@@ -1,25 +1,109 @@
 #!/usr/bin/env node
 
-import { intro, outro, spinner, select, confirm } from '@clack/prompts';
+import { intro, outro, spinner, select, confirm, isCancel } from '@clack/prompts';
 import { Command } from 'commander';
 import { getPreferences, savePreferences } from './utils/config';
-import { getTargetPath, AgentTarget, Scope } from './providers';
+import { getTargetPath, AgentTarget, Scope, ArtifactType } from './providers';
 import { installArtifact } from './core/executor';
+import { syncRegistry } from './core/registry';
+import { discoverSkills, discoverWorkflows, discoverProcesses, ProcessDefinition, SkillArtifact, WorkflowArtifact, SKILLS_DIR, WORKFLOWS_DIR } from './core/discovery';
 import path from 'path';
+import pc from 'picocolors';
 
 const program = new Command();
 program.name('awm').description('Agentic Workflow Manager').version('1.0.0');
 
+function handleCancel(value: unknown): void {
+    if (isCancel(value)) {
+        outro('Operation cancelled.');
+        process.exit(0);
+    }
+}
+
 program.command('add')
-  .description('Add a skill or process interactively')
+  .description('Add a skill, workflow, or process interactively')
   .action(async () => {
-      intro('AWM - Agentic Workflow Manager');
-      
+      intro(pc.bgCyan(pc.black(' AWM - Agentic Workflow Manager ')));
+
+      // 1. Sync the registry
+      const s = spinner();
+      s.start('Syncing registry with remote...');
+      try {
+          await syncRegistry();
+          s.stop('Registry synced.');
+      } catch (e: any) {
+          s.stop('Failed to sync registry.');
+          console.error(pc.red(e.message));
+          process.exit(1);
+      }
+
+      // 2. Discover artifacts
+      const skills = discoverSkills();
+      const workflows = discoverWorkflows();
+      const processes = discoverProcesses();
+
+      if (skills.length === 0 && workflows.length === 0 && processes.length === 0) {
+          outro(pc.yellow('No artifacts found in the registry. Please check your registry content.'));
+          process.exit(0);
+      }
+
+      // 3. What to install?
+      const installType = await select({
+          message: 'What do you want to install?',
+          options: [
+              ...(processes.length > 0 ? [{ value: 'process' as const, label: `📦 Process (${processes.length} available)` }] : []),
+              ...(skills.length > 0 ? [{ value: 'skill' as const, label: `🧠 Skill (${skills.length} available)` }] : []),
+              ...(workflows.length > 0 ? [{ value: 'workflow' as const, label: `⚡ Workflow (${workflows.length} available)` }] : []),
+          ]
+      });
+      handleCancel(installType);
+
+      // 4. Pick the artifact
       const prefs = getPreferences();
+      let artifactsToInstall: { name: string; sourcePath: string; type: ArtifactType }[] = [];
 
-      // Dummy source resolution for now (mocking the GitHub registry pull)
-      const mockRegistrySkillPath = path.resolve(__dirname, '../../skills/example-skill');
+      if (installType === 'process') {
+          const processChoice = await select({
+              message: 'Select a process to install',
+              options: processes.map(p => ({ value: p, label: `${p.name} - ${p.description}` }))
+          });
+          handleCancel(processChoice);
 
+          const proc = processChoice as ProcessDefinition;
+          // Resolve all skills and workflows in the process
+          for (const skillName of proc.skills) {
+              artifactsToInstall.push({
+                  name: skillName,
+                  sourcePath: path.join(SKILLS_DIR, skillName),
+                  type: 'skill'
+              });
+          }
+          for (const wfName of proc.workflows) {
+              artifactsToInstall.push({
+                  name: `${wfName}.md`,
+                  sourcePath: path.join(WORKFLOWS_DIR, `${wfName}.md`),
+                  type: 'workflow'
+              });
+          }
+      } else if (installType === 'skill') {
+          const skillChoice = await select({
+              message: 'Select a skill to install',
+              options: skills.map(s => ({ value: s, label: s.name }))
+          });
+          handleCancel(skillChoice);
+          const skill = skillChoice as SkillArtifact;
+          artifactsToInstall.push({ name: skill.name, sourcePath: skill.path, type: 'skill' });
+      } else {
+          const wfChoice = await select({
+              message: 'Select a workflow to install',
+              options: workflows.map(w => ({ value: w, label: w.name }))
+          });
+          handleCancel(wfChoice);
+          const wf = wfChoice as WorkflowArtifact;
+          artifactsToInstall.push({ name: `${wf.name}.md`, sourcePath: wf.path, type: 'workflow' });
+      }
+
+      // 5. Agent & Scope
       const targetAgent = await select({
           message: 'Which agent do you want to install to?',
           options: [
@@ -28,6 +112,7 @@ program.command('add')
           ],
           initialValue: prefs.defaultAgent
       }) as AgentTarget;
+      handleCancel(targetAgent);
 
       const scope = await select({
           message: 'Installation scope',
@@ -37,6 +122,7 @@ program.command('add')
           ],
           initialValue: prefs.defaultScope
       }) as Scope;
+      handleCancel(scope);
 
       const method = await select({
           message: 'Installation method',
@@ -46,32 +132,55 @@ program.command('add')
           ],
           initialValue: prefs.installMethod
       }) as 'symlink' | 'copy';
+      handleCancel(method);
 
-      const shouldProceed = await confirm({ message: 'Proceed with installation?' });
+      // 6. Confirm
+      const shouldProceed = await confirm({ message: `Install ${artifactsToInstall.length} artifact(s)?` });
+      handleCancel(shouldProceed);
 
       if (shouldProceed) {
-          const s = spinner();
-          s.start('Installing...');
-          
+          const installSpinner = spinner();
+          installSpinner.start('Installing artifacts...');
+
           try {
-              const targetPath = getTargetPath('skill', targetAgent, scope);
-              const finalDest = path.join(targetPath, 'example-skill');
-              
-              // Only runs if source exists, skipping actual install in this template
-              // installArtifact(mockRegistrySkillPath, finalDest, method);
-              
-              // Save preferences
+              for (const artifact of artifactsToInstall) {
+                  const targetDir = getTargetPath(artifact.type, targetAgent, scope);
+                  const finalDest = path.join(targetDir, artifact.name);
+                  installArtifact(artifact.sourcePath, finalDest, method);
+              }
+
               savePreferences({ defaultAgent: targetAgent, defaultScope: scope, installMethod: method });
 
-              s.stop('Installation complete!');
-              outro(`Success! Registered to ${targetAgent} (${scope})`);
+              installSpinner.stop('Installation complete!');
+
+              const names = artifactsToInstall.map(a => pc.green(a.name)).join(', ');
+              outro(`✅ Installed: ${names} → ${targetAgent} (${scope})`);
           } catch (e: any) {
-              s.stop('Installation failed.');
-              console.error(e.message);
+              installSpinner.stop('Installation failed.');
+              console.error(pc.red(e.message));
               process.exit(1);
           }
       } else {
           outro('Installation cancelled.');
+      }
+});
+
+program.command('update')
+  .description('Sync the local registry with the remote repository')
+  .action(async () => {
+      intro(pc.bgCyan(pc.black(' AWM - Update Registry ')));
+
+      const s = spinner();
+      s.start('Pulling latest changes from remote...');
+
+      try {
+          await syncRegistry();
+          s.stop('Registry updated successfully.');
+          outro('✅ All symlinked skills and workflows are now up-to-date.');
+      } catch (e: any) {
+          s.stop('Update failed.');
+          console.error(pc.red(e.message));
+          process.exit(1);
       }
 });
 
