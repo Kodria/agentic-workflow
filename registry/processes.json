@@ -1,0 +1,26 @@
+[
+  {
+    "name": "core-dev",
+    "description": "Las habilidades fundamentales para el desarrollo guiado por agentes.",
+    "skills": ["brainstorming", "writing-plans", "executing-plans", "subagent-driven-development", "test-driven-development"],
+    "workflows": ["brainstorming", "writing-plans", "executing-plans"]
+  },
+  {
+    "name": "cscti-docs",
+    "description": "Herramientas de documentación con estándar CSCTI",
+    "skills": ["cscti-docs-assistant", "cscti-template-manager", "cscti-template-wizard"],
+    "workflows": ["cscti-docs-assistant", "cscti-template-manager", "cscti-template-wizard"]
+  },
+  {
+    "name": "module-docs",
+    "description": "Utilidades para documentar módulos a nivel técnico y de negocio",
+    "skills": ["documenting-modules", "business-documenting-modules"],
+    "workflows": ["documenting-modules", "business-documenting-modules"]
+  },
+  {
+    "name": "utils",
+    "description": "Flujos sueltos y utilidades menores",
+    "skills": ["project-context-init", "requesting-code-review", "find-skills", "skill-creator"],
+    "workflows": ["project-context-init", "commit-name", "docs-system-orchestrator", "issues-as-notion-task"]
+  }
+]
