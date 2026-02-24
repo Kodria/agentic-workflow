@@ -1,5 +1,5 @@
 // tests/core/executor.test.ts
-import { installArtifact } from '../../src/core/executor';
+import { installArtifact, removeArtifact } from '../../src/core/executor';
 import fs from 'fs';
 import path from 'path';
 
@@ -29,5 +29,19 @@ describe('Executor Engine', () => {
         installArtifact(sourceDir, dest, 'copy');
         expect(fs.lstatSync(dest).isDirectory()).toBe(true);
         expect(fs.existsSync(path.join(dest, 'test.txt'))).toBe(true);
+    });
+
+    it('removes an installed artifact', () => {
+        const dest = path.join(targetDir, 'to-remove');
+        installArtifact(sourceDir, dest, 'symlink');
+        expect(fs.existsSync(dest)).toBe(true);
+
+        removeArtifact(dest);
+        expect(fs.existsSync(dest)).toBe(false);
+    });
+
+    it('throws when removing a non-existent artifact', () => {
+        const dest = path.join(targetDir, 'does-not-exist');
+        expect(() => removeArtifact(dest)).toThrow('Artifact not found');
     });
 });

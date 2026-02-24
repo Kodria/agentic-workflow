@@ -2,6 +2,13 @@
 import fs from 'fs';
 import path from 'path';
 
+export function removeArtifact(targetPath: string): void {
+    if (!fs.existsSync(targetPath)) {
+        throw new Error(`Artifact not found at: ${targetPath}`);
+    }
+    fs.rmSync(targetPath, { recursive: true, force: true });
+}
+
 export function installArtifact(sourcePath: string, targetPath: string, method: 'symlink' | 'copy'): void {
     if (!fs.existsSync(sourcePath)) {
         throw new Error(`Source path does not exist: ${sourcePath}`);

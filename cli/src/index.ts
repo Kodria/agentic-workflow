@@ -4,7 +4,7 @@ import { intro, outro, spinner, select, confirm, isCancel } from '@clack/prompts
 import { Command } from 'commander';
 import { getPreferences, savePreferences } from './utils/config';
 import { getTargetPath, AgentTarget, Scope, ArtifactType } from './providers';
-import { installArtifact } from './core/executor';
+import { installArtifact, removeArtifact } from './core/executor';
 import { syncRegistry } from './core/registry';
 import { discoverSkills, discoverWorkflows, discoverProcesses, ProcessDefinition, SkillArtifact, WorkflowArtifact, SKILLS_DIR, WORKFLOWS_DIR } from './core/discovery';
 import path from 'path';
@@ -181,6 +181,81 @@ program.command('update')
           s.stop('Update failed.');
           console.error(pc.red(e.message));
           process.exit(1);
+      }
+});
+
+program.command('remove')
+  .description('Remove an installed skill or workflow')
+  .action(async () => {
+      intro(pc.bgCyan(pc.black(' AWM - Remove Artifact ')));
+
+      const prefs = getPreferences();
+
+      const targetAgent = await select({
+          message: 'From which agent?',
+          options: [
+              { value: 'antigravity', label: 'Antigravity' },
+              { value: 'opencode', label: 'OpenCode' }
+          ],
+          initialValue: prefs.defaultAgent
+      }) as AgentTarget;
+      handleCancel(targetAgent);
+
+      const scope = await select({
+          message: 'Scope?',
+          options: [
+              { value: 'local', label: 'Project (Local)' },
+              { value: 'global', label: 'Global' }
+          ],
+          initialValue: prefs.defaultScope
+      }) as Scope;
+      handleCancel(scope);
+
+      // Scan installed artifacts
+      const fs = await import('fs');
+      const installed: { name: string; fullPath: string; type: ArtifactType }[] = [];
+
+      const scanDir = (dir: string, type: ArtifactType) => {
+          if (!fs.existsSync(dir)) return;
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+              installed.push({ name: entry.name, fullPath: path.join(dir, entry.name), type });
+          }
+      };
+
+      try {
+          scanDir(getTargetPath('skill', targetAgent, scope), 'skill');
+      } catch { /* workflows not supported for some agents */ }
+      try {
+          scanDir(getTargetPath('workflow', targetAgent, scope), 'workflow');
+      } catch { /* ok */ }
+
+      if (installed.length === 0) {
+          outro(pc.yellow('No installed artifacts found for this agent/scope.'));
+          process.exit(0);
+      }
+
+      const toRemove = await select({
+          message: 'Select artifact to remove',
+          options: installed.map(a => ({ value: a, label: `${a.type === 'skill' ? '🧠' : '⚡'} ${a.name}` }))
+      });
+      handleCancel(toRemove);
+
+      const artifact = toRemove as typeof installed[0];
+
+      const confirmRemove = await confirm({ message: `Remove ${pc.red(artifact.name)}?` });
+      handleCancel(confirmRemove);
+
+      if (confirmRemove) {
+          try {
+              removeArtifact(artifact.fullPath);
+              outro(`✅ Removed ${pc.red(artifact.name)} from ${targetAgent} (${scope})`);
+          } catch (e: any) {
+              console.error(pc.red(e.message));
+              process.exit(1);
+          }
+      } else {
+          outro('Removal cancelled.');
       }
 });
 
