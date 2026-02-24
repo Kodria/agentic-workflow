@@ -184,6 +184,54 @@ program.command('update')
       }
 });
 
+program.command('list')
+  .description('List all available artifacts in the local cache registry')
+  .action(async () => {
+      intro(pc.bgCyan(pc.black(' AWM - Registry Listing ')));
+
+      const s = spinner();
+      s.start('Syncing registry...');
+      try {
+          await syncRegistry();
+          s.stop('Registry synced.');
+      } catch (e: any) {
+          s.stop('Failed to sync registry.');
+          console.error(pc.red(e.message));
+          process.exit(1);
+      }
+
+      const skills = discoverSkills();
+      const workflows = discoverWorkflows();
+      const processes = discoverProcesses();
+
+      console.log(`\n${pc.cyan(pc.bold('Skills'))} (${skills.length} available)`);
+      if (skills.length > 0) {
+          skills.forEach(sk => console.log(`  🧠 ${sk.name}`));
+      } else {
+          console.log('  (none)');
+      }
+
+      console.log(`\n${pc.cyan(pc.bold('Workflows'))} (${workflows.length} available)`);
+      if (workflows.length > 0) {
+          workflows.forEach(wf => console.log(`  ⚡ ${wf.name}`));
+      } else {
+          console.log('  (none)');
+      }
+
+      console.log(`\n${pc.cyan(pc.bold('Processes'))} (${processes.length} available)`);
+      if (processes.length > 0) {
+          processes.forEach(proc => {
+              console.log(`  📦 ${pc.bold(proc.name)} — ${proc.description}`);
+              console.log(`     Skills: ${proc.skills.join(', ')}`);
+              console.log(`     Workflows: ${proc.workflows.join(', ')}`);
+          });
+      } else {
+          console.log('  (none)');
+      }
+
+      outro(`Run ${pc.green('awm add')} to install any of these artifacts.`);
+  });
+
 program.command('remove')
   .description('Remove an installed skill or workflow')
   .action(async () => {
