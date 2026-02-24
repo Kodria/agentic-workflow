@@ -20,9 +20,14 @@ function handleCancel(value: unknown): void {
     }
 }
 
-program.command('add')
-  .description('Add a skill, workflow, or process interactively')
-  .action(async () => {
+program.command('add [name]')
+  .description('Add a skill, workflow, or process interactively (or non-interactively with flags)')
+  .option('-t, --type <type>', 'Artifact type: skill, workflow, or process')
+  .option('-a, --agent <agent>', 'Target agent: antigravity or opencode')
+  .option('-s, --scope <scope>', 'Scope: local or global')
+  .option('-m, --method <method>', 'Install method: symlink or copy')
+  .option('-y, --yes', 'Skip confirmation prompts')
+  .action(async (name: string | undefined, options: { type?: string; agent?: string; scope?: string; method?: string; yes?: boolean }) => {
       intro(pc.bgCyan(pc.black(' AWM - Agentic Workflow Manager ')));
 
       // 1. Sync the registry
@@ -47,121 +52,181 @@ program.command('add')
           process.exit(0);
       }
 
-      // 3. What to install?
-      const installType = await select({
-          message: 'What do you want to install?',
-          options: [
-              ...(processes.length > 0 ? [{ value: 'process' as const, label: `📦 Process (${processes.length} available)` }] : []),
-              ...(skills.length > 0 ? [{ value: 'skill' as const, label: `🧠 Skill (${skills.length} available)` }] : []),
-              ...(workflows.length > 0 ? [{ value: 'workflow' as const, label: `⚡ Workflow (${workflows.length} available)` }] : []),
-          ]
-      });
-      handleCancel(installType);
+      // 3. Determine what to install
+      let installType: string;
+      if (options.type) {
+          if (!['skill', 'workflow', 'process'].includes(options.type)) {
+              console.error(pc.red(`Invalid type "${options.type}". Use: skill, workflow, or process.`));
+              process.exit(1);
+          }
+          installType = options.type;
+      } else {
+          const selected = await select({
+              message: 'What do you want to install?',
+              options: [
+                  ...(processes.length > 0 ? [{ value: 'process' as const, label: `📦 Process (${processes.length} available)` }] : []),
+                  ...(skills.length > 0 ? [{ value: 'skill' as const, label: `🧠 Skill (${skills.length} available)` }] : []),
+                  ...(workflows.length > 0 ? [{ value: 'workflow' as const, label: `⚡ Workflow (${workflows.length} available)` }] : []),
+              ]
+          });
+          handleCancel(selected);
+          installType = selected as string;
+      }
 
       // 4. Pick the artifact
       const prefs = getPreferences();
       let artifactsToInstall: { name: string; sourcePath: string; type: ArtifactType }[] = [];
 
       if (installType === 'process') {
-          const processChoice = await select({
-              message: 'Select a process to install',
-              options: processes.map(p => ({ value: p, label: `${p.name} - ${p.description}` }))
-          });
-          handleCancel(processChoice);
-
-          const proc = processChoice as ProcessDefinition;
-          // Resolve all skills and workflows in the process
-          for (const skillName of proc.skills) {
-              artifactsToInstall.push({
-                  name: skillName,
-                  sourcePath: path.join(SKILLS_DIR, skillName),
-                  type: 'skill'
+          let proc: ProcessDefinition;
+          if (name) {
+              const found = processes.find(p => p.name === name);
+              if (!found) {
+                  console.error(pc.red(`Process "${name}" not found. Available: ${processes.map(p => p.name).join(', ')}`));
+                  process.exit(1);
+              }
+              proc = found;
+          } else {
+              const processChoice = await select({
+                  message: 'Select a process to install',
+                  options: processes.map(p => ({ value: p, label: `${p.name} - ${p.description}` }))
               });
+              handleCancel(processChoice);
+              proc = processChoice as ProcessDefinition;
+          }
+          for (const skillName of proc.skills) {
+              artifactsToInstall.push({ name: skillName, sourcePath: path.join(SKILLS_DIR, skillName), type: 'skill' });
           }
           for (const wfName of proc.workflows) {
-              artifactsToInstall.push({
-                  name: `${wfName}.md`,
-                  sourcePath: path.join(WORKFLOWS_DIR, `${wfName}.md`),
-                  type: 'workflow'
-              });
+              artifactsToInstall.push({ name: `${wfName}.md`, sourcePath: path.join(WORKFLOWS_DIR, `${wfName}.md`), type: 'workflow' });
           }
       } else if (installType === 'skill') {
-          const skillChoice = await select({
-              message: 'Select a skill to install',
-              options: skills.map(s => ({ value: s, label: s.name }))
-          });
-          handleCancel(skillChoice);
-          const skill = skillChoice as SkillArtifact;
-          artifactsToInstall.push({ name: skill.name, sourcePath: skill.path, type: 'skill' });
-      } else {
-          const wfChoice = await select({
-              message: 'Select a workflow to install',
-              options: workflows.map(w => ({ value: w, label: w.name }))
-          });
-          handleCancel(wfChoice);
-          const wf = wfChoice as WorkflowArtifact;
-          artifactsToInstall.push({ name: `${wf.name}.md`, sourcePath: wf.path, type: 'workflow' });
-      }
-
-      // 5. Agent & Scope
-      const targetAgent = await select({
-          message: 'Which agent do you want to install to?',
-          options: [
-              { value: 'antigravity', label: 'Antigravity' },
-              { value: 'opencode', label: 'OpenCode' }
-          ],
-          initialValue: prefs.defaultAgent
-      }) as AgentTarget;
-      handleCancel(targetAgent);
-
-      const scope = await select({
-          message: 'Installation scope',
-          options: [
-              { value: 'local', label: 'Project (Local)' },
-              { value: 'global', label: 'Global' }
-          ],
-          initialValue: prefs.defaultScope
-      }) as Scope;
-      handleCancel(scope);
-
-      const method = await select({
-          message: 'Installation method',
-          options: [
-              { value: 'symlink', label: 'Symlink (Recommended) - Updates instantly' },
-              { value: 'copy', label: 'Copy to agent' }
-          ],
-          initialValue: prefs.installMethod
-      }) as 'symlink' | 'copy';
-      handleCancel(method);
-
-      // 6. Confirm
-      const shouldProceed = await confirm({ message: `Install ${artifactsToInstall.length} artifact(s)?` });
-      handleCancel(shouldProceed);
-
-      if (shouldProceed) {
-          const installSpinner = spinner();
-          installSpinner.start('Installing artifacts...');
-
-          try {
-              for (const artifact of artifactsToInstall) {
-                  const targetDir = getTargetPath(artifact.type, targetAgent, scope);
-                  const finalDest = path.join(targetDir, artifact.name);
-                  installArtifact(artifact.sourcePath, finalDest, method);
+          if (name) {
+              const found = skills.find(s => s.name === name);
+              if (!found) {
+                  console.error(pc.red(`Skill "${name}" not found. Available: ${skills.map(s => s.name).join(', ')}`));
+                  process.exit(1);
               }
-
-              savePreferences({ defaultAgent: targetAgent, defaultScope: scope, installMethod: method });
-
-              installSpinner.stop('Installation complete!');
-
-              const names = artifactsToInstall.map(a => pc.green(a.name)).join(', ');
-              outro(`✅ Installed: ${names} → ${targetAgent} (${scope})`);
-          } catch (e: any) {
-              installSpinner.stop('Installation failed.');
-              console.error(pc.red(e.message));
-              process.exit(1);
+              artifactsToInstall.push({ name: found.name, sourcePath: found.path, type: 'skill' });
+          } else {
+              const skillChoice = await select({
+                  message: 'Select a skill to install',
+                  options: skills.map(s => ({ value: s, label: s.name }))
+              });
+              handleCancel(skillChoice);
+              const skill = skillChoice as SkillArtifact;
+              artifactsToInstall.push({ name: skill.name, sourcePath: skill.path, type: 'skill' });
           }
       } else {
-          outro('Installation cancelled.');
+          if (name) {
+              const found = workflows.find(w => w.name === name);
+              if (!found) {
+                  console.error(pc.red(`Workflow "${name}" not found. Available: ${workflows.map(w => w.name).join(', ')}`));
+                  process.exit(1);
+              }
+              artifactsToInstall.push({ name: `${found.name}.md`, sourcePath: found.path, type: 'workflow' });
+          } else {
+              const wfChoice = await select({
+                  message: 'Select a workflow to install',
+                  options: workflows.map(w => ({ value: w, label: w.name }))
+              });
+              handleCancel(wfChoice);
+              const wf = wfChoice as WorkflowArtifact;
+              artifactsToInstall.push({ name: `${wf.name}.md`, sourcePath: wf.path, type: 'workflow' });
+          }
+      }
+
+      // 5. Agent & Scope & Method — resolve from flags or prompt
+      let targetAgent: AgentTarget;
+      if (options.agent) {
+          if (!['antigravity', 'opencode'].includes(options.agent)) {
+              console.error(pc.red(`Invalid agent "${options.agent}". Use: antigravity or opencode.`));
+              process.exit(1);
+          }
+          targetAgent = options.agent as AgentTarget;
+      } else {
+          const agentChoice = await select({
+              message: 'Which agent do you want to install to?',
+              options: [
+                  { value: 'antigravity', label: 'Antigravity' },
+                  { value: 'opencode', label: 'OpenCode' }
+              ],
+              initialValue: prefs.defaultAgent
+          });
+          handleCancel(agentChoice);
+          targetAgent = agentChoice as AgentTarget;
+      }
+
+      let scopeVal: Scope;
+      if (options.scope) {
+          if (!['local', 'global'].includes(options.scope)) {
+              console.error(pc.red(`Invalid scope "${options.scope}". Use: local or global.`));
+              process.exit(1);
+          }
+          scopeVal = options.scope as Scope;
+      } else {
+          const scopeChoice = await select({
+              message: 'Installation scope',
+              options: [
+                  { value: 'local', label: 'Project (Local)' },
+                  { value: 'global', label: 'Global' }
+              ],
+              initialValue: prefs.defaultScope
+          });
+          handleCancel(scopeChoice);
+          scopeVal = scopeChoice as Scope;
+      }
+
+      let methodVal: 'symlink' | 'copy';
+      if (options.method) {
+          if (!['symlink', 'copy'].includes(options.method)) {
+              console.error(pc.red(`Invalid method "${options.method}". Use: symlink or copy.`));
+              process.exit(1);
+          }
+          methodVal = options.method as 'symlink' | 'copy';
+      } else {
+          const methodChoice = await select({
+              message: 'Installation method',
+              options: [
+                  { value: 'symlink', label: 'Symlink (Recommended) - Updates instantly' },
+                  { value: 'copy', label: 'Copy to agent' }
+              ],
+              initialValue: prefs.installMethod
+          });
+          handleCancel(methodChoice);
+          methodVal = methodChoice as 'symlink' | 'copy';
+      }
+
+      // 6. Confirm (skip with --yes)
+      if (!options.yes) {
+          const shouldProceed = await confirm({ message: `Install ${artifactsToInstall.length} artifact(s)?` });
+          handleCancel(shouldProceed);
+          if (!shouldProceed) {
+              outro('Installation cancelled.');
+              return;
+          }
+      }
+
+      const installSpinner = spinner();
+      installSpinner.start('Installing artifacts...');
+
+      try {
+          for (const artifact of artifactsToInstall) {
+              const targetDir = getTargetPath(artifact.type, targetAgent, scopeVal);
+              const finalDest = path.join(targetDir, artifact.name);
+              installArtifact(artifact.sourcePath, finalDest, methodVal);
+          }
+
+          savePreferences({ defaultAgent: targetAgent, defaultScope: scopeVal, installMethod: methodVal });
+
+          installSpinner.stop('Installation complete!');
+
+          const names = artifactsToInstall.map(a => pc.green(a.name)).join(', ');
+          outro(`✅ Installed: ${names} → ${targetAgent} (${scopeVal})`);
+      } catch (e: any) {
+          installSpinner.stop('Installation failed.');
+          console.error(pc.red(e.message));
+          process.exit(1);
       }
 });
 
