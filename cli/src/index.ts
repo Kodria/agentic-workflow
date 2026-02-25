@@ -362,65 +362,90 @@ program.command('remove')
 
       const prefs = getPreferences();
 
-      const targetAgent = await select({
-          message: 'From which agent?',
+      // Multi-agent selection (matching the add command flow)
+      const agentChoice = await multiselect({
+          message: 'From which agent(s)?',
           options: [
-              { value: 'antigravity', label: 'Antigravity' },
-              { value: 'opencode', label: 'OpenCode' }
+              { value: 'antigravity' as AgentTarget, label: 'Antigravity' },
+              { value: 'opencode' as AgentTarget, label: 'OpenCode' }
           ],
-          initialValue: prefs.defaultAgent
-      }) as AgentTarget;
-      handleCancel(targetAgent);
+          initialValues: [prefs.defaultAgent],
+          required: true
+      });
+      handleCancel(agentChoice);
+      const targetAgents = agentChoice as AgentTarget[];
 
-      const scope = await select({
+      const scopeChoice = await select({
           message: 'Scope?',
           options: [
               { value: 'local', label: 'Project (Local)' },
               { value: 'global', label: 'Global' }
           ],
           initialValue: prefs.defaultScope
-      }) as Scope;
-      handleCancel(scope);
+      });
+      handleCancel(scopeChoice);
+      const scopeVal = scopeChoice as Scope;
 
-      // Scan installed artifacts
+      // Scan installed artifacts across all selected agents, aggregating by name
       const fs = await import('fs');
-      const installed: { name: string; fullPath: string; type: ArtifactType }[] = [];
+      const artifactMap = new Map<string, {
+          name: string;
+          type: ArtifactType;
+          installedIn: AgentTarget[];
+          fullPaths: string[];
+      }>();
 
-      const scanDir = (dir: string, type: ArtifactType) => {
+      const scanDir = (dir: string, type: ArtifactType, agent: AgentTarget) => {
           if (!fs.existsSync(dir)) return;
           const entries = fs.readdirSync(dir, { withFileTypes: true });
           for (const entry of entries) {
-              installed.push({ name: entry.name, fullPath: path.join(dir, entry.name), type });
+              const existing = artifactMap.get(entry.name);
+              if (existing) {
+                  existing.installedIn.push(agent);
+                  existing.fullPaths.push(path.join(dir, entry.name));
+              } else {
+                  artifactMap.set(entry.name, {
+                      name: entry.name,
+                      type,
+                      installedIn: [agent],
+                      fullPaths: [path.join(dir, entry.name)]
+                  });
+              }
           }
       };
 
-      try {
-          scanDir(getTargetPath('skill', targetAgent, scope), 'skill');
-      } catch { /* workflows not supported for some agents */ }
-      try {
-          scanDir(getTargetPath('workflow', targetAgent, scope), 'workflow');
-      } catch { /* ok */ }
+      for (const targetAgent of targetAgents) {
+          try { scanDir(getTargetPath('skill', targetAgent, scopeVal), 'skill', targetAgent); } catch { /* ok */ }
+          try { scanDir(getTargetPath('workflow', targetAgent, scopeVal), 'workflow', targetAgent); } catch { /* ok */ }
+      }
+
+      const installed = Array.from(artifactMap.values());
 
       if (installed.length === 0) {
-          outro(pc.yellow('No installed artifacts found for this agent/scope.'));
+          outro(pc.yellow('No installed artifacts found for the selected agents/scope.'));
           process.exit(0);
       }
 
       const toRemove = await select({
           message: 'Select artifact to remove',
-          options: installed.map(a => ({ value: a, label: `${a.type === 'skill' ? '🧠' : '⚡'} ${a.name}` }))
+          options: installed.map(a => ({
+              value: a,
+              label: `${a.type === 'skill' ? '🧠' : '⚡'} ${a.name} ${pc.dim(`(in: ${a.installedIn.join(', ')})`)}`
+          }))
       });
       handleCancel(toRemove);
 
       const artifact = toRemove as typeof installed[0];
 
-      const confirmRemove = await confirm({ message: `Remove ${pc.red(artifact.name)}?` });
+      const confirmRemove = await confirm({ message: `Remove ${pc.red(artifact.name)} from ${artifact.installedIn.join(' and ')}?` });
       handleCancel(confirmRemove);
 
       if (confirmRemove) {
           try {
-              removeArtifact(artifact.fullPath);
-              outro(`✅ Removed ${pc.red(artifact.name)} from ${targetAgent} (${scope})`);
+              for (const p of artifact.fullPaths) {
+                  removeArtifact(p);
+              }
+              outro(`✅ Removed ${pc.red(artifact.name)} from ${artifact.installedIn.join(', ')} (${scopeVal})`);
           } catch (e: any) {
               console.error(pc.red(e.message));
               process.exit(1);
@@ -428,6 +453,6 @@ program.command('remove')
       } else {
           outro('Removal cancelled.');
       }
-});
+  });
 
 program.parse();
