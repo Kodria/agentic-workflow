@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { intro, outro, spinner, select, confirm, isCancel } from '@clack/prompts';
+import { intro, outro, spinner, select, multiselect, confirm, isCancel } from '@clack/prompts';
 import { Command } from 'commander';
 import { getPreferences, savePreferences } from './utils/config';
 import { getTargetPath, AgentTarget, Scope, ArtifactType } from './providers';
@@ -55,24 +55,28 @@ program.command('add [name]')
       const prefs = getPreferences();
 
       // 3. Agent & Scope Prompts (Moved up)
-      let targetAgent: AgentTarget;
+      let targetAgents: AgentTarget[];
       if (options.agent) {
-          if (!['antigravity', 'opencode'].includes(options.agent)) {
-              console.error(pc.red(`Invalid agent "${options.agent}". Use: antigravity or opencode.`));
-              process.exit(1);
+          const parsed = options.agent.split(',').map(a => a.trim());
+          for (const a of parsed) {
+              if (!['antigravity', 'opencode'].includes(a)) {
+                  console.error(pc.red(`Invalid agent "${a}". Use: antigravity or opencode.`));
+                  process.exit(1);
+              }
           }
-          targetAgent = options.agent as AgentTarget;
+          targetAgents = parsed as AgentTarget[];
       } else {
-          const agentChoice = await select({
-              message: 'Which agent do you want to install to?',
+          const agentChoice = await multiselect({
+              message: 'Which agent(s) do you want to install to?',
               options: [
-                  { value: 'antigravity', label: 'Antigravity' },
-                  { value: 'opencode', label: 'OpenCode' }
+                  { value: 'antigravity' as AgentTarget, label: 'Antigravity' },
+                  { value: 'opencode' as AgentTarget, label: 'OpenCode' }
               ],
-              initialValue: prefs.defaultAgent
+              initialValues: [prefs.defaultAgent],
+              required: true
           });
           handleCancel(agentChoice);
-          targetAgent = agentChoice as AgentTarget;
+          targetAgents = agentChoice as AgentTarget[];
       }
 
       let scopeVal: Scope;
@@ -109,7 +113,7 @@ program.command('add [name]')
               ...(skills.length > 0 ? [{ value: 'skill' as const, label: `🧠 Skill (${skills.length} available)` }] : [])
           ];
           
-          if (targetAgent === 'antigravity' && workflows.length > 0) {
+          if (targetAgents.includes('antigravity') && workflows.length > 0) {
               typeOptions.push({ value: 'workflow' as const, label: `⚡ Workflow (${workflows.length} available)` });
           }
 
@@ -173,11 +177,17 @@ program.command('add [name]')
           }
 
           // Suggest complementary workflow if in Antigravity
-          if (targetAgent === 'antigravity') {
+          if (targetAgents.includes('antigravity')) {
               const complementaryWorkflow = workflows.find(w => w.name === skillArtifact.name);
               if (complementaryWorkflow) {
-                  const addWf = await confirm({ message: `A complementary workflow "${complementaryWorkflow.name}" exists for Antigravity. Install it too?` });
-                  handleCancel(addWf);
+                  let addWf: boolean;
+                  if (options.yes) {
+                      addWf = true;
+                  } else {
+                      const answer = await confirm({ message: `A complementary workflow "${complementaryWorkflow.name}" exists for Antigravity. Install it too?` });
+                      handleCancel(answer);
+                      addWf = answer as boolean;
+                  }
                   if (addWf) {
                       artifactsToInstall.push({ name: `${complementaryWorkflow.name}.md`, sourcePath: complementaryWorkflow.path, type: 'workflow' });
                   }
@@ -226,9 +236,11 @@ program.command('add [name]')
           methodVal = methodChoice as 'symlink' | 'copy';
       }
 
-      // 6. Confirm (skip with --yes)
+      // 7. Confirm (skip with --yes)
+      const totalInstalls = artifactsToInstall.length * targetAgents.length;
       if (!options.yes) {
-          const shouldProceed = await confirm({ message: `Install ${artifactsToInstall.length} artifact(s)?` });
+          const agentLabels = targetAgents.join(', ');
+          const shouldProceed = await confirm({ message: `Install ${artifactsToInstall.length} artifact(s) to ${targetAgents.length} agent(s) (${agentLabels})?` });
           handleCancel(shouldProceed);
           if (!shouldProceed) {
               outro('Installation cancelled.');
@@ -240,18 +252,35 @@ program.command('add [name]')
       installSpinner.start('Installing artifacts...');
 
       try {
-          for (const artifact of artifactsToInstall) {
-              const targetDir = getTargetPath(artifact.type, targetAgent, scopeVal);
-              const finalDest = path.join(targetDir, artifact.name);
-              installArtifact(artifact.sourcePath, finalDest, methodVal);
+          const installed: string[] = [];
+          const skipped: string[] = [];
+
+          for (const currentAgent of targetAgents) {
+              for (const artifact of artifactsToInstall) {
+                  // Skip workflows for non-Antigravity agents
+                  if (currentAgent !== 'antigravity' && artifact.type === 'workflow') {
+                      skipped.push(`${artifact.name} (${currentAgent})`);
+                      continue;
+                  }
+                  const targetDir = getTargetPath(artifact.type, currentAgent, scopeVal);
+                  const finalDest = path.join(targetDir, artifact.name);
+                  installArtifact(artifact.sourcePath, finalDest, methodVal);
+                  installed.push(`${artifact.name} → ${currentAgent} (${scopeVal})`);
+              }
           }
 
-          savePreferences({ defaultAgent: targetAgent, defaultScope: scopeVal, installMethod: methodVal });
+          savePreferences({ defaultAgent: targetAgents[0], defaultScope: scopeVal, installMethod: methodVal });
 
           installSpinner.stop('Installation complete!');
 
-          const names = artifactsToInstall.map(a => pc.green(a.name)).join(', ');
-          outro(`✅ Installed: ${names} → ${targetAgent} (${scopeVal})`);
+          if (skipped.length > 0) {
+              for (const s of skipped) {
+                  console.log(pc.yellow(`  ⚠️  Skipped: ${s} (workflows not supported)`));
+              }
+          }
+
+          const names = installed.map(n => pc.green(n)).join('\n  ');
+          outro(`✅ Installed:\n  ${names}`);
       } catch (e: any) {
           installSpinner.stop('Installation failed.');
           console.error(pc.red(e.message));
