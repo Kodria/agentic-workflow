@@ -52,91 +52,9 @@ program.command('add [name]')
           process.exit(0);
       }
 
-      // 3. Determine what to install
-      let installType: string;
-      if (options.type) {
-          if (!['skill', 'workflow', 'process'].includes(options.type)) {
-              console.error(pc.red(`Invalid type "${options.type}". Use: skill, workflow, or process.`));
-              process.exit(1);
-          }
-          installType = options.type;
-      } else {
-          const selected = await select({
-              message: 'What do you want to install?',
-              options: [
-                  ...(processes.length > 0 ? [{ value: 'process' as const, label: `📦 Process (${processes.length} available)` }] : []),
-                  ...(skills.length > 0 ? [{ value: 'skill' as const, label: `🧠 Skill (${skills.length} available)` }] : []),
-                  ...(workflows.length > 0 ? [{ value: 'workflow' as const, label: `⚡ Workflow (${workflows.length} available)` }] : []),
-              ]
-          });
-          handleCancel(selected);
-          installType = selected as string;
-      }
-
-      // 4. Pick the artifact
       const prefs = getPreferences();
-      let artifactsToInstall: { name: string; sourcePath: string; type: ArtifactType }[] = [];
 
-      if (installType === 'process') {
-          let proc: ProcessDefinition;
-          if (name) {
-              const found = processes.find(p => p.name === name);
-              if (!found) {
-                  console.error(pc.red(`Process "${name}" not found. Available: ${processes.map(p => p.name).join(', ')}`));
-                  process.exit(1);
-              }
-              proc = found;
-          } else {
-              const processChoice = await select({
-                  message: 'Select a process to install',
-                  options: processes.map(p => ({ value: p, label: `${p.name} - ${p.description}` }))
-              });
-              handleCancel(processChoice);
-              proc = processChoice as ProcessDefinition;
-          }
-          for (const skillName of proc.skills) {
-              artifactsToInstall.push({ name: skillName, sourcePath: path.join(SKILLS_DIR, skillName), type: 'skill' });
-          }
-          for (const wfName of proc.workflows) {
-              artifactsToInstall.push({ name: `${wfName}.md`, sourcePath: path.join(WORKFLOWS_DIR, `${wfName}.md`), type: 'workflow' });
-          }
-      } else if (installType === 'skill') {
-          if (name) {
-              const found = skills.find(s => s.name === name);
-              if (!found) {
-                  console.error(pc.red(`Skill "${name}" not found. Available: ${skills.map(s => s.name).join(', ')}`));
-                  process.exit(1);
-              }
-              artifactsToInstall.push({ name: found.name, sourcePath: found.path, type: 'skill' });
-          } else {
-              const skillChoice = await select({
-                  message: 'Select a skill to install',
-                  options: skills.map(s => ({ value: s, label: s.name }))
-              });
-              handleCancel(skillChoice);
-              const skill = skillChoice as SkillArtifact;
-              artifactsToInstall.push({ name: skill.name, sourcePath: skill.path, type: 'skill' });
-          }
-      } else {
-          if (name) {
-              const found = workflows.find(w => w.name === name);
-              if (!found) {
-                  console.error(pc.red(`Workflow "${name}" not found. Available: ${workflows.map(w => w.name).join(', ')}`));
-                  process.exit(1);
-              }
-              artifactsToInstall.push({ name: `${found.name}.md`, sourcePath: found.path, type: 'workflow' });
-          } else {
-              const wfChoice = await select({
-                  message: 'Select a workflow to install',
-                  options: workflows.map(w => ({ value: w, label: w.name }))
-              });
-              handleCancel(wfChoice);
-              const wf = wfChoice as WorkflowArtifact;
-              artifactsToInstall.push({ name: `${wf.name}.md`, sourcePath: wf.path, type: 'workflow' });
-          }
-      }
-
-      // 5. Agent & Scope & Method — resolve from flags or prompt
+      // 3. Agent & Scope Prompts (Moved up)
       let targetAgent: AgentTarget;
       if (options.agent) {
           if (!['antigravity', 'opencode'].includes(options.agent)) {
@@ -177,6 +95,116 @@ program.command('add [name]')
           scopeVal = scopeChoice as Scope;
       }
 
+      // 4. Determine what to install
+      let installType: string;
+      if (options.type) {
+          if (!['skill', 'workflow', 'process'].includes(options.type)) {
+              console.error(pc.red(`Invalid type "${options.type}". Use: skill, workflow, or process.`));
+              process.exit(1);
+          }
+          installType = options.type;
+      } else {
+          const typeOptions: Array<{ value: 'process' | 'skill' | 'workflow'; label: string }> = [
+              ...(processes.length > 0 ? [{ value: 'process' as const, label: `📦 Process (${processes.length} available)` }] : []),
+              ...(skills.length > 0 ? [{ value: 'skill' as const, label: `🧠 Skill (${skills.length} available)` }] : [])
+          ];
+          
+          if (targetAgent === 'antigravity' && workflows.length > 0) {
+              typeOptions.push({ value: 'workflow' as const, label: `⚡ Workflow (${workflows.length} available)` });
+          }
+
+          if (typeOptions.length === 0) {
+              outro(pc.yellow(`No artifacts available for the selected agent.`));
+              process.exit(0);
+          }
+
+          const selected = await select({
+              message: 'What do you want to install?',
+              options: typeOptions
+          });
+          handleCancel(selected);
+          installType = selected as string;
+      }
+
+      // 5. Pick the artifact
+      let artifactsToInstall: { name: string; sourcePath: string; type: ArtifactType }[] = [];
+
+      if (installType === 'process') {
+          let proc: ProcessDefinition;
+          if (name) {
+              const found = processes.find(p => p.name === name);
+              if (!found) {
+                  console.error(pc.red(`Process "${name}" not found. Available: ${processes.map(p => p.name).join(', ')}`));
+                  process.exit(1);
+              }
+              proc = found;
+          } else {
+              const processChoice = await select({
+                  message: 'Select a process to install',
+                  options: processes.map(p => ({ value: p, label: `${p.name} - ${p.description}` }))
+              });
+              handleCancel(processChoice);
+              proc = processChoice as ProcessDefinition;
+          }
+          for (const skillName of proc.skills) {
+              artifactsToInstall.push({ name: skillName, sourcePath: path.join(SKILLS_DIR, skillName), type: 'skill' });
+          }
+          for (const wfName of proc.workflows) {
+              artifactsToInstall.push({ name: `${wfName}.md`, sourcePath: path.join(WORKFLOWS_DIR, `${wfName}.md`), type: 'workflow' });
+          }
+      } else if (installType === 'skill') {
+          let skillArtifact: SkillArtifact;
+          if (name) {
+              const found = skills.find(s => s.name === name);
+              if (!found) {
+                  console.error(pc.red(`Skill "${name}" not found. Available: ${skills.map(s => s.name).join(', ')}`));
+                  process.exit(1);
+              }
+              skillArtifact = found;
+              artifactsToInstall.push({ name: found.name, sourcePath: found.path, type: 'skill' });
+          } else {
+              const skillChoice = await select({
+                  message: 'Select a skill to install',
+                  options: skills.map(s => ({ value: s, label: s.name }))
+              });
+              handleCancel(skillChoice);
+              skillArtifact = skillChoice as SkillArtifact;
+              artifactsToInstall.push({ name: skillArtifact.name, sourcePath: skillArtifact.path, type: 'skill' });
+          }
+
+          // Suggest complementary workflow if in Antigravity
+          if (targetAgent === 'antigravity') {
+              const complementaryWorkflow = workflows.find(w => w.name === skillArtifact.name);
+              if (complementaryWorkflow) {
+                  const addWf = await confirm({ message: `A complementary workflow "${complementaryWorkflow.name}" exists for Antigravity. Install it too?` });
+                  handleCancel(addWf);
+                  if (addWf) {
+                      artifactsToInstall.push({ name: `${complementaryWorkflow.name}.md`, sourcePath: complementaryWorkflow.path, type: 'workflow' });
+                  }
+              }
+          }
+      } else {
+          let wfArtifact: WorkflowArtifact;
+          if (name) {
+              const found = workflows.find(w => w.name === name);
+              if (!found) {
+                  console.error(pc.red(`Workflow "${name}" not found. Available: ${workflows.map(w => w.name).join(', ')}`));
+                  process.exit(1);
+              }
+              wfArtifact = found;
+              artifactsToInstall.push({ name: `${found.name}.md`, sourcePath: found.path, type: 'workflow' });
+          } else {
+              const wfChoice = await select({
+                  message: 'Select a workflow to install',
+                  options: workflows.map(w => ({ value: w, label: w.name }))
+              });
+              handleCancel(wfChoice);
+              wfArtifact = wfChoice as WorkflowArtifact;
+              artifactsToInstall.push({ name: `${wfArtifact.name}.md`, sourcePath: wfArtifact.path, type: 'workflow' });
+          }
+      }
+
+      // 6. Installation Method
       let methodVal: 'symlink' | 'copy';
       if (options.method) {
           if (!['symlink', 'copy'].includes(options.method)) {
@@ -185,13 +213,14 @@ program.command('add [name]')
           }
           methodVal = options.method as 'symlink' | 'copy';
       } else {
+          const recommendedMethod = scopeVal === 'local' ? 'copy' : 'symlink';
           const methodChoice = await select({
               message: 'Installation method',
               options: [
-                  { value: 'symlink', label: 'Symlink (Recommended) - Updates instantly' },
-                  { value: 'copy', label: 'Copy to agent' }
+                  { value: 'symlink', label: `Symlink (Updates instantly)${recommendedMethod === 'symlink' ? ' - Recommended' : ''}` },
+                  { value: 'copy', label: `Copy to agent${recommendedMethod === 'copy' ? ' - Recommended for Git repos' : ''}` }
               ],
-              initialValue: prefs.installMethod
+              initialValue: recommendedMethod
           });
           handleCancel(methodChoice);
           methodVal = methodChoice as 'symlink' | 'copy';
