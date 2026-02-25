@@ -426,26 +426,30 @@ program.command('remove')
           process.exit(0);
       }
 
-      const toRemove = await select({
-          message: 'Select artifact to remove',
+      const toRemove = await multiselect({
+          message: 'Select artifact(s) to remove',
           options: installed.map(a => ({
               value: a,
               label: `${a.type === 'skill' ? '🧠' : '⚡'} ${a.name} ${pc.dim(`(in: ${a.installedIn.join(', ')})`)}`
-          }))
+          })),
+          required: true
       });
       handleCancel(toRemove);
 
-      const artifact = toRemove as typeof installed[0];
+      const artifacts = toRemove as typeof installed;
+      const names = artifacts.map(a => pc.red(a.name)).join(', ');
 
-      const confirmRemove = await confirm({ message: `Remove ${pc.red(artifact.name)} from ${artifact.installedIn.join(' and ')}?` });
+      const confirmRemove = await confirm({ message: `Remove ${names}?` });
       handleCancel(confirmRemove);
 
       if (confirmRemove) {
           try {
-              for (const p of artifact.fullPaths) {
-                  removeArtifact(p);
+              for (const artifact of artifacts) {
+                  for (const p of artifact.fullPaths) {
+                      removeArtifact(p);
+                  }
               }
-              outro(`✅ Removed ${pc.red(artifact.name)} from ${artifact.installedIn.join(', ')} (${scopeVal})`);
+              outro(`✅ Removed ${artifacts.map(a => pc.red(a.name)).join(', ')} (${scopeVal})`);
           } catch (e: any) {
               console.error(pc.red(e.message));
               process.exit(1);
