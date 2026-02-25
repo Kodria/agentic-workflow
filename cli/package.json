@@ -15,7 +15,7 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": ["agentic", "workflow", "cli", "skills", "ai"],
-  "author": "crisecheverria",
+  "author": "Kodria",
   "license": "ISC",
   "description": "CLI to manage Agentic Workflows - install skills, workflows, and processes for AI agents",
   "dependencies": {

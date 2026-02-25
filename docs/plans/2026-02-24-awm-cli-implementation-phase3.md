@@ -284,7 +284,7 @@ fi
 
 # Install CLI globally from GitHub directly
 echo "📦 Installing awm package globally via npm..."
-npm install -g git+https://github.com/crisecheverria/agentic-workflow.git
+npm install -g git+https://github.com/Kodria/agentic-workflow.git
 
 # Trigger an invisible update to fetch registry
 echo "🔄 Bootstrapping local registry..."

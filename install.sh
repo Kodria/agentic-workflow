@@ -20,7 +20,7 @@ if ! command -v npm &> /dev/null; then
     exit 1
 fi
 
-REPO_URL="https://github.com/crisecheverria/agentic-workflow.git"
+REPO_URL="https://github.com/Kodria/agentic-workflow.git"
 INSTALL_DIR="$HOME/.awm/cli-source"
 
 # Clone or pull the repository
