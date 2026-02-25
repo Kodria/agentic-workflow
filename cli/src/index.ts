@@ -28,33 +28,45 @@ interface GroupableArtifact {
     [k: string]: any;
 }
 
+interface CombinedArtifact {
+    baseName: string;
+    artifacts: GroupableArtifact[];
+}
+
 function buildGroupedOptions<T extends GroupableArtifact>(
     artifacts: T[],
     processes: ProcessDefinition[],
-    formatLabel: (a: T) => string
+    formatLabel: (c: CombinedArtifact) => string
 ): { value: any; label: string; hint?: string }[] {
-    const grouped = new Map<string, T[]>();
-    const standalone: T[] = [];
+    const grouped = new Map<string, Map<string, T[]>>();
+    const standalone = new Map<string, T[]>();
 
     for (const a of artifacts) {
         let foundParent = false;
+        const baseName = a.type === 'workflow' ? a.name.replace(/\.md$/, '') : a.name;
+
         for (const p of processes) {
-            const matchName = a.type === 'workflow' ? a.name.replace(/\.md$/, '') : a.name;
-            if ((a.type === 'skill' && p.skills.includes(matchName)) ||
-                (a.type === 'workflow' && p.workflows.includes(matchName))) {
-                if (!grouped.has(p.name)) grouped.set(p.name, []);
-                grouped.get(p.name)!.push(a);
+            if ((a.type === 'skill' && p.skills.includes(baseName)) ||
+                (a.type === 'workflow' && p.workflows.includes(baseName))) {
+                if (!grouped.has(p.name)) grouped.set(p.name, new Map());
+                const procGroup = grouped.get(p.name)!;
+                if (!procGroup.has(baseName)) procGroup.set(baseName, []);
+                procGroup.get(baseName)!.push(a);
                 foundParent = true;
                 break;
             }
         }
-        if (!foundParent) standalone.push(a);
+        if (!foundParent) {
+            if (!standalone.has(baseName)) standalone.set(baseName, []);
+            standalone.get(baseName)!.push(a);
+        }
     }
 
     const options: { value: any; label: string; hint?: string }[] = [];
 
-    for (const [procName, children] of grouped.entries()) {
+    for (const [procName, baseNameMap] of grouped.entries()) {
         const proc = processes.find(p => p.name === procName)!;
+        const children = Array.from(baseNameMap.entries()).map(([baseName, arr]) => ({ baseName, artifacts: arr }));
         options.push({
             value: { _group: true, processName: procName, children },
             label: `📦 ${procName}`,
@@ -62,13 +74,14 @@ function buildGroupedOptions<T extends GroupableArtifact>(
         });
         children.forEach((c, idx) => {
             const prefix = idx === children.length - 1 ? '  └─ ' : '  ├─ ';
-            options.push({ value: { _child: true, artifact: c }, label: `${prefix}${formatLabel(c)}` });
+            options.push({ value: { _child: true, combined: c }, label: `${prefix}${formatLabel(c)}` });
         });
     }
 
-    if (standalone.length > 0) {
-        standalone.forEach(c => {
-            options.push({ value: { _child: true, artifact: c }, label: `🔹 ${formatLabel(c)}` });
+    if (standalone.size > 0) {
+        Array.from(standalone.entries()).forEach(([baseName, arr]) => {
+            const c = { baseName, artifacts: arr };
+            options.push({ value: { _child: true, combined: c }, label: `🔹 ${formatLabel(c)}` });
         });
     }
 
@@ -79,9 +92,13 @@ function resolveSelectedArtifacts(selections: any[]): any[] {
     const result = new Map<string, any>();
     for (const sel of selections) {
         if (sel._group) {
-            for (const c of sel.children) result.set(c.name, c);
+            for (const c of sel.children) {
+                for (const a of c.artifacts) result.set(a.name, a);
+            }
         } else if (sel._child) {
-            result.set(sel.artifact.name, sel.artifact);
+            for (const a of sel.combined.artifacts) {
+                result.set(a.name, a);
+            }
         }
     }
     return Array.from(result.values());
@@ -179,7 +196,12 @@ program.command('add [name]')
       }
 
       const groupedOpts = buildGroupedOptions(allAvailable, processes,
-          (a) => `${a.type === 'skill' ? '🧠' : '⚡'} ${a.name}`);
+          (c) => {
+              const hasSkill = c.artifacts.some(a => a.type === 'skill');
+              const hasWf = c.artifacts.some(a => a.type === 'workflow');
+              const icons = [hasSkill ? '🧠' : '', hasWf ? '⚡' : ''].filter(Boolean).join(' ');
+              return `${icons} ${c.baseName}`;
+          });
 
       // 5. Pick artifact(s) via grouped multiselect
       const artifactChoice = await multiselect({
@@ -315,43 +337,58 @@ program.command('list')
           ...workflows.map(w => ({ name: `${w.name}.md`, type: 'workflow' as ArtifactType }))
       ];
 
-      const grouped = new Map<string, GroupableArtifact[]>();
-      const standalone: GroupableArtifact[] = [];
+      const grouped = new Map<string, Map<string, GroupableArtifact[]>>();
+      const standalone = new Map<string, GroupableArtifact[]>();
 
       for (const a of allArtifacts) {
           let found = false;
+          const baseName = a.type === 'workflow' ? a.name.replace(/\.md$/, '') : a.name;
           for (const p of processes) {
-              const matchName = a.type === 'workflow' ? a.name.replace(/\.md$/, '') : a.name;
-              if ((a.type === 'skill' && p.skills.includes(matchName)) ||
-                  (a.type === 'workflow' && p.workflows.includes(matchName))) {
-                  if (!grouped.has(p.name)) grouped.set(p.name, []);
-                  grouped.get(p.name)!.push(a);
+              if ((a.type === 'skill' && p.skills.includes(baseName)) ||
+                  (a.type === 'workflow' && p.workflows.includes(baseName))) {
+                  if (!grouped.has(p.name)) grouped.set(p.name, new Map());
+                  const procGroup = grouped.get(p.name)!;
+                  if (!procGroup.has(baseName)) procGroup.set(baseName, []);
+                  procGroup.get(baseName)!.push(a);
                   found = true;
                   break;
               }
           }
-          if (!found) standalone.push(a);
+          if (!found) {
+              if (!standalone.has(baseName)) standalone.set(baseName, []);
+              standalone.get(baseName)!.push(a);
+          }
       }
 
-      for (const [procName, children] of grouped.entries()) {
+      for (const [procName, baseNameMap] of grouped.entries()) {
           const proc = processes.find(p => p.name === procName)!;
-          const skillCount = children.filter(c => c.type === 'skill').length;
-          const wfCount = children.filter(c => c.type === 'workflow').length;
+          let skillCount = 0; let wfCount = 0;
+          const children = Array.from(baseNameMap.values());
+          for (const arr of children) {
+              if (arr.some(a => a.type === 'skill')) skillCount++;
+              if (arr.some(a => a.type === 'workflow')) wfCount++;
+          }
           const badges = [skillCount > 0 ? `🧠 ${skillCount} skills` : '', wfCount > 0 ? `⚡ ${wfCount} workflows` : ''].filter(Boolean).join(' · ');
           console.log(`\n${pc.cyan(pc.bold(`📦 ${procName}`))} ${pc.dim(`— ${proc.description}`)} ${pc.magenta(`[${badges}]`)}`);
-          children.forEach((c, idx) => {
+          children.forEach((arr, idx) => {
               const prefix = idx === children.length - 1 ? '  └─ ' : '  ├─ ';
-              const icon = c.type === 'skill' ? '🧠' : '⚡';
-              console.log(`${prefix}${icon} ${c.name}`);
+              const hasSkill = arr.some(a => a.type === 'skill');
+              const hasWf = arr.some(a => a.type === 'workflow');
+              const icons = [hasSkill ? '🧠' : '', hasWf ? '⚡' : ''].filter(Boolean).join(' ');
+              const baseName = arr[0].type === 'workflow' ? arr[0].name.replace(/\.md$/, '') : arr[0].name;
+              console.log(`${prefix}${icons} ${baseName}`);
           });
       }
 
-      if (standalone.length > 0) {
+      if (standalone.size > 0) {
           console.log(`\n${pc.cyan(pc.bold('🔹 Standalone'))}`);
-          standalone.forEach((c, idx) => {
-              const prefix = idx === standalone.length - 1 ? '  └─ ' : '  ├─ ';
-              const icon = c.type === 'skill' ? '🧠' : '⚡';
-              console.log(`${prefix}${icon} ${c.name}`);
+          const entries = Array.from(standalone.entries());
+          entries.forEach(([baseName, arr], idx) => {
+              const prefix = idx === entries.length - 1 ? '  └─ ' : '  ├─ ';
+              const hasSkill = arr.some(a => a.type === 'skill');
+              const hasWf = arr.some(a => a.type === 'workflow');
+              const icons = [hasSkill ? '🧠' : '', hasWf ? '⚡' : ''].filter(Boolean).join(' ');
+              console.log(`${prefix}${icons} ${baseName}`);
           });
       }
 
@@ -432,7 +469,16 @@ program.command('remove')
 
       const processes = discoverProcesses();
       const groupedOpts = buildGroupedOptions(installed, processes,
-          (a) => `${a.type === 'skill' ? '🧠' : '⚡'} ${a.name} ${pc.dim(`(in: ${a.installedIn.join(', ')})`)}`
+          (c) => {
+              const hasSkill = c.artifacts.some(a => a.type === 'skill');
+              const hasWf = c.artifacts.some(a => a.type === 'workflow');
+              const icons = [hasSkill ? '🧠' : '', hasWf ? '⚡' : ''].filter(Boolean).join(' ');
+              const locations = new Set<string>();
+              for (const a of c.artifacts) {
+                  for (const loc of a.installedIn) locations.add(loc);
+              }
+              return `${icons} ${c.baseName} ${pc.dim(`(in: ${Array.from(locations).join(', ')})`)}`;
+          }
       );
 
       const toRemove = await multiselect({
