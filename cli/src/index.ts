@@ -20,6 +20,73 @@ function handleCancel(value: unknown): void {
     }
 }
 
+// ── Grouping utilities ──────────────────────────────────────────────────────
+
+interface GroupableArtifact {
+    name: string;
+    type: ArtifactType;
+    [k: string]: any;
+}
+
+function buildGroupedOptions<T extends GroupableArtifact>(
+    artifacts: T[],
+    processes: ProcessDefinition[],
+    formatLabel: (a: T) => string
+): { value: any; label: string; hint?: string }[] {
+    const grouped = new Map<string, T[]>();
+    const standalone: T[] = [];
+
+    for (const a of artifacts) {
+        let foundParent = false;
+        for (const p of processes) {
+            const matchName = a.type === 'workflow' ? a.name.replace(/\.md$/, '') : a.name;
+            if ((a.type === 'skill' && p.skills.includes(matchName)) ||
+                (a.type === 'workflow' && p.workflows.includes(matchName))) {
+                if (!grouped.has(p.name)) grouped.set(p.name, []);
+                grouped.get(p.name)!.push(a);
+                foundParent = true;
+                break;
+            }
+        }
+        if (!foundParent) standalone.push(a);
+    }
+
+    const options: { value: any; label: string; hint?: string }[] = [];
+
+    for (const [procName, children] of grouped.entries()) {
+        const proc = processes.find(p => p.name === procName)!;
+        options.push({
+            value: { _group: true, processName: procName, children },
+            label: `📦 ${procName}`,
+            hint: `${proc.description} — ${children.length} artifacts`
+        });
+        children.forEach((c, idx) => {
+            const prefix = idx === children.length - 1 ? '  └─ ' : '  ├─ ';
+            options.push({ value: { _child: true, artifact: c }, label: `${prefix}${formatLabel(c)}` });
+        });
+    }
+
+    if (standalone.length > 0) {
+        standalone.forEach(c => {
+            options.push({ value: { _child: true, artifact: c }, label: `🔹 ${formatLabel(c)}` });
+        });
+    }
+
+    return options;
+}
+
+function resolveSelectedArtifacts(selections: any[]): any[] {
+    const result = new Map<string, any>();
+    for (const sel of selections) {
+        if (sel._group) {
+            for (const c of sel.children) result.set(c.name, c);
+        } else if (sel._child) {
+            result.set(sel.artifact.name, sel.artifact);
+        }
+    }
+    return Array.from(result.values());
+}
+
 program.command('add [name]')
   .description('Add a skill, workflow, or process interactively (or non-interactively with flags)')
   .option('-t, --type <type>', 'Artifact type: skill, workflow, or process')
@@ -99,120 +166,35 @@ program.command('add [name]')
           scopeVal = scopeChoice as Scope;
       }
 
-      // 4. Determine what to install
-      let installType: string;
-      if (options.type) {
-          if (!['skill', 'workflow', 'process'].includes(options.type)) {
-              console.error(pc.red(`Invalid type "${options.type}". Use: skill, workflow, or process.`));
-              process.exit(1);
-          }
-          installType = options.type;
-      } else {
-          const typeOptions: Array<{ value: 'process' | 'skill' | 'workflow'; label: string }> = [
-              ...(processes.length > 0 ? [{ value: 'process' as const, label: `📦 Process (${processes.length} available)` }] : []),
-              ...(skills.length > 0 ? [{ value: 'skill' as const, label: `🧠 Skill (${skills.length} available)` }] : [])
-          ];
-          
-          if (targetAgents.includes('antigravity') && workflows.length > 0) {
-              typeOptions.push({ value: 'workflow' as const, label: `⚡ Workflow (${workflows.length} available)` });
-          }
+      // 4. Build unified artifact list grouped by process
+      const includeWorkflows = targetAgents.includes('antigravity');
+      const allAvailable: GroupableArtifact[] = [
+          ...skills.map(s => ({ name: s.name, type: 'skill' as ArtifactType, sourcePath: s.path })),
+          ...(includeWorkflows ? workflows.map(w => ({ name: `${w.name}.md`, type: 'workflow' as ArtifactType, sourcePath: w.path })) : [])
+      ];
 
-          if (typeOptions.length === 0) {
-              outro(pc.yellow(`No artifacts available for the selected agent.`));
-              process.exit(0);
-          }
-
-          const selected = await select({
-              message: 'What do you want to install?',
-              options: typeOptions
-          });
-          handleCancel(selected);
-          installType = selected as string;
+      if (allAvailable.length === 0) {
+          outro(pc.yellow('No artifacts available for the selected agent(s).'));
+          process.exit(0);
       }
 
-      // 5. Pick the artifact
-      let artifactsToInstall: { name: string; sourcePath: string; type: ArtifactType }[] = [];
+      const groupedOpts = buildGroupedOptions(allAvailable, processes,
+          (a) => `${a.type === 'skill' ? '🧠' : '⚡'} ${a.name}`);
 
-      if (installType === 'process') {
-          let proc: ProcessDefinition;
-          if (name) {
-              const found = processes.find(p => p.name === name);
-              if (!found) {
-                  console.error(pc.red(`Process "${name}" not found. Available: ${processes.map(p => p.name).join(', ')}`));
-                  process.exit(1);
-              }
-              proc = found;
-          } else {
-              const processChoice = await select({
-                  message: 'Select a process to install',
-                  options: processes.map(p => ({ value: p, label: `${p.name} - ${p.description}` }))
-              });
-              handleCancel(processChoice);
-              proc = processChoice as ProcessDefinition;
-          }
-          for (const skillName of proc.skills) {
-              artifactsToInstall.push({ name: skillName, sourcePath: path.join(SKILLS_DIR, skillName), type: 'skill' });
-          }
-          for (const wfName of proc.workflows) {
-              artifactsToInstall.push({ name: `${wfName}.md`, sourcePath: path.join(WORKFLOWS_DIR, `${wfName}.md`), type: 'workflow' });
-          }
-      } else if (installType === 'skill') {
-          let skillArtifact: SkillArtifact;
-          if (name) {
-              const found = skills.find(s => s.name === name);
-              if (!found) {
-                  console.error(pc.red(`Skill "${name}" not found. Available: ${skills.map(s => s.name).join(', ')}`));
-                  process.exit(1);
-              }
-              skillArtifact = found;
-              artifactsToInstall.push({ name: found.name, sourcePath: found.path, type: 'skill' });
-          } else {
-              const skillChoice = await select({
-                  message: 'Select a skill to install',
-                  options: skills.map(s => ({ value: s, label: s.name }))
-              });
-              handleCancel(skillChoice);
-              skillArtifact = skillChoice as SkillArtifact;
-              artifactsToInstall.push({ name: skillArtifact.name, sourcePath: skillArtifact.path, type: 'skill' });
-          }
+      // 5. Pick artifact(s) via grouped multiselect
+      const artifactChoice = await multiselect({
+          message: 'Select artifact(s) to install',
+          options: groupedOpts,
+          required: true
+      });
+      handleCancel(artifactChoice);
 
-          // Suggest complementary workflow if in Antigravity
-          if (targetAgents.includes('antigravity')) {
-              const complementaryWorkflow = workflows.find(w => w.name === skillArtifact.name);
-              if (complementaryWorkflow) {
-                  let addWf: boolean;
-                  if (options.yes) {
-                      addWf = true;
-                  } else {
-                      const answer = await confirm({ message: `A complementary workflow "${complementaryWorkflow.name}" exists for Antigravity. Install it too?` });
-                      handleCancel(answer);
-                      addWf = answer as boolean;
-                  }
-                  if (addWf) {
-                      artifactsToInstall.push({ name: `${complementaryWorkflow.name}.md`, sourcePath: complementaryWorkflow.path, type: 'workflow' });
-                  }
-              }
-          }
-      } else {
-          let wfArtifact: WorkflowArtifact;
-          if (name) {
-              const found = workflows.find(w => w.name === name);
-              if (!found) {
-                  console.error(pc.red(`Workflow "${name}" not found. Available: ${workflows.map(w => w.name).join(', ')}`));
-                  process.exit(1);
-              }
-              wfArtifact = found;
-              artifactsToInstall.push({ name: `${found.name}.md`, sourcePath: found.path, type: 'workflow' });
-          } else {
-              const wfChoice = await select({
-                  message: 'Select a workflow to install',
-                  options: workflows.map(w => ({ value: w, label: w.name }))
-              });
-              handleCancel(wfChoice);
-              wfArtifact = wfChoice as WorkflowArtifact;
-              artifactsToInstall.push({ name: `${wfArtifact.name}.md`, sourcePath: wfArtifact.path, type: 'workflow' });
-          }
-      }
+      const resolved = resolveSelectedArtifacts(artifactChoice as any[]);
+      const artifactsToInstall: { name: string; sourcePath: string; type: ArtifactType }[] = resolved.map((a: any) => ({
+          name: a.name,
+          sourcePath: a.sourcePath,
+          type: a.type
+      }));
 
       // 6. Installation Method
       let methodVal: 'symlink' | 'copy';
@@ -327,31 +309,53 @@ program.command('list')
       const workflows = discoverWorkflows();
       const processes = discoverProcesses();
 
-      console.log(`\n${pc.cyan(pc.bold('Skills'))} (${skills.length} available)`);
-      if (skills.length > 0) {
-          skills.forEach(sk => console.log(`  🧠 ${sk.name}`));
-      } else {
-          console.log('  (none)');
+      // Build combined artifact list for grouping
+      const allArtifacts: GroupableArtifact[] = [
+          ...skills.map(s => ({ name: s.name, type: 'skill' as ArtifactType })),
+          ...workflows.map(w => ({ name: `${w.name}.md`, type: 'workflow' as ArtifactType }))
+      ];
+
+      const grouped = new Map<string, GroupableArtifact[]>();
+      const standalone: GroupableArtifact[] = [];
+
+      for (const a of allArtifacts) {
+          let found = false;
+          for (const p of processes) {
+              const matchName = a.type === 'workflow' ? a.name.replace(/\.md$/, '') : a.name;
+              if ((a.type === 'skill' && p.skills.includes(matchName)) ||
+                  (a.type === 'workflow' && p.workflows.includes(matchName))) {
+                  if (!grouped.has(p.name)) grouped.set(p.name, []);
+                  grouped.get(p.name)!.push(a);
+                  found = true;
+                  break;
+              }
+          }
+          if (!found) standalone.push(a);
       }
 
-      console.log(`\n${pc.cyan(pc.bold('Workflows'))} (${workflows.length} available)`);
-      if (workflows.length > 0) {
-          workflows.forEach(wf => console.log(`  ⚡ ${wf.name}`));
-      } else {
-          console.log('  (none)');
-      }
-
-      console.log(`\n${pc.cyan(pc.bold('Processes'))} (${processes.length} available)`);
-      if (processes.length > 0) {
-          processes.forEach(proc => {
-              console.log(`  📦 ${pc.bold(proc.name)} — ${proc.description}`);
-              console.log(`     Skills: ${proc.skills.join(', ')}`);
-              console.log(`     Workflows: ${proc.workflows.join(', ')}`);
+      for (const [procName, children] of grouped.entries()) {
+          const proc = processes.find(p => p.name === procName)!;
+          const skillCount = children.filter(c => c.type === 'skill').length;
+          const wfCount = children.filter(c => c.type === 'workflow').length;
+          const badges = [skillCount > 0 ? `🧠 ${skillCount} skills` : '', wfCount > 0 ? `⚡ ${wfCount} workflows` : ''].filter(Boolean).join(' · ');
+          console.log(`\n${pc.cyan(pc.bold(`📦 ${procName}`))} ${pc.dim(`— ${proc.description}`)} ${pc.magenta(`[${badges}]`)}`);
+          children.forEach((c, idx) => {
+              const prefix = idx === children.length - 1 ? '  └─ ' : '  ├─ ';
+              const icon = c.type === 'skill' ? '🧠' : '⚡';
+              console.log(`${prefix}${icon} ${c.name}`);
           });
-      } else {
-          console.log('  (none)');
       }
 
+      if (standalone.length > 0) {
+          console.log(`\n${pc.cyan(pc.bold('🔹 Standalone'))}`);
+          standalone.forEach((c, idx) => {
+              const prefix = idx === standalone.length - 1 ? '  └─ ' : '  ├─ ';
+              const icon = c.type === 'skill' ? '🧠' : '⚡';
+              console.log(`${prefix}${icon} ${c.name}`);
+          });
+      }
+
+      console.log();
       outro(`Run ${pc.green('awm add')} to install any of these artifacts.`);
   });
 
@@ -426,30 +430,32 @@ program.command('remove')
           process.exit(0);
       }
 
+      const processes = discoverProcesses();
+      const groupedOpts = buildGroupedOptions(installed, processes,
+          (a) => `${a.type === 'skill' ? '🧠' : '⚡'} ${a.name} ${pc.dim(`(in: ${a.installedIn.join(', ')})`)}`
+      );
+
       const toRemove = await multiselect({
           message: 'Select artifact(s) to remove',
-          options: installed.map(a => ({
-              value: a,
-              label: `${a.type === 'skill' ? '🧠' : '⚡'} ${a.name} ${pc.dim(`(in: ${a.installedIn.join(', ')})`)}`
-          })),
+          options: groupedOpts,
           required: true
       });
       handleCancel(toRemove);
 
-      const artifacts = toRemove as typeof installed;
-      const names = artifacts.map(a => pc.red(a.name)).join(', ');
+      const resolved = resolveSelectedArtifacts(toRemove as any[]) as typeof installed;
+      const names = resolved.map(a => pc.red(a.name)).join(', ');
 
       const confirmRemove = await confirm({ message: `Remove ${names}?` });
       handleCancel(confirmRemove);
 
       if (confirmRemove) {
           try {
-              for (const artifact of artifacts) {
+              for (const artifact of resolved) {
                   for (const p of artifact.fullPaths) {
                       removeArtifact(p);
                   }
               }
-              outro(`✅ Removed ${artifacts.map(a => pc.red(a.name)).join(', ')} (${scopeVal})`);
+              outro(`✅ Removed ${resolved.map(a => pc.red(a.name)).join(', ')} (${scopeVal})`);
           } catch (e: any) {
               console.error(pc.red(e.message));
               process.exit(1);
