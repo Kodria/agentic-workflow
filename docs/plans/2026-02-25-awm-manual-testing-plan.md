@@ -18,7 +18,8 @@ curl -fsSL https://raw.githubusercontent.com/Kodria/agentic-workflow/main/instal
 
 **Evaluation (Agent):**
 - Verify the script clones `cli-source`, installs NPM dependencies, links the global binary, and bootstraps the `~/.awm/registry`.
-- Confirm no errors occurred during the NPM install or build process.
+- Confirm the new native bash spinner (`⠋⠙⠹...`) is displayed without any noisy output from `git`, `npm install`, or `tsc`.
+- Ensure each step concludes with a clear ✅ and there are no warnings.
 
 ### Step 1.2: Check Installation Idempotency
 Verify that running the installer again gracefully updates and reinstalls without breaking.
@@ -77,29 +78,63 @@ awm add
 **Evaluation (Agent):**
 - Confirm the operation succeeds. Use the terminal to verify the symlink exists in `.agents/skills/brainstorming`.
 
-### Step 3.2: Duplicate Artifact Handling
-Verify the explicit error message for existing artifacts.
+### Step 3.1.b: Interactive Skill Installation (Multi-Agent Support)
+Test the ability to select multiple agents using the new multiselect prompt.
 
 **Action (User):**
 ```bash
 awm add
 ```
-- Try to install `brainstorming` again.
+- Select: `find-skills` (or any other skill)
+- Agents (Space to select both): `antigravity`, `opencode`
+- Scope: `global`
+- Method: `symlink`
 
 **Evaluation (Agent):**
-- Ensure a clean error message is displayed (e.g., "Artifact already exists") without unhandled exceptions.
+- Verify installation succeeds for both agents.
+- Confirm symlinks exist in `~/.agents/skills/find-skills` AND `~/.opencode/skills/find-skills`.
 
-### Step 3.3: Non-Interactive Installation (Full Flags)
-Test the `--yes` flag to bypass the TUI entirely.
+### Step 3.1.c: Installation Filtering for Incompatible Agents
+Test that workflows gracefully skip incompatible agents (like `opencode`).
 
 **Action (User):**
 ```bash
-awm add "project-context-init" --type workflow --agent antigravity --scope local --method copy --yes
+awm add
+```
+- Select: `docs-system-orchestrator` (a workflow)
+- Agents: `antigravity`, `opencode`
+- Answer "Yes" to the complementary workflow prompt.
+- Scope: `global`
+- Method: `symlink`
+
+**Evaluation (Agent):**
+- Verify installation succeeds for `antigravity`.
+- Ensure a warning (`⚠️ Skipped: ... (opencode) (workflows not supported)`) is displayed for the `opencode` portion.
+
+### Step 3.2: Duplicate Artifact Handling (Idempotent)
+Verify the idempotent behavior when an artifact already exists (Option A).
+
+**Action (User):**
+```bash
+awm add
+```
+- Try to install `find-skills` again.
+
+**Evaluation (Agent):**
+- Ensure it successfully reinstalls (overwrites or replaces symlinks) without crashing, serving as a self-healing 'auto-repair' mechanism.
+
+### Step 3.3: Non-Interactive Installation (Full Flags & Multi-Agent)
+Test the `--yes` flag to bypass the TUI entirely, passing multiple agents.
+
+**Action (User):**
+```bash
+awm add "project-context-init" --type workflow --agent antigravity,opencode --scope local --method copy --yes
 ```
 
 **Evaluation (Agent):**
-- Confirm instant installation without prompts.
+- Confirm instant installation without interactive prompts (including bypassing the complementary workflow prompt).
 - Ensure the method respected `copy` instead of `symlink` in `.agents/workflows/project-context-init`.
+- Ensure it successfully installed to `antigravity` and skipped `opencode` gracefully.
 
 ---
 
