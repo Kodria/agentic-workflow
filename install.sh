@@ -27,7 +27,7 @@ INSTALL_DIR="$HOME/.awm/cli-source"
 if [ -d "$INSTALL_DIR" ]; then
     echo "🔄 Updating existing installation..."
     cd "$INSTALL_DIR"
-    git pull --ff-only origin master
+    git pull --ff-only origin main
 else
     echo "📥 Cloning repository..."
     git clone "$REPO_URL" "$INSTALL_DIR"
