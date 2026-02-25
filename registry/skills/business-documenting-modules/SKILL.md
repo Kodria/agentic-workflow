@@ -52,7 +52,7 @@ Analyze the codebase, plans, and recent context to extract the following structu
 
 ### Step 3: Delegate Formatting to Template Wizard
 
-1.  **Read the template** at `~/.agents/skills/cscti-template-wizard/resources/templates/business-knowledge-template.md`.
+1.  **Locate the template dynamically**: Use your file search tools (e.g., `find_by_name`) to find `template-wizard/resources/templates/business-knowledge-template.md` across your skill directories (`.agents/skills/`, `.agent/skills/`, `~/.gemini/antigravity/skills/`, `~/.agents/skills/`). Read the template from the discovered path.
 2.  **Extract the YAML metadata** (`template_purpose`, `interview_questions`) from the template.
 3.  **Auto-fill** each section of the template body using the structured data gathered in Step 2. Since the data was already collected, you do NOT need to ask the user the interview questions — fill them programmatically.
 4.  **Generate the final document** as a clean Markdown file (without YAML frontmatter) and save it to `{docs_path}/business-knowledge/<category>/<module-name>.md`. Create the necessary directories if they don't exist.
@@ -69,5 +69,5 @@ Analyze the codebase, plans, and recent context to extract the following structu
 -   **Language**: Write the documentation in **Spanish** (or as declared in `agent_context.language`).
 -   **Tone**: Keep it professional, accessible to non-technical stakeholders, and focused on business outcomes.
 -   **Focus**: Absolutely **NO** deep technical details (like specific database queries, class names, or component structures) unless strictly necessary to explain a business rule. Focus on the *What* and *Why*, not the *How*.
--   **Template Source**: Always use the official template from `~/.agents/skills/cscti-template-wizard/resources/templates/business-knowledge-template.md`. Never invent your own structure.
+-   **Template Source**: Always use the official template from `template-wizard/resources/templates/business-knowledge-template.md` (located dynamically via file search). Never invent your own structure.
 

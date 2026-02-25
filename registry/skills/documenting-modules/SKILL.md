@@ -46,7 +46,7 @@ Analyze the codebase and plans to extract the following structured information a
 
 ### Step 3: Delegate Formatting to Template Wizard
 
-1.  **Read the template** at `~/.agents/skills/cscti-template-wizard/resources/templates/module-template.md`.
+1.  **Locate the template dynamically**: Use your file search tools (e.g., `find_by_name`) to find `template-wizard/resources/templates/module-template.md` across your skill directories (`.agents/skills/`, `.agent/skills/`, `~/.gemini/antigravity/skills/`, `~/.agents/skills/`). Read the template from the discovered path.
 2.  **Extract the YAML metadata** (`template_purpose`, `interview_questions`) from the template.
 3.  **Auto-fill** each section of the template body using the structured data gathered in Step 2. Since the data was already collected, you do NOT need to ask the user the interview questions — fill them programmatically.
 4.  **Generate the final document** as a clean Markdown file (without YAML frontmatter) and save it to `{docs_path}/modules/<category>/<module-name>.md`.
@@ -64,5 +64,5 @@ Analyze the codebase and plans to extract the following structured information a
 -   **Language**: Write documentation in **Spanish** (as per project convention, or as declared in `agent_context.language`).
 -   **Conciseness**: Focus on "what it is" and "how it works", not "how we built it" (that's in the plans).
 -   **Location**: Always use `{docs_path}/modules`. Do not create loose files in `{docs_path}/` root.
--   **Template Source**: Always use the official template from `~/.agents/skills/cscti-template-wizard/resources/templates/module-template.md`. Never invent your own structure.
+-   **Template Source**: Always use the official template from `template-wizard/resources/templates/module-template.md` (located dynamically via file search). Never invent your own structure.
 
