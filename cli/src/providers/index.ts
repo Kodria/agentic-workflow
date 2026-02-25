@@ -11,9 +11,9 @@ export function getTargetPath(type: ArtifactType, agent: AgentTarget, scope: Sco
     
     if (agent === 'antigravity') {
         if (type === 'skill') {
-            return scope === 'global' ? path.join(homedir, '.agents/skills') : '.agents/skills';
+            return scope === 'global' ? path.join(homedir, '.gemini/antigravity/skills') : '.agent/skills';
         } else {
-            return scope === 'global' ? path.join(homedir, '.gemini/antigravity/global_workflows') : '.agents/workflows';
+            return scope === 'global' ? path.join(homedir, '.gemini/antigravity/global_workflows') : '.agent/workflows';
         }
     } 
     
