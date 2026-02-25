@@ -12,7 +12,7 @@
 Install AWM globally using the one-liner bash script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Kodria/agentic-workflow/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Kodria/agentic-workflow/main/install.sh | bash
 ```
 
 Once installed, verify it's working:
@@ -25,7 +25,7 @@ awm --help
 To safely remove the AWM CLI and its internal cache without deleting your personal skills or workflows, run the uninstall script from the repository root:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Kodria/agentic-workflow/master/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Kodria/agentic-workflow/main/uninstall.sh | bash
 ```
 
 > **Note**: Your installed artifacts in `~/.agents` and `~/.gemini/antigravity/global_workflows` are intentionally left intact to protect personal files. If you wish to remove them, please delete the specific directories or symlinks manually.
