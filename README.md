@@ -12,7 +12,7 @@
 Install AWM globally using the one-liner bash script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/crisecheverria/agentic-workflow/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Kodria/agentic-workflow/master/install.sh | bash
 ```
 
 Once installed, verify it's working:
