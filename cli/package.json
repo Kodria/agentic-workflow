@@ -1,5 +1,5 @@
 {
-  "name": "agentic-workflow",
+  "name": "agentic-workflow-manager",
   "version": "1.0.0",
   "main": "dist/index.js",
   "bin": {
@@ -11,12 +11,13 @@
   "scripts": {
     "build": "tsc",
     "test": "jest",
-    "start": "ts-node src/index.ts"
+    "start": "ts-node src/index.ts",
+    "prepublishOnly": "npm run build"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["agentic", "workflow", "cli", "skills", "ai"],
+  "author": "crisecheverria",
   "license": "ISC",
-  "description": "",
+  "description": "CLI to manage Agentic Workflows - install skills, workflows, and processes for AI agents",
   "dependencies": {
     "@clack/prompts": "^1.0.1",
     "commander": "^14.0.3",
