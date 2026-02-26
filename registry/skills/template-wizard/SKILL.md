@@ -10,11 +10,19 @@ description: "Asiste al usuario en la creación de nuevos documentos basándose 
 
 ## Paso 0: Autodescubrimiento Contextual de Recursos
 
-Antes de interactuar con el usuario o leer archivos del proyecto, DEBES ubicar dinámicamente tu carpeta de recursos de plantillas.
+Antes de interactuar con el usuario o leer archivos del proyecto, DEBES ubicar dinámicamente tus carpetas de plantillas.
+
+### 0.1 Plantillas Globales (`TEMPLATES_DIR`) — Solo Lectura
 - Usa tus herramientas de búsqueda de archivos (e.g. `find_by_name`) para buscar el patrón `template-wizard/resources/templates` dentro de tu entorno de ejecución.
 - Busca en las siguientes ubicaciones posibles: `.agents/skills/`, `.agent/skills/`, `~/.gemini/antigravity/skills/`, `~/.agents/skills/`.
-- Una vez ubicada la ruta absoluta correcta, guárdala como `TEMPLATES_DIR` y úsala como prefijo para todas las operaciones de lectura/escritura de plantillas en esta sesión.
+- Una vez ubicada la ruta absoluta correcta, guárdala como `TEMPLATES_DIR`.
 - **NO uses rutas hardcodeadas.** Si no encuentras la carpeta, informa al usuario y detente.
+- **⚠️ Las plantillas globales son de SOLO LECTURA.** Provienen del registry central de AWM y no deben ser modificadas por el usuario final.
+
+### 0.2 Plantillas Locales (`LOCAL_TEMPLATES_DIR`) — Proyecto Específico
+- Define `LOCAL_TEMPLATES_DIR` como la ruta `docs/templates/` relativa a la raíz del proyecto actual.
+- Verifica si este directorio existe. Si no existe, simplemente continúa sin plantillas locales (no es obligatorio).
+- Las plantillas locales son específicas del proyecto y pueden **sobrescribir** plantillas globales con el mismo `template_purpose`.
 
 ## Objetivo
 Guiar al usuario para redactar un nuevo borrador de documento eligiendo la plantilla adecuada y haciéndole preguntas progresivas para llenar las distintas secciones definidas en los metadatos de la propia plantilla.
@@ -27,9 +35,14 @@ Guiar al usuario para redactar un nuevo borrador de documento eligiendo la plant
      - `directories.dir_drafts` — carpeta de borradores (por defecto `{docs_path}/drafts`).
    - Usar estas rutas dinámicas en los pasos posteriores.
 
-2. **Fase de Descubrimiento**
-   - El agente DEBE listar y leer todos los archivos en `{TEMPLATES_DIR}`.
-   - Extraer el bloque YAML inicial (entre `---`) prestando especial atención al campo `template_purpose`.
+2. **Fase de Descubrimiento (Catálogo Unificado)**
+   - **2.1 Carga Global:** El agente DEBE listar y leer todos los archivos en `{TEMPLATES_DIR}` (plantillas globales). Extraer el bloque YAML inicial (entre `---`) prestando especial atención al campo `template_purpose`. Construir un catálogo en memoria usando `template_purpose` como identificador único.
+   - **2.2 Override Local:** El agente DEBE verificar si existe la carpeta `{LOCAL_TEMPLATES_DIR}` (`docs/templates/`) en el proyecto actual.
+     - Si **no existe**, continuar con el catálogo global tal cual.
+     - Si **existe**, listar y leer todos los archivos `.md` allí. Extraer su `template_purpose`.
+       - Si un `template_purpose` local **coincide** con uno global, la plantilla local **reemplaza** a la global en el catálogo.
+       - Si el `template_purpose` es **nuevo** (no existente a nivel global), se **agrega** al catálogo como plantilla adicional disponible.
+   - El resultado es un catálogo unificado donde las plantillas locales tienen prioridad sobre las globales.
 
 3. **Fase de Análisis y Match**
    - El agente debe cruzar la intención declarada por el usuario al invocar la skill con los `template_purpose` leídos.
