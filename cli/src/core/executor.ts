@@ -3,7 +3,15 @@ import fs from 'fs';
 import path from 'path';
 
 export function removeArtifact(targetPath: string): void {
-    if (!fs.existsSync(targetPath)) {
+    let exists = false;
+    try {
+        fs.lstatSync(targetPath);
+        exists = true;
+    } catch {
+        exists = false;
+    }
+    
+    if (!exists) {
         throw new Error(`Artifact not found at: ${targetPath}`);
     }
     fs.rmSync(targetPath, { recursive: true, force: true });
