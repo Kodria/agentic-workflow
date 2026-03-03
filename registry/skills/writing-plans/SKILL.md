@@ -94,23 +94,11 @@ git commit -m "feat: add specific feature"
 - Reference relevant skills with @ syntax
 - DRY, YAGNI, TDD, frequent commits
 
-## Execution Handoff
+## <TERMINATION_PHASE>
 
-After saving the plan, offer execution choice:
+Once the plan document is saved, **STOP COMPLETELY**. Do NOT invoke executing-plans, subagent-driven-development, or any other skill on your own.
 
-**"Plan complete and saved to `docs/plans/<filename>.md`. Two execution options:**
-
-**1. Subagent-Driven (this session)** - I dispatch fresh subagent per task, review between tasks, fast iteration
-
-**2. Parallel Session (separate)** - Open new session with executing-plans, batch execution with checkpoints
-
-**Which approach?"**
-
-**If Subagent-Driven chosen:**
-- **REQUIRED SUB-SKILL:** Use superpowers:subagent-driven-development
-- Stay in this session
-- Fresh subagent per task + code review
-
-**If Parallel Session chosen:**
-- Guide them to open new session in worktree
-- **REQUIRED SUB-SKILL:** New session uses superpowers:executing-plans
+Your only final step is:
+1. Report that the implementation plan is complete and saved to `docs/plans/<filename>.md`.
+2. Ask the user: *"¿Deseas continuar con la fase de ejecución? Si usas `development-process`, el orquestador evaluará el estado del proyecto y te propondrá el siguiente paso con las opciones disponibles."*
+3. Wait for confirmation. Do NOT proceed automatically.

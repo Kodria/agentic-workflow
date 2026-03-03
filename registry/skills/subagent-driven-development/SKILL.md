@@ -59,7 +59,7 @@ digraph process {
     "Read plan, extract all tasks with full text, note context, create TodoWrite" [shape=box];
     "More tasks remain?" [shape=diamond];
     "Dispatch final code reviewer subagent for entire implementation" [shape=box];
-    "Use superpowers:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
+    "STOP: Return control to orchestrator" [shape=doublecircle];
 
     "Read plan, extract all tasks with full text, note context, create TodoWrite" -> "Dispatch implementer subagent (./implementer-prompt.md)";
     "Dispatch implementer subagent (./implementer-prompt.md)" -> "Implementer subagent asks questions?";
@@ -78,7 +78,7 @@ digraph process {
     "Mark task complete in TodoWrite" -> "More tasks remain?";
     "More tasks remain?" -> "Dispatch implementer subagent (./implementer-prompt.md)" [label="yes"];
     "More tasks remain?" -> "Dispatch final code reviewer subagent for entire implementation" [label="no"];
-    "Dispatch final code reviewer subagent for entire implementation" -> "Use superpowers:finishing-a-development-branch";
+    "Dispatch final code reviewer subagent for entire implementation" -> "STOP: Return control to orchestrator";
 }
 ```
 
@@ -160,9 +160,16 @@ Code reviewer: ✅ Approved
 [After all tasks]
 [Dispatch final code-reviewer]
 Final reviewer: All requirements met, ready to merge
-
-Done!
 ```
+
+## <TERMINATION_PHASE>
+
+Once all tasks are complete and the final code review is approved, **STOP COMPLETELY**. Do NOT invoke finishing-a-development-branch or any other skill on your own.
+
+Your only final step is:
+1. Report a summary of all implemented tasks and the final reviewer's verdict.
+2. Ask the user: *"¿Deseas continuar con la fase de cierre de rama? Si usas `development-process`, el orquestador evaluará el estado del proyecto y te propondrá el siguiente paso."*
+3. Wait for confirmation. Do NOT proceed automatically.
 
 ## Advantages
 
@@ -233,7 +240,7 @@ Done!
 - **superpowers:using-git-worktrees** - REQUIRED: Set up isolated workspace before starting
 - **superpowers:writing-plans** - Creates the plan this skill executes
 - **superpowers:requesting-code-review** - Code review template for reviewer subagents
-- **superpowers:finishing-a-development-branch** - Complete development after all tasks
+- **superpowers:finishing-a-development-branch** - Invoked by the orchestrator in the next phase, NOT automatically by this skill
 
 **Subagents should use:**
 - **superpowers:test-driven-development** - Subagents follow TDD for each task

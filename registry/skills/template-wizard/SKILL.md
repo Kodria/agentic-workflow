@@ -59,4 +59,12 @@ Guiar al usuario para redactar un nuevo borrador de documento eligiendo la plant
 6. **Guardado (Drafting)**
    - El agente genera el documento resultante en la carpeta `{dir_drafts}/`.
    - El nombre del archivo debe seguir la convención kebab-case (ej. `{dir_drafts}/estandar-manejo-errores.md`).
-   - El agente finaliza confirmando la ruta al usuario y sugiriéndole invocar posteriormente la skill `docs-assistant` para perfeccionar y oficializar el documento.
+
+## <TERMINATION_PHASE>
+
+Una vez guardado el borrador, **DETENTE COMPLETAMENTE**. No invoques `docs-assistant` ni ninguna otra skill de forma autónoma.
+
+Tu único paso final es:
+1. Confirmar al usuario la ruta exacta donde se guardó el borrador.
+2. Preguntar: *"¿Deseas continuar con el proceso de documentación? Si invocas `docs-system-orchestrator`, el orquestador evaluará el siguiente paso (por ejemplo, revisar y oficializar el borrador con `docs-assistant`)."*
+3. Esperar confirmación. No proceder automáticamente.

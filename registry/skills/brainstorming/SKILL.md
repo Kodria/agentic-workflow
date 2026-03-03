@@ -28,7 +28,7 @@ You MUST create a task for each of these items and complete them in order:
 3. **Propose 2-3 approaches** — with trade-offs and your recommendation
 4. **Present design** — in sections scaled to their complexity, get user approval after each section
 5. **Write design doc** — save to `docs/plans/YYYY-MM-DD-<topic>-design.md` and commit
-6. **Transition to implementation** — invoke writing-plans skill to create implementation plan
+6. **Report completion** — communicate design is finalized and return control to orchestrator
 
 ## Process Flow
 
@@ -40,7 +40,7 @@ digraph brainstorming {
     "Present design sections" [shape=box];
     "User approves design?" [shape=diamond];
     "Write design doc" [shape=box];
-    "Invoke writing-plans skill" [shape=doublecircle];
+    "STOP: Return control to orchestrator" [shape=doublecircle];
 
     "Explore project context" -> "Ask clarifying questions";
     "Ask clarifying questions" -> "Propose 2-3 approaches";
@@ -48,11 +48,11 @@ digraph brainstorming {
     "Present design sections" -> "User approves design?";
     "User approves design?" -> "Present design sections" [label="no, revise"];
     "User approves design?" -> "Write design doc" [label="yes"];
-    "Write design doc" -> "Invoke writing-plans skill";
+    "Write design doc" -> "STOP: Return control to orchestrator";
 }
 ```
 
-**The terminal state is invoking writing-plans.** Do NOT invoke frontend-design, mcp-builder, or any other implementation skill. The ONLY skill you invoke after brainstorming is writing-plans.
+**The terminal state is returning control to the orchestrator.** Do NOT invoke writing-plans or any other skill autonomously. The development-process orchestrator is responsible for proposing and approving the next phase.
 
 ## The Process
 
@@ -82,9 +82,14 @@ digraph brainstorming {
 - Use elements-of-style:writing-clearly-and-concisely skill if available
 - Commit the design document to git
 
-**Implementation:**
-- Invoke the writing-plans skill to create a detailed implementation plan
-- Do NOT invoke any other skill. writing-plans is the next step.
+## <TERMINATION_PHASE>
+
+Once the design document is committed, **STOP COMPLETELY**. Do NOT invoke writing-plans or any other skill on your own.
+
+Your only final step is:
+1. Report that the design phase is complete and the document has been saved.
+2. Ask the user: *"¿Deseas continuar con la siguiente fase? Si usas `development-process`, el orquestador evaluará el estado del proyecto y te propondrá el siguiente paso."*
+3. Wait for confirmation. Do NOT proceed automatically.
 
 ## Key Principles
 
