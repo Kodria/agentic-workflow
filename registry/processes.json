@@ -2,8 +2,9 @@
   {
     "name": "core-dev",
     "description": "Las habilidades fundamentales para el desarrollo guiado por agentes.",
-    "skills": ["brainstorming", "writing-plans", "executing-plans", "subagent-driven-development", "test-driven-development", "requesting-code-review"],
-    "workflows": ["brainstorming", "writing-plans", "executing-plans"]
+    "skills": ["brainstorming", "writing-plans", "executing-plans", "subagent-driven-development", "test-driven-development", "requesting-code-review", "development-process"],
+    "workflows": ["brainstorming", "writing-plans", "executing-plans", "development-process"],
+    "agents": ["development-process"]
   },
   {
     "name": "docs",
