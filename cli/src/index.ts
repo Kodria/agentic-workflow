@@ -43,7 +43,7 @@ function buildGroupedOptions<T extends GroupableArtifact>(
 
     for (const a of artifacts) {
         let foundParent = false;
-        const baseName = a.type === 'workflow' ? a.name.replace(/\.md$/, '') : a.name;
+        const baseName = (a.type === 'workflow' || a.type === 'agent') ? a.name.replace(/\.md$/, '') : a.name;
 
         for (const p of processes) {
             if ((a.type === 'skill' && p.skills.includes(baseName)) ||
