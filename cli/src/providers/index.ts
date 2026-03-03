@@ -4,7 +4,7 @@ import path from 'path';
 
 export type AgentTarget = 'antigravity' | 'opencode';
 export type Scope = 'global' | 'local';
-export type ArtifactType = 'skill' | 'workflow';
+export type ArtifactType = 'skill' | 'workflow' | 'agent';
 
 export function getTargetPath(type: ArtifactType, agent: AgentTarget, scope: Scope): string {
     const homedir = os.homedir();
@@ -20,6 +20,9 @@ export function getTargetPath(type: ArtifactType, agent: AgentTarget, scope: Sco
     if (agent === 'opencode') {
         if (type === 'workflow') {
             throw new Error('Workflows are not natively supported by OpenCode.');
+        }
+        if (type === 'agent') {
+            return scope === 'global' ? path.join(homedir, '.config/opencode/agents') : '.agents/profiles';
         }
         return scope === 'global' ? path.join(homedir, '.agents/skills') : '.agents/skills';
     }
