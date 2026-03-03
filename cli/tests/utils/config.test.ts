@@ -10,7 +10,7 @@ describe('Preferences Manager', () => {
 
     afterEach(() => {
         if (fs.existsSync(PREFS_FILE)) fs.unlinkSync(PREFS_FILE);
-        if (fs.existsSync(PREFS_DIR)) fs.rmdirSync(PREFS_DIR);
+        if (fs.existsSync(PREFS_DIR)) fs.rmSync(PREFS_DIR, { recursive: true, force: true });
     });
 
     it('creates default preferences if none exist', () => {

@@ -5,7 +5,7 @@ import os from 'os';
 describe('Providers Routing', () => {
     it('routes antigravity global skills correctly', () => {
         const path = getTargetPath('skill', 'antigravity', 'global');
-        expect(path).toBe(`${os.homedir()}/.agents/skills`);
+        expect(path).toBe(`${os.homedir()}/.gemini/antigravity/skills`);
     });
 
     it('routes opencode local skills correctly', () => {
