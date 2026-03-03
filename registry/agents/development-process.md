@@ -1,7 +1,7 @@
 ---
 name: development-process
 description: Use as agent profile to orchestrate the development lifecycle - invokes the development-process skill which contains the full orchestration logic
-model: Claude 3.5 Sonnet
+mode: primary
 ---
 
 # Development Process Orchestrator
