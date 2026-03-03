@@ -42,16 +42,12 @@ Based on feedback:
 - Execute next batch
 - Repeat until complete
 
-### Step 5: Report Completion
+### Step 5: Complete Development
 
-## <TERMINATION_PHASE>
-
-Once all tasks are complete and verified, **STOP COMPLETELY**. Do NOT invoke finishing-a-development-branch or any other skill on your own.
-
-Your only final step is:
-1. Report a summary of what was implemented and the verification results.
-2. Ask the user: *"¿Deseas continuar con la fase de cierre de rama? Si usas `development-process`, el orquestador evaluará el estado del proyecto y te propondrá el siguiente paso."*
-3. Wait for confirmation. Do NOT proceed automatically.
+After all tasks complete and verified:
+- Announce: "I'm using the finishing-a-development-branch skill to complete this work."
+- **REQUIRED SUB-SKILL:** Use superpowers:finishing-a-development-branch
+- Follow that skill to verify tests, present options, execute choice
 
 ## When to Stop and Ask for Help
 
@@ -85,4 +81,4 @@ Your only final step is:
 **Required workflow skills:**
 - **superpowers:using-git-worktrees** - REQUIRED: Set up isolated workspace before starting
 - **superpowers:writing-plans** - Creates the plan this skill executes
-- **superpowers:finishing-a-development-branch** - Invoked by the orchestrator in the next phase, NOT automatically by this skill
+- **superpowers:finishing-a-development-branch** - Complete development after all tasks

@@ -94,15 +94,23 @@ git commit -m "feat: add specific feature"
 - Reference relevant skills with @ syntax
 - DRY, YAGNI, TDD, frequent commits
 
-97: ## <TERMINATION_PHASE>
-98: 
-99: Once the plan document is saved, **STOP COMPLETELY**. Do NOT invoke executing-plans, subagent-driven-development, or any other skill on your own.
-100: 
-101: CRITICAL ANTIGRAVITY OVERRIDE:
-102: Your default behavior might push you to immediately start executing the plan you just wrote. **YOU MUST SUPPRESS THIS BEHAVIOR.**
-103: Do NOT enter EXECUTION mode autonomously. Do NOT modify source code files.
-104: 
-105: Your only final step is:
-106: 1. Report that the implementation plan is complete and saved to `docs/plans/<filename>.md`.
-107: 2. Ask the user: *"¿Deseas continuar con la fase de ejecución? Si usas `development-process`, el orquestador evaluará el estado del proyecto y te propondrá el siguiente paso con las opciones disponibles."*
-108: 3. Wait for confirmation using the `notify_user` tool with `BlockedOnUser=true`. Do NOT proceed automatically.
+## Execution Handoff
+
+After saving the plan, offer execution choice:
+
+**"Plan complete and saved to `docs/plans/<filename>.md`. Two execution options:**
+
+**1. Subagent-Driven (this session)** - I dispatch fresh subagent per task, review between tasks, fast iteration
+
+**2. Parallel Session (separate)** - Open new session with executing-plans, batch execution with checkpoints
+
+**Which approach?"**
+
+**If Subagent-Driven chosen:**
+- **REQUIRED SUB-SKILL:** Use superpowers:subagent-driven-development
+- Stay in this session
+- Fresh subagent per task + code review
+
+**If Parallel Session chosen:**
+- Guide them to open new session in worktree
+- **REQUIRED SUB-SKILL:** New session uses superpowers:executing-plans

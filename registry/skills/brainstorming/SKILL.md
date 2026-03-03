@@ -11,15 +11,9 @@ Help turn ideas into fully formed designs and specs through natural collaborativ
 
 Start by understanding the current project context, then ask questions one at a time to refine the idea. Once you understand what you're building, present the design and get user approval.
 
-14: <HARD-GATE>
-15: Do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action until you have presented a design and the user has approved it. This applies to EVERY project regardless of perceived simplicity.
-16: 
-17: CRITICAL ANTIGRAVITY OVERRIDE:
-18: By default, your instructions tell you to "Always create implementation_plan.md to document your proposed changes". 
-19: **YOU MUST SUPPRESS THIS BEHAVIOR DURING THIS SKILL.**
-20: Do NOT create `implementation_plan.md`, `task.md`, or any other plan document upon starting. 
-21: Your VERY FIRST actionable step MUST BE to use the `notify_user` tool (with `BlockedOnUser=true`) to ask the user the first clarifying question. You must wait for the user to reply. DO NOT generate the final design document until the conversational brainstorming loop is complete.
-22: </HARD-GATE>
+<HARD-GATE>
+Do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action until you have presented a design and the user has approved it. This applies to EVERY project regardless of perceived simplicity.
+</HARD-GATE>
 
 ## Anti-Pattern: "This Is Too Simple To Need A Design"
 
@@ -34,7 +28,7 @@ You MUST create a task for each of these items and complete them in order:
 3. **Propose 2-3 approaches** — with trade-offs and your recommendation
 4. **Present design** — in sections scaled to their complexity, get user approval after each section
 5. **Write design doc** — save to `docs/plans/YYYY-MM-DD-<topic>-design.md` and commit
-6. **Report completion** — communicate design is finalized and return control to orchestrator
+6. **Transition to implementation** — invoke writing-plans skill to create implementation plan
 
 ## Process Flow
 
@@ -46,7 +40,7 @@ digraph brainstorming {
     "Present design sections" [shape=box];
     "User approves design?" [shape=diamond];
     "Write design doc" [shape=box];
-    "STOP: Return control to orchestrator" [shape=doublecircle];
+    "Invoke writing-plans skill" [shape=doublecircle];
 
     "Explore project context" -> "Ask clarifying questions";
     "Ask clarifying questions" -> "Propose 2-3 approaches";
@@ -54,11 +48,11 @@ digraph brainstorming {
     "Present design sections" -> "User approves design?";
     "User approves design?" -> "Present design sections" [label="no, revise"];
     "User approves design?" -> "Write design doc" [label="yes"];
-    "Write design doc" -> "STOP: Return control to orchestrator";
+    "Write design doc" -> "Invoke writing-plans skill";
 }
 ```
 
-**The terminal state is returning control to the orchestrator.** Do NOT invoke writing-plans or any other skill autonomously. The development-process orchestrator is responsible for proposing and approving the next phase.
+**The terminal state is invoking writing-plans.** Do NOT invoke frontend-design, mcp-builder, or any other implementation skill. The ONLY skill you invoke after brainstorming is writing-plans.
 
 ## The Process
 
@@ -88,14 +82,9 @@ digraph brainstorming {
 - Use elements-of-style:writing-clearly-and-concisely skill if available
 - Commit the design document to git
 
-## <TERMINATION_PHASE>
-
-Once the design document is committed, **STOP COMPLETELY**. Do NOT invoke writing-plans or any other skill on your own.
-
-Your only final step is:
-1. Report that the design phase is complete and the document has been saved.
-2. Ask the user: *"¿Deseas continuar con la siguiente fase? Si usas `development-process`, el orquestador evaluará el estado del proyecto y te propondrá el siguiente paso."*
-3. Wait for confirmation. Do NOT proceed automatically.
+**Implementation:**
+- Invoke the writing-plans skill to create a detailed implementation plan
+- Do NOT invoke any other skill. writing-plans is the next step.
 
 ## Key Principles
 
