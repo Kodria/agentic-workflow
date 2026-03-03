@@ -6,7 +6,7 @@ import { getPreferences, savePreferences } from './utils/config';
 import { getTargetPath, AgentTarget, Scope, ArtifactType } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
 import { syncRegistry } from './core/registry';
-import { discoverSkills, discoverWorkflows, discoverProcesses, ProcessDefinition, SkillArtifact, WorkflowArtifact, SKILLS_DIR, WORKFLOWS_DIR } from './core/discovery';
+import { discoverSkills, discoverWorkflows, discoverAgents, discoverProcesses, ProcessDefinition, SkillArtifact, WorkflowArtifact, AgentArtifact, SKILLS_DIR, WORKFLOWS_DIR, AGENTS_DIR } from './core/discovery';
 import path from 'path';
 import pc from 'picocolors';
 
@@ -47,7 +47,8 @@ function buildGroupedOptions<T extends GroupableArtifact>(
 
         for (const p of processes) {
             if ((a.type === 'skill' && p.skills.includes(baseName)) ||
-                (a.type === 'workflow' && p.workflows.includes(baseName))) {
+                (a.type === 'workflow' && p.workflows.includes(baseName)) ||
+                (a.type === 'agent' && p.agents?.includes(baseName))) {
                 if (!grouped.has(p.name)) grouped.set(p.name, new Map());
                 const procGroup = grouped.get(p.name)!;
                 if (!procGroup.has(baseName)) procGroup.set(baseName, []);
@@ -129,9 +130,10 @@ program.command('add [name]')
       // 2. Discover artifacts
       const skills = discoverSkills();
       const workflows = discoverWorkflows();
+      const agents = discoverAgents();
       const processes = discoverProcesses();
 
-      if (skills.length === 0 && workflows.length === 0 && processes.length === 0) {
+      if (skills.length === 0 && workflows.length === 0 && agents.length === 0 && processes.length === 0) {
           outro(pc.yellow('No artifacts found in the registry. Please check your registry content.'));
           process.exit(0);
       }
@@ -185,9 +187,11 @@ program.command('add [name]')
 
       // 4. Build unified artifact list grouped by process
       const includeWorkflows = targetAgents.includes('antigravity');
+      const includeAgents = targetAgents.includes('opencode');
       const allAvailable: GroupableArtifact[] = [
           ...skills.map(s => ({ name: s.name, type: 'skill' as ArtifactType, sourcePath: s.path })),
-          ...(includeWorkflows ? workflows.map(w => ({ name: `${w.name}.md`, type: 'workflow' as ArtifactType, sourcePath: w.path })) : [])
+          ...(includeWorkflows ? workflows.map(w => ({ name: `${w.name}.md`, type: 'workflow' as ArtifactType, sourcePath: w.path })) : []),
+          ...(includeAgents ? agents.map(a => ({ name: `${a.name}.md`, type: 'agent' as ArtifactType, sourcePath: a.path })) : [])
       ];
 
       if (allAvailable.length === 0) {
@@ -199,7 +203,8 @@ program.command('add [name]')
           (c) => {
               const hasSkill = c.artifacts.some(a => a.type === 'skill');
               const hasWf = c.artifacts.some(a => a.type === 'workflow');
-              const icons = [hasSkill ? '🧠' : '', hasWf ? '⚡' : ''].filter(Boolean).join(' ');
+              const hasAgent = c.artifacts.some(a => a.type === 'agent');
+              const icons = [hasSkill ? '🧠' : '', hasWf ? '⚡' : '', hasAgent ? '🤖' : ''].filter(Boolean).join(' ');
               return `${icons} ${c.baseName}`;
           });
 
@@ -266,6 +271,11 @@ program.command('add [name]')
                       skipped.push(`${artifact.name} (${currentAgent})`);
                       continue;
                   }
+                  // Skip agents for non-OpenCode agents
+                  if (currentAgent !== 'opencode' && artifact.type === 'agent') {
+                      skipped.push(`${artifact.name} (${currentAgent})`);
+                      continue;
+                  }
                   const targetDir = getTargetPath(artifact.type, currentAgent, scopeVal);
                   const finalDest = path.join(targetDir, artifact.name);
                   installArtifact(artifact.sourcePath, finalDest, methodVal);
@@ -279,7 +289,7 @@ program.command('add [name]')
 
           if (skipped.length > 0) {
               for (const s of skipped) {
-                  console.log(pc.yellow(`  ⚠️  Skipped: ${s} (workflows not supported)`));
+                  console.log(pc.yellow(`  ⚠️  Skipped: ${s} (not supported by target agent)`));
               }
           }
 
@@ -329,12 +339,14 @@ program.command('list')
 
       const skills = discoverSkills();
       const workflows = discoverWorkflows();
+      const agents = discoverAgents();
       const processes = discoverProcesses();
 
       // Build combined artifact list for grouping
       const allArtifacts: GroupableArtifact[] = [
           ...skills.map(s => ({ name: s.name, type: 'skill' as ArtifactType })),
-          ...workflows.map(w => ({ name: `${w.name}.md`, type: 'workflow' as ArtifactType }))
+          ...workflows.map(w => ({ name: `${w.name}.md`, type: 'workflow' as ArtifactType })),
+          ...agents.map(a => ({ name: `${a.name}.md`, type: 'agent' as ArtifactType }))
       ];
 
       const grouped = new Map<string, Map<string, GroupableArtifact[]>>();
@@ -342,10 +354,11 @@ program.command('list')
 
       for (const a of allArtifacts) {
           let found = false;
-          const baseName = a.type === 'workflow' ? a.name.replace(/\.md$/, '') : a.name;
+          const baseName = a.type === 'workflow' || a.type === 'agent' ? a.name.replace(/\.md$/, '') : a.name;
           for (const p of processes) {
               if ((a.type === 'skill' && p.skills.includes(baseName)) ||
-                  (a.type === 'workflow' && p.workflows.includes(baseName))) {
+                  (a.type === 'workflow' && p.workflows.includes(baseName)) ||
+                  (a.type === 'agent' && p.agents?.includes(baseName))) {
                   if (!grouped.has(p.name)) grouped.set(p.name, new Map());
                   const procGroup = grouped.get(p.name)!;
                   if (!procGroup.has(baseName)) procGroup.set(baseName, []);
@@ -362,20 +375,22 @@ program.command('list')
 
       for (const [procName, baseNameMap] of grouped.entries()) {
           const proc = processes.find(p => p.name === procName)!;
-          let skillCount = 0; let wfCount = 0;
+          let skillCount = 0; let wfCount = 0; let agentCount = 0;
           const children = Array.from(baseNameMap.values());
           for (const arr of children) {
               if (arr.some(a => a.type === 'skill')) skillCount++;
               if (arr.some(a => a.type === 'workflow')) wfCount++;
+              if (arr.some(a => a.type === 'agent')) agentCount++;
           }
-          const badges = [skillCount > 0 ? `🧠 ${skillCount} skills` : '', wfCount > 0 ? `⚡ ${wfCount} workflows` : ''].filter(Boolean).join(' · ');
+          const badges = [skillCount > 0 ? `🧠 ${skillCount} skills` : '', wfCount > 0 ? `⚡ ${wfCount} workflows` : '', agentCount > 0 ? `🤖 ${agentCount} agents` : ''].filter(Boolean).join(' · ');
           console.log(`\n${pc.cyan(pc.bold(`📦 ${procName}`))} ${pc.dim(`— ${proc.description}`)} ${pc.magenta(`[${badges}]`)}`);
           children.forEach((arr, idx) => {
               const prefix = idx === children.length - 1 ? '  └─ ' : '  ├─ ';
               const hasSkill = arr.some(a => a.type === 'skill');
               const hasWf = arr.some(a => a.type === 'workflow');
-              const icons = [hasSkill ? '🧠' : '', hasWf ? '⚡' : ''].filter(Boolean).join(' ');
-              const baseName = arr[0].type === 'workflow' ? arr[0].name.replace(/\.md$/, '') : arr[0].name;
+              const hasAgent = arr.some(a => a.type === 'agent');
+              const icons = [hasSkill ? '🧠' : '', hasWf ? '⚡' : '', hasAgent ? '🤖' : ''].filter(Boolean).join(' ');
+              const baseName = arr[0].type === 'workflow' || arr[0].type === 'agent' ? arr[0].name.replace(/\.md$/, '') : arr[0].name;
               console.log(`${prefix}${icons} ${baseName}`);
           });
       }
@@ -387,7 +402,8 @@ program.command('list')
               const prefix = idx === entries.length - 1 ? '  └─ ' : '  ├─ ';
               const hasSkill = arr.some(a => a.type === 'skill');
               const hasWf = arr.some(a => a.type === 'workflow');
-              const icons = [hasSkill ? '🧠' : '', hasWf ? '⚡' : ''].filter(Boolean).join(' ');
+              const hasAgent = arr.some(a => a.type === 'agent');
+              const icons = [hasSkill ? '🧠' : '', hasWf ? '⚡' : '', hasAgent ? '🤖' : ''].filter(Boolean).join(' ');
               console.log(`${prefix}${icons} ${baseName}`);
           });
       }
@@ -458,6 +474,7 @@ program.command('remove')
       for (const targetAgent of targetAgents) {
           try { scanDir(getTargetPath('skill', targetAgent, scopeVal), 'skill', targetAgent); } catch { /* ok */ }
           try { scanDir(getTargetPath('workflow', targetAgent, scopeVal), 'workflow', targetAgent); } catch { /* ok */ }
+          try { scanDir(getTargetPath('agent', targetAgent, scopeVal), 'agent', targetAgent); } catch { /* ok */ }
       }
 
       const installed = Array.from(artifactMap.values());
@@ -472,7 +489,8 @@ program.command('remove')
           (c) => {
               const hasSkill = c.artifacts.some(a => a.type === 'skill');
               const hasWf = c.artifacts.some(a => a.type === 'workflow');
-              const icons = [hasSkill ? '🧠' : '', hasWf ? '⚡' : ''].filter(Boolean).join(' ');
+              const hasAgent = c.artifacts.some(a => a.type === 'agent');
+              const icons = [hasSkill ? '🧠' : '', hasWf ? '⚡' : '', hasAgent ? '🤖' : ''].filter(Boolean).join(' ');
               const locations = new Set<string>();
               for (const a of c.artifacts) {
                   for (const loc of a.installedIn) locations.add(loc);
