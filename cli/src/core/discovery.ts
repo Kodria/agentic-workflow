@@ -5,6 +5,7 @@ import { REGISTRY_DIR } from './registry';
 
 export const SKILLS_DIR = path.join(REGISTRY_DIR, 'registry', 'skills');
 export const WORKFLOWS_DIR = path.join(REGISTRY_DIR, 'registry', 'workflows');
+export const AGENTS_DIR = path.join(REGISTRY_DIR, 'registry', 'agents');
 export const PROCESSES_FILE = path.join(REGISTRY_DIR, 'registry', 'processes.json');
 
 export interface SkillArtifact {
@@ -17,11 +18,17 @@ export interface WorkflowArtifact {
     path: string;
 }
 
+export interface AgentArtifact {
+    name: string;
+    path: string;
+}
+
 export interface ProcessDefinition {
     name: string;
     description: string;
     skills: string[];
     workflows: string[];
+    agents?: string[];
 }
 
 /**
@@ -56,6 +63,23 @@ export function discoverWorkflows(): WorkflowArtifact[] {
         .map((entry) => ({
             name: entry.name.replace('.md', ''),
             path: path.join(WORKFLOWS_DIR, entry.name),
+        }));
+}
+
+/**
+ * Scans the registry's agents directory and returns all valid agent profiles.
+ * A valid agent is a .md file.
+ */
+export function discoverAgents(): AgentArtifact[] {
+    if (!fs.existsSync(AGENTS_DIR)) return [];
+
+    const entries = fs.readdirSync(AGENTS_DIR, { withFileTypes: true });
+
+    return entries
+        .filter((entry) => !entry.isDirectory() && entry.name.endsWith('.md'))
+        .map((entry) => ({
+            name: entry.name.replace('.md', ''),
+            path: path.join(AGENTS_DIR, entry.name),
         }));
 }
 
