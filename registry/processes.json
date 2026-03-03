@@ -10,6 +10,7 @@
     "name": "docs",
     "description": "Herramientas de documentación con estándar Docs-as-Code",
     "skills": ["docs-system-orchestrator", "docs-assistant", "template-manager", "template-wizard", "documenting-modules", "business-documenting-modules"],
-    "workflows": ["docs-system-orchestrator"]
+    "workflows": ["docs-system-orchestrator"],
+    "agents": ["docs-system-orchestrator"]
   }
 ]
