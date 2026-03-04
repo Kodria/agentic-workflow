@@ -26,12 +26,14 @@ Identifica el requerimiento según la siguiente tabla:
 
 | Necesidad / Estado | Skill Destino | Cuándo usar |
 |--------------------|---------------|-------------|
+| **Crear/Mejorar Documentación** | `docs-brainstorming` | Cualquier necesidad de documentación nueva, mejora, diagramas o redacción. Punto de entrada principal del flujo de documentación. |
+| **Crear Diagramas de Arquitectura (solo)** | `c4-architecture` | Cuando el usuario pide EXCLUSIVAMENTE diagramas C4, sin documentación narrativa adicional. |
 | **Inicializar Documentación Base** | `project-context-init` | Iniciar proyectos, crear o actualizar el `AGENTS.md` dinámico del entorno. |
 | **Documentar Código Desarrollado** | `documenting-modules` | Documentación técnica post-desarrollo. Extraer el "Cómo", diagramas y flujos de código o infraestructura. |
 | **Documentar Funcionalidad / Negocio** | `business-documenting-modules` | Documentación funcional orientada a PMs/Negocio (ej. para Notion). Extraer el "Qué" y "Por qué" del código existente. |
-| **Mejorar/Oficializar Borrador** | `docs-assistant` | Revisar, formatear y oficializar documentos técnicos incompletos o en formato borrador (aplicar Linter, ortografía, formato corporativo). |
-| **Crear Documento desde Plantilla** | `template-wizard` | Instanciar un nuevo documento (ADR, Runbook, Guía, etc) guiando al usuario para llenar una plantilla existente. |
-| **Crear/Editar una Plantilla (Estándar)** | `template-manager` | Crear o editar un nuevo archivo en el directorio `docs/templates/` para que futuros documentos lo usen como base. |
+| **Mejorar/Oficializar Borrador (directo)** | `docs-assistant` | Formatear un borrador existente directamente, sin pasar por brainstorming. Uso rápido para tareas puntuales. |
+| **Crear Documento desde Plantilla (directo)** | `template-wizard` | Instanciar un nuevo documento (ADR, Runbook, Guía, etc) directamente desde una plantilla existente. Uso rápido. |
+| **Crear/Editar una Plantilla (directo)** | `template-manager` | Crear o editar un archivo de plantilla directamente, sin pasar por brainstorming. Uso rápido para tareas puntuales. |
 
 ## Orchestration Process
 
