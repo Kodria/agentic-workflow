@@ -3,3 +3,6 @@ dist
 coverage
 .env
 .awm
+.agent
+.agents
+skills-lock.json
