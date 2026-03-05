@@ -28,6 +28,7 @@ Identifica el requerimiento según la siguiente tabla:
 |--------------------|---------------|-------------|
 | **Crear/Mejorar Documentación** | `docs-brainstorming` | Cualquier necesidad de documentación nueva, mejora, diagramas o redacción. Punto de entrada principal del flujo de documentación. |
 | **Crear Diagramas de Arquitectura (solo)** | `c4-architecture` | Cuando el usuario pide EXCLUSIVAMENTE diagramas C4, sin documentación narrativa adicional. |
+| **Inicializar Repositorio de Documentación** | `init-docs-repo` | Inicializar o actualizar la estructura base de directorios (Docs-as-Code) en un repositorio, copiando plantillas y configurando el contexto en AGENTS.md. |
 | **Inicializar Documentación Base** | `project-context-init` | Iniciar proyectos, crear o actualizar el `AGENTS.md` dinámico del entorno. |
 | **Documentar Código Desarrollado** | `documenting-modules` | Documentación técnica post-desarrollo. Extraer el "Cómo", diagramas y flujos de código o infraestructura. |
 | **Documentar Funcionalidad / Negocio** | `business-documenting-modules` | Documentación funcional orientada a PMs/Negocio (ej. para Notion). Extraer el "Qué" y "Por qué" del código existente. |
