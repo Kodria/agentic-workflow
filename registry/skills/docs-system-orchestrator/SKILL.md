@@ -34,6 +34,7 @@ Identifica el requerimiento según la siguiente tabla:
 | **Mejorar/Oficializar Borrador (directo)** | `docs-assistant` | Formatear un borrador existente directamente, sin pasar por brainstorming. Uso rápido para tareas puntuales. |
 | **Crear Documento desde Plantilla (directo)** | `template-wizard` | Instanciar un nuevo documento (ADR, Runbook, Guía, etc) directamente desde una plantilla existente. Uso rápido. |
 | **Crear/Editar una Plantilla (directo)** | `template-manager` | Crear o editar un archivo de plantilla directamente, sin pasar por brainstorming. Uso rápido para tareas puntuales. |
+| **Discovery de Proyecto** | `discovery-assistant` | Iniciar un Discovery nuevo, actualizar uno existente con hallazgos de sesiones, o acompañar al TL en tiempo real durante sesiones de Discovery. |
 
 ## Orchestration Process
 
