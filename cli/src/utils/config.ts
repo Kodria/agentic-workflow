@@ -2,9 +2,10 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import type { AgentTarget } from '../providers';
 
 export interface AwmPreferences {
-    defaultAgent: 'antigravity' | 'opencode';
+    defaultAgent: AgentTarget;
     installMethod: 'symlink' | 'copy';
     defaultScope: 'global' | 'local';
 }

@@ -3,7 +3,7 @@
 import { intro, outro, spinner, select, multiselect, confirm, isCancel } from '@clack/prompts';
 import { Command } from 'commander';
 import { getPreferences, savePreferences } from './utils/config';
-import { getTargetPath, AgentTarget, Scope, ArtifactType } from './providers';
+import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
 import { syncRegistry } from './core/registry';
 import { discoverSkills, discoverWorkflows, discoverAgents, discoverProcesses, ProcessDefinition, SkillArtifact, WorkflowArtifact, AgentArtifact, SKILLS_DIR, WORKFLOWS_DIR, AGENTS_DIR } from './core/discovery';
@@ -108,7 +108,7 @@ function resolveSelectedArtifacts(selections: any[]): any[] {
 program.command('add [name]')
   .description('Add a skill, workflow, or process interactively (or non-interactively with flags)')
   .option('-t, --type <type>', 'Artifact type: skill, workflow, or process')
-  .option('-a, --agent <agent>', 'Target agent: antigravity or opencode')
+  .option('-a, --agent <agent>', `Target agent: ${Object.keys(PROVIDERS).join(', ')}`)
   .option('-s, --scope <scope>', 'Scope: local or global')
   .option('-m, --method <method>', 'Install method: symlink or copy')
   .option('-y, --yes', 'Skip confirmation prompts')
@@ -143,10 +143,11 @@ program.command('add [name]')
       // 3. Agent & Scope Prompts (Moved up)
       let targetAgents: AgentTarget[];
       if (options.agent) {
+          const validAgents = Object.keys(PROVIDERS);
           const parsed = options.agent.split(',').map(a => a.trim());
           for (const a of parsed) {
-              if (!['antigravity', 'opencode'].includes(a)) {
-                  console.error(pc.red(`Invalid agent "${a}". Use: antigravity or opencode.`));
+              if (!validAgents.includes(a)) {
+                  console.error(pc.red(`Invalid agent "${a}". Use: ${validAgents.join(', ')}.`));
                   process.exit(1);
               }
           }
@@ -154,10 +155,10 @@ program.command('add [name]')
       } else {
           const agentChoice = await multiselect({
               message: 'Which agent(s) do you want to install to?',
-              options: [
-                  { value: 'antigravity' as AgentTarget, label: 'Antigravity' },
-                  { value: 'opencode' as AgentTarget, label: 'OpenCode' }
-              ],
+              options: Object.entries(PROVIDERS).map(([key, config]) => ({
+                  value: key as AgentTarget,
+                  label: config.label
+              })),
               initialValues: [prefs.defaultAgent],
               required: true
           });
@@ -186,8 +187,8 @@ program.command('add [name]')
       }
 
       // 4. Build unified artifact list grouped by process
-      const includeWorkflows = targetAgents.includes('antigravity');
-      const includeAgents = targetAgents.includes('opencode');
+      const includeWorkflows = targetAgents.some(a => PROVIDERS[a].workflow !== null);
+      const includeAgents = targetAgents.some(a => PROVIDERS[a].agent !== null);
       const allAvailable: GroupableArtifact[] = [
           ...skills.map(s => ({ name: s.name, type: 'skill' as ArtifactType, sourcePath: s.path })),
           ...(includeWorkflows ? workflows.map(w => ({ name: `${w.name}.md`, type: 'workflow' as ArtifactType, sourcePath: w.path })) : []),
@@ -266,13 +267,8 @@ program.command('add [name]')
 
           for (const currentAgent of targetAgents) {
               for (const artifact of artifactsToInstall) {
-                  // Skip workflows for non-Antigravity agents
-                  if (currentAgent !== 'antigravity' && artifact.type === 'workflow') {
-                      skipped.push(`${artifact.name} (${currentAgent})`);
-                      continue;
-                  }
-                  // Skip agents for non-OpenCode agents
-                  if (currentAgent !== 'opencode' && artifact.type === 'agent') {
+                  // Skip artifacts not supported by this agent
+                  if (PROVIDERS[currentAgent][artifact.type] === null) {
                       skipped.push(`${artifact.name} (${currentAgent})`);
                       continue;
                   }
@@ -422,10 +418,10 @@ program.command('remove')
       // Multi-agent selection (matching the add command flow)
       const agentChoice = await multiselect({
           message: 'From which agent(s)?',
-          options: [
-              { value: 'antigravity' as AgentTarget, label: 'Antigravity' },
-              { value: 'opencode' as AgentTarget, label: 'OpenCode' }
-          ],
+          options: Object.entries(PROVIDERS).map(([key, config]) => ({
+              value: key as AgentTarget,
+              label: config.label
+          })),
           initialValues: [prefs.defaultAgent],
           required: true
       });
