@@ -3,71 +3,70 @@ name: business-documenting-modules
 description: "Use this skill AFTER completing development to document functional business modules into Notion-ready formats in `docs/business-knowledge`. Intelligently distinguishes between technical tasks and actual business features."
 ---
 
-# Business Documenting Modules
+# Documentación de Módulos de Negocio
 
-## Overview
+## Descripción General
 
-This skill automates the creation of high-level, business-focused documentation primarily intended for the project's Notion knowledge repository. Unlike standard technical documentation, this skill emphasizes business value, rules, user flows, and integrations.
+Esta skill automatiza la creación de documentación de alto nivel orientada al negocio, destinada principalmente al repositorio de conocimiento Notion del proyecto. A diferencia de la documentación técnica estándar, esta skill enfatiza el valor de negocio, las reglas, los flujos de usuario y las integraciones.
 
-## When to Use
+## Cuándo Usar
 
-Use this skill when:
-- You have completed a development cycle, especially one involving a new functional feature or significant business logic update.
-- The user requests business documentation or asks to document the module for Notion.
-- You are transitioning a completed feature to a state where stakeholders or non-technical team members need to understand its functionality.
+Usa esta skill cuando:
+- Terminaste un ciclo de desarrollo, especialmente uno que involucra una nueva funcionalidad o una actualización significativa de lógica de negocio.
+- El usuario solicita documentación de negocio o pide documentar el módulo para Notion.
+- Estás cerrando una funcionalidad completada y los stakeholders o miembros no técnicos del equipo necesitan entender su funcionamiento.
 
-## The Process
+## El Proceso
 
-### Step 0: Read Repository Contract
+### Paso 0: Leer el Contrato del Repositorio
 
-1.  **Read `AGENTS.md`** in the project root. Parse the YAML frontmatter block (`agent_context`) to extract:
-    - `level` — the documentation context level (`area`, `project`, or `component`).
-    - `docs_path` — the relative path where documentation lives (defaults to `docs`).
-2.  **Use `docs_path`** for all subsequent path references instead of hardcoding `docs/`.
+1. **Lee `AGENTS.md`** en la raíz del proyecto. Parsea el bloque frontmatter YAML (`agent_context`) para extraer:
+   - `level` — el nivel de contexto de documentación (`area`, `project` o `component`).
+   - `docs_path` — la ruta relativa donde vive la documentación (por defecto `docs`).
+2. **Usa `docs_path`** para todas las referencias de ruta posteriores en lugar de hardcodear `docs/`.
 
-### Step 1: Intelligent Filtering (Crucial Step)
+### Paso 1: Filtrado Inteligente (Paso Crítico)
 
-Before generating any documentation, you **MUST** analyze the recent context (e.g., from `task.md`, recent conversations, or `{docs_path}/plans`) to determine the nature of the work.
+Antes de generar cualquier documentación, DEBES analizar el contexto reciente (ej. desde `task.md`, conversaciones recientes o `{docs_path}/plans`) para determinar la naturaleza del trabajo.
 
-1.  **Is it a Functional Business Module?** Does it add or significantly alter a feature that end-users or the business interacts with? Examples: "Weekly Planning", "Checkout Flow", "User Onboarding".
-2.  **Is it a Technical Task?** Is it purely infrastructural, refactoring, or a minor cosmetic change? Examples: "Refactoring API", "Responsive UI fixes", "Updating Dependencies".
+1. **¿Es un Módulo de Negocio Funcional?** ¿Agrega o altera significativamente una funcionalidad con la que interactúan los usuarios finales o el negocio? Ejemplos: "Planificación Semanal", "Flujo de Checkout", "Onboarding de Usuarios".
+2. **¿Es una Tarea Técnica?** ¿Es puramente infraestructural, refactorización o un cambio cosmético menor? Ejemplos: "Refactorización de API", "Correcciones de UI responsiva", "Actualización de Dependencias".
 
-**Decision:**
-- If the work is purely a **Technical Task**, politely inform the user that the recent changes do not constitute a core business module and therefore business documentation will not be generated. *Stop execution here.*
-- If the work is a **Functional Business Module**, proceed to Step 2.
+**Decisión:**
+- Si el trabajo es puramente una **Tarea Técnica**, informa amablemente al usuario que los cambios recientes no constituyen un módulo de negocio central y por lo tanto no se generará documentación de negocio. *Detén la ejecución aquí.*
+- Si el trabajo es un **Módulo de Negocio Funcional**, continúa con el Paso 2.
 
-### Step 2: Gather Structured Business Data
+### Paso 2: Recopilar Datos de Negocio Estructurados
 
-Analyze the codebase, plans, and recent context to extract the following structured information:
+Analiza el código, los planes y el contexto reciente para extraer la siguiente información estructurada:
 
-| Data Point | Source |
-|-----------|--------|
-| Module Name | Plan title, feature name, or user input |
-| Business Purpose & Value | Plan context, user stories, README features |
-| Key Business Rules | Code constraints, validation logic, domain rules |
-| User Journey | UI components flow, API interactions, user stories |
-| Integration Points | Service calls, external APIs, cross-module dependencies |
+| Dato | Fuente |
+|------|--------|
+| Nombre del Módulo | Título del plan, nombre de la funcionalidad o input del usuario |
+| Propósito y Valor de Negocio | Contexto del plan, user stories, funcionalidades del README |
+| Reglas de Negocio Clave | Restricciones del código, lógica de validación, reglas de dominio |
+| Journey del Usuario | Flujo de componentes UI, interacciones con la API, user stories |
+| Puntos de Integración | Llamadas a servicios, APIs externas, dependencias entre módulos |
 
-**Do NOT write the final document yet.** Collect the data and proceed to Step 3.
+**NO escribas el documento final aún.** Recopila los datos y continúa con el Paso 3.
 
-### Step 3: Delegate Formatting to Template Wizard
+### Paso 3: Delegar el Formateo al Template Wizard
 
-1.  **Locate the template dynamically**: Use your file search tools (e.g., `find_by_name`) to find `template-wizard/resources/templates/business-knowledge-template.md` across your skill directories (`.agents/skills/`, `.agent/skills/`, `~/.gemini/antigravity/skills/`, `~/.agents/skills/`). Read the template from the discovered path.
-2.  **Extract the YAML metadata** (`template_purpose`, `interview_questions`) from the template.
-3.  **Auto-fill** each section of the template body using the structured data gathered in Step 2. Since the data was already collected, you do NOT need to ask the user the interview questions — fill them programmatically.
-4.  **Generate the final document** as a clean Markdown file (without YAML frontmatter) and save it to `{docs_path}/business-knowledge/<category>/<module-name>.md`. Create the necessary directories if they don't exist.
+1. **Localiza el template dinámicamente**: Usa tus herramientas de búsqueda de archivos (ej. `find_by_name`) para encontrar `template-wizard/resources/templates/business-knowledge-template.md` en tus directorios de skills (`.agents/skills/`, `.agent/skills/`, `~/.gemini/antigravity/skills/`, `~/.agents/skills/`). Lee el template desde la ruta encontrada.
+2. **Extrae los metadatos YAML** (`template_purpose`, `interview_questions`) del template.
+3. **Rellena automáticamente** cada sección del cuerpo del template usando los datos estructurados recopilados en el Paso 2. Como los datos ya fueron recopilados, NO necesitas hacerle las preguntas de entrevista al usuario — complétalas de forma programática.
+4. **Genera el documento final** como un archivo Markdown limpio (sin frontmatter YAML) y guárdalo en `{docs_path}/business-knowledge/<categoría>/<nombre-módulo>.md`. Crea los directorios necesarios si no existen.
 
--   **Category**: Group by high-level business domain (e.g., `planning`, `financials`, `core-operations`).
--   **Filename**: Use a descriptive, human-readable name in kebab-case (e.g., `weekly-planning-system.md`).
+- **Categoría**: Agrupa por dominio de negocio de alto nivel (ej. `planificacion`, `finanzas`, `operaciones-core`).
+- **Nombre de archivo**: Usa un nombre descriptivo y legible en kebab-case (ej. `sistema-planificacion-semanal.md`).
 
-### Step 4: Update Index
+### Paso 4: Actualizar el Índice
 
-1.  **Update `README.md`**: If there is a section for "Business Knowledge" or "Notion Knowledge Base", add a link to this new document. If not, consider adding a brief note or creating an index file in `{docs_path}/business-knowledge/README.md`.
+1. **Actualiza `README.md`**: Si existe una sección de "Conocimiento de Negocio" o "Base de Conocimiento Notion", agrega un enlace al nuevo documento. Si no existe, considera agregar una nota breve o crear un archivo índice en `{docs_path}/business-knowledge/README.md`.
 
-## Rules
+## Reglas
 
--   **Language**: Write the documentation in **Spanish** (or as declared in `agent_context.language`).
--   **Tone**: Keep it professional, accessible to non-technical stakeholders, and focused on business outcomes.
--   **Focus**: Absolutely **NO** deep technical details (like specific database queries, class names, or component structures) unless strictly necessary to explain a business rule. Focus on the *What* and *Why*, not the *How*.
--   **Template Source**: Always use the official template from `template-wizard/resources/templates/business-knowledge-template.md` (located dynamically via file search). Never invent your own structure.
-
+- **Idioma**: Escribe la documentación en **español** (o según lo declarado en `agent_context.language`).
+- **Tono**: Mantén un tono profesional, accesible para stakeholders no técnicos y enfocado en resultados de negocio.
+- **Enfoque**: **NADA** de detalles técnicos profundos (como consultas de base de datos específicas, nombres de clases o estructuras de componentes) a menos que sea estrictamente necesario para explicar una regla de negocio. Enfócate en el *Qué* y el *Por qué*, no en el *Cómo*.
+- **Fuente del Template**: Siempre usa el template oficial de `template-wizard/resources/templates/business-knowledge-template.md` (localizado dinámicamente mediante búsqueda de archivos). Nunca inventes tu propia estructura.

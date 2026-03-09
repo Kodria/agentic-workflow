@@ -3,66 +3,65 @@ name: documenting-modules
 description: "Use this skill AFTER completing development or improvements to document the changes. It analyzes plans and code to generate system documentation in `docs/modules` and updates the README."
 ---
 
-# Documenting Modules
+# Documentación de Módulos
 
-## Overview
+## Descripción General
 
-This skill automates the process of creating system documentation after development. It ensures that every new module or improvement is properly documented in the `docs/modules` directory and referenced in the `README.md`.
+Esta skill automatiza el proceso de crear documentación del sistema después del desarrollo. Garantiza que cada nuevo módulo o mejora quede correctamente documentado en el directorio `docs/modules` y referenciado en el `README.md`.
 
-## When to Use
+## Cuándo Usar
 
-Use this skill when:
-- You have just finished implementing a feature or module (e.g., after `executing-plans`).
-- The user asks you to "document this" or "update documentation".
-- You are closing a development cycle and need to leave the codebase in a clean state.
+Usa esta skill cuando:
+- Acabas de terminar de implementar una funcionalidad o módulo (ej. después de `executing-plans`).
+- El usuario te pide "documenta esto" o "actualiza la documentación".
+- Estás cerrando un ciclo de desarrollo y necesitas dejar el código en un estado limpio.
 
-## The Process
+## El Proceso
 
-### Step 0: Read Repository Contract
+### Paso 0: Leer el Contrato del Repositorio
 
-1.  **Read `AGENTS.md`** in the project root. Parse the YAML frontmatter block (`agent_context`) to extract:
-    - `level` — the documentation context level (`area`, `project`, or `component`).
-    - `docs_path` — the relative path where documentation lives (defaults to `docs`).
-2.  **Use `docs_path`** for all subsequent path references instead of hardcoding `docs/`.
+1. **Lee `AGENTS.md`** en la raíz del proyecto. Parsea el bloque frontmatter YAML (`agent_context`) para extraer:
+   - `level` — el nivel de contexto de documentación (`area`, `project` o `component`).
+   - `docs_path` — la ruta relativa donde vive la documentación (por defecto `docs`).
+2. **Usa `docs_path`** para todas las referencias de ruta posteriores en lugar de hardcodear `docs/`.
 
-### Step 1: Analyze Context
+### Paso 1: Analizar el Contexto
 
-1.  **Read Plans**: Look into `{docs_path}/plans` for the most recent design and implementation plans related to the work just finished.
-2.  **Identify Scope**: Determine if the work is a new standalone module (e.g., "Weekly Planning") or an improvement to an existing one (e.g., "Responsive UI").
+1. **Lee los Planes**: Busca en `{docs_path}/plans` los planes de diseño e implementación más recientes relacionados con el trabajo recién terminado.
+2. **Identifica el Alcance**: Determina si el trabajo es un nuevo módulo independiente (ej. "Planificación Semanal") o una mejora a uno existente (ej. "UI Responsiva").
 
-### Step 2: Gather Structured Data
+### Paso 2: Recopilar Datos Estructurados
 
-Analyze the codebase and plans to extract the following structured information about the module:
+Analiza el código y los planes para extraer la siguiente información estructurada sobre el módulo:
 
-| Data Point | Source |
-|-----------|--------|
-| Module Name | Plan title or user input |
-| Overview | Plan context + code analysis |
-| Key Features | Plan goals + implemented functionality |
-| Technical Architecture | Component analysis, data flow, key logic |
-| Usage | User-facing behavior from UI components or API endpoints |
+| Dato | Fuente |
+|------|--------|
+| Nombre del Módulo | Título del plan o input del usuario |
+| Descripción General | Contexto del plan + análisis del código |
+| Funcionalidades Clave | Objetivos del plan + funcionalidad implementada |
+| Arquitectura Técnica | Análisis de componentes, flujo de datos, lógica clave |
+| Uso | Comportamiento visible al usuario desde componentes UI o endpoints de API |
 
-**Do NOT write the final document yet.** Collect the data and proceed to Step 3.
+**NO escribas el documento final aún.** Recopila los datos y continúa con el Paso 3.
 
-### Step 3: Delegate Formatting to Template Wizard
+### Paso 3: Delegar el Formateo al Template Wizard
 
-1.  **Locate the template dynamically**: Use your file search tools (e.g., `find_by_name`) to find `template-wizard/resources/templates/module-template.md` across your skill directories (`.agents/skills/`, `.agent/skills/`, `~/.gemini/antigravity/skills/`, `~/.agents/skills/`). Read the template from the discovered path.
-2.  **Extract the YAML metadata** (`template_purpose`, `interview_questions`) from the template.
-3.  **Auto-fill** each section of the template body using the structured data gathered in Step 2. Since the data was already collected, you do NOT need to ask the user the interview questions — fill them programmatically.
-4.  **Generate the final document** as a clean Markdown file (without YAML frontmatter) and save it to `{docs_path}/modules/<category>/<module-name>.md`.
+1. **Localiza el template dinámicamente**: Usa tus herramientas de búsqueda de archivos (ej. `find_by_name`) para encontrar `template-wizard/resources/templates/module-template.md` en tus directorios de skills (`.agents/skills/`, `.agent/skills/`, `~/.gemini/antigravity/skills/`, `~/.agents/skills/`). Lee el template desde la ruta encontrada.
+2. **Extrae los metadatos YAML** (`template_purpose`, `interview_questions`) del template.
+3. **Rellena automáticamente** cada sección del cuerpo del template usando los datos estructurados recopilados en el Paso 2. Como los datos ya fueron recopilados, NO necesitas hacerle las preguntas de entrevista al usuario — complétalas de forma programática.
+4. **Genera el documento final** como un archivo Markdown limpio (sin frontmatter YAML) y guárdalo en `{docs_path}/modules/<categoría>/<nombre-módulo>.md`.
 
--   **Category**: Group by domain (e.g., `task-management`, `ui-ux`, `integrations`).
--   **Filename**: Use descriptive names in kebab-case (e.g., `weekly-planning.md`).
+- **Categoría**: Agrupa por dominio (ej. `gestion-tareas`, `ui-ux`, `integraciones`).
+- **Nombre de archivo**: Usa nombres descriptivos en kebab-case (ej. `planificacion-semanal.md`).
 
-### Step 4: Update Index
+### Paso 4: Actualizar el Índice
 
-1.  **Update `README.md`**: Add a link to the new documentation file in the "Documentación del Sistema" section.
-2.  **Verify**: Ensure the link is relative and works (e.g., `[Label]({docs_path}/modules/category/file.md)`).
+1. **Actualiza `README.md`**: Agrega un enlace al nuevo archivo de documentación en la sección "Documentación del Sistema".
+2. **Verifica**: Asegúrate de que el enlace sea relativo y funcione (ej. `[Etiqueta]({docs_path}/modules/categoria/archivo.md)`).
 
-## Rules
+## Reglas
 
--   **Language**: Write documentation in **Spanish** (as per project convention, or as declared in `agent_context.language`).
--   **Conciseness**: Focus on "what it is" and "how it works", not "how we built it" (that's in the plans).
--   **Location**: Always use `{docs_path}/modules`. Do not create loose files in `{docs_path}/` root.
--   **Template Source**: Always use the official template from `template-wizard/resources/templates/module-template.md` (located dynamically via file search). Never invent your own structure.
-
+- **Idioma**: Escribe la documentación en **español** (según la convención del proyecto, o según lo declarado en `agent_context.language`).
+- **Concisión**: Enfócate en "qué es" y "cómo funciona", no en "cómo lo construimos" (eso está en los planes).
+- **Ubicación**: Usa siempre `{docs_path}/modules`. No crees archivos sueltos en la raíz de `{docs_path}/`.
+- **Fuente del Template**: Siempre usa el template oficial de `template-wizard/resources/templates/module-template.md` (localizado dinámicamente mediante búsqueda de archivos). Nunca inventes tu propia estructura.

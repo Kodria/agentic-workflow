@@ -3,72 +3,72 @@ name: docs-brainstorming
 description: "Use before any documentation work — explores user intent, analyzes repository context, and produces a documentation plan. Routes to docs-assistant (for documents) or template-manager (for templates)."
 ---
 
-# Documentation Brainstorming
+# Brainstorming de Documentación
 
-## Overview
+## Descripción General
 
-Help turn documentation needs into fully formed documentation plans through natural collaborative dialogue.
+Convierte necesidades de documentación en planes completamente formados a través de un diálogo colaborativo natural.
 
-Start by autonomously exploring the project context, then ask questions one at a time to refine the documentation need. Once you understand what needs to be documented, present the plan and get user approval.
+Comienza explorando el contexto del proyecto de forma autónoma, luego hace preguntas de a una para refinar la necesidad de documentación. Una vez que comprendes qué debe documentarse, presenta el plan y obtiene la aprobación del usuario.
 
 <HARD-GATE>
-Do NOT invoke any execution skill, write any document, or take any implementation action until you have presented a documentation plan and the user has approved it. This applies to EVERY documentation request regardless of perceived simplicity.
+NO invoques ninguna skill de ejecución, no escribas ningún documento ni tomes ninguna acción de implementación hasta haber presentado un plan de documentación y recibido la aprobación del usuario. Esto aplica a TODA solicitud de documentación, sin importar su aparente simplicidad.
 </HARD-GATE>
 
 ## Checklist
 
-You MUST create a task for each of these items and complete them in order:
+DEBES crear una tarea para cada uno de estos ítems y completarlos en orden:
 
-1. **Explore project context** — analyze repo structure, existing docs, and available templates
-2. **Ask clarifying questions** — one at a time, understand what to document and for whom
-3. **Classify the need** — documentation (→ docs-assistant) or template (→ template-manager)
-4. **Present documentation plan** — with entregables, destinos, and support skills needed
-5. **Write plan document** — save to `docs/plans/YYYY-MM-DD-docs-<topic>-plan.md`
-6. **Transfer control** — invoke the executor skill indicated in the plan
+1. **Explorar el contexto del proyecto** — analizar estructura del repo, documentación existente y templates disponibles
+2. **Hacer preguntas de clarificación** — de a una, entender qué documentar y para quién
+3. **Clasificar la necesidad** — documentación (→ `docs-assistant`) o template (→ `template-manager`)
+4. **Presentar el plan de documentación** — con entregables, destinos y skills de apoyo necesarias
+5. **Escribir el documento del plan** — guardar en `docs/plans/YYYY-MM-DD-docs-<tema>-plan.md`
+6. **Transferir el control** — invocar la skill ejecutora indicada en el plan
 
-## Process Flow
+## Flujo del Proceso
 
-### Step 0: Autonomous Context Exploration
+### Paso 0: Exploración Autónoma de Contexto
 
-Before asking the user anything, gather context silently:
+Antes de preguntarle nada al usuario, recopila contexto en silencio:
 
-1. **Read `AGENTS.md`** in the project root (if it exists). Parse the YAML frontmatter (`agent_context`) to extract:
-   - `docs_path` — the root documentation directory.
-   - `directories.dir_drafts` — the drafts directory.
-2. **Scan existing documentation** in `{docs_path}/` to understand what is already documented.
-3. **Autodiscover templates** (both global and local):
-   - **Global templates:** Use file search tools to find `template-wizard/resources/templates` across skill directories (`.agents/skills/`, `.agent/skills/`, `~/.agents/skills/`, etc.). These are read-only reference templates installed by the AWM CLI.
-   - **Local templates:** Check `{docs_path}/templates/` or `docs/templates/` relative to the project root. These are project-specific overrides.
-4. **Scan source code** if the request appears to involve technical or architecture documentation — identify key modules, services, and structure.
+1. **Lee `AGENTS.md`** en la raíz del proyecto (si existe). Parsea el frontmatter YAML (`agent_context`) para extraer:
+   - `docs_path` — el directorio raíz de documentación.
+   - `directories.dir_drafts` — el directorio de borradores.
+2. **Escanea la documentación existente** en `{docs_path}/` para entender qué ya está documentado.
+3. **Autodescubre templates** (tanto globales como locales):
+   - **Templates globales:** Usa herramientas de búsqueda de archivos para encontrar `template-wizard/resources/templates` en los directorios de skills (`.agents/skills/`, `.agent/skills/`, `~/.agents/skills/`, etc.). Son templates de referencia de solo lectura instalados por el AWM CLI.
+   - **Templates locales:** Revisa `{docs_path}/templates/` o `docs/templates/` relativo a la raíz del proyecto. Son overrides específicos del proyecto.
+4. **Escanea el código fuente** si la solicitud parece involucrar documentación técnica o de arquitectura — identifica módulos clave, servicios y estructura.
 
-### Step 1: Collaborative Dialogue
+### Paso 1: Diálogo Colaborativo
 
-Ask questions **one at a time** to refine the documentation need:
+Haz preguntas **de a una** para refinar la necesidad de documentación:
 
-- What do you want to document? (module, architecture, process, standard, etc.)
-- Who is the target audience? (developers, PMs, DevOps, executives)
-- Is this new documentation or improvement of existing?
-- Do you need architecture diagrams? (C4 context, containers, components)
-- What type of document? (or detect from context)
-- Any specific constraints or requirements?
+- ¿Qué quieres documentar? (módulo, arquitectura, proceso, estándar, etc.)
+- ¿Quién es el público objetivo? (desarrolladores, PMs, DevOps, ejecutivos)
+- ¿Es documentación nueva o mejora de algo existente?
+- ¿Necesitas diagramas de arquitectura? (contexto C4, contenedores, componentes)
+- ¿Qué tipo de documento? (o detectar del contexto)
+- ¿Algún requisito o restricción específico?
 
-**Principles:**
-- **One question at a time** — do not overwhelm the user
-- **Prefer multiple choice** when possible
-- **Use discovered context** — reference what you found in Step 0 to make questions more relevant (e.g., "I see you already have docs for module X but not Y, is Y what you want to document?")
+**Principios:**
+- **Una pregunta a la vez** — no abrumes al usuario
+- **Prefiere opciones múltiples** cuando sea posible
+- **Usa el contexto descubierto** — referencia lo que encontraste en el Paso 0 para hacer las preguntas más relevantes (ej. "Veo que ya tienes docs del módulo X pero no de Y, ¿es Y lo que quieres documentar?")
 
-### Step 2: Classify the Need
+### Paso 2: Clasificar la Necesidad
 
-Based on the dialogue, determine the executor:
+Según el diálogo, determina el ejecutor:
 
-| Need | Executor | When |
-|------|----------|------|
-| Create/improve/format documentation | `docs-assistant` | Any document that will live in `{docs_path}/` |
-| Create/edit a reusable template | `template-manager` | Work on template standards in `docs/templates/` |
+| Necesidad | Ejecutor | Cuándo |
+|-----------|----------|--------|
+| Crear/mejorar/formatear documentación | `docs-assistant` | Cualquier documento que vivirá en `{docs_path}/` |
+| Crear/editar un template reutilizable | `template-manager` | Trabajo sobre estándares de templates en `docs/templates/` |
 
-### Step 3: Generate Documentation Plan
+### Paso 3: Generar el Plan de Documentación
 
-Write a documentation plan to `docs/plans/YYYY-MM-DD-docs-<topic>-plan.md` with this format:
+Escribe un plan de documentación en `docs/plans/YYYY-MM-DD-docs-<tema>-plan.md` con este formato:
 
 ~~~markdown
 # Plan de Documentación: [Título]
@@ -113,31 +113,31 @@ preguntar nada adicional sobre contexto.]
 - [ ] [Criterio 2]
 ~~~
 
-**Critical rules for the plan:**
-- The "Contexto Recopilado" section must be **self-contained** — the executor must be able to work without asking context questions.
-- Each entregable must specify whether it requires a support skill and which one.
-- The plan must be written in **Spanish** (matching the documentation ecosystem convention).
+**Reglas críticas para el plan:**
+- La sección "Contexto Recopilado" debe ser **autocontenida** — el ejecutor debe poder trabajar sin hacer preguntas de contexto.
+- Cada entregable debe especificar si requiere una skill de apoyo y cuál.
+- El plan debe estar escrito en **español** (siguiendo la convención del ecosistema de documentación).
 
-### Step 4: User Approval
+### Paso 4: Aprobación del Usuario
 
-Present the plan to the user. Wait for explicit approval.
-- If the user requests changes → iterate on the plan.
-- If the user approves → save the plan and proceed to Step 5.
+Presenta el plan al usuario. Espera aprobación explícita.
+- Si el usuario solicita cambios → itera sobre el plan.
+- Si el usuario aprueba → guarda el plan y continúa con el Paso 5.
 
-### Step 5: Transfer Control
+### Paso 5: Transferir el Control
 
-1. Save the plan document to `docs/plans/`.
-2. Inform the user: *"Plan aprobado y guardado. Transfiriendo control a `[executor skill]`."*
-3. Locate and read the executor skill's `SKILL.md` using dynamic autodiscovery.
-4. Execute the executor skill's instructions, passing the plan as context.
+1. Guarda el documento del plan en `docs/plans/`.
+2. Informa al usuario: *"Plan aprobado y guardado. Transfiriendo control a `[skill ejecutora]`."*
+3. Localiza y lee el `SKILL.md` de la skill ejecutora usando autodescubrimiento dinámico.
+4. Ejecuta las instrucciones de la skill ejecutora, pasando el plan como contexto.
 
-**The terminal state is invoking the executor skill.** Do NOT invoke any other skill. The ONLY skills you transfer to are `docs-assistant` or `template-manager`.
+**El estado terminal es invocar la skill ejecutora.** NO invoques ninguna otra skill. Las ÚNICAS skills a las que se transfiere el control son `docs-assistant` o `template-manager`.
 
-## Key Principles
+## Principios Clave
 
-- **One question at a time** — Don't overwhelm with multiple questions
-- **Multiple choice preferred** — Easier to answer than open-ended when possible
-- **Context-driven** — Use what you discovered in Step 0 to make dialogue efficient
-- **Self-contained plans** — The plan document must have ALL context the executor needs
-- **YAGNI** — Don't suggest documentation the user hasn't asked for
-- **No hallucination** — Only include information explicitly discovered or stated by the user
+- **Una pregunta a la vez** — no abrumes con múltiples preguntas
+- **Preferir opciones múltiples** — más fácil de responder que preguntas abiertas cuando sea posible
+- **Orientado al contexto** — usa lo que descubriste en el Paso 0 para hacer el diálogo eficiente
+- **Planes autocontenidos** — el documento del plan debe tener TODO el contexto que necesita el ejecutor
+- **YAGNI** — no sugieras documentación que el usuario no ha pedido
+- **Sin alucinaciones** — incluye solo información explícitamente descubierta o declarada por el usuario
