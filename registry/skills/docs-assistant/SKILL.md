@@ -195,5 +195,6 @@ Antes de invocar la skill de apoyo, informa al usuario:
 |----------------|-------|--------------------|
 | Diagramas de arquitectura C4 | `c4-architecture` | El entregable requiere diagramas de contexto de sistema, contenedores, componentes, despliegue o flujos dinámicos |
 | Documento desde plantilla existente | `template-wizard` | Un entregable necesita instanciar un nuevo documento basado en una plantilla oficial (ADR, Runbook, etc.) |
+| Diseño y validación de arquitectura | `architecture-advisor` | El entregable requiere definir decisiones arquitectónicas, validar un diseño existente, o enriquecer contenido técnico de arquitectura. **Invocar solo en modo contextual** — para validar/enriquecer, no para ciclo completo. |
 
 > **Extensibilidad:** Para agregar una nueva skill de apoyo, agrega una fila a esta tabla con el tipo de bloque que cubre, el nombre de la skill y las condiciones de detección.
