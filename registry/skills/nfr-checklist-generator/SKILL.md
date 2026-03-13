@@ -112,8 +112,7 @@ Compilar en artefacto estructurado. Destino según contexto de invocación:
 |---|---|---|
 | `brainstorming` | Resultado retornado a `brainstorming` para integrar en el diseño | `brainstorming` continúa su flujo (escribe design doc, luego llama a `writing-plans`) |
 | `docs-brainstorming` / `docs-system-orchestrator` | Plan de documentación | `docs-assistant` |
-| `discovery-assistant` (contextual) | Información integrada al discovery | `discovery-assistant` |
-| Standalone | Plan de documentación | `docs-assistant` |
+| Standalone | Documento de NFRs priorizados con matriz de timing | `docs-assistant` |
 
 ---
 
