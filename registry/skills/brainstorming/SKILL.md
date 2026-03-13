@@ -94,3 +94,20 @@ digraph brainstorming {
 - **Explore alternatives** - Always propose 2-3 approaches before settling
 - **Incremental validation** - Present design, get approval before moving on
 - **Be flexible** - Go back and clarify when something doesn't make sense
+
+## Specialist Skills Awareness
+
+During the approach exploration phase (Propose 2-3 approaches), if you detect the conversation involves decisions of significant complexity in these areas, you may invoke the corresponding specialist skill in **contextual mode** to enrich the discussion:
+
+| Area | Skill | When to invoke |
+|------|-------|----------------|
+| Architecture design | `architecture-advisor` | Designing system architecture, choosing patterns, defining components, evaluating integrations |
+| CI/CD pipeline | `cicd-proposal-builder` | Defining delivery pipeline, branching strategy, environments, deploy strategy |
+| Non-functional requirements | `nfr-checklist-generator` | Identifying and prioritizing NFRs early in design |
+| Technology selection | `technology-evaluator` | Evaluating and comparing technology options with structured criteria |
+
+**Rules:**
+- Only invoke for decisions of **significant complexity** — do not invoke for trivial choices.
+- Invoke in **contextual mode** — the specialist answers a specific question and returns control to you.
+- The specialist's output is integrated into the design document you are building, not written as a separate artifact.
+- You remain in control of the brainstorming flow. The specialist is a consultant, not a replacement.
