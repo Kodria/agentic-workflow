@@ -141,3 +141,19 @@ Presenta el plan al usuario. Espera aprobación explícita.
 - **Planes autocontenidos** — el documento del plan debe tener TODO el contexto que necesita el ejecutor
 - **YAGNI** — no sugieras documentación que el usuario no ha pedido
 - **Sin alucinaciones** — incluye solo información explícitamente descubierta o declarada por el usuario
+
+## Awareness de Skills Especialistas
+
+Al planificar documentación técnica, si detectas que el contenido requiere expertise especializado, puedes indicar en el plan de documentación que el ejecutor (`docs-assistant`) necesita invocar skills de apoyo.
+
+| Área | Skill | Cuándo indicar en el plan |
+|------|-------|--------------------------|
+| Arquitectura de software | `architecture-advisor` | El entregable requiere definir o documentar arquitectura con decisiones de patrones, componentes, integraciones |
+| Pipeline CI/CD | `cicd-proposal-builder` | El entregable requiere documentar o definir pipeline de delivery |
+| Requisitos no funcionales | `nfr-checklist-generator` | El entregable requiere identificar y priorizar NFRs |
+| Evaluación tecnológica | `technology-evaluator` | El entregable requiere evaluación comparativa de opciones tecnológicas |
+
+**Reglas:**
+- Incluye la skill de apoyo en el campo "Requiere skill de apoyo" del entregable en el plan.
+- Si la necesidad de documentación **es principalmente** uno de estos temas (ej. "necesito documentar la arquitectura del sistema"), considera si la skill especialista debería ser invocada en modo completo antes de generar el plan — en ese caso, recomienda al usuario invocar la skill directamente o vía `docs-system-orchestrator`.
+- Tú planificas, el ejecutor ejecuta. No invoques skills especialistas directamente — indícalas en el plan.
