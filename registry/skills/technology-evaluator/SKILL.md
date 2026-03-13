@@ -37,6 +37,8 @@ Antes de preguntar al usuario:
 
 - **No →** Toma exclusivamente lo que el usuario proporciona.
 
+**En Modo Contextual:** Omitir este paso — usar el contexto ya establecido por el skill invocador.
+
 ---
 
 ## Modo Completo — Ciclo Interactivo
@@ -102,7 +104,7 @@ Compilar todas las decisiones en un artefacto estructurado. El destino depende d
 
 | Invocada desde | Artefacto | Quién ejecuta |
 |---|---|---|
-| `brainstorming` | Decisiones integradas en `*-design.md` | `writing-plans` → `executing-plans` |
+| `brainstorming` | Resultado de evaluación retornado a `brainstorming` para integrar en el diseño | `brainstorming` continúa su flujo (escribe design doc, luego llama a `writing-plans`) |
 | `docs-brainstorming` / `docs-system-orchestrator` | Plan de documentación | `docs-assistant` produce el documento con templates |
 | Standalone | Plan de documentación | `docs-assistant` |
 
