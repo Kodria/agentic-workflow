@@ -216,6 +216,19 @@ Una vez arrancada la sesión, operas en modo reactivo:
 
 **El usuario dice "anota esto"** → Lo capturas directamente sin reformatear.
 
+**Surgen temas técnicos que requieren expertise especializado** → Si durante la sesión se discuten decisiones de arquitectura, requisitos no funcionales o evaluación de tecnologías, puedes invocar la skill especialista correspondiente en **modo contextual**:
+
+| Tema detectado | Skill | Ejemplo de intervención |
+|----------------|-------|------------------------|
+| Arquitectura del sistema | `architecture-advisor` | "¿Qué patrón conviene para este caso?" → la skill propone opciones con trade-offs |
+| Requisitos no funcionales | `nfr-checklist-generator` | "¿Qué NFRs deberíamos definir temprano?" → la skill identifica los prioritarios |
+| Selección tecnológica | `technology-evaluator` | "¿Qué framework conviene más?" → la skill evalúa con criterios |
+
+**Reglas de invocación contextual durante sesión:**
+- No interrumpas el flujo del discovery. La skill aporta y tú retomas.
+- Captura el resultado de la skill en el campo correspondiente del documento de discovery.
+- No invoques en modo completo — solo intervenciones puntuales que enriquezcan la sesión.
+
 ### C3. Cierre de sesión
 
 Cuando el usuario señale que la sesión terminó:
