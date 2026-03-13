@@ -36,6 +36,10 @@ Identifica el requerimiento según la siguiente tabla:
 | **Crear Documento desde Plantilla (directo)** | `template-wizard` | Instanciar un nuevo documento (ADR, Runbook, Guía, etc) directamente desde una plantilla existente. Uso rápido. |
 | **Crear/Editar una Plantilla (directo)** | `template-manager` | Crear o editar un archivo de plantilla directamente, sin pasar por brainstorming. Uso rápido para tareas puntuales. |
 | **Discovery de Proyecto** | `discovery-assistant` | Iniciar un Discovery nuevo, actualizar uno existente con hallazgos de sesiones, o acompañar al TL en tiempo real durante sesiones de Discovery. |
+| **Diseñar arquitectura de un sistema** | `architecture-advisor` | El usuario necesita definir, revisar o diseñar la arquitectura de un proyecto. Ciclo completo interactivo que cubre patrones, componentes, tecnologías, integraciones y riesgos. |
+| **Propuesta de CI/CD** | `cicd-proposal-builder` | El usuario necesita definir pipeline, estrategia de branching, ambientes, gates de calidad o estrategia de deploy. |
+| **Definir requisitos no funcionales** | `nfr-checklist-generator` | El usuario necesita identificar y priorizar NFRs para un proyecto (observabilidad, seguridad, compliance, performance, etc.). |
+| **Evaluar/comparar tecnologías** | `technology-evaluator` | El usuario necesita decidir entre opciones tecnológicas con criterios estructurados y scoring comparativo. |
 
 ## Orchestration Process
 
