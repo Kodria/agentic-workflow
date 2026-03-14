@@ -293,7 +293,6 @@ program.command('list')
                   if (!procGroup.has(baseName)) procGroup.set(baseName, []);
                   procGroup.get(baseName)!.push(a);
                   found = true;
-                  break;
               }
           }
           if (!found) {
