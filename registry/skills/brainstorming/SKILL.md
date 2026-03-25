@@ -40,6 +40,8 @@ digraph brainstorming {
     "Present design sections" [shape=box];
     "User approves design?" [shape=diamond];
     "Write design doc" [shape=box];
+    "Has UI Screens?" [shape=diamond];
+    "Invoke ui-design skill" [shape=doublecircle];
     "Invoke writing-plans skill" [shape=doublecircle];
 
     "Explore project context" -> "Ask clarifying questions";
@@ -48,11 +50,17 @@ digraph brainstorming {
     "Present design sections" -> "User approves design?";
     "User approves design?" -> "Present design sections" [label="no, revise"];
     "User approves design?" -> "Write design doc" [label="yes"];
-    "Write design doc" -> "Invoke writing-plans skill";
+    "Write design doc" -> "Has UI Screens?";
+    "Has UI Screens?" -> "Invoke ui-design skill" [label="yes, pending screens"];
+    "Has UI Screens?" -> "Invoke writing-plans skill" [label="no"];
 }
 ```
 
-**The terminal state is invoking writing-plans.** Do NOT invoke frontend-design, mcp-builder, or any other implementation skill. The ONLY skill you invoke after brainstorming is writing-plans.
+**The terminal state is invoking either `ui-design` or `writing-plans`:**
+- If the design doc contains a `## UI Screens` section with pending screens → invoke `ui-design`
+- If no `## UI Screens` section exists → invoke `writing-plans`
+
+Do NOT invoke any other implementation skill.
 
 ## The Process
 
@@ -82,9 +90,39 @@ digraph brainstorming {
 - Use elements-of-style:writing-clearly-and-concisely skill if available
 - Commit the design document to git
 
-**Implementation:**
-- Invoke the writing-plans skill to create a detailed implementation plan
-- Do NOT invoke any other skill. writing-plans is the next step.
+**Next step routing:**
+- If the design doc has a `## UI Screens` section with pending screens → invoke `ui-design`
+- Otherwise → invoke `writing-plans` to create a detailed implementation plan
+- Do NOT invoke any other skill.
+
+## UI Screen Detection
+
+During the "Presenting the design" phase, evaluate whether the feature involves UI screens that would benefit from visual design with Stitch:
+
+**Criteria (all must be true):**
+1. The feature has direct user interaction (not purely backend, API, or CLI)
+2. It requires new screens or significant layout changes
+3. The visual complexity justifies a designer (a button text change does not)
+
+**If UI screens are detected:**
+
+After the user approves the full design, before writing the design doc, present the detected screens:
+
+> "I detected N screens that could benefit from UI design with Stitch: [list screens]. Do you want to go through the UI design phase or skip it?"
+
+- **User accepts** → add a `## UI Screens` section to the design doc with a table:
+
+```markdown
+## UI Screens
+
+| Screen | Description | Device | Status |
+|--------|-------------|--------|--------|
+| [name] | [description] | [MOBILE/DESKTOP/TABLET] | pending |
+```
+
+- **User skips** → do not add the section. Proceed directly to `writing-plans`.
+
+**If no UI screens detected:** Do not add the section. Proceed directly to `writing-plans`.
 
 ## Key Principles
 
