@@ -30,7 +30,7 @@ digraph lifecycle {
     "New task / idea" -> "brainstorming";
     "brainstorming" -> "ui-design" [label="UI Screens pending"];
     "brainstorming" -> "writing-plans" [label="no UI"];
-    "ui-design" -> "writing-plans";
+    "ui-design" -> "writing-plans" [label="screens completed"];
     "writing-plans" -> "Choose execution";
     "Choose execution" -> "executing-plans" [label="separate session"];
     "Choose execution" -> "subagent-driven-development" [label="same session"];
@@ -70,8 +70,8 @@ Scan `docs/plans/` for existing artifacts:
 | Files found | State | Next action |
 |-------------|-------|-------------|
 | No design or plan files for the topic | **New** | Invoke `brainstorming` |
-| `*-design.md` with `## UI Screens` section containing `pending` screens | **UI Design pending** | Invoke `ui-design` |
-| `*-design.md` without `## UI Screens` or all screens completed, no `*-plan.md` | **Designed** | Invoke `writing-plans` |
+| `*-design.md` with `## UI Screens` section containing rows with `Status: pending` | **UI Design pending** | Invoke `ui-design` |
+| `*-design.md` without `## UI Screens` or no rows with `Status: pending`, no `*-plan.md` | **Designed** | Invoke `writing-plans` |
 | `*-plan.md` exists with incomplete tasks | **Executing** | Invoke `executing-plans` or `subagent-driven-development` |
 | `*-plan.md` exists, all tasks complete | **Finishing** | Invoke `finishing-a-development-branch` |
 
