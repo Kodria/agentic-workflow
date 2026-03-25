@@ -20,7 +20,7 @@ Do NOT write any implementation code. This skill only produces visual designs in
 You MUST create a task for each of these items and complete them in order:
 
 1. **Load design doc** — find and read the design doc, extract the `## UI Screens` table
-2. **Setup Stitch project** — detect or create the Stitch project and design system
+2. **Setup Stitch project** — list projects to find or create one for this feature, then detect or create design system
 3. **Design screens** — generate each pending screen one by one, iterate with user until approved
 4. **Update design doc** — update the table with Stitch references, commit
 5. **Transition to planning** — invoke writing-plans skill
@@ -65,7 +65,8 @@ digraph ui_design {
 1. Scan `docs/plans/` for the most recent `*-design.md` that contains a `## UI Screens` section.
 2. Parse the table to extract screens with their fields: Screen, Description, Device, Status.
 3. Filter to only screens with status `pending`.
-4. If no pending screens found, inform the user and invoke `writing-plans` immediately.
+4. If no design doc with `## UI Screens` section is found at all, inform the user: "The ui-design skill requires a completed brainstorming design doc with a `## UI Screens` section. Please run brainstorming first." Then stop — do NOT proceed.
+5. If a design doc exists but has no pending screens (all are completed or skipped), inform the user and invoke `writing-plans` immediately.
 
 **Expected table format:**
 
@@ -107,7 +108,7 @@ Present these options:
 - **Option B:** Use the reference to inform the design system properties, call `create_design_system` + `update_design_system`.
 - **Option C:** Proceed without a design system.
 
-If a design system was created or exists, it will be automatically applied to generated screens.
+If a design system was created or exists, call `apply_design_system` after generating each screen to ensure the design system is applied. Pass the screen instance IDs returned from `generate_screen_from_text`.
 
 ---
 
@@ -126,7 +127,7 @@ For each screen with status `pending`, in the order listed in the table:
    - `prompt`: The constructed prompt
    - `deviceType`: Map the Device column — `MOBILE`, `DESKTOP`, `TABLET`, or `AGNOSTIC`
    - `modelId`: `GEMINI_3_1_PRO` by default (high quality)
-3. Generation takes a few minutes. Do NOT retry on connection errors — call `get_screen` to check status.
+3. Generation takes a few minutes. Do NOT retry on connection errors — call `get_screen` to check status. Poll `get_screen` until `screenMetadata.status` returns `COMPLETE`. If status is `FAILED`, inform the user and offer to retry. Do not poll more than 10 times (roughly one per 30 seconds).
 4. If `output_components` in the response contains suggestions, present them to the user. If accepted, call `generate_screen_from_text` again with the suggestion as the new prompt.
 
 ### 3b. Present
