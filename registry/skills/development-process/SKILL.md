@@ -16,9 +16,10 @@ Orchestrates the development lifecycle by identifying project state and invoking
 ```dot
 digraph lifecycle {
     rankdir=TB;
-    
+
     "New task / idea" [shape=doublecircle];
     "brainstorming" [shape=box, style=filled, fillcolor=lightyellow];
+    "ui-design" [shape=box, style=filled, fillcolor=lightyellow, label="ui-design\n(optional)"];
     "writing-plans" [shape=box, style=filled, fillcolor=lightyellow];
     "Choose execution" [shape=diamond];
     "executing-plans" [shape=box, style=filled, fillcolor=lightblue];
@@ -27,7 +28,9 @@ digraph lifecycle {
     "Done" [shape=doublecircle];
 
     "New task / idea" -> "brainstorming";
-    "brainstorming" -> "writing-plans";
+    "brainstorming" -> "ui-design" [label="UI Screens pending"];
+    "brainstorming" -> "writing-plans" [label="no UI"];
+    "ui-design" -> "writing-plans";
     "writing-plans" -> "Choose execution";
     "Choose execution" -> "executing-plans" [label="separate session"];
     "Choose execution" -> "subagent-driven-development" [label="same session"];
@@ -41,8 +44,9 @@ digraph lifecycle {
 
 | Phase | Skill | Trigger | Output |
 |-------|-------|---------|--------|
-| 1. Design | `brainstorming` | New feature, new task, creative work | Design doc in `docs/plans/YYYY-MM-DD-<topic>-design.md` |
-| 2. Planning | `writing-plans` | Design doc approved | Implementation plan in `docs/plans/YYYY-MM-DD-<topic>-plan.md` |
+| 1. Design | `brainstorming` | New feature, new task, creative work | Design doc with optional `## UI Screens` section |
+| 1.5. UI Design | `ui-design` | Design doc has `## UI Screens` with pending screens | Design doc updated with Stitch screen references |
+| 2. Planning | `writing-plans` | Design doc without pending UI screens | Implementation plan in `docs/plans/YYYY-MM-DD-<topic>-plan.md` |
 | 3a. Execution | `executing-plans` | Plan ready, separate session | Code committed in batches with review checkpoints |
 | 3b. Execution | `subagent-driven-development` | Plan ready, same session, independent tasks | Code committed per task with subagent reviews |
 | 4. Completion | `finishing-a-development-branch` | All tasks done, tests pass | Merge, PR, or branch cleanup |
@@ -66,7 +70,8 @@ Scan `docs/plans/` for existing artifacts:
 | Files found | State | Next action |
 |-------------|-------|-------------|
 | No design or plan files for the topic | **New** | Invoke `brainstorming` |
-| `*-design.md` exists but no `*-plan.md` | **Designed** | Invoke `writing-plans` |
+| `*-design.md` with `## UI Screens` section containing `pending` screens | **UI Design pending** | Invoke `ui-design` |
+| `*-design.md` without `## UI Screens` or all screens completed, no `*-plan.md` | **Designed** | Invoke `writing-plans` |
 | `*-plan.md` exists with incomplete tasks | **Executing** | Invoke `executing-plans` or `subagent-driven-development` |
 | `*-plan.md` exists, all tasks complete | **Finishing** | Invoke `finishing-a-development-branch` |
 
@@ -96,8 +101,9 @@ Once approved, invoke the skill. The invoked skill takes full control of the ses
 ### When user says "build X" or "add feature Y"
 1. Check `docs/plans/` for existing design/plan
 2. If nothing exists → `brainstorming` (do NOT skip to coding)
-3. If design exists → `writing-plans`
-4. If plan exists → execution skill
+3. If design exists with `## UI Screens` containing `pending` screens → `ui-design`
+4. If design exists without pending UI → `writing-plans`
+5. If plan exists → execution skill
 
 ### When user says "fix bug" or "something is broken"
 1. Invoke `systematic-debugging` immediately
