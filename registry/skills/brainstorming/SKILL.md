@@ -28,7 +28,7 @@ You MUST create a task for each of these items and complete them in order:
 3. **Propose 2-3 approaches** — with trade-offs and your recommendation
 4. **Present design** — in sections scaled to their complexity, get user approval after each section
 5. **Write design doc** — save to `docs/plans/YYYY-MM-DD-<topic>-design.md` and commit
-6. **Transition to implementation** — invoke writing-plans skill to create implementation plan
+6. **Transition to next step** — if the design doc has `## UI Screens` with pending screens, invoke `ui-design`; otherwise invoke `writing-plans`
 
 ## Process Flow
 
@@ -106,11 +106,11 @@ During the "Presenting the design" phase, evaluate whether the feature involves 
 
 **If UI screens are detected:**
 
-After the user approves the full design, before writing the design doc, present the detected screens:
+After the user approves the full design, identify any UI screens detected. Before finalizing the design doc, ask the user:
 
 > "I detected N screens that could benefit from UI design with Stitch: [list screens]. Do you want to go through the UI design phase or skip it?"
 
-- **User accepts** → add a `## UI Screens` section to the design doc with a table:
+- **User accepts** → write the design doc including a `## UI Screens` section with a table:
 
 ```markdown
 ## UI Screens
@@ -120,9 +120,11 @@ After the user approves the full design, before writing the design doc, present 
 | [name] | [description] | [MOBILE/DESKTOP/TABLET] | pending |
 ```
 
-- **User skips** → do not add the section. Proceed directly to `writing-plans`.
+- **User skips** → write the design doc WITHOUT the `## UI Screens` section. Then invoke `writing-plans` directly.
 
 **If no UI screens detected:** Do not add the section. Proceed directly to `writing-plans`.
+
+> **Routing contract:** The `development-process` orchestrator and the `ui-design` skill route based on the presence of a `## UI Screens` table with at least one row where `Status` is exactly `pending`. Always use `pending` (lowercase) as the initial status value — using any other value will break routing.
 
 ## Key Principles
 
