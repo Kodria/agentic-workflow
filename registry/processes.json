@@ -9,7 +9,7 @@
   {
     "name": "docs",
     "description": "Herramientas de documentación con estándar Docs-as-Code",
-    "skills": ["docs-system-orchestrator", "docs-brainstorming", "docs-assistant", "template-manager", "template-wizard", "documenting-modules", "business-documenting-modules", "c4-architecture", "init-docs-repo", "project-context-init", "discovery-assistant", "architecture-advisor", "cicd-proposal-builder", "nfr-checklist-generator", "technology-evaluator"],
+    "skills": ["docs-system-orchestrator", "docs-brainstorming", "docs-assistant", "template-manager", "template-wizard", "documenting-modules", "business-documenting-modules", "c4-architecture", "init-docs-repo", "project-context-init", "discovery-assistant", "story-mapping", "architecture-advisor", "cicd-proposal-builder", "nfr-checklist-generator", "technology-evaluator"],
     "workflows": ["docs-system-orchestrator"],
     "agents": ["docs-system-orchestrator"]
   }
