@@ -289,4 +289,5 @@ Cuando el modo de operación concluya (documento creado, actualización guardada
 Tu único paso final es:
 1. Confirmar al usuario la ruta del documento actualizado y un resumen de cambios
 2. Preguntar: *"¿Necesitas algo más del Discovery? Puedo actualizar con más información, acompañarte en la próxima sesión, o si quieres continuar con otro paso de documentación, invoca `docs-system-orchestrator`."*
-3. Esperar confirmación. No proceder automáticamente.
+3. **Sugerencia contextual de Story Mapping:** Si el documento de Discovery tiene la Etapa 1 (Alineación y Framing) sustancialmente completada — personas definidas, problema claro, scope/MVP esbozado — agrega: *"El proyecto tiene suficiente contexto para iniciar un User Story Map. ¿Quieres que invoque `story-mapping` para mapear las historias de usuario?"*
+4. Esperar confirmación. No proceder automáticamente.
