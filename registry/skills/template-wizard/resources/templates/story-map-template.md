@@ -19,17 +19,32 @@ interview_questions:
 
 ## Backbone
 
+> Actividades (🟪): grandes bloques del viaje del usuario. Steps: pasos concretos dentro de cada actividad. Stories: organizadas verticalmente por release — más arriba = más prioritario.
+
 ### 🟪 {Actividad 1}
 
 #### Step: {Paso 1.1}
 - **[MVP]** {Story title}
   - _Como {persona}, quiero {acción} para {beneficio}_
-  - Status: pending | Effort: _ | Acceptance: …
+  - Status: pending | Effort: S/M/L | Acceptance: …
+- **[Release 2]** {Story title}
+  - _Como {persona}, quiero {acción} para {beneficio}_
+  - Status: pending | Effort: S/M/L | Acceptance: …
+- **[Backlog]** {Story title}
+  - _Como {persona}, quiero {acción} para {beneficio}_
+  - Status: pending | Effort: S/M/L | Acceptance: …
 
 #### Step: {Paso 1.2}
 - **[MVP]** {Story title}
   - _Como {persona}, quiero {acción} para {beneficio}_
-  - Status: pending | Effort: _ | Acceptance: …
+  - Status: pending | Effort: S/M/L | Acceptance: …
+
+### 🟪 {Actividad 2}
+
+#### Step: {Paso 2.1}
+- **[MVP]** {Story title}
+  - _Como {persona}, quiero {acción} para {beneficio}_
+  - Status: pending | Effort: S/M/L | Acceptance: …
 
 ## Release Summary
 

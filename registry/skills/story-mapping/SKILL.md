@@ -26,7 +26,7 @@ Antes de hacer cualquier pregunta al usuario:
 2. **Localiza el template de Story Map** usando búsqueda dinámica del patrón `template-wizard/resources/templates/story-map-template.md`
 3. **Busca un Story Map existente** del proyecto mencionado en `{docs_path}/` (busca archivos que contengan "story-map" o el nombre del proyecto)
 4. **Si el usuario indicó documentos fuente**, léelos y extrae: personas, flujos, problemas, scope/MVP
-5. **Si el usuario NO indicó documentos fuente**, busca en el repositorio de documentación: discovery documents, specs, notas de reunión, cualquier documento relevante del proyecto
+5. **Si el usuario NO indicó documentos fuente y el contexto NO es una sesión en vivo (Modo B)**, busca en el repositorio de documentación: discovery documents, specs, notas de reunión, cualquier documento relevante del proyecto
 
 ---
 
@@ -79,7 +79,7 @@ Con el backbone confirmado:
 
 ### A5. Generar documento
 
-1. Crea el archivo en `{docs_path}/50-projects/{nombre-proyecto}/story-map.md` usando el template
+1. Determina la ruta del archivo: por defecto `{docs_path}/50-projects/{nombre-proyecto}/story-map.md`. Si el directorio `50-projects/` no existe en el repositorio, pregunta al usuario: *"¿Dónde debo guardar el Story Map? Por defecto lo guardaría en `{docs_path}/50-projects/{nombre-proyecto}/story-map.md`."*
 2. Rellena con las personas, backbone, stories y releases confirmados
 3. Genera el Release Summary con conteo de stories por release
 4. Agrega entrada en Changelog: `[{fecha}] Sesión 1: Story Map generado desde documentación — {n} actividades, {n} steps, {n} stories`
@@ -108,7 +108,7 @@ Opera pregunta por pregunta para construir la estructura del mapa:
 3. **Steps:** Para cada actividad: *"¿Qué pasos concretos hace {persona} dentro de {actividad}? En orden cronológico."*
    - Registra los steps debajo de cada actividad
 
-Tras completar el backbone: *"Backbone definido: {n} actividades con {n} steps. ¿Pasamos a las historias de usuario? Puedes describirlas en cualquier orden — yo las ubico en el lugar correcto."*
+Tras completar el backbone: *"Backbone definido: {n_actividades} actividades con {n_steps} steps. ¿Pasamos a las historias de usuario? Puedes describirlas en cualquier orden — yo las ubico en el lugar correcto."*
 
 ### B3. Fase captura libre — Stories
 
@@ -141,7 +141,7 @@ Cuando el usuario señale que la sesión terminó:
 
 ### C1. Cargar documento existente
 
-Busca y carga el Story Map del proyecto. Si no lo encuentra, informa y ofrece crear uno (→ Modo A o B).
+Si el Paso 0 ya localizó el Story Map del proyecto, úsalo directamente. Si no lo encontró, informa al usuario y ofrece crear uno (→ Modo A o B).
 
 ### C2. Mostrar estado actual
 
@@ -158,6 +158,7 @@ Opera en modo reactivo:
 **Repriorización** → Mueve stories entre releases, actualiza Release Summary.
 **Refinamiento** → Actualiza acceptance criteria, effort, status de stories existentes.
 **Nuevo step o actividad** → Agrega al backbone en la posición correcta.
+**Eliminar story o step** → Confirma con el usuario antes de eliminar: *"¿Confirmas eliminar '{elemento}'? Esta acción no se puede deshacer en el documento."* Si confirma, elimina y actualiza el Release Summary.
 
 ### C4. Cierre
 
@@ -175,7 +176,7 @@ Opera en modo reactivo:
 - **Un campo vacío es mejor que uno inventado.** Si no tienes dato para un campo, déjalo con su placeholder.
 - **Confirma el backbone antes de las stories.** El backbone es la columna vertebral — si está mal, todo lo demás se desalinea.
 - **Respeta la estructura Jeff Patton.** Actividades → Steps → Stories. No mezcles niveles.
-- **Releases son cortes horizontales completos.** Cada release debe entregar valor end-to-end al usuario, no features aisladas. Si un release solo tiene stories de una actividad, señálalo como riesgo.
+- **Releases son cortes horizontales completos.** Cada release debe entregar valor end-to-end al usuario, no features aisladas. Si un release solo tiene stories de una actividad, añade una nota en el Changelog: `⚠️ Release {X} cubre solo la actividad {Y} — revisar si entrega valor end-to-end.`
 
 ---
 
