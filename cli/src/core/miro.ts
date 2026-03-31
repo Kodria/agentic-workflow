@@ -232,7 +232,7 @@ async function createFrame(config: MiroConfig, title: string, width: number, hei
     const data = await miroRequest(config, 'POST', `/boards/${encodeURIComponent(config.boardId)}/frames`, {
         data: { title, format: 'custom', type: 'freeform' },
         style: { fillColor: '#f5f5f5' },
-        position: { x: 0, y: 0, origin: 'center', relativeTo: 'canvas_center' },
+        position: { x: 0, y: 0, origin: 'center' },
         geometry: { width, height },
     }) as { id: string };
     if (!data?.id) throw new Error('Miro API returned frame without id');
@@ -243,7 +243,7 @@ async function createCard(config: MiroConfig, frameId: string, item: LayoutItem)
     const data = await miroRequest(config, 'POST', `/boards/${encodeURIComponent(config.boardId)}/cards`, {
         data: { title: item.title },
         style: { cardTheme: item.color },
-        position: { x: item.x, y: item.y, origin: 'center', relativeTo: 'canvas_center' },
+        position: { x: item.x, y: item.y, origin: 'center' },
         geometry: { width: item.width, height: item.height },
         parent: { id: frameId },
     }) as { id: string };
@@ -254,7 +254,7 @@ async function createText(config: MiroConfig, frameId: string, item: LayoutItem)
     const data = await miroRequest(config, 'POST', `/boards/${encodeURIComponent(config.boardId)}/texts`, {
         data: { content: `<b>${item.title}</b>` },
         style: { fillColor: '#e8e8e8', textAlign: 'left', fontSize: '14' },
-        position: { x: item.x, y: item.y, origin: 'center', relativeTo: 'canvas_center' },
+        position: { x: item.x, y: item.y, origin: 'center' },
         geometry: { width: item.width, height: item.height },
         parent: { id: frameId },
     }) as { id: string };
