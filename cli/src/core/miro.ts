@@ -3,13 +3,15 @@ import { StoryMap } from './story-map-parser';
 // Layout constants — Miro enforces min card width of 256 and auto-calculates card height (~94dp+)
 const CARD_W = 260;
 const CARD_H = 100;    // layout spacing only — not sent to API (Miro auto-calculates)
-const STORY_H = 120;   // layout spacing only — stories have longer titles
+const STORY_H = 150;   // layout spacing only — generous to avoid overlap with auto-sized cards
 const COL_GAP = 20;
 const COL_W = CARD_W + COL_GAP;   // 280
 const ROW_GAP = 15;
 const PADDING = 40;
 const TITLE_H = 50;
 const SWIMLANE_H = 40;
+const SWIMLANE_GAP = 30;   // extra vertical space before each swimlane separator
+const ACTIVITY_GAP = 40;   // horizontal gap between activity groups
 
 export type ItemKind = 'activity' | 'task' | 'story' | 'swimlane';
 
@@ -49,9 +51,7 @@ export function computeLayout(storyMap: StoryMap): Layout {
 
     // USM layout: each Task gets its own column. Activities span across their Tasks.
     // Stories go below their corresponding Task column.
-
-    // Total task columns (activities with 0 tasks still get 1 column)
-    const totalTaskCols = activities.reduce((sum, a) => sum + Math.max(1, a.tasks.length), 0);
+    // Activity groups are separated by ACTIVITY_GAP for visual distinction.
 
     // Collect all unique releases (ordered)
     const releaseSet = new Set<string>();
@@ -77,14 +77,20 @@ export function computeLayout(storyMap: StoryMap): Layout {
         maxStoriesPerRelease.set(release, max);
     }
 
+    // Precompute activity group widths and X offsets
+    // Each group: numTasks * COL_W - COL_GAP, separated by ACTIVITY_GAP
+    const activityGroupWidths = activities.map(a => Math.max(1, a.tasks.length) * COL_W - COL_GAP);
+    const contentWidth = activityGroupWidths.reduce((sum, w) => sum + w, 0)
+        + (activities.length - 1) * ACTIVITY_GAP;
+
     // Frame dimensions
-    const frameWidth = PADDING * 2 + totalTaskCols * COL_W - COL_GAP;
+    const frameWidth = PADDING * 2 + contentWidth;
 
     const releaseSectionH = releases.reduce((sum, r) => {
         const maxStories = maxStoriesPerRelease.get(r) ?? 0;
-        return sum + SWIMLANE_H + maxStories * (STORY_H + ROW_GAP);
+        return sum + SWIMLANE_GAP + SWIMLANE_H + maxStories * (STORY_H + ROW_GAP);
     }, 0);
-    // Activity row + Task row (single row, side by side) + releases
+    // Activity row + Task row + release sections
     const frameHeight = PADDING + TITLE_H + CARD_H + ROW_GAP + CARD_H + ROW_GAP + releaseSectionH + PADDING;
 
     // Frame top-left (frame centered at canvas origin)
@@ -97,30 +103,33 @@ export function computeLayout(storyMap: StoryMap): Layout {
     const activityY = frameTop + PADDING + TITLE_H + CARD_H / 2;
     const taskY = activityY + CARD_H / 2 + ROW_GAP + CARD_H / 2;
 
-    // Build columns: each Task = 1 column, Activity spans its Tasks
-    let taskColIdx = 0;
+    // Build columns with ACTIVITY_GAP between groups
+    // Track the X offset for each task column (needed for stories later)
+    const taskColXPositions: number[] = []; // one per task across all activities
+    let groupLeftX = PADDING; // running X from frame left edge
 
-    for (const activity of activities) {
+    for (let ai = 0; ai < activities.length; ai++) {
+        const activity = activities[ai];
         const numTaskCols = Math.max(1, activity.tasks.length);
-        const startCol = taskColIdx;
+        const groupWidth = activityGroupWidths[ai];
 
-        // Activity card — spans all its task columns
-        const activityWidth = numTaskCols * COL_W - COL_GAP;
-        const activityX = frameLeft + PADDING + startCol * COL_W + activityWidth / 2;
+        // Activity card — spans its task columns
+        const activityX = frameLeft + groupLeftX + groupWidth / 2;
 
         items.push({
             kind: 'activity',
             title: activity.title,
             x: activityX,
             y: activityY,
-            width: activityWidth,
+            width: groupWidth,
             height: CARD_H,
             color: '#ffdc4a',
         });
 
-        // Task cards — one per column
+        // Task cards — one per column within this group
         for (let j = 0; j < activity.tasks.length; j++) {
-            const colX = frameLeft + PADDING + (startCol + j) * COL_W + CARD_W / 2;
+            const colX = frameLeft + groupLeftX + j * COL_W + CARD_W / 2;
+            taskColXPositions.push(colX);
 
             items.push({
                 kind: 'task',
@@ -133,7 +142,12 @@ export function computeLayout(storyMap: StoryMap): Layout {
             });
         }
 
-        taskColIdx += numTaskCols;
+        // Activity with 0 tasks: placeholder column (no task card, but reserve X space)
+        if (activity.tasks.length === 0) {
+            taskColXPositions.push(frameLeft + groupLeftX + CARD_W / 2);
+        }
+
+        groupLeftX += groupWidth + ACTIVITY_GAP;
     }
 
     // Swimlanes and stories — each story goes below its Task column
@@ -141,6 +155,9 @@ export function computeLayout(storyMap: StoryMap): Layout {
 
     for (const release of releases) {
         const maxStories = maxStoriesPerRelease.get(release) ?? 0;
+
+        // Extra gap before each swimlane
+        swimlaneTop += SWIMLANE_GAP;
         const swimlaneCenterY = swimlaneTop + SWIMLANE_H / 2;
 
         items.push({
@@ -152,15 +169,15 @@ export function computeLayout(storyMap: StoryMap): Layout {
             height: SWIMLANE_H,
         });
 
-        // Stories per task column
-        let storyColIdx = 0;
+        // Stories per task column (using precomputed X positions)
+        let colIdx = 0;
         for (const activity of activities) {
             if (activity.tasks.length === 0) {
-                storyColIdx++; // empty activity still occupies 1 column
+                colIdx++;
                 continue;
             }
             for (const task of activity.tasks) {
-                const colX = frameLeft + PADDING + storyColIdx * COL_W + CARD_W / 2;
+                const colX = taskColXPositions[colIdx];
                 const releaseStories = task.stories.filter(s => s.release === release);
 
                 for (let k = 0; k < releaseStories.length; k++) {
@@ -176,7 +193,7 @@ export function computeLayout(storyMap: StoryMap): Layout {
                     });
                 }
 
-                storyColIdx++;
+                colIdx++;
             }
         }
 
@@ -224,10 +241,11 @@ async function miroRequest(config: MiroConfig, method: string, path: string, bod
 }
 
 async function createFrame(config: MiroConfig, title: string, width: number, height: number): Promise<string> {
+    // Position far from origin to avoid nesting inside any existing frame at (0,0)
     const data = await miroRequest(config, 'POST', `/boards/${encodeURIComponent(config.boardId)}/frames`, {
         data: { title, format: 'custom', type: 'freeform' },
         style: { fillColor: '#f5f6f8' },
-        position: { x: 0, y: 0, origin: 'center' },
+        position: { x: 50000, y: 0, origin: 'center' },
         geometry: { width, height },
     }) as { id: string };
     if (!data?.id) throw new Error('Miro API returned frame without id');
