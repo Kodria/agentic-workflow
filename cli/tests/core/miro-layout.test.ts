@@ -35,6 +35,11 @@ const SIMPLE_MAP: StoryMap = {
     ],
 };
 
+// New layout: column = Task. Total task columns = 3 (1 + 2)
+// CARD_W=260, COL_W=280, PADDING=40
+// frameWidth = 40*2 + 3*280 - 20 = 900
+// Activity 1 spans 1 col (width=260), Activity 2 spans 2 cols (width=540)
+
 describe('computeLayout', () => {
     it('returns one card per activity', () => {
         const { items } = computeLayout(SIMPLE_MAP);
@@ -62,24 +67,42 @@ describe('computeLayout', () => {
         expect(swimlanes.map(s => s.title)).toContain('Release 2');
     });
 
-    it('activities in same column as their tasks (same x)', () => {
+    it('activity with 1 task has same x as its task (centered over single column)', () => {
         const { items } = computeLayout(SIMPLE_MAP);
         const act1 = items.find(i => i.kind === 'activity' && i.title === 'Actividad 1')!;
         const task11 = items.find(i => i.kind === 'task' && i.title === 'Task 1.1')!;
         expect(act1.x).toBe(task11.x);
     });
 
-    it('activities in different columns have different x values', () => {
+    it('activity with 2 tasks is centered between its task columns', () => {
+        const { items } = computeLayout(SIMPLE_MAP);
+        const act2 = items.find(i => i.kind === 'activity' && i.title === 'Actividad 2')!;
+        const task21 = items.find(i => i.kind === 'task' && i.title === 'Task 2.1')!;
+        const task22 = items.find(i => i.kind === 'task' && i.title === 'Task 2.2')!;
+        // Activity center should be midpoint of its task columns
+        expect(act2.x).toBe((task21.x + task22.x) / 2);
+    });
+
+    it('activity with 2 tasks is wider than activity with 1 task', () => {
+        const { items } = computeLayout(SIMPLE_MAP);
+        const act1 = items.find(i => i.kind === 'activity' && i.title === 'Actividad 1')!;
+        const act2 = items.find(i => i.kind === 'activity' && i.title === 'Actividad 2')!;
+        expect(act2.width).toBeGreaterThan(act1.width);
+    });
+
+    it('activities in different positions have different x values', () => {
         const { items } = computeLayout(SIMPLE_MAP);
         const act1 = items.find(i => i.kind === 'activity' && i.title === 'Actividad 1')!;
         const act2 = items.find(i => i.kind === 'activity' && i.title === 'Actividad 2')!;
         expect(act1.x).not.toBe(act2.x);
     });
 
-    it('frame width scales with number of activities', () => {
+    it('frame width scales with total number of task columns', () => {
         const { frameWidth } = computeLayout(SIMPLE_MAP);
-        const oneActivity = { ...SIMPLE_MAP, activities: [SIMPLE_MAP.activities[0]] };
-        const { frameWidth: oneWidth } = computeLayout(oneActivity);
+        // 3 task columns
+        const oneTask = { ...SIMPLE_MAP, activities: [SIMPLE_MAP.activities[0]] };
+        const { frameWidth: oneWidth } = computeLayout(oneTask);
+        // 1 task column
         expect(frameWidth).toBeGreaterThan(oneWidth);
     });
 
@@ -108,13 +131,17 @@ describe('computeLayout', () => {
         expect(mvpIdx).toBeLessThan(r2Idx);
     });
 
-    it('first activity has the correct absolute X coordinate', () => {
-        // frameWidth = PADDING*2 + 2*COL_W - COL_GAP = 60 + 480 - 20 = 520
-        // frameLeft = -260
-        // colX[0] = frameLeft + PADDING + 0*COL_W + CARD_W/2 = -260 + 30 + 110 = -120
+    it('stories are placed below their corresponding task column', () => {
         const { items } = computeLayout(SIMPLE_MAP);
-        const act1 = items.find(i => i.kind === 'activity' && i.title === 'Actividad 1')!;
-        expect(act1.x).toBe(-120);
+        // Story A belongs to Task 1.1 → same column x
+        const task11 = items.find(i => i.kind === 'task' && i.title === 'Task 1.1')!;
+        const storyA = items.find(i => i.kind === 'story' && i.title === 'Story A')!;
+        expect(storyA.x).toBe(task11.x);
+
+        // Story C belongs to Task 2.1 → same column x
+        const task21 = items.find(i => i.kind === 'task' && i.title === 'Task 2.1')!;
+        const storyC = items.find(i => i.kind === 'story' && i.title === 'Story C')!;
+        expect(storyC.x).toBe(task21.x);
     });
 
     it('MVP swimlane Y is less than Release 2 swimlane Y (canvas coordinates)', () => {
@@ -124,10 +151,10 @@ describe('computeLayout', () => {
         expect(mvp.y).toBeLessThan(r2.y);
     });
 
-    it('first activity has the correct absolute Y coordinate', () => {
+    it('first activity Y is correct (frameTop + PADDING + TITLE_H + CARD_H/2)', () => {
         const { items, frameHeight } = computeLayout(SIMPLE_MAP);
         const act1 = items.find(i => i.kind === 'activity' && i.title === 'Actividad 1')!;
-        const expectedY = -frameHeight / 2 + 30 + 50 + 30; // frameTop + PADDING + TITLE_H + CARD_H/2
+        const expectedY = -frameHeight / 2 + 40 + 50 + 50; // PADDING(40) + TITLE_H(50) + CARD_H/2(50)
         expect(act1.y).toBe(expectedY);
     });
 

@@ -1,15 +1,15 @@
 import { StoryMap } from './story-map-parser';
 
-// Layout constants
-const CARD_W = 220;
-const CARD_H = 60;
-const STORY_H = 80;
+// Layout constants — Miro enforces min card width of 256 and auto-calculates card height (~94dp+)
+const CARD_W = 260;
+const CARD_H = 100;    // layout spacing only — not sent to API (Miro auto-calculates)
+const STORY_H = 120;   // layout spacing only — stories have longer titles
 const COL_GAP = 20;
-const COL_W = CARD_W + COL_GAP;   // 240
-const ROW_GAP = 10;
-const PADDING = 30;
+const COL_W = CARD_W + COL_GAP;   // 280
+const ROW_GAP = 15;
+const PADDING = 40;
 const TITLE_H = 50;
-const SWIMLANE_H = 35;
+const SWIMLANE_H = 40;
 
 export type ItemKind = 'activity' | 'task' | 'story' | 'swimlane';
 
@@ -41,12 +41,17 @@ function sortReleases(releases: string[]): string[] {
 
 export function computeLayout(storyMap: StoryMap): Layout {
     const { activities } = storyMap;
-    const numActivities = activities.length;
 
     // Guard: return empty layout when there are no activities
-    if (numActivities === 0) {
+    if (activities.length === 0) {
         return { frameWidth: 0, frameHeight: 0, items: [] };
     }
+
+    // USM layout: each Task gets its own column. Activities span across their Tasks.
+    // Stories go below their corresponding Task column.
+
+    // Total task columns (activities with 0 tasks still get 1 column)
+    const totalTaskCols = activities.reduce((sum, a) => sum + Math.max(1, a.tasks.length), 0);
 
     // Collect all unique releases (ordered)
     const releaseSet = new Set<string>();
@@ -59,74 +64,67 @@ export function computeLayout(storyMap: StoryMap): Layout {
     }
     const releases = sortReleases([...releaseSet]);
 
-    // Compute max tasks per activity (for uniform task section height)
-    const maxTasks = Math.max(0, ...activities.map(a => a.tasks.length));
-
-    // Compute max stories per release across all activities
-    // For each release, find the max stories in any single activity column
+    // Max stories in any single task column per release (determines row height)
     const maxStoriesPerRelease: Map<string, number> = new Map();
     for (const release of releases) {
         let max = 0;
         for (const activity of activities) {
-            let count = 0;
             for (const task of activity.tasks) {
-                count += task.stories.filter(s => s.release === release).length;
+                const count = task.stories.filter(s => s.release === release).length;
+                if (count > max) max = count;
             }
-            if (count > max) max = count;
         }
         maxStoriesPerRelease.set(release, max);
     }
 
-    // frameWidth
-    const frameWidth = PADDING * 2 + numActivities * COL_W - COL_GAP;
+    // Frame dimensions
+    const frameWidth = PADDING * 2 + totalTaskCols * COL_W - COL_GAP;
 
-    // frameHeight = PADDING + TITLE_H + CARD_H (activity) + ROW_GAP + maxTasks*(CARD_H+ROW_GAP)
-    //             + sum_releases(SWIMLANE_H + maxStoriesInRelease*(STORY_H+ROW_GAP))
-    //             + PADDING
-    // Each slot includes a trailing ROW_GAP (last slot adds padding before swimlane)
-    const taskSectionH = maxTasks * (CARD_H + ROW_GAP);
-    // Each story slot includes a trailing ROW_GAP (last slot adds padding before next swimlane)
     const releaseSectionH = releases.reduce((sum, r) => {
         const maxStories = maxStoriesPerRelease.get(r) ?? 0;
         return sum + SWIMLANE_H + maxStories * (STORY_H + ROW_GAP);
     }, 0);
-    const frameHeight = PADDING + TITLE_H + CARD_H + ROW_GAP + taskSectionH + releaseSectionH + PADDING;
+    // Activity row + Task row (single row, side by side) + releases
+    const frameHeight = PADDING + TITLE_H + CARD_H + ROW_GAP + CARD_H + ROW_GAP + releaseSectionH + PADDING;
 
-    // Frame top-left
+    // Frame top-left (frame centered at canvas origin)
     const frameLeft = -frameWidth / 2;
     const frameTop = -frameHeight / 2;
 
     const items: LayoutItem[] = [];
 
-    // Activity Y (center)
+    // Fixed Y positions
     const activityY = frameTop + PADDING + TITLE_H + CARD_H / 2;
+    const taskY = activityY + CARD_H / 2 + ROW_GAP + CARD_H / 2;
 
-    for (let i = 0; i < activities.length; i++) {
-        const activity = activities[i];
+    // Build columns: each Task = 1 column, Activity spans its Tasks
+    let taskColIdx = 0;
 
-        // Column center X
-        const colX = frameLeft + PADDING + i * COL_W + CARD_W / 2;
+    for (const activity of activities) {
+        const numTaskCols = Math.max(1, activity.tasks.length);
+        const startCol = taskColIdx;
 
-        // Activity card
+        // Activity card — spans all its task columns
+        const activityWidth = numTaskCols * COL_W - COL_GAP;
+        const activityX = frameLeft + PADDING + startCol * COL_W + activityWidth / 2;
+
         items.push({
             kind: 'activity',
             title: activity.title,
-            x: colX,
+            x: activityX,
             y: activityY,
-            width: CARD_W,
+            width: activityWidth,
             height: CARD_H,
             color: '#ffdc4a',
         });
 
-        // Task cards
+        // Task cards — one per column
         for (let j = 0; j < activity.tasks.length; j++) {
-            const task = activity.tasks[j];
-            // bottom of activity + gap + j-th slot offset + half-card center
-            const taskY = activityY + CARD_H + ROW_GAP + j * (CARD_H + ROW_GAP) + CARD_H / 2;
+            const colX = frameLeft + PADDING + (startCol + j) * COL_W + CARD_W / 2;
 
             items.push({
                 kind: 'task',
-                title: task.title,
+                title: activity.tasks[j].title,
                 x: colX,
                 y: taskY,
                 width: CARD_W,
@@ -134,18 +132,17 @@ export function computeLayout(storyMap: StoryMap): Layout {
                 color: '#659df2',
             });
         }
+
+        taskColIdx += numTaskCols;
     }
 
-    // Y position after tasks section (bottom of task section)
-    // activityY + CARD_H/2 + ROW_GAP + maxTasks*(CARD_H+ROW_GAP) gives the bottom of last task
-    // but we want the top of the swimlane section
-    let swimlaneTop = frameTop + PADDING + TITLE_H + CARD_H + ROW_GAP + taskSectionH;
+    // Swimlanes and stories — each story goes below its Task column
+    let swimlaneTop = frameTop + PADDING + TITLE_H + CARD_H + ROW_GAP + CARD_H + ROW_GAP;
 
     for (const release of releases) {
         const maxStories = maxStoriesPerRelease.get(release) ?? 0;
         const swimlaneCenterY = swimlaneTop + SWIMLANE_H / 2;
 
-        // Swimlane label — full-width, centered at x=0
         items.push({
             kind: 'swimlane',
             title: release,
@@ -153,35 +150,33 @@ export function computeLayout(storyMap: StoryMap): Layout {
             y: swimlaneCenterY,
             width: frameWidth,
             height: SWIMLANE_H,
-            // no color
         });
 
-        // Story cards per activity column
-        for (let i = 0; i < activities.length; i++) {
-            const activity = activities[i];
-            const colX = frameLeft + PADDING + i * COL_W + CARD_W / 2;
-
-            // Collect stories for this release in this activity (ordered by task, then story)
-            const releaseStories: string[] = [];
-            for (const task of activity.tasks) {
-                for (const story of task.stories) {
-                    if (story.release === release) {
-                        releaseStories.push(story.title);
-                    }
-                }
+        // Stories per task column
+        let storyColIdx = 0;
+        for (const activity of activities) {
+            if (activity.tasks.length === 0) {
+                storyColIdx++; // empty activity still occupies 1 column
+                continue;
             }
+            for (const task of activity.tasks) {
+                const colX = frameLeft + PADDING + storyColIdx * COL_W + CARD_W / 2;
+                const releaseStories = task.stories.filter(s => s.release === release);
 
-            for (let k = 0; k < releaseStories.length; k++) {
-                const storyY = swimlaneTop + SWIMLANE_H + k * (STORY_H + ROW_GAP) + STORY_H / 2;
-                items.push({
-                    kind: 'story',
-                    title: releaseStories[k],
-                    x: colX,
-                    y: storyY,
-                    width: CARD_W,
-                    height: STORY_H,
-                    color: '#ffffff',
-                });
+                for (let k = 0; k < releaseStories.length; k++) {
+                    const storyY = swimlaneTop + SWIMLANE_H + k * (STORY_H + ROW_GAP) + STORY_H / 2;
+                    items.push({
+                        kind: 'story',
+                        title: releaseStories[k].title,
+                        x: colX,
+                        y: storyY,
+                        width: CARD_W,
+                        height: STORY_H,
+                        color: '#ffffff',
+                    });
+                }
+
+                storyColIdx++;
             }
         }
 
@@ -231,7 +226,7 @@ async function miroRequest(config: MiroConfig, method: string, path: string, bod
 async function createFrame(config: MiroConfig, title: string, width: number, height: number): Promise<string> {
     const data = await miroRequest(config, 'POST', `/boards/${encodeURIComponent(config.boardId)}/frames`, {
         data: { title, format: 'custom', type: 'freeform' },
-        style: { fillColor: '#f5f5f5' },
+        style: { fillColor: '#f5f6f8' },
         position: { x: 0, y: 0, origin: 'center' },
         geometry: { width, height },
     }) as { id: string };
@@ -244,7 +239,7 @@ async function createCard(config: MiroConfig, frameId: string, item: LayoutItem,
         data: { title: item.title },
         style: { cardTheme: item.color },
         position: { x: item.x + offsetX, y: item.y + offsetY, origin: 'center' },
-        geometry: { width: item.width, height: item.height },
+        geometry: { width: item.width },  // height is read-only, auto-calculated by Miro
         parent: { id: frameId },
     }) as { id: string };
     return data.id;
@@ -255,7 +250,7 @@ async function createText(config: MiroConfig, frameId: string, item: LayoutItem,
         data: { content: `<b>${item.title}</b>` },
         style: { fillColor: '#e8e8e8', textAlign: 'left', fontSize: '14' },
         position: { x: item.x + offsetX, y: item.y + offsetY, origin: 'center' },
-        geometry: { width: item.width, height: item.height },
+        geometry: { width: item.width },  // height not supported for text items
         parent: { id: frameId },
     }) as { id: string };
     return data.id;
