@@ -19,7 +19,7 @@ El mapa tiene 4 niveles jerárquicos. Cada nivel responde a una pregunta distint
 
 > 🧠 **Pregunta clave:** "¿Por qué existe este producto?"
 
-- Es **uno solo** para todo el mapa (o muy pocos)
+- Es **uno solo** para todo el mapa (o muy pocos). No tiene emoji de color — no es una tarjeta del backbone, es el encabezado del mapa.
 - No es una tarjeta del backbone — es el título/encabezado del mapa (sección `## Goal`)
 - Es la razón de ser del sistema
 
@@ -35,10 +35,10 @@ Las Activities forman el **backbone** (fila superior del mapa), de izquierda a d
 
 | Test | Si falla |
 |------|----------|
-| ¿Es un verbo/acción? | No es Activity. Probablemente un concepto de negocio → fuera del mapa |
-| ¿Contiene múltiples pasos internos? | Si no tiene pasos, es una Task, no una Activity |
-| ¿Un usuario puede "hacer" esto directamente? | Si es abstracto, es un concepto de negocio (fuera del mapa) |
-| ¿Se explica en una frase? | Si necesitas un párrafo, es demasiado grande → divídela |
+| ¿Es un verbo/acción? | Bájalo al contexto — probablemente es un concepto de negocio. Ponlo como agrupador, no como Activity |
+| ¿Contiene múltiples pasos internos? | Si no tiene pasos internos, es una Task, no una Activity |
+| ¿Un usuario puede "hacer" esto directamente? | Si es abstracto, es un concepto de negocio — ponlo como agrupador visual encima del backbone |
+| ¿Se explica en una frase? | Es demasiado grande → divídela en dos Activities |
 
 **Bien:** "Gestionar órdenes de compra", "Agendar entrega al CD", "Consultar estado de pagos"
 **Mal:** "Logística" (dominio, no acción), "Ingresar credenciales" (demasiado pequeño → es Task), "Como proveedor, quiero ver mis OCs" (es Story)
@@ -72,7 +72,7 @@ Las Stories se **apilan verticalmente debajo de su Task padre**, priorizadas de 
 |------|----------|
 | ¿El equipo puede construir esto en 1-2 sprints? | Demasiado grande → divídela |
 | ¿Tiene un Definition of Done claro? | Demasiado vaga → refínala |
-| ¿Se puede reformular como "Como [rol], quiero [acción] para [beneficio]"? | No obligatorio, pero si no puedes, puede no ser una Story |
+| ¿Se puede reformular como "Como [rol], quiero [acción] para [beneficio]"? | Reformúlala. Si no puedes identificar un rol y un beneficio claro, puede ser un requisito técnico |
 
 **Bien** (debajo de Task "Aceptar una OC"): "Como proveedor, quiero aceptar una OC con doble clic para confirmar compromiso de entrega", "Como admin, quiero que se registre fecha/hora de aceptación para auditoría"
 **Mal:** "Módulo de órdenes de compra" (demasiado grande → es Activity), "Mejorar performance" (no describe valor de usuario → nota técnica)
@@ -102,7 +102,9 @@ Cuando tengas un elemento y no sepas dónde va:
 │   ├── Sí → Agrupador visual encima del backbone (no entra en el mapa)
 │   └── No → Fuera del mapa (requisito técnico, spike, constraint) → Sección "Notas técnicas"
 └── Sí → ¿Tiene múltiples pasos internos?
-    ├── No → Es una TASK 🔵
+    ├── No → ¿Describe lo que construye el equipo (no lo que hace el usuario)?
+    │   ├── Sí → Es una STORY ⬜
+    │   └── No → Es una TASK 🔵
     └── Sí → ¿Es demasiado grande para una sola sesión de trabajo?
         ├── Sí → Es una ACTIVITY 🟡
         └── No → ¿Se puede implementar en 1-2 sprints?
