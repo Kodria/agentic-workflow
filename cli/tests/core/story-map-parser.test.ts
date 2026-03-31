@@ -96,12 +96,43 @@ describe('parseStoryMap', () => {
         const result = parseStoryMap(SAMPLE_MARKDOWN);
         expect(result.activities.every(a => !a.title.includes('Release') && !a.title.includes('Changelog'))).toBe(true);
     });
+
+    it('falls back to title when project is absent from frontmatter', () => {
+        const content = `---
+goal: Some goal
+---
+
+# Story Map — Derived From Title
+
+## Goal
+> Some goal
+`;
+        const result = parseStoryMap(content);
+        expect(result.project).toBe('Derived From Title');
+    });
+
+    it('falls back to Unknown when project and title are both absent', () => {
+        const content = `---
+goal: Some goal
+---
+
+## Goal
+> Some goal
+`;
+        const result = parseStoryMap(content);
+        expect(result.project).toBe('Unknown');
+    });
 });
 
 describe('updateMiroFrameId', () => {
-    it('adds miro_frame_id to existing frontmatter', () => {
+    it('adds miro_frame_id to existing frontmatter and result parses correctly', () => {
         const result = updateMiroFrameId(SAMPLE_MARKDOWN, 'new-frame-123');
         expect(result).toContain('miro_frame_id: "new-frame-123"');
+        // Round-trip: the updated content should parse back to a valid StoryMap with the new id
+        const parsed = parseStoryMap(result);
+        expect(parsed.miro_frame_id).toBe('new-frame-123');
+        expect(parsed.project).toBe('Portal B2B');
+        expect(parsed.activities).toHaveLength(2);
     });
 
     it('replaces existing miro_frame_id', () => {

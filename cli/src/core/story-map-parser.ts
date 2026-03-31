@@ -21,7 +21,7 @@ export interface StoryMap {
 }
 
 function parseFrontmatter(content: string): { meta: Record<string, string>; body: string } {
-    const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+    const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
     if (!match) return { meta: {}, body: content };
 
     const meta: Record<string, string> = {};
@@ -30,6 +30,7 @@ function parseFrontmatter(content: string): { meta: Record<string, string>; body
         if (colonIdx === -1) continue;
         const key = line.slice(0, colonIdx).trim();
         const value = line.slice(colonIdx + 1).trim().replace(/^["']|["']$/g, '');
+        // Empty value is intentionally skipped — keys without values are not meaningful metadata
         if (key && value) meta[key] = value;
     }
 
@@ -78,7 +79,9 @@ function parseBackbone(backbone: string): Activity[] {
 }
 
 export function parseStoryMap(content: string): StoryMap {
-    const { meta, body } = parseFrontmatter(content);
+    // Normalize CRLF to LF so all downstream regexes can assume Unix line endings
+    const normalized = content.replace(/\r\n/g, '\n');
+    const { meta, body } = parseFrontmatter(normalized);
 
     const titleMatch = body.match(/^# Story Map — (.+)$/m);
     const project = meta['project'] || (titleMatch ? titleMatch[1].trim() : 'Unknown');
@@ -98,7 +101,7 @@ export function parseStoryMap(content: string): StoryMap {
 }
 
 export function updateMiroFrameId(content: string, frameId: string): string {
-    const match = content.match(/^(---\n)([\s\S]*?)(\n---\n)([\s\S]*)$/);
+    const match = content.match(/^(---\n)([\s\S]*?)(\n---\n?)([\s\S]*)$/);
     if (!match) {
         return `---\nmiro_frame_id: "${frameId}"\n---\n${content}`;
     }
