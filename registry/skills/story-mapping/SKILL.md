@@ -354,3 +354,75 @@ Cuando el usuario señale que la sesión terminó (o al completar la Fase 5):
 3. Agrega entrada en Changelog: `[{fecha}] Sesión {n}: {resumen de qué se hizo — fases completadas}`
 4. Muestra resumen: Goal, Activities, Tasks, Stories por release, decisiones tomadas
 5. Pregunta: *"¿Hay algo que quieras ajustar antes de guardar?"*
+
+---
+
+## Modo C: Actualizar — Story Map existente
+
+### C1. Cargar documento existente
+
+Si el Paso 0 ya localizó el Story Map del proyecto, úsalo directamente. Si no lo encontró, informa al usuario y ofrece crear uno (→ Modo A o B).
+
+### C2. Mostrar estado actual
+
+Presenta:
+- Última entrada del Changelog
+- Stats: n Activities, n Tasks, n Stories por release
+- Release Summary actual
+
+### C3. Aceptar actualizaciones
+
+Opera en modo reactivo. **Aplica el árbol de decisión** a cada nuevo elemento para clasificarlo en el nivel correcto:
+
+**Nuevas stories** → Aplica tests de Nivel 4. Ubica en Task y release correctos, actualiza conteos.
+**Repriorización** → Mueve stories entre releases, actualiza Release Summary.
+**Refinamiento** → Actualiza acceptance criteria, effort, status de stories existentes.
+**Nueva Task** → Aplica tests de Nivel 3. Agrega debajo de la Activity correcta.
+**Nueva Activity** → Aplica tests de Nivel 2. Agrega al backbone en la posición narrativa correcta.
+**Eliminar story o task** → Confirma con el usuario antes de eliminar: *"¿Confirmas eliminar '{elemento}'?"* Si confirma, elimina y actualiza el Release Summary.
+
+### C4. Cierre
+
+1. **Ejecuta la Checklist de Validación** (sección `## Checklist de Validación` más abajo en este documento) y reporta advertencias
+2. Actualiza Changelog con resumen de cambios
+3. Actualiza Release Summary
+4. Muestra diff de cambios realizados
+5. Pregunta: *"¿Algo más que actualizar?"*
+
+---
+
+## Reglas Transversales
+
+- **No inventes stories.** Solo documenta lo que el usuario confirma explícitamente o lo que se extrae de documentación existente.
+- **El template es inmutable.** No modifiques el template global. Solo modifica el documento de instancia del proyecto.
+- **Un campo vacío es mejor que uno inventado.** Si no tienes dato para un campo, déjalo con su placeholder.
+- **Respeta la jerarquía de 4 niveles.** Goal → Activity → Task → Story. No mezcles niveles. No saltes niveles.
+- **3 gates de confirmación.** Confirma Backbone (Activities) → luego Tasks → luego Stories. Nunca propongas un nivel inferior sin haber confirmado el superior.
+- **El eje horizontal es flujo narrativo, no secuencia estricta.** Ante cualquier ambigüedad de orden, pregunta: *"¿En qué momento de la explicación del sistema mencionarías esto?"*
+- **No bajes de nivel prematuramente.** Si estás en fase de Backbone y aparece una Task o Story, anótala para la fase correspondiente. Señálalo al usuario con amabilidad.
+- **Releases son cortes horizontales completos.** Cada release debe entregar valor end-to-end al usuario, no features aisladas. Si un release solo tiene stories de una actividad, añade una nota: `⚠️ Release {X} cubre solo la actividad {Y} — revisar si entrega valor end-to-end.`
+
+---
+
+## Checklist de Validación
+
+Ejecuta esta checklist **automáticamente al cierre de cualquier modo** (A, B o C). Reporta cada ítem como ✅ o ⚠️ con detalle:
+
+- [ ] **Activities son acciones del usuario.** ¿Cada Activity responde a "qué hace el usuario"? Si alguna es un concepto abstracto, no es Activity.
+- [ ] **Tasks tienen padre.** ¿Cada Task pertenece claramente a una Activity? Si es huérfana, falta una Activity o está mal clasificada.
+- [ ] **Stories son implementables.** ¿El equipo de desarrollo podría estimar cada Story? Si alguna es demasiado vaga o grande, señálala.
+- [ ] **MVP es viable.** ¿El MVP tiene sentido como producto mínimo? Si puedes quitar varias Stories y sigue funcionando, está sobredimensionado. Si no puedes quitar ninguna, está bien.
+- [ ] **Sin gaps en el backbone.** Lee el backbone de izquierda a derecha. ¿Falta algún paso obvio en el flujo del usuario?
+- [ ] **Features transversales contempladas.** ¿Cosas como autenticación, perfilamiento, auditoría tienen su lugar?
+- [ ] **Cada persona tiene camino.** Recorre el mapa como si fueras cada tipo de usuario. ¿Encuentras todo lo que necesitas?
+
+---
+
+## <TERMINATION_PHASE>
+
+Cuando el modo de operación concluya (documento generado, sesión cerrada, o actualización guardada), **DETENTE**.
+
+Tu único paso final es:
+1. Confirmar al usuario la ruta del documento actualizado y un resumen de cambios
+2. Preguntar: *"¿Necesitas algo más del Story Map? Puedo acompañarte en otra sesión, actualizar con más historias, o si quieres continuar con otro paso de documentación, invoca `docs-system-orchestrator`."*
+3. Esperar confirmación. No proceder automáticamente.
