@@ -330,7 +330,7 @@ Tras captura: *"¿Pasamos a priorizar y definir releases?"*
 1. **Recorre el mapa completo** en voz alta para que todos lo tengan fresco
 2. Recuerda los constraints: *"¿Hay limitaciones de tiempo, presupuesto o equipo que debamos considerar?"*
 3. **Por cada Activity:** *"¿Qué Stories son imprescindibles para que el sistema funcione desde el primer día?"*
-4. **Si hay desacuerdo** → sugiere dot voting: *"Cada participante tiene 3 votos por Activity. Marquen las Stories que consideran MVP."*
+4. **Si hay desacuerdo** → sugiere dot voting: *"Cada participante tiene entre 3 y 5 votos para repartir entre TODAS las Stories del mapa. Marquen las que consideran MVP."* — los votos son limitados en total, no por Activity.
 5. **Traza la línea de MVP** → valida: *"Si entregamos SOLO esto, ¿un usuario puede completar su flujo básico de principio a fin?"*
 6. **Sanity checks:**
    - *"¿Puedes quitar alguna Story del MVP y que siga funcionando?"* → Si sí, está sobredimensionado
