@@ -10,6 +10,9 @@ import { syncRegistry } from './core/registry';
 import { discoverSkills, discoverWorkflows, discoverAgents, discoverProcesses, ProcessDefinition, SkillArtifact, WorkflowArtifact, AgentArtifact, SKILLS_DIR, WORKFLOWS_DIR, AGENTS_DIR } from './core/discovery';
 import path from 'path';
 import pc from 'picocolors';
+import fs from 'fs';
+import { parseStoryMap, updateMiroFrameId } from './core/story-map-parser';
+import { syncToMiro } from './core/miro';
 
 const program = new Command();
 program.name('awm').description('Agentic Workflow Manager').version('1.0.0');
@@ -372,7 +375,6 @@ program.command('remove')
       const scopeVal = scopeChoice as Scope;
 
       // Scan installed artifacts across all selected agents, aggregating by name
-      const fs = await import('fs');
       const artifactMap = new Map<string, {
           name: string;
           type: ArtifactType;
@@ -456,5 +458,84 @@ program.command('remove')
           outro('Removal cancelled.');
       }
   });
+
+function loadEnvFile(cwd: string): Record<string, string> {
+    const envPath = path.join(cwd, '.env');
+    if (!fs.existsSync(envPath)) return {};
+    const env: Record<string, string> = {};
+    for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx === -1) continue;
+        const key = trimmed.slice(0, eqIdx).trim();
+        const value = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+        if (key) env[key] = value;
+    }
+    return env;
+}
+
+const miroCmd = program.command('miro').description('Miro board integration');
+
+miroCmd.command('sync <storyMapPath>')
+    .description('Sync a story-map.md file to a Miro board frame')
+    .action(async (storyMapPath: string) => {
+        intro(pc.bgCyan(pc.black(' AWM - Miro Sync ')));
+
+        // 1. Load config from .env in cwd
+        const env = loadEnvFile(process.cwd());
+        const token = env['MIRO_TOKEN'];
+        const boardId = env['MIRO_BOARD_ID'];
+
+        if (!token || !boardId) {
+            console.error(pc.red('✗ Missing config. Add to .env in project root:'));
+            console.error(pc.dim('  MIRO_TOKEN=your_token_here'));
+            console.error(pc.dim('  MIRO_BOARD_ID=your_board_id_here'));
+            process.exit(1);
+        }
+
+        // 2. Read and parse story map
+        const resolvedPath = path.resolve(process.cwd(), storyMapPath);
+        if (!fs.existsSync(resolvedPath)) {
+            console.error(pc.red(`✗ File not found: ${resolvedPath}`));
+            process.exit(1);
+        }
+
+        const content = fs.readFileSync(resolvedPath, 'utf-8');
+        const storyMap = parseStoryMap(content);
+
+        if (storyMap.activities.length === 0) {
+            console.error(pc.red('✗ No activities found in Backbone section. Check markdown format.'));
+            process.exit(1);
+        }
+
+        // 3. Sync to Miro
+        const s = spinner();
+        const isFirstSync = !storyMap.miro_frame_id;
+        s.start(isFirstSync ? 'Creating Miro frame...' : 'Updating Miro frame...');
+
+        try {
+            const result = await syncToMiro(
+                { token, boardId },
+                storyMap,
+                storyMap.miro_frame_id
+            );
+
+            // 4. Persist frame ID back to frontmatter on first sync
+            if (isFirstSync) {
+                const updated = updateMiroFrameId(content, result.frameId);
+                fs.writeFileSync(resolvedPath, updated, 'utf-8');
+            }
+
+            s.stop('Sync complete!');
+            console.log(pc.green(`  ✓ Frame: ${result.frameId}`));
+            console.log(pc.green(`  ✓ Created: ${result.created} | Updated: ${result.updated} | Deleted: ${result.deleted}`));
+            outro('Story map synced to Miro. Open your board to view the frame.');
+        } catch (e: any) {
+            s.stop('Sync failed.');
+            console.error(pc.red(`✗ ${e.message}`));
+            process.exit(1);
+        }
+    });
 
 program.parse();
