@@ -239,22 +239,22 @@ async function createFrame(config: MiroConfig, title: string, width: number, hei
     return data.id;
 }
 
-async function createCard(config: MiroConfig, frameId: string, item: LayoutItem): Promise<string> {
+async function createCard(config: MiroConfig, frameId: string, item: LayoutItem, offsetX: number, offsetY: number): Promise<string> {
     const data = await miroRequest(config, 'POST', `/boards/${encodeURIComponent(config.boardId)}/cards`, {
         data: { title: item.title },
         style: { cardTheme: item.color },
-        position: { x: item.x, y: item.y, origin: 'center' },
+        position: { x: item.x + offsetX, y: item.y + offsetY, origin: 'center' },
         geometry: { width: item.width, height: item.height },
         parent: { id: frameId },
     }) as { id: string };
     return data.id;
 }
 
-async function createText(config: MiroConfig, frameId: string, item: LayoutItem): Promise<string> {
+async function createText(config: MiroConfig, frameId: string, item: LayoutItem, offsetX: number, offsetY: number): Promise<string> {
     const data = await miroRequest(config, 'POST', `/boards/${encodeURIComponent(config.boardId)}/texts`, {
         data: { content: `<b>${item.title}</b>` },
         style: { fillColor: '#e8e8e8', textAlign: 'left', fontSize: '14' },
-        position: { x: item.x, y: item.y, origin: 'center' },
+        position: { x: item.x + offsetX, y: item.y + offsetY, origin: 'center' },
         geometry: { width: item.width, height: item.height },
         parent: { id: frameId },
     }) as { id: string };
@@ -302,6 +302,11 @@ export interface SyncResult {
 export async function syncToMiro(config: MiroConfig, storyMap: StoryMap, existingFrameId?: string): Promise<SyncResult> {
     const { frameWidth, frameHeight, items } = computeLayout(storyMap);
 
+    // Child items use coordinates relative to the frame's top-left corner.
+    // Layout engine computes coordinates centered at (0,0), so offset by half the frame dimensions.
+    const offsetX = frameWidth / 2;
+    const offsetY = frameHeight / 2;
+
     let frameId = existingFrameId;
     let created = 0;
     let updated = 0;
@@ -313,9 +318,9 @@ export async function syncToMiro(config: MiroConfig, storyMap: StoryMap, existin
 
         for (const item of items) {
             if (item.kind === 'swimlane') {
-                await createText(config, frameId, item);
+                await createText(config, frameId, item, offsetX, offsetY);
             } else {
-                await createCard(config, frameId, item);
+                await createCard(config, frameId, item, offsetX, offsetY);
             }
             created++;
         }
@@ -344,7 +349,7 @@ export async function syncToMiro(config: MiroConfig, storyMap: StoryMap, existin
             if (item.kind === 'swimlane') continue;
 
             if (!existingByTitle.has(item.title)) {
-                await createCard(config, frameId, item);
+                await createCard(config, frameId, item, offsetX, offsetY);
                 created++;
             }
             // matched cards already have the correct title — no update needed
