@@ -191,6 +191,7 @@ Del contexto extraído:
 2. Identifica los usuarios/actores principales
 3. Propone las Personas con rol, objetivo y pain points
 4. Presenta al usuario para confirmación: *"Este es el Goal y las Personas que identifiqué. ¿Son correctos? ¿Falta algo?"*
+   - Si el usuario aprueba el Goal pero ajusta las Personas, re-presenta solo las Personas revisadas antes de avanzar.
 
 ### A3. Proponer Backbone (solo Activities)
 
@@ -210,6 +211,8 @@ Con el backbone confirmado:
 3. Presenta por Activity: *"Estas son las Tasks para '{Activity}'. ¿Ajustamos?"*
 4. Si una Activity genera demasiadas Tasks (>8), sugiere dividir la Activity
 
+Tras completar todas las Activities: *"Backbone descompuesto: {n} Activities con {n} Tasks en total. ¿Pasamos a proponer las historias de usuario?"* — espera confirmación antes de avanzar a A4.
+
 ### A4. Proponer Stories por Release
 
 Con las Tasks confirmadas:
@@ -225,6 +228,6 @@ Con las Tasks confirmadas:
 2. Rellena el template con Goal, Personas, Backbone (Activities + Tasks), Stories y Releases confirmados
 3. Incluye sección `## Notas técnicas` si hay elementos no-acción identificados
 4. Genera el Release Summary con conteo de stories por release
-5. **Ejecuta la Checklist de Validación** (ver sección dedicada) y reporta advertencias
+5. **Ejecuta la Checklist de Validación** (sección `## Checklist de Validación` más abajo en este documento) y reporta advertencias
 6. Agrega entrada en Changelog: `[{fecha}] Sesión 1: Story Map generado desde documentación — {n} actividades, {n} tasks, {n} stories`
 7. Presenta la ruta del documento, el resultado de la checklist, y un resumen final
