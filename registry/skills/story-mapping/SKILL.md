@@ -143,3 +143,88 @@ Aplica esta tabla durante TODOS los modos de operación:
 | Detalle técnico como tarjeta | "Endpoint REST", "API de...", "Tabla de..." | *"Esto es un detalle técnico. Lo documento en Notas técnicas y lo vinculo a la Story que lo necesita."* |
 | Story demasiado grande | No estimable en 1-2 sprints | *"Esta Story parece demasiado grande para 1-2 sprints. ¿La dividimos?"* |
 | Task sin Activity padre | Task huérfana sin Activity clara | *"¿A qué actividad del usuario pertenece esta tarea?"* |
+
+## Paso 0: Autodescubrimiento de Contexto
+
+Antes de hacer cualquier pregunta al usuario:
+
+1. **Lee `AGENTS.md`** en la raíz del repositorio activo (si existe). Extrae:
+   - `docs_path` — directorio raíz de documentación
+   - Estructura de directorios disponible
+2. **Localiza el template de Story Map** usando búsqueda dinámica del patrón `template-wizard/resources/templates/story-map-template.md`
+3. **Busca un Story Map existente** del proyecto mencionado en `{docs_path}/` (busca archivos que contengan "story-map" o el nombre del proyecto)
+4. **Si el usuario indicó documentos fuente**, léelos y extrae: personas, flujos, problemas, scope/MVP
+5. **Si el usuario NO indicó documentos fuente y el contexto NO es una sesión en vivo (Modo B)**, busca en el repositorio de documentación: discovery documents, specs, notas de reunión, cualquier documento relevante del proyecto
+
+---
+
+## Paso 1: Detectar Modo de Operación
+
+Según el contexto del usuario, determina cuál de los 3 modos aplica:
+
+| Señal del usuario | Modo |
+|-------------------|------|
+| "Quiero crear un story map", "genera el story map desde la documentación", "haz el story mapping del proyecto X" | **Modo A: Generar** |
+| "Acompáñame en la sesión de planning", "vamos a mapear historias", "estamos en una sesión de story mapping" | **Modo B: Acompañar en Vivo** |
+| "Actualiza el story map", "agrega estas historias", "reprioriza el MVP", "continuar el story mapping" | **Modo C: Actualizar** |
+
+Si no queda claro, pregunta: *"¿Quieres que genere un Story Map desde documentación existente, que te acompañe en una sesión de planning en vivo, o que actualice un Story Map que ya existe?"*
+
+---
+
+## Modo A: Generar — Story Map desde documentación
+
+Sigue estos pasos en orden. **Cada paso es un gate de confirmación** — no avances al siguiente sin aprobación del usuario.
+
+### A1. Identificar fuentes de contexto
+
+Si el usuario indicó documentos específicos, úsalos. Si no:
+1. Busca en el repositorio de documentación del proyecto
+2. Prioriza: discovery documents > specs > notas de reunión > cualquier otro documento
+3. Presenta al usuario qué documentos encontraste y de cuáles extraerás contexto
+4. Espera confirmación
+
+### A2. Extraer y proponer Goal + Personas
+
+Del contexto extraído:
+1. Propón el **Goal** del producto: una frase que responde "¿por qué existe este sistema?"
+2. Identifica los usuarios/actores principales
+3. Propone las Personas con rol, objetivo y pain points
+4. Presenta al usuario para confirmación: *"Este es el Goal y las Personas que identifiqué. ¿Son correctos? ¿Falta algo?"*
+
+### A3. Proponer Backbone (solo Activities)
+
+Con el Goal y Personas confirmados:
+1. Identifica las actividades de alto nivel que cada persona necesita completar
+2. **Aplica los tests de validación de Nivel 2** a cada Activity propuesta
+3. Ordénalas en **flujo narrativo** (no cronológico): "¿En qué orden le explicarías el sistema a alguien?"
+4. Presenta el backbone: *"Este es el backbone propuesto — solo las actividades principales en flujo narrativo. ¿Ajustamos algo?"*
+
+**⚠️ NO proponer Tasks ni Stories en este paso.** Solo Activities.
+
+### A3b. Proponer Tasks por Activity
+
+Con el backbone confirmado:
+1. Para cada Activity, propone las Tasks (pasos concretos del usuario) de izquierda a derecha
+2. **Aplica los tests de validación de Nivel 3** a cada Task
+3. Presenta por Activity: *"Estas son las Tasks para '{Activity}'. ¿Ajustamos?"*
+4. Si una Activity genera demasiadas Tasks (>8), sugiere dividir la Activity
+
+### A4. Proponer Stories por Release
+
+Con las Tasks confirmadas:
+1. Para cada Task, propone user stories en formato: _Como {persona}, quiero {acción} para {beneficio}_
+2. **Aplica los tests de validación de Nivel 4** a cada Story
+3. Organiza en releases (MVP, Release 2, Backlog) según la prioridad detectada en la documentación
+4. **Clasifica elementos no-acción** que aparezcan: NFRs → Notas técnicas, integraciones → Stories técnicas, spikes → Notas técnicas
+5. Presenta por Activity: *"Estas son las Stories para '{Activity}'. ¿Ajustamos prioridades o agregamos algo?"*
+
+### A5. Generar documento y validar
+
+1. Determina la ruta del archivo: por defecto `{docs_path}/50-projects/{nombre-proyecto}/story-map.md`. Si el directorio no existe, pregunta al usuario dónde guardarlo.
+2. Rellena el template con Goal, Personas, Backbone (Activities + Tasks), Stories y Releases confirmados
+3. Incluye sección `## Notas técnicas` si hay elementos no-acción identificados
+4. Genera el Release Summary con conteo de stories por release
+5. **Ejecuta la Checklist de Validación** (ver sección dedicada) y reporta advertencias
+6. Agrega entrada en Changelog: `[{fecha}] Sesión 1: Story Map generado desde documentación — {n} actividades, {n} tasks, {n} stories`
+7. Presenta la ruta del documento, el resultado de la checklist, y un resumen final
