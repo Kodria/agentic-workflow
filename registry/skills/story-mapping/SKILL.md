@@ -424,5 +424,7 @@ Cuando el modo de operación concluya (documento generado, sesión cerrada, o ac
 
 Tu único paso final es:
 1. Confirmar al usuario la ruta del documento actualizado y un resumen de cambios
-2. Preguntar: *"¿Necesitas algo más del Story Map? Puedo acompañarte en otra sesión, actualizar con más historias, o si quieres continuar con otro paso de documentación, invoca `docs-system-orchestrator`."*
-3. Esperar confirmación. No proceder automáticamente.
+2. Si el proyecto tiene `MIRO_TOKEN` y `MIRO_BOARD_ID` en su `.env`, mencionar:
+   > "Para sincronizar con Miro: `awm miro sync docs/50-projects/story-map.md`"
+3. Preguntar: *"¿Necesitas algo más del Story Map? Puedo acompañarte en otra sesión, actualizar con más historias, o si quieres continuar con otro paso de documentación, invoca `docs-system-orchestrator`."*
+4. Esperar confirmación. No proceder automáticamente.
