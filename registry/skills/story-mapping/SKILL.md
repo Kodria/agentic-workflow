@@ -7,184 +7,137 @@ description: "Facilita sesiones de User Story Mapping (metodología Jeff Patton)
 
 Facilita el ciclo completo de User Story Mapping para planificación de producto. Opera en 3 modos según el contexto del usuario, documentando progresivamente en el repositorio del proyecto siguiendo la metodología de Jeff Patton.
 
-**Principio core:** El Story Map es un artefacto vivo que organiza las necesidades del usuario en dos dimensiones — horizontal (el viaje del usuario) y vertical (la prioridad de entrega). Markdown es la fuente de verdad; herramientas visuales (Miro, etc.) son capas de presentación opcionales.
-
-**Estructura del mapa (Jeff Patton):**
-- **Backbone** (eje horizontal): Actividades de alto nivel del usuario → Steps/pasos dentro de cada actividad
-- **Stories** (eje vertical): Historias de usuario debajo de cada step, ordenadas por prioridad
-- **Releases** (cortes horizontales): MVP, Release 2, Backlog — cada slice entrega valor end-to-end
+**Principio core:** El Story Map es un artefacto vivo que organiza las necesidades del usuario en dos dimensiones — horizontal (flujo narrativo del usuario) y vertical (prioridad de entrega). Markdown es la fuente de verdad; herramientas visuales (Miro, etc.) son capas de presentación opcionales.
 
 ---
 
-## Paso 0: Autodescubrimiento de Contexto
+## Fundamento metodológico — Los 4 niveles de Jeff Patton
 
-Antes de hacer cualquier pregunta al usuario:
+El mapa tiene 4 niveles jerárquicos. Cada nivel responde a una pregunta distinta. Si no sabes dónde poner algo, identifica qué pregunta responde.
 
-1. **Lee `AGENTS.md`** en la raíz del repositorio activo (si existe). Extrae:
-   - `docs_path` — directorio raíz de documentación
-   - Estructura de directorios disponible
-2. **Localiza el template de Story Map** usando búsqueda dinámica del patrón `template-wizard/resources/templates/story-map-template.md`
-3. **Busca un Story Map existente** del proyecto mencionado en `{docs_path}/` (busca archivos que contengan "story-map" o el nombre del proyecto)
-4. **Si el usuario indicó documentos fuente**, léelos y extrae: personas, flujos, problemas, scope/MVP
-5. **Si el usuario NO indicó documentos fuente y el contexto NO es una sesión en vivo (Modo B)**, busca en el repositorio de documentación: discovery documents, specs, notas de reunión, cualquier documento relevante del proyecto
+### Nivel 1 — Goal (Objetivo)
 
----
+> 🧠 **Pregunta clave:** "¿Por qué existe este producto?"
 
-## Paso 1: Detectar Modo de Operación
+- Es **uno solo** para todo el mapa (o muy pocos)
+- No es una tarjeta del backbone — es el título/encabezado del mapa (sección `## Goal`)
+- Es la razón de ser del sistema
 
-Según el contexto del usuario, determina cuál de los 3 modos aplica:
+**Test de validación:** ¿Tu sistema entero existe para resolver esto? → Es un Goal. Si es solo una parte del sistema → Baja de nivel.
 
-| Señal del usuario | Modo |
-|-------------------|------|
-| "Quiero crear un story map", "genera el story map desde la documentación", "haz el story mapping del proyecto X" | **Modo A: Generar** |
-| "Acompáñame en la sesión de planning", "vamos a mapear historias", "estamos en una sesión de story mapping" | **Modo B: Acompañar en Vivo** |
-| "Actualiza el story map", "agrega estas historias", "reprioriza el MVP", "continuar el story mapping" | **Modo C: Actualizar** |
+### Nivel 2 — Activity (🟡 Actividad) → Backbone
 
-Si no queda claro, pregunta: *"¿Quieres que genere un Story Map desde documentación existente, que te acompañe en una sesión de planning en vivo, o que actualice un Story Map que ya existe?"*
+> 🧠 **Pregunta clave:** "¿Qué está HACIENDO el usuario en este momento?"
 
----
+Las Activities forman el **backbone** (fila superior del mapa), de izquierda a derecha en **flujo narrativo** (no secuencia estricta).
 
-## Modo A: Generar — Story Map desde documentación
+**Tests de validación — aplica TODOS antes de confirmar una Activity:**
 
-Sigue estos pasos en orden:
+| Test | Si falla |
+|------|----------|
+| ¿Es un verbo/acción? | No es Activity. Probablemente un concepto de negocio → fuera del mapa |
+| ¿Contiene múltiples pasos internos? | Si no tiene pasos, es una Task, no una Activity |
+| ¿Un usuario puede "hacer" esto directamente? | Si es abstracto, es un concepto de negocio (fuera del mapa) |
+| ¿Se explica en una frase? | Si necesitas un párrafo, es demasiado grande → divídela |
 
-### A1. Identificar fuentes de contexto
+**Bien:** "Gestionar órdenes de compra", "Agendar entrega al CD", "Consultar estado de pagos"
+**Mal:** "Logística" (dominio, no acción), "Ingresar credenciales" (demasiado pequeño → es Task), "Como proveedor, quiero ver mis OCs" (es Story)
 
-Si el usuario indicó documentos específicos, úsalos. Si no:
-1. Busca en el repositorio de documentación del proyecto
-2. Prioriza: discovery documents > specs > notas de reunión > cualquier otro documento
-3. Presenta al usuario qué documentos encontraste y de cuáles extraerás contexto
-4. Espera confirmación
+### Nivel 3 — Task (🔵 Tarea)
 
-### A2. Extraer y proponer Personas
+> 🧠 **Pregunta clave:** "¿Cuáles son los pasos que el usuario sigue dentro de esta actividad?"
 
-Del contexto extraído:
-1. Identifica los usuarios/actores principales
-2. Propone las Personas con rol, objetivo y pain points
-3. Presenta al usuario para confirmación: *"Identifiqué estas personas del proyecto. ¿Son correctas? ¿Falta alguna?"*
+Las Tasks van **debajo de su Activity padre**, de izquierda a derecha. Pueden tener un mini-flujo secuencial dentro de la actividad.
 
-### A3. Proponer Backbone
+**Tests de validación — aplica TODOS antes de confirmar una Task:**
 
-Con las personas confirmadas:
-1. Identifica las actividades de alto nivel que cada persona necesita completar
-2. Para cada actividad, propone los steps/pasos en orden cronológico
-3. Presenta el backbone completo: *"Este es el backbone propuesto — las actividades principales y sus pasos. ¿Ajustamos algo?"*
+| Test | Si falla |
+|------|----------|
+| ¿Pertenece claramente a una Activity? | Si es huérfana, quizás es una Activity por sí misma |
+| ¿Es una acción unitaria? | Si tiene sub-pasos, puede ser una Activity |
+| ¿Describe lo que hace el usuario, no lo que construye el equipo? | Lo que construye el equipo son Stories |
 
-### A4. Proponer Stories por Release
+**Bien** (dentro de "Gestionar OCs"): "Ver listado de OCs", "Filtrar por estado", "Aceptar una OC", "Descargar detalle en PDF"
+**Mal:** "Gestionar órdenes de compra" (demasiado grande → es Activity), "Endpoint REST para listar OCs" (detalle técnico → fuera del mapa), "Como operador, quiero filtrar OCs" (es Story)
 
-Con el backbone confirmado:
-1. Para cada step, propone user stories en formato: _Como {persona}, quiero {acción} para {beneficio}_
-2. Organiza las stories en releases (MVP, Release 2, Backlog) según la prioridad detectada en la documentación
-3. Presenta por actividad: *"Estas son las stories para la actividad {X}. ¿Ajustamos prioridades o agregamos algo?"*
+### Nivel 4 — Story (⬜ Historia de usuario)
 
-### A5. Generar documento
+> 🧠 **Pregunta clave:** "¿Qué exactamente va a construir el equipo de desarrollo?"
 
-1. Determina la ruta del archivo: por defecto `{docs_path}/50-projects/{nombre-proyecto}/story-map.md`. Si el directorio `50-projects/` no existe en el repositorio, pregunta al usuario: *"¿Dónde debo guardar el Story Map? Por defecto lo guardaría en `{docs_path}/50-projects/{nombre-proyecto}/story-map.md`."*
-2. Rellena con las personas, backbone, stories y releases confirmados
-3. Genera el Release Summary con conteo de stories por release
-4. Agrega entrada en Changelog: `[{fecha}] Sesión 1: Story Map generado desde documentación — {n} actividades, {n} steps, {n} stories`
-5. Presenta la ruta del documento y un resumen final
+Las Stories se **apilan verticalmente debajo de su Task padre**, priorizadas de arriba (más importante) a abajo (menos importante).
+
+**Tests de validación — aplica TODOS antes de confirmar una Story:**
+
+| Test | Si falla |
+|------|----------|
+| ¿El equipo puede construir esto en 1-2 sprints? | Demasiado grande → divídela |
+| ¿Tiene un Definition of Done claro? | Demasiado vaga → refínala |
+| ¿Se puede reformular como "Como [rol], quiero [acción] para [beneficio]"? | No obligatorio, pero si no puedes, puede no ser una Story |
+
+**Bien** (debajo de Task "Aceptar una OC"): "Como proveedor, quiero aceptar una OC con doble clic para confirmar compromiso de entrega", "Como admin, quiero que se registre fecha/hora de aceptación para auditoría"
+**Mal:** "Módulo de órdenes de compra" (demasiado grande → es Activity), "Mejorar performance" (no describe valor de usuario → nota técnica)
 
 ---
 
-## Modo B: Acompañar en Vivo
+## El eje horizontal: flujo narrativo, NO secuencia estricta
 
-El usuario está en una sesión de planning y quiere al asistente como copiloto en tiempo real.
+> 🧠 **Pregunta clave para ordenar:** "¿En qué orden le explicarías el sistema a alguien que no lo conoce?"
 
-### B1. Setup inicial
+Eso es el **flujo narrativo**. Algunas actividades pueden ser paralelas o cíclicas en la realidad, pero en el mapa van en el orden en que contarías la historia del producto.
 
-Carga o confirma el documento de Story Map del proyecto (si no existe, créalo con el template base).
+**Lo que SÍ es:** El orden en que contarías la historia del producto. Una organización lógica que da contexto.
+**Lo que NO es:** Una secuencia estricta paso-a-paso. Un diagrama de flujo o BPMN. Un timeline de implementación.
 
-Pregunta: *"¿Qué proyecto estamos mapeando? ¿Quiénes participan en la sesión?"*
-
-### B2. Fase guiada — Backbone
-
-Opera pregunta por pregunta para construir la estructura del mapa:
-
-1. **Personas:** *"¿Para quién estamos construyendo? Descríbeme los usuarios principales."*
-   - Registra cada persona con rol y objetivo
-2. **Actividades:** *"¿Cuáles son las actividades principales que {persona} necesita hacer? Piensa en los grandes bloques de su recorrido."*
-   - Registra cada actividad como elemento del backbone
-3. **Steps:** Para cada actividad: *"¿Qué pasos concretos hace {persona} dentro de {actividad}? En orden cronológico."*
-   - Registra los steps debajo de cada actividad
-
-Tras completar el backbone: *"Backbone definido: {n_actividades} actividades con {n_steps} steps. ¿Pasamos a las historias de usuario? Puedes describirlas en cualquier orden — yo las ubico en el lugar correcto."*
-
-### B3. Fase captura libre — Stories
-
-Cambia a modo reactivo. El usuario describe stories en cualquier orden:
-
-**El usuario describe una story** → Tú:
-1. La ubicas en el step y actividad correctos
-2. Le asignas un release (pregunta si no es claro)
-3. La redactas en formato: _Como {persona}, quiero {acción} para {beneficio}_
-4. Confirmas brevemente: *"Registrada en {Actividad} > {Step} como [MVP]. ¿Sigo?"*
-
-**El usuario quiere repriorizar** → Mueve la story al release indicado y confirma.
-
-**El usuario quiere volver al modo guiado** → Retoma la secuencia de preguntas donde se dejó.
-
-**El usuario dice "anota esto"** → Captura directamente sin reformatear.
-
-### B4. Cierre de sesión
-
-Cuando el usuario señale que la sesión terminó:
-1. Genera o actualiza el documento con todo lo capturado
-2. Actualiza el Release Summary con conteos
-3. Agrega entrada en Changelog: `[{fecha}] Sesión {n}: {resumen de qué se hizo}`
-4. Muestra resumen: actividades, steps, stories por release, decisiones tomadas
-5. Pregunta: *"¿Hay algo que quieras ajustar antes de guardar?"*
+Si no sabes dónde poner una Activity: *"Cuando le explico el sistema a un nuevo miembro del equipo, ¿en qué momento de la explicación mencionaría esto?"*
 
 ---
 
-## Modo C: Actualizar — Story Map existente
+## Árbol de decisión para elementos ambiguos
 
-### C1. Cargar documento existente
+Cuando tengas un elemento y no sepas dónde va:
 
-Si el Paso 0 ya localizó el Story Map del proyecto, úsalo directamente. Si no lo encontró, informa al usuario y ofrece crear uno (→ Modo A o B).
-
-### C2. Mostrar estado actual
-
-Presenta:
-- Última entrada del Changelog
-- Stats: n actividades, n steps, n stories por release
-- Release Summary actual
-
-### C3. Aceptar actualizaciones
-
-Opera en modo reactivo:
-
-**Nuevas stories** → Ubica en step y release correctos, actualiza conteos.
-**Repriorización** → Mueve stories entre releases, actualiza Release Summary.
-**Refinamiento** → Actualiza acceptance criteria, effort, status de stories existentes.
-**Nuevo step o actividad** → Agrega al backbone en la posición correcta.
-**Eliminar story o step** → Confirma con el usuario antes de eliminar: *"¿Confirmas eliminar '{elemento}'? Esta acción no se puede deshacer en el documento."* Si confirma, elimina y actualiza el Release Summary.
-
-### C4. Cierre
-
-1. Actualiza Changelog con resumen de cambios
-2. Actualiza Release Summary
-3. Muestra diff de cambios realizados
-4. Pregunta: *"¿Algo más que actualizar?"*
+```
+¿Es algo que un usuario HACE en el sistema?
+├── No → ¿Es un concepto de negocio/dominio?
+│   ├── Sí → Agrupador visual encima del backbone (no entra en el mapa)
+│   └── No → Fuera del mapa (requisito técnico, spike, constraint) → Sección "Notas técnicas"
+└── Sí → ¿Tiene múltiples pasos internos?
+    ├── No → Es una TASK 🔵
+    └── Sí → ¿Es demasiado grande para una sola sesión de trabajo?
+        ├── Sí → Es una ACTIVITY 🟡
+        └── No → ¿Se puede implementar en 1-2 sprints?
+            ├── Sí → Es una STORY ⬜
+            └── No → Divídela en varias Stories
+```
 
 ---
 
-## Reglas Transversales
+## Conceptos que NO son acciones del usuario
 
-- **No inventes stories.** Solo documenta lo que el usuario confirma explícitamente o lo que se extrae de documentación existente.
-- **El template es inmutable.** No modifiques el template global. Solo modifica el documento de instancia del proyecto.
-- **Un campo vacío es mejor que uno inventado.** Si no tienes dato para un campo, déjalo con su placeholder.
-- **Confirma el backbone antes de las stories.** El backbone es la columna vertebral — si está mal, todo lo demás se desalinea.
-- **Respeta la estructura Jeff Patton.** Actividades → Steps → Stories. No mezcles niveles.
-- **Releases son cortes horizontales completos.** Cada release debe entregar valor end-to-end al usuario, no features aisladas. Si un release solo tiene stories de una actividad, añade una nota en el Changelog: `⚠️ Release {X} cubre solo la actividad {Y} — revisar si entrega valor end-to-end.`
+No todo lo que aparece en el discovery entra en el Story Map. Clasifica así:
+
+| Concepto | Ejemplo | Dónde va |
+|----------|---------|----------|
+| Capacidad de negocio | "Logística", "Due Diligence" | **Fuera del mapa** — agrupador visual. Se documenta como contexto, no como Activity |
+| Requisito técnico / NFR | "Soportar 1000 usuarios concurrentes" | **Fuera del mapa** — sección `## Notas técnicas` del documento |
+| Integración con sistema externo | "Recibir datos vía API desde ERP" | **Como Story** debajo de la Task que necesita esos datos |
+| Proceso batch / automatizado | "Carga nocturna de datos" | **Como Story** técnica debajo de la Activity que consume esos datos |
+| Feature transversal | "Multilenguaje", "Auditoría" | **Columna separada** al final del backbone, o Stories repetidas bajo varias Tasks |
+| Spike / investigación | "Evaluar WebSockets vs polling" | **Fuera del mapa** — sección `## Notas técnicas` |
+
+**Comportamiento:** Cuando el usuario proponga un elemento no-acción, identifícalo, explica por qué no entra directamente en el mapa, y sugiere dónde documentarlo. No lo descartes silenciosamente.
 
 ---
 
-## <TERMINATION_PHASE>
+## Detección proactiva de errores comunes
 
-Cuando el modo de operación concluya (documento generado, sesión cerrada, o actualización guardada), **DETENTE**.
+Aplica esta tabla durante TODOS los modos de operación:
 
-Tu único paso final es:
-1. Confirmar al usuario la ruta del documento actualizado y un resumen de cambios
-2. Preguntar: *"¿Necesitas algo más del Story Map? Puedo acompañarte en otra sesión, actualizar con más historias, o si quieres continuar con otro paso de documentación, invoca `docs-system-orchestrator`."*
-3. Esperar confirmación. No proceder automáticamente.
+| Error | Cómo detectarlo | Respuesta |
+|-------|-----------------|-----------|
+| Capacidad de negocio como Activity | Elemento no es verbo/acción | *"'{X}' parece un dominio, no una acción. ¿Qué hace el usuario dentro de {X}?"* |
+| Story escrita como Task | Formato "Como... quiero..." en nivel de Task | *"Esto parece una Story. La bajo al nivel correcto debajo de la Task."* |
+| Backbone como secuencia estricta | Usuario insiste en orden temporal estricto | *"El orden es narrativo, no secuencial. ¿En qué orden le explicarías el sistema a alguien nuevo?"* |
+| Detalle técnico como tarjeta | "Endpoint REST", "API de...", "Tabla de..." | *"Esto es un detalle técnico. Lo documento en Notas técnicas y lo vinculo a la Story que lo necesita."* |
+| Story demasiado grande | No estimable en 1-2 sprints | *"Esta Story parece demasiado grande para 1-2 sprints. ¿La dividimos?"* |
+| Task sin Activity padre | Task huérfana sin Activity clara | *"¿A qué actividad del usuario pertenece esta tarea?"* |
