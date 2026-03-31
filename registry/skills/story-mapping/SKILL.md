@@ -231,3 +231,126 @@ Con las Tasks confirmadas:
 5. **Ejecuta la Checklist de Validación** (sección `## Checklist de Validación` más abajo en este documento) y reporta advertencias
 6. Agrega entrada en Changelog: `[{fecha}] Sesión 1: Story Map generado desde documentación — {n} actividades, {n} tasks, {n} stories`
 7. Presenta la ruta del documento, el resultado de la checklist, y un resumen final
+
+---
+
+## Modo B: Acompañar en Vivo — 6 fases de ejecución
+
+El usuario está en una sesión de planning y quiere al asistente como copiloto en tiempo real. El Modo B se estructura en **6 fases** alineadas con la metodología de Jeff Patton. Cada fase tiene un objetivo claro y un principio de disciplina.
+
+**Al inicio, pregunta:** *"¿En qué fase estamos? ¿Es la primera sesión (empezamos por backbone) o ya tenemos backbone definido?"* — para retomar donde se dejó.
+
+| Fase | Objetivo | Principio |
+|------|----------|-----------|
+| 0. Preparación | Recopilar insumos, proponer borrador | Llegar con borrador, no con lienzo en blanco |
+| 1. Backbone | Definir y validar solo Activities | NO bajar a Tasks ni Stories |
+| 2. Tasks | Descomponer cada Activity en Tasks | Activity por activity, izquierda a derecha |
+| 3. Stories | Escribir historias debajo de cada Task | Captura libre — la skill ubica en el lugar correcto |
+| 4. Priorización | Trazar líneas de release | Dot voting, sanity checks del MVP |
+| 5. Validación | Ejecutar checklist sobre el mapa | 7 ítems de verificación |
+
+---
+
+### Fase 0 — Preparación
+
+Carga o crea el documento de Story Map del proyecto.
+
+1. Pregunta: *"¿Qué proyecto estamos mapeando? ¿Quiénes participan en la sesión?"*
+2. Si hay documentación fuente disponible (discovery, specs), léela y propón un **borrador de backbone** para que el equipo discuta
+3. Si no hay documentación, prepara un lienzo con Goal y Personas para completar con el grupo
+4. Presenta: *"Preparé este borrador como punto de partida para la discusión. No es una decisión, es un disparador."*
+
+> ⚠️ El borrador es un **punto de partida para la discusión**, no una decisión. Si llegas con el mapa "terminado", el equipo no se sentirá dueño del resultado.
+
+---
+
+### Fase 1 — Backbone (solo Activities)
+
+**Enfoque:** Solo Activities. **NO bajar a Tasks ni Stories.**
+
+1. **Goal:** Confirma o define el objetivo del producto: *"¿Por qué existe este producto? En una frase."*
+2. **Personas:** *"¿Para quién estamos construyendo? Descríbeme los usuarios principales."*
+3. **Divergencia:** *"¿Qué HACE el usuario en este sistema? Piensen en verbos — actividades grandes."*
+   - Registra cada Activity candidata
+4. **Convergencia:** Agrupa similares, elimina duplicados, ordena en flujo narrativo
+   - **Aplica tests de validación de Nivel 2** a cada Activity
+5. **Lectura del backbone:** Lee todas las Activities de izquierda a derecha como una historia
+   - *"¿Falta algo? ¿Sobra algo? ¿El orden narrativo tiene sentido?"*
+
+**Si el usuario baja a Tasks prematuramente:** *"Excelente punto — lo anoto para la fase de Tasks. Ahora mantengámonos en las actividades grandes."*
+
+Tras completar: *"Backbone definido: {n} Activities en flujo narrativo. ¿Pasamos a descomponer en Tasks?"*
+
+---
+
+### Fase 2 — Tasks (descomposición por Activity)
+
+**Enfoque:** Activity por Activity, de izquierda a derecha. **NO bajar a Stories.**
+
+Para cada Activity (15-25 min por Activity):
+1. Lee la Activity en voz alta
+2. *"¿Qué pasos concretos sigue el usuario aquí? ¿Qué hace primero, después?"*
+3. Registra Tasks candidatas debajo de la Activity
+4. **Aplica tests de validación de Nivel 3** a cada Task
+5. Ordena de izquierda a derecha
+
+**Si una Activity toma demasiado tiempo (>25 min):** *"Esta Activity parece demasiado grande. ¿La dividimos en dos Activities?"*
+
+**Si aparecen Stories:** *"Eso suena a una historia de usuario — lo anoto para la fase de Stories. Ahora enfoquémonos en los pasos del usuario."*
+
+Tras completar todas las Activities: *"Todas las Activities descompuestas: {n} Tasks en total. ¿Pasamos a las historias de usuario?"*
+
+---
+
+### Fase 3 — Stories (captura libre)
+
+Cambia a **modo reactivo**. El usuario describe stories en cualquier orden:
+
+**El usuario describe una story** → Tú:
+1. **Aplica los tests de validación de Nivel 4**
+2. La ubicas en la Task y Activity correctas
+3. Le asignas un release (pregunta si no es claro)
+4. La redactas en formato: _Como {persona}, quiero {acción} para {beneficio}_
+5. Confirmas brevemente: *"Registrada en 🟡 {Activity} > 🔵 {Task} como [MVP]. ¿Sigo?"*
+
+**El usuario propone un elemento no-acción** → Clasifícalo según la tabla de conceptos no-acción y explica dónde va.
+
+**El usuario quiere repriorizar** → Mueve la story al release indicado y confirma.
+
+**El usuario quiere volver al modo guiado** → Retoma la fase donde se dejó.
+
+**El usuario dice "anota esto"** → Captura directamente sin reformatear.
+
+Tras captura: *"¿Pasamos a priorizar y definir releases?"*
+
+---
+
+### Fase 4 — Priorización y Releases
+
+1. **Recorre el mapa completo** en voz alta para que todos lo tengan fresco
+2. Recuerda los constraints: *"¿Hay limitaciones de tiempo, presupuesto o equipo que debamos considerar?"*
+3. **Por cada Activity:** *"¿Qué Stories son imprescindibles para que el sistema funcione desde el primer día?"*
+4. **Si hay desacuerdo** → sugiere dot voting: *"Cada participante tiene 3 votos por Activity. Marquen las Stories que consideran MVP."*
+5. **Traza la línea de MVP** → valida: *"Si entregamos SOLO esto, ¿un usuario puede completar su flujo básico de principio a fin?"*
+6. **Sanity checks:**
+   - *"¿Puedes quitar alguna Story del MVP y que siga funcionando?"* → Si sí, está sobredimensionado
+   - *"Si quitas cualquier Story, ¿deja de funcionar?"* → Si sí con varias, está muy ajustado
+7. **Releases siguientes:** Agrupa Stories restantes en R2, R3 sin ser muy preciso
+8. Valida: *"No es necesario que todas las Activities tengan Stories en el MVP. Si una Activity completa puede esperar, todas sus Stories van en un release posterior."*
+
+---
+
+### Fase 5 — Validación
+
+Ejecuta la **Checklist de Validación** (sección `## Checklist de Validación` más abajo en este documento) sobre el mapa completo y reporta resultados al grupo.
+
+---
+
+### Cierre de sesión (Modo B)
+
+Cuando el usuario señale que la sesión terminó (o al completar la Fase 5):
+1. Genera o actualiza el documento con todo lo capturado
+2. Actualiza el Release Summary con conteos
+3. Agrega entrada en Changelog: `[{fecha}] Sesión {n}: {resumen de qué se hizo — fases completadas}`
+4. Muestra resumen: Goal, Activities, Tasks, Stories por release, decisiones tomadas
+5. Pregunta: *"¿Hay algo que quieras ajustar antes de guardar?"*
