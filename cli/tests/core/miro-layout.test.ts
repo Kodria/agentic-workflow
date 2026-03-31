@@ -124,6 +124,13 @@ describe('computeLayout', () => {
         expect(mvp.y).toBeLessThan(r2.y);
     });
 
+    it('first activity has the correct absolute Y coordinate', () => {
+        const { items, frameHeight } = computeLayout(SIMPLE_MAP);
+        const act1 = items.find(i => i.kind === 'activity' && i.title === 'Actividad 1')!;
+        const expectedY = -frameHeight / 2 + 30 + 50 + 30; // frameTop + PADDING + TITLE_H + CARD_H/2
+        expect(act1.y).toBe(expectedY);
+    });
+
     it('handles empty activities gracefully', () => {
         const emptyMap: StoryMap = { project: 'Empty', goal: '', activities: [] };
         const { frameWidth, frameHeight, items } = computeLayout(emptyMap);
