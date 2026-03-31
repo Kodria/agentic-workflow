@@ -387,7 +387,7 @@ Opera en modo reactivo. **Aplica el árbol de decisión** a cada nuevo elemento 
 2. Actualiza Changelog con resumen de cambios
 3. Actualiza Release Summary
 4. Muestra diff de cambios realizados
-5. Pregunta: *"¿Algo más que actualizar?"*
+5. Pregunta: *"¿Algo más que actualizar?"* — si no hay más cambios, procede a `<TERMINATION_PHASE>`.
 
 ---
 
