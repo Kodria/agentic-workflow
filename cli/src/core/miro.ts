@@ -201,23 +201,31 @@ export interface MiroConfig {
 }
 
 async function miroRequest(config: MiroConfig, method: string, path: string, body?: unknown): Promise<unknown> {
-    const response = await fetch(`${MIRO_BASE}${path}`, {
-        method,
-        headers: {
-            'Authorization': `Bearer ${config.token}`,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-        },
-        body: body ? JSON.stringify(body) : undefined,
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30_000);
 
-    if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Miro API ${method} ${path} → ${response.status}: ${text}`);
+    try {
+        const response = await fetch(`${MIRO_BASE}${path}`, {
+            method,
+            headers: {
+                'Authorization': `Bearer ${config.token}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            },
+            body: body ? JSON.stringify(body) : undefined,
+            signal: controller.signal,
+        });
+
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(`Miro API ${method} ${path} → ${response.status}: ${text}`);
+        }
+
+        if (response.status === 204) return null;
+        return response.json();
+    } finally {
+        clearTimeout(timeoutId);
     }
-
-    if (response.status === 204) return null;
-    return response.json();
 }
 
 async function createFrame(config: MiroConfig, title: string, width: number, height: number): Promise<string> {
@@ -227,6 +235,7 @@ async function createFrame(config: MiroConfig, title: string, width: number, hei
         position: { x: 0, y: 0, origin: 'center', relativeTo: 'canvas_center' },
         geometry: { width, height },
     }) as { id: string };
+    if (!data?.id) throw new Error('Miro API returned frame without id');
     return data.id;
 }
 
@@ -252,27 +261,29 @@ async function createText(config: MiroConfig, frameId: string, item: LayoutItem)
     return data.id;
 }
 
-async function updateCardTitle(config: MiroConfig, cardId: string, title: string): Promise<void> {
-    await miroRequest(config, 'PATCH', `/boards/${encodeURIComponent(config.boardId)}/cards/${cardId}`, {
-        data: { title },
-    });
-}
-
 async function deleteItem(config: MiroConfig, itemId: string): Promise<void> {
     await miroRequest(config, 'DELETE', `/boards/${encodeURIComponent(config.boardId)}/items/${itemId}`);
 }
 
 async function listFrameCards(config: MiroConfig, frameId: string): Promise<{ id: string; title: string }[]> {
-    const data = await miroRequest(
-        config,
-        'GET',
-        `/boards/${encodeURIComponent(config.boardId)}/items?parent_item_id=${frameId}&type=card&limit=200`
-    ) as { data: { id: string; data?: { title?: string } }[] };
+    const results: { id: string; title: string }[] = [];
+    let cursor: string | undefined;
 
-    return (data.data || []).map(item => ({
-        id: item.id,
-        title: stripHtml(item.data?.title || ''),
-    }));
+    do {
+        const url = `/boards/${encodeURIComponent(config.boardId)}/items?parent_item_id=${frameId}&type=card&limit=50${cursor ? `&cursor=${cursor}` : ''}`;
+        const data = await miroRequest(config, 'GET', url) as {
+            data: { id: string; data?: { title?: string } }[];
+            cursor?: string;
+        };
+
+        for (const item of data.data || []) {
+            results.push({ id: item.id, title: stripHtml(item.data?.title || '') });
+        }
+
+        cursor = data.cursor;
+    } while (cursor);
+
+    return results;
 }
 
 function stripHtml(html: string): string {
@@ -327,15 +338,16 @@ export async function syncToMiro(config: MiroConfig, storyMap: StoryMap, existin
 
         // Create or update cards from new layout
         for (const item of items) {
+            // Note: swimlane text items are not diffed on re-sync.
+            // Renamed or removed releases require deleting and re-creating the frame manually.
+            // Full text-item diffing is a known limitation to address in a future iteration.
             if (item.kind === 'swimlane') continue;
 
-            if (existingByTitle.has(item.title)) {
-                await updateCardTitle(config, existingByTitle.get(item.title)!, item.title);
-                updated++;
-            } else {
+            if (!existingByTitle.has(item.title)) {
                 await createCard(config, frameId, item);
                 created++;
             }
+            // matched cards already have the correct title — no update needed
         }
     }
 
