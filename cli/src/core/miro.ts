@@ -43,6 +43,11 @@ export function computeLayout(storyMap: StoryMap): Layout {
     const { activities } = storyMap;
     const numActivities = activities.length;
 
+    // Guard: return empty layout when there are no activities
+    if (numActivities === 0) {
+        return { frameWidth: 0, frameHeight: 0, items: [] };
+    }
+
     // Collect all unique releases (ordered)
     const releaseSet = new Set<string>();
     for (const activity of activities) {
@@ -78,7 +83,9 @@ export function computeLayout(storyMap: StoryMap): Layout {
     // frameHeight = PADDING + TITLE_H + CARD_H (activity) + ROW_GAP + maxTasks*(CARD_H+ROW_GAP)
     //             + sum_releases(SWIMLANE_H + maxStoriesInRelease*(STORY_H+ROW_GAP))
     //             + PADDING
+    // Each slot includes a trailing ROW_GAP (last slot adds padding before swimlane)
     const taskSectionH = maxTasks * (CARD_H + ROW_GAP);
+    // Each story slot includes a trailing ROW_GAP (last slot adds padding before next swimlane)
     const releaseSectionH = releases.reduce((sum, r) => {
         const maxStories = maxStoriesPerRelease.get(r) ?? 0;
         return sum + SWIMLANE_H + maxStories * (STORY_H + ROW_GAP);
@@ -114,7 +121,8 @@ export function computeLayout(storyMap: StoryMap): Layout {
         // Task cards
         for (let j = 0; j < activity.tasks.length; j++) {
             const task = activity.tasks[j];
-            const taskY = activityY + CARD_H / 2 + ROW_GAP + j * (CARD_H + ROW_GAP) + CARD_H / 2;
+            // bottom of activity + gap + j-th slot offset + half-card center
+            const taskY = activityY + CARD_H + ROW_GAP + j * (CARD_H + ROW_GAP) + CARD_H / 2;
 
             items.push({
                 kind: 'task',

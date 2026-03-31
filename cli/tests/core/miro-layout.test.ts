@@ -107,4 +107,28 @@ describe('computeLayout', () => {
         const r2Idx = swimlanes.findIndex(s => s.title === 'Release 2');
         expect(mvpIdx).toBeLessThan(r2Idx);
     });
+
+    it('first activity has the correct absolute X coordinate', () => {
+        // frameWidth = PADDING*2 + 2*COL_W - COL_GAP = 60 + 480 - 20 = 520
+        // frameLeft = -260
+        // colX[0] = frameLeft + PADDING + 0*COL_W + CARD_W/2 = -260 + 30 + 110 = -120
+        const { items } = computeLayout(SIMPLE_MAP);
+        const act1 = items.find(i => i.kind === 'activity' && i.title === 'Actividad 1')!;
+        expect(act1.x).toBe(-120);
+    });
+
+    it('MVP swimlane Y is less than Release 2 swimlane Y (canvas coordinates)', () => {
+        const { items } = computeLayout(SIMPLE_MAP);
+        const mvp = items.find(i => i.kind === 'swimlane' && i.title === 'MVP')!;
+        const r2 = items.find(i => i.kind === 'swimlane' && i.title === 'Release 2')!;
+        expect(mvp.y).toBeLessThan(r2.y);
+    });
+
+    it('handles empty activities gracefully', () => {
+        const emptyMap: StoryMap = { project: 'Empty', goal: '', activities: [] };
+        const { frameWidth, frameHeight, items } = computeLayout(emptyMap);
+        expect(frameWidth).toBeGreaterThanOrEqual(0);
+        expect(frameHeight).toBeGreaterThanOrEqual(0);
+        expect(items).toHaveLength(0);
+    });
 });
