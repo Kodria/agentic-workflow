@@ -1,6 +1,7 @@
 ---
 name: ui-design
 description: "Design UI screens using Google Stitch. Reads screens from the design doc's ## UI Screens table, generates them one by one via Stitch MCP, iterates with user feedback, and updates the design doc with Stitch references. Invoke after brainstorming when UI Screens section exists with pending screens."
+model: sonnet
 ---
 
 # UI Design with Google Stitch

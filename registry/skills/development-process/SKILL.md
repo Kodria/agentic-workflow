@@ -1,6 +1,7 @@
 ---
 name: development-process
 description: Use when starting a new development task, resuming work, or when unsure which skill to invoke next - orchestrates the full development lifecycle from idea to merge
+model: sonnet
 ---
 
 # Development Process Orchestrator
