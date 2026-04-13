@@ -269,6 +269,14 @@ async function createCard(config: MiroConfig, frameId: string, item: LayoutItem,
     return data.id;
 }
 
+async function updateCard(config: MiroConfig, cardId: string, item: LayoutItem, offsetX: number, offsetY: number): Promise<void> {
+    await miroRequest(config, 'PATCH', `/boards/${encodeURIComponent(config.boardId)}/cards/${cardId}`, {
+        style: { cardTheme: item.color },
+        position: { x: item.x + offsetX, y: item.y + offsetY, origin: 'center' },
+        geometry: { width: item.width },
+    });
+}
+
 async function createText(config: MiroConfig, frameId: string, item: LayoutItem, offsetX: number, offsetY: number): Promise<string> {
     const data = await miroRequest(config, 'POST', `/boards/${encodeURIComponent(config.boardId)}/texts`, {
         data: { content: `<b>${item.title}</b>` },
@@ -363,18 +371,23 @@ export async function syncToMiro(config: MiroConfig, storyMap: StoryMap, existin
             }
         }
 
-        // Create or update cards from new layout
+        // Create or reposition cards from new layout
         for (const item of items) {
             // Note: swimlane text items are not diffed on re-sync.
             // Renamed or removed releases require deleting and re-creating the frame manually.
             // Full text-item diffing is a known limitation to address in a future iteration.
             if (item.kind === 'swimlane') continue;
 
-            if (!existingByTitle.has(item.title)) {
+            const existingId = existingByTitle.get(item.title);
+            if (!existingId) {
                 await createCard(config, frameId, item, offsetX, offsetY);
                 created++;
+            } else {
+                // Reposition and resize the existing card to match the current layout.
+                // This is necessary when the layout changes (new activities added, gaps adjusted, etc.)
+                await updateCard(config, existingId, item, offsetX, offsetY);
+                updated++;
             }
-            // matched cards already have the correct title — no update needed
         }
     }
 
