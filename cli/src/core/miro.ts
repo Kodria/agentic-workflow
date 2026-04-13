@@ -252,6 +252,12 @@ async function createFrame(config: MiroConfig, title: string, width: number, hei
     return data.id;
 }
 
+async function updateFrame(config: MiroConfig, frameId: string, width: number, height: number): Promise<void> {
+    await miroRequest(config, 'PATCH', `/boards/${encodeURIComponent(config.boardId)}/frames/${frameId}`, {
+        geometry: { width, height },
+    });
+}
+
 async function createCard(config: MiroConfig, frameId: string, item: LayoutItem, offsetX: number, offsetY: number): Promise<string> {
     const data = await miroRequest(config, 'POST', `/boards/${encodeURIComponent(config.boardId)}/cards`, {
         data: { title: item.title },
@@ -338,7 +344,10 @@ export async function syncToMiro(config: MiroConfig, storyMap: StoryMap, existin
             created++;
         }
     } else {
-        // Subsequent sync: diff and update
+        // Subsequent sync: resize frame first so new positions don't exceed old boundaries,
+        // then diff and update cards.
+        await updateFrame(config, frameId, frameWidth, frameHeight);
+
         const existingCards = await listFrameCards(config, frameId);
         const existingByTitle = new Map(existingCards.map(c => [c.title, c.id]));
 
