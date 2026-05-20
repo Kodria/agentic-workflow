@@ -15,8 +15,8 @@
   },
   {
     "name": "notion-tracker-career",
-    "description": "Workflows MCP del módulo Carrera de NotionTracker: brainstorm de metas (W1), curación semanal de evidencia (W2), narración de logros con 4 narrativas (W3). Requiere el server MCP de NotionTracker configurado en el cliente.",
-    "skills": ["career-goal-brainstorm", "career-curation-pulse", "career-achievement-narrate"],
+    "description": "Skill del módulo Carrera de NotionTracker: brainstorm conversacional de metas (W1). Los workflows W2 (curación de evidencia) y W3 (narración de logros) viven en las description de las tools MCP correspondientes, no requieren Skill. Requiere el server MCP de NotionTracker configurado en el cliente.",
+    "skills": ["career-goal-brainstorm"],
     "workflows": [],
     "agents": []
   }
