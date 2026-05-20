@@ -12,5 +12,12 @@
     "skills": ["docs-system-orchestrator", "docs-brainstorming", "docs-assistant", "template-manager", "template-wizard", "documenting-modules", "business-documenting-modules", "c4-architecture", "init-docs-repo", "project-context-init", "discovery-assistant", "story-mapping", "architecture-advisor", "cicd-proposal-builder", "nfr-checklist-generator", "technology-evaluator"],
     "workflows": ["docs-system-orchestrator"],
     "agents": ["docs-system-orchestrator"]
+  },
+  {
+    "name": "notion-tracker-career",
+    "description": "Workflows MCP del módulo Carrera de NotionTracker: brainstorm de metas (W1), curación semanal de evidencia (W2), narración de logros con 4 narrativas (W3). Requiere el server MCP de NotionTracker configurado en el cliente.",
+    "skills": ["career-goal-brainstorm", "career-curation-pulse", "career-achievement-narrate"],
+    "workflows": [],
+    "agents": []
   }
 ]
