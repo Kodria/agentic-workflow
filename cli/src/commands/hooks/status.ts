@@ -41,7 +41,7 @@ function checkFile(file: string): CheckResult {
     }
 }
 
-function checkSettingsEntry(settingsPath: string, scriptsDir: string, matcher: string): CheckResult {
+function checkSettingsEntry(settingsPath: string, scriptsDir: string, matcher: string, eventName: string): CheckResult {
     if (!fs.existsSync(settingsPath)) {
         return { ok: false, detail: `settings.json not found: ${settingsPath}` };
     }
@@ -51,7 +51,7 @@ function checkSettingsEntry(settingsPath: string, scriptsDir: string, matcher: s
     } catch {
         return { ok: false, detail: 'settings.json is not valid JSON' };
     }
-    const entries: any[] = parsed?.hooks?.SessionStart ?? [];
+    const entries: any[] = parsed?.hooks?.[eventName] ?? [];
     const awmEntry = entries.find((e) =>
         e?.matcher === matcher &&
         (e?.hooks ?? []).some((h: any) => typeof h?.command === 'string' && h.command.includes(scriptsDir))
@@ -72,7 +72,7 @@ export function computeHookStatus(agent: AgentTarget): HookStatus {
         bootstrapSkill: checkFile(path.join(config.scriptsDir, 'using-awm.md')),
         sessionStartScript: checkExecutable(path.join(config.scriptsDir, 'session-start')),
         runHookWrapper: checkExecutable(path.join(config.scriptsDir, 'run-hook.cmd')),
-        settingsEntry: checkSettingsEntry(config.settingsPath, config.scriptsDir, config.matcher)
+        settingsEntry: checkSettingsEntry(config.settingsPath, config.scriptsDir, config.matcher, config.eventName)
     };
 
     const allOk = Object.values(checks).every((c) => c.ok);
