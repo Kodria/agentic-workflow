@@ -2,7 +2,7 @@
   {
     "name": "core-dev",
     "description": "Las habilidades fundamentales para el desarrollo guiado por agentes.",
-    "skills": ["brainstorming", "writing-plans", "executing-plans", "subagent-driven-development", "test-driven-development", "requesting-code-review", "development-process", "finishing-a-development-branch", "receiving-code-review", "verification-before-completion", "systematic-debugging", "project-context-init", "architecture-advisor", "cicd-proposal-builder", "nfr-checklist-generator", "technology-evaluator", "ui-design"],
+    "skills": ["brainstorming", "writing-plans", "executing-plans", "subagent-driven-development", "test-driven-development", "requesting-code-review", "development-process", "finishing-a-development-branch", "receiving-code-review", "verification-before-completion", "systematic-debugging", "project-context-init", "architecture-advisor", "cicd-proposal-builder", "nfr-checklist-generator", "technology-evaluator", "ui-design", "dispatching-parallel-agents", "using-git-worktrees", "writing-skills"],
     "workflows": ["development-process"],
     "agents": ["development-process"]
   },
