@@ -27,7 +27,7 @@ export type ProviderConfig = {
     hooks?: HookConfig;
 };
 
-const homedir = os.homedir();
+const homedir = process.env.HOME || os.homedir();
 const awmHome = process.env.AWM_HOME || path.join(homedir, '.awm');
 
 export const PROVIDERS: Record<AgentTarget, ProviderConfig> = {
