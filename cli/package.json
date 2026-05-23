@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "jest",
+    "test": "jest --runInBand",
     "start": "ts-node src/index.ts",
     "prepublishOnly": "npm run build"
   },

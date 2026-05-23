@@ -6,3 +6,4 @@ coverage
 .agent
 .agents
 skills-lock.json
+tmp/*

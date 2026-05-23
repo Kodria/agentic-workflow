@@ -13,6 +13,7 @@ import pc from 'picocolors';
 import fs from 'fs';
 import { parseStoryMap, updateMiroFrameId } from './core/story-map-parser';
 import { syncToMiro } from './core/miro';
+import { registerHooksCommand } from './commands/hooks';
 
 const program = new Command();
 program.name('awm').description('Agentic Workflow Manager').version('1.0.0');
@@ -537,5 +538,7 @@ miroCmd.command('sync <storyMapPath>')
             process.exit(1);
         }
     });
+
+registerHooksCommand(program);
 
 program.parse();

@@ -11,14 +11,24 @@ type ArtifactConfig = {
     local: string;
 };
 
+export type HookConfig = {
+    type: 'cc-settings-merge';
+    settingsPath: string;
+    scriptsDir: string;
+    matcher: string;
+    eventName: string;
+};
+
 export type ProviderConfig = {
     label: string;
     skill: ArtifactConfig;
     workflow: ArtifactConfig | null;
     agent: ArtifactConfig | null;
+    hooks?: HookConfig;
 };
 
-const homedir = os.homedir();
+const homedir = process.env.HOME || os.homedir();
+const awmHome = process.env.AWM_HOME || path.join(homedir, '.awm');
 
 export const PROVIDERS: Record<AgentTarget, ProviderConfig> = {
     antigravity: {
@@ -37,7 +47,14 @@ export const PROVIDERS: Record<AgentTarget, ProviderConfig> = {
         label: 'Claude Code',
         skill:    { global: path.join(homedir, '.claude/skills'),  local: '.claude/skills' },
         workflow: null,
-        agent:    { global: path.join(homedir, '.claude/agents'),  local: '.claude/agents' }
+        agent:    { global: path.join(homedir, '.claude/agents'),  local: '.claude/agents' },
+        hooks: {
+            type: 'cc-settings-merge',
+            settingsPath: path.join(homedir, '.claude/settings.json'),
+            scriptsDir: path.join(awmHome, 'hooks'),
+            matcher: 'startup|clear|compact',
+            eventName: 'SessionStart'
+        }
     }
 };
 
@@ -49,4 +66,9 @@ export function getTargetPath(type: ArtifactType, agent: AgentTarget, scope: Sco
     if (!config) throw new Error(`${type}s are not supported by ${provider.label}.`);
 
     return config[scope];
+}
+
+export function getHookConfig(agent: AgentTarget): HookConfig | undefined {
+    const provider = PROVIDERS[agent];
+    return provider?.hooks;
 }
