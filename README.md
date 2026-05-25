@@ -20,6 +20,8 @@ Once installed, verify it's working:
 awm --help
 ```
 
+> **First time using AWM?** Read the [Getting Started guide](docs/getting-started.md) — it walks you through enabling the bootstrap hook, installing the `core-dev` pack, and configuring a project end-to-end (sensors + CONSTITUTION.md + the Harness Engineering loop).
+
 ## �️ Uninstallation
 
 To safely remove the AWM CLI and its internal cache without deleting your personal skills or workflows, run the uninstall script from the repository root:
@@ -55,6 +57,7 @@ awm update
 
 Dive deeper into how AWM works and how you can contribute:
 
+- [Getting Started](docs/getting-started.md): First-use walkthrough — bootstrap hook, sensors, CONSTITUTION.md, and the Harness Engineering loop end-to-end.
 - [Architecture & Design](docs/architecture.md): Understand the logical monorepo and how AWM routes artifacts.
 - [CLI Reference](docs/cli-reference.md): Detailed usage of all `awm` commands and non-interactive flags.
 - [Registry Contributor Guide](docs/registry-guide.md): Learn how to build your own Skills (`SKILL.md`) and bundle them into Processes.
