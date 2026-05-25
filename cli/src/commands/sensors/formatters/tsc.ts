@@ -8,10 +8,11 @@ export function parseTscOutput(raw: string): SensorError[] {
         if (!line) continue;
         const m = TSC_LINE.exec(line);
         if (!m) continue;
-        const [, file, lineStr, , code, msg] = m;
+        const [, file, lineStr, colStr, code, msg] = m;
         errors.push({
             file,
             line: parseInt(lineStr, 10),
+            column: parseInt(colStr, 10),
             rule: code,
             message: `SENSOR[typecheck] ${file} line ${lineStr} — ${msg} Fix: review the type annotation. Error code: ${code}.`,
         });

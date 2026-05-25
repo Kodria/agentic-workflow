@@ -21,7 +21,9 @@ export function registerSensorsCommand(program: Command): void {
         .option('--all', 'run all sensors regardless of speed')
         .action((opts) => {
             const output = runSensors({ fast: opts.fast, slow: opts.slow, all: opts.all });
-            process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+            if (output.sensors.length > 0) {
+                process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+            }
             if (output.overall === 'fail') process.exit(1);
         });
 

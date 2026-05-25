@@ -39,9 +39,9 @@ function getFormatter(name: string): (raw: string) => SensorError[] {
     return parseGenericOutput;
 }
 
-function runSensor(name: string, cmd: string, timeout: number): SensorResult {
+function runSensor(name: string, cmd: string, timeout: number, cwd: string): SensorResult {
     try {
-        const raw = execSync(cmd, { encoding: 'utf-8', timeout, stdio: ['pipe', 'pipe', 'pipe'] });
+        const raw = execSync(cmd, { encoding: 'utf-8', timeout, cwd, stdio: ['pipe', 'pipe', 'pipe'] });
         const errors = getFormatter(name)(raw);
         return { name, status: errors.length > 0 ? 'fail' : 'pass', errors };
     } catch (err: any) {
@@ -76,7 +76,7 @@ export function runSensors(opts: RunOptions = {}): RunOutput {
         }
 
         const timeout = config.timeout ?? (isFast ? DEFAULT_FAST_TIMEOUT : DEFAULT_SLOW_TIMEOUT);
-        results.push(runSensor(name, config.cmd, timeout));
+        results.push(runSensor(name, config.cmd, timeout, cwd));
     }
 
     const overall = results.some(r => r.status === 'fail') ? 'fail'
