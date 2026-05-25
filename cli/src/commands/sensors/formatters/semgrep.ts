@@ -12,8 +12,8 @@ export function parseSemgrepOutput(raw: string): SensorError[] {
     }
     return (parsed.results ?? []).map(r => ({
         file: r.path,
-        line: r.start.line,
+        line: r.start?.line ?? 0,
         rule: r.check_id,
-        message: `SENSOR[security] ${r.path}:${r.start.line} — ${r.extra.message} Fix: review rule ${r.check_id}.`,
+        message: `SENSOR[security] ${r.path}:${r.start?.line ?? '?'} — ${r.extra?.message ?? 'unknown'} Fix: review rule ${r.check_id}.`,
     }));
 }
