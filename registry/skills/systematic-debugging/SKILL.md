@@ -264,6 +264,21 @@ If you catch yourself thinking:
 | **3. Hypothesis** | Form theory, test minimally | Confirmed or new hypothesis |
 | **4. Implementation** | Create test, fix, verify | Bug resolved, tests pass |
 
+## Phase 5: Pattern Recognition (AWM harness-retro)
+
+<!-- AWM-INTEGRATION: debugging-retro -->
+
+After the fix is verified, ask one question:
+
+> "Have I debugged this same root cause before in this repo?"
+
+Check `docs/harness-retros.md` (if it exists) and recent commit messages matching `harness-retro:` for prior instances. If you find one:
+
+- **Yes, second occurrence** → invoke the `harness-retro` skill. The fix you just shipped is one sample; the rule from harness-retro turns it into a class.
+- **No, first occurrence** → ship the regression test (Phase 4 Step 1 already covers this) and move on. Don't structuralize on a single sample.
+
+This is what closes the loop between debugging and the harness. Without it, every recurrence costs a full debug cycle.
+
 ## When Process Reveals "No Root Cause"
 
 If systematic investigation reveals issue is truly environmental, timing-dependent, or external:
