@@ -9,7 +9,7 @@
     "doc": "docs"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/src/index.js",
     "test": "jest --runInBand",
     "start": "ts-node src/index.ts",
     "prepublishOnly": "npm run build"
