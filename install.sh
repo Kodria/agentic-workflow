@@ -79,6 +79,10 @@ fi
 cd "$INSTALL_DIR/cli"
 run_step "Installing dependencies..." npm install --production=false
 run_step "Building CLI..." npm run build
+# Clear any previous global link before re-linking. This makes install
+# idempotent regardless of whether the global awm previously pointed at a
+# stale, deleted, or differently-located source directory.
+run_step "Cleaning previous link..." bash -c "npm rm -g agentic-workflow-manager 2>/dev/null || true"
 run_step "Linking globally..." npm link
 
 # ── Bootstrap registry ─────────────────────────────────────────────────
