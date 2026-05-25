@@ -133,7 +133,7 @@ Wait for explicit approval before moving to the next config. Do not batch.
 
 Use the `Write` tool for each approved config. Update `.awm/sensors.json` if a sensor's command needs to change (e.g. `--config eslint.config.awm.mjs` added).
 
-### 7. Validate
+### 7. Re-run sensor status
 
 ```bash
 awm sensors status
@@ -141,7 +141,7 @@ awm sensors status
 
 Every DEGRADED sensor you touched should now report HEALTHY. If any are still DEGRADED, re-read the status output for the specific failure reason and iterate (return to step 3 for that sensor).
 
-Then test the sensors run end-to-end:
+### 8. Run sensors end-to-end
 
 ```bash
 awm sensors run --all
@@ -149,7 +149,7 @@ awm sensors run --all
 
 Expected: each sensor either passes or fails with LLM-friendly output (lines starting with `SENSOR[<type>]`). If any sensor crashes (non-zero exit with stderr noise), the config is still wrong — iterate.
 
-### 8. Commit
+### 9. Commit
 
 ```bash
 git add eslint.config.awm.mjs tsconfig.awm.json .awm/sensors.json
