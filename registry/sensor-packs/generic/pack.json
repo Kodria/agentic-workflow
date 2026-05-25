@@ -1,0 +1,13 @@
+{
+  "name": "generic",
+  "description": "Generic sensor pack — Semgrep only, works with any language",
+  "detects": [],
+  "sensors": {
+    "security": {
+      "fast": false,
+      "defaultCmd": "semgrep --config .semgrep.awm.yml --json .",
+      "configFile": ".semgrep.awm.yml",
+      "formatter": "semgrep"
+    }
+  }
+}

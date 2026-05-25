@@ -1,0 +1,15 @@
+# AWM Semgrep rules — generic security patterns (any language)
+
+rules:
+  - id: awm-generic-no-hardcoded-secrets
+    patterns:
+      - pattern: |
+          $VAR = "..."
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: (password|secret|api_key|apikey|token|passwd)
+    message: >
+      SENSOR[security] Potential hardcoded secret in '$VAR'.
+      Fix: use environment variables or a secrets manager.
+    languages: [generic]
+    severity: WARNING

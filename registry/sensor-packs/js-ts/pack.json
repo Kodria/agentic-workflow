@@ -1,0 +1,37 @@
+{
+  "name": "js-ts",
+  "description": "JavaScript / TypeScript sensor pack",
+  "detects": ["package.json"],
+  "sensors": {
+    "typecheck": {
+      "fast": true,
+      "defaultCmd": "npx tsc --noEmit",
+      "formatter": "tsc"
+    },
+    "lint": {
+      "fast": true,
+      "defaultCmd": "npx eslint . --format json",
+      "configFile": "eslint.config.awm.mjs",
+      "configFileFallback": "eslint.config.awm.cjs",
+      "formatter": "eslint-llm"
+    },
+    "security": {
+      "fast": false,
+      "defaultCmd": "semgrep --config .semgrep.awm.yml --json .",
+      "configFile": ".semgrep.awm.yml",
+      "formatter": "semgrep"
+    },
+    "depcheck": {
+      "fast": false,
+      "defaultCmd": "npx depcruise --config .dep-cruiser.awm.js src",
+      "configFile": ".dep-cruiser.awm.js",
+      "formatter": "generic"
+    },
+    "mutation": {
+      "fast": false,
+      "enabled": false,
+      "defaultCmd": "npx stryker run",
+      "formatter": "generic"
+    }
+  }
+}
