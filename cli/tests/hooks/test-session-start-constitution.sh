@@ -25,7 +25,7 @@ assert_contains() {
     else
         echo "FAIL: $name"
         echo "  Expected to find: $needle"
-        echo "  Got: $haystack" | head -c 500
+        printf '  Got: %.500s\n' "$haystack"
         echo ""
         FAIL=$((FAIL + 1))
     fi
@@ -38,6 +38,7 @@ assert_not_contains() {
     if printf '%s' "$haystack" | grep -qF "$needle"; then
         echo "FAIL: $name"
         echo "  Expected NOT to find: $needle"
+        printf '  Got: %.500s\n' "$haystack"
         FAIL=$((FAIL + 1))
     else
         echo "PASS: $name"
@@ -46,11 +47,14 @@ assert_not_contains() {
 }
 
 # Setup: three isolated temp dirs
+TMP_WITH=""
+TMP_WITHOUT=""
+TMP_EMPTY=""
+cleanup() { rm -rf "${TMP_WITH:-}" "${TMP_WITHOUT:-}" "${TMP_EMPTY:-}"; }
+trap cleanup EXIT
 TMP_WITH=$(mktemp -d)
 TMP_WITHOUT=$(mktemp -d)
 TMP_EMPTY=$(mktemp -d)
-cleanup() { rm -rf "$TMP_WITH" "$TMP_WITHOUT" "$TMP_EMPTY"; }
-trap cleanup EXIT
 
 # Test 1: CONSTITUTION.md present and non-empty
 cat > "$TMP_WITH/CONSTITUTION.md" << 'CONSTITUTION'

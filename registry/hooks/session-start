@@ -41,6 +41,7 @@ CONSTITUTION_FILE="$PWD/CONSTITUTION.md"
 if [ -s "$CONSTITUTION_FILE" ]; then
     constitution_content=$(cat "$CONSTITUTION_FILE")
     constitution_escaped=$(escape_for_json "$constitution_content")
+    # \n is a literal two-char JSON escape sequence (not a shell newline) — matches the convention on line 36.
     session_context="${session_context}\n\n## Project Constitution\n\n${constitution_escaped}"
 fi
 
