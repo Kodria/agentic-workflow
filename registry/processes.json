@@ -19,5 +19,12 @@
     "skills": ["career-goal-brainstorm"],
     "workflows": [],
     "agents": []
+  },
+  {
+    "name": "notion-tracker-procesos",
+    "description": "Skills del módulo Procesos de NotionTracker (Caso 3 MCP): cristalizar-proceso (convierte nodos capturados en documentación versionada en Notion) y agregar-nodos-proceso (identifica actividades de la conversación, las propone como nodos y las inyecta en un proceso con reorganización, preview-then-confirm). Ambas usan el server MCP de NotionTracker con scope read+write.",
+    "skills": ["cristalizar-proceso", "agregar-nodos-proceso"],
+    "workflows": [],
+    "agents": []
   }
 ]
