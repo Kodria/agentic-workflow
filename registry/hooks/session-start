@@ -35,6 +35,15 @@ using_awm_escaped=$(escape_for_json "$using_awm_content")
 # Wrap with the imperative envelope.
 session_context="<EXTREMELY_IMPORTANT>\nYou have AWM.\n\n**Below is the full content of your 'using-awm' skill — your introduction to using skills. For all other skills, use the 'Skill' tool:**\n\n${using_awm_escaped}\n</EXTREMELY_IMPORTANT>"
 
+# Inject CONSTITUTION.md from the project root if present and non-empty.
+# Silent-in-absence: empty or missing file leaves session_context untouched.
+CONSTITUTION_FILE="$PWD/CONSTITUTION.md"
+if [ -s "$CONSTITUTION_FILE" ]; then
+    constitution_content=$(cat "$CONSTITUTION_FILE")
+    constitution_escaped=$(escape_for_json "$constitution_content")
+    session_context="${session_context}\n\n## Project Constitution\n\n${constitution_escaped}"
+fi
+
 # Emit Claude Code format using printf (avoids bash 5.3+ heredoc hang).
 printf '{\n  "hookSpecificOutput": {\n    "hookEventName": "SessionStart",\n    "additionalContext": "%s"\n  }\n}\n' "$session_context"
 
