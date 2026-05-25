@@ -204,6 +204,14 @@ You understand 1,2,3,6. Unclear on 4,5.
 
 When replying to inline review comments on GitHub, reply in the comment thread (`gh api repos/{owner}/{repo}/pulls/{pr}/comments/{id}/replies`), not as a top-level PR comment.
 
+## Recurring Feedback (AWM)
+
+<!-- AWM-INTEGRATION: receiving-retro -->
+
+If the SAME feedback item has appeared on a prior PR (check the last 5–10 merged PRs for matching language), do not just apply the fix this time — invoke the `harness-retro` skill.
+
+Recurring review feedback means the human reviewer is acting as the harness for a class of issues the automated harness misses. `harness-retro` promotes the human-loop check into a sensor/test/rule so the reviewer's time goes to genuinely new things next round.
+
 ## The Bottom Line
 
 **External feedback = suggestions to evaluate, not orders to follow.**
