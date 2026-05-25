@@ -25,15 +25,16 @@ description: Use when a repository needs to formalize its non-negotiable rules s
 
 ## Checklist
 
-Create a task for each item and complete them in order:
+You MUST create a task for each item and complete them in order:
 
 1. **Gather project context** — read CLAUDE.md, AGENTS.md, README.md, package.json/pyproject.toml, .awm/sensors.json
-2. **Detect existing CONSTITUTION.md** — if present, treat as an update (preserve existing rules)
-3. **Draft sections** — Testing, Architecture, Sensors, Code Style, Process — skip any that have nothing to say
+2. **Detect existing CONSTITUTION.md** — if present, treat as an update (preserve existing rules, surface conflicts)
+3. **Draft sections** — work through Section structure and Drafting rules to produce section drafts
 4. **Present sections to user one at a time** — get explicit approval before moving to the next
-5. **Write CONSTITUTION.md** to repo root
+5. **Write CONSTITUTION.md** to repo root using the Write tool
 6. **Verify hook installation** — run `awm hooks status`; tell user to run `awm hooks install` if not HEALTHY
 7. **Commit** the new file
+8. **Tell the user** how to verify the injection worked (start a new session, check additionalContext)
 
 ## The Process
 
@@ -47,7 +48,10 @@ Run these reads in parallel where possible:
 - `Read .awm/sensors.json` — capture which sensors are configured (typecheck, lint, security, etc.)
 - `Glob CONSTITUTION.md` — confirm whether one already exists at the root
 
-If `CONSTITUTION.md` exists: read it and treat this session as an update. Preserve every existing rule unless the user explicitly asks to remove or change it.
+If `CONSTITUTION.md` exists: read it and treat this session as an update.
+- Diff gathered context against existing rules: identify rules that are still valid, rules that are now outdated, and new rules to add from the gathered context.
+- Surface any contradictions to the user before presenting sections (e.g., "The README says X but your current constitution says Y — which should we follow?").
+- Preserve every existing rule unless the user explicitly asks to remove or change it.
 
 ### 2. Section structure
 
@@ -102,9 +106,7 @@ Wait for explicit approval before drafting the next section. Do not batch.
 
 After all sections approved:
 
-```bash
-# Write CONSTITUTION.md to the repo root (use the Write tool)
-```
+Use the Write tool to create `CONSTITUTION.md` at the repo root with all approved sections concatenated in order.
 
 Then verify the hook will pick it up:
 
