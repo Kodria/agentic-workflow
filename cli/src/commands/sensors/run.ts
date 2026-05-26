@@ -6,6 +6,7 @@ import { parseTscOutput } from './formatters/tsc';
 import { parseEslintOutput } from './formatters/eslint';
 import { parseSemgrepOutput } from './formatters/semgrep';
 import { parseGenericOutput } from './formatters/generic';
+import { readBaseline, partition } from './baseline';
 
 const MANIFEST_FILE = '.awm/sensors.json';
 const DEFAULT_FAST_TIMEOUT = 10_000;
@@ -20,7 +21,27 @@ export type RunOptions = {
     slow?: boolean;
     all?: boolean;
     cwd?: string;
+    /** Skip baseline suppression (used by `awm sensors baseline` to capture all findings). */
+    ignoreBaseline?: boolean;
 };
+
+/**
+ * Apply the baseline to a sensor result: keep only findings not already accepted.
+ * `status` becomes 'pass' when every finding was baseline-suppressed. Skipped
+ * sensors are returned untouched.
+ */
+function applyBaseline(result: SensorResult, accepted: string[] | undefined): SensorResult {
+    if (result.status === 'skipped') return result;
+    const { newErrors, suppressed } = partition(result.name, result.errors, accepted);
+    if (suppressed === 0) return result;
+    return {
+        ...result,
+        errors: newErrors,
+        status: newErrors.length > 0 ? 'fail' : 'pass',
+        newCount: newErrors.length,
+        baselineCount: suppressed,
+    };
+}
 
 function readManifest(cwd: string): SensorManifest | null {
     const p = path.join(cwd, MANIFEST_FILE);
@@ -73,6 +94,10 @@ export function runSensors(opts: RunOptions = {}): RunOutput {
     if (!manifest) return { sensors: [], overall: 'skipped' };
 
     const results: SensorResult[] = [];
+    // Baseline suppresses already-accepted findings so sensors fail only on NEW
+    // ones (essential on repos with a large pre-existing baseline). Absent file or
+    // --ignore-baseline → every finding counts (backward-compatible).
+    const baseline = opts.ignoreBaseline ? null : readBaseline(cwd);
 
     for (const [name, config] of Object.entries(manifest.sensors)) {
         const isFast = config.fast ?? false;
@@ -88,7 +113,9 @@ export function runSensors(opts: RunOptions = {}): RunOutput {
         }
 
         const timeout = config.timeout ?? (isFast ? DEFAULT_FAST_TIMEOUT : DEFAULT_SLOW_TIMEOUT);
-        results.push(runSensor(name, config.cmd, timeout, cwd));
+        let result = runSensor(name, config.cmd, timeout, cwd);
+        if (baseline) result = applyBaseline(result, baseline[name]);
+        results.push(result);
     }
 
     const overall = results.some(r => r.status === 'fail') ? 'fail'

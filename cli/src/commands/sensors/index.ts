@@ -7,6 +7,7 @@ import { runSensors } from './run';
 import { initSensors } from './init';
 import { computeSensorStatus } from './status';
 import { installSensorHook } from './install';
+import { buildBaseline, writeBaseline } from './baseline';
 
 const DEFAULT_REGISTRY_ROOT = path.join(os.homedir(), '.awm', 'cli-source');
 
@@ -37,6 +38,18 @@ export function registerSensorsCommand(program: Command): void {
             log.success(`Detected: ${result.detection.pack} (${result.detection.indicators.join(', ') || 'fallback'})`);
             log.success('Wrote .awm/sensors.json');
             result.configured.forEach((f: string) => log.info(`  Installed ${f}`));
+        });
+
+    sensors
+        .command('baseline')
+        .description('snapshot current findings as accepted — sensors then fail only on NEW ones')
+        .action(() => {
+            const output = runSensors({ all: true, ignoreBaseline: true });
+            const baseline = buildBaseline(output.sensors.map(s => ({ name: s.name, errors: s.errors })));
+            writeBaseline(process.cwd(), baseline);
+            const total = Object.values(baseline).reduce((n, fps) => n + fps.length, 0);
+            log.success(`Baseline guardado: ${total} hallazgos aceptados en .awm/sensors.baseline.json`);
+            log.info('Los sensors ahora fallan solo ante hallazgos nuevos. Re-corré `awm sensors baseline` tras reducir deuda.');
         });
 
     sensors

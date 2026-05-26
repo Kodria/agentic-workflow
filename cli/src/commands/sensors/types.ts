@@ -23,6 +23,10 @@ export type SensorResult = {
     status: 'pass' | 'fail' | 'skipped';
     errors: SensorError[];
     skipReason?: string;
+    /** New findings (not in baseline). Present only when a baseline is applied. */
+    newCount?: number;
+    /** Findings suppressed by the baseline. Present only when a baseline is applied. */
+    baselineCount?: number;
 };
 
 export type RunOutput = {

@@ -82,4 +82,53 @@ describe('runSensors', () => {
         expect(sec!.status).toBe('skipped');
         expect(sec!.skipReason).toBe('disabled');
     });
+
+    const tcError = () => { throw Object.assign(new Error(), { stdout: 'src/a.ts(1,1): error TS0001: Bad type.', stderr: '', status: 1 }); };
+
+    it('baseline suppresses accepted findings — sensor passes on no NEW findings', () => {
+        const { runSensors } = load();
+        const { buildBaseline, writeBaseline } = require('../../../src/commands/sensors/baseline');
+
+        // Run 1 (no baseline): typecheck reports a TS error → fail.
+        mockExecSyncFn.mockImplementationOnce(tcError).mockReturnValueOnce('' as any);
+        const first = runSensors({ fast: true, cwd: tmpDir });
+        expect(first.overall).toBe('fail');
+
+        // Accept the current findings as baseline.
+        writeBaseline(tmpDir, buildBaseline(first.sensors.map((s: any) => ({ name: s.name, errors: s.errors }))));
+
+        // Run 2 (same finding): baseline-suppressed → pass.
+        mockExecSyncFn.mockImplementationOnce(tcError).mockReturnValueOnce('' as any);
+        const second = runSensors({ fast: true, cwd: tmpDir });
+        const tc = second.sensors.find((s: any) => s.name === 'typecheck');
+        expect(tc!.status).toBe('pass');
+        expect(tc!.baselineCount).toBe(1);
+        expect(second.overall).toBe('pass');
+    });
+
+    it('baseline lets NEW findings through (still fails)', () => {
+        const { runSensors } = load();
+        const { writeBaseline } = require('../../../src/commands/sensors/baseline');
+        writeBaseline(tmpDir, { typecheck: ['some-unrelated-fingerprint'] });
+
+        mockExecSyncFn.mockImplementationOnce(tcError).mockReturnValueOnce('' as any);
+        const result = runSensors({ fast: true, cwd: tmpDir });
+        const tc = result.sensors.find((s: any) => s.name === 'typecheck');
+        expect(tc!.status).toBe('fail');
+        expect(result.overall).toBe('fail');
+    });
+
+    it('--ignore-baseline reports all findings even when a baseline exists', () => {
+        const { runSensors } = load();
+        const { buildBaseline, writeBaseline } = require('../../../src/commands/sensors/baseline');
+        // First capture + accept the finding.
+        mockExecSyncFn.mockImplementationOnce(tcError).mockReturnValueOnce('' as any);
+        const first = runSensors({ fast: true, cwd: tmpDir });
+        writeBaseline(tmpDir, buildBaseline(first.sensors.map((s: any) => ({ name: s.name, errors: s.errors }))));
+
+        // With ignoreBaseline, the accepted finding still counts → fail.
+        mockExecSyncFn.mockImplementationOnce(tcError).mockReturnValueOnce('' as any);
+        const result = runSensors({ fast: true, cwd: tmpDir, ignoreBaseline: true });
+        expect(result.overall).toBe('fail');
+    });
 });
