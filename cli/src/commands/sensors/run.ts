@@ -10,6 +10,10 @@ import { parseGenericOutput } from './formatters/generic';
 const MANIFEST_FILE = '.awm/sensors.json';
 const DEFAULT_FAST_TIMEOUT = 10_000;
 const DEFAULT_SLOW_TIMEOUT = 120_000;
+// Sensor JSON output can be several MB on large repos (e.g. `eslint --format json`
+// with thousands of findings). execSync defaults to a 1MB buffer and kills the
+// child with SIGTERM when exceeded — which previously surfaced as a false "timeout".
+const MAX_BUFFER = 64 * 1024 * 1024;
 
 export type RunOptions = {
     fast?: boolean;
@@ -41,13 +45,21 @@ function getFormatter(name: string): (raw: string) => SensorError[] {
 
 function runSensor(name: string, cmd: string, timeout: number, cwd: string): SensorResult {
     try {
-        const raw = execSync(cmd, { encoding: 'utf-8', timeout, cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+        const raw = execSync(cmd, { encoding: 'utf-8', timeout, cwd, maxBuffer: MAX_BUFFER, stdio: ['pipe', 'pipe', 'pipe'] });
         const errors = getFormatter(name)(raw);
         return { name, status: errors.length > 0 ? 'fail' : 'pass', errors };
     } catch (err: any) {
-        if (err.code === 'ETIMEDOUT' || err.signal === 'SIGTERM') {
+        // Output exceeded maxBuffer — child is killed before output can be read.
+        // Check this BEFORE the SIGTERM branch (ENOBUFS kills with SIGTERM too).
+        if (err.code === 'ENOBUFS') {
+            return { name, status: 'skipped', errors: [], skipReason: `output exceeded ${MAX_BUFFER} bytes` };
+        }
+        // Genuine timeout: execSync kills with SIGTERM after `timeout` ms.
+        if (err.code === 'ETIMEDOUT' || (err.killed && err.signal === 'SIGTERM')) {
             return { name, status: 'skipped', errors: [], skipReason: `timeout after ${timeout}ms` };
         }
+        // Non-zero exit — the normal path for linters/typecheckers that found
+        // issues. Their report is on stdout/stderr; parse it for findings.
         const raw = String((err.stdout ?? '') + (err.stderr ?? ''));
         const errors = getFormatter(name)(raw);
         if (errors.length > 0) return { name, status: 'fail', errors };
