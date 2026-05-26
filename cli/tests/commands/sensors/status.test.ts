@@ -21,17 +21,61 @@ describe('computeSensorStatus', () => {
         expect(result.pack).toBeNull();
     });
 
-    it('returns HEALTHY when all sensor binaries are found', () => {
+    // Helper: simulate a tool installed locally (node_modules/.bin/<tool>)
+    function installLocalBin(tool: string) {
+        const binDir = path.join(tmpDir, 'node_modules', '.bin');
+        fs.mkdirSync(binDir, { recursive: true });
+        fs.writeFileSync(path.join(binDir, tool), '');
+    }
+
+    it('returns HEALTHY when an npx tool is installed locally', () => {
+        installLocalBin('tsc');
         fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
             pack: 'js-ts',
             sensors: { typecheck: { cmd: 'npx tsc --noEmit', fast: true } }
         }));
-        mockExecSync.mockReturnValue('' as any);
         const result = computeSensorStatus(tmpDir);
         expect(result.overall).toBe('HEALTHY');
         expect(result.pack).toBe('js-ts');
         expect(result.checks.typecheck.ok).toBe(true);
+    });
+
+    it('marks an npx sensor DEGRADED when the tool is NOT installed locally (npx would fetch a remote package)', () => {
+        // No node_modules/.bin/depcruise → status must NOT report ✔ just because npx exists.
+        fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+            pack: 'js-ts',
+            sensors: { depcheck: { cmd: 'npx depcruise --config .dep-cruiser.awm.js app', fast: false } }
+        }));
+        const result = computeSensorStatus(tmpDir);
+        expect(result.overall).toBe('DEGRADED');
+        expect(result.checks.depcheck.ok).toBe(false);
+        expect(result.checks.depcheck.detail).toMatch(/no instalada/i);
+    });
+
+    it('marks a sensor DEGRADED when its --config file is missing', () => {
+        installLocalBin('eslint');
+        fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+            pack: 'js-ts',
+            sensors: { lint: { cmd: 'npx eslint . --config eslint.config.awm.mjs --format json', fast: true } }
+        }));
+        const result = computeSensorStatus(tmpDir);
+        expect(result.checks.lint.ok).toBe(false);
+        expect(result.checks.lint.detail).toMatch(/config faltante/i);
+    });
+
+    it('is HEALTHY when the npx tool is installed and the --config file exists', () => {
+        installLocalBin('eslint');
+        fs.writeFileSync(path.join(tmpDir, 'eslint.config.awm.mjs'), 'export default []');
+        fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+            pack: 'js-ts',
+            sensors: { lint: { cmd: 'npx eslint . --config eslint.config.awm.mjs --format json', fast: true } }
+        }));
+        const result = computeSensorStatus(tmpDir);
+        expect(result.checks.lint.ok).toBe(true);
     });
 
     it('returns DEGRADED when a binary is missing', () => {
