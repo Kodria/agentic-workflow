@@ -29,8 +29,8 @@ export function registerSensorsCommand(program: Command): void {
 
     sensors
         .command('init')
-        .description('detect stack and write .awm/sensors.json')
-        .option('--configure', 'also copy sensor pack config files into the project')
+        .description('detect stack and write .awm/sensors.json (+ copy pack config files)')
+        .option('--no-configure', 'skip copying sensor pack config files into the project')
         .option('--registry-root <path>', 'path to AWM registry root', DEFAULT_REGISTRY_ROOT)
         .action((opts) => {
             const result = initSensors({ configure: opts.configure, registryRoot: opts.registryRoot });

@@ -10,7 +10,7 @@
     },
     "lint": {
       "fast": true,
-      "defaultCmd": "npx eslint . --format json",
+      "defaultCmd": "npx eslint . --config eslint.config.awm.mjs --cache --format json",
       "configFile": "eslint.config.awm.mjs",
       "configFileFallback": "eslint.config.awm.cjs",
       "formatter": "eslint-llm"
@@ -23,7 +23,7 @@
     },
     "depcheck": {
       "fast": false,
-      "defaultCmd": "npx depcruise --config .dep-cruiser.awm.js src",
+      "defaultCmd": "npx depcruise --config .dep-cruiser.awm.js {{SOURCE_DIRS}}",
       "configFile": ".dep-cruiser.awm.js",
       "formatter": "generic"
     },
