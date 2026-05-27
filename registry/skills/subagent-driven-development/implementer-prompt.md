@@ -31,10 +31,16 @@ Task tool (general-purpose):
     Once you're clear on requirements:
     1. Implement exactly what the task specifies
     2. Write tests (following TDD if task says to)
-    3. Verify implementation works
-    4. Commit your work
-    5. Self-review (see below)
-    6. Report back
+    3. Verify implementation works (run the test/build commands; read the output)
+    4. **Run sensors if this repo has them.** If `.awm/sensors.json` exists, run
+       `awm sensors run` (NO flag — that runs all sensors; do NOT use `--slow`,
+       which skips lint and typecheck). Fix every **new** finding it reports
+       (`newCount` / the listed errors — the ratchet already suppresses the
+       pre-existing baseline). Re-run until `overall: pass`. Do not report DONE
+       with unaddressed new sensor findings.
+    5. Commit your work
+    6. Self-review (see below)
+    7. Report back
 
     Work from: [directory]
 
@@ -95,6 +101,10 @@ Task tool (general-purpose):
     - Did I follow TDD if required?
     - Are tests comprehensive?
 
+    **Sensors (if `.awm/sensors.json` exists):**
+    - Did I run `awm sensors run` (all sensors) and see `overall: pass`?
+    - Did I fix the NEW findings rather than touch the baseline?
+
     If you find issues during self-review, fix them now before reporting.
 
     ## Report Format
@@ -103,6 +113,7 @@ Task tool (general-purpose):
     - **Status:** DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
     - What you implemented (or what you attempted, if blocked)
     - What you tested and test results
+    - **Sensor results** (if `.awm/sensors.json` exists): the `awm sensors run` `overall` and any new findings you fixed
     - Files changed
     - Self-review findings (if any)
     - Any issues or concerns

@@ -139,11 +139,13 @@ If the repo has `.awm/sensors.json`, "done" requires sensor evidence in addition
 **Before claiming done:**
 
 ```bash
-awm sensors run --slow
+awm sensors run
 ```
 
+Run with **no flag** — that runs *all* sensors (fast: `tsc`, `lint`; slow: `semgrep`, `mutation`). Do **not** use `--slow`: it runs only the slow sensors and skips `lint` and `typecheck`, which is where most new findings surface. (`--fast` / `--slow` exist only for splitting a run when iterating; the completion gate is the full run.)
+
 - Exit 0 with `overall: pass` → sensors clean; proceed.
-- Exit 1 with sensor failures → autocorrect using the LLM-formatted errors, re-run sensors, then claim done.
+- Exit 1 with sensor failures → autocorrect using the LLM-formatted errors, re-run sensors, then claim done. The ratchet reports only **new** findings (`newCount`); fix those, not the pre-existing baseline.
 
 **Recurrence trigger:**
 

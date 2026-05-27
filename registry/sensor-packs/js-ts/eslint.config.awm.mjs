@@ -14,7 +14,11 @@ export default [
   ...projectConfig,
   {
     rules: {
-      'no-unused-vars': ['error', { vars: 'all', args: 'after-used' }],
+      // `_`-prefixed args/vars are intentionally unused (callback signatures,
+      // interface method types, destructure-and-drop). This is the canonical
+      // TS/ESLint convention; without it, type-only param names in interfaces
+      // get flagged as unused. See @typescript-eslint/no-unused-vars docs.
+      'no-unused-vars': ['error', { vars: 'all', args: 'after-used', argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'no-undef': 'error',
       'no-unreachable': 'error',
     },

@@ -28,7 +28,8 @@ For each task:
 1. Mark as in_progress
 2. Follow each step exactly (plan has bite-sized steps)
 3. Run verifications as specified
-4. Mark as completed
+4. **Run sensors before marking complete.** If the repo has `.awm/sensors.json`, run `awm sensors run` (no flag — all sensors; `--slow` skips lint/typecheck) and fix every NEW finding (`newCount`; the baseline is already suppressed). A task isn't done while it adds sensor findings. <!-- AWM-INTEGRATION: executing-plans-sensor-gate -->
+5. Mark as completed
 
 ### Step 3: Report
 When batch complete:
@@ -81,4 +82,5 @@ After all tasks complete and verified:
 **Required workflow skills:**
 - **superpowers:using-git-worktrees** - REQUIRED: Set up isolated workspace before starting
 - **superpowers:writing-plans** - Creates the plan this skill executes
+- **verification-before-completion** - Defines what "done" requires, including the AWM sensor gate (`awm sensors run`) applied per task and per batch <!-- AWM-INTEGRATION: executing-plans-sensor-gate -->
 - **superpowers:finishing-a-development-branch** - Complete development after all tasks

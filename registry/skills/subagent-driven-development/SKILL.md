@@ -119,6 +119,19 @@ Implementer subagents report one of four statuses. Handle each appropriately:
 
 **Never** ignore an escalation or force the same model to retry without changes. If the implementer said it's stuck, something needs to change.
 
+## Sensor Gate (AWM)
+
+<!-- AWM-INTEGRATION: subagent-sensor-gate -->
+
+If the repo has `.awm/sensors.json`, a task is **not complete** until sensors pass — `typecheck`/`test`/`build` alone are not sufficient. Subagents run in isolated context and only do what their prompt says, so the gate must be enforced at two points:
+
+1. **In the implementer prompt:** the implementer runs `awm sensors run` (no flag — all sensors) before reporting DONE and fixes any **new** findings (`newCount`). The implementer prompt template already includes this step.
+2. **At the controller, before marking the task complete:** after the code quality review approves, confirm sensor evidence exists. If the implementer's report doesn't show a clean `awm sensors run`, do not mark complete — send it back. Trust-but-verify: `awm sensors run` is cheap and authoritative.
+
+**Pitfall — do not use `awm sensors run --slow` as the gate.** `--slow` runs only `semgrep`/`mutation` and skips `lint`/`typecheck`, where most new findings surface. The completion gate is the full run (no flag).
+
+**Recurring sensor failure** (same `name` + `rule` as a prior session) → invoke `harness-retro` instead of just fixing it.
+
 ## Prompt Templates
 
 - `./implementer-prompt.md` - Dispatch implementer subagent
@@ -277,10 +290,12 @@ Your only final step is:
 - **superpowers:using-git-worktrees** - Ensures isolated workspace (creates one or verifies existing)
 - **superpowers:writing-plans** - Creates the plan this skill executes
 - **superpowers:requesting-code-review** - Code review template for reviewer subagents
+- **verification-before-completion** - Defines what "done" requires, including the AWM sensor gate (`awm sensors run`). The controller applies this before marking each task — and the whole plan — complete. <!-- AWM-INTEGRATION: subagent-sensor-gate -->
 - **superpowers:finishing-a-development-branch** - Invoked by the orchestrator (`development-process`) in the next phase, NOT automatically by this skill
 
 **Subagents should use:**
 - **superpowers:test-driven-development** - Subagents follow TDD for each task
+- **verification-before-completion** - Run `awm sensors run` (when `.awm/sensors.json` exists) before reporting DONE
 
 **Alternative workflow:**
 - **superpowers:executing-plans** - Use for parallel session instead of same-session execution

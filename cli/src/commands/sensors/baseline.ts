@@ -17,8 +17,26 @@ function maskNumbers(s: string): string {
     return s.replace(/\d+/g, '#');
 }
 
+/**
+ * Identity of a finding, for matching against the accepted baseline.
+ *
+ * The basis deliberately EXCLUDES the human-readable message when a `rule` id is
+ * present (every real sensor — eslint `ruleId`, tsc error code, semgrep
+ * `check_id` — sets one). The message text is volatile: it changes with tool
+ * version bumps and rule-config tweaks (e.g. adding `argsIgnorePattern` makes
+ * eslint append "Allowed unused args must match ...").  When the message was
+ * part of the basis, any such change re-fingerprinted every existing finding, so
+ * the whole baseline silently went stale and reported hundreds of false "new"
+ * findings. Keying on `sensor|file|rule` makes the baseline immune to wording
+ * changes; occurrence counts (see `partition`) keep it precise.
+ *
+ * Findings without a rule (the generic formatter) fall back to the masked
+ * message, preserving the previous behaviour for that case.
+ */
 export function fingerprint(sensor: string, e: SensorError): string {
-    const basis = `${sensor}|${e.file ?? ''}|${e.rule ?? ''}|${maskNumbers(e.message)}`;
+    const basis = e.rule
+        ? `${sensor}|${e.file ?? ''}|${e.rule}`
+        : `${sensor}|${e.file ?? ''}|${maskNumbers(e.message)}`;
     return crypto.createHash('sha1').update(basis).digest('hex');
 }
 
@@ -43,8 +61,20 @@ export function partition(
     accepted: string[] | undefined,
 ): { newErrors: SensorError[]; suppressed: number } {
     if (!accepted || accepted.length === 0) return { newErrors: errors, suppressed: 0 };
-    const set = new Set(accepted);
-    const newErrors = errors.filter(e => !set.has(fingerprint(sensor, e)));
+    // Count-based matching: the baseline holds one fingerprint per accepted
+    // occurrence (duplicates allowed). A finding is suppressed only while there's
+    // remaining "budget" for its fingerprint. This is what closes the gap left by
+    // keying on `sensor|file|rule` alone — if a file had 3 accepted findings of a
+    // rule and now has 5, the 2 extra are correctly reported as new.
+    const remaining = new Map<string, number>();
+    for (const fp of accepted) remaining.set(fp, (remaining.get(fp) ?? 0) + 1);
+    const newErrors: SensorError[] = [];
+    for (const e of errors) {
+        const fp = fingerprint(sensor, e);
+        const budget = remaining.get(fp) ?? 0;
+        if (budget > 0) remaining.set(fp, budget - 1);
+        else newErrors.push(e);
+    }
     return { newErrors, suppressed: errors.length - newErrors.length };
 }
 

@@ -15,11 +15,26 @@ describe('fingerprint', () => {
         expect(a).toBe(b);
     });
 
-    it('differs when file, rule, or (non-numeric) message differs', () => {
+    it('differs when file or rule differs', () => {
         const base = fingerprint('lint', err());
         expect(fingerprint('lint', err({ file: 'lib/b.ts' }))).not.toBe(base);
         expect(fingerprint('lint', err({ rule: 'TS9999' }))).not.toBe(base);
-        expect(fingerprint('lint', err({ message: 'totally different' }))).not.toBe(base);
+    });
+
+    it('is STABLE across message wording changes when a rule id is present', () => {
+        // Regression guard: a tool-version bump or rule-config tweak (e.g. adding
+        // argsIgnorePattern) rewords the message. The fingerprint must NOT change,
+        // or the entire baseline goes stale and reports false "new" findings.
+        const base = fingerprint('lint', err({ message: "'x' is defined but never used." }));
+        const reworded = fingerprint('lint', err({ message: "'x' is defined but never used. Allowed unused args must match /^_/u." }));
+        expect(reworded).toBe(base);
+    });
+
+    it('falls back to the masked message when there is no rule id (generic sensor)', () => {
+        const base = fingerprint('raw', { message: 'SENSOR[raw] something broke' });
+        expect(fingerprint('raw', { message: 'SENSOR[raw] something else' })).not.toBe(base);
+        // digits are still masked in the fallback path
+        expect(fingerprint('raw', { message: 'err at 199' })).toBe(fingerprint('raw', { message: 'err at 412' }));
     });
 
     it('differs by sensor', () => {
@@ -43,6 +58,28 @@ describe('partition', () => {
         expect(suppressed).toBe(1);
         expect(newErrors).toHaveLength(1);
         expect(newErrors[0].file).toBe('lib/new.ts');
+    });
+
+    it('counts occurrences: extra same-(file,rule) findings beyond the baseline budget are new', () => {
+        // Baseline accepted 3 occurrences of the same (file, rule). The file now
+        // has 5 → only the 2 beyond the accepted budget are new. This is the gap
+        // that a plain Set of fingerprints would have missed (it would suppress
+        // all 5). Messages vary to prove matching ignores wording.
+        const occ = (msg: string) => err({ message: msg });
+        const baseline = [
+            fingerprint('lint', err()), fingerprint('lint', err()), fingerprint('lint', err()),
+        ];
+        const current = [occ('a'), occ('b'), occ('c'), occ('d'), occ('e')];
+        const { newErrors, suppressed } = partition('lint', current, baseline);
+        expect(suppressed).toBe(3);
+        expect(newErrors).toHaveLength(2);
+    });
+
+    it('fixing findings below the baseline budget yields zero new', () => {
+        const baseline = [fingerprint('lint', err()), fingerprint('lint', err())];
+        const { newErrors, suppressed } = partition('lint', [err()], baseline);
+        expect(suppressed).toBe(1);
+        expect(newErrors).toHaveLength(0);
     });
 });
 
