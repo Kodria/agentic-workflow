@@ -52,11 +52,14 @@ El riesgo de traer las 4 tal cual es que sus `description` se pisan ("design, re
 | `code-to-design` (Google) | `registry/skills/code-to-design/` | Round-trip código↔Stitch. |
 | `react-components` (Google) | `registry/skills/react-components/` | Stitch → sistema de componentes React (handoff clave). |
 
-### Fix técnico de impeccable
+### Fix técnico y alcance de impeccable
 
-- Sus scripts resuelven datos contra el `cwd` del proyecto (`.impeccable/`, `live/`, `critique/`) — correcto, no se tocan.
-- **Único problema:** el SKILL.md y refs invocan scripts con la ruta literal `node .agents/skills/impeccable/scripts/X.mjs`, relativa a cwd. **Fix:** reescribir esas invocaciones para resolver contra el directorio base de la skill.
-- **De-tuning completo a Claude:** reescribir prompts con sabor GPT ("GPT is capable…"), eliminar `agents/openai.yaml` y `reference/codex.md`, recalibrar para Claude Code.
+**Alcance acotado (decisión 2026-05-29):** se vendoriza solo **knowledge + detector estático + sub-comandos no-live**. Se descarta la capa `live`/Codex (modo de variantes en browser y asset-producer), porque (a) portar su orquestación de agentes Codex→Claude es un proyecto aparte y (b) se solapa con el loop visual de Playwright del Plan B.
+
+- **Conservar:** `reference/*.md` de diseño (menos `live.md`/`codex.md`), detector estático (`scripts/detector/`, `detect.mjs`, `detect-csp.mjs`), y scripts de soporte no-live: `context.mjs`, `context-signals.mjs`, `critique-storage.mjs`, `design-parser.mjs`, `is-generated.mjs`, `palette.mjs`, `pin.mjs`, `cleanup-deprecated.mjs`, `command-metadata.json`, `impeccable-paths.mjs`.
+- **Eliminar:** todos los `scripts/live-*.mjs`, `scripts/live-browser*.js`, `scripts/modern-screenshot.umd.js`, el dir `agents/` (defs Codex/openai), `reference/live.md`, `reference/codex.md`, y la fila `live` de la tabla de comandos del SKILL.md.
+- **Fix de paths:** los scripts resuelven datos contra el `cwd` del proyecto (correcto, no se tocan). Solo hay que reescribir las invocaciones literales `node .agents/skills/impeccable/scripts/X.mjs` (en `SKILL.md`, `reference/init.md`, `reference/critique.md`, `reference/polish.md`) para que resuelvan contra el directorio base de la skill.
+- **De-tuning a Claude:** reescribir prosa con sabor GPT ("GPT is capable…") en SKILL.md y refs restantes.
 - Dependencias: solo Node builtins + `@babel/parser` (carga lazy).
 - Método de instalación: **copy** (trae scripts; debe viajar con el repo destino).
 
