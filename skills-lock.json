@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "skills": {
+    "c4-architecture": {
+      "source": "softaworks/agent-toolkit",
+      "sourceType": "github",
+      "computedHash": "f35f57420c35f2e8413e1e22934ca3950cae8286499f6fbe978cff604c35cfcd"
+    },
+    "skill-creator": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "computedHash": "9b03bb78ec5c81c4e0546dbb78cfc970368c72dcae5482e8c59690175abbc8e7"
+    },
+    "writing-skills": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "computedHash": "7cd0c064b5a62ffdc9cfff539a7b4d8d4a7792c8f0d544436bea021f08632e7b"
+    },
+    "emil-design-eng": {
+      "source": "emilkowalski/skill",
+      "sourceType": "github"
+    },
+    "design-taste-frontend": {
+      "source": "Leonxlnx/taste-skill",
+      "sourceType": "github"
+    },
+    "impeccable": {
+      "source": "pbakaus/impeccable",
+      "sourceType": "github"
+    },
+    "extract-design-md": {
+      "source": "google-labs-code/stitch-skills",
+      "sourceType": "github"
+    },
+    "code-to-design": {
+      "source": "google-labs-code/stitch-skills",
+      "sourceType": "github"
+    },
+    "react-components": {
+      "source": "google-labs-code/stitch-skills",
+      "sourceType": "github"
+    }
+  }
+}
