@@ -2,7 +2,7 @@
   {
     "name": "core-dev",
     "description": "Las habilidades fundamentales para el desarrollo guiado por agentes.",
-    "skills": ["brainstorming", "writing-plans", "executing-plans", "subagent-driven-development", "test-driven-development", "requesting-code-review", "development-process", "finishing-a-development-branch", "receiving-code-review", "verification-before-completion", "systematic-debugging", "project-context-init", "architecture-advisor", "cicd-proposal-builder", "nfr-checklist-generator", "technology-evaluator", "ui-design", "dispatching-parallel-agents", "using-git-worktrees", "writing-skills", "harness-retro", "setup-sensors", "project-constitution"],
+    "skills": ["brainstorming", "writing-plans", "executing-plans", "subagent-driven-development", "test-driven-development", "requesting-code-review", "development-process", "finishing-a-development-branch", "receiving-code-review", "verification-before-completion", "systematic-debugging", "project-context-init", "architecture-advisor", "cicd-proposal-builder", "nfr-checklist-generator", "technology-evaluator", "ui-design", "dispatching-parallel-agents", "using-git-worktrees", "writing-skills", "harness-retro", "setup-sensors", "project-constitution", "frontend-craft"],
     "workflows": ["development-process"],
     "agents": ["development-process"]
   },
@@ -24,6 +24,13 @@
     "name": "notion-tracker-procesos",
     "description": "Skills del módulo Procesos de NotionTracker (Caso 3 MCP): cristalizar-proceso (convierte nodos capturados en documentación versionada en Notion) y agregar-nodos-proceso (identifica actividades de la conversación, las propone como nodos y las inyecta en un proceso con reorganización, preview-then-confirm). Ambas usan el server MCP de NotionTracker con scope read+write.",
     "skills": ["cristalizar-proceso", "agregar-nodos-proceso"],
+    "workflows": [],
+    "agents": []
+  },
+  {
+    "name": "frontend-design",
+    "description": "Capa de diseño e implementación frontend: motor de craft (impeccable), diseño visual con Stitch (ui-design) y handoff Stitch→código (extract-design-md, code-to-design, react-components).",
+    "skills": ["impeccable", "ui-design", "extract-design-md", "code-to-design", "react-components"],
     "workflows": [],
     "agents": []
   }
