@@ -4,13 +4,12 @@ The setup command for a project. One codebase crawl feeds everything it writes:
 
 - **PRODUCT.md** (strategic): root project file for register, target users, product purpose, brand personality, anti-references, strategic design principles. Answers "who/what/why".
 - **DESIGN.md** (visual): root project file for visual theme, color palette, typography, components, layout. Follows the [Google Stitch DESIGN.md format](https://stitch.withgoogle.com/docs/design-md/format/). Answers "how it looks".
-- **`.impeccable/live/config.json`** (live mode): pre-configured so `$impeccable live` boots straight into variant mode with no first-time detour.
 
 It closes by pointing the user at the best command to run next. Every other impeccable command reads PRODUCT.md and DESIGN.md before doing any work.
 
 ## Step 1: Load current state
 
-Check what already exists. PRODUCT.md and DESIGN.md live at the project root, or under `.agents/context/` or `docs/` (case-insensitive). Read whichever are present with your native file tool. Also note whether `.impeccable/live/config.json` already exists (Step 6 leaves it untouched if so).
+Check what already exists. PRODUCT.md and DESIGN.md live at the project root, or under `.agents/context/` or `docs/` (case-insensitive). Read whichever are present with your native file tool.
 
 Decision tree:
 - **Neither file exists (empty project or no context yet)**: do Steps 2-4 (write PRODUCT.md), then decide on DESIGN.md based on whether there's code to analyze.
@@ -25,10 +24,10 @@ If init was invoked as a setup blocker by another command, such as `$impeccable 
 
 ## Step 2: Explore the codebase
 
-Before asking questions, thoroughly scan the project to discover what you can. This single crawl feeds PRODUCT.md, DESIGN.md, **and** the live-mode framework detection in Step 6, so be thorough once rather than re-scanning later:
+Before asking questions, thoroughly scan the project to discover what you can. This single crawl feeds PRODUCT.md and DESIGN.md, so be thorough once rather than re-scanning later:
 
 - **README and docs**: Project purpose, target audience, any stated goals
-- **Package.json / config files**: Tech stack, dependencies, existing design libraries, **and the framework** (Vite/SPA, Next.js, Nuxt, SvelteKit, Astro, multi-page static) plus the HTML entry the browser actually loads
+- **Package.json / config files**: Tech stack, dependencies, existing design libraries, and the framework (Vite/SPA, Next.js, Nuxt, SvelteKit, Astro, multi-page static)
 - **Existing components**: Current design patterns, spacing, typography in use
 - **Brand assets**: Logos, favicons, color values already defined
 - **Design tokens / CSS variables**: Existing color palettes, font stacks, spacing scales
@@ -135,21 +134,9 @@ If the user agrees, delegate to `$impeccable document` (it auto-detects scan vs 
 
 If the user prefers to skip, mention they can run `$impeccable document` any time later.
 
-## Step 6: Configure live mode (when code exists)
+## Step 6: Live mode configuration
 
-If the project has code with HTML entries and a dev server (the same "code exists" condition that puts `$impeccable document` in scan mode), pre-configure live mode now. You already identified the framework and the served HTML entry in Step 2, so this is nearly free, and it spares the user the first-time setup detour when they later run `$impeccable live`.
-
-**Skip this step for empty / pre-implementation projects** (nothing to inject into yet). Tell the user live mode will configure itself the first time they run it once there's code.
-
-**If `.impeccable/live/config.json` already exists, leave it untouched** and note that live mode is already configured.
-
-Otherwise:
-
-1. Write `.impeccable/live/config.json`. Choose `files` (the HTML entries the browser actually loads), `insertBefore`, and `commentSyntax` from the framework table in [live.md](live.md)'s **First-time setup** section, using the framework you found in Step 2. That table is canonical; do not restate it here. For multi-page static sites, prefer a glob (`["public/**/*.html"]`) over a literal list.
-2. Run `node "$CLAUDE_PLUGIN_ROOT/scripts/detect-csp.mjs"`. If it reports a patchable shape (`append-arrays` / `append-string`), use the **consent prompt template** from live.md before editing any source file. On decline, skip the patch. For `middleware` / `meta-tag` shapes, surface the detected files and ask the user to add `http://localhost:8400` to `script-src` and `connect-src` manually. For `null`, there's nothing to do.
-3. Set `cspChecked: true` in the config once CSP is handled (patched, declined, manual, or not needed). The schema and per-shape patch details live in live.md's First-time setup; follow it rather than duplicating.
-
-Writing the config file is harmless and needs no consent; only the CSP **source-file patch** requires a yes.
+Live mode configuration is not available in this registry build. Skip this step entirely.
 
 ## Step 7: Recommend starting points, then wrap up
 
@@ -163,7 +150,7 @@ Then recommend the **best commands to run next**, drawn from what your Step 2 cr
 
 - **Build something new**: `$impeccable craft <feature>` (shape, then build end-to-end) or `$impeccable shape <feature>` (plan first). Lead with this for empty or early-stage projects.
 - **Improve what's there**: name the specific surface. `$impeccable critique <page>` for a scored UX review; `$impeccable audit <area>` for a11y / perf / responsive checks; `$impeccable polish <component>` for a pre-ship pass. When the crawl flagged a specific weakness, point the matching command at it: thin hierarchy or spacing → `layout`, flat or gray palette → `colorize`, missing error / empty states → `harden` or `onboard`, dull or unclear copy → `clarify`.
-- **Iterate visually**: `$impeccable live` (configured in Step 6) to pick elements in the browser and generate variants in place.
+- **Iterate visually**: `$impeccable overdrive` or `$impeccable delight` to push visual quality further.
 
 The full command menu is one bare `$impeccable` away; keep this list short and pointed.
 

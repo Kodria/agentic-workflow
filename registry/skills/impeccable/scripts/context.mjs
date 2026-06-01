@@ -11,9 +11,8 @@
  *      escape hatch, only consulted when defaults are empty
  *   4. cwd as a "nothing found" default
  *
- * `resolveContextDir()` and `loadContext()` are also exported for the
- * server-side scripts (live.mjs, live-server.mjs) that need the structured
- * shape rather than the markdown block.
+ * `resolveContextDir()` and `loadContext()` are also exported for
+ * other scripts that need the structured shape rather than the markdown block.
  */
 import fs from 'node:fs';
 import os from 'node:os';
