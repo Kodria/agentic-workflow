@@ -12,7 +12,7 @@ Most AI-generated UIs fail not because of bad code, but because of skipped think
 
 **Do NOT write any code or make any design decisions during this phase.** Your only job is to understand the feature deeply enough to make excellent design decisions later.
 
-This is a required interaction, not optional guidance. Ask these questions in conversation, adapting based on answers. Don't dump them all at once; have a natural dialogue. STOP and use Codex's structured user-input/question tool when available; if unavailable, ask directly in chat to clarify what you cannot infer.
+This is a required interaction, not optional guidance. Ask these questions in conversation, adapting based on answers. Don't dump them all at once; have a natural dialogue. STOP and use the harness's structured question tool when available; if unavailable, ask directly in chat to clarify what you cannot infer.
 
 ### Interview cadence
 
@@ -75,7 +75,7 @@ After the discovery interview, generate a small set of visual direction probes *
 
 - The work is **net-new** or directionally ambiguous enough that visual exploration will clarify the brief.
 - The requested fidelity is **mid-fi, high-fi, or production-ready**. Skip for sketch-only planning.
-- The current harness gives you native image generation (Codex's `image_gen`, an equivalent MCP tool, or similar). Don't ask the user to install APIs or tooling.
+- The current harness gives you native image generation (an `image_gen` tool, an equivalent MCP tool, or similar). Don't ask the user to install APIs or tooling.
 
 When those conditions are met, this step is mandatory. If image generation isn't natively available, do not ask the user to install APIs or tooling. State in one line that the image step is skipped because the harness lacks native image generation, then proceed. The one-line announcement is required, not optional; it forces a conscious decision instead of letting the step quietly evaporate.
 
@@ -158,7 +158,7 @@ Anything genuinely unresolved. Don't list "open questions" you've already recomm
 
 ---
 
-STOP and use Codex's structured user-input/question tool when available; if unavailable, ask directly in chat to clarify what you cannot infer. Ask for explicit confirmation of the brief before finishing.
+STOP and use the harness's structured question tool when available; if unavailable, ask directly in chat to clarify what you cannot infer. Ask for explicit confirmation of the brief before finishing.
 
 If the user disagrees with any part, revisit the relevant discovery questions. A shape run is incomplete until the user confirms direction.
 
