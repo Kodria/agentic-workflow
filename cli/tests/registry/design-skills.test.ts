@@ -120,3 +120,45 @@ describe('skills-lock.json', () => {
     }
   });
 });
+
+describe('post-implementation-qa skill', () => {
+  const base = path.join(SKILLS, 'post-implementation-qa');
+
+  it('exists with valid frontmatter', () => {
+    const content = fs.readFileSync(path.join(base, 'SKILL.md'), 'utf-8');
+    const match = content.match(/^---\n([\s\S]*?)\n---/);
+    expect(match).not.toBeNull();
+    const fm = match![1];
+    expect(fm).toMatch(/^name:\s*post-implementation-qa\s*$/m);
+    expect(fm).toMatch(/^description:\s*.+$/m);
+  });
+
+  it('includes deep-review-prompt.md', () => {
+    expect(fs.existsSync(path.join(base, 'deep-review-prompt.md'))).toBe(true);
+  });
+
+  it('SKILL.md contains the awm-qa-complete marker instruction', () => {
+    const content = fs.readFileSync(path.join(base, 'SKILL.md'), 'utf-8');
+    expect(content).toMatch(/awm-qa-complete/);
+  });
+});
+
+describe('development-process QA integration', () => {
+  it('SKILL.md references post-implementation-qa at least 6 times', () => {
+    const content = fs.readFileSync(
+      path.join(SKILLS, 'development-process', 'SKILL.md'),
+      'utf-8'
+    );
+    const matches = content.match(/post-implementation-qa/g) || [];
+    expect(matches.length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('SKILL.md references awm-qa-complete at least 2 times', () => {
+    const content = fs.readFileSync(
+      path.join(SKILLS, 'development-process', 'SKILL.md'),
+      'utf-8'
+    );
+    const matches = content.match(/awm-qa-complete/g) || [];
+    expect(matches.length).toBeGreaterThanOrEqual(2);
+  });
+});
