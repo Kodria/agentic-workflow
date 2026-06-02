@@ -4,7 +4,7 @@ import { intro, outro, spinner, select, multiselect, confirm, isCancel } from '@
 import { Command } from 'commander';
 import { getPreferences, savePreferences } from './utils/config';
 import { buildGroupedOptions, GroupableArtifact, CombinedArtifact } from './utils/grouping';
-import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, buildLevel1Options, buildLevel2Options, resolveLevel2Selection, ALL_SENTINEL, ArtifactView } from './utils/registry-view';
+import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, buildLevel1Options, buildLevel2Options, resolveLevel2Selection, ALL_SENTINEL, ArtifactView, artifactValue } from './utils/registry-view';
 import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
 import { syncRegistry } from './core/registry';
@@ -156,14 +156,14 @@ program.command('add [name]')
       for (let i = 0; i < selectedPackages.length; i++) {
           const pkg = selectedPackages[i];
           const skillChoice = await multiselect({
-              message: `[${i + 1}/${selectedPackages.length}] ${pkg.name} — select skills`,
+              message: `[${i + 1}/${selectedPackages.length}] ${pkg.name} — select artifacts`,
               options: buildLevel2Options(pkg),
               initialValues: [ALL_SENTINEL],
               required: true
           });
           handleCancel(skillChoice);
           for (const a of resolveLevel2Selection(pkg, skillChoice as string[])) {
-              dedup.set(`${a.type}:${a.installName}`, a);
+              dedup.set(artifactValue(a), a);
           }
       }
 

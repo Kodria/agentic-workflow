@@ -152,7 +152,7 @@ export function findPackage(packages: PackageView[], query: string): PackageLook
 
 export const ALL_SENTINEL = '__ALL__';
 
-function artifactValue(a: ArtifactView): string {
+export function artifactValue(a: ArtifactView): string {
     return `${a.type}:${a.name}`;
 }
 
