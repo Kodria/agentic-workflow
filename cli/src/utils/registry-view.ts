@@ -89,7 +89,8 @@ function packageIcon(pkg: PackageView): string {
 
 /** Compact summary: a header line plus one aligned line per package. */
 export function packageSummaryLines(packages: PackageView[]): string[] {
-    const totalSkills = packages.reduce((n, p) => n + p.counts.skills, 0);
+    const uniqueSkillNames = new Set(packages.flatMap((p) => p.artifacts.filter((a) => a.type === 'skill').map((a) => a.name)));
+    const totalSkills = uniqueSkillNames.size;
     const lines: string[] = [`AWM Registry — ${plural(packages.length, 'package')}, ${plural(totalSkills, 'skill')}`, ''];
 
     const nameWidth = Math.max(0, ...packages.map((p) => p.name.length));

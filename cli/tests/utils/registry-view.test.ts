@@ -95,4 +95,9 @@ describe('findPackage', () => {
         expect(res.match).toBeUndefined();
         expect(res.suggestion).toBe('core-dev');
     });
+    it('falls back to prefix suggestion when no substring match exists', () => {
+        const res = findPackage(view, 'xyz');
+        expect(res.match).toBeUndefined();
+        expect(res.suggestion).toBe('core-dev');
+    });
 });
