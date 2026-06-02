@@ -110,6 +110,13 @@ describe('buildLevel1Options', () => {
         expect(opts.find((o) => o.value === 'core-dev')!.label).toContain('core-dev');
         expect(opts.find((o) => o.value === 'core-dev')!.label).toContain('Dev lifecycle');
     });
+
+    it('uses artifact-count label for standalone packages', () => {
+        const view = buildPackageView([skill('orphan')], [], [], []);
+        const opts = buildLevel1Options(view);
+        expect(opts[0].value).toBe(STANDALONE_NAME);
+        expect(opts[0].label).toContain('1 artifact');
+    });
 });
 
 describe('buildLevel2Options', () => {
@@ -126,6 +133,14 @@ describe('buildLevel2Options', () => {
         // description embedded in the label (always-visible, multi-line)
         expect(opts.find((o) => o.value === 'skill:brainstorming')!.label).toContain('explore');
     });
+
+    it('uses plain title for artifact with no description', () => {
+        const view = buildPackageView([skill('brainstorming', 'explore')], [wf('exec')], [agent('plan')], processes);
+        const core = view.find((p) => p.name === 'core-dev')!;
+        const opts = buildLevel2Options(core);
+        const wfOpt = opts.find((o) => o.value === 'workflow:exec')!;
+        expect(wfOpt.label).toBe('⚡ exec');
+    });
 });
 
 describe('resolveLevel2Selection', () => {
@@ -140,5 +155,9 @@ describe('resolveLevel2Selection', () => {
     it('returns only the cherry-picked artifacts otherwise', () => {
         const out = resolveLevel2Selection(core, ['skill:brainstorming']);
         expect(out.map((a) => a.name)).toEqual(['brainstorming']);
+    });
+
+    it('returns empty array when no values are selected', () => {
+        expect(resolveLevel2Selection(core, [])).toEqual([]);
     });
 });
