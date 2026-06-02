@@ -1,4 +1,4 @@
-import { discoverSkills, discoverWorkflows, discoverProcesses, readArtifactDescription, SKILLS_DIR, WORKFLOWS_DIR, PROCESSES_FILE } from '../../src/core/discovery';
+import { discoverSkills, discoverWorkflows, discoverProcesses, readArtifactDescription, SKILLS_DIR } from '../../src/core/discovery';
 import fs from 'fs';
 
 jest.mock('fs');
@@ -26,6 +26,7 @@ describe('Artifact Discovery', () => {
             expect(skills).toHaveLength(2);
             expect(skills[0].name).toBe('my-skill');
             expect(skills[1].name).toBe('another-skill');
+            expect(skills[0].description).toBe('');
         });
 
         it('should return an empty array if the skills directory does not exist', () => {
@@ -66,6 +67,7 @@ describe('Artifact Discovery', () => {
             expect(workflows).toHaveLength(2);
             expect(workflows[0].name).toBe('deploy');
             expect(workflows[1].name).toBe('ci');
+            expect(workflows[0].description).toBe('');
         });
 
         it('should return an empty array if the workflows directory does not exist', () => {

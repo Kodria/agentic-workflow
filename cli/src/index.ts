@@ -8,7 +8,7 @@ import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage,
 import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
 import { syncRegistry } from './core/registry';
-import { discoverSkills, discoverWorkflows, discoverAgents, discoverProcesses, ProcessDefinition, SkillArtifact, WorkflowArtifact, AgentArtifact, SKILLS_DIR, WORKFLOWS_DIR, AGENTS_DIR } from './core/discovery';
+import { discoverSkills, discoverWorkflows, discoverAgents, discoverProcesses } from './core/discovery';
 import path from 'path';
 import pc from 'picocolors';
 import fs from 'fs';
@@ -198,7 +198,6 @@ program.command('add [name]')
       }
 
       // 7. Confirm (skip with --yes)
-      const totalInstalls = artifactsToInstall.length * targetAgents.length;
       if (!options.yes) {
           const agentLabels = targetAgents.join(', ');
           const shouldProceed = await confirm({ message: `Install ${artifactsToInstall.length} artifact(s) to ${targetAgents.length} agent(s) (${agentLabels})?` });
