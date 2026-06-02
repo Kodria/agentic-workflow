@@ -4,6 +4,7 @@ import { intro, outro, spinner, select, multiselect, confirm, isCancel } from '@
 import { Command } from 'commander';
 import { getPreferences, savePreferences } from './utils/config';
 import { buildGroupedOptions, GroupableArtifact, CombinedArtifact } from './utils/grouping';
+import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage } from './utils/registry-view';
 import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
 import { syncRegistry } from './core/registry';
@@ -255,9 +256,10 @@ program.command('update')
       }
 });
 
-program.command('list')
-  .description('List all available artifacts in the local cache registry')
-  .action(async () => {
+program.command('list [package]')
+  .description('List available artifacts. With no argument shows a package summary; pass a package name or --all for detail.')
+  .option('-a, --all', 'Expand every package')
+  .action(async (packageName: string | undefined, options: { all?: boolean }) => {
       intro(pc.bgCyan(pc.black(' AWM - Registry Listing ')));
 
       const s = spinner();
@@ -271,78 +273,44 @@ program.command('list')
           process.exit(1);
       }
 
-      const skills = discoverSkills();
-      const workflows = discoverWorkflows();
-      const agents = discoverAgents();
-      const processes = discoverProcesses();
+      const view = buildPackageView(discoverSkills(), discoverWorkflows(), discoverAgents(), discoverProcesses());
 
-      // Build combined artifact list for grouping
-      const allArtifacts: GroupableArtifact[] = [
-          ...skills.map(s => ({ name: s.name, type: 'skill' as ArtifactType })),
-          ...workflows.map(w => ({ name: `${w.name}.md`, type: 'workflow' as ArtifactType })),
-          ...agents.map(a => ({ name: `${a.name}.md`, type: 'agent' as ArtifactType }))
-      ];
-
-      const grouped = new Map<string, Map<string, GroupableArtifact[]>>();
-      const standalone = new Map<string, GroupableArtifact[]>();
-
-      for (const a of allArtifacts) {
-          let found = false;
-          const baseName = a.type === 'workflow' || a.type === 'agent' ? a.name.replace(/\.md$/, '') : a.name;
-          for (const p of processes) {
-              if ((a.type === 'skill' && p.skills.includes(baseName)) ||
-                  (a.type === 'workflow' && p.workflows.includes(baseName)) ||
-                  (a.type === 'agent' && p.agents?.includes(baseName))) {
-                  if (!grouped.has(p.name)) grouped.set(p.name, new Map());
-                  const procGroup = grouped.get(p.name)!;
-                  if (!procGroup.has(baseName)) procGroup.set(baseName, []);
-                  procGroup.get(baseName)!.push(a);
-                  found = true;
-              }
-          }
-          if (!found) {
-              if (!standalone.has(baseName)) standalone.set(baseName, []);
-              standalone.get(baseName)!.push(a);
-          }
+      if (view.length === 0) {
+          outro(pc.yellow('No artifacts found in the registry. Run `awm update` or check your registry content.'));
+          return;
       }
 
-      for (const [procName, baseNameMap] of grouped.entries()) {
-          const proc = processes.find(p => p.name === procName)!;
-          let skillCount = 0; let wfCount = 0; let agentCount = 0;
-          const children = Array.from(baseNameMap.values());
-          for (const arr of children) {
-              if (arr.some(a => a.type === 'skill')) skillCount++;
-              if (arr.some(a => a.type === 'workflow')) wfCount++;
-              if (arr.some(a => a.type === 'agent')) agentCount++;
+      // Detail for a single package.
+      if (packageName) {
+          const { match, suggestion } = findPackage(view, packageName);
+          if (!match) {
+              console.error(pc.red(`No package named "${packageName}".`) + (suggestion ? pc.dim(` Did you mean "${suggestion}"?`) : ''));
+              process.exit(1);
           }
-          const badges = [skillCount > 0 ? `🧠 ${skillCount} skills` : '', wfCount > 0 ? `⚡ ${wfCount} workflows` : '', agentCount > 0 ? `🤖 ${agentCount} agents` : ''].filter(Boolean).join(' · ');
-          console.log(`\n${pc.cyan(pc.bold(`📦 ${procName}`))} ${pc.dim(`— ${proc.description}`)} ${pc.magenta(`[${badges}]`)}`);
-          children.forEach((arr, idx) => {
-              const prefix = idx === children.length - 1 ? '  └─ ' : '  ├─ ';
-              const hasSkill = arr.some(a => a.type === 'skill');
-              const hasWf = arr.some(a => a.type === 'workflow');
-              const hasAgent = arr.some(a => a.type === 'agent');
-              const icons = [hasSkill ? '🧠' : '', hasWf ? '⚡' : '', hasAgent ? '🤖' : ''].filter(Boolean).join(' ');
-              const baseName = arr[0].type === 'workflow' || arr[0].type === 'agent' ? arr[0].name.replace(/\.md$/, '') : arr[0].name;
-              console.log(`${prefix}${icons} ${baseName}`);
-          });
+          console.log();
+          for (const line of packageDetailLines(match)) console.log(line);
+          console.log();
+          outro(`Run ${pc.green(`awm add`)} to install artifacts from ${pc.cyan(match.name)}.`);
+          return;
       }
 
-      if (standalone.size > 0) {
-          console.log(`\n${pc.cyan(pc.bold('🔹 Standalone'))}`);
-          const entries = Array.from(standalone.entries());
-          entries.forEach(([baseName, arr], idx) => {
-              const prefix = idx === entries.length - 1 ? '  └─ ' : '  ├─ ';
-              const hasSkill = arr.some(a => a.type === 'skill');
-              const hasWf = arr.some(a => a.type === 'workflow');
-              const hasAgent = arr.some(a => a.type === 'agent');
-              const icons = [hasSkill ? '🧠' : '', hasWf ? '⚡' : '', hasAgent ? '🤖' : ''].filter(Boolean).join(' ');
-              console.log(`${prefix}${icons} ${baseName}`);
-          });
+      // Expand everything.
+      if (options.all) {
+          for (const pkg of view) {
+              console.log();
+              for (const line of packageDetailLines(pkg)) console.log(line);
+          }
+          console.log();
+          outro(`Run ${pc.green('awm add')} to install any of these artifacts.`);
+          return;
       }
 
+      // Default: compact summary.
       console.log();
-      outro(`Run ${pc.green('awm add')} to install any of these artifacts.`);
+      for (const line of packageSummaryLines(view)) console.log(line);
+      console.log();
+      console.log(pc.dim(`  awm list <package>  ·  awm list --all`));
+      outro(`Run ${pc.green('awm add')} to install artifacts.`);
   });
 
 program.command('remove')
