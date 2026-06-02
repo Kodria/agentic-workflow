@@ -280,11 +280,18 @@ program.command('list [package]')
           return;
       }
 
+      if (packageName && options.all) {
+          console.log(pc.dim('(Ignoring --all when a package name is provided.)'));
+      }
+
       // Detail for a single package.
       if (packageName) {
           const { match, suggestion } = findPackage(view, packageName);
           if (!match) {
-              console.error(pc.red(`No package named "${packageName}".`) + (suggestion ? pc.dim(` Did you mean "${suggestion}"?`) : ''));
+              const hint = suggestion
+                  ? pc.dim(` Did you mean "${suggestion}"?`)
+                  : pc.dim(' Run `awm list` to see available packages.');
+              console.error(pc.red(`No package named "${packageName}".`) + hint);
               process.exit(1);
           }
           console.log();
@@ -309,7 +316,7 @@ program.command('list [package]')
       console.log();
       for (const line of packageSummaryLines(view)) console.log(line);
       console.log();
-      console.log(pc.dim(`  awm list <package>  ·  awm list --all`));
+      console.log(pc.dim(`  awm list <pkg>  ·  awm list --all`));
       outro(`Run ${pc.green('awm add')} to install artifacts.`);
   });
 
