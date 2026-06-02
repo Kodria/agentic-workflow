@@ -66,3 +66,84 @@ export function buildPackageView(
 
     return packages;
 }
+
+const TYPE_ICON: Record<ArtifactType, string> = { skill: '', workflow: '⚡ ', agent: '🤖 ' };
+
+function plural(n: number, noun: string): string {
+    return `${n} ${noun}${n === 1 ? '' : 's'}`;
+}
+
+/** Human label for a package's contents, e.g. "2 skills · 1 workflow". */
+export function artifactCountLabel(counts: PackageView['counts']): string {
+    const parts: string[] = [];
+    if (counts.skills > 0) parts.push(plural(counts.skills, 'skill'));
+    if (counts.workflows > 0) parts.push(plural(counts.workflows, 'workflow'));
+    if (counts.agents > 0) parts.push(plural(counts.agents, 'agent'));
+    if (parts.length === 0) return '0 artifacts';
+    return parts.join(' · ');
+}
+
+function packageIcon(pkg: PackageView): string {
+    return pkg.isStandalone ? '🔹' : '📦';
+}
+
+/** Compact summary: a header line plus one aligned line per package. */
+export function packageSummaryLines(packages: PackageView[]): string[] {
+    const totalSkills = packages.reduce((n, p) => n + p.counts.skills, 0);
+    const lines: string[] = [`AWM Registry — ${plural(packages.length, 'package')}, ${plural(totalSkills, 'skill')}`, ''];
+
+    const nameWidth = Math.max(0, ...packages.map((p) => p.name.length));
+    const countLabels = packages.map((p) => (p.isStandalone ? plural(p.artifacts.length, 'artifact') : artifactCountLabel(p.counts)));
+    const countWidth = Math.max(0, ...countLabels.map((c) => c.length));
+
+    packages.forEach((p, i) => {
+        const name = p.name.padEnd(nameWidth);
+        const count = countLabels[i].padEnd(countWidth);
+        const desc = p.isStandalone ? '' : p.description;
+        lines.push(`${packageIcon(p)} ${name}   ${count}   ${desc}`.trimEnd());
+    });
+    return lines;
+}
+
+/** Detailed view of a single package: header + one or two lines per artifact. */
+export function packageDetailLines(pkg: PackageView): string[] {
+    const lines: string[] = [];
+    const header = pkg.isStandalone
+        ? `${packageIcon(pkg)} ${pkg.name} — ${plural(pkg.artifacts.length, 'artifact')}`
+        : `${packageIcon(pkg)} ${pkg.name} — ${pkg.description}  [${artifactCountLabel(pkg.counts)}]`;
+    lines.push(header);
+    pkg.artifacts.forEach((a) => {
+        lines.push(`  ${TYPE_ICON[a.type]}${a.name}`);
+        if (a.description) lines.push(`     ${a.description}`);
+    });
+    return lines;
+}
+
+export interface PackageLookup {
+    match?: PackageView;
+    suggestion?: string;
+}
+
+/** Exact (case-insensitive) name match; otherwise the closest name as a suggestion. */
+export function findPackage(packages: PackageView[], query: string): PackageLookup {
+    const q = query.toLowerCase();
+    const exact = packages.find((p) => p.name.toLowerCase() === q);
+    if (exact) return { match: exact };
+
+    // Closest: prefer substring containment, then longest shared prefix.
+    const contains = packages.find((p) => p.name.toLowerCase().includes(q) || q.includes(p.name.toLowerCase()));
+    if (contains) return { suggestion: contains.name };
+
+    let best: PackageView | undefined;
+    let bestPrefix = -1;
+    for (const p of packages) {
+        const name = p.name.toLowerCase();
+        let i = 0;
+        while (i < name.length && i < q.length && name[i] === q[i]) i++;
+        if (i > bestPrefix) {
+            bestPrefix = i;
+            best = p;
+        }
+    }
+    return { suggestion: best?.name };
+}
