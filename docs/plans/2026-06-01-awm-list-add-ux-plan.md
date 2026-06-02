@@ -1,5 +1,7 @@
 # AWM `list` / `add` UX Redesign — Implementation Plan
 
+<!-- awm-qa-complete: 2026-06-02 -->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the flat ~54-item multiselect in `awm add` with a 2-level drill-down, and turn `awm list` into a compact summary with on-demand detail, both fed by a shared package-view model with frontmatter descriptions.
