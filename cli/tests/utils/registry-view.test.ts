@@ -1,4 +1,4 @@
-import { buildPackageView, STANDALONE_NAME, packageSummaryLines, packageDetailLines, findPackage, artifactCountLabel } from '../../src/utils/registry-view';
+import { buildPackageView, STANDALONE_NAME, packageSummaryLines, packageDetailLines, findPackage, artifactCountLabel, ALL_SENTINEL, buildLevel1Options, buildLevel2Options, resolveLevel2Selection } from '../../src/utils/registry-view';
 import { SkillArtifact, WorkflowArtifact, AgentArtifact, ProcessDefinition } from '../../src/core/discovery';
 
 const skill = (name: string, description = ''): SkillArtifact => ({ name, path: `/s/${name}`, description });
@@ -99,5 +99,46 @@ describe('findPackage', () => {
         const res = findPackage(view, 'xyz');
         expect(res.match).toBeUndefined();
         expect(res.suggestion).toBe('core-dev');
+    });
+});
+
+describe('buildLevel1Options', () => {
+    it('produces one option per package keyed by package name', () => {
+        const view = buildPackageView([skill('brainstorming'), skill('shared')], [], [], processes);
+        const opts = buildLevel1Options(view);
+        expect(opts.map((o) => o.value).sort()).toEqual(['core-dev', 'docs']);
+        expect(opts.find((o) => o.value === 'core-dev')!.label).toContain('core-dev');
+        expect(opts.find((o) => o.value === 'core-dev')!.label).toContain('Dev lifecycle');
+    });
+});
+
+describe('buildLevel2Options', () => {
+    it('puts an "install entire package" sentinel first, then one option per artifact', () => {
+        const view = buildPackageView([skill('brainstorming', 'explore')], [wf('exec')], [agent('plan')], processes);
+        const core = view.find((p) => p.name === 'core-dev')!;
+        const opts = buildLevel2Options(core);
+        expect(opts[0].value).toBe(ALL_SENTINEL);
+        expect(opts[0].label).toContain('Install entire package');
+        const values = opts.slice(1).map((o) => o.value);
+        expect(values).toContain('skill:brainstorming');
+        expect(values).toContain('workflow:exec');
+        expect(values).toContain('agent:plan');
+        // description embedded in the label (always-visible, multi-line)
+        expect(opts.find((o) => o.value === 'skill:brainstorming')!.label).toContain('explore');
+    });
+});
+
+describe('resolveLevel2Selection', () => {
+    const view = buildPackageView([skill('brainstorming'), skill('shared')], [], [], processes);
+    const core = view.find((p) => p.name === 'core-dev')!;
+
+    it('returns all artifacts when the sentinel is selected', () => {
+        const out = resolveLevel2Selection(core, [ALL_SENTINEL]);
+        expect(out.map((a) => a.name).sort()).toEqual(['brainstorming', 'shared']);
+    });
+
+    it('returns only the cherry-picked artifacts otherwise', () => {
+        const out = resolveLevel2Selection(core, ['skill:brainstorming']);
+        expect(out.map((a) => a.name)).toEqual(['brainstorming']);
     });
 });

@@ -1,3 +1,4 @@
+import pc from 'picocolors';
 import { ArtifactType } from '../providers';
 import { ProcessDefinition, SkillArtifact, WorkflowArtifact, AgentArtifact } from '../core/discovery';
 
@@ -147,4 +148,44 @@ export function findPackage(packages: PackageView[], query: string): PackageLook
         }
     }
     return { suggestion: best?.name };
+}
+
+export const ALL_SENTINEL = '__ALL__';
+
+function artifactValue(a: ArtifactView): string {
+    return `${a.type}:${a.name}`;
+}
+
+/** Level-1 multiselect options: one per package, value = package name. */
+export function buildLevel1Options(packages: PackageView[]): { value: string; label: string }[] {
+    return packages.map((p) => {
+        const count = p.isStandalone ? plural(p.artifacts.length, 'artifact') : artifactCountLabel(p.counts);
+        const desc = p.isStandalone ? '' : ` · ${p.description}`;
+        return { value: p.name, label: `${packageIcon(p)} ${p.name}  ${pc.dim(`${count}${desc}`)}` };
+    });
+}
+
+/**
+ * Level-2 multiselect options for one package. First option is the
+ * "install entire package" sentinel; the rest are one per artifact with the
+ * description embedded into the label (always-visible — @clack hints only show
+ * on the focused row).
+ */
+export function buildLevel2Options(pkg: PackageView): { value: string; label: string }[] {
+    const installAll = { value: ALL_SENTINEL, label: `✨ Install entire package (${pkg.artifacts.length})` };
+    const rest = pkg.artifacts.map((a) => {
+        const title = `${TYPE_ICON[a.type]}${a.name}`;
+        const label = a.description ? `${title}\n     ${pc.dim(a.description)}` : title;
+        return { value: artifactValue(a), label };
+    });
+    return [installAll, ...rest];
+}
+
+/**
+ * Maps a level-2 selection back to artifacts. The sentinel means "all".
+ */
+export function resolveLevel2Selection(pkg: PackageView, selectedValues: string[]): ArtifactView[] {
+    if (selectedValues.includes(ALL_SENTINEL)) return [...pkg.artifacts];
+    const wanted = new Set(selectedValues);
+    return pkg.artifacts.filter((a) => wanted.has(artifactValue(a)));
 }
