@@ -4,7 +4,7 @@ import { intro, outro, spinner, select, multiselect, confirm, isCancel } from '@
 import { Command } from 'commander';
 import { getPreferences, savePreferences } from './utils/config';
 import { buildGroupedOptions, GroupableArtifact, CombinedArtifact } from './utils/grouping';
-import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage } from './utils/registry-view';
+import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, buildLevel1Options, buildLevel2Options, resolveLevel2Selection, ALL_SENTINEL, ArtifactView } from './utils/registry-view';
 import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
 import { syncRegistry } from './core/registry';
@@ -125,43 +125,55 @@ program.command('add [name]')
           scopeVal = scopeChoice as Scope;
       }
 
-      // 4. Build unified artifact list grouped by process
+      // 4. Build the package view, filtered to artifact types the target agent(s) support
       const includeWorkflows = targetAgents.some(a => PROVIDERS[a].workflow !== null);
       const includeAgents = targetAgents.some(a => PROVIDERS[a].agent !== null);
-      const allAvailable: GroupableArtifact[] = [
-          ...skills.map(s => ({ name: s.name, type: 'skill' as ArtifactType, sourcePath: s.path })),
-          ...(includeWorkflows ? workflows.map(w => ({ name: `${w.name}.md`, type: 'workflow' as ArtifactType, sourcePath: w.path })) : []),
-          ...(includeAgents ? agents.map(a => ({ name: `${a.name}.md`, type: 'agent' as ArtifactType, sourcePath: a.path })) : [])
-      ];
+      const view = buildPackageView(
+          skills,
+          includeWorkflows ? workflows : [],
+          includeAgents ? agents : [],
+          processes
+      );
 
-      if (allAvailable.length === 0) {
+      if (view.length === 0) {
           outro(pc.yellow('No artifacts available for the selected agent(s).'));
           process.exit(0);
       }
 
-      const groupedOpts = buildGroupedOptions(allAvailable, processes,
-          (c) => {
-              const hasSkill = c.artifacts.some(a => a.type === 'skill');
-              const hasWf = c.artifacts.some(a => a.type === 'workflow');
-              const hasAgent = c.artifacts.some(a => a.type === 'agent');
-              const icons = [hasSkill ? '🧠' : '', hasWf ? '⚡' : '', hasAgent ? '🤖' : ''].filter(Boolean).join(' ');
-              return `${icons} ${c.baseName}`;
-          });
-
-      // 5. Pick artifact(s) via grouped multiselect
-      const artifactChoice = await multiselect({
-          message: 'Select artifact(s) to install',
-          options: groupedOpts,
+      // 5. Level 1 — pick package(s)
+      const pkgChoice = await multiselect({
+          message: 'Select package(s)',
+          options: buildLevel1Options(view),
           required: true
       });
-      handleCancel(artifactChoice);
+      handleCancel(pkgChoice);
+      const selectedPackages = (pkgChoice as string[])
+          .map(name => view.find(p => p.name === name)!)
+          .filter(Boolean);
 
-      const resolved = resolveSelectedArtifacts(artifactChoice as any[]);
-      const artifactsToInstall: { name: string; sourcePath: string; type: ArtifactType }[] = resolved.map((a: any) => ({
-          name: a.name,
-          sourcePath: a.sourcePath,
-          type: a.type
-      }));
+      // 5b. Level 2 — pick skills within each package, in sequence
+      const dedup = new Map<string, ArtifactView>();
+      for (let i = 0; i < selectedPackages.length; i++) {
+          const pkg = selectedPackages[i];
+          const skillChoice = await multiselect({
+              message: `[${i + 1}/${selectedPackages.length}] ${pkg.name} — select skills`,
+              options: buildLevel2Options(pkg),
+              initialValues: [ALL_SENTINEL],
+              required: true
+          });
+          handleCancel(skillChoice);
+          for (const a of resolveLevel2Selection(pkg, skillChoice as string[])) {
+              dedup.set(`${a.type}:${a.installName}`, a);
+          }
+      }
+
+      const artifactsToInstall: { name: string; sourcePath: string; type: ArtifactType }[] =
+          Array.from(dedup.values()).map(a => ({ name: a.installName, sourcePath: a.sourcePath, type: a.type }));
+
+      if (artifactsToInstall.length === 0) {
+          outro(pc.yellow('No artifacts selected.'));
+          return;
+      }
 
       // 6. Installation Method
       let methodVal: 'symlink' | 'copy';
