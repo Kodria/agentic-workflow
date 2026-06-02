@@ -3,7 +3,7 @@
 import { intro, outro, spinner, select, multiselect, confirm, isCancel } from '@clack/prompts';
 import { Command } from 'commander';
 import { getPreferences, savePreferences } from './utils/config';
-import { buildGroupedOptions, GroupableArtifact, CombinedArtifact } from './utils/grouping';
+import { buildGroupedOptions } from './utils/grouping';
 import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, buildLevel1Options, buildLevel2Options, resolveLevel2Selection, ALL_SENTINEL, ArtifactView, artifactValue } from './utils/registry-view';
 import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
