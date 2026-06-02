@@ -11,16 +11,19 @@ export const PROCESSES_FILE = path.join(REGISTRY_DIR, 'registry', 'processes.jso
 export interface SkillArtifact {
     name: string;
     path: string;
+    description: string;
 }
 
 export interface WorkflowArtifact {
     name: string;
     path: string;
+    description: string;
 }
 
 export interface AgentArtifact {
     name: string;
     path: string;
+    description: string;
 }
 
 export interface ProcessDefinition {
@@ -29,6 +32,28 @@ export interface ProcessDefinition {
     skills: string[];
     workflows: string[];
     agents?: string[];
+}
+
+export function readArtifactDescription(filePath: string): string {
+    try {
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+        if (!fmMatch) return '';
+        const line = fmMatch[1]
+            .split(/\r?\n/)
+            .find((l) => /^description\s*:/.test(l));
+        if (!line) return '';
+        let val = line.replace(/^description\s*:/, '').trim();
+        if (
+            (val.startsWith('"') && val.endsWith('"')) ||
+            (val.startsWith("'") && val.endsWith("'"))
+        ) {
+            val = val.slice(1, -1);
+        }
+        return val.trim();
+    } catch {
+        return '';
+    }
 }
 
 /**
@@ -46,6 +71,7 @@ export function discoverSkills(): SkillArtifact[] {
         .map((entry) => ({
             name: entry.name,
             path: path.join(SKILLS_DIR, entry.name),
+            description: readArtifactDescription(path.join(SKILLS_DIR, entry.name, 'SKILL.md')),
         }));
 }
 
@@ -63,6 +89,7 @@ export function discoverWorkflows(): WorkflowArtifact[] {
         .map((entry) => ({
             name: entry.name.replace('.md', ''),
             path: path.join(WORKFLOWS_DIR, entry.name),
+            description: readArtifactDescription(path.join(WORKFLOWS_DIR, entry.name)),
         }));
 }
 
@@ -80,6 +107,7 @@ export function discoverAgents(): AgentArtifact[] {
         .map((entry) => ({
             name: entry.name.replace('.md', ''),
             path: path.join(AGENTS_DIR, entry.name),
+            description: readArtifactDescription(path.join(AGENTS_DIR, entry.name)),
         }));
 }
 

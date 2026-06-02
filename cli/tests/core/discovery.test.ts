@@ -1,4 +1,4 @@
-import { discoverSkills, discoverWorkflows, discoverProcesses, SKILLS_DIR, WORKFLOWS_DIR, PROCESSES_FILE } from '../../src/core/discovery';
+import { discoverSkills, discoverWorkflows, discoverProcesses, readArtifactDescription, SKILLS_DIR, WORKFLOWS_DIR, PROCESSES_FILE } from '../../src/core/discovery';
 import fs from 'fs';
 
 jest.mock('fs');
@@ -101,6 +101,37 @@ describe('Artifact Discovery', () => {
 
             const processes = discoverProcesses();
             expect(processes).toEqual([]);
+        });
+    });
+
+    describe('readArtifactDescription', () => {
+        it('extracts the description field from YAML frontmatter', () => {
+            (fs.readFileSync as jest.Mock).mockReturnValue(
+                '---\nname: my-skill\ndescription: Does a useful thing\n---\n\n# Body\n'
+            );
+            expect(readArtifactDescription('/any/SKILL.md')).toBe('Does a useful thing');
+        });
+
+        it('strips surrounding quotes from the description', () => {
+            (fs.readFileSync as jest.Mock).mockReturnValue(
+                '---\ndescription: "Quoted desc"\n---\n'
+            );
+            expect(readArtifactDescription('/any/SKILL.md')).toBe('Quoted desc');
+        });
+
+        it('returns empty string when there is no frontmatter', () => {
+            (fs.readFileSync as jest.Mock).mockReturnValue('# Just a heading\n');
+            expect(readArtifactDescription('/any/SKILL.md')).toBe('');
+        });
+
+        it('returns empty string when description is absent', () => {
+            (fs.readFileSync as jest.Mock).mockReturnValue('---\nname: x\n---\n');
+            expect(readArtifactDescription('/any/SKILL.md')).toBe('');
+        });
+
+        it('returns empty string when the file cannot be read', () => {
+            (fs.readFileSync as jest.Mock).mockImplementation(() => { throw new Error('ENOENT'); });
+            expect(readArtifactDescription('/missing/SKILL.md')).toBe('');
         });
     });
 });
