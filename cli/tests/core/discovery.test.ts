@@ -133,5 +133,10 @@ describe('Artifact Discovery', () => {
             (fs.readFileSync as jest.Mock).mockImplementation(() => { throw new Error('ENOENT'); });
             expect(readArtifactDescription('/missing/SKILL.md')).toBe('');
         });
+
+        it('returns empty string for a block scalar description indicator', () => {
+            (fs.readFileSync as jest.Mock).mockReturnValue('---\ndescription: >-\n  actual text\n---\n');
+            expect(readArtifactDescription('/any/SKILL.md')).toBe('');
+        });
     });
 });

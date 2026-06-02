@@ -50,6 +50,8 @@ export function readArtifactDescription(filePath: string): string {
         ) {
             val = val.slice(1, -1);
         }
+        const BLOCK_INDICATORS = new Set(['>-', '>', '|-', '|', '>+', '|+']);
+        if (BLOCK_INDICATORS.has(val.trim())) return '';
         return val.trim();
     } catch {
         return '';
