@@ -1,0 +1,10 @@
+{
+  "name": "frontend",
+  "version": "1.0.0",
+  "description": "Capa de craft e implementación frontend.",
+  "scope": "project",
+  "dependsOn": ["dev"],
+  "skills": ["impeccable", "ui-design", "extract-design-md", "code-to-design", "react-components", "frontend-craft"],
+  "workflows": [],
+  "agents": []
+}

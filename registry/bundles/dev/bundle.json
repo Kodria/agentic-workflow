@@ -1,0 +1,25 @@
+{
+  "name": "dev",
+  "version": "1.0.0",
+  "description": "Núcleo de desarrollo de software agéntico: espina SDD, gates de calidad, sensores y advisory.",
+  "scope": "baseline",
+  "dependsOn": [],
+  "skills": [
+    "using-awm", "development-process", "brainstorming", "writing-plans", "executing-plans",
+    "subagent-driven-development", "test-driven-development", "requesting-code-review",
+    "receiving-code-review", "post-implementation-qa", "finishing-a-development-branch",
+    "verification-before-completion", "systematic-debugging",
+    { "name": "dispatching-parallel-agents", "onSignal": true },
+    { "name": "using-git-worktrees", "onSignal": true },
+    { "name": "project-context-init", "onSignal": true },
+    { "name": "project-constitution", "onSignal": true },
+    { "name": "setup-sensors", "onSignal": true },
+    { "name": "harness-retro", "onSignal": true },
+    { "name": "architecture-advisor", "onSignal": true },
+    { "name": "cicd-proposal-builder", "onSignal": true },
+    { "name": "nfr-checklist-generator", "onSignal": true },
+    { "name": "technology-evaluator", "onSignal": true }
+  ],
+  "workflows": ["development-process"],
+  "agents": ["development-process"]
+}

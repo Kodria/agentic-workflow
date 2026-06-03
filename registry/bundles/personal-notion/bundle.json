@@ -1,0 +1,11 @@
+{
+  "name": "personal-notion",
+  "version": "1.0.0",
+  "description": "Módulos personales de NotionTracker (anclados a MCP).",
+  "scope": "ambient",
+  "visibility": "private",
+  "dependsOn": [],
+  "skills": ["career-goal-brainstorm", "cristalizar-proceso", "agregar-nodos-proceso"],
+  "workflows": [],
+  "agents": []
+}
