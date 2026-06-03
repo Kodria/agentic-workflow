@@ -3,7 +3,6 @@ import path from 'path';
 
 const REGISTRY = path.join(__dirname, '..', '..', '..', 'registry');
 const SKILLS = path.join(REGISTRY, 'skills');
-const PROCESSES_FILE = path.join(REGISTRY, 'processes.json');
 const LOCK_FILE = path.join(__dirname, '..', '..', '..', 'skills-lock.json');
 
 function frontmatter(skill: string): string {
@@ -81,29 +80,43 @@ describe('google stitch skills', () => {
   }
 });
 
-describe('processes.json', () => {
-  const processes = JSON.parse(fs.readFileSync(PROCESSES_FILE, 'utf-8')) as Array<{
-    name: string; skills: string[]; workflows: string[]; agents?: string[];
-  }>;
+describe('catalog/bundles (replaces processes.json)', () => {
+  const catalog = JSON.parse(fs.readFileSync(path.join(REGISTRY, 'catalog.json'), 'utf-8')) as {
+    bundles: Array<{ name: string; source: string }>;
+  };
 
-  it('core-dev includes frontend-craft', () => {
-    const core = processes.find((p) => p.name === 'core-dev');
-    expect(core).toBeDefined();
-    expect(core!.skills).toContain('frontend-craft');
-  });
+  function readBundle(source: string) {
+    return JSON.parse(fs.readFileSync(path.join(REGISTRY, source, 'bundle.json'), 'utf-8')) as {
+      name: string; skills: Array<string | { name: string }>;
+    };
+  }
 
-  it('frontend-design process exists with the heavy design skills', () => {
-    const fd = processes.find((p) => p.name === 'frontend-design');
-    expect(fd).toBeDefined();
+  function skillNames(bundle: { skills: Array<string | { name: string }> }): string[] {
+    return bundle.skills.map((s) => (typeof s === 'string' ? s : s.name));
+  }
+
+  it('frontend bundle includes the heavy design skills', () => {
+    const entry = catalog.bundles.find((b) => b.name === 'frontend')!;
+    expect(entry).toBeDefined();
+    const bundle = readBundle(entry.source);
+    const names = skillNames(bundle);
     for (const s of ['impeccable', 'ui-design', 'extract-design-md', 'code-to-design', 'react-components']) {
-      expect(fd!.skills).toContain(s);
+      expect(names).toContain(s);
     }
   });
 
-  it('every skill referenced by any process exists on disk', () => {
-    for (const p of processes) {
-      for (const skill of p.skills) {
-        expect(fs.existsSync(path.join(SKILLS, skill, 'SKILL.md'))).toBe(true);
+  it('frontend bundle includes frontend-craft', () => {
+    const entry = catalog.bundles.find((b) => b.name === 'frontend')!;
+    expect(entry).toBeDefined();
+    const bundle = readBundle(entry.source);
+    expect(skillNames(bundle)).toContain('frontend-craft');
+  });
+
+  it('every skill referenced by any bundle exists on disk', () => {
+    for (const entry of catalog.bundles) {
+      const bundle = readBundle(entry.source);
+      for (const s of skillNames(bundle)) {
+        expect(fs.existsSync(path.join(SKILLS, s, 'SKILL.md'))).toBe(true);
       }
     }
   });
