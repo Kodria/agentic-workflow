@@ -132,6 +132,8 @@ registry/
 }
 ```
 
+> Nota sobre `scope`/metadata espejada: `bundle.json` es la **fuente de verdad** de cada bundle (`scope`, `version`, `dependsOn`, `skills`). `catalog.json` **espeja** `scope`/`version`/`visibility` solo para que `awm list` sea rápido sin abrir cada manifest. Si ambos discrepan, gana `bundle.json`; un test de consistencia valida que el espejo esté sincronizado.
+
 > Nota de fronteras de fase: el campo `version` por bundle existe pero es **informativo** en este release (un solo `git pull` sincroniza todo). La convención de tags `{bundle}--v{semver}` y el resolver de rangos son **Fase 2**. `dependsOn` se resuelve por nombre, sin rangos.
 
 ### 4.2 Contenido de los 5 bundles (reparto completo de las 44 skills)
