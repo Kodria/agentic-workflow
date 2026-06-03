@@ -23,10 +23,11 @@ describe('using-awm skill', () => {
         expect(content).not.toMatch(/^model:\s*/m);
     });
 
-    it('contains the imperative bootstrap rule (1% pattern)', () => {
+    it('uses tiered triggering (no blanket 1% mandate)', () => {
         const content = fs.readFileSync(skillPath, 'utf-8');
-        expect(content).toMatch(/1%/);
-        expect(content).toMatch(/MUST invoke/i);
+        expect(content).not.toMatch(/1%/);
+        expect(content).toMatch(/always|siempre/i);
+        expect(content).toMatch(/signal|señal/i);
     });
 
     it('contains SUBAGENT-STOP block (prevents recursion)', () => {

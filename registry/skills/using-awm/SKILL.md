@@ -1,20 +1,12 @@
 ---
 name: using-awm
 version: "1.0.0"
-description: Use when starting any conversation - establishes how to find and use skills, requiring Skill tool invocation before ANY response including clarifying questions
+description: Use when starting any development conversation - establishes tiered skill invocation policy (spine skills always, specialized skills on clear signal)
 ---
 
 <SUBAGENT-STOP>
 If you were dispatched as a subagent to execute a specific task, skip this skill.
 </SUBAGENT-STOP>
-
-<EXTREMELY-IMPORTANT>
-If you think there is even a 1% chance a skill might apply to what you are doing, you ABSOLUTELY MUST invoke the skill to check.
-
-IF A SKILL APPLIES TO YOUR TASK AFTER CHECKING, YOU DO NOT HAVE A CHOICE. YOU MUST FOLLOW IT.
-
-This is not negotiable. This is not optional. You cannot rationalize your way out of this.
-</EXTREMELY-IMPORTANT>
 
 ## Instruction Priority
 
@@ -32,9 +24,23 @@ Use the `Skill` tool. When you invoke a skill, its content is loaded and present
 
 # Using Skills
 
-## The Rule
+## La regla (por niveles)
 
-**Invoke relevant or requested skills BEFORE any response or action.** Even a 1% chance a skill might apply means that you should invoke the skill to check. If an invoked skill turns out to be wrong for the situation, you don't need to use it.
+No toda skill compite por tu atención por igual. Aplica dos niveles:
+
+**Espina y gates — considéralas siempre.** Las skills de proceso y de calidad
+(`development-process`, `brainstorming`, `writing-plans`, `executing-plans`,
+`subagent-driven-development`, `test-driven-development`,
+`requesting-code-review`, `receiving-code-review`, `post-implementation-qa`,
+`finishing-a-development-branch`, `verification-before-completion`,
+`systematic-debugging`) forman la disciplina del desarrollo: evalúalas en todo
+trabajo de desarrollo. Tu entrada por defecto es `development-process`.
+
+**Especializadas — solo ante señal clara.** Las demás skills (advisory de
+arquitectura/CI/NFR, frontend, documentación, etc.) se invocan **únicamente
+cuando el contexto lo pide explícitamente** (hablas de arquitectura, configuras
+un pipeline, trabajas una pantalla UI, documentas un módulo…). No las invoques
+"por si acaso": esperar la signal evita ruido y carga innecesaria.
 
 ## Orchestration
 
@@ -49,8 +55,8 @@ These thoughts mean STOP — you're rationalizing:
 - "I know what to do, I don't need the skill" → **INVOKE IT**
 - "It's a simple request, the skill is overkill" → **INVOKE IT**
 - "I'll just answer first, then check if a skill applies" → **INVOKE IT FIRST**
-- "The skill description doesn't exactly match" → **INVOKE IT IF THERE'S 1% CHANCE**
-- "The user just asked a question, no skill needed" → **CHECK FIRST**
+- "The skill description doesn't exactly match" → **INVOKE IT if the spine/gates are relevant**
+- "The user just asked a question, no skill needed" → **CHECK FIRST for spine skills**
 
 The skill decides if it applies, not you.
 
