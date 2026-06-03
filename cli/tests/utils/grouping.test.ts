@@ -1,21 +1,18 @@
 import { buildGroupedOptions, GroupableArtifact } from '../../src/utils/grouping';
-import { ProcessDefinition } from '../../src/core/discovery';
+import { BundleDefinition } from '../../src/core/bundles';
 
-const processes: ProcessDefinition[] = [
-    {
-        name: 'core-dev',
-        description: 'Core development skills',
-        skills: ['brainstorming', 'shared-skill'],
-        workflows: [],
-        agents: []
-    },
-    {
-        name: 'docs',
-        description: 'Documentation skills',
-        skills: ['docs-assistant', 'shared-skill'],
-        workflows: [],
-        agents: []
-    }
+const bundle = (over: Partial<BundleDefinition> & { name: string }): BundleDefinition => ({
+    description: '', version: '1.0.0', scope: 'project', visibility: 'public',
+    dependsOn: [], skills: [], workflows: [], agents: [], ...over,
+});
+
+const processes: BundleDefinition[] = [
+    bundle({ name: 'core-dev', description: 'Core development skills',
+        skills: [{ name: 'brainstorming', onSignal: false }, { name: 'shared-skill', onSignal: false }],
+        workflows: [], agents: [] }),
+    bundle({ name: 'docs', description: 'Documentation skills',
+        skills: [{ name: 'docs-assistant', onSignal: false }, { name: 'shared-skill', onSignal: false }],
+        workflows: [], agents: [] }),
 ];
 
 const formatLabel = (c: { baseName: string }) => c.baseName;

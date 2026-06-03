@@ -1,5 +1,5 @@
 import { ArtifactType } from '../providers';
-import { ProcessDefinition } from '../core/discovery';
+import { BundleDefinition } from '../core/bundles';
 
 export interface GroupableArtifact {
     name: string;
@@ -14,7 +14,7 @@ export interface CombinedArtifact {
 
 export function buildGroupedOptions<T extends GroupableArtifact>(
     artifacts: T[],
-    processes: ProcessDefinition[],
+    bundles: BundleDefinition[],
     formatLabel: (c: CombinedArtifact) => string
 ): { value: any; label: string; hint?: string }[] {
     const grouped = new Map<string, Map<string, T[]>>();
@@ -24,10 +24,11 @@ export function buildGroupedOptions<T extends GroupableArtifact>(
         let foundParent = false;
         const baseName = (a.type === 'workflow' || a.type === 'agent') ? a.name.replace(/\.md$/, '') : a.name;
 
-        for (const p of processes) {
-            if ((a.type === 'skill' && p.skills.includes(baseName)) ||
+        for (const p of bundles) {
+            const skillNames = p.skills.map((s) => s.name);
+            if ((a.type === 'skill' && skillNames.includes(baseName)) ||
                 (a.type === 'workflow' && p.workflows.includes(baseName)) ||
-                (a.type === 'agent' && p.agents?.includes(baseName))) {
+                (a.type === 'agent' && p.agents.includes(baseName))) {
                 if (!grouped.has(p.name)) grouped.set(p.name, new Map());
                 const procGroup = grouped.get(p.name)!;
                 if (!procGroup.has(baseName)) procGroup.set(baseName, []);
@@ -44,7 +45,7 @@ export function buildGroupedOptions<T extends GroupableArtifact>(
     const options: { value: any; label: string; hint?: string }[] = [];
 
     for (const [procName, baseNameMap] of grouped.entries()) {
-        const proc = processes.find(p => p.name === procName)!;
+        const proc = bundles.find(p => p.name === procName)!;
         const children = Array.from(baseNameMap.entries()).map(([baseName, arr]) => ({ baseName, artifacts: arr }));
         options.push({
             value: { _group: true, processName: procName, children },
