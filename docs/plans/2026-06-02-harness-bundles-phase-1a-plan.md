@@ -1,5 +1,7 @@
 # Harness Bundles — Fase 1a Implementation Plan
 
+<!-- awm-qa-complete: 2026-06-03 -->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Reestructurar el registry de un `processes.json` plano a un modelo `catalog.json` + `bundle.json`×5 (corte limpio), con versión por skill y `using-awm` por niveles, sin romper los comandos `add`/`list`/`remove`.
