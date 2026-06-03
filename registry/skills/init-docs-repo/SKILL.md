@@ -1,5 +1,6 @@
 ---
 name: init-docs-repo
+version: "1.0.0"
 description: "Inicializa o actualiza la estructura de documentación Docs-as-Code para un repositorio de proyecto. Úsala CUANDO se requiera crear o dar formato estándar a la documentación de un repositorio, incluyendo la creación de directorios (docs/00-overview, docs/10-architecture, etc.), copiado de plantillas base, generación de archivos raíz (README.md, CONTRIBUTING.md, CODEOWNERS) y la configuración del contexto agentil mediante AGENTS.md. Soporta la inicialización de repositorios vacíos así como la refactorización o evolución de repositorios existentes basándose en el análisis de contexto de project-context-init."
 ---
 

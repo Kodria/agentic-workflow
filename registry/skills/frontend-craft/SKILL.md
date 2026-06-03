@@ -1,5 +1,6 @@
 ---
 name: frontend-craft
+version: "1.0.0"
 description: Use during development when implementing or adjusting any frontend/UI surface (landing pages, dashboards, components, forms, layouts, responsive behavior, styling, animation, polish). The single entry point for frontend craft — applies anti-slop, typography, color and responsive rules, and escalates to the impeccable engine for UI-centric work. NOT for backend, API, CLI, or non-UI tasks.
 ---
 

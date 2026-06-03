@@ -1,5 +1,6 @@
 ---
 name: story-mapping
+version: "1.0.0"
 description: "Facilita sesiones de User Story Mapping (metodología Jeff Patton). Usa esta skill cuando el usuario quiera crear un Story Map desde documentación existente, ser acompañado en tiempo real durante una sesión de planning, o actualizar un Story Map existente. Activa ante frases como: 'quiero hacer un story mapping del proyecto X', 'vamos a hacer el story map', 'acompáñame en la sesión de planning', 'actualiza el story map con estas historias', 'repriorizar el story map', 'continuar el story mapping del proyecto X'."
 ---
 

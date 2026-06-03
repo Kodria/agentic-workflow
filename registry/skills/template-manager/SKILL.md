@@ -1,5 +1,6 @@
 ---
 name: template-manager
+version: "1.0.0"
 description: "Administra las plantillas de documentación del proyecto. Úsala cuando necesites crear un nuevo formato de documentación transversal o mejorar uno existente. Supports plan-driven execution with subdelegation to support skills."
 ---
 

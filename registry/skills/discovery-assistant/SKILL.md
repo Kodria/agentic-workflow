@@ -1,5 +1,6 @@
 ---
 name: discovery-assistant
+version: "1.0.0"
 description: "Gestiona el ciclo completo de Discovery de proyectos. Usa esta skill cuando el usuario quiera iniciar un Discovery de un nuevo proyecto, actualizar un Discovery existente con información de una sesión, un dato suelto, una corrección puntual o una mejora de texto, o ser acompañado en tiempo real durante una sesión de Discovery. Activa ante frases como: 'quiero iniciar el discovery del proyecto X', 'actualiza el discovery con esta info', 'vamos a tener una sesión de discovery, acompáñame', 'continuar discovery del proyecto X', 'abrir el discovery del proyecto X', 'esto me llegó por Slack', 'corrijo este campo', 'mejora el tono de esta sección'."
 ---
 

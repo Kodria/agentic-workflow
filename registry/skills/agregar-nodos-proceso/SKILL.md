@@ -1,5 +1,6 @@
 ---
 name: agregar-nodos-proceso
+version: "1.0.0"
 description: Identifica las actividades que hiciste en la conversación, las convierte en nodos de un proceso de NotionTracker, te muestra una propuesta, y las inyecta cuando confirmás — ubicándolas y reorganizando los nodos existentes donde corresponda. Activá ante frases como "agregá esto al proceso X", "convertí lo que hicimos en nodos del proceso de aprobación", "meté estos pasos al proceso Y".
 ---
 

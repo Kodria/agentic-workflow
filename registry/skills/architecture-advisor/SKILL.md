@@ -1,5 +1,6 @@
 ---
 name: architecture-advisor
+version: "1.0.0"
 description: "Especialista en diseño de arquitectura de software. Usa esta skill cuando necesites definir, revisar o diseñar la arquitectura de un sistema — desde la comprensión de la necesidad hasta la definición completa de componentes, patrones, tecnologías, integraciones y trade-offs. Activa ante frases como: 'diseñar la arquitectura', 'qué patrón conviene', 'arquitectura del sistema', 'definir componentes', 'revisar la arquitectura', 'propuesta de arquitectura', 'qué riesgos tiene esta integración'."
 ---
 

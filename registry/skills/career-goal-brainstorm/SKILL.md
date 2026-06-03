@@ -1,5 +1,6 @@
 ---
 name: career-goal-brainstorm
+version: "1.0.0"
 description: Sesión conversacional iterativa para definir metas de carrera al inicio de un Q. NO propone metas en batch. Hidrata contexto desde NotionTracker, pregunta antes de proponer, evita reforzar patrones existentes, persiste solo lo que el usuario confirma. Activala cuando el usuario diga que quiere brainstormear metas de carrera, definir objetivos del Q, o planificar dirección estratégica.
 ---
 

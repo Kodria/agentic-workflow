@@ -1,5 +1,6 @@
 ---
 name: project-context-init
+version: "1.0.0"
 description: "Initialize or intelligently update the AGENTS.md context contract by analyzing a repository's codebase, inferring its purpose, and applying the agents.md standard (https://agents.md/)."
 ---
 

@@ -1,5 +1,6 @@
 ---
 name: template-wizard
+version: "1.0.0"
 description: "Asiste al usuario en la creación de nuevos documentos basándose en plantillas existentes. Usa esta skill cuando el usuario quiera crear un documento desde cero."
 ---
 

@@ -1,5 +1,6 @@
 ---
 name: technology-evaluator
+version: "1.0.0"
 description: "Especialista en evaluación comparativa de tecnologías. Usa esta skill cuando necesites decidir entre opciones tecnológicas (frameworks, librerías, bases de datos, cloud services, herramientas) con criterios estructurados y scoring. Activa ante frases como: 'compara estas opciones', 'qué framework debería usar', 'evalúa estas alternativas', 'necesito elegir entre X e Y', 'qué base de datos conviene para este caso'."
 ---
 

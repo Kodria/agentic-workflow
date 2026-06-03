@@ -1,5 +1,6 @@
 ---
 name: documenting-modules
+version: "1.0.0"
 description: "Use this skill AFTER completing development or improvements to document the changes. It analyzes plans and code to generate system documentation in `docs/modules` and updates the README."
 ---
 

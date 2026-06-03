@@ -1,5 +1,6 @@
 ---
 name: project-constitution
+version: "1.0.0"
 description: Use when a repository needs to formalize its non-negotiable rules so Claude Code receives them as feedforward in every session. Generates CONSTITUTION.md at the repo root from project context (CLAUDE.md, AGENTS.md, README, sensors manifest). The AWM SessionStart hook injects this file into additionalContext automatically.
 ---
 

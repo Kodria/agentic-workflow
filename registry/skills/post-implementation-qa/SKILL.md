@@ -1,5 +1,6 @@
 ---
 name: post-implementation-qa
+version: "1.0.0"
 description: Use after implementation is complete and before finishing the branch — reviews plan vs. implementation, finds Type B (fidelity) and Type C (quality) issues, and drives a fix loop until clean. Also works standalone when a bug is found independently.
 ---
 

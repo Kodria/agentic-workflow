@@ -1,5 +1,6 @@
 ---
 name: docs-assistant
+version: "1.0.0"
 description: "Use this skill to create, review, format, and finalize documentation following Docs-as-Code standards. Supports plan-driven execution with subdelegation to support skills (e.g., c4-architecture for diagrams)."
 ---
 

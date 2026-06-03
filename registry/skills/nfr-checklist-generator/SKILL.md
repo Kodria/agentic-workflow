@@ -1,5 +1,6 @@
 ---
 name: nfr-checklist-generator
+version: "1.0.0"
 description: "Especialista en requisitos no funcionales. Usa esta skill cuando necesites identificar, priorizar y definir NFRs para un proyecto — observabilidad, seguridad, data privacy, compliance, performance, operación/soporte. Activa ante frases como: 'qué no funcionales necesito', 'checklist de NFRs', 'qué definir temprano', 'requisitos de seguridad', 'necesito definir observabilidad', 'qué compliance aplica'."
 ---
 

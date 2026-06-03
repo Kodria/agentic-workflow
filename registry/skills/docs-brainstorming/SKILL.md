@@ -1,5 +1,6 @@
 ---
 name: docs-brainstorming
+version: "1.0.0"
 description: "Use before any documentation work — explores user intent, analyzes repository context, and produces a documentation plan. Routes to docs-assistant (for documents) or template-manager (for templates)."
 ---
 

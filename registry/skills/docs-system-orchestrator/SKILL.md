@@ -1,5 +1,6 @@
 ---
 name: docs-system-orchestrator
+version: "1.0.0"
 description: Router automático del ecosistema de documentación. Analiza la petición del usuario, requiere aprobación y delega a la skill especialista correspondiente.
 ---
 

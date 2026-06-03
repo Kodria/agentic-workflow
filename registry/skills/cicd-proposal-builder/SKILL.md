@@ -1,5 +1,6 @@
 ---
 name: cicd-proposal-builder
+version: "1.0.0"
 description: "Especialista en diseño de pipelines CI/CD. Usa esta skill cuando necesites definir pipeline, estrategia de branching, ambientes, gates de calidad, estrategia de deploy o controles mínimos. Activa ante frases como: 'necesito un pipeline', 'propuesta de CI/CD', 'qué branching strategy', 'cómo configuro los ambientes', 'qué gates de calidad debería tener', 'estrategia de deploy'."
 ---
 

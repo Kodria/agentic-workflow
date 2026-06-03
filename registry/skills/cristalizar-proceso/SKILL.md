@@ -1,5 +1,6 @@
 ---
 name: cristalizar-proceso
+version: "1.0.0"
 description: Cristaliza un proceso de NotionTracker — busca por nombre, te muestra el draft, itera con tus ajustes, y persiste cuando confirmás. Activá ante frases como "cristalizá el proceso X", "cristalicemos el de aprobación", "actualizá la cristalización de Y".
 ---
 

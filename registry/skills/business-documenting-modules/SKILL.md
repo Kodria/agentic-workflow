@@ -1,5 +1,6 @@
 ---
 name: business-documenting-modules
+version: "1.0.0"
 description: "Use this skill AFTER completing development to document functional business modules into Notion-ready formats in `docs/business-knowledge`. Intelligently distinguishes between technical tasks and actual business features."
 ---
 

@@ -1,5 +1,6 @@
 ---
 name: harness-retro
+version: "1.0.0"
 description: Use when the same bug, review finding, or sensor failure has appeared at least twice — turns recurring symptoms into structural rules so the harness catches them automatically next time. Triggered by systematic-debugging, code-quality-reviewer, receiving-code-review, or the user. Outputs lint rules, structural tests, CONSTITUTION.md entries, or Semgrep rules depending on the bug class.
 ---
 
