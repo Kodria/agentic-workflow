@@ -8,7 +8,7 @@ import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage,
 import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
 import { syncRegistry } from './core/registry';
-import { discoverSkills, discoverWorkflows, discoverAgents, discoverProcesses } from './core/discovery';
+import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
 import path from 'path';
 import pc from 'picocolors';
 import fs from 'fs';
@@ -70,9 +70,8 @@ program.command('add [name]')
       const skills = discoverSkills();
       const workflows = discoverWorkflows();
       const agents = discoverAgents();
-      const processes = discoverProcesses();
 
-      if (skills.length === 0 && workflows.length === 0 && agents.length === 0 && processes.length === 0) {
+      if (skills.length === 0 && workflows.length === 0 && agents.length === 0) {
           outro(pc.yellow('No artifacts found in the registry. Please check your registry content.'));
           process.exit(0);
       }
@@ -132,7 +131,7 @@ program.command('add [name]')
           skills,
           includeWorkflows ? workflows : [],
           includeAgents ? agents : [],
-          processes
+          []
       );
 
       if (view.length === 0) {
@@ -284,7 +283,7 @@ program.command('list [package]')
           process.exit(1);
       }
 
-      const view = buildPackageView(discoverSkills(), discoverWorkflows(), discoverAgents(), discoverProcesses());
+      const view = buildPackageView(discoverSkills(), discoverWorkflows(), discoverAgents(), []);
 
       if (view.length === 0) {
           outro(pc.yellow('No artifacts found in the registry. Run `awm update` or check your registry content.'));
@@ -402,8 +401,7 @@ program.command('remove')
           process.exit(0);
       }
 
-      const processes = discoverProcesses();
-      const groupedOpts = buildGroupedOptions(installed, processes,
+      const groupedOpts = buildGroupedOptions(installed, [],
           (c) => {
               const hasSkill = c.artifacts.some(a => a.type === 'skill');
               const hasWf = c.artifacts.some(a => a.type === 'workflow');

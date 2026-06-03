@@ -6,7 +6,6 @@ import { REGISTRY_DIR } from './registry';
 export const SKILLS_DIR = path.join(REGISTRY_DIR, 'registry', 'skills');
 export const WORKFLOWS_DIR = path.join(REGISTRY_DIR, 'registry', 'workflows');
 export const AGENTS_DIR = path.join(REGISTRY_DIR, 'registry', 'agents');
-export const PROCESSES_FILE = path.join(REGISTRY_DIR, 'registry', 'processes.json');
 
 export interface SkillArtifact {
     name: string;
@@ -24,14 +23,6 @@ export interface AgentArtifact {
     name: string;
     path: string;
     description: string;
-}
-
-export interface ProcessDefinition {
-    name: string;
-    description: string;
-    skills: string[];
-    workflows: string[];
-    agents?: string[];
 }
 
 export function readArtifactDescription(filePath: string): string {
@@ -113,12 +104,3 @@ export function discoverAgents(): AgentArtifact[] {
         }));
 }
 
-/**
- * Parses the processes.json file and returns all available processes.
- */
-export function discoverProcesses(): ProcessDefinition[] {
-    if (!fs.existsSync(PROCESSES_FILE)) return [];
-
-    const raw = fs.readFileSync(PROCESSES_FILE, 'utf-8');
-    return JSON.parse(raw) as ProcessDefinition[];
-}

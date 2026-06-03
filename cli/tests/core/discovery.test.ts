@@ -1,4 +1,4 @@
-import { discoverSkills, discoverWorkflows, discoverProcesses, readArtifactDescription, SKILLS_DIR } from '../../src/core/discovery';
+import { discoverSkills, discoverWorkflows, readArtifactDescription, SKILLS_DIR } from '../../src/core/discovery';
 import fs from 'fs';
 
 jest.mock('fs');
@@ -75,34 +75,6 @@ describe('Artifact Discovery', () => {
 
             const workflows = discoverWorkflows();
             expect(workflows).toEqual([]);
-        });
-    });
-
-    describe('discoverProcesses', () => {
-        it('should parse the processes.json file and return a list of processes', () => {
-            (fs.existsSync as jest.Mock).mockReturnValue(true);
-            (fs.readFileSync as jest.Mock).mockReturnValue(JSON.stringify([
-                {
-                    name: 'full-dev-flow',
-                    description: 'Complete development workflow',
-                    skills: ['brainstorming', 'writing-plans'],
-                    workflows: ['executing-plans']
-                }
-            ]));
-
-            const processes = discoverProcesses();
-
-            expect(processes).toHaveLength(1);
-            expect(processes[0].name).toBe('full-dev-flow');
-            expect(processes[0].skills).toEqual(['brainstorming', 'writing-plans']);
-            expect(processes[0].workflows).toEqual(['executing-plans']);
-        });
-
-        it('should return an empty array if processes.json does not exist', () => {
-            (fs.existsSync as jest.Mock).mockReturnValue(false);
-
-            const processes = discoverProcesses();
-            expect(processes).toEqual([]);
         });
     });
 
