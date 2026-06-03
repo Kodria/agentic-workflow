@@ -1,30 +1,39 @@
 import pc from 'picocolors';
 import { ArtifactType } from '../providers';
-import { ProcessDefinition, SkillArtifact, WorkflowArtifact, AgentArtifact } from '../core/discovery';
+import { SkillArtifact, WorkflowArtifact, AgentArtifact } from '../core/discovery';
+import { BundleDefinition } from '../core/bundles';
 
 export const STANDALONE_NAME = 'standalone';
 
 export interface ArtifactView {
-    name: string;          // baseName (no extension)
-    type: ArtifactType;    // 'skill' | 'workflow' | 'agent'
-    sourcePath: string;    // path to install from
-    installName: string;   // on-disk name at the destination
-    description: string;   // from frontmatter; '' when absent
+    name: string;
+    type: ArtifactType;
+    sourcePath: string;
+    installName: string;
+    description: string;
 }
 
 export interface PackageView {
     name: string;
     description: string;
     isStandalone: boolean;
+    visibility: 'public' | 'private';
     artifacts: ArtifactView[];
     counts: { skills: number; workflows: number; agents: number };
 }
 
-function makePackage(name: string, description: string, isStandalone: boolean, artifacts: ArtifactView[]): PackageView {
+function makePackage(
+    name: string,
+    description: string,
+    isStandalone: boolean,
+    visibility: 'public' | 'private',
+    artifacts: ArtifactView[]
+): PackageView {
     return {
         name,
         description,
         isStandalone,
+        visibility,
         artifacts,
         counts: {
             skills: artifacts.filter((a) => a.type === 'skill').length,
@@ -38,7 +47,7 @@ export function buildPackageView(
     skills: SkillArtifact[],
     workflows: WorkflowArtifact[],
     agents: AgentArtifact[],
-    processes: ProcessDefinition[]
+    bundles: BundleDefinition[]
 ): PackageView[] {
     const all: ArtifactView[] = [
         ...skills.map((s) => ({ name: s.name, type: 'skill' as ArtifactType, sourcePath: s.path, installName: s.name, description: s.description ?? '' })),
@@ -49,20 +58,21 @@ export function buildPackageView(
     const packages: PackageView[] = [];
     const claimed = new Set<ArtifactView>();
 
-    for (const p of processes) {
+    for (const b of bundles) {
+        const skillNames = b.skills.map((s) => s.name);
         const arts = all.filter((a) =>
-            (a.type === 'skill' && p.skills.includes(a.name)) ||
-            (a.type === 'workflow' && p.workflows.includes(a.name)) ||
-            (a.type === 'agent' && (p.agents ?? []).includes(a.name))
+            (a.type === 'skill' && skillNames.includes(a.name)) ||
+            (a.type === 'workflow' && b.workflows.includes(a.name)) ||
+            (a.type === 'agent' && b.agents.includes(a.name))
         );
         if (arts.length === 0) continue;
         arts.forEach((a) => claimed.add(a));
-        packages.push(makePackage(p.name, p.description, false, arts));
+        packages.push(makePackage(b.name, b.description, false, b.visibility, arts));
     }
 
     const orphans = all.filter((a) => !claimed.has(a));
     if (orphans.length > 0) {
-        packages.push(makePackage(STANDALONE_NAME, 'Artifacts not part of any package', true, orphans));
+        packages.push(makePackage(STANDALONE_NAME, 'Artifacts not part of any package', true, 'public', orphans));
     }
 
     return packages;
@@ -74,7 +84,6 @@ function plural(n: number, noun: string): string {
     return `${n} ${noun}${n === 1 ? '' : 's'}`;
 }
 
-/** Human label for a package's contents, e.g. "2 skills · 1 workflow". */
 export function artifactCountLabel(counts: PackageView['counts']): string {
     const parts: string[] = [];
     if (counts.skills > 0) parts.push(plural(counts.skills, 'skill'));
@@ -88,7 +97,6 @@ function packageIcon(pkg: PackageView): string {
     return pkg.isStandalone ? '🔹' : '📦';
 }
 
-/** Compact summary: a header line plus one aligned line per package. */
 export function packageSummaryLines(packages: PackageView[]): string[] {
     const uniqueSkillNames = new Set(packages.flatMap((p) => p.artifacts.filter((a) => a.type === 'skill').map((a) => a.name)));
     const totalSkills = uniqueSkillNames.size;
@@ -107,7 +115,6 @@ export function packageSummaryLines(packages: PackageView[]): string[] {
     return lines;
 }
 
-/** Detailed view of a single package: header + one or two lines per artifact. */
 export function packageDetailLines(pkg: PackageView): string[] {
     const lines: string[] = [];
     const header = pkg.isStandalone
@@ -126,13 +133,11 @@ export interface PackageLookup {
     suggestion?: string;
 }
 
-/** Exact (case-insensitive) name match; otherwise the closest name as a suggestion. */
 export function findPackage(packages: PackageView[], query: string): PackageLookup {
     const q = query.toLowerCase();
     const exact = packages.find((p) => p.name.toLowerCase() === q);
     if (exact) return { match: exact };
 
-    // Closest: prefer substring containment, then longest shared prefix.
     const contains = packages.find((p) => p.name.toLowerCase().includes(q) || q.includes(p.name.toLowerCase()));
     if (contains) return { suggestion: contains.name };
 
@@ -156,7 +161,6 @@ export function artifactValue(a: ArtifactView): string {
     return `${a.type}:${a.name}`;
 }
 
-/** Level-1 multiselect options: one per package, value = package name. */
 export function buildLevel1Options(packages: PackageView[]): { value: string; label: string }[] {
     return packages.map((p) => {
         const count = p.isStandalone ? plural(p.artifacts.length, 'artifact') : artifactCountLabel(p.counts);
@@ -165,12 +169,6 @@ export function buildLevel1Options(packages: PackageView[]): { value: string; la
     });
 }
 
-/**
- * Level-2 multiselect options for one package. First option is the
- * "install entire package" sentinel; the rest are one per artifact with the
- * description embedded into the label (always-visible — @clack hints only show
- * on the focused row).
- */
 export function buildLevel2Options(pkg: PackageView): { value: string; label: string }[] {
     const installAll = { value: ALL_SENTINEL, label: `✨ Install entire package (${pkg.artifacts.length})` };
     const rest = pkg.artifacts.map((a) => {
@@ -181,9 +179,6 @@ export function buildLevel2Options(pkg: PackageView): { value: string; label: st
     return [installAll, ...rest];
 }
 
-/**
- * Maps a level-2 selection back to artifacts. The sentinel means "all".
- */
 export function resolveLevel2Selection(pkg: PackageView, selectedValues: string[]): ArtifactView[] {
     if (selectedValues.includes(ALL_SENTINEL)) return [...pkg.artifacts];
     const wanted = new Set(selectedValues);

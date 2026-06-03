@@ -1,13 +1,22 @@
 import { buildPackageView, STANDALONE_NAME, packageSummaryLines, packageDetailLines, findPackage, artifactCountLabel, ALL_SENTINEL, buildLevel1Options, buildLevel2Options, resolveLevel2Selection } from '../../src/utils/registry-view';
-import { SkillArtifact, WorkflowArtifact, AgentArtifact, ProcessDefinition } from '../../src/core/discovery';
+import { SkillArtifact, WorkflowArtifact, AgentArtifact } from '../../src/core/discovery';
+import { BundleDefinition } from '../../src/core/bundles';
 
 const skill = (name: string, description = ''): SkillArtifact => ({ name, path: `/s/${name}`, description });
 const wf = (name: string, description = ''): WorkflowArtifact => ({ name, path: `/w/${name}.md`, description });
 const agent = (name: string, description = ''): AgentArtifact => ({ name, path: `/a/${name}.md`, description });
 
-const processes: ProcessDefinition[] = [
-    { name: 'core-dev', description: 'Dev lifecycle', skills: ['brainstorming', 'shared'], workflows: ['exec'], agents: ['plan'] },
-    { name: 'docs', description: 'Docs as code', skills: ['shared'], workflows: [], agents: [] },
+const bundle = (over: Partial<BundleDefinition> & { name: string }): BundleDefinition => ({
+    description: '', version: '1.0.0', scope: 'project', visibility: 'public',
+    dependsOn: [], skills: [], workflows: [], agents: [], ...over,
+});
+
+const processes: BundleDefinition[] = [
+    bundle({ name: 'core-dev', description: 'Dev lifecycle', scope: 'baseline',
+        skills: [{ name: 'brainstorming', onSignal: false }, { name: 'shared', onSignal: false }],
+        workflows: ['exec'], agents: ['plan'] }),
+    bundle({ name: 'docs', description: 'Docs as code',
+        skills: [{ name: 'shared', onSignal: false }] }),
 ];
 
 describe('buildPackageView', () => {
@@ -130,7 +139,6 @@ describe('buildLevel2Options', () => {
         expect(values).toContain('skill:brainstorming');
         expect(values).toContain('workflow:exec');
         expect(values).toContain('agent:plan');
-        // description embedded in the label (always-visible, multi-line)
         expect(opts.find((o) => o.value === 'skill:brainstorming')!.label).toContain('explore');
     });
 
@@ -159,5 +167,21 @@ describe('resolveLevel2Selection', () => {
 
     it('returns empty array when no values are selected', () => {
         expect(resolveLevel2Selection(core, [])).toEqual([]);
+    });
+});
+
+describe('visibility', () => {
+    it('marks a private bundle on its PackageView', () => {
+        const priv: BundleDefinition[] = [
+            bundle({ name: 'secret', description: 'private', visibility: 'private',
+                skills: [{ name: 'a', onSignal: false }] }),
+        ];
+        const view = buildPackageView([skill('a')], [], [], priv);
+        expect(view.find((p) => p.name === 'secret')!.visibility).toBe('private');
+    });
+
+    it('defaults visibility to public', () => {
+        const view = buildPackageView([skill('brainstorming')], [], [], processes);
+        expect(view.find((p) => p.name === 'core-dev')!.visibility).toBe('public');
     });
 });
