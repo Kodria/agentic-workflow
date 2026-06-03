@@ -9,6 +9,7 @@ import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './pr
 import { installArtifact, removeArtifact } from './core/executor';
 import { syncRegistry } from './core/registry';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
+import { discoverBundles } from './core/bundles';
 import path from 'path';
 import pc from 'picocolors';
 import fs from 'fs';
@@ -131,7 +132,7 @@ program.command('add [name]')
           skills,
           includeWorkflows ? workflows : [],
           includeAgents ? agents : [],
-          []
+          discoverBundles()
       );
 
       if (view.length === 0) {
@@ -283,7 +284,8 @@ program.command('list [package]')
           process.exit(1);
       }
 
-      const view = buildPackageView(discoverSkills(), discoverWorkflows(), discoverAgents(), []);
+      const fullView = buildPackageView(discoverSkills(), discoverWorkflows(), discoverAgents(), discoverBundles());
+      const view = options.all ? fullView : fullView.filter((p) => p.visibility !== 'private');
 
       if (view.length === 0) {
           outro(pc.yellow('No artifacts found in the registry. Run `awm update` or check your registry content.'));
@@ -296,7 +298,7 @@ program.command('list [package]')
 
       // Detail for a single package.
       if (packageName) {
-          const { match, suggestion } = findPackage(view, packageName);
+          const { match, suggestion } = findPackage(fullView, packageName);
           if (!match) {
               const hint = suggestion
                   ? pc.dim(` Did you mean "${suggestion}"?`)
@@ -401,7 +403,7 @@ program.command('remove')
           process.exit(0);
       }
 
-      const groupedOpts = buildGroupedOptions(installed, [],
+      const groupedOpts = buildGroupedOptions(installed, discoverBundles(),
           (c) => {
               const hasSkill = c.artifacts.some(a => a.type === 'skill');
               const hasWf = c.artifacts.some(a => a.type === 'workflow');
