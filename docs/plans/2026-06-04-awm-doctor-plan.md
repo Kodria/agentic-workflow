@@ -1,5 +1,7 @@
 # `awm doctor` (Sub-fase 1c) Implementation Plan
 
+<!-- awm-qa-complete: 2026-06-04 -->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Entregar `awm doctor`, un comando read-only que computa e imprime el estado del harness (máquina + proyecto), construyendo un motor de diagnóstico compartido (probe + checks puros) que `init` (1d) reutilizará sin refactor.
