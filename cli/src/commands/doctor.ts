@@ -19,7 +19,8 @@ function remedyText(r: CheckResult): string {
 
 function line(r: CheckResult): string {
     const rem = remedyText(r);
-    return `  ${glyph(r.status)} ${r.label}${rem ? '   ' + rem : ''}`;
+    const det = r.detail ? pc.dim(` (${r.detail})`) : '';
+    return `  ${glyph(r.status)} ${r.label}${det}${rem ? '   ' + rem : ''}`;
 }
 
 export function renderReport(report: CheckReport): string {

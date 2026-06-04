@@ -34,6 +34,18 @@ describe('renderReport', () => {
         expect(out).not.toContain('Proyecto:');
     });
 
+    it('renders the detail field in parentheses when present', () => {
+        const out = renderReport(report({
+            results: [
+                { id: 'machine.cli', level: 'machine', label: 'CLI v1.2.0', status: 'warn',
+                    detail: 'cache desactualizado', remedy: { kind: 'command', value: 'awm update' } },
+            ],
+        }));
+        expect(out).toContain('CLI v1.2.0');
+        expect(out).toContain('(cache desactualizado)');
+        expect(out).toContain('→ awm update');
+    });
+
     it('renders the project block titled with projectName', () => {
         const out = renderReport(report({
             hasProject: true,

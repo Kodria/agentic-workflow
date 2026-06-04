@@ -63,7 +63,7 @@ describe('gatherContext', () => {
         fs.symlinkSync(path.join(tmpHome, 'targets', 'gone'), path.join(skillsDir, 'brainstorming'), 'dir');
         const { gatherContext } = require('../../../src/core/diagnostics/context');
         const ctx = gatherContext({ cwd: tmpHome, bundles: [bundle('dev-core', 'baseline', ['brainstorming'])] });
-        expect(ctx.machine.devCore.present).toBe(false);
+        expect(ctx.machine.devCore.present).toBe(true);
         expect(ctx.machine.devCore.brokenLinks).toContain('brainstorming');
     });
 

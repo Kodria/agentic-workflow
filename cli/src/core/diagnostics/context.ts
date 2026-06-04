@@ -79,7 +79,7 @@ function gatherMachine(bundles: BundleDefinition[]): MachineFacts {
     if (baseline) {
         const skillNames = resolveBundleSkills(baseline.name, bundles);
         const { linked, broken } = classifyLinks(skillNames, skillsDir);
-        devCorePresent = skillNames.length > 0 && linked.length === skillNames.length;
+        devCorePresent = skillNames.length > 0 && (linked.length + broken.length) > 0;
         brokenLinks = broken;
     }
 
