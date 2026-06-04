@@ -41,7 +41,10 @@ export function readProfile(root: string): ProjectProfile {
     if (!fs.existsSync(file)) return { extensions: [] };
     try {
         const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
-        return { extensions: Array.isArray(raw.extensions) ? raw.extensions : [] };
+        const exts = Array.isArray(raw.extensions)
+            ? (raw.extensions as unknown[]).filter((e): e is string => typeof e === 'string')
+            : [];
+        return { extensions: exts };
     } catch {
         return { extensions: [] };
     }
