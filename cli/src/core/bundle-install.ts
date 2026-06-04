@@ -9,7 +9,7 @@ import {
 } from './bundles';
 import { installArtifact } from './executor';
 import { AgentTarget, ArtifactType, Scope, getTargetPath, PROVIDERS } from '../providers';
-import { addExtension, ensureSkillsGitignored, shouldRecordExtension } from './profile';
+import { addExtension, ensureSkillsGitignored, readProfile, shouldRecordExtension } from './profile';
 
 export type InstallMethod = 'symlink' | 'copy';
 
@@ -118,4 +118,43 @@ export function addBundle(opts: InstallBundleOptions): AddBundleResult {
     }
 
     return { ...summary, recordedExtension };
+}
+
+export interface SyncProfileOptions {
+    projectRoot: string;
+    bundles: BundleDefinition[];
+    agents: AgentTarget[];
+    method: InstallMethod;
+    contentDir?: string;
+}
+
+export interface SyncResult extends InstallSummary {
+    extensions: string[];
+}
+
+/**
+ * Rebuilds local symlinks from `.awm/profile.json` — each listed extension is
+ * installed locally (with its dependency closure). Does not modify the profile.
+ */
+export function syncProfile(opts: SyncProfileOptions): SyncResult {
+    const profile = readProfile(opts.projectRoot);
+    const installed: string[] = [];
+    const skipped: string[] = [];
+
+    for (const ext of profile.extensions) {
+        const summary = installBundle({
+            bundleName: ext,
+            bundles: opts.bundles,
+            agents: opts.agents,
+            method: opts.method,
+            projectRoot: opts.projectRoot,
+            contentDir: opts.contentDir,
+        });
+        installed.push(...summary.installed);
+        skipped.push(...summary.skipped);
+    }
+
+    if (profile.extensions.length > 0) ensureSkillsGitignored(opts.projectRoot);
+
+    return { installed, skipped, extensions: profile.extensions };
 }

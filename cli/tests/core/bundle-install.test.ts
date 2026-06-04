@@ -2,8 +2,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { discoverBundles } from '../../src/core/bundles';
-import { installBundle, addBundle } from '../../src/core/bundle-install';
-import { readProfile } from '../../src/core/profile';
+import { installBundle, addBundle, syncProfile } from '../../src/core/bundle-install';
+import { readProfile, writeProfile } from '../../src/core/profile';
 
 /**
  * Builds a fixture with:
@@ -130,5 +130,31 @@ describe('addBundle', () => {
         addBundle(opts);
         addBundle(opts);
         expect(readProfile(projectRoot).extensions).toEqual(['ext']);
+    });
+});
+
+describe('syncProfile', () => {
+    it('rematerializes symlinks for every extension listed in the profile', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+        writeProfile(projectRoot, { extensions: ['ext'] });
+        const result = syncProfile({
+            projectRoot, bundles, agents: ['claude-code'],
+            method: 'symlink', contentDir: content,
+        });
+        expect(result.extensions).toEqual(['ext']);
+        expect(fs.existsSync(path.join(projectRoot, '.claude', 'skills', 's-ext'))).toBe(true);
+        expect(fs.existsSync(path.join(projectRoot, '.claude', 'skills', 's-base'))).toBe(true);
+    });
+
+    it('is a no-op when the profile has no extensions', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+        writeProfile(projectRoot, { extensions: [] });
+        const result = syncProfile({
+            projectRoot, bundles, agents: ['claude-code'],
+            method: 'symlink', contentDir: content,
+        });
+        expect(result.extensions).toEqual([]);
+        expect(result.installed).toEqual([]);
+        expect(fs.existsSync(path.join(projectRoot, '.claude', 'skills'))).toBe(false);
     });
 });
