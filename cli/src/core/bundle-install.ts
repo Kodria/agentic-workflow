@@ -9,6 +9,7 @@ import {
 } from './bundles';
 import { installArtifact } from './executor';
 import { AgentTarget, ArtifactType, Scope, getTargetPath, PROVIDERS } from '../providers';
+import { addExtension, ensureSkillsGitignored, shouldRecordExtension } from './profile';
 
 export type InstallMethod = 'symlink' | 'copy';
 
@@ -90,4 +91,31 @@ export function installBundle(opts: InstallBundleOptions): InstallSummary {
     }
 
     return { installed, skipped };
+}
+
+export interface AddBundleResult extends InstallSummary {
+    /** The bundle name recorded as a project extension, or null if not recorded. */
+    recordedExtension: string | null;
+}
+
+/**
+ * Installs a bundle (closure) and, when it is a project-scope bundle installed
+ * locally, records it as an extension in `.awm/profile.json` and ensures the
+ * local symlinks are gitignored. Dependencies are never recorded.
+ */
+export function addBundle(opts: InstallBundleOptions): AddBundleResult {
+    const summary = installBundle(opts);
+    const target = opts.bundles.find((b) => b.name === opts.bundleName);
+
+    let recordedExtension: string | null = null;
+    if (target) {
+        const effective: Scope = opts.scopeOverride ?? defaultScopeForBundle(target.scope);
+        if (shouldRecordExtension(target.scope, effective)) {
+            addExtension(opts.projectRoot, opts.bundleName);
+            ensureSkillsGitignored(opts.projectRoot);
+            recordedExtension = opts.bundleName;
+        }
+    }
+
+    return { ...summary, recordedExtension };
 }

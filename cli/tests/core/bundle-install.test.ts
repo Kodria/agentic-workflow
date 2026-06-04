@@ -2,7 +2,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { discoverBundles } from '../../src/core/bundles';
-import { installBundle } from '../../src/core/bundle-install';
+import { installBundle, addBundle } from '../../src/core/bundle-install';
+import { readProfile } from '../../src/core/profile';
 
 /**
  * Builds a fixture with:
@@ -95,5 +96,39 @@ describe('installBundle', () => {
         });
         expect(result.skipped.some((l) => l.includes('s-base'))).toBe(true);
         expect(fs.existsSync(path.join(projectRoot, '.claude', 'skills', 's-ext'))).toBe(true);
+    });
+});
+
+describe('addBundle', () => {
+    it('records a project bundle installed locally as an extension + gitignores symlinks', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+        const result = addBundle({
+            bundleName: 'ext', bundles, agents: ['claude-code'],
+            method: 'symlink', projectRoot, contentDir: content,
+        });
+        expect(result.recordedExtension).toBe('ext');
+        expect(readProfile(projectRoot).extensions).toEqual(['ext']);
+        const gi = fs.readFileSync(path.join(projectRoot, '.gitignore'), 'utf-8');
+        expect(gi).toContain('.claude/skills/');
+    });
+
+    it('does not record the dependency bundle, only the named one', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+        addBundle({
+            bundleName: 'ext', bundles, agents: ['claude-code'],
+            method: 'symlink', projectRoot, contentDir: content,
+        });
+        expect(readProfile(projectRoot).extensions).toEqual(['ext']); // not ['base','ext']
+    });
+
+    it('is idempotent: adding the same bundle twice keeps one extension entry', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+        const opts = {
+            bundleName: 'ext', bundles, agents: ['claude-code' as const],
+            method: 'symlink' as const, projectRoot, contentDir: content,
+        };
+        addBundle(opts);
+        addBundle(opts);
+        expect(readProfile(projectRoot).extensions).toEqual(['ext']);
     });
 });
