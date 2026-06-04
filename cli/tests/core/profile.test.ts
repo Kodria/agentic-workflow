@@ -75,7 +75,7 @@ describe('readProfile / writeProfile / addExtension', () => {
 describe('ensureSkillsGitignored', () => {
     it('appends the pattern when .gitignore is absent', () => {
         const root = tmpRoot();
-        ensureSkillsGitignored(root);
+        ensureSkillsGitignored(root, ['claude-code']);
         const gi = fs.readFileSync(path.join(root, '.gitignore'), 'utf-8');
         expect(gi.split(/\r?\n/)).toContain('.claude/skills/');
     });
@@ -83,8 +83,8 @@ describe('ensureSkillsGitignored', () => {
     it('is idempotent and preserves existing entries', () => {
         const root = tmpRoot();
         fs.writeFileSync(path.join(root, '.gitignore'), 'node_modules\n');
-        ensureSkillsGitignored(root);
-        ensureSkillsGitignored(root);
+        ensureSkillsGitignored(root, ['claude-code']);
+        ensureSkillsGitignored(root, ['claude-code']);
         const lines = fs.readFileSync(path.join(root, '.gitignore'), 'utf-8').split(/\r?\n/);
         expect(lines).toContain('node_modules');
         expect(lines.filter((l) => l.trim() === '.claude/skills/').length).toBe(1);
@@ -93,7 +93,7 @@ describe('ensureSkillsGitignored', () => {
     it('does not duplicate when the unslashed variant already exists', () => {
         const root = tmpRoot();
         fs.writeFileSync(path.join(root, '.gitignore'), '.claude/skills\n');
-        ensureSkillsGitignored(root);
+        ensureSkillsGitignored(root, ['claude-code']);
         const lines = fs.readFileSync(path.join(root, '.gitignore'), 'utf-8').split(/\r?\n/);
         expect(lines.filter((l) => l.trim().startsWith('.claude/skills')).length).toBe(1);
     });

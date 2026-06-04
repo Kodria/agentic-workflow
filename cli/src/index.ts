@@ -111,11 +111,14 @@ program.command('add [name]')
                   bundleName: matchedBundle.name,
                   bundles: allBundles,
                   agents: bundleAgents,
-                  method: options.method === 'copy' ? 'copy' : 'symlink',
+                  method: 'symlink',
                   projectRoot: projectRoot ?? process.cwd(),
                   scopeOverride,
               });
 
+              if (result.skipped.length > 0) {
+                  for (const s of result.skipped) console.log(pc.yellow(`  ⚠  Skipped: ${s}`));
+              }
               if (result.installed.length === 0) {
                   outro(pc.yellow(`Nothing installed for bundle "${matchedBundle.name}".`));
                   return;
@@ -124,9 +127,6 @@ program.command('add [name]')
               const recordNote = result.recordedExtension
                   ? `\n\n${pc.dim('Recorded as a project extension in .awm/profile.json (commit it; symlinks are gitignored).')}`
                   : '';
-              if (result.skipped.length > 0) {
-                  for (const s of result.skipped) console.log(pc.yellow(`  ⚠  Skipped: ${s}`));
-              }
               outro(`✅ Installed bundle ${pc.cyan(matchedBundle.name)}:\n  ${lines}${recordNote}`);
               return;
           }

@@ -108,11 +108,13 @@ export function addBundle(opts: InstallBundleOptions): AddBundleResult {
     const target = opts.bundles.find((b) => b.name === opts.bundleName);
 
     let recordedExtension: string | null = null;
-    if (target && summary.installed.length > 0) {
+    // Check the named bundle's own artifacts (not just closure deps) were installed.
+    const ownInstalled = summary.installed.filter((line) => line.endsWith(`[${opts.bundleName}]`));
+    if (target && ownInstalled.length > 0) {
         const effective: Scope = opts.scopeOverride ?? defaultScopeForBundle(target.scope);
         if (shouldRecordExtension(target.scope, effective)) {
             addExtension(opts.projectRoot, opts.bundleName);
-            ensureSkillsGitignored(opts.projectRoot);
+            ensureSkillsGitignored(opts.projectRoot, opts.agents);
             recordedExtension = opts.bundleName;
         }
     }
@@ -142,6 +144,10 @@ export function syncProfile(opts: SyncProfileOptions): SyncResult {
     const skipped: string[] = [];
 
     for (const ext of profile.extensions) {
+        if (!opts.bundles.some((b) => b.name === ext)) {
+            skipped.push(`${ext} (bundle not found in registry — remove with \`awm remove ${ext}\`)`);
+            continue;
+        }
         const summary = installBundle({
             bundleName: ext,
             bundles: opts.bundles,
@@ -154,7 +160,7 @@ export function syncProfile(opts: SyncProfileOptions): SyncResult {
         skipped.push(...summary.skipped);
     }
 
-    if (profile.extensions.length > 0) ensureSkillsGitignored(opts.projectRoot);
+    if (profile.extensions.length > 0) ensureSkillsGitignored(opts.projectRoot, opts.agents);
 
     return { installed, skipped, extensions: profile.extensions };
 }

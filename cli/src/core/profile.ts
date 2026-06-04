@@ -2,13 +2,12 @@
 import fs from 'fs';
 import path from 'path';
 import type { BundleScope } from './bundles';
-import type { Scope } from '../providers';
+import type { Scope, ArtifactType, AgentTarget } from '../providers';
+import { PROVIDERS } from '../providers';
 
 export interface ProjectProfile {
     extensions: string[];
 }
-
-const GITIGNORE_ENTRY = '.claude/skills/';
 
 /**
  * Walks up from `startDir` looking for a project root marker
@@ -16,7 +15,12 @@ const GITIGNORE_ENTRY = '.claude/skills/';
  * absolute (realpath) directory, or null if none is found.
  */
 export function findProjectRoot(startDir: string): string | null {
-    let dir = fs.realpathSync(path.resolve(startDir));
+    let dir: string;
+    try {
+        dir = fs.realpathSync(path.resolve(startDir));
+    } catch {
+        return null;
+    }
     // eslint-disable-next-line no-constant-condition
     while (true) {
         if (
@@ -65,18 +69,32 @@ export function addExtension(root: string, name: string): ProjectProfile {
 }
 
 /**
- * Ensures the project's .gitignore ignores the local skill symlinks
- * (machine-specific; rebuilt by `awm sync`). Idempotent.
+ * Ensures the project's .gitignore ignores the local artifact symlinks for
+ * all given agents (machine-specific; rebuilt by `awm sync`). Idempotent.
  */
-export function ensureSkillsGitignored(root: string): void {
+export function ensureSkillsGitignored(root: string, agents: AgentTarget[]): void {
     const gi = path.join(root, '.gitignore');
     const existing = fs.existsSync(gi) ? fs.readFileSync(gi, 'utf-8') : '';
-    const alreadyIgnored = existing
-        .split(/\r?\n/)
-        .some((l) => l.trim() === '.claude/skills/' || l.trim() === '.claude/skills');
-    if (alreadyIgnored) return;
+    const existingLines = existing.split(/\r?\n/).map((l) => l.trim());
+
+    const toIgnore: string[] = [];
+    for (const agent of agents) {
+        const provider = PROVIDERS[agent];
+        for (const type of ['skill', 'workflow', 'agent'] as ArtifactType[]) {
+            const config = provider[type];
+            if (!config) continue;
+            const entry = config.local.endsWith('/') ? config.local : `${config.local}/`;
+            if (!toIgnore.includes(entry)) toIgnore.push(entry);
+        }
+    }
+
+    const missing = toIgnore.filter(
+        (e) => !existingLines.some((l) => l === e || l === e.replace(/\/$/, ''))
+    );
+    if (missing.length === 0) return;
+
     const needsNewline = existing.length > 0 && !existing.endsWith('\n');
-    fs.appendFileSync(gi, `${needsNewline ? '\n' : ''}${GITIGNORE_ENTRY}\n`);
+    fs.appendFileSync(gi, `${needsNewline ? '\n' : ''}${missing.join('\n')}\n`);
 }
 
 /**

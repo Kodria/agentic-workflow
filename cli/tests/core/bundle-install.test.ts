@@ -144,6 +144,32 @@ describe('addBundle', () => {
         expect(result.recordedExtension).toBeNull();
         expect(readProfile(projectRoot).extensions).toEqual([]);
     });
+
+    it('does not record extension when only dep sources are present (named bundle own artifacts missing)', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+        // Remove only ext's own sources; keep dep (base) sources intact.
+        fs.rmSync(path.join(content, 'skills', 's-ext'), { recursive: true, force: true });
+        fs.rmSync(path.join(content, 'agents', 'ag-ext.md'), { force: true });
+        const result = addBundle({
+            bundleName: 'ext', bundles, agents: ['claude-code'],
+            method: 'symlink', projectRoot, contentDir: content,
+        });
+        expect(result.installed.some((l) => l.includes('s-base'))).toBe(true); // dep installed
+        expect(result.recordedExtension).toBeNull();                             // ext not recorded
+        expect(readProfile(projectRoot).extensions).toEqual([]);
+    });
+
+    it('respects explicit scopeOverride: local and still records the extension', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+        const result = addBundle({
+            bundleName: 'ext', bundles, agents: ['claude-code'],
+            method: 'symlink', projectRoot, contentDir: content,
+            scopeOverride: 'local',
+        });
+        expect(result.recordedExtension).toBe('ext');
+        expect(fs.existsSync(path.join(projectRoot, '.claude', 'skills', 's-ext'))).toBe(true);
+        expect(readProfile(projectRoot).extensions).toEqual(['ext']);
+    });
 });
 
 describe('syncProfile', () => {
@@ -169,5 +195,17 @@ describe('syncProfile', () => {
         expect(result.extensions).toEqual([]);
         expect(result.installed).toEqual([]);
         expect(fs.existsSync(path.join(projectRoot, '.claude', 'skills'))).toBe(false);
+    });
+
+    it('skips and warns about extensions no longer in registry (stale entries)', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+        writeProfile(projectRoot, { extensions: ['stale-bundle', 'ext'] });
+        const result = syncProfile({
+            projectRoot, bundles, agents: ['claude-code'],
+            method: 'symlink', contentDir: content,
+        });
+        expect(result.extensions).toEqual(['stale-bundle', 'ext']);
+        expect(result.skipped.some((l) => l.includes('stale-bundle'))).toBe(true);
+        expect(fs.existsSync(path.join(projectRoot, '.claude', 'skills', 's-ext'))).toBe(true);
     });
 });
