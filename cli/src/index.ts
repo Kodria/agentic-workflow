@@ -9,7 +9,9 @@ import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './pr
 import { installArtifact, removeArtifact } from './core/executor';
 import { syncRegistry } from './core/registry';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
-import { discoverBundles } from './core/bundles';
+import { discoverBundles, defaultScopeForBundle } from './core/bundles';
+import { addBundle, syncProfile } from './core/bundle-install';
+import { findProjectRoot, readProfile } from './core/profile';
 import path from 'path';
 import pc from 'picocolors';
 import fs from 'fs';
@@ -65,6 +67,69 @@ program.command('add [name]')
           s.stop('Failed to sync registry.');
           console.error(pc.red(e.message));
           process.exit(1);
+      }
+
+      // 1b. If `name` matches a bundle, run the bundle-activation flow and exit.
+      if (name) {
+          const allBundles = discoverBundles();
+          const matchedBundle = allBundles.find((b) => b.name === name);
+          if (matchedBundle) {
+              const prefs = getPreferences();
+
+              let bundleAgents: AgentTarget[];
+              if (options.agent) {
+                  const valid = Object.keys(PROVIDERS);
+                  const parsed = options.agent.split(',').map((a) => a.trim());
+                  for (const a of parsed) {
+                      if (!valid.includes(a)) {
+                          console.error(pc.red(`Invalid agent "${a}". Use: ${valid.join(', ')}.`));
+                          process.exit(1);
+                      }
+                  }
+                  bundleAgents = parsed as AgentTarget[];
+              } else {
+                  bundleAgents = [prefs.defaultAgent];
+              }
+
+              let scopeOverride: Scope | undefined;
+              if (options.scope) {
+                  if (!['local', 'global'].includes(options.scope)) {
+                      console.error(pc.red(`Invalid scope "${options.scope}". Use: local or global.`));
+                      process.exit(1);
+                  }
+                  scopeOverride = options.scope as Scope;
+              }
+
+              const effective = scopeOverride ?? defaultScopeForBundle(matchedBundle.scope);
+              const projectRoot = findProjectRoot(process.cwd());
+              if (effective === 'local' && !projectRoot) {
+                  console.error(pc.red('No project root found (need a .git/, package.json, or .awm/profile.json here). Run inside a project, or pass --global.'));
+                  process.exit(1);
+              }
+
+              const result = addBundle({
+                  bundleName: matchedBundle.name,
+                  bundles: allBundles,
+                  agents: bundleAgents,
+                  method: 'symlink',
+                  projectRoot: projectRoot ?? process.cwd(),
+                  scopeOverride,
+              });
+
+              if (result.skipped.length > 0) {
+                  for (const s of result.skipped) console.log(pc.yellow(`  ⚠  Skipped: ${s}`));
+              }
+              if (result.installed.length === 0) {
+                  outro(pc.yellow(`Nothing installed for bundle "${matchedBundle.name}".`));
+                  return;
+              }
+              const lines = result.installed.map((n) => pc.green(n)).join('\n  ');
+              const recordNote = result.recordedExtension
+                  ? `\n\n${pc.dim('Recorded as a project extension in .awm/profile.json (commit it; symlinks are gitignored).')}`
+                  : '';
+              outro(`✅ Installed bundle ${pc.cyan(matchedBundle.name)}:\n  ${lines}${recordNote}`);
+              return;
+          }
       }
 
       // 2. Discover artifacts
@@ -266,6 +331,62 @@ program.command('update')
           process.exit(1);
       }
 });
+
+program.command('sync')
+  .description('Rebuild local skill symlinks from .awm/profile.json (e.g. after cloning on a new machine)')
+  .option('-a, --agent <agent>', `Target agent: ${Object.keys(PROVIDERS).join(', ')}`)
+  .option('-m, --method <method>', 'Install method: symlink or copy', 'symlink')
+  .action(async (options: { agent?: string; method?: string }) => {
+      intro(pc.bgCyan(pc.black(' AWM - Sync Project Profile ')));
+
+      const projectRoot = findProjectRoot(process.cwd());
+      if (!projectRoot) {
+          console.error(pc.red('No project root found (need a .git/, package.json, or .awm/profile.json here).'));
+          process.exit(1);
+      }
+
+      const profile = readProfile(projectRoot);
+      if (profile.extensions.length === 0) {
+          outro(pc.yellow('No extensions in .awm/profile.json — nothing to sync. Use `awm add <bundle>` first.'));
+          return;
+      }
+
+      const s = spinner();
+      s.start('Syncing registry...');
+      try {
+          await syncRegistry();
+          s.stop('Registry synced.');
+      } catch (e: any) {
+          s.stop('Failed to sync registry.');
+          console.error(pc.red(e.message));
+          process.exit(1);
+      }
+
+      const prefs = getPreferences();
+      let agents: AgentTarget[];
+      if (options.agent) {
+          const valid = Object.keys(PROVIDERS);
+          const parsed = options.agent.split(',').map((a) => a.trim());
+          for (const a of parsed) {
+              if (!valid.includes(a)) {
+                  console.error(pc.red(`Invalid agent "${a}". Use: ${valid.join(', ')}.`));
+                  process.exit(1);
+              }
+          }
+          agents = parsed as AgentTarget[];
+      } else {
+          agents = [prefs.defaultAgent];
+      }
+      const method = options.method === 'copy' ? 'copy' : 'symlink';
+
+      const result = syncProfile({ projectRoot, bundles: discoverBundles(), agents, method });
+      if (result.skipped.length > 0) {
+          for (const sk of result.skipped) console.log(pc.yellow(`  ⚠  Skipped: ${sk}`));
+      }
+      const lines = result.installed.map((n) => pc.green(n)).join('\n  ');
+      const installedNote = lines ? `\n  ${lines}` : pc.dim(' (all up to date)');
+      outro(`✅ Synced extensions [${result.extensions.join(', ')}]:${installedNote}`);
+  });
 
 program.command('list [package]')
   .description('List available artifacts. With no argument shows a package summary; pass a package name or --all for detail.')

@@ -1,7 +1,14 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { discoverBundles, readCatalog, resolveBundleSkills, BundleDefinition } from '../../src/core/bundles';
+import {
+    discoverBundles,
+    readCatalog,
+    resolveBundleSkills,
+    resolveBundleClosure,
+    defaultScopeForBundle,
+    BundleDefinition,
+} from '../../src/core/bundles';
 
 function makeFixture(): string {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-bundles-'));
@@ -68,5 +75,35 @@ describe('resolveBundleSkills', () => {
         const content = makeFixture();
         const bundles = discoverBundles(content);
         expect(resolveBundleSkills('dev', bundles).sort()).toEqual(['architecture-advisor', 'brainstorming']);
+    });
+});
+
+describe('defaultScopeForBundle', () => {
+    it('maps baseline and ambient to global, project to local', () => {
+        expect(defaultScopeForBundle('baseline')).toBe('global');
+        expect(defaultScopeForBundle('ambient')).toBe('global');
+        expect(defaultScopeForBundle('project')).toBe('local');
+    });
+});
+
+describe('resolveBundleClosure', () => {
+    it('returns dependencies before the bundle, deduped, in deps-first order', () => {
+        const content = makeFixture();
+        const bundles = discoverBundles(content);
+        const closure = resolveBundleClosure('frontend', bundles);
+        expect(closure.map((b) => b.name)).toEqual(['dev', 'frontend']);
+    });
+
+    it('returns just the bundle when it has no dependencies', () => {
+        const content = makeFixture();
+        const bundles = discoverBundles(content);
+        const closure = resolveBundleClosure('dev', bundles);
+        expect(closure.map((b) => b.name)).toEqual(['dev']);
+    });
+
+    it('returns [] for an unknown bundle name', () => {
+        const content = makeFixture();
+        const bundles = discoverBundles(content);
+        expect(resolveBundleClosure('nope', bundles)).toEqual([]);
     });
 });
