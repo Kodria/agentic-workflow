@@ -265,10 +265,12 @@ La detección es **bootstrap** (una vez por proyecto). En sesiones siguientes `i
 
 ## 8. Entrega por sub-fases (cada una shippable)
 
-- **1a — Estructura + curación**: `catalog.json` + `bundle.json` (×5) + dev-core curado + `version` por skill + `using-awm` tiered + install baseline/ambient global. *(Corte limpio de processes.json.)*
-- **1b — Activación por proyecto**: `.awm/profile.json` + `awm sync` + `awm add --local` + scope `project`.
-- **1c — `awm doctor`**: motor de estado + dashboard visual.
-- **1d — `awm init` orquestador**: detección + bootstrap idempotente sobre el motor de estado, señalando pasos agente-requeridos.
+- **1a — Estructura + curación**: `catalog.json` + `bundle.json` (×5) + dev-core curado + `version` por skill + `using-awm` tiered + install baseline/ambient global. *(Corte limpio de processes.json.)* — ✅ **Completa, QA cerrado y mergeada en `main` (2026-06-04, commit `1348d48`).**
+- **1b — Activación por proyecto**: `.awm/profile.json` + `awm sync` + `awm add --local` + scope `project`. — ✅ **Completa, QA cerrado y mergeada en `main` (2026-06-04, commit `1348d48`).**
+- **1c — `awm doctor`**: motor de estado + dashboard visual. — ⬜ **Pendiente (próxima sub-fase a iniciar).**
+- **1d — `awm init` orquestador**: detección + bootstrap idempotente sobre el motor de estado, señalando pasos agente-requeridos. — ⬜ **Pendiente.**
+
+> **Estado del release (2026-06-04):** Fase 1 al 50% — sub-fases 1a y 1b entregadas y en `main`. Siguiente: 1c (`awm doctor`).
 
 ## 9. Fuera de alcance (fases siguientes, ya acordadas)
 
