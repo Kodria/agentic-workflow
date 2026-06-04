@@ -79,8 +79,9 @@ function gatherMachine(bundles: BundleDefinition[]): MachineFacts {
     if (baseline) {
         const skillNames = resolveBundleSkills(baseline.name, bundles);
         const { linked, broken } = classifyLinks(skillNames, skillsDir);
+        const absent = skillNames.filter((s) => !linked.includes(s) && !broken.includes(s));
         devCorePresent = skillNames.length > 0 && (linked.length + broken.length) > 0;
-        brokenLinks = broken;
+        brokenLinks = [...broken, ...absent];
     }
 
     // ambient (deseados desde ~/.awm/config.json)

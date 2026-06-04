@@ -57,6 +57,14 @@ describe('gatherContext', () => {
         expect(ctx.machine.devCore.brokenLinks).toEqual([]);
     });
 
+    it('machine: partial install (some absent, not dangling) surfaces absent skills in brokenLinks', () => {
+        linkGlobalSkill('brainstorming'); // only 1 of 2 skills linked
+        const { gatherContext } = require('../../../src/core/diagnostics/context');
+        const ctx = gatherContext({ cwd: tmpHome, bundles: [bundle('dev-core', 'baseline', ['brainstorming', 'another-skill'])] });
+        expect(ctx.machine.devCore.present).toBe(true);
+        expect(ctx.machine.devCore.brokenLinks).toContain('another-skill');
+    });
+
     it('machine: reports a broken dev-core symlink', () => {
         const skillsDir = path.join(tmpHome, '.claude', 'skills');
         fs.mkdirSync(skillsDir, { recursive: true });
