@@ -7,23 +7,41 @@ import {
 import { runChecks } from '../diagnostics/checks';
 import { gatherContext } from '../diagnostics/context';
 
+function wrapStep(id: string, level: StepResult['level'], fn: () => StepResult | Promise<StepResult>): Promise<StepResult> {
+    try {
+        const result = fn();
+        if (result instanceof Promise) {
+            return result.catch((e: unknown) => ({
+                id, level, action: 'failed' as const,
+                error: e instanceof Error ? e.message : String(e),
+            }));
+        }
+        return Promise.resolve(result);
+    } catch (e: unknown) {
+        return Promise.resolve({
+            id, level, action: 'failed' as const,
+            error: e instanceof Error ? e.message : String(e),
+        });
+    }
+}
+
 export async function runInitSteps(deps: InitDeps): Promise<InitOutcome> {
     const before = runChecks(deps.ctx);
     const steps: StepResult[] = [];
 
     // Nivel máquina (siempre)
-    steps.push(await stepCache(deps));
-    steps.push(stepHook(deps));
-    steps.push(stepDevCore(deps));
-    steps.push(stepAmbient(deps));
+    steps.push(await wrapStep('machine.cache', 'machine', () => stepCache(deps)));
+    steps.push(await wrapStep('machine.hook', 'machine', () => stepHook(deps)));
+    steps.push(await wrapStep('machine.devCore', 'machine', () => stepDevCore(deps)));
+    steps.push(await wrapStep('machine.ambient', 'machine', () => stepAmbient(deps)));
 
     // Nivel proyecto (solo en repo)
     if (deps.ctx.project) {
-        steps.push(await stepProfile(deps));
-        steps.push(stepActivation(deps));
-        steps.push(stepSensors(deps));
-        steps.push(stepConstitution(deps));
-        steps.push(stepContext(deps));
+        steps.push(await wrapStep('project.profile', 'project', () => stepProfile(deps)));
+        steps.push(await wrapStep('project.activation', 'project', () => stepActivation(deps)));
+        steps.push(await wrapStep('project.sensors', 'project', () => stepSensors(deps)));
+        steps.push(await wrapStep('project.constitution', 'project', () => stepConstitution(deps)));
+        steps.push(await wrapStep('project.context', 'project', () => stepContext(deps)));
     }
 
     const after = runChecks(gatherContext({ cwd: deps.cwd, bundles: deps.bundles }));

@@ -20,6 +20,7 @@ import { syncToMiro } from './core/miro';
 import { registerHooksCommand } from './commands/hooks';
 import { registerSensorsCommand } from './commands/sensors';
 import { registerDoctorCommand } from './commands/doctor';
+import { registerInitCommand } from './commands/init';
 
 const program = new Command();
 program.name('awm').description('Agentic Workflow Manager').version('1.0.0');
@@ -651,5 +652,6 @@ miroCmd.command('sync <storyMapPath>')
 registerHooksCommand(program);
 registerSensorsCommand(program);
 registerDoctorCommand(program);
+registerInitCommand(program);
 
 program.parse();
