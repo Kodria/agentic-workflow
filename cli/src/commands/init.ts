@@ -48,11 +48,8 @@ export function renderInitOutcome(o: InitOutcome): string {
 
     // --- Summary ---
     const pendingCount = o.pending;
-    if (pendingCount > 0) {
-        lines.push(pc.yellow(`${pendingCount} pasos requieren un agente`));
-    } else {
-        lines.push(pc.green('0 pasos requieren un agente'));
-    }
+    const estado = o.after.overall === 'healthy' ? pc.green('sano') : pc.red('degradado');
+    lines.push(`estado: ${estado} · ${pendingCount} pasos requieren un agente (skills arriba)`);
 
     return lines.join('\n');
 }
@@ -89,9 +86,20 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
             ...(opts.actions ?? {}),
         };
 
-        // confirmExtensions: with --yes auto-confirm all proposed; without --yes also auto-confirm
-        // (no @clack/prompts in non-interactive mode per spec)
-        const confirmExtensions = async (proposed: string[]): Promise<string[]> => proposed;
+        // confirmExtensions: with --yes auto-confirm all proposed; without --yes show interactive multiselect
+        const confirmExtensions = opts.yes
+            ? async (proposed: string[]) => proposed
+            : async (proposed: string[], signals: string[]) => {
+                  const { multiselect, isCancel } = await import('@clack/prompts');
+                  const choice = await multiselect({
+                      message: `Extensiones detectadas (${signals.join(', ')}) — ¿activar?`,
+                      options: proposed.map((p) => ({ value: p, label: p })),
+                      initialValues: proposed,
+                      required: false,
+                  });
+                  if (isCancel(choice)) return [];
+                  return choice as string[];
+              };
 
         outcome = await runInitSteps({
             cwd,
