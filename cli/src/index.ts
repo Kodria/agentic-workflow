@@ -111,7 +111,7 @@ program.command('add [name]')
                   bundleName: matchedBundle.name,
                   bundles: allBundles,
                   agents: bundleAgents,
-                  method: 'symlink',
+                  method: options.method === 'copy' ? 'copy' : 'symlink',
                   projectRoot: projectRoot ?? process.cwd(),
                   scopeOverride,
               });
