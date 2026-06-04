@@ -1,15 +1,12 @@
 import { Command } from 'commander';
 import pc from 'picocolors';
-import path from 'path';
-import os from 'os';
 import { confirm, isCancel } from '@clack/prompts';
 import { getPreferences } from '../../utils/config';
 import { installHook } from './install';
 import { uninstallHook } from './uninstall';
 import { computeHookStatus } from './status';
 import type { AgentTarget } from '../../providers';
-
-const DEFAULT_REGISTRY_ROOT = path.join(os.homedir(), '.awm/cli-source');
+import { REGISTRY_DIR } from '../../core/registry';
 
 export function registerHooksCommand(program: Command): void {
     const hooks = program.command('hooks').description('Manage SessionStart bootstrap hooks');
@@ -25,7 +22,7 @@ export function registerHooksCommand(program: Command): void {
             try {
                 const result = installHook({
                     agent,
-                    registryRoot: DEFAULT_REGISTRY_ROOT,
+                    registryRoot: REGISTRY_DIR,
                     installMethod: prefs.installMethod
                 });
 

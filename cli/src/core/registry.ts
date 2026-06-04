@@ -4,7 +4,8 @@ import path from "path";
 import os from "os";
 import simpleGit from "simple-git";
 
-export const REGISTRY_DIR = path.join(os.homedir(), ".awm", "registry");
+const AWM_HOME = process.env.AWM_HOME || path.join(process.env.HOME || os.homedir(), ".awm");
+export const REGISTRY_DIR = path.join(AWM_HOME, "cli-source");
 export const DEFAULT_REMOTE = "https://github.com/Kodria/agentic-workflow.git";
 
 /**

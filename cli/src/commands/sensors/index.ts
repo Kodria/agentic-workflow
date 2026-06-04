@@ -1,6 +1,4 @@
 import { Command } from 'commander';
-import path from 'path';
-import os from 'os';
 import pc from 'picocolors';
 import { log } from '@clack/prompts';
 import { runSensors } from './run';
@@ -8,8 +6,7 @@ import { initSensors } from './init';
 import { computeSensorStatus } from './status';
 import { installSensorHook } from './install';
 import { buildBaseline, writeBaseline } from './baseline';
-
-const DEFAULT_REGISTRY_ROOT = path.join(os.homedir(), '.awm', 'cli-source');
+import { REGISTRY_CONTENT_DIR } from '../../core/bundles';
 
 export function registerSensorsCommand(program: Command): void {
     const sensors = program.command('sensors').description('manage computational sensors for the current project');
@@ -32,7 +29,7 @@ export function registerSensorsCommand(program: Command): void {
         .command('init')
         .description('detect stack and write .awm/sensors.json (+ copy pack config files)')
         .option('--no-configure', 'skip copying sensor pack config files into the project')
-        .option('--registry-root <path>', 'path to AWM registry root', DEFAULT_REGISTRY_ROOT)
+        .option('--registry-root <path>', 'path to AWM registry root', REGISTRY_CONTENT_DIR)
         .action((opts) => {
             const result = initSensors({ configure: opts.configure, registryRoot: opts.registryRoot });
             log.success(`Detected: ${result.detection.pack} (${result.detection.indicators.join(', ') || 'fallback'})`);
