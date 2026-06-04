@@ -124,6 +124,9 @@ program.command('add [name]')
               const recordNote = result.recordedExtension
                   ? `\n\n${pc.dim('Recorded as a project extension in .awm/profile.json (commit it; symlinks are gitignored).')}`
                   : '';
+              if (result.skipped.length > 0) {
+                  for (const s of result.skipped) console.log(pc.yellow(`  ⚠  Skipped: ${s}`));
+              }
               outro(`✅ Installed bundle ${pc.cyan(matchedBundle.name)}:\n  ${lines}${recordNote}`);
               return;
           }
@@ -377,8 +380,12 @@ program.command('sync')
       const method = options.method === 'copy' ? 'copy' : 'symlink';
 
       const result = syncProfile({ projectRoot, bundles: discoverBundles(), agents, method });
+      if (result.skipped.length > 0) {
+          for (const sk of result.skipped) console.log(pc.yellow(`  ⚠  Skipped: ${sk}`));
+      }
       const lines = result.installed.map((n) => pc.green(n)).join('\n  ');
-      outro(`✅ Synced extensions [${result.extensions.join(', ')}]:\n  ${lines}`);
+      const installedNote = lines ? `\n  ${lines}` : pc.dim(' (all up to date)');
+      outro(`✅ Synced extensions [${result.extensions.join(', ')}]:${installedNote}`);
   });
 
 program.command('list [package]')

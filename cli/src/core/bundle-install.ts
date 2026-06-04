@@ -108,7 +108,7 @@ export function addBundle(opts: InstallBundleOptions): AddBundleResult {
     const target = opts.bundles.find((b) => b.name === opts.bundleName);
 
     let recordedExtension: string | null = null;
-    if (target) {
+    if (target && summary.installed.length > 0) {
         const effective: Scope = opts.scopeOverride ?? defaultScopeForBundle(target.scope);
         if (shouldRecordExtension(target.scope, effective)) {
             addExtension(opts.projectRoot, opts.bundleName);

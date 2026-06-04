@@ -131,6 +131,19 @@ describe('addBundle', () => {
         addBundle(opts);
         expect(readProfile(projectRoot).extensions).toEqual(['ext']);
     });
+
+    it('does not record extension when all sources are missing (nothing installed)', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+        fs.rmSync(path.join(content, 'skills', 's-ext'), { recursive: true, force: true });
+        fs.rmSync(path.join(content, 'skills', 's-base'), { recursive: true, force: true });
+        fs.rmSync(path.join(content, 'agents', 'ag-ext.md'), { force: true });
+        const result = addBundle({
+            bundleName: 'ext', bundles, agents: ['claude-code'],
+            method: 'symlink', projectRoot, contentDir: content,
+        });
+        expect(result.recordedExtension).toBeNull();
+        expect(readProfile(projectRoot).extensions).toEqual([]);
+    });
 });
 
 describe('syncProfile', () => {
