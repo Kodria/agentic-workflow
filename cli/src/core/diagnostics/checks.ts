@@ -96,7 +96,7 @@ function projectChecks(p: ProjectFacts): CheckResult[] {
         out.push({ id: 'project.context', level: 'project', label: p.context.file ?? 'CLAUDE.md',
             status: 'ok', remedy: none });
     } else {
-        out.push({ id: 'project.context', level: 'project', label: 'CLAUDE.md ausente', status: 'warn',
+        out.push({ id: 'project.context', level: 'project', label: 'contexto del agente (CLAUDE.md/AGENTS.md) ausente', status: 'warn',
             remedy: skillRemedy('project-context-init') });
     }
 
