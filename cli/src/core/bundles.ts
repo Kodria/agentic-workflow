@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { REGISTRY_DIR } from './registry';
+import { Scope } from '../providers';
 
 export const REGISTRY_CONTENT_DIR = path.join(REGISTRY_DIR, 'registry');
 
@@ -85,4 +86,36 @@ export function resolveBundleSkills(bundleName: string, bundles: BundleDefinitio
     };
     visit(bundleName);
     return Array.from(skills);
+}
+
+/**
+ * Default install scope for a bundle, derived from its scope class.
+ * baseline/ambient install globally; project bundles install locally.
+ */
+export function defaultScopeForBundle(scope: BundleScope): Scope {
+    return scope === 'project' ? 'local' : 'global';
+}
+
+/**
+ * Resolves the dependency closure of a bundle in deps-first order, deduped.
+ * Each bundle appears once, after all bundles it depends on. Unknown names
+ * (missing from `bundles`) are skipped.
+ */
+export function resolveBundleClosure(
+    bundleName: string,
+    bundles: BundleDefinition[]
+): BundleDefinition[] {
+    const byName = new Map(bundles.map((b) => [b.name, b]));
+    const ordered: BundleDefinition[] = [];
+    const seen = new Set<string>();
+    const visit = (name: string) => {
+        if (seen.has(name)) return;
+        seen.add(name);
+        const b = byName.get(name);
+        if (!b) return;
+        for (const dep of b.dependsOn) visit(dep);
+        ordered.push(b);
+    };
+    visit(bundleName);
+    return ordered;
 }
