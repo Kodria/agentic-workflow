@@ -38,7 +38,7 @@ function detectGitState(repoDir: string): GitState {
             .toString().trim();
         if (porcelain.length > 0) return 'dirty';
         try {
-            const behind = execSync('git rev-list --count HEAD..@{u}', { cwd: repoDir, stdio: ['ignore', 'pipe', 'ignore'] })
+            const behind = execSync('git rev-list --count HEAD..@{u}', { cwd: repoDir, stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 })
                 .toString().trim();
             if (behind !== '' && behind !== '0') return 'behind';
         } catch { /* sin upstream configurado */ }
