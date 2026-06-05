@@ -14,6 +14,8 @@ import { addExtension as realAddExtension } from '../profile';
 import { gatherContext } from '../diagnostics/context';
 import { detectExtensions } from './detector';
 import type { InitDeps, InitActions, StepResult } from './types';
+import { InjectionOrchestrator, ContextOp } from '../context/orchestrator';
+import { getInjection } from '../../providers';
 
 // ---------------------------------------------------------------------------
 // defaultActions — bridges the real functions to the InitActions interface
@@ -53,6 +55,10 @@ export const defaultActions: InitActions = {
     addExtension: (root, name) => { realAddExtension(root, name); },
 
     gatherProject: (cwd, bundles) => gatherContext({ cwd, bundles }).project,
+
+    contextStatus: (op) => new InjectionOrchestrator().contextStatus(op),
+
+    installContext: (op) => { new InjectionOrchestrator().installContext(op); },
 };
 
 // ---------------------------------------------------------------------------
@@ -212,4 +218,23 @@ export function stepContext(d: InitDeps): StepResult {
     if (proj.context.present) return ok('project.context', 'project', 'skipped');
 
     return ok('project.context', 'project', 'pending', 'skill: project-context-init');
+}
+
+/** Step 2b – Inject AWM context for agents whose mechanism isn't the Claude hook. */
+export function stepContextInjection(d: InitDeps): StepResult {
+    const inj = getInjection(d.agent);
+    if (!inj) return ok('machine.contextInjection', 'machine', 'skipped', 'sin mecanismo de inyección');
+    if (inj.type === 'cc-settings-merge') return ok('machine.contextInjection', 'machine', 'skipped', 'cubierto por hook');
+
+    const op: ContextOp = {
+        agent: d.agent,
+        scope: 'global',
+        registryRoot: d.registryRoot,
+        installMethod: d.installMethod,
+        profileExtensions: [],
+    };
+    if (d.actions.contextStatus(op) === 'injected') return ok('machine.contextInjection', 'machine', 'skipped');
+
+    d.actions.installContext(op);
+    return ok('machine.contextInjection', 'machine', 'applied');
 }

@@ -1,7 +1,7 @@
 // src/core/init/orchestrator.ts
 import { InitDeps, InitOutcome, StepResult } from './types';
 import {
-    stepCache, stepHook, stepDevCore, stepAmbient,
+    stepCache, stepHook, stepContextInjection, stepDevCore, stepAmbient,
     stepProfile, stepActivation, stepSensors, stepConstitution, stepContext,
 } from './steps';
 import { runChecks } from '../diagnostics/checks';
@@ -33,6 +33,7 @@ export async function runInitSteps(deps: InitDeps): Promise<InitOutcome> {
     // Nivel máquina (siempre)
     steps.push(await wrapStep('machine.cache', 'machine', () => stepCache(deps)));
     steps.push(await wrapStep('machine.hook', 'machine', () => stepHook(deps)));
+    steps.push(await wrapStep('machine.contextInjection', 'machine', () => stepContextInjection(deps)));
     steps.push(await wrapStep('machine.devCore', 'machine', () => stepDevCore(deps)));
     steps.push(await wrapStep('machine.ambient', 'machine', () => stepAmbient(deps)));
 

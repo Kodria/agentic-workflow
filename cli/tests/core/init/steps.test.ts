@@ -4,6 +4,7 @@ import path from 'path';
 import {
     stepCache, stepHook, stepDevCore, stepAmbient,
     stepProfile, stepActivation, stepSensors, stepConstitution, stepContext,
+    stepContextInjection,
 } from '../../../src/core/init/steps';
 import type { InitDeps, InitActions } from '../../../src/core/init/types';
 import type { HarnessContext, ProjectFacts } from '../../../src/core/diagnostics/types';
@@ -48,6 +49,8 @@ function spies(): jest.Mocked<InitActions> {
         initSensors: jest.fn(() => ({ detection: { pack: 'js-ts' } })),
         addExtension: jest.fn(),
         gatherProject: jest.fn((_cwd: string, _bundles: any) => null),
+        contextStatus: jest.fn(() => 'absent' as const),
+        installContext: jest.fn(),
     } as unknown as jest.Mocked<InitActions>;
 }
 
@@ -206,5 +209,45 @@ describe('stepConstitution / stepContext (frontera agente)', () => {
         const ctx: HarnessContext = { machine: machine(), project: project() };
         expect(stepConstitution(deps(ctx, a)).action).toBe('skipped');
         expect(stepContext(deps(ctx, a)).action).toBe('skipped');
+    });
+});
+
+describe('stepContextInjection', () => {
+    it('skips claude-code (covered by stepHook)', () => {
+        const a = spies();
+        const r = stepContextInjection(deps({ machine: machine(), project: null }, a, { agent: 'claude-code' }));
+        expect(r.action).toBe('skipped');
+        expect(a.installContext).not.toHaveBeenCalled();
+    });
+
+    it('skips an agent without an injection mechanism', () => {
+        const a = spies();
+        const r = stepContextInjection(deps({ machine: machine(), project: null }, a, { agent: 'antigravity' }));
+        expect(r.action).toBe('skipped');
+        expect(a.installContext).not.toHaveBeenCalled();
+    });
+
+    it('skips opencode when already injected', () => {
+        const a = spies();
+        (a as any).contextStatus = jest.fn(() => 'injected' as const);
+        const r = stepContextInjection(deps({ machine: machine(), project: null }, a, { agent: 'opencode' }));
+        expect(r.action).toBe('skipped');
+        expect(a.installContext).not.toHaveBeenCalled();
+    });
+
+    it('installs context for opencode when absent', () => {
+        const a = spies();
+        (a as any).contextStatus = jest.fn(() => 'absent' as const);
+        const r = stepContextInjection(deps({ machine: machine(), project: null }, a, { agent: 'opencode' }));
+        expect(r.action).toBe('applied');
+        expect(a.installContext).toHaveBeenCalledWith(expect.objectContaining({ agent: 'opencode', scope: 'global' }));
+    });
+
+    it('installs context for opencode when stale', () => {
+        const a = spies();
+        (a as any).contextStatus = jest.fn(() => 'stale' as const);
+        const r = stepContextInjection(deps({ machine: machine(), project: null }, a, { agent: 'opencode' }));
+        expect(r.action).toBe('applied');
+        expect(a.installContext).toHaveBeenCalled();
     });
 });

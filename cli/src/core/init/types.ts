@@ -3,6 +3,8 @@ import type { HarnessContext, CheckReport, ProjectFacts } from '../diagnostics/t
 import type { BundleDefinition } from '../bundles';
 import type { AgentTarget } from '../../providers';
 import type { InstallMethod, InstallSummary, SyncResult } from '../bundle-install';
+import type { ContextOp } from '../context/orchestrator';
+import type { InjectionState } from '../context/types';
 
 export type StepAction = 'applied' | 'skipped' | 'pending' | 'failed';
 
@@ -39,6 +41,8 @@ export interface InitActions {
     initSensors: (o: { cwd: string; registryRoot: string; configure: boolean }) => { detection: { pack: string } };
     addExtension: (root: string, name: string) => void;
     gatherProject: (cwd: string, bundles: BundleDefinition[]) => ProjectFacts | null;
+    contextStatus: (op: ContextOp) => InjectionState;
+    installContext: (op: ContextOp) => void;
 }
 
 export interface InitDeps {
