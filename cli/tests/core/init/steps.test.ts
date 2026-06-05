@@ -23,6 +23,7 @@ function machine(): HarnessContext['machine'] {
         hook: { present: true, degraded: false },
         devCore: { present: true, brokenLinks: [] },
         ambient: { wanted: [], installed: [] },
+        contextInjection: [],
     };
 }
 

@@ -54,6 +54,20 @@ function machineChecks(m: MachineFacts): CheckResult[] {
             status: installed ? 'ok' : 'missing', remedy: installed ? none : cmd(`awm add ${b}`) });
     }
 
+    // machine.context.<agent> — una fila por agente con contexto AWM gestionado
+    for (const c of m.contextInjection) {
+        if (c.state === 'injected') {
+            out.push({ id: `machine.context.${c.agent}`, level: 'machine', label: `contexto AWM (${c.agent})`,
+                status: 'ok', remedy: none });
+        } else if (c.state === 'stale') {
+            out.push({ id: `machine.context.${c.agent}`, level: 'machine', label: `contexto AWM (${c.agent})`,
+                status: 'warn', detail: 'contexto desactualizado', remedy: cmd('awm init') });
+        } else {
+            out.push({ id: `machine.context.${c.agent}`, level: 'machine', label: `contexto AWM (${c.agent})`,
+                status: 'missing', remedy: cmd('awm init') });
+        }
+    }
+
     return out;
 }
 

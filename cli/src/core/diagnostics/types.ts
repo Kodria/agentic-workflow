@@ -1,4 +1,6 @@
 // src/core/diagnostics/types.ts
+import { AgentTarget } from '../../providers';
+import { InjectionState } from '../context/types';
 
 export type CheckLevel = 'machine' | 'project';
 export type CheckStatus = 'ok' | 'warn' | 'missing'; // ✔ / ⚠ / ✖
@@ -24,6 +26,7 @@ export interface MachineFacts {
     hook: { present: boolean; degraded?: boolean };
     devCore: { present: boolean; brokenLinks: string[] };
     ambient: { wanted: string[]; installed: string[] };
+    contextInjection: { agent: AgentTarget; state: InjectionState }[];
 }
 
 export interface ProjectFacts {

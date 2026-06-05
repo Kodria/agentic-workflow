@@ -1,5 +1,7 @@
 import { runChecks } from '../../../src/core/diagnostics/checks';
 import { HarnessContext, ProjectFacts } from '../../../src/core/diagnostics/types';
+import { AgentTarget } from '../../../src/providers';
+import { InjectionState } from '../../../src/core/context/types';
 
 function healthyMachine(): HarnessContext['machine'] {
     return {
@@ -7,6 +9,7 @@ function healthyMachine(): HarnessContext['machine'] {
         hook: { present: true, degraded: false },
         devCore: { present: true, brokenLinks: [] },
         ambient: { wanted: [], installed: [] },
+        contextInjection: [],
     };
 }
 
@@ -164,5 +167,31 @@ describe('runChecks — project', () => {
         const c = runChecks({ machine: healthyMachine(), project: p }).results.find((r) => r.id === 'project.sensors')!;
         expect(c.status).toBe('missing');
         expect(c.remedy).toEqual({ kind: 'command', value: 'awm sensors init' });
+    });
+});
+
+describe('machine.context.<agent> checks', () => {
+    function machineWith(contextInjection: { agent: AgentTarget; state: InjectionState }[]) {
+        return { ...healthyMachine(), contextInjection };
+    }
+
+    it('ok when context is injected for an agent', () => {
+        const r = runChecks({ machine: machineWith([{ agent: 'opencode', state: 'injected' }]), project: null });
+        const row = r.results.find((x) => x.id === 'machine.context.opencode')!;
+        expect(row.status).toBe('ok');
+        expect(row.remedy).toEqual({ kind: 'none' });
+    });
+
+    it('missing + awm init remedy when absent (degrades overall)', () => {
+        const r = runChecks({ machine: machineWith([{ agent: 'opencode', state: 'absent' }]), project: null });
+        const row = r.results.find((x) => x.id === 'machine.context.opencode')!;
+        expect(row.status).toBe('missing');
+        expect(row.remedy).toEqual({ kind: 'command', value: 'awm init' });
+        expect(r.overall).toBe('degraded');
+    });
+
+    it('warn when stale', () => {
+        const r = runChecks({ machine: machineWith([{ agent: 'claude-code', state: 'stale' }]), project: null });
+        expect(r.results.find((x) => x.id === 'machine.context.claude-code')!.status).toBe('warn');
     });
 });

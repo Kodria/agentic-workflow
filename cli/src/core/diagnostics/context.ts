@@ -104,6 +104,7 @@ function gatherMachine(bundles: BundleDefinition[]): MachineFacts {
         hook: { present: hookPresent, degraded: hookDegraded },
         devCore: { present: devCorePresent, brokenLinks },
         ambient: { wanted, installed },
+        contextInjection: [],
     };
 }
 
