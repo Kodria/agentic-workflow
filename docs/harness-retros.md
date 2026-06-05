@@ -5,6 +5,35 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
 
 ---
 
+## 2026-06-05 — `post-implementation-qa` omitido tras `subagent-driven-development`
+
+- **Clase:** de proceso
+- **Dónde se vio:** ≥2 ciclos de desarrollo donde `subagent-driven-development`
+  terminó su final code review, el TERMINATION_PHASE decía `STOP COMPLETELY`, y el
+  agente pasó directamente a preguntar sobre `finishing-a-development-branch` sin
+  haber invocado `post-implementation-qa`. El QA (plan-vs-implementación, Type B/C)
+  se omitió en cada caso hasta que el usuario lo detectó manualmente.
+
+- **Causa raíz:** El TERMINATION_PHASE mezclaba dos invariantes distintos:
+  1. "No auto-mergees" (válido)
+  2. "Para antes del QA" (incorrecto — QA es obligatorio, no opcional)
+  El texto `STOP COMPLETELY. Do NOT invoke... any other skill` impedía que el agente
+  invocara `post-implementation-qa`, que es parte del flujo mandatorio definido en
+  `development-process`. El final code reviewer interno del skill solo cubre calidad
+  de código, no fidelidad al plan.
+
+- **Regla agregada:**
+  - `registry/skills/subagent-driven-development/SKILL.md` — TERMINATION_PHASE
+    reemplaza `STOP COMPLETELY` por una secuencia explícita que exige invocar
+    `post-implementation-qa` como primer paso antes de reportar y preguntar al
+    usuario. Incluye el `Why not skip it` explicando la diferencia de clases de
+    revisión.
+
+- **Sensor que lo atrapa:** proceso (no hay sensor automático para esto — la regla
+  vive en el texto del skill y el agente la sigue al entrar en TERMINATION_PHASE).
+
+---
+
 ## 2026-05-27 — Los sensores nunca se corrieron durante subagent-driven-development
 
 - **Clase:** de proceso + estructural

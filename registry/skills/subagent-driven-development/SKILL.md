@@ -215,12 +215,15 @@ Final reviewer: All requirements met, ready to merge
 
 ## <TERMINATION_PHASE>
 
-Once all tasks are complete and the final code review is approved, **STOP COMPLETELY**. Do NOT invoke finishing-a-development-branch or any other skill on your own.
+Once all tasks are complete and the final code review is approved, you have **one mandatory step before stopping**: invoke `post-implementation-qa`.
 
-Your only final step is:
-1. Report a summary of all implemented tasks and the final reviewer's verdict.
-2. Ask the user: *"¿Deseas continuar con la fase de cierre de rama? Si usas `development-process`, el orquestador evaluará el estado del proyecto y te propondrá el siguiente paso."*
-3. Wait for confirmation. Do NOT proceed automatically.
+> **Why not skip it:** The final code reviewer within this skill checks code quality. `post-implementation-qa` checks plan fidelity (Type B) and logic bugs (Type C) — a different review class that this skill's code reviewer does not perform. Skipping it means the branch reaches `finishing-a-development-branch` without a plan-vs-implementation audit.
+
+Your sequence — execute in order, do not skip:
+1. **Invoke `post-implementation-qa`** via the Skill tool. It runs inline in this session: it reads the plan, diffs the branch, dispatches its own review subagent, runs the fix loop if needed, and adds `<!-- awm-qa-complete -->` to the plan. Let it complete fully before continuing.
+2. After QA completes, report a summary of all implemented tasks and the QA verdict.
+3. Ask the user: *"¿Deseas continuar con la fase de cierre de rama? Si usas `development-process`, el orquestador evaluará el estado del proyecto y te propondrá el siguiente paso."*
+4. Wait for confirmation. Do NOT invoke `finishing-a-development-branch` automatically.
 
 ## Advantages
 
