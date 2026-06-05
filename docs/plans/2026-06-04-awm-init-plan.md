@@ -1,5 +1,7 @@
 # `awm init` (Sub-fase 1d) Implementation Plan
 
+<!-- awm-qa-complete: 2026-06-04 -->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Entregar `awm init`, el orquestador único, context-aware e idempotente que deja el harness en estado conocido-bueno, reutilizando el motor de diagnóstico de 1c (`gatherContext → runChecks → CheckReport`) sin refactorizarlo.
