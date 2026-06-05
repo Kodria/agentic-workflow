@@ -7,3 +7,4 @@ coverage
 .agents
 skills-lock.json
 tmp/*
+*.awm.*
