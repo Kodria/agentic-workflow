@@ -1,0 +1,57 @@
+// cli/src/core/context/orchestrator.ts
+import { AgentTarget, Scope, ProviderConfig, PROVIDERS, getInjection } from '../../providers';
+import { InjectionStrategy } from './strategies/strategy';
+import { HookMergeStrategy } from './strategies/hook-merge';
+import { ConfigInstructionsStrategy } from './strategies/config-instructions';
+import { buildContext } from './provider';
+import { materialize, globalContextPath } from './materializer';
+import { InjectionInput, InjectionState } from './types';
+
+export type ContextOp = {
+    agent: AgentTarget;
+    scope: Scope;
+    registryRoot: string;
+    installMethod: 'symlink' | 'copy';
+    profileExtensions: string[];
+};
+
+type Overrides = { providerOverride?: ProviderConfig; contextPathOverride?: string };
+
+export class InjectionOrchestrator {
+    constructor(private overrides: Overrides = {}) {}
+
+    private provider(agent: AgentTarget): ProviderConfig {
+        return this.overrides.providerOverride ?? PROVIDERS[agent];
+    }
+
+    private strategy(agent: AgentTarget): InjectionStrategy {
+        const inj = this.overrides.providerOverride?.injection ?? getInjection(agent);
+        if (!inj) throw new Error(`agent '${agent}' has no injection mechanism configured`);
+        switch (inj.type) {
+            case 'cc-settings-merge': return new HookMergeStrategy();
+            case 'config-instructions': return new ConfigInstructionsStrategy();
+        }
+    }
+
+    private inputFor(op: ContextOp): InjectionInput {
+        const ctx = buildContext({ registryRoot: op.registryRoot, profileExtensions: op.profileExtensions });
+        const absPath = this.overrides.contextPathOverride ?? globalContextPath();
+        const ref = materialize(ctx, absPath, op.scope);
+        return { ref, registryRoot: op.registryRoot, installMethod: op.installMethod, agent: op.agent, scope: op.scope };
+    }
+
+    installContext(op: ContextOp): void {
+        const provider = this.provider(op.agent);
+        this.strategy(op.agent).inject(this.inputFor(op), provider);
+    }
+
+    uninstallContext(op: ContextOp): void {
+        const provider = this.provider(op.agent);
+        this.strategy(op.agent).remove(this.inputFor(op), provider);
+    }
+
+    contextStatus(op: ContextOp): InjectionState {
+        const provider = this.provider(op.agent);
+        return this.strategy(op.agent).status(this.inputFor(op), provider);
+    }
+}
