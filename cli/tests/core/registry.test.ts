@@ -72,12 +72,28 @@ describe('buildCli', () => {
         expect(result.error).toContain('tsc error');
     });
 
-    it('returns failure when spawnSync throws (e.g. npm not found)', () => {
-        mockSpawnSync.mockImplementation(() => { throw new Error('npm not found'); });
+    it('returns failure with stdout message when tsc writes errors to stdout', () => {
+        mockSpawnSync.mockReturnValue({ status: 2, stderr: Buffer.from(''), stdout: Buffer.from('error TS2322: Type mismatch'), pid: 1, output: [], signal: null });
         const { buildCli } = require('../../src/core/registry');
-        expect(() => buildCli('/fake/cli')).not.toThrow();
         const result = buildCli('/fake/cli');
         expect(result.success).toBe(false);
+        expect((result as { success: false; error: string }).error).toContain('TS2322');
+    });
+
+    it('returns failure when spawnSync throws unexpectedly', () => {
+        mockSpawnSync.mockImplementation(() => { throw new Error('unexpected error'); });
+        const { buildCli } = require('../../src/core/registry');
+        const result = buildCli('/fake/cli');
+        expect(result.success).toBe(false);
+        expect((result as { success: false; error: string }).error).toBe('unexpected error');
+    });
+
+    it('returns failure when npm is not found (shell returns status 127)', () => {
+        mockSpawnSync.mockReturnValue({ status: 127, stderr: Buffer.from('/bin/sh: npm: not found'), stdout: Buffer.from(''), pid: 1, output: [], signal: null });
+        const { buildCli } = require('../../src/core/registry');
+        const result = buildCli('/fake/cli');
+        expect(result.success).toBe(false);
+        expect((result as { success: false; error: string }).error).toContain('not found');
     });
 
     it('uses REGISTRY_DIR/cli as default cwd', () => {

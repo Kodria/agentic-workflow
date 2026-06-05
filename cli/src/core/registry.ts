@@ -39,7 +39,11 @@ export function buildCli(cliDir: string = path.join(REGISTRY_DIR, "cli")): Build
       timeout: 60_000,
     });
     if (result.status !== 0) {
-      const msg = result.error?.message || result.stderr?.toString().trim() || "tsc build failed with no output";
+      const msg =
+        result.error?.message ||
+        result.stderr?.toString().trim() ||
+        result.stdout?.toString().trim() ||
+        "tsc build failed with no output";
       return { success: false, error: msg };
     }
     return { success: true };
