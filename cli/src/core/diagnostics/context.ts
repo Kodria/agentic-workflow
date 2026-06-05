@@ -4,7 +4,10 @@ import os from 'os';
 import path from 'path';
 import { execSync } from 'child_process';
 import { HarnessContext, MachineFacts, ProjectFacts, GitState } from './types';
-import { PROVIDERS } from '../../providers';
+import { PROVIDERS, AgentTarget } from '../../providers';
+import { REGISTRY_DIR } from '../registry';
+import { InjectionOrchestrator } from '../context/orchestrator';
+import { InjectionState } from '../context/types';
 import { computeHookStatus } from '../../commands/hooks/status';
 import { findProjectRoot, readProfile } from '../profile';
 import { discoverBundles, resolveBundleSkills, BundleDefinition } from '../bundles';
@@ -46,6 +49,34 @@ function detectGitState(repoDir: string): GitState {
     } catch {
         return 'unknown';
     }
+}
+
+// Estado del contexto AWM para agentes cuyo mecanismo de inyección es config-instructions
+// (hoy: opencode). claude-code usa el hook → ya se reporta como machine.hook, no se duplica.
+// Sólo se reporta un agente si su archivo de config existe (señal de que el agente está en uso).
+function gatherContextInjection(): { agent: AgentTarget; state: InjectionState }[] {
+    const out: { agent: AgentTarget; state: InjectionState }[] = [];
+    const orch = new InjectionOrchestrator();
+    for (const agent of Object.keys(PROVIDERS) as AgentTarget[]) {
+        const inj = PROVIDERS[agent].injection;
+        if (!inj || inj.type !== 'config-instructions') continue;
+        if (!fs.existsSync(inj.configPath)) continue;
+        let state: InjectionState = 'absent';
+        try {
+            state = orch.contextStatus({
+                agent,
+                scope: 'global',
+                registryRoot: REGISTRY_DIR,
+                installMethod: 'symlink',
+                profileExtensions: [],
+            });
+        } catch {
+            // registry ausente u otra falla → tratar como ausente (no romper el doctor)
+            state = 'absent';
+        }
+        out.push({ agent, state });
+    }
+    return out;
 }
 
 function gatherMachine(bundles: BundleDefinition[]): MachineFacts {
@@ -104,7 +135,7 @@ function gatherMachine(bundles: BundleDefinition[]): MachineFacts {
         hook: { present: hookPresent, degraded: hookDegraded },
         devCore: { present: devCorePresent, brokenLinks },
         ambient: { wanted, installed },
-        contextInjection: [],
+        contextInjection: gatherContextInjection(),
     };
 }
 

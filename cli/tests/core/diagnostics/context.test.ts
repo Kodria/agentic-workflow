@@ -89,6 +89,23 @@ describe('gatherContext', () => {
         expect(ctx.machine.ambient.installed).toEqual(['personal-notion']);
     });
 
+    it('machine: contextInjection empty when opencode config is absent', () => {
+        const { gatherContext } = require('../../../src/core/diagnostics/context');
+        const ctx = gatherContext({ cwd: tmpHome, bundles: [] });
+        // sin ~/.config/opencode/opencode.json no se reporta ninguna fila de contexto
+        expect(ctx.machine.contextInjection).toEqual([]);
+    });
+
+    it('machine: contextInjection reports opencode absent when config exists without the sentinel', () => {
+        const ocDir = path.join(tmpHome, '.config', 'opencode');
+        fs.mkdirSync(ocDir, { recursive: true });
+        fs.writeFileSync(path.join(ocDir, 'opencode.json'),
+            JSON.stringify({ $schema: 'https://opencode.ai/config.json', instructions: [] }));
+        const { gatherContext } = require('../../../src/core/diagnostics/context');
+        const ctx = gatherContext({ cwd: tmpHome, bundles: [] });
+        expect(ctx.machine.contextInjection).toEqual([{ agent: 'opencode', state: 'absent' }]);
+    });
+
     it('project: null when cwd has no project root', () => {
         // tmpHome is bare (no .git / package.json / .awm/profile.json)
         const { gatherContext } = require('../../../src/core/diagnostics/context');
