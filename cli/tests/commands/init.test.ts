@@ -1,4 +1,4 @@
-import { renderInitOutcome, runInit } from '../../src/commands/init';
+import { renderInitOutcome } from '../../src/commands/init';
 import type { InitOutcome } from '../../src/core/init/types';
 import type { CheckReport } from '../../src/core/diagnostics/types';
 import fs from 'fs';
@@ -46,6 +46,7 @@ describe('runInit', () => {
         originalAwmHome = process.env.AWM_HOME;
         process.env.HOME = tmpHome;
         process.env.AWM_HOME = path.join(tmpHome, '.awm');
+        jest.resetModules();
         writeSpy = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
     });
     afterEach(() => {
@@ -56,11 +57,13 @@ describe('runInit', () => {
     });
 
     it('returns exit 1 on a bare HOME and never prompts with --yes (cache stubbed)', async () => {
+        const { runInit } = require('../../src/commands/init');
         const code = await runInit({ cwd: tmpHome, yes: true, actions: { syncCache: async () => {} } });
         expect(code).toBe(1); // cache/hook/devCore siguen ausentes (syncCache no-op) → degradado
     });
 
     it('--json emits a parseable InitOutcome', async () => {
+        const { runInit } = require('../../src/commands/init');
         const code = await runInit({ cwd: tmpHome, yes: true, json: true, actions: { syncCache: async () => {} } });
         const written = writeSpy.mock.calls.map((c) => c[0]).join('');
         const parsed = JSON.parse(written);
