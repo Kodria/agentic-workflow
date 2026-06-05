@@ -7,7 +7,7 @@ import { buildGroupedOptions } from './utils/grouping';
 import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, buildLevel1Options, buildLevel2Options, resolveLevel2Selection, ALL_SENTINEL, ArtifactView, artifactValue } from './utils/registry-view';
 import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
-import { syncRegistry } from './core/registry';
+import { syncRegistry, buildCli } from './core/registry';
 import { regenerateGlobalContext } from './core/context/regenerate';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
 import { discoverBundles, defaultScopeForBundle } from './core/bundles';
@@ -327,6 +327,16 @@ program.command('update')
       try {
           await syncRegistry();
           s.stop('Registry updated successfully.');
+
+          const buildSpinner = spinner();
+          buildSpinner.start('Compiling latest CLI...');
+          const build = buildCli();
+          if (build.success) {
+              buildSpinner.stop('CLI compiled successfully.');
+          } else {
+              buildSpinner.stop(pc.yellow('CLI build skipped — running previous version.'));
+              console.warn(pc.yellow(`  ⚠  ${build.error}`));
+          }
 
           try {
               const regen = regenerateGlobalContext();

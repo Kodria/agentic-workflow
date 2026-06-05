@@ -36,6 +36,7 @@ export function buildCli(cliDir: string = path.join(REGISTRY_DIR, "cli")): Build
       cwd: cliDir,
       stdio: "pipe",
       shell: true,
+      timeout: 60_000,
     });
     if (result.status !== 0) {
       const msg = result.error?.message || result.stderr?.toString().trim() || "tsc build failed with no output";
