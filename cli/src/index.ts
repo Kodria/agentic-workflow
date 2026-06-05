@@ -8,6 +8,7 @@ import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage,
 import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
 import { syncRegistry } from './core/registry';
+import { regenerateGlobalContext } from './core/context/regenerate';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
 import { discoverBundles, defaultScopeForBundle } from './core/bundles';
 import { addBundle, syncProfile } from './core/bundle-install';
@@ -326,6 +327,13 @@ program.command('update')
       try {
           await syncRegistry();
           s.stop('Registry updated successfully.');
+
+          const regen = regenerateGlobalContext();
+          const refreshed = regen.filter((r) => r.action === 'refreshed').map((r) => r.agent);
+          if (refreshed.length > 0) {
+              console.log(pc.green(`  ✓ Regenerated AWM context for: ${refreshed.join(', ')}`));
+          }
+
           outro('✅ All symlinked skills and workflows are now up-to-date.');
       } catch (e: any) {
           s.stop('Update failed.');
