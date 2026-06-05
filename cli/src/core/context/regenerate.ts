@@ -1,3 +1,9 @@
+// W3 — Regeneración del contexto global tras `awm update`.
+// Para cada agente con inyección config-instructions cuya config exista:
+//   - 'stale'    (sentinel presente, archivo materializado ausente/viejo) → re-materializa.
+//   - 'injected' (ya fresco)                                              → no toca nada.
+//   - 'absent'   (sentinel ausente)                                       → no inyecta (eso es `awm init`).
+// Solo scope global. Defensivo: nunca rompe `awm update` por una falla de un agente.
 import fs from 'fs';
 import { PROVIDERS, AgentTarget } from '../../providers';
 import { REGISTRY_DIR } from '../registry';
