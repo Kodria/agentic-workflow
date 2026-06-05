@@ -97,9 +97,21 @@ describe('stepHook / stepDevCore / stepAmbient', () => {
         expect(stepHook(deps({ machine: m, project: null }, a)).action).toBe('applied');
         expect(a.installHook).toHaveBeenCalled();
     });
+    it('hook reinstalls when present but degraded', () => {
+        const a = spies();
+        const m = machine(); m.hook = { present: true, degraded: true };
+        expect(stepHook(deps({ machine: m, project: null }, a)).action).toBe('applied');
+        expect(a.installHook).toHaveBeenCalled();
+    });
     it('devCore installs baseline when links broken', () => {
         const a = spies();
         const m = machine(); m.devCore = { present: true, brokenLinks: ['brainstorming'] };
+        expect(stepDevCore(deps({ machine: m, project: null }, a)).action).toBe('applied');
+        expect(a.installBundle).toHaveBeenCalled();
+    });
+    it('devCore installs when not present at all', () => {
+        const a = spies();
+        const m = machine(); m.devCore = { present: false, brokenLinks: [] };
         expect(stepDevCore(deps({ machine: m, project: null }, a)).action).toBe('applied');
         expect(a.installBundle).toHaveBeenCalled();
     });
