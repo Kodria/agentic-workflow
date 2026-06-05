@@ -38,7 +38,7 @@ export interface InitActions {
     }) => SyncResult;
     initSensors: (o: { cwd: string; registryRoot: string; configure: boolean }) => { detection: { pack: string } };
     addExtension: (root: string, name: string) => void;
-    gatherProject: (cwd: string) => ProjectFacts | null;
+    gatherProject: (cwd: string, bundles: BundleDefinition[]) => ProjectFacts | null;
 }
 
 export interface InitDeps {

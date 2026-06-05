@@ -57,7 +57,8 @@ export function detectExtensions(root: string): DetectionResult {
     }
 
     // infra (deferred — sin bundle aún)
-    const k8s = fs.existsSync(root) && fs.readdirSync(root).some((f) => f.endsWith('.k8s.yaml'));
+    let k8s = false;
+    try { k8s = fs.readdirSync(root).some((f) => f.endsWith('.k8s.yaml')); } catch { /* directory vanished */ }
     const infraMarker = INFRA_MARKERS.find((m) => fs.existsSync(path.join(root, m)));
     if (k8s || infraMarker) {
         deferred.push('infra (Fase futura)');

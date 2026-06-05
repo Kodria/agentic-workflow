@@ -43,7 +43,7 @@ function spies(): jest.Mocked<InitActions> {
         syncProfile: jest.fn(() => ({ installed: ['a'], skipped: [], extensions: ['frontend'] })),
         initSensors: jest.fn(() => ({ detection: { pack: 'js-ts' } })),
         addExtension: jest.fn(),
-        gatherProject: jest.fn(() => null),
+        gatherProject: jest.fn((_cwd: string, _bundles: any) => null),
     } as unknown as jest.Mocked<InitActions>;
 }
 
@@ -136,14 +136,14 @@ describe('stepProfile', () => {
 describe('stepActivation', () => {
     it('skips when expected all linked and none broken', () => {
         const a = spies();
-        a.gatherProject = jest.fn((_cwd: string) => project({ activeBundles: { expected: ['x'], linked: ['x'], broken: [] } }));
+        a.gatherProject = jest.fn((_cwd: string, _bundles: any) => project({ activeBundles: { expected: ['x'], linked: ['x'], broken: [] } }));
         const r = stepActivation(deps({ machine: machine(), project: project() }, a));
         expect(r.action).toBe('skipped');
         expect(a.syncProfile).not.toHaveBeenCalled();
     });
     it('syncs when links missing', () => {
         const a = spies();
-        a.gatherProject = jest.fn((_cwd: string) => project({ activeBundles: { expected: ['x', 'y'], linked: ['x'], broken: [] } }));
+        a.gatherProject = jest.fn((_cwd: string, _bundles: any) => project({ activeBundles: { expected: ['x', 'y'], linked: ['x'], broken: [] } }));
         const r = stepActivation(deps({ machine: machine(), project: project() }, a));
         expect(r.action).toBe('applied');
         expect(a.syncProfile).toHaveBeenCalled();

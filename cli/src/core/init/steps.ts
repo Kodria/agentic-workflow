@@ -31,7 +31,7 @@ export const defaultActions: InitActions = {
     installBundle: (o) => realInstallBundle({
         bundleName: o.bundleName,
         bundles: o.bundles,
-        agents: [o.agents[0]],
+        agents: o.agents,
         method: o.method,
         projectRoot: o.projectRoot,
         contentDir: o.contentDir,
@@ -52,7 +52,7 @@ export const defaultActions: InitActions = {
 
     addExtension: (root, name) => { realAddExtension(root, name); },
 
-    gatherProject: (cwd) => gatherContext({ cwd }).project,
+    gatherProject: (cwd, bundles) => gatherContext({ cwd, bundles }).project,
 };
 
 // ---------------------------------------------------------------------------
@@ -170,7 +170,7 @@ export function stepActivation(d: InitDeps): StepResult {
     if (!proj) return ok('project.activation', 'project', 'skipped', 'no project');
 
     // Re-read project state so we pick up extensions added by stepProfile
-    const fresh = d.actions.gatherProject(proj.root) ?? proj;
+    const fresh = d.actions.gatherProject(proj.root, d.bundles) ?? proj;
     const { expected, linked, broken } = fresh.activeBundles;
 
     const allLinked = expected.every((e) => linked.includes(e)) && broken.length === 0;
