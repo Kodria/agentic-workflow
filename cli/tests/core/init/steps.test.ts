@@ -1,3 +1,6 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import {
     stepCache, stepHook, stepDevCore, stepAmbient,
     stepProfile, stepActivation, stepSensors, stepConstitution, stepContext,
@@ -129,12 +132,21 @@ describe('stepHook / stepDevCore / stepAmbient', () => {
 });
 
 describe('stepProfile', () => {
-    it('writes confirmed extensions and skips already-present ones', async () => {
-        const a = spies();
-        const ctx: HarnessContext = { machine: machine(), project: project({ profile: { present: true, extensions: [] } }) };
-        const d = deps(ctx, a, { confirmExtensions: async () => ['frontend'] });
-        const r = await stepProfile({ ...d, ctx });
-        expect(['skipped', 'applied']).toContain(r.action);
+    it('adds confirmed extension when detector finds a match', async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-step-profile-'));
+        try {
+            fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ dependencies: { next: '14.0.0' } }));
+            const a = spies();
+            const ctx: HarnessContext = {
+                machine: machine(),
+                project: project({ root, profile: { present: true, extensions: [] } }),
+            };
+            const r = await stepProfile(deps(ctx, a, { confirmExtensions: async (p) => p }));
+            expect(r.action).toBe('applied');
+            expect(a.addExtension).toHaveBeenCalledWith(root, 'frontend');
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
     });
     it('skips when confirm returns empty', async () => {
         const a = spies();

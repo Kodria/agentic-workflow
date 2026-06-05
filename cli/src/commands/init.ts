@@ -88,7 +88,7 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
 
         // confirmExtensions: with --yes auto-confirm all proposed; without --yes show interactive multiselect
         const confirmExtensions = opts.yes
-            ? async (proposed: string[]) => proposed
+            ? async (proposed: string[]) => proposed  // --yes: auto-confirm all; signals not shown
             : async (proposed: string[], signals: string[]) => {
                   const { multiselect, isCancel } = await import('@clack/prompts');
                   const choice = await multiselect({

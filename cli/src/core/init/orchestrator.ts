@@ -8,6 +8,7 @@ import { runChecks } from '../diagnostics/checks';
 import { gatherContext } from '../diagnostics/context';
 
 function wrapStep(id: string, level: StepResult['level'], fn: () => StepResult | Promise<StepResult>): Promise<StepResult> {
+    // id/level used only on error path; happy-path result carries its own id from the step function.
     try {
         const result = fn();
         if (result instanceof Promise) {
