@@ -36,7 +36,7 @@ export function buildCli(cliDir: string = path.join(REGISTRY_DIR, "cli")): Build
       cwd: cliDir,
       stdio: "pipe",
       shell: true,
-      timeout: 60_000,
+      timeout: 120_000, // Allow up to 2 minutes for tsc on slow machines / cold builds
     });
     if (result.status !== 0) {
       const msg =

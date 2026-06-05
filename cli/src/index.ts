@@ -328,6 +328,7 @@ program.command('update')
           await syncRegistry();
           s.stop('Registry updated successfully.');
 
+          // Node has dist/ loaded into memory; rebuilding mid-run is safe.
           const buildSpinner = spinner();
           buildSpinner.start('Compiling latest CLI...');
           const build = buildCli();
