@@ -20,7 +20,7 @@ export type HookConfig = {
 };
 
 export type InjectionConfig =
-    | { type: 'cc-settings-merge'; settingsPath: string; scriptsDir: string; matcher: string; eventName: string }
+    | { type: 'cc-settings-merge' }  // routing discriminant only; hook params come from provider.hooks
     | { type: 'config-instructions'; configPath: string; field: 'instructions' };
 
 export type ProviderConfig = {
@@ -65,13 +65,7 @@ export const PROVIDERS: Record<AgentTarget, ProviderConfig> = {
             matcher: 'startup|clear|compact',
             eventName: 'SessionStart'
         },
-        injection: {
-            type: 'cc-settings-merge',
-            settingsPath: path.join(homedir, '.claude/settings.json'),
-            scriptsDir: path.join(awmHome, 'hooks'),
-            matcher: 'startup|clear|compact',
-            eventName: 'SessionStart',
-        }
+        injection: { type: 'cc-settings-merge' }
     }
 };
 

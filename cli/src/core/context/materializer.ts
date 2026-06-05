@@ -15,7 +15,8 @@ export function globalContextPath(): string {
 }
 
 export function materialize(ctx: AwmContext, absPath: string, scope: Scope): MaterializedRef {
-    const onDisk = fs.existsSync(absPath) ? sha256(fs.readFileSync(absPath, 'utf-8')) : null;
+    let onDisk: string | null = null;
+    try { onDisk = sha256(fs.readFileSync(absPath, 'utf-8')); } catch { /* file absent or removed */ }
     if (onDisk !== ctx.contentHash) {
         fs.mkdirSync(path.dirname(absPath), { recursive: true });
         fs.writeFileSync(absPath, ctx.markdown, 'utf-8');

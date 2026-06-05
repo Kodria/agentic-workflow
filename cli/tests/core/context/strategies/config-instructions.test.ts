@@ -75,6 +75,13 @@ describe('ConfigInstructionsStrategy.status', () => {
         expect(strat.status(input, provider)).toBe('stale');
     });
 
+    it('stale when sentinel entry is present but the materialized file no longer exists', () => {
+        const { absPath, provider, input } = setup();
+        strat.inject(input, provider);
+        fs.rmSync(absPath);
+        expect(strat.status(input, provider)).toBe('stale');
+    });
+
     it('throws actionable error on malformed opencode.json instead of clobbering', () => {
         const { configPath, provider, input } = setup();
         fs.writeFileSync(configPath, '{ not json');

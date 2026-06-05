@@ -25,7 +25,9 @@ export class InjectionOrchestrator {
     }
 
     private strategy(agent: AgentTarget): InjectionStrategy {
-        const inj = this.overrides.providerOverride?.injection ?? getInjection(agent);
+        const inj = this.overrides.providerOverride !== undefined
+            ? this.overrides.providerOverride.injection
+            : getInjection(agent);
         if (!inj) throw new Error(`agent '${agent}' has no injection mechanism configured`);
         switch (inj.type) {
             case 'cc-settings-merge': return new HookMergeStrategy();
@@ -58,8 +60,10 @@ export class InjectionOrchestrator {
         try {
             const ctx = buildContext({ registryRoot: op.registryRoot, profileExtensions: op.profileExtensions });
             contentHash = ctx.contentHash;
-        } catch {
-            // Registry missing — fall back to empty hash; strategy handles absent file independently.
+        } catch (err) {
+            // Only suppress "registry not yet initialised" — all other errors propagate.
+            const msg = err instanceof Error ? err.message : String(err);
+            if (!msg.includes('using-awm skill not found')) throw err;
         }
         const ref: MaterializedRef = { absPath, scope: op.scope, contentHash };
         return { ref, registryRoot: op.registryRoot, installMethod: op.installMethod, agent: op.agent, scope: op.scope };
