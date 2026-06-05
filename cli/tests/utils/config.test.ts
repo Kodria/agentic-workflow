@@ -5,12 +5,16 @@ import path from 'path';
 import os from 'os';
 
 describe('Preferences Manager', () => {
-    const PREFS_DIR = path.join(os.homedir(), '.awm');
-    const PREFS_FILE = path.join(PREFS_DIR, 'preferences.json');
+    let tmpDir: string;
+
+    beforeEach(() => {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-prefs-'));
+        process.env.AWM_HOME = tmpDir;
+    });
 
     afterEach(() => {
-        if (fs.existsSync(PREFS_FILE)) fs.unlinkSync(PREFS_FILE);
-        if (fs.existsSync(PREFS_DIR)) fs.rmSync(PREFS_DIR, { recursive: true, force: true });
+        delete process.env.AWM_HOME;
+        fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
     it('creates default preferences if none exist', () => {

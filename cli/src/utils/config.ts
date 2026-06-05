@@ -16,21 +16,24 @@ const DEFAULT_PREFS: AwmPreferences = {
     defaultScope: 'local'
 };
 
-const PREFS_DIR = path.join(os.homedir(), '.awm');
-const PREFS_FILE = path.join(PREFS_DIR, 'preferences.json');
+function prefsDir(): string {
+    return process.env.AWM_HOME || path.join(process.env.HOME || os.homedir(), '.awm');
+}
 
 export function getPreferences(): AwmPreferences {
-    if (!fs.existsSync(PREFS_FILE)) {
+    const file = path.join(prefsDir(), 'preferences.json');
+    if (!fs.existsSync(file)) {
         savePreferences(DEFAULT_PREFS);
         return DEFAULT_PREFS;
     }
-    const raw = fs.readFileSync(PREFS_FILE, 'utf-8');
+    const raw = fs.readFileSync(file, 'utf-8');
     return JSON.parse(raw) as AwmPreferences;
 }
 
 export function savePreferences(prefs: AwmPreferences): void {
-    if (!fs.existsSync(PREFS_DIR)) {
-        fs.mkdirSync(PREFS_DIR, { recursive: true });
+    const dir = prefsDir();
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(PREFS_FILE, JSON.stringify(prefs, null, 2), 'utf-8');
+    fs.writeFileSync(path.join(dir, 'preferences.json'), JSON.stringify(prefs, null, 2), 'utf-8');
 }
