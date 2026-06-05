@@ -52,4 +52,27 @@ describe('InjectionOrchestrator (opencode, real strategy)', () => {
         expect(() => bare.installContext({ agent: 'antigravity', scope: 'global', registryRoot, installMethod: 'symlink', profileExtensions: [] }))
             .toThrow('no injection mechanism');
     });
+
+    it('contextStatus returns stale when the materialized file drifts without re-materializing it', () => {
+        const args = { agent: 'opencode' as const, scope: 'global' as const, registryRoot, installMethod: 'symlink' as const, profileExtensions: [] };
+        orch.installContext(args);
+        // Drift the materialized file content after install
+        fs.writeFileSync(absPath, 'DRIFTED CONTENT');
+        // contextStatus must detect stale without correcting the file
+        expect(orch.contextStatus(args)).toBe('stale');
+        // Confirm the drifted content is still on disk (not silently corrected)
+        expect(fs.readFileSync(absPath, 'utf-8')).toBe('DRIFTED CONTENT');
+    });
+
+    it('uninstallContext succeeds even when the registry does not exist', () => {
+        const args = { agent: 'opencode' as const, scope: 'global' as const, registryRoot, installMethod: 'symlink' as const, profileExtensions: [] };
+        orch.installContext(args);
+        // Remove the registry to simulate a degraded state
+        fs.rmSync(registryRoot, { recursive: true, force: true });
+        // uninstallContext must not throw 'using-awm skill not found'
+        expect(() => orch.uninstallContext(args)).not.toThrow();
+        // After removal the sentinel must be gone from opencode.json
+        const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        expect((cfg.instructions ?? []).includes(absPath)).toBe(false);
+    });
 });

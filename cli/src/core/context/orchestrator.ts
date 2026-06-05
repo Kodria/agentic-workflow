@@ -5,7 +5,7 @@ import { HookMergeStrategy } from './strategies/hook-merge';
 import { ConfigInstructionsStrategy } from './strategies/config-instructions';
 import { buildContext } from './provider';
 import { materialize, globalContextPath } from './materializer';
-import { InjectionInput, InjectionState } from './types';
+import { InjectionInput, InjectionState, MaterializedRef } from './types';
 
 export type ContextOp = {
     agent: AgentTarget;
@@ -33,10 +33,35 @@ export class InjectionOrchestrator {
         }
     }
 
+    /** Full input: builds context from registry and materializes to disk. Used by installContext only. */
     private inputFor(op: ContextOp): InjectionInput {
         const ctx = buildContext({ registryRoot: op.registryRoot, profileExtensions: op.profileExtensions });
         const absPath = this.overrides.contextPathOverride ?? globalContextPath();
         const ref = materialize(ctx, absPath, op.scope);
+        return { ref, registryRoot: op.registryRoot, installMethod: op.installMethod, agent: op.agent, scope: op.scope };
+    }
+
+    /** Path-only input: no buildContext, no materialize. Safe for remove() which never reads contentHash. */
+    private pathInputFor(op: ContextOp): InjectionInput {
+        const absPath = this.overrides.contextPathOverride ?? globalContextPath();
+        const ref: MaterializedRef = { absPath, scope: op.scope, contentHash: '' };
+        return { ref, registryRoot: op.registryRoot, installMethod: op.installMethod, agent: op.agent, scope: op.scope };
+    }
+
+    /**
+     * Status input: builds context from registry (to get expected hash) but does NOT materialize.
+     * Avoids silently correcting a stale file before the strategy can observe it.
+     */
+    private statusInputFor(op: ContextOp): InjectionInput {
+        const absPath = this.overrides.contextPathOverride ?? globalContextPath();
+        let contentHash = '';
+        try {
+            const ctx = buildContext({ registryRoot: op.registryRoot, profileExtensions: op.profileExtensions });
+            contentHash = ctx.contentHash;
+        } catch {
+            // Registry missing — fall back to empty hash; strategy handles absent file independently.
+        }
+        const ref: MaterializedRef = { absPath, scope: op.scope, contentHash };
         return { ref, registryRoot: op.registryRoot, installMethod: op.installMethod, agent: op.agent, scope: op.scope };
     }
 
@@ -47,11 +72,11 @@ export class InjectionOrchestrator {
 
     uninstallContext(op: ContextOp): void {
         const provider = this.provider(op.agent);
-        this.strategy(op.agent).remove(this.inputFor(op), provider);
+        this.strategy(op.agent).remove(this.pathInputFor(op), provider);
     }
 
     contextStatus(op: ContextOp): InjectionState {
         const provider = this.provider(op.agent);
-        return this.strategy(op.agent).status(this.inputFor(op), provider);
+        return this.strategy(op.agent).status(this.statusInputFor(op), provider);
     }
 }

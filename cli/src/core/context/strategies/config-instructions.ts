@@ -35,6 +35,9 @@ export class ConfigInstructionsStrategy implements InjectionStrategy {
     inject(input: InjectionInput, provider: ProviderConfig): void {
         const { configPath } = this.cfgOf(provider);
         const cfg = this.read(configPath);
+        if (cfg.instructions !== undefined && !Array.isArray(cfg.instructions)) {
+            throw new Error(`${configPath}: 'instructions' field must be an array. Fix it manually, then re-run.`);
+        }
         const list = Array.isArray(cfg.instructions) ? cfg.instructions : [];
         if (!list.includes(input.ref.absPath)) list.push(input.ref.absPath);
         cfg.instructions = list;

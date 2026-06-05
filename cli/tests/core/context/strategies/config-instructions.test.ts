@@ -80,4 +80,9 @@ describe('ConfigInstructionsStrategy.status', () => {
         fs.writeFileSync(configPath, '{ not json');
         expect(() => strat.inject(input, provider)).toThrow('not valid JSON');
     });
+
+    it('throws when instructions is a non-array value instead of silently overwriting it', () => {
+        const { provider, input } = setup({ instructions: 'docs/rules.md' as unknown as string[] });
+        expect(() => strat.inject(input, provider)).toThrow("'instructions' field must be an array");
+    });
 });
