@@ -72,7 +72,6 @@ function gatherContextInjection(): { agent: AgentTarget; state: InjectionState }
             });
         } catch {
             // registry ausente u otra falla → tratar como ausente (no romper el doctor)
-            state = 'absent';
         }
         out.push({ agent, state });
     }
