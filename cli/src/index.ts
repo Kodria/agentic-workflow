@@ -328,10 +328,14 @@ program.command('update')
           await syncRegistry();
           s.stop('Registry updated successfully.');
 
-          const regen = regenerateGlobalContext();
-          const refreshed = regen.filter((r) => r.action === 'refreshed').map((r) => r.agent);
-          if (refreshed.length > 0) {
-              console.log(pc.green(`  ✓ Regenerated AWM context for: ${refreshed.join(', ')}`));
+          try {
+              const regen = regenerateGlobalContext();
+              const refreshed = regen.filter((r) => r.action === 'refreshed').map((r) => r.agent);
+              if (refreshed.length > 0) {
+                  console.log(pc.green(`  ✓ Regenerated AWM context for: ${refreshed.join(', ')}`));
+              }
+          } catch {
+              // context regeneration failure must not abort a successful registry update
           }
 
           outro('✅ All symlinked skills and workflows are now up-to-date.');
