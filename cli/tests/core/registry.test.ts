@@ -1,9 +1,11 @@
 import { syncRegistry, REGISTRY_DIR, DEFAULT_REMOTE } from '../../src/core/registry';
 import fs from 'fs';
 import simpleGit from 'simple-git';
+import { spawnSync } from 'child_process';
 
 jest.mock('simple-git');
 jest.mock('fs');
+jest.mock('child_process');
 
 const mockGit = {
     clone: jest.fn().mockResolvedValue(undefined),
@@ -44,5 +46,44 @@ describe('Registry Manager', () => {
         await syncRegistry(customRemote);
 
         expect(mockGit.clone).toHaveBeenCalledWith(customRemote, REGISTRY_DIR);
+    });
+});
+
+const mockSpawnSync = spawnSync as jest.MockedFunction<typeof spawnSync>;
+
+describe('buildCli', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
+    it('returns success when npm run build exits 0', () => {
+        mockSpawnSync.mockReturnValue({ status: 0, stderr: Buffer.from(''), stdout: Buffer.from(''), pid: 1, output: [], signal: null });
+        const { buildCli } = require('../../src/core/registry');
+        const result = buildCli('/fake/cli');
+        expect(result).toEqual({ success: true });
+        expect(mockSpawnSync).toHaveBeenCalledWith('npm', ['run', 'build'], expect.objectContaining({ cwd: '/fake/cli', shell: true }));
+    });
+
+    it('returns failure with error message when build exits non-zero', () => {
+        mockSpawnSync.mockReturnValue({ status: 1, stderr: Buffer.from('tsc error: Type mismatch'), stdout: Buffer.from(''), pid: 1, output: [], signal: null });
+        const { buildCli } = require('../../src/core/registry');
+        const result = buildCli('/fake/cli');
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('tsc error');
+    });
+
+    it('returns failure when spawnSync throws (e.g. npm not found)', () => {
+        mockSpawnSync.mockImplementation(() => { throw new Error('npm not found'); });
+        const { buildCli } = require('../../src/core/registry');
+        expect(() => buildCli('/fake/cli')).not.toThrow();
+        const result = buildCli('/fake/cli');
+        expect(result.success).toBe(false);
+    });
+
+    it('uses REGISTRY_DIR/cli as default cwd', () => {
+        mockSpawnSync.mockReturnValue({ status: 0, stderr: Buffer.from(''), stdout: Buffer.from(''), pid: 1, output: [], signal: null });
+        const { buildCli, REGISTRY_DIR } = require('../../src/core/registry');
+        buildCli();
+        expect(mockSpawnSync).toHaveBeenCalledWith('npm', ['run', 'build'], expect.objectContaining({ cwd: `${REGISTRY_DIR}/cli` }));
     });
 });

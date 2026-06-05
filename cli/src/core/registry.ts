@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import simpleGit from "simple-git";
+import { spawnSync } from "child_process";
 
 const AWM_HOME = process.env.AWM_HOME || path.join(process.env.HOME || os.homedir(), ".awm");
 export const REGISTRY_DIR = path.join(AWM_HOME, "cli-source");
@@ -24,5 +25,25 @@ export async function syncRegistry(remoteUrl?: string): Promise<void> {
   } else {
     const repoGit = simpleGit(REGISTRY_DIR);
     await repoGit.pull();
+  }
+}
+
+export type BuildResult = { success: true } | { success: false; error: string };
+
+export function buildCli(cliDir: string = path.join(REGISTRY_DIR, "cli")): BuildResult {
+  try {
+    const result = spawnSync("npm", ["run", "build"], {
+      cwd: cliDir,
+      stdio: "pipe",
+      shell: true,
+    });
+    if (result.status !== 0) {
+      const msg = result.error?.message || result.stderr?.toString().trim() || "tsc build failed with no output";
+      return { success: false, error: msg };
+    }
+    return { success: true };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { success: false, error: msg };
   }
 }
