@@ -206,3 +206,17 @@ Idempotente: reemplaza entre marcadores; si no existen, *appendea*. Remove: borr
 ## 10. Fuentes
 
 - [opencode.ai/docs/rules](https://opencode.ai/docs/rules) — `instructions[]` en `opencode.json`, `AGENTS.md`, carga eager vs lazy.
+
+## 11. Resultado del spike (Task 1) — 2026-06-05
+
+**Versión probada:** opencode 1.16.2
+
+**Pregunta:** ¿`instructions[]` en `~/.config/opencode/opencode.json` carga el contenido del archivo en el contexto del agente?
+
+**Resultado:**
+- `instructions[]` con **ruta absoluta** en el **config global** (`~/.config/opencode/opencode.json`) → ✅ **carga eager confirmada**. El agente vio el token sentinela `AWM_PROBE_TOKEN_42` correctamente.
+- `instructions[]` con **ruta relativa** en un **config de proyecto local** (`./opencode.json`) → ❌ no cargó (razón probable: OpenCode no leyó el config local, o la resolución de ruta relativa no aplica en ese contexto).
+
+**Conclusión:** El diseño de `ConfigInstructionsStrategy` es correcto. AWM escribe la ruta absoluta `~/.awm/context/awm-context.md` en `~/.config/opencode/opencode.json`, y OpenCode la carga en cada sesión.
+
+**Tolerancia a archivo ausente:** No probado (la validación manual se detuvo al confirmar la carga eager). Riesgo bajo — la estrategia crea el archivo antes de escribir el sentinel, y `regenerateGlobalContext()` lo regenera si queda stale.
