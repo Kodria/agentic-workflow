@@ -25,7 +25,7 @@ export function regenerateGlobalContext(
             agent,
             scope: 'global',
             registryRoot: REGISTRY_DIR,
-            installMethod: 'symlink',
+            installMethod: 'symlink', // config-instructions strategy ignores this; consistent with stepContextInjection/gatherContextInjection
             profileExtensions: [],
         };
 
