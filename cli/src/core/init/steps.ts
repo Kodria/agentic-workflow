@@ -21,6 +21,8 @@ import { getInjection } from '../../providers';
 // defaultActions — bridges the real functions to the InitActions interface
 // ---------------------------------------------------------------------------
 
+const realInjectionOrchestrator = new InjectionOrchestrator();
+
 export const defaultActions: InitActions = {
     syncCache: async () => { await syncRegistry(); },
 
@@ -56,9 +58,9 @@ export const defaultActions: InitActions = {
 
     gatherProject: (cwd, bundles) => gatherContext({ cwd, bundles }).project,
 
-    contextStatus: (op) => new InjectionOrchestrator().contextStatus(op),
+    contextStatus: (op) => realInjectionOrchestrator.contextStatus(op),
 
-    installContext: (op) => { new InjectionOrchestrator().installContext(op); },
+    installContext: (op) => { realInjectionOrchestrator.installContext(op); },
 };
 
 // ---------------------------------------------------------------------------
