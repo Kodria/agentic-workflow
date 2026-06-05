@@ -19,12 +19,17 @@ export type HookConfig = {
     eventName: string;
 };
 
+export type InjectionConfig =
+    | { type: 'cc-settings-merge'; settingsPath: string; scriptsDir: string; matcher: string; eventName: string }
+    | { type: 'config-instructions'; configPath: string; field: 'instructions' };
+
 export type ProviderConfig = {
     label: string;
     skill: ArtifactConfig;
     workflow: ArtifactConfig | null;
     agent: ArtifactConfig | null;
     hooks?: HookConfig;
+    injection?: InjectionConfig;
 };
 
 const homedir = process.env.HOME || os.homedir();
@@ -41,7 +46,12 @@ export const PROVIDERS: Record<AgentTarget, ProviderConfig> = {
         label: 'OpenCode',
         skill:    { global: path.join(homedir, '.agents/skills'),          local: '.agents/skills' },
         workflow: null,
-        agent:    { global: path.join(homedir, '.config/opencode/agents'), local: '.agents/profiles' }
+        agent:    { global: path.join(homedir, '.config/opencode/agents'), local: '.agents/profiles' },
+        injection: {
+            type: 'config-instructions',
+            configPath: path.join(homedir, '.config/opencode/opencode.json'),
+            field: 'instructions',
+        },
     },
     'claude-code': {
         label: 'Claude Code',
@@ -54,6 +64,13 @@ export const PROVIDERS: Record<AgentTarget, ProviderConfig> = {
             scriptsDir: path.join(awmHome, 'hooks'),
             matcher: 'startup|clear|compact',
             eventName: 'SessionStart'
+        },
+        injection: {
+            type: 'cc-settings-merge',
+            settingsPath: path.join(homedir, '.claude/settings.json'),
+            scriptsDir: path.join(awmHome, 'hooks'),
+            matcher: 'startup|clear|compact',
+            eventName: 'SessionStart',
         }
     }
 };
@@ -71,4 +88,8 @@ export function getTargetPath(type: ArtifactType, agent: AgentTarget, scope: Sco
 export function getHookConfig(agent: AgentTarget): HookConfig | undefined {
     const provider = PROVIDERS[agent];
     return provider?.hooks;
+}
+
+export function getInjection(agent: AgentTarget): InjectionConfig | undefined {
+    return PROVIDERS[agent]?.injection;
 }
