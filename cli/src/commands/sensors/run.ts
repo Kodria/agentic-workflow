@@ -95,10 +95,25 @@ function runSensor(name: string, cmd: string, timeout: number, cwd: string): Sen
             return { name, status: 'skipped', errors: [], skipReason: `timeout after ${timeout}ms` };
         }
         // Non-zero exit — the normal path for linters/typecheckers that found
-        // issues. Their report is on stdout/stderr; parse it for findings.
+        // findings. Parse the output; if it yields findings, that's a fail.
         const raw = String((err.stdout ?? '') + (err.stderr ?? ''));
         const errors = getFormatter(name)(raw);
         if (errors.length > 0) return { name, status: 'fail', errors };
+        // A missing tool (binary not installed) must NOT pass silently — the gate
+        // cannot certify what it could not run. Treat it as a fail with a clear message.
+        const lower = raw.toLowerCase();
+        const toolMissing =
+            lower.includes('command not found') ||
+            lower.includes('not found') ||
+            lower.includes('enoent') ||
+            lower.includes('could not determine executable');
+        if (toolMissing) {
+            return {
+                name,
+                status: 'fail',
+                errors: [{ message: `sensor tool not available: ${raw.slice(0, 200)}` }],
+            };
+        }
         return { name, status: 'skipped', errors: [], skipReason: `exit ${err.status}: ${raw.slice(0, 200)}` };
     }
 }

@@ -140,6 +140,37 @@ describe('runSensors', () => {
     });
 });
 
+describe('runSensors — missing tool is a fail, not a skip', () => {
+    beforeEach(() => {
+        mockExecSyncFn.mockReset();
+        // Simulate shell exit 127 "command not found" — matches what Node's execSync
+        // captures in err.stderr when the binary does not exist on PATH.
+        mockExecSyncFn.mockImplementation(() => {
+            throw Object.assign(new Error('Command failed: awm-nonexistent-binary-xyz --check'), {
+                stdout: '',
+                stderr: '/bin/sh: awm-nonexistent-binary-xyz: command not found\n',
+                status: 127,
+            });
+        });
+    });
+
+    it('marks a sensor whose binary is missing as fail', () => {
+        const root = mkTmp();
+        fs.mkdirSync(path.join(root, '.awm'));
+        fs.writeFileSync(
+            path.join(root, '.awm', 'sensors.json'),
+            JSON.stringify({
+                pack: 'test',
+                sensors: { ghost: { cmd: 'awm-nonexistent-binary-xyz --check', fast: true } },
+            }),
+        );
+        const out = runSensors({ cwd: root });
+        const ghost = out.sensors.find((s) => s.name === 'ghost');
+        expect(ghost?.status).toBe('fail');
+        expect(out.overall).toBe('fail');
+    });
+});
+
 describe('runSensors — not_certified + auto-discovery', () => {
     beforeEach(() => {
         mockExecSyncFn.mockReset();
