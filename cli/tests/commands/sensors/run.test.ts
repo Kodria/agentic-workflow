@@ -284,7 +284,8 @@ describe('runSensors — honest floor (not_certified over real stack)', () => {
             JSON.stringify({ pack: 'generic', sensors: { security: { cmd: 'semgrep .', fast: false } } }));
         fs.writeFileSync(path.join(dir, 'package.json'), '{}');
         const prevHome = process.env.AWM_HOME;
-        process.env.AWM_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-nohome-')); // no cli-source → no upgrade
+        const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-nohome-'));
+        process.env.AWM_HOME = fakeHome; // no cli-source → no upgrade
         try {
             jest.resetModules();
             const { runSensors } = require('../../../src/commands/sensors/run');
@@ -293,6 +294,7 @@ describe('runSensors — honest floor (not_certified over real stack)', () => {
         } finally {
             process.env.AWM_HOME = prevHome;
             fs.rmSync(dir, { recursive: true });
+            fs.rmSync(fakeHome, { recursive: true, force: true });
         }
     });
 });

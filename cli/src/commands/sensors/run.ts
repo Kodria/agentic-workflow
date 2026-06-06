@@ -68,17 +68,20 @@ export function reconcilePack(
     manifestDir: string,
     manifest: SensorManifest,
     registryRoot?: string,
-): { manifest: SensorManifest; upgradedFrom?: string } {
-    if (manifest.pack !== 'generic') return { manifest };
+): { manifest: SensorManifest; upgradedFrom?: string; detection: ReturnType<typeof detectStack> } {
+    if (manifest.pack !== 'generic') {
+        const detection = detectStack(manifestDir);
+        return { manifest, detection };
+    }
     const detection = detectStack(manifestDir);
-    if (detection.pack === 'generic') return { manifest }; // truly generic — stay honest
+    if (detection.pack === 'generic') return { manifest, detection }; // truly generic — stay honest
     const root = registryRoot ?? defaultRegistryRoot();
-    if (!fs.existsSync(root)) return { manifest }; // can't rebuild without registry
+    if (!fs.existsSync(root)) return { manifest, detection }; // can't rebuild without registry
     try {
         const { manifest: rebuilt } = initSensors({ cwd: manifestDir, registryRoot: root, configure: true });
-        return { manifest: rebuilt, upgradedFrom: 'generic' };
+        return { manifest: rebuilt, upgradedFrom: 'generic', detection };
     } catch {
-        return { manifest }; // never abort the run on a reconcile failure
+        return { manifest, detection }; // never abort the run on a reconcile failure
     }
 }
 
@@ -193,7 +196,7 @@ export function runSensors(opts: RunOptions = {}): RunOutput {
 
     // Honest floor: a benign-green 'skipped' over a tree that clearly HAS a stack
     // (indicators present) is a false green — the gate ran nothing real. Never green.
-    if (overall === 'skipped' && detectStack(manifestDir).pack !== 'generic') {
+    if (overall === 'skipped' && reconciled.detection.pack !== 'generic') {
         overall = 'not_certified';
     }
 
