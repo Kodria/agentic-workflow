@@ -1,5 +1,7 @@
 # Body B-1 — Instalación/reparación agnóstica — Implementation Plan
 
+<!-- awm-qa-complete: 2026-06-06 -->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Que `awm init --agent <X>` deje a cualquier agente (Claude u OpenCode) tan funcional como a Claude — diagnóstico/reparación de skills scoped al agente target, prosa sin sesgo a `~/.claude`, y `CONSTITUTION.md` entregado a OpenCode.
