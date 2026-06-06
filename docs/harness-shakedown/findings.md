@@ -82,6 +82,22 @@ Bugs encontrados corriendo el arnés de verdad. Se arreglan DESPUÉS de que el l
 
 ---
 
+## Hallazgo #5 — Fuga al path de Claude por "hardcode blando" (prosa de skills + prior del modelo) + instalación inconsistente en OpenCode
+
+- **Encontrado:** 2026-06-05, el usuario notó en el transcript de OpenCode: `Read ~/.claude/skills/post-implementation-qa/deep-review-prompt.md` — OpenCode leyó UNA skill desde el path de Claude, mientras leía las otras desde `~/.agents/skills/`.
+- **Investigación (descartando hardcodes "duros"):** NO está hardcodeado en: config de OpenCode (`opencode.json`/agents — grep `.claude` vacío), contexto inyectado (`awm-context.md` no menciona `.claude`), cuerpo de subagent-driven (dice "via the Skill tool", sin path), cuerpo de post-implementation-qa (usa `./deep-review-prompt.md` relativo), ni el código del CLI.
+- **Causa real (hardcode BLANDO):**
+  1. `post-implementation-qa` NO está registrada como agent nativo de OpenCode — solo 5 skills están en `~/.config/opencode/agents/` (brainstorming, development-process, writing-plans, executing-plans, docs-system-orchestrator). QA y subagent-driven no.
+  2. Al necesitar QA sin tenerla como agent nativo, el **modelo la localizó solo** y eligió `~/.claude/skills/` — porque esa es la **convención dominante en la PROSA del ecosistema** (p.ej. `writing-skills/SKILL.md:13` declara "`~/.claude/skills` for Claude Code"; 4 skills mencionan `.claude/skills`) y/o el prior del modelo subyacente.
+  3. Funcionó solo por coincidencia: ambos symlinks (`~/.claude/skills/...` y `~/.agents/skills/...`) apuntan al mismo target.
+- **Por qué es peor que un hardcode duro:** es invisible (no aparece en config auditable), pervasivo (repartido en texto de varias skills + prior del modelo), y **sobrevive a un plumbing agnóstico perfecto** — el agente deriva a `~/.claude` aunque la inyección sea 100% agnóstica.
+- **Inconsistencia adicional destapada:** AWM instala skills a OpenCode por **3 mecanismos descoordinados** — 5 como agents nativos (`~/.config/opencode/agents/`), el resto como symlinks (`~/.agents/skills/`), y algunas se resuelven vía `~/.claude/skills/`. Cobertura inconsistente.
+- **Severidad:** MEDIA-ALTA para agnosticismo — el plumbing puede ser agnóstico y aun así el comportamiento derivar a Claude.
+- **Dirección de fix:** (a) auditar y des-Claude-izar la prosa de las skills (referir paths de forma agnóstica o no referirlos); (b) unificar la instalación de skills a OpenCode en UN mecanismo con cobertura completa; (c) considerar instalar todas las skills relevantes como agents nativos de OpenCode, no solo 5.
+- **Estado:** ABIERTO.
+
+---
+
 ## Hallazgo #3 — El verde del arnés viene de la disciplina del agente, no del gate (implicación de agnosticismo)
 
 - **Encontrado:** 2026-06-05, Fase 5-6 (Claude), como consecuencia del Hallazgo #2.
