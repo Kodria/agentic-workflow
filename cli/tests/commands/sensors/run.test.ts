@@ -141,6 +141,12 @@ describe('runSensors', () => {
 });
 
 describe('runSensors — missing tool is a fail, not a skip', () => {
+    let root: string;
+
+    afterEach(() => {
+        if (root) fs.rmSync(root, { recursive: true, force: true });
+    });
+
     beforeEach(() => {
         mockExecSyncFn.mockReset();
         // Simulate shell exit 127 "command not found" — matches what Node's execSync
@@ -155,7 +161,7 @@ describe('runSensors — missing tool is a fail, not a skip', () => {
     });
 
     it('marks a sensor whose binary is missing as fail', () => {
-        const root = mkTmp();
+        root = mkTmp();
         fs.mkdirSync(path.join(root, '.awm'));
         fs.writeFileSync(
             path.join(root, '.awm', 'sensors.json'),

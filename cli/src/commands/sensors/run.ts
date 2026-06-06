@@ -104,7 +104,6 @@ function runSensor(name: string, cmd: string, timeout: number, cwd: string): Sen
         const lower = raw.toLowerCase();
         const toolMissing =
             lower.includes('command not found') ||
-            lower.includes('not found') ||
             lower.includes('enoent') ||
             lower.includes('could not determine executable');
         if (toolMissing) {
