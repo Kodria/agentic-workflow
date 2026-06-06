@@ -10,6 +10,7 @@ jest.mock('child_process');
 const mockGit = {
     clone: jest.fn().mockResolvedValue(undefined),
     pull: jest.fn().mockResolvedValue(undefined),
+    reset: jest.fn().mockResolvedValue(undefined),
 };
 
 (simpleGit as unknown as jest.Mock).mockReturnValue(mockGit);
@@ -35,7 +36,19 @@ describe('Registry Manager', () => {
         await syncRegistry();
 
         expect(mockGit.clone).not.toHaveBeenCalled();
+        expect(mockGit.reset).toHaveBeenCalledWith(['--hard']);
         expect(mockGit.pull).toHaveBeenCalled();
+    });
+
+    it('should reset hard before pulling to discard local changes', async () => {
+        (fs.existsSync as jest.Mock).mockReturnValue(true);
+        const callOrder: string[] = [];
+        mockGit.reset.mockImplementation(() => { callOrder.push('reset'); return Promise.resolve(); });
+        mockGit.pull.mockImplementation(() => { callOrder.push('pull'); return Promise.resolve(); });
+
+        await syncRegistry();
+
+        expect(callOrder).toEqual(['reset', 'pull']);
     });
 
     it('should use a custom remote URL when provided', async () => {

@@ -24,6 +24,7 @@ export async function syncRegistry(remoteUrl?: string): Promise<void> {
     await git.clone(remote, REGISTRY_DIR);
   } else {
     const repoGit = simpleGit(REGISTRY_DIR);
+    await repoGit.reset(['--hard']);
     await repoGit.pull();
   }
 }
