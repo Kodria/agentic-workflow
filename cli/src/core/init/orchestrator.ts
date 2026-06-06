@@ -2,7 +2,7 @@
 import { InitDeps, InitOutcome, StepResult } from './types';
 import {
     stepCache, stepHook, stepContextInjection, stepDevCore, stepGlobalSkillsRepair, stepAmbient,
-    stepProfile, stepActivation, stepSensors, stepConstitution, stepContext,
+    stepProfile, stepActivation, stepSensors, stepConstitution, stepConstitutionInjection, stepContext,
 } from './steps';
 import { runChecks } from '../diagnostics/checks';
 import { gatherContext } from '../diagnostics/context';
@@ -44,6 +44,7 @@ export async function runInitSteps(deps: InitDeps): Promise<InitOutcome> {
         steps.push(await wrapStep('project.activation', 'project', () => stepActivation(deps)));
         steps.push(await wrapStep('project.sensors', 'project', () => stepSensors(deps)));
         steps.push(await wrapStep('project.constitution', 'project', () => stepConstitution(deps)));
+        steps.push(await wrapStep('project.constitutionInjection', 'project', () => stepConstitutionInjection(deps)));
         steps.push(await wrapStep('project.context', 'project', () => stepContext(deps)));
     }
 

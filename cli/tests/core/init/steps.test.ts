@@ -4,7 +4,7 @@ import path from 'path';
 import {
     stepCache, stepHook, stepDevCore, stepAmbient,
     stepProfile, stepActivation, stepSensors, stepConstitution, stepContext,
-    stepContextInjection, stepGlobalSkillsRepair,
+    stepContextInjection, stepGlobalSkillsRepair, stepConstitutionInjection,
 } from '../../../src/core/init/steps';
 import type { InitDeps, InitActions } from '../../../src/core/init/types';
 import type { HarnessContext, ProjectFacts } from '../../../src/core/diagnostics/types';
@@ -54,6 +54,7 @@ function spies(): jest.Mocked<InitActions> {
         contextStatus: jest.fn(() => 'absent' as const),
         installContext: jest.fn(),
         repairGlobalSkills: jest.fn(() => ({ relinked: [], pruned: [], failed: [] })),
+        injectProjectConstitution: jest.fn(() => 'injected' as const),
     } as unknown as jest.Mocked<InitActions>;
 }
 
@@ -261,6 +262,35 @@ describe('stepGlobalSkillsRepair', () => {
         const r = stepGlobalSkillsRepair(deps({ machine: m, project: null }, a, { agent: 'opencode' }));
         expect(r.action).toBe('applied');
         expect(a.repairGlobalSkills).toHaveBeenCalledWith(PROVIDERS['opencode'].skill.global, expect.any(String));
+    });
+});
+
+describe('stepConstitutionInjection (#6)', () => {
+    it('injects for a config-instructions agent when CONSTITUTION.md is present', () => {
+        const a = spies();
+        const r = stepConstitutionInjection(
+            deps({ machine: machine(), project: project({ constitution: { present: true } }) }, a, { agent: 'opencode' }),
+        );
+        expect(r.action).toBe('applied');
+        expect(a.injectProjectConstitution).toHaveBeenCalledWith({ projectRoot: '/repo', agent: 'opencode' });
+    });
+
+    it('skips for Claude (delivered by the hook), never touching the action', () => {
+        const a = spies();
+        const r = stepConstitutionInjection(
+            deps({ machine: machine(), project: project({ constitution: { present: true } }) }, a, { agent: 'claude-code' }),
+        );
+        expect(r.action).toBe('skipped');
+        expect(a.injectProjectConstitution).not.toHaveBeenCalled();
+    });
+
+    it('skips when CONSTITUTION.md is absent', () => {
+        const a = spies();
+        const r = stepConstitutionInjection(
+            deps({ machine: machine(), project: project({ constitution: { present: false } }) }, a, { agent: 'opencode' }),
+        );
+        expect(r.action).toBe('skipped');
+        expect(a.injectProjectConstitution).not.toHaveBeenCalled();
     });
 });
 

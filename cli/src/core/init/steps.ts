@@ -18,6 +18,7 @@ import { InjectionOrchestrator, ContextOp } from '../context/orchestrator';
 import { getInjection, PROVIDERS } from '../../providers';
 import { repairGlobalSkills as realRepairGlobalSkills } from '../skill-integrity';
 import { REGISTRY_CONTENT_DIR } from '../bundles';
+import { injectProjectConstitution as realInjectProjectConstitution } from '../context/project-constitution-inject';
 
 // ---------------------------------------------------------------------------
 // defaultActions — bridges the real functions to the InitActions interface
@@ -64,6 +65,7 @@ export const defaultActions: InitActions = {
 
     installContext: (op) => { realInjectionOrchestrator.installContext(op); },
     repairGlobalSkills: (skillsDir, registryContentDir) => realRepairGlobalSkills(skillsDir, registryContentDir),
+    injectProjectConstitution: (o) => realInjectProjectConstitution(o.projectRoot, o.agent),
 };
 
 // ---------------------------------------------------------------------------
@@ -228,6 +230,25 @@ export function stepConstitution(d: InitDeps): StepResult {
     if (proj.constitution.present) return ok('project.constitution', 'project', 'skipped');
 
     return ok('project.constitution', 'project', 'pending', 'skill: project-constitution');
+}
+
+/** Step 8b – Entregar CONSTITUTION.md a agentes con inyección config-instructions
+ *  (opencode) vía un opencode.json local del proyecto. Claude lo recibe por el hook. */
+export function stepConstitutionInjection(d: InitDeps): StepResult {
+    const proj = d.ctx.project;
+    if (!proj) return ok('project.constitutionInjection', 'project', 'skipped', 'no project');
+
+    const inj = getInjection(d.agent);
+    if (!inj || inj.type !== 'config-instructions') {
+        return ok('project.constitutionInjection', 'project', 'skipped', 'cubierto por hook');
+    }
+    if (!proj.constitution.present) {
+        return ok('project.constitutionInjection', 'project', 'skipped', 'sin CONSTITUTION.md');
+    }
+
+    const res = d.actions.injectProjectConstitution({ projectRoot: proj.root, agent: d.agent });
+    if (res === 'injected') return ok('project.constitutionInjection', 'project', 'applied');
+    return ok('project.constitutionInjection', 'project', 'skipped', res);
 }
 
 /** Step 9 – Signal that the agent should run the project-context-init skill. */

@@ -5,6 +5,7 @@ import type { AgentTarget } from '../../providers';
 import type { InstallMethod, InstallSummary, SyncResult } from '../bundle-install';
 import type { ContextOp } from '../context/orchestrator';
 import type { InjectionState } from '../context/types';
+import type { ConstitutionInjectResult } from '../context/project-constitution-inject';
 
 export type StepAction = 'applied' | 'skipped' | 'pending' | 'failed';
 
@@ -44,6 +45,7 @@ export interface InitActions {
     contextStatus: (op: ContextOp) => InjectionState;
     installContext: (op: ContextOp) => void;
     repairGlobalSkills: (skillsDir: string, registryContentDir: string) => { relinked: string[]; pruned: string[]; failed: string[] };
+    injectProjectConstitution: (o: { projectRoot: string; agent: AgentTarget }) => ConstitutionInjectResult;
 }
 
 export interface InitDeps {
