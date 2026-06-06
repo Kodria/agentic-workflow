@@ -103,6 +103,7 @@ function runSensor(name: string, cmd: string, timeout: number, cwd: string): Sen
         // cannot certify what it could not run. Treat it as a fail with a clear message.
         const lower = raw.toLowerCase();
         const toolMissing =
+            (err as any).code === 'ENOENT' ||               // execSync spawn failure (no shell)
             lower.includes('command not found') ||
             lower.includes('enoent') ||
             lower.includes('could not determine executable');

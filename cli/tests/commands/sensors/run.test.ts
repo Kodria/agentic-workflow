@@ -178,27 +178,35 @@ describe('runSensors — missing tool is a fail, not a skip', () => {
 });
 
 describe('runSensors — not_certified + auto-discovery', () => {
+    let tmpDir: string | undefined;
+
     beforeEach(() => {
         mockExecSyncFn.mockReset();
         mockExecSyncFn.mockReturnValue('' as any);
     });
 
+    afterEach(() => {
+        if (tmpDir) {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+            tmpDir = undefined;
+        }
+    });
+
     it('returns not_certified when no manifest exists anywhere up the tree', () => {
-        const dir = mkTmp();
-        const out = runSensors({ cwd: dir });
+        tmpDir = mkTmp();
+        const out = runSensors({ cwd: tmpDir });
         expect(out.overall).toBe('not_certified');
         expect(out.sensors).toEqual([]);
     });
 
     it('discovers .awm/sensors.json in a parent directory (walk-up)', () => {
-        const root = mkTmp();
-        fs.mkdirSync(path.join(root, '.awm'));
-        // Manifest con un sensor trivial que siempre pasa (echo no produce errores parseables).
+        tmpDir = mkTmp();
+        fs.mkdirSync(path.join(tmpDir, '.awm'));
         fs.writeFileSync(
-            path.join(root, '.awm', 'sensors.json'),
+            path.join(tmpDir, '.awm', 'sensors.json'),
             JSON.stringify({ pack: 'test', sensors: { noop: { cmd: 'echo ok', fast: true } } }),
         );
-        const nested = path.join(root, 'a', 'b');
+        const nested = path.join(tmpDir, 'a', 'b');
         fs.mkdirSync(nested, { recursive: true });
         const out = runSensors({ cwd: nested });
         expect(out.overall).toBe('pass');
