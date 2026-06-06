@@ -59,7 +59,7 @@ export const defaultActions: InitActions = {
 
     addExtension: (root, name) => { realAddExtension(root, name); },
 
-    gatherProject: (cwd, bundles) => gatherContext({ cwd, bundles }).project,
+    gatherProject: (cwd, bundles, agent) => gatherContext({ cwd, bundles, agent }).project,
 
     contextStatus: (op) => realInjectionOrchestrator.contextStatus(op),
 
@@ -195,7 +195,7 @@ export function stepActivation(d: InitDeps): StepResult {
     if (!proj) return ok('project.activation', 'project', 'skipped', 'no project');
 
     // Re-read project state so we pick up extensions added by stepProfile
-    const fresh = d.actions.gatherProject(proj.root, d.bundles) ?? proj;
+    const fresh = d.actions.gatherProject(proj.root, d.bundles, d.agent) ?? proj;
     const { expected, linked, broken } = fresh.activeBundles;
 
     const allLinked = expected.every((e) => linked.includes(e)) && broken.length === 0;

@@ -140,11 +140,11 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
     };
 }
 
-function gatherProject(root: string, bundles: BundleDefinition[]): ProjectFacts {
+function gatherProject(root: string, bundles: BundleDefinition[], agent: AgentTarget = 'claude-code'): ProjectFacts {
     const profile = readProfile(root);
     const profilePresent = fs.existsSync(path.join(root, '.awm', 'profile.json'));
 
-    const localSkillsDir = path.join(root, PROVIDERS['claude-code'].skill.local); // '.claude/skills'
+    const localSkillsDir = path.join(root, PROVIDERS[agent].skill.local);
     const expected: string[] = [];
     for (const ext of profile.extensions) {
         for (const s of resolveBundleSkills(ext, bundles)) if (!expected.includes(s)) expected.push(s);
@@ -178,6 +178,6 @@ export function gatherContext(opts: GatherOptions = {}): HarnessContext {
     const root = findProjectRoot(cwd);
     return {
         machine: gatherMachine(bundles, agent),
-        project: root ? gatherProject(root, bundles) : null,
+        project: root ? gatherProject(root, bundles, agent) : null,
     };
 }

@@ -197,6 +197,14 @@ describe('stepActivation', () => {
         expect(r.action).toBe('applied');
         expect(a.syncProfile).toHaveBeenCalled();
     });
+    it('passes target agent to gatherProject (#4 — project local skills scoped to agent)', () => {
+        const a = spies();
+        const m = machine();
+        m.devCore = { present: true, brokenLinks: [] };
+        const ctx = { machine: m, project: project() };
+        stepActivation(deps(ctx, a, { agent: 'opencode' }));
+        expect(a.gatherProject).toHaveBeenCalledWith(expect.any(String), expect.any(Array), 'opencode');
+    });
 });
 
 describe('stepSensors', () => {
