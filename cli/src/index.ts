@@ -11,7 +11,7 @@ import { syncRegistry, buildCli } from './core/registry';
 import { regenerateGlobalContext } from './core/context/regenerate';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
 import { discoverBundles, defaultScopeForBundle, REGISTRY_CONTENT_DIR } from './core/bundles';
-import { repairGlobalSkills } from './core/skill-integrity';
+import { reconcileAllSkillLinks } from './core/skill-integrity';
 import { addBundle, syncProfile } from './core/bundle-install';
 import { findProjectRoot, readProfile } from './core/profile';
 import path from 'path';
@@ -351,11 +351,11 @@ program.command('update')
           }
 
           try {
-              const skillsDir = PROVIDERS['claude-code'].skill.global;
-              const repair = repairGlobalSkills(skillsDir, REGISTRY_CONTENT_DIR);
-              const touched = repair.relinked.length + repair.pruned.length;
-              if (touched > 0) {
-                  console.log(pc.green(`  ✓ Reconciled skill links: re-linked ${repair.relinked.length}, pruned ${repair.pruned.length}`));
+              for (const { agent, result } of reconcileAllSkillLinks(REGISTRY_CONTENT_DIR)) {
+                  const touched = result.relinked.length + result.pruned.length;
+                  if (touched > 0) {
+                      console.log(pc.green(`  ✓ Reconciled ${agent} skill links: re-linked ${result.relinked.length}, pruned ${result.pruned.length}`));
+                  }
               }
           } catch {
               // la reconciliación de symlinks no debe abortar un update exitoso

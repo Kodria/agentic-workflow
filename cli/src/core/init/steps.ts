@@ -138,7 +138,7 @@ export function stepGlobalSkillsRepair(d: InitDeps): StepResult {
     const broken = globalSkills.repairable.length + globalSkills.dead.length;
     if (broken === 0) return ok('machine.globalSkills', 'machine', 'skipped');
 
-    const skillsDir = PROVIDERS['claude-code'].skill.global;
+    const skillsDir = PROVIDERS[d.agent].skill.global;
     const r = d.actions.repairGlobalSkills(skillsDir, REGISTRY_CONTENT_DIR);
     return ok('machine.globalSkills', 'machine', 'applied', `re-linked ${r.relinked.length}, pruned ${r.pruned.length}`);
 }

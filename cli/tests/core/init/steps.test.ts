@@ -9,6 +9,7 @@ import {
 import type { InitDeps, InitActions } from '../../../src/core/init/types';
 import type { HarnessContext, ProjectFacts } from '../../../src/core/diagnostics/types';
 import type { BundleDefinition } from '../../../src/core/bundles';
+import { PROVIDERS } from '../../../src/providers';
 
 function bundle(name: string, scope: BundleDefinition['scope'], skills: string[]): BundleDefinition {
     return {
@@ -250,6 +251,16 @@ describe('stepGlobalSkillsRepair', () => {
         expect(a.repairGlobalSkills).toHaveBeenCalledTimes(1);
         expect(r.detail).toContain('re-linked 1');
         expect(r.detail).toContain('pruned 1');
+    });
+
+    it('repairs the target agent skills dir, not Claude (#4)', () => {
+        const a = spies();
+        (a as any).repairGlobalSkills = jest.fn(() => ({ relinked: ['b'], pruned: [], failed: [] }));
+        const m = machine();
+        m.globalSkills = { valid: [], repairable: ['b'], dead: [] };
+        const r = stepGlobalSkillsRepair(deps({ machine: m, project: null }, a, { agent: 'opencode' }));
+        expect(r.action).toBe('applied');
+        expect(a.repairGlobalSkills).toHaveBeenCalledWith(PROVIDERS['opencode'].skill.global, expect.any(String));
     });
 });
 

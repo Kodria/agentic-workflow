@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { PROVIDERS, AgentTarget } from '../providers';
 
 export type SkillIntegrity = {
     valid: string[];
@@ -57,4 +58,19 @@ export function repairGlobalSkills(skillsDir: string, registryContentDir: string
         catch { result.failed.push(name); }
     }
     return result;
+}
+
+/** Reconcilia los symlinks de skills de TODOS los providers con soporte de skills
+ *  cuyo dir global existe. Es mantenimiento machine-global (awm update): no hay un
+ *  único agente target. Cada provider en su propio path; un dir ausente se omite. */
+export function reconcileAllSkillLinks(
+    registryContentDir: string,
+): { agent: AgentTarget; result: RepairResult }[] {
+    const out: { agent: AgentTarget; result: RepairResult }[] = [];
+    for (const agent of Object.keys(PROVIDERS) as AgentTarget[]) {
+        const skill = PROVIDERS[agent].skill;
+        if (!skill || !fs.existsSync(skill.global)) continue;
+        out.push({ agent, result: repairGlobalSkills(skill.global, registryContentDir) });
+    }
+    return out;
 }

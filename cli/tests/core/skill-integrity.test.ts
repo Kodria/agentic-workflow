@@ -46,6 +46,33 @@ describe('classifyGlobalSkills', () => {
     });
 });
 
+describe('reconcileAllSkillLinks (#4 — awm update, all providers)', () => {
+    it('repairs every provider dir that exists and skips absent ones', () => {
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-home-'));
+        const prevHome = process.env.HOME;
+        process.env.HOME = home;
+        try {
+            jest.resetModules();
+            const { reconcileAllSkillLinks } = require('../../src/core/skill-integrity');
+
+            // OpenCode dir exists with a dead orphan; Claude dir does NOT exist.
+            const ocSkills = path.join(home, '.agents/skills');
+            fs.mkdirSync(ocSkills, { recursive: true });
+            fs.symlinkSync(path.join(home, 'no-such-target'), path.join(ocSkills, 'ghost'), 'dir');
+
+            const res = reconcileAllSkillLinks(path.join(home, 'no-registry'));
+            const oc = res.find((r: any) => r.agent === 'opencode');
+            const cc = res.find((r: any) => r.agent === 'claude-code');
+            expect(oc).toBeTruthy();
+            expect(oc.result.pruned).toContain('ghost');
+            expect(cc).toBeFalsy(); // claude dir absent → not in results
+        } finally {
+            process.env.HOME = prevHome;
+            fs.rmSync(home, { recursive: true, force: true });
+        }
+    });
+});
+
 describe('repairGlobalSkills', () => {
     it('re-links repairable to cli-source and prunes dead; valid untouched; idempotent', () => {
         const { skillsDir, registryContentDir } = setup();
