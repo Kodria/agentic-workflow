@@ -8,6 +8,15 @@ import { installSensorHook } from './install';
 import { buildBaseline, writeBaseline } from './baseline';
 import { REGISTRY_CONTENT_DIR } from '../../core/bundles';
 
+export type RunOutputLike = { sensors: unknown[]; overall: 'pass' | 'fail' | 'skipped' | 'not_certified' };
+
+/** Map a sensor run verdict to a process exit code. fail → 1; everything else → 0.
+ *  not_certified intentionally exits 0: its signal lives in `overall`, because
+ *  exit code 2 is a blocking error in Claude Code hooks. */
+export function exitCodeFor(output: RunOutputLike): number {
+    return output.overall === 'fail' ? 1 : 0;
+}
+
 export function registerSensorsCommand(program: Command): void {
     const sensors = program.command('sensors').description('manage computational sensors for the current project');
 
@@ -19,10 +28,11 @@ export function registerSensorsCommand(program: Command): void {
         .option('--all', 'run all sensors regardless of speed')
         .action((opts) => {
             const output = runSensors({ fast: opts.fast, slow: opts.slow, all: opts.all });
-            if (output.sensors.length > 0) {
-                process.stdout.write(JSON.stringify(output, null, 2) + '\n');
-            }
-            if (output.overall === 'fail') process.exit(1);
+            // Emit the verdict ALWAYS — an empty `sensors` with overall:'not_certified'
+            // must be visible, never a silent exit-0 that reads as "clean".
+            process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+            const code = exitCodeFor(output);
+            if (code !== 0) process.exit(code);
         });
 
     sensors
