@@ -115,3 +115,18 @@ Bugs encontrados corriendo el arnés de verdad. Se arreglan DESPUÉS de que el l
 - **Implicación:** la capa de juicio **es capaz** de cazar el bug de seguridad, pero **no garantiza** cazarlo (varía por agente y probablemente por corrida). La única garantía agnóstica es un **gate determinístico** (ver ⭐ INSIGHT CENTRAL). OpenCode aquí aplicó "seguridad ≠ alcance" mejor que Claude — el principio es alcanzable por juicio, no garantizado.
 - **Relación:** consecuencia de [Hallazgo #2]. Fix de #2 (gate real con tsc/lint/test/estructural) da el piso determinístico que esto necesita.
 - **Estado:** CONFIRMADO — el juicio de QA es no-determinístico entre agentes; la ejecución (con skills) sí es agnóstica.
+
+---
+
+## Hallazgo #6 — `CONSTITUTION.md` no se entrega de forma agnóstica (el hilo desconectado)
+
+- **Encontrado:** 2026-06-06, durante el ciclo de diseño de B-2 (capa 1, ¿dónde vive el invariante de seguridad?). El usuario identificó la causa raíz: la dicotomía "constitution vs awm-context" era falsa — nace de este bug.
+- **Modelo correcto de los dos canales:**
+  - `awm-context.md` = reglas **genéricas/agnósticas** de AWM (incl. seguridad genérica). Machine-global, generado del registry. **Ya es agnóstico.**
+  - `CONSTITUTION.md` = fuente de la verdad de los **lineamientos del proyecto** (incl. seguridad específica). Per-proyecto (`$PWD`). **Debería llegar a todos los agentes y hoy no lo hace.**
+- **Evidencia (código):** `grep -rln CONSTITUTION cli/src/` → solo `diagnostics/checks.ts` y `diagnostics/context.ts` (se **detecta** su presencia). **Nunca aparece en `cli/src/core/context/`** (materializer/orchestrator/strategies), que es la maquinaria de context delivery. Contraste: `awm-context.md` se materializa a `~/.awm/context/awm-context.md` y se entrega vía `cc-settings-merge` (hook Claude) + `config-instructions` (OpenCode → `opencode.json` `instructions[]`). `CONSTITUTION.md` solo lo lee el SessionStart **hook de Claude** (`$PWD/CONSTITUTION.md`); para OpenCode no se referencia en ningún lado.
+- **Efecto:** los lineamientos del proyecto (CONSTITUTION) llegan a Claude pero **no a OpenCode**. Cualquier agente ≠ Claude desarrolla sin la fuente de la verdad del proyecto. Rompe el agnosticismo en la capa de gobernanza, no solo de ejecución.
+- **Severidad:** ALTA para el objetivo de agnosticismo — es la fuente de la verdad de los lineamientos, ciega para todo agente que no sea Claude.
+- **Dirección de fix:** la estrategia `config-instructions` (y el lado Claude) debe referenciar también el `CONSTITUTION.md` **del proyecto**, no solo el `awm-context.md` machine-global. Para OpenCode: agregar `$PWD/CONSTITUTION.md` a `instructions[]` junto al `awm-context.md`. Es delivery de contexto per-proyecto + agnóstico → **tema de Body B-1** (install/context agnóstico), no de B-2.
+- **Relación:** misma familia que #5 (canal agnóstico vs canal Claude-only). Desbloquea que B-2 deje la capa 1 (invariante genérico) en `awm-context.md` sin depender de este fix.
+- **Estado:** ABIERTO — asignado a **Body B-1**.
