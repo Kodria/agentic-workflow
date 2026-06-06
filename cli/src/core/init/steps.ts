@@ -140,9 +140,7 @@ export function stepGlobalSkillsRepair(d: InitDeps): StepResult {
     const broken = globalSkills.repairable.length + globalSkills.dead.length;
     if (broken === 0) return ok('machine.globalSkills', 'machine', 'skipped');
 
-    const skillConfig = PROVIDERS[d.agent].skill;
-    if (!skillConfig) return ok('machine.globalSkills', 'machine', 'skipped', 'provider has no skills');
-    const skillsDir = skillConfig.global;
+    const skillsDir = PROVIDERS[d.agent].skill.global;
     const r = d.actions.repairGlobalSkills(skillsDir, REGISTRY_CONTENT_DIR);
     return ok('machine.globalSkills', 'machine', 'applied', `re-linked ${r.relinked.length}, pruned ${r.pruned.length}`);
 }
