@@ -1,5 +1,7 @@
 # Body B-2 — Gate de calidad determinístico — Implementation Plan
 
+<!-- awm-qa-complete: 2026-06-06 -->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Hacer que el gate de sensores de AWM sea determinístico — que se auto-corrija cuando el pack quedó en `generic` sobre un stack real, que nunca dé verde benigno sin haber corrido sensores reales, y que los tests del proyecto sean parte del gate.
