@@ -102,7 +102,9 @@ export function initSensors(opts: InitOptions = {}): { manifest: SensorManifest;
 
     const manifest = buildManifest(detection.pack, existing, opts.registryRoot, cwd);
     fs.mkdirSync(path.join(cwd, '.awm'), { recursive: true });
-    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+    const tmpPath = manifestPath + '.tmp';
+    fs.writeFileSync(tmpPath, JSON.stringify(manifest, null, 2), 'utf-8');
+    fs.renameSync(tmpPath, manifestPath);
 
     const configured: string[] = [];
     if (configure && opts.registryRoot) {
