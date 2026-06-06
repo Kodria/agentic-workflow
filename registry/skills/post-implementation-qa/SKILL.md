@@ -31,6 +31,8 @@ El usuario invoca directamente al encontrar un bug o querer un QA pass sin desar
 | **B — Fidelidad** | El plan dice X, el código hace Y (falta algo, sobra algo, mal entendido) | Subagente de corrección apuntado al gap, sin root cause analysis |
 | **C — Calidad** | Bug lógico, edge case, comportamiento inesperado | `systematic-debugging` → root cause → subagente fix |
 
+> **Lente de seguridad (alcance ≠ exención).** "Documentado-fuera-de-alcance" NO exime invariantes de seguridad/robustez. Una función pública que devuelve `Infinity`/`NaN`/`undefined` en silencio, o que crashea con entradas límite/inválidas, es un hallazgo **Type C aunque el diseño lo haya declarado fuera de alcance.** El alcance excluye *features*, nunca el piso de robustez.
+
 ## El Proceso
 
 ```dot

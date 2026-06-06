@@ -40,6 +40,7 @@ Agent tool (general-purpose):
     - Error paths that crash or behave silently instead of handling gracefully
     - Data that could get into an inconsistent state
     - Missing validations at system boundaries (user input, external APIs)
+    - Safety/robustness invariants violated even if the design declared them out of scope — a public function returning Infinity/NaN/undefined silently, or crashing on boundary/invalid input, is Type C regardless of stated scope
 
     **Do NOT report** things already flagged in sensor results unless they point to a specific logic problem not visible from the sensor output alone.
 
