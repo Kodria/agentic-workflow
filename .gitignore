@@ -8,3 +8,5 @@ coverage
 skills-lock.json
 tmp/*
 *.awm.*
+.claude/skills/
+.claude/agents/
