@@ -53,9 +53,9 @@ Leyenda: ⬜ no iniciado · 🟡 en progreso · ✅ funciona · ⚠️ parcial �
 | 0 Preflight | ✅ | ✅ | ambas instaladas; opencode 1.16.2, claude 2.1.166 |
 | 1 Instalar arnés | ⚠️ | ⚠️ | Ambas: hook/skills/sensores ✔. OpenCode: `machine.contextInjection` **APLICÓ** (vs "skipped" en Claude) → `~/.awm/context/awm-context.md` creado + entrada en `opencode.json` verificada. Hallazgos #1 (profile crash) y #2 (pack generic) **reproducen idéntico → agnósticos**. |
 | 2 Verificar inyección de contexto | ✅ | ✅ | **PIEZA CENTRAL PROBADA.** OpenCode respondió idéntico a Claude (entry point, regla por niveles, 3 skills) de memoria, sin leer archivos — vía archivo materializado + `instructions[]`, SIN hook. La capa de inyección es agnóstica. |
-| 3 Diseño | ✅ | 🟡 | Claude: `splitbill-design.md` commiteado; bug `personas=0` plantado OK. OpenCode: siguiente — mismo pedido de build, ver si rutea a brainstorming Y si puede ejecutar con el mismo rigor (test del Hallazgo #3). |
-| 4 Plan | ✅ | ⬜ | `splitbill-plan.md` commiteado; 2 tasks (scaffold + función TDD con Vitest) |
-| 5 Ejecución | ✅ | ⬜ | subagent-driven OK: implementer + 2 revisores/tarea, TDD, rechazó 4 falsos positivos. Código + 4 tests Vitest verdes. |
+| 3 Diseño | ✅ | ✅⚠️ | Claude: design commiteado. OpenCode: improvisó brainstorming desde contexto inyectado y produjo design — pero **sin commitear**, más fino, año mal (2025). Bug `personas=0` también fuera de alcance (igual que Claude). |
+| 4 Plan | ✅ | ✅⚠️ | Claude: plan commiteado. OpenCode: produjo plan pero **sin commitear** (untracked). Fidelidad menor. |
+| 5 Ejecución | ✅ | 🟡 | Claude: subagent-driven (implementer + 2 revisores/tarea, TDD, rechazó 4 FP), 4 tests verdes. OpenCode: scaffold commiteado, en ejecución; sin las dos etapas de review. Observar gate de sensores + commits. |
 | 6 Gate de sensores | ⚠️ | ⬜ | Hallazgo #2+#3 confirmados: `run`→solo semgrep "pass"; `--fast`→0 sensores "skipped". El verde = disciplina del agente, no el gate. |
 | 7 Cerrar + retomar | ✅ | ⬜ | Sesión nueva recuperó estado sin pistas: "Estado: Finishing", listó design/plan/marker/commit, recomendó finishing-a-development-branch. Re-inyección + recuperación de estado confirmadas. |
 | 8 QA | ✅ | ⬜ | corrió automático (TERMINATION_PHASE de SDD), 0 hallazgos. Bug `personas=0` sobrevivió → ver ⭐ INSIGHT CENTRAL en findings.md (alcance vs seguridad). |
