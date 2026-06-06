@@ -17,7 +17,7 @@ description: Use when a repository needs to formalize its non-negotiable rules s
 - Repo has no `CONSTITUTION.md` and the team wants to codify rules
 - After `awm sensors init` — sensors are configured but their rules aren't enforced doctrinally yet
 - Existing rules are scattered across CLAUDE.md, README, code review comments — needs consolidation
-- Onboarding new contributors and want every Claude Code session to start with the same rules
+- Onboarding new contributors and want every agent session to start with the same rules
 
 ## When NOT to use
 
@@ -126,7 +126,7 @@ git commit -m "docs: add project constitution"
 
 ### 7. Verification
 
-Tell the user: the next Claude Code session in this repo will receive `CONSTITUTION.md` as part of `additionalContext` from the SessionStart hook. To verify, they can `/clear` the conversation and confirm that the agent acknowledges or applies the rules.
+Tell the user: the next agent session in this repo will receive `CONSTITUTION.md` as context via the SessionStart hook. To verify on Claude Code, they can `/clear` the conversation and confirm that the agent acknowledges or applies the rules.
 
 ## Anti-patterns
 
