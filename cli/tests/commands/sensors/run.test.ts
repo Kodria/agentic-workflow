@@ -141,6 +141,11 @@ describe('runSensors', () => {
 });
 
 describe('runSensors — not_certified + auto-discovery', () => {
+    beforeEach(() => {
+        mockExecSyncFn.mockReset();
+        mockExecSyncFn.mockReturnValue('' as any);
+    });
+
     it('returns not_certified when no manifest exists anywhere up the tree', () => {
         const dir = mkTmp();
         const out = runSensors({ cwd: dir });
@@ -159,7 +164,7 @@ describe('runSensors — not_certified + auto-discovery', () => {
         const nested = path.join(root, 'a', 'b');
         fs.mkdirSync(nested, { recursive: true });
         const out = runSensors({ cwd: nested });
-        expect(out.overall).not.toBe('not_certified');
+        expect(out.overall).toBe('pass');
         expect(out.sensors.length).toBe(1);
     });
 });
