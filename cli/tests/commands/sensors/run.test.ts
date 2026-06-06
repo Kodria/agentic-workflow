@@ -213,3 +213,86 @@ describe('runSensors — not_certified + auto-discovery', () => {
         expect(out.sensors.length).toBe(1);
     });
 });
+
+describe('reconcilePack', () => {
+    const REPO_REGISTRY = path.resolve(__dirname, '../../../../registry');
+
+    function tmpProject(pack: string, withPackageJson: boolean): string {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-reconcile-'));
+        fs.mkdirSync(path.join(dir, '.awm'), { recursive: true });
+        fs.writeFileSync(
+            path.join(dir, '.awm', 'sensors.json'),
+            JSON.stringify({ pack, sensors: pack === 'generic'
+                ? { security: { cmd: 'semgrep .', fast: false } }
+                : {} }),
+        );
+        if (withPackageJson) fs.writeFileSync(path.join(dir, 'package.json'), '{}');
+        return dir;
+    }
+
+    it('upgrades generic→js-ts when package.json is present', () => {
+        const { reconcilePack } = require('../../../src/commands/sensors/run');
+        const dir = tmpProject('generic', true);
+        try {
+            const manifest = JSON.parse(fs.readFileSync(path.join(dir, '.awm', 'sensors.json'), 'utf-8'));
+            const res = reconcilePack(dir, manifest, REPO_REGISTRY);
+            expect(res.manifest.pack).toBe('js-ts');
+            expect(res.upgradedFrom).toBe('generic');
+            expect(Object.keys(res.manifest.sensors)).toContain('typecheck');
+            // persisted to disk
+            const onDisk = JSON.parse(fs.readFileSync(path.join(dir, '.awm', 'sensors.json'), 'utf-8'));
+            expect(onDisk.pack).toBe('js-ts');
+        } finally { fs.rmSync(dir, { recursive: true }); }
+    });
+
+    it('is a no-op when pack is already real (idempotent)', () => {
+        const { reconcilePack } = require('../../../src/commands/sensors/run');
+        const dir = tmpProject('js-ts', true);
+        try {
+            const manifest = JSON.parse(fs.readFileSync(path.join(dir, '.awm', 'sensors.json'), 'utf-8'));
+            const res = reconcilePack(dir, manifest, REPO_REGISTRY);
+            expect(res.manifest.pack).toBe('js-ts');
+            expect(res.upgradedFrom).toBeUndefined();
+        } finally { fs.rmSync(dir, { recursive: true }); }
+    });
+
+    it('does not upgrade a truly generic project (no indicators)', () => {
+        const { reconcilePack } = require('../../../src/commands/sensors/run');
+        const dir = tmpProject('generic', false);
+        try {
+            const manifest = JSON.parse(fs.readFileSync(path.join(dir, '.awm', 'sensors.json'), 'utf-8'));
+            const res = reconcilePack(dir, manifest, REPO_REGISTRY);
+            expect(res.manifest.pack).toBe('generic');
+            expect(res.upgradedFrom).toBeUndefined();
+        } finally { fs.rmSync(dir, { recursive: true }); }
+    });
+});
+
+describe('runSensors — honest floor (not_certified over real stack)', () => {
+    const path = require('path');
+    const os = require('os');
+
+    beforeEach(() => {
+        mockExecSyncFn.mockReset();
+        mockExecSyncFn.mockReturnValue('' as any);
+    });
+
+    it('returns not_certified (not skipped) for a generic manifest over a real stack', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-floor-'));
+        fs.mkdirSync(path.join(dir, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(dir, '.awm', 'sensors.json'),
+            JSON.stringify({ pack: 'generic', sensors: { security: { cmd: 'semgrep .', fast: false } } }));
+        fs.writeFileSync(path.join(dir, 'package.json'), '{}');
+        const prevHome = process.env.AWM_HOME;
+        process.env.AWM_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-nohome-')); // no cli-source → no upgrade
+        try {
+            jest.resetModules();
+            const { runSensors } = require('../../../src/commands/sensors/run');
+            const result = runSensors({ fast: true, cwd: dir }); // --fast filters the fast:false security sensor → empty
+            expect(result.overall).toBe('not_certified');
+        } finally {
+            process.env.AWM_HOME = prevHome;
+            fs.rmSync(dir, { recursive: true });
+        }
+    });
+});

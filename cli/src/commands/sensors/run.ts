@@ -1,5 +1,6 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { SensorManifest, SensorResult, RunOutput, SensorError } from './types';
 import { parseTscOutput } from './formatters/tsc';
@@ -7,6 +8,7 @@ import { parseEslintOutput } from './formatters/eslint';
 import { parseSemgrepOutput } from './formatters/semgrep';
 import { parseGenericOutput } from './formatters/generic';
 import { readBaseline, partition } from './baseline';
+import { detectStack, initSensors } from './init';
 
 const MANIFEST_FILE = '.awm/sensors.json';
 const DEFAULT_FAST_TIMEOUT = 10_000;
@@ -47,6 +49,37 @@ function readManifest(cwd: string): SensorManifest | null {
     const p = path.join(cwd, MANIFEST_FILE);
     if (!fs.existsSync(p)) return null;
     try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { return null; }
+}
+
+function defaultRegistryRoot(): string {
+    const home = process.env.AWM_HOME || path.join(process.env.HOME || os.homedir(), '.awm');
+    return path.join(home, 'cli-source', 'registry');
+}
+
+/**
+ * Upgrade-only, idempotent pack reconciliation. If the manifest sits on the
+ * `generic` fallback but the tree now has real stack indicators (package.json,
+ * pyproject.toml…), re-detect and rebuild via initSensors — which merges existing
+ * custom sensors and copies the pack's config files. Never downgrades, never
+ * touches a real pack. FS/registry failures degrade to a no-op (the honest floor
+ * in runSensors covers the gap).
+ */
+export function reconcilePack(
+    manifestDir: string,
+    manifest: SensorManifest,
+    registryRoot?: string,
+): { manifest: SensorManifest; upgradedFrom?: string } {
+    if (manifest.pack !== 'generic') return { manifest };
+    const detection = detectStack(manifestDir);
+    if (detection.pack === 'generic') return { manifest }; // truly generic — stay honest
+    const root = registryRoot ?? defaultRegistryRoot();
+    if (!fs.existsSync(root)) return { manifest }; // can't rebuild without registry
+    try {
+        const { manifest: rebuilt } = initSensors({ cwd: manifestDir, registryRoot: root, configure: true });
+        return { manifest: rebuilt, upgradedFrom: 'generic' };
+    } catch {
+        return { manifest }; // never abort the run on a reconcile failure
+    }
 }
 
 /**
@@ -124,6 +157,8 @@ export function runSensors(opts: RunOptions = {}): RunOutput {
     if (!manifestDir) return { sensors: [], overall: 'not_certified' };
     const manifest = readManifest(manifestDir);
     if (!manifest) return { sensors: [], overall: 'not_certified' };
+    const reconciled = reconcilePack(manifestDir, manifest);
+    const activeManifest = reconciled.manifest;
     const cwd = manifestDir; // ejecutar sensores y baseline desde donde vive el manifest
 
     const results: SensorResult[] = [];
@@ -132,7 +167,7 @@ export function runSensors(opts: RunOptions = {}): RunOutput {
     // --ignore-baseline → every finding counts (backward-compatible).
     const baseline = opts.ignoreBaseline ? null : readBaseline(cwd);
 
-    for (const [name, config] of Object.entries(manifest.sensors)) {
+    for (const [name, config] of Object.entries(activeManifest.sensors)) {
         const isFast = config.fast ?? false;
         if (!shouldRun(isFast, opts)) continue;
 
@@ -151,10 +186,20 @@ export function runSensors(opts: RunOptions = {}): RunOutput {
         results.push(result);
     }
 
-    const overall = results.some(r => r.status === 'fail') ? 'fail'
+    let overall: RunOutput['overall'] = results.some(r => r.status === 'fail') ? 'fail'
         : results.length > 0 && results.every(r => r.status === 'skipped') ? 'skipped'
         : results.length === 0 ? 'skipped'
         : 'pass';
 
-    return { sensors: results, overall };
+    // Honest floor: a benign-green 'skipped' over a tree that clearly HAS a stack
+    // (indicators present) is a false green — the gate ran nothing real. Never green.
+    if (overall === 'skipped' && detectStack(manifestDir).pack !== 'generic') {
+        overall = 'not_certified';
+    }
+
+    return {
+        sensors: results,
+        overall,
+        ...(reconciled.upgradedFrom ? { packUpgraded: `${reconciled.upgradedFrom}→${activeManifest.pack}` } : {}),
+    };
 }

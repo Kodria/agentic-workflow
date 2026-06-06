@@ -32,6 +32,9 @@ export type SensorResult = {
 export type RunOutput = {
     sensors: SensorResult[];
     overall: 'pass' | 'fail' | 'skipped' | 'not_certified';
+    /** Set when reconcilePack upgraded the manifest off the `generic` fallback
+     *  (e.g. "generic→js-ts"). Absent on no-op runs. */
+    packUpgraded?: string;
 };
 
 export type SensorCheck = {
