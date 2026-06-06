@@ -15,7 +15,9 @@ import { gatherContext } from '../diagnostics/context';
 import { detectExtensions } from './detector';
 import type { InitDeps, InitActions, StepResult } from './types';
 import { InjectionOrchestrator, ContextOp } from '../context/orchestrator';
-import { getInjection } from '../../providers';
+import { getInjection, PROVIDERS } from '../../providers';
+import { repairGlobalSkills as realRepairGlobalSkills } from '../skill-integrity';
+import { REGISTRY_CONTENT_DIR } from '../bundles';
 
 // ---------------------------------------------------------------------------
 // defaultActions — bridges the real functions to the InitActions interface
@@ -61,6 +63,7 @@ export const defaultActions: InitActions = {
     contextStatus: (op) => realInjectionOrchestrator.contextStatus(op),
 
     installContext: (op) => { realInjectionOrchestrator.installContext(op); },
+    repairGlobalSkills: (skillsDir, registryContentDir) => realRepairGlobalSkills(skillsDir, registryContentDir),
 };
 
 // ---------------------------------------------------------------------------
@@ -127,6 +130,17 @@ export function stepDevCore(d: InitDeps): StepResult {
         contentDir: d.contentDir,
     });
     return ok('machine.devCore', 'machine', 'applied');
+}
+
+/** Step 3.5 – Repair broken global skill symlinks (orphans outside the baseline). */
+export function stepGlobalSkillsRepair(d: InitDeps): StepResult {
+    const { globalSkills } = d.ctx.machine;
+    const broken = globalSkills.repairable.length + globalSkills.dead.length;
+    if (broken === 0) return ok('machine.globalSkills', 'machine', 'skipped');
+
+    const skillsDir = PROVIDERS['claude-code'].skill.global;
+    const r = d.actions.repairGlobalSkills(skillsDir, REGISTRY_CONTENT_DIR);
+    return ok('machine.globalSkills', 'machine', 'applied', `re-linked ${r.relinked.length}, pruned ${r.pruned.length}`);
 }
 
 /** Step 4 – Install missing ambient bundles. */

@@ -4,7 +4,7 @@ import path from 'path';
 import {
     stepCache, stepHook, stepDevCore, stepAmbient,
     stepProfile, stepActivation, stepSensors, stepConstitution, stepContext,
-    stepContextInjection,
+    stepContextInjection, stepGlobalSkillsRepair,
 } from '../../../src/core/init/steps';
 import type { InitDeps, InitActions } from '../../../src/core/init/types';
 import type { HarnessContext, ProjectFacts } from '../../../src/core/diagnostics/types';
@@ -52,6 +52,7 @@ function spies(): jest.Mocked<InitActions> {
         gatherProject: jest.fn((_cwd: string, _bundles: any) => null),
         contextStatus: jest.fn(() => 'absent' as const),
         installContext: jest.fn(),
+        repairGlobalSkills: jest.fn(() => ({ relinked: [], pruned: [], failed: [] })),
     } as unknown as jest.Mocked<InitActions>;
 }
 
@@ -210,6 +211,28 @@ describe('stepConstitution / stepContext (frontera agente)', () => {
         const ctx: HarnessContext = { machine: machine(), project: project() };
         expect(stepConstitution(deps(ctx, a)).action).toBe('skipped');
         expect(stepContext(deps(ctx, a)).action).toBe('skipped');
+    });
+});
+
+describe('stepGlobalSkillsRepair', () => {
+    it('skips when nothing is broken', () => {
+        const a = spies();
+        const m = machine(); // globalSkills.repairable=[], dead=[] by default
+        const r = stepGlobalSkillsRepair(deps({ machine: m, project: null }, a));
+        expect(r.action).toBe('skipped');
+        expect(a.repairGlobalSkills).not.toHaveBeenCalled();
+    });
+
+    it('applies repair when there are broken links', () => {
+        const a = spies();
+        (a as any).repairGlobalSkills = jest.fn(() => ({ relinked: ['b'], pruned: ['c'], failed: [] }));
+        const m = machine();
+        m.globalSkills = { valid: ['a'], repairable: ['b'], dead: ['c'] };
+        const r = stepGlobalSkillsRepair(deps({ machine: m, project: null }, a));
+        expect(r.action).toBe('applied');
+        expect(a.repairGlobalSkills).toHaveBeenCalledTimes(1);
+        expect(r.detail).toContain('re-linked 1');
+        expect(r.detail).toContain('pruned 1');
     });
 });
 

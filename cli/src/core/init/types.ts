@@ -43,6 +43,7 @@ export interface InitActions {
     gatherProject: (cwd: string, bundles: BundleDefinition[]) => ProjectFacts | null;
     contextStatus: (op: ContextOp) => InjectionState;
     installContext: (op: ContextOp) => void;
+    repairGlobalSkills: (skillsDir: string, registryContentDir: string) => { relinked: string[]; pruned: string[]; failed: string[] };
 }
 
 export interface InitDeps {
