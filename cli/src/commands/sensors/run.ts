@@ -54,7 +54,7 @@ function readManifest(cwd: string): SensorManifest | null {
  * `.awm/sensors.json` (git/.git pattern). Returns that directory, or null
  * if none is found before the filesystem root.
  */
-function findManifestDir(startCwd: string): string | null {
+export function findManifestDir(startCwd: string): string | null {
     let dir = path.resolve(startCwd);
     while (true) {
         if (fs.existsSync(path.join(dir, MANIFEST_FILE))) return dir;

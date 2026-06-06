@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import pc from 'picocolors';
 import { log } from '@clack/prompts';
-import { runSensors } from './run';
+import { runSensors, findManifestDir } from './run';
 import { initSensors } from './init';
 import { computeSensorStatus } from './status';
 import { installSensorHook } from './install';
@@ -51,9 +51,11 @@ export function registerSensorsCommand(program: Command): void {
         .command('baseline')
         .description('snapshot current findings as accepted — sensors then fail only on NEW ones')
         .action(() => {
+            const manifestDir = findManifestDir(process.cwd());
             const output = runSensors({ all: true, ignoreBaseline: true });
             const baseline = buildBaseline(output.sensors.map(s => ({ name: s.name, errors: s.errors })));
-            writeBaseline(process.cwd(), baseline);
+            const writeDir = manifestDir ?? process.cwd();
+            writeBaseline(writeDir, baseline);
             const total = Object.values(baseline).reduce((n, fps) => n + fps.length, 0);
             log.success(`Baseline guardado: ${total} hallazgos aceptados en .awm/sensors.baseline.json`);
             log.info('Los sensors ahora fallan solo ante hallazgos nuevos. Re-corré `awm sensors baseline` tras reducir deuda.');
