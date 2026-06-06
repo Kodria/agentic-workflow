@@ -79,7 +79,7 @@ function gatherContextInjection(): { agent: AgentTarget; state: InjectionState }
     return out;
 }
 
-function gatherMachine(bundles: BundleDefinition[]): MachineFacts {
+function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude-code'): MachineFacts {
     // cliSource
     const cacheDir = path.join(awmHome(), 'cli-source');
     const cliPresent = fs.existsSync(path.join(cacheDir, '.git'));
@@ -103,7 +103,7 @@ function gatherMachine(bundles: BundleDefinition[]): MachineFacts {
     } catch { /* sin soporte de hooks → ausente */ }
 
     // devCore (bundle baseline)
-    const skillsDir = PROVIDERS['claude-code'].skill.global;
+    const skillsDir = PROVIDERS[agent].skill.global;
     const baseline = bundles.find((b) => b.scope === 'baseline');
     let devCorePresent = false;
     let brokenLinks: string[] = [];
@@ -168,14 +168,16 @@ function gatherProject(root: string, bundles: BundleDefinition[]): ProjectFacts 
 export interface GatherOptions {
     cwd?: string;
     bundles?: BundleDefinition[];
+    agent?: AgentTarget;
 }
 
 export function gatherContext(opts: GatherOptions = {}): HarnessContext {
     const cwd = opts.cwd ?? process.cwd();
     const bundles = opts.bundles ?? discoverBundles();
+    const agent = opts.agent ?? 'claude-code';
     const root = findProjectRoot(cwd);
     return {
-        machine: gatherMachine(bundles),
+        machine: gatherMachine(bundles, agent),
         project: root ? gatherProject(root, bundles) : null,
     };
 }

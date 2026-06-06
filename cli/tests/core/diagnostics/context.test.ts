@@ -152,3 +152,30 @@ describe('gatherContext', () => {
         expect(ctx.project.context).toEqual({ present: true, file: 'CLAUDE.md' });
     });
 });
+
+describe('gatherMachine — agnostic skill health (#4)', () => {
+    it('classifies the target agent skills dir, not always Claude', () => {
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-home-'));
+        const prevHome = process.env.HOME;
+        process.env.HOME = home;
+        try {
+            jest.resetModules();
+            const { gatherContext } = require('../../../src/core/diagnostics/context');
+
+            // OpenCode skills dir gets a dangling symlink (not in the registry) → 'dead'.
+            const ocSkills = path.join(home, '.agents/skills');
+            fs.mkdirSync(ocSkills, { recursive: true });
+            fs.symlinkSync(path.join(home, 'no-such-target'), path.join(ocSkills, 'ghost'), 'dir');
+
+            const oc = gatherContext({ cwd: home, bundles: [], agent: 'opencode' });
+            expect(oc.machine.globalSkills.dead).toContain('ghost');
+
+            // Claude's dir is empty → its 'dead' list must NOT pick up OpenCode's orphan.
+            const cc = gatherContext({ cwd: home, bundles: [], agent: 'claude-code' });
+            expect(cc.machine.globalSkills.dead).not.toContain('ghost');
+        } finally {
+            process.env.HOME = prevHome;
+            fs.rmSync(home, { recursive: true, force: true });
+        }
+    });
+});

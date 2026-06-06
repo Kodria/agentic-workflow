@@ -74,7 +74,7 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
     let outcome: InitOutcome;
     try {
         const bundles = discoverBundles();
-        const ctx = gatherContext({ cwd, bundles });
+        const ctx = gatherContext({ cwd, bundles, agent });
 
         // In machineOnly mode, null out the project context so project steps are skipped
         const effectiveCtx = opts.machineOnly

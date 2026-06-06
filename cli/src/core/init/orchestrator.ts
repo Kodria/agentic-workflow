@@ -47,7 +47,7 @@ export async function runInitSteps(deps: InitDeps): Promise<InitOutcome> {
         steps.push(await wrapStep('project.context', 'project', () => stepContext(deps)));
     }
 
-    const after = runChecks(gatherContext({ cwd: deps.cwd, bundles: deps.bundles }));
+    const after = runChecks(gatherContext({ cwd: deps.cwd, bundles: deps.bundles, agent: deps.agent }));
 
     return {
         steps,
