@@ -29,8 +29,10 @@
 | Estado | Significado | Exit code | Hook automático | Gate de completitud |
 |--------|-------------|:---:|:---:|:---:|
 | `pass` | Config existe, corrió, sin findings nuevos | 0 | silencioso | ✅ verde |
-| `fail` | Config existe, corrió, hay findings nuevos **o DEGRADED** (tool faltante) | 1 | reporta | ❌ bloquea |
-| `not_certified` | No se encontró config en todo el árbol | 2 | benigno, informativo | ⚠️ **no certifica** (nunca verde) |
+| `fail` | Config existe, corrió, hay findings nuevos **o DEGRADED** (tool faltante) | 1 | reporta (no-blocking) | ❌ bloquea |
+| `not_certified` | No se encontró config en todo el árbol | 0 | benigno, informativo | ⚠️ **no certifica** (nunca verde) |
+
+**Nota de señal (decisión 2026-06-05):** la distinción de `not_certified` es por el **campo `overall` del JSON**, no por el exit code. Exit 2 está reservado en los hooks de Claude Code (blocking error que alimenta stderr al modelo); usarlo haría que el hook automático `awm sensors run --fast` bloqueara en cada repo sin sensores. Por eso `not_certified` sale exit 0 (benigno para el hook) pero **siempre emite el JSON con `overall: 'not_certified'`**. El gate distingue leyendo `overall`. Este era el fix real: el bug original era que las skills leían `exit 0` como éxito en vez de leer el veredicto.
 
 ### Auto-discovery
 `awm sensors run` camina hacia arriba desde el `cwd` buscando `.awm/sensors.json` (patrón git/`.git`). Resuelve "corro desde `cli/` vs raíz".
