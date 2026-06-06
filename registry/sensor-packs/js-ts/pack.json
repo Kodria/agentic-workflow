@@ -31,7 +31,7 @@
       "fast": false,
       "enabled": true,
       "defaultCmd": "npm test --silent",
-      "formatter": "generic"
+      "formatter": "test"
     },
     "mutation": {
       "fast": false,

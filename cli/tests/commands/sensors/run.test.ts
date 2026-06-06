@@ -239,6 +239,8 @@ describe('reconcilePack', () => {
             expect(res.manifest.pack).toBe('js-ts');
             expect(res.upgradedFrom).toBe('generic');
             expect(Object.keys(res.manifest.sensors)).toContain('typecheck');
+            // custom sensor cmd preserved through merge
+            expect(res.manifest.sensors.security?.cmd).toBe('semgrep .');
             // persisted to disk
             const onDisk = JSON.parse(fs.readFileSync(path.join(dir, '.awm', 'sensors.json'), 'utf-8'));
             expect(onDisk.pack).toBe('js-ts');
