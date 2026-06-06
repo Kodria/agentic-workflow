@@ -10,7 +10,8 @@ import { installArtifact, removeArtifact } from './core/executor';
 import { syncRegistry, buildCli } from './core/registry';
 import { regenerateGlobalContext } from './core/context/regenerate';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
-import { discoverBundles, defaultScopeForBundle } from './core/bundles';
+import { discoverBundles, defaultScopeForBundle, REGISTRY_CONTENT_DIR } from './core/bundles';
+import { repairGlobalSkills } from './core/skill-integrity';
 import { addBundle, syncProfile } from './core/bundle-install';
 import { findProjectRoot, readProfile } from './core/profile';
 import path from 'path';
@@ -347,6 +348,17 @@ program.command('update')
               }
           } catch {
               // context regeneration failure must not abort a successful registry update
+          }
+
+          try {
+              const skillsDir = PROVIDERS['claude-code'].skill.global;
+              const repair = repairGlobalSkills(skillsDir, REGISTRY_CONTENT_DIR);
+              const touched = repair.relinked.length + repair.pruned.length;
+              if (touched > 0) {
+                  console.log(pc.green(`  ✓ Reconciled skill links: re-linked ${repair.relinked.length}, pruned ${repair.pruned.length}`));
+              }
+          } catch {
+              // la reconciliación de symlinks no debe abortar un update exitoso
           }
 
           outro('✅ All symlinked skills and workflows are now up-to-date.');
