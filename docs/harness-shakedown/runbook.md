@@ -59,17 +59,34 @@ Leyenda: ⬜ no iniciado · 🟡 en progreso · ✅ funciona · ⚠️ parcial �
 | 6 Gate de sensores | ⚠️ | ⚠️ | Mismo falso verde en ambas: `awm sensors run`→solo semgrep "pass". El bug NO lo caza el gate. |
 | 6 Gate de sensores | ⚠️ | ⬜ | Hallazgo #2+#3 confirmados: `run`→solo semgrep "pass"; `--fast`→0 sensores "skipped". El verde = disciplina del agente, no el gate. |
 | 7 Cerrar + retomar | ✅ | ⬜ | Claude: sesión nueva recuperó estado y recomendó finishing. OpenCode: pendiente. |
-| 8 QA | ✅ | ✅‼️ | **DIVERGENCIA CLAVE.** Claude QA: 0 hallazgos (waiveó el bug). OpenCode QA: **C1 BLOCKER (Infinity) + C2 (negativos)** — cazó lo que Claude dejó pasar. Misma skill, resultado opuesto → juicio NO-determinístico (ver Hallazgo #3 actualizado). |
-| 9 Cierre | 🟡 | ⬜ | Claude lo está ofreciendo; proceder en la sesión |
+| 8 QA | ✅ | ✅‼️ | **DIVERGENCIA CLAVE.** Claude QA: 0 hallazgos → embarcó el bug. OpenCode QA: C1 BLOCKER + C2 → cazó Y arregló (`a01d51c`, guarda `personas<=0` + 2 tests, 6/6). Misma skill, resultado OPUESTO → juicio NO-determinístico. |
+| 9 Cierre | 🟡 | 🟡 | Ambas en punto de finishing; proyectos desechables, cerrar como se quiera. Datos del lab ya capturados. |
 
 ---
 
 ## Dónde estamos ahora
 
-**Claude:** Fases 1-8 ✅ (Fase 9 cierre pendiente en su sesión). 3 hallazgos + ⭐ insight central.
-**OpenCode:** Fases 0-2 ✅. **Inyección de contexto agnóstica PROBADA** (Fase 2 idéntica a Claude, sin hook). Hallazgos #1 y #2 confirmados agnósticos.
+**LAB COMPLETO** — Claude y OpenCode corridos de punta a punta. Quedan solo los cierres de rama (Fase 9), desechables.
 
-**Siguiente:** Fase 3 en OpenCode — darle el MISMO pedido de build (`splitBill`) y observar la prueba decisiva del Hallazgo #3: el contexto (instructions) ya probamos que es agnóstico, pero ¿la *maquinaria de ejecución* (Skill tool, dispatch de subagentes, gate de sensores, dos etapas de review) es agnóstica o es Claude-shaped? Hipótesis: OpenCode quizás lea las skills como texto-guía pero no tenga el tooling (Skill/Agent) que las skills AWM asumen → ahí estarían los gaps reales de agnosticismo. Mismo bug plantado (`personas=0` fuera de alcance). Dir: `test-awm/project-opencode`.
+## ⭐ VEREDICTO FINAL DE AGNOSTICISMO (empírico, dos herramientas)
+
+**Lo que SÍ es agnóstico (idéntico en Claude y OpenCode):**
+1. **Inyección de contexto** — `using-awm` llega a ambas, mismo contenido, distinto mecanismo (hook vivo vs archivo referenciado). Probado Fase 2.
+2. **Orquestación del flujo** — ambas rutean development-process → brainstorming → plan → ejecución → QA.
+3. **Ejecución de skills CON skills instaladas** — OpenCode replicó subagent dispatch + dos etapas de review + fix loops + QA. Igual que Claude.
+
+**Lo que NO es agnóstico / los gaps (los 5 hallazgos):**
+- **#1** `project.profile` crashea en ambas (bug agnóstico).
+- **#2** detección de pack → `generic` → gate hueco (falso verde) en ambas. **Prerrequisito de todo.**
+- **#3** la calidad/verde viene del **juicio del agente, no de un gate determinístico** — y el juicio es **NO-determinístico**: Claude embarcó el bug `Infinity`, OpenCode lo cazó+arregló. **El hallazgo central.**
+- **#4** install/repair de skills es **Claude-only** (2 refs hardcodeadas) → skills de OpenCode rotas hasta reparación manual. Linchpin de la fidelidad de ejecución.
+- **#5** **hardcode blando** a `~/.claude` (prosa de skills + prior del modelo) + instalación de skills a OpenCode por 3 mecanismos descoordinados.
+
+**Patrón:** *todo lo que es entrega de contexto es agnóstico; todo lo que toca skills/máquina/resolución asume Claude.* La garantía de calidad es no-determinística → debe moverse a gates determinísticos (ver ⭐ INSIGHT CENTRAL en findings.md).
+
+## Agrupación para el ciclo de diseño
+- **Body B-1 — Instalación/reparación agnóstica:** Hallazgos #1, #4, #5 (init/repair/skill-install agnósticos; des-Claude-izar la prosa; unificar mecanismo de install a OpenCode).
+- **Body B-2 — Gate de calidad determinístico:** Hallazgos #2, #3 + ⭐ insight central (detección de pack real + invariantes de seguridad como gate, no como juicio).
 
 ---
 
