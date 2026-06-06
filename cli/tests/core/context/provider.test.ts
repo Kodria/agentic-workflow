@@ -4,6 +4,8 @@ import os from 'os';
 import path from 'path';
 import { buildContext, sha256 } from '../../../src/core/context/provider';
 
+const REPO_ROOT = path.resolve(__dirname, '../../../..');
+
 function tmpRegistry(skillBody: string): string {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-reg-'));
     const dir = path.join(root, 'registry/skills/using-awm');
@@ -38,5 +40,12 @@ describe('buildContext', () => {
     it('throws an actionable error when the using-awm skill is missing', () => {
         const reg = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-empty-'));
         expect(() => buildContext({ registryRoot: reg, profileExtensions: [] })).toThrow('using-awm skill not found');
+    });
+});
+
+describe('buildContext — generic robustness invariant', () => {
+    it('carries the public-function input-validation invariant into awm-context', () => {
+        const ctx = buildContext({ registryRoot: REPO_ROOT, profileExtensions: [] });
+        expect(ctx.markdown).toMatch(/valida.*entradas|input validation|falla ruidosamente|fail loudly/i);
     });
 });

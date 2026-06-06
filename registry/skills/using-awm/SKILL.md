@@ -67,3 +67,10 @@ When you invoke a skill, announce it briefly: *"I'm using the {skill-name} skill
 ## Checklist-Driven Skills
 
 If a skill provides a checklist, create a task for each item with the task tool and complete them in order. Skills are designed to be followed exactly — do not skip steps or reorder them.
+
+## Invariantes de robustez (agnósticos, AWM)
+
+Reglas genéricas que AWM hereda a todo agente vía contexto inyectado. No son específicas de ningún proyecto:
+
+- **Toda función pública valida sus entradas y falla ruidosamente.** Nunca devuelvas `Infinity`/`NaN`/`undefined` en silencio ante entradas inválidas o límite: lanzá un error explícito.
+- **El alcance puede excluir *features*, nunca *seguridad/robustez*.** Que el diseño declare algo "fuera de alcance" justifica omitir una feature, no omitir la validación de entradas ni un invariante de robustez. La validación de entradas es un piso, no una feature.
