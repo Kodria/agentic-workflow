@@ -8,7 +8,7 @@ description: Use when a repository needs to formalize its non-negotiable rules s
 
 ## Overview
 
-`CONSTITUTION.md` is the project's non-negotiable rulebook: testing discipline, architecture invariants, sensor obligations, code style, process. It lives at the repo root. The AWM SessionStart hook reads `$PWD/CONSTITUTION.md` and appends its content to `additionalContext` on every Claude Code session — so the agent sees these rules from the first token.
+`CONSTITUTION.md` is the project's non-negotiable rulebook: testing discipline, architecture invariants, sensor obligations, code style, process. It lives at the repo root. AWM delivers it to the agent on every session — via the SessionStart hook (Claude Code) or the project-local config `instructions` (agents like OpenCode) — so the agent sees these rules from the first token.
 
 **Announce at start:** "I'm using the project-constitution skill to generate CONSTITUTION.md."
 
@@ -61,7 +61,7 @@ The CONSTITUTION.md should contain only the sections that apply. Skip any sectio
 ```markdown
 # Project Constitution
 
-> Non-negotiable rules for this repo. The AWM SessionStart hook injects this file into every Claude Code session as `additionalContext`. Rules here override agent defaults.
+> Non-negotiable rules for this repo. AWM delivers this file into every agent session as feedforward context. Rules here override agent defaults.
 
 ## Testing
 - (TDD requirements, coverage thresholds, what must have a test, what tests must be human-written)
@@ -115,7 +115,7 @@ Then verify the hook will pick it up:
 awm hooks status
 ```
 
-If status is not `HEALTHY`, tell the user to run `awm hooks install` so the SessionStart hook is registered in `~/.claude/settings.json`. The hook reads `$PWD/CONSTITUTION.md` automatically — no further configuration needed.
+If status is not `HEALTHY`, tell the user to run `awm hooks install` so the SessionStart hook is registered for their agent. The hook reads `$PWD/CONSTITUTION.md` automatically — no further configuration needed.
 
 ### 6. Commit
 
