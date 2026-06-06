@@ -27,6 +27,7 @@ export interface MachineFacts {
     devCore: { present: boolean; brokenLinks: string[] };
     ambient: { wanted: string[]; installed: string[] };
     contextInjection: { agent: AgentTarget; state: InjectionState }[];
+    globalSkills: { valid: string[]; repairable: string[]; dead: string[] };
 }
 
 export interface ProjectFacts {

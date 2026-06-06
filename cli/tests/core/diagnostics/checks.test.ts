@@ -10,6 +10,7 @@ function healthyMachine(): HarnessContext['machine'] {
         devCore: { present: true, brokenLinks: [] },
         ambient: { wanted: [], installed: [] },
         contextInjection: [],
+        globalSkills: { valid: [], repairable: [], dead: [] },
     };
 }
 
@@ -167,6 +168,36 @@ describe('runChecks — project', () => {
         const c = runChecks({ machine: healthyMachine(), project: p }).results.find((r) => r.id === 'project.sensors')!;
         expect(c.status).toBe('missing');
         expect(c.remedy).toEqual({ kind: 'command', value: 'awm sensors init' });
+    });
+});
+
+describe('machineChecks — global skill integrity', () => {
+    function machineCtx(globalSkills: { valid: string[]; repairable: string[]; dead: string[] }): HarnessContext {
+        return {
+            machine: {
+                cliSource: { present: true, version: '1.0.0', gitState: 'clean' },
+                hook: { present: true, degraded: false },
+                devCore: { present: true, brokenLinks: [] },
+                ambient: { wanted: [], installed: [] },
+                contextInjection: [],
+                globalSkills,
+            },
+            project: null,
+        };
+    }
+
+    it('ok when no broken global skill links', () => {
+        const report = runChecks(machineCtx({ valid: ['a'], repairable: [], dead: [] }));
+        const row = report.results.find((r) => r.id === 'machine.globalSkills');
+        expect(row?.status).toBe('ok');
+    });
+
+    it('warns with awm init remedy when there are broken links', () => {
+        const report = runChecks(machineCtx({ valid: ['a'], repairable: ['b'], dead: ['c'] }));
+        const row = report.results.find((r) => r.id === 'machine.globalSkills');
+        expect(row?.status).toBe('warn');
+        expect(row?.detail).toContain('2'); // 1 repairable + 1 dead
+        expect(row?.remedy).toEqual({ kind: 'command', value: 'awm init' });
     });
 });
 

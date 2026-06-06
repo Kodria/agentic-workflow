@@ -25,6 +25,7 @@ function machine(): HarnessContext['machine'] {
         devCore: { present: true, brokenLinks: [] },
         ambient: { wanted: [], installed: [] },
         contextInjection: [],
+        globalSkills: { valid: [], repairable: [], dead: [] },
     };
 }
 

@@ -47,6 +47,15 @@ function machineChecks(m: MachineFacts): CheckResult[] {
             remedy: cmd('awm init') });
     }
 
+    // machine.globalSkills — integridad de symlinks en ~/.claude/skills (fuera del baseline)
+    const brokenGlobal = m.globalSkills.repairable.length + m.globalSkills.dead.length;
+    if (brokenGlobal === 0) {
+        out.push({ id: 'machine.globalSkills', level: 'machine', label: 'skills globales', status: 'ok', remedy: none });
+    } else {
+        out.push({ id: 'machine.globalSkills', level: 'machine', label: 'skills globales', status: 'warn',
+            detail: `${brokenGlobal} enlaces rotos`, remedy: cmd('awm init') });
+    }
+
     // machine.ambient.<b> — una fila por bundle deseado
     for (const b of m.ambient.wanted) {
         const installed = m.ambient.installed.includes(b);
