@@ -292,6 +292,16 @@ describe('stepConstitutionInjection (#6)', () => {
         expect(r.action).toBe('skipped');
         expect(a.injectProjectConstitution).not.toHaveBeenCalled();
     });
+
+    it('maps already → skipped when CONSTITUTION.md was already in opencode.json', () => {
+        const a = spies();
+        a.injectProjectConstitution.mockReturnValue('already');
+        const r = stepConstitutionInjection(
+            deps({ machine: machine(), project: project({ constitution: { present: true } }) }, a, { agent: 'opencode' }),
+        );
+        expect(r.action).toBe('skipped');
+        expect(r.detail).toBe('already');
+    });
 });
 
 describe('stepContextInjection', () => {
