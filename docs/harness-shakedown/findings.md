@@ -4,6 +4,32 @@ Bugs encontrados corriendo el arnés de verdad. Se arreglan DESPUÉS de que el l
 
 ---
 
+## ⭐ INSIGHT CENTRAL — La distinción alcance-vs-seguridad falta en el modelo de calidad
+
+> No es un bug puntual: es un principio de arquitectura de calidad que el arnés no tiene cableado. Es el hallazgo más valioso del shakedown. Material para un ciclo de diseño dedicado.
+
+**Qué pasó:** brainstorming preguntó por edge cases, el usuario dijo "caso feliz", y el sistema documentó `personas=0` como "fuera de alcance". QA respetó ese alcance → 0 hallazgos. El `splitBill(100,0,10) → Infinity` silencioso se quedó en el código. Ni QA ni brainstorming fallaron por separado: **comparten un punto ciego.**
+
+**El principio que falta:**
+> **El alcance puede excluir *features*. Nunca puede excluir *seguridad*.** La validación de entradas no es una feature: es un piso. Una función pública jamás debería devolver `Infinity`/`NaN` en silencio — debe fallar ruidosamente. "El usuario dijo que no" justifica omitir una feature, NO omitir un invariante de robustez.
+
+**Por qué importa para el objetivo de producto (garantía agnóstica):**
+- "Brainstorming con más criterio" **NO es la solución primaria**: el criterio del LLM es exactamente lo que varía entre herramientas (ver [Hallazgo #3]). Confiar en él reintroduce la dependencia de la disciplina del agente. Sirve como red de respaldo, no como garantía.
+- La capa que **garantiza** debe ser **determinística y agnóstica** — dispara sin importar quién escribió el código.
+
+**Portafolio propuesto (de más agnóstico a menos), a diseñar con datos de ambas herramientas:**
+1. **Regla de proceso (CONSTITUTION, agnóstica):** toda función pública valida entradas y falla ruidosamente. Heredada por todos los agentes vía contexto inyectado.
+2. **Convención de test estructural (semi-determinística):** todo módulo exige test de entradas límite/inválidas, no solo caso feliz → convierte "¿probaste el cero?" en gate, no en juicio.
+3. **Sensor estructural/semgrep (determinística donde se pueda):** clases encodables (división sin guarda, `eval`, etc.). Verdad incómoda: "ningún `Infinity` silencioso para toda entrada" es difícil de volver puramente estático (TS no tiene tipos refinados); por eso es portafolio y no una sola capa.
+4. **QA con lente de seguridad (juicio, respaldo):** instruir a QA que "documentado-fuera-de-alcance NO exime invariantes de seguridad" → `Infinity` silencioso es Type-C aunque el diseño lo waiveó.
+5. **harness-retro (el trinquete):** cada bug que escapa ≥2 veces se vuelve regla. La garantía crece con el tiempo; nunca es total el día uno.
+
+**Prerrequisito:** nada de esto corre mientras el gate esté hueco ([Hallazgo #2]). Arreglar la detección de pack es el primer escalón.
+
+**Próximo paso:** completar la corrida de OpenCode para obtener evidencia decisiva (¿el juicio de brainstorming/QA sobrevive un cambio de herramienta?), luego abrir ciclo de diseño de la capa de calidad agnóstica.
+
+---
+
 ## Hallazgo #1 — `awm init` crashea en el step `project.profile`
 
 - **Encontrado:** 2026-06-05, Fase 1 (Claude), corriendo `awm init --agent claude-code` en `~/awm-lab/tip-splitter-claude`

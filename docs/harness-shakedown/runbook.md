@@ -57,9 +57,9 @@ Leyenda: ⬜ no iniciado · 🟡 en progreso · ✅ funciona · ⚠️ parcial �
 | 4 Plan | ✅ | ⬜ | `splitbill-plan.md` commiteado; 2 tasks (scaffold + función TDD con Vitest) |
 | 5 Ejecución | ✅ | ⬜ | subagent-driven OK: implementer + 2 revisores/tarea, TDD, rechazó 4 falsos positivos. Código + 4 tests Vitest verdes. |
 | 6 Gate de sensores | ⚠️ | ⬜ | Hallazgo #2+#3 confirmados: `run`→solo semgrep "pass"; `--fast`→0 sensores "skipped". El verde = disciplina del agente, no el gate. |
-| 7 Cerrar + retomar | 🟡 | ⬜ | siguiente paso para Claude (cerrar sesión, abrir nueva, "continuá", ver recuperación de estado) |
-| 8 QA | ✅ | ⬜ | corrió automático (TERMINATION_PHASE de SDD), 0 hallazgos. Bug `personas=0` sobrevivió: el diseño lo pre-aprobó como fuera de alcance → QA respetó scope (correcto). Lección: plantar bug NO pre-legitimado. |
-| 9 Cierre | ⬜ | ⬜ | Claude lo está ofreciendo; hacer tras Fase 7 |
+| 7 Cerrar + retomar | ✅ | ⬜ | Sesión nueva recuperó estado sin pistas: "Estado: Finishing", listó design/plan/marker/commit, recomendó finishing-a-development-branch. Re-inyección + recuperación de estado confirmadas. |
+| 8 QA | ✅ | ⬜ | corrió automático (TERMINATION_PHASE de SDD), 0 hallazgos. Bug `personas=0` sobrevivió → ver ⭐ INSIGHT CENTRAL en findings.md (alcance vs seguridad). |
+| 9 Cierre | 🟡 | ⬜ | Claude lo está ofreciendo; proceder en la sesión |
 
 ---
 
