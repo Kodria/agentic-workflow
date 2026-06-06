@@ -1,9 +1,21 @@
-import { renderInitOutcome } from '../../src/commands/init';
+import { renderInitOutcome, makeConfirmExtensions } from '../../src/commands/init';
 import type { InitOutcome } from '../../src/core/init/types';
 import type { CheckReport } from '../../src/core/diagnostics/types';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+
+describe('makeConfirmExtensions (#1 empty-multiselect guard)', () => {
+    it('returns [] for empty proposed without invoking clack (non-yes path)', async () => {
+        const fn = makeConfirmExtensions(false);
+        await expect(fn([], [])).resolves.toEqual([]);
+    });
+
+    it('auto-confirms all proposed in --yes mode', async () => {
+        const fn = makeConfirmExtensions(true);
+        await expect(fn(['frontend'], ['package.json: next'])).resolves.toEqual(['frontend']);
+    });
+});
 
 function report(over: Partial<CheckReport> = {}): CheckReport {
     return {

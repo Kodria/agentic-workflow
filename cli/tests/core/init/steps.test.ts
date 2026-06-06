@@ -161,6 +161,23 @@ describe('stepProfile', () => {
         expect(a.addExtension).not.toHaveBeenCalled();
         expect(r.action).toBe('skipped');
     });
+
+    it('does not invoke confirmExtensions when no new extensions are proposed (#1 guard)', async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-empty-ext-'));
+        try {
+            const a = spies();
+            const confirm = jest.fn(async (p: string[]) => p);
+            const ctx: HarnessContext = {
+                machine: machine(),
+                project: project({ root, profile: { present: true, extensions: [] } }),
+            };
+            const r = await stepProfile(deps(ctx, a, { confirmExtensions: confirm }));
+            expect(confirm).not.toHaveBeenCalled();
+            expect(r.action).toBe('skipped');
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
 });
 
 describe('stepActivation', () => {

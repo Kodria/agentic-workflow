@@ -86,20 +86,7 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
             ...(opts.actions ?? {}),
         };
 
-        // confirmExtensions: with --yes auto-confirm all proposed; without --yes show interactive multiselect
-        const confirmExtensions = opts.yes
-            ? async (proposed: string[]) => proposed  // --yes: auto-confirm all; signals not shown
-            : async (proposed: string[], signals: string[]) => {
-                  const { multiselect, isCancel } = await import('@clack/prompts');
-                  const choice = await multiselect({
-                      message: `Extensiones detectadas (${signals.join(', ')}) — ¿activar?`,
-                      options: proposed.map((p) => ({ value: p, label: p })),
-                      initialValues: proposed,
-                      required: false,
-                  });
-                  if (isCancel(choice)) return [];
-                  return choice as string[];
-              };
+        const confirmExtensions = makeConfirmExtensions(!!opts.yes);
 
         outcome = await runInitSteps({
             cwd,
@@ -124,6 +111,34 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
     }
 
     return outcome.after.overall === 'healthy' ? 0 : 1;
+}
+
+// ---------------------------------------------------------------------------
+// Extension confirmation factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the extension-confirmation callback. The non-`--yes` path opens a clack
+ * `multiselect`; clack crashes ("Cannot read properties of undefined (reading
+ * 'disabled')") when handed an empty options array, so we short-circuit empty
+ * `proposed` BEFORE importing/invoking it (#1, greenfield dirs detect no signals).
+ */
+export function makeConfirmExtensions(
+    yes: boolean,
+): (proposed: string[], signals: string[]) => Promise<string[]> {
+    if (yes) return async (proposed: string[]) => proposed;
+    return async (proposed: string[], signals: string[]) => {
+        if (proposed.length === 0) return [];
+        const { multiselect, isCancel } = await import('@clack/prompts');
+        const choice = await multiselect({
+            message: `Extensiones detectadas (${signals.join(', ')}) — ¿activar?`,
+            options: proposed.map((p) => ({ value: p, label: p })),
+            initialValues: proposed,
+            required: false,
+        });
+        if (isCancel(choice)) return [];
+        return choice as string[];
+    };
 }
 
 // ---------------------------------------------------------------------------

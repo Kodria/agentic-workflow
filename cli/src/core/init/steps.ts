@@ -176,6 +176,7 @@ export async function stepProfile(d: InitDeps): Promise<StepResult> {
     const { proposed, signals } = detectExtensions(proj.root);
     const alreadyPresent = proj.profile.extensions;
     const newProposed = proposed.filter((p) => !alreadyPresent.includes(p));
+    if (newProposed.length === 0) return ok('project.profile', 'project', 'skipped', 'sin extensiones nuevas');
 
     const confirmed = await d.confirmExtensions(newProposed, signals);
     if (confirmed.length === 0) return ok('project.profile', 'project', 'skipped');
