@@ -51,8 +51,8 @@ Leyenda: ⬜ no iniciado · 🟡 en progreso · ✅ funciona · ⚠️ parcial �
 | Fase | Claude | OpenCode | Notas |
 |---|---|---|---|
 | 0 Preflight | ✅ | ✅ | ambas instaladas; opencode 1.16.2, claude 2.1.166 |
-| 1 Instalar arnés | ⚠️ | ⬜ | Claude: hook/skills/sensores ✔ pero `project.profile` crasheó → Hallazgo #1 |
-| 2 Verificar inyección de contexto | ✅ | ⬜ | Claude respondió de memoria (entry point, regla por niveles, 3 skills) sin leer archivos; citó "using-awm cargada al inicio". Hook confirmado. |
+| 1 Instalar arnés | ⚠️ | ⚠️ | Ambas: hook/skills/sensores ✔. OpenCode: `machine.contextInjection` **APLICÓ** (vs "skipped" en Claude) → `~/.awm/context/awm-context.md` creado + entrada en `opencode.json` verificada. Hallazgos #1 (profile crash) y #2 (pack generic) **reproducen idéntico → agnósticos**. |
+| 2 Verificar inyección de contexto | ✅ | 🟡 | Claude: respondió de memoria sin leer archivos; hook confirmado. OpenCode: siguiente — abrir sesión y sondear (prueba de carga eager del archivo). |
 | 3 Diseño | ✅ | ⬜ | `splitbill-design.md` commiteado; brainstorming detectó el edge `personas=0` pero respetó "caso feliz" → bug plantado OK |
 | 4 Plan | ✅ | ⬜ | `splitbill-plan.md` commiteado; 2 tasks (scaffold + función TDD con Vitest) |
 | 5 Ejecución | ✅ | ⬜ | subagent-driven OK: implementer + 2 revisores/tarea, TDD, rechazó 4 falsos positivos. Código + 4 tests Vitest verdes. |

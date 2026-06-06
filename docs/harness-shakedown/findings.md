@@ -39,6 +39,7 @@ Bugs encontrados corriendo el arnés de verdad. Se arreglan DESPUÉS de que el l
 - **Clase (sospechada):** lógica / runtime — un `.disabled` leído sobre un objeto `undefined`.
 - **Pista de investigación:** `grep "disabled" cli/src/` **NO** muestra ninguna lectura literal de `.disabled` en `profile.ts` ni en `init/`. Las únicas coincidencias son `config.enabled === false` (sensors/status.ts:72) y un `skipReason: 'disabled'` (sensors/run.ts:140) — ninguna es la culpable. Conclusión: el `.disabled` se lee en la cadena que `stepProfile` dispara al **activar bundles/skills** (acción `syncProfile`), probablemente sobre una entrada de bundle/skill `undefined` (mismatch de forma entre el registry y lo que el profile espera). Puede ser acceso dinámico (`obj['disabled']`) o en el path de instalación de bundles.
 - **Repro:** `awm init --agent claude-code` en un dir git fresco sin `.awm/profile.json` previo.
+- **CONFIRMADO AGNÓSTICO (2026-06-05):** reproduce idéntico con `awm init --agent opencode` en `project-opencode`. No es Claude-specific → bug del CLI, independiente del agente. Efecto colateral observado: el contexto materializado de OpenCode quedó con "Extensiones activas: ninguna" (el crash impide cargar extensiones del proyecto).
 - **Archivos a inspeccionar al debuggear:** `cli/src/core/init/steps.ts` (`stepProfile`), la acción `syncProfile` y su cadena de activación de bundles, `cli/src/core/profile.ts`, `cli/src/core/bundles.ts`.
 - **Estado:** ABIERTO — debuggear con `systematic-debugging` después del lab.
 
