@@ -38,6 +38,11 @@ Task tool (general-purpose):
        (`newCount` / the listed errors — the ratchet already suppresses the
        pre-existing baseline). Re-run until `overall: pass`. Do not report DONE
        with unaddressed new sensor findings.
+
+       **Lee `overall`, no el exit code.** `not_certified` (sin `.awm/sensors.json`)
+       también sale exit 0 — NO lo reportes como "sensors pass". Si el veredicto es
+       `not_certified`, dilo explícito: "sin sensores configurados, gate no certificado".
+       Solo `overall: "pass"` cuenta como verde; `fail` se arregla antes de reportar DONE.
     5. Commit your work
     6. Self-review (see below)
     7. Report back
