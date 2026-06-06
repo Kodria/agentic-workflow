@@ -311,6 +311,23 @@ describe('runSensors — test sensor (exit-code)', () => {
         expect(test.status).toBe('fail');
         expect(result.overall).toBe('fail');
     });
+
+    it('test sensor: missing npm test script exits non-zero → fail, not skipped', () => {
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'),
+            JSON.stringify({ pack: 'js-ts', sensors: { test: { cmd: 'npm test', fast: false } } }));
+        mockExecSyncFn.mockImplementation(() => {
+            const err: any = new Error('npm test: missing script');
+            err.status = 1;
+            err.stdout = 'npm error Missing script: test\n';
+            err.stderr = '';
+            throw err;
+        });
+        const { runSensors } = load();
+        const result = runSensors({ all: true, cwd: tmpDir });
+        const test = result.sensors.find((s: any) => s.name === 'test');
+        expect(test.status).toBe('fail');
+        expect(result.overall).toBe('fail');
+    });
 });
 
 describe('runSensors — honest floor (not_certified over real stack)', () => {

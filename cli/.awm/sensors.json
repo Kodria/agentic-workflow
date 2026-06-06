@@ -1,0 +1,30 @@
+{
+  "pack": "js-ts",
+  "sensors": {
+    "typecheck": {
+      "cmd": "npx tsc --noEmit",
+      "fast": true
+    },
+    "lint": {
+      "cmd": "npx eslint . --config eslint.config.awm.mjs --cache --format json",
+      "fast": true
+    },
+    "security": {
+      "cmd": "semgrep --config .semgrep.awm.yml --json .",
+      "fast": false
+    },
+    "depcheck": {
+      "cmd": "npx depcruise --config .dep-cruiser.awm.js src",
+      "fast": false
+    },
+    "test": {
+      "cmd": "npm test --silent",
+      "fast": false
+    },
+    "mutation": {
+      "cmd": "npx stryker run",
+      "fast": false,
+      "enabled": false
+    }
+  }
+}
