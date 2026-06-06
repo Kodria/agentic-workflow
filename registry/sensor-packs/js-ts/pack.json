@@ -27,6 +27,12 @@
       "configFile": ".dep-cruiser.awm.js",
       "formatter": "generic"
     },
+    "test": {
+      "fast": false,
+      "enabled": true,
+      "defaultCmd": "npm test --silent",
+      "formatter": "generic"
+    },
     "mutation": {
       "fast": false,
       "enabled": false,

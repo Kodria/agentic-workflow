@@ -268,6 +268,49 @@ describe('reconcilePack', () => {
     });
 });
 
+describe('runSensors — test sensor (exit-code)', () => {
+    let tmpDir: string;
+    const path = require('path');
+    const os = require('os');
+
+    beforeEach(() => {
+        jest.resetModules();
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-run-test-'));
+        fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+        mockExecSyncFn.mockReset();
+    });
+    afterEach(() => { fs.rmSync(tmpDir, { recursive: true }); });
+
+    const load = () => require('../../../src/commands/sensors/run');
+
+    it('test sensor: passing run (exit 0 with output) is pass, not fail', () => {
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'),
+            JSON.stringify({ pack: 'js-ts', sensors: { test: { cmd: 'npm test', fast: false } } }));
+        mockExecSyncFn.mockReturnValue('Tests: 6 passed, 6 total\n'); // runner prints on success
+        const { runSensors } = load();
+        const result = runSensors({ all: true, cwd: tmpDir });
+        const test = result.sensors.find((s: any) => s.name === 'test');
+        expect(test.status).toBe('pass');
+    });
+
+    it('test sensor: failing run (non-zero exit) is fail, not skipped', () => {
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'),
+            JSON.stringify({ pack: 'js-ts', sensors: { test: { cmd: 'npm test', fast: false } } }));
+        mockExecSyncFn.mockImplementation(() => {
+            const err: any = new Error('jest failed');
+            err.status = 1;
+            err.stdout = 'Tests: 1 failed, 5 passed\n';
+            err.stderr = '';
+            throw err;
+        });
+        const { runSensors } = load();
+        const result = runSensors({ all: true, cwd: tmpDir });
+        const test = result.sensors.find((s: any) => s.name === 'test');
+        expect(test.status).toBe('fail');
+        expect(result.overall).toBe('fail');
+    });
+});
+
 describe('runSensors — honest floor (not_certified over real stack)', () => {
     const path = require('path');
     const os = require('os');

@@ -7,6 +7,7 @@ import { parseTscOutput } from './formatters/tsc';
 import { parseEslintOutput } from './formatters/eslint';
 import { parseSemgrepOutput } from './formatters/semgrep';
 import { parseGenericOutput } from './formatters/generic';
+import { parseTestOutput } from './formatters/test';
 import { readBaseline, partition } from './baseline';
 import { detectStack, initSensors } from './init';
 
@@ -112,7 +113,12 @@ function getFormatter(name: string): (raw: string) => SensorError[] {
     if (name === 'typecheck') return parseTscOutput;
     if (name === 'lint') return parseEslintOutput;
     if (name === 'security') return parseSemgrepOutput;
+    if (name === 'test') return parseTestOutput;
     return parseGenericOutput;
+}
+
+function isExitCodeSensor(name: string): boolean {
+    return name === 'test';
 }
 
 function runSensor(name: string, cmd: string, timeout: number, cwd: string): SensorResult {
@@ -149,6 +155,11 @@ function runSensor(name: string, cmd: string, timeout: number, cwd: string): Sen
                 status: 'fail',
                 errors: [{ message: `sensor tool not available: ${raw.slice(0, 200)}` }],
             };
+        }
+        // Exit-code sensors (tests): any genuine non-zero exit is a real failure,
+        // even when no per-line findings can be parsed from the output.
+        if (isExitCodeSensor(name)) {
+            return { name, status: 'fail', errors: [{ message: `SENSOR[${name}] failed (exit ${err.status})` }] };
         }
         return { name, status: 'skipped', errors: [], skipReason: `exit ${err.status}: ${raw.slice(0, 200)}` };
     }
