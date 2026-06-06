@@ -49,6 +49,21 @@ function readManifest(cwd: string): SensorManifest | null {
     try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { return null; }
 }
 
+/**
+ * Walk up from `startCwd` looking for the nearest ancestor that contains
+ * `.awm/sensors.json` (git/.git pattern). Returns that directory, or null
+ * if none is found before the filesystem root.
+ */
+function findManifestDir(startCwd: string): string | null {
+    let dir = path.resolve(startCwd);
+    while (true) {
+        if (fs.existsSync(path.join(dir, MANIFEST_FILE))) return dir;
+        const parent = path.dirname(dir);
+        if (parent === dir) return null; // reached filesystem root
+        dir = parent;
+    }
+}
+
 function shouldRun(isFast: boolean, opts: RunOptions): boolean {
     if (opts.all) return true;
     if (opts.fast && isFast) return true;
@@ -89,9 +104,12 @@ function runSensor(name: string, cmd: string, timeout: number, cwd: string): Sen
 }
 
 export function runSensors(opts: RunOptions = {}): RunOutput {
-    const cwd = opts.cwd ?? process.cwd();
-    const manifest = readManifest(cwd);
-    if (!manifest) return { sensors: [], overall: 'skipped' };
+    const startCwd = opts.cwd ?? process.cwd();
+    const manifestDir = findManifestDir(startCwd);
+    if (!manifestDir) return { sensors: [], overall: 'not_certified' };
+    const manifest = readManifest(manifestDir);
+    if (!manifest) return { sensors: [], overall: 'not_certified' };
+    const cwd = manifestDir; // ejecutar sensores y baseline desde donde vive el manifest
 
     const results: SensorResult[] = [];
     // Baseline suppresses already-accepted findings so sensors fail only on NEW

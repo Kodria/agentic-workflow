@@ -1,4 +1,11 @@
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { runSensors } from '../../../src/commands/sensors/run';
+
+function mkTmp(): string {
+    return fs.mkdtempSync(path.join(os.tmpdir(), 'awm-sensors-'));
+}
 
 // Define stable mock before jest.mock hoisting
 const mockExecSyncFn = jest.fn();
@@ -33,12 +40,12 @@ describe('runSensors', () => {
 
     const load = () => require('../../../src/commands/sensors/run');
 
-    it('returns skipped output when manifest does not exist', () => {
+    it('returns not_certified output when manifest does not exist', () => {
         const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-empty-'));
         try {
             const { runSensors } = load();
             const result = runSensors({ fast: true, cwd: emptyDir });
-            expect(result.overall).toBe('skipped');
+            expect(result.overall).toBe('not_certified');
             expect(result.sensors).toHaveLength(0);
         } finally { fs.rmSync(emptyDir, { recursive: true }); }
     });
@@ -130,5 +137,29 @@ describe('runSensors', () => {
         mockExecSyncFn.mockImplementationOnce(tcError).mockReturnValueOnce('' as any);
         const result = runSensors({ fast: true, cwd: tmpDir, ignoreBaseline: true });
         expect(result.overall).toBe('fail');
+    });
+});
+
+describe('runSensors — not_certified + auto-discovery', () => {
+    it('returns not_certified when no manifest exists anywhere up the tree', () => {
+        const dir = mkTmp();
+        const out = runSensors({ cwd: dir });
+        expect(out.overall).toBe('not_certified');
+        expect(out.sensors).toEqual([]);
+    });
+
+    it('discovers .awm/sensors.json in a parent directory (walk-up)', () => {
+        const root = mkTmp();
+        fs.mkdirSync(path.join(root, '.awm'));
+        // Manifest con un sensor trivial que siempre pasa (echo no produce errores parseables).
+        fs.writeFileSync(
+            path.join(root, '.awm', 'sensors.json'),
+            JSON.stringify({ pack: 'test', sensors: { noop: { cmd: 'echo ok', fast: true } } }),
+        );
+        const nested = path.join(root, 'a', 'b');
+        fs.mkdirSync(nested, { recursive: true });
+        const out = runSensors({ cwd: nested });
+        expect(out.overall).not.toBe('not_certified');
+        expect(out.sensors.length).toBe(1);
     });
 });

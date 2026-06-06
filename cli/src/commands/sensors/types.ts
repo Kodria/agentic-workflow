@@ -31,7 +31,7 @@ export type SensorResult = {
 
 export type RunOutput = {
     sensors: SensorResult[];
-    overall: 'pass' | 'fail' | 'skipped';
+    overall: 'pass' | 'fail' | 'skipped' | 'not_certified';
 };
 
 export type SensorCheck = {
