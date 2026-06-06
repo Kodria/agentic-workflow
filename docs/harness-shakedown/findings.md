@@ -62,6 +62,20 @@ Bugs encontrados corriendo el arnés de verdad. Se arreglan DESPUÉS de que el l
 
 ---
 
+## Hallazgo #4 — La reparación de symlinks de skills es Claude-only; OpenCode tiene 10 symlinks rotos (Body A a medias)
+
+- **Encontrado:** 2026-06-05, preparando la Fase 3 de OpenCode.
+- **Síntoma:** `~/.agents/skills` (path de skills de OpenCode, per `PROVIDERS['opencode'].skill.global`) tiene **10 symlinks rotos** que apuntan a `~/.awm/registry/registry/skills/` — el root viejo que **no existe** (el real es `~/.awm/cli-source/registry/skills/`). Evidencia: `find ~/.agents/skills -type l ! -exec test -e {} \; | wc -l` → 10. En contraste, `~/.claude/skills` → 0 rotos (Body A lo reparó).
+- **Causa raíz:** `stepGlobalSkillsRepair` está hardcodeado a `PROVIDERS['claude-code'].skill.global` (`cli/src/core/init/steps.ts:141`). El endurecimiento en `awm update` (`cli/src/index.ts`) también usa `PROVIDERS['claude-code'].skill.global`. La reparación de Body A **no es agnóstica**: arregla Claude e ignora a OpenCode/Antigravity.
+- **Efecto:** `awm init --agent opencode` NO instala ni repara las skills de OpenCode. No existe hoy un comando que deje las skills de OpenCode sanas. Los cuerpos de las skills no son accesibles desde el path de OpenCode.
+- **Severidad:** ALTA para el objetivo de agnosticismo — es Body A "terminado" solo para Claude.
+- **Pregunta abierta más profunda (a probar empíricamente):** aun con los symlinks reparados, **¿OpenCode consume `~/.agents/skills`?** OpenCode no tiene un "Skill tool" estilo Claude. Puede que el path sea inerte. Hay que reparar → probar Fase 3 → observar si OpenCode realmente invoca/lee alguna skill.
+- **Dirección de fix:** hacer `stepGlobalSkillsRepair` (y la reconciliación de `awm update`) iterar sobre el path del agente target (o de todos los agentes con skills), no hardcodear `claude-code`. Conecta con la misma raíz de Body A.
+- **Workaround para desbloquear el lab:** re-linkear manualmente los 10 symlinks de `~/.agents/skills` → `~/.awm/cli-source/registry/skills/` (equivalente a lo que Body A hace para Claude).
+- **Estado:** ABIERTO.
+
+---
+
 ## Hallazgo #3 — El verde del arnés viene de la disciplina del agente, no del gate (implicación de agnosticismo)
 
 - **Encontrado:** 2026-06-05, Fase 5-6 (Claude), como consecuencia del Hallazgo #2.
