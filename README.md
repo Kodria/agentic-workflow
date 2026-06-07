@@ -20,9 +20,17 @@ Once installed, verify it's working:
 awm --help
 ```
 
-> **First time using AWM?** Read the [Getting Started guide](docs/getting-started.md) — it walks you through enabling the bootstrap hook, installing the `core-dev` pack, and configuring a project end-to-end (sensors + CONSTITUTION.md + the Harness Engineering loop).
+Then, **inside the repo where you want the harness**, bootstrap everything in one idempotent pass:
 
-## �️ Uninstallation
+```bash
+awm init                  # Claude Code (default)
+awm init --agent opencode # or OpenCode
+awm doctor                # read the machine + project state any time
+```
+
+> **First time using AWM?** Read the [Getting Started runbook](docs/getting-started.md) — the from-zero walkthrough for both Claude Code and OpenCode: install → `awm init` → `awm doctor` → finish project setup (sensors + `CONSTITUTION.md` + the learning loop).
+
+## 🧹 Uninstallation
 
 To safely remove the AWM CLI and its internal cache without deleting your personal skills or workflows, run the uninstall script from the repository root:
 
@@ -32,7 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/Kodria/agentic-workflow/main/uninst
 
 > **Note**: Your installed artifacts in `~/.agents` and `~/.gemini/antigravity/global_workflows` are intentionally left intact to protect personal files. If you wish to remove them, please delete the specific directories or symlinks manually.
 
-## �📦 Managing Skills and Workflows
+## 📦 Managing Skills and Workflows
 
 AWM comes with an interactive terminal interface.
 
@@ -57,11 +65,17 @@ awm update
 
 Dive deeper into how AWM works and how you can contribute:
 
-- [Getting Started](docs/getting-started.md): First-use walkthrough — bootstrap hook, sensors, CONSTITUTION.md, and the Harness Engineering loop end-to-end.
-- [Architecture & Design](docs/architecture.md): Understand the logical monorepo and how AWM routes artifacts.
-- [CLI Reference](docs/cli-reference.md): Detailed usage of all `awm` commands and non-interactive flags.
-- [Registry Contributor Guide](docs/registry-guide.md): Learn how to build your own Skills (`SKILL.md`) and bundle them into Processes.
-- [CLI Developer Guide](cli/README.md): Instructions for working on the core AWM CLI source code.
+**Use it**
+- [Getting Started](docs/getting-started.md): The from-zero runbook for Claude Code & OpenCode — install → `awm init` → `awm doctor` → sensors, `CONSTITUTION.md`, and the development + learning loop end-to-end.
+- [CLI Reference](docs/cli-reference.md): Every `awm` command and non-interactive flag (`init`, `doctor`, `sensors`, `hooks`, `ledger`, `add`, …).
+
+**Understand it**
+- [Architecture & Design](docs/architecture.md): The logical monorepo and how AWM routes artifacts between the registry and your install.
+- [Harness Retros](docs/harness-retros.md): Auditable log of recurring harness gaps converted into structural rules.
+
+**Extend it**
+- [Registry Contributor Guide](docs/registry-guide.md): Author your own Skills (`SKILL.md`) and bundle them into Processes.
+- [CLI Developer Guide](cli/README.md): Work on the core AWM CLI source code.
 
 ## 🤝 Why AWM?
 
