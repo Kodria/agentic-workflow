@@ -50,6 +50,7 @@ function spies(): jest.Mocked<InitActions> {
         syncProfile: jest.fn(() => ({ installed: ['a'], skipped: [], extensions: ['frontend'] })),
         initSensors: jest.fn(() => ({ detection: { pack: 'js-ts' } })),
         addExtension: jest.fn(),
+        ensureProfile: jest.fn(),
         gatherProject: jest.fn((_cwd: string, _bundles: any) => null),
         contextStatus: jest.fn(() => 'absent' as const),
         installContext: jest.fn(),
@@ -176,6 +177,39 @@ describe('stepProfile', () => {
             const r = await stepProfile(deps(ctx, a, { confirmExtensions: confirm }));
             expect(confirm).not.toHaveBeenCalled();
             expect(r.action).toBe('skipped');
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('bootstraps an empty profile when none exists and no extensions are proposed', async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-bootstrap-profile-'));
+        try {
+            const a = spies();
+            const ctx: HarnessContext = {
+                machine: machine(),
+                project: project({ root, profile: { present: false, extensions: [] } }),
+            };
+            const r = await stepProfile(deps(ctx, a, { confirmExtensions: async (p) => p }));
+            expect(r.action).toBe('applied');
+            expect(a.ensureProfile).toHaveBeenCalledWith(root);
+            expect(a.addExtension).not.toHaveBeenCalled();
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('does not bootstrap when the profile already exists', async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-existing-profile-'));
+        try {
+            const a = spies();
+            const ctx: HarnessContext = {
+                machine: machine(),
+                project: project({ root, profile: { present: true, extensions: [] } }),
+            };
+            const r = await stepProfile(deps(ctx, a));
+            expect(r.action).toBe('skipped');
+            expect(a.ensureProfile).not.toHaveBeenCalled();
         } finally {
             fs.rmSync(root, { recursive: true, force: true });
         }
