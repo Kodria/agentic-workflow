@@ -62,7 +62,8 @@ export function registerLedgerCommand(program: Command): void {
         .action((opts: { min: string; branch?: string }) => {
             const cwd = process.cwd();
             const branch = opts.branch ?? detectBranch(cwd);
-            const min = Number.parseInt(opts.min, 10) || 2;
+            const parsed = Number.parseInt(opts.min, 10);
+            const min = Number.isNaN(parsed) || parsed < 1 ? 2 : parsed;
             process.stdout.write(JSON.stringify(recurring(cwd, branch, min), null, 2) + '\n');
         });
 
@@ -74,6 +75,9 @@ export function registerLedgerCommand(program: Command): void {
             const cwd = process.cwd();
             const branch = opts.branch ?? detectBranch(cwd);
             const moved = archiveLedger(cwd, branch, archiveLabel());
+            if (!moved) {
+                process.stderr.write(`awm ledger archive: no active ledger found for branch "${branch}" — nothing to archive\n`);
+            }
             process.stdout.write(JSON.stringify({ archived: moved, branch }, null, 2) + '\n');
         });
 }
