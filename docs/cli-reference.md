@@ -143,7 +143,7 @@ Snapshot current findings as an accepted baseline (`.awm/sensors.baseline.json`)
 
 ### `awm sensors install`
 
-Install the **`PostToolUse`** hook in `~/.claude/settings.json` so fast sensors run automatically after each file edit. **Claude Code only** — OpenCode has no hooks and runs sensors at the completion gate instead.
+Install the **`PostToolUse`** hook in `~/.claude/settings.json` so fast sensors run automatically after each file edit. This installs **only the per-edit *trigger*, not the sensors** — the checks and the completion gate are identical on every agent. **Claude Code only:** OpenCode has no hooks, so it has nothing to install here; it runs the same sensors at the completion gate (`awm sensors run`, via `verification-before-completion`). The difference is *cadence* (Claude gets an extra early loop), not *coverage*.
 
 ---
 
