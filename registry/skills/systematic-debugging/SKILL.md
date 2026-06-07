@@ -162,6 +162,14 @@ You MUST complete each phase before proceeding to the next.
    - Didn't work? Form NEW hypothesis
    - DON'T add more fixes on top
 
+   On confirmed root cause, record it to the ledger so a second occurrence is detectable:
+
+   ```
+   awm ledger add --phase debugging --source-skill systematic-debugging --polarity finding --class <structural|logica|seguridad> --signature <root-cause-slug> --severity <blocker|important> --desc "<root cause, one line>" --ref <file:line>
+   ```
+
+   (Best-effort — skip if `awm` is unavailable.)
+
 4. **When You Don't Know**
    - Say "I don't understand X"
    - Don't pretend to know

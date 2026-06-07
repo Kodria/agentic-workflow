@@ -102,6 +102,8 @@ Usar template `./deep-review-prompt.md`. Inyectar:
 
 El subagente retorna JSON con lista de hallazgos clasificados.
 
+- El subagente además registra cada hallazgo y win en el ledger vía `awm ledger add` (ver deep-review-prompt.md), insumo de `harness-retro`.
+
 ### Paso 4: Presentar hallazgos al usuario
 
 ```

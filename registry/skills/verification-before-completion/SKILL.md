@@ -159,6 +159,14 @@ Run with **no flag** — that runs *all* sensors (fast: `tsc`, `lint`; slow: `se
 
 If the SAME sensor (same `name` + same `rule`) has failed in a prior session for this repo, do not just fix it — invoke the `harness-retro` skill. Recurring sensor failures mean the harness has a gap; `harness-retro` turns the recurrence into a structural rule.
 
+When a sensor failure recurs (same `name` + `rule` as a prior fix in this session), log it before fixing so the recurrence is counted:
+
+```
+awm ledger add --phase sensors --source-skill verification-before-completion --polarity finding --class structural --signature <sensor>:<rule> --severity important --desc "<sensor> recurred on <rule>"
+```
+
+(Best-effort — skip if `awm` is unavailable.)
+
 ## The Bottom Line
 
 **No shortcuts for verification.**

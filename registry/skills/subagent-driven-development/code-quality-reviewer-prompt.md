@@ -25,3 +25,20 @@ Task tool (general-purpose):
 - **Systemic patterns:** Does the same flaw appear across ≥2 files in this change? If yes, name the pattern and recommend the orchestrator invoke the `harness-retro` skill after this review. Do NOT list every occurrence as a separate finding — name the pattern once and point to one example. <!-- AWM-INTEGRATION: reviewer-retro -->
 
 **Code reviewer returns:** Strengths, Issues (Critical/Important/Minor), Assessment
+
+## Record to the ledger (AWM)
+
+After forming your verdict, persist each result to the branch ledger so harness-retro can learn from this session:
+
+For each quality issue found:
+```
+awm ledger add --phase code-quality-review --source-skill subagent-driven-development --polarity finding --class <structural|logica|seguridad> --signature <short-slug> --severity <blocker|important|minor> --desc "<one line>" --ref <file:line>
+```
+Use `--class structural` for type/shape issues, `--class logica` for behavioral bugs, `--class seguridad` for vulnerabilities.
+
+For each thing the implementation did **well** (a win worth reinforcing):
+```
+awm ledger add --phase code-quality-review --source-skill subagent-driven-development --polarity win --class <appropriate-class> --signature <short-slug> --severity info --desc "<one line>"
+```
+
+Use a stable, lowercase `--signature` slug so recurring issues group across sessions. If `awm` is not on PATH, skip silently — the ledger is best-effort.

@@ -32,3 +32,34 @@ describe('B-3 harness-retro is ledger-driven', () => {
         expect(skill).toMatch(/se(ñ|n)al|signal/i);
     });
 });
+
+describe('B-3 capture wiring — phases append to the ledger', () => {
+    test('SDD spec reviewer emits findings AND wins to the ledger', () => {
+        const p = read('subagent-driven-development/spec-reviewer-prompt.md');
+        expect(p).toMatch(/awm ledger add/);
+        expect(p).toMatch(/--polarity (win|finding)/);
+        expect(p).toMatch(/--polarity win/);
+    });
+
+    test('SDD code-quality reviewer emits findings AND wins to the ledger', () => {
+        const p = read('subagent-driven-development/code-quality-reviewer-prompt.md');
+        expect(p).toMatch(/awm ledger add/);
+        expect(p).toMatch(/--polarity win/);
+    });
+
+    test('post-qa deep-review emits findings AND wins to the ledger', () => {
+        const p = read('post-implementation-qa/deep-review-prompt.md');
+        expect(p).toMatch(/awm ledger add/);
+        expect(p).toMatch(/--polarity win/);
+    });
+
+    test('verification-before-completion logs recurring sensor failures', () => {
+        const p = read('verification-before-completion/SKILL.md');
+        expect(p).toMatch(/awm ledger add/);
+    });
+
+    test('systematic-debugging logs the confirmed root cause', () => {
+        const p = read('systematic-debugging/SKILL.md');
+        expect(p).toMatch(/awm ledger add/);
+    });
+});

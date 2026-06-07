@@ -59,3 +59,19 @@ Task tool (general-purpose):
     - ✅ Spec compliant (if everything matches after code inspection)
     - ❌ Issues found: [list specifically what's missing or extra, with file:line references]
 ```
+
+## Record to the ledger (AWM)
+
+After forming your verdict, persist each result to the branch ledger so harness-retro can learn from this session. One command per item:
+
+For each spec gap (missing / extra / misread):
+```
+awm ledger add --phase spec-review --source-skill subagent-driven-development --polarity finding --class proceso --signature <short-slug> --severity <blocker|important|minor> --desc "<one line>" --ref <file:line>
+```
+
+For each thing the implementer did **well** (a win worth reinforcing):
+```
+awm ledger add --phase spec-review --source-skill subagent-driven-development --polarity win --class proceso --signature <short-slug> --severity info --desc "<one line>"
+```
+
+Use a stable, lowercase `--signature` slug (e.g. `missing-progress-reporting`) so recurring issues group across sessions. If `awm` is not on PATH, skip silently — the ledger is best-effort.

@@ -80,3 +80,24 @@ Agent tool (general-purpose):
 
     Be thorough. A finding list that is too short is more dangerous than one that is too long.
 ```
+
+## Record to the ledger (AWM)
+
+After classifying findings, emit one `awm ledger add` command per finding and per win:
+
+For each Type B finding (plan-vs-implementation gap):
+```
+awm ledger add --phase post-qa --source-skill post-implementation-qa --polarity finding --class proceso --signature <short-slug> --severity <blocker|important|minor> --desc "<one line>"
+```
+
+For each Type C finding (logic bug / behavioral issue):
+```
+awm ledger add --phase post-qa --source-skill post-implementation-qa --polarity finding --class <logica|seguridad> --signature <short-slug> --severity <blocker|important|minor> --desc "<one line>" --ref <file:line>
+```
+
+For each invariant the implementation got **right** (a win worth reinforcing):
+```
+awm ledger add --phase post-qa --source-skill post-implementation-qa --polarity win --class <appropriate-class> --signature <short-slug> --severity info --desc "<one line>"
+```
+
+Use a stable, lowercase `--signature` slug so recurring issues group across sessions. If `awm` is not on PATH, skip silently — the ledger is best-effort.
