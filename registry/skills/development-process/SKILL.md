@@ -25,7 +25,6 @@ digraph lifecycle {
     "Choose execution" [shape=diamond];
     "executing-plans" [shape=box, style=filled, fillcolor=lightblue];
     "subagent-driven-development" [shape=box, style=filled, fillcolor=lightblue];
-    "finishing-a-development-branch" [shape=box, style=filled, fillcolor=lightgreen];
     "Done" [shape=doublecircle];
 
     "New task / idea" -> "brainstorming";
@@ -36,9 +35,12 @@ digraph lifecycle {
     "Choose execution" -> "executing-plans" [label="separate session"];
     "Choose execution" -> "subagent-driven-development" [label="same session"];
     "post-implementation-qa" [shape=box, style=filled, fillcolor=lightyellow, label="post-implementation-qa"];
+    "harness-retro" [shape=box, style=filled, fillcolor=lightyellow, label="harness-retro"];
+    "finishing-a-development-branch" [shape=box, style=filled, fillcolor=lightgreen];
     "executing-plans" -> "post-implementation-qa";
     "subagent-driven-development" -> "post-implementation-qa";
-    "post-implementation-qa" -> "finishing-a-development-branch";
+    "post-implementation-qa" -> "harness-retro";
+    "harness-retro" -> "finishing-a-development-branch";
     "finishing-a-development-branch" -> "Done";
 }
 ```
@@ -53,7 +55,8 @@ digraph lifecycle {
 | 3a. Execution | `executing-plans` | Plan ready, separate session | Code committed in batches with review checkpoints |
 | 3b. Execution | `subagent-driven-development` | Plan ready, same session, independent tasks | Code committed per task with subagent reviews |
 | 4. QA | `post-implementation-qa` | All tasks done, before finishing | Hallazgos Type B/C cerrados, marker `awm-qa-complete` en plan |
-| 5. Completion | `finishing-a-development-branch` | QA complete (`awm-qa-complete` marker present) | Merge, PR, or branch cleanup |
+| 4.5. Retro | `harness-retro` | QA complete (`awm-qa-complete`), retro not yet done (`awm-retro-complete` absent) | Lessons cured into remediation tree / CONSTITUTION.md / AGENTS.md; ledger archived; marker `awm-retro-complete` added to plan |
+| 5. Completion | `finishing-a-development-branch` | `awm-retro-complete` present in plan | Merge, PR, or branch cleanup |
 
 ### Cross-Cutting Skills (used during any phase)
 
@@ -78,7 +81,8 @@ Scan `docs/plans/` for existing artifacts:
 | `*-design.md` without `## UI Screens` or no rows with `Status: pending`, no `*-plan.md` | **Designed** | Invoke `writing-plans` |
 | `*-plan.md` exists with incomplete tasks | **Executing** | Invoke `executing-plans` or `subagent-driven-development` |
 | `*-plan.md` exists, all tasks complete, no `<!-- awm-qa-complete` in plan | **QA Pending** | Invoke `post-implementation-qa` |
-| `*-plan.md` exists, all tasks complete, `<!-- awm-qa-complete` present in plan | **Finishing** | Invoke `finishing-a-development-branch` |
+| `*-plan.md` all tasks complete, `<!-- awm-qa-complete` present in plan, no `<!-- awm-retro-complete` | **Retro pending** | Invoke `harness-retro` |
+| `*-plan.md` all tasks complete, `<!-- awm-retro-complete` present in plan | **Finishing** | Invoke `finishing-a-development-branch` |
 
 ### Step 2: Present State to User
 
@@ -107,6 +111,11 @@ Once approved, invoke the skill. The invoked skill takes full control of the ses
 1. Check `docs/plans/` plan file for `<!-- awm-qa-complete` anywhere in the file
 2. If absent → invoke `post-implementation-qa`
 3. Do NOT jump to `finishing-a-development-branch` without QA evidence
+
+### When QA is complete but the retro marker is absent
+1. Check the plan for `<!-- awm-retro-complete`
+2. If absent → invoke `harness-retro` (it always runs; if the ledger is empty it exits fast and adds the marker)
+3. Do NOT jump to `finishing-a-development-branch` without the retro marker
 
 ### When user says "build X" or "add feature Y"
 1. Check `docs/plans/` for existing design/plan

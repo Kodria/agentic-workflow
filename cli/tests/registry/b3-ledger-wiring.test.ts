@@ -63,3 +63,20 @@ describe('B-3 capture wiring — phases append to the ledger', () => {
         expect(p).toMatch(/awm ledger add/);
     });
 });
+
+describe('B-3 development-process routes harness-retro as a terminal phase', () => {
+    const skill = read('development-process/SKILL.md');
+
+    test('harness-retro appears as a pipeline phase between QA and finishing', () => {
+        const qaIdx = skill.indexOf('post-implementation-qa');
+        const retroIdx = skill.indexOf('harness-retro');
+        const finishIdx = skill.indexOf('finishing-a-development-branch');
+        expect(retroIdx).toBeGreaterThan(-1);
+        expect(qaIdx).toBeLessThan(retroIdx);
+        expect(retroIdx).toBeLessThan(finishIdx);
+    });
+
+    test('routing keys on the awm-retro-complete marker', () => {
+        expect(skill).toMatch(/awm-retro-complete/);
+    });
+});
