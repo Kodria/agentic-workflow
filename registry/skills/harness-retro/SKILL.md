@@ -1,57 +1,65 @@
 ---
 name: harness-retro
-version: "1.0.0"
-description: Use when the same bug, review finding, or sensor failure has appeared at least twice — turns recurring symptoms into structural rules so the harness catches them automatically next time. Triggered by systematic-debugging, code-quality-reviewer, receiving-code-review, or the user. Outputs lint rules, structural tests, CONSTITUTION.md entries, or Semgrep rules depending on the bug class.
+version: "2.0.0"
+description: Use as the terminal learning phase of development-process — reads the per-branch findings ledger (awm ledger), presents the session's findings and wins interactively, and cures each into a concrete, durable rule (remediation tree / CONSTITUTION.md / AGENTS.md) so the agent stops repeating mistakes. Ledger-driven, not dependent on human recall.
 ---
 
 # Harness Retro
 
 ## Overview
 
-A bug that escapes the harness once is a miss. A bug that escapes twice is a harness gap. `harness-retro` is the cross-cutting skill that turns the second occurrence into a structural rule so there is no third occurrence. It is the steering layer of the AWM Harness Engineering loop.
+`harness-retro` is the terminal learning phase of `development-process`. It reads the branch ledger accumulated during the session (populated by SDD reviewers, post-qa, sensors, and debugging phases), presents every item to the user interactively, and cures the approved ones into the remediation tree or existing delivered docs.
 
-**Announce at start:** "I'm using the harness-retro skill to convert this recurring issue into a structural rule."
+**Announce at start:** "I'm using the harness-retro skill to review this session's findings and cure them into the harness."
 
 **Core principle:** Add the rule to the harness, not the fix to the symptom.
 
+**Source of truth:** the per-branch ledger at `.awm/ledger/<branch>.jsonl`, populated during the session by the review/QA/sensor/debugging phases. harness-retro reads it; it does not ask you to remember prior occurrences.
+
 ## When to use
 
-- A test failure or production bug has the same root cause as a prior one
-- A code reviewer flags the same systemic pattern across multiple files
-- The same PR feedback recurs across multiple PRs
-- An `awm sensors run` failure recurs after a recent fix that supposedly resolved it
-- A `systematic-debugging` session ends with "we've seen this before"
-- The user explicitly invokes it ("we keep seeing X, do a retro")
+- Automatically: `development-process` routes here after `post-implementation-qa` completes and `awm-qa-complete` is present but `awm-retro-complete` is absent.
+- Manually: the user invokes it directly ("do a retro on this session", "we keep seeing X, do a retro").
 
 ## When NOT to use
 
-- First occurrence of a bug — fix it, write a regression test, move on. Don't structuralize on a single sample
-- Style preference with no measurable failure — that's a discussion, not a harness gap
-- Bug that's truly one-off due to environment (flaky network, race in third-party code) — handle defensively, don't add a rule that will never fire again
+- The ledger is empty and there are no manual observations — exit fast and add the `awm-retro-complete` marker.
 
 ## Checklist
 
 You MUST create a task for each item and complete them in order:
 
-1. **Confirm recurrence** — ≥2 occurrences with the same root cause; if only 1, exit and recommend the user wait for the next instance
-2. **Classify the bug** — structural / lógica / proceso / seguridad (see "The remediation tree" below)
-3. **Identify the remediation target** — which file gets the new rule, which sensor catches it
-4. **Draft the rule** — actual lint/test/constitution/semgrep text
-5. **Present to user for approval** — show the rule and what it would have caught
-6. **Apply the rule** — edit the target file
-7. **Verify the rule fires** — manufacture the original failure, run the sensor, confirm it now fails fast
-8. **Commit** the rule
-9. **Add an entry to `docs/harness-retros.md`** (create if absent) — date, recurring issue summary, rule added
+1. **Read the session ledger** — run `awm ledger list` and `awm ledger recurring --min 2`; summarize findings + wins for the user
+2. **Present each item interactively** — for each finding and win, let the user decide: structuralize, record as AGENTS.md lesson, or dismiss
+3. **Classify each approved item** — structural / lógica / proceso / seguridad
+4. **Draft the rule** — actual lint/test/constitution/semgrep/AGENTS.md text
+5. **Apply the rule** — edit the target file
+6. **Verify the rule fires** (for sensor rules) — manufacture the failure, run the sensor, confirm it catches it
+7. **Commit** the rules
+8. **Log the retro** — append to `docs/harness-retros.md`
+9. **Close the retro** — run `awm ledger archive` and add the `awm-retro-complete` marker
 
 ## The remediation tree
 
 ```
-Bug escapó ≥2 veces
-├── estructural → nueva regla de linter/tsc → agrega a eslint.config.awm.mjs / tsconfig.awm.json
-├── de lógica  → nuevo test estructural → escrito por humano, no IA
-├── de proceso → regla en CONSTITUTION.md o nueva skill
-└── de seguridad → regla Semgrep nueva → agrega a .semgrep.awm.yml
+Session finding
+├── structural / seguridad / lógica (sensor-catchable)
+│   └── remediation tree: eslint.config.awm.mjs / .semgrep.awm.yml / tests/structural/
+├── de proceso (project rule)
+│   └── CONSTITUTION.md
+└── agent working-style + wins
+    └── AGENTS.md
 ```
+
+**Two-tier curation targets:**
+
+| Class | Cured target (existing, delivered) |
+|---|---|
+| structural / seguridad / lógica (sensor-catchable) | remediation tree: `eslint.config.awm.mjs` / `.semgrep.awm.yml` / `tests/structural/` |
+| de proceso (project rule) | `CONSTITUTION.md` |
+| agent working-style + **wins** | `AGENTS.md` |
+
+Wins (`polarity: win`) are reinforced as short "what works here" notes in `AGENTS.md`. Agent-style lessons land in `AGENTS.md` (agnostic — every agent reads it), never `CLAUDE.md`.
 
 ### Classification heuristics
 
@@ -61,39 +69,41 @@ Bug escapó ≥2 veces
 | Logic error only caught when code runs | de lógica | Behavioral; needs a test that exercises the path |
 | "We always forget to do X before Y" | de proceso | Human discipline; rule belongs in CONSTITUTION.md |
 | Pattern that creates a vulnerability (eval, unsanitized SQL, etc.) | de seguridad | Semgrep / dataflow rule |
+| Agent working-style lesson or win | agent | Notes in AGENTS.md |
 
-If the bug straddles two classes (e.g., structural + de seguridad), pick the one that fails *earliest* in the loop — earlier = cheaper.
+If the bug straddles two classes, pick the one that fails *earliest* in the loop — earlier = cheaper.
 
 ## The Process
 
-### 1. Confirm recurrence
+### 1. Read the session ledger
 
-Ask explicitly: "Where did this pattern fail before?" Get:
+Run these two commands:
 
-- File or PR reference for occurrence #1
-- File or PR reference for occurrence #2
-- One-sentence statement of the shared root cause
+```bash
+awm ledger list
+awm ledger recurring --min 2
+```
 
-If the user can't name two instances, this is premature. Recommend: "Add a regression test for this instance. When it happens a second time, come back."
+`awm ledger list` shows all findings and wins recorded during the session.
+`awm ledger recurring --min 2` groups by `signature` and shows clusters where the same issue appeared ≥2 times — this is a **señal** (signal) to weigh when deciding whether to structuralize, not a hard gate. You may structuralize a single high-impact finding (`count: 1`), or defer a recurring trivial one. The user decides per item.
 
-### 2. Classify
+Summarize for the user: total findings, total wins, recurring clusters (if any).
+
+### 2. Present each item interactively
+
+Present every ledger item — findings AND wins — grouped by signature with its recurrence count. For each, wait for an explicit user decision:
+
+- **Structuralize** → which target (remediation tree / CONSTITUTION.md / AGENTS.md)?
+- **Record as AGENTS.md lesson/win** → reinforcing working patterns
+- **Dismiss** → note the reason and move on
+
+Do not apply anything without explicit user approval per item. Do not batch-apply.
+
+### 3. Classify
 
 Apply the heuristics from the table above. State the classification out loud:
 
 > "Classifying as `de lógica` because the bug only surfaced when the function ran against an empty input — a static check wouldn't have caught it."
-
-### 3. Identify the remediation target
-
-Map class → target:
-
-| Class | Target file(s) |
-|---|---|
-| structural | `eslint.config.awm.mjs` (rules), `tsconfig.awm.json` (compiler flags), `.dep-cruiser.awm.js` (boundaries) |
-| de lógica | A new structural test file (e.g. `tests/structural/no-empty-input-leaks.test.ts`) |
-| de proceso | `CONSTITUTION.md` (new bullet under Process or Sensors) |
-| de seguridad | `.semgrep.awm.yml` (new rule) |
-
-The structural tests directory may not exist yet. Create `tests/structural/` if needed. These tests are conventional unit tests, but their *purpose* is to enforce architectural invariants rather than verify business logic.
 
 ### 4. Draft the rule
 
@@ -138,43 +148,36 @@ test('parseConfig returns explicit error on empty input', () => {
   languages: [javascript, typescript]
 ```
 
-### 5. Present to user
+**agent lesson/win (AGENTS.md):**
+```markdown
+## What works here
+- Staging files individually (not `git add -A`) prevents accidental secret inclusion — confirmed pattern across multiple sessions.
+```
 
-Show:
-1. The rule text (above)
-2. **What it would have caught:** point at occurrence #1 and #2, confirm the rule fires on both
-3. **False-positive risk:** would the rule flag any current code that's actually correct? Run `awm sensors run --all` (or the specific sensor) and report findings
+### 5. Cure, don't append raw
 
-Wait for explicit approval.
+When writing to `CONSTITUTION.md` or `AGENTS.md`, **merge and prune**: fold the new lesson into the relevant existing section and drop entries that no longer apply. These docs are delivered every session — keep them a curated index, not an append-only log, so context never saturates.
 
-### 6. Apply the rule
+### 6. Apply
 
 Use the `Edit` or `Write` tool to add the rule to the target file. If the file doesn't exist (e.g. `tests/structural/` is new), create it and any required scaffolding.
 
 ### 7. Verify the rule fires
 
-Manufacture the original failure in a scratch file or stash, then run the sensor:
+For sensor-catchable rules (structural, de lógica, de seguridad), manufacture the original failure and confirm the sensor catches it:
 
 ```bash
-awm sensors run --fast    # for tsc/eslint rules
-awm sensors run --slow    # for semgrep
+awm sensors run    # for tsc/eslint rules
 npm test -- tests/structural   # for structural tests
 ```
 
-Expected: the sensor fails on the manufactured case with a clear error message pointing at the rule. If it doesn't fire, the rule is mis-scoped — iterate.
-
-Then revert the manufactured failure and re-run: sensors should pass cleanly.
+Expected: the sensor fails on the manufactured case. Then revert and re-run — sensors should pass cleanly.
 
 ### 8. Commit
 
 ```bash
 git add <changed-files>
 git commit -m "harness-retro: <class> rule for <issue summary>"
-```
-
-Example:
-```bash
-git commit -m "harness-retro: structural rule for missing setTimeout delay"
 ```
 
 ### 9. Log the retro
@@ -184,29 +187,44 @@ Append (or create) `docs/harness-retros.md`:
 ```markdown
 ## YYYY-MM-DD — <one-line issue>
 
-- **Class:** structural | de lógica | de proceso | de seguridad
-- **Occurrences:** <PR/commit ref #1>, <PR/commit ref #2>
+- **Class:** structural | de lógica | de proceso | de seguridad | agent
+- **Occurrences (ledger count):** N
 - **Rule:** path:line of the new rule
-- **Sensor:** which sensor catches it (typecheck | lint | security | structural-test | constitution)
+- **Sensor:** which sensor catches it (typecheck | lint | security | structural-test | constitution | agents-md)
 ```
 
-The log is auditable evidence that the harness is improving over time.
+### 10. Close the retro
+
+Run `awm ledger archive` to rotate this branch's ledger out of the active flow (it stays on disk under `.awm/ledger/archive/` for audit; the next plan starts fresh):
+
+```bash
+awm ledger archive
+```
+
+Then add the `awm-retro-complete` marker to the active plan (first line after the `#` header), so `development-process` routes to `finishing-a-development-branch`:
+
+```markdown
+<!-- awm-retro-complete: YYYY-MM-DD -->
+```
 
 ## Anti-patterns
 
-- **Skipping recurrence confirmation.** Adding rules for one-off bugs creates false-positive noise that erodes trust in sensors. Two occurrences minimum.
-- **Drafting a "philosophical" rule instead of an enforceable one.** "Code should be readable" is a wish, not a rule. Rules are concrete patterns a sensor can match.
-- **Replacing the regression test with the rule.** Both should exist — the test asserts the specific case is fixed, the rule prevents the class of cases from returning.
-- **Verifying with intent ("this rule clearly catches it") instead of running the sensor.** The verify step is non-optional. Manufacture the failure, see the sensor fail.
-- **Letting AI write the de lógica structural test.** Per CONSTITUTION conventions, the harness-retro structural tests are reviewed/authored by a human. The skill drafts the test, but the human owns approval and may rewrite from scratch.
+- **Asking "where did this fail before?" instead of reading the ledger.** The ledger has the answer — use `awm ledger list` and `awm ledger recurring`.
+- **Treating recurrence count as a hard gate.** Count is a signal to weigh, not a threshold to pass. A single high-severity finding may be worth structuralizing.
+- **Drafting a "philosophical" rule instead of an enforceable one.** "Code should be readable" is a wish, not a rule.
+- **Replacing the regression test with the harness rule.** Both should exist — the test asserts the specific case is fixed, the rule prevents the class of cases from returning.
+- **Letting AI write the de lógica structural test.** The skill drafts, the human owns approval.
+- **Appending raw entries to CONSTITUTION.md / AGENTS.md** without merging/pruning — these docs are delivered every session and must stay bounded.
+- **Curating agent-style lessons into CLAUDE.md.** Agent lessons and wins go to `AGENTS.md` (every agent reads it), never `CLAUDE.md` (Claude-specific).
+- **Skipping the `awm ledger archive` step.** The next session should start with a clean ledger; always archive before closing.
 
 ## Integration with other skills
 
-Four cross-cutting skills propose `harness-retro` when they detect recurrence. The integration patches that wire this up are committed to the AWM registry in `registry/skills/<name>/SKILL.md` and in `registry/skills/harness-retro/integrations/` (as documentation of what was changed and why):
-
-- `integrations/verification-before-completion.md` — sensors that fail twice
-- `integrations/systematic-debugging.md` — debug sessions ending in pattern match
-- `integrations/sdd-code-quality-reviewer.md` — reviewer findings spanning ≥2 files
-- `integrations/receiving-code-review.md` — same PR feedback across ≥2 PRs
-
-Users get the updated skills via `awm update` or reinstall.
+| Skill | How it feeds harness-retro |
+|---|---|
+| `subagent-driven-development` spec-reviewer | Emits `awm ledger add --polarity finding|win` per spec gap / win |
+| `subagent-driven-development` code-quality-reviewer | Emits `awm ledger add` per quality issue / win |
+| `post-implementation-qa` deep-review | Emits `awm ledger add` per Type B/C finding / win |
+| `verification-before-completion` | Emits `awm ledger add` on recurring sensor failure |
+| `systematic-debugging` | Emits `awm ledger add` on confirmed root cause |
+| `development-process` | Routes to harness-retro after QA; requires `awm-retro-complete` to proceed to finishing |
