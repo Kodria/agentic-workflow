@@ -21,6 +21,7 @@ import { parseStoryMap, updateMiroFrameId } from './core/story-map-parser';
 import { syncToMiro } from './core/miro';
 import { registerHooksCommand } from './commands/hooks';
 import { registerSensorsCommand } from './commands/sensors';
+import { registerLedgerCommand } from './commands/ledger';
 import { registerDoctorCommand } from './commands/doctor';
 import { registerInitCommand } from './commands/init';
 
@@ -686,6 +687,7 @@ miroCmd.command('sync <storyMapPath>')
 
 registerHooksCommand(program);
 registerSensorsCommand(program);
+registerLedgerCommand(program);
 registerDoctorCommand(program);
 registerInitCommand(program);
 
