@@ -37,7 +37,7 @@ describe('B-3 capture wiring — phases append to the ledger', () => {
     test('SDD spec reviewer emits findings AND wins to the ledger', () => {
         const p = read('subagent-driven-development/spec-reviewer-prompt.md');
         expect(p).toMatch(/awm ledger add/);
-        expect(p).toMatch(/--polarity (win|finding)/);
+        expect(p).toMatch(/--polarity finding/);
         expect(p).toMatch(/--polarity win/);
     });
 
@@ -74,6 +74,9 @@ describe('B-3 development-process routes harness-retro as a terminal phase', () 
         expect(retroIdx).toBeGreaterThan(-1);
         expect(qaIdx).toBeLessThan(retroIdx);
         expect(retroIdx).toBeLessThan(finishIdx);
+        // Also assert the routing edge exists (not just node declarations)
+        expect(skill).toMatch(/post-implementation-qa.*harness-retro|harness-retro.*post-implementation-qa/s);
+        expect(skill).toMatch(/harness-retro.*finishing-a-development-branch|finishing-a-development-branch.*harness-retro/s);
     });
 
     test('routing keys on the awm-retro-complete marker', () => {
