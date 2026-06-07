@@ -41,6 +41,7 @@ export interface InitActions {
     }) => SyncResult;
     initSensors: (o: { cwd: string; registryRoot: string; configure: boolean }) => { detection: { pack: string } };
     addExtension: (root: string, name: string) => void;
+    ensureProfile: (root: string) => void;
     gatherProject: (cwd: string, bundles: BundleDefinition[], agent?: AgentTarget) => ProjectFacts | null;
     contextStatus: (op: ContextOp) => InjectionState;
     installContext: (op: ContextOp) => void;

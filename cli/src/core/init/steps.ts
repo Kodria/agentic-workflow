@@ -10,10 +10,11 @@ import { syncRegistry } from '../registry';
 import { installHook as realInstallHook } from '../../commands/hooks/install';
 import { installBundle as realInstallBundle, syncProfile as realSyncProfile } from '../bundle-install';
 import { initSensors as realInitSensors } from '../../commands/sensors/init';
-import { addExtension as realAddExtension } from '../profile';
+import { addExtension as realAddExtension, ensureProfile as realEnsureProfile } from '../profile';
 import { gatherContext } from '../diagnostics/context';
 import { detectExtensions } from './detector';
 import type { InitDeps, InitActions, StepResult } from './types';
+import type { ProjectFacts } from '../diagnostics/types';
 import { InjectionOrchestrator, ContextOp } from '../context/orchestrator';
 import { getInjection, PROVIDERS } from '../../providers';
 import { repairGlobalSkills as realRepairGlobalSkills } from '../skill-integrity';
@@ -58,6 +59,8 @@ export const defaultActions: InitActions = {
     },
 
     addExtension: (root, name) => { realAddExtension(root, name); },
+
+    ensureProfile: (root) => { realEnsureProfile(root); },
 
     gatherProject: (cwd, bundles, agent) => gatherContext({ cwd, bundles, agent }).project,
 
@@ -178,15 +181,29 @@ export async function stepProfile(d: InitDeps): Promise<StepResult> {
     const { proposed, signals } = detectExtensions(proj.root);
     const alreadyPresent = proj.profile.extensions;
     const newProposed = proposed.filter((p) => !alreadyPresent.includes(p));
-    if (newProposed.length === 0) return ok('project.profile', 'project', 'skipped', 'sin extensiones nuevas');
+    if (newProposed.length === 0) return bootstrapOrSkip(d, proj, 'sin extensiones nuevas');
 
     const confirmed = await d.confirmExtensions(newProposed, signals);
-    if (confirmed.length === 0) return ok('project.profile', 'project', 'skipped');
+    if (confirmed.length === 0) return bootstrapOrSkip(d, proj, 'sin extensiones confirmadas');
 
     for (const name of confirmed) {
         d.actions.addExtension(proj.root, name);
     }
     return ok('project.profile', 'project', 'applied', `added: ${confirmed.join(', ')}`);
+}
+
+/**
+ * No new extensions to add. If the profile file doesn't exist yet, bootstrap an
+ * empty one so the project is marked initialized — otherwise `awm init` would
+ * leave `.awm/profile.json` missing and the diagnostic would self-referentially
+ * suggest re-running `awm init`. If it already exists, this is a true no-op.
+ */
+function bootstrapOrSkip(d: InitDeps, proj: ProjectFacts, skipDetail: string): StepResult {
+    if (!proj.profile.present) {
+        d.actions.ensureProfile(proj.root);
+        return ok('project.profile', 'project', 'applied', 'perfil inicializado (sin extensiones)');
+    }
+    return ok('project.profile', 'project', 'skipped', skipDetail);
 }
 
 /** Step 6 – Re-gather project facts and sync the profile symlinks if needed. */

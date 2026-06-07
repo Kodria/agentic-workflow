@@ -6,6 +6,7 @@ import {
     readProfile,
     writeProfile,
     addExtension,
+    ensureProfile,
     ensureSkillsGitignored,
     shouldRecordExtension,
 } from '../../src/core/profile';
@@ -69,6 +70,23 @@ describe('readProfile / writeProfile / addExtension', () => {
         fs.mkdirSync(path.join(root, '.awm'));
         fs.writeFileSync(path.join(root, '.awm', 'profile.json'), '{"extensions":"oops"}');
         expect(readProfile(root)).toEqual({ extensions: [] });
+    });
+});
+
+describe('ensureProfile', () => {
+    it('creates an empty profile when none exists and reports it created one', () => {
+        const root = tmpRoot();
+        expect(fs.existsSync(path.join(root, '.awm', 'profile.json'))).toBe(false);
+        expect(ensureProfile(root)).toBe(true);
+        expect(fs.existsSync(path.join(root, '.awm', 'profile.json'))).toBe(true);
+        expect(readProfile(root)).toEqual({ extensions: [] });
+    });
+
+    it('is idempotent and preserves existing extensions', () => {
+        const root = tmpRoot();
+        addExtension(root, 'frontend');
+        expect(ensureProfile(root)).toBe(false);
+        expect(readProfile(root).extensions).toEqual(['frontend']);
     });
 });
 

@@ -60,6 +60,22 @@ export function writeProfile(root: string, profile: ProjectProfile): void {
     fs.writeFileSync(profilePath(root), JSON.stringify(profile, null, 2) + '\n', 'utf-8');
 }
 
+/**
+ * Ensures `.awm/profile.json` exists, creating an empty `{ extensions: [] }`
+ * profile when absent. Idempotent: a present profile (with any extensions) is
+ * left untouched. Returns true only when it created the file.
+ *
+ * Without this, a project with no detectable extensions never gets a profile
+ * written (`addExtension` is the only other writer, and it only runs when there
+ * is something to add) — so `awm init` would leave the project flagged as
+ * uninitialized and self-referentially suggest re-running `awm init`.
+ */
+export function ensureProfile(root: string): boolean {
+    if (fs.existsSync(profilePath(root))) return false;
+    writeProfile(root, { extensions: [] });
+    return true;
+}
+
 /** Adds a bundle name to the profile's extensions (deduped) and persists it. */
 export function addExtension(root: string, name: string): ProjectProfile {
     const profile = readProfile(root);
