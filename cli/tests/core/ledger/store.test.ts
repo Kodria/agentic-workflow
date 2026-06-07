@@ -74,7 +74,7 @@ describe('ledger store — detectBranch', () => {
         const { execSync: exec } = require('child_process');
         const tmp = mkTmp();
         try {
-            exec('git init && git commit --allow-empty -m init && git checkout -b test-ledger-branch', { cwd: tmp, stdio: 'ignore' });
+            exec('git init && git -c user.email=test@test.com -c user.name=Test commit --allow-empty -m init && git checkout -b test-ledger-branch', { cwd: tmp, stdio: 'ignore' });
             expect(detectBranch(tmp)).toBe('test-ledger-branch');
         } finally {
             fs.rmSync(tmp, { recursive: true, force: true });
