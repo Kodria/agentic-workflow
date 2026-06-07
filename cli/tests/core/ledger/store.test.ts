@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { addEntry, listEntries, ledgerPath, detectBranch } from '../../../src/core/ledger/store';
+import { addEntry, listEntries, ledgerPath, detectBranch, recurring, archiveLedger } from '../../../src/core/ledger/store';
 import type { LedgerEntry } from '../../../src/core/ledger/types';
 
 function mkTmp(): string {
@@ -79,5 +79,55 @@ describe('ledger store — detectBranch', () => {
         } finally {
             fs.rmSync(tmp, { recursive: true, force: true });
         }
+    });
+});
+
+describe('ledger store — recurring', () => {
+    let cwd: string;
+    beforeEach(() => { cwd = mkTmp(); });
+    afterEach(() => { fs.rmSync(cwd, { recursive: true, force: true }); });
+
+    test('groups by signature and reports clusters with count >= min', () => {
+        addEntry(cwd, entry({ signature: 'dup' }));
+        addEntry(cwd, entry({ signature: 'dup' }));
+        addEntry(cwd, entry({ signature: 'solo' }));
+        const clusters = recurring(cwd, 'feat-x', 2);
+        expect(clusters).toHaveLength(1);
+        expect(clusters[0]).toMatchObject({ signature: 'dup', count: 2 });
+        expect(clusters[0].entries).toHaveLength(2);
+    });
+
+    test('respects --min: count 2 is excluded when min is 3', () => {
+        addEntry(cwd, entry({ signature: 'dup' }));
+        addEntry(cwd, entry({ signature: 'dup' }));
+        expect(recurring(cwd, 'feat-x', 3)).toEqual([]);
+    });
+
+    test('sorts clusters by count descending', () => {
+        addEntry(cwd, entry({ signature: 'a' }));
+        addEntry(cwd, entry({ signature: 'a' }));
+        addEntry(cwd, entry({ signature: 'b' }));
+        addEntry(cwd, entry({ signature: 'b' }));
+        addEntry(cwd, entry({ signature: 'b' }));
+        const clusters = recurring(cwd, 'feat-x', 2);
+        expect(clusters.map(c => c.signature)).toEqual(['b', 'a']);
+    });
+});
+
+describe('ledger store — archive', () => {
+    let cwd: string;
+    beforeEach(() => { cwd = mkTmp(); });
+    afterEach(() => { fs.rmSync(cwd, { recursive: true, force: true }); });
+
+    test('moves the branch ledger into archive/ and leaves no active ledger', () => {
+        addEntry(cwd, entry());
+        const moved = archiveLedger(cwd, 'feat-x', '20260606T000000');
+        expect(moved).toBe(true);
+        expect(fs.existsSync(ledgerPath(cwd, 'feat-x'))).toBe(false);
+        expect(fs.existsSync(path.join(cwd, '.awm', 'ledger', 'archive', 'feat-x-20260606T000000.jsonl'))).toBe(true);
+    });
+
+    test('archiving a non-existent ledger is a no-op returning false', () => {
+        expect(archiveLedger(cwd, 'feat-x', '20260606T000000')).toBe(false);
     });
 });
