@@ -33,11 +33,12 @@ You MUST create a task for each item and complete them in order:
 2. **Present each item interactively** — for each finding and win, let the user decide: structuralize, record as AGENTS.md lesson, or dismiss
 3. **Classify each approved item** — structural / lógica / proceso / seguridad
 4. **Draft the rule** — actual lint/test/constitution/semgrep/AGENTS.md text
-5. **Apply the rule** — edit the target file
-6. **Verify the rule fires** (for sensor rules) — manufacture the failure, run the sensor, confirm it catches it
-7. **Commit** the rules
-8. **Log the retro** — append to `docs/harness-retros.md`
-9. **Close the retro** — run `awm ledger archive` and add the `awm-retro-complete` marker
+5. **Cure, don't append raw** — when writing to CONSTITUTION.md or AGENTS.md: merge the new lesson into the relevant existing section and drop entries that no longer apply (merge-and-prune, never append raw)
+6. **Apply the rule** — edit the target file
+7. **Verify the rule fires** (for sensor rules) — manufacture the failure, run the sensor, confirm it catches it
+8. **Commit** the rules
+9. **Log the retro** — append to `docs/harness-retros.md`
+10. **Close the retro** — run `awm ledger archive` and add the `awm-retro-complete` marker
 
 ## The remediation tree
 
