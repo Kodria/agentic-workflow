@@ -106,4 +106,44 @@ describe('resyncInstalledHooks', () => {
         expect(results).toEqual([{ agent: 'claude-code', action: 'registry-missing' }]);
         expect(fs.readFileSync(path.join(scriptsDir, 'session-start'), 'utf-8')).toContain('OLD');
     });
+
+    it('re-creates session-start as copy when scriptsDir exists but session-start is missing', () => {
+        writeRegistry('#!/usr/bin/env bash\necho "FRESH"');
+        const scriptsDir = path.join(tmpHome, '.awm/hooks');
+        fs.mkdirSync(scriptsDir, { recursive: true });
+        // session-start intentionally absent — only run-hook.cmd exists
+        fs.writeFileSync(path.join(scriptsDir, 'run-hook.cmd'), '#!/usr/bin/env bash\nexec bash "$1"', { mode: 0o755 });
+        writeSettingsWithAwmEntry(scriptsDir);
+
+        const { resyncInstalledHooks } = require('../../../src/commands/hooks/resync');
+        const results = resyncInstalledHooks(tmpRegistry);
+
+        expect(results).toEqual([{ agent: 'claude-code', action: 'resynced' }]);
+        expect(fs.existsSync(path.join(scriptsDir, 'session-start'))).toBe(true);
+        // detectInstallMethod fell back to copy since lstatSync threw
+        expect(fs.lstatSync(path.join(scriptsDir, 'session-start')).isSymbolicLink()).toBe(false);
+    });
+
+    it('returns registry-missing when run-hook.cmd is absent from registry', () => {
+        // Partial registry: only session-start present, run-hook.cmd absent
+        const regHooks = path.join(tmpRegistry, 'registry/hooks');
+        const regSkill = path.join(tmpRegistry, 'registry/skills/using-awm');
+        fs.mkdirSync(regHooks, { recursive: true });
+        fs.mkdirSync(regSkill, { recursive: true });
+        fs.writeFileSync(path.join(regHooks, 'session-start'), '#!/usr/bin/env bash\necho "V2"', { mode: 0o755 });
+        // run-hook.cmd intentionally NOT written
+        fs.writeFileSync(path.join(regSkill, 'SKILL.md'), '---\nname: using-awm\n---');
+
+        const scriptsDir = path.join(tmpHome, '.awm/hooks');
+        fs.mkdirSync(scriptsDir, { recursive: true });
+        fs.writeFileSync(path.join(scriptsDir, 'session-start'), '#!/usr/bin/env bash\necho "OLD"', { mode: 0o755 });
+        writeSettingsWithAwmEntry(scriptsDir);
+
+        const { resyncInstalledHooks } = require('../../../src/commands/hooks/resync');
+        const results = resyncInstalledHooks(tmpRegistry);
+
+        expect(results).toEqual([{ agent: 'claude-code', action: 'registry-missing' }]);
+        // old script left intact — never leave user without hook
+        expect(fs.readFileSync(path.join(scriptsDir, 'session-start'), 'utf-8')).toContain('OLD');
+    });
 });

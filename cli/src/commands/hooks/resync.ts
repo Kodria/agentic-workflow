@@ -34,7 +34,7 @@ export function resyncInstalledHooks(registryRoot: string): ResyncResult[] {
 
         const sourceHooks = path.join(registryRoot, 'registry/hooks');
         const sourceSkill = path.join(registryRoot, 'registry/skills/using-awm/SKILL.md');
-        if (!fs.existsSync(path.join(sourceHooks, 'session-start')) || !fs.existsSync(sourceSkill)) {
+        if (!fs.existsSync(path.join(sourceHooks, 'session-start')) || !fs.existsSync(path.join(sourceHooks, 'run-hook.cmd')) || !fs.existsSync(sourceSkill)) {
             results.push({ agent, action: 'registry-missing' });
             continue;
         }
