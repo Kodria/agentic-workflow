@@ -1,7 +1,13 @@
-import { discoverSkills, discoverWorkflows, readArtifactDescription, SKILLS_DIR } from '../../src/core/discovery';
+import { discoverSkills, discoverWorkflows, readArtifactDescription, SKILLS_DIR, WORKFLOWS_DIR } from '../../src/core/discovery';
+import path from 'path';
 import fs from 'fs';
 
 jest.mock('fs');
+
+// Explicit roots derived from the exported constants — avoids calling contentRoots()
+// (which would hit the real/mocked fs for registries config) inside unit tests.
+const SKILLS_ROOT = path.dirname(SKILLS_DIR);   // …/registry
+const WORKFLOWS_ROOT = path.dirname(WORKFLOWS_DIR); // …/registry
 
 describe('Artifact Discovery', () => {
     beforeEach(() => {
@@ -21,7 +27,7 @@ describe('Artifact Discovery', () => {
                 { name: 'readme.txt', isDirectory: () => false },
             ]);
 
-            const skills = discoverSkills();
+            const skills = discoverSkills([SKILLS_ROOT]);
 
             expect(skills).toHaveLength(2);
             expect(skills[0].name).toBe('my-skill');
@@ -32,7 +38,7 @@ describe('Artifact Discovery', () => {
         it('should return an empty array if the skills directory does not exist', () => {
             (fs.existsSync as jest.Mock).mockReturnValue(false);
 
-            const skills = discoverSkills();
+            const skills = discoverSkills([SKILLS_ROOT]);
 
             expect(skills).toEqual([]);
         });
@@ -48,7 +54,7 @@ describe('Artifact Discovery', () => {
                 { name: 'broken-skill', isDirectory: () => true },
             ]);
 
-            const skills = discoverSkills();
+            const skills = discoverSkills([SKILLS_ROOT]);
             expect(skills).toEqual([]);
         });
     });
@@ -62,7 +68,7 @@ describe('Artifact Discovery', () => {
                 { name: 'readme.txt', isDirectory: () => false },
             ]);
 
-            const workflows = discoverWorkflows();
+            const workflows = discoverWorkflows([WORKFLOWS_ROOT]);
 
             expect(workflows).toHaveLength(2);
             expect(workflows[0].name).toBe('deploy');
@@ -73,7 +79,7 @@ describe('Artifact Discovery', () => {
         it('should return an empty array if the workflows directory does not exist', () => {
             (fs.existsSync as jest.Mock).mockReturnValue(false);
 
-            const workflows = discoverWorkflows();
+            const workflows = discoverWorkflows([WORKFLOWS_ROOT]);
             expect(workflows).toEqual([]);
         });
     });

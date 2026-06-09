@@ -2,6 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import { REGISTRY_DIR } from './registry';
+import { contentRoots } from './registries';
 
 export const SKILLS_DIR = path.join(REGISTRY_DIR, 'registry', 'skills');
 export const WORKFLOWS_DIR = path.join(REGISTRY_DIR, 'registry', 'workflows');
@@ -49,58 +50,86 @@ export function readArtifactDescription(filePath: string): string {
     }
 }
 
+function collisionError(kind: string, name: string, first: string, second: string): Error {
+    return new Error(
+        `Artifact name collision: ${kind} "${name}" exists in both ${first} and ${second}. ` +
+        `Remove or rename one of them (per-registry namespacing llega en WS-2).`
+    );
+}
+
 /**
- * Scans the registry's skills directory and returns all valid skills.
+ * Scans skills directories across all provided content roots and returns all valid skills.
  * A valid skill is a directory that contains a SKILL.md file.
+ * Throws on name collision across roots.
  */
-export function discoverSkills(): SkillArtifact[] {
-    if (!fs.existsSync(SKILLS_DIR)) return [];
-
-    const entries = fs.readdirSync(SKILLS_DIR, { withFileTypes: true });
-
-    return entries
-        .filter((entry) => entry.isDirectory())
-        .filter((entry) => fs.existsSync(path.join(SKILLS_DIR, entry.name, 'SKILL.md')))
-        .map((entry) => ({
-            name: entry.name,
-            path: path.join(SKILLS_DIR, entry.name),
-            description: readArtifactDescription(path.join(SKILLS_DIR, entry.name, 'SKILL.md')),
-        }));
+export function discoverSkills(roots: string[] = contentRoots()): SkillArtifact[] {
+    const out: SkillArtifact[] = [];
+    const seen = new Map<string, string>();
+    for (const root of roots) {
+        const dir = path.join(root, 'skills');
+        if (!fs.existsSync(dir)) continue;
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (!entry.isDirectory()) continue;
+            const skillPath = path.join(dir, entry.name);
+            if (!fs.existsSync(path.join(skillPath, 'SKILL.md'))) continue;
+            const prev = seen.get(entry.name);
+            if (prev) throw collisionError('skill', entry.name, prev, skillPath);
+            seen.set(entry.name, skillPath);
+            out.push({
+                name: entry.name,
+                path: skillPath,
+                description: readArtifactDescription(path.join(skillPath, 'SKILL.md')),
+            });
+        }
+    }
+    return out;
 }
 
 /**
- * Scans the registry's workflows directory and returns all valid workflows.
+ * Scans workflows directories across all provided content roots and returns all valid workflows.
  * A valid workflow is a .md file.
+ * Throws on name collision across roots.
  */
-export function discoverWorkflows(): WorkflowArtifact[] {
-    if (!fs.existsSync(WORKFLOWS_DIR)) return [];
-
-    const entries = fs.readdirSync(WORKFLOWS_DIR, { withFileTypes: true });
-
-    return entries
-        .filter((entry) => !entry.isDirectory() && entry.name.endsWith('.md'))
-        .map((entry) => ({
-            name: entry.name.replace('.md', ''),
-            path: path.join(WORKFLOWS_DIR, entry.name),
-            description: readArtifactDescription(path.join(WORKFLOWS_DIR, entry.name)),
-        }));
+export function discoverWorkflows(roots: string[] = contentRoots()): WorkflowArtifact[] {
+    const out: WorkflowArtifact[] = [];
+    const seen = new Map<string, string>();
+    for (const root of roots) {
+        const dir = path.join(root, 'workflows');
+        if (!fs.existsSync(dir)) continue;
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (entry.isDirectory() || !entry.name.endsWith('.md')) continue;
+            const name = entry.name.replace('.md', '');
+            const filePath = path.join(dir, entry.name);
+            const prev = seen.get(name);
+            if (prev) throw collisionError('workflow', name, prev, filePath);
+            seen.set(name, filePath);
+            out.push({ name, path: filePath, description: readArtifactDescription(filePath) });
+        }
+    }
+    return out;
 }
 
 /**
- * Scans the registry's agents directory and returns all valid agent profiles.
+ * Scans agents directories across all provided content roots and returns all valid agent profiles.
  * A valid agent is a .md file.
+ * Throws on name collision across roots.
  */
-export function discoverAgents(): AgentArtifact[] {
-    if (!fs.existsSync(AGENTS_DIR)) return [];
-
-    const entries = fs.readdirSync(AGENTS_DIR, { withFileTypes: true });
-
-    return entries
-        .filter((entry) => !entry.isDirectory() && entry.name.endsWith('.md'))
-        .map((entry) => ({
-            name: entry.name.replace('.md', ''),
-            path: path.join(AGENTS_DIR, entry.name),
-            description: readArtifactDescription(path.join(AGENTS_DIR, entry.name)),
-        }));
+export function discoverAgents(roots: string[] = contentRoots()): AgentArtifact[] {
+    const out: AgentArtifact[] = [];
+    const seen = new Map<string, string>();
+    for (const root of roots) {
+        const dir = path.join(root, 'agents');
+        if (!fs.existsSync(dir)) continue;
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (entry.isDirectory() || !entry.name.endsWith('.md')) continue;
+            const name = entry.name.replace('.md', '');
+            const filePath = path.join(dir, entry.name);
+            const prev = seen.get(name);
+            if (prev) throw collisionError('agent', name, prev, filePath);
+            seen.set(name, filePath);
+            out.push({ name, path: filePath, description: readArtifactDescription(filePath) });
+        }
+    }
+    return out;
 }
 
