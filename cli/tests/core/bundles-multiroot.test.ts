@@ -51,6 +51,7 @@ describe('bundles multi-root', () => {
         const { discoverAllBundles } = require('../../src/core/bundles');
         expect(() => discoverAllBundles([rootA, rootB])).toThrow(/dup/);
         expect(() => discoverAllBundles([rootA, rootB])).toThrow(new RegExp(rootA.replace(/[/\\]/g, '.')));
+        expect(() => discoverAllBundles([rootA, rootB])).toThrow(new RegExp(rootB.replace(/[/\\]/g, '.')));
     });
 
     it('installBundle resolves artifacts from the bundle own contentRoot', () => {
