@@ -55,6 +55,16 @@ describe('core/registries', () => {
         expect(() => m.readRegistriesConfig()).toThrow(/malformed entry/);
     });
 
+    it('readRegistriesConfig rejects single-dot name to prevent path traversal', () => {
+        const m = load();
+        fs.mkdirSync(path.join(tmpHome, '.awm'), { recursive: true });
+        fs.writeFileSync(
+            path.join(tmpHome, '.awm', 'registries.json'),
+            JSON.stringify([{ name: '.', remote: 'r' }])
+        );
+        expect(() => m.readRegistriesConfig()).toThrow(/path traversal/);
+    });
+
     it('listRegistries derives contentRoot under ~/.awm/registries/<name>', () => {
         const m = load();
         m.writeRegistriesConfig([{ name: 'personal', remote: 'r' }]);

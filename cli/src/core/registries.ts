@@ -52,7 +52,7 @@ export function readRegistriesConfig(): RegistryEntry[] {
                 `Invalid registries config at ${REGISTRIES_CONFIG_PATH}: malformed entry ${JSON.stringify(entry)}`
             );
         }
-        if (entry.name.includes('/') || entry.name.includes('\\') || entry.name.includes('..')) {
+        if (entry.name === '.' || entry.name.includes('/') || entry.name.includes('\\') || entry.name.includes('..')) {
             throw new Error(
                 `Invalid registries config at ${REGISTRIES_CONFIG_PATH}: malformed entry name "${entry.name}" (path traversal)`
             );

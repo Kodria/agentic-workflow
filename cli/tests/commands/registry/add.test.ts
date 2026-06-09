@@ -89,6 +89,15 @@ describe('addRegistry', () => {
         expect(fs.existsSync(path.join(tmpHome, '.awm/registries/personal'))).toBe(false);
     });
 
+    it('rejects dot as registry name without touching disk', async () => {
+        const { addRegistry } = require('../../../src/commands/registry/add');
+        const result = await addRegistry('/any/remote', '.');
+        expect(result.ok).toBe(false);
+        expect(result.error).toMatch(/Invalid registry name/);
+        const { readRegistriesConfig } = require('../../../src/core/registries');
+        expect(readRegistriesConfig()).toEqual([]);
+    });
+
     it('rejects duplicate registry name and clone failure without writing config', async () => {
         const source = makeSourceRepo(tmpWork, { skill: 'alpha' });
         const { addRegistry } = require('../../../src/commands/registry/add');

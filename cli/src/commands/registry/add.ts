@@ -26,7 +26,7 @@ export function deriveRegistryName(remote: string): string {
 
 export async function addRegistry(remote: string, nameOverride?: string): Promise<AddRegistryResult> {
     const name = nameOverride ?? deriveRegistryName(remote);
-    if (!name || /[/\\]/.test(name) || name === 'cli-source') {
+    if (!name || name === '.' || /[/\\]/.test(name) || name === 'cli-source') {
         return { ok: false, error: `Invalid registry name "${name}" — use --name <simple-dir-name>` };
     }
     const existing = readRegistriesConfig();
