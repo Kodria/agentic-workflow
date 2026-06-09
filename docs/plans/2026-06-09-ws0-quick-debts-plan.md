@@ -1,6 +1,6 @@
 # WS-0 Quick Debts Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Cerrar las 3 deudas rápidas de la era anterior (F-6 hook resync en `awm update`, F-7 branding, F-8 golden output E2E) según WS-0 de `docs/plans/2026-06-09-distribution-roadmap.md`.
 

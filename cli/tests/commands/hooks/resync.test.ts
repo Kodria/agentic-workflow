@@ -92,6 +92,7 @@ describe('resyncInstalledHooks', () => {
 
         expect(results).toEqual([{ agent: 'claude-code', action: 'resynced' }]);
         expect(fs.lstatSync(path.join(scriptsDir, 'session-start')).isSymbolicLink()).toBe(true);
+        expect(fs.lstatSync(path.join(scriptsDir, 'using-awm.md')).isSymbolicLink()).toBe(true);
     });
 
     it('skips with registry-missing when the registry has no hooks dir', () => {

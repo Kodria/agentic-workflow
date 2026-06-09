@@ -25,9 +25,9 @@
 | F-3 | **Distribución source-based frágil.** Requiere git + node + npm + `npm link` + build local por máquina. CLI no publicado en npm (el badge del README apunta a un paquete que no se usa para instalar). | Análisis distribución 2026-06-09 | WS-4 |
 | F-4 | **Contenido personal en el repo distribuible.** Bundle `personal-notion` + 3 skills NotionTracker (`career-goal-brainstorm` nombra a Nicolas directamente). `visibility: private` los oculta del listado pero viajan en disco a cada máquina del equipo. | Análisis distribución 2026-06-09 | WS-1 |
 | F-5 | **Acoplamiento a Claude Code / agnosticismo inconcluso.** Hooks solo CC; **Antigravity sin estrategia de inyección de contexto ni hooks**; OpenCode sin scope local; `ConventionFileStrategy` (fallback `AGENTS.md`) diferido en decoupling §7; adapters `registry/references/` (codex/copilot/gemini) importados pero no cableados; hook ports Antigravity 2.0/OpenCode diferidos desde pendientes 2026-05-22. | Decoupling design §7 + pendientes 2026-05-22 + análisis 2026-06-09 | WS-6 |
-| F-6 | **`awm update` no re-sincroniza `~/.awm/hooks/`.** Verificado 2026-06-09: el handler de `update` en `cli/src/index.ts` regenera contexto y reconcilia symlinks de skills, pero los scripts de hooks son copias que quedan desactualizadas hasta correr `awm hooks install` a mano. En un equipo: N máquinas con hooks viejos en silencio. | Pendientes 2026-05-22 (deuda #3), verificado abierto 2026-06-09 | WS-0 |
-| F-7 | **Branding ajeno.** "Superpowers Brainstorming" en `registry/skills/brainstorming/scripts/frame-template.html` líneas 5 y 199. | Pendientes 2026-05-22 (deferred) | WS-0 |
-| F-8 | **E2E manual del hook sin golden output.** Protocolo en `cli/tests/integration/README.md`; nunca se guardó el output de referencia. | Pendientes 2026-05-22 (quick win #1) | WS-0 |
+| F-6 | ~~**`awm update` no re-sincroniza `~/.awm/hooks/`.**~~ ✓ Resuelto (WS-0) Verificado 2026-06-09: el handler de `update` en `cli/src/index.ts` regenera contexto y reconcilia symlinks de skills, pero los scripts de hooks son copias que quedan desactualizadas hasta correr `awm hooks install` a mano. En un equipo: N máquinas con hooks viejos en silencio. | Pendientes 2026-05-22 (deuda #3), verificado abierto 2026-06-09 | WS-0 |
+| F-7 | ~~**Branding ajeno.**~~ ✓ Resuelto (WS-0) "Superpowers Brainstorming" en `registry/skills/brainstorming/scripts/frame-template.html` líneas 5 y 199. | Pendientes 2026-05-22 (deferred) | WS-0 |
+| F-8 | ~~**E2E manual del hook sin golden output.**~~ ✓ Resuelto (WS-0, skipped por decisión) Protocolo en `cli/tests/integration/README.md`; nunca se guardó el output de referencia. | Pendientes 2026-05-22 (quick win #1) | WS-0 |
 | F-9 | **Mutation testing inactivo.** Sensor Stryker existe en el pack js-ts pero `enabled: false` por defecto. Diferido explícito del plan B-2; falta la decisión de activarlo (y para qué paths). | B-2 plan (diferido explícito) | WS-7 |
 | F-10 | **Política de idioma indefinida.** ~6 skills, workflows, agents y CLAUDE.md en español; el resto en inglés. Sin decisión es-first / en-first / locales. | Análisis distribución 2026-06-09 | WS-7 |
 | F-11 | **Windows nominal.** `run-hook.cmd` es stub; symlinks en Windows requieren developer mode; paths asumen Unix. | Análisis distribución 2026-06-09 | WS-7 |
@@ -44,7 +44,7 @@ Una sesión corta. Sin design previo (alcance trivial y ya especificado).
 - [x] Fix: `awm update` re-sincroniza hooks si están instalados (llamada a la lógica de `hooks install` en el handler de `update`, `cli/src/index.ts`) + test (plan: 2026-06-09-ws0-quick-debts-plan.md)
 - [x] Edit: branding `frame-template.html:5,199` → AWM (plan: 2026-06-09-ws0-quick-debts-plan.md)
 - [x] E2E manual del hook → guardar `cli/tests/integration/golden-output-<fecha>.txt` (skipped by decision — not needed)
-- [x] Cierre: plan corto con `awm-qa-complete` (plan: 2026-06-09-ws0-quick-debts-plan.md)
+- [ ] Cierre: plan corto con `awm-qa-complete` (plan: 2026-06-09-ws0-quick-debts-plan.md)
 
 **Criterio de cierre:** los 3 ítems verificados; F-6/F-7/F-8 marcados resueltos en el registro.
 
