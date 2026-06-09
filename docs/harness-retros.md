@@ -5,6 +5,17 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
 
 ---
 
+## 2026-06-09 — WS-1 (registries adicionales): guard de path-component incompleto + patrones de diseño
+
+- **Class:** de proceso (F1) + agent (F2, W1–W4)
+- **Occurrences (ledger count):** 3 hallazgos de validación incompleta (mismo root cause), 4 wins confirmados
+- **Reglas curadas:**
+  - `CONSTITUTION.md` — guard de nombre/path debe rechazar conjunto completo: vacío, `.`, `..`, `/`, `\\`
+  - `AGENTS.md` — dual-tmpdir-isolation, module-level-env comment, default-arg-seam, contentRoot-stamp-at-discovery, atomic-add-rollback
+- **Sensor:** constitution (revisión manual al inicio de sesión)
+
+---
+
 ## 2026-06-09 — WS-0 (deudas rápidas): ledger vacío al cierre — pipeline de aprendizaje roto
 
 > **Corregido 2026-06-09 (mismo día):** la versión original de esta entrada clasificó el problema
