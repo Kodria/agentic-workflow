@@ -1,4 +1,5 @@
 # Design: AWM Installer UX Improvements (Bash Native)
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 ## Problem Statement
 The current `install.sh` for Agentic Workflow Manager (AWM) is extremely verbose. The user sees `git pull` details, verbose `npm install` warnings, and TypeScript compiler (`tsc`) outputs. This visual noise detracts from the professional feel of the tool. The user wants a clean, quiet, and polished installation experience.

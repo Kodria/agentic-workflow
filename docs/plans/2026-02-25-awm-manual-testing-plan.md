@@ -1,4 +1,5 @@
 # 2026-02-25 AWM Exhaustive Manual Testing Plan
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 > **Note**: This plan is designed for manual execution by the user, step-by-step in the provided `zsh` terminal. The Agent will observe, evaluate, and assist as needed during each step.
 

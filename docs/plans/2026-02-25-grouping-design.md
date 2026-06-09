@@ -1,4 +1,5 @@
 # Artifact Grouping Design Proposal
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 ## 1. `awm list`
 Instead of a flat table/list, we will parse `processes.json` and display a tree-like output in the console.

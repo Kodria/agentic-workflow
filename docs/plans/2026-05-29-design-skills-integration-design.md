@@ -1,4 +1,5 @@
 # Integración de skills de diseño al flujo AWM
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 **Fecha:** 2026-05-29
 **Estado:** Diseño aprobado

@@ -1,4 +1,21 @@
 # Pendientes — Próximas sesiones AWM
+<!-- awm-plan-closed: 2026-06-09 — cerrado con auditoría; ítems ejecutados verificados contra git, ítems vivos migrados a 2026-06-09-distribution-roadmap.md -->
+
+> **CIERRE (2026-06-09):** Auditoría completa contra historial de git.
+>
+> **Ejecutado** (vía planes posteriores, todos con QA cerrado):
+> - P1 Sensores computacionales → harness-engineering plans 1–3 + harness-stabilization + B-2 (`awm sensors run/init/baseline/status/install`, packs js-ts + generic)
+> - P2 Mutation testing → sensor Stryker en pack js-ts (quedó `enabled: false` por defecto — decisión migrada al roadmap como F-9)
+> - P3 Project Constitution → skill `project-constitution` + inyección en init/hook (B-1 la hizo agnóstica)
+> - P4 Steering loop → skill `harness-retro` (v2 ledger-driven, B-3) + `awm ledger`
+> - P5 Quality gates fast/slow → modelo fast/slow en sensor-packs
+> - Quick win #2 (reinstalar skills actualizadas) → superado por symlinks + `awm update`
+>
+> **Migrado a [2026-06-09-distribution-roadmap.md](2026-06-09-distribution-roadmap.md):**
+> - Deuda #3: `awm update` no re-sincroniza `~/.awm/hooks/` → **F-6** (verificado abierto el 2026-06-09 en `cli/src/index.ts`)
+> - Quick win #1: E2E manual del hook con golden output → **F-8**
+> - Deferred: hook ports Antigravity 2.0 / OpenCode → **F-5** (parcial: inyección de contexto sin hook probada en el lab shakedown)
+> - Deferred: branding "Superpowers Brainstorming" en `frame-template.html` → **F-7**
 
 **Fecha:** 2026-05-22
 **Contexto:** Sesión de hoy completó sync superpowers v5.1.0 + bootstrap hook port (`awm hooks`). Este doc captura qué sigue.

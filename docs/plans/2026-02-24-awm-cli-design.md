@@ -1,4 +1,5 @@
 # Agentic Workflow Manager (AWM) CLI Design
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 ## 1. Goal
 Design a professional, scalable, and interactive Command Line Interface (CLI) to manage personal AI agent skills and workflows. The tool must support distribution across a team, allow installing complete "processes" (bundles of skills), and provide an excellent user experience similar to `npx skills`, supporting multiple AI IDEs (Antigravity, OpenCode, etc.).

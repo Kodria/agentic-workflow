@@ -1,4 +1,5 @@
 # Docs System Orchestrator Refactor Plan
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 Refactorizar el `docs-system-orchestrator` para que siga el mismo principio arquitectónico del `development-process`: un workflow que actúa como un punto de entrada muy ligero (Fast Mode) que delega a una skill dedicada, la cual contiene todas las reglas de decisión, ciclos de vida y validaciones, requiriendo siempre la aprobación del usuario antes del enrutamiento final.
 

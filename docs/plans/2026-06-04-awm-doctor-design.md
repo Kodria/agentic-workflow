@@ -1,4 +1,5 @@
 # Diseño — `awm doctor` (Sub-fase 1c del release de bundles)
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 - **Fecha**: 2026-06-04
 - **Rama**: `feature/improvements-r3`

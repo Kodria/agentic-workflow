@@ -1,4 +1,5 @@
 # Agentic Workflow Manager (AWM) Documentation Design
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 ## 1. Goal
 Implement a comprehensive, modular documentation strategy for the AWM repository (a CLI and Registry for AI Agent skills and workflows). The documentation must cater to both end-users (who only want to install and use skills) and developers (who want to contribute to the CLI or the Registry).

@@ -1,4 +1,5 @@
 # 2026-02-25-AWM-Exhaustive-Testing-Strategy-Design
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 ## Overview
 This document outlines an exhaustive manual testing strategy for the Agentic Workflow Manager (AWM). The goal is to validate the CLI tool from a clean state, covering the happy path, edge cases, error handling, and complete cleanup.

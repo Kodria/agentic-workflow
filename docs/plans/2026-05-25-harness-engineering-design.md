@@ -1,4 +1,5 @@
 # Harness Engineering — Design
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 **Fecha:** 2026-05-25
 **Contexto:** Investigación previa en `tmp/investigation-harness.md`. AWM está al ~65% del framework de Böckeler (ThoughtWorks): ~90% feedforward cubierto por superpowers, ~20% de sensores computacionales. Este diseño cierra ese gap con una arquitectura unificada para P1–P5.

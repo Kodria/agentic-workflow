@@ -1,4 +1,5 @@
 # Plan de Corrección: Auto-Chaining en Ecosistema docs-system-orchestrator
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 ## Análisis de Skills
 

@@ -1,4 +1,5 @@
 # Integración de c4-architecture al Ecosistema de Documentación — Design Doc
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 > **Para Claude:** REQUIRED SUB-SKILL: Use superpowers:writing-plans para crear el plan de implementación basado en este diseño.
 

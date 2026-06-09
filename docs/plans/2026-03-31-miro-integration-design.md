@@ -1,4 +1,5 @@
 # Design: Integración Miro — `awm miro sync`
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 ## Propósito
 

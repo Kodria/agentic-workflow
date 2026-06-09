@@ -1,4 +1,5 @@
 # Plan A — Vendoring de skills de diseño al registry AWM
+<!-- awm-plan-closed: 2026-06-09 — superseded por 2026-05-31-new-skills-consolidated-plan.md (que fue ejecutado y cerrado con QA); cierre administrativo -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

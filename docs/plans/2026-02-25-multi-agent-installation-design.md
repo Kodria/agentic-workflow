@@ -1,4 +1,5 @@
 # Design: Multi-Agent Installation for AWM CLI
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 ## Objetivo
 Permitir a los usuarios seleccionar múltiples agentes simultáneamente durante la ejecución de `awm add`, de modo que un único flujo interactivo pueda instalar un mismo artefacto (y sus complementos) en varios entornos (por ejemplo, en `Antigravity` y en `OpenCode` a la vez).

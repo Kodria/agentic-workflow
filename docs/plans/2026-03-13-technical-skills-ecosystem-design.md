@@ -1,4 +1,5 @@
 # Diseño: Ecosistema de Skills Técnicas Transversales
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 > **Estado:** Aprobado
 > **Fecha:** 2026-03-13

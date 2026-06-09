@@ -1,4 +1,5 @@
 # Body B-2 — Gate de calidad determinístico — Diseño
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 **Fecha:** 2026-06-06
 **Origen:** Harness shakedown lab (`docs/harness-shakedown/`). Body B-2 agrupa los Hallazgos #2 y #3 + el ⭐ insight central (alcance-vs-seguridad).

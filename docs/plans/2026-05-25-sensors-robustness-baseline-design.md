@@ -1,4 +1,5 @@
 # Sensors: robustez + baseline/ratchet — Design
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 - **Fecha:** 2026-05-25
 - **Repo:** agentic-workflow (CLI `awm sensors`)

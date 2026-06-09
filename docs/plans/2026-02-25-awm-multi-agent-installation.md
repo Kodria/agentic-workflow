@@ -1,4 +1,5 @@
 # Implementation Plan: AWM Multi-Agent Installation
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 **Description:** Allow users to seamlessly install skills, workflows, and processes to multiple agents (e.g., Antigravity and OpenCode) simultaneously in a single `awm add` command execution.
 

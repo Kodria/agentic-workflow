@@ -1,4 +1,5 @@
 # Design Doc: Integración del Orquestador "development-process"
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 ## 1. Visión General
 El objetivo de este diseño es definir la arquitectura de un ecosistema de desarrollo agnóstico, gestionado por el Agentic Workflow Manager (AWM). En lugar de depender de reglas heurísticas dispersas por proyecto, se implementará un "Orquestador de Orquestadores" llamado `development-process`. 

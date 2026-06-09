@@ -1,4 +1,5 @@
 # 2026-02-25-awm-uninstall-mechanism-design
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 ## Overview
 AWM currently lacks a straightforward method for users to uninstall the CLI tool and clean up its internal files. This design proposes a remote uninstallation script approach, symmetric to the installation process.

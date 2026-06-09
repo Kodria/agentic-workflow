@@ -1,4 +1,5 @@
 # Bootstrap Hook Port to AWM CLI — Design
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 **Date:** 2026-05-22
 **Status:** Approved (brainstorming phase complete)

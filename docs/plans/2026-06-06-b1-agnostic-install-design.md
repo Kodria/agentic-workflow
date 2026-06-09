@@ -1,4 +1,5 @@
 # Body B-1 — Instalación/reparación agnóstica — Diseño
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 **Fecha:** 2026-06-06
 **Origen:** Harness shakedown lab (`docs/harness-shakedown/`). Body B-1 agrupa los Hallazgos #1, #4, #5, #6.

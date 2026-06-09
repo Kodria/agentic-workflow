@@ -1,4 +1,5 @@
 # Design: Claude Code Support for AWM CLI
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 **Date:** 2026-03-06
 **Status:** Approved

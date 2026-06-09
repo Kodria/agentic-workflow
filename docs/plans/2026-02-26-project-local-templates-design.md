@@ -1,4 +1,5 @@
 # Design: Project-Local Template Overrides
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 ## Goal
 Implement a mechanism that allows individual projects to define and manage their own local documentation templates. These local templates can either introduce new project-specific formats or override (shadow) existing global templates provided by the `template-wizard` and `template-manager` skills from the AWM registry.

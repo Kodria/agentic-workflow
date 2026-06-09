@@ -1,4 +1,5 @@
 # Plan de Corrección Integral: Desacoplar Skills del Flujo de Ejecución
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 ## Análisis del Problema
 Actualmente, el framework base tiene un patrón de _skill-chaining_ (encadenamiento de skills) incrustado en su código, lo cual asume flujos continuos y rompe con nuestro nuevo principio de Orquestación Central donde **`development-process` es el único autorizado para proponer transiciones de fase**.

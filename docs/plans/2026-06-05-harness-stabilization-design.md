@@ -1,4 +1,5 @@
 # Estabilización del Harness (Body A) — Diseño
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 **Fecha:** 2026-06-05
 **Origen:** Auditoría funcional ejecutada del harness (Fases 0–3). Patrón hallado: buen código y buena arquitectura, pero **solo el camino de Claude está probado en la realidad**, y el harness da **verdes falsos** en dos frentes que minan la confianza.

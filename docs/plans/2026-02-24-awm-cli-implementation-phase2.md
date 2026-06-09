@@ -1,4 +1,5 @@
 # AWM CLI Implementation Plan - Phase 2
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 **Goal:** Implement the real-world integrations for the `awm` CLI based on the `awm-cli-design.md`. This phase focuses on connecting to the remote GitHub registry, downloading artifacts, extracting available processes and skills, and finalizing the interactive commands.
 

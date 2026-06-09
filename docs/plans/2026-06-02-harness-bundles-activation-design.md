@@ -1,4 +1,5 @@
 # Diseño — Bundles, activación por proyecto y disciplina del harness (Fase 0 + Fase 1)
+<!-- awm-plan-closed: 2026-06-09 — ejecutado; cierre administrativo retroactivo, verificado contra historial de git (previo a la existencia del marcador awm-qa-complete) -->
 
 - **Fecha**: 2026-06-02
 - **Estado**: Aprobado (brainstorming)
