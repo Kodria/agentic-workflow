@@ -15,7 +15,7 @@ export type InstallResult = {
     backupPath: string | null;
 };
 
-function syncFile(source: string, dest: string, method: 'symlink' | 'copy'): void {
+export function syncFile(source: string, dest: string, method: 'symlink' | 'copy'): void {
     try { fs.unlinkSync(dest); } catch { /* not exists, fine */ }
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     if (method === 'symlink') {
