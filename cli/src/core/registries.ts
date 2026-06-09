@@ -5,6 +5,7 @@ import os from 'os';
 import simpleGit from 'simple-git';
 import { REGISTRY_DIR } from './registry';
 
+// Evaluated at require-time — tests must use jest.resetModules() + late require() to pick up env overrides.
 const AWM_HOME = process.env.AWM_HOME || path.join(process.env.HOME || os.homedir(), '.awm');
 
 /** Content root del registry base. Mismo valor que REGISTRY_CONTENT_DIR (bundles.ts);
@@ -25,7 +26,11 @@ export interface RegistrySource extends RegistryEntry {
 }
 
 export function registryContentRoot(name: string): string {
-    return path.join(REGISTRIES_DIR, name);
+    const root = path.join(REGISTRIES_DIR, name);
+    if (!path.resolve(root).startsWith(path.resolve(REGISTRIES_DIR) + path.sep)) {
+        throw new Error(`Invalid registry name "${name}" — must not contain path separators`);
+    }
+    return root;
 }
 
 export function readRegistriesConfig(): RegistryEntry[] {
@@ -45,6 +50,11 @@ export function readRegistriesConfig(): RegistryEntry[] {
         if (typeof (entry as Record<string, unknown>)?.name !== 'string' || typeof (entry as Record<string, unknown>)?.remote !== 'string') {
             throw new Error(
                 `Invalid registries config at ${REGISTRIES_CONFIG_PATH}: malformed entry ${JSON.stringify(entry)}`
+            );
+        }
+        if (entry.name.includes('/') || entry.name.includes('\\') || entry.name.includes('..')) {
+            throw new Error(
+                `Invalid registries config at ${REGISTRIES_CONFIG_PATH}: malformed entry name "${entry.name}" (path traversal)`
             );
         }
     }
