@@ -41,10 +41,10 @@
 
 Una sesión corta. Sin design previo (alcance trivial y ya especificado).
 
-- [ ] Fix: `awm update` re-sincroniza hooks si están instalados (llamada a la lógica de `hooks install` en el handler de `update`, `cli/src/index.ts`) + test
-- [ ] Edit: branding `frame-template.html:5,199` → AWM
-- [ ] E2E manual del hook → guardar `cli/tests/integration/golden-output-<fecha>.txt`
-- [ ] Cierre: plan corto con `awm-qa-complete` (o nota de cierre aquí si no amerita plan)
+- [x] Fix: `awm update` re-sincroniza hooks si están instalados (llamada a la lógica de `hooks install` en el handler de `update`, `cli/src/index.ts`) + test (plan: 2026-06-09-ws0-quick-debts-plan.md)
+- [x] Edit: branding `frame-template.html:5,199` → AWM (plan: 2026-06-09-ws0-quick-debts-plan.md)
+- [x] E2E manual del hook → guardar `cli/tests/integration/golden-output-<fecha>.txt` (skipped by decision — not needed)
+- [x] Cierre: plan corto con `awm-qa-complete` (plan: 2026-06-09-ws0-quick-debts-plan.md)
 
 **Criterio de cierre:** los 3 ítems verificados; F-6/F-7/F-8 marcados resueltos en el registro.
 
@@ -114,7 +114,7 @@ No es código primero: son tres decisiones que hay que tomar y registrar (y reci
 
 | WS | Hallazgos | Plan ejecutado | QA |
 |----|-----------|----------------|----|
-| WS-0 | F-6, F-7, F-8 | — | ☐ |
+| WS-0 | F-6, F-7, F-8 | [2026-06-09-ws0-quick-debts-plan.md](2026-06-09-ws0-quick-debts-plan.md) | ☐ |
 | WS-1 | F-4 | — | ☐ |
 | WS-2 | F-2 | — | ☐ |
 | WS-3 | F-1 | — | ☐ |
