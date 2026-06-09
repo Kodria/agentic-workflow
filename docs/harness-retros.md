@@ -5,6 +5,17 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
 
 ---
 
+## 2026-06-09 — WS-0 (deudas rápidas): ledger vacío al cierre
+
+- **Clase:** de proceso
+- **Occurrences (ledger count):** 0 (ledger vacío — los subagentes de SDD y el deep-review de post-qa no emitieron `awm ledger add`)
+- **Observación:** Los prompts despachados a los subagentes de `subagent-driven-development` y al deep-review de `post-implementation-qa` no incluían instrucción explícita de registrar hallazgos y wins en el ledger. El harness-retro llegó con ledger vacío, por lo que no hubo nada que curar. El flujo funcionó correctamente (QA encontró 5 hallazgos MINOR y los cerró), pero el aprendizaje no quedó capturado de forma estructurada para sesiones futuras.
+- **Regla:** ninguna regla técnica — el ledger se alimenta desde los prompts de los subagentes. Los prompts de `subagent-driven-development` ya incluyen la instrucción de `awm ledger add` en `implementer-prompt.md` y `code-quality-reviewer-prompt.md` (ver retro 2026-05-27). El deep-review prompt de `post-implementation-qa` también la tiene. La causa aquí fue que los prompts se construyeron inline (no desde los templates del skill) y no incluyeron esa instrucción.
+- **Aprendizaje para el orquestador:** cuando se despachan subagentes con prompts inline (no desde templates), verificar que incluyan la instrucción de `awm ledger add` para hallazgos y wins.
+- **Sensor que lo atrapa:** ninguno automático — es una disciplina del orquestador.
+
+---
+
 ## 2026-06-05 — `post-implementation-qa` omitido tras `subagent-driven-development`
 
 - **Clase:** de proceso
