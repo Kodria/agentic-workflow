@@ -7,7 +7,7 @@ import { buildGroupedOptions } from './utils/grouping';
 import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, buildLevel1Options, buildLevel2Options, resolveLevel2Selection, ALL_SENTINEL, ArtifactView, artifactValue } from './utils/registry-view';
 import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
-import { syncRegistry, buildCli } from './core/registry';
+import { syncRegistry, buildCli, REGISTRY_DIR } from './core/registry';
 import { regenerateGlobalContext } from './core/context/regenerate';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
 import { discoverBundles, defaultScopeForBundle, REGISTRY_CONTENT_DIR } from './core/bundles';
@@ -20,6 +20,7 @@ import fs from 'fs';
 import { parseStoryMap, updateMiroFrameId } from './core/story-map-parser';
 import { syncToMiro } from './core/miro';
 import { registerHooksCommand } from './commands/hooks';
+import { resyncInstalledHooks } from './commands/hooks/resync';
 import { registerSensorsCommand } from './commands/sensors';
 import { registerLedgerCommand } from './commands/ledger';
 import { registerDoctorCommand } from './commands/doctor';
@@ -360,6 +361,18 @@ program.command('update')
               }
           } catch {
               // la reconciliación de symlinks no debe abortar un update exitoso
+          }
+
+          try {
+              for (const r of resyncInstalledHooks(REGISTRY_DIR)) {
+                  if (r.action === 'resynced') {
+                      console.log(pc.green(`  ✓ Re-synced ${r.agent} hook scripts`));
+                  } else if (r.action === 'registry-missing') {
+                      console.warn(pc.yellow(`  ⚠  ${r.agent} hook installed but registry hooks missing — run 'awm hooks install'`));
+                  }
+              }
+          } catch {
+              // hook resync failure must not abort a successful registry update
           }
 
           outro('✅ All symlinked skills and workflows are now up-to-date.');
