@@ -303,7 +303,7 @@ describe('stepGlobalSkillsRepair', () => {
         m.globalSkills = { valid: [], repairable: ['b'], dead: [] };
         const r = stepGlobalSkillsRepair(deps({ machine: m, project: null }, a, { agent: 'opencode' }));
         expect(r.action).toBe('applied');
-        expect(a.repairGlobalSkills).toHaveBeenCalledWith(PROVIDERS['opencode'].skill.global, expect.any(String));
+        expect(a.repairGlobalSkills).toHaveBeenCalledWith(PROVIDERS['opencode'].skill.global, expect.any(Array));
     });
 });
 

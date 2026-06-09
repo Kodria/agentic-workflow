@@ -18,7 +18,7 @@ import type { ProjectFacts } from '../diagnostics/types';
 import { InjectionOrchestrator, ContextOp } from '../context/orchestrator';
 import { getInjection, PROVIDERS } from '../../providers';
 import { repairGlobalSkills as realRepairGlobalSkills } from '../skill-integrity';
-import { REGISTRY_CONTENT_DIR } from '../bundles';
+import { contentRoots } from '../registries';
 import { injectProjectConstitution as realInjectProjectConstitution } from '../context/project-constitution-inject';
 
 // ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ export const defaultActions: InitActions = {
     contextStatus: (op) => realInjectionOrchestrator.contextStatus(op),
 
     installContext: (op) => { realInjectionOrchestrator.installContext(op); },
-    repairGlobalSkills: (skillsDir, registryContentDir) => realRepairGlobalSkills(skillsDir, registryContentDir),
+    repairGlobalSkills: (skillsDir, registryContentDirs) => realRepairGlobalSkills(skillsDir, registryContentDirs),
     injectProjectConstitution: (o) => realInjectProjectConstitution(o.projectRoot, o.agent),
 };
 
@@ -144,7 +144,7 @@ export function stepGlobalSkillsRepair(d: InitDeps): StepResult {
     if (broken === 0) return ok('machine.globalSkills', 'machine', 'skipped');
 
     const skillsDir = PROVIDERS[d.agent].skill.global;
-    const r = d.actions.repairGlobalSkills(skillsDir, REGISTRY_CONTENT_DIR);
+    const r = d.actions.repairGlobalSkills(skillsDir, contentRoots());
     return ok('machine.globalSkills', 'machine', 'applied', `re-linked ${r.relinked.length}, pruned ${r.pruned.length}`);
 }
 

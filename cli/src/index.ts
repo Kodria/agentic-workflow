@@ -10,8 +10,9 @@ import { installArtifact, removeArtifact } from './core/executor';
 import { syncRegistry, buildCli, REGISTRY_DIR } from './core/registry';
 import { regenerateGlobalContext } from './core/context/regenerate';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
-import { discoverBundles, defaultScopeForBundle, REGISTRY_CONTENT_DIR } from './core/bundles';
+import { discoverBundles, defaultScopeForBundle } from './core/bundles';
 import { reconcileAllSkillLinks } from './core/skill-integrity';
+import { contentRoots, syncAdditionalRegistries } from './core/registries';
 import { addBundle, syncProfile } from './core/bundle-install';
 import { findProjectRoot, readProfile } from './core/profile';
 import path from 'path';
@@ -353,7 +354,7 @@ program.command('update')
           }
 
           try {
-              for (const { agent, result } of reconcileAllSkillLinks(REGISTRY_CONTENT_DIR)) {
+              for (const { agent, result } of reconcileAllSkillLinks(contentRoots())) {
                   const touched = result.relinked.length + result.pruned.length;
                   if (touched > 0) {
                       console.log(pc.green(`  ✓ Reconciled ${agent} skill links: re-linked ${result.relinked.length}, pruned ${result.pruned.length}`));

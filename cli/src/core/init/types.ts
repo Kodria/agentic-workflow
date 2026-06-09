@@ -45,7 +45,7 @@ export interface InitActions {
     gatherProject: (cwd: string, bundles: BundleDefinition[], agent?: AgentTarget) => ProjectFacts | null;
     contextStatus: (op: ContextOp) => InjectionState;
     installContext: (op: ContextOp) => void;
-    repairGlobalSkills: (skillsDir: string, registryContentDir: string) => { relinked: string[]; pruned: string[]; failed: string[] };
+    repairGlobalSkills: (skillsDir: string, registryContentDirs: string[]) => { relinked: string[]; pruned: string[]; failed: string[] };
     injectProjectConstitution: (o: { projectRoot: string; agent: AgentTarget }) => ConstitutionInjectResult;
 }
 

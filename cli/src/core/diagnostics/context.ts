@@ -10,8 +10,9 @@ import { InjectionOrchestrator } from '../context/orchestrator';
 import { InjectionState } from '../context/types';
 import { computeHookStatus } from '../../commands/hooks/status';
 import { findProjectRoot, readProfile } from '../profile';
-import { discoverBundles, resolveBundleSkills, BundleDefinition, REGISTRY_CONTENT_DIR } from '../bundles';
+import { discoverBundles, resolveBundleSkills, BundleDefinition } from '../bundles';
 import { classifyGlobalSkills } from '../skill-integrity';
+import { contentRoots } from '../registries';
 
 function home(): string { return process.env.HOME || os.homedir(); }
 function awmHome(): string { return process.env.AWM_HOME || path.join(home(), '.awm'); }
@@ -136,7 +137,7 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
         devCore: { present: devCorePresent, brokenLinks },
         ambient: { wanted, installed },
         contextInjection: gatherContextInjection(),
-        globalSkills: classifyGlobalSkills(skillsDir, REGISTRY_CONTENT_DIR),
+        globalSkills: classifyGlobalSkills(skillsDir, contentRoots()),
     };
 }
 
