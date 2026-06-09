@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import pc from 'picocolors';
 import { renderReport } from './doctor';
 import { gatherContext } from '../core/diagnostics/context';
-import { discoverBundles, REGISTRY_CONTENT_DIR } from '../core/bundles';
+import { discoverAllBundles, REGISTRY_CONTENT_DIR } from '../core/bundles';
 import { REGISTRY_DIR } from '../core/registry';
 import { runInitSteps } from '../core/init/orchestrator';
 import { defaultActions } from '../core/init/steps';
@@ -73,7 +73,7 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
 
     let outcome: InitOutcome;
     try {
-        const bundles = discoverBundles();
+        const bundles = discoverAllBundles();
         const ctx = gatherContext({ cwd, bundles, agent });
 
         // In machineOnly mode, null out the project context so project steps are skipped

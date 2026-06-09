@@ -10,7 +10,7 @@ import { InjectionOrchestrator } from '../context/orchestrator';
 import { InjectionState } from '../context/types';
 import { computeHookStatus } from '../../commands/hooks/status';
 import { findProjectRoot, readProfile } from '../profile';
-import { discoverBundles, resolveBundleSkills, BundleDefinition } from '../bundles';
+import { discoverAllBundles, resolveBundleSkills, BundleDefinition } from '../bundles';
 import { classifyGlobalSkills } from '../skill-integrity';
 import { contentRoots } from '../registries';
 
@@ -174,7 +174,7 @@ export interface GatherOptions {
 
 export function gatherContext(opts: GatherOptions = {}): HarnessContext {
     const cwd = opts.cwd ?? process.cwd();
-    const bundles = opts.bundles ?? discoverBundles();
+    const bundles = opts.bundles ?? discoverAllBundles();
     const agent = opts.agent ?? 'claude-code';
     const root = findProjectRoot(cwd);
     return {

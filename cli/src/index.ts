@@ -10,7 +10,7 @@ import { installArtifact, removeArtifact } from './core/executor';
 import { syncRegistry, buildCli, REGISTRY_DIR } from './core/registry';
 import { regenerateGlobalContext } from './core/context/regenerate';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
-import { discoverBundles, defaultScopeForBundle } from './core/bundles';
+import { discoverBundles, discoverAllBundles, defaultScopeForBundle } from './core/bundles';
 import { reconcileAllSkillLinks } from './core/skill-integrity';
 import { contentRoots, syncAdditionalRegistries } from './core/registries';
 import { addBundle, syncProfile } from './core/bundle-install';
@@ -26,6 +26,7 @@ import { registerSensorsCommand } from './commands/sensors';
 import { registerLedgerCommand } from './commands/ledger';
 import { registerDoctorCommand } from './commands/doctor';
 import { registerInitCommand } from './commands/init';
+import { registerRegistryCommand } from './commands/registry';
 
 const program = new Command();
 program.name('awm').description('Agentic Workflow Manager').version('1.0.0');
@@ -78,7 +79,7 @@ program.command('add [name]')
 
       // 1b. If `name` matches a bundle, run the bundle-activation flow and exit.
       if (name) {
-          const allBundles = discoverBundles();
+          const allBundles = discoverAllBundles();
           const matchedBundle = allBundles.find((b) => b.name === name);
           if (matchedBundle) {
               const prefs = getPreferences();
@@ -204,7 +205,7 @@ program.command('add [name]')
           skills,
           includeWorkflows ? workflows : [],
           includeAgents ? agents : [],
-          discoverBundles()
+          discoverAllBundles()
       );
 
       if (view.length === 0) {
@@ -344,6 +345,18 @@ program.command('update')
           }
 
           try {
+              for (const r of await syncAdditionalRegistries()) {
+                  if (r.action === 'error') {
+                      console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
+                  } else {
+                      console.log(pc.green(`  ✓ Registry ${r.name} ${r.action === 'pulled' ? 'updated' : 're-cloned'}`));
+                  }
+              }
+          } catch {
+              // additional registry sync must not abort a successful update
+          }
+
+          try {
               const regen = regenerateGlobalContext();
               const refreshed = regen.filter((r) => r.action === 'refreshed').map((r) => r.agent);
               if (refreshed.length > 0) {
@@ -431,7 +444,7 @@ program.command('sync')
       }
       const method = options.method === 'copy' ? 'copy' : 'symlink';
 
-      const result = syncProfile({ projectRoot, bundles: discoverBundles(), agents, method });
+      const result = syncProfile({ projectRoot, bundles: discoverAllBundles(), agents, method });
       if (result.skipped.length > 0) {
           for (const sk of result.skipped) console.log(pc.yellow(`  ⚠  Skipped: ${sk}`));
       }
@@ -457,7 +470,7 @@ program.command('list [package]')
           process.exit(1);
       }
 
-      const fullView = buildPackageView(discoverSkills(), discoverWorkflows(), discoverAgents(), discoverBundles());
+      const fullView = buildPackageView(discoverSkills(), discoverWorkflows(), discoverAgents(), discoverAllBundles());
       const view = options.all ? fullView : fullView.filter((p) => p.visibility !== 'private');
 
       if (view.length === 0) {
@@ -576,7 +589,7 @@ program.command('remove')
           process.exit(0);
       }
 
-      const groupedOpts = buildGroupedOptions(installed, discoverBundles(),
+      const groupedOpts = buildGroupedOptions(installed, discoverAllBundles(),
           (c) => {
               const hasSkill = c.artifacts.some(a => a.type === 'skill');
               const hasWf = c.artifacts.some(a => a.type === 'workflow');
@@ -704,5 +717,6 @@ registerSensorsCommand(program);
 registerLedgerCommand(program);
 registerDoctorCommand(program);
 registerInitCommand(program);
+registerRegistryCommand(program);
 
 program.parse();
