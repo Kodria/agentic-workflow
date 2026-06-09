@@ -15,8 +15,8 @@ describe('skill frontmatter version', () => {
         .filter((e) => fs.existsSync(path.join(SKILLS_DIR, e.name, 'SKILL.md')))
         .map((e) => e.name);
 
-    it('finds the 44 skills', () => {
-        expect(dirs.length).toBe(44);
+    it('finds the 41 skills', () => {
+        expect(dirs.length).toBe(41);
     });
 
     it.each(dirs)('skill "%s" declares a semver version', (name) => {

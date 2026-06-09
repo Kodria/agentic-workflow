@@ -8,9 +8,9 @@ function readJson(p: string): any { return JSON.parse(fs.readFileSync(p, 'utf-8'
 describe('catalog/bundle consistency', () => {
     const catalog = readJson(path.join(CONTENT, 'catalog.json'));
 
-    it('declares exactly the 5 bundles', () => {
+    it('declares exactly the 4 bundles', () => {
         expect(catalog.bundles.map((b: any) => b.name).sort())
-            .toEqual(['authoring', 'dev', 'docs', 'frontend', 'personal-notion']);
+            .toEqual(['authoring', 'dev', 'docs', 'frontend']);
     });
 
     it('every catalog entry has a matching bundle.json whose mirrored fields agree', () => {
@@ -33,14 +33,14 @@ describe('catalog/bundle consistency', () => {
         }
     });
 
-    it('bundle skills partition the 44 skills with no overlap', () => {
+    it('bundle skills partition the 41 skills with no overlap', () => {
         const all: string[] = [];
         for (const entry of catalog.bundles) {
             const manifest = readJson(path.join(CONTENT, entry.source, 'bundle.json'));
             for (const s of manifest.skills) all.push(typeof s === 'string' ? s : s.name);
         }
-        expect(all.length).toBe(44);
-        expect(new Set(all).size).toBe(44);
+        expect(all.length).toBe(41);
+        expect(new Set(all).size).toBe(41);
     });
 
     it('processes.json has been removed', () => {
