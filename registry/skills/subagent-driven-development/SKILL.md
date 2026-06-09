@@ -133,7 +133,20 @@ If the repo has `.awm/sensors.json`, a task is **not complete** until sensors pa
 
 **Recurring sensor failure** (same `name` + `rule` as a prior session) → invoke `harness-retro` instead of just fixing it.
 
+## Ledger Gate (AWM)
+
+<!-- AWM-INTEGRATION: subagent-ledger-gate -->
+
+The per-branch ledger (`awm ledger`) is what `harness-retro` learns from. Reviewer subagents emit `awm ledger add` per finding and per win — but only if their prompt tells them to. Subagents run in isolated context and only do what their prompt says, so the gate must be enforced at two points:
+
+1. **In the reviewer prompts:** the `awm ledger add` instruction lives in `./spec-reviewer-prompt.md` and `./code-quality-reviewer-prompt.md`. Dispatch prompts MUST be constructed from these templates — read the template file and inject the task-specific context into it. An inline prompt written from memory silently drops the ledger instruction (this happened: a full SDD+QA cycle produced findings but a 0-entry ledger, and the retro had nothing to learn from).
+2. **At the controller, before marking the task complete:** if a reviewer reported findings or wins, run `awm ledger list` and confirm the ledger grew accordingly. If the reviewer's report shows issues but the ledger has no matching entries, send the reviewer back to emit them. Trust-but-verify: `awm ledger list` is cheap and authoritative.
+
+A clean review with genuinely zero findings and zero wins is the only case where no ledger growth is acceptable.
+
 ## Prompt Templates
+
+Dispatch prompts are **built from these templates, not written from memory** — read the template file and inject context into its structure. The templates carry mandatory instructions (sensor gate, ledger emission) that inline prompts silently lose.
 
 - `./implementer-prompt.md` - Dispatch implementer subagent
 - `./spec-reviewer-prompt.md` - Dispatch spec compliance reviewer subagent
@@ -265,6 +278,8 @@ Your sequence — execute in order, do not skip:
 - Proceed with unfixed issues
 - Dispatch multiple implementation subagents in parallel (conflicts)
 - Make subagent read plan file (provide full text instead)
+- Dispatch an implementer or reviewer with an inline prompt written from memory (build it from the prompt template — inline prompts drop the sensor/ledger instructions)
+- Mark a task complete when the reviewer reported findings/wins but `awm ledger list` shows no matching entries
 - Skip scene-setting context (subagent needs to understand where task fits)
 - Ignore subagent questions (answer before letting them proceed)
 - Accept "close enough" on spec compliance (spec reviewer found issues = not done)

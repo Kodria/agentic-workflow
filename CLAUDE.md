@@ -2,6 +2,14 @@
 
 This document codifies architectural and design principles for the Agentic Workflow Manager (AWM) repository to ensure consistency and prevent future design drift.
 
+## `~/.awm` es territorio del instalador — NUNCA tocarlo
+
+`~/.awm` (incluyendo `~/.awm/cli-source`, hooks, config) se gestiona **exclusivamente** vía `install.sh` y `awm update`. Desde una sesión de desarrollo en este repo está **prohibido** escribir, editar, borrar o "arreglar" cualquier cosa bajo `~/.awm`.
+
+**El flujo correcto:** todo cambio se hace en el repo (`registry/`, `cli/`) → se commitea → llega a la instalación mediante el ciclo de update. Los skills instalados en `~/.claude/skills/` son symlinks hacia `~/.awm/cli-source/registry/skills/`, así que reflejan el registry instalado, no el working copy — la latencia entre editar el registry y verlo instalado es esperada y correcta; no se "atajea" editando la instalación.
+
+**Tests:** ningún test puede tocar el `~/.awm` real. Todos usan tmpdirs aislados con `process.env.HOME` y `process.env.AWM_HOME` sobreescritos (patrón de `cli/tests/commands/hooks/install.test.ts`).
+
 ## Sensores y packs — frontera genérico/específico
 
 Los sensor-packs de AWM (`registry/sensor-packs/`) envían solo reglas **genéricas y agnósticas a clases de problema** (eval, secrets, SQL injection, validación de entradas). NO se hornean reglas nacidas de un bug puntual de un proyecto. Las reglas **específicas** las crece `harness-retro` **dentro del proyecto**, sobre los config files copiados (`.semgrep.awm.yml`, `eslint.config.awm.mjs`, `tests/structural/`). El framework nunca enumera bugs puntuales.

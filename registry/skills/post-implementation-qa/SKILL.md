@@ -95,7 +95,7 @@ awm sensors run
 
 ### Paso 3: Dispatch del subagente de revisión profunda
 
-Usar template `./deep-review-prompt.md`. Inyectar:
+**Construir el prompt DESDE el template `./deep-review-prompt.md`** — leer el archivo e inyectar el contexto en su estructura. Un prompt inline escrito de memoria pierde la instrucción de ledger. Inyectar:
 - Texto completo del plan
 - Git diff completo de la rama
 - Output completo de `awm sensors run`
@@ -105,6 +105,8 @@ El subagente retorna JSON con lista de hallazgos clasificados.
 - El subagente además registra cada hallazgo y win en el ledger vía `awm ledger add` (ver deep-review-prompt.md), insumo de `harness-retro`.
 
 ### Paso 4: Presentar hallazgos al usuario
+
+**Gate de ledger (antes de presentar):** correr `awm ledger list` y verificar que cada hallazgo del JSON tiene su entrada correspondiente (fase `post-qa`). Si el subagente reportó N hallazgos pero el ledger no creció, el pipeline de aprendizaje está roto — re-despachar al subagente para que emita los `awm ledger add` faltantes antes de continuar. No presentar hallazgos cuyo registro no existe.
 
 ```
 ## Hallazgos QA
@@ -171,6 +173,8 @@ NO CLAIM DE "QA COMPLETO" SIN:
 - Mezclar tratamiento Type B y C
 - Saltar confirmación antes del fix loop
 - Olvidar el marker `<!-- awm-qa-complete -->`
+- Despachar el deep-review con prompt inline en vez del template → se pierde la instrucción de `awm ledger add`
+- Presentar hallazgos sin verificar que el ledger creció (gate del Paso 4)
 
 ## Conexiones
 

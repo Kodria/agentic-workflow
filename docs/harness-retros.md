@@ -5,14 +5,42 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
 
 ---
 
-## 2026-06-09 — WS-0 (deudas rápidas): ledger vacío al cierre
+## 2026-06-09 — WS-0 (deudas rápidas): ledger vacío al cierre — pipeline de aprendizaje roto
 
-- **Clase:** de proceso
-- **Occurrences (ledger count):** 0 (ledger vacío — los subagentes de SDD y el deep-review de post-qa no emitieron `awm ledger add`)
-- **Observación:** Los prompts despachados a los subagentes de `subagent-driven-development` y al deep-review de `post-implementation-qa` no incluían instrucción explícita de registrar hallazgos y wins en el ledger. El harness-retro llegó con ledger vacío, por lo que no hubo nada que curar. El flujo funcionó correctamente (QA encontró 5 hallazgos MINOR y los cerró), pero el aprendizaje no quedó capturado de forma estructurada para sesiones futuras.
-- **Regla:** ninguna regla técnica — el ledger se alimenta desde los prompts de los subagentes. Los prompts de `subagent-driven-development` ya incluyen la instrucción de `awm ledger add` en `implementer-prompt.md` y `code-quality-reviewer-prompt.md` (ver retro 2026-05-27). El deep-review prompt de `post-implementation-qa` también la tiene. La causa aquí fue que los prompts se construyeron inline (no desde los templates del skill) y no incluyeron esa instrucción.
-- **Aprendizaje para el orquestador:** cuando se despachan subagentes con prompts inline (no desde templates), verificar que incluyan la instrucción de `awm ledger add` para hallazgos y wins.
-- **Sensor que lo atrapa:** ninguno automático — es una disciplina del orquestador.
+> **Corregido 2026-06-09 (mismo día):** la versión original de esta entrada clasificó el problema
+> como "disciplina del orquestador" sin regla técnica, y afirmó erróneamente que la instrucción
+> de ledger vive en `implementer-prompt.md` (vive en `spec-reviewer-prompt.md` y
+> `code-quality-reviewer-prompt.md` — emiten los reviewers, no el implementer). El usuario
+> detectó que el retro se cerró sin rastrear la causa estructural. Esta entrada reemplaza a la original.
+
+- **Clase:** estructural (del harness) — 3 gaps en skills, no disciplina individual
+- **Occurrences (ledger count):** 0 entradas tras un ciclo que produjo 5 hallazgos QA — la
+  contradicción ES el hallazgo
+- **Traza de la falla en cadena:**
+  - **G1 — `subagent-driven-development/SKILL.md` no mencionaba el ledger.** La instrucción
+    `awm ledger add` vivía solo en los templates (`spec-reviewer-prompt.md:69`,
+    `code-quality-reviewer-prompt.md:35`), y la sección *Prompt Templates* era un listado
+    pasivo sin obligación de construir los prompts desde ellos. Un orquestador que arma
+    prompts inline pierde la instrucción por completo — exactamente lo que pasó. El Sensor
+    Gate tenía verificación del lado del controller; el ledger no tenía equivalente.
+  - **G2 — `post-implementation-qa/SKILL.md` mencionaba el ledger como nota, no como gate.**
+    El deep-review reportó 5 hallazgos con ledger en 0 y ningún paso lo detectó.
+  - **G3 — `harness-retro/SKILL.md` trataba "ledger vacío" como exit incondicional.**
+    No distinguía "vacío porque no hubo hallazgos" de "vacío porque la tubería se rompió",
+    así que el retro cerró declarando que no había nada que aprender.
+- **Reglas agregadas:**
+  - `registry/skills/subagent-driven-development/SKILL.md` — sección *Ledger Gate (AWM)*
+    espejo del Sensor Gate: prompts construidos desde templates (obligatorio) +
+    trust-but-verify del controller (`awm ledger list` debe crecer si el reviewer reportó
+    hallazgos/wins) + 2 red flags nuevos.
+  - `registry/skills/post-implementation-qa/SKILL.md` — Paso 3 exige construir el prompt
+    desde el template; Paso 4 gana gate de ledger (verificar entradas `post-qa` antes de
+    presentar hallazgos) + 2 red flags nuevos.
+  - `registry/skills/harness-retro/SKILL.md` — *empty-ledger consistency check* obligatorio
+    antes del fast-exit: si hubo hallazgos reportados en el ciclo y el ledger está vacío,
+    eso es el hallazgo del retro (rastrear y curar) + anti-pattern nuevo.
+- **Sensor que lo atrapa:** proceso — los gates viven en el texto de los 3 skills (controller
+  verifica con `awm ledger list`, barato y autoritativo). Sin sensor automático de código.
 
 ---
 

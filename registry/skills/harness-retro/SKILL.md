@@ -23,7 +23,9 @@ description: Use as the terminal learning phase of development-process — reads
 
 ## When NOT to use
 
-- The ledger is empty and there are no manual observations — exit fast and add the `awm-retro-complete` marker.
+- The ledger is empty, there are no manual observations, **and the session genuinely produced zero findings** — exit fast and add the `awm-retro-complete` marker.
+
+**Empty-ledger consistency check (mandatory before fast-exit):** an empty ledger is only legitimate if nothing was found during the cycle. Cross-check against the session evidence: did the spec/quality reviewers report issues? Did `post-implementation-qa` present findings (Type B/C in the plan or QA report)? If findings were reported anywhere but the ledger is empty, the learning pipeline is broken — **that IS the retro finding**. Do not fast-exit: trace where the `awm ledger add` instruction was dropped (inline prompt instead of template? missing gate?), cure the gap in the responsible skill, and log it. An empty ledger after a cycle with findings is contradictory evidence, never a clean bill.
 
 ## Checklist
 
@@ -218,6 +220,7 @@ Then add the `awm-retro-complete` marker to the active plan (first line after th
 - **Appending raw entries to CONSTITUTION.md / AGENTS.md** without merging/pruning — these docs are delivered every session and must stay bounded.
 - **Curating agent-style lessons into CLAUDE.md.** Agent lessons and wins go to `AGENTS.md` (every agent reads it), never `CLAUDE.md` (Claude-specific).
 - **Skipping the `awm ledger archive` step.** The next session should start with a clean ledger; always archive before closing.
+- **Fast-exiting on an empty ledger without the consistency check.** If reviewers or QA reported findings during the cycle, an empty ledger means the emission pipeline broke — trace and cure it; don't declare "nothing to learn".
 
 ## Integration with other skills
 
