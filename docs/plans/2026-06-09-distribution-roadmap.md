@@ -52,8 +52,8 @@ Una sesión corta. Sin design previo (alcance trivial y ya especificado).
 
 Separar `personal-notion` + las 3 skills NotionTracker a un registry/overlay personal fuera del repo distribuible. Desbloquea WS-2 (es el primer caso de uso real de "segundo registry").
 
-- [ ] Brainstorming + design (¿overlay local? ¿repo privado aparte? ¿mecanismo genérico de registry adicional mínimo?)
-- [ ] Plan + ejecución
+- [x] Brainstorming + design (¿overlay local? ¿repo privado aparte? ¿mecanismo genérico de registry adicional mínimo?) → [2026-06-09-ws1-personal-content-extraction-design.md](2026-06-09-ws1-personal-content-extraction-design.md)
+- [x] Plan + ejecución → [2026-06-09-ws1-personal-content-extraction-plan.md](2026-06-09-ws1-personal-content-extraction-plan.md)
 - [ ] Verificación: clone limpio del repo no contiene contenido personal; tus skills personales siguen funcionando en tu máquina
 - [ ] QA → `awm-qa-complete`
 
@@ -115,7 +115,7 @@ No es código primero: son tres decisiones que hay que tomar y registrar (y reci
 | WS | Hallazgos | Plan ejecutado | QA |
 |----|-----------|----------------|----|
 | WS-0 | F-6, F-7, F-8 | [2026-06-09-ws0-quick-debts-plan.md](2026-06-09-ws0-quick-debts-plan.md) | ☑ |
-| WS-1 | F-4 | — | ☐ |
+| WS-1 | F-4 | Plan ejecutado: [2026-06-09-ws1-personal-content-extraction-plan.md](2026-06-09-ws1-personal-content-extraction-plan.md) | ☐ |
 | WS-2 | F-2 | — | ☐ |
 | WS-3 | F-1 | — | ☐ |
 | WS-4 | F-3 | — | ☐ |
