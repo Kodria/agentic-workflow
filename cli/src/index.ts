@@ -10,7 +10,7 @@ import { installArtifact, removeArtifact } from './core/executor';
 import { syncRegistry, buildCli, REGISTRY_DIR } from './core/registry';
 import { regenerateGlobalContext } from './core/context/regenerate';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
-import { discoverBundles, discoverAllBundles, defaultScopeForBundle } from './core/bundles';
+import { discoverAllBundles, defaultScopeForBundle } from './core/bundles';
 import { reconcileAllSkillLinks } from './core/skill-integrity';
 import { contentRoots, syncAdditionalRegistries } from './core/registries';
 import { addBundle, syncProfile } from './core/bundle-install';

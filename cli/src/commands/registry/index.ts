@@ -5,7 +5,7 @@ import { intro, outro, confirm, isCancel, spinner } from '@clack/prompts';
 import pc from 'picocolors';
 import { listRegistries, contentRoots } from '../../core/registries';
 import { discoverSkills, discoverWorkflows, discoverAgents } from '../../core/discovery';
-import { discoverBundles } from '../../core/bundles';
+import { discoverAllBundles } from '../../core/bundles';
 import { reconcileAllSkillLinks } from '../../core/skill-integrity';
 import { regenerateGlobalContext } from '../../core/context/regenerate';
 import { addRegistry } from './add';
@@ -51,7 +51,7 @@ export function registerRegistryCommand(program: Command): void {
                 }
                 const counts = [
                     `${discoverSkills([r.contentRoot]).length} skills`,
-                    `${discoverBundles(r.contentRoot).length} bundles`,
+                    `${discoverAllBundles([r.contentRoot]).length} bundles`,
                     `${discoverWorkflows([r.contentRoot]).length} workflows`,
                     `${discoverAgents([r.contentRoot]).length} agents`,
                 ].join(', ');
