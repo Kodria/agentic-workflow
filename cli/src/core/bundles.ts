@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { REGISTRY_DIR } from './registry';
 import { Scope } from '../providers';
+import { contentRoots } from './registries';
 
 export const REGISTRY_CONTENT_DIR = path.join(REGISTRY_DIR, 'registry');
 
@@ -23,6 +24,8 @@ export interface BundleDefinition {
     skills: BundleSkillRef[];
     workflows: string[];
     agents: string[];
+    /** Root de contenido donde se descubrió el bundle (multi-registry, WS-1). */
+    contentRoot?: string;
 }
 
 export interface CatalogEntry {
@@ -67,6 +70,7 @@ export function discoverBundles(contentDir: string = REGISTRY_CONTENT_DIR): Bund
             skills: normalizeSkillRefs(raw.skills),
             workflows: raw.workflows ?? [],
             agents: raw.agents ?? [],
+            contentRoot: contentDir,
         });
     }
     return bundles;
@@ -94,6 +98,27 @@ export function resolveBundleSkills(bundleName: string, bundles: BundleDefinitio
  */
 export function defaultScopeForBundle(scope: BundleScope): Scope {
     return scope === 'project' ? 'local' : 'global';
+}
+
+/** Descubre bundles de TODOS los roots (base + registries adicionales).
+ *  Colisión de nombre entre roots → error explícito nombrando ambas fuentes. */
+export function discoverAllBundles(roots: string[] = contentRoots()): BundleDefinition[] {
+    const out: BundleDefinition[] = [];
+    const seen = new Map<string, string>();
+    for (const root of roots) {
+        for (const b of discoverBundles(root)) {
+            const prev = seen.get(b.name);
+            if (prev) {
+                throw new Error(
+                    `Artifact name collision: bundle "${b.name}" exists in both ${prev} and ${root}. ` +
+                    `Remove or rename one of them (per-registry namespacing llega en WS-2).`
+                );
+            }
+            seen.set(b.name, root);
+            out.push(b);
+        }
+    }
+    return out;
 }
 
 /**

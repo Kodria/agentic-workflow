@@ -60,12 +60,13 @@ function bundleArtifacts(b: BundleDefinition, contentDir: string): ArtifactRef[]
  * missing sources are skipped (never thrown).
  */
 export function installBundle(opts: InstallBundleOptions): InstallSummary {
-    const contentDir = opts.contentDir ?? REGISTRY_CONTENT_DIR;
+    const fallbackContentDir = opts.contentDir ?? REGISTRY_CONTENT_DIR;
     const closure = resolveBundleClosure(opts.bundleName, opts.bundles);
     const installed: string[] = [];
     const skipped: string[] = [];
 
     for (const b of closure) {
+        const contentDir = b.contentRoot ?? fallbackContentDir;
         const scope: Scope =
             b.name === opts.bundleName
                 ? opts.scopeOverride ?? defaultScopeForBundle(b.scope)
