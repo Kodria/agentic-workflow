@@ -51,6 +51,15 @@ describe('profile.registries (pin de proyecto)', () => {
         expect(readProfile(tmpProj)).toEqual({ extensions: ['a'], registries: { base: '1.0.0' } });
     });
 
+    it.each([[''], ['.'], ['..'], ['a/b'], ['a\\b']])(
+        'clave "%s" en registries → error (path traversal guard)',
+        (key) => {
+            writeRaw({ extensions: [], registries: { [key]: '1.0.0' } });
+            const { readProfile } = require('../../src/core/profile');
+            expect(() => readProfile(tmpProj)).toThrow(/not a valid registry name/);
+        }
+    );
+
     it('addExtension preserva registries existente', () => {
         const { readProfile, writeProfile, addExtension } = require('../../src/core/profile');
         writeProfile(tmpProj, { extensions: [], registries: { base: '1.0.0' } });

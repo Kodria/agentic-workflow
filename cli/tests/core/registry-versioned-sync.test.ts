@@ -118,6 +118,19 @@ describe('syncRegistry versionado (fixtures git locales)', () => {
         expect(fs.readFileSync(registryVersionFile(), 'utf-8')).toBe('init');
     });
 
+    it('C2 regression: clone fresco limpiado si pin inexistente falla post-clone', async () => {
+        // Si el clone se completa pero resolveTargetRef falla (pin no existe),
+        // REGISTRY_DIR debe limpiarse para no quedar en estado inconsistente.
+        const source = makeTaggedRepo(tmpWork, 'src', ['1.0.0']);
+        const { syncRegistry } = require('../../src/core/registry');
+        const { REGISTRY_DIR } = require('../../src/core/registry');
+
+        await expect(
+            syncRegistry(source, { pin: '9.9.9', channel: 'stable' })
+        ).rejects.toThrow();
+        expect(fs.existsSync(REGISTRY_DIR)).toBe(false);
+    });
+
     it('sin opts (callers legacy) → comportamiento stable por default', async () => {
         const source = makeTaggedRepo(tmpWork, 'src', ['2.0.0']);
         const { syncRegistry } = require('../../src/core/registry');

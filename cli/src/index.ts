@@ -428,11 +428,6 @@ program.command('sync')
           console.error(pc.red(e.message));
           process.exit(1);
       }
-      if (profile.extensions.length === 0) {
-          outro(pc.yellow('No extensions in .awm/profile.json — nothing to sync. Use `awm add <bundle>` first.'));
-          return;
-      }
-
       const s = spinner();
       s.start('Syncing registry...');
       try {
@@ -445,6 +440,7 @@ program.command('sync')
       }
 
       // Gate de versión (WS-3): el pin del profile es el lock del proyecto.
+      // Runs before the empty-extensions early-exit so pinned projects always fail fast.
       const pins = profile.registries ?? {};
       if (Object.keys(pins).length > 0) {
           const failures = await verifyProjectPins(pins);
@@ -465,6 +461,11 @@ program.command('sync')
               }
               process.exit(1);
           }
+      }
+
+      if (profile.extensions.length === 0) {
+          outro(pc.yellow('No extensions in .awm/profile.json — nothing to sync. Use `awm add <bundle>` first.'));
+          return;
       }
 
       const prefs = getPreferences();

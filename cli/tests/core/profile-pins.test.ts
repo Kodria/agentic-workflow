@@ -93,6 +93,18 @@ describe('verifyProjectPins (gate de awm sync)', () => {
         ]);
     });
 
+    it('pin gate corre aunque extensions esté vacío (B1 regression)', async () => {
+        // Un profile {extensions: [], registries: {base: '1.0.0'}} con la máquina en v1.1.0
+        // DEBE producir mismatch — el early-exit de extensions no puede bypassear el gate.
+        const source = makeTaggedRepo(tmpWork, 'src', ['1.0.0', '1.1.0']);
+        const { syncRegistry } = require('../../src/core/registry');
+        await syncRegistry(source, { channel: 'stable' }); // máquina en v1.1.0
+        const { verifyProjectPins } = require('../../src/core/profile-pins');
+        const failures = await verifyProjectPins({ base: '1.0.0' });
+        expect(failures).toHaveLength(1);
+        expect(failures[0]).toMatchObject({ name: 'base', required: '1.0.0', reason: 'mismatch' });
+    });
+
     it('CRITERIO ROADMAP end-to-end: pineado no recibe main hasta bump; rollback funciona', async () => {
         const source = makeTaggedRepo(tmpWork, 'src', ['1.0.0']);
         const { syncRegistry } = require('../../src/core/registry');

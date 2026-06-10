@@ -67,6 +67,11 @@ export function readProfile(root: string): ProjectProfile {
         }
         const registries: Record<string, string> = {};
         for (const [name, version] of Object.entries(raw.registries as Record<string, unknown>)) {
+            if (!name || name === '.' || name.includes('..') || /[/\\]/.test(name)) {
+                throw new Error(
+                    `Invalid profile at ${file}: registries key "${name}" is not a valid registry name`
+                );
+            }
             if (typeof version !== 'string' || !PIN_VERSION_RE.test(version)) {
                 throw new Error(
                     `Invalid profile at ${file}: registries["${name}"] must be "X.Y.Z", got ${JSON.stringify(version)}`

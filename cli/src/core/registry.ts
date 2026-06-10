@@ -43,7 +43,8 @@ export async function syncRegistry(
   const remote = remoteUrl ?? DEFAULT_REMOTE;
   const { pin, channel = 'stable' } = opts ?? {};
 
-  if (!fs.existsSync(REGISTRY_DIR)) {
+  const freshClone = !fs.existsSync(REGISTRY_DIR);
+  if (freshClone) {
     const parentDir = path.dirname(REGISTRY_DIR);
     fs.mkdirSync(parentDir, { recursive: true });
     try {
@@ -57,12 +58,19 @@ export async function syncRegistry(
   }
 
   const repoGit = simpleGit(REGISTRY_DIR);
-  const resolved = await resolveTargetRef(REGISTRY_DIR, { pin, channel });
-  await repoGit.checkout(resolved.ref);
-  if (resolved.kind !== 'tag') {
-    await repoGit.pull('origin', resolved.ref);
+  try {
+    const resolved = await resolveTargetRef(REGISTRY_DIR, { pin, channel });
+    await repoGit.checkout(resolved.ref);
+    if (resolved.kind !== 'tag') {
+      await repoGit.pull('origin', resolved.ref);
+    }
+    return resolved;
+  } catch (e) {
+    if (freshClone) {
+      fs.rmSync(REGISTRY_DIR, { recursive: true, force: true });
+    }
+    throw e;
   }
-  return resolved;
 }
 
 export type BuildResult = { success: true } | { success: false; error: string };
