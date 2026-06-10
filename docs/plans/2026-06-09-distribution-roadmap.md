@@ -70,8 +70,8 @@ La pieza que convierte AWM de "tus skills" en plataforma: remote configurable (e
 
 Releases taggeados, canal estable separado de main, pinning de versión en `.awm/profile.json` (`{"name": "dev", "version": "1.2.0"}`), y hacer que el CLI lea/escriba un lockfile real (revivir o reemplazar `skills-lock.json`). El symlink sigue siendo el mecanismo; apunta a un tag, no a HEAD.
 
-- [ ] Brainstorming + design (esquema de versiones, canales, formato de lockfile, migración de profiles existentes)
-- [ ] Plan + ejecución
+- [x] Brainstorming + design → [2026-06-10-ws3-versioning-design.md](2026-06-10-ws3-versioning-design.md)
+- [x] Plan + ejecución → [2026-06-10-ws3-versioning-plan.md](2026-06-10-ws3-versioning-plan.md)
 - [ ] Verificación: un proyecto pineado NO recibe cambios de main hasta bump explícito; rollback funciona
 - [ ] QA → `awm-qa-complete`
 
@@ -117,7 +117,7 @@ No es código primero: son tres decisiones que hay que tomar y registrar (y reci
 | WS-0 | F-6, F-7, F-8 | [2026-06-09-ws0-quick-debts-plan.md](2026-06-09-ws0-quick-debts-plan.md) | ☑ |
 | WS-1 | F-4 | Plan ejecutado: [2026-06-09-ws1-personal-content-extraction-plan.md](2026-06-09-ws1-personal-content-extraction-plan.md) | ☑ |
 | WS-2 | F-2 | [2026-06-09-ws2-multi-registry-plan.md](2026-06-09-ws2-multi-registry-plan.md) | ☑ |
-| WS-3 | F-1 | — | ☐ |
+| WS-3 | F-1 | [2026-06-10-ws3-versioning-plan.md](2026-06-10-ws3-versioning-plan.md) | ☐ |
 | WS-4 | F-3 | — | ☐ |
 | WS-5 | F-12 | — | ☐ |
 | WS-6 | F-5 | — | ☐ |
