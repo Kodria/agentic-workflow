@@ -106,19 +106,23 @@ export function registerRegistryCommand(program: Command): void {
                     earlier.push(r.contentRoot);
                     continue;
                 }
-                const counts = [
-                    `${discoverSkills([r.contentRoot]).length} skills`,
-                    `${discoverAllBundles([r.contentRoot]).length} bundles`,
-                    `${discoverWorkflows([r.contentRoot]).length} workflows`,
-                    `${discoverAgents([r.contentRoot]).length} agents`,
-                ].join(', ');
-                console.log(`${pc.cyan(r.name)}  ${r.remote}  ${pc.dim(counts)}`);
-                for (const o of overrideStatus(r.contentRoot, earlier)) {
-                    console.log(
-                        o.active
-                            ? pc.yellow(`    ↑ override activo: ${o.name}`)
-                            : pc.dim(`    ∅ override sin efecto: ${o.name}`)
-                    );
+                try {
+                    const counts = [
+                        `${discoverSkills([r.contentRoot]).length} skills`,
+                        `${discoverAllBundles([r.contentRoot]).length} bundles`,
+                        `${discoverWorkflows([r.contentRoot]).length} workflows`,
+                        `${discoverAgents([r.contentRoot]).length} agents`,
+                    ].join(', ');
+                    console.log(`${pc.cyan(r.name)}  ${r.remote}  ${pc.dim(counts)}`);
+                    for (const o of overrideStatus(r.contentRoot, earlier)) {
+                        console.log(
+                            o.active
+                                ? pc.yellow(`    ↑ override activo: ${o.name}`)
+                                : pc.dim(`    ∅ override sin efecto: ${o.name}`)
+                        );
+                    }
+                } catch (e) {
+                    console.log(`${pc.cyan(r.name)}  ${r.remote}  ${pc.yellow(`⚠  Error reading registry: ${e instanceof Error ? e.message : String(e)}`)}`);
                 }
                 earlier.push(r.contentRoot);
             }
