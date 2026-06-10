@@ -29,6 +29,7 @@ import { registerInitCommand } from './commands/init';
 import { registerRegistryCommand } from './commands/registry';
 import { registerPinCommands } from './commands/pin';
 import { machineVersionOpts } from './core/versioning';
+import { verifyProjectPins } from './core/profile-pins';
 
 const program = new Command();
 program.name('awm').description('Agentic Workflow Manager').version('1.0.0');
@@ -420,7 +421,13 @@ program.command('sync')
           process.exit(1);
       }
 
-      const profile = readProfile(projectRoot);
+      let profile;
+      try {
+          profile = readProfile(projectRoot);
+      } catch (e: any) {
+          console.error(pc.red(e.message));
+          process.exit(1);
+      }
       if (profile.extensions.length === 0) {
           outro(pc.yellow('No extensions in .awm/profile.json — nothing to sync. Use `awm add <bundle>` first.'));
           return;
@@ -435,6 +442,23 @@ program.command('sync')
           s.stop('Failed to sync registry.');
           console.error(pc.red(e.message));
           process.exit(1);
+      }
+
+      // Gate de versión (WS-3): el pin del profile es el lock del proyecto.
+      const pins = profile.registries ?? {};
+      if (Object.keys(pins).length > 0) {
+          const failures = await verifyProjectPins(pins);
+          if (failures.length > 0) {
+              for (const f of failures) {
+                  if (f.reason === 'missing-registry') {
+                      console.error(pc.red(`El proyecto requiere el registry "${f.name}" @ v${f.required}, pero no está configurado en esta máquina. Corré: awm registry add <remote>`));
+                  } else {
+                      console.error(pc.red(`La máquina tiene ${f.name} @ ${f.actual ? `v${f.actual}` : 'HEAD (sin tag)'} pero el proyecto requiere v${f.required}.`));
+                      console.error(pc.red(`  Corré: awm pin ${f.name} ${f.required} && awm update`));
+                  }
+              }
+              process.exit(1);
+          }
       }
 
       const prefs = getPreferences();
