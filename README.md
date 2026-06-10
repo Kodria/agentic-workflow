@@ -1,4 +1,4 @@
-# Agentic Workflow Manager (AWM)
+# Agentic Workflow Manager (AWM) 
 
 [![Version](https://img.shields.io/npm/v/agentic-workflow-manager)](https://www.npmjs.com/package/agentic-workflow-manager)
 [![Build Status](https://img.shields.io/badge/build-passing-success)]()
