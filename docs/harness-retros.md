@@ -5,6 +5,18 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
 
 ---
 
+## 2026-06-10 — WS-2 (multi-registry de equipo): call-site perdido al wiring + patrón hoist-per-root-io
+
+- **Class:** de proceso (F1) + agent (W3)
+- **Occurrences (ledger count):** F1 count 1 (important, detectado en spec-review loop); W3 count 2 (confirmado en 2 code-quality reviews independientes)
+- **Reglas curadas:**
+  - `CONSTITUTION.md § Implementación` — al conectar una función nueva que reemplaza un bare call, grep todos los call-sites antes de marcar el task; el plan puede no listar módulos secundarios (caso: `init/steps.ts` quedó sin wiring en Task 5)
+  - `AGENTS.md § Patrones de diseño de API` — hoist-per-root-io: I/O de por-root fuera del loop interno de artefactos (patrón `readRegistryManifest` en discovery/bundles)
+- **Sensor:** constitution (CONSTITUTION.md checklist) / agents-md (AGENTS.md)
+- **Descartados:** 7 ítems (F2 deuda WS-4, F3 cosmético, F4 divergencia intencional, F5 dead-code inofensivo, F6 plumbing intencional, W1 ya en CONSTITUTION, W2 ya en AGENTS)
+
+---
+
 ## 2026-06-09 — WS-1 (registries adicionales): guard de path-component incompleto + patrones de diseño
 
 - **Class:** de proceso (F1) + agent (F2, W1–W4)
