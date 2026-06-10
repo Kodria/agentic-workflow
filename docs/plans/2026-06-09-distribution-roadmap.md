@@ -62,7 +62,7 @@ Separar `personal-notion` + las 3 skills NotionTracker a un registry/overlay per
 La pieza que convierte AWM de "tus skills" en plataforma: remote configurable (env/preferences) y soporte para registry del equipo junto al upstream, con namespacing. Resuelve también la gobernanza (el equipo contribuye a SU registry).
 
 - [x] Brainstorming + design (capas upstream+equipo, overrides explícitos por manifest `awm-registry.json`, remote base configurable, install en `registry add`; namespacing descartado — rompe la transparencia de nombres planos) → [2026-06-09-ws2-multi-registry-design.md](2026-06-09-ws2-multi-registry-design.md)
-- [ ] Plan + ejecución
+- [x] Plan + ejecución → [2026-06-09-ws2-multi-registry-plan.md](2026-06-09-ws2-multi-registry-plan.md)
 - [ ] Verificación: un repo de contenido distinto al de Kodria funciona end-to-end como registry
 - [ ] QA → `awm-qa-complete`
 
