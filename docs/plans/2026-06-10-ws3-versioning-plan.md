@@ -1,5 +1,6 @@
 # WS-3 — Versionado real (releases + pinning + canal estable) Implementation Plan
 <!-- awm-qa-complete: 2026-06-10 -->
+<!-- awm-retro-complete: 2026-06-10 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

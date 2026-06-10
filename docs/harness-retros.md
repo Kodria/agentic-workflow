@@ -5,6 +5,19 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
 
 ---
 
+## 2026-06-10 — WS-3 (versionado real): gate de contrato después de early-exit + asimetría de cleanup de clone
+
+- **Class:** de proceso (F1) + de lógica (F2) + agent/win (W1)
+- **Occurrences (ledger count):** F1 count 1 (important, detectado en post-qa); F2 count 2 (detectado en code-quality-review + confirmado en post-qa como C2); W1 count 3 wins independientes
+- **Reglas curadas:**
+  - `CONSTITUTION.md § Implementación` — gates de contrato (versión, seguridad, permisos) deben ir ANTES de early-exits de conveniencia en handlers de comando; el early-exit elimina trabajo, el gate verifica un invariante — si el gate queda después, los flujos que toman el early-exit lo saltean en silencio
+  - `cli/src/core/registries.ts` — `syncAdditionalRegistries` ahora limpia `reg.contentRoot` si clone falla O si checkout/pull falla post-clone fresco (asimetría con `syncRegistry` corregida); regression test en `registries-sync.test.ts`
+  - `AGENTS.md § Patrones de testing` — entrada `dual-tmpdir-isolation` ampliada: patrón completo (`resetModules` + late `require`) + nota obligatoria `-c tag.gpgSign=false` en GIT helper cuando los fixtures crean tags (confirmado necesario en máquinas con `tag.gpgSign=true` global)
+- **Sensor:** constitution (CONSTITUTION.md checklist) / agents-md (AGENTS.md) / test (`registries-sync.test.ts` F2 regression)
+- **Descartados:** F3 (`empty-pin` string — setPin ya valida en escritura), F4 (DRY inline trivial), F5 (idioma — deferido a WS-7 F-10), F6 (cobertura head-fallback — no invariante roto)
+
+---
+
 ## 2026-06-10 — WS-2 (multi-registry de equipo): call-site perdido al wiring + patrón hoist-per-root-io
 
 - **Class:** de proceso (F1) + agent (W3)
