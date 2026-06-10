@@ -97,22 +97,31 @@ export async function syncAdditionalRegistries(): Promise<RegistrySyncResult[]> 
     const results: RegistrySyncResult[] = [];
     for (const reg of listRegistries()) {
         try {
-            let action: 'pulled' | 'recloned';
-            if (!fs.existsSync(reg.contentRoot)) {
+            const freshClone = !fs.existsSync(reg.contentRoot);
+            if (freshClone) {
                 fs.mkdirSync(REGISTRIES_DIR, { recursive: true });
-                await simpleGit().clone(reg.remote, reg.contentRoot);
-                action = 'recloned';
+                try {
+                    await simpleGit().clone(reg.remote, reg.contentRoot);
+                } catch (e) {
+                    fs.rmSync(reg.contentRoot, { recursive: true, force: true });
+                    throw e;
+                }
             } else {
                 await simpleGit(reg.contentRoot).reset(['--hard']);
-                action = 'pulled';
             }
             const git = simpleGit(reg.contentRoot);
-            const resolved = await resolveTargetRef(reg.contentRoot, machineVersionOpts(reg.name));
-            await git.checkout(resolved.ref);
-            if (resolved.kind !== 'tag') await git.pull('origin', resolved.ref);
+            let resolved;
+            try {
+                resolved = await resolveTargetRef(reg.contentRoot, machineVersionOpts(reg.name));
+                await git.checkout(resolved.ref);
+                if (resolved.kind !== 'tag') await git.pull('origin', resolved.ref);
+            } catch (e) {
+                if (freshClone) fs.rmSync(reg.contentRoot, { recursive: true, force: true });
+                throw e;
+            }
             results.push({
                 name: reg.name,
-                action,
+                action: freshClone ? 'recloned' : 'pulled',
                 version: resolved.kind === 'tag' ? `v${resolved.version}` : 'HEAD',
             });
         } catch (e) {

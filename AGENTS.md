@@ -6,7 +6,7 @@ Lecciones y patrones confirmados en este repo. Todo agente que trabaje aquí deb
 
 ## Patrones de testing
 
-- **dual-tmpdir-isolation:** cuando un test de comando escribe al home *y* clona repos, usar dos tmpdirs separados (`tmpHome` para HOME/AWM_HOME, `tmpWork` para repos fixture). Un solo tmpdir mezcla el "home falso" con los artefactos de trabajo y provoca contaminación cruzada entre tests.
+- **dual-tmpdir-isolation:** cuando un test de comando escribe al home *y* clona repos, usar dos tmpdirs separados (`tmpHome` para HOME/AWM_HOME, `tmpWork` para repos fixture). Un solo tmpdir mezcla el "home falso" con los artefactos de trabajo y provoca contaminación cruzada entre tests. Patrón completo: `beforeEach` crea ambos tmpdirs + sobreescribe `process.env.HOME` y `process.env.AWM_HOME` + llama `jest.resetModules()`; `afterEach` restaura y limpia. Todos los módulos se importan con `require()` dentro del test (no al top-level del archivo). **Git fixtures con tags:** agregar `-c tag.gpgSign=false` al helper GIT (`execSync(\`git -c user.email=t@t.t -c user.name=t -c tag.gpgSign=false ...\`)`); en máquinas con `tag.gpgSign=true` global la creación de tags falla sin este flag. Confirmado necesario en WS-3 (×3 reviewers independientes).
 
 - **module-level env vars:** las constantes derivadas de `process.env` (como `AWM_HOME`) se evalúan al momento del `require`. Al crear un módulo con este patrón, agregar el comentario `// Evaluated at require-time — tests must use jest.resetModules() + late require() to pick up env overrides.` para que futuros implementadores de tests no lo descubran a las malas.
 

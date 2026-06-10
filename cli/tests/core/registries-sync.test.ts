@@ -97,6 +97,25 @@ describe('syncAdditionalRegistries (git fixtures locales)', () => {
         expect(synced).toContain('test skill'); // contenido del tag, no del HEAD
     });
 
+    it('F2 regression: clone fresco limpiado si pin inexistente falla post-clone', async () => {
+        const m = require('../../src/core/registries');
+        const source = makeSourceRepo(tmpWork, 'alpha');
+        GIT(source, 'tag v1.0.0');
+        m.writeRegistriesConfig([{ name: 'personal', remote: source }]);
+        const awmDir = path.join(tmpHome, '.awm');
+        fs.mkdirSync(awmDir, { recursive: true });
+        fs.writeFileSync(
+            path.join(awmDir, 'preferences.json'),
+            JSON.stringify({ defaultAgent: 'claude', installMethod: 'symlink', defaultScope: 'local', pins: { personal: '9.9.9' } })
+        );
+
+        const results = await m.syncAdditionalRegistries();
+
+        expect(results[0].action).toBe('error');
+        // El dir no debe quedar en disco tras el fallo
+        expect(fs.existsSync(path.join(tmpHome, '.awm/registries/personal'))).toBe(false);
+    });
+
     it('pin por nombre en preferences gana sobre el último tag', async () => {
         const m = require('../../src/core/registries');
         const source = makeSourceRepo(tmpWork, 'alpha');
