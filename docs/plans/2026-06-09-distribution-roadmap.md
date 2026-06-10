@@ -54,14 +54,14 @@ Separar `personal-notion` + las 3 skills NotionTracker a un registry/overlay per
 
 - [x] Brainstorming + design (¿overlay local? ¿repo privado aparte? ¿mecanismo genérico de registry adicional mínimo?) → [2026-06-09-ws1-personal-content-extraction-design.md](2026-06-09-ws1-personal-content-extraction-design.md)
 - [x] Plan + ejecución → [2026-06-09-ws1-personal-content-extraction-plan.md](2026-06-09-ws1-personal-content-extraction-plan.md)
-- [ ] Verificación: clone limpio del repo no contiene contenido personal; tus skills personales siguen funcionando en tu máquina
-- [ ] QA → `awm-qa-complete`
+- [x] Verificación: clone limpio del repo no contiene contenido personal; tus skills personales siguen funcionando en tu máquina (verificado 2026-06-09 en máquina real vía `awm update` + `awm registry add` + `awm install`)
+- [x] QA → `awm-qa-complete` (2026-06-09, + `awm-retro-complete`)
 
 ### WS-2 — Registry configurable + multi-registry `[F-2]`
 
 La pieza que convierte AWM de "tus skills" en plataforma: remote configurable (env/preferences) y soporte para registry del equipo junto al upstream, con namespacing. Resuelve también la gobernanza (el equipo contribuye a SU registry).
 
-- [ ] Brainstorming + design (modelo de resolución multi-registry, precedencia, namespacing, `awm update` multi-remote)
+- [x] Brainstorming + design (capas upstream+equipo, overrides explícitos por manifest `awm-registry.json`, remote base configurable, install en `registry add`; namespacing descartado — rompe la transparencia de nombres planos) → [2026-06-09-ws2-multi-registry-design.md](2026-06-09-ws2-multi-registry-design.md)
 - [ ] Plan + ejecución
 - [ ] Verificación: un repo de contenido distinto al de Kodria funciona end-to-end como registry
 - [ ] QA → `awm-qa-complete`
