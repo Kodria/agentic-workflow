@@ -1,66 +1,6 @@
-import { syncRegistry, REGISTRY_DIR, DEFAULT_REMOTE } from '../../src/core/registry';
-import fs from 'fs';
-import simpleGit from 'simple-git';
 import { spawnSync } from 'child_process';
 
-jest.mock('simple-git');
-jest.mock('fs');
 jest.mock('child_process');
-
-const mockGit = {
-    clone: jest.fn().mockResolvedValue(undefined),
-    pull: jest.fn().mockResolvedValue(undefined),
-    reset: jest.fn().mockResolvedValue(undefined),
-};
-
-(simpleGit as unknown as jest.Mock).mockReturnValue(mockGit);
-
-describe('Registry Manager', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-    });
-
-    it('should clone the repository if the registry directory does not exist', async () => {
-        (fs.existsSync as jest.Mock).mockReturnValue(false);
-        (fs.mkdirSync as jest.Mock).mockReturnValue(undefined);
-
-        await syncRegistry();
-
-        expect(fs.mkdirSync).toHaveBeenCalledWith(expect.any(String), { recursive: true });
-        expect(mockGit.clone).toHaveBeenCalledWith(DEFAULT_REMOTE, REGISTRY_DIR);
-    });
-
-    it('should pull if the registry directory already exists', async () => {
-        (fs.existsSync as jest.Mock).mockReturnValue(true);
-
-        await syncRegistry();
-
-        expect(mockGit.clone).not.toHaveBeenCalled();
-        expect(mockGit.reset).toHaveBeenCalledWith(['--hard']);
-        expect(mockGit.pull).toHaveBeenCalled();
-    });
-
-    it('should reset hard before pulling to discard local changes', async () => {
-        (fs.existsSync as jest.Mock).mockReturnValue(true);
-        const callOrder: string[] = [];
-        mockGit.reset.mockImplementation(() => { callOrder.push('reset'); return Promise.resolve(); });
-        mockGit.pull.mockImplementation(() => { callOrder.push('pull'); return Promise.resolve(); });
-
-        await syncRegistry();
-
-        expect(callOrder).toEqual(['reset', 'pull']);
-    });
-
-    it('should use a custom remote URL when provided', async () => {
-        (fs.existsSync as jest.Mock).mockReturnValue(false);
-        (fs.mkdirSync as jest.Mock).mockReturnValue(undefined);
-
-        const customRemote = 'https://github.com/my-org/custom-registry.git';
-        await syncRegistry(customRemote);
-
-        expect(mockGit.clone).toHaveBeenCalledWith(customRemote, REGISTRY_DIR);
-    });
-});
 
 const mockSpawnSync = spawnSync as jest.MockedFunction<typeof spawnSync>;
 

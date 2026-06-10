@@ -5,6 +5,7 @@ import os from "os";
 import simpleGit from "simple-git";
 import { spawnSync } from "child_process";
 import { getPreferences } from "../utils/config";
+import { resolveTargetRef, type ResolvedRef, type Channel } from "./versioning";
 
 const AWM_HOME = process.env.AWM_HOME || path.join(process.env.HOME || os.homedir(), ".awm");
 export const REGISTRY_DIR = path.join(AWM_HOME, "cli-source");
@@ -29,23 +30,34 @@ export function resolveBaseRemote(): string {
 }
 
 /**
- * Syncs the local registry cache with the remote repository.
- * - If the registry doesn't exist locally, it clones the repo.
- * - If it already exists, it runs `git pull` to get the latest.
+ * Sincroniza el clone local del registry base y lo deja checkouteado en el
+ * ref resuelto (pin > último tag semver > HEAD según canal) — WS-3.
+ * - Clone fresco si no existe; si existe, reset --hard + fetch + checkout.
+ * - Tags dejan el clone en detached HEAD (esperado); head/head-fallback
+ *   checkoutean el branch y pullean.
  */
-export async function syncRegistry(remoteUrl?: string): Promise<void> {
+export async function syncRegistry(
+  remoteUrl?: string,
+  opts?: { pin?: string; channel?: Channel }
+): Promise<ResolvedRef> {
   const remote = remoteUrl ?? DEFAULT_REMOTE;
-  const git = simpleGit();
+  const { pin, channel = 'stable' } = opts ?? {};
 
   if (!fs.existsSync(REGISTRY_DIR)) {
     const parentDir = path.dirname(REGISTRY_DIR);
     fs.mkdirSync(parentDir, { recursive: true });
-    await git.clone(remote, REGISTRY_DIR);
+    await simpleGit().clone(remote, REGISTRY_DIR);
   } else {
-    const repoGit = simpleGit(REGISTRY_DIR);
-    await repoGit.reset(['--hard']);
-    await repoGit.pull();
+    await simpleGit(REGISTRY_DIR).reset(['--hard']);
   }
+
+  const repoGit = simpleGit(REGISTRY_DIR);
+  const resolved = await resolveTargetRef(REGISTRY_DIR, { pin, channel });
+  await repoGit.checkout(resolved.ref);
+  if (resolved.kind !== 'tag') {
+    await repoGit.pull('origin', resolved.ref);
+  }
+  return resolved;
 }
 
 export type BuildResult = { success: true } | { success: false; error: string };
