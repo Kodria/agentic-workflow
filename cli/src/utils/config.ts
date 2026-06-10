@@ -10,6 +10,10 @@ export interface AwmPreferences {
     defaultScope: 'global' | 'local';
     /** Remote del registry base (override de DEFAULT_REMOTE). Opcional — WS-2. */
     baseRemote?: string;
+    /** Canal de updates: 'stable' (último tag, default si ausente) | 'dev' (HEAD). Opcional — WS-3. */
+    channel?: 'stable' | 'dev';
+    /** Pins de versión por registry; clave reservada 'base'. Valores "X.Y.Z" sin prefijo v. Opcional — WS-3. */
+    pins?: Record<string, string>;
 }
 
 const DEFAULT_PREFS: AwmPreferences = {
