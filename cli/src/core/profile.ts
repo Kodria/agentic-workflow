@@ -7,6 +7,8 @@ import { PROVIDERS } from '../providers';
 
 export interface ProjectProfile {
     extensions: string[];
+    /** Pin de versión por registry ('base' reservado). El pin del profile ES el lock del proyecto — WS-3. */
+    registries?: Record<string, string>;
 }
 
 /**
@@ -40,18 +42,41 @@ function profilePath(root: string): string {
     return path.join(root, '.awm', 'profile.json');
 }
 
+const PIN_VERSION_RE = /^v?\d+\.\d+\.\d+$/;
+
 export function readProfile(root: string): ProjectProfile {
     const file = profilePath(root);
     if (!fs.existsSync(file)) return { extensions: [] };
+    let raw: Record<string, unknown>;
     try {
-        const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
-        const exts = Array.isArray(raw.extensions)
-            ? (raw.extensions as unknown[]).filter((e): e is string => typeof e === 'string')
-            : [];
-        return { extensions: exts };
+        raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
     } catch {
+        // JSON corrupto: comportamiento lenient histórico (perfil vacío)
         return { extensions: [] };
     }
+    const exts = Array.isArray(raw.extensions)
+        ? (raw.extensions as unknown[]).filter((e): e is string => typeof e === 'string')
+        : [];
+    const profile: ProjectProfile = { extensions: exts };
+
+    // El pin de proyecto es un contrato de versionado: malformado → error explícito
+    // (consistente con readRegistryManifest de WS-2), nunca silenciar.
+    if (raw.registries !== undefined) {
+        if (typeof raw.registries !== 'object' || raw.registries === null || Array.isArray(raw.registries)) {
+            throw new Error(`Invalid profile at ${file}: "registries" must be an object of name → version`);
+        }
+        const registries: Record<string, string> = {};
+        for (const [name, version] of Object.entries(raw.registries as Record<string, unknown>)) {
+            if (typeof version !== 'string' || !PIN_VERSION_RE.test(version)) {
+                throw new Error(
+                    `Invalid profile at ${file}: registries["${name}"] must be "X.Y.Z", got ${JSON.stringify(version)}`
+                );
+            }
+            registries[name] = version.replace(/^v/, '');
+        }
+        profile.registries = registries;
+    }
+    return profile;
 }
 
 export function writeProfile(root: string, profile: ProjectProfile): void {
