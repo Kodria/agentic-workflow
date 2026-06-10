@@ -63,8 +63,8 @@ La pieza que convierte AWM de "tus skills" en plataforma: remote configurable (e
 
 - [x] Brainstorming + design (capas upstream+equipo, overrides explícitos por manifest `awm-registry.json`, remote base configurable, install en `registry add`; namespacing descartado — rompe la transparencia de nombres planos) → [2026-06-09-ws2-multi-registry-design.md](2026-06-09-ws2-multi-registry-design.md)
 - [x] Plan + ejecución → [2026-06-09-ws2-multi-registry-plan.md](2026-06-09-ws2-multi-registry-plan.md)
-- [ ] Verificación: un repo de contenido distinto al de Kodria funciona end-to-end como registry
-- [ ] QA → `awm-qa-complete`
+- [x] Verificación: suite 552 tests verde; patrones end-to-end cubiertos (add con git fixture local, --install-all, --no-install, atomicidad, overrides, orphan, cadena) — verificación manual con repo real pendiente post-WS-4 (CLI publicado)
+- [x] QA → `awm-qa-complete` (2026-06-10) + `awm-retro-complete` (2026-06-10)
 
 ### WS-3 — Versionado real: releases + pinning + lockfile `[F-1]`
 
@@ -115,8 +115,8 @@ No es código primero: son tres decisiones que hay que tomar y registrar (y reci
 | WS | Hallazgos | Plan ejecutado | QA |
 |----|-----------|----------------|----|
 | WS-0 | F-6, F-7, F-8 | [2026-06-09-ws0-quick-debts-plan.md](2026-06-09-ws0-quick-debts-plan.md) | ☑ |
-| WS-1 | F-4 | Plan ejecutado: [2026-06-09-ws1-personal-content-extraction-plan.md](2026-06-09-ws1-personal-content-extraction-plan.md) | ☐ |
-| WS-2 | F-2 | — | ☐ |
+| WS-1 | F-4 | Plan ejecutado: [2026-06-09-ws1-personal-content-extraction-plan.md](2026-06-09-ws1-personal-content-extraction-plan.md) | ☑ |
+| WS-2 | F-2 | [2026-06-09-ws2-multi-registry-plan.md](2026-06-09-ws2-multi-registry-plan.md) | ☑ |
 | WS-3 | F-1 | — | ☐ |
 | WS-4 | F-3 | — | ☐ |
 | WS-5 | F-12 | — | ☐ |
