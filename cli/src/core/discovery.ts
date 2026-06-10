@@ -2,7 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import { REGISTRY_DIR } from './registry';
-import { contentRoots } from './registries';
+import { contentRoots, readRegistryManifest } from './registries';
 
 export const SKILLS_DIR = path.join(REGISTRY_DIR, 'registry', 'skills');
 export const WORKFLOWS_DIR = path.join(REGISTRY_DIR, 'registry', 'workflows');
@@ -12,18 +12,24 @@ export interface SkillArtifact {
     name: string;
     path: string;
     description: string;
+    /** Path del artifact de un root anterior que este tapó (override declarado en awm-registry.json). */
+    overrode?: string;
 }
 
 export interface WorkflowArtifact {
     name: string;
     path: string;
     description: string;
+    /** Path del artifact de un root anterior que este tapó (override declarado en awm-registry.json). */
+    overrode?: string;
 }
 
 export interface AgentArtifact {
     name: string;
     path: string;
     description: string;
+    /** Path del artifact de un root anterior que este tapó (override declarado en awm-registry.json). */
+    overrode?: string;
 }
 
 export function readArtifactDescription(filePath: string): string {
@@ -53,83 +59,109 @@ export function readArtifactDescription(filePath: string): string {
 function collisionError(kind: string, name: string, first: string, second: string): Error {
     return new Error(
         `Artifact name collision: ${kind} "${name}" exists in both ${first} and ${second}. ` +
-        `Remove or rename one of them (per-registry namespacing llega en WS-2).`
+        `Remove or rename one of them, or declare "${name}" in "overrides" of the later registry's awm-registry.json.`
     );
+}
+
+interface DiscoveredEntry {
+    name: string;
+    path: string;
+    description: string;
+    overrode?: string;
+}
+
+/** Inserta o resuelve colisión: override declarado en el root posterior → reemplaza
+ *  (Map.set sobre key existente conserva la posición de inserción); no declarado → error. */
+function mergeEntry(
+    kind: string,
+    byName: Map<string, DiscoveredEntry>,
+    entry: DiscoveredEntry,
+    rootOverrides: Set<string>
+): void {
+    const prev = byName.get(entry.name);
+    if (!prev) {
+        byName.set(entry.name, entry);
+        return;
+    }
+    if (rootOverrides.has(entry.name)) {
+        byName.set(entry.name, { ...entry, overrode: prev.path });
+        return;
+    }
+    throw collisionError(kind, entry.name, prev.path, entry.path);
 }
 
 /**
  * Scans skills directories across all provided content roots and returns all valid skills.
  * A valid skill is a directory that contains a SKILL.md file.
- * Throws on name collision across roots.
+ * Throws on name collision across roots unless the later root declares the name in its awm-registry.json overrides.
  */
 export function discoverSkills(roots: string[] = contentRoots()): SkillArtifact[] {
-    const out: SkillArtifact[] = [];
-    const seen = new Map<string, string>();
+    const byName = new Map<string, DiscoveredEntry>();
     for (const root of roots) {
         const dir = path.join(root, 'skills');
         if (!fs.existsSync(dir)) continue;
+        const overrides = readRegistryManifest(root).overrides;
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
             if (!entry.isDirectory()) continue;
             const skillPath = path.join(dir, entry.name);
             if (!fs.existsSync(path.join(skillPath, 'SKILL.md'))) continue;
-            const prev = seen.get(entry.name);
-            if (prev) throw collisionError('skill', entry.name, prev, skillPath);
-            seen.set(entry.name, skillPath);
-            out.push({
+            mergeEntry('skill', byName, {
                 name: entry.name,
                 path: skillPath,
                 description: readArtifactDescription(path.join(skillPath, 'SKILL.md')),
-            });
+            }, overrides);
         }
     }
-    return out;
+    return Array.from(byName.values());
 }
 
 /**
  * Scans workflows directories across all provided content roots and returns all valid workflows.
  * A valid workflow is a .md file.
- * Throws on name collision across roots.
+ * Throws on name collision across roots unless the later root declares the name in its awm-registry.json overrides.
  */
 export function discoverWorkflows(roots: string[] = contentRoots()): WorkflowArtifact[] {
-    const out: WorkflowArtifact[] = [];
-    const seen = new Map<string, string>();
+    const byName = new Map<string, DiscoveredEntry>();
     for (const root of roots) {
         const dir = path.join(root, 'workflows');
         if (!fs.existsSync(dir)) continue;
+        const overrides = readRegistryManifest(root).overrides;
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
             if (entry.isDirectory() || !entry.name.endsWith('.md')) continue;
             const name = entry.name.replace('.md', '');
             const filePath = path.join(dir, entry.name);
-            const prev = seen.get(name);
-            if (prev) throw collisionError('workflow', name, prev, filePath);
-            seen.set(name, filePath);
-            out.push({ name, path: filePath, description: readArtifactDescription(filePath) });
+            mergeEntry('workflow', byName, {
+                name,
+                path: filePath,
+                description: readArtifactDescription(filePath),
+            }, overrides);
         }
     }
-    return out;
+    return Array.from(byName.values());
 }
 
 /**
  * Scans agents directories across all provided content roots and returns all valid agent profiles.
  * A valid agent is a .md file.
- * Throws on name collision across roots.
+ * Throws on name collision across roots unless the later root declares the name in its awm-registry.json overrides.
  */
 export function discoverAgents(roots: string[] = contentRoots()): AgentArtifact[] {
-    const out: AgentArtifact[] = [];
-    const seen = new Map<string, string>();
+    const byName = new Map<string, DiscoveredEntry>();
     for (const root of roots) {
         const dir = path.join(root, 'agents');
         if (!fs.existsSync(dir)) continue;
+        const overrides = readRegistryManifest(root).overrides;
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
             if (entry.isDirectory() || !entry.name.endsWith('.md')) continue;
             const name = entry.name.replace('.md', '');
             const filePath = path.join(dir, entry.name);
-            const prev = seen.get(name);
-            if (prev) throw collisionError('agent', name, prev, filePath);
-            seen.set(name, filePath);
-            out.push({ name, path: filePath, description: readArtifactDescription(filePath) });
+            mergeEntry('agent', byName, {
+                name,
+                path: filePath,
+                description: readArtifactDescription(filePath),
+            }, overrides);
         }
     }
-    return out;
+    return Array.from(byName.values());
 }
 

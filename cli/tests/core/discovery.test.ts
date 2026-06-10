@@ -61,7 +61,10 @@ describe('Artifact Discovery', () => {
 
     describe('discoverWorkflows', () => {
         it('should return a list of .md files in the workflows directory', () => {
-            (fs.existsSync as jest.Mock).mockReturnValue(true);
+            (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
+                if (p.endsWith('awm-registry.json')) return false;
+                return true;
+            });
             (fs.readdirSync as jest.Mock).mockReturnValue([
                 { name: 'deploy.md', isDirectory: () => false },
                 { name: 'ci.md', isDirectory: () => false },
