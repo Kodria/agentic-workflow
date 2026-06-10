@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { REGISTRY_DIR } from './registry';
 import { Scope } from '../providers';
-import { contentRoots } from './registries';
+import { contentRoots, readRegistryManifest } from './registries';
 
 export const REGISTRY_CONTENT_DIR = path.join(REGISTRY_DIR, 'registry');
 
@@ -26,6 +26,8 @@ export interface BundleDefinition {
     agents: string[];
     /** Root de contenido donde se descubrió el bundle (multi-registry, WS-1). */
     contentRoot?: string;
+    /** Content root del bundle de un root anterior que este tapó (override declarado, WS-2). */
+    overrode?: string;
 }
 
 export interface CatalogEntry {
@@ -101,24 +103,29 @@ export function defaultScopeForBundle(scope: BundleScope): Scope {
 }
 
 /** Descubre bundles de TODOS los roots (base + registries adicionales).
- *  Colisión de nombre entre roots → error explícito nombrando ambas fuentes. */
+ *  Colisión de nombre entre roots: override declarado en awm-registry.json
+ *  del root posterior → reemplaza; no declarado → error nombrando ambas fuentes. */
 export function discoverAllBundles(roots: string[] = contentRoots()): BundleDefinition[] {
-    const out: BundleDefinition[] = [];
-    const seen = new Map<string, string>();
+    const byName = new Map<string, BundleDefinition>();
     for (const root of roots) {
+        const overrides = readRegistryManifest(root).overrides;
         for (const b of discoverBundles(root)) {
-            const prev = seen.get(b.name);
-            if (prev) {
-                throw new Error(
-                    `Artifact name collision: bundle "${b.name}" exists in both ${prev} and ${root}. ` +
-                    `Remove or rename one of them (per-registry namespacing llega en WS-2).`
-                );
+            const prev = byName.get(b.name);
+            if (!prev) {
+                byName.set(b.name, b);
+                continue;
             }
-            seen.set(b.name, root);
-            out.push(b);
+            if (overrides.has(b.name)) {
+                byName.set(b.name, { ...b, overrode: prev.contentRoot });
+                continue;
+            }
+            throw new Error(
+                `Artifact name collision: bundle "${b.name}" exists in both ${prev.contentRoot} and ${root}. ` +
+                `Remove or rename one of them, or declare "${b.name}" in "overrides" of the later registry's awm-registry.json.`
+            );
         }
     }
-    return out;
+    return Array.from(byName.values());
 }
 
 /**
