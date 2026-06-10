@@ -2,6 +2,7 @@ import pc from 'picocolors';
 import { ArtifactType } from '../providers';
 import { SkillArtifact, WorkflowArtifact, AgentArtifact } from '../core/discovery';
 import { BundleDefinition } from '../core/bundles';
+import { registryNameForPath } from '../core/registries';
 
 export const STANDALONE_NAME = 'standalone';
 
@@ -11,6 +12,8 @@ export interface ArtifactView {
     sourcePath: string;
     installName: string;
     description: string;
+    /** Path del artifact tapado cuando este es un override declarado (WS-2). */
+    overrode?: string;
 }
 
 export interface PackageView {
@@ -50,9 +53,9 @@ export function buildPackageView(
     bundles: BundleDefinition[]
 ): PackageView[] {
     const all: ArtifactView[] = [
-        ...skills.map((s) => ({ name: s.name, type: 'skill' as ArtifactType, sourcePath: s.path, installName: s.name, description: s.description ?? '' })),
-        ...workflows.map((w) => ({ name: w.name, type: 'workflow' as ArtifactType, sourcePath: w.path, installName: `${w.name}.md`, description: w.description ?? '' })),
-        ...agents.map((a) => ({ name: a.name, type: 'agent' as ArtifactType, sourcePath: a.path, installName: `${a.name}.md`, description: a.description ?? '' })),
+        ...skills.map((s) => ({ name: s.name, type: 'skill' as ArtifactType, sourcePath: s.path, installName: s.name, description: s.description ?? '', overrode: s.overrode })),
+        ...workflows.map((w) => ({ name: w.name, type: 'workflow' as ArtifactType, sourcePath: w.path, installName: `${w.name}.md`, description: w.description ?? '', overrode: w.overrode })),
+        ...agents.map((a) => ({ name: a.name, type: 'agent' as ArtifactType, sourcePath: a.path, installName: `${a.name}.md`, description: a.description ?? '', overrode: a.overrode })),
     ];
 
     const packages: PackageView[] = [];
@@ -122,7 +125,10 @@ export function packageDetailLines(pkg: PackageView): string[] {
         : `${packageIcon(pkg)} ${pkg.name} — ${pkg.description}  [${artifactCountLabel(pkg.counts)}]`;
     lines.push(header);
     pkg.artifacts.forEach((a) => {
-        lines.push(`  ${TYPE_ICON[a.type]}${a.name}`);
+        const mark = a.overrode
+            ? pc.yellow(`  ← ${registryNameForPath(a.sourcePath) ?? 'unknown'} (override)`)
+            : '';
+        lines.push(`  ${TYPE_ICON[a.type]}${a.name}${mark}`);
         if (a.description) lines.push(`     ${a.description}`);
     });
     return lines;
