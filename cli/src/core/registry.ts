@@ -46,7 +46,12 @@ export async function syncRegistry(
   if (!fs.existsSync(REGISTRY_DIR)) {
     const parentDir = path.dirname(REGISTRY_DIR);
     fs.mkdirSync(parentDir, { recursive: true });
-    await simpleGit().clone(remote, REGISTRY_DIR);
+    try {
+      await simpleGit().clone(remote, REGISTRY_DIR);
+    } catch (e) {
+      fs.rmSync(REGISTRY_DIR, { recursive: true, force: true });
+      throw e;
+    }
   } else {
     await simpleGit(REGISTRY_DIR).reset(['--hard']);
   }
