@@ -6,7 +6,7 @@
 //
 // defaultActions wires the real I/O implementations; tests inject spies.
 
-import { syncRegistry } from '../registry';
+import { syncRegistry, resolveBaseRemote } from '../registry';
 import { installHook as realInstallHook } from '../../commands/hooks/install';
 import { installBundle as realInstallBundle, syncProfile as realSyncProfile } from '../bundle-install';
 import { initSensors as realInitSensors } from '../../commands/sensors/init';
@@ -28,7 +28,7 @@ import { injectProjectConstitution as realInjectProjectConstitution } from '../c
 const realInjectionOrchestrator = new InjectionOrchestrator();
 
 export const defaultActions: InitActions = {
-    syncCache: async () => { await syncRegistry(); },
+    syncCache: async () => { await syncRegistry(resolveBaseRemote()); },
 
     installHook: (o) => realInstallHook({
         agent: o.agent,

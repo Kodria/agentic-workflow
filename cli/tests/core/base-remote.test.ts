@@ -56,10 +56,22 @@ describe('resolveBaseRemote', () => {
 
     it('resolveBaseRemoteInfo reports where the remote came from', () => {
         const { resolveBaseRemoteInfo, DEFAULT_REMOTE } = require('../../src/core/registry');
+        // default
         expect(resolveBaseRemoteInfo()).toEqual({ remote: DEFAULT_REMOTE, source: 'default' });
+        // prefs
+        const awmDir = path.join(tmpHome, '.awm');
+        fs.mkdirSync(awmDir, { recursive: true });
+        fs.writeFileSync(
+            path.join(awmDir, 'preferences.json'),
+            JSON.stringify({ defaultAgent: 'claude-code', installMethod: 'symlink', defaultScope: 'local', baseRemote: 'git@prefs:content.git' })
+        );
+        jest.resetModules();
+        const m2 = require('../../src/core/registry');
+        expect(m2.resolveBaseRemoteInfo()).toEqual({ remote: 'git@prefs:content.git', source: 'prefs' });
+        // env wins over prefs
         process.env.AWM_BASE_REMOTE = 'git@env:x.git';
         jest.resetModules();
-        const m = require('../../src/core/registry');
-        expect(m.resolveBaseRemoteInfo()).toEqual({ remote: 'git@env:x.git', source: 'env' });
+        const m3 = require('../../src/core/registry');
+        expect(m3.resolveBaseRemoteInfo()).toEqual({ remote: 'git@env:x.git', source: 'env' });
     });
 });
