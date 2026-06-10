@@ -357,7 +357,7 @@ program.command('update')
                   if (r.action === 'error') {
                       console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
                   } else {
-                      console.log(pc.green(`  ✓ Registry ${r.name} ${r.action === 'pulled' ? 'updated' : 're-cloned'}`));
+                      console.log(pc.green(`  ✓ Registry ${r.name} ${r.action === 'pulled' ? 'updated' : 're-cloned'} @ ${r.version}`));
                   }
               }
           } catch {

@@ -4,6 +4,7 @@ import path from 'path';
 import os from 'os';
 import simpleGit from 'simple-git';
 import { REGISTRY_DIR } from './registry';
+import { resolveTargetRef, machineVersionOpts } from './versioning';
 
 // Evaluated at require-time — tests must use jest.resetModules() + late require() to pick up env overrides.
 const AWM_HOME = process.env.AWM_HOME || path.join(process.env.HOME || os.homedir(), '.awm');
@@ -87,25 +88,33 @@ export function validateRegistryLayout(root: string): boolean {
 }
 
 export type RegistrySyncResult =
-    | { name: string; action: 'pulled' | 'recloned' }
+    | { name: string; action: 'pulled' | 'recloned'; version: string }  // version: 'vX.Y.Z' | 'HEAD'
     | { name: string; action: 'error'; error: string };
 
-/** Pull (reset --hard) de cada registry adicional; re-clona si falta el dir.
- *  Errores por-registry NO fatales: se reportan en el resultado. */
+/** Sincroniza cada registry adicional al ref resuelto (pin > último tag > HEAD);
+ *  re-clona si falta el dir. Errores por-registry NO fatales: se reportan en el resultado. */
 export async function syncAdditionalRegistries(): Promise<RegistrySyncResult[]> {
     const results: RegistrySyncResult[] = [];
     for (const reg of listRegistries()) {
         try {
+            let action: 'pulled' | 'recloned';
             if (!fs.existsSync(reg.contentRoot)) {
                 fs.mkdirSync(REGISTRIES_DIR, { recursive: true });
                 await simpleGit().clone(reg.remote, reg.contentRoot);
-                results.push({ name: reg.name, action: 'recloned' });
+                action = 'recloned';
             } else {
-                const git = simpleGit(reg.contentRoot);
-                await git.reset(['--hard']);
-                await git.pull();
-                results.push({ name: reg.name, action: 'pulled' });
+                await simpleGit(reg.contentRoot).reset(['--hard']);
+                action = 'pulled';
             }
+            const git = simpleGit(reg.contentRoot);
+            const resolved = await resolveTargetRef(reg.contentRoot, machineVersionOpts(reg.name));
+            await git.checkout(resolved.ref);
+            if (resolved.kind !== 'tag') await git.pull('origin', resolved.ref);
+            results.push({
+                name: reg.name,
+                action,
+                version: resolved.kind === 'tag' ? `v${resolved.version}` : 'HEAD',
+            });
         } catch (e) {
             results.push({ name: reg.name, action: 'error', error: e instanceof Error ? e.message : String(e) });
         }

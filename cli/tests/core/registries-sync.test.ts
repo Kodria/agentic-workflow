@@ -5,7 +5,7 @@ import os from 'os';
 import { execSync } from 'child_process';
 
 const GIT = (cwd: string, cmd: string) =>
-    execSync(`git -c user.email=t@t.t -c user.name=t ${cmd}`, { cwd, stdio: 'pipe' });
+    execSync(`git -c user.email=t@t.t -c user.name=t -c tag.gpgSign=false ${cmd}`, { cwd, stdio: 'pipe' });
 
 /** Creates a git source repo with a skill, returns its path (serves as local remote). */
 function makeSourceRepo(base: string, skillName: string): string {
@@ -53,7 +53,7 @@ describe('syncAdditionalRegistries (git fixtures locales)', () => {
 
         const results = await m.syncAdditionalRegistries();
 
-        expect(results).toEqual([{ name: 'personal', action: 'recloned' }]);
+        expect(results).toEqual([{ name: 'personal', action: 'recloned', version: 'HEAD' }]);
         expect(fs.existsSync(path.join(tmpHome, '.awm/registries/personal/skills/alpha/SKILL.md'))).toBe(true);
     });
 
@@ -73,10 +73,48 @@ describe('syncAdditionalRegistries (git fixtures locales)', () => {
 
         const results = await m.syncAdditionalRegistries();
 
-        expect(results[0]).toEqual({ name: 'personal', action: 'pulled' });
+        expect(results[0]).toEqual({ name: 'personal', action: 'pulled', version: 'HEAD' });
         expect(results[1].name).toBe('broken');
         expect(results[1].action).toBe('error');
         const synced = fs.readFileSync(path.join(tmpHome, '.awm/registries/personal/skills/alpha/SKILL.md'), 'utf-8');
         expect(synced).toContain('v2');
+    });
+
+    it('registry con tags queda en el último tag y reporta la versión', async () => {
+        const m = require('../../src/core/registries');
+        const source = makeSourceRepo(tmpWork, 'alpha');
+        GIT(source, 'tag v1.0.0');
+        // commit post-tag: HEAD va más allá del release
+        fs.writeFileSync(path.join(source, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\ndescription: unreleased\n---\n');
+        GIT(source, 'add -A');
+        GIT(source, 'commit -qm unreleased');
+        m.writeRegistriesConfig([{ name: 'personal', remote: source }]);
+
+        const results = await m.syncAdditionalRegistries();
+
+        expect(results).toEqual([{ name: 'personal', action: 'recloned', version: 'v1.0.0' }]);
+        const synced = fs.readFileSync(path.join(tmpHome, '.awm/registries/personal/skills/alpha/SKILL.md'), 'utf-8');
+        expect(synced).toContain('test skill'); // contenido del tag, no del HEAD
+    });
+
+    it('pin por nombre en preferences gana sobre el último tag', async () => {
+        const m = require('../../src/core/registries');
+        const source = makeSourceRepo(tmpWork, 'alpha');
+        GIT(source, 'tag v1.0.0');
+        fs.writeFileSync(path.join(source, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\ndescription: v2\n---\n');
+        GIT(source, 'add -A');
+        GIT(source, 'commit -qm v2');
+        GIT(source, 'tag v1.1.0');
+        m.writeRegistriesConfig([{ name: 'personal', remote: source }]);
+        const awmDir = path.join(tmpHome, '.awm');
+        fs.mkdirSync(awmDir, { recursive: true });
+        fs.writeFileSync(
+            path.join(awmDir, 'preferences.json'),
+            JSON.stringify({ defaultAgent: 'claude', installMethod: 'symlink', defaultScope: 'local', pins: { personal: '1.0.0' } })
+        );
+
+        const results = await m.syncAdditionalRegistries();
+
+        expect(results).toEqual([{ name: 'personal', action: 'recloned', version: 'v1.0.0' }]);
     });
 });
