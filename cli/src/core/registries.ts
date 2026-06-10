@@ -112,3 +112,47 @@ export async function syncAdditionalRegistries(): Promise<RegistrySyncResult[]> 
     }
     return results;
 }
+
+export const REGISTRY_MANIFEST_NAME = 'awm-registry.json';
+
+export interface RegistryManifest {
+    /** Nombres de artifacts que este registry puede sobreescribir de roots anteriores. */
+    overrides: Set<string>;
+}
+
+export function readRegistryManifest(root: string): RegistryManifest {
+    const file = path.join(root, REGISTRY_MANIFEST_NAME);
+    if (!fs.existsSync(file)) return { overrides: new Set() };
+    let raw: unknown;
+    try {
+        raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    } catch (e) {
+        throw new Error(
+            `Invalid registry manifest at ${file}: ${e instanceof Error ? e.message : String(e)}`
+        );
+    }
+    const overrides = (raw as Record<string, unknown>)?.overrides ?? [];
+    if (!Array.isArray(overrides) || overrides.some((n) => typeof n !== 'string')) {
+        throw new Error(`Invalid registry manifest at ${file}: "overrides" must be an array of strings`);
+    }
+    for (const name of overrides as string[]) {
+        if (!name || name === '.' || name.includes('..') || /[/\\]/.test(name)) {
+            throw new Error(`Invalid registry manifest at ${file}: override name "${name}" (path traversal)`);
+        }
+    }
+    return { overrides: new Set(overrides as string[]) };
+}
+
+/** Nombre del registry dueño de un path: 'base' para el content root base,
+ *  el nombre del clone bajo REGISTRIES_DIR, o null si no pertenece a ninguno. */
+export function registryNameForPath(p: string): string | null {
+    const resolved = path.resolve(p);
+    const base = path.resolve(BASE_CONTENT_DIR);
+    if (resolved === base || resolved.startsWith(base + path.sep)) return 'base';
+    const regsRoot = path.resolve(REGISTRIES_DIR) + path.sep;
+    if (resolved.startsWith(regsRoot)) {
+        const first = resolved.slice(regsRoot.length).split(path.sep)[0];
+        return first || null;
+    }
+    return null;
+}
