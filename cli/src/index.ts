@@ -12,7 +12,7 @@ import { regenerateGlobalContext } from './core/context/regenerate';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
 import { discoverAllBundles, defaultScopeForBundle } from './core/bundles';
 import { reconcileAllSkillLinks } from './core/skill-integrity';
-import { contentRoots, syncAdditionalRegistries } from './core/registries';
+import { contentRoots, syncAdditionalRegistries, readRegistriesConfig } from './core/registries';
 import { addBundle, syncProfile } from './core/bundle-install';
 import { findProjectRoot, readProfile } from './core/profile';
 import path from 'path';
@@ -451,7 +451,13 @@ program.command('sync')
           if (failures.length > 0) {
               for (const f of failures) {
                   if (f.reason === 'missing-registry') {
-                      console.error(pc.red(`El proyecto requiere el registry "${f.name}" @ v${f.required}, pero no está configurado en esta máquina. Corré: awm registry add <remote>`));
+                      const registriesConfig = readRegistriesConfig();
+                      const isConfigured = f.name === 'base' || registriesConfig.some((r: {name: string}) => r.name === f.name);
+                      if (isConfigured) {
+                          console.error(pc.red(`The registry "${f.name}" is configured but not yet synced on this machine. Run: awm update`));
+                      } else {
+                          console.error(pc.red(`The registry "${f.name}" is not configured on this machine. Run: awm registry add <remote>`));
+                      }
                   } else {
                       console.error(pc.red(`La máquina tiene ${f.name} @ ${f.actual ? `v${f.actual}` : 'HEAD (sin tag)'} pero el proyecto requiere v${f.required}.`));
                       console.error(pc.red(`  Corré: awm pin ${f.name} ${f.required} && awm update`));
