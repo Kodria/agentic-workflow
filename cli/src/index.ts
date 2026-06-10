@@ -27,6 +27,7 @@ import { registerLedgerCommand } from './commands/ledger';
 import { registerDoctorCommand } from './commands/doctor';
 import { registerInitCommand } from './commands/init';
 import { registerRegistryCommand } from './commands/registry';
+import { machineVersionOpts } from './core/versioning';
 
 const program = new Command();
 program.name('awm').description('Agentic Workflow Manager').version('1.0.0');
@@ -69,7 +70,7 @@ program.command('add [name]')
       const s = spinner();
       s.start('Syncing registry with remote...');
       try {
-          await syncRegistry(resolveBaseRemote());
+          await syncRegistry(resolveBaseRemote(), machineVersionOpts('base'));
           s.stop('Registry synced.');
       } catch (e: any) {
           s.stop('Failed to sync registry.');
@@ -330,8 +331,15 @@ program.command('update')
       s.start('Pulling latest changes from remote...');
 
       try {
-          await syncRegistry(resolveBaseRemote());
+          const resolved = await syncRegistry(resolveBaseRemote(), machineVersionOpts('base'));
           s.stop('Registry updated successfully.');
+          if (resolved.kind === 'tag') {
+              console.log(pc.green(`  ✓ Registry base @ v${resolved.version}`));
+          } else if (resolved.kind === 'head') {
+              console.log(pc.dim(`  Registry base @ ${resolved.ref} (canal dev)`));
+          } else {
+              console.log(pc.yellow(`  ⚠ Registry base sin tags — siguiendo HEAD (taggeá v1.0.0 para activar el canal estable)`));
+          }
 
           // Node has dist/ loaded into memory; rebuilding mid-run is safe.
           const buildSpinner = spinner();
@@ -420,7 +428,7 @@ program.command('sync')
       const s = spinner();
       s.start('Syncing registry...');
       try {
-          await syncRegistry(resolveBaseRemote());
+          await syncRegistry(resolveBaseRemote(), machineVersionOpts('base'));
           s.stop('Registry synced.');
       } catch (e: any) {
           s.stop('Failed to sync registry.');
@@ -463,7 +471,7 @@ program.command('list [package]')
       const s = spinner();
       s.start('Syncing registry...');
       try {
-          await syncRegistry(resolveBaseRemote());
+          await syncRegistry(resolveBaseRemote(), machineVersionOpts('base'));
           s.stop('Registry synced.');
       } catch (e: any) {
           s.stop('Failed to sync registry.');
