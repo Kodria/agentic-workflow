@@ -7,7 +7,7 @@ import { buildGroupedOptions } from './utils/grouping';
 import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, buildLevel1Options, buildLevel2Options, resolveLevel2Selection, ALL_SENTINEL, ArtifactView, artifactValue } from './utils/registry-view';
 import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
-import { syncRegistry, buildCli, REGISTRY_DIR } from './core/registry';
+import { syncRegistry, buildCli, REGISTRY_DIR, resolveBaseRemote, resolveBaseRemoteInfo } from './core/registry';
 import { regenerateGlobalContext } from './core/context/regenerate';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
 import { discoverAllBundles, defaultScopeForBundle } from './core/bundles';
@@ -69,7 +69,7 @@ program.command('add [name]')
       const s = spinner();
       s.start('Syncing registry with remote...');
       try {
-          await syncRegistry();
+          await syncRegistry(resolveBaseRemote());
           s.stop('Registry synced.');
       } catch (e: any) {
           s.stop('Failed to sync registry.');
@@ -330,7 +330,7 @@ program.command('update')
       s.start('Pulling latest changes from remote...');
 
       try {
-          await syncRegistry();
+          await syncRegistry(resolveBaseRemote());
           s.stop('Registry updated successfully.');
 
           // Node has dist/ loaded into memory; rebuilding mid-run is safe.
@@ -391,8 +391,9 @@ program.command('update')
 
           outro('✅ All symlinked skills and workflows are now up-to-date.');
       } catch (e: any) {
+          const { remote, source } = resolveBaseRemoteInfo();
           s.stop('Update failed.');
-          console.error(pc.red(e.message));
+          console.error(pc.red(`${e.message}\n  (base remote: ${remote} — from ${source})`));
           process.exit(1);
       }
 });
@@ -419,7 +420,7 @@ program.command('sync')
       const s = spinner();
       s.start('Syncing registry...');
       try {
-          await syncRegistry();
+          await syncRegistry(resolveBaseRemote());
           s.stop('Registry synced.');
       } catch (e: any) {
           s.stop('Failed to sync registry.');
@@ -462,7 +463,7 @@ program.command('list [package]')
       const s = spinner();
       s.start('Syncing registry...');
       try {
-          await syncRegistry();
+          await syncRegistry(resolveBaseRemote());
           s.stop('Registry synced.');
       } catch (e: any) {
           s.stop('Failed to sync registry.');

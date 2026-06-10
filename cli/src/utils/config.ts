@@ -8,6 +8,8 @@ export interface AwmPreferences {
     defaultAgent: AgentTarget;
     installMethod: 'symlink' | 'copy';
     defaultScope: 'global' | 'local';
+    /** Remote del registry base (override de DEFAULT_REMOTE). Opcional — WS-2. */
+    baseRemote?: string;
 }
 
 const DEFAULT_PREFS: AwmPreferences = {

@@ -63,7 +63,7 @@ if [ $missing -ne 0 ]; then
     exit 1
 fi
 
-REPO_URL="https://github.com/Kodria/agentic-workflow.git"
+REPO_URL="${AWM_REPO_URL:-https://github.com/Kodria/agentic-workflow.git}"
 INSTALL_DIR="$HOME/.awm/cli-source"
 
 # ── Clone or update ────────────────────────────────────────────────────

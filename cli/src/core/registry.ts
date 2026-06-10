@@ -4,10 +4,29 @@ import path from "path";
 import os from "os";
 import simpleGit from "simple-git";
 import { spawnSync } from "child_process";
+import { getPreferences } from "../utils/config";
 
 const AWM_HOME = process.env.AWM_HOME || path.join(process.env.HOME || os.homedir(), ".awm");
 export const REGISTRY_DIR = path.join(AWM_HOME, "cli-source");
 export const DEFAULT_REMOTE = "https://github.com/Kodria/agentic-workflow.git";
+
+export type BaseRemoteSource = 'env' | 'prefs' | 'default';
+
+/** Remote efectivo del registry base y su origen: env AWM_BASE_REMOTE > preferences.baseRemote > DEFAULT_REMOTE. */
+export function resolveBaseRemoteInfo(): { remote: string; source: BaseRemoteSource } {
+    if (process.env.AWM_BASE_REMOTE) return { remote: process.env.AWM_BASE_REMOTE, source: 'env' };
+    try {
+        const prefs = getPreferences();
+        if (prefs.baseRemote) return { remote: prefs.baseRemote, source: 'prefs' };
+    } catch {
+        // preferencias ilegibles no deben bloquear un update — cae al default
+    }
+    return { remote: DEFAULT_REMOTE, source: 'default' };
+}
+
+export function resolveBaseRemote(): string {
+    return resolveBaseRemoteInfo().remote;
+}
 
 /**
  * Syncs the local registry cache with the remote repository.
