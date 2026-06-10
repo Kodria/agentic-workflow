@@ -27,6 +27,7 @@ import { registerLedgerCommand } from './commands/ledger';
 import { registerDoctorCommand } from './commands/doctor';
 import { registerInitCommand } from './commands/init';
 import { registerRegistryCommand } from './commands/registry';
+import { registerPinCommands } from './commands/pin';
 import { machineVersionOpts } from './core/versioning';
 
 const program = new Command();
@@ -727,5 +728,6 @@ registerLedgerCommand(program);
 registerDoctorCommand(program);
 registerInitCommand(program);
 registerRegistryCommand(program);
+registerPinCommands(program);
 
 program.parse();
