@@ -103,6 +103,8 @@ export function registerRegistryCommand(program: Command): void {
             for (const r of regs) {
                 if (!fs.existsSync(r.contentRoot)) {
                     console.log(`${pc.cyan(r.name)}  ${r.remote}  ${pc.yellow("missing on disk — run 'awm update'")}`);
+                    // Push before continue so overrides declared against this missing registry
+                    // are correctly shown as "sin efecto" (orphan) rather than "active".
                     earlier.push(r.contentRoot);
                     continue;
                 }

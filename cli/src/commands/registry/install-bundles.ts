@@ -1,7 +1,7 @@
 // cli/src/commands/registry/install-bundles.ts
 // Instalación de bundles de un registry recién agregado (flujo post-add).
 // Separado del wiring de commander para ser testeable sin prompts.
-import { discoverAllBundles } from '../../core/bundles';
+import { discoverAllBundles, discoverBundles } from '../../core/bundles';
 import { addBundle } from '../../core/bundle-install';
 import { AgentTarget } from '../../providers';
 
@@ -11,11 +11,10 @@ export interface RegistryBundleInstallResult {
     skipped: string[];
 }
 
-/** Bundles disponibles en un content root concreto (candidatos a instalar tras el add). */
+/** Bundles disponibles en un content root concreto (candidatos a instalar tras el add).
+ * Uses single-root discovery to avoid surfacing cross-registry collision errors here. */
 export function bundlesInRegistry(contentRoot: string): string[] {
-    return discoverAllBundles()
-        .filter((b) => b.contentRoot === contentRoot)
-        .map((b) => b.name);
+    return discoverBundles(contentRoot).map((b) => b.name);
 }
 
 /**

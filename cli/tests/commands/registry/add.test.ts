@@ -113,3 +113,128 @@ describe('addRegistry', () => {
         expect(readRegistriesConfig().map((r: { name: string }) => r.name)).toEqual(['personal']);
     });
 });
+
+describe('registry add + bundle install (post-add flow)', () => {
+    let tmpHome: string;
+    let tmpWork: string;
+    let originalHome: string | undefined;
+    let originalAwmHome: string | undefined;
+
+    beforeEach(() => {
+        tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-regadd-bundle-home-'));
+        tmpWork = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-regadd-bundle-work-'));
+        originalHome = process.env.HOME;
+        originalAwmHome = process.env.AWM_HOME;
+        process.env.HOME = tmpHome;
+        process.env.AWM_HOME = path.join(tmpHome, '.awm');
+        jest.resetModules();
+    });
+
+    afterEach(() => {
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+        fs.rmSync(tmpWork, { recursive: true, force: true });
+        if (originalHome === undefined) delete process.env.HOME;
+        else process.env.HOME = originalHome;
+        if (originalAwmHome === undefined) delete process.env.AWM_HOME;
+        else process.env.AWM_HOME = originalAwmHome;
+    });
+
+    function makeBundleRegistry(base: string, name: string): string {
+        const dir = path.join(base, `bundle-src-${name}`);
+        fs.mkdirSync(path.join(dir, 'skills', name), { recursive: true });
+        fs.writeFileSync(
+            path.join(dir, 'skills', name, 'SKILL.md'),
+            `---\nname: ${name}\ndescription: d\n---\n`
+        );
+        fs.mkdirSync(path.join(dir, 'bundles', name), { recursive: true });
+        fs.writeFileSync(
+            path.join(dir, 'bundles', name, 'bundle.json'),
+            JSON.stringify({ name, version: '1.0.0', scope: 'ambient', skills: [name] })
+        );
+        fs.writeFileSync(
+            path.join(dir, 'catalog.json'),
+            JSON.stringify({
+                version: 1,
+                bundles: [{ name, source: `./bundles/${name}`, version: '1.0.0', scope: 'ambient' }],
+            })
+        );
+        GIT(dir, 'init -q');
+        GIT(dir, 'add -A');
+        GIT(dir, 'commit -qm init');
+        return dir;
+    }
+
+    it('--install-all simulation: installs bundle and skill symlink after add', async () => {
+        const skillName = 'myskill';
+        const source = makeBundleRegistry(tmpWork, skillName);
+        const { addRegistry } = require('../../../src/commands/registry/add');
+        const result = await addRegistry(source, 'team');
+        expect(result.ok).toBe(true);
+
+        const { installBundlesFromRegistry } = require('../../../src/commands/registry/install-bundles');
+        const results = installBundlesFromRegistry(result.contentRoot, 'all', ['claude-code'], tmpWork);
+
+        expect(results).toHaveLength(1);
+        expect(results[0].bundle).toBe(skillName);
+
+        const skillLink = path.join(tmpHome, '.claude', 'skills', skillName);
+        expect(fs.existsSync(skillLink)).toBe(true);
+
+        const { readRegistriesConfig } = require('../../../src/core/registries');
+        expect(readRegistriesConfig()).toHaveLength(1);
+        expect(readRegistriesConfig()[0].name).toBe('team');
+    });
+
+    it('--no-install simulation: add persists but skill symlink absent', async () => {
+        const skillName = 'noskill';
+        const source = makeBundleRegistry(tmpWork, skillName);
+        const { addRegistry } = require('../../../src/commands/registry/add');
+        const result = await addRegistry(source, 'team');
+        expect(result.ok).toBe(true);
+
+        // Simulate --no-install: do not call installBundlesFromRegistry
+
+        const { readRegistriesConfig } = require('../../../src/core/registries');
+        expect(readRegistriesConfig()).toHaveLength(1);
+        expect(readRegistriesConfig()[0].name).toBe('team');
+
+        const skillLink = path.join(tmpHome, '.claude', 'skills', skillName);
+        expect(fs.existsSync(skillLink)).toBe(false);
+    });
+
+    it('atomicity: failing install does not revert the registry add', async () => {
+        const skillName = 'atomicskill';
+        const source = makeBundleRegistry(tmpWork, skillName);
+        const { addRegistry } = require('../../../src/commands/registry/add');
+        const result = await addRegistry(source, 'team');
+        expect(result.ok).toBe(true);
+
+        // Corrupt the bundle.json so discoverAllBundles inside installBundlesFromRegistry
+        // reads an invalid file and throws, simulating a failing install.
+        const bundleJsonPath = path.join(result.contentRoot, 'bundles', skillName, 'bundle.json');
+        fs.rmSync(bundleJsonPath);
+
+        const { installBundlesFromRegistry } = require('../../../src/commands/registry/install-bundles');
+        // discoverAllBundles skips entries whose bundle.json is missing (continue), so deletion
+        // produces an empty result (no throw). Force a failure via corrupted catalog.json instead.
+        const catalogPath = path.join(result.contentRoot, 'catalog.json');
+        fs.writeFileSync(catalogPath, 'not-json');
+
+        let threw = false;
+        try {
+            installBundlesFromRegistry(result.contentRoot, 'all', ['claude-code'], tmpWork);
+        } catch (_e) {
+            threw = true;
+        }
+        expect(threw).toBe(true);
+
+        // Registry add must still be persisted
+        const { readRegistriesConfig } = require('../../../src/core/registries');
+        expect(readRegistriesConfig()).toHaveLength(1);
+        expect(readRegistriesConfig()[0].name).toBe('team');
+
+        // Skill symlink must NOT exist (install failed)
+        const skillLink = path.join(tmpHome, '.claude', 'skills', skillName);
+        expect(fs.existsSync(skillLink)).toBe(false);
+    });
+});
