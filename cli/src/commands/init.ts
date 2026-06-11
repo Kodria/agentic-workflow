@@ -28,13 +28,13 @@ export function renderInitOutcome(o: InitOutcome): string {
     lines.push(pc.bold('AWM · init'));
     lines.push('');
 
-    // --- Estado inicial ---
-    lines.push(pc.bold('Estado inicial'));
+    // --- Initial state ---
+    lines.push(pc.bold('Initial state'));
     lines.push(renderReport(o.before));
     lines.push('');
 
-    // --- Acciones ---
-    lines.push(pc.bold('Acciones'));
+    // --- Actions ---
+    lines.push(pc.bold('Actions'));
     for (const s of o.steps) {
         const det = s.detail ? pc.dim(` ${s.detail}`) : '';
         const err = s.error ? pc.red(` [${s.error}]`) : '';
@@ -42,15 +42,15 @@ export function renderInitOutcome(o: InitOutcome): string {
     }
     lines.push('');
 
-    // --- Estado final ---
-    lines.push(pc.bold('Estado final'));
+    // --- Final state ---
+    lines.push(pc.bold('Final state'));
     lines.push(renderReport(o.after));
     lines.push('');
 
     // --- Summary ---
     const pendingCount = o.pending;
-    const estado = o.after.overall === 'healthy' ? pc.green('sano') : pc.red('degradado');
-    lines.push(`estado: ${estado} · ${pendingCount} pasos requieren un agente (skills arriba)`);
+    const status = o.after.overall === 'healthy' ? pc.green('healthy') : pc.red('degraded');
+    lines.push(`status: ${status} · ${pendingCount} steps require an agent (skills above)`);
 
     return lines.join('\n');
 }
@@ -107,7 +107,7 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
             actions: mergedActions,
         });
     } catch (err) {
-        process.stderr.write(`awm init: error interno: ${(err as Error).message}\n`);
+        process.stderr.write(`awm init: internal error: ${(err as Error).message}\n`);
         return 2;
     }
 
@@ -138,7 +138,7 @@ export function makeConfirmExtensions(
         if (proposed.length === 0) return [];
         const { multiselect, isCancel } = await import('@clack/prompts');
         const choice = await multiselect({
-            message: `Extensiones detectadas (${signals.join(', ')}) — ¿activar?`,
+            message: `Extensions detected (${signals.join(', ')}) — activate?`,
             options: proposed.map((p) => ({ value: p, label: p })),
             initialValues: proposed,
             required: false,

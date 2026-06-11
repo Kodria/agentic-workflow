@@ -36,13 +36,13 @@ describe('renderInitOutcome', () => {
         };
         const out = renderInitOutcome(outcome);
         expect(out).toContain('AWM · init');
-        expect(out).toContain('Estado inicial');
-        expect(out).toContain('Acciones');
+        expect(out).toContain('Initial state');
+        expect(out).toContain('Actions');
         expect(out).toContain('machine.cache');
         expect(out).toContain('skill: project-constitution');
-        expect(out).toContain('Estado final');
+        expect(out).toContain('Final state');
         expect(out).toContain('AWM · harness status'); // viene de renderReport
-        expect(out).toContain('1 pasos requieren un agente');
+        expect(out).toContain('1 steps require an agent');
     });
 });
 

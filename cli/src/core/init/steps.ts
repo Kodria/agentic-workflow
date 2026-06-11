@@ -181,10 +181,10 @@ export async function stepProfile(d: InitDeps): Promise<StepResult> {
     const { proposed, signals } = detectExtensions(proj.root);
     const alreadyPresent = proj.profile.extensions;
     const newProposed = proposed.filter((p) => !alreadyPresent.includes(p));
-    if (newProposed.length === 0) return bootstrapOrSkip(d, proj, 'sin extensiones nuevas');
+    if (newProposed.length === 0) return bootstrapOrSkip(d, proj, 'no new extensions');
 
     const confirmed = await d.confirmExtensions(newProposed, signals);
-    if (confirmed.length === 0) return bootstrapOrSkip(d, proj, 'sin extensiones confirmadas');
+    if (confirmed.length === 0) return bootstrapOrSkip(d, proj, 'no extensions confirmed');
 
     for (const name of confirmed) {
         d.actions.addExtension(proj.root, name);
@@ -201,7 +201,7 @@ export async function stepProfile(d: InitDeps): Promise<StepResult> {
 function bootstrapOrSkip(d: InitDeps, proj: ProjectFacts, skipDetail: string): StepResult {
     if (!proj.profile.present) {
         d.actions.ensureProfile(proj.root);
-        return ok('project.profile', 'project', 'applied', 'perfil inicializado (sin extensiones)');
+        return ok('project.profile', 'project', 'applied', 'profile initialized (no extensions)');
     }
     return ok('project.profile', 'project', 'skipped', skipDetail);
 }
@@ -258,7 +258,7 @@ export function stepConstitutionInjection(d: InitDeps): StepResult {
         return ok('project.constitutionInjection', 'project', 'skipped', 'cubierto por hook');
     }
     if (!proj.constitution.present) {
-        return ok('project.constitutionInjection', 'project', 'skipped', 'sin CONSTITUTION.md');
+        return ok('project.constitutionInjection', 'project', 'skipped', 'no CONSTITUTION.md');
     }
 
     const res = d.actions.injectProjectConstitution({ projectRoot: proj.root, agent: d.agent });
@@ -278,7 +278,7 @@ export function stepContext(d: InitDeps): StepResult {
 /** Step 2b – Inject AWM context for agents whose mechanism isn't the Claude hook. */
 export function stepContextInjection(d: InitDeps): StepResult {
     const inj = getInjection(d.agent);
-    if (!inj) return ok('machine.contextInjection', 'machine', 'skipped', 'sin mecanismo de inyección');
+    if (!inj) return ok('machine.contextInjection', 'machine', 'skipped', 'no injection mechanism');
     if (inj.type === 'cc-settings-merge') return ok('machine.contextInjection', 'machine', 'skipped', 'cubierto por hook');
 
     const op: ContextOp = {
