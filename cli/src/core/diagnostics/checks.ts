@@ -12,7 +12,7 @@ function machineChecks(m: MachineFacts): CheckResult[] {
     // machine.cli
     if (!m.registryCache.present) {
         out.push({ id: 'machine.cli', level: 'machine', label: 'CLI', status: 'missing',
-            detail: 'registry cache missing — run awm update', remedy: cmd('awm init') });
+            detail: 'registry cache missing — run awm init', remedy: cmd('awm init') });
     } else if (m.registryCache.gitState === 'clean') {
         out.push({ id: 'machine.cli', level: 'machine', label: 'CLI', status: 'ok', remedy: none });
     } else if (m.registryCache.gitState === 'behind') {
