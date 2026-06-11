@@ -5,7 +5,7 @@ jest.mock('../../../src/commands/sensors/init', () => ({ initSensors: jest.fn() 
 jest.mock('../../../src/commands/sensors/status', () => ({ computeSensorStatus: jest.fn() }));
 jest.mock('../../../src/commands/sensors/install', () => ({ installSensorHook: jest.fn() }));
 jest.mock('../../../src/commands/sensors/baseline', () => ({ buildBaseline: jest.fn(), writeBaseline: jest.fn() }));
-jest.mock('../../../src/core/bundles', () => ({ REGISTRY_CONTENT_DIR: '/mock/registry' }));
+jest.mock('../../../src/core/registries', () => ({ capabilityRoot: jest.fn(() => '/mock/registry') }));
 
 import { exitCodeFor, RunOutputLike } from '../../../src/commands/sensors/index';
 

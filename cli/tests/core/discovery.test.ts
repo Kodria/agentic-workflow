@@ -1,13 +1,17 @@
-import { discoverSkills, discoverWorkflows, readArtifactDescription, SKILLS_DIR, WORKFLOWS_DIR } from '../../src/core/discovery';
+import { discoverSkills, discoverWorkflows, readArtifactDescription } from '../../src/core/discovery';
 import path from 'path';
 import fs from 'fs';
 
 jest.mock('fs');
 
-// Explicit roots derived from the exported constants — avoids calling contentRoots()
-// (which would hit the real/mocked fs for registries config) inside unit tests.
-const SKILLS_ROOT = path.dirname(SKILLS_DIR);   // …/registry
-const WORKFLOWS_ROOT = path.dirname(WORKFLOWS_DIR); // …/registry
+// Fixed roots used in unit tests — these are passed explicitly to discoverSkills/
+// discoverWorkflows, which append 'skills'/'workflows' subdirectories internally.
+const CONTENT_ROOT = '/fake/registry';
+const SKILLS_ROOT = CONTENT_ROOT;
+const WORKFLOWS_ROOT = CONTENT_ROOT;
+// For backward-compat with mock expectations that check SKILLS_DIR-style paths:
+const SKILLS_DIR = path.join(CONTENT_ROOT, 'skills');
+const WORKFLOWS_DIR = path.join(CONTENT_ROOT, 'workflows');
 
 describe('Artifact Discovery', () => {
     beforeEach(() => {

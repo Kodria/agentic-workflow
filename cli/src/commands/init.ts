@@ -3,8 +3,9 @@ import { Command } from 'commander';
 import pc from 'picocolors';
 import { renderReport } from './doctor';
 import { gatherContext } from '../core/diagnostics/context';
-import { discoverAllBundles, REGISTRY_CONTENT_DIR } from '../core/bundles';
+import { discoverAllBundles } from '../core/bundles';
 import { REGISTRY_DIR } from '../core/registry';
+import { contentRoots } from '../core/registries';
 import { runInitSteps } from '../core/init/orchestrator';
 import { defaultActions } from '../core/init/steps';
 import type { InitOutcome, InitActions, StepResult } from '../core/init/types';
@@ -95,7 +96,7 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
             agent,
             installMethod: 'symlink',
             registryRoot: REGISTRY_DIR,
-            contentDir: REGISTRY_CONTENT_DIR,
+            contentDir: contentRoots()[0] ?? '',
             confirmExtensions,
             actions: mergedActions,
         });

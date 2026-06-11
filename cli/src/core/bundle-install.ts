@@ -3,13 +3,13 @@ import fs from 'fs';
 import path from 'path';
 import {
     BundleDefinition,
-    REGISTRY_CONTENT_DIR,
     defaultScopeForBundle,
     resolveBundleClosure,
 } from './bundles';
 import { installArtifact } from './executor';
 import { AgentTarget, ArtifactType, Scope, getTargetPath, PROVIDERS } from '../providers';
 import { addExtension, ensureSkillsGitignored, readProfile, shouldRecordExtension } from './profile';
+import { contentRoots } from './registries';
 
 export type InstallMethod = 'symlink' | 'copy';
 
@@ -60,7 +60,7 @@ function bundleArtifacts(b: BundleDefinition, contentDir: string): ArtifactRef[]
  * missing sources are skipped (never thrown).
  */
 export function installBundle(opts: InstallBundleOptions): InstallSummary {
-    const fallbackContentDir = opts.contentDir ?? REGISTRY_CONTENT_DIR;
+    const fallbackContentDir = opts.contentDir ?? contentRoots()[0] ?? '';
     const closure = resolveBundleClosure(opts.bundleName, opts.bundles);
     const installed: string[] = [];
     const skipped: string[] = [];

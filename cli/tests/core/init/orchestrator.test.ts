@@ -2,34 +2,37 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-// Siembra un cache mínimo en <cliSource> con un baseline bundle de 1 skill + hooks.
-function seedCache(cliSource: string) {
-    const content = path.join(cliSource, 'registry');
-    fs.mkdirSync(path.join(content, 'skills', 'brainstorming'), { recursive: true });
-    fs.writeFileSync(path.join(content, 'skills', 'brainstorming', 'SKILL.md'), '# brainstorming');
-    fs.mkdirSync(path.join(content, 'skills', 'using-awm'), { recursive: true });
-    fs.writeFileSync(path.join(content, 'skills', 'using-awm', 'SKILL.md'), '# using-awm');
-    fs.mkdirSync(path.join(content, 'hooks'), { recursive: true });
-    fs.writeFileSync(path.join(content, 'hooks', 'session-start'), '#!/bin/sh\n');
-    fs.chmodSync(path.join(content, 'hooks', 'session-start'), 0o755);
-    fs.writeFileSync(path.join(content, 'hooks', 'run-hook.cmd'), '#!/bin/sh\n');
-    fs.chmodSync(path.join(content, 'hooks', 'run-hook.cmd'), 0o755);
-    fs.mkdirSync(path.join(content, 'sensor-packs', 'js-ts'), { recursive: true });
-    fs.writeFileSync(path.join(content, 'sensor-packs', 'js-ts', 'pack.json'),
+// Siembra un registry baseline mínimo en <contentRoot> (= ~/.awm/registries/baseline).
+// El content root ES la raíz del registry — no hay subdir "registry/" en la nueva arquitectura.
+function seedRegistry(contentRoot: string) {
+    fs.mkdirSync(path.join(contentRoot, 'skills', 'brainstorming'), { recursive: true });
+    fs.writeFileSync(path.join(contentRoot, 'skills', 'brainstorming', 'SKILL.md'), '# brainstorming');
+    fs.mkdirSync(path.join(contentRoot, 'skills', 'using-awm'), { recursive: true });
+    fs.writeFileSync(path.join(contentRoot, 'skills', 'using-awm', 'SKILL.md'), '# using-awm');
+    fs.mkdirSync(path.join(contentRoot, 'hooks'), { recursive: true });
+    fs.writeFileSync(path.join(contentRoot, 'hooks', 'session-start'), '#!/bin/sh\n');
+    fs.chmodSync(path.join(contentRoot, 'hooks', 'session-start'), 0o755);
+    fs.writeFileSync(path.join(contentRoot, 'hooks', 'run-hook.cmd'), '#!/bin/sh\n');
+    fs.chmodSync(path.join(contentRoot, 'hooks', 'run-hook.cmd'), 0o755);
+    fs.mkdirSync(path.join(contentRoot, 'sensor-packs', 'js-ts'), { recursive: true });
+    fs.writeFileSync(path.join(contentRoot, 'sensor-packs', 'js-ts', 'pack.json'),
         JSON.stringify({ sensors: { lint: { defaultCmd: 'eslint {{SOURCE_DIRS}}', fast: true } } }));
-    // .git para que machine.cli.present sea true tras "sync"
-    fs.mkdirSync(path.join(cliSource, '.git'), { recursive: true });
-    fs.mkdirSync(path.join(cliSource, 'cli'), { recursive: true });
-    fs.writeFileSync(path.join(cliSource, 'cli', 'package.json'), JSON.stringify({ version: '1.0.0' }));
     // catalog + bundle dev (baseline)
-    fs.writeFileSync(path.join(content, 'catalog.json'), JSON.stringify({
+    fs.writeFileSync(path.join(contentRoot, 'catalog.json'), JSON.stringify({
         version: 1, bundles: [{ name: 'dev', source: './bundles/dev', version: '1.0.0', scope: 'baseline' }],
     }));
-    fs.mkdirSync(path.join(content, 'bundles', 'dev'), { recursive: true });
-    fs.writeFileSync(path.join(content, 'bundles', 'dev', 'bundle.json'), JSON.stringify({
+    fs.mkdirSync(path.join(contentRoot, 'bundles', 'dev'), { recursive: true });
+    fs.writeFileSync(path.join(contentRoot, 'bundles', 'dev', 'bundle.json'), JSON.stringify({
         name: 'dev', version: '1.0.0', scope: 'baseline', dependsOn: [],
         skills: [{ name: 'brainstorming' }, { name: 'using-awm' }], workflows: [], agents: [],
     }));
+
+    // Mantener cli-source/.git para que gatherMachine.cliSource.present sea true
+    // (Task 9 eliminará este check; mientras tanto lo sembramos igual).
+    const cliSource = path.join(path.dirname(path.dirname(contentRoot)), 'cli-source');
+    fs.mkdirSync(path.join(cliSource, '.git'), { recursive: true });
+    fs.mkdirSync(path.join(cliSource, 'cli'), { recursive: true });
+    fs.writeFileSync(path.join(cliSource, 'cli', 'package.json'), JSON.stringify({ version: '1.0.0' }));
 }
 
 describe('runInitSteps — orchestrator', () => {
@@ -53,16 +56,29 @@ describe('runInitSteps — orchestrator', () => {
 
     function buildDeps(cwd: string) {
         const { gatherContext } = require('../../../src/core/diagnostics/context');
-        const { discoverBundles, REGISTRY_CONTENT_DIR } = require('../../../src/core/bundles');
+        const { discoverAllBundles } = require('../../../src/core/bundles');
         const { REGISTRY_DIR } = require('../../../src/core/registry');
+        const { contentRoots, REGISTRIES_DIR } = require('../../../src/core/registries');
         const { defaultActions } = require('../../../src/core/init/steps');
-        const cliSource = path.join(tmpHome, '.awm', 'cli-source');
-        seedCache(cliSource);
-        const bundles = discoverBundles();
+
+        // Seed content at ~/.awm/registries/baseline (content root IS the registry root).
+        const contentRoot = path.join(process.env.AWM_HOME!, 'registries', 'baseline');
+        fs.mkdirSync(contentRoot, { recursive: true });
+        seedRegistry(contentRoot);
+
+        // Register the baseline registry in registries.json so contentRoots() picks it up.
+        const registriesJson = path.join(process.env.AWM_HOME!, 'registries.json');
+        fs.writeFileSync(registriesJson, JSON.stringify([
+            { name: 'baseline', remote: 'https://example.com/baseline.git' },
+        ], null, 2));
+
+        const roots = contentRoots();
+        const bundles = discoverAllBundles(roots);
+        const contentDir = roots[0] ?? '';
         const ctx = gatherContext({ cwd, bundles });
         return {
             cwd, ctx, bundles, agent: 'claude-code', installMethod: 'symlink',
-            registryRoot: REGISTRY_DIR, contentDir: REGISTRY_CONTENT_DIR,
+            registryRoot: REGISTRY_DIR, contentDir,
             confirmExtensions: async (p: string[]) => p,
             // syncCache es no-op: el cache ya está sembrado en disco
             actions: { ...defaultActions, syncCache: async () => {} },

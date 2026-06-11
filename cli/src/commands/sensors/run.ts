@@ -1,6 +1,5 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { SensorManifest, SensorResult, RunOutput, SensorError } from './types';
 import { parseTscOutput } from './formatters/tsc';
@@ -10,6 +9,7 @@ import { parseGenericOutput } from './formatters/generic';
 import { parseTestOutput } from './formatters/test';
 import { readBaseline, partition } from './baseline';
 import { detectStack, initSensors } from './init';
+import { capabilityRoot } from '../../core/registries';
 
 const MANIFEST_FILE = '.awm/sensors.json';
 const DEFAULT_FAST_TIMEOUT = 10_000;
@@ -52,11 +52,6 @@ function readManifest(cwd: string): SensorManifest | null {
     try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { return null; }
 }
 
-function defaultRegistryRoot(): string {
-    const home = process.env.AWM_HOME || path.join(process.env.HOME || os.homedir(), '.awm');
-    return path.join(home, 'cli-source', 'registry');
-}
-
 /**
  * Upgrade-only, idempotent pack reconciliation. If the manifest sits on the
  * `generic` fallback but the tree now has real stack indicators (package.json,
@@ -76,8 +71,8 @@ export function reconcilePack(
     }
     const detection = detectStack(manifestDir);
     if (detection.pack === 'generic') return { manifest, detection }; // truly generic — stay honest
-    const root = registryRoot ?? defaultRegistryRoot();
-    if (!fs.existsSync(root)) return { manifest, detection }; // can't rebuild without registry
+    const root = registryRoot ?? capabilityRoot('sensor-packs');
+    if (!root || !fs.existsSync(root)) return { manifest, detection }; // can't rebuild without registry
     try {
         const { manifest: rebuilt } = initSensors({ cwd: manifestDir, registryRoot: root, configure: true });
         return { manifest: rebuilt, upgradedFrom: 'generic', detection };

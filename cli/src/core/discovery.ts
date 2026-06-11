@@ -1,12 +1,7 @@
 // src/core/discovery.ts
 import fs from 'fs';
 import path from 'path';
-import { REGISTRY_DIR } from './registry';
 import { contentRoots, readRegistryManifest } from './registries';
-
-export const SKILLS_DIR = path.join(REGISTRY_DIR, 'registry', 'skills');
-export const WORKFLOWS_DIR = path.join(REGISTRY_DIR, 'registry', 'workflows');
-export const AGENTS_DIR = path.join(REGISTRY_DIR, 'registry', 'agents');
 
 export interface SkillArtifact {
     name: string;

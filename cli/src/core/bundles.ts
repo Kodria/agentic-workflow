@@ -1,10 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { REGISTRY_DIR } from './registry';
 import { Scope } from '../providers';
 import { contentRoots, readRegistryManifest } from './registries';
-
-export const REGISTRY_CONTENT_DIR = path.join(REGISTRY_DIR, 'registry');
 
 export type BundleScope = 'baseline' | 'project' | 'ambient';
 export type BundleVisibility = 'public' | 'private';
@@ -42,7 +39,7 @@ function catalogPath(contentDir: string): string {
     return path.join(contentDir, 'catalog.json');
 }
 
-export function readCatalog(contentDir: string = REGISTRY_CONTENT_DIR): CatalogEntry[] {
+export function readCatalog(contentDir: string): CatalogEntry[] {
     const file = catalogPath(contentDir);
     if (!fs.existsSync(file)) return [];
     const parsed = JSON.parse(fs.readFileSync(file, 'utf-8')) as { version: number; bundles: CatalogEntry[] };
@@ -55,7 +52,7 @@ function normalizeSkillRefs(raw: Array<string | { name: string; onSignal?: boole
     );
 }
 
-export function discoverBundles(contentDir: string = REGISTRY_CONTENT_DIR): BundleDefinition[] {
+export function discoverBundles(contentDir: string): BundleDefinition[] {
     const entries = readCatalog(contentDir);
     const bundles: BundleDefinition[] = [];
     for (const entry of entries) {
