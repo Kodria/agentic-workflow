@@ -5,6 +5,16 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
 
 ---
 
+## 2026-06-11 — WS-7 (policy execution): tdd-first-i18n pattern
+
+- **Class:** agent/win
+- **Occurrences (ledger count):** 2 (ws7-tdd-test-first-discipline + tdd-red-green-translation, mismo patrón)
+- **Rule:** `AGENTS.md` — "Patrones de testing › tdd-first-i18n"
+- **Sensor:** agents-md (lectura contextual)
+- **Dismissed findings (8):** todos ya corregidos durante QA; sin regla estructural añadida — el único patrón durable es el de testing
+
+---
+
 ## 2026-06-10 — WS-3 (versionado real): gate de contrato después de early-exit + asimetría de cleanup de clone
 
 - **Class:** de proceso (F1) + de lógica (F2) + agent/win (W1)
