@@ -118,7 +118,7 @@ No es código primero: son tres decisiones que hay que tomar y registrar (y reci
 - [x] **F-9 Mutation testing → off por defecto, opt-in documentado.** Stryker sigue `enabled: false` (lento/ruidoso como gate); se documenta en `docs/registry-guide.md` cómo habilitarlo por proyecto para paths críticos. Sin cambio en el pack.
 - [x] **F-11 Windows → no soportado por ahora, documentado.** Se declara explícitamente en README/getting-started con WSL como vía recomendada. Nota registrada: si AWM apunta a extensibilidad amplia, el soporte Windows deberá activarse — queda como diferido con trigger de demanda, igual que WS-6.
 - [x] Ejecución de lo derivado (docs F-9/F-11 + normalización a inglés de los mensajes del CLI) → [2026-06-11-ws7-policy-execution-plan.md](2026-06-11-ws7-policy-execution-plan.md)
-- [ ] QA → `awm-qa-complete`
+- [x] QA → `awm-qa-complete` (2026-06-11)
 
 ---
 
@@ -133,6 +133,6 @@ No es código primero: son tres decisiones que hay que tomar y registrar (y reci
 | WS-4 | F-3 | [2026-06-10-ws4-npm-distribution-plan.md](2026-06-10-ws4-npm-distribution-plan.md) | ☑ |
 | WS-5 | F-12 | — | ☐ |
 | WS-6 | F-5 | diferido a demanda (2026-06-11) | ◌ diferido |
-| WS-7 | F-9, F-10, F-11 | [2026-06-11-ws7-policy-execution-plan.md](2026-06-11-ws7-policy-execution-plan.md) | ☐ |
+| WS-7 | F-9, F-10, F-11 | [2026-06-11-ws7-policy-execution-plan.md](2026-06-11-ws7-policy-execution-plan.md) | ☑ |
 
 **Este documento se cierra** (marcador `awm-qa-complete` + nota de cierre de era) cuando las 8 filas tengan QA ☑ o estado "diferido" registrado (re-alcance 2026-06-11).
