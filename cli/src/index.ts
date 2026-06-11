@@ -7,12 +7,12 @@ import { buildGroupedOptions } from './utils/grouping';
 import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, buildLevel1Options, buildLevel2Options, resolveLevel2Selection, ALL_SENTINEL, ArtifactView, artifactValue } from './utils/registry-view';
 import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
-import { syncRegistry, buildCli, REGISTRY_DIR, resolveBaseRemote, resolveBaseRemoteInfo } from './core/registry';
 import { regenerateGlobalContext } from './core/context/regenerate';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
 import { discoverAllBundles, defaultScopeForBundle } from './core/bundles';
 import { reconcileAllSkillLinks } from './core/skill-integrity';
-import { contentRoots, syncRegistries, readRegistriesConfig } from './core/registries';
+import { contentRoots, syncRegistries, readRegistriesConfig, verifyMinCliVersions, capabilityRoot } from './core/registries';
+import { cliVersion } from './core/cli-version';
 import { addBundle, syncProfile } from './core/bundle-install';
 import { findProjectRoot, readProfile } from './core/profile';
 import path from 'path';
@@ -28,7 +28,6 @@ import { registerDoctorCommand } from './commands/doctor';
 import { registerInitCommand } from './commands/init';
 import { registerRegistryCommand } from './commands/registry';
 import { registerPinCommands } from './commands/pin';
-import { machineVersionOpts } from './core/versioning';
 import { verifyProjectPins } from './core/profile-pins';
 
 const program = new Command();
@@ -70,14 +69,11 @@ program.command('add [name]')
 
       // 1. Sync the registry
       const s = spinner();
-      s.start('Syncing registry with remote...');
-      try {
-          await syncRegistry(resolveBaseRemote(), machineVersionOpts('base'));
-          s.stop('Registry synced.');
-      } catch (e: any) {
-          s.stop('Failed to sync registry.');
-          console.error(pc.red(e.message));
-          process.exit(1);
+      s.start('Syncing registries...');
+      const results = await syncRegistries();
+      s.stop('Registries synced.');
+      for (const r of results) {
+          if (r.action === 'error') console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
       }
 
       // 1b. If `name` matches a bundle, run the bundle-activation flow and exit.
@@ -325,88 +321,57 @@ program.command('add [name]')
 });
 
 program.command('update')
-  .description('Sync the local registry with the remote repository')
+  .description('Sync all configured registries with their remotes')
   .action(async () => {
-      intro(pc.bgCyan(pc.black(' AWM - Update Registry ')));
+      intro(pc.bgCyan(pc.black(' AWM - Update Registries ')));
 
       const s = spinner();
-      s.start('Pulling latest changes from remote...');
+      s.start('Syncing registries...');
+      const results = await syncRegistries();
+      s.stop('Registries synced.');
+
+      if (results.length === 0) {
+          console.log(pc.yellow('  No registries configured — run `awm init` (seeds baseline) or `awm registry add <remote>`.'));
+      }
+      for (const r of results) {
+          if (r.action === 'error') {
+              console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
+          } else {
+              console.log(pc.green(`  ✓ Registry ${r.name} ${r.action === 'pulled' ? 'updated' : 're-cloned'} @ ${r.version}`));
+          }
+      }
+
+      for (const f of verifyMinCliVersions()) {
+          console.warn(pc.yellow(`  ⚠  El registry ${f.name} requiere CLI ≥ ${f.min} (tenés ${cliVersion()}) — corré: npm i -g agentic-workflow-manager`));
+      }
 
       try {
-          const resolved = await syncRegistry(resolveBaseRemote(), machineVersionOpts('base'));
-          s.stop('Registry updated successfully.');
-          if (resolved.kind === 'tag') {
-              console.log(pc.green(`  ✓ Registry base @ v${resolved.version}`));
-          } else if (resolved.kind === 'head') {
-              console.log(pc.dim(`  Registry base @ ${resolved.ref} (canal dev)`));
-          } else {
-              console.log(pc.yellow(`  ⚠ Registry base sin tags — siguiendo HEAD (taggeá v1.0.0 para activar el canal estable)`));
-          }
+          const regen = regenerateGlobalContext();
+          const refreshed = regen.filter((r) => r.action === 'refreshed').map((r) => r.agent);
+          if (refreshed.length > 0) console.log(pc.green(`  ✓ Regenerated AWM context for: ${refreshed.join(', ')}`));
+      } catch { /* no aborta */ }
 
-          // Node has dist/ loaded into memory; rebuilding mid-run is safe.
-          const buildSpinner = spinner();
-          buildSpinner.start('Compiling latest CLI...');
-          const build = buildCli();
-          if (build.success) {
-              buildSpinner.stop('CLI compiled successfully.');
-          } else {
-              buildSpinner.stop(pc.yellow('CLI build skipped — running previous version.'));
-              console.warn(pc.yellow(`  ⚠  ${build.error}`));
+      try {
+          for (const { agent, result } of reconcileAllSkillLinks(contentRoots())) {
+              const touched = result.relinked.length + result.pruned.length;
+              if (touched > 0) console.log(pc.green(`  ✓ Reconciled ${agent} skill links: re-linked ${result.relinked.length}, pruned ${result.pruned.length}`));
           }
+      } catch { /* no aborta */ }
 
-          try {
-              for (const r of await syncRegistries()) {
-                  if (r.action === 'error') {
-                      console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
-                  } else {
-                      console.log(pc.green(`  ✓ Registry ${r.name} ${r.action === 'pulled' ? 'updated' : 're-cloned'} @ ${r.version}`));
-                  }
+      try {
+          const hooksRoot = capabilityRoot('hooks');
+          if (hooksRoot) {
+              for (const r of resyncInstalledHooks(hooksRoot)) {
+                  if (r.action === 'resynced') console.log(pc.green(`  ✓ Re-synced ${r.agent} hook scripts`));
+                  else if (r.action === 'registry-missing') console.warn(pc.yellow(`  ⚠  ${r.agent} hook installed but registry hooks missing — run 'awm hooks install'`));
               }
-          } catch {
-              // additional registry sync must not abort a successful update
           }
+      } catch { /* no aborta */ }
 
-          try {
-              const regen = regenerateGlobalContext();
-              const refreshed = regen.filter((r) => r.action === 'refreshed').map((r) => r.agent);
-              if (refreshed.length > 0) {
-                  console.log(pc.green(`  ✓ Regenerated AWM context for: ${refreshed.join(', ')}`));
-              }
-          } catch {
-              // context regeneration failure must not abort a successful registry update
-          }
+      // await offerSelfUpdate();   // capa 2 — Task 13
 
-          try {
-              for (const { agent, result } of reconcileAllSkillLinks(contentRoots())) {
-                  const touched = result.relinked.length + result.pruned.length;
-                  if (touched > 0) {
-                      console.log(pc.green(`  ✓ Reconciled ${agent} skill links: re-linked ${result.relinked.length}, pruned ${result.pruned.length}`));
-                  }
-              }
-          } catch {
-              // la reconciliación de symlinks no debe abortar un update exitoso
-          }
-
-          try {
-              for (const r of resyncInstalledHooks(REGISTRY_DIR)) {
-                  if (r.action === 'resynced') {
-                      console.log(pc.green(`  ✓ Re-synced ${r.agent} hook scripts`));
-                  } else if (r.action === 'registry-missing') {
-                      console.warn(pc.yellow(`  ⚠  ${r.agent} hook installed but registry hooks missing — run 'awm hooks install'`));
-                  }
-              }
-          } catch {
-              // hook resync failure must not abort a successful registry update
-          }
-
-          outro('✅ All symlinked skills and workflows are now up-to-date.');
-      } catch (e: any) {
-          const { remote, source } = resolveBaseRemoteInfo();
-          s.stop('Update failed.');
-          console.error(pc.red(`${e.message}\n  (base remote: ${remote} — from ${source})`));
-          process.exit(1);
-      }
-});
+      outro('✅ Registries, skills y hooks actualizados.');
+  });
 
 program.command('sync')
   .description('Rebuild local skill symlinks from .awm/profile.json (e.g. after cloning on a new machine)')
@@ -429,13 +394,21 @@ program.command('sync')
           process.exit(1);
       }
       const s = spinner();
-      s.start('Syncing registry...');
-      try {
-          await syncRegistry(resolveBaseRemote(), machineVersionOpts('base'));
-          s.stop('Registry synced.');
-      } catch (e: any) {
-          s.stop('Failed to sync registry.');
-          console.error(pc.red(e.message));
+      s.start('Syncing registries...');
+      const syncResults = await syncRegistries();
+      s.stop('Registries synced.');
+      for (const r of syncResults) {
+          if (r.action === 'error') console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
+      }
+
+      // Gate minCliVersion (WS-4): un registry puede exigir una versión mínima del CLI.
+      // Corre ANTES del gate de pins — gates de contrato primero (CONSTITUTION).
+      const cliFailures = verifyMinCliVersions();
+      if (cliFailures.length > 0) {
+          for (const f of cliFailures) {
+              console.error(pc.red(`El registry ${f.name} requiere CLI ≥ ${f.min} (tenés ${cliVersion()}).`));
+              console.error(pc.red('  Corré: npm i -g agentic-workflow-manager'));
+          }
           process.exit(1);
       }
 
@@ -501,14 +474,11 @@ program.command('list [package]')
       intro(pc.bgCyan(pc.black(' AWM - Registry Listing ')));
 
       const s = spinner();
-      s.start('Syncing registry...');
-      try {
-          await syncRegistry(resolveBaseRemote(), machineVersionOpts('base'));
-          s.stop('Registry synced.');
-      } catch (e: any) {
-          s.stop('Failed to sync registry.');
-          console.error(pc.red(e.message));
-          process.exit(1);
+      s.start('Syncing registries...');
+      const listSyncResults = await syncRegistries();
+      s.stop('Registries synced.');
+      for (const r of listSyncResults) {
+          if (r.action === 'error') console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
       }
 
       const fullView = buildPackageView(discoverSkills(), discoverWorkflows(), discoverAgents(), discoverAllBundles());
