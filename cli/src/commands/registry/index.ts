@@ -120,7 +120,7 @@ export function registerRegistryCommand(program: Command): void {
                         console.log(
                             o.active
                                 ? pc.yellow(`    ↑ override activo: ${o.name}`)
-                                : pc.dim(`    ∅ override sin efecto: ${o.name}`)
+                                : pc.dim(`    ∅ override with no effect: ${o.name}`)
                         );
                     }
                 } catch (e) {

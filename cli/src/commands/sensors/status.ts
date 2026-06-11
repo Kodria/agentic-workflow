@@ -16,7 +16,7 @@ function configCheck(parts: string[], cwd: string): SensorCheck | null {
     const i = parts.indexOf('--config');
     const cfg = i !== -1 ? parts[i + 1] : undefined;
     if (cfg && !fs.existsSync(path.join(cwd, cfg))) {
-        return { ok: false, detail: `config faltante: ${cfg}` };
+        return { ok: false, detail: `missing config: ${cfg}` };
     }
     return null;
 }
@@ -35,12 +35,12 @@ function checkCmd(cmd: string, cwd: string): SensorCheck {
 
     if (bin === 'npx') {
         const tool = npxTool(parts);
-        if (!tool) return { ok: false, detail: 'npx sin tool especificada' };
+        if (!tool) return { ok: false, detail: 'npx without a tool specified' };
         const localBin = path.join(cwd, 'node_modules', '.bin', tool);
         if (!fs.existsSync(localBin)) {
             return {
                 ok: false,
-                detail: `${tool} no instalada localmente (npx bajaría un paquete remoto) — agregala a devDependencies`,
+                detail: `${tool} not installed locally (npx would download a remote package) — add it to devDependencies`,
             };
         }
         return configCheck(parts, cwd) ?? { ok: true, detail: `${tool} (node_modules/.bin)` };

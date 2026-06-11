@@ -51,7 +51,7 @@ describe('computeSensorStatus', () => {
         const result = computeSensorStatus(tmpDir);
         expect(result.overall).toBe('DEGRADED');
         expect(result.checks.depcheck.ok).toBe(false);
-        expect(result.checks.depcheck.detail).toMatch(/no instalada/i);
+        expect(result.checks.depcheck.detail).toMatch(/not installed locally/i);
     });
 
     it('marks a sensor DEGRADED when its --config file is missing', () => {
@@ -63,7 +63,7 @@ describe('computeSensorStatus', () => {
         }));
         const result = computeSensorStatus(tmpDir);
         expect(result.checks.lint.ok).toBe(false);
-        expect(result.checks.lint.detail).toMatch(/config faltante/i);
+        expect(result.checks.lint.detail).toMatch(/missing config/i);
     });
 
     it('is HEALTHY when the npx tool is installed and the --config file exists', () => {
