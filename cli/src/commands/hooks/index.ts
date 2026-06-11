@@ -6,7 +6,7 @@ import { installHook } from './install';
 import { uninstallHook } from './uninstall';
 import { computeHookStatus } from './status';
 import type { AgentTarget } from '../../providers';
-import { REGISTRY_DIR } from '../../core/registry';
+import { capabilityRoot } from '../../core/registries';
 
 export function registerHooksCommand(program: Command): void {
     const hooks = program.command('hooks').description('Manage SessionStart bootstrap hooks');
@@ -19,10 +19,16 @@ export function registerHooksCommand(program: Command): void {
             const agent = (options.target ?? 'claude-code') as AgentTarget;
             const prefs = getPreferences();
 
+            const hooksRoot = capabilityRoot('hooks');
+            if (!hooksRoot) {
+                console.error(pc.red('No configured registry provides hooks/ — run `awm update` first.'));
+                process.exit(1);
+            }
+
             try {
                 const result = installHook({
                     agent,
-                    registryRoot: REGISTRY_DIR,
+                    registryRoot: hooksRoot,
                     installMethod: prefs.installMethod
                 });
 

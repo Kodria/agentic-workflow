@@ -4,11 +4,11 @@ import os from 'os';
 import path from 'path';
 import { buildContext, sha256 } from '../../../src/core/context/provider';
 
-const REPO_ROOT = path.resolve(__dirname, '../../../..');
+const REPO_REGISTRY = path.resolve(__dirname, '../../../../registry');
 
 function tmpRegistry(skillBody: string): string {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-reg-'));
-    const dir = path.join(root, 'registry/skills/using-awm');
+    const dir = path.join(root, 'skills/using-awm');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'SKILL.md'), skillBody);
     return root;
@@ -45,7 +45,7 @@ describe('buildContext', () => {
 
 describe('buildContext — generic robustness invariant', () => {
     it('carries the public-function input-validation invariant into awm-context', () => {
-        const ctx = buildContext({ registryRoot: REPO_ROOT, profileExtensions: [] });
+        const ctx = buildContext({ registryRoot: REPO_REGISTRY, profileExtensions: [] });
         expect(ctx.markdown).toMatch(/valida.*entradas|input validation|falla ruidosamente|fail loudly/i);
     });
 });

@@ -12,9 +12,9 @@ describe('installHook (happy path + merge)', () => {
         tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-install-'));
         tmpRegistry = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-registry-'));
 
-        // Mock registry layout
-        const regHooks = path.join(tmpRegistry, 'registry/hooks');
-        const regSkill = path.join(tmpRegistry, 'registry/skills/using-awm');
+        // Mock registry layout (content root — no registry/ prefix)
+        const regHooks = path.join(tmpRegistry, 'hooks');
+        const regSkill = path.join(tmpRegistry, 'skills/using-awm');
         fs.mkdirSync(regHooks, { recursive: true });
         fs.mkdirSync(regSkill, { recursive: true });
         fs.writeFileSync(path.join(regHooks, 'session-start'), '#!/usr/bin/env bash\necho "{}"', { mode: 0o755 });
@@ -143,7 +143,7 @@ describe('installHook (happy path + merge)', () => {
     });
 
     it('fails fast when registry is missing', () => {
-        fs.rmSync(path.join(tmpRegistry, 'registry'), { recursive: true });
+        fs.rmSync(path.join(tmpRegistry, 'hooks'), { recursive: true });
 
         const { installHook } = require('../../../src/commands/hooks/install');
         expect(() => installHook({ agent: 'claude-code', registryRoot: tmpRegistry, installMethod: 'symlink' }))

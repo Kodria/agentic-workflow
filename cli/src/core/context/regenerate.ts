@@ -6,7 +6,7 @@
 // Solo scope global. Defensivo: nunca rompe `awm update` por una falla de un agente.
 import fs from 'fs';
 import { PROVIDERS, AgentTarget } from '../../providers';
-import { REGISTRY_DIR } from '../registry';
+import { capabilityRoot } from '../registries';
 import { InjectionOrchestrator, ContextOp } from './orchestrator';
 
 export type RegenAction = 'refreshed' | 'fresh' | 'skipped';
@@ -15,6 +15,9 @@ export type RegenResult = { agent: AgentTarget; action: RegenAction };
 export function regenerateGlobalContext(
     orch: InjectionOrchestrator = new InjectionOrchestrator(),
 ): RegenResult[] {
+    const skillsRoot = capabilityRoot('skills');
+    if (!skillsRoot) return [];
+
     const out: RegenResult[] = [];
     for (const agent of Object.keys(PROVIDERS) as AgentTarget[]) {
         const inj = PROVIDERS[agent].injection;
@@ -24,7 +27,7 @@ export function regenerateGlobalContext(
         const op: ContextOp = {
             agent,
             scope: 'global',
-            registryRoot: REGISTRY_DIR,
+            registryRoot: skillsRoot,
             installMethod: 'symlink', // config-instructions strategy ignores this; consistent with stepContextInjection/gatherContextInjection
             profileExtensions: [],
         };

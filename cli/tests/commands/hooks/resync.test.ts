@@ -9,8 +9,8 @@ describe('resyncInstalledHooks', () => {
     let originalAwmHome: string | undefined;
 
     function writeRegistry(sessionStartContent: string) {
-        const regHooks = path.join(tmpRegistry, 'registry/hooks');
-        const regSkill = path.join(tmpRegistry, 'registry/skills/using-awm');
+        const regHooks = path.join(tmpRegistry, 'hooks');
+        const regSkill = path.join(tmpRegistry, 'skills/using-awm');
         fs.mkdirSync(regHooks, { recursive: true });
         fs.mkdirSync(regSkill, { recursive: true });
         fs.writeFileSync(path.join(regHooks, 'session-start'), sessionStartContent, { mode: 0o755 });
@@ -83,8 +83,8 @@ describe('resyncInstalledHooks', () => {
         writeRegistry('#!/usr/bin/env bash\necho "V2"');
         const scriptsDir = path.join(tmpHome, '.awm/hooks');
         fs.mkdirSync(scriptsDir, { recursive: true });
-        fs.symlinkSync(path.join(tmpRegistry, 'registry/hooks/session-start'), path.join(scriptsDir, 'session-start'));
-        fs.symlinkSync(path.join(tmpRegistry, 'registry/hooks/run-hook.cmd'), path.join(scriptsDir, 'run-hook.cmd'));
+        fs.symlinkSync(path.join(tmpRegistry, 'hooks/session-start'), path.join(scriptsDir, 'session-start'));
+        fs.symlinkSync(path.join(tmpRegistry, 'hooks/run-hook.cmd'), path.join(scriptsDir, 'run-hook.cmd'));
         writeSettingsWithAwmEntry(scriptsDir);
 
         const { resyncInstalledHooks } = require('../../../src/commands/hooks/resync');
@@ -127,8 +127,8 @@ describe('resyncInstalledHooks', () => {
 
     it('returns registry-missing when run-hook.cmd is absent from registry', () => {
         // Partial registry: only session-start present, run-hook.cmd absent
-        const regHooks = path.join(tmpRegistry, 'registry/hooks');
-        const regSkill = path.join(tmpRegistry, 'registry/skills/using-awm');
+        const regHooks = path.join(tmpRegistry, 'hooks');
+        const regSkill = path.join(tmpRegistry, 'skills/using-awm');
         fs.mkdirSync(regHooks, { recursive: true });
         fs.mkdirSync(regSkill, { recursive: true });
         fs.writeFileSync(path.join(regHooks, 'session-start'), '#!/usr/bin/env bash\necho "V2"', { mode: 0o755 });

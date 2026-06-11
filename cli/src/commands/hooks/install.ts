@@ -53,8 +53,8 @@ export function installHook(options: InstallOptions): InstallResult {
     }
 
     // 1. Verify registry sources exist FIRST (before touching settings)
-    const sourceHooks = path.join(options.registryRoot, 'registry/hooks');
-    const sourceSkill = path.join(options.registryRoot, 'registry/skills/using-awm/SKILL.md');
+    const sourceHooks = path.join(options.registryRoot, 'hooks');
+    const sourceSkill = path.join(options.registryRoot, 'skills/using-awm/SKILL.md');
     if (!fs.existsSync(path.join(sourceHooks, 'session-start'))) {
         throw new Error(`AWM registry not found at ${sourceHooks}. Run 'awm update' to refresh the registry.`);
     }

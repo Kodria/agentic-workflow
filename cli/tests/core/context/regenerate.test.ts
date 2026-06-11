@@ -24,10 +24,18 @@ describe('regenerateGlobalContext', () => {
     });
 
     // Crea un registry falso con el skill canónico using-awm que buildContext lee.
+    // Escribe registries.json apuntando al content root y crea el skill en la raíz del content root.
     function seedRegistry(body = '---\nname: using-awm\nversion: "1.0.0"\n---\nUSING-AWM-BODY') {
-        const dir = path.join(tmpHome, '.awm', 'cli-source', 'registry', 'skills', 'using-awm');
+        const awmHome = path.join(tmpHome, '.awm');
+        const contentRoot = path.join(awmHome, 'registries', 'baseline');
+        const dir = path.join(contentRoot, 'skills', 'using-awm');
         fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(path.join(dir, 'SKILL.md'), body);
+        // Write registries.json so capabilityRoot('skills') resolves to contentRoot
+        fs.writeFileSync(
+            path.join(awmHome, 'registries.json'),
+            JSON.stringify([{ name: 'baseline', remote: 'https://example.com/baseline.git' }], null, 2) + '\n',
+        );
     }
 
     // Escribe un opencode.json con instructions[] = entries.
@@ -78,7 +86,15 @@ describe('regenerateGlobalContext', () => {
     });
 
     it('does not throw when the registry has no using-awm skill (stale but unregenerable → skipped)', () => {
-        // registry vacío (sin using-awm); opencode stale
+        // registry con skills/ pero sin using-awm dentro; opencode stale
+        const awmHome = path.join(tmpHome, '.awm');
+        const contentRoot = path.join(awmHome, 'registries', 'baseline');
+        // Create skills/ dir (so capabilityRoot resolves) but omit using-awm/
+        fs.mkdirSync(path.join(contentRoot, 'skills'), { recursive: true });
+        fs.writeFileSync(
+            path.join(awmHome, 'registries.json'),
+            JSON.stringify([{ name: 'baseline', remote: 'https://example.com/baseline.git' }], null, 2) + '\n',
+        );
         seedOpencode([contextPath()]);
         const { regenerateGlobalContext } = require('../../../src/core/context/regenerate');
         expect(() => regenerateGlobalContext()).not.toThrow();

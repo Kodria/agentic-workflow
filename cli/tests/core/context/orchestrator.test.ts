@@ -16,7 +16,7 @@ import { computeHookStatus } from '../../../src/commands/hooks/status';
 
 function tmpRegistry(): string {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-orch-'));
-    const dir = path.join(root, 'registry/skills/using-awm');
+    const dir = path.join(root, 'skills/using-awm');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'SKILL.md'), '---\nversion: "1.0.0"\n---\nBODY');
     return root;
@@ -35,7 +35,7 @@ describe('InjectionOrchestrator (claude-code dispatch via HookMergeStrategy)', (
 
     it('installContext delegates to installHook', () => {
         const reg = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-cc-reg-'));
-        const dir = path.join(reg, 'registry/skills/using-awm');
+        const dir = path.join(reg, 'skills/using-awm');
         fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(path.join(dir, 'SKILL.md'), '---\nversion: "1.0.0"\n---\nBODY');
         const ctxPath = path.join(reg, 'awm-context.md');

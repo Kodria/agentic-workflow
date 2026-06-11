@@ -5,7 +5,7 @@ import path from 'path';
 import { execSync } from 'child_process';
 import { HarnessContext, MachineFacts, ProjectFacts, GitState } from './types';
 import { PROVIDERS, AgentTarget } from '../../providers';
-import { REGISTRY_DIR } from '../registry';
+import { capabilityRoot } from '../registries';
 import { InjectionOrchestrator } from '../context/orchestrator';
 import { InjectionState } from '../context/types';
 import { computeHookStatus } from '../../commands/hooks/status';
@@ -68,7 +68,7 @@ function gatherContextInjection(): { agent: AgentTarget; state: InjectionState }
             state = orch.contextStatus({
                 agent,
                 scope: 'global',
-                registryRoot: REGISTRY_DIR,
+                registryRoot: capabilityRoot('skills') ?? '',
                 installMethod: 'symlink',
                 profileExtensions: [],
             });

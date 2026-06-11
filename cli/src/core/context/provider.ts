@@ -19,7 +19,7 @@ function parseVersion(skill: string): string {
 }
 
 export function buildContext(input: ContextInput): AwmContext {
-    const skillPath = path.join(input.registryRoot, 'registry/skills/using-awm/SKILL.md');
+    const skillPath = path.join(input.registryRoot, 'skills/using-awm/SKILL.md');
     if (!fs.existsSync(skillPath)) {
         throw new Error(`using-awm skill not found at ${skillPath}. Run 'awm update' first.`);
     }
