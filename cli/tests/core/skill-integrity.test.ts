@@ -115,7 +115,7 @@ describe('reconcileAllSkillLinks (#4 — awm update, all providers)', () => {
 });
 
 describe('repairGlobalSkills', () => {
-    it('re-links repairable to cli-source and prunes dead; valid untouched; idempotent', () => {
+    it('re-links repairable to registry content dir and prunes dead; valid untouched; idempotent', () => {
         const { skillsDir, registryContentDir } = setup();
 
         const okTarget = makeRegistrySkill(registryContentDir, 'alpha');
@@ -128,7 +128,7 @@ describe('repairGlobalSkills', () => {
         expect(r1.relinked).toEqual(['beta']);
         expect(r1.pruned).toEqual(['gamma']);
 
-        // beta ahora apunta a cli-source y resuelve
+        // beta ahora apunta al registry content dir y resuelve
         expect(fs.existsSync(path.join(skillsDir, 'beta'))).toBe(true);
         expect(fs.realpathSync(path.join(skillsDir, 'beta')))
             .toBe(fs.realpathSync(path.join(registryContentDir, 'skills', 'beta')));

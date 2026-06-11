@@ -168,4 +168,82 @@ describe('syncRegistries (git fixtures locales)', () => {
         m.writeRegistriesConfig([{ name: 'fantasma', remote: '/no/existe' }]);
         expect(m.verifyMinCliVersions()).toEqual([]);
     });
+
+    it('transición tag→tag: clone existente en v1.0.0 avanza a v1.1.0 tras nuevo release', async () => {
+        const m = require('../../src/core/registries');
+        const source = makeSourceRepo(tmpWork, 'alpha');
+        GIT(source, 'tag v1.0.0');
+        m.writeRegistriesConfig([{ name: 'personal', remote: source }]);
+        // primera sync: queda en v1.0.0
+        const r1 = await m.syncRegistries();
+        expect(r1).toEqual([{ name: 'personal', action: 'recloned', version: 'v1.0.0' }]);
+
+        // nueva release en el remote
+        fs.writeFileSync(path.join(source, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\ndescription: v2\n---\n');
+        GIT(source, 'add -A');
+        GIT(source, 'commit -qm v1.1.0');
+        GIT(source, 'tag v1.1.0');
+
+        // segunda sync: avanza al nuevo tag
+        const r2 = await m.syncRegistries();
+        expect(r2).toEqual([{ name: 'personal', action: 'pulled', version: 'v1.1.0' }]);
+        const content = fs.readFileSync(path.join(tmpHome, '.awm/registries/personal/skills/alpha/SKILL.md'), 'utf-8');
+        expect(content).toContain('v2');
+    });
+
+    it('rollback tag→tag: clone en v1.1.0 retrocede a v1.0.0 al establecer pin', async () => {
+        const m = require('../../src/core/registries');
+        const source = makeSourceRepo(tmpWork, 'alpha');
+        GIT(source, 'tag v1.0.0');
+        fs.writeFileSync(path.join(source, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\ndescription: v2\n---\n');
+        GIT(source, 'add -A');
+        GIT(source, 'commit -qm v1.1.0');
+        GIT(source, 'tag v1.1.0');
+        m.writeRegistriesConfig([{ name: 'personal', remote: source }]);
+
+        // primera sync sin pin: queda en v1.1.0
+        const r1 = await m.syncRegistries();
+        expect(r1).toEqual([{ name: 'personal', action: 'recloned', version: 'v1.1.0' }]);
+
+        // establece pin a la versión anterior
+        const awmDir = path.join(tmpHome, '.awm');
+        fs.writeFileSync(
+            path.join(awmDir, 'preferences.json'),
+            JSON.stringify({ defaultAgent: 'claude', installMethod: 'symlink', defaultScope: 'local', pins: { personal: '1.0.0' } })
+        );
+
+        // segunda sync con pin: retrocede a v1.0.0
+        const r2 = await m.syncRegistries();
+        expect(r2).toEqual([{ name: 'personal', action: 'pulled', version: 'v1.0.0' }]);
+        const content = fs.readFileSync(path.join(tmpHome, '.awm/registries/personal/skills/alpha/SKILL.md'), 'utf-8');
+        expect(content).toContain('test skill'); // contenido original del tag v1.0.0
+    });
+
+    it('canal dev: preferences.channel=dev sigue HEAD y recibe commits nuevos', async () => {
+        const m = require('../../src/core/registries');
+        const source = makeSourceRepo(tmpWork, 'alpha');
+        GIT(source, 'tag v1.0.0');
+        m.writeRegistriesConfig([{ name: 'personal', remote: source }]);
+        const awmDir = path.join(tmpHome, '.awm');
+        fs.mkdirSync(awmDir, { recursive: true });
+        fs.writeFileSync(
+            path.join(awmDir, 'preferences.json'),
+            JSON.stringify({ defaultAgent: 'claude', installMethod: 'symlink', defaultScope: 'local', channel: 'dev' })
+        );
+
+        // primera sync en canal dev: queda en HEAD (no en el tag)
+        const r1 = await m.syncRegistries();
+        expect(r1).toEqual([{ name: 'personal', action: 'recloned', version: 'HEAD' }]);
+
+        // nuevo commit en el remote (post-tag, no release)
+        fs.writeFileSync(path.join(source, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\ndescription: head-2\n---\n');
+        GIT(source, 'add -A');
+        GIT(source, 'commit -qm head-2');
+
+        // segunda sync: recibe el nuevo commit
+        const r2 = await m.syncRegistries();
+        expect(r2).toEqual([{ name: 'personal', action: 'pulled', version: 'HEAD' }]);
+        const content = fs.readFileSync(path.join(tmpHome, '.awm/registries/personal/skills/alpha/SKILL.md'), 'utf-8');
+        expect(content).toContain('head-2');
+    });
 });

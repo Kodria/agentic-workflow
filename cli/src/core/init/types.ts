@@ -55,8 +55,8 @@ export interface InitDeps {
     bundles: BundleDefinition[];
     agent: AgentTarget;
     installMethod: InstallMethod;
-    registryRoot: string;   // cli-source (repo root) — para installHook
-    contentDir: string;     // cli-source/registry — para installBundle/initSensors
+    registryRoot: string;   // content root del registry activo — para installHook
+    contentDir: string;     // content root del registry activo — para installBundle/initSensors
     confirmExtensions: (proposed: string[], signals: string[]) => Promise<string[]>;
     actions: InitActions;
 }

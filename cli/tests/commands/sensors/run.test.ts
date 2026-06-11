@@ -347,7 +347,7 @@ describe('runSensors — honest floor (not_certified over real stack)', () => {
         fs.writeFileSync(path.join(dir, 'package.json'), '{}');
         const prevHome = process.env.AWM_HOME;
         const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-nohome-'));
-        process.env.AWM_HOME = fakeHome; // no cli-source → no upgrade
+        process.env.AWM_HOME = fakeHome; // no registry cache → no upgrade
         try {
             jest.resetModules();
             const { runSensors } = require('../../../src/commands/sensors/run');

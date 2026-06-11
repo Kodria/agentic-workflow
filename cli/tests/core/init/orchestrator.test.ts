@@ -53,7 +53,6 @@ describe('runInitSteps — orchestrator', () => {
     function buildDeps(cwd: string) {
         const { gatherContext } = require('../../../src/core/diagnostics/context');
         const { discoverAllBundles } = require('../../../src/core/bundles');
-        const { REGISTRY_DIR } = require('../../../src/core/registry');
         const { contentRoots, REGISTRIES_DIR } = require('../../../src/core/registries');
         const { defaultActions } = require('../../../src/core/init/steps');
 
@@ -74,7 +73,7 @@ describe('runInitSteps — orchestrator', () => {
         const ctx = gatherContext({ cwd, bundles });
         return {
             cwd, ctx, bundles, agent: 'claude-code', installMethod: 'symlink',
-            registryRoot: REGISTRY_DIR, contentDir,
+            registryRoot: contentRoot, contentDir,
             confirmExtensions: async (p: string[]) => p,
             // syncCache es no-op: el cache ya está sembrado en disco
             actions: { ...defaultActions, syncCache: async () => {} },
