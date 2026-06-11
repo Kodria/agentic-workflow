@@ -24,8 +24,8 @@ export function buildContext(input: ContextInput): AwmContext {
         throw new Error(`using-awm skill not found at ${skillPath}. Run 'awm update' first.`);
     }
     const skill = fs.readFileSync(skillPath, 'utf-8');
-    const exts = input.profileExtensions.length ? input.profileExtensions.join(', ') : 'ninguna';
-    const header = `<!-- AWM context (generated) -->\n# AWM\n\nExtensiones activas: ${exts}\n\n`;
+    const exts = input.profileExtensions.length ? input.profileExtensions.join(', ') : 'none';
+    const header = `<!-- AWM context (generated) -->\n# AWM\n\nActive extensions: ${exts}\n\n`;
     const markdown = header + skill;
     return { markdown, sourceVersion: parseVersion(skill), contentHash: sha256(markdown) };
 }

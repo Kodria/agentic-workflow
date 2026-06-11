@@ -119,7 +119,7 @@ export function registerRegistryCommand(program: Command): void {
                     for (const o of overrideStatus(r.contentRoot, earlier)) {
                         console.log(
                             o.active
-                                ? pc.yellow(`    ↑ override activo: ${o.name}`)
+                                ? pc.yellow(`    ↑ override active: ${o.name}`)
                                 : pc.dim(`    ∅ override with no effect: ${o.name}`)
                         );
                     }
