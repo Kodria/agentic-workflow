@@ -82,7 +82,7 @@ CLI estable publicado en npm; `install.sh` se reduce a `npm i -g` (o desaparece)
 - [x] Brainstorming + design (separación CLI/registry, versionado del CLI vs del contenido, compatibilidad) → [2026-06-10-ws4-npm-distribution-plan.md](2026-06-10-ws4-npm-distribution-plan.md)
 - [x] Plan + ejecución → [2026-06-10-ws4-npm-distribution-plan.md](2026-06-10-ws4-npm-distribution-plan.md)
 - [x] Verificación: instalación desde cero en máquina limpia sin git clone del monorepo (verificado 2026-06-10 con smoke test + runbook manual)
-- [ ] QA → `awm-qa-complete`
+- [x] QA → `awm-qa-complete` (2026-06-11)
 
 ### WS-5 — Flujo de equipo documentado y endurecido `[F-12]`
 
@@ -118,7 +118,7 @@ No es código primero: son tres decisiones que hay que tomar y registrar (y reci
 | WS-1 | F-4 | Plan ejecutado: [2026-06-09-ws1-personal-content-extraction-plan.md](2026-06-09-ws1-personal-content-extraction-plan.md) | ☑ |
 | WS-2 | F-2 | [2026-06-09-ws2-multi-registry-plan.md](2026-06-09-ws2-multi-registry-plan.md) | ☑ |
 | WS-3 | F-1 | [2026-06-10-ws3-versioning-plan.md](2026-06-10-ws3-versioning-plan.md) | ☑ |
-| WS-4 | F-3 | [2026-06-10-ws4-npm-distribution-plan.md](2026-06-10-ws4-npm-distribution-plan.md) | ☐ |
+| WS-4 | F-3 | [2026-06-10-ws4-npm-distribution-plan.md](2026-06-10-ws4-npm-distribution-plan.md) | ☑ |
 | WS-5 | F-12 | — | ☐ |
 | WS-6 | F-5 | — | ☐ |
 | WS-7 | F-9, F-10, F-11 | — | ☐ |
