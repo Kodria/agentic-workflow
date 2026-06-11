@@ -448,7 +448,7 @@ program.command('sync')
               for (const f of failures) {
                   if (f.reason === 'missing-registry') {
                       const registriesConfig = readRegistriesConfig();
-                      const isConfigured = f.name === 'base' || registriesConfig.some((r: {name: string}) => r.name === f.name);
+                      const isConfigured = registriesConfig.some((r: {name: string}) => r.name === f.name);
                       if (isConfigured) {
                           console.error(pc.red(`The registry "${f.name}" is configured but not yet synced on this machine. Run: awm update`));
                       } else {

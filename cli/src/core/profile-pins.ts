@@ -4,7 +4,6 @@
 // proyecto (.awm/profile.json → registries) contra la versión checkouteada
 // real de cada registry en la máquina.
 import fs from 'fs';
-import { REGISTRY_DIR } from './registry';
 import { registryContentRoot } from './registries';
 import { currentVersion, normalizePin } from './versioning';
 
@@ -15,9 +14,9 @@ export interface PinFailure {
     reason: 'mismatch' | 'missing-registry';
 }
 
-/** Dir del clone de un registry pineable: 'base' → cli-source; otro → ~/.awm/registries/<name>. */
+/** Dir del clone de un registry pineable: ~/.awm/registries/<name>. */
 export function pinnedRepoDir(name: string): string {
-    return name === 'base' ? REGISTRY_DIR : registryContentRoot(name);
+    return registryContentRoot(name);
 }
 
 /** Verifica cada pin del proyecto contra la máquina. Lista vacía = todo en orden. */

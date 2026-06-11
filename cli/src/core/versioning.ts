@@ -95,7 +95,7 @@ export async function currentVersion(repoDir: string): Promise<string | null> {
     }
 }
 
-/** Opts de versionado de la máquina para un registry ('base' reservado), desde preferences.
+/** Opts de versionado de la máquina para un registry, desde preferences.
  *  Preferences ilegibles → defaults (stable, sin pin) — patrón de resolveBaseRemoteInfo. */
 export function machineVersionOpts(registryName: string): { pin?: string; channel: Channel } {
     try {

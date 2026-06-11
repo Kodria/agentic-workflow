@@ -57,22 +57,24 @@ describe('verifyProjectPins (gate de awm sync)', () => {
 
     it('match: máquina en la versión pineada → sin failures', async () => {
         const source = makeTaggedRepo(tmpWork, 'src', ['1.0.0']);
-        const { syncRegistry } = require('../../src/core/registry');
-        await syncRegistry(source, { channel: 'stable' }); // queda en v1.0.0
+        const { writeRegistriesConfig, syncRegistries } = require('../../src/core/registries');
+        writeRegistriesConfig([{ name: 'baseline', remote: source }]);
+        await syncRegistries(); // queda en v1.0.0
         const { verifyProjectPins } = require('../../src/core/profile-pins');
-        expect(await verifyProjectPins({ base: '1.0.0' })).toEqual([]);
+        expect(await verifyProjectPins({ baseline: '1.0.0' })).toEqual([]);
     });
 
     it('mismatch: la máquina avanzó más allá del pin → failure con actual y required', async () => {
         const source = makeTaggedRepo(tmpWork, 'src', ['1.0.0']);
-        const { syncRegistry } = require('../../src/core/registry');
-        await syncRegistry(source, { channel: 'stable' });
+        const { writeRegistriesConfig, syncRegistries } = require('../../src/core/registries');
+        writeRegistriesConfig([{ name: 'baseline', remote: source }]);
+        await syncRegistries();
         addRelease(source, '1.1.0');
-        await syncRegistry(source, { channel: 'stable' }); // máquina avanza a v1.1.0
+        await syncRegistries(); // máquina avanza a v1.1.0
 
         const { verifyProjectPins } = require('../../src/core/profile-pins');
-        expect(await verifyProjectPins({ base: '1.0.0' })).toEqual([
-            { name: 'base', required: '1.0.0', actual: '1.1.0', reason: 'mismatch' },
+        expect(await verifyProjectPins({ baseline: '1.0.0' })).toEqual([
+            { name: 'baseline', required: '1.0.0', actual: '1.1.0', reason: 'mismatch' },
         ]);
     });
 
@@ -85,48 +87,54 @@ describe('verifyProjectPins (gate de awm sync)', () => {
 
     it('máquina siguiendo HEAD (sin tag) con pin declarado → mismatch con actual null', async () => {
         const source = makeTaggedRepo(tmpWork, 'src', []);
-        const { syncRegistry } = require('../../src/core/registry');
-        await syncRegistry(source, { channel: 'stable' }); // head-fallback
+        const { writeRegistriesConfig, syncRegistries } = require('../../src/core/registries');
+        writeRegistriesConfig([{ name: 'baseline', remote: source }]);
+        await syncRegistries(); // head-fallback
         const { verifyProjectPins } = require('../../src/core/profile-pins');
-        expect(await verifyProjectPins({ base: '1.0.0' })).toEqual([
-            { name: 'base', required: '1.0.0', actual: null, reason: 'mismatch' },
+        expect(await verifyProjectPins({ baseline: '1.0.0' })).toEqual([
+            { name: 'baseline', required: '1.0.0', actual: null, reason: 'mismatch' },
         ]);
     });
 
     it('pin gate corre aunque extensions esté vacío (B1 regression)', async () => {
-        // Un profile {extensions: [], registries: {base: '1.0.0'}} con la máquina en v1.1.0
+        // Un profile {extensions: [], registries: {baseline: '1.0.0'}} con la máquina en v1.1.0
         // DEBE producir mismatch — el early-exit de extensions no puede bypassear el gate.
         const source = makeTaggedRepo(tmpWork, 'src', ['1.0.0', '1.1.0']);
-        const { syncRegistry } = require('../../src/core/registry');
-        await syncRegistry(source, { channel: 'stable' }); // máquina en v1.1.0
+        const { writeRegistriesConfig, syncRegistries } = require('../../src/core/registries');
+        writeRegistriesConfig([{ name: 'baseline', remote: source }]);
+        await syncRegistries(); // máquina en v1.1.0
         const { verifyProjectPins } = require('../../src/core/profile-pins');
-        const failures = await verifyProjectPins({ base: '1.0.0' });
+        const failures = await verifyProjectPins({ baseline: '1.0.0' });
         expect(failures).toHaveLength(1);
-        expect(failures[0]).toMatchObject({ name: 'base', required: '1.0.0', reason: 'mismatch' });
+        expect(failures[0]).toMatchObject({ name: 'baseline', required: '1.0.0', reason: 'mismatch' });
     });
 
     it('CRITERIO ROADMAP end-to-end: pineado no recibe main hasta bump; rollback funciona', async () => {
         const source = makeTaggedRepo(tmpWork, 'src', ['1.0.0']);
-        const { syncRegistry } = require('../../src/core/registry');
+        const { writeRegistriesConfig, syncRegistries } = require('../../src/core/registries');
+        const { savePreferences, getPreferences } = require('../../src/utils/config');
         const { verifyProjectPins } = require('../../src/core/profile-pins');
-        const versionFile = path.join(tmpHome, '.awm/cli-source/VERSION');
+        const versionFile = path.join(tmpHome, '.awm/registries/baseline/VERSION');
 
         // proyecto pineado a 1.0.0, máquina en 1.0.0 → ok
-        await syncRegistry(source, { channel: 'stable' });
-        expect(await verifyProjectPins({ base: '1.0.0' })).toEqual([]);
+        writeRegistriesConfig([{ name: 'baseline', remote: source }]);
+        await syncRegistries();
+        expect(await verifyProjectPins({ baseline: '1.0.0' })).toEqual([]);
 
         // el remote avanza (release 1.1.0) y la máquina updatea → el proyecto pineado FALLA (no recibe el cambio en silencio)
         addRelease(source, '1.1.0');
-        await syncRegistry(source, { channel: 'stable' });
+        await syncRegistries();
         expect(fs.readFileSync(versionFile, 'utf-8')).toBe('1.1.0');
-        expect((await verifyProjectPins({ base: '1.0.0' }))[0]?.reason).toBe('mismatch');
+        expect((await verifyProjectPins({ baseline: '1.0.0' }))[0]?.reason).toBe('mismatch');
 
         // bump explícito del profile → pasa
-        expect(await verifyProjectPins({ base: '1.1.0' })).toEqual([]);
+        expect(await verifyProjectPins({ baseline: '1.1.0' })).toEqual([]);
 
         // rollback: pin de máquina a 1.0.0 → contenido vuelve y el proyecto pineado a 1.0.0 pasa
-        await syncRegistry(source, { pin: '1.0.0', channel: 'stable' });
+        const prefs = getPreferences();
+        savePreferences({ ...prefs, pins: { baseline: '1.0.0' } });
+        await syncRegistries();
         expect(fs.readFileSync(versionFile, 'utf-8')).toBe('1.0.0');
-        expect(await verifyProjectPins({ base: '1.0.0' })).toEqual([]);
+        expect(await verifyProjectPins({ baseline: '1.0.0' })).toEqual([]);
     });
 });

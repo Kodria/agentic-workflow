@@ -12,7 +12,7 @@ export interface AwmPreferences {
     baseRemote?: string;
     /** Canal de updates: 'stable' (último tag, default si ausente) | 'dev' (HEAD). Opcional — WS-3. */
     channel?: 'stable' | 'dev';
-    /** Pins de versión por registry; clave reservada 'base'. Valores "X.Y.Z" sin prefijo v. Opcional — WS-3. */
+    /** Pins de versión por registry configurado (p.ej. 'baseline'). Valores "X.Y.Z" sin prefijo v. Opcional — WS-3/WS-4. */
     pins?: Record<string, string>;
 }
 
