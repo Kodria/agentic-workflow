@@ -17,7 +17,7 @@ function machineChecks(m: MachineFacts): CheckResult[] {
         out.push({ id: 'machine.cli', level: 'machine', label: 'CLI', status: 'ok', remedy: none });
     } else if (m.registryCache.gitState === 'behind') {
         out.push({ id: 'machine.cli', level: 'machine', label: 'CLI', status: 'warn',
-            detail: 'cache desactualizado', remedy: cmd('awm update') });
+            detail: 'cache out of date', remedy: cmd('awm update') });
     } else {
         // dirty | unknown | undefined → advisory, sin acción
         out.push({ id: 'machine.cli', level: 'machine', label: 'CLI', status: 'warn',
@@ -29,7 +29,7 @@ function machineChecks(m: MachineFacts): CheckResult[] {
         out.push({ id: 'machine.hook', level: 'machine', label: 'hook SessionStart', status: 'ok', remedy: none });
     } else if (m.hook.present) {
         out.push({ id: 'machine.hook', level: 'machine', label: 'hook SessionStart', status: 'warn',
-            detail: 'scripts incompletos', remedy: cmd('awm init') });
+            detail: 'incomplete scripts', remedy: cmd('awm init') });
     } else {
         out.push({ id: 'machine.hook', level: 'machine', label: 'hook SessionStart', status: 'missing',
             remedy: cmd('awm init') });
@@ -40,7 +40,7 @@ function machineChecks(m: MachineFacts): CheckResult[] {
         out.push({ id: 'machine.devCore', level: 'machine', label: 'dev-core (baseline)', status: 'ok', remedy: none });
     } else if (m.devCore.present) {
         out.push({ id: 'machine.devCore', level: 'machine', label: 'dev-core (baseline)', status: 'warn',
-            detail: `${m.devCore.brokenLinks.length} symlinks rotos`, remedy: cmd('awm init') });
+            detail: `${m.devCore.brokenLinks.length} broken symlinks`, remedy: cmd('awm init') });
     } else {
         out.push({ id: 'machine.devCore', level: 'machine', label: 'dev-core (baseline)', status: 'missing',
             remedy: cmd('awm init') });
@@ -49,10 +49,10 @@ function machineChecks(m: MachineFacts): CheckResult[] {
     // machine.globalSkills — integridad de symlinks en ~/.claude/skills (fuera del baseline)
     const brokenGlobal = m.globalSkills.repairable.length + m.globalSkills.dead.length;
     if (brokenGlobal === 0) {
-        out.push({ id: 'machine.globalSkills', level: 'machine', label: 'skills globales', status: 'ok', remedy: none });
+        out.push({ id: 'machine.globalSkills', level: 'machine', label: 'global skills', status: 'ok', remedy: none });
     } else {
-        out.push({ id: 'machine.globalSkills', level: 'machine', label: 'skills globales', status: 'warn',
-            detail: `${brokenGlobal} enlaces rotos`, remedy: cmd('awm init') });
+        out.push({ id: 'machine.globalSkills', level: 'machine', label: 'global skills', status: 'warn',
+            detail: `${brokenGlobal} broken links`, remedy: cmd('awm init') });
     }
 
     // machine.ambient.<b> — una fila por bundle deseado
@@ -65,13 +65,13 @@ function machineChecks(m: MachineFacts): CheckResult[] {
     // machine.context.<agent> — una fila por agente con contexto AWM gestionado
     for (const c of m.contextInjection) {
         if (c.state === 'injected') {
-            out.push({ id: `machine.context.${c.agent}`, level: 'machine', label: `contexto AWM (${c.agent})`,
+            out.push({ id: `machine.context.${c.agent}`, level: 'machine', label: `AWM context (${c.agent})`,
                 status: 'ok', remedy: none });
         } else if (c.state === 'stale') {
-            out.push({ id: `machine.context.${c.agent}`, level: 'machine', label: `contexto AWM (${c.agent})`,
-                status: 'warn', detail: 'contexto desactualizado', remedy: cmd('awm init') });
+            out.push({ id: `machine.context.${c.agent}`, level: 'machine', label: `AWM context (${c.agent})`,
+                status: 'warn', detail: 'context out of date', remedy: cmd('awm init') });
         } else {
-            out.push({ id: `machine.context.${c.agent}`, level: 'machine', label: `contexto AWM (${c.agent})`,
+            out.push({ id: `machine.context.${c.agent}`, level: 'machine', label: `AWM context (${c.agent})`,
                 status: 'missing', remedy: cmd('awm init') });
         }
     }
@@ -84,7 +84,7 @@ function projectChecks(p: ProjectFacts): CheckResult[] {
 
     // project.profile
     if (p.profile.present) {
-        const exts = p.profile.extensions.length ? p.profile.extensions.join(', ') : 'sin extensiones';
+        const exts = p.profile.extensions.length ? p.profile.extensions.join(', ') : 'no extensions';
         out.push({ id: 'project.profile', level: 'project', label: `.awm/profile.json (${exts})`,
             status: 'ok', remedy: none });
     } else {
@@ -95,22 +95,22 @@ function projectChecks(p: ProjectFacts): CheckResult[] {
     // project.activation
     const missingLinks = p.activeBundles.expected.filter((s) => !p.activeBundles.linked.includes(s));
     if (p.activeBundles.broken.length === 0 && missingLinks.length === 0) {
-        out.push({ id: 'project.activation', level: 'project', label: 'bundles activos', status: 'ok', remedy: none });
+        out.push({ id: 'project.activation', level: 'project', label: 'active bundles', status: 'ok', remedy: none });
     } else {
-        out.push({ id: 'project.activation', level: 'project', label: 'bundles activos', status: 'missing',
-            detail: `${missingLinks.length} faltan, ${p.activeBundles.broken.length} rotos`, remedy: cmd('awm sync') });
+        out.push({ id: 'project.activation', level: 'project', label: 'active bundles', status: 'missing',
+            detail: `${missingLinks.length} missing, ${p.activeBundles.broken.length} broken`, remedy: cmd('awm sync') });
     }
 
     // project.sensors
     out.push(p.sensors.present
-        ? { id: 'project.sensors', level: 'project', label: 'sensores', status: 'ok', remedy: none }
-        : { id: 'project.sensors', level: 'project', label: 'sensores no inicializados', status: 'missing',
+        ? { id: 'project.sensors', level: 'project', label: 'sensors', status: 'ok', remedy: none }
+        : { id: 'project.sensors', level: 'project', label: 'sensors not initialized', status: 'missing',
             remedy: cmd('awm sensors init') });
 
     // project.constitution (missing degrada; remedio agente)
     out.push(p.constitution.present
         ? { id: 'project.constitution', level: 'project', label: 'CONSTITUTION.md', status: 'ok', remedy: none }
-        : { id: 'project.constitution', level: 'project', label: 'CONSTITUTION.md ausente', status: 'missing',
+        : { id: 'project.constitution', level: 'project', label: 'CONSTITUTION.md missing', status: 'missing',
             remedy: skillRemedy('project-constitution') });
 
     // project.context (advisory; no degrada)
@@ -118,7 +118,7 @@ function projectChecks(p: ProjectFacts): CheckResult[] {
         out.push({ id: 'project.context', level: 'project', label: p.context.file ?? 'CLAUDE.md',
             status: 'ok', remedy: none });
     } else {
-        out.push({ id: 'project.context', level: 'project', label: 'contexto del agente (CLAUDE.md/AGENTS.md) ausente', status: 'warn',
+        out.push({ id: 'project.context', level: 'project', label: 'agent context (CLAUDE.md/AGENTS.md) missing', status: 'warn',
             remedy: skillRemedy('project-context-init') });
     }
 

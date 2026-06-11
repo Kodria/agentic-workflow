@@ -20,17 +20,17 @@ function report(partial: Partial<CheckReport> = {}): CheckReport {
 describe('renderReport', () => {
     it('renders the machine block with glyphs and remedies', () => {
         const out = renderReport(report());
-        expect(out).toContain('AWM · estado del harness');
-        expect(out).toContain('Máquina (global)');
+        expect(out).toContain('AWM · harness status');
+        expect(out).toContain('Machine (global)');
         expect(out).toContain('✔ CLI v1.0.0');
         expect(out).toContain('✖ hook SessionStart');
         expect(out).toContain('→ awm init');
-        expect(out).toContain('estado: degradado · 1 acciones sugeridas');
+        expect(out).toContain('status: degraded · 1 suggested actions');
     });
 
     it('omits the project block and shows a hint when hasProject is false', () => {
         const out = renderReport(report());
-        expect(out).toContain('(sin proyecto en el cwd)');
+        expect(out).toContain('(no project in cwd)');
         expect(out).not.toContain('Proyecto:');
     });
 
@@ -38,11 +38,11 @@ describe('renderReport', () => {
         const out = renderReport(report({
             results: [
                 { id: 'machine.cli', level: 'machine', label: 'CLI v1.2.0', status: 'warn',
-                    detail: 'cache desactualizado', remedy: { kind: 'command', value: 'awm update' } },
+                    detail: 'cache out of date', remedy: { kind: 'command', value: 'awm update' } },
             ],
         }));
         expect(out).toContain('CLI v1.2.0');
-        expect(out).toContain('(cache desactualizado)');
+        expect(out).toContain('(cache out of date)');
         expect(out).toContain('→ awm update');
     });
 
@@ -55,7 +55,7 @@ describe('renderReport', () => {
                     status: 'missing', remedy: { kind: 'skill', value: 'project-constitution' } },
             ],
         }));
-        expect(out).toContain('Proyecto: belanz');
+        expect(out).toContain('Project: belanz');
         expect(out).toContain('→ skill: project-constitution');
     });
 });

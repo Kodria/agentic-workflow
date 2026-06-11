@@ -25,21 +25,21 @@ function line(r: CheckResult): string {
 
 export function renderReport(report: CheckReport): string {
     const lines: string[] = [];
-    lines.push(pc.bold('AWM · estado del harness'));
+    lines.push(pc.bold('AWM · harness status'));
     lines.push('');
-    lines.push('Máquina (global)');
+    lines.push('Machine (global)');
     for (const r of report.results.filter((x) => x.level === 'machine')) lines.push(line(r));
     lines.push('');
     if (report.hasProject) {
-        lines.push(`Proyecto: ${report.projectName ?? ''}`.trimEnd());
+        lines.push(`Project: ${report.projectName ?? ''}`.trimEnd());
         for (const r of report.results.filter((x) => x.level === 'project')) lines.push(line(r));
     } else {
-        lines.push(pc.dim('(sin proyecto en el cwd)'));
+        lines.push(pc.dim('(no project in cwd)'));
     }
     lines.push('');
     const actions = report.results.filter((r) => r.remedy.kind !== 'none').length;
-    const estado = report.overall === 'healthy' ? pc.green('sano') : pc.red('degradado');
-    lines.push(`estado: ${estado} · ${actions} acciones sugeridas`);
+    const status = report.overall === 'healthy' ? pc.green('healthy') : pc.red('degraded');
+    lines.push(`status: ${status} · ${actions} suggested actions`);
     return lines.join('\n');
 }
 
@@ -53,7 +53,7 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
     try {
         report = runChecks(gatherContext({ cwd: opts.cwd }));
     } catch (err) {
-        process.stderr.write(`awm doctor: error interno: ${(err as Error).message}\n`);
+        process.stderr.write(`awm doctor: internal error: ${(err as Error).message}\n`);
         return 2;
     }
     if (opts.json) {

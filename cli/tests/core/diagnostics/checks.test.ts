@@ -150,7 +150,7 @@ describe('runChecks — project', () => {
         const report = runChecks({ machine: healthyMachine(), project: p });
         const c = report.results.find((r) => r.id === 'project.context')!;
         expect(c.status).toBe('warn');
-        expect(c.label).toBe('contexto del agente (CLAUDE.md/AGENTS.md) ausente');
+        expect(c.label).toBe('agent context (CLAUDE.md/AGENTS.md) missing');
         expect(c.remedy).toEqual({ kind: 'skill', value: 'project-context-init' });
         expect(report.overall).toBe('healthy');
     });
