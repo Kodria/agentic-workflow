@@ -51,7 +51,7 @@ describe('renderReport', () => {
             hasProject: true,
             projectName: 'belanz',
             results: [
-                { id: 'project.constitution', level: 'project', label: 'CONSTITUTION.md ausente',
+                { id: 'project.constitution', level: 'project', label: 'CONSTITUTION.md missing',
                     status: 'missing', remedy: { kind: 'skill', value: 'project-constitution' } },
             ],
         }));
