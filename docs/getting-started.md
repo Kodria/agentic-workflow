@@ -76,6 +76,7 @@ Same spine as Track A, plus two extra moves (steps 6 and 9) because an existing 
 
 - `git`, `node`, `npm` on your `$PATH`.
 - A working directory that is a git repo. If it isn't one yet: `git init`.
+- **macOS or Linux.** Windows is not supported natively (symlinks + Unix paths); use [WSL](https://learn.microsoft.com/en-us/windows/wsl/) instead.
 
 ---
 

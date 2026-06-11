@@ -35,6 +35,16 @@ awm doctor                # read the machine + project state any time
 
 > **First time using AWM?** Read the [Getting Started runbook](docs/getting-started.md) — the from-zero walkthrough for both Claude Code and OpenCode: install → `awm init` → `awm doctor` → finish project setup (sensors + `CONSTITUTION.md` + the learning loop).
 
+## Platform support
+
+AWM supports **macOS and Linux**. **Windows is not supported** at the moment: the
+hook wrapper (`run-hook.cmd`) is a stub, skill installation relies on symlinks
+(which require Developer Mode on Windows), and paths assume a Unix layout.
+
+**Windows users:** use [WSL](https://learn.microsoft.com/en-us/windows/wsl/)
+(Windows Subsystem for Linux) — AWM works normally inside a WSL distribution.
+Native Windows support will be revisited if real demand appears.
+
 ## 📦 Managing Skills and Workflows
 
 AWM comes with an interactive terminal interface.
