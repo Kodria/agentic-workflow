@@ -157,3 +157,12 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
 - **Sensor que lo atrapa:** `lint` (y `typecheck`/`security`) vía `awm sensors run`
   ahora referenciado por el loop de ejecución. Tests: `cli/tests/commands/sensors/baseline.test.ts`
   (regresión de wording-stable + conteo de ocurrencias).
+
+## 2026-06-11 — gate-order-annotation: comentar los gates de CONSTITUTION en el código
+
+- **Class:** agent (proceso)
+- **Occurrences (ledger count):** 1 (win confirmado en WS-3 B1 retro + WS-4 gate explícito)
+- **Rule:** `AGENTS.md` — sección "Patrones de implementación" › `gate-order-annotation`
+- **Sensor:** agents-md (entregado a cada agente vía contexto)
+- **Detalle:** cuando el orden de un bloque de gates está dictado por CONSTITUTION, un comentario inline `// CONSTITUTION: gates de contrato antes de early-exits` hace visible el invariante, previene reordenamientos accidentales y permite a reviewers verificar sin buscar la regla. Derivado del win W2 de WS-4: el handler `awm sync` ya incluye este comentario y fue el único gate-order correcto en toda la sesión. WS-3 tuvo B1 por exactamente este antipatrón (early-exit antes del gate de pins).
+- **Dismissed:** 5 findings (todos cosmetics o ya resueltos durante la sesión: F1 compareSemver NaN — docstring documenta contrato; F2 bySemverAsc duplication — YAGNI; F3 tmpWork muerto — cosmético; F4 non-null en test — no prod; F5 test title — sin impacto comportamental).
