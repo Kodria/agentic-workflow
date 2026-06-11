@@ -347,7 +347,7 @@ program.command('update')
       }
 
       for (const f of verifyMinCliVersions()) {
-          console.warn(pc.yellow(`  ⚠  El registry ${f.name} requiere CLI ≥ ${f.min} (tenés ${cliVersion()}) — corré: npm i -g agentic-workflow-manager`));
+          console.warn(pc.yellow(`  ⚠  Registry ${f.name} requires CLI ≥ ${f.min} (you have ${cliVersion()}) — run: npm i -g agentic-workflow-manager`));
       }
 
       try {
@@ -375,7 +375,7 @@ program.command('update')
 
       await offerSelfUpdate();   // capa 2 — Task 13
 
-      outro('✅ Registries, skills y hooks actualizados.');
+      outro('✅ Registries, skills and hooks updated.');
   });
 
 program.command('sync')
@@ -411,8 +411,8 @@ program.command('sync')
       const cliFailures = verifyMinCliVersions();
       if (cliFailures.length > 0) {
           for (const f of cliFailures) {
-              console.error(pc.red(`El registry ${f.name} requiere CLI ≥ ${f.min} (tenés ${cliVersion()}).`));
-              console.error(pc.red('  Corré: npm i -g agentic-workflow-manager'));
+              console.error(pc.red(`Registry ${f.name} requires CLI ≥ ${f.min} (you have ${cliVersion()}).`));
+              console.error(pc.red('  Run: npm i -g agentic-workflow-manager'));
           }
           process.exit(1);
       }
@@ -433,8 +433,8 @@ program.command('sync')
                           console.error(pc.red(`The registry "${f.name}" is not configured on this machine. Run: awm registry add <remote>`));
                       }
                   } else {
-                      console.error(pc.red(`La máquina tiene ${f.name} @ ${f.actual ? `v${f.actual}` : 'HEAD (sin tag)'} pero el proyecto requiere v${f.required}.`));
-                      console.error(pc.red(`  Corré: awm pin ${f.name} ${f.required} && awm update`));
+                      console.error(pc.red(`This machine has ${f.name} @ ${f.actual ? `v${f.actual}` : 'HEAD (no tag)'} but the project requires v${f.required}.`));
+                      console.error(pc.red(`  Run: awm pin ${f.name} ${f.required} && awm update`));
                   }
               }
               process.exit(1);

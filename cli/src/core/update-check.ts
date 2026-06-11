@@ -64,7 +64,7 @@ export function maybeNotifyUpdate(opts?: { now?: number; spawnWorker?: () => voi
     const spawnWorker = opts?.spawnWorker ?? spawnRefreshWorker;
     const cache = readUpdateCache();
     if (cache?.latest && compareSemver(cache.latest, cliVersion()) > 0) {
-        console.log(pc.dim(`\n⬆ awm v${cache.latest} disponible → npm i -g ${CLI_PACKAGE_NAME}`));
+        console.log(pc.dim(`\n⬆ awm v${cache.latest} available → npm i -g ${CLI_PACKAGE_NAME}`));
     }
     if (!cache || now - cache.lastCheck > TTL_MS) spawnWorker();
 }
@@ -89,17 +89,17 @@ export async function offerSelfUpdate(deps: SelfUpdateDeps = {}): Promise<void> 
         const r = await confirm({ message });
         return !isCancel(r) && r === true;
     });
-    const yes = await confirmImpl(`¿Actualizar awm v${current} → v${latest} ahora?`);
+    const yes = await confirmImpl(`Update awm v${current} → v${latest} now?`);
     if (!yes) {
-        console.log(pc.dim(`  Para actualizar después: npm i -g ${CLI_PACKAGE_NAME}`));
+        console.log(pc.dim(`  To update later: npm i -g ${CLI_PACKAGE_NAME}`));
         return;
     }
     const runner = deps.runner ?? ((cmd: string, args: string[]) =>
         spawnSync(cmd, args, { stdio: 'inherit', shell: true }));
     const r = runner('npm', ['i', '-g', `${CLI_PACKAGE_NAME}@latest`]);
     if (r.status === 0) {
-        console.log(pc.green(`  ✓ CLI actualizado a v${latest} (aplica desde el próximo comando)`));
+        console.log(pc.green(`  ✓ CLI updated to v${latest} (takes effect from the next command)`));
     } else {
-        console.warn(pc.yellow(`  ⚠  No se pudo actualizar automáticamente — corré: npm i -g ${CLI_PACKAGE_NAME}`));
+        console.warn(pc.yellow(`  ⚠  Automatic update failed — run: npm i -g ${CLI_PACKAGE_NAME}`));
     }
 }
