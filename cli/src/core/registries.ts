@@ -82,6 +82,15 @@ export function contentRoots(): string[] {
     return roots;
 }
 
+/** Primer content root configurado (en orden de registries.json) que contiene el
+ *  directorio pedido ('hooks', 'sensor-packs', 'skills'…). null si ninguno. */
+export function capabilityRoot(dirName: string): string | null {
+    for (const root of contentRoots()) {
+        if (fs.existsSync(path.join(root, dirName))) return root;
+    }
+    return null;
+}
+
 /** Un registry válido tiene ≥1 dir de contenido en su raíz. */
 export function validateRegistryLayout(root: string): boolean {
     return CONTENT_DIR_NAMES.some((d) => fs.existsSync(path.join(root, d)));
