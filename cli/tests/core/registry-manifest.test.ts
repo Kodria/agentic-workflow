@@ -85,4 +85,27 @@ describe('registry manifest (awm-registry.json)', () => {
         expect(m.registryNameForPath(regPath)).toBe('team-acme');
         expect(m.registryNameForPath('/somewhere/else')).toBeNull();
     });
+
+    // minCliVersion tests (WS-4)
+    function writeManifest(data: Record<string, unknown>) {
+        fs.writeFileSync(path.join(tmpWork, 'awm-registry.json'), JSON.stringify(data));
+    }
+
+    it('minCliVersion válido se expone normalizado (acepta prefijo v)', () => {
+        writeManifest({ minCliVersion: 'v2.1.0' });
+        const { readRegistryManifest } = load();
+        expect(readRegistryManifest(tmpWork).minCliVersion).toBe('2.1.0');
+    });
+
+    it('minCliVersion ausente → undefined', () => {
+        writeManifest({ overrides: [] });
+        const { readRegistryManifest } = load();
+        expect(readRegistryManifest(tmpWork).minCliVersion).toBeUndefined();
+    });
+
+    it.each([['banana'], ['2.1'], [2], [null]])('minCliVersion malformado %p → error explícito', (bad) => {
+        writeManifest({ minCliVersion: bad });
+        const { readRegistryManifest } = load();
+        expect(() => readRegistryManifest(tmpWork)).toThrow(/minCliVersion/);
+    });
 });

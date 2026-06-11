@@ -136,6 +136,8 @@ export const REGISTRY_MANIFEST_NAME = 'awm-registry.json';
 export interface RegistryManifest {
     /** Nombres de artifacts que este registry puede sobreescribir de roots anteriores. */
     overrides: Set<string>;
+    /** Versión mínima del CLI requerida por el contenido ("X.Y.Z", sin prefijo v). Opcional — WS-4. */
+    minCliVersion?: string;
 }
 
 export function readRegistryManifest(root: string): RegistryManifest {
@@ -158,7 +160,15 @@ export function readRegistryManifest(root: string): RegistryManifest {
             throw new Error(`Invalid registry manifest at ${file}: override name "${name}" (path traversal)`);
         }
     }
-    return { overrides: new Set(overrides as string[]) };
+    let minCliVersion: string | undefined;
+    const rawMin = (raw as Record<string, unknown>)?.minCliVersion;
+    if (rawMin !== undefined) {
+        if (typeof rawMin !== 'string' || !/^v?\d+\.\d+\.\d+$/.test(rawMin)) {
+            throw new Error(`Invalid registry manifest at ${file}: "minCliVersion" must be "X.Y.Z", got ${JSON.stringify(rawMin)}`);
+        }
+        minCliVersion = rawMin.replace(/^v/, '');
+    }
+    return { overrides: new Set(overrides as string[]), minCliVersion };
 }
 
 /** Nombre del registry dueño de un path: 'base' para el content root base,
