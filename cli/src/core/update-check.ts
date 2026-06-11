@@ -39,7 +39,7 @@ export function writeUpdateCache(c: UpdateCache): void {
 export async function fetchLatestVersion(fetchImpl: typeof fetch = fetch): Promise<string | null> {
     try {
         const ctl = new AbortController();
-        const t = setTimeout(() => ctl.abort(), 2000);
+        const t = setTimeout(() => ctl.abort(), 2000).unref();
         const res = await fetchImpl(REGISTRY_URL, { signal: ctl.signal });
         clearTimeout(t);
         if (!res.ok) return null;
