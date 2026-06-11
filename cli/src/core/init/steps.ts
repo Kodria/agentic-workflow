@@ -234,7 +234,7 @@ export function stepSensors(d: InitDeps): StepResult {
     if (!proj) return ok('project.sensors', 'project', 'skipped', 'no project');
     if (proj.sensors.present) return ok('project.sensors', 'project', 'skipped');
 
-    d.actions.initSensors({ cwd: proj.root, registryRoot: d.contentDir, configure: true });
+    d.actions.initSensors({ cwd: proj.root, registryRoot: d.sensorPacksRoot, configure: true });
     return ok('project.sensors', 'project', 'applied');
 }
 

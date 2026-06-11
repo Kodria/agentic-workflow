@@ -93,4 +93,14 @@ describe('update-check', () => {
         expect(warn.mock.calls.flat().join('\n')).toContain('npm i -g agentic-workflow-manager');
         warn.mockRestore();
     });
+
+    it('offerSelfUpdate escribe cache cuando ya está actualizado (TTL reset)', async () => {
+        const m = require('../../src/core/update-check');
+        const fakeFetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ version: '2.0.0' }) });
+        await m.offerSelfUpdate({ current: '2.0.0', fetchImpl: fakeFetch });
+        const cache = m.readUpdateCache();
+        expect(cache).not.toBeNull();
+        expect(cache.latest).toBe('2.0.0');
+        expect(cache.lastCheck).toBeGreaterThan(0);
+    });
 });

@@ -32,7 +32,7 @@ import { verifyProjectPins } from './core/profile-pins';
 import { maybeNotifyUpdate, offerSelfUpdate } from './core/update-check';
 
 const program = new Command();
-program.name('awm').description('Agentic Workflow Manager').version('1.0.0');
+program.name('awm').description('Agentic Workflow Manager').version(cliVersion());
 
 program.hook('postAction', () => {
     try { maybeNotifyUpdate(); } catch { /* el aviso nunca rompe un comando */ }

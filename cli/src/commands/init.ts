@@ -102,6 +102,7 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
             installMethod: 'symlink',
             registryRoot: capabilityRoot('hooks') ?? '',
             contentDir: contentRoots()[0] ?? '',
+            sensorPacksRoot: capabilityRoot('sensor-packs') ?? '',
             confirmExtensions,
             actions: mergedActions,
         });

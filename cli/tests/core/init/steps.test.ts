@@ -63,7 +63,7 @@ function deps(ctx: HarnessContext, actions: InitActions, over: Partial<InitDeps>
     return {
         cwd: '/repo', ctx, bundles: [bundle('dev', 'baseline', ['brainstorming'])],
         agent: 'claude-code', installMethod: 'symlink',
-        registryRoot: '/cache', contentDir: '/cache/registry',
+        registryRoot: '/cache', contentDir: '/cache/registry', sensorPacksRoot: '/cache/registry',
         confirmExtensions: async (p) => p, actions, ...over,
     };
 }
@@ -250,7 +250,7 @@ describe('stepSensors', () => {
         const a = spies();
         const r = stepSensors(deps({ machine: machine(), project: project({ sensors: { present: false } }) }, a));
         expect(r.action).toBe('applied');
-        expect(a.initSensors).toHaveBeenCalledWith({ cwd: '/repo', registryRoot: '/cache/registry', configure: true });
+        expect(a.initSensors).toHaveBeenCalledWith({ cwd: '/repo', registryRoot: '/cache/registry', configure: true }); // sensorPacksRoot='/cache/registry' from deps()
     });
 });
 
