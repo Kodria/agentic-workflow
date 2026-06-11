@@ -41,7 +41,7 @@ describe('renderInitOutcome', () => {
         expect(out).toContain('machine.cache');
         expect(out).toContain('skill: project-constitution');
         expect(out).toContain('Estado final');
-        expect(out).toContain('AWM · estado del harness'); // viene de renderReport
+        expect(out).toContain('AWM · harness status'); // viene de renderReport
         expect(out).toContain('1 pasos requieren un agente');
     });
 });
