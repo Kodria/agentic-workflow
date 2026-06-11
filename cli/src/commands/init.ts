@@ -1,11 +1,11 @@
 // src/commands/init.ts
+import fs from 'fs';
 import { Command } from 'commander';
 import pc from 'picocolors';
 import { renderReport } from './doctor';
 import { gatherContext } from '../core/diagnostics/context';
 import { discoverAllBundles } from '../core/bundles';
-import { REGISTRY_DIR } from '../core/registry';
-import { contentRoots } from '../core/registries';
+import { contentRoots, listRegistries, seedBaselineRegistry, capabilityRoot } from '../core/registries';
 import { runInitSteps } from '../core/init/orchestrator';
 import { defaultActions } from '../core/init/steps';
 import type { InitOutcome, InitActions, StepResult } from '../core/init/types';
@@ -74,6 +74,16 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
 
     let outcome: InitOutcome;
     try {
+        const mergedActions: InitActions = {
+            ...defaultActions,
+            ...(opts.actions ?? {}),
+        };
+
+        seedBaselineRegistry();
+        if (listRegistries().some((r) => !fs.existsSync(r.contentRoot))) {
+            await mergedActions.syncCache();
+        }
+
         const bundles = discoverAllBundles();
         const ctx = gatherContext({ cwd, bundles, agent });
 
@@ -81,11 +91,6 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
         const effectiveCtx = opts.machineOnly
             ? { ...ctx, project: null }
             : ctx;
-
-        const mergedActions: InitActions = {
-            ...defaultActions,
-            ...(opts.actions ?? {}),
-        };
 
         const confirmExtensions = makeConfirmExtensions(!!opts.yes);
 
@@ -95,7 +100,7 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
             bundles,
             agent,
             installMethod: 'symlink',
-            registryRoot: REGISTRY_DIR,
+            registryRoot: capabilityRoot('hooks') ?? '',
             contentDir: contentRoots()[0] ?? '',
             confirmExtensions,
             actions: mergedActions,
