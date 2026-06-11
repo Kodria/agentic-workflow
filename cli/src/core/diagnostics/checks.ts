@@ -8,21 +8,20 @@ const none: Remedy = { kind: 'none' };
 
 function machineChecks(m: MachineFacts): CheckResult[] {
     const out: CheckResult[] = [];
-    const version = m.cliSource.version ?? '?';
 
     // machine.cli
-    if (!m.cliSource.present) {
+    if (!m.registryCache.present) {
         out.push({ id: 'machine.cli', level: 'machine', label: 'CLI', status: 'missing',
-            detail: 'cache ~/.awm/cli-source ausente', remedy: cmd('awm init') });
-    } else if (m.cliSource.gitState === 'clean') {
-        out.push({ id: 'machine.cli', level: 'machine', label: `CLI v${version}`, status: 'ok', remedy: none });
-    } else if (m.cliSource.gitState === 'behind') {
-        out.push({ id: 'machine.cli', level: 'machine', label: `CLI v${version}`, status: 'warn',
+            detail: 'registry cache missing — run awm update', remedy: cmd('awm init') });
+    } else if (m.registryCache.gitState === 'clean') {
+        out.push({ id: 'machine.cli', level: 'machine', label: 'CLI', status: 'ok', remedy: none });
+    } else if (m.registryCache.gitState === 'behind') {
+        out.push({ id: 'machine.cli', level: 'machine', label: 'CLI', status: 'warn',
             detail: 'cache desactualizado', remedy: cmd('awm update') });
     } else {
         // dirty | unknown | undefined → advisory, sin acción
-        out.push({ id: 'machine.cli', level: 'machine', label: `CLI v${version}`, status: 'warn',
-            detail: `git ${m.cliSource.gitState ?? 'unknown'}`, remedy: none });
+        out.push({ id: 'machine.cli', level: 'machine', label: 'CLI', status: 'warn',
+            detail: `git ${m.registryCache.gitState ?? 'unknown'}`, remedy: none });
     }
 
     // machine.hook

@@ -27,12 +27,8 @@ function seedRegistry(contentRoot: string) {
         skills: [{ name: 'brainstorming' }, { name: 'using-awm' }], workflows: [], agents: [],
     }));
 
-    // Mantener cli-source/.git para que gatherMachine.cliSource.present sea true
-    // (Task 9 eliminará este check; mientras tanto lo sembramos igual).
-    const cliSource = path.join(path.dirname(path.dirname(contentRoot)), 'cli-source');
-    fs.mkdirSync(path.join(cliSource, '.git'), { recursive: true });
-    fs.mkdirSync(path.join(cliSource, 'cli'), { recursive: true });
-    fs.writeFileSync(path.join(cliSource, 'cli', 'package.json'), JSON.stringify({ version: '1.0.0' }));
+    // Seed .git in the content root so gatherMachine.registryCache.present is true.
+    fs.mkdirSync(path.join(contentRoot, '.git'), { recursive: true });
 }
 
 describe('runInitSteps — orchestrator', () => {

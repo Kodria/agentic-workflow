@@ -22,7 +22,7 @@ export interface CheckResult {
 }
 
 export interface MachineFacts {
-    cliSource: { present: boolean; version?: string; gitState?: GitState };
+    registryCache: { present: boolean; gitState?: GitState };
     hook: { present: boolean; degraded?: boolean };
     devCore: { present: boolean; brokenLinks: string[] };
     ambient: { wanted: string[]; installed: string[] };

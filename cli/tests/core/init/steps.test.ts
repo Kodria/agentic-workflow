@@ -21,7 +21,7 @@ function bundle(name: string, scope: BundleDefinition['scope'], skills: string[]
 
 function machine(): HarnessContext['machine'] {
     return {
-        cliSource: { present: true, version: '1.0.0', gitState: 'clean' },
+        registryCache: { present: true, gitState: 'clean' },
         hook: { present: true, degraded: false },
         devCore: { present: true, brokenLinks: [] },
         ambient: { wanted: [], installed: [] },
@@ -75,22 +75,22 @@ describe('stepCache', () => {
         expect(r.action).toBe('skipped');
         expect(a.syncCache).not.toHaveBeenCalled();
     });
-    it('syncs when cli absent', async () => {
+    it('syncs when registry cache absent', async () => {
         const a = spies();
-        const m = machine(); m.cliSource = { present: false };
+        const m = machine(); m.registryCache = { present: false };
         const r = await stepCache(deps({ machine: m, project: null }, a));
         expect(r.action).toBe('applied');
         expect(a.syncCache).toHaveBeenCalled();
     });
-    it('syncs when cli behind', async () => {
+    it('syncs when registry cache behind', async () => {
         const a = spies();
-        const m = machine(); m.cliSource = { present: true, gitState: 'behind' };
+        const m = machine(); m.registryCache = { present: true, gitState: 'behind' };
         expect((await stepCache(deps({ machine: m, project: null }, a))).action).toBe('applied');
     });
     it('reports failed when syncCache throws (does not throw)', async () => {
         const a = spies();
         a.syncCache = jest.fn(async () => { throw new Error('net down'); });
-        const m = machine(); m.cliSource = { present: false };
+        const m = machine(); m.registryCache = { present: false };
         const r = await stepCache(deps({ machine: m, project: null }, a));
         expect(r.action).toBe('failed');
         expect(r.error).toContain('net down');

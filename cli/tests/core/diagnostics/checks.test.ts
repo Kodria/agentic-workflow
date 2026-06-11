@@ -5,7 +5,7 @@ import { InjectionState } from '../../../src/core/context/types';
 
 function healthyMachine(): HarnessContext['machine'] {
     return {
-        cliSource: { present: true, version: '1.0.0', gitState: 'clean' },
+        registryCache: { present: true, gitState: 'clean' },
         hook: { present: true, degraded: false },
         devCore: { present: true, brokenLinks: [] },
         ambient: { wanted: [], installed: [] },
@@ -52,35 +52,35 @@ describe('runChecks — overall', () => {
 
     it('does NOT degrade on warn-only states', () => {
         const m = healthyMachine();
-        m.cliSource.gitState = 'behind'; // warn
+        m.registryCache.gitState = 'behind'; // warn
         expect(runChecks({ machine: m, project: null }).overall).toBe('healthy');
     });
 });
 
 describe('runChecks — machine.cli', () => {
-    it('ok + version label when cache clean', () => {
+    it('ok when cache clean', () => {
         const c = byId({ machine: healthyMachine(), project: null }, 'machine.cli');
         expect(c.status).toBe('ok');
-        expect(c.label).toBe('CLI v1.0.0');
+        expect(c.label).toBe('CLI');
         expect(c.remedy).toEqual({ kind: 'none' });
     });
 
     it('warn → awm update when behind', () => {
-        const m = healthyMachine(); m.cliSource.gitState = 'behind';
+        const m = healthyMachine(); m.registryCache.gitState = 'behind';
         const c = byId({ machine: m, project: null }, 'machine.cli');
         expect(c.status).toBe('warn');
         expect(c.remedy).toEqual({ kind: 'command', value: 'awm update' });
     });
 
     it('warn + no action when dirty/unknown', () => {
-        const m = healthyMachine(); m.cliSource.gitState = 'dirty';
+        const m = healthyMachine(); m.registryCache.gitState = 'dirty';
         const c = byId({ machine: m, project: null }, 'machine.cli');
         expect(c.status).toBe('warn');
         expect(c.remedy).toEqual({ kind: 'none' });
     });
 
     it('missing → awm init when cache absent', () => {
-        const m = healthyMachine(); m.cliSource = { present: false };
+        const m = healthyMachine(); m.registryCache = { present: false };
         const c = byId({ machine: m, project: null }, 'machine.cli');
         expect(c.status).toBe('missing');
         expect(c.remedy).toEqual({ kind: 'command', value: 'awm init' });
@@ -175,7 +175,7 @@ describe('machineChecks — global skill integrity', () => {
     function machineCtx(globalSkills: { valid: string[]; repairable: string[]; dead: string[] }): HarnessContext {
         return {
             machine: {
-                cliSource: { present: true, version: '1.0.0', gitState: 'clean' },
+                registryCache: { present: true, gitState: 'clean' },
                 hook: { present: true, degraded: false },
                 devCore: { present: true, brokenLinks: [] },
                 ambient: { wanted: [], installed: [] },

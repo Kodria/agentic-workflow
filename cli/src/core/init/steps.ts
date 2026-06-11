@@ -90,8 +90,8 @@ function failed(id: string, level: StepResult['level'], error: string): StepResu
 
 /** Step 1 – Sync the registry cache (clone / pull). */
 export async function stepCache(d: InitDeps): Promise<StepResult> {
-    const { cliSource } = d.ctx.machine;
-    const needsSync = !cliSource.present || cliSource.gitState === 'behind';
+    const { registryCache } = d.ctx.machine;
+    const needsSync = !registryCache.present || registryCache.gitState === 'behind';
     if (!needsSync) return ok('machine.cache', 'machine', 'skipped');
 
     try {

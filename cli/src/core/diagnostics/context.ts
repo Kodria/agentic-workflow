@@ -5,14 +5,13 @@ import path from 'path';
 import { execSync } from 'child_process';
 import { HarnessContext, MachineFacts, ProjectFacts, GitState } from './types';
 import { PROVIDERS, AgentTarget } from '../../providers';
-import { capabilityRoot } from '../registries';
+import { capabilityRoot, listRegistries, contentRoots } from '../registries';
 import { InjectionOrchestrator } from '../context/orchestrator';
 import { InjectionState } from '../context/types';
 import { computeHookStatus } from '../../commands/hooks/status';
 import { findProjectRoot, readProfile } from '../profile';
 import { discoverAllBundles, resolveBundleSkills, BundleDefinition } from '../bundles';
 import { classifyGlobalSkills } from '../skill-integrity';
-import { contentRoots } from '../registries';
 
 function home(): string { return process.env.HOME || os.homedir(); }
 function awmHome(): string { return process.env.AWM_HOME || path.join(home(), '.awm'); }
@@ -81,18 +80,11 @@ function gatherContextInjection(): { agent: AgentTarget; state: InjectionState }
 }
 
 function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude-code'): MachineFacts {
-    // cliSource
-    const cacheDir = path.join(awmHome(), 'cli-source');
-    const cliPresent = fs.existsSync(path.join(cacheDir, '.git'));
-    let version: string | undefined;
-    let gitState: GitState | undefined;
-    if (cliPresent) {
-        try {
-            const pkg = JSON.parse(fs.readFileSync(path.join(cacheDir, 'cli', 'package.json'), 'utf-8'));
-            version = typeof pkg.version === 'string' ? pkg.version : undefined;
-        } catch { /* deja version undefined */ }
-        gitState = detectGitState(cacheDir);
-    }
+    // registryCache: estado del primer registry configurado (baseline en una máquina sembrada)
+    const regs = listRegistries();
+    const first = regs[0];
+    const cachePresent = !!first && fs.existsSync(path.join(first.contentRoot, '.git'));
+    const gitState = cachePresent ? detectGitState(first.contentRoot) : undefined;
 
     // hook (reutiliza computeHookStatus)
     let hookPresent = false;
@@ -132,7 +124,7 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
     });
 
     return {
-        cliSource: { present: cliPresent, version, gitState },
+        registryCache: { present: cachePresent, gitState },
         hook: { present: hookPresent, degraded: hookDegraded },
         devCore: { present: devCorePresent, brokenLinks },
         ambient: { wanted, installed },

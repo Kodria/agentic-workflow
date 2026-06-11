@@ -43,7 +43,7 @@ describe('gatherContext', () => {
     it('machine: cli/hook/devCore absent on a bare HOME', () => {
         const { gatherContext } = require('../../../src/core/diagnostics/context');
         const ctx = gatherContext({ cwd: tmpHome, bundles: [bundle('dev-core', 'baseline', ['brainstorming'])] });
-        expect(ctx.machine.cliSource.present).toBe(false);
+        expect(ctx.machine.registryCache.present).toBe(false);
         expect(ctx.machine.hook.present).toBe(false);
         expect(ctx.machine.devCore.present).toBe(false);
         expect(ctx.machine.ambient.wanted).toEqual([]);
