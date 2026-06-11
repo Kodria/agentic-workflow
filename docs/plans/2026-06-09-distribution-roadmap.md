@@ -117,7 +117,7 @@ No es código primero: son tres decisiones que hay que tomar y registrar (y reci
 - [x] **F-10 Idioma → en-first distribuible.** Todo lo que un equipo consume (docs de usuario, contenido de registries, mensajes del CLI) se normaliza a inglés. Lo interno del repo (plans, retros, CLAUDE.md, CONSTITUTION) sigue en español. Trabajo derivado: normalizar ~34 mensajes de consola en `cli/src` (+~4 asserts de tests); los skills en español del baseline se normalizan en `awm-baseline-registry` — y ese release sirve como caso real de verificación del ciclo de equipo en WS-5.
 - [x] **F-9 Mutation testing → off por defecto, opt-in documentado.** Stryker sigue `enabled: false` (lento/ruidoso como gate); se documenta en `docs/registry-guide.md` cómo habilitarlo por proyecto para paths críticos. Sin cambio en el pack.
 - [x] **F-11 Windows → no soportado por ahora, documentado.** Se declara explícitamente en README/getting-started con WSL como vía recomendada. Nota registrada: si AWM apunta a extensibilidad amplia, el soporte Windows deberá activarse — queda como diferido con trigger de demanda, igual que WS-6.
-- [ ] Ejecución de lo derivado (docs F-9/F-11 + normalización en de mensajes del CLI) + QA → `awm-qa-complete`
+- [ ] Ejecución de lo derivado (docs F-9/F-11 + normalización a inglés de los mensajes del CLI) + QA → `awm-qa-complete`
 
 ---
 
