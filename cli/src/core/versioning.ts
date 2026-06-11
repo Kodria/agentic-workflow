@@ -109,3 +109,10 @@ export function machineVersionOpts(registryName: string): { pin?: string; channe
         return { pin: undefined, channel: 'stable' };
     }
 }
+
+/** Compara "X.Y.Z" vs "X.Y.Z" (sin prefijo v) numéricamente. <0, 0, >0. */
+export function compareSemver(a: string, b: string): number {
+    const pa = a.split('.').map(Number);
+    const pb = b.split('.').map(Number);
+    return (pa[0] - pb[0]) || (pa[1] - pb[1]) || (pa[2] - pb[2]);
+}
