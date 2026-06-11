@@ -10,6 +10,8 @@ Lecciones y patrones confirmados en este repo. Todo agente que trabaje aquí deb
 
 - **module-level env vars:** las constantes derivadas de `process.env` (como `AWM_HOME`) se evalúan al momento del `require`. Al crear un módulo con este patrón, agregar el comentario `// Evaluated at require-time — tests must use jest.resetModules() + late require() to pick up env overrides.` para que futuros implementadores de tests no lo descubran a las malas.
 
+- **tdd-first-i18n:** para migraciones de strings (i18n, rebranding, renombrado de labels), actualizar primero los asserts de tests al nuevo valor → verificar que fallen (red) → traducir la fuente (green). Esto garantiza que no quedan asserts huérfanos silenciados y que cualquier string omitido en el sweep rompe el build en vez de pasar desapercibido. Confirmado en WS-7 F-10 (~40 strings CLI en→es): el ciclo red→green detectó un cascade en `init.test.ts` que un sweep directo habría silenciado.
+
 ## Patrones de diseño de API
 
 - **default-arg-seam:** en funciones multi-root (`discoverSkills`, `discoverAllBundles`, etc.), pasar `roots = contentRoots()` como parámetro default en vez de llamar `contentRoots()` en el cuerpo. Esto da compatibilidad hacia atrás en todos los call-sites existentes (sin cambios) y permite inyectar roots en tests sin tocar `~/.awm`. Patrón listo para ser enriquecido por WS-2 sin modificar consumidores.
