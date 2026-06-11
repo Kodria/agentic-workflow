@@ -1,27 +1,46 @@
 # Registry Contributor Guide
 
-The value of the AWM comes from the centralized Registry: A unified location where developers can write `SKILL.md` operating procedures and workflows, and instantly distribute them across a team.
+The value of AWM comes from its registries: git repos that hold `SKILL.md` operating procedures, bundles, sensor-packs, and hooks that can be distributed across a team.
 
-This guide explains how to define and add artifacts to the AWM core `registry/`.
+AWM ships with two default registries (both public):
 
-All PRs contributing new organizational practices should focus on adding folders/files to the `registry/skills/` and `registry/workflows/` directories.
+- [`awm-baseline-registry`](https://github.com/Kodria/awm-baseline-registry) — the baseline skill pack seeded by default on `awm init`
+- [`awm-documentation-registry`](https://github.com/Kodria/awm-documentation-registry) — documentation-focused skills (opt-in)
+
+To contribute content, open a PR in the relevant registry repo. This CLI repo (`agentic-workflow-manager`) does **not** contain content — it only contains the CLI tool.
 
 ---
 
-## 🏗 Anatomy of a Skill
+## Registry layout
 
-A Skill is a specialized set of instructions and tools that extends an AI Agent's capabilities for specialized engineering tasks.
+A registry repo follows this directory structure:
 
-To add a new skill to the registry, create a new folder under `registry/skills/[your-skill-name]/`.
+```
+skills/
+  <skill-name>/
+    SKILL.md          # required
+    scripts/          # optional helper scripts
+    examples/         # optional implementation references
+bundles/
+  <bundle-name>.json  # bundle manifest
+sensor-packs/
+  <pack-name>/        # eslint/semgrep configs
+hooks/                # agent hook files
+catalog.json          # registry manifest (name, minCliVersion, etc.)
+```
 
-Inside that folder, you must define:
+---
+
+## Anatomy of a Skill
+
+A Skill is a specialized set of instructions that extends an AI Agent's capabilities for a specific engineering task.
+
+Create a new folder under `skills/[your-skill-name]/` and define:
 - `SKILL.md` (Required): The primary instruction document.
 - `scripts/` (Optional): Helper scripts for data gathering or validation.
 - `examples/` (Optional): Implementation references to ground the LLM's context.
 
 ### The `SKILL.md` File
-
-This document must use Markdown and include a YAML frontmatter block at the top containing a clear `name` and `description`.
 
 ```yaml
 ---
@@ -33,21 +52,18 @@ description: [Short definition (1-3 sentences) explaining WHEN the agent should 
 
 Detailed Markdown instructions. Use `<HARD-GATE>` XML tags or code blocks to enforce strict rules on the Agent.
 ```
+
 *(When a user runs `awm list`, the CLI parses this YAML frontmatter to display the skill's description).*
 
 ---
 
-## 🛠 Anatomy of a Workflow
+## Anatomy of a Workflow
 
-A Workflow is a well-defined sequence of steps to achieve a specific outcome, meant to be triggered interactively by the user (unlike Skills which the Agent chooses autonomously).
+A Workflow is a well-defined sequence of steps to achieve a specific outcome, triggered interactively by the user.
 
-To add a new workflow, create a single Markdown file under `registry/workflows/[your-workflow-name].md`.
+Create a single Markdown file under `skills/workflows/[your-workflow-name].md`.
 
-The name of the file (`your-workflow-name`) will become the `/slash-command` used to invoke it in IDEs like Antigravity.
-
-### Workflow File Requirements
-
-Like skills, a workflow needs a YAML frontmatter `description` block. The rest of the file should contain a step-by-step numbered guide.
+The name of the file becomes the `/slash-command` used to invoke it in IDEs like Antigravity.
 
 ```yaml
 ---
@@ -63,28 +79,30 @@ description: [Short title describing what this workflow achieves]
 
 ---
 
-## 📦 Defining Processes (Bundling)
+## Defining Bundles
 
-Instead of forcing users to install 5 separate skills for a single context domain, AWM supports "Processes" — logically bundled collections of features.
+Instead of forcing users to install multiple skills individually, AWM supports bundles — collections of artifacts installed together.
 
-To define a Process, open the `registry/processes.json` file.
-
-Add a new key-value entry mapped to your domain:
+Create a JSON file under `bundles/[bundle-name].json`:
 
 ```json
 {
-  "processes": [
-    {
-      "name": "domain-docs",
-      "description": "Essential skills required for documenting domain service architectures.",
-      "artifacts": [
-        { "type": "skill", "name": "documenting-modules" },
-        { "type": "skill", "name": "business-documenting-modules" },
-        { "type": "workflow", "name": "docs-system-orchestrator.md" }
-      ]
-    }
+  "name": "domain-docs",
+  "description": "Essential skills required for documenting domain service architectures.",
+  "artifacts": [
+    { "type": "skill", "name": "documenting-modules" },
+    { "type": "skill", "name": "business-documenting-modules" }
   ]
 }
 ```
 
-A user can now run `awm add domain-docs`, and the CLI will silently install all 3 artifacts via Symlink in a single execution.
+A user can then run `awm add domain-docs` to install all artifacts in one pass.
+
+---
+
+## Publishing a new registry version
+
+1. Edit content in the registry repo.
+2. Commit and push.
+3. Create a semver tag: `git -c tag.gpgSign=false tag vX.Y.Z && git push --tags`
+4. Users pick up the update with `awm update`.

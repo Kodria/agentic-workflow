@@ -215,7 +215,37 @@ describe('runSensors — not_certified + auto-discovery', () => {
 });
 
 describe('reconcilePack', () => {
-    const REPO_REGISTRY = path.resolve(__dirname, '../../../../registry');
+    // Build a minimal fake registry in a tmpdir (registry/ no longer lives in this repo —
+    // content lives in awm-baseline-registry / awm-documentation-registry).
+    let FAKE_REGISTRY: string;
+
+    beforeAll(() => {
+        FAKE_REGISTRY = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-fake-reg-'));
+        const jstsPackDir = path.join(FAKE_REGISTRY, 'sensor-packs', 'js-ts');
+        const genericPackDir = path.join(FAKE_REGISTRY, 'sensor-packs', 'generic');
+        fs.mkdirSync(jstsPackDir, { recursive: true });
+        fs.mkdirSync(genericPackDir, { recursive: true });
+        // Minimal pack.json matching what the real js-ts pack ships
+        fs.writeFileSync(path.join(jstsPackDir, 'pack.json'), JSON.stringify({
+            name: 'js-ts',
+            description: 'JavaScript/TypeScript sensor pack (test fixture)',
+            sensors: {
+                typecheck: { defaultCmd: 'npx tsc --noEmit', fast: true },
+                lint:      { defaultCmd: 'npx eslint . --format json', fast: true },
+                security:  { defaultCmd: 'semgrep --config .semgrep.awm.yml --json .', fast: false },
+                mutation:  { enabled: false },
+            },
+        }));
+        fs.writeFileSync(path.join(genericPackDir, 'pack.json'), JSON.stringify({
+            name: 'generic',
+            description: 'Generic sensor pack (test fixture)',
+            sensors: {
+                security: { defaultCmd: 'semgrep .', fast: false },
+            },
+        }));
+    });
+
+    afterAll(() => { fs.rmSync(FAKE_REGISTRY, { recursive: true, force: true }); });
 
     function tmpProject(pack: string, withPackageJson: boolean): string {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-reconcile-'));
@@ -235,7 +265,7 @@ describe('reconcilePack', () => {
         const dir = tmpProject('generic', true);
         try {
             const manifest = JSON.parse(fs.readFileSync(path.join(dir, '.awm', 'sensors.json'), 'utf-8'));
-            const res = reconcilePack(dir, manifest, REPO_REGISTRY);
+            const res = reconcilePack(dir, manifest, FAKE_REGISTRY);
             expect(res.manifest.pack).toBe('js-ts');
             expect(res.upgradedFrom).toBe('generic');
             expect(Object.keys(res.manifest.sensors)).toContain('typecheck');
@@ -252,7 +282,7 @@ describe('reconcilePack', () => {
         const dir = tmpProject('js-ts', true);
         try {
             const manifest = JSON.parse(fs.readFileSync(path.join(dir, '.awm', 'sensors.json'), 'utf-8'));
-            const res = reconcilePack(dir, manifest, REPO_REGISTRY);
+            const res = reconcilePack(dir, manifest, FAKE_REGISTRY);
             expect(res.manifest.pack).toBe('js-ts');
             expect(res.upgradedFrom).toBeUndefined();
         } finally { fs.rmSync(dir, { recursive: true }); }
@@ -263,7 +293,7 @@ describe('reconcilePack', () => {
         const dir = tmpProject('generic', false);
         try {
             const manifest = JSON.parse(fs.readFileSync(path.join(dir, '.awm', 'sensors.json'), 'utf-8'));
-            const res = reconcilePack(dir, manifest, REPO_REGISTRY);
+            const res = reconcilePack(dir, manifest, FAKE_REGISTRY);
             expect(res.manifest.pack).toBe('generic');
             expect(res.upgradedFrom).toBeUndefined();
         } finally { fs.rmSync(dir, { recursive: true }); }

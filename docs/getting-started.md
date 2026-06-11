@@ -33,7 +33,7 @@ Pick your scenario and follow the ordered list. Each line is a real command or a
 ### Track A — New / greenfield repo
 
 ```text
- 1. curl -fsSL …/install.sh | bash        # install AWM (once per machine)
+ 1. npm i -g agentic-workflow-manager      # install AWM (once per machine)
  2. cd <your-repo>                         # a git repo (run `git init` if needed)
  3. awm init                               # or: awm init --agent opencode
  4. awm doctor                             # confirm machine layer is green
@@ -52,7 +52,7 @@ Pick your scenario and follow the ordered list. Each line is a real command or a
 Same spine as Track A, plus two extra moves (steps 6 and 9) because an existing codebase has a real stack and pre-existing debt from day one:
 
 ```text
- 1. curl -fsSL …/install.sh | bash        # install AWM (once per machine)
+ 1. npm i -g agentic-workflow-manager      # install AWM (once per machine)
  2. cd <your-repo>
  3. awm init                               # detects your real stack → real sensors immediately
  4. awm doctor                             # confirm machine layer is green
@@ -82,11 +82,13 @@ Same spine as Track A, plus two extra moves (steps 6 and 9) because an existing 
 ## Part 1 — Install AWM (once per machine)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Kodria/agentic-workflow/main/install.sh | bash
+npm i -g agentic-workflow-manager
 awm --help        # verify it's on PATH
 ```
 
-The installer clones the registry into `~/.awm/cli-source` and links the `awm` binary. **Nothing is wired into any agent yet** — that's `awm init` (Part 2). This step is machine-wide; you do it once, not per repo.
+This installs the `awm` binary globally. **Nothing is wired into any agent yet** — that's `awm init` (Part 2). This step is machine-wide; you do it once, not per repo.
+
+`awm init` will seed `~/.awm/registries/baseline/` by cloning [`awm-baseline-registry`](https://github.com/Kodria/awm-baseline-registry) the first time it runs.
 
 ---
 
@@ -289,7 +291,7 @@ You rarely touch `awm ledger` directly. Inspect it if curious: `awm ledger list`
 awm update
 ```
 
-Pulls the latest registry **and rebuilds the CLI binary** (you never run `npm build`). Because skills are symlinked into the cache by default, the update instantly patches every global and local install on the machine. Re-run `awm init` afterward to reconcile the wiring to any new defaults (it's idempotent).
+Pulls the latest content from each configured registry clone and rebuilds the CLI binary (you never run `npm build`). Because skills are symlinked into the registry clone by default, the update instantly patches every installed skill on the machine. Re-run `awm init` afterward to reconcile the wiring to any new defaults (it's idempotent).
 
 ---
 
@@ -314,7 +316,7 @@ Full flags and every subcommand: [cli-reference.md](cli-reference.md).
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `awm: command not found` | binary symlink points at a missing `~/.awm/cli-source/cli` | re-run the install script |
+| `awm: command not found` | npm global bin not on PATH, or npm package not installed | `npm i -g agentic-workflow-manager` and ensure `npm bin -g` is on your `$PATH` |
 | `awm doctor` shows `✖ .awm/profile.json → awm init` right **after** `awm init` | (fixed) profile wasn't bootstrapped on zero-extension repos | `awm update` to rebuild the CLI, then `awm init` |
 | New session doesn't show `using-awm` in context | session opened before the wiring existed | Claude: `/clear` or restart · OpenCode: start a new session |
 | Sensors never run after an edit (Claude) | `PostToolUse` hook not installed | `awm sensors install` |

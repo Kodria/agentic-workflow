@@ -7,13 +7,18 @@
 
 **AWM** (Agentic Workflow Manager) is a tool designed to solve the problem of fragmented prompt engineering and agent scripts. It allows you to package standard operating procedures, architectural guidelines, and codebase context into reusable "Skills" and "Workflows" that can be instantly installed into AI IDEs like Antigravity or OpenCode.
 
-## 🚀 Quick Start
-
-Install AWM globally using the one-liner bash script:
+## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Kodria/agentic-workflow/main/install.sh | bash
+npm i -g agentic-workflow-manager
+awm init        # en tu proyecto: bootstrapea ~/.awm, clona el baseline registry e instala los bundles
 ```
+
+El contenido vive en registries git separados del CLI:
+[awm-baseline-registry](https://github.com/Kodria/awm-baseline-registry) (sembrado por defecto) y
+[awm-documentation-registry](https://github.com/Kodria/awm-documentation-registry) (opt-in:
+`awm registry add https://github.com/Kodria/awm-documentation-registry.git`).
+`AWM_BASE_REMOTE` overridea el remote del baseline en la siembra.
 
 Once installed, verify it's working:
 ```bash
@@ -29,16 +34,6 @@ awm doctor                # read the machine + project state any time
 ```
 
 > **First time using AWM?** Read the [Getting Started runbook](docs/getting-started.md) — the from-zero walkthrough for both Claude Code and OpenCode: install → `awm init` → `awm doctor` → finish project setup (sensors + `CONSTITUTION.md` + the learning loop).
-
-## 🧹 Uninstallation
-
-To safely remove the AWM CLI and its internal cache without deleting your personal skills or workflows, run the uninstall script from the repository root:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Kodria/agentic-workflow/main/uninstall.sh | bash
-```
-
-> **Note**: Your installed artifacts in `~/.agents` and `~/.gemini/antigravity/global_workflows` are intentionally left intact to protect personal files. If you wish to remove them, please delete the specific directories or symlinks manually.
 
 ## 📦 Managing Skills and Workflows
 
@@ -59,7 +54,7 @@ awm list
 ```bash
 awm update
 ```
-*(Because AWM uses symlinks by default, updating the central registry instantly updates the skills across all your local projects).*
+*(Pulls the latest content from each configured registry and rebuilds the CLI binary.)*
 
 ## 📚 Documentation
 
@@ -74,7 +69,7 @@ Dive deeper into how AWM works and how you can contribute:
 - [Harness Retros](docs/harness-retros.md): Auditable log of recurring harness gaps converted into structural rules.
 
 **Extend it**
-- [Registry Contributor Guide](docs/registry-guide.md): Author your own Skills (`SKILL.md`) and bundle them into Processes.
+- [Registry Contributor Guide](docs/registry-guide.md): Author your own Skills (`SKILL.md`) and bundle them into Processes in the external registry repos.
 - [CLI Developer Guide](cli/README.md): Work on the core AWM CLI source code.
 
 ## 🤝 Why AWM?

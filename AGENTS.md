@@ -19,3 +19,10 @@ Lecciones y patrones confirmados en este repo. Todo agente que trabaje aquí deb
 - **hoist-per-root-io:** en funciones que iteran sobre roots y dentro de cada root iteran sobre artefactos, hacer el I/O de por-root (p.ej. `readRegistryManifest(root)`) **fuera del loop interno**, no dentro. Multiplicar lecturas de disco por artifact es innecesario. Patrón: `for (const root of roots) { const overrides = readRegistryManifest(root); for (const a of artifacts(root)) { /* usa overrides */ } }`. Confirmado en dos code-quality reviews de WS-2.
 
 - **atomic-add para directorios administrados:** el flujo correcto para un comando que agrega a un directorio gestionado es: operación costosa (clone/fetch) → validar → verificar colisiones → escribir config. Fallo en cualquier paso = limpiar el directorio creado (`rmSync(dest, {recursive:true,force:true})`) + no escribir config. Nunca escribir config antes de que la validación sea exitosa.
+
+## Layout del repo y de la instalación
+
+- **Este repo** contiene solo el CLI TypeScript (`cli/`). El contenido (skills, bundles, sensor-packs, hooks) vive en repos externos: `awm-baseline-registry` y `awm-documentation-registry`.
+- **No hay `registry/` en este repo** ni `~/.awm/cli-source/`. El concepto `cli-source` fue eliminado en WS-4.
+- **Layout de instalación:** `~/.awm/registries/<name>/` — cada registry configurado se clona aquí (ej. `~/.awm/registries/baseline/`). Los skills se instalan como symlinks hacia esos paths.
+- **Descubrimiento de contenido:** `contentRoots()` devuelve los paths bajo `~/.awm/registries/` según la config. No hay constante fija de `baseRoot` ni de `cliSource`.

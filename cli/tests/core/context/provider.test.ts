@@ -4,8 +4,6 @@ import os from 'os';
 import path from 'path';
 import { buildContext, sha256 } from '../../../src/core/context/provider';
 
-const REPO_REGISTRY = path.resolve(__dirname, '../../../../registry');
-
 function tmpRegistry(skillBody: string): string {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-reg-'));
     const dir = path.join(root, 'skills/using-awm');
@@ -43,9 +41,6 @@ describe('buildContext', () => {
     });
 });
 
-describe('buildContext — generic robustness invariant', () => {
-    it('carries the public-function input-validation invariant into awm-context', () => {
-        const ctx = buildContext({ registryRoot: REPO_REGISTRY, profileExtensions: [] });
-        expect(ctx.markdown).toMatch(/valida.*entradas|input validation|falla ruidosamente|fail loudly/i);
-    });
-});
+// NOTE: the 'generic robustness invariant' test that validated specific prose in the
+// using-awm SKILL.md has been removed — content now lives in awm-baseline-registry
+// (an external repo), not in this monorepo. Content-level tests belong there.

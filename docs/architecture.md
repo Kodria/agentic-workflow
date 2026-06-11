@@ -1,54 +1,54 @@
 # AWM Architecture
 
-This document outlines the high-level architecture of the Agentic Workflow Manager (AWM) and its registry design pattern.
+This document outlines the high-level architecture of the Agentic Workflow Manager (AWM).
 
-## 1. Logical Monorepo Pattern
+## 1. CLI + Content separation
 
-AWM utilizes a "Logical Monorepo" approach to keep the CLI tool and the artifact registry tightly coupled.
+AWM separates the **CLI tool** from its **content** into distinct repos:
 
-The repository is structured into two main components:
-- `cli/`: Contains the TypeScript source code that builds the global `awm` Node binary.
-- `registry/`: Contains the actual content (Skills, Workflows, Processes) that `awm` manages and distributes.
+- **CLI** (`cli/` in this repo): the TypeScript source for the global `awm` binary, published to npm as `agentic-workflow-manager`.
+- **Content repos** (separate git repos):
+  - [`awm-baseline-registry`](https://github.com/Kodria/awm-baseline-registry) — Skills, bundles, sensor-packs, hooks seeded by default on `awm init`.
+  - [`awm-documentation-registry`](https://github.com/Kodria/awm-documentation-registry) — Documentation-focused skills (opt-in: `awm registry add <url>`).
 
-## 2. The Local Cache (`~/.awm/registry/`)
+## 2. The Local Cache (`~/.awm/registries/`)
 
-When you run the initial installation script (`install.sh`), AWM clones the *entire* github repository into a clean workspace directory located at `~/.awm/cli-source/`.
+When you run `awm init`, AWM clones each configured registry into `~/.awm/registries/<name>/`.
 
-During installation:
-1. The `cli/` folder is built and the binary is linked to your system's global `npm` bin path.
-2. The CLI uses the `registry/` folder inside this clone as the **"Local Cache"**.
+- `~/.awm/registries/baseline/` — the baseline registry clone
+- `~/.awm/registries/<name>/` — any additional registered registries
 
-Every time you run `awm add`, the CLI actually looks inside `~/.awm/cli-source/registry/` to find and parse available skills, workflows, and process bundles. It does *not* hit the GitHub API directly.
-When you run `awm update`, the CLI executes an internal `git pull` inside `~/.awm/cli-source/`, instantly syncing your local cache with the latest remote version.
+Every time you run `awm add`, the CLI looks inside these directories to find and parse available skills, workflows, and process bundles. It does *not* hit the GitHub API directly.
 
-## 3. Providers & Multi-Target Support
+When you run `awm update`, the CLI fetches the latest commits for each registry clone and rebuilds the CLI binary (you never run `npm build`).
+
+## 3. Content Discovery
+
+The CLI discovers content via `contentRoots()`, which returns the list of configured registry paths under `~/.awm/registries/`. Each artifact (skill, bundle, sensor-pack) carries a `contentRoot` stamp pointing to the registry it came from, so install/use logic always resolves the correct absolute path.
+
+## 4. Providers & Multi-Target Support
 
 AWM is not tied to a single AI IDE or agent interface. Depending on the `Provider` selected during installation, artifacts are routed to different target locations on the user's filesystem.
 
 Currently supported Providers:
 
-### 3.1 Antigravity
+### 4.1 Claude Code
+- **Global Skills paths**: `~/.claude/skills/` (symlinks into `~/.awm/registries/<name>/skills/`)
+
+### 4.2 OpenCode
+- **Global Skills paths**: `~/.agents/skills/`
+
+### 4.3 Antigravity
 Google Deepmind's internal engineering agent platform.
 - **Global Skills paths**: `~/.agents/skills/`
-- **Local Skills paths**: `./.agents/skills/`
 - **Global Workflows paths**: `~/.gemini/antigravity/global_workflows/`
-- **Local Workflows paths**: `./.agents/workflows/`
 
-### 3.2 OpenCode
-An open-source or separate ecosystem target point.
-- **Global Skills paths**: `~/.agents/skills/`
-- **Local Skills paths**: `./.agents/skills/`
-- *Workflows*: OpenCode natively utilizes different configuration conventions. Workflows from AWM are currently ignored for OpenCode deployments to prevent path pollution.
+## 5. Symlinks vs. Copy Implementation
 
-## 4. Symlinks vs. Copy Implementation
+AWM supports **Symlink Installation (Default)**.
 
-The most powerful feature of AWM is its support for **Symlink Installation (Default)**.
+When you install a skill globally via symlink, AWM creates a symbolic link from the target destination back to the registry clone in `~/.awm/registries/<name>/skills/skill-name/`.
 
-When you install a skill globally via symlink, AWM does not copy the file contents from `~/.awm/cli-source/registry/skills/skill-name/` to `~/.agents/skills/skill-name/`.
+Because the target is a window to the registry clone, anytime an upstream maintainer updates a skill and the user runs `awm update` (fetching the registry), the change propagates through the symlink instantly.
 
-Instead, it creates a hard symbolic link pointing from the target destination back to the Local Cache.
-
-#### Why is this important?
-Because the target is simply a window to the Local Cache, anytime an upstream maintainer updates a skill's behavior and the user runs `awm update` (processing the `git pull`), the change instantly propagates through the Symlink. All projects across the machine instantly benefit from the updated skill without requiring a re-install loop.
-
-The **Copy** installation method exists solely for "ejecting" a skill. If a user wishes to fork a skill and modify it aggressively for a highly specific local project, `copy` creates a hard clone that disconnects it from future upstream `awm update` syncs.
+The **Copy** installation method exists for "ejecting" a skill — if a user wants to fork and modify it locally, `copy` creates a hard clone that disconnects it from future `awm update` syncs.
