@@ -3,7 +3,7 @@ import fs from 'fs';
 import { Command } from 'commander';
 import { intro, outro, confirm, isCancel, spinner, multiselect, select } from '@clack/prompts';
 import pc from 'picocolors';
-import { listRegistries, contentRoots, BASE_CONTENT_DIR } from '../../core/registries';
+import { listRegistries, contentRoots } from '../../core/registries';
 import { discoverSkills, discoverWorkflows, discoverAgents } from '../../core/discovery';
 import { discoverAllBundles } from '../../core/bundles';
 import { reconcileAllSkillLinks } from '../../core/skill-integrity';
@@ -99,7 +99,7 @@ export function registerRegistryCommand(program: Command): void {
                 console.log(pc.dim('No additional registries. Add one with `awm registry add <git-url>`.'));
                 return;
             }
-            const earlier: string[] = fs.existsSync(BASE_CONTENT_DIR) ? [BASE_CONTENT_DIR] : [];
+            const earlier: string[] = [];
             for (const r of regs) {
                 if (!fs.existsSync(r.contentRoot)) {
                     console.log(`${pc.cyan(r.name)}  ${r.remote}  ${pc.yellow("missing on disk — run 'awm update'")}`);

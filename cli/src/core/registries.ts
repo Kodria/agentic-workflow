@@ -3,15 +3,12 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import simpleGit from 'simple-git';
-import { REGISTRY_DIR } from './registry';
+import { resolveBaseRemote } from './registry';
 import { resolveTargetRef, machineVersionOpts } from './versioning';
 
 // Evaluated at require-time — tests must use jest.resetModules() + late require() to pick up env overrides.
 const AWM_HOME = process.env.AWM_HOME || path.join(process.env.HOME || os.homedir(), '.awm');
 
-/** Content root del registry base. Mismo valor que REGISTRY_CONTENT_DIR (bundles.ts);
- *  duplicado aquí para evitar el ciclo de imports bundles → registries → bundles. */
-export const BASE_CONTENT_DIR = path.join(REGISTRY_DIR, 'registry');
 export const REGISTRIES_DIR = path.join(AWM_HOME, 'registries');
 export const REGISTRIES_CONFIG_PATH = path.join(AWM_HOME, 'registries.json');
 
@@ -67,15 +64,23 @@ export function writeRegistriesConfig(entries: RegistryEntry[]): void {
     fs.writeFileSync(REGISTRIES_CONFIG_PATH, JSON.stringify(entries, null, 2) + '\n', 'utf-8');
 }
 
+/** Bootstrap de máquina (awm init): si no hay registries.json, lo crea con la
+ *  entrada baseline (remote por cadena WS-2: env > prefs > default).
+ *  Devuelve true si sembró. Nunca toca un registries.json existente. */
+export function seedBaselineRegistry(): boolean {
+    if (fs.existsSync(REGISTRIES_CONFIG_PATH)) return false;
+    writeRegistriesConfig([{ name: 'baseline', remote: resolveBaseRemote() }]);
+    return true;
+}
+
 export function listRegistries(): RegistrySource[] {
     return readRegistriesConfig().map((e) => ({ ...e, contentRoot: registryContentRoot(e.name) }));
 }
 
-/** Roots de contenido en orden: base primero, luego adicionales presentes en disco.
+/** Roots de contenido en orden de registries.json.
  *  Un registry configurado pero ausente se omite (awm update lo re-clona). */
 export function contentRoots(): string[] {
     const roots: string[] = [];
-    if (fs.existsSync(BASE_CONTENT_DIR)) roots.push(BASE_CONTENT_DIR);
     for (const reg of listRegistries()) {
         if (fs.existsSync(reg.contentRoot)) roots.push(reg.contentRoot);
     }
@@ -180,12 +185,10 @@ export function readRegistryManifest(root: string): RegistryManifest {
     return { overrides: new Set(overrides as string[]), minCliVersion };
 }
 
-/** Nombre del registry dueño de un path: 'base' para el content root base,
- *  el nombre del clone bajo REGISTRIES_DIR, o null si no pertenece a ninguno. */
+/** Nombre del registry dueño de un path: el nombre del clone bajo REGISTRIES_DIR,
+ *  o null si no pertenece a ninguno. */
 export function registryNameForPath(p: string): string | null {
     const resolved = path.resolve(p);
-    const base = path.resolve(BASE_CONTENT_DIR);
-    if (resolved === base || resolved.startsWith(base + path.sep)) return 'base';
     const regsRoot = path.resolve(REGISTRIES_DIR) + path.sep;
     if (resolved.startsWith(regsRoot)) {
         const first = resolved.slice(regsRoot.length).split(path.sep)[0];

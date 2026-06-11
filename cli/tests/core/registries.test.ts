@@ -73,19 +73,16 @@ describe('core/registries', () => {
         ]);
     });
 
-    it('contentRoots prepends the base content dir and filters registries missing on disk', () => {
+    it('contentRoots includes only configured registries present on disk', () => {
         const m = load();
-        // base existe
-        const base = path.join(tmpHome, '.awm', 'cli-source', 'registry');
-        fs.mkdirSync(base, { recursive: true });
         // 'present' existe en disco, 'ghost' no
         const present = path.join(tmpHome, '.awm', 'registries', 'present');
         fs.mkdirSync(present, { recursive: true });
         m.writeRegistriesConfig([{ name: 'present', remote: 'r1' }, { name: 'ghost', remote: 'r2' }]);
-        expect(m.contentRoots()).toEqual([base, present]);
+        expect(m.contentRoots()).toEqual([present]);
     });
 
-    it('contentRoots omits the base dir itself when absent (clean machine)', () => {
+    it('contentRoots returns [] when no registries are configured', () => {
         const m = load();
         expect(m.contentRoots()).toEqual([]);
     });

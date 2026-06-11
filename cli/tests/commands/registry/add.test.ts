@@ -71,21 +71,36 @@ describe('addRegistry', () => {
         expect(fs.existsSync(path.join(tmpHome, '.awm/registries/bad'))).toBe(false);
     });
 
-    it('is atomic: artifact collision with existing content → no config, cleanup, error names both', async () => {
-        // base content root with the 'alpha' skill
-        const base = path.join(tmpHome, '.awm/cli-source/registry/skills/alpha');
-        fs.mkdirSync(base, { recursive: true });
-        fs.writeFileSync(path.join(base, 'SKILL.md'), '---\nname: alpha\ndescription: base\n---\n');
+    it('is atomic: artifact collision with existing configured registry → no config, cleanup, error names both', async () => {
+        // First registry already registered with the 'alpha' skill
+        const source1 = path.join(tmpWork, 'src-alpha-1');
+        fs.mkdirSync(path.join(source1, 'skills', 'alpha'), { recursive: true });
+        fs.writeFileSync(path.join(source1, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\ndescription: d\n---\n');
+        GIT(source1, 'init -q');
+        GIT(source1, 'add -A');
+        GIT(source1, 'commit -qm init');
 
-        const source = makeSourceRepo(tmpWork, { skill: 'alpha' });
         const { addRegistry } = require('../../../src/commands/registry/add');
-        const result = await addRegistry(source, 'personal');
+        const first = await addRegistry(source1, 'baseline');
+        expect(first.ok).toBe(true);
+
+        // Second registry also has 'alpha' — should collide
+        const source2 = path.join(tmpWork, 'src-alpha-2');
+        fs.mkdirSync(path.join(source2, 'skills', 'alpha'), { recursive: true });
+        fs.writeFileSync(path.join(source2, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\ndescription: d\n---\n');
+        GIT(source2, 'init -q');
+        GIT(source2, 'add -A');
+        GIT(source2, 'commit -qm init');
+
+        jest.resetModules();
+        const { addRegistry: addRegistry2 } = require('../../../src/commands/registry/add');
+        const result = await addRegistry2(source2, 'personal');
 
         expect(result.ok).toBe(false);
         expect(result.error).toMatch(/collision/i);
         expect(result.error).toMatch(/alpha/);
         const { readRegistriesConfig } = require('../../../src/core/registries');
-        expect(readRegistriesConfig()).toEqual([]);
+        expect(readRegistriesConfig().map((r: { name: string }) => r.name)).toEqual(['baseline']);
         expect(fs.existsSync(path.join(tmpHome, '.awm/registries/personal'))).toBe(false);
     });
 
