@@ -20,6 +20,10 @@ Lecciones y patrones confirmados en este repo. Todo agente que trabaje aquí deb
 
 - **atomic-add para directorios administrados:** el flujo correcto para un comando que agrega a un directorio gestionado es: operación costosa (clone/fetch) → validar → verificar colisiones → escribir config. Fallo en cualquier paso = limpiar el directorio creado (`rmSync(dest, {recursive:true,force:true})`) + no escribir config. Nunca escribir config antes de que la validación sea exitosa.
 
+## Patrones de implementación
+
+- **gate-order-annotation:** cuando el orden de ejecución de un bloque está dictado por una regla de CONSTITUTION (p.ej. "gates de contrato antes de early-exits"), agregar un comentario inline que la cite: `// CONSTITUTION: gates de contrato antes de early-exits`. Hace visible *por qué* el orden importa, previene reordenamientos accidentales en refactors futuros, y permite a reviewers verificar cumplimiento sin buscar la regla. El comentario va inmediatamente antes del primer gate del bloque. Confirmado necesario en WS-3 (B1 regression por early-exit antes del gate de pins) y WS-4 (gate minCliVersion colocado explícitamente antes del early-exit de extensions vacías).
+
 ## Layout del repo y de la instalación
 
 - **Este repo** contiene solo el CLI TypeScript (`cli/`). El contenido (skills, bundles, sensor-packs, hooks) vive en repos externos: `awm-baseline-registry` y `awm-documentation-registry`.
