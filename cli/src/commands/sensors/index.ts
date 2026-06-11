@@ -58,7 +58,7 @@ export function registerSensorsCommand(program: Command): void {
             const writeDir = manifestDir ?? process.cwd();
             writeBaseline(writeDir, baseline);
             const total = Object.values(baseline).reduce((n, fps) => n + fps.length, 0);
-            log.success(`Baseline guardado: ${total} hallazgos aceptados en .awm/sensors.baseline.json`);
+            log.success(`Baseline saved: ${total} findings accepted in .awm/sensors.baseline.json`);
             log.info('Sensors now fail only on new findings. Re-run `awm sensors baseline` after reducing debt.');
         });
 
