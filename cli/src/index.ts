@@ -12,7 +12,7 @@ import { regenerateGlobalContext } from './core/context/regenerate';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
 import { discoverAllBundles, defaultScopeForBundle } from './core/bundles';
 import { reconcileAllSkillLinks } from './core/skill-integrity';
-import { contentRoots, syncAdditionalRegistries, readRegistriesConfig } from './core/registries';
+import { contentRoots, syncRegistries, readRegistriesConfig } from './core/registries';
 import { addBundle, syncProfile } from './core/bundle-install';
 import { findProjectRoot, readProfile } from './core/profile';
 import path from 'path';
@@ -355,7 +355,7 @@ program.command('update')
           }
 
           try {
-              for (const r of await syncAdditionalRegistries()) {
+              for (const r of await syncRegistries()) {
                   if (r.action === 'error') {
                       console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
                   } else {

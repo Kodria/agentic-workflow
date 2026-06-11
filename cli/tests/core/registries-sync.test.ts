@@ -21,7 +21,7 @@ function makeSourceRepo(base: string, skillName: string): string {
     return dir;
 }
 
-describe('syncAdditionalRegistries (git fixtures locales)', () => {
+describe('syncRegistries (git fixtures locales)', () => {
     let tmpHome: string;
     let tmpWork: string;
     let originalHome: string | undefined;
@@ -51,7 +51,7 @@ describe('syncAdditionalRegistries (git fixtures locales)', () => {
         const source = makeSourceRepo(tmpWork, 'alpha');
         m.writeRegistriesConfig([{ name: 'personal', remote: source }]);
 
-        const results = await m.syncAdditionalRegistries();
+        const results = await m.syncRegistries();
 
         expect(results).toEqual([{ name: 'personal', action: 'recloned', version: 'HEAD' }]);
         expect(fs.existsSync(path.join(tmpHome, '.awm/registries/personal/skills/alpha/SKILL.md'))).toBe(true);
@@ -64,14 +64,14 @@ describe('syncAdditionalRegistries (git fixtures locales)', () => {
             { name: 'personal', remote: source },
             { name: 'broken', remote: path.join(tmpWork, 'does-not-exist') },
         ]);
-        await m.syncAdditionalRegistries(); // first pass: clones 'personal', fails 'broken'
+        await m.syncRegistries(); // first pass: clones 'personal', fails 'broken'
 
         // advance the remote
         fs.writeFileSync(path.join(source, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\ndescription: v2\n---\n');
         GIT(source, 'add -A');
         GIT(source, 'commit -qm v2');
 
-        const results = await m.syncAdditionalRegistries();
+        const results = await m.syncRegistries();
 
         expect(results[0]).toEqual({ name: 'personal', action: 'pulled', version: 'HEAD' });
         expect(results[1].name).toBe('broken');
@@ -90,7 +90,7 @@ describe('syncAdditionalRegistries (git fixtures locales)', () => {
         GIT(source, 'commit -qm unreleased');
         m.writeRegistriesConfig([{ name: 'personal', remote: source }]);
 
-        const results = await m.syncAdditionalRegistries();
+        const results = await m.syncRegistries();
 
         expect(results).toEqual([{ name: 'personal', action: 'recloned', version: 'v1.0.0' }]);
         const synced = fs.readFileSync(path.join(tmpHome, '.awm/registries/personal/skills/alpha/SKILL.md'), 'utf-8');
@@ -109,7 +109,7 @@ describe('syncAdditionalRegistries (git fixtures locales)', () => {
             JSON.stringify({ defaultAgent: 'claude', installMethod: 'symlink', defaultScope: 'local', pins: { personal: '9.9.9' } })
         );
 
-        const results = await m.syncAdditionalRegistries();
+        const results = await m.syncRegistries();
 
         expect(results[0].action).toBe('error');
         // El dir no debe quedar en disco tras el fallo
@@ -132,8 +132,40 @@ describe('syncAdditionalRegistries (git fixtures locales)', () => {
             JSON.stringify({ defaultAgent: 'claude', installMethod: 'symlink', defaultScope: 'local', pins: { personal: '1.0.0' } })
         );
 
-        const results = await m.syncAdditionalRegistries();
+        const results = await m.syncRegistries();
 
         expect(results).toEqual([{ name: 'personal', action: 'recloned', version: 'v1.0.0' }]);
+    });
+
+    it('baseline sembrado se sincroniza por el mismo loop que cualquier registry', async () => {
+        const m = require('../../src/core/registries');
+        const source = makeSourceRepo(tmpWork, 'alpha');
+        GIT(source, 'tag v1.0.0');
+        process.env.AWM_BASE_REMOTE = source;
+        m.seedBaselineRegistry();
+        delete process.env.AWM_BASE_REMOTE;
+
+        const results = await m.syncRegistries();
+
+        expect(results).toEqual([{ name: 'baseline', action: 'recloned', version: 'v1.0.0' }]);
+        expect(fs.existsSync(path.join(tmpHome, '.awm/registries/baseline/skills/alpha/SKILL.md'))).toBe(true);
+    });
+
+    it('verifyMinCliVersions reporta registries que exigen CLI más nuevo', async () => {
+        const m = require('../../src/core/registries');
+        const source = makeSourceRepo(tmpWork, 'alpha');
+        fs.writeFileSync(path.join(source, 'awm-registry.json'), JSON.stringify({ minCliVersion: '99.0.0' }));
+        GIT(source, 'add -A'); GIT(source, 'commit -qm manifest');
+        m.writeRegistriesConfig([{ name: 'exigente', remote: source }]);
+        await m.syncRegistries();
+
+        const failures = m.verifyMinCliVersions();
+        expect(failures).toEqual([{ name: 'exigente', min: '99.0.0' }]);
+    });
+
+    it('verifyMinCliVersions ignora registries sin campo o ausentes en disco', () => {
+        const m = require('../../src/core/registries');
+        m.writeRegistriesConfig([{ name: 'fantasma', remote: '/no/existe' }]);
+        expect(m.verifyMinCliVersions()).toEqual([]);
     });
 });

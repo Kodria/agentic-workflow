@@ -4,7 +4,8 @@ import path from 'path';
 import os from 'os';
 import simpleGit from 'simple-git';
 import { resolveBaseRemote } from './registry';
-import { resolveTargetRef, machineVersionOpts } from './versioning';
+import { resolveTargetRef, machineVersionOpts, compareSemver } from './versioning';
+import { cliVersion } from './cli-version';
 
 // Evaluated at require-time — tests must use jest.resetModules() + late require() to pick up env overrides.
 const AWM_HOME = process.env.AWM_HOME || path.join(process.env.HOME || os.homedir(), '.awm');
@@ -105,9 +106,9 @@ export type RegistrySyncResult =
     | { name: string; action: 'pulled' | 'recloned'; version: string }  // version: 'vX.Y.Z' | 'HEAD'
     | { name: string; action: 'error'; error: string };
 
-/** Sincroniza cada registry adicional al ref resuelto (pin > último tag > HEAD);
+/** Sincroniza cada registry configurado al ref resuelto (pin > último tag > HEAD);
  *  re-clona si falta el dir. Errores por-registry NO fatales: se reportan en el resultado. */
-export async function syncAdditionalRegistries(): Promise<RegistrySyncResult[]> {
+export async function syncRegistries(): Promise<RegistrySyncResult[]> {
     const results: RegistrySyncResult[] = [];
     for (const reg of listRegistries()) {
         try {
@@ -195,4 +196,18 @@ export function registryNameForPath(p: string): string | null {
         return first || null;
     }
     return null;
+}
+
+export interface CliVersionFailure { name: string; min: string; }
+
+/** Registries cuyo manifest exige un CLI más nuevo que el actual (capa 3, WS-4). */
+export function verifyMinCliVersions(current: string = cliVersion()): CliVersionFailure[] {
+    const failures: CliVersionFailure[] = [];
+    for (const reg of listRegistries()) {
+        if (!fs.existsSync(reg.contentRoot)) continue;
+        let min: string | undefined;
+        try { min = readRegistryManifest(reg.contentRoot).minCliVersion; } catch { continue; }
+        if (min && compareSemver(current, min) < 0) failures.push({ name: reg.name, min });
+    }
+    return failures;
 }
