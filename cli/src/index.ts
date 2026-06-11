@@ -29,9 +29,14 @@ import { registerInitCommand } from './commands/init';
 import { registerRegistryCommand } from './commands/registry';
 import { registerPinCommands } from './commands/pin';
 import { verifyProjectPins } from './core/profile-pins';
+import { maybeNotifyUpdate, offerSelfUpdate } from './core/update-check';
 
 const program = new Command();
 program.name('awm').description('Agentic Workflow Manager').version('1.0.0');
+
+program.hook('postAction', () => {
+    try { maybeNotifyUpdate(); } catch { /* el aviso nunca rompe un comando */ }
+});
 
 function handleCancel(value: unknown): void {
     if (isCancel(value)) {
@@ -368,7 +373,7 @@ program.command('update')
           }
       } catch { /* no aborta */ }
 
-      // await offerSelfUpdate();   // capa 2 — Task 13
+      await offerSelfUpdate();   // capa 2 — Task 13
 
       outro('✅ Registries, skills y hooks actualizados.');
   });
