@@ -255,7 +255,7 @@ export function stepConstitutionInjection(d: InitDeps): StepResult {
 
     const inj = getInjection(d.agent);
     if (!inj || inj.type !== 'config-instructions') {
-        return ok('project.constitutionInjection', 'project', 'skipped', 'cubierto por hook');
+        return ok('project.constitutionInjection', 'project', 'skipped', 'covered by hook');
     }
     if (!proj.constitution.present) {
         return ok('project.constitutionInjection', 'project', 'skipped', 'no CONSTITUTION.md');
@@ -279,7 +279,7 @@ export function stepContext(d: InitDeps): StepResult {
 export function stepContextInjection(d: InitDeps): StepResult {
     const inj = getInjection(d.agent);
     if (!inj) return ok('machine.contextInjection', 'machine', 'skipped', 'no injection mechanism');
-    if (inj.type === 'cc-settings-merge') return ok('machine.contextInjection', 'machine', 'skipped', 'cubierto por hook');
+    if (inj.type === 'cc-settings-merge') return ok('machine.contextInjection', 'machine', 'skipped', 'covered by hook');
 
     const op: ContextOp = {
         agent: d.agent,
