@@ -35,6 +35,18 @@
 
 ---
 
+## Decisión de re-alcance (2026-06-11)
+
+Con WS-0..WS-4 cerrados, la maquinaria del ciclo de equipo ya existe y está cubierta por la suite (multi-registry, versionado por tags, pinning, gates, npm). Se re-evaluó lo restante con lente de valor funcional (regla #5 — decisión explícita registrada):
+
+1. **WS-7 se adelanta antes de WS-5.** Son decisiones baratas y una de ellas (F-10, idioma) define en qué idioma se escribe el runbook de WS-5.
+2. **WS-5 se recorta:** runbook de equipo + verificación manual del ciclo real contra GitHub (incluyendo registry privado/SSH — el hueco funcional real, hoy sin documentar ni verificar) + hardening solo de lo que se rompa. **Sin E2E nuevo de simulación** — duplicaría la cobertura existente (`registries-sync`, `sync-gates`, `profile-pins`, `versioning`, `update-check`, `pack-e2e`).
+3. **WS-6 se difiere a demanda.** Antigravity, adapters (codex/copilot/gemini) y scope local de OpenCode son especulativos: no hay usuario real de otro agente. Se reactiva cuando exista demanda concreta; para el cierre de la era, su fila cuenta como cerrada con estado "diferido".
+
+Orden efectivo restante: **WS-7 → WS-5**; WS-6 diferido.
+
+---
+
 ## Workstreams (en orden de prioridad)
 
 ### WS-0 — Deudas rápidas de la era anterior `[F-6, F-7, F-8]`
@@ -84,21 +96,19 @@ CLI estable publicado en npm; `install.sh` se reduce a `npm i -g` (o desaparece)
 - [x] Verificación: instalación desde cero en máquina limpia sin git clone del monorepo (verificado 2026-06-10 con smoke test + runbook manual)
 - [x] QA → `awm-qa-complete` (2026-06-11)
 
-### WS-5 — Flujo de equipo documentado y endurecido `[F-12]`
+### WS-5 — Flujo de equipo documentado y endurecido `[F-12]` *(re-alcance 2026-06-11; depende de WS-7/F-10 para idioma)*
 
-Documentar y probar el ciclo completo de equipo (depende de WS-2/3/4): senior autorea skill → PR al registry del equipo → release taggeado → teammates reciben con `awm update`; nuevo dev → `git clone` + `awm sync`.
+Documentar el ciclo completo de equipo (depende de WS-2/3/4): senior autorea skill → PR al registry del equipo → release taggeado → teammates reciben con `awm update`; nuevo dev → `git clone` + `awm sync`. Alcance recortado: sin E2E nuevo de simulación (cobertura ya existente en la suite).
 
-- [ ] Runbook de equipo en `docs/` + hardening de los edge cases que aparezcan al probarlo
-- [ ] Verificación: onboarding simulado de cero en máquina/usuario limpio
+- [ ] Runbook de equipo en `docs/` (ciclo de releases, pinning, onboarding de nuevo dev)
+- [ ] Verificación manual del ciclo real contra GitHub, incluyendo registry **privado** (SSH/auth) — hardening solo de lo que se rompa
 - [ ] QA → `awm-qa-complete`
 
-### WS-6 — Agnosticismo de harness, fase 2 `[F-5]`
+### WS-6 — Agnosticismo de harness, fase 2 `[F-5]` — **DIFERIDO A DEMANDA (2026-06-11)**
 
 Cerrar los diferidos acumulados: estrategia de inyección para Antigravity, scope local de OpenCode, `ConventionFileStrategy` (`AGENTS.md` fallback), evaluación de cablear `registry/references/` como adapters, hook ports si el design los justifica.
 
-- [ ] Brainstorming + design (continúa decoupling §7; decidir alcance real: ¿Antigravity se mantiene como target soportado?)
-- [ ] Plan + ejecución
-- [ ] QA → `awm-qa-complete`
+**Decisión de re-alcance:** sin usuario real de otro agente, este trabajo es especulativo. Se reactiva cuando exista demanda concreta (un equipo o usuario real en Antigravity/codex/copilot/gemini, o necesidad de scope local OpenCode). Para el cierre de la era, esta fila cuenta como cerrada con estado "diferido". F-5 queda vivo en el registro como diferido, no perdido.
 
 ### WS-7 — Decisiones de política `[F-9, F-10, F-11]`
 
@@ -120,7 +130,7 @@ No es código primero: son tres decisiones que hay que tomar y registrar (y reci
 | WS-3 | F-1 | [2026-06-10-ws3-versioning-plan.md](2026-06-10-ws3-versioning-plan.md) | ☑ |
 | WS-4 | F-3 | [2026-06-10-ws4-npm-distribution-plan.md](2026-06-10-ws4-npm-distribution-plan.md) | ☑ |
 | WS-5 | F-12 | — | ☐ |
-| WS-6 | F-5 | — | ☐ |
+| WS-6 | F-5 | diferido a demanda (2026-06-11) | ◌ diferido |
 | WS-7 | F-9, F-10, F-11 | — | ☐ |
 
-**Este documento se cierra** (marcador `awm-qa-complete` + nota de cierre de era) cuando las 8 filas tengan QA ☑.
+**Este documento se cierra** (marcador `awm-qa-complete` + nota de cierre de era) cuando las 8 filas tengan QA ☑ o estado "diferido" registrado (re-alcance 2026-06-11).
