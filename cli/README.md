@@ -2,14 +2,14 @@
 
 This directory contains the source code for the `agentic-workflow-manager` Command Line Interface.
 
-Built with Node.js and TypeScript, the CLI uses `@clack/prompts` to deliver a zero-friction, interactive Text User Interface (TUI) for adding artifacts from the `../registry/` directory into the local OS environment.
+Built with Node.js and TypeScript, the CLI uses `@clack/prompts` to deliver a zero-friction, interactive Text User Interface (TUI) for installing skills and workflows from configured git registries into the local OS environment.
 
 ## 📁 Directory Structure
 
 The CLI is cleanly layered to decouple configuration mapping from core engine logic:
 - `src/index.ts`: The main entrypoint, orchestrating Commander args and Clack prompts.
 - `src/core/`: The core engine modules:
-  - `registry.ts`: Reads paths pointing to `.awm/cli-source/registry/` and parses YAML/JSON manifests.
+  - `registry.ts`: Resolves the base registry remote and parses YAML/JSON manifests from `~/.awm/registries/<name>/`.
   - `discovery.ts`: Provides searching, mapping, and categorization inside the registry format.
   - `executor.ts`: The installation logic handling target validations, filesystem hooks, Copy execution, and Symlink deployment.
 - `src/providers/`: Encapsulates logic for routing. e.g. mapping `antigravity` to `~/.gemini/antigravity/` vs mapped `opencode` to standard OS `.agents/` targets.

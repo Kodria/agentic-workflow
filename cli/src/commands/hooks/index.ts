@@ -42,7 +42,7 @@ export function registerHooksCommand(program: Command): void {
                 console.log('');
                 console.log(`  Scripts:        ${result.scriptsDir}/session-start`);
                 console.log(`                  ${result.scriptsDir}/run-hook.cmd`);
-                console.log(`                  ${result.scriptsDir}/using-awm.md → registry/skills/using-awm/SKILL.md`);
+                console.log(`                  ${result.scriptsDir}/using-awm.md → ~/.awm/registries/baseline/skills/using-awm/SKILL.md`);
                 console.log('');
                 console.log(`  Settings file:  ${result.settingsPath}`);
                 if (result.backupPath) {

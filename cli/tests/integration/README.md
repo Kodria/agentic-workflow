@@ -10,18 +10,20 @@ The hook activates inside Claude Code's runtime, and the only way to verify it w
 
 - Claude Code CLI installed and on PATH (`which claude`)
 - `ANTHROPIC_API_KEY` env var set (or equivalent auth)
-- AWM CLI built (`cd cli && npm run build && npm link`)
+- AWM CLI installed globally (`npm i -g agentic-workflow-manager` or `cd cli && npm run build && npm link`)
 
 ## Protocol
 
 ```bash
-# 1. Set up an isolated HOME and registry
+# 1. Set up an isolated HOME and bootstrap AWM
 export TMPHOME=$(mktemp -d)
 export AWM_HOME="$TMPHOME/.awm"
 export HOME_BACKUP="$HOME"
 export HOME="$TMPHOME"
-mkdir -p "$AWM_HOME/cli-source"
-cp -R /path/to/agentic-workflow/registry "$AWM_HOME/cli-source/"
+
+# Bootstrap: seeds the baseline registry under $AWM_HOME/registries/baseline
+# (Use AWM_BASE_REMOTE to point to a fixture registry instead of the live remote)
+awm init
 
 # 2. Install the hook
 awm hooks install
