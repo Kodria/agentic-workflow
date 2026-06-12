@@ -95,7 +95,47 @@ awm sync [-a <agent>] [-m <method>]
 
 ### `awm update`
 
-Pull the latest registry from the canonical GitHub remote **and rebuild the CLI binary** (you never run `npm build` yourself). Because skills are symlinked into the cache by default, this instantly patches every global and local install on the machine. (No flags.)
+Pull the latest content from every configured registry (checking out the latest semver tag, or the pinned version if the project pins one). Because skills are symlinked into the registry clones by default, this instantly patches every global and local install on the machine. (No flags.)
+
+> `awm update` updates **content** (registries). The CLI itself is updated via npm: `npm i -g agentic-workflow-manager@latest`.
+
+---
+
+## Registries & pinning (team/personal content)
+
+Additional registries let a team or individual distribute their own skills, bundles, and packs alongside the baseline. Each registry is a git repo cloned under `~/.awm/registries/<name>/`.
+
+### `awm registry add <remote>`
+
+Clone an additional registry (git URL or local path) and register it in the machine config.
+
+```
+awm registry add <remote> [--name <name>] [--install-all] [--no-install]
+```
+
+| Flag | Description |
+|---|---|
+| `--name <name>` | Registry name (default: repo basename). |
+| `--install-all` | Install every bundle from the new registry for the default agent. |
+| `--no-install` | Skip the bundle install offer. |
+
+Use an SSH remote (`git@github.com:org/repo.git`) for private registries — clone/fetch run through git, so your ssh-agent and `~/.ssh/config` apply as with any repo.
+
+### `awm registry list`
+
+List configured additional registries.
+
+### `awm registry remove <name>`
+
+Remove an additional registry (config + clone). `-y, --yes` skips confirmation.
+
+### `awm pin <registry> <version>`
+
+Pin a registry (`base` or an additional registry name) to a version tag, e.g. `awm pin base 1.2.0`. The pin is stored in the project's `.awm/profile.json` (`registries` map) — commit it and the whole team is pinned.
+
+### `awm unpin <registry>`
+
+Remove the version pin (the registry returns to the latest tag on the next `awm update`).
 
 ---
 
