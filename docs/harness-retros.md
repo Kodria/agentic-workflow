@@ -5,6 +5,18 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
 
 ---
 
+## 2026-06-12 — WS-5 (team workflow): verify-cmd-source + runbook-as-script
+
+- **Class:** agent (×2 — working-style lessons)
+- **Occurrences (ledger count):** F2 `awm-pin-writes-prefs-not-profile` (important) + `cli-reference-pin-base-wrong-keyword` (important) — mismo root cause, 2 entries. W1 `runbook-as-script` — confirmado end-to-end en Fase C.
+- **Rule:** `AGENTS.md` — nueva sección "Patrones de documentación":
+  - `verify-cmd-source-before-documenting`: al documentar un comando AWM, verificar `cli/src/commands/<cmd>.ts` antes de escribir. Tanto keyword como storage target de `awm pin` pasaron dos rondas de review con valores incorrectos.
+  - `runbook-as-script`: escribir el doc como hipótesis y ejecutarlo literalmente; las divergencias se corrigen en el doc. Tres hallazgos de QA (doctor example stale, sync footnote, §4.7 incompleto) derivan del mismo patrón: ejemplos de output escritos sin verificar el binario real.
+- **Sensor:** agents-md (entregado a cada agente vía contexto)
+- **Dismissed:** F-1 (prompts españoles — F-10 ya es política, sin brecha estructural nueva), F-3 (verificación parcial de onboarding — demasiado específico al tipo de workstream), W-1 atomic-add (ya en AGENTS.md), W-1 awm-update-distinction (ya en tres docs).
+
+---
+
 ## 2026-06-11 — WS-7 (policy execution): tdd-first-i18n pattern
 
 - **Class:** agent/win
