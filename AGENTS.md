@@ -26,6 +26,12 @@ Lecciones y patrones confirmados en este repo. Todo agente que trabaje aquí deb
 
 - **gate-order-annotation:** cuando el orden de ejecución de un bloque está dictado por una regla de CONSTITUTION (p.ej. "gates de contrato antes de early-exits"), agregar un comentario inline que la cite: `// CONSTITUTION: gates de contrato antes de early-exits`. Hace visible *por qué* el orden importa, previene reordenamientos accidentales en refactors futuros, y permite a reviewers verificar cumplimiento sin buscar la regla. El comentario va inmediatamente antes del primer gate del bloque. Confirmado necesario en WS-3 (B1 regression por early-exit antes del gate de pins) y WS-4 (gate minCliVersion colocado explícitamente antes del early-exit de extensions vacías).
 
+## Patrones de documentación
+
+- **verify-cmd-source-before-documenting:** cuando se documenta un comando AWM (storage target, keywords aceptados, flags), verificar `cli/src/commands/<cmd>.ts` antes de escribir. La narrativa puede sobrevivir spec-review y code-quality-review sin que nadie cheque el código fuente. En WS-5, `awm pin` fue documentado con keyword incorrecto (`base` vs `baseline`) y storage location incorrecta (`profile.json` vs `~/.awm/preferences.json`); ambos pasaron las dos primeras rondas de review.
+
+- **runbook-as-script:** para workstreams que combinan documentación + verificación manual, escribir el doc como hipótesis y ejecutarlo literalmente como test. Las divergencias se corrigen en el doc (no en el tool); el entregable es un doc verificado contra realidad. Confirmado en WS-5: §4.4 (error messages), §4.5 (pin mechanics) y §4.7 (onboarding sequence) se corrigieron durante la Fase C. Tres hallazgos de QA (doctor example stale, sync footnote, onboarding incompleto) también apuntan al mismo patrón: escribir ejemplos de output de CLI sin verificar contra el binario real.
+
 ## Layout del repo y de la instalación
 
 - **Este repo** contiene solo el CLI TypeScript (`cli/`). El contenido (skills, bundles, sensor-packs, hooks) vive en repos externos: `awm-baseline-registry` y `awm-documentation-registry`.
