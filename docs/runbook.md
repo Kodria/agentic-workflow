@@ -1,0 +1,311 @@
+# AWM Runbook
+
+The complete operating manual for AWM: install it, wire a project, use it day to day,
+set it up for a team, and extend it with your own content.
+
+---
+
+## Who this is for
+
+**Individual developer** — you want AWM running on your machine and wired into one or more repos. Start with [Chapter 1](#chapter-1--install--machine-setup) and follow [Chapter 2](#chapter-2--project-setup).
+
+**Team lead setting up a shared registry** — you want every engineer on the team to share the same skills, sensor packs, and rules. After completing Chapters 1-2 yourself, go to [Chapter 4](#chapter-4--team-setup--customization).
+
+**Contributor authoring skills or packs** — you want to create new skills, sensor packs, or registry bundles. Go to [Chapter 5](#chapter-5--extensibility-authoring-content).
+
+---
+
+## Mental model
+
+AWM has **two layers**, and **one command (`awm init`) bootstraps both**:
+
+| Layer | Lives in | Set up | Holds |
+|---|---|---|---|
+| **Machine (global)** | `~/.awm/` + the agent's global skills dir | once per machine | the CLI cache, the baseline skill pack, the agent's context-delivery mechanism |
+| **Project (per repo)** | `<repo>/.awm/`, `CONSTITUTION.md`, sensor configs | once per repo | the project profile, the sensor manifest, the project's rules |
+
+`awm init` is **idempotent** — re-run it any time; it only fills gaps, never clobbers. `awm doctor` reports the state of both layers and **changes nothing**. You rarely call the low-level commands (`awm hooks install`, `awm sensors init`, …) by hand; `init` orchestrates them.
+
+**How each agent stores skills and receives context** — the *only* per-agent difference:
+
+| Agent | Global skills dir | Context delivery (how the agent learns AWM + your rules) |
+|---|---|---|
+| **Claude Code** | `~/.claude/skills/` | a `SessionStart` **hook** injects `using-awm` + `CONSTITUTION.md` into every session |
+| **OpenCode** | `~/.agents/skills/` | `instructions[]` entries in `~/.config/opencode/opencode.json` (global AWM context) **+** `<repo>/opencode.json` (project `CONSTITUTION.md`) |
+
+---
+
+## Chapter 1 — Install & machine setup
+
+### 1.1 Prerequisites
+
+- `git`, `node`, `npm` on your `$PATH`.
+- A working directory that is a git repo. If it isn't one yet: `git init`.
+- **macOS or Linux.** Windows is not supported natively (symlinks + Unix paths); use [WSL](https://learn.microsoft.com/en-us/windows/wsl/) instead.
+
+### 1.2 Install the CLI
+
+```bash
+npm i -g agentic-workflow-manager
+awm --help        # verify it's on PATH
+```
+
+This installs the `awm` binary globally. **Nothing is wired into any agent yet** — that happens in [Chapter 2](#chapter-2--project-setup) with `awm init`. This step is machine-wide; you do it once, not per repo.
+
+`awm init` will seed `~/.awm/registries/baseline/` by cloning [`awm-baseline-registry`](https://github.com/Kodria/awm-baseline-registry) the first time it runs.
+
+### 1.3 Keeping the CLI itself up to date
+
+The CLI and content (registries) are updated separately — this is an important distinction:
+
+- **To update the CLI binary** (new `awm` commands, bug fixes in the tool itself):
+  ```bash
+  npm i -g agentic-workflow-manager@latest
+  ```
+
+- **To update content** (skills, sensor packs, registry bundles):
+  ```bash
+  awm update
+  ```
+  `awm update` pulls the latest content from each configured registry clone. It does **not** update the CLI binary — those are delivered via npm.
+
+After `awm update`, re-run `awm init` to reconcile the wiring to any new defaults (it's idempotent).
+
+---
+
+## Chapter 2 — Project setup
+
+### 2.1 Bootstrap: `awm init`
+
+Run **inside the repo**. Pick your agent:
+
+```bash
+awm init                    # Claude Code (the default)
+awm init --agent opencode   # OpenCode
+```
+
+Flags: `--machine-only` (bootstrap only the global layer, no project changes) · `--yes` (skip prompts, for scripts) · `--json` (machine-readable outcome).
+
+**What `awm init` does in one idempotent pass:**
+
+- **Machine layer:** syncs the registry cache · installs the agent's context mechanism (Claude: `SessionStart` hook; OpenCode: `instructions[]` in the global `opencode.json`) · installs the **baseline skill pack** (`dev`) — the full spine: `using-awm`, `development-process`, `brainstorming`, `writing-plans`, `subagent-driven-development`, `test-driven-development`, `systematic-debugging`, `verification-before-completion`, `post-implementation-qa`, `harness-retro`, `setup-sensors`, `project-constitution`, `project-context-init`, and more.
+- **Project layer:** bootstraps `.awm/profile.json` · detects your stack and writes `.awm/sensors.json` (+ copies the pack's config files) · for OpenCode, wires `CONSTITUTION.md` into the repo-local `opencode.json` once that file exists.
+
+**What `awm init` deliberately leaves for you** — it flags these, it does not do them, because each needs an agent or a choice:
+
+| Left for you | How to do it |
+|---|---|
+| `CONSTITUTION.md` (the repo's rules) | run the `project-constitution` skill through the agent |
+| Agent context (`AGENTS.md` / `CLAUDE.md`) | run the `project-context-init` skill through the agent |
+| Per-edit fast-sensor trigger **(Claude only)** | `awm sensors install` |
+
+### 2.2 Read the state: `awm doctor`
+
+```bash
+awm doctor
+```
+
+```text
+AWM · estado del harness
+
+Machine (global)
+  ✔ CLI v2.x.x
+  ✔ hook SessionStart
+  ✔ dev-core (baseline)
+  ✔ global skills
+
+Project: my-repo
+  ✔ .awm/profile.json
+  ✔ active bundles
+  ✔ sensors
+  ✖ CONSTITUTION.md absent        → skill: project-constitution
+  ⚠ agent context absent          → skill: project-context-init
+```
+
+Glyphs: `✔` healthy · `⚠` advisory (does not degrade) · `✖` missing (degrades state). Every non-`✔` row carries its **own remedy** — a command (`→ awm …`) or a skill to ask the agent to run (`→ skill: …`).
+
+**A `✖ CONSTITUTION.md absent` row is not a bug.** It is `init` telling you the next step requires the agent. A fresh repo is *expected* to read degraded until you run those skills — that is the normal starting state, not an error.
+
+### 2.3 Track A — greenfield
+
+For **new repos with no existing stack**. Pick your scenario and follow the ordered list. Each line is a real command or a plain-language prompt to your agent.
+
+```text
+ 1. npm i -g agentic-workflow-manager      # install AWM (once per machine)
+ 2. cd <your-repo>                         # a git repo (run `git init` if needed)
+ 3. awm init                               # or: awm init --agent opencode
+ 4. awm doctor                             # confirm machine layer is green
+ 5. (reload the agent session)             # Claude: /clear or restart · OpenCode: new session
+ 6. ask agent: "Generá la CONSTITUTION.md con project-constitution."
+ 7. ask agent: "Inicializá el contexto del proyecto con project-context-init."
+ 8. (reload the agent session again)       # so it starts receiving CONSTITUTION.md
+ 9. awm sensors install                    # (Claude only) per-edit fast-sensor trigger
+10. ready — give your first development prompt
+```
+
+On a brand-new repo with no stack files yet (`package.json`/`pyproject.toml`), sensors start as the `generic` pack. **That is fine and self-correcting**: the first time `awm sensors run` executes over a tree that now has a real stack, it auto-upgrades the manifest to the right pack (tsc/lint/test). You never have to re-detect by hand.
+
+### 2.4 Track B — legacy
+
+For **existing codebases with a real stack and pre-existing debt**. Same spine as Track A, plus two extra steps (6 and 9) because an existing codebase has a real stack and pre-existing debt from day one:
+
+```text
+ 1. npm i -g agentic-workflow-manager      # install AWM (once per machine)
+ 2. cd <your-repo>
+ 3. awm init                               # detects your real stack → real sensors immediately
+ 4. awm doctor                             # confirm machine layer is green
+ 5. (reload the agent session)             # Claude: /clear or restart · OpenCode: new session
+ 6. awm sensors status                     # EXTRA: are the gate tools healthy on this stack?
+       └─ if DEGRADED → ask agent: "Adaptá los sensors con setup-sensors."
+       └─ if "tool not installed" → npm i -D <tool>
+ 7. ask agent: "Generá la CONSTITUTION.md con project-constitution."
+ 8. ask agent: "Inicializá el contexto del proyecto con project-context-init."
+ 9. awm sensors baseline                   # EXTRA: accept existing debt → commit the file
+10. (reload the agent session again)
+11. awm sensors install                    # (Claude only) per-edit fast-sensor trigger
+12. ready — give your first development prompt
+```
+
+**Why the two extra steps on legacy?** Step 6: an existing project pins specific tool versions, so the templated sensor configs may need adapting before the gate is trustworthy. Step 9: a mature codebase has pre-existing findings — `awm sensors baseline` snapshots them as *accepted*, so the gate fails only on **new** problems you introduce, not on inherited debt. On greenfield there is no debt to baseline, so you skip both.
+
+### 2.5 Load the agent context
+
+After `awm init`, trigger a fresh context load so the wiring takes effect:
+
+- **Claude Code:** `/clear`, or restart the session. The `SessionStart` hook injects `using-awm` (and `CONSTITUTION.md` once it exists).
+- **OpenCode:** start a new session. The `instructions[]` entries in `opencode.json` load each session.
+
+Confirm it worked — ask the agent: *"¿qué skills de AWM tenés disponibles?"* It should reference `development-process` and the spine skills. If it does not, see [Troubleshooting](#troubleshooting).
+
+### 2.6 Constitution & agent context files
+
+These run **through your agent**, in the session you just loaded. Ask in plain language; the agent invokes the skill.
+
+**Generate `CONSTITUTION.md`:**
+
+`CONSTITUTION.md` holds the repo's **non-negotiable rules**. AWM delivers it into every session automatically (Claude: hook; OpenCode: repo-local `opencode.json`).
+
+> *"Generá la `CONSTITUTION.md` con `project-constitution`."*
+
+The skill reads `CLAUDE.md`/`AGENTS.md`/`README`/`.awm/sensors.json`, drafts the rules section by section (with your approval), writes the file at the repo root, and commits it. **After it exists, reload the session** (see [2.5](#25-load-the-agent-context)) so the agent starts receiving it.
+
+**Generate the agent context file:**
+
+`AGENTS.md` (agent-agnostic, preferred) or `CLAUDE.md` (Claude-specific) **describes** the repo — purpose, structure, commands. The split is deliberate: **rules → `CONSTITUTION.md`; description → `AGENTS.md`.**
+
+> *"Inicializá el contexto del proyecto con `project-context-init`."*
+
+Prefer `AGENTS.md` — every agent reads it. Use `CLAUDE.md` only for Claude-specific notes.
+
+### 2.7 Sensors: the quality gate
+
+Sensors are **deterministic computational checks** (tsc, ESLint, Semgrep, test runner, …) whose output is LLM-readable. They are the project's quality gate. `awm init` already wrote `.awm/sensors.json` and copied the pack configs — these steps make the gate **trustworthy**.
+
+> **Are sensors agnostic? — Yes.**
+>
+> **The checks and the completion gate are 100% agent-agnostic.** `awm sensors run` executes the exact same tsc/eslint/semgrep/tests on Claude, OpenCode, or any agent. There is **no** "Claude-only sensor."
+>
+> What *is* Claude-only is the **automatic per-edit trigger** — a `PostToolUse` hook (see step 9/11 in the tracks above). It is a matter of **cadence, not coverage**:
+>
+> | | Per-edit fast feedback | Full gate at "done" |
+> |---|---|---|
+> | **Claude Code** | hook runs fast sensors after each edit | `awm sensors run` |
+> | **OpenCode** | — (no hooks exist) | `awm sensors run` |
+>
+> Both agents enforce the **same floor** at the completion gate (driven by `verification-before-completion`). Claude additionally gets a tighter, earlier feedback loop. Installing the hook does **not** make sensors "Claude-only" — it only adds an *extra, earlier* check on Claude.
+
+**Check sensor health:**
+
+```bash
+awm sensors status
+```
+
+- `HEALTHY` — ready.
+- `DEGRADED` — the templated config does not match your installed tool versions (common on legacy repos).
+- `NOT_CONFIGURED` — no manifest yet (should not happen after `awm init`).
+
+**Adapt the configs (mostly legacy):**
+
+If `status` shows `DEGRADED`, ask the agent:
+
+> *"Adaptá los sensors con `setup-sensors`."*
+
+Also: tools that run via `npx` (eslint, depcruise, …) must be **devDependencies**, or `npx` fetches them remotely and `status` reports them as not installed. Fix with `npm i -D <tool>`.
+
+**Baseline existing debt (legacy only):**
+
+A mature codebase has pre-existing findings. Snapshot them as **accepted** so the gate fails only on **new** findings you introduce — then commit the snapshot so the whole team shares the ratchet:
+
+```bash
+awm sensors baseline      # writes .awm/sensors.baseline.json — commit it
+```
+
+Skip this on greenfield — there is no debt to accept. The baseline is a *manual* snapshot you re-take deliberately when you want to move the ratchet; it never updates itself.
+
+**(Claude only) Add the per-edit fast-sensor trigger:**
+
+```bash
+awm sensors install
+```
+
+This installs the `PostToolUse` hook so fast sensors (tsc/eslint) run automatically after each file edit. OpenCode has no hooks, so it has nothing to install here — it runs the same sensors at the completion gate instead.
+
+**How the gate stays honest:**
+
+`awm sensors run` **re-detects your stack on every run**. If the manifest is still on the `generic` fallback but your tree now has a real stack, it auto-upgrades to the right pack. And if a run executed nothing real over a tree that clearly has a stack, it refuses to report green (`not_certified`) instead of a false pass. This is why greenfield Track A works without any manual re-detection.
+
+### 2.8 Ready checklist
+
+You are ready when **all** of these hold:
+
+- [ ] `awm doctor` — machine layer all `✔`.
+- [ ] `CONSTITUTION.md` exists and the session was reloaded after it was created.
+- [ ] Agent context (`AGENTS.md`/`CLAUDE.md`) exists.
+- [ ] `awm sensors status` — `HEALTHY` (and on legacy, a committed baseline).
+- [ ] **(Claude only)** `awm sensors install` done.
+
+Now just describe the work in plain language. Your default entry point for any development is the **`development-process`** orchestrator — you do not pick the skill, *it* reads project state and routes the phases:
+
+```text
+brainstorming → writing-plans → subagent-driven-development → post-implementation-qa → finishing-a-development-branch
+```
+
+---
+
+## Chapter 3 — Day-to-day in a project
+<!-- ch3: Task 2 -->
+
+---
+
+## Chapter 4 — Team setup & customization
+<!-- ch4: Task 3 -->
+
+---
+
+## Chapter 5 — Extensibility: authoring content
+<!-- ch5: Task 4 -->
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `awm: command not found` | npm global bin not on PATH, or npm package not installed | `npm i -g agentic-workflow-manager` and ensure `npm bin -g` is on your `$PATH` |
+| `awm doctor` shows `✖ .awm/profile.json → awm init` right after `awm init` | (fixed) profile was not bootstrapped on zero-extension repos | `awm update` to get latest content, then `awm init` |
+| New session does not show `using-awm` in context | session opened before the wiring existed | Claude: `/clear` or restart · OpenCode: start a new session |
+| Sensors never run after an edit (Claude) | `PostToolUse` hook not installed | `awm sensors install` |
+| Sensors do not run after edits (OpenCode) | **by design** — OpenCode has no hooks | they run at the completion gate via `awm sensors run` |
+| `awm sensors status` says a tool is "not installed locally" | `npx` tool missing from devDependencies | `npm i -D <tool>` |
+| Sensor always red on a legacy repo | no baseline accepted yet | `awm sensors baseline` |
+| `DEGRADED` sensor that will not clear | config templated for a different tool version | ask the agent to run `setup-sensors` |
+| Gate reports `generic` / nothing ran on a real stack | stack appeared after `awm init` | just run `awm sensors run` once — it self-upgrades; never reports false green |
+| A skill is not in the agent's catalog | baseline pack not installed | re-run `awm init` (installs the `dev` baseline) |
+| OpenCode is not receiving `CONSTITUTION.md` | repo-local `opencode.json` missing the entry | re-run `awm init --agent opencode` (it wires it when `CONSTITUTION.md` exists) |
+
+---
+
+## See also
+
+- [cli-reference.md](cli-reference.md) — full `awm` command surface and non-interactive flags.
+- [architecture.md](architecture.md) — how AWM routes artifacts between the registry and your local install.
