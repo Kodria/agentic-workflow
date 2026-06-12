@@ -387,6 +387,8 @@ awm registry add <git-url> --no-install  # clone only, skip bundle install
 
 AWM clones the registry under `~/.awm/registries/<name>/` and registers it in the machine config. Once added, `awm update` keeps it in sync alongside the baseline.
 
+> **Tip:** If your registry has no semver tags yet (a common starting state for new team registries), `awm update` reports `updated @ HEAD` and syncs to the latest commit. Add a tag when you're ready to version your releases.
+
 Inspect and remove registries:
 
 ```bash
@@ -411,6 +413,8 @@ GIT_TERMINAL_PROMPT=0 awm registry add <url>
 ```
 
 A failed `awm registry add` leaves no clone on disk and no entry in the machine config (atomic — either it works or nothing changes).
+
+> **Note:** `awm registry add` against a truly non-existent or inaccessible repository exits cleanly in ~2 seconds with a `Clone failed:` prefix, leaving no partial files or config entries behind.
 
 ### 4.5 Version pinning
 
@@ -467,6 +471,8 @@ awm doctor                          # 5. verify everything is green
 ```
 
 After step 5, the developer has the same skill set as every other teammate. No manual file copying, no registry access needed beyond what the profile declares.
+
+> `awm sync` is a no-op if `.awm/profile.json` declares no extensions — it completes silently. It becomes necessary once a teammate has run `awm add <bundle>` to add project extensions; the sync materializes those symlinks on a fresh machine.
 
 ---
 

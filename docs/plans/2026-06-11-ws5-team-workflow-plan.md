@@ -621,13 +621,73 @@ Expected: la secuencia es EXACTAMENTE la del runbook ch4.7; baseline respeta el 
 > Se completa durante la Fase C (protocolo de contingencia, regla 3).
 
 ### Escenario 1 — Release cycle real (Tasks 11-12)
-*(pendiente)*
+
+**Sandbox:** `/tmp/ws5-verify-mwRm`
+
+Pre-release (Task 11):
+```
+git describe --tags → v1.0.0
+grep -c "Especialista" skills/architecture-advisor/SKILL.md → 2 (Spanish content present)
+```
+
+Post-release (Task 12):
+```
+git push origin v1.1.0 → * [new tag] v1.1.0 -> v1.1.0
+awm update → ✓ Registry baseline updated @ v1.1.0
+git describe --tags → v1.1.0
+grep -c "Especialista" skills/architecture-advisor/SKILL.md → 0 (English now)
+```
+
+Pin verification:
+```
+awm pin baseline 1.0.0 → ✓ baseline pinned to v1.0.0
+awm update → ✓ Registry baseline updated @ v1.0.0
+git describe --tags → v1.0.0 (pin respected)
+awm unpin baseline → ✓ baseline unpinned
+awm update → ✓ Registry baseline updated @ v1.1.0
+git describe --tags → v1.1.0 (moved to latest)
+```
 
 ### Escenario 2 — Registry privado happy path (Task 13)
-*(pendiente)*
+
+```
+SSH key: id_ed25519_github_personal
+awm registry add git@github.com:Kodria/awm-personal-registry.git
+→ ◇ Registry awm-personal-registry added
+→ Bundles available: personal-notion
+
+awm registry list:
+  baseline               30 skills, 3 bundles
+  awm-personal-registry  3 skills, 1 bundle
+
+awm update → ✓ Registry awm-personal-registry updated @ HEAD
+(no semver tags — graceful HEAD fallback)
+```
 
 ### Escenario 3 — Registry privado sin acceso (Task 14)
-*(pendiente)*
+
+```
+SSH null identity test (exit 1, ~2s):
+Clone failed: Load key "/dev/null": invalid format
+ERROR: Repository not found.
+No clone garbage, no config entry. ✓
+
+HTTPS no credentials test (exit 1, ~2s):
+Clone failed: fatal: could not read Username for 'https://github.com': terminal prompts disabled
+No clone garbage, no config entry. ✓
+
+All 5 acceptance criteria passed for both tests.
+```
 
 ### Escenario 4 — Onboarding nuevo dev (Task 15)
-*(pendiente)*
+
+```
+Profile: {"extensions": [], "registries": {"baseline": "1.1.0"}}
+Fresh newdev-home (no prior ~/.awm)
+
+awm init --yes → machine layer: hook ✔, dev-core ✔, global skills ✔
+awm sync → "No extensions in .awm/profile.json — nothing to sync."
+awm doctor → Machine layer: 4/4 ✔ | Degraded: CONSTITUTION.md + AGENTS.md (skill-driven, expected)
+
+Isolation: real ~/.awm unchanged (23 skills, baseline only)
+```
