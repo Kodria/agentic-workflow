@@ -2,7 +2,7 @@
 
 The `awm` (Agentic Workflow Manager) binary is the entry point for the registry and the harness. It supports an interactive Text User Interface (TUI) via Clack Prompts by default, plus quiet, flag-based execution for scripting and CI.
 
-New to AWM? Start with the [Getting Started runbook](getting-started.md). This page is the exhaustive command surface.
+New to AWM? Start with the [AWM Runbook](runbook.md). This page is the exhaustive command surface.
 
 ## Concepts used across commands
 
@@ -264,6 +264,5 @@ Standard Commander help and version output. Every command and subcommand accepts
 
 ## See also
 
-- [Getting Started](getting-started.md) — the from-zero runbook (Claude & OpenCode).
+- [AWM Runbook](runbook.md) — the complete operating manual (install → team setup → authoring).
 - [Architecture & Design](architecture.md) — how AWM routes artifacts between the registry and your install.
-- [Registry Contributor Guide](registry-guide.md) — author your own skills and packs.

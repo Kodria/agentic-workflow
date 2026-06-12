@@ -33,7 +33,7 @@ awm init --agent opencode # or OpenCode
 awm doctor                # read the machine + project state any time
 ```
 
-> **First time using AWM?** Read the [Getting Started runbook](docs/getting-started.md) — the from-zero walkthrough for both Claude Code and OpenCode: install → `awm init` → `awm doctor` → finish project setup (sensors + `CONSTITUTION.md` + the learning loop).
+> **First time using AWM?** Read the [AWM Runbook](docs/runbook.md) — the complete operating manual: install → project setup → day-to-day → team setup → authoring your own content.
 
 ## Platform support
 
@@ -71,7 +71,7 @@ awm update
 Dive deeper into how AWM works and how you can contribute:
 
 **Use it**
-- [Getting Started](docs/getting-started.md): The from-zero runbook for Claude Code & OpenCode — install → `awm init` → `awm doctor` → sensors, `CONSTITUTION.md`, and the development + learning loop end-to-end.
+- [AWM Runbook](docs/runbook.md): The complete operating manual — install, project setup, day-to-day usage, team registries & pinning, and authoring your own content.
 - [CLI Reference](docs/cli-reference.md): Every `awm` command and non-interactive flag (`init`, `doctor`, `sensors`, `hooks`, `ledger`, `add`, …).
 
 **Understand it**
@@ -79,7 +79,7 @@ Dive deeper into how AWM works and how you can contribute:
 - [Harness Retros](docs/harness-retros.md): Auditable log of recurring harness gaps converted into structural rules.
 
 **Extend it**
-- [Registry Contributor Guide](docs/registry-guide.md): Author your own Skills (`SKILL.md`) and bundle them into Processes in the external registry repos.
+- [AWM Runbook — Ch. 5 Extensibility](docs/runbook.md#chapter-5--extensibility-authoring-content): Author your own Skills (`SKILL.md`), bundles, and packs in the external registry repos.
 - [CLI Developer Guide](cli/README.md): Work on the core AWM CLI source code.
 
 ## 🤝 Why AWM?
