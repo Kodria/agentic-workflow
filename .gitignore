@@ -10,3 +10,4 @@ tmp/*
 *.awm.*
 .claude/skills/
 .claude/agents/
+*.eslintcache
