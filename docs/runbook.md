@@ -334,7 +334,139 @@ Keep your installed content current without over-running updates:
 ---
 
 ## Chapter 4 — Team setup & customization
-<!-- ch4: Task 3 -->
+
+### 4.1 The team model
+
+AWM supports a self-service team workflow:
+
+```
+senior authors a skill → PR to team registry → tagged release vX.Y.Z → teammates run awm update to receive it
+new developer → git clone → awm init → awm sync → awm doctor → ready
+```
+
+Skills live in a git repo (the team registry). You author them, tag a release, and every teammate's `awm update` pulls the new version. A new developer joins by cloning the project, running three commands, and their machine is fully wired — no manual file copying, no shared drives.
+
+### 4.2 Create your team registry
+
+A registry is a git repo with this minimum structure:
+
+```
+<registry-repo>/
+├── skills/
+│   └── <skill-name>/
+│       └── SKILL.md
+├── bundles/
+│   └── <bundle-name>/
+│       └── bundle.json
+└── catalog.json
+```
+
+`catalog.json` declares the bundles:
+
+```json
+{
+  "version": 1,
+  "bundles": [
+    { "name": "dev", "source": "bundles/dev", "version": "1.0.0", "scope": "baseline" }
+  ]
+}
+```
+
+The registry can be **public or private** from day one. SSH remotes work the same as any git repo (see §4.4).
+
+### 4.3 Wire it: awm registry add
+
+Register an additional registry on your machine:
+
+```bash
+awm registry add <git-url>               # prompts for a name
+awm registry add <git-url> --name <name> # skip the prompt
+awm registry add <git-url> --install-all # install every bundle after cloning
+awm registry add <git-url> --no-install  # clone only, skip bundle install
+```
+
+AWM clones the registry under `~/.awm/registries/<name>/` and registers it in the machine config. Once added, `awm update` keeps it in sync alongside the baseline.
+
+Inspect and remove registries:
+
+```bash
+awm registry list                # list all configured registries
+awm registry remove <name>       # remove registry config + clone (-y to skip confirmation)
+```
+
+### 4.4 Private registries (SSH)
+
+Use an SSH remote for private repositories:
+
+```bash
+awm registry add git@github.com:your-org/your-registry.git
+```
+
+Clone and fetch run through git, so your `ssh-agent` and `~/.ssh/config` apply exactly as with any git repository. No AWM-specific configuration needed.
+
+**If access fails:** AWM reports a git authentication error and exits cleanly. It does not hang waiting for credentials. In CI or headless environments, export `GIT_TERMINAL_PROMPT=0` before running any `awm` command that touches git — this tells git to fail immediately instead of prompting for a username/password:
+
+```bash
+GIT_TERMINAL_PROMPT=0 awm registry add <url>
+```
+
+A failed `awm registry add` leaves no clone on disk and no entry in the machine config (atomic — either it works or nothing changes).
+
+### 4.5 Version pinning
+
+By default, `awm update` checks out the latest semver tag in each registry (the **stable channel**). To lock a project to a specific version:
+
+```bash
+awm pin <registry> <version>    # e.g. awm pin baseline 1.0.0
+awm unpin <registry>             # return to latest-tag behavior
+```
+
+The pin is stored in `.awm/profile.json` under the `registries` map:
+
+```json
+{
+  "extensions": ["frontend"],
+  "registries": {
+    "baseline": "1.0.0"
+  }
+}
+```
+
+**Commit `.awm/profile.json`.** The whole team is pinned as soon as they pull — the pin is a project contract, not a per-machine preference. After committing a pin, `awm update` in any teammate's sandbox respects it.
+
+### 4.6 The shared profile: .awm/profile.json
+
+`.awm/profile.json` is the project's AWM configuration:
+
+```json
+{
+  "extensions": ["frontend"],
+  "registries": {
+    "baseline": "1.1.0"
+  }
+}
+```
+
+| Field | What it does |
+|---|---|
+| `extensions` | Skill bundles installed for the project (names from your registries' catalogs) |
+| `registries` | Version pins per registry (omit a registry to use the latest tag) |
+
+**Commit this file.** It is the onboarding contract — a new developer's `awm sync` reads it and materializes the correct symlinks for every declared extension.
+
+### 4.7 Onboarding a new developer
+
+A developer joining the project:
+
+```bash
+npm i -g agentic-workflow-manager   # 1. install AWM CLI (once per machine)
+git clone <project> && cd <project> # 2. clone the project
+awm init                            # 3. machine layer + reads the committed profile
+awm sync                            # 4. materializes skill symlinks the profile declares
+awm doctor                          # 5. verify everything is green
+```
+
+After step 5, the developer has the same skill set as every other teammate. No manual file copying, no registry access needed beyond what the profile declares.
 
 ---
 
