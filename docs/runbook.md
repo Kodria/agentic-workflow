@@ -106,7 +106,7 @@ awm doctor
 ```
 
 ```text
-AWM · estado del harness
+AWM · harness status
 
 Machine (global)
   ✔ CLI v2.x.x
@@ -120,6 +120,8 @@ Project: my-repo
   ✔ sensors
   ✖ CONSTITUTION.md absent        → skill: project-constitution
   ⚠ agent context absent          → skill: project-context-init
+
+status: degraded · 2 suggested actions
 ```
 
 Glyphs: `✔` healthy · `⚠` advisory (does not degrade) · `✖` missing (degrades state). Every non-`✔` row carries its **own remedy** — a command (`→ awm …`) or a skill to ask the agent to run (`→ skill: …`).
@@ -136,8 +138,8 @@ For **new repos with no existing stack**. Pick your scenario and follow the orde
  3. awm init                               # or: awm init --agent opencode
  4. awm doctor                             # confirm machine layer is green
  5. (reload the agent session)             # Claude: /clear or restart · OpenCode: new session
- 6. ask agent: "Generá la CONSTITUTION.md con project-constitution."
- 7. ask agent: "Inicializá el contexto del proyecto con project-context-init."
+ 6. ask agent: "Generate the CONSTITUTION.md with project-constitution."
+ 7. ask agent: "Initialize the project context with project-context-init."
  8. (reload the agent session again)       # so it starts receiving CONSTITUTION.md
  9. awm sensors install                    # (Claude only) per-edit fast-sensor trigger
 10. ready — give your first development prompt
@@ -156,10 +158,10 @@ For **existing codebases with a real stack and pre-existing debt**. Same spine a
  4. awm doctor                             # confirm machine layer is green
  5. (reload the agent session)             # Claude: /clear or restart · OpenCode: new session
  6. awm sensors status                     # EXTRA: are the gate tools healthy on this stack?
-       └─ if DEGRADED → ask agent: "Adaptá los sensors con setup-sensors."
+       └─ if DEGRADED → ask agent: "Adapt the sensors with setup-sensors."
        └─ if "tool not installed" → npm i -D <tool>
- 7. ask agent: "Generá la CONSTITUTION.md con project-constitution."
- 8. ask agent: "Inicializá el contexto del proyecto con project-context-init."
+ 7. ask agent: "Generate the CONSTITUTION.md with project-constitution."
+ 8. ask agent: "Initialize the project context with project-context-init."
  9. awm sensors baseline                   # EXTRA: accept existing debt → commit the file
 10. (reload the agent session again)
 11. awm sensors install                    # (Claude only) per-edit fast-sensor trigger
@@ -175,7 +177,7 @@ After `awm init`, trigger a fresh context load so the wiring takes effect:
 - **Claude Code:** `/clear`, or restart the session. The `SessionStart` hook injects `using-awm` (and `CONSTITUTION.md` once it exists).
 - **OpenCode:** start a new session. The `instructions[]` entries in `opencode.json` load each session.
 
-Confirm it worked — ask the agent: *"¿qué skills de AWM tenés disponibles?"* It should reference `development-process` and the spine skills. If it does not, see [Troubleshooting](#troubleshooting).
+Confirm it worked — ask the agent: *"what AWM skills do you have available?"* It should reference `development-process` and the spine skills. If it does not, see [Troubleshooting](#troubleshooting).
 
 ### 2.6 Constitution & agent context files
 
@@ -185,7 +187,7 @@ These run **through your agent**, in the session you just loaded. Ask in plain l
 
 `CONSTITUTION.md` holds the repo's **non-negotiable rules**. AWM delivers it into every session automatically (Claude: hook; OpenCode: repo-local `opencode.json`).
 
-> *"Generá la `CONSTITUTION.md` con `project-constitution`."*
+> *"Generate the `CONSTITUTION.md` with `project-constitution`."*
 
 The skill reads `CLAUDE.md`/`AGENTS.md`/`README`/`.awm/sensors.json`, drafts the rules section by section (with your approval), writes the file at the repo root, and commits it. **After it exists, reload the session** (see [2.5](#25-load-the-agent-context)) so the agent starts receiving it.
 
@@ -193,7 +195,7 @@ The skill reads `CLAUDE.md`/`AGENTS.md`/`README`/`.awm/sensors.json`, drafts the
 
 `AGENTS.md` (agent-agnostic, preferred) or `CLAUDE.md` (Claude-specific) **describes** the repo — purpose, structure, commands. The split is deliberate: **rules → `CONSTITUTION.md`; description → `AGENTS.md`.**
 
-> *"Inicializá el contexto del proyecto con `project-context-init`."*
+> *"Initialize the project context with `project-context-init`."*
 
 Prefer `AGENTS.md` — every agent reads it. Use `CLAUDE.md` only for Claude-specific notes.
 
@@ -228,7 +230,7 @@ awm sensors status
 
 If `status` shows `DEGRADED`, ask the agent:
 
-> *"Adaptá los sensors con `setup-sensors`."*
+> *"Adapt the sensors with `setup-sensors`."*
 
 Also: tools that run via `npx` (eslint, depcruise, …) must be **devDependencies**, or `npx` fetches them remotely and `status` reports them as not installed. Fix with `npm i -D <tool>`.
 
@@ -472,13 +474,17 @@ A developer joining the project:
 npm i -g agentic-workflow-manager   # 1. install AWM CLI (once per machine)
 git clone <project> && cd <project> # 2. clone the project
 awm init                            # 3. machine layer + reads the committed profile
+# 3a. If the team uses a non-baseline registry, add it now:
+# awm registry add <team-registry-url>   # SSH for private: git@github.com:org/repo.git
 awm sync                            # 4. materializes skill symlinks the profile declares
 awm doctor                          # 5. verify everything is green
 ```
 
-After step 5, the developer has the same skill set as every other teammate. No manual file copying, no registry access needed beyond what the profile declares.
+After step 5, the developer has the same skill set as every other teammate. No manual file copying.
 
-> `awm sync` is a no-op if `.awm/profile.json` declares no extensions — it completes silently. It becomes necessary once a teammate has run `awm add <bundle>` to add project extensions; the sync materializes those symlinks on a fresh machine.
+> **Team registry note:** `.awm/profile.json` stores extension names and version pins but not registry URLs. If your team uses a non-baseline registry, document its URL in the project README and have new developers run `awm registry add <url>` (step 3a) before `awm sync`. Otherwise `awm sync` will report `<bundle> (bundle not found in registry)` for each missing extension.
+
+> `awm sync` confirms what it did — if `.awm/profile.json` declares no extensions it emits `No extensions in .awm/profile.json — nothing to sync.` It becomes necessary once a teammate has run `awm add <bundle>` to add project extensions; the sync materializes those symlinks on a fresh machine.
 
 ---
 

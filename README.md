@@ -11,14 +11,14 @@
 
 ```bash
 npm i -g agentic-workflow-manager
-awm init        # en tu proyecto: bootstrapea ~/.awm, clona el baseline registry e instala los bundles
+awm init        # in your project: bootstraps ~/.awm, clones the baseline registry, installs bundles
 ```
 
-El contenido vive en registries git separados del CLI:
-[awm-baseline-registry](https://github.com/Kodria/awm-baseline-registry) (sembrado por defecto) y
+Content lives in git registries separate from the CLI:
+[awm-baseline-registry](https://github.com/Kodria/awm-baseline-registry) (seeded by default) and
 [awm-documentation-registry](https://github.com/Kodria/awm-documentation-registry) (opt-in:
 `awm registry add https://github.com/Kodria/awm-documentation-registry.git`).
-`AWM_BASE_REMOTE` overridea el remote del baseline en la siembra.
+`AWM_BASE_REMOTE` overrides the baseline remote at seeding.
 
 Once installed, verify it's working:
 ```bash
