@@ -273,7 +273,63 @@ brainstorming → writing-plans → subagent-driven-development → post-impleme
 ---
 
 ## Chapter 3 — Day-to-day in a project
-<!-- ch3: Task 2 -->
+
+### 3.1 The development loop
+
+AWM plugs into your work via the `development-process` skill — a lightweight orchestrator you invoke by describing what you want to build. It reads project state and routes you through the correct phases automatically:
+
+```
+brainstorming → writing-plans → subagent-driven-development → post-implementation-qa → harness-retro → finishing-a-development-branch
+```
+
+Cross-cutting skills kick in within phases: `test-driven-development` (write the test first), `systematic-debugging` (root-cause before fixing), `verification-before-completion` (run sensors before declaring done).
+
+To start any development task, just describe it in plain language — `development-process` decides what's next.
+
+### 3.2 What happens automatically
+
+| Trigger | Claude Code | OpenCode |
+|---|---|---|
+| New session in the repo | `SessionStart` hook injects `using-awm` + `CONSTITUTION.md` | `instructions[]` load the global AWM context + project `CONSTITUTION.md` |
+| Agent edits a file | `PostToolUse` hook runs fast sensors (tsc/lint), surfaces findings | — (no per-edit hook; caught at the gate) |
+| Agent about to declare "done" | `verification-before-completion` runs `awm sensors run` and reads the output | **same** |
+| Same sensor fails a 2nd time | the skill recommends `harness-retro` to turn it into a structural rule | **same** |
+
+The common thread: **recurrence becomes a rule, not a repeated symptom fix.**
+
+### 3.3 The quality gate in practice
+
+The project's quality gate is `awm sensors run` (no flag — runs all sensors). Here is how to use it:
+
+- **Per-edit (Claude Code only):** fast sensors (tsc/lint) run automatically after each file edit via the `PostToolUse` hook. This is early feedback, not the gate.
+- **Completion gate (all agents):** before declaring a task done, the `verification-before-completion` skill runs `awm sensors run` (all sensors, no flag) and reads `overall`. Only `overall: "pass"` counts as green.
+- **Do not use `--slow` as the gate.** `awm sensors run --slow` runs only semgrep/mutation and skips lint/typecheck, where most findings surface.
+- **Baseline ratchet:** `awm sensors baseline` snapshots current findings as accepted. Re-take it deliberately when you want to move the ratchet forward (e.g. after a debt-reduction sprint). It never updates itself.
+
+### 3.4 The learning loop
+
+AWM builds institutional memory per branch without bloating your context:
+
+- During development, skills append wins and findings to a per-branch **ledger** (`awm ledger`) — ephemeral working memory, gitignored, never injected into agent context.
+- At the end of a branch, **`harness-retro`** reads the ledger and *cures* recurring lessons into durable docs:
+  - Structural / security / logic findings → the remediation tree (`eslint.config.awm.mjs`, `.semgrep.awm.yml`, `tests/structural/`)
+  - Process lessons → `CONSTITUTION.md`
+  - Agent working-style lessons + wins → `AGENTS.md`
+
+You rarely touch `awm ledger` directly. Inspect it if curious: `awm ledger list` / `awm ledger recurring --min 2`.
+
+> **Project-specific vs framework rules.** Rules born from a bug in *your* repo live in *your* repo (grown by `harness-retro` into your config files / `CONSTITUTION.md`). Only universally-avoidable patterns (e.g. "never `eval`") belong in the AWM registry. AWM ships the *mechanism*, not your project's bug list.
+
+### 3.5 Update cadence
+
+Keep your installed content current without over-running updates:
+
+| What | When | Command |
+|---|---|---|
+| Team registry content (new skills, fixes) | When a teammate cuts a release, or at the start of a sprint | `awm update` |
+| Machine harness health | When something feels off | `awm doctor` |
+| Re-run project init | After a large `awm update` that adds new defaults | `awm init` (idempotent — safe to re-run) |
+| CLI itself | When a new AWM CLI version ships | `npm i -g agentic-workflow-manager@latest` (separate from `awm update`) |
 
 ---
 
