@@ -418,14 +418,20 @@ A failed `awm registry add` leaves no clone on disk and no entry in the machine 
 
 ### 4.5 Version pinning
 
-By default, `awm update` checks out the latest semver tag in each registry (the **stable channel**). To lock a project to a specific version:
+By default, `awm update` checks out the latest semver tag in each registry (the **stable channel**). There are two ways to pin a registry to a specific version, depending on whether the pin is for your machine only or for the whole team.
+
+**Machine-level pin (local convenience only):**
 
 ```bash
 awm pin <registry> <version>    # e.g. awm pin baseline 1.0.0
 awm unpin <registry>             # return to latest-tag behavior
 ```
 
-The pin is stored in `.awm/profile.json` under the `registries` map:
+`awm pin` is a machine-level convenience — it stores the pin in `~/.awm/preferences.json` (not committed). This affects only your local `awm update` runs; teammates are not affected.
+
+**Team pin (project contract — commit it):**
+
+To pin for the whole team, edit `.awm/profile.json`'s `registries` map directly and commit it:
 
 ```json
 {
@@ -436,7 +442,7 @@ The pin is stored in `.awm/profile.json` under the `registries` map:
 }
 ```
 
-**Commit `.awm/profile.json`.** The whole team is pinned as soon as they pull — the pin is a project contract, not a per-machine preference. After committing a pin, `awm update` in any teammate's sandbox respects it.
+**Commit `.awm/profile.json`.** The whole team is pinned as soon as they pull — the pin is a project contract. After committing a pin, `awm update` in any teammate's sandbox respects it.
 
 ### 4.6 The shared profile: .awm/profile.json
 

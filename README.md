@@ -64,7 +64,7 @@ awm list
 ```bash
 awm update
 ```
-*(Pulls the latest content from each configured registry and rebuilds the CLI binary.)*
+*(Pulls the latest content from each configured registry. The CLI itself is updated separately: `npm i -g agentic-workflow-manager@latest`.)*
 
 ## 📚 Documentation
 

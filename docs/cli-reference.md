@@ -131,7 +131,7 @@ Remove an additional registry (config + clone). `-y, --yes` skips confirmation.
 
 ### `awm pin <registry> <version>`
 
-Pin a registry (`base` or an additional registry name) to a version tag, e.g. `awm pin base 1.2.0`. The pin is stored in the project's `.awm/profile.json` (`registries` map) — commit it and the whole team is pinned.
+Pin a registry (`baseline` or an additional registry name) to a version tag, e.g. `awm pin baseline 1.0.0`. The pin is stored in `~/.awm/preferences.json` (machine-level, not committed) — it applies only to your local `awm update` runs. To pin for the whole team, edit `.awm/profile.json`'s `registries` map directly and commit it.
 
 ### `awm unpin <registry>`
 
