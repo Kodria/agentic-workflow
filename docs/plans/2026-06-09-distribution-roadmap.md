@@ -100,8 +100,9 @@ CLI estable publicado en npm; `install.sh` se reduce a `npm i -g` (o desaparece)
 
 Documentar el ciclo completo de equipo (depende de WS-2/3/4): senior autorea skill → PR al registry del equipo → release taggeado → teammates reciben con `awm update`; nuevo dev → `git clone` + `awm sync`. Alcance recortado: sin E2E nuevo de simulación (cobertura ya existente en la suite).
 
-- [ ] Runbook de equipo en `docs/` (ciclo de releases, pinning, onboarding de nuevo dev)
-- [ ] Verificación manual del ciclo real contra GitHub, incluyendo registry **privado** (SSH/auth) — hardening solo de lo que se rompa
+- [x] Runbook maestro publicado
+- [x] 4 escenarios de verificación ejecutados con evidencia
+- [x] Release baseline normalizado publicado y recibido vía awm update
 - [ ] QA → `awm-qa-complete`
 
 ### WS-6 — Agnosticismo de harness, fase 2 `[F-5]` — **DIFERIDO A DEMANDA (2026-06-11)**
@@ -131,7 +132,7 @@ No es código primero: son tres decisiones que hay que tomar y registrar (y reci
 | WS-2 | F-2 | [2026-06-09-ws2-multi-registry-plan.md](2026-06-09-ws2-multi-registry-plan.md) | ☑ |
 | WS-3 | F-1 | [2026-06-10-ws3-versioning-plan.md](2026-06-10-ws3-versioning-plan.md) | ☑ |
 | WS-4 | F-3 | [2026-06-10-ws4-npm-distribution-plan.md](2026-06-10-ws4-npm-distribution-plan.md) | ☑ |
-| WS-5 | F-12 | — | ☐ |
+| WS-5 | F-12 | [2026-06-11-ws5-team-workflow-plan.md](2026-06-11-ws5-team-workflow-plan.md) | ☐ |
 | WS-6 | F-5 | diferido a demanda (2026-06-11) | ◌ diferido |
 | WS-7 | F-9, F-10, F-11 | [2026-06-11-ws7-policy-execution-plan.md](2026-06-11-ws7-policy-execution-plan.md) | ☑ |
 
