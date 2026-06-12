@@ -1,7 +1,8 @@
 # Roadmap — Era de Distribución (AWM para equipos)
+<!-- awm-qa-complete: 2026-06-12 -->
 
 **Fecha:** 2026-06-09
-**Estado:** ABIERTO — este documento es el índice maestro de la era; se cierra solo cuando todos los workstreams tengan su plan con `<!-- awm-qa-complete -->`.
+**Estado:** CERRADO 2026-06-12 — todos los workstreams con QA ☑ o diferido registrado. Era completa.
 **Contexto:** El 2026-06-09 se cerró administrativamente todo el backlog de planes de la era "harness personal" (78 docs en `docs/plans/`, todos marcados `awm-qa-complete` o `awm-plan-closed`). Este roadmap arranca la era siguiente: volver AWM distribuible a equipos de desarrollo, no solo de uso personal. Nace del análisis funcional de distribución (sesión 2026-06-09) + los diferidos vivos de la era anterior.
 
 ---
@@ -132,8 +133,8 @@ No es código primero: son tres decisiones que hay que tomar y registrar (y reci
 | WS-2 | F-2 | [2026-06-09-ws2-multi-registry-plan.md](2026-06-09-ws2-multi-registry-plan.md) | ☑ |
 | WS-3 | F-1 | [2026-06-10-ws3-versioning-plan.md](2026-06-10-ws3-versioning-plan.md) | ☑ |
 | WS-4 | F-3 | [2026-06-10-ws4-npm-distribution-plan.md](2026-06-10-ws4-npm-distribution-plan.md) | ☑ |
-| WS-5 | F-12 | [2026-06-11-ws5-team-workflow-plan.md](2026-06-11-ws5-team-workflow-plan.md) | ☐ |
+| WS-5 | F-12 | [2026-06-11-ws5-team-workflow-plan.md](2026-06-11-ws5-team-workflow-plan.md) | ☑ |
 | WS-6 | F-5 | diferido a demanda (2026-06-11) | ◌ diferido |
 | WS-7 | F-9, F-10, F-11 | [2026-06-11-ws7-policy-execution-plan.md](2026-06-11-ws7-policy-execution-plan.md) | ☑ |
 
-**Este documento se cierra** (marcador `awm-qa-complete` + nota de cierre de era) cuando las 8 filas tengan QA ☑ o estado "diferido" registrado (re-alcance 2026-06-11).
+**Era cerrada 2026-06-12.** WS-0..WS-5 + WS-7 completados con QA ☑; WS-6 diferido a demanda (criterio de cierre cumplido).
