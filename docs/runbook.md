@@ -267,7 +267,7 @@ You are ready when **all** of these hold:
 Now just describe the work in plain language. Your default entry point for any development is the **`development-process`** orchestrator — you do not pick the skill, *it* reads project state and routes the phases:
 
 ```text
-brainstorming → writing-plans → subagent-driven-development → post-implementation-qa → finishing-a-development-branch
+brainstorming → writing-plans → subagent-driven-development → post-implementation-qa → harness-retro → finishing-a-development-branch
 ```
 
 ---
