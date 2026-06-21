@@ -49,6 +49,8 @@ Registradas vía consulta directa a Nicolás. Son el marco no negociable del bri
 | D-2 | **Entornos de nube objetivo** | **Solo Claude Code en la web.** | No se diseña para GitHub Actions / Codespaces / Docker genérico en esta era. El mecanismo de arranque se apoya en *setup scripts* + variables de entorno del entorno web. |
 | D-3 | **Auth de registries privados** | **Token git por variable de entorno** (HTTPS con PAT/fine-grained token inyectado como secreto del entorno). | Los repos siguen **privados**. No se hace público nada. Reusa la cadena `AWM_BASE_REMOTE`; hay que extender el modelo a registries adicionales (ver §4). |
 | D-4 | **Entregable de esta sesión** | **Doc markdown en el repo** (este archivo), commiteado a la rama de feature. | — |
+| D-5 | **Modelo de credencial** (resuelve PA-5) | **Un solo secreto.** Las sesiones de nube son solo para Nicolás y sus repos, todos en su cuenta de GitHub. Un único token cubre baseline + cualquier registry privado suyo. | No hace falta modelo multi-credential. WS-B se simplifica a un solo `AWM_GIT_TOKEN`. |
+| D-6 | **Tipo de token** (resuelve PA-4) | **Fine-grained token, read-only, permiso *Contents***, sobre los repos de registry de Nicolás. | El usuario lo crea una vez en GitHub y lo inyecta como variable de entorno del entorno web. |
 
 ---
 
@@ -97,8 +99,8 @@ awm init --yes            # no-interactivo; siembra baseline + clona + instala h
 
 **Consideraciones de seguridad a resolver en el design:**
 - **PA-3:** Si el token viaja embebido en la URL de `AWM_BASE_REMOTE`, se persiste a `registries.json` en disco. En VM efímera el riesgo es acotado, pero conviene preferir el modelo "token en env var separada, nunca persistido" (`AWM_GIT_TOKEN`) por encima de embeber el token en la URL guardada.
-- **PA-4:** Alcance del token: ¿un PAT clásico, o fine-grained tokens read-only por repo? Recomendación: fine-grained, solo lectura de Contents, sobre los repos de registry. **Decisión de Nicolás.**
-- **PA-5:** ¿Las sesiones de nube necesitan **solo el baseline**, o también registries privados de equipo/personales? Esto define si un solo secreto basta o hace falta el modelo multi-credential. **Decisión de Nicolás.**
+- **PA-4 — RESUELTA (D-6):** fine-grained token, read-only, permiso *Contents*, sobre los repos de registry de Nicolás.
+- **PA-5 — RESUELTA (D-5):** un solo secreto. Las sesiones de nube son solo para Nicolás y sus repos (todos en su cuenta de GitHub), así que un único `AWM_GIT_TOKEN` cubre baseline + cualquier registry privado suyo. Sin modelo multi-credential.
 
 ### 4.3 Sensibilidad al SO (D-1)
 
@@ -145,14 +147,13 @@ Symlink→copia, `run-hook.cmd` validado, paths Windows. Se reactiva tras WS-C s
 
 ## 7. Preguntas abiertas pendientes de decisión (para Nicolás)
 
-Ninguna bloquea redactar este brief, pero todas afectan los designs de WS-A/WS-B:
+PA-4 y PA-5 quedaron resueltas (ver D-5/D-6 en §2). Pendientes, ninguna bloqueante:
 
-- **PA-1 / PA-2** (técnicas, se resuelven verificando en una sesión web real): ¿dispara el hook en web? ¿el init corre al crear el entorno o en cada sesión?
-- **PA-4:** tipo y alcance del token (recomendación: fine-grained read-only por repo).
-- **PA-5:** ¿en la nube hace falta solo el baseline, o también registries privados de equipo/personales? Define single-secret vs multi-credential.
+- **PA-1 / PA-2** (técnicas, se resuelven verificando en una sesión web real, dentro de WS-A): ¿dispara el hook en web? ¿el init corre al crear el entorno o en cada sesión?
+- **PA-3** (de diseño, dentro de WS-B): preferir token en env var separada (`AWM_GIT_TOKEN`), nunca persistido a `registries.json`.
 
 ---
 
 ## 8. Próximo paso
 
-Validar este brief con Nicolás → confirmar orden de workstreams y responder PA-4/PA-5 → abrir el primer workstream (probablemente WS-B + WS-A juntos) con su ciclo `development-process`.
+Decisiones de producto cerradas (D-1..D-6; PA-4/PA-5 resueltas el 2026-06-21). El brief queda como spec lista. Cuando Nicolás dé luz verde, abrir el primer workstream — **WS-B + WS-A diseñados juntos, ejecución B→A** — con su ciclo `development-process → design → plan → ejecución → QA`. WS-C sigue; WS-D diferido (D-1).
