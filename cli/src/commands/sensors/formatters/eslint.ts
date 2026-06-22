@@ -1,3 +1,4 @@
+import path from 'path';
 import { SensorError } from '../types';
 
 type EslintMessage = { ruleId: string | null; severity: number; message: string; line: number; column: number; };
@@ -11,7 +12,7 @@ export function parseEslintOutput(raw: string): SensorError[] {
     for (const file of parsed) {
         for (const msg of file.messages) {
             if (msg.severity < 2 || msg.line == null || msg.column == null) continue;
-            const rel = file.filePath.startsWith(cwd + '/') ? file.filePath.slice(cwd.length + 1) : file.filePath;
+            const rel = path.relative(cwd, file.filePath);
             errors.push({
                 file: rel,
                 line: msg.line,
