@@ -45,6 +45,8 @@ hook wrapper (`run-hook.cmd`) is a stub, skill installation relies on symlinks
 (Windows Subsystem for Linux) — AWM works normally inside a WSL distribution.
 Native Windows support will be revisited if real demand appears.
 
+> **Cloud & platforms:** For Claude Code web bootstrap, private-registry tokens, and Windows/WSL, see [docs/operations/cloud-and-platforms.md](docs/operations/cloud-and-platforms.md).
+
 ## 📦 Managing Skills and Workflows
 
 AWM comes with an interactive terminal interface.
