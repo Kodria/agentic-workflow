@@ -10,6 +10,7 @@ import { runInitSteps } from '../core/init/orchestrator';
 import { defaultActions } from '../core/init/steps';
 import type { InitOutcome, InitActions, StepResult } from '../core/init/types';
 import type { AgentTarget } from '../providers';
+import { warnIfUnsupportedPlatform } from '../core/paths';
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -160,6 +161,7 @@ export function registerInitCommand(program: Command): void {
         .option('--machine-only', 'Only run machine-level steps (skip project steps)')
         .option('--json', 'Emit the InitOutcome as JSON')
         .action(async (options: { yes?: boolean; agent?: string; machineOnly?: boolean; json?: boolean }) => {
+            warnIfUnsupportedPlatform((m) => console.warn(pc.yellow(`⚠ ${m}`)));
             const code = await runInit({
                 yes: options.yes,
                 agent: options.agent,

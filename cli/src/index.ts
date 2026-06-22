@@ -30,6 +30,7 @@ import { registerRegistryCommand } from './commands/registry';
 import { registerPinCommands } from './commands/pin';
 import { verifyProjectPins } from './core/profile-pins';
 import { maybeNotifyUpdate, offerSelfUpdate } from './core/update-check';
+import { warnIfUnsupportedPlatform } from './core/paths';
 
 const program = new Command();
 program.name('awm').description('Agentic Workflow Manager').version(cliVersion());
@@ -384,6 +385,7 @@ program.command('sync')
   .option('-m, --method <method>', 'Install method: symlink or copy', 'symlink')
   .action(async (options: { agent?: string; method?: string }) => {
       intro(pc.bgCyan(pc.black(' AWM - Sync Project Profile ')));
+      warnIfUnsupportedPlatform((m) => console.warn(pc.yellow(`⚠ ${m}`)));
 
       const projectRoot = findProjectRoot(process.cwd());
       if (!projectRoot) {
