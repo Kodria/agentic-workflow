@@ -44,3 +44,22 @@ it('seeds the initial selection', async () => {
   const result = await p;
   expect(new Set(result)).toEqual(new Set([ALL_SENTINEL, 'skill:a', 'skill:b']));
 });
+
+it('Esc with empty filter cancels and returns null', async () => {
+  const { io, send } = fakeIO();
+  const p = multiselectPicker({ title: 't', items }, io);
+  send('\x1b');  // Esc with no active filter → cancel
+  await expect(p).resolves.toBeNull();
+  expect(io.input.setRawMode).toHaveBeenLastCalledWith(false);
+});
+
+it('Esc with active filter clears it instead of cancelling', async () => {
+  const { io, send } = fakeIO();
+  const p = multiselectPicker({ title: 't', items }, io);
+  send('a');     // type 'a' → filter becomes 'a'
+  send('\x1b');  // Esc → should clear filter, NOT cancel
+  send('\r');    // Enter → confirm (with no selection)
+  await expect(p).resolves.toEqual([]);
+  // setRawMode(false) called on confirm, not on Esc
+  expect(io.input.setRawMode).toHaveBeenLastCalledWith(false);
+});
