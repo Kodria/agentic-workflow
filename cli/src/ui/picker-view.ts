@@ -65,7 +65,7 @@ export function renderPicker(state: PickerState, vp: Viewport): string[] {
     const isCursor = i === cursor;
     const marker = isCursor ? pc.cyan('❯') : ' ';
     const box = checkbox(state.selected.has(item.value));
-    const labelWidth = listWidth - 4; // marker + space + box + space
+    const labelWidth = listWidth - 5; // wide cursor marker (2 cells) + space + checkbox + space
     const label = truncate(item.label, labelWidth);
     rows.push(`${marker} ${box} ${label}`);
   }
