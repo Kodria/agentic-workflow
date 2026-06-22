@@ -1,7 +1,7 @@
 # Brief de Producto — Era de Portabilidad y Arranque en la Nube
 
-**Fecha:** 2026-06-21
-**Estado:** BRIEF — en discusión. No es un plan de implementación; define problema, alcance, decisiones tomadas y preguntas abiertas antes de abrir workstreams.
+**Fecha:** 2026-06-21 · **Validación empírica:** 2026-06-22
+**Estado:** BRIEF — spikes WS-A y WS-B validados empíricamente en sesión web real (ver §0). PA-1/PA-2/PA-3 cerradas con evidencia. No es un plan de implementación; define problema, alcance, decisiones tomadas y resultados de validación antes de abrir workstreams de ejecución.
 **Autor de la sesión:** Nicolás (`nicolasf1402@gmail.com`)
 **Contexto:** Cerrada la "Era de Distribución" (2026-06-12, AWM distribuible a equipos vía npm + multi-registry + versionado), surgen dos necesidades nuevas que esa era dejó explícitamente diferidas o sin contemplar:
 
@@ -9,6 +9,40 @@
 2. **Arranque en entornos efímeros de nube.** Nicolás usa Claude Code en la web (VMs efímeras como la de esta sesión), donde AWM no está instalado y no hay credenciales git. Los registries privados no se pueden clonar. Este escenario **no estaba en ningún plan previo** — es necesidad nueva.
 
 Este brief nace de la misma disciplina del roadmap de distribución (`2026-06-09-distribution-roadmap.md`): registro de hallazgos F-n, workstreams con ciclo completo, nada se marca hecho sin verificación.
+
+---
+
+## 0. Resultados de validación empírica (2026-06-22)
+
+Antes de abrir workstreams de ejecución se corrieron dos spikes en una sesión real de Claude Code web. **Ambos positivos.** Esto cambia el diagnóstico: lo que se temía un rediseño es esencialmente un setup script.
+
+### Spike WS-A — arranque en nube + hook SessionStart `[cierra G-1, G-5; resuelve PA-1, PA-2]`
+
+- **Setup script probado** (corre una vez al crear el entorno, cacheado por la web — confirma PA-2):
+  ```bash
+  npm i -g agentic-workflow-manager
+  awm init --yes
+  ```
+- **Verificado en la VM:** `awm --version` → `2.0.1`; `awm doctor` → Machine global sano (CLI ✅, hook SessionStart ✅, baseline `dev-core` ✅, skills globales ✅).
+- **PA-1 RESUELTA POSITIVO:** el hook **SÍ dispara** en la sesión web. El bloque de contexto "You have AWM" fue inyectado tal cual en el system prompt de la sesión. El mecanismo: `awm init` escribe `~/.claude/settings.json` **nativamente dentro de la VM**, y Claude Code web lo lee en runtime. La duda previa ("user-level settings no se copian del laptop") era un falso negativo: *no copiarse* ≠ *ser ignorado un settings.json escrito en la propia VM*.
+- **Consecuencia:** WS-A **no requiere rediseño** — se reduce al setup script de 2 líneas. G-5 cerrado.
+
+### Spike WS-B — registry privado por token `[cierra G-2, G-3; resuelve PA-3]`
+
+- **Setup script probado** con un registry privado real (`awm-personal-registry`):
+  ```bash
+  git config --global url."https://x-access-token:${AWM_GIT_TOKEN}@github.com/".insteadOf "https://github.com/"
+  npm i -g agentic-workflow-manager
+  awm init --yes || true
+  awm registry add "https://github.com/<owner>/awm-personal-registry.git" --name personal --no-install || true
+  ```
+- **Variable de entorno:** `AWM_GIT_TOKEN` (fine-grained, read-only, *Contents: Read* — D-6), inyectada como secreto del entorno web.
+- **Verificado:** el registry privado **se clonó correctamente** desde la VM efímera sin credenciales de host. El token se inyecta en la capa de transporte git (`url.insteadOf`), **no** en `registries.json` ni en `.git/config` del registry → **PA-3 satisfecha**: el secreto nunca se persiste en disco.
+- **Consecuencia:** G-2 y G-3 cerrados empíricamente. El mecanismo `url.insteadOf` resuelve el hueco de "registries adicionales sin override por env" **sin tocar código del CLI** — prefigura la solución de diseño de §4.2.
+
+### Qué queda
+
+La validación demuestra **factibilidad end-to-end** con mecanismos existentes (setup script + `git config insteadOf`). Lo que resta es **producto, no factibilidad**: decidir si el mecanismo `url.insteadOf` se documenta como receta operativa o se hornea dentro del CLI (`AWM_GIT_TOKEN` nativo, §4.2), y ejecutar WS-C (sensibilidad al SO). Ver §6/§8.
 
 ---
 
@@ -86,8 +120,8 @@ awm init --yes            # no-interactivo; siembra baseline + clona + instala h
 ```
 
 **Preguntas abiertas (PA):**
-- **PA-1:** ¿El hook SessionStart de AWM (`~/.claude/settings.json`) llega a dispararse dentro de una sesión web, o el entorno web gestiona su propio contexto y lo ignora? Si no dispara, el valor de AWM en la nube se reduce a "skills instaladas" sin el bootstrap imperativo. **Hay que verificarlo empíricamente en una sesión web real.**
-- **PA-2:** ¿El `awm init` corre en el *setup script* del entorno (una vez, al crear) o en cada arranque de sesión? Esto define idempotencia y latencia.
+- **PA-1 — RESUELTA POSITIVO (spike 2026-06-22, ver §0):** el hook SessionStart **sí dispara** en la sesión web; el bloque "You have AWM" se inyecta en el system prompt. `awm init` escribe `~/.claude/settings.json` nativamente en la VM y la web lo lee en runtime.
+- **PA-2 — RESUELTA (spike 2026-06-22, ver §0):** el `awm init` corre en el *setup script* del entorno, **una vez al crear** (cacheado por la web), no por sesión.
 
 ### 4.2 Token git por variable de entorno (D-3)
 
@@ -98,7 +132,7 @@ awm init --yes            # no-interactivo; siembra baseline + clona + instala h
 - Un mecanismo de **inyección de credencial agnóstico al registry**: el CLI, al clonar/pull, reescribe `https://github.com/...` → `https://x-access-token:<TOKEN>@github.com/...` tomando el token de una env var única (p.ej. `AWM_GIT_TOKEN`) cuando el remote es HTTPS de un host conocido. Así un solo secreto cubre baseline + N registries privados del mismo host.
 
 **Consideraciones de seguridad a resolver en el design:**
-- **PA-3:** Si el token viaja embebido en la URL de `AWM_BASE_REMOTE`, se persiste a `registries.json` en disco. En VM efímera el riesgo es acotado, pero conviene preferir el modelo "token en env var separada, nunca persistido" (`AWM_GIT_TOKEN`) por encima de embeber el token en la URL guardada.
+- **PA-3 — RESUELTA (spike 2026-06-22, ver §0):** validado el modelo "token en env var separada, nunca persistido". `git config --global url."https://x-access-token:${AWM_GIT_TOKEN}@github.com/".insteadOf "https://github.com/"` inyecta el token en la capa de transporte git; el clone autentica pero **ni `registries.json` ni `.git/config` guardan el secreto** (quedan con la URL limpia). El embeber-en-URL de `AWM_BASE_REMOTE` queda como anti-patrón a evitar.
 - **PA-4 — RESUELTA (D-6):** fine-grained token, read-only, permiso *Contents*, sobre los repos de registry de Nicolás.
 - **PA-5 — RESUELTA (D-5):** un solo secreto. Las sesiones de nube son solo para Nicolás y sus repos (todos en su cuenta de GitHub), así que un único `AWM_GIT_TOKEN` cubre baseline + cualquier registry privado suyo. Sin modelo multi-credential.
 
@@ -115,13 +149,13 @@ awm init --yes            # no-interactivo; siembra baseline + clona + instala h
 
 ## 5. Registro de hallazgos
 
-| ID | Hallazgo | Fuente | Workstream |
-|----|----------|--------|------------|
-| G-1 | **Arranque en nube no contemplado.** AWM no se autoinstala en VMs efímeras; depende de instalación manual previa. | Sesión 2026-06-21 | WS-A |
-| G-2 | **Auth de registry privado imposible sin credenciales host.** `simpleGit().clone` usa auth del host; en VM efímera no hay. Solo el baseline tiene override por env; los registries adicionales no. | `registries.ts:119`, `registry.ts:13` | WS-B |
-| G-3 | **Token potencialmente persistido en disco.** Embeber el token en `AWM_BASE_REMOTE` lo escribe a `registries.json`. Falta modelo "token en env, no persistido". | `registries.ts:63-66` | WS-B |
-| G-4 | **SO Unix asumido (3 puntos).** Symlinks, `run-hook.cmd` stub, paths `HOME`. Trigger de F-11 activado por demanda real del equipo. | `install.ts:73`, README "Platform support" | WS-C |
-| G-5 | **Hook SessionStart sin verificar en entorno web.** Desconocido si dispara dentro de Claude Code web. | PA-1, sesión 2026-06-21 | WS-A |
+| ID | Hallazgo | Fuente | Workstream | Estado |
+|----|----------|--------|------------|--------|
+| G-1 | **Arranque en nube no contemplado.** AWM no se autoinstala en VMs efímeras; depende de instalación manual previa. | Sesión 2026-06-21 | WS-A | ✅ **Cerrado** — setup script de 2 líneas validado (§0) |
+| G-2 | **Auth de registry privado imposible sin credenciales host.** `simpleGit().clone` usa auth del host; en VM efímera no hay. Solo el baseline tiene override por env; los registries adicionales no. | `registries.ts:119`, `registry.ts:13` | WS-B | ✅ **Cerrado** — `git config url.insteadOf` + `AWM_GIT_TOKEN` clona registry privado desde la VM (§0) |
+| G-3 | **Token potencialmente persistido en disco.** Embeber el token en `AWM_BASE_REMOTE` lo escribe a `registries.json`. Falta modelo "token en env, no persistido". | `registries.ts:63-66` | WS-B | ✅ **Cerrado** — `insteadOf` no persiste el token; `registries.json`/`.git/config` quedan limpios (§0) |
+| G-4 | **SO Unix asumido (3 puntos).** Symlinks, `run-hook.cmd` stub, paths `HOME`. Trigger de F-11 activado por demanda real del equipo. | `install.ts:73`, README "Platform support" | WS-C | ⬜ Abierto |
+| G-5 | **Hook SessionStart sin verificar en entorno web.** Desconocido si dispara dentro de Claude Code web. | PA-1, sesión 2026-06-21 | WS-A | ✅ **Cerrado** — dispara; contexto "You have AWM" inyectado (§0) |
 
 ---
 
@@ -129,13 +163,13 @@ awm init --yes            # no-interactivo; siembra baseline + clona + instala h
 
 > Propuesta. El orden y el corte se confirman con Nicolás antes de abrir el primero.
 
-### WS-A — Arranque automático en Claude Code web `[G-1, G-5]`
-Setup script de entorno + `awm init --yes` + verificación empírica de si el hook dispara en web (PA-1/PA-2). **Entregable de valor:** una sesión web nueva arranca con AWM funcionando.
+### WS-A — Arranque automático en Claude Code web `[G-1, G-5]` — ✅ **VALIDADO (spike 2026-06-22)**
+Setup script de entorno + `awm init --yes`. Hook verificado disparando en web (PA-1/PA-2 resueltas, §0). **Entregable de valor logrado:** una sesión web nueva arranca con AWM funcionando. **Resta solo** convertir la receta en documentación operativa (parte de WS-C/§docs).
 
-### WS-B — Credenciales de registry privado por token `[G-2, G-3]`
-Modelo de inyección de token agnóstico al registry (`AWM_GIT_TOKEN`), sin persistir el secreto. Resuelve PA-3/PA-4/PA-5. **Entregable de valor:** clonar registries privados desde una VM sin exponerlos ni hacerlos públicos.
+### WS-B — Credenciales de registry privado por token `[G-2, G-3]` — ✅ **VALIDADO (spike 2026-06-22)**
+Mecanismo validado: `git config --global url.insteadOf` + `AWM_GIT_TOKEN`, sin persistir el secreto (PA-3 resuelta, §0). **Entregable de valor logrado:** clonar registries privados desde una VM sin exponerlos. **Decisión de producto pendiente:** ¿se deja como receta de setup script, o se hornea `AWM_GIT_TOKEN` nativo en el CLI (§4.2) para que `awm init`/`awm sync` lo apliquen sin que el usuario configure git a mano?
 
-> WS-A y WS-B son interdependientes: el arranque en nube **necesita** la auth privada para que el `awm init` no falle al clonar. Probablemente se diseñan juntos y se ejecutan B→A.
+> Ambos workstreams quedan probados end-to-end con mecanismos existentes (setup script + `insteadOf`), **sin tocar código del CLI**. La pregunta ya no es factibilidad sino ergonomía/producto.
 
 ### WS-C — Sensibilidad al SO, fase 1 (Linux duro + WSL documentado) `[G-4]`
 Detección de plataforma, endurecimiento Linux, documentación WSL para Windows. **Sin** Windows nativo (D-1). **Entregable de valor:** el equipo Linux y el equipo Windows-vía-WSL tienen un camino soportado y documentado.
@@ -147,13 +181,21 @@ Symlink→copia, `run-hook.cmd` validado, paths Windows. Se reactiva tras WS-C s
 
 ## 7. Preguntas abiertas pendientes de decisión (para Nicolás)
 
-PA-4 y PA-5 quedaron resueltas (ver D-5/D-6 en §2). Pendientes, ninguna bloqueante:
+Todas las preguntas abiertas quedaron resueltas. PA-4/PA-5 vía D-5/D-6 (§2); PA-1/PA-2/PA-3 vía spikes (§0):
 
-- **PA-1 / PA-2** (técnicas, se resuelven verificando en una sesión web real, dentro de WS-A): ¿dispara el hook en web? ¿el init corre al crear el entorno o en cada sesión?
-- **PA-3** (de diseño, dentro de WS-B): preferir token en env var separada (`AWM_GIT_TOKEN`), nunca persistido a `registries.json`.
+- **PA-1 / PA-2 — RESUELTAS (spike 2026-06-22):** el hook dispara en web; el init corre una vez al crear el entorno (cacheado).
+- **PA-3 — RESUELTA (spike 2026-06-22):** `git config url.insteadOf` + `AWM_GIT_TOKEN` no persiste el secreto.
+
+**Única decisión de producto que queda (no técnica, no bloqueante):** receta de setup script vs. `AWM_GIT_TOKEN` nativo en el CLI (ver WS-B/§4.2).
 
 ---
 
 ## 8. Próximo paso
 
-Decisiones de producto cerradas (D-1..D-6; PA-4/PA-5 resueltas el 2026-06-21). El brief queda como spec lista. Cuando Nicolás dé luz verde, abrir el primer workstream — **WS-B + WS-A diseñados juntos, ejecución B→A** — con su ciclo `development-process → design → plan → ejecución → QA`. WS-C sigue; WS-D diferido (D-1).
+Decisiones de producto cerradas (D-1..D-6) y **factibilidad de WS-A/WS-B validada empíricamente** (spikes 2026-06-22, §0). El arranque en nube con registry privado **ya funciona** con setup script + `AWM_GIT_TOKEN`, sin cambios de código.
+
+Lo que queda, en orden:
+
+1. **Decisión de producto WS-B:** ¿dejar la receta `url.insteadOf` como documentación operativa, o hornear `AWM_GIT_TOKEN` nativo en el CLI? Si se hornea, ese sí abre un ciclo `development-process → design → plan → ejecución → QA`.
+2. **WS-C — sensibilidad al SO (Linux duro + WSL documentado):** único workstream con trabajo de código/diseño claramente pendiente. Aquí también vive la documentación operativa del flujo de nube ya validado.
+3. **WS-D — Windows nativo:** diferido (D-1, fase 2).
