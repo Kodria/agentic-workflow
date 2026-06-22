@@ -17,4 +17,14 @@ describe('parseEslintOutput — relative path normalization', () => {
     const file = first.file ?? '';
     expect(file.startsWith(path.sep)).toBe(false); // genuinely relative
   });
+
+  it('preserves the absolute path for files outside cwd', () => {
+    const abs = '/some/other/project/file.ts';
+    const raw = JSON.stringify([
+      { filePath: abs, messages: [{ ruleId: 'no-eval', severity: 2, message: 'no eval', line: 1, column: 1 }] },
+    ]);
+    const errors = parseEslintOutput(raw);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.file).toBe(abs); // absolute path preserved, no traversal strings
+  });
 });

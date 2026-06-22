@@ -12,7 +12,9 @@ export function parseEslintOutput(raw: string): SensorError[] {
     for (const file of parsed) {
         for (const msg of file.messages) {
             if (msg.severity < 2 || msg.line == null || msg.column == null) continue;
-            const rel = path.relative(cwd, file.filePath);
+            const rel = file.filePath.startsWith(cwd + path.sep)
+                ? path.relative(cwd, file.filePath)
+                : file.filePath;
             errors.push({
                 file: rel,
                 line: msg.line,
