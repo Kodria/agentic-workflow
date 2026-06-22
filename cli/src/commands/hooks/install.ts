@@ -67,10 +67,15 @@ export function installHook(options: InstallOptions): InstallResult {
     syncFile(path.join(sourceHooks, 'session-start'), path.join(config.scriptsDir, 'session-start'), options.installMethod);
     syncFile(path.join(sourceHooks, 'run-hook.cmd'), path.join(config.scriptsDir, 'run-hook.cmd'), options.installMethod);
 
-    // 3. Symlink the skill (ALWAYS symlink so awm update propagates)
+    // 3. Link the skill (default: symlink so 'awm update' propagates; fall back to copy if symlink is unavailable, e.g. Windows without Developer Mode)
     const skillDest = path.join(config.scriptsDir, 'using-awm.md');
     try { fs.unlinkSync(skillDest); } catch { /* not exists */ }
-    fs.symlinkSync(sourceSkill, skillDest);
+    try {
+        fs.symlinkSync(sourceSkill, skillDest);
+    } catch {
+        // best-effort: copy the single skill file; 'awm update' will not auto-propagate
+        fs.copyFileSync(sourceSkill, skillDest);
+    }
 
     // 4. Backup settings if it exists
     const backupPath = backupSettings(config.settingsPath);
