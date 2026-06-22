@@ -3,6 +3,19 @@
 Auditable log of recurring/structural harness gaps converted into rules. See the
 `harness-retro` skill for the process. Newest first.
 
+## 2026-06-22 — WS-C OS Sensitivity: 4 agent patterns curados
+
+- **Class:** agent (working-style + wins)
+- **Branch:** `feat/ws-c-os-sensitivity`
+- **Ledger:** ~13 findings (todos minor, sin recurrentes), ~39 wins; 2 findings arreglados en QA (C1, C2), 1 descartado (C3)
+- **Curado en AGENTS.md:**
+  - **W1 / module-level env vars → call-time preference:** merged en bullet existente — exportar funciones call-time evita `jest.resetModules()` en tests
+  - **W3 / stub-process-platform:** `Object.defineProperty(process, 'platform', { configurable: true })` — el flag es esencial, sin él la restauración falla silenciosamente
+  - **W2 / injected-logger:** recibir el logger como argumento (`fn(log)`) en vez de llamar `console.warn()` — función pura, testeable sin capturar stdout
+  - **F4 / best-effort-catch-comment:** bare `catch {}` es indistinguible de un olvido; añadir comentario explicando qué hace el fallback y qué se pierde
+- **Sensor:** agents-md (entregado a cada agente vía contexto de sesión)
+- **Dismissed:** 9 findings (F1 obsoleto/resuelto por Task 2, F2 doble-llamada idempotente trivial, F3 posible divergencia de strings, F5 reviewer equivocado/código correcto, F6 plan-accepted, + duplicados ya-fijados C1/C2/C3)
+
 ---
 
 ## 2026-06-12 — WS-5 (team workflow): verify-cmd-source + runbook-as-script
