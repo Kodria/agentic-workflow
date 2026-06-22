@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { AgentTarget, getHookConfig } from '../../providers';
+import { awmHome } from '../../core/paths';
 
 export type UninstallOptions = {
     agent: AgentTarget;
@@ -13,8 +14,7 @@ export type UninstallResult = {
 
 function backupSettings(settingsPath: string): string | null {
     if (!fs.existsSync(settingsPath)) return null;
-    const awmHome = process.env.AWM_HOME || path.join(process.env.HOME!, '.awm');
-    const backupDir = path.join(awmHome, 'backups');
+    const backupDir = path.join(awmHome(), 'backups');
     fs.mkdirSync(backupDir, { recursive: true });
     const ts = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '-').slice(0, 19);
     const backupPath = path.join(backupDir, `settings.json.${ts}.bak`);

@@ -1,6 +1,5 @@
 // src/core/diagnostics/context.ts
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { execSync } from 'child_process';
 import { HarnessContext, MachineFacts, ProjectFacts, GitState } from './types';
@@ -12,9 +11,10 @@ import { computeHookStatus } from '../../commands/hooks/status';
 import { findProjectRoot, readProfile } from '../profile';
 import { discoverAllBundles, resolveBundleSkills, BundleDefinition } from '../bundles';
 import { classifyGlobalSkills } from '../skill-integrity';
+import { homeDir, awmHome as awmHomePath } from '../paths';
 
-function home(): string { return process.env.HOME || os.homedir(); }
-function awmHome(): string { return process.env.AWM_HOME || path.join(home(), '.awm'); }
+function home(): string { return homeDir(); }
+function awmHome(): string { return awmHomePath(); }
 
 // Estado de un artefacto en <dir>/<skill>: link vivo / symlink colgante / ausente.
 function linkState(dir: string, skill: string): 'present' | 'broken' | 'absent' {

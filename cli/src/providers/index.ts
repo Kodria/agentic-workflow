@@ -1,6 +1,6 @@
 // src/providers/index.ts
-import os from 'os';
 import path from 'path';
+import { homeDir, awmHome } from '../core/paths';
 
 export type AgentTarget = 'antigravity' | 'opencode' | 'claude-code';
 export type Scope = 'global' | 'local';
@@ -32,8 +32,8 @@ export type ProviderConfig = {
     injection?: InjectionConfig;
 };
 
-const homedir = process.env.HOME || os.homedir();
-const awmHome = process.env.AWM_HOME || path.join(homedir, '.awm');
+const homedir = homeDir();
+const awmHomeDir = awmHome();
 
 export const PROVIDERS: Record<AgentTarget, ProviderConfig> = {
     antigravity: {
@@ -61,7 +61,7 @@ export const PROVIDERS: Record<AgentTarget, ProviderConfig> = {
         hooks: {
             type: 'cc-settings-merge',
             settingsPath: path.join(homedir, '.claude/settings.json'),
-            scriptsDir: path.join(awmHome, 'hooks'),
+            scriptsDir: path.join(awmHomeDir, 'hooks'),
             matcher: 'startup|clear|compact',
             eventName: 'SessionStart'
         },

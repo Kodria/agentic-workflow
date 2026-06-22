@@ -1,14 +1,14 @@
 // src/core/registries.ts
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import simpleGit from 'simple-git';
 import { resolveBaseRemote } from './registry';
 import { resolveTargetRef, machineVersionOpts, compareSemver } from './versioning';
 import { cliVersion } from './cli-version';
+import { awmHome } from './paths';
 
-// Evaluated at require-time — tests must use jest.resetModules() + late require() to pick up env overrides.
-const AWM_HOME = process.env.AWM_HOME || path.join(process.env.HOME || os.homedir(), '.awm');
+// Computed at require-time by calling the shared resolver (single source of truth: core/paths.ts).
+const AWM_HOME = awmHome();
 
 export const REGISTRIES_DIR = path.join(AWM_HOME, 'registries');
 export const REGISTRIES_CONFIG_PATH = path.join(AWM_HOME, 'registries.json');

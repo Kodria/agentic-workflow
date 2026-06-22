@@ -1,8 +1,8 @@
 // src/utils/config.ts
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import type { AgentTarget } from '../providers';
+import { awmHome } from '../core/paths';
 
 export interface AwmPreferences {
     defaultAgent: AgentTarget;
@@ -23,7 +23,7 @@ const DEFAULT_PREFS: AwmPreferences = {
 };
 
 function prefsDir(): string {
-    return process.env.AWM_HOME || path.join(process.env.HOME || os.homedir(), '.awm');
+    return awmHome();
 }
 
 export function getPreferences(): AwmPreferences {

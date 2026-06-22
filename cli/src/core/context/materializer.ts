@@ -1,14 +1,10 @@
 // cli/src/core/context/materializer.ts
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { AwmContext, MaterializedRef } from './types';
 import { sha256 } from './provider';
 import { Scope } from '../../providers';
-
-function awmHome(): string {
-    return process.env.AWM_HOME || path.join(process.env.HOME || os.homedir(), '.awm');
-}
+import { awmHome } from '../paths';
 
 export function globalContextPath(): string {
     return path.join(awmHome(), 'context', 'awm-context.md');

@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
+import { homeDir, awmHome } from '../../core/paths';
 
 const POST_TOOL_USE_EVENT = 'PostToolUse';
 const POST_TOOL_USE_MATCHER = 'Write|Edit|MultiEdit';
@@ -10,7 +10,7 @@ type HookEntry = { type: 'command'; command: string; };
 type HookMatcher = { matcher: string; hooks: HookEntry[]; };
 
 function defaultSettingsPath(): string {
-    return path.join(process.env.HOME ?? os.homedir(), '.claude', 'settings.json');
+    return path.join(homeDir(), '.claude', 'settings.json');
 }
 
 function readSettings(p: string): any {
@@ -25,8 +25,7 @@ function isAwmEntry(e: HookMatcher): boolean {
 
 function backupSettings(settingsPath: string): string | undefined {
     if (!fs.existsSync(settingsPath)) return undefined;
-    const awmHome = process.env.AWM_HOME || path.join(process.env.HOME ?? os.homedir(), '.awm');
-    const backupDir = path.join(awmHome, 'backups');
+    const backupDir = path.join(awmHome(), 'backups');
     fs.mkdirSync(backupDir, { recursive: true });
     const ts = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '-').slice(0, 19);
     const backupPath = path.join(backupDir, `settings.json.${ts}.sensor.bak`);

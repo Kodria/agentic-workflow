@@ -5,12 +5,12 @@
 // `awm update`. AWM_NO_UPDATE_CHECK=1 desactiva ambas (tests, CI).
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { spawn, spawnSync } from 'child_process';
 import pc from 'picocolors';
 import { confirm, isCancel } from '@clack/prompts';
 import { cliVersion, CLI_PACKAGE_NAME } from './cli-version';
 import { compareSemver } from './versioning';
+import { awmHome } from './paths';
 
 const TTL_MS = 24 * 60 * 60 * 1000;
 const REGISTRY_URL = `https://registry.npmjs.org/${CLI_PACKAGE_NAME}/latest`;
@@ -18,8 +18,7 @@ const REGISTRY_URL = `https://registry.npmjs.org/${CLI_PACKAGE_NAME}/latest`;
 export interface UpdateCache { lastCheck: number; latest: string | null; }
 
 function cacheFile(): string {
-    const home = process.env.AWM_HOME || path.join(process.env.HOME || os.homedir(), '.awm');
-    return path.join(home, 'update-check.json');
+    return path.join(awmHome(), 'update-check.json');
 }
 
 export function readUpdateCache(): UpdateCache | null {
