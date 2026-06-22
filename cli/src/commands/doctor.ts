@@ -4,6 +4,7 @@ import pc from 'picocolors';
 import { gatherContext } from '../core/diagnostics/context';
 import { runChecks } from '../core/diagnostics/checks';
 import { CheckReport, CheckResult } from '../core/diagnostics/types';
+import { platformLabel } from '../core/paths';
 
 function glyph(status: CheckResult['status']): string {
     if (status === 'ok') return pc.green('✔');
@@ -28,6 +29,7 @@ export function renderReport(report: CheckReport): string {
     lines.push(pc.bold('AWM · harness status'));
     lines.push('');
     lines.push('Machine (global)');
+    lines.push(pc.dim(`  platform: ${platformLabel()}`));
     for (const r of report.results.filter((x) => x.level === 'machine')) lines.push(line(r));
     lines.push('');
     if (report.hasProject) {
