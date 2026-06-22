@@ -85,6 +85,7 @@ Registradas vía consulta directa a Nicolás. Son el marco no negociable del bri
 | D-4 | **Entregable de esta sesión** | **Doc markdown en el repo** (este archivo), commiteado a la rama de feature. | — |
 | D-5 | **Modelo de credencial** (resuelve PA-5) | **Un solo secreto.** Las sesiones de nube son solo para Nicolás y sus repos, todos en su cuenta de GitHub. Un único token cubre baseline + cualquier registry privado suyo. | No hace falta modelo multi-credential. WS-B se simplifica a un solo `AWM_GIT_TOKEN`. |
 | D-6 | **Tipo de token** (resuelve PA-4) | **Fine-grained token, read-only, permiso *Contents***, sobre los repos de registry de Nicolás. | El usuario lo crea una vez en GitHub y lo inyecta como variable de entorno del entorno web. |
+| D-7 | **Forma de entrega del token** (cierra la decisión WS-B) | **Receta de setup script** (`git config url.insteadOf` + `AWM_GIT_TOKEN`), no `AWM_GIT_TOKEN` nativo en el CLI. | Costo cero, ya validado (§0). WS-B queda **cerrado**, sin abrir ciclo de desarrollo en `cli/`. La receta se documenta como parte de WS-C. |
 
 ---
 
@@ -194,8 +195,9 @@ Todas las preguntas abiertas quedaron resueltas. PA-4/PA-5 vía D-5/D-6 (§2); P
 
 Decisiones de producto cerradas (D-1..D-6) y **factibilidad de WS-A/WS-B validada empíricamente** (spikes 2026-06-22, §0). El arranque en nube con registry privado **ya funciona** con setup script + `AWM_GIT_TOKEN`, sin cambios de código.
 
+**Decisión WS-B cerrada (D-7):** se queda la receta `url.insteadOf` como mecanismo; no se hornea `AWM_GIT_TOKEN` en el CLI. WS-A y WS-B quedan completos.
+
 Lo que queda, en orden:
 
-1. **Decisión de producto WS-B:** ¿dejar la receta `url.insteadOf` como documentación operativa, o hornear `AWM_GIT_TOKEN` nativo en el CLI? Si se hornea, ese sí abre un ciclo `development-process → design → plan → ejecución → QA`.
-2. **WS-C — sensibilidad al SO (Linux duro + WSL documentado):** único workstream con trabajo de código/diseño claramente pendiente. Aquí también vive la documentación operativa del flujo de nube ya validado.
-3. **WS-D — Windows nativo:** diferido (D-1, fase 2).
+1. **WS-C — sensibilidad al SO (Linux duro + WSL documentado):** único workstream con trabajo de código/diseño pendiente. Aquí también vive la documentación operativa del flujo de nube ya validado (setup scripts de §0). **← workstream activo.**
+2. **WS-D — Windows nativo:** diferido (D-1, fase 2).
