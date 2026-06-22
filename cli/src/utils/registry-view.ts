@@ -3,6 +3,8 @@ import { ArtifactType } from '../providers';
 import { SkillArtifact, WorkflowArtifact, AgentArtifact } from '../core/discovery';
 import { BundleDefinition } from '../core/bundles';
 import { registryNameForPath } from '../core/registries';
+import { truncate } from '../ui/text';
+import { PickerItem } from '../ui/picker-view';
 
 export const STANDALONE_NAME = 'standalone';
 
@@ -100,7 +102,7 @@ function packageIcon(pkg: PackageView): string {
     return pkg.isStandalone ? '🔹' : '📦';
 }
 
-export function packageSummaryLines(packages: PackageView[]): string[] {
+export function packageSummaryLines(packages: PackageView[], width?: number): string[] {
     const uniqueSkillNames = new Set(packages.flatMap((p) => p.artifacts.filter((a) => a.type === 'skill').map((a) => a.name)));
     const totalSkills = uniqueSkillNames.size;
     const lines: string[] = [`AWM Registry — ${plural(packages.length, 'package')}, ${plural(totalSkills, 'skill')}`, ''];
@@ -112,13 +114,18 @@ export function packageSummaryLines(packages: PackageView[]): string[] {
     packages.forEach((p, i) => {
         const name = p.name.padEnd(nameWidth);
         const count = countLabels[i].padEnd(countWidth);
-        const desc = p.isStandalone ? '' : p.description;
+        let desc = p.isStandalone ? '' : p.description;
+        if (width && desc) {
+            const used = 3 + nameWidth + 3 + countWidth + 3; // icon(2)+space(1), name, gap, count, gap
+            const avail = width - used;
+            desc = avail > 1 ? truncate(desc, avail) : '';
+        }
         lines.push(`${packageIcon(p)} ${name}   ${count}   ${desc}`.trimEnd());
     });
     return lines;
 }
 
-export function packageDetailLines(pkg: PackageView): string[] {
+export function packageDetailLines(pkg: PackageView, width?: number): string[] {
     const lines: string[] = [];
     const header = pkg.isStandalone
         ? `${packageIcon(pkg)} ${pkg.name} — ${plural(pkg.artifacts.length, 'artifact')}`
@@ -129,7 +136,10 @@ export function packageDetailLines(pkg: PackageView): string[] {
             ? pc.yellow(`  ← ${registryNameForPath(a.sourcePath) ?? 'unknown'} (override)`)
             : '';
         lines.push(`  ${TYPE_ICON[a.type]}${a.name}${mark}`);
-        if (a.description) lines.push(`     ${a.description}`);
+        if (a.description) {
+            const desc = width ? truncate(a.description, width - 5) : a.description;
+            lines.push(`     ${desc}`);
+        }
     });
     return lines;
 }
@@ -167,22 +177,28 @@ export function artifactValue(a: ArtifactView): string {
     return `${a.type}:${a.name}`;
 }
 
-export function buildLevel1Options(packages: PackageView[]): { value: string; label: string }[] {
-    return packages.map((p) => {
-        const count = p.isStandalone ? plural(p.artifacts.length, 'artifact') : artifactCountLabel(p.counts);
-        const desc = p.isStandalone ? '' : ` · ${p.description}`;
-        return { value: p.name, label: `${packageIcon(p)} ${p.name}  ${pc.dim(`${count}${desc}`)}` };
-    });
+export function packagePickerItems(packages: PackageView[]): PickerItem[] {
+    return packages.map((p) => ({
+        value: p.name,
+        label: `${packageIcon(p)} ${p.name}`,
+        description: p.isStandalone
+            ? plural(p.artifacts.length, 'artifact')
+            : `${artifactCountLabel(p.counts)} · ${p.description}`,
+    }));
 }
 
-export function buildLevel2Options(pkg: PackageView): { value: string; label: string }[] {
-    const installAll = { value: ALL_SENTINEL, label: `✨ Install entire package (${pkg.artifacts.length})` };
-    const rest = pkg.artifacts.map((a) => {
-        const title = `${TYPE_ICON[a.type]}${a.name}`;
-        const label = a.description ? `${title}\n     ${pc.dim(a.description)}` : title;
-        return { value: artifactValue(a), label };
-    });
-    return [installAll, ...rest];
+export function artifactPickerItems(pkg: PackageView): PickerItem[] {
+    const all: PickerItem = {
+        value: ALL_SENTINEL,
+        label: `✨ Install entire package (${pkg.artifacts.length})`,
+        description: 'Select every artifact in this package.',
+    };
+    const rest: PickerItem[] = pkg.artifacts.map((a) => ({
+        value: artifactValue(a),
+        label: `${TYPE_ICON[a.type]}${a.name}`,
+        description: a.description || '(no description)',
+    }));
+    return [all, ...rest];
 }
 
 export function resolveLevel2Selection(pkg: PackageView, selectedValues: string[]): ArtifactView[] {

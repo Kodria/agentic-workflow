@@ -4,7 +4,7 @@ import { intro, outro, spinner, select, multiselect, confirm, isCancel } from '@
 import { Command } from 'commander';
 import { getPreferences, savePreferences } from './utils/config';
 import { buildGroupedOptions } from './utils/grouping';
-import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, buildLevel1Options, buildLevel2Options, resolveLevel2Selection, ALL_SENTINEL, ArtifactView, artifactValue } from './utils/registry-view';
+import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, artifactCountLabel, resolveLevel2Selection, ALL_SENTINEL, ArtifactView, artifactValue } from './utils/registry-view';
 import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
 import { regenerateGlobalContext } from './core/context/regenerate';
@@ -221,7 +221,12 @@ program.command('add [name]')
       // 5. Level 1 — pick package(s)
       const pkgChoice = await multiselect({
           message: 'Select package(s)',
-          options: buildLevel1Options(view),
+          options: view.map((p) => {
+              const count = p.isStandalone ? `${p.artifacts.length} artifact${p.artifacts.length === 1 ? '' : 's'}` : artifactCountLabel(p.counts);
+              const desc = p.isStandalone ? '' : ` · ${p.description}`;
+              const icon = p.isStandalone ? '🔹' : '📦';
+              return { value: p.name, label: `${icon} ${p.name}  ${pc.dim(`${count}${desc}`)}` };
+          }),
           required: true
       });
       handleCancel(pkgChoice);
@@ -235,7 +240,15 @@ program.command('add [name]')
           const pkg = selectedPackages[i];
           const skillChoice = await multiselect({
               message: `[${i + 1}/${selectedPackages.length}] ${pkg.name} — select artifacts`,
-              options: buildLevel2Options(pkg),
+              options: [
+                  { value: ALL_SENTINEL, label: `✨ Install entire package (${pkg.artifacts.length})` },
+                  ...pkg.artifacts.map((a) => {
+                      const typeIcon: Record<string, string> = { skill: '', workflow: '⚡ ', agent: '🤖 ' };
+                      const title = `${typeIcon[a.type] ?? ''}${a.name}`;
+                      const label = a.description ? `${title}\n     ${pc.dim(a.description)}` : title;
+                      return { value: artifactValue(a), label };
+                  }),
+              ],
               initialValues: [ALL_SENTINEL],
               required: true
           });
