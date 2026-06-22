@@ -155,7 +155,7 @@ awm init --yes            # no-interactivo; siembra baseline + clona + instala h
 | G-1 | **Arranque en nube no contemplado.** AWM no se autoinstala en VMs efímeras; depende de instalación manual previa. | Sesión 2026-06-21 | WS-A | ✅ **Cerrado** — setup script de 2 líneas validado (§0) |
 | G-2 | **Auth de registry privado imposible sin credenciales host.** `simpleGit().clone` usa auth del host; en VM efímera no hay. Solo el baseline tiene override por env; los registries adicionales no. | `registries.ts:119`, `registry.ts:13` | WS-B | ✅ **Cerrado** — `git config url.insteadOf` + `AWM_GIT_TOKEN` clona registry privado desde la VM (§0) |
 | G-3 | **Token potencialmente persistido en disco.** Embeber el token en `AWM_BASE_REMOTE` lo escribe a `registries.json`. Falta modelo "token en env, no persistido". | `registries.ts:63-66` | WS-B | ✅ **Cerrado** — `insteadOf` no persiste el token; `registries.json`/`.git/config` quedan limpios (§0) |
-| G-4 | **SO Unix asumido (3 puntos).** Symlinks, `run-hook.cmd` stub, paths `HOME`. Trigger de F-11 activado por demanda real del equipo. | `install.ts:73`, README "Platform support" | WS-C | ⬜ Abierto |
+| G-4 | **SO Unix asumido (3 puntos).** Symlinks, `run-hook.cmd` stub, paths `HOME`. Trigger de F-11 activado por demanda real del equipo. | `install.ts:73`, README "Platform support" | WS-C | ✅ **Cerrado** — `core/paths.ts` single source of truth, symlink→copy fallback, `warnIfUnsupportedPlatform`, docs WSL operativa (2026-06-22) |
 | G-5 | **Hook SessionStart sin verificar en entorno web.** Desconocido si dispara dentro de Claude Code web. | PA-1, sesión 2026-06-21 | WS-A | ✅ **Cerrado** — dispara; contexto "You have AWM" inyectado (§0) |
 
 ---
@@ -172,8 +172,8 @@ Mecanismo validado: `git config --global url.insteadOf` + `AWM_GIT_TOKEN`, sin p
 
 > Ambos workstreams quedan probados end-to-end con mecanismos existentes (setup script + `insteadOf`), **sin tocar código del CLI**. La pregunta ya no es factibilidad sino ergonomía/producto.
 
-### WS-C — Sensibilidad al SO, fase 1 (Linux duro + WSL documentado) `[G-4]`
-Detección de plataforma, endurecimiento Linux, documentación WSL para Windows. **Sin** Windows nativo (D-1). **Entregable de valor:** el equipo Linux y el equipo Windows-vía-WSL tienen un camino soportado y documentado.
+### WS-C — Sensibilidad al SO, fase 1 (Linux duro + WSL documentado) `[G-4]` — ✅ **CERRADO (2026-06-22)**
+Detección de plataforma, endurecimiento Linux, documentación WSL para Windows. **Sin** Windows nativo (D-1). **Entregable de valor:** el equipo Linux y el equipo Windows-vía-WSL tienen un camino soportado y documentado. `core/paths.ts` centraliza HOME/AWM_HOME, symlink→copy fallback para EPERM, `warnIfUnsupportedPlatform` en init/sync/doctor, `docs/operations/cloud-and-platforms.md` con guías de VM + token + WSL. Branch `feat/ws-c-os-sensitivity` mergeado a main.
 
 ### WS-D — Windows nativo `[G-4]` — **DIFERIDO (D-1, fase 2)**
 Symlink→copia, `run-hook.cmd` validado, paths Windows. Se reactiva tras WS-C según demanda.
@@ -199,5 +199,5 @@ Decisiones de producto cerradas (D-1..D-6) y **factibilidad de WS-A/WS-B validad
 
 Lo que queda, en orden:
 
-1. **WS-C — sensibilidad al SO (Linux duro + WSL documentado):** único workstream con trabajo de código/diseño pendiente. Aquí también vive la documentación operativa del flujo de nube ya validado (setup scripts de §0). **← workstream activo.**
-2. **WS-D — Windows nativo:** diferido (D-1, fase 2).
+1. **WS-C — sensibilidad al SO (Linux duro + WSL documentado):** ✅ **CERRADO 2026-06-22.** Todos los hallazgos G-4 resueltos, branch mergeado.
+2. **WS-D — Windows nativo:** diferido (D-1, fase 2). Próximo paso si hay demanda.
