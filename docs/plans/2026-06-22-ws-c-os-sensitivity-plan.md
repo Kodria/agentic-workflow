@@ -1,5 +1,7 @@
 # WS-C: OS Sensitivity Phase 1 — Implementation Plan
 
+<!-- awm-qa-complete: 2026-06-22 -->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Eliminate the macOS-masked OS fragility in the AWM CLI by centralizing home/path/platform resolution into one module, close the unsafe `process.env.HOME!` gap, make symlink install degrade gracefully, warn native-Windows users toward WSL, and document the validated cloud + WSL flows.
