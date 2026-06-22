@@ -11,9 +11,8 @@ import { computeHookStatus } from '../../commands/hooks/status';
 import { findProjectRoot, readProfile } from '../profile';
 import { discoverAllBundles, resolveBundleSkills, BundleDefinition } from '../bundles';
 import { classifyGlobalSkills } from '../skill-integrity';
-import { homeDir, awmHome as awmHomePath } from '../paths';
+import { awmHome as awmHomePath } from '../paths';
 
-function home(): string { return homeDir(); }
 function awmHome(): string { return awmHomePath(); }
 
 // Estado de un artefacto en <dir>/<skill>: link vivo / symlink colgante / ausente.
