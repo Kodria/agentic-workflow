@@ -140,8 +140,11 @@ export function multiselectPicker(opts: MultiselectOptions, io: PickerIO = defau
       lastLineCount = lines.length;
     };
 
+    let onSigint: () => void;
+
     const cleanup = () => {
       io.input.removeListener('data', onData);
+      if (onSigint) process.removeListener('SIGINT', onSigint);
       try { io.input.setRawMode?.(false); } catch { /* best-effort: terminal may not support raw mode */ }
       io.input.pause?.();
       io.output.write('\x1b[?25h'); // show cursor
@@ -173,6 +176,12 @@ export function multiselectPicker(opts: MultiselectOptions, io: PickerIO = defau
       }
       draw();
     };
+
+    onSigint = () => {
+      cleanup();
+      resolve(null);
+    };
+    process.once('SIGINT', onSigint);
 
     try { io.input.setRawMode?.(true); } catch { /* best-effort: degrade if raw mode unsupported */ }
     io.input.resume?.();
