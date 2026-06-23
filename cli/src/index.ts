@@ -145,6 +145,10 @@ program.command('add [name]')
               outro(`✅ Installed bundle ${pc.cyan(matchedBundle.name)}:\n  ${lines}${recordNote}`);
               return;
           }
+          // name given but no matching bundle found — report clearly regardless of TTY
+          console.error(pc.red(`Bundle "${name}" not found in registry.`));
+          console.error(pc.dim('Run `awm list` to see available packages.'));
+          process.exit(1);
       }
 
       // 2. Discover artifacts

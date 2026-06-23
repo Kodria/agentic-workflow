@@ -49,6 +49,13 @@ describe('pickerReducer', () => {
     const s = pickerReducer(base(), { type: 'toggleAll' });
     expect(s.selected.has('skill:a')).toBe(true);
     expect(s.selected.has('skill:b')).toBe(true);
+    expect(s.selected.has(ALL_SENTINEL)).toBe(true);
+  });
+  it('toggleAll via Tab syncs ALL_SENTINEL when all become selected', () => {
+    const s = pickerReducer(base(), { type: 'toggleAll' });
+    expect(s.selected.has('skill:a')).toBe(true);
+    expect(s.selected.has('skill:b')).toBe(true);
+    expect(s.selected.has(ALL_SENTINEL)).toBe(true);
   });
   it('typing filters and resets the cursor to 0', () => {
     const s = pickerReducer(base({ cursor: 2 }), { type: 'filterChar', char: 'b' });

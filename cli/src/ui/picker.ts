@@ -83,6 +83,7 @@ export function pickerReducer(state: PickerState, key: ReducerKey): PickerState 
         selected.delete(ALL_SENTINEL);
       } else {
         reals.forEach((v) => selected.add(v));
+        selected.add(ALL_SENTINEL);
       }
       return { ...state, selected };
     }
