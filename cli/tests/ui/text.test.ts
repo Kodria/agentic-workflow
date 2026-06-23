@@ -18,6 +18,16 @@ describe('displayWidth', () => {
     expect(displayWidth('📦')).toBe(2);
     expect(displayWidth('✍️')).toBe(2);
   });
+  it('counts CJK ideographs as 2 cells', () => {
+    expect(displayWidth('你好')).toBe(4);
+  });
+  it('counts Hangul syllables as 2 cells', () => {
+    expect(displayWidth('안녕')).toBe(4);
+  });
+  it('counts fullwidth Latin as 2 cells', () => {
+    // U+FF21 = Ａ (fullwidth A)
+    expect(displayWidth('ＡＢ')).toBe(4);
+  });
 });
 
 describe('truncate', () => {

@@ -9,6 +9,9 @@ function isWide(cp: number): boolean {
     (cp >= 0x1100 && cp <= 0x115f) ||   // Hangul Jamo
     (cp >= 0x2300 && cp <= 0x23ff) ||   // misc technical (⏎ etc.)
     (cp >= 0x2600 && cp <= 0x27bf) ||   // misc symbols / dingbats
+    (cp >= 0x4e00 && cp <= 0x9fff) ||   // CJK Unified Ideographs
+    (cp >= 0xac00 && cp <= 0xd7a3) ||   // Hangul Syllables
+    (cp >= 0xff00 && cp <= 0xffef) ||   // Fullwidth Latin/symbols
     (cp >= 0x1f000 && cp <= 0x1faff)    // emoji
   );
 }
