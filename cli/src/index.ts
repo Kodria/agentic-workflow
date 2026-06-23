@@ -4,7 +4,9 @@ import { intro, outro, spinner, select, multiselect, confirm, isCancel } from '@
 import { Command } from 'commander';
 import { getPreferences, savePreferences } from './utils/config';
 import { buildGroupedOptions } from './utils/grouping';
-import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, artifactCountLabel, resolveLevel2Selection, ALL_SENTINEL, ArtifactView, artifactValue } from './utils/registry-view';
+import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, packagePickerItems, artifactPickerItems, resolveLevel2Selection, ALL_SENTINEL, ArtifactView, artifactValue } from './utils/registry-view';
+import { isInteractive } from './ui/tty';
+import { multiselectPicker } from './ui/picker';
 import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
 import { regenerateGlobalContext } from './core/context/regenerate';
@@ -157,6 +159,13 @@ program.command('add [name]')
 
       const prefs = getPreferences();
 
+      // Interactive selection requires a TTY. Bundle-by-name (handled above) works headless.
+      if (!isInteractive()) {
+          console.error(pc.red('`awm add` needs an interactive terminal for selection.'));
+          console.error(pc.dim('Install a bundle non-interactively: `awm add <bundle>` (optionally with --agent/--scope).'));
+          process.exit(1);
+      }
+
       // 3. Agent & Scope Prompts (Moved up)
       let targetAgents: AgentTarget[];
       if (options.agent) {
@@ -219,43 +228,27 @@ program.command('add [name]')
       }
 
       // 5. Level 1 — pick package(s)
-      // TODO(Task 7): replace with packagePickerItems()/multiselectPicker()
-      const pkgChoice = await multiselect({
-          message: 'Select package(s)',
-          options: view.map((p) => {
-              const count = p.isStandalone ? `${p.artifacts.length} artifact${p.artifacts.length === 1 ? '' : 's'}` : artifactCountLabel(p.counts);
-              const desc = p.isStandalone ? '' : ` · ${p.description}`;
-              const icon = p.isStandalone ? '🔹' : '📦';
-              return { value: p.name, label: `${icon} ${p.name}  ${pc.dim(`${count}${desc}`)}` };
-          }),
-          required: true
+      const pickedPackages = await multiselectPicker({
+          title: 'Select package(s)',
+          items: packagePickerItems(view),
       });
-      handleCancel(pkgChoice);
-      const selectedPackages = (pkgChoice as string[])
-          .map(name => view.find(p => p.name === name)!)
+      if (pickedPackages === null) { outro('Operation cancelled.'); process.exit(0); }
+      if (pickedPackages.length === 0) { outro(pc.yellow('No packages selected.')); return; }
+      const selectedPackages = pickedPackages
+          .map((name) => view.find((p) => p.name === name)!)
           .filter(Boolean);
 
       // 5b. Level 2 — pick skills within each package, in sequence
-      // TODO(Task 7): replace with artifactPickerItems()/multiselectPicker()
       const dedup = new Map<string, ArtifactView>();
       for (let i = 0; i < selectedPackages.length; i++) {
           const pkg = selectedPackages[i];
-          const skillChoice = await multiselect({
-              message: `[${i + 1}/${selectedPackages.length}] ${pkg.name} — select artifacts`,
-              options: [
-                  { value: ALL_SENTINEL, label: `✨ Install entire package (${pkg.artifacts.length})` },
-                  ...pkg.artifacts.map((a) => {
-                      const typeIcon: Record<string, string> = { skill: '', workflow: '⚡ ', agent: '🤖 ' };
-                      const title = `${typeIcon[a.type] ?? ''}${a.name}`;
-                      const label = a.description ? `${title}\n     ${pc.dim(a.description)}` : title;
-                      return { value: artifactValue(a), label };
-                  }),
-              ],
-              initialValues: [ALL_SENTINEL],
-              required: true
+          const picked = await multiselectPicker({
+              title: `[${i + 1}/${selectedPackages.length}] ${pkg.name} — select artifacts`,
+              items: artifactPickerItems(pkg),
+              initialSelected: [ALL_SENTINEL, ...pkg.artifacts.map((a) => artifactValue(a))],
           });
-          handleCancel(skillChoice);
-          for (const a of resolveLevel2Selection(pkg, skillChoice as string[])) {
+          if (picked === null) { outro('Operation cancelled.'); process.exit(0); }
+          for (const a of resolveLevel2Selection(pkg, picked)) {
               dedup.set(artifactValue(a), a);
           }
       }
@@ -515,6 +508,8 @@ program.command('list [package]')
           console.log(pc.dim('(Ignoring --all when a package name is provided.)'));
       }
 
+      const listWidth = process.stdout.isTTY ? process.stdout.columns : undefined;
+
       // Detail for a single package.
       if (packageName) {
           const { match, suggestion } = findPackage(fullView, packageName);
@@ -526,7 +521,7 @@ program.command('list [package]')
               process.exit(1);
           }
           console.log();
-          for (const line of packageDetailLines(match)) console.log(line);
+          for (const line of packageDetailLines(match, listWidth)) console.log(line);
           console.log();
           outro(`Run ${pc.green(`awm add`)} to install artifacts from ${pc.cyan(match.name)}.`);
           return;
@@ -536,7 +531,7 @@ program.command('list [package]')
       if (options.all) {
           for (const pkg of view) {
               console.log();
-              for (const line of packageDetailLines(pkg)) console.log(line);
+              for (const line of packageDetailLines(pkg, listWidth)) console.log(line);
           }
           console.log();
           outro(`Run ${pc.green('awm add')} to install any of these artifacts.`);
@@ -545,7 +540,7 @@ program.command('list [package]')
 
       // Default: compact summary.
       console.log();
-      for (const line of packageSummaryLines(view)) console.log(line);
+      for (const line of packageSummaryLines(view, listWidth)) console.log(line);
       console.log();
       console.log(pc.dim(`  awm list <pkg>  ·  awm list --all`));
       outro(`Run ${pc.green('awm add')} to install artifacts.`);
