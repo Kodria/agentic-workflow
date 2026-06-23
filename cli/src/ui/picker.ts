@@ -75,7 +75,7 @@ export function pickerReducer(state: PickerState, key: ReducerKey): PickerState 
       return { ...state, selected };
     }
     case 'toggleAll': {
-      const reals = realValues(state);
+      const reals = vis.filter((i) => i.value !== ALL_SENTINEL).map((i) => i.value);
       const selected = new Set(state.selected);
       const allSel = reals.every((v) => selected.has(v));
       if (allSel) {

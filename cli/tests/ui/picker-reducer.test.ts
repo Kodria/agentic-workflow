@@ -85,4 +85,10 @@ describe('pickerReducer', () => {
     expect(s.selected.has('skill:a')).toBe(true);
     expect(s.selected.has(ALL_SENTINEL)).toBe(true);
   });
+  it('toggleAll with active filter only toggles visible items', () => {
+    // filter to 'beta' — only skill:b is visible (ALL_SENTINEL label '✨ Install entire package (2)' does not match)
+    const s = pickerReducer(base({ filter: 'beta' }), { type: 'toggleAll' });
+    expect(s.selected.has('skill:b')).toBe(true);
+    expect(s.selected.has('skill:a')).toBe(false); // not visible, should NOT be selected
+  });
 });
