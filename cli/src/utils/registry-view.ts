@@ -196,7 +196,7 @@ export function artifactPickerItems(pkg: PackageView): PickerItem[] {
     const rest: PickerItem[] = pkg.artifacts.map((a) => ({
         value: artifactValue(a),
         label: `${TYPE_ICON[a.type]}${a.name}`,
-        description: a.description || '(no description)',
+        description: a.description || '',
     }));
     return [all, ...rest];
 }

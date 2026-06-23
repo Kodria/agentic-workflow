@@ -219,6 +219,7 @@ program.command('add [name]')
       }
 
       // 5. Level 1 — pick package(s)
+      // TODO(Task 7): replace with packagePickerItems()/multiselectPicker()
       const pkgChoice = await multiselect({
           message: 'Select package(s)',
           options: view.map((p) => {
@@ -235,6 +236,7 @@ program.command('add [name]')
           .filter(Boolean);
 
       // 5b. Level 2 — pick skills within each package, in sequence
+      // TODO(Task 7): replace with artifactPickerItems()/multiselectPicker()
       const dedup = new Map<string, ArtifactView>();
       for (let i = 0; i < selectedPackages.length; i++) {
           const pkg = selectedPackages[i];
