@@ -62,8 +62,15 @@ export function pickerReducer(state: PickerState, key: ReducerKey): PickerState 
           selected.add(ALL_SENTINEL);
         }
       } else {
-        if (selected.has(item.value)) selected.delete(item.value);
-        else selected.add(item.value);
+        if (selected.has(item.value)) {
+          selected.delete(item.value);
+          selected.delete(ALL_SENTINEL); // no longer all-selected
+        } else {
+          selected.add(item.value);
+          // if every real item is now selected, also mark the sentinel
+          const reals = realValues(state);
+          if (reals.every((v) => selected.has(v))) selected.add(ALL_SENTINEL);
+        }
       }
       return { ...state, selected };
     }

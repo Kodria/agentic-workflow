@@ -62,4 +62,20 @@ describe('pickerReducer', () => {
     const s = base({ filter: 'zzz', cursor: 0 });
     expect(pickerReducer(s, { type: 'down' }).cursor).toBe(0);
   });
+  it('toggling an individual item off removes ALL_SENTINEL from selected', () => {
+    // Start with all items pre-selected (the initialSelected scenario)
+    const all = new Set([ALL_SENTINEL, 'skill:a', 'skill:b']);
+    const s = pickerReducer(base({ cursor: 1, selected: all }), { type: 'toggle' });
+    // Unchecked skill:a — sentinel should be gone
+    expect(s.selected.has('skill:a')).toBe(false);
+    expect(s.selected.has(ALL_SENTINEL)).toBe(false);
+    expect(s.selected.has('skill:b')).toBe(true);
+  });
+  it('toggling the last missing item on syncs the ALL_SENTINEL', () => {
+    // skill:a is missing, skill:b is selected — select skill:a and sentinel should appear
+    const partial = new Set(['skill:b']);
+    const s = pickerReducer(base({ cursor: 1, selected: partial }), { type: 'toggle' });
+    expect(s.selected.has('skill:a')).toBe(true);
+    expect(s.selected.has(ALL_SENTINEL)).toBe(true);
+  });
 });
