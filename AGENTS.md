@@ -12,6 +12,10 @@ Lecciones y patrones confirmados en este repo. Todo agente que trabaje aquí deb
 
 - **stub-process-platform:** para stubbear `process.platform` en tests usar `Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })`. El flag `configurable: true` es esencial — sin él, la restauración en `afterEach` falla silenciosamente. Capturar el valor real antes de los tests (`const realPlatform = process.platform`) y restaurar en `afterEach` con la misma llamada.
 
+- **ansi-testing-inject-precolored:** los tests que construyen strings coloreados con `picocolors` para verificar stripping ANSI son vacuos en Jest: Jest corre en non-TTY, `picocolors` devuelve strings planos sin sequences ANSI, y el código de strip nunca se ejercita. Inyectar la sequence directamente: `'\x1b[32mhello\x1b[0m'` en vez de `pc.green('hello')`. Si el test mide `displayWidth` de strings que vendrán coloreados en producción, usar strings ANSI hardcodeados o forzar `FORCE_COLOR=1` en el entorno del test.
+
+- **eventemitter-fake-stdin:** para testear shells interactivos (raw-mode, key events) sin un TTY real, usar `EventEmitter` como fake de `input`: emitir `'data'` con buffers de teclas, verificar lo escrito a `output`. No se necesita stdin global ni `process.stdin` — solo el contrato `{ on, removeListener, setRawMode?, pause? }`. Patrón confirmado en `tests/ui/picker-shell.test.ts`.
+
 - **tdd-first-i18n:** para migraciones de strings (i18n, rebranding, renombrado de labels), actualizar primero los asserts de tests al nuevo valor → verificar que fallen (red) → traducir la fuente (green). Esto garantiza que no quedan asserts huérfanos silenciados y que cualquier string omitido en el sweep rompe el build en vez de pasar desapercibido. Confirmado en WS-7 F-10 (~40 strings CLI en→es): el ciclo red→green detectó un cascade en `init.test.ts` que un sweep directo habría silenciado.
 
 ## Patrones de diseño de API
@@ -21,6 +25,8 @@ Lecciones y patrones confirmados en este repo. Todo agente que trabaje aquí deb
 - **contentRoot stamp en discovery:** estampar `contentRoot` sobre cada artefacto en el momento del discovery, no en el momento del install/uso. Los consumidores downstream no necesitan saber de qué registry proviene el artefacto — el path absoluto ya los guía al lugar correcto.
 
 - **injected-logger:** cuando una función necesita emitir warnings o mensajes al usuario, recibir el logger como argumento (`fn(log: (msg: string) => void)`) en vez de llamar `console.warn()` directamente. Ventaja: la función es pura (sin side effects de I/O), testeable sin capturar stdout, y reutilizable con cualquier output channel. Patrón: `warnIfUnsupportedPlatform((m) => console.warn(pc.yellow(m)))` en el call-site.
+
+- **pure-render-io-split:** al construir un selector/picker interactivo, separar completamente el render puro (`(state, width) → string[]`) del shell I/O (`onData → dispatch → redraw`). El render puro es 100% testeable sin terminal; el shell I/O queda delgado y se aísla con injectable IO. Patrón: `defaultIO = () => ({ input: process.stdin, output: process.stdout })` como función lazy (no en import-time) + seam de default argument en la función pública. Confirmado en `src/ui/picker-view.ts` + `picker.ts`.
 
 - **hoist-per-root-io:** en funciones que iteran sobre roots y dentro de cada root iteran sobre artefactos, hacer el I/O de por-root (p.ej. `readRegistryManifest(root)`) **fuera del loop interno**, no dentro. Multiplicar lecturas de disco por artifact es innecesario. Patrón: `for (const root of roots) { const overrides = readRegistryManifest(root); for (const a of artifacts(root)) { /* usa overrides */ } }`. Confirmado en dos code-quality reviews de WS-2.
 
