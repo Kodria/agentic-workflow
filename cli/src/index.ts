@@ -72,7 +72,8 @@ program.command('add [name]')
   .option('-s, --scope <scope>', 'Scope: local or global')
   .option('-m, --method <method>', 'Install method: symlink or copy')
   .option('-y, --yes', 'Skip confirmation prompts')
-  .action(async (name: string | undefined, options: { type?: string; agent?: string; scope?: string; method?: string; yes?: boolean }) => {
+  .option('--all', 'install all artifacts from all packages without prompting')
+  .action(async (name: string | undefined, options: { type?: string; agent?: string; scope?: string; method?: string; yes?: boolean; all?: boolean }) => {
       intro(pc.bgCyan(pc.black(' AWM - Agentic Workflow Manager ')));
 
       // 1. Sync the registry
@@ -162,6 +163,111 @@ program.command('add [name]')
       }
 
       const prefs = getPreferences();
+
+      // --all: install everything from every package headlessly
+      if (options.all) {
+          let targetAgents: AgentTarget[];
+          if (options.agent) {
+              const validAgents = Object.keys(PROVIDERS);
+              const parsed = options.agent.split(',').map((a) => a.trim());
+              for (const a of parsed) {
+                  if (!validAgents.includes(a)) {
+                      console.error(pc.red(`Invalid agent "${a}". Use: ${validAgents.join(', ')}.`));
+                      process.exit(1);
+                  }
+              }
+              targetAgents = parsed as AgentTarget[];
+          } else {
+              targetAgents = [prefs.defaultAgent];
+          }
+
+          let scopeVal: Scope;
+          if (options.scope) {
+              if (!['local', 'global'].includes(options.scope)) {
+                  console.error(pc.red(`Invalid scope "${options.scope}". Use: local or global.`));
+                  process.exit(1);
+              }
+              scopeVal = options.scope as Scope;
+          } else {
+              scopeVal = prefs.defaultScope;
+          }
+
+          let methodVal: 'symlink' | 'copy';
+          if (options.method) {
+              if (!['symlink', 'copy'].includes(options.method)) {
+                  console.error(pc.red(`Invalid method "${options.method}". Use: symlink or copy.`));
+                  process.exit(1);
+              }
+              methodVal = options.method as 'symlink' | 'copy';
+          } else {
+              methodVal = scopeVal === 'local' ? 'copy' : 'symlink';
+          }
+
+          const includeWorkflows = targetAgents.some((a) => PROVIDERS[a].workflow !== null);
+          const includeAgents = targetAgents.some((a) => PROVIDERS[a].agent !== null);
+          const allView = buildPackageView(
+              skills,
+              includeWorkflows ? workflows : [],
+              includeAgents ? agents : [],
+              discoverAllBundles()
+          );
+
+          const allDedup = new Map<string, ArtifactView>();
+          for (const pkg of allView) {
+              for (const a of pkg.artifacts) {
+                  allDedup.set(artifactValue(a), a);
+              }
+          }
+
+          const artifactsToInstall = Array.from(allDedup.values()).map((a) => ({
+              name: a.installName,
+              sourcePath: a.sourcePath,
+              type: a.type,
+          }));
+
+          if (artifactsToInstall.length === 0) {
+              outro(pc.yellow('No artifacts available.'));
+              return;
+          }
+
+          const installSpinner = spinner();
+          installSpinner.start('Installing artifacts...');
+
+          try {
+              const installed: string[] = [];
+              const skipped: string[] = [];
+
+              for (const currentAgent of targetAgents) {
+                  for (const artifact of artifactsToInstall) {
+                      if (PROVIDERS[currentAgent][artifact.type] === null) {
+                          skipped.push(`${artifact.name} (${currentAgent})`);
+                          continue;
+                      }
+                      const targetDir = getTargetPath(artifact.type, currentAgent, scopeVal);
+                      const finalDest = path.join(targetDir, artifact.name);
+                      installArtifact(artifact.sourcePath, finalDest, methodVal);
+                      installed.push(`${artifact.name} → ${currentAgent} (${scopeVal})`);
+                  }
+              }
+
+              savePreferences({ defaultAgent: targetAgents[0], defaultScope: scopeVal, installMethod: methodVal });
+              installSpinner.stop('Installation complete!');
+
+              if (skipped.length > 0) {
+                  for (const sk of skipped) {
+                      console.log(pc.yellow(`  ⚠️  Skipped: ${sk} (not supported by target agent)`));
+                  }
+              }
+
+              const names = installed.map((n) => pc.green(n)).join('\n  ');
+              outro(`✅ Installed:\n  ${names}`);
+          } catch (e: any) {
+              installSpinner.stop('Installation failed.');
+              console.error(pc.red(e.message));
+              process.exit(1);
+          }
+          return;
+      }
 
       // Interactive selection requires a TTY. Bundle-by-name (handled above) works headless.
       if (!isInteractive()) {
