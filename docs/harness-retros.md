@@ -3,6 +3,20 @@
 Auditable log of recurring/structural harness gaps converted into rules. See the
 `harness-retro` skill for the process. Newest first.
 
+## 2026-06-22 — CLI Interface Engine: 3 agent patterns curados
+
+- **Class:** agent (testing + diseño)
+- **Branch:** `feat/cli-interface-engine`
+- **Ledger:** ~16 findings (1 minor structuralizado, 2 dismissed, resto ya corregidos durante SDD/QA), ~22 wins; 4 QA findings cerrados (B1 toggleAll visible, B2 SIGINT handler, B3 --all flag, C1 CJK ranges)
+- **Curado en AGENTS.md:**
+  - **`ansi-testing-inject-precolored`:** tests con picocolors en Jest son vacuos (non-TTY → strings planos); inyectar ANSI hardcodeado o usar FORCE_COLOR=1
+  - **`eventemitter-fake-stdin`:** usar EventEmitter como fake de stdin para tests de I/O shell sin TTY real; contrato mínimo `{ on, removeListener, setRawMode?, pause? }`
+  - **`pure-render-io-split`:** separar render puro `(state, width) → string[]` del shell I/O; defaultIO lazy + default-arg-seam para injectable IO testeable
+- **Sensor:** agents-md (entregado a cada agente vía contexto de sesión)
+- **Dismissed:** `ansi-regex-incomplete` (aceptado como fuera de scope — solo input de picocolors), `cursor-oob-not-clamped-on-filter-change` (benigno, no es un bug real)
+
+---
+
 ## 2026-06-22 — WS-C OS Sensitivity: 4 agent patterns curados
 
 - **Class:** agent (working-style + wins)

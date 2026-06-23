@@ -1,5 +1,6 @@
 # CLI Interface Engine Implementation Plan
 <!-- awm-qa-complete: 2026-06-22 -->
+<!-- awm-retro-complete: 2026-06-22 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
