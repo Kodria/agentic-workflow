@@ -3,6 +3,22 @@
 Auditable log of recurring/structural harness gaps converted into rules. See the
 `harness-retro` skill for the process. Newest first.
 
+## 2026-06-25 — release-script: CLI arg validation + multi-step rollback + call-order test + execFileSync
+
+- **Class:** proceso × 2 (CONSTITUTION) + agent × 2 (AGENTS.md)
+- **Branch:** `feature/release-script`
+- **Ledger:** 7 findings (2 important, 5 minor), 4 wins; todos los findings corregidos en la sesión
+- **Curado en CONSTITUTION.md:**
+  - **CLI arg validation:** `argv[++i] ?? 'default'` silencia el error cuando el usuario omite el valor — lanzar error explícito si el token es `undefined` o empieza con `--`
+  - **Multi-step rollback:** operaciones no atómicas (git commit + tag + npm publish) deben implementar rollback de los side-effects locales si el paso final falla; patrón: catch → `git tag -d` + `git reset --hard HEAD~1` → re-lanzar
+- **Curado en AGENTS.md:**
+  - **`assert-call-order-not-just-existence`:** cuando el fake graba commands en `calls[]`, verificar el orden con `indexOf` + `toBeLessThan`, no solo con `toContain`
+  - **`execFileSync-not-execSync`:** usar `execFileSync(cmd, args[])` — evita shell intermedio y riesgo de inyección por metacaracteres
+- **Sensor:** constitution + agents-md (entregados a cada agente vía contexto)
+- **Dismissed:** `missing-idempotence-gate-tests` (corregido, sin patrón estructural nuevo), `release-script-no-prebuild` (fix puntual en package.json), `tag-re-duplicated-across-modules` (deuda técnica menor, no patrón de clase)
+
+---
+
 ## 2026-06-22 — CLI Interface Engine: 3 agent patterns curados
 
 - **Class:** agent (testing + diseño)
