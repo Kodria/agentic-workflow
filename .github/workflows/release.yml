@@ -2,6 +2,8 @@
 name: release
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -10,7 +12,8 @@ on:
         default: false
 
 permissions:
-  contents: write   # push de commit + tag
+  contents: write
+  id-token: write   # OIDC para npm Trusted Publisher
 
 jobs:
   release:
@@ -39,7 +42,5 @@ jobs:
 
       - name: Release
         working-directory: cli
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          node dist/src/release/index.js ${{ inputs.dry_run && '--dry-run' || '' }}
+          node dist/src/release/index.js ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true && '--dry-run' || '' }}

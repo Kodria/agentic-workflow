@@ -56,7 +56,9 @@ export function release(opts: ReleaseOpts, io: ReleaseIO): ReleaseResult {
   if (!opts.dryRun) {
     const dirty = io.run('git', ['status', '--porcelain']).trim();
     if (dirty) throw new Error('Working tree con cambios sin commitear — abortando');
-    if (!io.env.NPM_TOKEN) throw new Error('Falta NPM_TOKEN en el entorno — requerido para publicar');
+    if (!io.env.NPM_TOKEN && !io.env.NODE_AUTH_TOKEN) {
+      throw new Error('Falta NPM_TOKEN o NODE_AUTH_TOKEN en el entorno — requerido para publicar');
+    }
   }
 
   // baseline
@@ -97,15 +99,26 @@ export function release(opts: ReleaseOpts, io: ReleaseIO): ReleaseResult {
   io.run('git', ['commit', '-m', `chore(release): v${version} [skip ci]`]);
   io.run('git', ['tag', '-a', `v${version}`, '-m', `v${version}`]);
 
-  const token = io.env.NPM_TOKEN as string;
+  // OIDC mode (NODE_AUTH_TOKEN set by setup-node): auth pre-configured, use --provenance
+  // Legacy mode (NPM_TOKEN): write .npmrc manually, cleanup in finally
+  const useOidc = !!io.env.NODE_AUTH_TOKEN && !io.env.NPM_TOKEN;
   let publishError: unknown;
-  try {
-    io.writeNpmrc(token);
-    io.run('npm', ['publish'], { cwd: opts.cliDir });
-  } catch (e) {
-    publishError = e;
-  } finally {
-    io.removeNpmrc();
+  if (useOidc) {
+    try {
+      io.run('npm', ['publish', '--provenance'], { cwd: opts.cliDir });
+    } catch (e) {
+      publishError = e;
+    }
+  } else {
+    const token = io.env.NPM_TOKEN as string;
+    try {
+      io.writeNpmrc(token);
+      io.run('npm', ['publish'], { cwd: opts.cliDir });
+    } catch (e) {
+      publishError = e;
+    } finally {
+      io.removeNpmrc();
+    }
   }
 
   if (publishError) {

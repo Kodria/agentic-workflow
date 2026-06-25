@@ -74,6 +74,16 @@ describe('release — happy path', () => {
     expect(calls.join('\n')).not.toMatch(/npm publish|WRITE_PKG|git commit/);
   });
 
+  it('OIDC: NODE_AUTH_TOKEN sin NPM_TOKEN usa --provenance y omite .npmrc', () => {
+    const { io, calls } = makeIO({ commits: `feat: x${US}${RS}` });
+    io.env = { NODE_AUTH_TOKEN: 'oidc-tok' };
+    const res = release(opts(), io);
+    expect(res).toEqual({ released: true, version: '2.2.0' });
+    expect(calls.join('\n')).toMatch(/npm publish --provenance/);
+    expect(calls).not.toContain('WRITE_NPMRC');
+    expect(calls).not.toContain('REMOVE_NPMRC');
+  });
+
   it('--no-push omite los push', () => {
     const { io, calls } = makeIO({ commits: `feat: x${US}${RS}` });
     release(opts({ push: false }), io);
@@ -106,16 +116,16 @@ describe('release — gates de preflight', () => {
     expect(() => release(opts(), fake)).toThrow(/working tree|sin commitear|dirty/i);
   });
 
-  it('aborta si falta NPM_TOKEN', () => {
+  it('aborta si falta NPM_TOKEN y NODE_AUTH_TOKEN', () => {
     const fake = makeIO().io;
     fake.env = {};
-    expect(() => release(opts(), fake)).toThrow(/NPM_TOKEN/);
+    expect(() => release(opts(), fake)).toThrow(/NPM_TOKEN|NODE_AUTH_TOKEN/);
   });
 
   it('el gate de token corre ANTES del early-exit de "nada que publicar"', () => {
     const fake = makeIO({ commits: `docs: x${US}${RS}` }).io; // sin commits releasables
     fake.env = {};
-    expect(() => release(opts(), fake)).toThrow(/NPM_TOKEN/); // no devuelve {released:false}
+    expect(() => release(opts(), fake)).toThrow(/NPM_TOKEN|NODE_AUTH_TOKEN/); // no devuelve {released:false}
   });
 
   it('--dry-run no exige NPM_TOKEN ni working tree limpio', () => {
