@@ -6,6 +6,8 @@ Lecciones y patrones confirmados en este repo. Todo agente que trabaje aquí deb
 
 ## Patrones de testing
 
+- **assert-call-order-not-just-existence:** cuando un orquestador debe ejecutar pasos en un orden específico y el fake graba comandos en un array `calls[]`, verificar el orden con `expect(calls.indexOf('A')).toBeLessThan(calls.indexOf('B'))` — no solo con `expect(calls).toContain('A')`. Un `toContain` pasa aunque los pasos se reordenen. Aplicar a cualquier secuencia donde el orden importa: ej. `writePackageVersion` antes de `git commit`, `WRITE_NPMRC` antes de `npm publish`, `npm publish` antes de `git push`.
+
 - **dual-tmpdir-isolation:** cuando un test de comando escribe al home *y* clona repos, usar dos tmpdirs separados (`tmpHome` para HOME/AWM_HOME, `tmpWork` para repos fixture). Un solo tmpdir mezcla el "home falso" con los artefactos de trabajo y provoca contaminación cruzada entre tests. Patrón completo: `beforeEach` crea ambos tmpdirs + sobreescribe `process.env.HOME` y `process.env.AWM_HOME` + llama `jest.resetModules()`; `afterEach` restaura y limpia. Todos los módulos se importan con `require()` dentro del test (no al top-level del archivo). **Git fixtures con tags:** agregar `-c tag.gpgSign=false` al helper GIT (`execSync(\`git -c user.email=t@t.t -c user.name=t -c tag.gpgSign=false ...\`)`); en máquinas con `tag.gpgSign=true` global la creación de tags falla sin este flag. Confirmado necesario en WS-3 (×3 reviewers independientes).
 
 - **module-level env vars / call-time preference:** las constantes derivadas de `process.env` (como `AWM_HOME`) se evalúan al momento del `require`. Al crear un módulo con este patrón, agregar el comentario `// Evaluated at require-time — tests must use jest.resetModules() + late require() to pick up env overrides.` para que futuros implementadores de tests no lo descubran a las malas. **Alternativa preferida (WS-C):** exportar funciones en vez de constantes — `export function awmHome() { return process.env.AWM_HOME || ... }` evalúa en call-time; los tests pueden sobreescribir `process.env` en `beforeEach/afterEach` sin `jest.resetModules()`.
@@ -33,6 +35,8 @@ Lecciones y patrones confirmados en este repo. Todo agente que trabaje aquí deb
 - **atomic-add para directorios administrados:** el flujo correcto para un comando que agrega a un directorio gestionado es: operación costosa (clone/fetch) → validar → verificar colisiones → escribir config. Fallo en cualquier paso = limpiar el directorio creado (`rmSync(dest, {recursive:true,force:true})`) + no escribir config. Nunca escribir config antes de que la validación sea exitosa.
 
 ## Patrones de implementación
+
+- **execFileSync-not-execSync:** al ejecutar comandos externos desde Node.js, usar `execFileSync(cmd, args[])` en vez de `execSync('cmd arg1 arg2')`. `execSync` pasa la string a la shell — cualquier arg con espacios, comillas o metacaracteres puede alterar el comando. `execFileSync` con array de args evita el shell intermedio. Aplica a todos los wrappers de git/npm/awm en este repo.
 
 - **best-effort-catch-comment:** un bloque `catch {}` vacío es indistinguible de un olvido. Cuando el catch es deliberado (fallback silencioso, best-effort), agregar un comentario que explique el tradeoff: `// best-effort: <qué hace el fallback>; <qué se pierde respecto al happy path>`. Hace la intención explícita para reviewers y previene que refactors futuros añadan un re-throw "para limpieza" que rompa el comportamiento.
 
