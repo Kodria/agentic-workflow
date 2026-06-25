@@ -27,7 +27,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+          # Sin registry-url: evita que setup-node escriba un .npmrc con _authToken
+          # placeholder que hace que npm prefiera auth por token sobre OIDC.
+
+      - name: Actualizar npm (OIDC Trusted Publisher requiere >=11.5.1)
+        run: npm install -g npm@latest
 
       - name: Configurar identidad git
         run: |
@@ -42,9 +46,5 @@ jobs:
 
       - name: Release
         working-directory: cli
-        env:
-          # Vacío a propósito: con registry-url, setup-node puede dejar un placeholder
-          # que hace que npm prefiera auth por token sobre OIDC y falle el publish.
-          NODE_AUTH_TOKEN: ''
         run: |
           node dist/src/release/index.js ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true && '--dry-run' || '' }}
