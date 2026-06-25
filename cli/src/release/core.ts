@@ -64,3 +64,22 @@ export function selectFloor(current: string, lastTagVersion: string | null): str
   if (!lastTagVersion) return cur;
   return compareSemver(cur, lastTagVersion) >= 0 ? cur : lastTagVersion;
 }
+
+function line(c: Commit): string {
+  return c.scope ? `- **${c.scope}:** ${c.subject}` : `- ${c.subject}`;
+}
+
+export function renderChangelog(version: string, dateISO: string, commits: Commit[]): string {
+  const sections: string[] = [`## v${version} - ${dateISO}`, ''];
+  const groups: Array<[string, (c: Commit) => boolean]> = [
+    ['Breaking Changes', (c) => c.breaking],
+    ['Features', (c) => !c.breaking && c.type === 'feat'],
+    ['Fixes', (c) => !c.breaking && (c.type === 'fix' || c.type === 'perf')],
+  ];
+  for (const [title, pred] of groups) {
+    const items = commits.filter(pred);
+    if (items.length === 0) continue;
+    sections.push(`### ${title}`, ...items.map(line), '');
+  }
+  return sections.join('\n').trimEnd() + '\n';
+}

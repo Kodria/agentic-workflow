@@ -1,4 +1,4 @@
-import { parseCommits, determineBump, nextVersion, selectFloor, RS, US } from '../../src/release/core';
+import { parseCommits, determineBump, nextVersion, selectFloor, renderChangelog, RS, US } from '../../src/release/core';
 import type { Commit } from '../../src/release/core';
 
 const rec = (header: string, body = '') => `${header}${US}${body}${RS}`;
@@ -85,5 +85,33 @@ describe('selectFloor', () => {
   });
   it('rechaza current inválido', () => {
     expect(() => selectFloor('', null)).toThrow(/invalid/i);
+  });
+});
+
+describe('renderChangelog', () => {
+  const commits: Commit[] = [
+    { type: 'feat', scope: 'add', breaking: false, subject: 'flag --all' },
+    { type: 'fix', scope: null, breaking: false, subject: 'corrige width' },
+    { type: 'chore', scope: null, breaking: true, subject: 'sube node' },
+  ];
+
+  it('encabeza con versión y fecha', () => {
+    expect(renderChangelog('2.2.0', '2026-06-25', commits)).toContain('## v2.2.0 - 2026-06-25');
+  });
+  it('agrupa Features, Fixes y Breaking Changes', () => {
+    const md = renderChangelog('2.2.0', '2026-06-25', commits);
+    expect(md).toContain('### Features');
+    expect(md).toContain('- **add:** flag --all');
+    expect(md).toContain('### Fixes');
+    expect(md).toContain('- corrige width');
+    expect(md).toContain('### Breaking Changes');
+    expect(md).toContain('- sube node');
+  });
+  it('omite secciones vacías', () => {
+    const md = renderChangelog('2.2.1', '2026-06-25', [
+      { type: 'fix', scope: null, breaking: false, subject: 'x' },
+    ]);
+    expect(md).toContain('### Fixes');
+    expect(md).not.toContain('### Features');
   });
 });
