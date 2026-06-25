@@ -27,8 +27,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          # Sin registry-url: evita que setup-node escriba .npmrc con _authToken vacío
-          # que bloquea el flujo OIDC de npm Trusted Publisher
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Configurar identidad git
         run: |
@@ -43,5 +42,9 @@ jobs:
 
       - name: Release
         working-directory: cli
+        env:
+          # Vacío a propósito: con registry-url, setup-node puede dejar un placeholder
+          # que hace que npm prefiera auth por token sobre OIDC y falle el publish.
+          NODE_AUTH_TOKEN: ''
         run: |
           node dist/src/release/index.js ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true && '--dry-run' || '' }}
