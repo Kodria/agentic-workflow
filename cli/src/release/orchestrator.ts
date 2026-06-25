@@ -56,8 +56,8 @@ export function release(opts: ReleaseOpts, io: ReleaseIO): ReleaseResult {
   if (!opts.dryRun) {
     const dirty = io.run('git', ['status', '--porcelain']).trim();
     if (dirty) throw new Error('Working tree con cambios sin commitear — abortando');
-    if (!io.env.NPM_TOKEN && !io.env.NODE_AUTH_TOKEN) {
-      throw new Error('Falta NPM_TOKEN o NODE_AUTH_TOKEN en el entorno — requerido para publicar');
+    if (!io.env.NPM_TOKEN && !io.env.NODE_AUTH_TOKEN && !io.env.ACTIONS_ID_TOKEN_REQUEST_URL) {
+      throw new Error('Falta credencial de publicación: configurá NPM_TOKEN, NODE_AUTH_TOKEN, o usa OIDC (id-token: write en GitHub Actions)');
     }
   }
 
@@ -99,9 +99,11 @@ export function release(opts: ReleaseOpts, io: ReleaseIO): ReleaseResult {
   io.run('git', ['commit', '-m', `chore(release): v${version} [skip ci]`]);
   io.run('git', ['tag', '-a', `v${version}`, '-m', `v${version}`]);
 
-  // OIDC mode (NODE_AUTH_TOKEN set by setup-node): auth pre-configured, use --provenance
-  // Legacy mode (NPM_TOKEN): write .npmrc manually, cleanup in finally
-  const useOidc = !!io.env.NODE_AUTH_TOKEN && !io.env.NPM_TOKEN;
+  // OIDC mode: GitHub inyecta ACTIONS_ID_TOKEN_REQUEST_URL con id-token:write
+  //            o NODE_AUTH_TOKEN sin NPM_TOKEN (setup-node legacy con OIDC)
+  // Legacy mode (NPM_TOKEN): write .npmrc temporal, cleanup en finally
+  const useOidc = !io.env.NPM_TOKEN &&
+    (!!io.env.ACTIONS_ID_TOKEN_REQUEST_URL || !!io.env.NODE_AUTH_TOKEN);
   let publishError: unknown;
   if (useOidc) {
     try {

@@ -27,7 +27,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+          # Sin registry-url: evita que setup-node escriba .npmrc con _authToken vacío
+          # que bloquea el flujo OIDC de npm Trusted Publisher
 
       - name: Configurar identidad git
         run: |
