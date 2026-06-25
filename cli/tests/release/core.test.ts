@@ -1,4 +1,4 @@
-import { parseCommits, determineBump, RS, US } from '../../src/release/core';
+import { parseCommits, determineBump, nextVersion, RS, US } from '../../src/release/core';
 import type { Commit } from '../../src/release/core';
 
 const rec = (header: string, body = '') => `${header}${US}${body}${RS}`;
@@ -49,5 +49,23 @@ describe('determineBump', () => {
   });
   it('lista vacía → null', () => {
     expect(determineBump([])).toBeNull();
+  });
+});
+
+describe('nextVersion', () => {
+  it('major resetea minor y patch', () => {
+    expect(nextVersion('2.1.1', 'major')).toBe('3.0.0');
+  });
+  it('minor resetea patch', () => {
+    expect(nextVersion('2.1.1', 'minor')).toBe('2.2.0');
+  });
+  it('patch incrementa patch', () => {
+    expect(nextVersion('2.1.1', 'patch')).toBe('2.1.2');
+  });
+  it('tolera espacios alrededor', () => {
+    expect(nextVersion('  2.1.1  ', 'patch')).toBe('2.1.2');
+  });
+  it.each(['', '.', '..', 'x.y.z', '2.1', '2.1.1.0'])('rechaza base inválida %p', (bad) => {
+    expect(() => nextVersion(bad as string, 'patch')).toThrow(/invalid base version/i);
   });
 });

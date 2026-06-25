@@ -5,6 +5,8 @@ export const GIT_LOG_FORMAT = `%s${US}%b${RS}`;
 
 export type Bump = 'major' | 'minor' | 'patch';
 
+const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)$/;
+
 export interface Commit {
   type: string;
   scope: string | null;
@@ -41,4 +43,13 @@ export function determineBump(commits: Commit[]): Bump | null {
   if (commits.some((c) => c.type === 'feat')) return 'minor';
   if (commits.some((c) => c.type === 'fix' || c.type === 'perf')) return 'patch';
   return null;
+}
+
+export function nextVersion(base: string, bump: Bump): string {
+  const m = SEMVER_RE.exec((base ?? '').trim());
+  if (!m) throw new Error(`Invalid base version: "${base}"`);
+  const [maj, min, pat] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (bump === 'major') return `${maj + 1}.0.0`;
+  if (bump === 'minor') return `${maj}.${min + 1}.0`;
+  return `${maj}.${min}.${pat + 1}`;
 }
