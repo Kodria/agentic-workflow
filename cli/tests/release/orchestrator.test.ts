@@ -128,6 +128,28 @@ describe('release — gates de preflight', () => {
   });
 });
 
+describe('release — gates de idempotencia', () => {
+  it('aborta si el tag v2.2.0 ya existe en git', () => {
+    const { io } = makeIO({ commits: `feat: x${US}${RS}` });
+    const origRun = io.run;
+    (io.run as any) = (cmd: string, args: string[], o?: any) => {
+      if (cmd === 'git' && args[0] === 'tag' && args[1] === '--list' && args[2] === 'v2.2.0') return 'v2.2.0';
+      return origRun(cmd, args, o);
+    };
+    expect(() => release(opts(), io)).toThrow(/ya existe|v2\.2\.0/i);
+  });
+
+  it('aborta si agentic-workflow-manager@2.2.0 ya está publicado en npm', () => {
+    const { io } = makeIO({ commits: `feat: x${US}${RS}` });
+    const origRun = io.run;
+    (io.run as any) = (cmd: string, args: string[], o?: any) => {
+      if (cmd === 'npm' && args[0] === 'view' && args[1] === 'agentic-workflow-manager@2.2.0') return '2.2.0';
+      return origRun(cmd, args, o);
+    };
+    expect(() => release(opts(), io)).toThrow(/ya está publicado|2\.2\.0/i);
+  });
+});
+
 import { parseArgs } from '../../src/release/index';
 
 describe('parseArgs', () => {
