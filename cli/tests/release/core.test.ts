@@ -1,4 +1,4 @@
-import { parseCommits, determineBump, nextVersion, RS, US } from '../../src/release/core';
+import { parseCommits, determineBump, nextVersion, selectFloor, RS, US } from '../../src/release/core';
 import type { Commit } from '../../src/release/core';
 
 const rec = (header: string, body = '') => `${header}${US}${body}${RS}`;
@@ -67,5 +67,23 @@ describe('nextVersion', () => {
   });
   it.each(['', '.', '..', 'x.y.z', '2.1', '2.1.1.0'])('rechaza base inválida %p', (bad) => {
     expect(() => nextVersion(bad as string, 'patch')).toThrow(/invalid base version/i);
+  });
+});
+
+describe('selectFloor', () => {
+  it('sin tag → usa la versión del package.json', () => {
+    expect(selectFloor('2.1.1', null)).toBe('2.1.1');
+  });
+  it('package.json mayor que el tag → gana package.json (caso drift real)', () => {
+    expect(selectFloor('2.1.1', '1.0.0')).toBe('2.1.1');
+  });
+  it('tag mayor que package.json → gana el tag', () => {
+    expect(selectFloor('2.1.1', '2.5.0')).toBe('2.5.0');
+  });
+  it('iguales → ese valor', () => {
+    expect(selectFloor('2.1.1', '2.1.1')).toBe('2.1.1');
+  });
+  it('rechaza current inválido', () => {
+    expect(() => selectFloor('', null)).toThrow(/invalid/i);
   });
 });

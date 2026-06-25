@@ -1,3 +1,5 @@
+import { compareSemver } from '../core/versioning';
+
 export const PKG_NAME = 'agentic-workflow-manager';
 export const RS = '\x1e';
 export const US = '\x1f';
@@ -52,4 +54,13 @@ export function nextVersion(base: string, bump: Bump): string {
   if (bump === 'major') return `${maj + 1}.0.0`;
   if (bump === 'minor') return `${maj}.${min + 1}.0`;
   return `${maj}.${min}.${pat + 1}`;
+}
+
+export function selectFloor(current: string, lastTagVersion: string | null): string {
+  if (!SEMVER_RE.test((current ?? '').trim())) {
+    throw new Error(`Invalid current version: "${current}"`);
+  }
+  const cur = current.trim();
+  if (!lastTagVersion) return cur;
+  return compareSemver(cur, lastTagVersion) >= 0 ? cur : lastTagVersion;
 }
