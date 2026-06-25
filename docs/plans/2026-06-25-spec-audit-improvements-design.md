@@ -113,6 +113,42 @@ Contrato de la skill (disparada tras un evento de compaction/auto-compact, o man
 
 ---
 
+## Cambio 4 — QA multi-lente, dos pistas (Ejes 2 + 3 — refunde el Type C)
+
+**Problema:** El `post-implementation-qa` actual clasifica hallazgos en **Type B (fidelidad: el plan dice X, el código hace Y)** y **Type C (calidad: bug lógico, caso borde)**. El Type C es un **cubo monolítico**: un solo subagente de deep-review busca "todos los bugs de calidad" en una pasada, y la calidad se mide **anclada al plan**. Dos debilidades:
+
+1. **Una sola lente = un solo modo de falla cubierto.** Un revisor único, con un prompt único, en el mismo modelo que implementó, tiene un punto ciego único. El Eje 2 muestra que redundar el *mismo* crítico no ayuda (blinding no neutraliza el sesgo); lo que ayuda es **diversidad de criterio anclada a algo externo**.
+2. **La calidad se evalúa contra el plan.** Pero un bug de robustez (división por cero → `Infinity`) es defecto **independientemente del plan** — que puede ni mencionarlo. El "scope ≠ exemption" ya está parcheado como nota al pie, pero sigue viviendo *dentro* del cubo Type C anclado al plan, en vez de ser un criterio de primera clase.
+
+**Decisión (aprobada):** **disolver el Type C monolítico en un panel de lentes plan-agnósticas.** El Type C se reemplaza — no coexiste. El QA pasa a tener **dos pistas explícitas**:
+
+- **Pista A — Fidelidad (anclada al plan).** Es el actual **Type B**, ahora **dirigido por los IDs de requisito** del Cambio 3: cada `R#` del spec es un ítem de checklist de completitud (¿implementado? ¿testeado?). Forward gap = requisito sin código/test; backward gap = código sin requisito (scope creep). Sin IDs no hay contra qué medir (cierra el hueco que la best-practice de Claude Code [29] señala).
+
+- **Pista B — Calidad (plan-agnóstica, multi-lente).** **Reemplaza al Type C.** En lugar de un cubo "encontrá bugs", un panel de **lentes distintas**, cada una con criterio propio e independiente del plan, despachadas como **subagentes separados** (contexto aislado por lente — la diversidad necesita independencia real, no un solo agente recorriendo una lista):
+  - **Lente de robustez/seguridad** — el piso que el scope no exime: `Infinity`/`NaN`/`undefined` silenciosos, crash en borde/entrada inválida, validación en fronteras (la doctrina de robustez de AWM + scope≠exemption, ahora lente de primera clase y no nota al pie).
+  - **Lente de corrección lógica** — resultado incorrecto para entrada válida, invariantes rotos, estado inconsistente.
+  - **Lente de tests** — ¿cada requisito tiene test? ¿los tests ejercen los casos borde de los criterios `IF/THEN`? ¿hay asserts vacíos o tests que no fallarían nunca?
+  - *(extensible/tier: lentes de perf, concurrencia, etc., solo cuando el dominio lo amerita)*
+
+**Por qué multi-lente y no un cubo más grande (evidencia):**
+- **Perspective-diverse verify:** cuando un artefacto puede fallar de varias maneras, dar a cada verificador una **lente distinta** (corrección / robustez / tests) atrapa modos de falla que la redundancia del mismo crítico no puede. Es diversidad de *criterio*, no de cantidad.
+- **Eje 2 directo:** el sesgo de auto-preferencia sobrevive al contexto fresco [11,12]; lo que lo ataca es anclar la crítica a un **criterio externo** (CAI [18]) y separar el crítico (CriticGPT [15]). Cada lente plan-agnóstica *es* un criterio externo distinto; el cubo monolítico compartía un solo criterio difuso.
+- **Eje 3 sinergia:** la Pista A consume los IDs del Cambio 3 como checklist; sin la capa de requisitos, la fidelidad no tiene métrica. Las pistas se refuerzan: A mide "¿está todo lo prometido?", B mide "¿lo que hay es sólido?" — al margen de lo prometido.
+
+**Absorbe el Cambio 2 en la misma superficie (cierra tres ejes en una pasada):** las plantillas de prompt de cada lente heredan las notas anti-sesgo del Cambio 2 —
+- **2a** — nota "**el contexto fresco es atenuación, no neutralización; ante conflicto lente-vs-sensor, gana el sensor determinista**" en cada lente.
+- **2b** — **evidencia concreta por hallazgo** (test que falla / ID de regla de sensor / `archivo:línea`); hallazgo sin evidencia se descarta — combate la alucinación del crítico LLM [15].
+
+Así, una sola reescritura de `post-implementation-qa` realiza el Eje 3 (Pista A por IDs), el Eje 2 (anti-sesgo en plantillas) y este Cambio 4 (Pista B multi-lente) — **sin tocar la skill tres veces**. Es la razón de plegar estos tres cambios en una edición batch de la skill de QA.
+
+**Tier (anti-waterfall):** el panel completo de lentes aplica a features multi-archivo/riesgosas. Un diff trivial corre **solo la lente de robustez** (el piso nunca se saltea) + la Pista A si hay IDs. No se despachan N subagentes para un cambio de una línea.
+
+**Gate determinista manda (principio 4):** ninguna lente puede declarar "limpio" por encima de un `awm sensors run` rojo; el panel **se suma** al gate de sensores, no lo reemplaza.
+
+**Riesgo / caveat:** N lentes = N subagentes = más tokens. Mitigación doble: el tier (panel pleno solo en cambios riesgosos) y la **deduplicación** de hallazgos solapados entre lentes antes de presentar al usuario (robustez y corrección pueden flaggear el mismo `archivo:línea`).
+
+---
+
 ## Resumen de impacto por skill (en `awm-baseline-registry`)
 
 | Skill | Cambio | Eje |
@@ -122,15 +158,15 @@ Contrato de la skill (disparada tras un evento de compaction/auto-compact, o man
 | **`subagent-driven-development`** | Reconciliation gate en retorno de subagente; nota "fresco ≠ neutral"; model/rol separation opcional (2c); usar IDs en spec-reviewer. | 1, 2, 3 |
 | **`brainstorming`** | Sección `## Requisitos` en EARS; gate de clarify (cero ambigüedad); spec self-review extendido. | 3 |
 | **`writing-plans`** | IDs de requisito por task; self-review → matriz de trazabilidad req→tarea→test. | 3 |
-| **`post-implementation-qa`** | Check `analyze` de cobertura pre-QA; IDs como checklist de completitud; evidencia concreta por hallazgo. | 2, 3 |
+| **`post-implementation-qa`** | **Reescritura holística (una sola edición):** dos pistas — Pista A (fidelidad por IDs, ex-Type B) + Pista B (panel multi-lente plan-agnóstico que **reemplaza al Type C**); check `analyze` de cobertura pre-QA; evidencia concreta por hallazgo. | 2, 3, 4 |
 | **`requesting-code-review`** | Nota "fresco = atenuación, no neutralización; el sensor gana al juicio". | 2 |
-| **plantillas de prompt** (`*-reviewer-prompt.md`, `deep-review-prompt.md`) | Exigir evidencia concreta (test/ID de sensor/línea) por hallazgo. | 2 |
+| **plantillas de prompt** (`*-reviewer-prompt.md`, `deep-review-prompt.md`) | Exigir evidencia concreta (test/ID de sensor/línea) por hallazgo; `deep-review-prompt.md` se reestructura en plantilla de dos pistas con una lente por subagente. | 2, 4 |
 
 ---
 
 ## Qué NO se propone (alcance excluido, con razón)
 
-- **No** multi-agent debate del mismo modelo como verificador — [13] muestra que no supera a self-consistency a igual cómputo.
+- **No** multi-agent debate del mismo modelo como verificador — [13] muestra que no supera a self-consistency a igual cómputo. *(El panel multi-lente del Cambio 4 NO es debate: cada lente tiene un criterio distinto y plan-agnóstico — diversidad de criterio, no N copias discutiendo.)*
 - **No** adoptar tooling propietario de spec (Kiro/Spec Kit como dependencia) — se toma la *notación* (EARS) y los *conceptos* (trazabilidad, clarify/analyze), agnósticos y sin tooling.
 - **No** separar `design.md` en tres archivos físicos obligatorios — basta una sección de Requisitos durable como cabeza del spec (G6 es baja-media); evitar ceremonia.
 - **No** tocar `~/.awm` ni la instalación — todo cambio de contenido va por el flujo registry → tag → `awm update`.
@@ -138,6 +174,6 @@ Contrato de la skill (disparada tras un evento de compaction/auto-compact, o man
 ## Próximos pasos sugeridos (no ejecutados)
 
 1. Revisión humana de esta propuesta (priorizar Cambios 3a/3b — mayor palanca, menor coste).
-2. Para los cambios aprobados: abrir el ciclo en `awm-baseline-registry` (brainstorming → writing-plans → TDD sobre las skills) en su rama.
+2. Para los cambios aprobados: abrir el ciclo en `awm-baseline-registry` (brainstorming → writing-plans → TDD sobre las skills) en su rama. *(En curso: el plan `docs/plans/2026-06-25-requirements-layer.md` del registry cubre el Cambio 3 y, en su Task 6, pliega los Cambios 4 y 2 en una reescritura única de `post-implementation-qa` — aprobado que la Pista B reemplaza al Type C.)*
 3. Validar `context-compaction-recovery` con un escenario real de sesión larga antes de hornearlo en el espinazo.
 4. Verificar la metadata de las citas marcadas como "preprint, verificar" antes de cualquier publicación externa del informe.
