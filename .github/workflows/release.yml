@@ -1,0 +1,45 @@
+# .github/workflows/release.yml
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no publica)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # push de commit + tag
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # historia completa + tags para el bump
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Configurar identidad git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Instalar y build
+        working-directory: cli
+        run: |
+          npm ci
+          npm run build
+
+      - name: Release
+        working-directory: cli
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          node dist/src/release/index.js ${{ inputs.dry_run && '--dry-run' || '' }}
