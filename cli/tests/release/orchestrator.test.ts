@@ -80,3 +80,50 @@ describe('release — happy path', () => {
     expect(calls.join('\n')).not.toMatch(/git push/);
   });
 });
+
+describe('release — gates de preflight', () => {
+  it('aborta si la rama no es la esperada', () => {
+    const fake = makeIO().io;
+    const origRun = fake.run;
+    (fake.run as any) = (cmd: string, args: string[], o?: any) =>
+      cmd === 'git' && args[0] === 'rev-parse' ? 'feature/x' : origRun(cmd, args, o);
+    expect(() => release(opts(), fake)).toThrow(/rama|branch/i);
+  });
+
+  it('--force relaja el gate de rama', () => {
+    const fake = makeIO({ commits: `feat: x${US}${RS}` }).io;
+    const origRun = fake.run;
+    (fake.run as any) = (cmd: string, args: string[], o?: any) =>
+      cmd === 'git' && args[0] === 'rev-parse' ? 'feature/x' : origRun(cmd, args, o);
+    expect(() => release(opts({ force: 'patch' }), fake)).not.toThrow();
+  });
+
+  it('aborta si el working tree está sucio', () => {
+    const fake = makeIO().io;
+    const origRun = fake.run;
+    (fake.run as any) = (cmd: string, args: string[], o?: any) =>
+      cmd === 'git' && args[0] === 'status' ? ' M cli/src/x.ts' : origRun(cmd, args, o);
+    expect(() => release(opts(), fake)).toThrow(/working tree|sin commitear|dirty/i);
+  });
+
+  it('aborta si falta NPM_TOKEN', () => {
+    const fake = makeIO().io;
+    fake.env = {};
+    expect(() => release(opts(), fake)).toThrow(/NPM_TOKEN/);
+  });
+
+  it('el gate de token corre ANTES del early-exit de "nada que publicar"', () => {
+    const fake = makeIO({ commits: `docs: x${US}${RS}` }).io; // sin commits releasables
+    fake.env = {};
+    expect(() => release(opts(), fake)).toThrow(/NPM_TOKEN/); // no devuelve {released:false}
+  });
+
+  it('--dry-run no exige NPM_TOKEN ni working tree limpio', () => {
+    const fake = makeIO({ commits: `feat: x${US}${RS}` }).io;
+    fake.env = {};
+    const origRun = fake.run;
+    (fake.run as any) = (cmd: string, args: string[], o?: any) =>
+      cmd === 'git' && args[0] === 'status' ? ' M x' : origRun(cmd, args, o);
+    expect(release(opts({ dryRun: true }), fake).version).toBe('2.2.0');
+  });
+});

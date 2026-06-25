@@ -46,6 +46,19 @@ function highestTag(io: ReleaseIO): string | null {
 }
 
 export function release(opts: ReleaseOpts, io: ReleaseIO): ReleaseResult {
+  // --- preflight gates (contrato, antes de cualquier early-exit) ---
+  if (!opts.force) {
+    const branch = io.run('git', ['rev-parse', '--abbrev-ref', 'HEAD']).trim();
+    if (branch !== opts.branch) {
+      throw new Error(`Rama actual "${branch}" != esperada "${opts.branch}" (usá --force para relajar)`);
+    }
+  }
+  if (!opts.dryRun) {
+    const dirty = io.run('git', ['status', '--porcelain']).trim();
+    if (dirty) throw new Error('Working tree con cambios sin commitear — abortando');
+    if (!io.env.NPM_TOKEN) throw new Error('Falta NPM_TOKEN en el entorno — requerido para publicar');
+  }
+
   // baseline
   const current = io.readPackageVersion();
   const lastTag = highestTag(io);              // "vX.Y.Z" | null
