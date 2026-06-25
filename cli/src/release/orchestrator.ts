@@ -98,11 +98,20 @@ export function release(opts: ReleaseOpts, io: ReleaseIO): ReleaseResult {
   io.run('git', ['tag', '-a', `v${version}`, '-m', `v${version}`]);
 
   const token = io.env.NPM_TOKEN as string;
+  let publishError: unknown;
   try {
     io.writeNpmrc(token);
     io.run('npm', ['publish'], { cwd: opts.cliDir });
+  } catch (e) {
+    publishError = e;
   } finally {
     io.removeNpmrc();
+  }
+
+  if (publishError) {
+    try { io.run('git', ['tag', '-d', `v${version}`]); } catch { /* best effort */ }
+    try { io.run('git', ['reset', '--hard', 'HEAD~1']); } catch { /* best effort */ }
+    throw publishError;
   }
 
   if (opts.push) {

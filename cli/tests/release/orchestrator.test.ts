@@ -128,6 +128,22 @@ describe('release — gates de preflight', () => {
   });
 });
 
+describe('release — rollback', () => {
+  it('si npm publish falla, hace rollback del commit y del tag', () => {
+    const { io, calls } = makeIO({ commits: `feat: x${US}${RS}` });
+    const origRun = io.run;
+    (io.run as any) = (cmd: string, args: string[], o?: any) => {
+      if (cmd === 'npm' && args[0] === 'publish') throw new Error('network error');
+      return origRun(cmd, args, o);
+    };
+    expect(() => release(opts(), io)).toThrow(/network error/i);
+    const joined = calls.join('\n');
+    expect(joined).toMatch(/git tag -d v2.2.0/);
+    expect(joined).toMatch(/git reset --hard HEAD~1/);
+    expect(calls).toContain('REMOVE_NPMRC'); // .npmrc siempre se limpia
+  });
+});
+
 describe('release — gates de idempotencia', () => {
   it('aborta si el tag v2.2.0 ya existe en git', () => {
     const { io } = makeIO({ commits: `feat: x${US}${RS}` });
