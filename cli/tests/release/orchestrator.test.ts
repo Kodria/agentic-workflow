@@ -127,3 +127,18 @@ describe('release — gates de preflight', () => {
     expect(release(opts({ dryRun: true }), fake).version).toBe('2.2.0');
   });
 });
+
+import { parseArgs } from '../../src/release/index';
+
+describe('parseArgs', () => {
+  it('defaults', () => {
+    expect(parseArgs([])).toMatchObject({ dryRun: false, force: null, push: true, branch: 'main' });
+  });
+  it('--dry-run, --no-push, --force minor, --branch release', () => {
+    expect(parseArgs(['--dry-run', '--no-push', '--force', 'minor', '--branch', 'release']))
+      .toMatchObject({ dryRun: true, push: false, force: 'minor', branch: 'release' });
+  });
+  it('rechaza --force con nivel inválido', () => {
+    expect(() => parseArgs(['--force', 'huge'])).toThrow(/force/i);
+  });
+});

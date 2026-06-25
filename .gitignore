@@ -11,3 +11,4 @@ tmp/*
 .claude/skills/
 .claude/agents/
 *.eslintcache
+cli/.npmrc
