@@ -35,3 +35,10 @@ export function parseCommits(raw: string): Commit[] {
     .map(parseOne)
     .filter((c): c is Commit => c !== null);
 }
+
+export function determineBump(commits: Commit[]): Bump | null {
+  if (commits.some((c) => c.breaking)) return 'major';
+  if (commits.some((c) => c.type === 'feat')) return 'minor';
+  if (commits.some((c) => c.type === 'fix' || c.type === 'perf')) return 'patch';
+  return null;
+}

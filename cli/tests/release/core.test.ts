@@ -1,6 +1,8 @@
-import { parseCommits, RS, US } from '../../src/release/core';
+import { parseCommits, determineBump, RS, US } from '../../src/release/core';
+import type { Commit } from '../../src/release/core';
 
 const rec = (header: string, body = '') => `${header}${US}${body}${RS}`;
+const mk = (type: string, breaking = false): Commit => ({ type, scope: null, breaking, subject: 's' });
 
 describe('parseCommits', () => {
   it('parsea type, scope, subject', () => {
@@ -28,5 +30,24 @@ describe('parseCommits', () => {
 
   it('entrada vacía → arreglo vacío', () => {
     expect(parseCommits('')).toEqual([]);
+  });
+});
+
+describe('determineBump', () => {
+  it('breaking → major (gana sobre feat/fix)', () => {
+    expect(determineBump([mk('fix'), mk('feat', true)])).toBe('major');
+  });
+  it('feat sin breaking → minor', () => {
+    expect(determineBump([mk('fix'), mk('feat')])).toBe('minor');
+  });
+  it('fix o perf → patch', () => {
+    expect(determineBump([mk('fix')])).toBe('patch');
+    expect(determineBump([mk('perf')])).toBe('patch');
+  });
+  it('solo docs/chore/refactor → null (nada releasable)', () => {
+    expect(determineBump([mk('docs'), mk('chore'), mk('refactor')])).toBeNull();
+  });
+  it('lista vacía → null', () => {
+    expect(determineBump([])).toBeNull();
   });
 });
