@@ -1,6 +1,6 @@
 # Mejoras al flujo spec-driven de AWM — Design Doc
 
-> **Estado:** Propuesta (NO implementada). Plan de cambios derivado de la auditoría de mercado.
+> **Estado:** Implementado (Cambios 1–4 en `awm-baseline-registry`, distribuidos vía tag + `awm update`). Derivado de la auditoría de mercado.
 > **Fecha:** 2026-06-25
 > **Sustento:** [`docs/research/2026-06-25-agentic-harness-market-audit.md`](../research/2026-06-25-agentic-harness-market-audit.md)
 > **Naturaleza:** Estos cambios tocan **contenido de skills**, que vive en `awm-baseline-registry`
@@ -39,22 +39,33 @@ Para evitar regresiones, se documenta explícitamente qué **no** cambiar, porqu
 
 **Evidencia:** Lost in the Middle [1]; Context Rot [2]; compaction descarta bloques previos [4]; Gemini CLI es el único que verifica su compaction [5]; recitación de objetivos de Manus [6].
 
-**Propuesta — nueva skill cross-cutting `context-compaction-recovery`** (hogar: no hay fase natural; es transversal como `verification-before-completion`).
+**Propuesta — NO una skill, sino una extensión del hook de SessionStart (corrección de diseño).**
 
-Contrato de la skill (disparada tras un evento de compaction/auto-compact, o manualmente):
+> *Revisión de diseño:* la versión original proponía una **skill** `context-compaction-recovery` que el agente invocaría tras un compact. Eso es frágil: la instrucción de invocarla puede haberse ido *en* la misma compactación, y la recuperación no puede depender de que el agente (recién compactado) recuerde correrla. La recuperación debe ser **determinista, a nivel de hook** — el mismo lugar (y, de hecho, el mismo hook) que ya re-inyecta `use-awm`/CONSTITUTION en cada arranque de sesión. `harness-retro` **no** sirve como mecanismo de recuperación: salta al final del proceso; es la capa de *aprendizaje*, no de recuperación en tiempo real.
 
-1. **Re-leer las fuentes de verdad:** plan activo en `docs/plans/`, design doc, `awm ledger list` (ítems abiertos).
-2. **Reconciliar:** comparar el resumen post-compaction contra esas fuentes; listar cualquier objetivo/ítem abierto/decisión que el resumen haya omitido.
-3. **Re-anclar al final del contexto:** re-emitir, como mensaje fresco al *final* del contexto, un bloque compacto con: objetivo actual, sección activa del plan (tarea en curso), ítems abiertos del ledger, e invariantes del CONSTITUTION relevantes.
-4. **Continuar** solo después del re-anclaje.
+**Hecho que lo habilita:** el hook de SessionStart de AWM ya está cableado al matcher `startup|clear|compact` (`cli/src/providers/index.ts`). O sea, **ya dispara en cada compactación**; hoy solo re-inyecta el feedforward estático (use-awm + CONSTITUTION). El hueco de Cambio 1 es el estado **dinámico** de la tarea.
+
+**Arquitectura en tres capas (separadas):**
+
+| Capa | Cuándo | Quién | Qué hace |
+|------|--------|-------|----------|
+| **Recuperación** | en cada compact, determinista | **hook SessionStart (`source=compact`)** | re-ancla el bloque dinámico de estado canónico |
+| **Auditoría** | durante la sesión | **ledger** (`--phase compaction-recovery`) | registra el evento → auditable leyendo el log, sin interrumpir al agente |
+| **Aprendizaje** | fin de proceso | **`harness-retro`** | si la pérdida se repite (≥2), cura una regla durable |
+
+**Contrato del re-anclaje** (en `hooks/session-start`, failure-safe / silencioso-en-ausencia, mismo contrato que la inyección de CONSTITUTION):
+1. Detectar el **plan activo** de forma file-derived: el plan más reciente en `docs/plans/` (excluyendo design docs) con checkboxes `- [ ]` abiertos y sin marcador de completitud.
+2. Si existe, anexar a `additionalContext` un bloque **Re-anchor**: objetivo (`**Goal:**`/título), ítems abiertos del plan, e ítems abiertos de `awm ledger list`.
+3. En un borde `compact` genuino, además emitir un `awm ledger add --phase compaction-recovery` best-effort (silencioso si `awm`/ledger ausente) — ese log ES el blanco predecible de auditoría.
+
+**Contra qué se valida (clave):** no contra la memoria del agente, sino contra el **estado canónico derivado de archivos** (checkboxes del plan + `awm ledger list` + marcador de tarea activa). El snapshot que el hook inyecta es el blanco predecible; el ledger es el rastro auditable. La detección de *qué dropeó el resumen* es una operación de **tiempo de auditoría** (comparar el snapshot del ledger contra lo retenido), no algo que el hook calcule en vivo.
 
 **Integración:**
-- `development-process` lista `context-compaction-recovery` en la tabla de Cross-Cutting Skills con trigger "tras cualquier compaction/auto-compact o al retomar una sesión larga".
-- `subagent-driven-development`: añadir nota de que **el retorno de cada subagente es un borde de compaction** — el controlador reconcilia el resumen del subagente contra el plan/ledger antes de marcar la tarea completa (ya hay un "ledger gate"; se extiende con "reconciliation gate").
+- `subagent-driven-development`: **reconciliation gate** — el retorno de cada subagente es un borde de compaction para el controlador (solo ve el resumen, no el contexto). Antes de marcar la tarea completa, reconciliar el reporte contra IDs de requisito / ítems abiertos / `awm ledger list`; ante desacuerdo, **ganan los archivos**. Es el contrapunto por-subagente del re-anclaje del agente principal.
 
-**Tier:** aplica a sesiones largas (umbral: tras el primer compact, o runs con >N tareas). No aplica a sesiones cortas de una tarea.
+**Caveat de agnosticismo:** esta es la vía determinista de **Claude Code** (que ofrece el evento de hook en `compact`). Harnesses sin hook de compactación (p. ej. OpenCode, inyección por `config-instructions`) no tienen el mecanismo determinista; para ellos el fallback portable es model-invoked/manual. El **contrato** (re-anclar estado canónico tras compact) es universal; el **mecanismo** es best-effort según la capacidad del harness.
 
-**Riesgo / caveat:** no sobre-recitar (coste de tokens). Limitar el bloque de re-anclaje a ~objetivo + tarea activa + ítems abiertos, no el plan entero.
+**Riesgo / caveat:** no sobre-recitar (coste de tokens). El bloque se limita a objetivo + ítems abiertos (plan + ledger), no el plan entero; y solo se inyecta cuando hay un plan activo en vuelo.
 
 ---
 
@@ -151,11 +162,10 @@ Así, una sola reescritura de `post-implementation-qa` realiza el Eje 3 (Pista A
 
 ## Resumen de impacto por skill (en `awm-baseline-registry`)
 
-| Skill | Cambio | Eje |
+| Artefacto | Cambio | Eje |
 |-------|--------|-----|
-| **`development-process`** | Registrar `context-compaction-recovery` en Cross-Cutting Skills. | 1 |
-| **`context-compaction-recovery`** *(nueva)* | Re-anclaje + reconciliación tras compaction, dirigido por ledger/plan. | 1 |
-| **`subagent-driven-development`** | Reconciliation gate en retorno de subagente; nota "fresco ≠ neutral"; model/rol separation opcional (2c); usar IDs en spec-reviewer. | 1, 2, 3 |
+| **`hooks/session-start`** *(extensión, no skill nueva)* | Re-anclaje determinista del estado canónico (objetivo + ítems abiertos de plan/ledger) en cada `compact`; log `--phase compaction-recovery` al ledger. | 1 |
+| **`subagent-driven-development`** | Reconciliation gate en retorno de subagente (el retorno = borde de compaction; ganan los archivos); nota "fresco ≠ neutral"; model/rol separation opcional (2c). | 1, 2 |
 | **`brainstorming`** | Sección `## Requisitos` en EARS; gate de clarify (cero ambigüedad); spec self-review extendido. | 3 |
 | **`writing-plans`** | IDs de requisito por task; self-review → matriz de trazabilidad req→tarea→test. | 3 |
 | **`post-implementation-qa`** | **Reescritura holística (una sola edición):** dos pistas — Pista A (fidelidad por IDs, ex-Type B) + Pista B (panel multi-lente plan-agnóstico que **reemplaza al Type C**); check `analyze` de cobertura pre-QA; evidencia concreta por hallazgo. | 2, 3, 4 |
@@ -173,7 +183,13 @@ Así, una sola reescritura de `post-implementation-qa` realiza el Eje 3 (Pista A
 
 ## Próximos pasos sugeridos (no ejecutados)
 
-1. Revisión humana de esta propuesta (priorizar Cambios 3a/3b — mayor palanca, menor coste).
-2. Para los cambios aprobados: abrir el ciclo en `awm-baseline-registry` (brainstorming → writing-plans → TDD sobre las skills) en su rama. *(En curso: el plan `docs/plans/2026-06-25-requirements-layer.md` del registry cubre el Cambio 3 y, en su Task 6, pliega los Cambios 4 y 2 en una reescritura única de `post-implementation-qa` — aprobado que la Pista B reemplaza al Type C.)*
-3. Validar `context-compaction-recovery` con un escenario real de sesión larga antes de hornearlo en el espinazo.
-4. Verificar la metadata de las citas marcadas como "preprint, verificar" antes de cualquier publicación externa del informe.
+**Estado de implementación (en `awm-baseline-registry`):**
+1. **Cambio 3** — ✅ capa de requisitos (EARS + IDs + trazabilidad) en `brainstorming`/`writing-plans`/`post-implementation-qa`.
+2. **Cambio 4** — ✅ QA dos pistas; el panel multi-lente reemplaza al Type C.
+3. **Cambio 2** — ✅ guardas anti-sesgo en toda la superficie de review (QA + `requesting-code-review` + reviewers de `subagent-driven-development`), con separación modelo/rol (2c).
+4. **Cambio 1** — ✅ re-anclaje determinista en `hooks/session-start` (`source=compact`) + reconciliation gate en `subagent-driven-development`; auditoría vía ledger.
+
+**Pendiente:**
+- **Validación del Cambio 1 en escenario real:** el mecanismo es determinista y testeado (syntax + tests funcionales del hook), pero la *calidad de recuperación* se audita leyendo el ledger (`--phase compaction-recovery`) a lo largo de sesiones reales; no requiere hornear nada más, solo observar el log.
+- **Fallback portable del Cambio 1** para harnesses sin hook de compactación (OpenCode): camino model-invoked/manual — aún no escrito.
+- Verificar la metadata de las citas marcadas como "preprint, verificar" antes de cualquier publicación externa del informe.
