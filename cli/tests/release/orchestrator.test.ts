@@ -179,4 +179,7 @@ describe('parseArgs', () => {
   it('rechaza --force con nivel inválido', () => {
     expect(() => parseArgs(['--force', 'huge'])).toThrow(/force/i);
   });
+  it('--branch sin valor lanza error', () => {
+    expect(() => parseArgs(['--branch'])).toThrow(/--branch requiere/i);
+  });
 });

@@ -11,7 +11,13 @@ export function parseArgs(argv: string[]): ReleaseOpts {
     const a = argv[i];
     if (a === '--dry-run') opts.dryRun = true;
     else if (a === '--no-push') opts.push = false;
-    else if (a === '--branch') opts.branch = argv[++i] ?? 'main';
+    else if (a === '--branch') {
+      const val = argv[++i];
+      if (val === undefined || val.startsWith('--')) {
+        throw new Error('--branch requiere un valor (ej: --branch main)');
+      }
+      opts.branch = val;
+    }
     else if (a === '--force') {
       const lvl = argv[++i];
       if (lvl !== 'major' && lvl !== 'minor' && lvl !== 'patch') {
