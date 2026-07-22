@@ -1,3 +1,8 @@
+## v3.0.1 - 2026-07-22
+
+### Fixes
+- **cli:** default agent to claude-code + persist agent on init (#7)
+
 ## v3.0.0 - 2026-06-25
 
 ### Breaking Changes
