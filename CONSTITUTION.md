@@ -10,6 +10,10 @@ Reglas de proceso del proyecto. Todo agente que trabaje en este repo debe leerla
 
 - **Al escribir un guard de nombre/componente de path, rechazar el conjunto completo de entradas peligrosas: string vacío, `.`, `..`, `/`, `\\`.** Nunca enumerar solo los patrones que se te ocurran. Un guard que rechaza `..` y `/` pero deja pasar `.` sigue siendo una vulnerabilidad de path traversal — `path.join('registries', '.')` resuelve al directorio padre. Usar siempre `name === '.' || name.includes('..') || /[/\\]/.test(name) || !name` como base.
 
+## Release del CLI
+
+- **El publish del CLI a npm es automático y exclusivo de la CI — nunca se corre `npm publish` a mano ni se crea un workflow paralelo de publish.** `.github/workflows/release.yml` dispara en cada push a `main`: buildea `cli/` y corre `cli/src/release/index.js`, que bumpea la versión por conventional commits, publica vía OIDC Trusted Publisher (`id-token: write`, sin token de npm en secrets) y commitea el bump con `[skip ci]`. Un `npm publish` manual saltea el bump y el OIDC, y desincroniza la versión publicada del historial. Corolario: el nivel de release depende del prefijo de conventional commit del merge (`feat`→minor, `fix`→patch, `!`/`BREAKING`→major) — escribí el título del PR/commit de merge en consecuencia. Antes de proponer cualquier automatización de release, verificá que `release.yml` ya la cubre.
+
 ## Implementación
 
 - **Al conectar una función nueva que reemplaza un call directo en múltiples puntos (p.ej. un resolver que reemplaza una constante hardcodeada), buscar TODOS los call-sites con `grep` antes de marcar el task completo.** El plan puede no listar módulos secundarios. En WS-2, `init/steps.ts` quedó sin wiring porque el plan solo mencionaba `index.ts`; el spec-reviewer lo detectó pero solo después del commit. Comando de referencia: `grep -rn "syncRegistry\b" src/ --include="*.ts"`.

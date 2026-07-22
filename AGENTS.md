@@ -48,6 +48,10 @@ Lecciones y patrones confirmados en este repo. Todo agente que trabaje aquí deb
 
 - **runbook-as-script:** para workstreams que combinan documentación + verificación manual, escribir el doc como hipótesis y ejecutarlo literalmente como test. Las divergencias se corrigen en el doc (no en el tool); el entregable es un doc verificado contra realidad. Confirmado en WS-5: §4.4 (error messages), §4.5 (pin mechanics) y §4.7 (onboarding sequence) se corrigieron durante la Fase C. Tres hallazgos de QA (doctor example stale, sync footnote, onboarding incompleto) también apuntan al mismo patrón: escribir ejemplos de output de CLI sin verificar contra el binario real.
 
+## Release / publish
+
+- **El release del CLI es automático en `main` — no hay paso manual de `npm publish`.** `.github/workflows/release.yml` (trigger `push` a `main`) buildea `cli/` y corre `cli/src/release/index.js`: bump por conventional commits + `npm publish` vía OIDC Trusted Publisher + commit de bump con `[skip ci]`. **Antes de decir "publicá a mano" o de proponer/crear un workflow de release, verificá que `release.yml` ya lo cubre** — ya existe y es completo (esta nota nace de haber afirmado por error que el publish era manual, contradiciendo el propio `release.yml`). El nivel de versión sale del prefijo de conventional commit del merge; regla no-negociable en `CONSTITUTION.md` → "Release del CLI".
+
 ## Layout del repo y de la instalación
 
 - **Este repo** contiene solo el CLI TypeScript (`cli/`). El contenido (skills, bundles, sensor-packs, hooks) vive en repos externos: `awm-baseline-registry` y `awm-documentation-registry`.
