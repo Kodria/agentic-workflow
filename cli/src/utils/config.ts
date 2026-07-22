@@ -17,13 +17,25 @@ export interface AwmPreferences {
 }
 
 const DEFAULT_PREFS: AwmPreferences = {
-    defaultAgent: 'antigravity',
+    // claude-code matches `awm init`'s own documented default (see init.ts / `awm init --help`).
+    // Previously 'antigravity', which silently mis-installed bundles in claude-code
+    // environments when `awm add` (the first getPreferences caller) stamped it to disk (#7).
+    defaultAgent: 'claude-code',
     installMethod: 'symlink',
     defaultScope: 'local'
 };
 
 function prefsDir(): string {
     return awmHome();
+}
+
+function prefsFile(): string {
+    return path.join(prefsDir(), 'preferences.json');
+}
+
+/** True if preferences.json is already on disk (no side effect — does NOT create it). */
+export function preferencesExist(): boolean {
+    return fs.existsSync(prefsFile());
 }
 
 export function getPreferences(): AwmPreferences {
