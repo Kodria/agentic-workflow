@@ -11,6 +11,7 @@ import { defaultActions } from '../core/init/steps';
 import type { InitOutcome, InitActions, StepResult } from '../core/init/types';
 import type { AgentTarget } from '../providers';
 import { warnIfUnsupportedPlatform } from '../core/paths';
+import { getPreferences, savePreferences, preferencesExist } from '../utils/config';
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -72,6 +73,15 @@ export interface RunInitOptions {
 export async function runInit(opts: RunInitOptions = {}): Promise<number> {
     const cwd = opts.cwd ?? process.cwd();
     const agent: AgentTarget = (opts.agent as AgentTarget) ?? 'claude-code';
+
+    // #7: make init the source of truth for the default agent. Persist the resolved
+    // agent so later `awm add`/`awm sync` (which read preferences.defaultAgent) target
+    // the right agent instead of stamping the static default. Do NOT clobber an existing
+    // explicit preference on a bare re-init: only write when an agent was passed via -a,
+    // or when no preferences file exists yet.
+    if (opts.agent != null || !preferencesExist()) {
+        savePreferences({ ...getPreferences(), defaultAgent: agent });
+    }
 
     let outcome: InitOutcome;
     try {

@@ -83,4 +83,28 @@ describe('runInit', () => {
         expect(parsed.after.overall).toBe('degraded');
         expect(code).toBe(1);
     });
+
+    const prefsFile = () => path.join(process.env.AWM_HOME as string, 'preferences.json');
+    const readAgent = () => JSON.parse(fs.readFileSync(prefsFile(), 'utf-8')).defaultAgent;
+
+    it('#7: first init (no -a) persists claude-code as the default agent', async () => {
+        const { runInit } = require('../../src/commands/init');
+        expect(fs.existsSync(prefsFile())).toBe(false);
+        await runInit({ cwd: tmpHome, yes: true, actions: { syncCache: async () => {} } });
+        expect(readAgent()).toBe('claude-code');
+    });
+
+    it('#7: init -a opencode persists the explicit agent', async () => {
+        const { runInit } = require('../../src/commands/init');
+        await runInit({ cwd: tmpHome, yes: true, agent: 'opencode', actions: { syncCache: async () => {} } });
+        expect(readAgent()).toBe('opencode');
+    });
+
+    it('#7: re-init without -a does NOT clobber an existing explicit preference', async () => {
+        const { savePreferences } = require('../../src/utils/config');
+        savePreferences({ defaultAgent: 'opencode', installMethod: 'symlink', defaultScope: 'local' });
+        const { runInit } = require('../../src/commands/init');
+        await runInit({ cwd: tmpHome, yes: true, actions: { syncCache: async () => {} } });
+        expect(readAgent()).toBe('opencode');
+    });
 });
