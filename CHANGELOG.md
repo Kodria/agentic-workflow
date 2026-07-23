@@ -1,3 +1,20 @@
+## v3.1.0 - 2026-07-23
+
+### Features
+- **export:** awm export command wired into the CLI (#9)
+- **export:** engine orchestration — resolve, adapt, pack, offline-only (#9)
+- **export:** deterministic artifact writer with layered system-zip (#9)
+- **export:** bundle/skill resolution with portability gate and override consistency (#9)
+- **export:** claude-ai mechanical transform — pure function, line-based frontmatter (#9)
+
+### Fixes
+- **export:** escape apostrophe in single-quoted YAML description, throw on trailing inline comment
+- **export:** refuse symlinks in skill references/ (BLOCKER security fix)
+- document --out subfolder and surface export kind in summary
+- **export:** strengthen R1.4 test and narrow transform try/catch
+- **export:** resolve skills via discoverSkills to respect registry overrides
+- **export:** tolerate CRLF frontmatter and single-quoted descriptions
+
 ## v3.0.1 - 2026-07-22
 
 ### Fixes
