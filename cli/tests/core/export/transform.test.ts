@@ -24,6 +24,26 @@ describe('claudeAiTransform', () => {
     expect(out).toContain(`description: Does things. ${DEFERENCE_LINE('x')}`);
   });
 
+  it('appends the deference line inside a single-quoted description', () => {  // verifies R3.1
+    const input = FM(['name: x', 'portable: true', "description: 'Does things.'"]);
+    const out = claudeAiTransform(input, 'x');
+    expect(out).toContain(`description: 'Does things. ${DEFERENCE_LINE('x')}'`);
+  });
+
+  it('appends the deference line inside a double-quoted description with trailing whitespace', () => {  // verifies R3.1
+    const input = FM(['name: x', 'portable: true', 'description: "Does things."   ']);
+    const out = claudeAiTransform(input, 'x');
+    expect(out).toContain(`description: "Does things. ${DEFERENCE_LINE('x')}"`);
+  });
+
+  it('accepts CRLF-terminated frontmatter', () => {  // verifies R3.4
+    const input = '---\r\nname: x\r\nportable: true\r\ndescription: "Does things."\r\n---\r\nBody line.\r\n';
+    const out = claudeAiTransform(input, 'x');
+    expect(out).not.toMatch(/^portable:/m);
+    expect(out).toContain(`description: "Does things. ${DEFERENCE_LINE('x')}"`);
+    expect(out).toContain('Body line.\r\n');
+  });
+
   it('throws on missing frontmatter block', () => {  // verifies R3.4
     expect(() => claudeAiTransform('No frontmatter here.', 'x')).toThrow(/frontmatter/);
   });
