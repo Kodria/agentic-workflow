@@ -8,6 +8,21 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import { ZipFn, ZipResult } from './types';
 
+/** Refuses symlinks anywhere in the tree — copying/zipping them could dereference
+ * into content outside the registry (info-leak) or embed a broken/unexpected
+ * link for the recipient. Exported artifacts are plain files only. */
+function assertNoSymlinks(dir: string): void {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isSymbolicLink()) {
+            throw new Error(
+                `Refusing to export "${full}": symlinks are not supported in exported artifacts (could leak file content via zip dereferencing, or resolve unexpectedly for the recipient).`
+            );
+        }
+        if (entry.isDirectory()) assertNoSymlinks(full);
+    }
+}
+
 /** Capa 1: binario `zip` del sistema. ENOENT → missing (capa 2: carpeta). */
 export const defaultZip: ZipFn = (cwd, zipName, folderName): ZipResult => {
     const r = spawnSync('zip', ['-r', '-q', zipName, folderName], { cwd });
@@ -40,6 +55,7 @@ export function packSkill(opts: PackSkillOptions): { dir: string; zip: string | 
     fs.writeFileSync(path.join(skillOut, 'SKILL.md'), opts.adaptedSkillMd);
     const refs = path.join(opts.srcDir, 'references');
     if (fs.existsSync(refs)) {
+        assertNoSymlinks(refs);
         fs.cpSync(refs, path.join(skillOut, 'references'), { recursive: true });  // R3.2 byte-idéntico
     }
 

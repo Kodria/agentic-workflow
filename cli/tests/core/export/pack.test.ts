@@ -62,6 +62,44 @@ describe('packSkill', () => {
         expect(() => packSkill({ name: 'x', adaptedSkillMd: 'adapted', srcDir: src, targetRoot: out, zip: failingZip }))
             .toThrow(/zip failed/);
     });
+
+    it('refuses to export when references/ contains a symlink (blocks zip-dereference exfiltration)', () => {
+        // Simulate the exfiltration shape: a "secret" file living entirely
+        // outside srcDir, symlinked from within references/.
+        const secretsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-secret-'));
+        const secretPath = path.join(secretsDir, 'id_rsa');
+        const secretContents = 'THIS-IS-A-PRIVATE-KEY-SHOULD-NEVER-LEAK';
+        fs.writeFileSync(secretPath, secretContents);
+        fs.symlinkSync(secretPath, path.join(src, 'references/evil-link'));
+
+        try {
+            expect(() =>
+                packSkill({ name: 'x', adaptedSkillMd: 'adapted', srcDir: src, targetRoot: out, zip: okZip })
+            ).toThrow(/symlink/i);
+
+            // Nothing under targetRoot should ever contain the secret's bytes,
+            // whether as a copied symlink or a dereferenced regular file.
+            const walk = (dir: string): string[] => {
+                if (!fs.existsSync(dir)) return [];
+                return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+                    const full = path.join(dir, e.name);
+                    if (e.isDirectory()) return walk(full);
+                    if (e.isSymbolicLink()) return [full]; // leaked symlink itself is also unacceptable
+                    return [full];
+                });
+            };
+            for (const f of walk(out)) {
+                const st = fs.lstatSync(f);
+                if (st.isSymbolicLink()) {
+                    throw new Error(`leaked symlink found under targetRoot: ${f}`);
+                }
+                const contents = fs.readFileSync(f, 'utf-8');
+                expect(contents).not.toContain(secretContents);
+            }
+        } finally {
+            fs.rmSync(secretsDir, { recursive: true, force: true });
+        }
+    });
 });
 
 describe('defaultZip (system binary, layered)', () => {
