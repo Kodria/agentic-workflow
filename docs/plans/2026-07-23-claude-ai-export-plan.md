@@ -1,5 +1,7 @@
 # `awm export --target claude-ai` — Implementation Plan
 
+<!-- awm-qa-complete: 2026-07-23 -->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Comando `awm export <nombre>` que genera artefactos subibles a claude.ai (carpeta + zip) desde el registry instalado, con gate de portabilidad y adaptación mecánica/override.
