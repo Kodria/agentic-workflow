@@ -99,6 +99,21 @@ Pull the latest content from every configured registry (checking out the latest 
 
 > `awm update` updates **content** (registries). The CLI itself is updated via npm: `npm i -g agentic-workflow-manager@latest`.
 
+### `awm export <name>`
+
+Exports a bundle or an individual skill from the installed registry as claude.ai-uploadable
+custom skill artifacts: one folder per skill (`SKILL.md` + `references/`) plus a `.zip`
+when the system `zip` binary is available (folder-only fallback otherwise).
+
+- Only skills declaring `portable: true` in their `SKILL.md` frontmatter are exported;
+  bundle exports list non-portable skills as skipped, and requesting a non-portable
+  skill explicitly is an error.
+- If `skills/<name>/port.claude-ai.md` exists in the registry, it is used verbatim;
+  otherwise a mechanical transform strips AWM-only frontmatter fields (`version`,
+  `portable`) and appends a deference line to the description.
+- `--target <target>` (default `claude-ai`, the only target today) · `--out <dir>`
+  (default `./awm-export`). Reads from the installed registry content roots.
+
 ---
 
 ## Registries & pinning (team/personal content)
