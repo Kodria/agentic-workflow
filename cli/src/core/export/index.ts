@@ -41,8 +41,9 @@ export function runExport(opts: RunExportOptions): ExportSummary {
             adapted = fs.readFileSync(skill.overridePath, 'utf-8');  // R3: verbatim
         } else {
             const canonical = path.join(skill.dir, 'SKILL.md');
+            const raw = fs.readFileSync(canonical, 'utf-8');
             try {
-                adapted = claudeAiTransform(fs.readFileSync(canonical, 'utf-8'), skill.name);
+                adapted = claudeAiTransform(raw, skill.name);
             } catch (e) {
                 throw new Error(`${canonical}: ${e instanceof Error ? e.message : String(e)}`);  // R3.4 cita el archivo
             }

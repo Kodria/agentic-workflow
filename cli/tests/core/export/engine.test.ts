@@ -79,8 +79,15 @@ describe('runExport (engine end-to-end)', () => {
 
     it('reads only the provided roots (never ~/.claude/skills)', () => {  // verifies R1.4
         // La lectura sale exclusivamente de roots: un root vacío no resuelve nada.
+        // Control negativo real: contentRoots() (el fallback al registry instalado)
+        // no debe invocarse en absoluto cuando opts.roots viene dado explícitamente.
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const registries = require('../../../src/core/registries');
+        const spy = jest.spyOn(registries, 'contentRoots');
         const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-empty-root-'));
         expect(() => runExport({ name: 'mermaid', out, roots: [empty], zip: okZip })).toThrow(/neither a bundle nor a skill/);
+        expect(spy).not.toHaveBeenCalled();
+        spy.mockRestore();
         fs.rmSync(empty, { recursive: true, force: true });
     });
 });
