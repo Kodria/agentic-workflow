@@ -91,4 +91,18 @@ describe('runExport (engine end-to-end)', () => {
         spy.mockRestore();
         fs.rmSync(empty, { recursive: true, force: true });
     });
+
+    it('defaults --out to ./awm-export/<target> under the current working directory', () => {  // verifies R4
+        const cwdTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-engine-cwd-'));
+        const originalCwd = process.cwd();
+        process.chdir(cwdTmp);
+        try {
+            const summary = runExport({ name: 'mermaid', roots: [root], zip: okZip });  // sin `out`
+            expect(summary.outDir).toBe(path.join(cwdTmp, 'awm-export', 'claude-ai'));
+            expect(fs.existsSync(path.join(cwdTmp, 'awm-export/claude-ai/mermaid/SKILL.md'))).toBe(true);
+        } finally {
+            process.chdir(originalCwd);
+            fs.rmSync(cwdTmp, { recursive: true, force: true });
+        }
+    });
 });
