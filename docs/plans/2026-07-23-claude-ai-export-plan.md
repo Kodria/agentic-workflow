@@ -8,7 +8,16 @@
 
 **Tech Stack:** TypeScript, commander, picocolors, jest (ts-jest, `--runInBand`), Node `fs`/`child_process` — cero dependencias nuevas.
 
-**Modo de ejecución:** interactivo
+**Modo de ejecución:** desatendido
+
+> Mandato de ejecución desatendida: ejecución completa sin pausas de check-in
+> entre tareas, ni de confirmación entre fases (development-process rutea
+> automáticamente y subagent-driven-development no pregunta si continuar con
+> el cierre). harness-retro triagea con criterio propio del agente (solo valor
+> real, recurrente o sistémico — descarta el resto sin preguntar).
+> post-implementation-qa corrige TODOS los hallazgos que surjan, no solo algunos.
+> finishing-a-development-branch crea el PR directamente (opción "push + PR"),
+> sin presentar el menú de 4 opciones.
 
 **Diseño:** `docs/plans/2026-07-23-claude-ai-export-design.md` (issue [agentic-workflow#9](https://github.com/Kodria/agentic-workflow/issues/9)). R6 (PR de contenido en `awm-baseline-registry`) queda explícitamente FUERA de este plan.
 
