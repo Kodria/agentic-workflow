@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { discoverAllBundles, resolveBundleSkills } from '../bundles';
+import { discoverSkills } from '../discovery';
 import { ExportResolution, ResolvedSkill } from './types';
 
 const OVERRIDE_FILE = 'port.claude-ai.md';
@@ -17,16 +18,21 @@ function isPortable(skillMd: string): boolean {
     return /^portable\s*:\s*true\s*$/m.test(fmMatch[1]);
 }
 
+/**
+ * Delegates skill location to discoverSkills(roots) so the SAME collision/override
+ * contract used by bundles/workflows/agents applies here (R3): a same-named skill in
+ * two roots throws unless the later root's awm-registry.json declares it in "overrides",
+ * in which case the later root's version wins. Locating manually (first-root-wins) would
+ * silently resolve to the wrong registry's version — see Finding 1.
+ */
 function locate(skillName: string, roots: string[]): ResolvedSkill | null {
-    for (const root of roots) {
-        const dir = path.join(root, 'skills', skillName);
-        const skillFile = path.join(dir, 'SKILL.md');
-        if (!fs.existsSync(skillFile)) continue;
-        const overridePath = fs.existsSync(path.join(dir, OVERRIDE_FILE))
-            ? path.join(dir, OVERRIDE_FILE) : null;
-        return { name: skillName, dir, portable: isPortable(fs.readFileSync(skillFile, 'utf-8')), overridePath };
-    }
-    return null;
+    const found = discoverSkills(roots).find((s) => s.name === skillName);
+    if (!found) return null;
+    const dir = found.path;
+    const skillFile = path.join(dir, 'SKILL.md');
+    const overridePath = fs.existsSync(path.join(dir, OVERRIDE_FILE))
+        ? path.join(dir, OVERRIDE_FILE) : null;
+    return { name: skillName, dir, portable: isPortable(fs.readFileSync(skillFile, 'utf-8')), overridePath };
 }
 
 /** R3.3: un override declara intención de export; sin portable es contrato a medias. */

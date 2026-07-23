@@ -75,4 +75,9 @@ describe('resolveExport', () => {
         fs.writeFileSync(path.join(root, 'skills/ported/SKILL.md'), '---\nname: ported\ndescription: "P."\n---\nB.\n');
         expect(() => resolveExport('ported', [root])).toThrow(/inconsistent/i);
     });
+
+    it('fails on override without portable: true when resolved via a bundle (assertOverrideConsistency bundle-loop path)', () => {  // verifies R3.3 via bundle
+        fs.writeFileSync(path.join(root, 'skills/ported/SKILL.md'), '---\nname: ported\ndescription: "P."\n---\nB.\n');
+        expect(() => resolveExport('dev', [root])).toThrow(/inconsistent/i);
+    });
 });
