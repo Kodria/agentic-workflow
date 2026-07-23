@@ -112,7 +112,8 @@ when the system `zip` binary is available (folder-only fallback otherwise).
   otherwise a mechanical transform strips AWM-only frontmatter fields (`version`,
   `portable`) and appends a deference line to the description.
 - `--target <target>` (default `claude-ai`, the only target today) · `--out <dir>`
-  (default `./awm-export`). Reads from the installed registry content roots.
+  (default `./awm-export`; artifacts are written under `<out>/<target>/`). Reads from
+  the installed registry content roots.
 
 ---
 

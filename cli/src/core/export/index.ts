@@ -52,5 +52,5 @@ export function runExport(opts: RunExportOptions): ExportSummary {
         if (packed.zipMissing) zipAvailable = false;
         exported.push({ name: skill.name, dir: packed.dir, zip: packed.zip });
     }
-    return { outDir, exported, skipped: resolution.skipped, zipAvailable };
+    return { outDir, kind: resolution.kind, exported, skipped: resolution.skipped, zipAvailable };
 }

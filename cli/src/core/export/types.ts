@@ -29,6 +29,8 @@ export type ZipFn = (cwd: string, zipName: string, folderName: string) => ZipRes
 export interface ExportSummary {
   /** Directorio target: <out>/claude-ai */
   outDir: string;
+  /** 'bundle' si <name> resolvió a un bundle, 'skill' si resolvió a una skill individual. */
+  kind: 'bundle' | 'skill';
   exported: Array<{ name: string; dir: string; zip: string | null }>;
   skipped: string[];
   /** false si el binario zip no estaba disponible (imprime instrucción manual). */

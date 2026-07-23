@@ -51,6 +51,7 @@ describe('runExport (engine end-to-end)', () => {
 
     it('exports a bundle: transform for mermaid, verbatim override for ported, skips proc-skill', () => {  // verifies R1, R3, R3.1, R3.2
         const summary = runExport({ name: 'dev', out, roots: [root], zip: okZip });
+        expect(summary.kind).toBe('bundle');
         expect(summary.exported.map((e) => e.name).sort()).toEqual(['mermaid', 'ported']);
         expect(summary.skipped).toEqual(['proc-skill']);
 

@@ -32,6 +32,7 @@ export function runExportCommand(name: string, flags: CommandFlags, deps: Comman
     };
     const summary = runExport(opts);
 
+    log(pc.dim(`Exported ${summary.kind} "${name}"`));
     for (const e of summary.exported) {
         log(pc.green(`✓ ${e.name}`) + pc.dim(` → ${e.zip ?? e.dir}`));
     }

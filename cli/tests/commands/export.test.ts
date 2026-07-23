@@ -49,6 +49,7 @@ describe('runExportCommand (salida al usuario)', () => {
     it('reports exported skills and visible skips', () => {  // verifies R2.2
         runExportCommand('dev', { target: 'claude-ai', out }, { roots: [root], zip: okZip, log });
         const text = logs.join('\n');
+        expect(text).toMatch(/exported bundle.*dev/i);
         expect(text).toContain('mermaid');
         expect(text).toMatch(/skipped.*proc-skill/i);
     });
