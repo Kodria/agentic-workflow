@@ -30,6 +30,7 @@ import { registerDoctorCommand } from './commands/doctor';
 import { registerInitCommand } from './commands/init';
 import { registerRegistryCommand } from './commands/registry';
 import { registerPinCommands } from './commands/pin';
+import { registerExportCommand } from './commands/export';
 import { verifyProjectPins } from './core/profile-pins';
 import { maybeNotifyUpdate, offerSelfUpdate } from './core/update-check';
 import { warnIfUnsupportedPlatform } from './core/paths';
@@ -857,5 +858,6 @@ registerDoctorCommand(program);
 registerInitCommand(program);
 registerRegistryCommand(program);
 registerPinCommands(program);
+registerExportCommand(program);
 
 program.parse();
