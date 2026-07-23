@@ -27,7 +27,10 @@ describe('claudeAiTransform', () => {
   it('appends the deference line inside a single-quoted description', () => {  // verifies R3.1
     const input = FM(['name: x', 'portable: true', "description: 'Does things.'"]);
     const out = claudeAiTransform(input, 'x');
-    expect(out).toContain(`description: 'Does things. ${DEFERENCE_LINE('x')}'`);
+    // DEFERENCE_LINE itself always contains an apostrophe ("registry's"), so
+    // even a fixture with no apostrophe of its own must see it doubled ('')
+    // per YAML single-quote escaping once spliced into a single-quoted scalar.
+    expect(out).toContain(`description: 'Does things. ${DEFERENCE_LINE('x').replace(/'/g, "''")}'`);
   });
 
   it('appends the deference line inside a double-quoted description with trailing whitespace', () => {  // verifies R3.1
@@ -58,5 +61,27 @@ describe('claudeAiTransform', () => {
 
   it('throws on multi-line (block scalar) description', () => {  // verifies R3.4
     expect(() => claudeAiTransform(FM(['name: x', 'description: >', '  folded text']), 'x')).toThrow(/single-line/);
+  });
+
+  it('escapes an apostrophe in the deference line when appending to a single-quoted description', () => {  // verifies R3.4 (BLOCKER fix)
+    const input = FM(['name: mermaid', 'portable: true', "description: 'Diagrams and flowcharts.'"]);
+    const out = claudeAiTransform(input, 'mermaid');
+    // The apostrophe in "registry's" must be doubled ('') per YAML single-quote escaping.
+    expect(out).toContain("registry''s mermaid skill");
+    expect(out).not.toContain("registry's mermaid skill");
+    const descLine = out.split('\n').find((l) => l.startsWith('description:'));
+    expect(descLine).toBe(
+      `description: 'Diagrams and flowcharts. ${DEFERENCE_LINE('mermaid').replace(/'/g, "''")}'`
+    );
+    // Sanity check the result is well-formed: single-quoted scalar body has no
+    // lone (unescaped) apostrophes — every ' is either the opening/closing
+    // quote or part of a doubled '' pair.
+    const body = descLine!.slice('description: \''.length, -1);
+    expect(body.replace(/''/g, '')).not.toMatch(/'/);
+  });
+
+  it('throws when a quoted description has trailing content after its closing quote (e.g. inline comment)', () => {  // verifies R3.4 (MINOR fix)
+    const input = FM(['name: x', 'portable: true', 'description: "Does things." # a comment']);
+    expect(() => claudeAiTransform(input, 'x')).toThrow(/trailing content|comment/i);
   });
 });

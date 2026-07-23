@@ -38,10 +38,17 @@ export function claudeAiTransform(skillMd: string, skillName: string): string {
   // trimmed value so trailing whitespace after a closing quote doesn't fool us.
   const isDoubleQuoted = value.length >= 2 && value.startsWith('"') && value.endsWith('"');
   const isSingleQuoted = value.length >= 2 && value.startsWith("'") && value.endsWith("'");
+  if ((value.startsWith('"') || value.startsWith("'")) && !isDoubleQuoted && !isSingleQuoted) {
+    throw new Error('description has trailing content after its closing quote (e.g. an inline comment) — not supported by the export transform; remove the comment or use a port.claude-ai.md override');
+  }
+  // YAML single-quoted scalars escape a literal ' by doubling it (''); the
+  // deference text ("...registry's..." — see DEFERENCE_LINE) contains an
+  // apostrophe, so it must be escaped before splicing into a single-quoted
+  // description or it would prematurely close the YAML string.
   const newValue = isDoubleQuoted
     ? `${value.slice(0, -1)} ${deference}"`
     : isSingleQuoted
-      ? `${value.slice(0, -1)} ${deference}'`
+      ? `${value.slice(0, -1)} ${deference.replace(/'/g, "''")}'`
       : `${value} ${deference}`;
   fmLines[descIdx] = `description: ${newValue}`;
 
