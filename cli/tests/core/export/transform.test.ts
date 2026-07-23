@@ -48,6 +48,10 @@ describe('claudeAiTransform', () => {
     expect(() => claudeAiTransform('No frontmatter here.', 'x')).toThrow(/frontmatter/);
   });
 
+  it('throws on unterminated frontmatter block', () => {  // verifies R3.4
+    expect(() => claudeAiTransform('---\nname: x\ndescription: "D."\n', 'x')).toThrow(/unterminated/);
+  });
+
   it('throws on frontmatter without description', () => {  // verifies R3.4
     expect(() => claudeAiTransform(FM(['name: x', 'portable: true']), 'x')).toThrow(/description/);
   });
