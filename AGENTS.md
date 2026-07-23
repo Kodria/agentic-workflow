@@ -34,6 +34,8 @@ Lecciones y patrones confirmados en este repo. Todo agente que trabaje aquí deb
 
 - **atomic-add para directorios administrados:** el flujo correcto para un comando que agrega a un directorio gestionado es: operación costosa (clone/fetch) → validar → verificar colisiones → escribir config. Fallo en cualquier paso = limpiar el directorio creado (`rmSync(dest, {recursive:true,force:true})`) + no escribir config. Nunca escribir config antes de que la validación sea exitosa.
 
+- **reuse-discovery-not-hand-rolled-scan:** al resolver un artefacto por nombre a través de múltiples content roots, delegar SIEMPRE a las funciones de discovery existentes (`discoverSkills`, `discoverAllBundles`, etc.) en vez de reimplementar un scan manual "primer root que matchea". Esas funciones ya encapsulan la semántica de colisión/override de `awm-registry.json` (`mergeEntry`: mismo nombre en 2 roots → error, salvo override declarado) — un scan manual la ignora silenciosamente, resolviendo al root incorrecto en instalaciones multi-registry sin avisar a nadie. Confirmado en `cli/src/core/export/resolve.ts`: la primera versión de `locate()` era un scan hand-rolled; el fix la reescribió para delegar en `discoverSkills(roots)`.
+
 ## Patrones de implementación
 
 - **execFileSync-not-execSync:** al ejecutar comandos externos desde Node.js, usar `execFileSync(cmd, args[])` en vez de `execSync('cmd arg1 arg2')`. `execSync` pasa la string a la shell — cualquier arg con espacios, comillas o metacaracteres puede alterar el comando. `execFileSync` con array de args evita el shell intermedio. Aplica a todos los wrappers de git/npm/awm en este repo.
