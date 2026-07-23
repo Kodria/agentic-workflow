@@ -4,6 +4,9 @@ import os from 'os';
 import { packSkill, defaultZip } from '../../../src/core/export/pack';
 import { ZipFn } from '../../../src/core/export/types';
 
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const childProcess = require('child_process');
+
 const okZip: ZipFn = (cwd, zipName) => {
     fs.writeFileSync(path.join(cwd, zipName), 'fake-zip');
     return { ok: true, missing: false };
@@ -53,6 +56,12 @@ describe('packSkill', () => {
         packSkill({ name: 'x', adaptedSkillMd: 'adapted', srcDir: src, targetRoot: out, zip: okZip });
         expect(fs.existsSync(path.join(out, 'x/references'))).toBe(false);
     });
+
+    it('throws when the zip function reports a real failure (not missing binary)', () => {  // verifies R4.1
+        const failingZip: ZipFn = () => ({ ok: false, missing: false });
+        expect(() => packSkill({ name: 'x', adaptedSkillMd: 'adapted', srcDir: src, targetRoot: out, zip: failingZip }))
+            .toThrow(/zip failed/);
+    });
 });
 
 describe('defaultZip (system binary, layered)', () => {
@@ -68,5 +77,14 @@ describe('defaultZip (system binary, layered)', () => {
             expect(fs.existsSync(path.join(cwd, 'folder.zip'))).toBe(true);
         }
         fs.rmSync(cwd, { recursive: true, force: true });
+    });
+
+    it('returns missing:true when spawnSync reports ENOENT (binary absent)', () => {  // verifies R4.2
+        const spy = jest.spyOn(childProcess, 'spawnSync').mockReturnValue({
+            error: Object.assign(new Error('spawn zip ENOENT'), { code: 'ENOENT' }),
+        } as unknown as ReturnType<typeof childProcess.spawnSync>);
+        const r = defaultZip('/irrelevant', 'folder.zip', 'folder');
+        expect(r).toEqual({ ok: false, missing: true });
+        spy.mockRestore();
     });
 });
