@@ -6,16 +6,16 @@
 import fs from 'fs';
 import path from 'path';
 import { discoverAllBundles, resolveBundleSkills } from '../bundles';
-import { discoverSkills } from '../discovery';
+import { discoverSkills, matchFrontmatterBlock } from '../discovery';
 import { ExportResolution, ResolvedSkill } from './types';
 
 const OVERRIDE_FILE = 'port.claude-ai.md';
 
 /** portable: true en el frontmatter (bloque --- inicial), CRLF-tolerant como readArtifactDescription en discovery.ts. */
 function isPortable(skillMd: string): boolean {
-    const fmMatch = skillMd.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    if (!fmMatch) return false;
-    return /^portable\s*:\s*true\s*$/m.test(fmMatch[1]);
+    const frontmatter = matchFrontmatterBlock(skillMd);
+    if (frontmatter === null) return false;
+    return /^portable\s*:\s*true\s*$/m.test(frontmatter);
 }
 
 /**
