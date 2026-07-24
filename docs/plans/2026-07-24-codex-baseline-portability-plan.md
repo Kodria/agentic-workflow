@@ -8,7 +8,16 @@
 
 **Tech Stack:** Markdown con frontmatter, Node.js 20+ para validación y hook, shell sólo para comandos de verificación, JSON de bundles/catalog.
 
-**Modo de ejecución:** interactivo
+**Modo de ejecución:** desatendido
+
+> Mandato de ejecución desatendida: ejecución completa sin pausas de check-in
+> entre tareas, ni de confirmación entre fases (development-process rutea
+> automáticamente y subagent-driven-development no pregunta si continuar con
+> el cierre). harness-retro triagea con criterio propio del agente (solo valor
+> real, recurrente o sistémico — descarta el resto sin preguntar).
+> post-implementation-qa corrige TODOS los hallazgos que surjan, no solo algunos.
+> finishing-a-development-branch crea el PR directamente (opción "push + PR"),
+> sin presentar el menú de 4 opciones.
 
 ---
 
