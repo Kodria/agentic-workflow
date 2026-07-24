@@ -284,7 +284,9 @@ The hook:
 - identifies the most recent incomplete implementation plan deterministically;
 - includes the plan goal, up to eight open plan items, and up to eight open ledger items;
 - writes a heartbeat containing hook version/hash and last successful event;
-- emits Codex-native hook JSON;
+- emits Codex-native `hookSpecificOutput.additionalContext` for
+  `hookEventName: "SessionStart"` so the recovered state becomes model-visible
+  developer context;
 - degrades safely when optional files or the `awm` executable are absent.
 
 The global `AGENTS.md` block provides automatic AWM activation even while the hook awaits trust. The hook is required for dynamic re-anchoring and is not considered healthy until its heartbeat proves execution.
@@ -301,7 +303,12 @@ AWM does not bypass Codex hook trust:
 
 ## 8. Canonical skill portability
 
-The baseline registry remains the source of truth for 31 skills. Portability work changes vocabulary and capability references, not lifecycle decisions.
+The current stable baseline registry (`v1.5.2`) is the source of truth for 37
+skills across `dev`, `product`, `frontend`, and `authoring`. The working checkout
+initially inspected during design was still at `v1.4.0` with 31 skills; planning
+therefore adds an explicit current-remote gate before implementation. Portability
+work changes vocabulary and capability references, not lifecycle or product
+decisions.
 
 The audit covers:
 
