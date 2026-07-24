@@ -27,12 +27,18 @@ export interface AgentArtifact {
     overrode?: string;
 }
 
+/** Extracts the raw frontmatter text (between the --- delimiters), or null if the block is missing/malformed. CRLF-tolerant. */
+export function matchFrontmatterBlock(raw: string): string | null {
+    const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    return fmMatch ? fmMatch[1] : null;
+}
+
 export function readArtifactDescription(filePath: string): string {
     try {
         const raw = fs.readFileSync(filePath, 'utf-8');
-        const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-        if (!fmMatch) return '';
-        const line = fmMatch[1]
+        const frontmatter = matchFrontmatterBlock(raw);
+        if (frontmatter === null) return '';
+        const line = frontmatter
             .split(/\r?\n/)
             .find((l) => /^description\s*:/.test(l));
         if (!line) return '';

@@ -3,6 +3,18 @@
 Auditable log of recurring/structural harness gaps converted into rules. See the
 `harness-retro` skill for the process. Newest first.
 
+## 2026-07-23 — awm export --target claude-ai: symlink exfiltration blocker + discovery-reuse lesson
+
+- **Class:** security (CONSTITUTION.md) + agent/API-pattern (AGENTS.md)
+- **Branch:** `claude/awm-v1-4-0-frontend-upgrade-bcd3gq`
+- **Ledger:** 83 entries (23 findings, 60 wins) across 6 SDD tasks (with fix loops), 1 whole-implementation final review, and post-implementation-qa's 4-lens panel (Track A fidelity: 0 findings; Track B: 2 blockers + 2 minors, all fixed and verified with before/after reproductions in the same session)
+- **Occurrences (recurring signal, `awm ledger recurring --min 2`):** 5 clusters flagged, ALL verified via timestamp inspection to be the same finding/win emitted multiple times within seconds by one reviewer (retry after an ambiguous CLI confirmation) — not genuine cross-task recurrence. No pipeline break: `awm ledger list` verification at the controller already tolerates this without masking real signal. Documented as a non-issue rather than cured.
+- **Curado en CONSTITUTION.md** ("Validación de entrada"): symlinks in a directory tree sourced from registry content (semi-trusted, possibly third-party) must be rejected explicitly when copying/archiving — `fs.cpSync` copies them as-is, but `zip -r` dereferences them, embedding arbitrary file content from outside the registry into the exported artifact. Confirmed exploitable and fixed in `cli/src/core/export/pack.ts` (commit `2e3144b`) with a before/after reproduction (real secret file leaked into a real zip pre-fix, blocked post-fix).
+- **Curado en AGENTS.md** ("Patrones de diseño de API"): multi-root artifact resolution must reuse existing discovery functions (`discoverSkills`, `discoverAllBundles`) instead of hand-rolling a "first root that matches" scan — the discovery functions already encode the `awm-registry.json` override/collision contract; a hand-rolled scan silently ignores it. Confirmed in `cli/src/core/export/resolve.ts`'s `locate()` (fixed in commit `d3d4957`).
+- **Sensor:** none (process/agent-class lessons, not sensor-catchable — this repo's `cli/eslint.config.awm.mjs` is a distributable sensor-pack asset for consumer projects, not self-applied CI for this repo; the durable safeguard for the specific bug is the regression test already committed in `cli/tests/core/export/pack.test.ts`).
+- **Also fixed this session, not separately cured** (already closed via regression tests per the "logic error → needs a test" heuristic, no additional harness rule needed beyond what's in the diff): apostrophe in `DEFERENCE_LINE` breaking single-quoted YAML output (blocker, `transform.ts`); trailing YAML inline comment silently dropping the deference line (minor, `transform.ts`); untested default `--out` cwd-relative branch (minor, `index.ts`).
+- **Descartes (modo desatendido):** the 5 duplicate-emission clusters above — reason: ledger noise from same-event reviewer retries, not a systemic finding; no rule change needed since the controller's ledger-list verification already catches and tolerates it.
+
 ## 2026-06-25 — release-script: CLI arg validation + multi-step rollback + call-order test + execFileSync
 
 - **Class:** proceso × 2 (CONSTITUTION) + agent × 2 (AGENTS.md)
