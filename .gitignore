@@ -12,3 +12,4 @@ tmp/*
 .claude/agents/
 *.eslintcache
 cli/.npmrc
+.worktrees/
