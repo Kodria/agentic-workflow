@@ -16,12 +16,24 @@
 // flags only, never file contents or environment variables.
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { InstallPlan, PlannedOperation } from './install-planner';
 import { writeArtifactState } from './artifact-state';
 import { awmHome } from './paths';
 import { writeFileAtomic } from './atomic-file';
 import { renderCodexAgent } from './renderers/codex-agent';
 import { stageArtifact, replaceArtifact } from './executor';
+
+/**
+ * The single timestamp-sanitization rule for transaction IDs, shared by
+ * `applyInstallPlan` and `beginBackupSession` so both always produce IDs
+ * `restoreBackup`'s validation regex (`^\d{4}-\d{2}-\d{2}T[0-9A-Za-z.-]+$`)
+ * accepts. Strips both `:` and `.` (an ISO timestamp has both) so the result
+ * is filesystem- and regex-safe either way.
+ */
+function sanitizeTransactionTimestamp(): string {
+    return new Date().toISOString().replace(/[:.]/g, '-');
+}
 
 export type InstallSummary = {
     installed: string[];
@@ -58,6 +70,8 @@ type BackupManifestEntry = {
     existed: boolean;
     /** Path relative to the manifest's backup directory; null when the target didn't exist. */
     backupRelPath: string | null;
+    /** sha256 of the backed-up content; omitted when the target didn't exist (nothing to hash). */
+    contentHash?: string;
 };
 
 type BackupManifest = {
@@ -103,6 +117,32 @@ function targetExists(targetPath: string): boolean {
     }
 }
 
+/**
+ * sha256 of the target's content, for the manifest's integrity record.
+ * Files hash their bytes directly; directories and symlinks hash a stable
+ * summary (entry name + kind + size + mtime, or the symlink's own target)
+ * rather than walking and hashing every file individually — enough to detect
+ * "the backup no longer matches what's on disk" without the cost of a full
+ * recursive content hash.
+ */
+function computeContentHash(targetPath: string): string {
+    const hash = crypto.createHash('sha256');
+    const stat = fs.lstatSync(targetPath);
+    if (stat.isSymbolicLink()) {
+        hash.update('symlink:').update(fs.readlinkSync(targetPath));
+    } else if (stat.isDirectory()) {
+        hash.update('dir:');
+        for (const name of fs.readdirSync(targetPath).sort()) {
+            const entryStat = fs.lstatSync(path.join(targetPath, name));
+            const kind = entryStat.isDirectory() ? 'd' : entryStat.isSymbolicLink() ? 'l' : 'f';
+            hash.update(`${name}:${kind}:${entryStat.size}:${entryStat.mtimeMs}\n`);
+        }
+    } else {
+        hash.update(fs.readFileSync(targetPath));
+    }
+    return hash.digest('hex');
+}
+
 /** Copies `targetPath` (if it exists) into `backupDir/relName` and returns the manifest entry. */
 function backupEntryFor(targetPath: string, backupDir: string, relName: string): BackupManifestEntry {
     if (!targetExists(targetPath)) {
@@ -112,7 +152,7 @@ function backupEntryFor(targetPath: string, backupDir: string, relName: string):
     // dereference:false (fs.cpSync default) — a symlinked target is backed up
     // as a symlink, not by copying whatever it points at.
     fs.cpSync(targetPath, path.join(backupDir, relName), { recursive: true });
-    return { targetPath, existed: true, backupRelPath: relName };
+    return { targetPath, existed: true, backupRelPath: relName, contentHash: computeContentHash(targetPath) };
 }
 
 /** Restores `targetPath` from its backup, or removes it if it didn't exist before. */
@@ -155,18 +195,29 @@ export function applyInstallPlan(
 ): InstallSummary {
     for (const op of plan.operations) deps.validate(op);
 
-    const backupDir = path.join(
-        awmHome(),
-        'backups',
-        new Date().toISOString().replace(/[:.]/g, '-'),
-    );
+    const backupDir = path.join(awmHome(), 'backups', sanitizeTransactionTimestamp());
     const transactionId = path.basename(backupDir);
 
     const backups = new Map<PlannedOperation, string | null>();
     for (const op of plan.operations) backups.set(op, deps.backup(op, backupDir));
 
     const staged = new Map<PlannedOperation, string>();
-    for (const op of plan.operations) staged.set(op, deps.stage(op));
+    try {
+        for (const op of plan.operations) staged.set(op, deps.stage(op));
+    } catch (error) {
+        // Best-effort: clean up any temp files earlier iterations already
+        // staged before this one threw — none of them have been swapped in
+        // yet (replace() hasn't run), so there's nothing to roll back, just
+        // orphaned staging artifacts to remove.
+        for (const stagedPath of staged.values()) {
+            try {
+                fs.rmSync(stagedPath, { recursive: true, force: true });
+            } catch {
+                // best-effort: retain the original failure
+            }
+        }
+        throw error;
+    }
 
     const replaced: PlannedOperation[] = [];
     try {
@@ -325,7 +376,7 @@ export function beginBackupSession(targetPaths: string[]): BackupSession {
     if (unique.some((target) => target === path.parse(target).root)) {
         throw new Error('refusing to back up a filesystem root');
     }
-    const transactionId = new Date().toISOString().replace(/[:]/g, '-');
+    const transactionId = sanitizeTransactionTimestamp();
     const backupDir = path.join(awmHome(), 'backups', transactionId);
     const manifest = createBackupManifest(unique, backupDir);
     writeBackupManifest(backupDir, manifest);

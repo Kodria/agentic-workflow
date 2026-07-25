@@ -57,6 +57,13 @@ function planWithTwoTargets(): InstallPlan {
     return { operations: [a, b], records: [], reports: [] };
 }
 
+function planWithThreeTargets(): InstallPlan {
+    const a = makeOp('a');
+    const b = makeOp('b');
+    const c = makeOp('c');
+    return { operations: [a, b, c], records: [], reports: [] };
+}
+
 /**
  * Builds a plan whose second operation ("b") is guaranteed to be replaced
  * (real filesystem write) before verification runs, letting the test force a
@@ -136,25 +143,32 @@ describe('applyInstallPlan', () => {
         expect(summary.transactionId).toBeTruthy();
     });
 
-    it('keeps rolling back remaining targets, and still surfaces the original error, when one rollback itself fails', () => {
+    it('keeps rolling back remaining targets, and still surfaces the original error, when a MIDDLE rollback fails', () => {
+        // 3 ops (a, b, c) all replaced; verification fails on 'c', so rollback
+        // runs in reverse order: c, b, a. Making 'b' — the middle op in that
+        // reversed order, with an op both before and after it in the loop —
+        // the one that throws is what actually proves the per-op try/catch
+        // isolates failures: 'a' still runs AFTER 'b' throws, not just
+        // trivially "nothing left to run" as a last-in-order failure would.
         const calls: string[] = [];
-        const plan = planWithTwoTargets();
+        const plan = planWithThreeTargets();
 
         expect(() => applyInstallPlan(plan, {
             validate: () => {},
             backup: () => null,
             stage: (op) => `/staged/${op.name}`,
             replace: (op) => calls.push(`replace:${op.name}`),
-            verify: (op) => { if (op.name === 'b') throw new Error('verification failed: forced'); },
+            verify: (op) => { if (op.name === 'c') throw new Error('verification failed: forced'); },
             rollback: (op) => {
                 calls.push(`rollback:${op.name}`);
-                if (op.name === 'a') throw new Error('rollback failed for a (simulated)');
+                if (op.name === 'b') throw new Error('rollback failed for b (simulated)');
             },
         })).toThrow('verification failed: forced');
 
-        // Both replaced ops (a, b) got a rollback attempt, in reverse order,
-        // even though rolling back 'a' itself throws.
-        expect(calls).toEqual(['replace:a', 'replace:b', 'rollback:b', 'rollback:a']);
+        // All three replaced ops got a rollback attempt, in reverse order —
+        // including 'a', which runs strictly after 'b' throws, proving the
+        // loop doesn't stop or skip ahead when a non-terminal rollback fails.
+        expect(calls).toEqual(['replace:a', 'replace:b', 'replace:c', 'rollback:c', 'rollback:b', 'rollback:a']);
     });
 });
 

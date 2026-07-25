@@ -145,8 +145,10 @@ export interface SyncProfileOptions {
     applyPlan?: (plan: InstallPlan) => InstallSummary;
 }
 
-export interface SyncResult extends InstallSummary {
+export interface SyncResult extends Omit<InstallSummary, 'transactionId'> {
     extensions: string[];
+    /** One transaction ID per bundle actually installed during this sync, in order — a multi-bundle sync runs one applyInstallPlan transaction per bundle. */
+    transactionIds: string[];
 }
 
 /**
@@ -158,7 +160,7 @@ export function syncProfile(opts: SyncProfileOptions): SyncResult {
     const installed: string[] = [];
     const skipped: string[] = [];
     const modifiedFiles: string[] = [];
-    let transactionId = '';
+    const transactionIds: string[] = [];
 
     for (const ext of profile.extensions) {
         if (!opts.bundles.some((b) => b.name === ext)) {
@@ -177,10 +179,10 @@ export function syncProfile(opts: SyncProfileOptions): SyncResult {
         installed.push(...summary.installed);
         skipped.push(...summary.skipped);
         modifiedFiles.push(...summary.modifiedFiles);
-        transactionId = summary.transactionId;
+        transactionIds.push(summary.transactionId);
     }
 
     if (profile.extensions.length > 0) ensureSkillsGitignored(opts.projectRoot, opts.agents);
 
-    return { installed, skipped, extensions: profile.extensions, transactionId, modifiedFiles };
+    return { installed, skipped, extensions: profile.extensions, transactionIds, modifiedFiles };
 }
