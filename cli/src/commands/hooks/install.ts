@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { AgentTarget, getHookConfig } from '../../providers';
+import { AgentTarget, getSettingsMergeHookConfig } from '../../providers';
 import { awmHome } from '../../core/paths';
 
 export type InstallOptions = {
@@ -47,10 +47,7 @@ function isAwmEntry(entry: any, scriptsDir: string, matcher: string): boolean {
 }
 
 export function installHook(options: InstallOptions): InstallResult {
-    const config = getHookConfig(options.agent);
-    if (!config) {
-        throw new Error(`hooks not supported for agent target: ${options.agent}`);
-    }
+    const config = getSettingsMergeHookConfig(options.agent);
 
     // 1. Verify registry sources exist FIRST (before touching settings)
     const sourceHooks = path.join(options.registryRoot, 'hooks');

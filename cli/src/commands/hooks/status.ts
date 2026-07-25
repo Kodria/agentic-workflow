@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { AgentTarget, getHookConfig } from '../../providers';
+import { AgentTarget, getSettingsMergeHookConfig } from '../../providers';
 
 export type CheckResult = {
     ok: boolean;
@@ -63,10 +63,7 @@ function checkSettingsEntry(settingsPath: string, scriptsDir: string, matcher: s
 }
 
 export function computeHookStatus(agent: AgentTarget): HookStatus {
-    const config = getHookConfig(agent);
-    if (!config) {
-        throw new Error(`hooks not supported for agent target: ${agent}`);
-    }
+    const config = getSettingsMergeHookConfig(agent);
 
     const checks = {
         bootstrapSkill: checkFile(path.join(config.scriptsDir, 'using-awm.md')),

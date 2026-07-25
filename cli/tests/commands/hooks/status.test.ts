@@ -86,4 +86,12 @@ describe('computeHookStatus', () => {
         const { computeHookStatus } = require('../../../src/commands/hooks/status');
         expect(() => computeHookStatus('antigravity')).toThrow(/hooks not supported/i);
     });
+
+    it('rejects Codex before applying Claude status checks', () => {
+        const { computeHookStatus } = require('../../../src/commands/hooks/status');
+
+        expect(() => computeHookStatus('codex'))
+            .toThrow('Codex hook strategy is not implemented yet');
+        expect(fs.existsSync(path.join(tmpHome, '.awm/hooks/codex'))).toBe(false);
+    });
 });

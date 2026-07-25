@@ -109,4 +109,18 @@ describe('uninstallHook', () => {
         expect(result.backupPath).not.toBeNull();
         expect(fs.existsSync(result.backupPath!)).toBe(true);
     });
+
+    it('rejects Codex before changing hooks or creating a backup', () => {
+        const codexDir = path.join(tmpHome, '.codex');
+        const hooksPath = path.join(codexDir, 'hooks.json');
+        const original = '{ "user": "content" }\n';
+        fs.mkdirSync(codexDir, { recursive: true });
+        fs.writeFileSync(hooksPath, original);
+        const { uninstallHook } = require('../../../src/commands/hooks/uninstall');
+
+        expect(() => uninstallHook({ agent: 'codex' }))
+            .toThrow('Codex hook strategy is not implemented yet');
+        expect(fs.readFileSync(hooksPath, 'utf-8')).toBe(original);
+        expect(fs.existsSync(path.join(tmpHome, '.awm/backups'))).toBe(false);
+    });
 });

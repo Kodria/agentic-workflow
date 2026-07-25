@@ -26,6 +26,10 @@ describe('assertProviderSupported', () => {
         [Buffer.from('codex-cli 0.145.0-beta.1\n'), 'could not parse Codex version'],
         [Buffer.from('codex-cli v0.145.0\n'), 'could not parse Codex version'],
         [Buffer.from('codex-cli 0.145\n'), 'could not parse Codex version'],
+        [Buffer.from('unexpected-tool 9.9.9\n'), 'could not parse Codex version'],
+        [Buffer.from('notice: codex-cli 0.145.0\n'), 'could not parse Codex version'],
+        [Buffer.from('codex-cli stable 0.145.0\n'), 'could not parse Codex version'],
+        [Buffer.from('codex-cli 0.145.0 trailing\n'), 'could not parse Codex version'],
     ])('rejects unsupported output without mutation', (output, message) => {
         expect(() => assertProviderSupported('codex', () => output)).toThrow(message);
     });

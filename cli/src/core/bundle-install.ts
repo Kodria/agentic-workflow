@@ -7,7 +7,7 @@ import {
     resolveBundleClosure,
 } from './bundles';
 import { installArtifact } from './executor';
-import { AgentTarget, ArtifactType, Scope, getTargetPath, providerFor } from '../providers';
+import { AgentTarget, ArtifactType, Scope, assertLinkRenderer } from '../providers';
 import { addExtension, ensureSkillsGitignored, readProfile, shouldRecordExtension } from './profile';
 import { contentRoots } from './registries';
 
@@ -78,11 +78,12 @@ export function installBundle(opts: InstallBundleOptions): InstallSummary {
                 continue;
             }
             for (const agent of opts.agents) {
-                if (providerFor(agent)[art.type] === null) {
+                const config = assertLinkRenderer(art.type, agent);
+                if (config === null) {
                     skipped.push(`${art.name} (${agent}: ${art.type} unsupported)`);
                     continue;
                 }
-                const rel = getTargetPath(art.type, agent, scope);
+                const rel = config[scope];
                 const baseDir = scope === 'local' ? path.join(opts.projectRoot, rel) : rel;
                 const dest = path.join(baseDir, art.installName);
                 installArtifact(art.sourcePath, dest, opts.method);

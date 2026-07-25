@@ -165,4 +165,17 @@ describe('installHook (happy path + merge)', () => {
         expect(() => installHook({ agent: 'antigravity', registryRoot: tmpRegistry, installMethod: 'symlink' }))
             .toThrow(/not supported/);
     });
+
+    it('rejects Codex before creating hook settings or scripts', () => {
+        const { installHook } = require('../../../src/commands/hooks/install');
+
+        expect(() => installHook({
+            agent: 'codex',
+            registryRoot: tmpRegistry,
+            installMethod: 'symlink',
+        })).toThrow('Codex hook strategy is not implemented yet');
+        expect(fs.existsSync(path.join(tmpHome, '.codex/hooks.json'))).toBe(false);
+        expect(fs.existsSync(path.join(tmpHome, '.awm/hooks/codex'))).toBe(false);
+        expect(fs.existsSync(path.join(tmpHome, '.awm/backups'))).toBe(false);
+    });
 });

@@ -97,6 +97,44 @@ describe('installBundle', () => {
         expect(result.skipped.some((l) => l.includes('s-base'))).toBe(true);
         expect(fs.existsSync(path.join(projectRoot, '.claude', 'skills', 's-ext'))).toBe(true);
     });
+
+    it('blocks Codex agent rendering before materializing the artifact', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+        const ext = bundles.find((bundle) => bundle.name === 'ext')!;
+        const agentOnly = [{
+            ...ext,
+            dependsOn: [],
+            skills: [],
+            workflows: [],
+        }];
+
+        expect(() => installBundle({
+            bundleName: 'ext',
+            bundles: agentOnly,
+            agents: ['codex'],
+            method: 'symlink',
+            projectRoot,
+            contentDir: content,
+        })).toThrow("Renderer 'codex-agent-toml' for codex agent artifacts is not implemented yet");
+        expect(fs.existsSync(path.join(projectRoot, '.codex/agents/ag-ext.md'))).toBe(false);
+    });
+
+    it('keeps Codex skill installs on the legacy link renderer', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+        const base = bundles.find((bundle) => bundle.name === 'base')!;
+
+        const result = installBundle({
+            bundleName: 'base',
+            bundles: [base],
+            agents: ['codex'],
+            method: 'symlink',
+            projectRoot,
+            contentDir: content,
+        });
+
+        expect(fs.existsSync(path.join(projectRoot, '.agents/skills/s-base'))).toBe(true);
+        expect(result.installed).toContain('s-base → codex (local) [base]');
+    });
 });
 
 describe('addBundle', () => {

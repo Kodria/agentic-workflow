@@ -28,6 +28,10 @@ export type HookConfig = {
     eventName: string;
 };
 
+export type SettingsMergeHookConfig = HookConfig & {
+    type: 'cc-settings-merge';
+};
+
 export type InjectionConfig =
     | { type: 'cc-settings-merge' }
     | { type: 'config-instructions'; configPath: string; field: 'instructions' }
@@ -162,6 +166,33 @@ export function getTargetPath(type: ArtifactType, agent: AgentTarget, scope: Sco
 
 export function getHookConfig(agent: AgentTarget): HookConfig | undefined {
     return providerFor(agent).hooks;
+}
+
+export function getSettingsMergeHookConfig(agent: AgentTarget): SettingsMergeHookConfig {
+    const config = getHookConfig(agent);
+    if (!config) {
+        throw new Error(`hooks not supported for agent target: ${agent}`);
+    }
+    if (config.type !== 'cc-settings-merge') {
+        throw new Error(`${providerFor(agent).label} hook strategy is not implemented yet`);
+    }
+    return config as SettingsMergeHookConfig;
+}
+
+export function assertLinkRenderer(
+    type: ArtifactType,
+    agent: AgentTarget,
+): ArtifactConfig | null {
+    if (!(['skill', 'workflow', 'agent'] as unknown[]).includes(type)) {
+        throw new Error(`Unknown artifact type: ${String(type)}`);
+    }
+    const config = providerFor(agent)[type];
+    if (config && config.renderer !== 'link') {
+        throw new Error(
+            `Renderer '${config.renderer}' for ${agent} ${type} artifacts is not implemented yet`,
+        );
+    }
+    return config;
 }
 
 export function getInjection(agent: AgentTarget): InjectionConfig | undefined {

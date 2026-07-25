@@ -9,6 +9,7 @@ import { isInteractive } from './ui/tty';
 import { multiselectPicker } from './ui/picker';
 import {
   AGENT_TARGETS,
+  assertLinkRenderer,
   getTargetPath,
   providerFor,
   AgentTarget,
@@ -247,11 +248,12 @@ program.command('add [name]')
 
               for (const currentAgent of targetAgents) {
                   for (const artifact of artifactsToInstall) {
-                      if (providerFor(currentAgent)[artifact.type] === null) {
+                      const config = assertLinkRenderer(artifact.type, currentAgent);
+                      if (config === null) {
                           skipped.push(`${artifact.name} (${currentAgent})`);
                           continue;
                       }
-                      const targetDir = getTargetPath(artifact.type, currentAgent, scopeVal);
+                      const targetDir = config[scopeVal];
                       const finalDest = path.join(targetDir, artifact.name);
                       installArtifact(artifact.sourcePath, finalDest, methodVal);
                       installed.push(`${artifact.name} → ${currentAgent} (${scopeVal})`);
@@ -431,11 +433,12 @@ program.command('add [name]')
           for (const currentAgent of targetAgents) {
               for (const artifact of artifactsToInstall) {
                   // Skip artifacts not supported by this agent
-                  if (providerFor(currentAgent)[artifact.type] === null) {
+                  const config = assertLinkRenderer(artifact.type, currentAgent);
+                  if (config === null) {
                       skipped.push(`${artifact.name} (${currentAgent})`);
                       continue;
                   }
-                  const targetDir = getTargetPath(artifact.type, currentAgent, scopeVal);
+                  const targetDir = config[scopeVal];
                   const finalDest = path.join(targetDir, artifact.name);
                   installArtifact(artifact.sourcePath, finalDest, methodVal);
                   installed.push(`${artifact.name} → ${currentAgent} (${scopeVal})`);

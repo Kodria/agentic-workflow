@@ -38,7 +38,7 @@ export function assertProviderSupported(
         throw new Error(`Codex version probe failed: ${(error as Error).message}`);
     }
 
-    const match = output.match(/(?:^|\s)(\d+\.\d+\.\d+)(?=\s*$)/);
+    const match = output.trim().match(/^codex-cli (\d+\.\d+\.\d+)$/);
     if (!match) {
         throw new Error(`could not parse Codex version from: ${output.trim()}`);
     }
