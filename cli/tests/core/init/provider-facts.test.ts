@@ -122,6 +122,68 @@ describe('gatherProviderFacts / assertClaudeBaselinePreserved', () => {
         expect(() => assertClaudeBaselinePreserved(before, afterModify)).not.toThrow();
     });
 
+    // -----------------------------------------------------------------------
+    // Codex-only bootstrap: Claude's scriptsDir has NEVER existed.
+    //
+    // Every nested-exclusion test above seeds ~/.awm/hooks first, so they only
+    // ever exercise the present→present transition. On a fresh Codex-only
+    // machine (a cloud box, the actual rollout target) that directory does not
+    // exist, and installing the Codex hook creates it as a side effect of
+    // `mkdirSync(dirname, {recursive:true})` in syncExecutable — flipping
+    // Claude's own scriptsDir from absent to present-but-empty. That is not a
+    // change to anything Claude owns, but it moved the hash and aborted init.
+    // -----------------------------------------------------------------------
+
+    it('does NOT flag Codex creating its nested scriptsDir when Claude\'s has never existed', () => {
+        const { gatherProviderFacts, assertClaudeBaselinePreserved } = require('../../../src/core/init/provider-facts');
+
+        const claudeScripts = path.join(tmpHome, '.awm', 'hooks');
+        expect(fs.existsSync(claudeScripts)).toBe(false);
+
+        const before = gatherProviderFacts('claude-code');
+
+        // Exactly what syncExecutable does for the Codex hook: one recursive
+        // mkdir that necessarily materializes Claude's hooks/ as the parent.
+        const codexScripts = path.join(claudeScripts, 'codex');
+        fs.mkdirSync(codexScripts, { recursive: true });
+        fs.writeFileSync(path.join(codexScripts, 'session-start'), '#!/bin/sh\necho codex\n');
+
+        const after = gatherProviderFacts('claude-code');
+        expect(after.hash).toBe(before.hash);
+        expect(() => assertClaudeBaselinePreserved(before, after)).not.toThrow();
+    });
+
+    it('still flags real Claude content appearing where the directory did not exist', () => {
+        const { gatherProviderFacts, assertClaudeBaselinePreserved } = require('../../../src/core/init/provider-facts');
+
+        const before = gatherProviderFacts('claude-code');
+
+        // The guard must not be relaxed into blindness: an absent directory
+        // gaining Claude-owned content is still a genuine baseline change.
+        const claudeScripts = path.join(tmpHome, '.awm', 'hooks');
+        fs.mkdirSync(claudeScripts, { recursive: true });
+        fs.writeFileSync(path.join(claudeScripts, 'session-start'), '#!/bin/sh\n');
+
+        const after = gatherProviderFacts('claude-code');
+        expect(after.hash).not.toBe(before.hash);
+        expect(() => assertClaudeBaselinePreserved(before, after)).toThrow(/must never happen \(R19\)/);
+    });
+
+    it('still flags Claude content being emptied out of an existing directory', () => {
+        const { gatherProviderFacts, assertClaudeBaselinePreserved } = require('../../../src/core/init/provider-facts');
+
+        const claudeScripts = path.join(tmpHome, '.awm', 'hooks');
+        fs.mkdirSync(claudeScripts, { recursive: true });
+        fs.writeFileSync(path.join(claudeScripts, 'session-start'), '#!/bin/sh\n');
+
+        const before = gatherProviderFacts('claude-code');
+        fs.rmSync(path.join(claudeScripts, 'session-start'));
+
+        const after = gatherProviderFacts('claude-code');
+        expect(after.hash).not.toBe(before.hash);
+        expect(() => assertClaudeBaselinePreserved(before, after)).toThrow(/must never happen \(R19\)/);
+    });
+
     it('still flags a genuinely Claude-owned change alongside an untouched Codex nested dir', () => {
         const { gatherProviderFacts, assertClaudeBaselinePreserved } = require('../../../src/core/init/provider-facts');
 

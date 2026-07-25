@@ -213,6 +213,41 @@ describe('codex provider — isolated home E2E (Task 9)', () => {
         expect(snapshotTree(path.join(tmpHome, '.claude'))).toEqual(claudeBefore);
     });
 
+    it('initializes Codex on a machine that has never run a Claude Code init', async () => {
+        // The E2E above inits claude-code FIRST, so ~/.awm/hooks always exists
+        // by the time Codex runs — which is precisely why it never caught this.
+        // A fresh Codex Cloud box has no Claude install at all, and installing
+        // the Codex hook creates ~/.awm/hooks as a side effect of the recursive
+        // mkdir for its own nested ~/.awm/hooks/codex. That flipped Claude's
+        // R19 baseline digest from absent to present-but-empty and aborted init
+        // with "Claude Code baseline changed during a non-Claude init".
+        seedPublicRegistryFixture(path.join(tmpHome, '.awm/registries/baseline'));
+
+        const { runInit } = require('../../src/commands/init');
+
+        expect(fs.existsSync(path.join(tmpHome, '.awm/hooks'))).toBe(false);
+        expect(fs.existsSync(path.join(tmpHome, '.claude'))).toBe(false);
+
+        const codex = await runInit({
+            cwd: tmpWork,
+            yes: true,
+            agent: 'codex',
+            machineOnly: true,
+            assertProviderSupported: () => ({ provider: 'codex' as const, version: '0.150.0' }),
+        });
+
+        // Exit 2 is the internal-error path the R19 guard aborts through.
+        expect(codex).toBeLessThanOrEqual(1);
+        expect(readPrefs().enabledAgents).toEqual(['codex']);
+
+        // The Codex hook really installed, and Claude gained no content of its own.
+        const hooksJson = JSON.parse(fs.readFileSync(path.join(tmpHome, '.codex/hooks.json'), 'utf8'));
+        expect(hooksJson.hooks.SessionStart).toHaveLength(1);
+        expect(fs.existsSync(path.join(tmpHome, '.awm/hooks/codex/session-start'))).toBe(true);
+        expect(fs.readdirSync(path.join(tmpHome, '.awm/hooks'))).toEqual(['codex']);
+        expect(fs.existsSync(path.join(tmpHome, '.claude/settings.json'))).toBe(false);
+    });
+
     it('doctor reports the isolated Codex install as supported/healthy, not against the real ~/.awm', () => {
         seedPublicRegistryFixture(path.join(tmpHome, '.awm/registries/baseline'));
         writePrefs(prefsWith(['claude-code', 'codex']));
