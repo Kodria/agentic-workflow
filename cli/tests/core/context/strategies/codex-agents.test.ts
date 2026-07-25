@@ -103,6 +103,31 @@ describe('CodexAgentsStrategy', () => {
         expect(fs.readFileSync(file, 'utf8')).toBe(ambiguous);
     });
 
+    it.each([
+        '<!-- AWM:BOUNDARY prefix=9 suffix=1 -->',
+        '<!-- AWM:BOUNDARY prefix=1 suffix=2 -->',
+        '<!-- AWM:BOUNDARY prefix=1 suffix=1 -->\n<!-- AWM:BOUNDARY prefix=0 suffix=1 -->',
+        'owned\n<!-- AWM:BOUNDARY prefix=1 suffix=1 -->',
+        '<!-- AWM:BOUNDARY prefix=1',
+        'inline <!-- AWM:BOUNDARY prefix=1 suffix=1 -->',
+    ])('rejects ambiguous boundary metadata without changing the file: %j', (metadata) => {
+        const file = path.join(tmpHome, '.codex/AGENTS.md');
+        const materialized = path.join(tmpWork, 'awm-context.md');
+        const markdown = '# AWM\n\nExpected.';
+        const original = `<!-- AWM:START -->\n${metadata}\nowned\n<!-- AWM:END -->`;
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, original);
+        fs.writeFileSync(materialized, markdown);
+        const provider = codexProvider(file);
+        const input = injectionInput(materialized, markdown);
+        const strategy = new CodexAgentsStrategy();
+
+        expect(() => strategy.inject(input, provider)).toThrow('malformed AWM boundary metadata');
+        expect(() => strategy.remove(input, provider)).toThrow('malformed AWM boundary metadata');
+        expect(() => strategy.status(input, provider)).toThrow('malformed AWM boundary metadata');
+        expect(fs.readFileSync(file, 'utf8')).toBe(original);
+    });
+
     it('injects project constitution guidance without owning the whole AGENTS.md', () => {
         const project = path.join(tmpWork, 'repo');
         fs.mkdirSync(project, { recursive: true });

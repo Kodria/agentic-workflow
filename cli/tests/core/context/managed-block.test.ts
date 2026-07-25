@@ -6,6 +6,15 @@ import {
 } from '../../../src/core/context/managed-block';
 
 const body = 'Use AWM through the development-process skill.';
+const malformedBoundaries = [
+    `${AWM_START}\n<!-- AWM:BOUNDARY prefix=9 suffix=1 -->\nowned\n${AWM_END}`,
+    `${AWM_START}\n<!-- AWM:BOUNDARY prefix=1 suffix=2 -->\nowned\n${AWM_END}`,
+    `${AWM_START}\n<!-- AWM:BOUNDARY prefix=1 suffix=1 -->\n<!-- AWM:BOUNDARY prefix=0 suffix=1 -->\nowned\n${AWM_END}`,
+    `${AWM_START}\nowned\n<!-- AWM:BOUNDARY prefix=1 suffix=1 -->\n${AWM_END}`,
+    `${AWM_START}\n<!-- AWM:BOUNDARY prefix=1\nowned\n${AWM_END}`,
+    `${AWM_START}\ninline <!-- AWM:BOUNDARY prefix=1 suffix=1 -->\nowned\n${AWM_END}`,
+    `<!-- AWM:BOUNDARY prefix=0 suffix=1 -->\n${AWM_START}\nowned\n${AWM_END}`,
+];
 
 describe('mergeManagedBlock', () => {
     it('appends exactly one block and preserves user content byte-for-byte', () => {
@@ -67,6 +76,10 @@ describe('mergeManagedBlock', () => {
     ])('rejects invalid runtime input', (original, managedBody, message) => {
         expect(() => mergeManagedBlock(original as never, managedBody as never)).toThrow(message);
     });
+
+    it.each(malformedBoundaries)('rejects ambiguous boundary metadata in %j', (original) => {
+        expect(() => mergeManagedBlock(original, body)).toThrow('malformed AWM boundary metadata');
+    });
 });
 
 describe('removeManagedBlock', () => {
@@ -88,5 +101,9 @@ describe('removeManagedBlock', () => {
     it('is unchanged when no block exists and rejects ambiguous markers', () => {
         expect(removeManagedBlock('user only\n')).toBe('user only\n');
         expect(() => removeManagedBlock(`${AWM_START}\nmissing end`)).toThrow('unmatched');
+    });
+
+    it.each(malformedBoundaries)('rejects ambiguous boundary metadata before removal in %j', (original) => {
+        expect(() => removeManagedBlock(original)).toThrow('malformed AWM boundary metadata');
     });
 });

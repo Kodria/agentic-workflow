@@ -77,6 +77,7 @@ function inspect(input: string): Block | null {
 
     const comments = input.match(/<!--[\s\S]*?-->/g) ?? [];
     const malformed = comments.some((comment) =>
+        !comment.includes('AWM:BOUNDARY') &&
         (comment.includes('AWM:START') || comment.includes('AWM:END')) &&
         comment !== AWM_START &&
         comment !== AWM_END,
@@ -85,7 +86,12 @@ function inspect(input: string): Block | null {
 
     const starts = markerOffsets(input, AWM_START);
     const ends = markerOffsets(input, AWM_END);
-    if (starts.length === 0 && ends.length === 0) return null;
+    if (starts.length === 0 && ends.length === 0) {
+        if (input.includes('AWM:BOUNDARY')) {
+            throw new Error('malformed AWM boundary metadata');
+        }
+        return null;
+    }
     if (starts.length !== ends.length) throw new Error('unmatched AWM marker');
     if (ends[0] < starts[0]) throw new Error('reversed AWM markers');
     if (starts.length > 1) {
@@ -105,11 +111,21 @@ function stripDelimiterNewlines(value: string): string {
 }
 
 function contentOf(original: string, block: Block): { body: string; boundary: Boundary | null } {
-    let content = stripDelimiterNewlines(
-        original.slice(block.start + AWM_START.length, block.end),
-    );
+    const rawContent = original.slice(block.start + AWM_START.length, block.end);
+    const totalBoundaryOccurrences = original.split('AWM:BOUNDARY').length - 1;
+    const contentBoundaryOccurrences = rawContent.split('AWM:BOUNDARY').length - 1;
+    if (totalBoundaryOccurrences !== contentBoundaryOccurrences) {
+        throw new Error('malformed AWM boundary metadata');
+    }
+
+    let content = stripDelimiterNewlines(rawContent);
+    const boundaryOccurrences = content.split('AWM:BOUNDARY').length - 1;
+    if (boundaryOccurrences === 0) return { body: content, boundary: null };
+
     const boundaryMatch = content.match(BOUNDARY_PATTERN);
-    if (!boundaryMatch) return { body: content, boundary: null };
+    if (boundaryOccurrences !== 1 || !boundaryMatch) {
+        throw new Error('malformed AWM boundary metadata');
+    }
 
     content = content.slice(boundaryMatch[0].length);
     return {
