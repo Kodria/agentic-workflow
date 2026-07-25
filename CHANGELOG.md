@@ -1,3 +1,8 @@
+## v3.2.2 - 2026-07-25
+
+### Fixes
+- don't let unrelated project degradation fail a --machine-only init
+
 ## v3.2.1 - 2026-07-25
 
 ### Fixes
