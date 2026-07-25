@@ -14,13 +14,12 @@
 import path from 'path';
 import { AgentTarget, providerFor } from '../../providers';
 import type { AwmPreferences } from '../../utils/config';
-import type { BundleDefinition } from '../bundles';
+import { defaultScopeForBundle, type BundleDefinition } from '../bundles';
 import { expandBundleArtifacts } from '../bundle-install';
 import { artifactStateFile } from '../artifact-state';
 import { awmHome } from '../paths';
 import { findProjectRoot, readProfile } from '../profile';
 import { contentRoots } from '../registries';
-import { defaultScopeForBundle } from '../bundles';
 
 export type PlanInitMutationTargetsParams = {
     cwd: string;
