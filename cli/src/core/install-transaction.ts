@@ -188,8 +188,14 @@ export function applyInstallPlan(
     }
 
     return {
+        // Every owner in plan.reports — 'install' (the owner whose selection
+        // caused the physical write) AND 'retain' (co-owners of the same
+        // shared target, e.g. OpenCode+Codex sharing one skill directory) —
+        // gained ownership of this target as a result of THIS run. The
+        // user-facing summary must list all of them, not just the first
+        // (R15/R15.1): a single physical write can still mean N providers now
+        // own the artifact.
         installed: plan.reports
-            .filter((report) => report.action === 'install')
             .map((report) => `${path.basename(report.targetPath)} → ${report.owner}`),
         skipped: [],
         transactionId,

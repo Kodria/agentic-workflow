@@ -6,7 +6,7 @@ import { installBundle, addBundle, syncProfile, InstallSummary } from '../../src
 import { readProfile, writeProfile } from '../../src/core/profile';
 import { installArtifact } from '../../src/core/executor';
 import * as executor from '../../src/core/executor';
-import { InstallPlan, planInstall } from '../../src/core/install-planner';
+import { InstallPlan } from '../../src/core/install-planner';
 
 /**
  * `installBundle` is a thin façade — it expands the bundle closure into
@@ -233,7 +233,7 @@ describe('installBundle', () => {
         expect(fs.existsSync(path.join(projectRoot, '.gitignore'))).toBe(true);
     });
 
-    it('installs a skill shared by two agents (OpenCode + Codex) with exactly one replaceArtifact call, but both providers own it', () => {
+    it('installs a skill shared by two agents (OpenCode + Codex) with exactly one replaceArtifact call, but the summary contains both providers', () => {
         const { content, projectRoot, bundles } = makeFixture();
         const base = bundles.find((bundle) => bundle.name === 'base')!;
         const replaceSpy = jest.spyOn(executor, 'replaceArtifact');
@@ -249,19 +249,16 @@ describe('installBundle', () => {
 
         const skillTarget = path.join(projectRoot, '.agents/skills/s-base');
         expect(fs.existsSync(skillTarget)).toBe(true);
+        // One physical write for the shared target...
         expect(replaceSpy).toHaveBeenCalledTimes(1);
         replaceSpy.mockRestore();
 
-        const plan = planInstall({
-            artifacts: [{ name: 's-base', type: 'skill', installName: 's-base', sourcePath: path.join(content, 'skills', 's-base') }],
-            selectedAgents: ['opencode', 'codex'],
-            enabledAgents: ['opencode', 'codex'],
-            scope: 'local',
-            projectRoot,
-            method: 'symlink',
-        });
-        const owners = plan.reports.filter((r) => r.targetPath === skillTarget).map((r) => r.owner);
-        expect(owners).toEqual(expect.arrayContaining(['opencode', 'codex']));
+        // ...but the real installBundle/applyInstallPlan result must report
+        // BOTH providers as owning the artifact, not just the one whose
+        // selection triggered the write (install-planner.ts tags the other as
+        // 'retain', which applyInstallPlan must still surface).
+        const installedForSkill = result.installed.filter((line) => line.startsWith('s-base → '));
+        expect(installedForSkill).toEqual(expect.arrayContaining(['s-base → opencode', 's-base → codex']));
         expect(result.modifiedFiles).toContain(skillTarget);
     });
 });
