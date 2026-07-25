@@ -537,7 +537,7 @@ _Requirements: R3, R4, R5, R6, R17_
 - Create: `cli/tests/core/context/managed-block.test.ts`
 - Create: `cli/tests/core/context/strategies/codex-agents.test.ts`
 
-- [ ] **Step 1: Escribir los tests rojos del merge estricto**
+- [x] **Step 1: Escribir los tests rojos del merge estricto**
 
 Crear `cli/tests/core/context/managed-block.test.ts`:
 
@@ -564,7 +564,7 @@ it.each([
 });
 ```
 
-- [ ] **Step 2: Implementar escritura atómica y merge**
+- [x] **Step 2: Implementar escritura atómica y merge**
 
 Crear `cli/src/core/atomic-file.ts`:
 
@@ -607,7 +607,7 @@ export function mergeManagedBlock(original: string, body: string): string {
 }
 ```
 
-- [ ] **Step 3: Escribir los tests rojos de la estrategia Codex**
+- [x] **Step 3: Escribir los tests rojos de la estrategia Codex**
 
 Crear `cli/tests/core/context/strategies/codex-agents.test.ts`:
 
@@ -635,7 +635,7 @@ it('injects project constitution guidance without owning the whole AGENTS.md', (
 });
 ```
 
-- [ ] **Step 4: Implementar la estrategia Codex**
+- [x] **Step 4: Implementar la estrategia Codex**
 
 Crear `cli/src/core/context/strategies/codex-agents.ts`:
 
@@ -680,13 +680,13 @@ export class CodexAgentsStrategy {
 
 Conectar esta estrategia en `cli/src/core/context/orchestrator.ts` para `managed-agents-md`, y hacer que `stepContextInjection` instale el bloque global mientras `stepConstitutionInjection` instale/actualice el bloque del proyecto para Codex aunque `CONSTITUTION.md` aún no exista.
 
-- [ ] **Step 5: Ejecutar tests y verificar que OpenCode siga usando `instructions[]`**
+- [x] **Step 5: Ejecutar tests y verificar que OpenCode siga usando `instructions[]`**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/context/managed-block.test.ts tests/core/context/strategies/codex-agents.test.ts tests/core/context/strategies/config-instructions.test.ts tests/core/context/project-constitution-inject.test.ts`
 
 Expected: PASS; el test OpenCode confirma que `opencode.json` sigue preservando campos ajenos.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cli/src/core/atomic-file.ts cli/src/core/context cli/src/core/init/steps.ts cli/tests/core/context
