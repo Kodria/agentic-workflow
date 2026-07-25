@@ -61,10 +61,22 @@ export interface RunDoctorOptions {
 
 export function runDoctor(opts: RunDoctorOptions = {}): number {
     const resolveTargets = opts.resolveTargets ?? resolveAgentTargets;
-    let report: CheckReport;
+
+    // Validates --agent separately from the general diagnostic gathering below:
+    // an unknown or disabled agent is a normal input-validation failure (the
+    // user typo'd or forgot `awm init --agent <x>`), not an "internal error" —
+    // give it its own clear message rather than lumping it under the generic
+    // internal-error catch further down.
     try {
         const prefs = getPreferences();
-        resolveTargets({ prefs, explicit: opts.agent }); // validates --agent; throws on an unknown/disabled agent
+        resolveTargets({ prefs, explicit: opts.agent });
+    } catch (err) {
+        process.stderr.write(`awm doctor: ${(err as Error).message}\n`);
+        return 2;
+    }
+
+    let report: CheckReport;
+    try {
         report = runChecks(gatherContext({ cwd: opts.cwd }));
     } catch (err) {
         process.stderr.write(`awm doctor: internal error: ${(err as Error).message}\n`);

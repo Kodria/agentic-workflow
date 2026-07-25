@@ -1,6 +1,11 @@
 import type { AwmPreferences } from '../utils/config';
 import { isAgentTarget, type AgentTarget } from '../providers';
 
+export type ResolveAgentTargetsInput = {
+    prefs: { readonly enabledAgents: Readonly<AwmPreferences['enabledAgents']> };
+    explicit?: string;
+};
+
 export function resolveAgentTargets(input: {
     prefs: { readonly enabledAgents: Readonly<AwmPreferences['enabledAgents']> };
     explicit?: string;
@@ -29,4 +34,26 @@ export function resolveAgentTargets(input: {
         }
     }
     return agents as AgentTarget[];
+}
+
+export type ResolveAgentTargetsResult =
+    | { ok: true; targets: AgentTarget[] }
+    | { ok: false; error: string };
+
+/**
+ * Non-throwing wrapper over `resolveAgentTargets` — every one of `add`,
+ * `remove`, `sync`, `update` and `doctor` needs the exact same
+ * try/resolve/catch shape, but each has a different failure-handling style
+ * (`process.exit` in `index.ts`'s interactive Commander actions vs. returning
+ * `{ code: 1, ... }` from the testable `run*Core` functions). Keeping this
+ * wrapper pure (no logging, no process.exit) lets every call site reuse the
+ * SAME resolution logic while choosing its own way to report/exit on
+ * failure, rather than duplicating the try/catch at each of the 6+ sites.
+ */
+export function resolveAgentTargetsOrError(input: ResolveAgentTargetsInput): ResolveAgentTargetsResult {
+    try {
+        return { ok: true, targets: resolveAgentTargets(input) };
+    } catch (e) {
+        return { ok: false, error: (e as Error).message };
+    }
 }

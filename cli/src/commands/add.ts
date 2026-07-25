@@ -8,7 +8,7 @@
 import pc from 'picocolors';
 import { AgentTarget, Scope } from '../providers';
 import { AwmPreferences } from '../utils/config';
-import { resolveAgentTargets } from '../core/agent-targets';
+import { resolveAgentTargetsOrError } from '../core/agent-targets';
 import { BundleDefinition, defaultScopeForBundle } from '../core/bundles';
 import { addBundle as realAddBundle, AddBundleResult } from '../core/bundle-install';
 import { findProjectRoot } from '../core/profile';
@@ -51,13 +51,12 @@ export function runAddBundleCore(
         return { code: 1, selectedAgents: [] };
     }
 
-    let selectedAgents: AgentTarget[];
-    try {
-        selectedAgents = resolveAgentTargets({ prefs, explicit: options.agent });
-    } catch (e) {
-        console.error(pc.red((e as Error).message));
+    const resolved = resolveAgentTargetsOrError({ prefs, explicit: options.agent });
+    if (!resolved.ok) {
+        console.error(pc.red(resolved.error));
         return { code: 1, selectedAgents: [] };
     }
+    const selectedAgents = resolved.targets;
 
     let scopeOverride: Scope | undefined;
     if (options.scope) {

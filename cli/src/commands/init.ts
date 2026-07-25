@@ -130,7 +130,6 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
         const mutationTargets = planInitMutationTargets({
             cwd,
             agent,
-            preferences: nextPreferences,
             bundles: preSyncBundles,
         });
         const backup = beginBackupSession(mutationTargets);

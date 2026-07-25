@@ -5,9 +5,14 @@
 // already managed for claude-code. `gatherProviderFacts` snapshots every path
 // Claude's own init run would touch (hooks, skill/agent dirs, injection);
 // `assertClaudeBaselinePreserved` compares a before/after pair and throws if
-// anything moved. Hashing mirrors install-transaction.ts's manifest content
-// hash (paths + kind + size/mtime for dirs, sha256 for files) — cheap, no
-// full recursive tree hashing, good enough to detect "something changed".
+// anything moved. Directories are hashed by recursively walking the full tree
+// and folding in every nested file's own content hash — this is an absolute
+// safety invariant (R19), so a mutation nested arbitrarily deep under a
+// managed directory (e.g. a `copy`-mode global install materializing a
+// nested source tree) must still be detected, not just a top-level stat
+// summary. These are small, provider-managed directories (skills/agents/
+// hook scripts), never arbitrary user content, so full content hashing stays
+// cheap.
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -21,6 +26,49 @@ export type ProviderFacts = {
     hash: string;
 };
 
+function hashFileContent(target: string): string {
+    return crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex');
+}
+
+/**
+ * Recursively walks `dir`, producing a digest that changes if ANY nested
+ * file's content changes at ANY depth, or any entry is added/removed/renamed/
+ * changes kind (file/dir/symlink) — not just the top-level entries.
+ */
+function hashDirectoryTree(dir: string): string {
+    let entries: string[];
+    try {
+        entries = fs.readdirSync(dir).sort();
+    } catch {
+        return 'unreadable';
+    }
+    const parts = entries.map((name) => {
+        const p = path.join(dir, name);
+        let s: fs.Stats;
+        try {
+            s = fs.lstatSync(p);
+        } catch {
+            return `${name}:missing`;
+        }
+        if (s.isSymbolicLink()) {
+            try {
+                return `${name}:l:${fs.readlinkSync(p)}`;
+            } catch {
+                return `${name}:l:unreadable`;
+            }
+        }
+        if (s.isDirectory()) {
+            return `${name}:d:${hashDirectoryTree(p)}`;
+        }
+        try {
+            return `${name}:f:${hashFileContent(p)}`;
+        } catch {
+            return `${name}:f:unreadable`;
+        }
+    });
+    return parts.join('|');
+}
+
 function hashPath(target: string): string {
     let stat: fs.Stats;
     try {
@@ -32,25 +80,9 @@ function hashPath(target: string): string {
         return `symlink:${fs.readlinkSync(target)}`;
     }
     if (stat.isDirectory()) {
-        let entries: string[];
-        try {
-            entries = fs.readdirSync(target).sort();
-        } catch {
-            return 'dir:unreadable';
-        }
-        const summary = entries.map((name) => {
-            const p = path.join(target, name);
-            try {
-                const s = fs.lstatSync(p);
-                const kind = s.isDirectory() ? 'd' : s.isSymbolicLink() ? 'l' : 'f';
-                return `${name}:${kind}:${s.size}:${s.mtimeMs}`;
-            } catch {
-                return `${name}:missing`;
-            }
-        });
-        return `dir:${summary.join('|')}`;
+        return `dir:${hashDirectoryTree(target)}`;
     }
-    return `file:${crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex')}`;
+    return `file:${hashFileContent(target)}`;
 }
 
 /** Paths that materially represent `agent`'s managed AWM state (hook, injection, artifact dirs). */

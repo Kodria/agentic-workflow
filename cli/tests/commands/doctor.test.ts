@@ -95,4 +95,31 @@ describe('runDoctor', () => {
         expect(Array.isArray(parsed.results)).toBe(true);
         expect(code).toBe(1);
     });
+
+    it('reports a clear, specific error for an invalid --agent value, not a generic "internal error"', () => {
+        const errSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        try {
+            const code = runDoctor({ cwd: tmpHome, agent: 'not-a-real-agent' });
+            expect(code).toBe(2);
+            const written = errSpy.mock.calls.map((c) => c[0]).join('');
+            expect(written).toContain('awm doctor: Invalid agent "not-a-real-agent"');
+            expect(written).not.toContain('internal error');
+        } finally {
+            errSpy.mockRestore();
+        }
+    });
+
+    it('reports a clear error when --agent names a target that is not enabled', () => {
+        const errSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        try {
+            // Bare HOME → default preferences enable only claude-code.
+            const code = runDoctor({ cwd: tmpHome, agent: 'codex' });
+            expect(code).toBe(2);
+            const written = errSpy.mock.calls.map((c) => c[0]).join('');
+            expect(written).toContain('awm doctor: codex is not enabled');
+            expect(written).not.toContain('internal error');
+        } finally {
+            errSpy.mockRestore();
+        }
+    });
 });

@@ -13,14 +13,13 @@ import pc from 'picocolors';
 import { AgentTarget } from '../providers';
 import { findProjectRoot, readProfile } from '../core/profile';
 import {
-    syncRegistries, readRegistriesConfig, verifyMinCliVersions, RegistrySyncResult,
+    syncRegistries, readRegistriesConfig, verifyMinCliVersions, assertRegistryGates, RegistrySyncResult,
 } from '../core/registries';
-import { cliVersion } from '../core/cli-version';
 import { discoverAllBundles } from '../core/bundles';
 import { syncProfile as realSyncProfile, SyncResult } from '../core/bundle-install';
 import { verifyProjectPins, PinFailure } from '../core/profile-pins';
 import { getPreferences } from '../utils/config';
-import { resolveAgentTargets } from '../core/agent-targets';
+import { resolveAgentTargetsOrError } from '../core/agent-targets';
 
 export type RunSyncOptions = {
     cwd?: string;
@@ -71,13 +70,12 @@ export async function runSyncCore(
     }
 
     const prefs = getPreferences();
-    let selectedAgents: AgentTarget[];
-    try {
-        selectedAgents = resolveAgentTargets({ prefs, explicit: options.agent });
-    } catch (e) {
-        console.error(pc.red((e as Error).message));
+    const resolved = resolveAgentTargetsOrError({ prefs, explicit: options.agent });
+    if (!resolved.ok) {
+        console.error(pc.red(resolved.error));
         return { code: 1, selectedAgents: [] };
     }
+    const selectedAgents = resolved.targets;
 
     const syncResults = await d.syncRegistries();
     for (const r of syncResults) {
@@ -85,12 +83,10 @@ export async function runSyncCore(
     }
 
     // Gate minCliVersion (WS-4) before pins (contract gates first — CONSTITUTION).
-    const cliFailures = d.verifyMinCliVersions();
-    if (cliFailures.length > 0) {
-        for (const f of cliFailures) {
-            console.error(pc.red(`Registry ${f.name} requires CLI >= ${f.min} (you have ${cliVersion()}).`));
-            console.error(pc.red('  Run: npm i -g agentic-workflow-manager'));
-        }
+    try {
+        assertRegistryGates(d.verifyMinCliVersions());
+    } catch (e) {
+        console.error(pc.red((e as Error).message));
         return { code: 1, selectedAgents };
     }
 

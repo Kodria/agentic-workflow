@@ -13,7 +13,6 @@
 // outside the backup session and survive a rollback.
 import path from 'path';
 import { AgentTarget, providerFor } from '../../providers';
-import type { AwmPreferences } from '../../utils/config';
 import { defaultScopeForBundle, type BundleDefinition } from '../bundles';
 import { expandBundleArtifacts } from '../bundle-install';
 import { artifactStateFile } from '../artifact-state';
@@ -24,7 +23,6 @@ import { contentRoots } from '../registries';
 export type PlanInitMutationTargetsParams = {
     cwd: string;
     agent: AgentTarget;
-    preferences: AwmPreferences;
     bundles: BundleDefinition[];
 };
 
@@ -76,9 +74,11 @@ function addBundleTargets(
 
 /**
  * Enumerates every path `runInitSteps` may write to for `agent`, given the
- * current preferences and discovered bundle catalog. Pure / read-only (does
- * hit the filesystem to discover project root and read the project profile,
- * but never writes).
+ * discovered bundle catalog. Driven entirely by `agent` (the single target
+ * being initialized this run) and `bundles` — not by preferences, since
+ * enumeration never needs to know about any OTHER enabled agent's targets.
+ * Pure / read-only (does hit the filesystem to discover project root and
+ * read the project profile, but never writes).
  */
 export function planInitMutationTargets(params: PlanInitMutationTargetsParams): string[] {
     const { cwd, agent, bundles } = params;

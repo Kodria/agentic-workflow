@@ -41,7 +41,8 @@ import { registerAgentCommand } from './commands/agent';
 import { runAddBundleCore } from './commands/add';
 import { runSyncCore } from './commands/sync';
 import { runUpdateCore } from './commands/update';
-import { resolveAgentTargets } from './core/agent-targets';
+import { resolveAgentTargetsOrError } from './core/agent-targets';
+import type { AwmPreferences } from './utils/config';
 import { maybeNotifyUpdate } from './core/update-check';
 import { warnIfUnsupportedPlatform } from './core/paths';
 import { cliVersion } from './core/cli-version';
@@ -52,6 +53,18 @@ program.name('awm').description('Agentic Workflow Manager').version(cliVersion()
 program.hook('postAction', () => {
     try { maybeNotifyUpdate(); } catch { /* el aviso nunca rompe un comando */ }
 });
+
+/** Shared resolve-or-exit for the 3 index.ts call sites that need `--agent` targeting
+ *  outside an already-testable `run*Core` function (which returns `{ code: 1, ... }`
+ *  instead — see `core/agent-targets.ts`'s `resolveAgentTargetsOrError`). */
+function resolveTargetsOrExit(prefs: AwmPreferences, explicit: string | undefined): AgentTarget[] {
+    const resolved = resolveAgentTargetsOrError({ prefs, explicit });
+    if (!resolved.ok) {
+        console.error(pc.red(resolved.error));
+        process.exit(1);
+    }
+    return resolved.targets;
+}
 
 function handleCancel(value: unknown): void {
     if (isCancel(value)) {
@@ -121,13 +134,7 @@ program.command('add [name]')
 
       // --all: install everything from every package headlessly
       if (options.all) {
-          let targetAgents: AgentTarget[];
-          try {
-              targetAgents = resolveAgentTargets({ prefs, explicit: options.agent });
-          } catch (e) {
-              console.error(pc.red((e as Error).message));
-              process.exit(1);
-          }
+          const targetAgents = resolveTargetsOrExit(prefs, options.agent);
 
           let scopeVal: Scope;
           if (options.scope) {
@@ -242,12 +249,7 @@ program.command('add [name]')
       // 3. Agent & Scope Prompts (Moved up)
       let targetAgents: AgentTarget[];
       if (options.agent) {
-          try {
-              targetAgents = resolveAgentTargets({ prefs, explicit: options.agent });
-          } catch (e) {
-              console.error(pc.red((e as Error).message));
-              process.exit(1);
-          }
+          targetAgents = resolveTargetsOrExit(prefs, options.agent);
       } else {
           const agentChoice = await multiselect({
               message: 'Which agent(s) do you want to install to?',
@@ -518,12 +520,7 @@ program.command('remove')
       // the interactive prompt and resolves the same way as add/sync/update/doctor (R12/R13).
       let targetAgents: AgentTarget[];
       if (options.agent) {
-          try {
-              targetAgents = resolveAgentTargets({ prefs, explicit: options.agent });
-          } catch (e) {
-              console.error(pc.red((e as Error).message));
-              process.exit(1);
-          }
+          targetAgents = resolveTargetsOrExit(prefs, options.agent);
       } else {
           const agentChoice = await multiselect({
               message: 'From which agent(s)?',

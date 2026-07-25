@@ -16,7 +16,7 @@
 import pc from 'picocolors';
 import { AgentTarget } from '../providers';
 import { getPreferences } from '../utils/config';
-import { resolveAgentTargets } from '../core/agent-targets';
+import { resolveAgentTargetsOrError } from '../core/agent-targets';
 import {
     syncRegistries, verifyMinCliVersions, assertRegistryGates, contentRoots, capabilityRoot,
     RegistrySyncResult,
@@ -79,13 +79,12 @@ export async function runUpdateCore(
     const d: RunUpdateDeps = { ...defaultDeps, ...deps };
     const prefs = getPreferences();
 
-    let selectedAgents: AgentTarget[];
-    try {
-        selectedAgents = resolveAgentTargets({ prefs, explicit: options.agent });
-    } catch (e) {
-        console.error(pc.red((e as Error).message));
+    const resolved = resolveAgentTargetsOrError({ prefs, explicit: options.agent });
+    if (!resolved.ok) {
+        console.error(pc.red(resolved.error));
         return { code: 1, selectedAgents: [] };
     }
+    const selectedAgents = resolved.targets;
 
     const registryResults = await d.syncRegistries();
     for (const r of registryResults) {
