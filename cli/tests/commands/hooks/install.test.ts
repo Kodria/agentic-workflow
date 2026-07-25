@@ -163,19 +163,28 @@ describe('installHook (happy path + merge)', () => {
     it('throws for unsupported agent target', () => {
         const { installHook } = require('../../../src/commands/hooks/install');
         expect(() => installHook({ agent: 'antigravity', registryRoot: tmpRegistry, installMethod: 'symlink' }))
-            .toThrow(/not supported/);
+            .toThrow(/hooks not supported/);
     });
 
-    it('rejects Codex before creating hook settings or scripts', () => {
-        const { installHook } = require('../../../src/commands/hooks/install');
+    // Characterization test (Task 7, Step 1): freezes the Claude adapter's
+    // observable contract — matcher, ordering, and untouched unrelated
+    // settings/hooks keys — before the Claude-specific logic moves into
+    // claude.ts. Verifies R19.
+    it('keeps the Claude SessionStart matcher and unrelated settings unchanged', () => {
+        const claudeDir = path.join(tmpHome, '.claude');
+        fs.mkdirSync(claudeDir, { recursive: true });
+        const settingsPath = path.join(claudeDir, 'settings.json');
+        fs.writeFileSync(settingsPath, JSON.stringify({
+            permissions: { allow: ['Read'] },
+            hooks: { SessionEnd: [{ hooks: [{ type: 'command', command: 'echo bye' }] }] },
+        }));
 
-        expect(() => installHook({
-            agent: 'codex',
-            registryRoot: tmpRegistry,
-            installMethod: 'symlink',
-        })).toThrow('Codex hook strategy is not implemented yet');
-        expect(fs.existsSync(path.join(tmpHome, '.codex/hooks.json'))).toBe(false);
-        expect(fs.existsSync(path.join(tmpHome, '.awm/hooks/codex'))).toBe(false);
-        expect(fs.existsSync(path.join(tmpHome, '.awm/backups'))).toBe(false);
+        const { installHook } = require('../../../src/commands/hooks/install');
+        installHook({ agent: 'claude-code', registryRoot: tmpRegistry, installMethod: 'copy' });
+
+        const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+        expect(settings.permissions).toEqual({ allow: ['Read'] });
+        expect(settings.hooks.SessionEnd).toHaveLength(1);
+        expect(settings.hooks.SessionStart[0].matcher).toBe('startup|clear|compact');
     });
 });

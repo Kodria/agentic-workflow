@@ -61,7 +61,10 @@ describe('resyncInstalledHooks', () => {
         const { resyncInstalledHooks } = require('../../../src/commands/hooks/resync');
         const results = resyncInstalledHooks(tmpRegistry);
 
-        expect(results).toEqual([{ agent: 'claude-code', action: 'resynced' }]);
+        expect(results).toEqual([
+            { agent: 'claude-code', action: 'resynced' },
+            { agent: 'codex', action: 'not-installed' },
+        ]);
         const synced = fs.readFileSync(path.join(scriptsDir, 'session-start'), 'utf-8');
         expect(synced).toContain('NEW VERSION');
         expect(fs.lstatSync(path.join(scriptsDir, 'session-start')).isSymbolicLink()).toBe(false);
@@ -75,7 +78,10 @@ describe('resyncInstalledHooks', () => {
         const { resyncInstalledHooks } = require('../../../src/commands/hooks/resync');
         const results = resyncInstalledHooks(tmpRegistry);
 
-        expect(results).toEqual([{ agent: 'claude-code', action: 'not-installed' }]);
+        expect(results).toEqual([
+            { agent: 'claude-code', action: 'not-installed' },
+            { agent: 'codex', action: 'not-installed' },
+        ]);
         expect(fs.existsSync(path.join(tmpHome, '.awm/hooks/session-start'))).toBe(false);
     });
 
@@ -90,7 +96,10 @@ describe('resyncInstalledHooks', () => {
         const { resyncInstalledHooks } = require('../../../src/commands/hooks/resync');
         const results = resyncInstalledHooks(tmpRegistry);
 
-        expect(results).toEqual([{ agent: 'claude-code', action: 'resynced' }]);
+        expect(results).toEqual([
+            { agent: 'claude-code', action: 'resynced' },
+            { agent: 'codex', action: 'not-installed' },
+        ]);
         expect(fs.lstatSync(path.join(scriptsDir, 'session-start')).isSymbolicLink()).toBe(true);
         expect(fs.lstatSync(path.join(scriptsDir, 'using-awm.md')).isSymbolicLink()).toBe(true);
     });
@@ -104,7 +113,10 @@ describe('resyncInstalledHooks', () => {
         const { resyncInstalledHooks } = require('../../../src/commands/hooks/resync');
         const results = resyncInstalledHooks(tmpRegistry);
 
-        expect(results).toEqual([{ agent: 'claude-code', action: 'registry-missing' }]);
+        expect(results).toEqual([
+            { agent: 'claude-code', action: 'registry-missing' },
+            { agent: 'codex', action: 'not-installed' },
+        ]);
         expect(fs.readFileSync(path.join(scriptsDir, 'session-start'), 'utf-8')).toContain('OLD');
     });
 
@@ -119,7 +131,10 @@ describe('resyncInstalledHooks', () => {
         const { resyncInstalledHooks } = require('../../../src/commands/hooks/resync');
         const results = resyncInstalledHooks(tmpRegistry);
 
-        expect(results).toEqual([{ agent: 'claude-code', action: 'resynced' }]);
+        expect(results).toEqual([
+            { agent: 'claude-code', action: 'resynced' },
+            { agent: 'codex', action: 'not-installed' },
+        ]);
         expect(fs.existsSync(path.join(scriptsDir, 'session-start'))).toBe(true);
         // detectInstallMethod fell back to copy since lstatSync threw
         expect(fs.lstatSync(path.join(scriptsDir, 'session-start')).isSymbolicLink()).toBe(false);
@@ -143,8 +158,45 @@ describe('resyncInstalledHooks', () => {
         const { resyncInstalledHooks } = require('../../../src/commands/hooks/resync');
         const results = resyncInstalledHooks(tmpRegistry);
 
-        expect(results).toEqual([{ agent: 'claude-code', action: 'registry-missing' }]);
+        expect(results).toEqual([
+            { agent: 'claude-code', action: 'registry-missing' },
+            { agent: 'codex', action: 'not-installed' },
+        ]);
         // old script left intact — never leave user without hook
         expect(fs.readFileSync(path.join(scriptsDir, 'session-start'), 'utf-8')).toContain('OLD');
+    });
+
+    it('refreshes an installed Codex hook script and skips the untouched Claude target', () => {
+        const codexScriptsDir = path.join(tmpHome, '.awm/hooks/codex');
+        fs.mkdirSync(codexScriptsDir, { recursive: true });
+        fs.writeFileSync(path.join(codexScriptsDir, 'session-start'), '#!/usr/bin/env bash\necho "OLD CODEX"', { mode: 0o755 });
+
+        const codexHooksPath = path.join(tmpHome, '.codex/hooks.json');
+        fs.mkdirSync(path.dirname(codexHooksPath), { recursive: true });
+        fs.writeFileSync(codexHooksPath, JSON.stringify({
+            hooks: {
+                SessionStart: [{
+                    matcher: 'startup|resume|clear|compact',
+                    hooks: [{
+                        type: 'command',
+                        command: path.join(codexScriptsDir, 'session-start'),
+                        statusMessage: 'Loading AWM session state',
+                    }],
+                }],
+            },
+        }, null, 2));
+
+        const regHooks = path.join(tmpRegistry, 'hooks');
+        fs.mkdirSync(regHooks, { recursive: true });
+        fs.writeFileSync(path.join(regHooks, 'codex-session-start'), '#!/usr/bin/env bash\necho "NEW CODEX"', { mode: 0o755 });
+
+        const { resyncInstalledHooks } = require('../../../src/commands/hooks/resync');
+        const results = resyncInstalledHooks(tmpRegistry);
+
+        expect(results).toEqual([
+            { agent: 'claude-code', action: 'not-installed' },
+            { agent: 'codex', action: 'resynced' },
+        ]);
+        expect(fs.readFileSync(path.join(codexScriptsDir, 'session-start'), 'utf-8')).toContain('NEW CODEX');
     });
 });

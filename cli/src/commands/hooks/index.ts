@@ -5,15 +5,21 @@ import { getPreferences } from '../../utils/config';
 import { installHook } from './install';
 import { uninstallHook } from './uninstall';
 import { computeHookStatus } from './status';
-import type { AgentTarget } from '../../providers';
+import { AGENT_TARGETS, AgentTarget, getHookConfig } from '../../providers';
 import { capabilityRoot } from '../../core/registries';
+
+const HOOK_TARGETS = AGENT_TARGETS.filter((a) => getHookConfig(a));
+
+function targetOptionDescription(): string {
+    return `Target harness (${HOOK_TARGETS.join('|')})`;
+}
 
 export function registerHooksCommand(program: Command): void {
     const hooks = program.command('hooks').description('Manage SessionStart bootstrap hooks');
 
     hooks.command('install')
         .description('Install the AWM bootstrap hook into the target harness')
-        .option('-t, --target <target>', 'Target harness (claude-code only in this version)', 'claude-code')
+        .option('-t, --target <target>', targetOptionDescription(), 'claude-code')
         .option('-y, --yes', 'Skip interactive confirmations', false)
         .action(async (options: { target?: string; yes?: boolean }) => {
             const agent = (options.target ?? 'claude-code') as AgentTarget;
@@ -41,8 +47,10 @@ export function registerHooksCommand(program: Command): void {
                 console.log(pc.green('✓ AWM bootstrap hook installed.'));
                 console.log('');
                 console.log(`  Scripts:        ${result.scriptsDir}/session-start`);
-                console.log(`                  ${result.scriptsDir}/run-hook.cmd`);
-                console.log(`                  ${result.scriptsDir}/using-awm.md → ~/.awm/registries/baseline/skills/using-awm/SKILL.md`);
+                if (agent === 'claude-code') {
+                    console.log(`                  ${result.scriptsDir}/run-hook.cmd`);
+                    console.log(`                  ${result.scriptsDir}/using-awm.md → ~/.awm/registries/baseline/skills/using-awm/SKILL.md`);
+                }
                 console.log('');
                 console.log(`  Settings file:  ${result.settingsPath}`);
                 if (result.backupPath) {
@@ -54,7 +62,7 @@ export function registerHooksCommand(program: Command): void {
                 console.log(`  Verify:         ${pc.cyan('awm hooks status')}`);
                 console.log(`  Remove:         ${pc.cyan('awm hooks uninstall')}`);
                 console.log('');
-                console.log(pc.yellow('  ⚠ Restart Claude Code to activate the hook in existing sessions.'));
+                console.log(pc.yellow(`  ⚠ Restart ${agent} to activate the hook in existing sessions.`));
             } catch (e: any) {
                 console.error(pc.red(`✗ ${e.message}`));
                 process.exit(1);
@@ -63,7 +71,7 @@ export function registerHooksCommand(program: Command): void {
 
     hooks.command('uninstall')
         .description('Remove the AWM bootstrap hook')
-        .option('-t, --target <target>', 'Target harness (claude-code only in this version)', 'claude-code')
+        .option('-t, --target <target>', targetOptionDescription(), 'claude-code')
         .option('-y, --yes', 'Skip interactive confirmations', false)
         .action(async (options: { target?: string; yes?: boolean }) => {
             const agent = (options.target ?? 'claude-code') as AgentTarget;
@@ -94,17 +102,25 @@ export function registerHooksCommand(program: Command): void {
 
     hooks.command('status')
         .description('Check the bootstrap hook installation status')
-        .option('-t, --target <target>', 'Target harness (claude-code only in this version)', 'claude-code')
+        .option('-t, --target <target>', targetOptionDescription(), 'claude-code')
         .action((options: { target?: string }) => {
             const agent = (options.target ?? 'claude-code') as AgentTarget;
             try {
                 const result = computeHookStatus(agent);
                 const symbol = (ok: boolean) => ok ? pc.green('✓') : pc.red('✗');
                 console.log('');
-                console.log(`  Bootstrap skill:    ${symbol(result.checks.bootstrapSkill.ok)} ${result.checks.bootstrapSkill.detail}`);
+                if (result.checks.bootstrapSkill) {
+                    console.log(`  Bootstrap skill:    ${symbol(result.checks.bootstrapSkill.ok)} ${result.checks.bootstrapSkill.detail}`);
+                }
                 console.log(`  Session-start:      ${symbol(result.checks.sessionStartScript.ok)} ${result.checks.sessionStartScript.detail}`);
-                console.log(`  Run-hook wrapper:   ${symbol(result.checks.runHookWrapper.ok)} ${result.checks.runHookWrapper.detail}`);
+                if (result.checks.runHookWrapper) {
+                    console.log(`  Run-hook wrapper:   ${symbol(result.checks.runHookWrapper.ok)} ${result.checks.runHookWrapper.detail}`);
+                }
                 console.log(`  Settings entry:     ${symbol(result.checks.settingsEntry.ok)} ${result.checks.settingsEntry.detail}`);
+                if (result.trust) {
+                    const trustSymbol = result.trust === 'healthy' ? pc.green('✓') : result.trust === 'stale' ? pc.red('✗') : pc.yellow('…');
+                    console.log(`  Trust:              ${trustSymbol} ${result.trust}`);
+                }
                 console.log('');
                 const overall = result.overall === 'HEALTHY' ? pc.green(result.overall) :
                                 result.overall === 'NOT_INSTALLED' ? pc.yellow(result.overall) :

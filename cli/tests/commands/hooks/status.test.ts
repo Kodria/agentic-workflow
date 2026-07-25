@@ -87,11 +87,14 @@ describe('computeHookStatus', () => {
         expect(() => computeHookStatus('antigravity')).toThrow(/hooks not supported/i);
     });
 
-    it('rejects Codex before applying Claude status checks', () => {
+    it('dispatches Codex targets to the Codex status checks (not the Claude ones)', () => {
+        // No Codex hook installed in this tmpHome — should report NOT/DEGRADED
+        // via the Codex-specific checks (sessionStartScript, settingsEntry),
+        // never touching Claude's settings.json path.
         const { computeHookStatus } = require('../../../src/commands/hooks/status');
-
-        expect(() => computeHookStatus('codex'))
-            .toThrow('Codex hook strategy is not implemented yet');
-        expect(fs.existsSync(path.join(tmpHome, '.awm/hooks/codex'))).toBe(false);
+        const result = computeHookStatus('codex');
+        expect(result.checks.settingsEntry.detail).toContain('.codex/hooks.json');
+        expect(result.checks.bootstrapSkill).toBeUndefined();
+        expect(result.checks.runHookWrapper).toBeUndefined();
     });
 });
