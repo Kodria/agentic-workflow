@@ -136,6 +136,28 @@ describe('installHook / computeHookStatus / uninstallHook — Codex adapter', ()
         expect(cfg.hooks.SessionStart[0].hooks[0].statusMessage).toBe('Loading AWM session state');
     });
 
+    it('is a no-op on a second install when nothing changed (idempotent, no backup/write churn)', () => {
+        writeRegistry();
+        const { installHook } = require('../../../src/commands/hooks/install');
+
+        const first = installHook({ agent: 'codex', registryRoot: tmpRegistry, installMethod: 'copy' });
+        expect(first.status).toBe('installed');
+
+        const scriptPath = path.join(codexScriptsDir, 'session-start');
+        const contentBefore = fs.readFileSync(hooksJson, 'utf8');
+        const hooksJsonMtimeBefore = fs.statSync(hooksJson).mtimeMs;
+        const scriptMtimeBefore = fs.statSync(scriptPath).mtimeMs;
+
+        const second = installHook({ agent: 'codex', registryRoot: tmpRegistry, installMethod: 'copy' });
+
+        expect(second.status).toBe('already-up-to-date');
+        expect(second.backupPath).toBeNull();
+        expect(fs.existsSync(path.join(tmpHome, '.awm/backups'))).toBe(false); // no backup churn
+        expect(fs.readFileSync(hooksJson, 'utf8')).toBe(contentBefore);
+        expect(fs.statSync(hooksJson).mtimeMs).toBe(hooksJsonMtimeBefore);
+        expect(fs.statSync(scriptPath).mtimeMs).toBe(scriptMtimeBefore);
+    });
+
     function hashOf(file: string): string {
         return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
     }
@@ -173,6 +195,33 @@ describe('installHook / computeHookStatus / uninstallHook — Codex adapter', ()
 
         const { computeHookStatus } = require('../../../src/commands/hooks/status');
         expect(computeHookStatus('codex').trust).toBe('stale');
+    });
+
+    it('degrades to stale (not throwing) when heartbeat.json is malformed JSON', () => {
+        installCodexFixture({ heartbeat: false });
+        fs.writeFileSync(path.join(codexScriptsDir, 'heartbeat.json'), '{ not valid json');
+
+        const { computeHookStatus } = require('../../../src/commands/hooks/status');
+        let result: any;
+        expect(() => { result = computeHookStatus('codex'); }).not.toThrow();
+        expect(result.trust).toBe('stale');
+    });
+
+    it('omits trust entirely when the AWM entry is not present in hooks.json', () => {
+        // Script + heartbeat both exist (e.g. left over from a prior install),
+        // but hooks.json has no AWM SessionStart entry — nothing to trust.
+        fs.mkdirSync(codexScriptsDir, { recursive: true });
+        const scriptPath = path.join(codexScriptsDir, 'session-start');
+        fs.writeFileSync(scriptPath, '#!/usr/bin/env bash\necho "hi"', { mode: 0o755 });
+        fs.writeFileSync(
+            path.join(codexScriptsDir, 'heartbeat.json'),
+            JSON.stringify({ hash: hashOf(scriptPath), ts: new Date().toISOString() }),
+        );
+
+        const { computeHookStatus } = require('../../../src/commands/hooks/status');
+        const result = computeHookStatus('codex');
+        expect(result.checks.settingsEntry.ok).toBe(false);
+        expect(result.trust).toBeUndefined();
     });
 
     it('reports HEALTHY overall with no bootstrapSkill/runHookWrapper checks', () => {

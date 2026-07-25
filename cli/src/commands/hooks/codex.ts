@@ -63,9 +63,15 @@ export function installCodexHook(options: InstallOptions): InstallResult {
         throw new Error('multiple AWM SessionStart entries in Codex hooks.json');
     }
 
+    const newEntry = awmCodexEntry(config.scriptsDir);
+
+    if (matches.length === 1 && JSON.stringify(matches[0]) === JSON.stringify(newEntry)) {
+        return { status: 'already-up-to-date', scriptsDir: config.scriptsDir, settingsPath: config.settingsPath, backupPath: null };
+    }
+
     const nextEntries = matches.length === 1
-        ? entries.map((entry) => isAwmCodexEntry(entry, config.scriptsDir) ? awmCodexEntry(config.scriptsDir) : entry)
-        : [...entries, awmCodexEntry(config.scriptsDir)];
+        ? entries.map((entry) => isAwmCodexEntry(entry, config.scriptsDir) ? newEntry : entry)
+        : [...entries, newEntry];
 
     const merged = { ...current, hooks: { ...hooks, SessionStart: nextEntries } };
     const backupPath = backupManagedFile(config.settingsPath);
@@ -140,9 +146,15 @@ export function computeCodexHookStatus(agent: 'codex'): HookStatus {
     else if (settingsOnlyMissing) overall = 'NOT_INSTALLED';
     else overall = 'DEGRADED';
 
+    // Trust only makes sense once the AWM entry is actually present in
+    // hooks.json — otherwise there's nothing installed to trust.
+    const trust = settingsEntry.ok
+        ? computeCodexTrust(sessionStartScript, scriptPath, heartbeatPath)
+        : undefined;
+
     return {
         overall,
-        trust: computeCodexTrust(sessionStartScript, scriptPath, heartbeatPath),
+        trust,
         checks: { sessionStartScript, settingsEntry },
     };
 }

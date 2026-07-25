@@ -5,7 +5,7 @@ import { getPreferences } from '../../utils/config';
 import { installHook } from './install';
 import { uninstallHook } from './uninstall';
 import { computeHookStatus } from './status';
-import { AGENT_TARGETS, AgentTarget, getHookConfig } from '../../providers';
+import { AGENT_TARGETS, AgentTarget, getHookConfig, providerFor } from '../../providers';
 import { capabilityRoot } from '../../core/registries';
 
 const HOOK_TARGETS = AGENT_TARGETS.filter((a) => getHookConfig(a));
@@ -62,7 +62,7 @@ export function registerHooksCommand(program: Command): void {
                 console.log(`  Verify:         ${pc.cyan('awm hooks status')}`);
                 console.log(`  Remove:         ${pc.cyan('awm hooks uninstall')}`);
                 console.log('');
-                console.log(pc.yellow(`  ⚠ Restart ${agent} to activate the hook in existing sessions.`));
+                console.log(pc.yellow(`  ⚠ Restart ${providerFor(agent).label} to activate the hook in existing sessions.`));
             } catch (e: any) {
                 console.error(pc.red(`✗ ${e.message}`));
                 process.exit(1);
