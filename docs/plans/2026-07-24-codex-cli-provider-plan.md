@@ -9,6 +9,11 @@
      depcheck-generic-formatter-false-fail). typecheck/lint/test/build/
      git-diff-check are all genuinely clean. security is environment-limited
      (semgrep binary absent), not a code finding. -->
+<!-- awm-retro-complete: 2026-07-25 -->
+<!-- See docs/harness-retros.md, entry "2026-07-25 — Codex CLI provider
+     plan: shared-state overwrite, R14 singleton-agent refusal, and the
+     fix-needs-a-test gap" for the full session ledger summary and the
+     rules cured into CONSTITUTION.md / AGENTS.md / tests/structural/. -->
 
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
