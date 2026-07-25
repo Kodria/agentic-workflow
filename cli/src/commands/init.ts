@@ -11,7 +11,7 @@ import { defaultActions } from '../core/init/steps';
 import type { InitOutcome, InitActions, StepResult } from '../core/init/types';
 import type { AgentTarget } from '../providers';
 import { warnIfUnsupportedPlatform } from '../core/paths';
-import { getPreferences, savePreferences, preferencesExist } from '../utils/config';
+import { enableAgent, loadPreferences, savePreferences, preferencesExist } from '../utils/config';
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -80,7 +80,8 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
     // explicit preference on a bare re-init: only write when an agent was passed via -a,
     // or when no preferences file exists yet.
     if (opts.agent != null || !preferencesExist()) {
-        savePreferences({ ...getPreferences(), defaultAgent: agent });
+        const prefs = enableAgent(loadPreferences(agent).prefs, agent);
+        savePreferences({ ...prefs, defaultAgent: agent });
     }
 
     let outcome: InitOutcome;

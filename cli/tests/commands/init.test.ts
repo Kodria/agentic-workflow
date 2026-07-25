@@ -85,7 +85,8 @@ describe('runInit', () => {
     });
 
     const prefsFile = () => path.join(process.env.AWM_HOME as string, 'preferences.json');
-    const readAgent = () => JSON.parse(fs.readFileSync(prefsFile(), 'utf-8')).defaultAgent;
+    const readPreferences = () => JSON.parse(fs.readFileSync(prefsFile(), 'utf-8'));
+    const readAgent = () => readPreferences().defaultAgent;
 
     it('#7: first init (no -a) persists claude-code as the default agent', async () => {
         const { runInit } = require('../../src/commands/init');
@@ -98,6 +99,7 @@ describe('runInit', () => {
         const { runInit } = require('../../src/commands/init');
         await runInit({ cwd: tmpHome, yes: true, agent: 'opencode', actions: { syncCache: async () => {} } });
         expect(readAgent()).toBe('opencode');
+        expect(readPreferences().enabledAgents).toContain('opencode');
     });
 
     it('#7: re-init without -a does NOT clobber an existing explicit preference', async () => {

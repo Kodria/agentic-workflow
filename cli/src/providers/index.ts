@@ -2,9 +2,16 @@
 import path from 'path';
 import { homeDir, awmHome } from '../core/paths';
 
-export type AgentTarget = 'antigravity' | 'opencode' | 'claude-code';
+const AGENT_TARGETS = ['antigravity', 'opencode', 'claude-code', 'codex'] as const;
+
+export type AgentTarget = typeof AGENT_TARGETS[number];
 export type Scope = 'global' | 'local';
 export type ArtifactType = 'skill' | 'workflow' | 'agent';
+
+export function isAgentTarget(value: unknown): value is AgentTarget {
+    return typeof value === 'string' &&
+        (AGENT_TARGETS as readonly string[]).includes(value);
+}
 
 type ArtifactConfig = {
     global: string;
@@ -35,7 +42,11 @@ export type ProviderConfig = {
 const homedir = homeDir();
 const awmHomeDir = awmHome();
 
-export const PROVIDERS: Record<AgentTarget, ProviderConfig> = {
+type ConfiguredAgentTarget = Exclude<AgentTarget, 'codex'>;
+
+// Codex is a valid preference target before its provider configuration lands.
+// The string index preserves existing callers during this temporary split.
+export const PROVIDERS: Record<ConfiguredAgentTarget, ProviderConfig> & Record<string, ProviderConfig> = {
     antigravity: {
         label: 'Antigravity',
         skill:    { global: path.join(homedir, '.gemini/antigravity/skills'),           local: '.agent/skills' },
