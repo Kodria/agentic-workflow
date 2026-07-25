@@ -306,6 +306,33 @@ describe('stepActivation', () => {
         stepActivation(deps(ctx, a, { agent: 'opencode' }));
         expect(a.gatherProject).toHaveBeenCalledWith(expect.any(String), expect.any(Array), 'opencode');
     });
+
+    // Same class of bug as stepDevCore/stepAmbient's shared-group regression
+    // above, in the LOCAL-scope (project) code path: OpenCode and Codex share
+    // both their global AND local skill directories, so a project extension
+    // with a skill artifact hits the identical R14 refusal whenever
+    // syncProfile is called with a `[d.agent]` singleton and a co-owner is
+    // independently enabled.
+    it('activation includes a co-enabled agent sharing the same LOCAL skill target (codex + opencode)', () => {
+        const a = spies();
+        a.gatherProject = jest.fn((_cwd: string, _bundles: any) => project({ activeBundles: { expected: ['x'], linked: [], broken: [] } }));
+        const r = stepActivation(deps({ machine: machine(), project: project() }, a, {
+            agent: 'codex', enabledAgents: ['claude-code', 'opencode', 'codex'],
+        }));
+        expect(r.action).toBe('applied');
+        const call = a.syncProfile.mock.calls[0][0];
+        expect(call.agents.sort()).toEqual(['codex', 'opencode']);
+    });
+
+    it('activation does not add a co-owner that is not currently enabled', () => {
+        const a = spies();
+        a.gatherProject = jest.fn((_cwd: string, _bundles: any) => project({ activeBundles: { expected: ['x'], linked: [], broken: [] } }));
+        const r = stepActivation(deps({ machine: machine(), project: project() }, a, {
+            agent: 'codex', enabledAgents: ['claude-code', 'codex'],
+        }));
+        expect(r.action).toBe('applied');
+        expect(a.syncProfile).toHaveBeenCalledWith(expect.objectContaining({ agents: ['codex'] }));
+    });
 });
 
 describe('stepSensors', () => {

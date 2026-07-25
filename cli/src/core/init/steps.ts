@@ -123,6 +123,19 @@ function sharedInstallAgents(d: InitDeps): AgentTarget[] {
     return group.includes(d.agent) ? group : [d.agent, ...group];
 }
 
+/**
+ * Same reasoning as `sharedInstallAgents`, but for LOCAL-scope project
+ * extension bundles (`stepActivation`'s `syncProfile` call). OpenCode and
+ * Codex share both their global AND local skill directories
+ * (`providers/index.ts`), so a project with a skill-bearing extension hits
+ * the identical R14 refusal `sharedInstallAgents` was added to avoid — just
+ * scoped to `proj.root` instead of the machine-global directory.
+ */
+function sharedActivationAgents(d: InitDeps, projectRoot: string): AgentTarget[] {
+    const group = agentsSharingSkillTarget(d.agent, d.enabledAgents, 'local', projectRoot);
+    return group.includes(d.agent) ? group : [d.agent, ...group];
+}
+
 /** Step 1 – Sync the registry cache (clone / pull). */
 export async function stepCache(d: InitDeps): Promise<StepResult> {
     const { registryCache } = d.ctx.machine;
@@ -267,7 +280,7 @@ export function stepActivation(d: InitDeps): StepResult {
     d.actions.syncProfile({
         projectRoot: proj.root,
         bundles: d.bundles,
-        agents: [d.agent],
+        agents: sharedActivationAgents(d, proj.root),
         method: d.installMethod,
         contentDir: d.contentDir,
     });
