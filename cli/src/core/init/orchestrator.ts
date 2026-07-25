@@ -48,7 +48,26 @@ export async function runInitSteps(deps: InitDeps): Promise<InitOutcome> {
         steps.push(await wrapStep('project.context', 'project', () => stepContext(deps)));
     }
 
+    // Re-gather fresh so the report reflects whatever the steps above just
+    // installed. `results` deliberately keeps every check — including project
+    // ones — so the render still shows real project state (e.g. "run awm sync")
+    // when one exists; only `overall`, the exit-code verdict, needs scoping.
+    //
+    // If this run started with project scope nulled — `--machine-only`
+    // (init.ts's effectiveCtx), or genuinely no project at this cwd — `overall`
+    // must reflect only what THIS run attempted. `runChecks` otherwise mixes
+    // machine + project results into one flat `overall` (checks.ts), so a
+    // `--machine-only` bootstrap into an already-initialized project with
+    // unrelated unsynced bundles reports "degraded" and callers gating on it
+    // (`runInit`'s exit code) fail a run that fully succeeded at everything it
+    // was asked to do — the exact shape of a real Codex Cloud bootstrap script
+    // aborting under `set -euo pipefail` right after `awm init`.
     const after = runChecks(gatherContext({ cwd: deps.cwd, bundles: deps.bundles, agent: deps.agent }));
+    if (deps.ctx.project === null) {
+        after.overall = after.results
+            .filter((r) => r.level === 'machine')
+            .some((r) => r.status === 'missing') ? 'degraded' : 'healthy';
+    }
 
     return {
         steps,

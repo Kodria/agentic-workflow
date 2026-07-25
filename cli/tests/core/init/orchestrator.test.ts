@@ -95,6 +95,38 @@ describe('runInitSteps — orchestrator', () => {
         }
     });
 
+    it('machine-only inside an already-initialized project with unsynced bundles still reaches overall healthy', async () => {
+        // Reproduces a real Codex Cloud bootstrap: `awm init --agent codex --yes
+        // --machine-only` run with cwd inside an existing, previously-initialized
+        // project (its own `.awm/profile.json` already committed, declaring bundles
+        // this machine-only run was never asked to sync). The bare-cwd test above
+        // can't catch this — there, `ctx.project` is null for two reasons at once
+        // (machineOnly AND no project exists), so it never exercises "machineOnly
+        // nulled a project that actually has real, degraded content."
+        const root = path.join(tmpHome, 'existing-project');
+        fs.mkdirSync(path.join(root, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ dependencies: { next: '14.0.0' } }));
+        // Declares the "dev" bundle active, but its skills were never symlinked —
+        // exactly `active bundles (N missing)` in the real report the user saw.
+        fs.writeFileSync(path.join(root, '.awm', 'profile.json'), JSON.stringify({ extensions: ['dev'] }));
+
+        const deps = buildDeps(root);
+        deps.ctx.project = null; // what init.ts's effectiveCtx does for --machine-only
+
+        const { runInitSteps } = require('../../../src/core/init/orchestrator');
+        const out = await runInitSteps(deps);
+
+        // The steps this run actually attempted (machine-only) all succeeded —
+        // that must be reflected in the caller's exit code.
+        expect(out.steps.every((s: any) => s.action !== 'failed')).toBe(true);
+        expect(out.after.results.find((r: any) => r.id === 'machine.devCore')?.status).toBe('ok');
+        // Project state exists and IS genuinely degraded, and it must stay visible
+        // in the report (the CLI's own render still shows it) — but it must not
+        // drag down the overall verdict for a run that never touched project scope.
+        expect(out.after.results.some((r: any) => r.id === 'project.activation' && r.status === 'missing')).toBe(true);
+        expect(out.after.overall).toBe('healthy');
+    });
+
     it('project repo: applies activation/sensors, flags constitution+context as pending', async () => {
         const root = path.join(tmpHome, 'repo');
         fs.mkdirSync(path.join(root, '.awm'), { recursive: true });
