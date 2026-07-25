@@ -14,12 +14,13 @@ function writeBundle(
     name: string,
     scope: 'baseline' | 'ambient' | 'project',
     skills: string[],
+    dependsOn: unknown = [],
 ): void {
     fs.mkdirSync(path.join(contentRoot, 'bundles', name), { recursive: true });
     fs.writeFileSync(
         path.join(contentRoot, 'bundles', name, 'bundle.json'),
         JSON.stringify({
-            name, version: '1.0.0', scope, dependsOn: [],
+            name, version: '1.0.0', scope, dependsOn,
             skills: skills.map((s) => ({ name: s })), workflows: [], agents: [],
         }),
     );
@@ -27,6 +28,17 @@ function writeBundle(
         fs.mkdirSync(path.join(contentRoot, 'skills', skill), { recursive: true });
         fs.writeFileSync(path.join(contentRoot, 'skills', skill, 'SKILL.md'), `# ${skill}`);
     }
+}
+
+function addToCatalog(
+    contentRoot: string,
+    name: string,
+    scope: 'baseline' | 'ambient' | 'project',
+): void {
+    const catalogFile = path.join(contentRoot, 'catalog.json');
+    const catalog = JSON.parse(fs.readFileSync(catalogFile, 'utf-8'));
+    catalog.bundles.push({ name, source: `./bundles/${name}`, version: '1.0.0', scope });
+    fs.writeFileSync(catalogFile, JSON.stringify(catalog));
 }
 
 describe('planReconciliation (real, unmocked)', () => {
@@ -120,5 +132,64 @@ describe('planReconciliation (real, unmocked)', () => {
         const plan = planReconciliation({ targets: ['opencode'], roots: [contentRoot] });
         const owners = new Set(plan.operations.flatMap((op: any) => op.owners));
         expect(owners).toEqual(new Set(['opencode']));
+    });
+
+    // NOTE on the two tests below: `resolveBundleClosure` (bundles.ts) already
+    // treats a `dependsOn` entry naming a bundle that isn't in the catalog as
+    // silently absent from the closure — it does NOT throw (verified directly:
+    // a baseline bundle with `dependsOn: ['does-not-exist']` resolves its own
+    // artifacts fine; the ghost name is just dropped). So a plain dangling
+    // `dependsOn` string never reaches `planReconciliation`'s
+    // `try { expandBundleArtifacts(...) } catch { continue; }` guard at all —
+    // the first test below confirms that directly. To actually force the catch
+    // branch (and check it skips only the one broken bundle, not the whole
+    // batch, and doesn't silently eat some other bug), the second test injects
+    // a bundle whose `dependsOn` field is malformed in a way that genuinely
+    // breaks closure resolution (`dependsOn` is not an array, so
+    // `resolveBundleClosure`'s `for (const dep of b.dependsOn)` throws) —
+    // mirroring the kind of real, unresolvable-closure error the catch is
+    // meant to guard against.
+
+    it('tolerates a plain dangling dependsOn reference without needing the catch — the bundle installs normally', () => {
+        writeBundle(contentRoot, 'dangling-dep', 'baseline', ['dangling-skill'], ['does-not-exist']);
+        addToCatalog(contentRoot, 'dangling-dep', 'baseline');
+
+        const { planReconciliation } = require('../../src/core/reconciliation');
+        const plan = planReconciliation({ targets: ['claude-code'], roots: [contentRoot] });
+
+        const names = plan.operations.map((op: any) => op.name).sort();
+        // 'dangling-skill' installs fine even though its bundle's dependsOn
+        // points nowhere — resolveBundleClosure just drops the missing dep.
+        expect(names).toEqual(['ambient-skill', 'brainstorming', 'dangling-skill']);
+    });
+
+    it('skips a bundle whose closure genuinely fails to resolve, without aborting reconciliation for the rest', () => {
+        // Malformed dependsOn (not an array) makes resolveBundleClosure throw
+        // when it tries to iterate it — a real "unresolvable closure" error,
+        // unlike a plain dangling name reference (see test above).
+        writeBundle(contentRoot, 'broken', 'baseline', ['broken-skill'], 5);
+        addToCatalog(contentRoot, 'broken', 'baseline');
+
+        const { planReconciliation } = require('../../src/core/reconciliation');
+
+        let plan: any;
+        expect(() => {
+            plan = planReconciliation({ targets: ['claude-code'], roots: [contentRoot] });
+        }).not.toThrow();
+
+        // The healthy bundles (baseline 'dev' + ambient 'ambient-x') still
+        // reconcile correctly.
+        const names = plan.operations.map((op: any) => op.name).sort();
+        expect(names).toEqual(['ambient-skill', 'brainstorming']);
+
+        // The broken bundle is cleanly absent — no partial/broken entry for
+        // 'broken-skill' or any operation touching it.
+        expect(names).not.toContain('broken-skill');
+        expect(plan.operations.some((op: any) => op.sourcePath?.includes('broken'))).toBe(false);
+
+        // Applying the plan end-to-end still works (no dangling reference to
+        // the broken bundle leaked into the plan).
+        const { applyInstallPlan } = require('../../src/core/install-transaction');
+        expect(() => applyInstallPlan(plan)).not.toThrow();
     });
 });
