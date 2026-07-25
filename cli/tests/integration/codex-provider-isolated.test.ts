@@ -9,28 +9,23 @@
 // ~/.awm" rule; HOME/AWM_HOME are isolated tmpdirs for the whole test, same
 // pattern as tests/commands/hooks/install.test.ts).
 //
-// Deviation from the plan's illustrative snippet, and why: the snippet
-// enables `opencode` alongside `claude-code` before running a REAL
-// `awm init --agent codex`. That trips install-planner.ts's
-// `assertCompleteSharedGroup` (R14, Task 5) — opencode and codex share the
-// exact same physical skills directory (~/.agents/skills, providers/index.ts),
-// and R14 intentionally REFUSES a real bundle install that selects one owner
-// of a shared target without the other (see
-// tests/commands/multi-agent-targeting.test.ts's "add refuses a codex-only
-// skill install when OpenCode ... is also enabled" — the identical guard,
-// already reviewed and covered). `awm init --agent X` always narrowly targets
-// `[X]` for its baseline bundle step (core/init/steps.ts stepDevCore), so
-// enabling opencode ahead of a REAL `init --agent codex` run hits this
-// by-design refusal, not a bug — confirmed by direct reproduction while
-// building this fixture. Fixing that interaction would mean redesigning
-// stepDevCore's target selection, which is out of Task 9's scope (diagnostics)
-// and risks Task 8's already-reviewed rollback-safe init flow. This test
-// therefore keeps `opencode` OUT of enabledAgents and focuses on what R19/
-// R19.1/R23 actually require: Claude's baseline is untouched by a Codex init.
-// The "OpenCode and Codex share one physical skills dir, scanned once" claim
-// (R7-adjacent) is covered separately and more precisely at the unit level in
-// tests/core/diagnostics/context.test.ts ("reports shared skills for both
-// owners without scanning twice"), which doesn't need real installs to prove.
+// Matches the plan's illustrative Task 9 Step 5 snippet: OpenCode is enabled
+// (and really initialized) alongside Claude Code BEFORE the real
+// `awm init --agent codex` run, exactly the "OpenCode already enabled, then
+// Codex joins" scenario this whole plan exists to support. This used to trip
+// install-planner.ts's `assertCompleteSharedGroup` (R14, Task 5) — OpenCode
+// and Codex share the exact same physical skills directory (~/.agents/skills,
+// providers/index.ts) — because `core/init/steps.ts`'s `stepDevCore`/
+// `stepAmbient` passed a `[agent]` singleton as `selectedAgents`, which R14
+// refuses whenever a co-owner of the shared target is independently enabled.
+// That was a confirmed BLOCKER (found in post-implementation QA): it made
+// `awm init --agent codex` structurally fail whenever OpenCode was already
+// enabled, and vice versa. Fixed by having `stepDevCore`/`stepAmbient`
+// compute the complete shared-skill-target group among currently-enabled
+// agents (`install-planner.ts`'s `agentsSharingSkillTarget`, used via
+// `steps.ts`'s `sharedInstallAgents`) instead of a singleton — see
+// tests/core/init/steps.test.ts for the unit-level coverage of that
+// computation. This test proves the real end-to-end flow now succeeds.
 //
 // While building this fixture, this test also caught and fixed a real,
 // previously-untested bug: `runInit` called `assertClaudeBaselinePreserved`
@@ -144,7 +139,7 @@ describe('codex provider — isolated home E2E (Task 9)', () => {
         return walk(dir);
     }
 
-    it('initializes Codex beside a real Claude Code install without touching Claude files', async () => {
+    it('initializes Codex beside a real Claude Code + OpenCode install without touching Claude files', async () => {
         expect(process.env.HOME).toBe(tmpHome);
         expect(process.env.AWM_HOME).toBe(path.join(tmpHome, '.awm'));
 
@@ -159,10 +154,23 @@ describe('codex provider — isolated home E2E (Task 9)', () => {
         expect(fs.lstatSync(path.join(tmpHome, '.claude/skills/development-process')).isSymbolicLink()).toBe(true);
         expect(readPrefs().enabledAgents).toEqual(['claude-code']);
 
+        // Real, full, unstubbed init for opencode — enables it alongside Claude
+        // Code and materializes its real ~/.agents/skills symlink, the exact
+        // physical directory Codex shares (providers/index.ts). This is the
+        // scenario the plan's own Task 9 Step 5 snippet illustrates ("OpenCode
+        // already enabled, then Codex joins") and the one the BLOCKER fixed in
+        // core/init/steps.ts (sharedInstallAgents) makes work end-to-end.
+        const opencode = await runInit({ cwd: tmpWork, yes: true, agent: 'opencode' });
+        expect(opencode).toBeLessThanOrEqual(1);
+        expect(readPrefs().enabledAgents).toEqual(['claude-code', 'opencode']);
+        const opencodeSkillLinkBefore = fs.realpathSync(path.join(tmpHome, '.agents/skills/development-process'));
+
         const claudeBefore = snapshotTree(path.join(tmpHome, '.claude'));
 
         // Real, full, unstubbed init for codex — real Codex hook, real shared
-        // skill symlink, real Codex-native TOML agent render.
+        // skill symlink (co-owned with OpenCode), real Codex-native TOML agent
+        // render. Before the fix, this call threw: "Shared skill target cannot
+        // diverge; select the complete shared target group: opencode,codex".
         const codex = await runInit({
             cwd: tmpWork,
             yes: true,
@@ -177,15 +185,19 @@ describe('codex provider — isolated home E2E (Task 9)', () => {
         });
         expect(codex).toBeLessThanOrEqual(1);
 
-        expect(readPrefs().enabledAgents).toEqual(['claude-code', 'codex']);
+        expect(readPrefs().enabledAgents).toEqual(['claude-code', 'opencode', 'codex']);
 
         // R1/R7: Codex's global skill dir (~/.agents/skills, shared by design with
-        // OpenCode — providers/index.ts) got a real symlink into the registry.
+        // OpenCode — providers/index.ts) got a real symlink into the registry —
+        // the SAME physical link OpenCode's own init already produced, now
+        // co-owned by both agents (R15/R15.1) rather than fought over.
         const skillLink = path.join(tmpHome, '.agents/skills/development-process');
         expect(fs.lstatSync(skillLink).isSymbolicLink()).toBe(true);
         expect(fs.realpathSync(skillLink)).toContain(
             path.join('.awm/registries/baseline/skills/development-process'),
         );
+        // OpenCode's own skill link is untouched — same physical target, same source.
+        expect(fs.realpathSync(skillLink)).toBe(opencodeSkillLinkBefore);
 
         // R8: the canonical agent got rendered into Codex's native .toml shape.
         const tomlPath = path.join(tmpHome, '.codex/agents/development-process.toml');

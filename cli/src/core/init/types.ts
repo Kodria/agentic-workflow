@@ -58,6 +58,16 @@ export interface InitDeps {
     ctx: HarnessContext;
     bundles: BundleDefinition[];
     agent: AgentTarget;
+    /**
+     * Every agent enabled on this machine (preferences.json's `enabledAgents`
+     * as of the start of this run — includes `agent` itself). Used by
+     * `stepDevCore`/`stepAmbient` to compute the complete shared-skill-target
+     * group when auto-installing the baseline/ambient bundles, so a co-owner
+     * agent (e.g. OpenCode sharing Codex's `~/.agents/skills`) that's already
+     * enabled doesn't trip install-planner.ts's `assertCompleteSharedGroup`
+     * (R14) refusal.
+     */
+    enabledAgents: AgentTarget[];
     installMethod: InstallMethod;
     registryRoot: string;     // content root que provee hooks/ — para installHook
     contentDir: string;       // content root del primer registry — para installBundle/syncProfile

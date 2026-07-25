@@ -9,7 +9,7 @@ import { InjectionOrchestrator } from '../context/orchestrator';
 import { InjectionState } from '../context/types';
 import { computeHookStatus } from '../../commands/hooks/status';
 import { findProjectRoot, readProfile } from '../profile';
-import { discoverAllBundles, resolveBundleSkills, BundleDefinition } from '../bundles';
+import { discoverAllBundles, resolveBundleSkills, resolveBundleAgents, BundleDefinition } from '../bundles';
 import { classifyGlobalSkills } from '../skill-integrity';
 import { awmHome } from '../paths';
 import { gatherProviderChecks, ScanSkills } from './provider-checks';
@@ -109,6 +109,28 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
         const absent = skillNames.filter((s) => !linked.includes(s) && !broken.includes(s));
         devCorePresent = skillNames.length > 0 && (linked.length + broken.length) > 0;
         brokenLinks = [...broken, ...absent];
+
+        // Agent-type artifacts are never shared across agents (R12/R13 —
+        // install-planner.ts — unlike skills, where OpenCode and Codex both
+        // resolve to ~/.agents/skills). A shared skill directory already
+        // linked by a co-owner agent must not make THIS agent's own native
+        // agent artifacts look "present" when they were never installed for
+        // it specifically — otherwise stepDevCore (init/steps.ts) would skip
+        // re-running and Codex would never get its .toml rendered on a
+        // machine where OpenCode was initialized first. Found while building
+        // the real Codex+OpenCode coexistence E2E test
+        // (tests/integration/codex-provider-isolated.test.ts).
+        const agentConfig = providerFor(agent).agent;
+        if (agentConfig) {
+            const agentNames = resolveBundleAgents(baseline.name, bundles);
+            if (agentNames.length > 0) {
+                const filenames = agentNames.map((n) =>
+                    agentConfig.renderer === 'codex-agent-toml' ? `${n}.toml` : n);
+                const { linked: agentLinked, broken: agentBroken } = classifyLinks(filenames, agentConfig.global);
+                const agentAbsent = filenames.filter((f) => !agentLinked.includes(f) && !agentBroken.includes(f));
+                brokenLinks = [...brokenLinks, ...agentBroken, ...agentAbsent];
+            }
+        }
     }
 
     // ambient (deseados desde ~/.awm/config.json)

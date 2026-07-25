@@ -84,6 +84,43 @@ export function physicalTarget(intent: ArtifactIntent, agent: AgentTarget, scope
 }
 
 /**
+ * The physical directory `agent`'s skill artifacts resolve to at `scope` —
+ * independent of any specific artifact/intent, since every skill intent for
+ * a given agent+scope shares the same directory and only the filename
+ * inside it varies (`physicalTarget`'s `dir` component, without the
+ * filename). Exposed so callers that need to answer "does agent X share
+ * agent Y's skill target?" purely structurally — e.g. deciding which agents
+ * to proactively include in a `selectedAgents` set — don't need to invent a
+ * throwaway `ArtifactIntent` just to ask a directory-equality question.
+ */
+export function skillTargetDir(agent: AgentTarget, scope: Scope, projectRoot: string): string {
+    const config = providerFor(agent).skill;
+    return scope === 'local' ? path.join(projectRoot, config.local) : config.global;
+}
+
+/**
+ * Of `candidates`, the ones that share `agent`'s skill physical target at
+ * `scope` (includes `agent` itself when it appears in `candidates`). Used by
+ * `core/init/steps.ts` to compute the correct `selectedAgents` for an
+ * automatic baseline/ambient bundle install: `stepDevCore`/`stepAmbient`
+ * used to pass a `[agent]` singleton, which `assertCompleteSharedGroup`
+ * below (R14) then refused whenever a co-owner (e.g. OpenCode alongside
+ * Codex) was independently enabled — a BLOCKER that made `awm init --agent
+ * codex` structurally fail once OpenCode was already enabled, and vice
+ * versa. Passing the complete shared group up front avoids tripping R14 in
+ * the first place, without weakening the assertion itself.
+ */
+export function agentsSharingSkillTarget(
+    agent: AgentTarget,
+    candidates: AgentTarget[],
+    scope: Scope,
+    projectRoot: string,
+): AgentTarget[] {
+    const target = skillTargetDir(agent, scope, projectRoot);
+    return candidates.filter((candidate) => skillTargetDir(candidate, scope, projectRoot) === target);
+}
+
+/**
  * Skills are, today, the only artifact type where two agents' provider
  * configs physically resolve to the exact same directory (OpenCode and Codex
  * both use `~/.agents/skills` globally). Because that target is shared,

@@ -162,6 +162,7 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
                 ctx: effectiveCtx,
                 bundles,
                 agent,
+                enabledAgents: nextPreferences.enabledAgents,
                 installMethod: 'symlink',
                 registryRoot: capabilityRoot('hooks') ?? '',
                 contentDir: contentRoots()[0] ?? '',

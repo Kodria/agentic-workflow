@@ -16,7 +16,8 @@ import { detectExtensions } from './detector';
 import type { InitDeps, InitActions, StepResult } from './types';
 import type { ProjectFacts } from '../diagnostics/types';
 import { InjectionOrchestrator, ContextOp } from '../context/orchestrator';
-import { getInjection, providerFor } from '../../providers';
+import { AgentTarget, getInjection, providerFor } from '../../providers';
+import { agentsSharingSkillTarget } from '../install-planner';
 import { repairGlobalSkills as realRepairGlobalSkills } from '../skill-integrity';
 import { contentRoots } from '../registries';
 import { injectProjectConstitution as realInjectProjectConstitution } from '../context/project-constitution-inject';
@@ -97,6 +98,31 @@ function failed(id: string, level: StepResult['level'], error: string): StepResu
 // Machine-level steps
 // ---------------------------------------------------------------------------
 
+/**
+ * Agents to pass as `agents` when auto-installing a global-scope bundle for
+ * `d.agent`: `d.agent` itself, plus every other currently-enabled agent that
+ * shares `d.agent`'s physical skill directory (today: OpenCode and Codex
+ * both resolve to `~/.agents/skills`, see providers/index.ts). Baseline/
+ * ambient bundles always install at 'global' scope (bundles.ts's
+ * `defaultScopeForBundle` — 'baseline'/'ambient' never map to 'local'), so
+ * scope is fixed here rather than threaded through InitDeps.
+ *
+ * Without this, a `[d.agent]` singleton would make install-planner.ts's
+ * `assertCompleteSharedGroup` (R14) refuse the install outright whenever a
+ * co-owner is independently enabled (e.g. `awm init --agent codex` on a
+ * machine with OpenCode already enabled) — that was a BLOCKER: it broke the
+ * exact "multiple providers coexist on one machine" scenario this plan
+ * exists to deliver. Including the co-owner here is safe: it already has
+ * this exact skill installed from its own prior init (same source, same
+ * target), so `planInstall`'s dedup (R15/R15.1) collapses it into the same
+ * physical operation and simply re-confirms ownership — it does not change
+ * the co-owner's installed content.
+ */
+function sharedInstallAgents(d: InitDeps): AgentTarget[] {
+    const group = agentsSharingSkillTarget(d.agent, d.enabledAgents, 'global', d.cwd);
+    return group.includes(d.agent) ? group : [d.agent, ...group];
+}
+
 /** Step 1 – Sync the registry cache (clone / pull). */
 export async function stepCache(d: InitDeps): Promise<StepResult> {
     const { registryCache } = d.ctx.machine;
@@ -114,6 +140,16 @@ export async function stepCache(d: InitDeps): Promise<StepResult> {
 
 /** Step 2 – Install the session-start hook for the target agent. */
 export function stepHook(d: InitDeps): StepResult {
+    // Not every agent has a hook mechanism (today: OpenCode, Antigravity —
+    // providers/index.ts's `hooks` is optional). Mirrors provider-checks.ts's
+    // `hookTrustCheck`, which treats a missing `hooks` config as "not
+    // applicable" rather than a failure. Without this guard, a real
+    // (unstubbed) `awm init --agent opencode` throws "hooks not supported for
+    // agent target: opencode" from `installHook` — a real, previously-latent
+    // bug caught while building this plan's real end-to-end init test
+    // (tests/integration/codex-provider-isolated.test.ts).
+    if (!providerFor(d.agent).hooks) return ok('machine.hook', 'machine', 'skipped', 'no hook mechanism for this agent');
+
     const { hook } = d.ctx.machine;
     if (hook.present && !hook.degraded) return ok('machine.hook', 'machine', 'skipped');
 
@@ -139,7 +175,7 @@ export function stepDevCore(d: InitDeps): StepResult {
     d.actions.installBundle({
         bundleName,
         bundles: d.bundles,
-        agents: [d.agent],
+        agents: sharedInstallAgents(d),
         method: d.installMethod,
         projectRoot: d.cwd,
         contentDir: d.contentDir,
@@ -170,7 +206,7 @@ export function stepAmbient(d: InitDeps): StepResult {
         d.actions.installBundle({
             bundleName,
             bundles: d.bundles,
-            agents: [d.agent],
+            agents: sharedInstallAgents(d),
             method: d.installMethod,
             projectRoot: d.cwd,
             contentDir: d.contentDir,
