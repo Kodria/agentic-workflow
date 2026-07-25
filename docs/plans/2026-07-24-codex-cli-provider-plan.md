@@ -322,7 +322,14 @@ _Requirements: R1, R2, R7, R19, R19.1_
 - Modify: `cli/src/core/skill-integrity.ts`
 - Modify: `cli/src/index.ts`
 
-- [ ] **Step 1: Escribir los tests rojos del provider**
+**Plan drift autorizado durante ejecución:** para no exponer mecánicas nativas
+Codex a los paths legacy se agregaron preflights en
+`cli/src/core/provider-artifacts.ts` y un boundary CLI en
+`cli/src/ui/provider-preflight.ts`. La normalización del hook Claude hacia
+`~/.awm/hooks/claude-code` se difiere a Task 7, donde puede hacerse con backup y
+migración; Task 2 conserva `~/.awm/hooks` y no rompe instalaciones existentes.
+
+- [x] **Step 1: Escribir los tests rojos del provider**
 
 Agregar a `cli/tests/providers/index.test.ts`:
 
@@ -346,7 +353,7 @@ it('keeps Claude Code and OpenCode destinations unchanged', () => {
 });
 ```
 
-- [ ] **Step 2: Implementar el catálogo de providers como factory**
+- [x] **Step 2: Implementar el catálogo de providers como factory**
 
 En `cli/src/providers/index.ts`, reemplazar la constante evaluada al importar por:
 
@@ -425,13 +432,13 @@ export function providerFor(agent: AgentTarget): ProviderConfig {
 
 Añadir `renderer: RendererId` a `ArtifactConfig`, las variantes `codex-hooks-json` y `managed-agents-md` a sus uniones y los campos opcionales `minimumVersion`/`versionCommand` a `ProviderConfig`. Cambiar todos los consumidores listados en **Files** de `PROVIDERS[agent]` a `providerFor(agent)` y los recorridos de `Object.keys(PROVIDERS)` a `AGENT_TARGETS`.
 
-- [ ] **Step 3: Ejecutar los tests del provider**
+- [x] **Step 3: Ejecutar los tests del provider**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/providers/index.test.ts tests/providers/hooks-config.test.ts tests/providers/injection-config.test.ts`
 
 Expected: PASS; los tests de Claude Code y OpenCode siguen verdes.
 
-- [ ] **Step 4: Escribir los tests rojos del gate de versión**
+- [x] **Step 4: Escribir los tests rojos del gate de versión**
 
 Crear `cli/tests/core/provider-version.test.ts`:
 
@@ -461,7 +468,7 @@ it('reports a missing Codex binary distinctly', () => {
 });
 ```
 
-- [ ] **Step 5: Implementar el gate con `execFileSync` inyectable**
+- [x] **Step 5: Implementar el gate con `execFileSync` inyectable**
 
 Crear `cli/src/core/provider-version.ts`:
 
@@ -503,13 +510,13 @@ export function assertProviderSupported(
 }
 ```
 
-- [ ] **Step 6: Ejecutar el task completo y build**
+- [x] **Step 6: Ejecutar el task completo y build**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/providers/index.test.ts tests/core/provider-version.test.ts && npm run build`
 
 Expected: PASS y TypeScript sin errores.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add cli/src/providers cli/src/core/provider-version.ts cli/src/commands/hooks/resync.ts cli/src/commands/registry/index.ts cli/src/core/bundle-install.ts cli/src/core/context cli/src/core/diagnostics/context.ts cli/src/core/init/steps.ts cli/src/core/profile.ts cli/src/core/skill-integrity.ts cli/src/index.ts cli/tests/providers cli/tests/core/provider-version.test.ts
