@@ -158,6 +158,45 @@ describe('install-planner', () => {
                 path.join(tmpWork, '.claude', 'skills', 'development-process'),
             );
         });
+
+        it('dedupes two intents that share both targetPath and sourcePath into one operation', () => {
+            // e.g. the same skill pulled in twice via different bundles in a
+            // closure — same physical target, same backing source: fine.
+            const plan = planInstall({
+                artifacts: [skillArtifact('development-process'), skillArtifact('development-process')],
+                selectedAgents: ['claude-code'],
+                enabledAgents: ['claude-code'],
+                scope: 'global',
+                projectRoot: tmpWork,
+                method: 'symlink',
+            });
+            expect(plan.operations).toHaveLength(1);
+        });
+
+        it('throws when two intents share a targetPath but have different sourcePaths', () => {
+            // e.g. the same skill name shipped by two different registries —
+            // one physical target can't be backed by two different sources.
+            const registryA: ArtifactIntent = {
+                name: 'development-process',
+                installName: 'development-process',
+                type: 'skill',
+                sourcePath: path.join(tmpWork, 'registry-a', 'skills', 'development-process'),
+            };
+            const registryB: ArtifactIntent = {
+                name: 'development-process',
+                installName: 'development-process',
+                type: 'skill',
+                sourcePath: path.join(tmpWork, 'registry-b', 'skills', 'development-process'),
+            };
+            expect(() => planInstall({
+                artifacts: [registryA, registryB],
+                selectedAgents: ['claude-code'],
+                enabledAgents: ['claude-code'],
+                scope: 'global',
+                projectRoot: tmpWork,
+                method: 'symlink',
+            })).toThrow(/physical target already claimed by a different source/);
+        });
     });
 
     describe('planRemoval', () => {

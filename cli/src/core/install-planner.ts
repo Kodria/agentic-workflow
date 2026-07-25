@@ -105,15 +105,22 @@ function assertCompleteSharedGroup(
 
 /**
  * Plans installation of `artifacts` for `selectedAgents`. Pure — no
- * filesystem access. Groups by (targetPath, renderer, sourcePath): when two
- * selected agents resolve an intent to the identical physical location, they
- * collapse into a single PlannedOperation with both agents listed as owners
- * (R15/R15.1), so the operation is only ever performed once. Independently
- * addressed artifact types (workflow, agent) never collapse across agents,
- * since each agent's provider config points at its own directory (R12/R13).
- * An artifact type unsupported by a given agent (provider config is null for
- * that type) is silently skipped for that agent, mirroring the legacy
- * installBundle skip semantics — it is not an error.
+ * filesystem access. Groups by physical location (targetPath + renderer) —
+ * NOT sourcePath: a target path is one filesystem location, so at most one
+ * source may back it. When two selected agents resolve an intent to the
+ * identical physical location with the SAME sourcePath, they collapse into a
+ * single PlannedOperation with both agents listed as owners (R15/R15.1), so
+ * the operation is only ever performed once. When two intents resolve to the
+ * same physical location with DIFFERENT sourcePaths (e.g. same skill name
+ * shipped by two different registries), that is a genuine conflict — one
+ * target can't be backed by two different sources — and planInstall throws
+ * before producing any operations, in the same "abort before writes" spirit
+ * as assertCompleteSharedGroup's shared-group error. Independently addressed
+ * artifact types (workflow, agent) never collapse across agents, since each
+ * agent's provider config points at its own directory (R12/R13). An artifact
+ * type unsupported by a given agent (provider config is null for that type)
+ * is silently skipped for that agent, mirroring the legacy installBundle
+ * skip semantics — it is not an error.
  *
  * Within a shared group, the first owner (in selection order) is reported
  * with action 'install' (it is the one that causes the operation) and any
@@ -142,7 +149,13 @@ export function planInstall(params: PlanInstallParams): InstallPlan {
             const config = providerFor(agent)[intent.type];
             if (!config) continue;
             const { targetPath, renderer } = physicalTarget(intent, agent, scope, projectRoot);
-            const key = `${targetPath}\0${renderer}\0${intent.sourcePath}`;
+            // Key on the physical location alone (targetPath + renderer), NOT
+            // sourcePath: a target path is one filesystem location, so it can
+            // only ever be backed by one source. Including sourcePath in the
+            // key would let two intents with different sources but the same
+            // target silently produce two operations for the same physical
+            // location — see the conflict check just below.
+            const key = `${targetPath}\0${renderer}`;
             let group = groups.get(key);
             if (!group) {
                 group = {
@@ -154,6 +167,10 @@ export function planInstall(params: PlanInstallParams): InstallPlan {
                     owners: [],
                 };
                 groups.set(key, group);
+            } else if (group.sourcePath !== intent.sourcePath) {
+                throw new Error(
+                    `physical target already claimed by a different source: ${targetPath} (${group.sourcePath} vs ${intent.sourcePath})`,
+                );
             }
             if (!group.owners.includes(agent)) group.owners.push(agent);
         }

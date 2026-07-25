@@ -64,6 +64,14 @@ export function expandBundleArtifacts(opts: InstallBundleOptions): ArtifactInten
     return closure.flatMap((b) => bundleArtifacts(b, b.contentRoot ?? fallbackContentDir));
 }
 
+// KNOWN RED (Task 6): every real caller of installBundle/addBundle/syncProfile
+// that doesn't inject `opts.applyPlan` hits this throw — that includes actual
+// CLI code paths, not just test fixtures: `awm init`'s defaultActions
+// (src/core/init/steps.ts), `awm add`'s post-add bundle install
+// (src/commands/registry/install-bundles.ts), and multi-root bundle installs.
+// Those code paths are non-functional until Task 6 lands the real
+// applyInstallPlan (transactional filesystem apply + backups/rollback +
+// artifact-state persistence).
 function applyInstallPlan(_plan: InstallPlan): InstallSummary {
     throw new Error('applyInstallPlan is not implemented yet (Task 6)');
 }

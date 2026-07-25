@@ -37,6 +37,14 @@ export const defaultActions: InitActions = {
         installMethod: o.installMethod,
     }),
 
+    // KNOWN RED (Task 6, tracked at src/core/bundle-install.ts's installBundle
+    // façade): neither call below passes `applyPlan`, so on this real `awm
+    // init` code path `installBundle`/`syncProfile` now throw
+    // "applyInstallPlan is not implemented yet (Task 6)" instead of actually
+    // materializing anything — `machine.devCore` and any step that depends on
+    // bundle installation cannot reach 'applied' until Task 6 lands the real
+    // applyInstallPlan. See tests/core/init/orchestrator.test.ts for the
+    // affected case(s).
     installBundle: (o) => realInstallBundle({
         bundleName: o.bundleName,
         bundles: o.bundles,
