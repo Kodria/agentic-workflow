@@ -5,6 +5,8 @@ import { gatherContext } from '../core/diagnostics/context';
 import { runChecks } from '../core/diagnostics/checks';
 import { CheckReport, CheckResult } from '../core/diagnostics/types';
 import { platformLabel } from '../core/paths';
+import { getPreferences } from '../utils/config';
+import { resolveAgentTargets } from '../core/agent-targets';
 
 function glyph(status: CheckResult['status']): string {
     if (status === 'ok') return pc.green('✔');
@@ -48,11 +50,21 @@ export function renderReport(report: CheckReport): string {
 export interface RunDoctorOptions {
     json?: boolean;
     cwd?: string;
+    /** Comma-separated agent subset (R12/R13) — defaults to every enabled agent. */
+    agent?: string;
+    /** Injectable seam over `resolveAgentTargets` (core/agent-targets.ts) — tests spy on this
+     *  to observe which targets `doctor` resolved. Task 9 owns building the full per-provider
+     *  diagnostic breakdown on top of this; today the resolution is validated but the report
+     *  itself stays machine+project wide (CheckReport's shape is unchanged). */
+    resolveTargets?: typeof resolveAgentTargets;
 }
 
 export function runDoctor(opts: RunDoctorOptions = {}): number {
+    const resolveTargets = opts.resolveTargets ?? resolveAgentTargets;
     let report: CheckReport;
     try {
+        const prefs = getPreferences();
+        resolveTargets({ prefs, explicit: opts.agent }); // validates --agent; throws on an unknown/disabled agent
         report = runChecks(gatherContext({ cwd: opts.cwd }));
     } catch (err) {
         process.stderr.write(`awm doctor: internal error: ${(err as Error).message}\n`);
@@ -70,7 +82,8 @@ export function registerDoctorCommand(program: Command): void {
     program.command('doctor')
         .description('Read-only dashboard of the AWM harness state (machine + project)')
         .option('--json', 'Emit the diagnostic report as JSON')
-        .action((options: { json?: boolean }) => {
-            process.exitCode = runDoctor({ json: options.json });
+        .option('-a, --agent <agent>', 'Target agent subset (comma-separated); defaults to every enabled agent')
+        .action((options: { json?: boolean; agent?: string }) => {
+            process.exitCode = runDoctor({ json: options.json, agent: options.agent });
         });
 }

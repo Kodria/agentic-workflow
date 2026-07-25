@@ -24,6 +24,10 @@ export interface InitOutcome {
     failed: number;
     before: CheckReport;
     after: CheckReport;
+    /** Basename of the backup-session transaction wrapping this run's writes. Set on success. */
+    transactionId?: string;
+    /** Every target path the backup session snapshotted before this run's writes. Set on success. */
+    modifiedFiles?: string[];
 }
 
 // Efectos de I/O inyectables — defaultActions delega en las funciones reales;

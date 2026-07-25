@@ -88,12 +88,6 @@ describe('runInitSteps — orchestrator', () => {
             deps.ctx.project = null;
             const out = await runInitSteps(deps);
             expect(out.applied).toBeGreaterThan(0);
-            // KNOWN RED (Task 5 interim / Task 6): `defaultActions.installBundle`
-            // (src/core/init/steps.ts) calls the real installBundle without an
-            // `applyPlan`, so this step now throws "applyInstallPlan is not
-            // implemented yet (Task 6)" instead of reaching 'applied' — see the
-            // KNOWN RED comment at that call site and at bundle-install.ts's
-            // applyInstallPlan stub. Resolved for real once Task 6 lands.
             expect(out.steps.some((s: any) => s.id === 'machine.devCore' && s.action === 'applied')).toBe(true);
             expect(out.after.results.find((r: any) => r.id === 'machine.devCore').status).toBe('ok');
         } finally {

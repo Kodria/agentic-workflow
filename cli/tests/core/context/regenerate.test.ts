@@ -108,7 +108,7 @@ describe('regenerateGlobalContext', () => {
         const { InjectionOrchestrator } = require('../../../src/core/context/orchestrator');
         const brokenOrch = new InjectionOrchestrator();
         brokenOrch.contextStatus = () => { throw new Error('unexpected orchestrator error'); };
-        expect(regenerateGlobalContext(brokenOrch)).toEqual([{ agent: 'opencode', action: 'skipped' }]);
+        expect(regenerateGlobalContext(undefined, brokenOrch)).toEqual([{ agent: 'opencode', action: 'skipped' }]);
         expect(fs.existsSync(contextPath())).toBe(false); // installContext never called
     });
 });

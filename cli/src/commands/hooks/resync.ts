@@ -20,10 +20,13 @@ function detectInstallMethod(scriptsDir: string): 'symlink' | 'copy' {
     }
 }
 
-export function resyncInstalledHooks(registryRoot: string): ResyncResult[] {
+export function resyncInstalledHooks(
+    registryRoot: string,
+    targets: AgentTarget[] = [...AGENT_TARGETS],
+): ResyncResult[] {
     const results: ResyncResult[] = [];
 
-    for (const agent of AGENT_TARGETS) {
+    for (const agent of targets) {
         const config = getHookConfig(agent);
         if (!config) continue;
 

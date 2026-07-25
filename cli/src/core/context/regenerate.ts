@@ -13,13 +13,14 @@ export type RegenAction = 'refreshed' | 'fresh' | 'skipped';
 export type RegenResult = { agent: AgentTarget; action: RegenAction };
 
 export function regenerateGlobalContext(
+    targets: AgentTarget[] = [...AGENT_TARGETS],
     orch: InjectionOrchestrator = new InjectionOrchestrator(),
 ): RegenResult[] {
     const skillsRoot = capabilityRoot('skills');
     if (!skillsRoot) return [];
 
     const out: RegenResult[] = [];
-    for (const agent of AGENT_TARGETS) {
+    for (const agent of targets) {
         const inj = providerFor(agent).injection;
         if (!inj || inj.type !== 'config-instructions') continue;
         if (!fs.existsSync(inj.configPath)) continue;

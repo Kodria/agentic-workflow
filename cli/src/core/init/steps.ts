@@ -37,13 +37,9 @@ export const defaultActions: InitActions = {
         installMethod: o.installMethod,
     }),
 
-    // KNOWN RED (Task 6, tracked at src/core/bundle-install.ts's applyInstallPlan
-    // stub): this call passes no `applyPlan`, so on this real `awm init` code
-    // path installBundle now throws "applyInstallPlan is not implemented yet
-    // (Task 6)" instead of actually materializing anything — `machine.devCore`
-    // and any step that depends on bundle installation cannot reach 'applied'
-    // until Task 6 lands the real applyInstallPlan. See
-    // tests/core/init/orchestrator.test.ts for the affected case(s).
+    // No `applyPlan` override here — installBundle defaults to the real
+    // applyInstallPlan (install-transaction.ts, Task 6), so this materializes
+    // for real on the `awm init` code path.
     installBundle: (o) => realInstallBundle({
         bundleName: o.bundleName,
         bundles: o.bundles,
@@ -53,10 +49,7 @@ export const defaultActions: InitActions = {
         contentDir: o.contentDir,
     }),
 
-    // KNOWN RED (Task 6, same cause as installBundle above): this call also
-    // passes no `applyPlan`, so syncProfile throws "applyInstallPlan is not
-    // implemented yet (Task 6)" on this real `awm init` code path too, instead
-    // of rematerializing extensions from .awm/profile.json.
+    // Same as installBundle above — defaults to the real applyInstallPlan.
     syncProfile: (o) => realSyncProfile({
         projectRoot: o.projectRoot,
         bundles: o.bundles,

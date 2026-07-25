@@ -14,6 +14,14 @@ export function isAgentTarget(value: unknown): value is AgentTarget {
         (AGENT_TARGETS as readonly string[]).includes(value);
 }
 
+/** Assertion form of `isAgentTarget` — narrows or throws a clear, user-facing error. */
+export function requireAgentTarget(value: unknown): AgentTarget {
+    if (!isAgentTarget(value)) {
+        throw new Error(`Invalid agent target: ${String(value)}. Use: ${AGENT_TARGETS.join(', ')}.`);
+    }
+    return value;
+}
+
 export type ArtifactConfig = {
     global: string;
     local: string;

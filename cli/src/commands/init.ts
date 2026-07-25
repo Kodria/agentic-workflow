@@ -8,10 +8,15 @@ import { discoverAllBundles } from '../core/bundles';
 import { contentRoots, listRegistries, seedBaselineRegistry, capabilityRoot } from '../core/registries';
 import { runInitSteps } from '../core/init/orchestrator';
 import { defaultActions } from '../core/init/steps';
+import { planInitMutationTargets } from '../core/init/mutation-targets';
+import { gatherProviderFacts, assertClaudeBaselinePreserved } from '../core/init/provider-facts';
+import { beginBackupSession } from '../core/install-transaction';
+import { assertProviderSupported } from '../core/provider-version';
 import type { InitOutcome, InitActions, StepResult } from '../core/init/types';
 import type { AgentTarget } from '../providers';
+import { requireAgentTarget } from '../providers';
 import { warnIfUnsupportedPlatform } from '../core/paths';
-import { enableAgent, loadPreferences, savePreferences, preferencesExist } from '../utils/config';
+import { enableAgent, loadPreferences, savePreferences } from '../utils/config';
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -68,21 +73,37 @@ export interface RunInitOptions {
     machineOnly?: boolean;
     agent?: string;
     actions?: Partial<InitActions>;
+    /** Injectable seam over the real Codex-version gate (core/provider-version.ts). Tests override to avoid shelling out. */
+    assertProviderSupported?: typeof assertProviderSupported;
 }
 
 export async function runInit(opts: RunInitOptions = {}): Promise<number> {
     const cwd = opts.cwd ?? process.cwd();
-    const agent: AgentTarget = (opts.agent as AgentTarget) ?? 'claude-code';
+    const agent: AgentTarget = opts.agent === undefined ? 'claude-code' : requireAgentTarget(opts.agent);
 
-    // #7: make init the source of truth for the default agent. Persist the resolved
-    // agent so later `awm add`/`awm sync` (which read preferences.defaultAgent) target
-    // the right agent instead of stamping the static default. Do NOT clobber an existing
-    // explicit preference on a bare re-init: only write when an agent was passed via -a,
-    // or when no preferences file exists yet.
-    if (opts.agent != null || !preferencesExist()) {
-        const prefs = enableAgent(loadPreferences(agent).prefs, agent);
-        savePreferences({ ...prefs, defaultAgent: agent });
+    // R2: gate BEFORE anything is read or written — an unsupported provider
+    // version must never touch preferences.json or any provider file.
+    const gate = opts.assertProviderSupported ?? assertProviderSupported;
+    try {
+        gate(agent);
+    } catch (error) {
+        process.stderr.write(`awm init: ${(error as Error).message}\n`);
+        return 2;
     }
+
+    // #7 / R11: make init the source of truth for the default agent, but never
+    // clobber an existing explicit default on a bare re-init (`opts.agent`
+    // undefined) — only ENABLE the resolved agent into enabledAgents. On a
+    // machine with no preferences yet, `loadPreferences(agent)` proposes
+    // `{ defaultAgent: agent, enabledAgents: [agent], ... }` as the seed.
+    const loaded = loadPreferences(agent);
+    const nextPreferences = opts.agent === undefined
+        ? loaded.prefs
+        : enableAgent(loaded.prefs, agent);
+
+    // R19: Claude's baseline is read-only from every OTHER agent's init run —
+    // snapshotted before any write, compared after every step ran.
+    const beforeClaudeFacts = gatherProviderFacts('claude-code');
 
     let outcome: InitOutcome;
     try {
@@ -91,33 +112,72 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
             ...(opts.actions ?? {}),
         };
 
-        seedBaselineRegistry();
-        if (listRegistries().some((r) => !fs.existsSync(r.contentRoot))) {
-            await mergedActions.syncCache();
-        }
-
-        const bundles = discoverAllBundles();
-        const ctx = gatherContext({ cwd, bundles, agent });
-
-        // In machineOnly mode, null out the project context so project steps are skipped
-        const effectiveCtx = opts.machineOnly
-            ? { ...ctx, project: null }
-            : ctx;
-
-        const confirmExtensions = makeConfirmExtensions(!!opts.yes);
-
-        outcome = await runInitSteps({
+        // Enumerate every path this run may write to and open one backup
+        // session covering the whole init (preferences + every machine/project
+        // step) BEFORE calling anything else — including `seedBaselineRegistry`,
+        // whose `resolveBaseRemote()` incidentally reads preferences.json and
+        // (on a machine with none yet) would otherwise auto-vivify it with
+        // stock defaults ahead of our own write, corrupting the "before"
+        // snapshot rollback restores to. Uses whatever bundle content already
+        // exists on disk right now (before this run's own registry sync).
+        // Known narrow gap: on a truly first-ever init (no prior registry
+        // clone at all), the bundle artifacts this SAME run freshly clones and
+        // installs can't be named yet at this point, so a failure later in
+        // that exact run won't roll those specific artifacts back — every
+        // other target (preferences, hook, injection, previously-installed
+        // bundle content) is covered.
+        const preSyncBundles = discoverAllBundles();
+        const mutationTargets = planInitMutationTargets({
             cwd,
-            ctx: effectiveCtx,
-            bundles,
             agent,
-            installMethod: 'symlink',
-            registryRoot: capabilityRoot('hooks') ?? '',
-            contentDir: contentRoots()[0] ?? '',
-            sensorPacksRoot: capabilityRoot('sensor-packs') ?? '',
-            confirmExtensions,
-            actions: mergedActions,
+            preferences: nextPreferences,
+            bundles: preSyncBundles,
         });
+        const backup = beginBackupSession(mutationTargets);
+
+        try {
+            savePreferences(nextPreferences);
+
+            seedBaselineRegistry();
+            if (listRegistries().some((r) => !fs.existsSync(r.contentRoot))) {
+                await mergedActions.syncCache();
+            }
+
+            const bundles = discoverAllBundles();
+            const ctx = gatherContext({ cwd, bundles, agent });
+
+            // In machineOnly mode, null out the project context so project steps are skipped
+            const effectiveCtx = opts.machineOnly
+                ? { ...ctx, project: null }
+                : ctx;
+
+            const confirmExtensions = makeConfirmExtensions(!!opts.yes);
+
+            outcome = await runInitSteps({
+                cwd,
+                ctx: effectiveCtx,
+                bundles,
+                agent,
+                installMethod: 'symlink',
+                registryRoot: capabilityRoot('hooks') ?? '',
+                contentDir: contentRoots()[0] ?? '',
+                sensorPacksRoot: capabilityRoot('sensor-packs') ?? '',
+                confirmExtensions,
+                actions: mergedActions,
+            });
+            if (outcome.failed > 0) {
+                throw new Error('one or more init steps failed');
+            }
+
+            assertClaudeBaselinePreserved(beforeClaudeFacts, gatherProviderFacts('claude-code'));
+
+            backup.commit();
+            outcome.transactionId = backup.transactionId;
+            outcome.modifiedFiles = backup.targetPaths;
+        } catch (error) {
+            backup.rollback();
+            throw error;
+        }
     } catch (err) {
         process.stderr.write(`awm init: internal error: ${(err as Error).message}\n`);
         return 2;
