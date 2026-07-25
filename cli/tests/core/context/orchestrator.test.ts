@@ -144,9 +144,21 @@ describe('InjectionOrchestrator (opencode, real strategy)', () => {
 });
 
 describe('InjectionOrchestrator (codex, managed AGENTS.md strategy)', () => {
+    let roots: string[];
+
+    beforeEach(() => {
+        roots = [];
+        jest.clearAllMocks();
+    });
+
+    afterEach(() => {
+        for (const root of roots) fs.rmSync(root, { recursive: true, force: true });
+    });
+
     it('owns only the managed block and never dispatches to Claude hooks', () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-codex-orch-'));
         const registryRoot = tmpRegistry();
+        roots.push(dir, registryRoot);
         const agentsPath = path.join(dir, 'AGENTS.md');
         const contextPath = path.join(dir, 'awm-context.md');
         fs.writeFileSync(agentsPath, '# User rules\n');
@@ -173,7 +185,6 @@ describe('InjectionOrchestrator (codex, managed AGENTS.md strategy)', () => {
         expect(orch.contextStatus(op)).toBe('injected');
 
         orch.uninstallContext(op);
-        expect(fs.readFileSync(agentsPath, 'utf8')).toContain('# User rules\n');
-        expect(fs.readFileSync(agentsPath, 'utf8')).not.toContain('<!-- AWM:');
+        expect(fs.readFileSync(agentsPath, 'utf8')).toBe('# User rules\n');
     });
 });

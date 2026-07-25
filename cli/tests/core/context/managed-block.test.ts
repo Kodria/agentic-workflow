@@ -18,10 +18,10 @@ describe('mergeManagedBlock', () => {
     });
 
     it.each([
-        ['', `${AWM_START}\n${body}\n${AWM_END}\n`],
-        ['user', `user\n\n${AWM_START}\n${body}\n${AWM_END}\n`],
-        ['user\n', `user\n\n${AWM_START}\n${body}\n${AWM_END}\n`],
-        ['user\n\n', `user\n\n${AWM_START}\n${body}\n${AWM_END}\n`],
+        ['', `${AWM_START}\n<!-- AWM:BOUNDARY prefix=0 suffix=1 -->\n${body}\n${AWM_END}\n`],
+        ['user', `user\n\n${AWM_START}\n<!-- AWM:BOUNDARY prefix=2 suffix=1 -->\n${body}\n${AWM_END}\n`],
+        ['user\n', `user\n\n${AWM_START}\n<!-- AWM:BOUNDARY prefix=1 suffix=1 -->\n${body}\n${AWM_END}\n`],
+        ['user\n\n', `user\n\n${AWM_START}\n<!-- AWM:BOUNDARY prefix=0 suffix=1 -->\n${body}\n${AWM_END}\n`],
     ])('uses a stable separator for original %j', (original, expected) => {
         expect(mergeManagedBlock(original, body)).toBe(expected);
     });
@@ -49,6 +49,11 @@ describe('mergeManagedBlock', () => {
         [`${AWM_END}\nbody\n${AWM_START}`, 'reversed'],
         ['<!-- AWM:STARTED -->\nuser', 'malformed'],
         ['<!-- prefix AWM:END -->\nuser', 'malformed'],
+        ['<!-- AWM:START', 'incomplete'],
+        ['<!-- AWM:END', 'incomplete'],
+        [`inline ${AWM_START}\nbody\n${AWM_END}`, 'standalone'],
+        [`\`${AWM_START}\` and \`${AWM_END}\``, 'standalone'],
+        [`\`\`\`md\n${AWM_START}\nbody\n${AWM_END}\n\`\`\``, 'standalone'],
     ])('rejects ambiguous markers in %j', (input, message) => {
         expect(() => mergeManagedBlock(input, body)).toThrow(message);
     });
@@ -65,6 +70,16 @@ describe('mergeManagedBlock', () => {
 });
 
 describe('removeManagedBlock', () => {
+    it.each([
+        '',
+        'user',
+        'user\n',
+        'user\n\n',
+        '# Rules\n\nKeep every byte.\n',
+    ])('restores original %j byte-for-byte after merge', (original) => {
+        expect(removeManagedBlock(mergeManagedBlock(original, body))).toBe(original);
+    });
+
     it('removes only the valid block and preserves every surrounding byte', () => {
         const original = `before\n\n${AWM_START}\nowned\n${AWM_END}\n\nafter`;
         expect(removeManagedBlock(original)).toBe('before\n\n\n\nafter');

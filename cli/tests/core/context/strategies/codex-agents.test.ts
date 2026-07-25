@@ -79,7 +79,7 @@ describe('CodexAgentsStrategy', () => {
         strategy.injectGlobal({ markdown: 'new' });
 
         expect(fs.readFileSync(file, 'utf8')).toBe(
-            'before\n\n<!-- AWM:START -->\nnew\n<!-- AWM:END -->\nafter\n',
+            'before\n\n<!-- AWM:START -->\n<!-- AWM:BOUNDARY prefix=1 suffix=1 -->\nnew\n<!-- AWM:END -->\nafter\n',
         );
     });
 
@@ -90,6 +90,16 @@ describe('CodexAgentsStrategy', () => {
         fs.writeFileSync(file, ambiguous);
 
         expect(() => new CodexAgentsStrategy().injectGlobal({ markdown: 'new' })).toThrow('unmatched');
+        expect(fs.readFileSync(file, 'utf8')).toBe(ambiguous);
+    });
+
+    it('rejects inline marker examples without changing the global file', () => {
+        const file = path.join(tmpHome, '.codex/AGENTS.md');
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        const ambiguous = '`<!-- AWM:START -->` example and `<!-- AWM:END -->` example';
+        fs.writeFileSync(file, ambiguous);
+
+        expect(() => new CodexAgentsStrategy().injectGlobal({ markdown: 'new' })).toThrow('standalone');
         expect(fs.readFileSync(file, 'utf8')).toBe(ambiguous);
     });
 
@@ -138,7 +148,7 @@ describe('CodexAgentsStrategy', () => {
 
         fs.appendFileSync(file, 'user suffix\n');
         strategy.remove(input, provider);
-        expect(fs.readFileSync(file, 'utf8')).toBe('\nuser suffix\n');
+        expect(fs.readFileSync(file, 'utf8')).toBe('user suffix\n');
         expect(strategy.status(input, provider)).toBe('absent');
     });
 
@@ -148,16 +158,12 @@ describe('CodexAgentsStrategy', () => {
         expect(() => strategy.injectGlobal(null as never)).toThrow('context');
         expect(() => strategy.injectProject('')).toThrow('projectRoot');
 
-        const writes: string[] = [];
-        const realWrite = fs.writeFileSync;
-        jest.spyOn(fs, 'writeFileSync').mockImplementation(((file: fs.PathOrFileDescriptor, ...args: unknown[]) => {
-            writes.push(String(file));
-            return (realWrite as (...params: unknown[]) => unknown)(file, ...args);
-        }) as typeof fs.writeFileSync);
+        const open = jest.spyOn(fs, 'openSync');
         strategy.injectGlobal({ markdown: 'safe' });
         strategy.injectProject(path.join(tmpWork, 'safe-project'));
 
-        expect(writes.every((file) => file.startsWith(tmpHome) || file.startsWith(tmpWork))).toBe(true);
+        const opened = open.mock.calls.map((call) => String(call[0]));
+        expect(opened.every((file) => file.startsWith(tmpHome) || file.startsWith(tmpWork))).toBe(true);
     });
 });
 
