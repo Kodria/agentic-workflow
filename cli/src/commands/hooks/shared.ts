@@ -7,7 +7,37 @@
 
 import fs from 'fs';
 import path from 'path';
+import { AgentTarget } from '../../providers';
 import { awmHome } from '../../core/paths';
+
+// Types shared between the dispatchers (install.ts/uninstall.ts/status.ts,
+// which pick an adapter by config.type) and the per-agent adapters
+// (claude.ts/codex.ts, which need these same shapes for their own return
+// values). Living here — a leaf module with no dependency on either side —
+// avoids the circular import a dispatcher -> adapter -> dispatcher chain
+// would otherwise create (dispatchers import adapter functions; adapters
+// only ever needed these types, not any dispatcher function).
+export type InstallOptions = {
+    agent: AgentTarget;
+    registryRoot: string;
+    installMethod: 'symlink' | 'copy';
+};
+
+export type InstallResult = {
+    status: 'installed' | 'already-up-to-date';
+    scriptsDir: string;
+    settingsPath: string;
+    backupPath: string | null;
+};
+
+export type UninstallOptions = {
+    agent: AgentTarget;
+};
+
+export type UninstallResult = {
+    status: 'uninstalled' | 'not-installed';
+    backupPath: string | null;
+};
 
 /**
  * Sync a single managed file (script, wrapper, skill doc, ...) from `source`
@@ -84,3 +114,19 @@ export function checkFile(file: string): CheckResult {
         return { ok: false, detail: `broken link: ${file}` };
     }
 }
+
+export type HookStatus = {
+    overall: 'HEALTHY' | 'DEGRADED' | 'NOT_INSTALLED';
+    // Codex-only: whether a runtime heartbeat confirms the installed script
+    // matches what actually ran last session. Absent for agents (Claude)
+    // that don't have a heartbeat mechanism.
+    trust?: 'pending-trust' | 'healthy' | 'stale';
+    checks: {
+        // Claude-only checks (the using-awm.md bootstrap skill symlink and the
+        // run-hook.cmd wrapper script). Absent for agents without them.
+        bootstrapSkill?: CheckResult;
+        sessionStartScript: CheckResult;
+        runHookWrapper?: CheckResult;
+        settingsEntry: CheckResult;
+    };
+};

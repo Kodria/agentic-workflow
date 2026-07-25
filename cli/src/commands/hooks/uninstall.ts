@@ -1,15 +1,9 @@
-import { AgentTarget, getHookConfig } from '../../providers';
+import { getHookConfig } from '../../providers';
 import { uninstallClaudeHook } from './claude';
 import { uninstallCodexHook } from './codex';
+import type { UninstallOptions, UninstallResult } from './shared';
 
-export type UninstallOptions = {
-    agent: AgentTarget;
-};
-
-export type UninstallResult = {
-    status: 'uninstalled' | 'not-installed';
-    backupPath: string | null;
-};
+export type { UninstallOptions, UninstallResult };
 
 export function uninstallHook(options: UninstallOptions): UninstallResult {
     const config = getHookConfig(options.agent);

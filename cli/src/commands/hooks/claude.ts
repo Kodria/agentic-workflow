@@ -10,9 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { getSettingsMergeHookConfig } from '../../providers';
 import { backupManagedFile, syncExecutable, checkExecutable, checkFile } from './shared';
-import type { InstallOptions, InstallResult } from './install';
-import type { UninstallResult } from './uninstall';
-import type { HookStatus, CheckResult } from './status';
+import type { InstallOptions, InstallResult, UninstallResult, HookStatus, CheckResult } from './shared';
 
 function isAwmEntry(entry: any, scriptsDir: string, matcher: string): boolean {
     return (

@@ -1,19 +1,9 @@
-import { AgentTarget, getHookConfig } from '../../providers';
+import { getHookConfig } from '../../providers';
 import { installClaudeHook } from './claude';
 import { installCodexHook } from './codex';
+import type { InstallOptions, InstallResult } from './shared';
 
-export type InstallOptions = {
-    agent: AgentTarget;
-    registryRoot: string;
-    installMethod: 'symlink' | 'copy';
-};
-
-export type InstallResult = {
-    status: 'installed' | 'already-up-to-date';
-    scriptsDir: string;
-    settingsPath: string;
-    backupPath: string | null;
-};
+export type { InstallOptions, InstallResult };
 
 export function installHook(options: InstallOptions): InstallResult {
     const config = getHookConfig(options.agent);

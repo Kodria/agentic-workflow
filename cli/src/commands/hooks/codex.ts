@@ -11,9 +11,7 @@ import crypto from 'crypto';
 import { getHookConfig } from '../../providers';
 import { backupManagedFile, syncExecutable, readStrictJson, checkExecutable } from './shared';
 import { writeFileAtomic } from '../../core/atomic-file';
-import type { InstallOptions, InstallResult } from './install';
-import type { UninstallResult } from './uninstall';
-import type { HookStatus, CheckResult } from './status';
+import type { InstallOptions, InstallResult, UninstallResult, HookStatus, CheckResult } from './shared';
 
 function codexMatcher(): string {
     const config = getHookConfig('codex');
