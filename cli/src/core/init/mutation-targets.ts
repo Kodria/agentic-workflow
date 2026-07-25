@@ -105,6 +105,18 @@ export function planInitMutationTargets(params: PlanInitMutationTargetsParams): 
         targets.add(provider.hooks.scriptsDir);
     }
 
+    // Global skills directory itself, not just the bundle-derived skill
+    // subdirectories enumerated below. stepGlobalSkillsRepair (steps.ts) calls
+    // repairGlobalSkills, which readdirSync's the WHOLE skills dir and
+    // rm/symlinks individual entries classified as repairable/dead — i.e.
+    // entries that, by definition, don't belong to any currently-known
+    // bundle, so they can never be enumerated by addBundleTargets below.
+    // Adding the parent directory here makes beginBackupSession snapshot the
+    // whole tree (backupEntryFor does a recursive fs.cpSync for directory
+    // targets — verified in install-transaction.ts), covering any entry that
+    // repair might mutate. Broad-but-safe, per this module's own philosophy.
+    targets.add(provider.skill.global);
+
     // global context / AGENTS.md injection (covered by the hook for claude-code)
     const injection = provider.injection;
     if (injection) {
