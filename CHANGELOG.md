@@ -1,3 +1,8 @@
+## v3.2.1 - 2026-07-25
+
+### Fixes
+- allow a Codex-only bootstrap to pass the R19 Claude-baseline guard
+
 ## v3.2.0 - 2026-07-25
 
 ### Features
