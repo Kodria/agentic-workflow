@@ -97,9 +97,10 @@ describe('runExport (engine end-to-end)', () => {
         const originalCwd = process.cwd();
         process.chdir(cwdTmp);
         try {
+            const actualCwd = process.cwd();
             const summary = runExport({ name: 'mermaid', roots: [root], zip: okZip });  // sin `out`
-            expect(summary.outDir).toBe(path.join(cwdTmp, 'awm-export', 'claude-ai'));
-            expect(fs.existsSync(path.join(cwdTmp, 'awm-export/claude-ai/mermaid/SKILL.md'))).toBe(true);
+            expect(summary.outDir).toBe(path.join(actualCwd, 'awm-export', 'claude-ai'));
+            expect(fs.existsSync(path.join(actualCwd, 'awm-export/claude-ai/mermaid/SKILL.md'))).toBe(true);
         } finally {
             process.chdir(originalCwd);
             fs.rmSync(cwdTmp, { recursive: true, force: true });
