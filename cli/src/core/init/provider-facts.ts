@@ -85,18 +85,34 @@ function hashDirectoryTree(dir: string, exclude: Set<string>): string {
     return parts.join('|');
 }
 
+/** Canonical digest for "this agent owns nothing here" — see hashPath. */
+const NO_CONTENT = 'absent';
+
 function hashPath(target: string, exclude: Set<string>): string {
     let stat: fs.Stats;
     try {
         stat = fs.lstatSync(target);
     } catch {
-        return 'absent';
+        return NO_CONTENT;
     }
     if (stat.isSymbolicLink()) {
         return `symlink:${fs.readlinkSync(target)}`;
     }
     if (stat.isDirectory()) {
-        return `dir:${hashDirectoryTree(target, exclude)}`;
+        const tree = hashDirectoryTree(target, exclude);
+        // A managed directory that exists but holds nothing this agent owns is
+        // indistinguishable, for R19's purposes, from one that doesn't exist:
+        // either way Claude has no hook, no skill and no agent installed there.
+        // Collapsing both to one digest is what makes a Codex-only bootstrap
+        // possible — Codex's scriptsDir (~/.awm/hooks/codex) is nested inside
+        // Claude's (~/.awm/hooks), so installing the Codex hook necessarily
+        // creates Claude's directory via `mkdirSync(..., {recursive: true})`
+        // (commands/hooks/shared.ts). On a machine that never ran a Claude
+        // init, that flipped Claude's digest from absent to `dir:` and aborted
+        // every `awm init --agent codex` — the exact fresh-cloud-box scenario
+        // Codex Cloud boots into. Genuine changes still register: content
+        // appearing here, or being emptied out, both move the digest.
+        return tree === '' ? NO_CONTENT : `dir:${tree}`;
     }
     return `file:${hashFileContent(target)}`;
 }
