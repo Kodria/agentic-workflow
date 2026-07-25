@@ -118,7 +118,13 @@ export async function runSyncCore(
     }
 
     const method = options.method === 'copy' ? 'copy' : 'symlink';
-    const result = d.syncProfile({ projectRoot, bundles: discoverAllBundles(), agents: selectedAgents, method });
+    let result: SyncResult;
+    try {
+        result = d.syncProfile({ projectRoot, bundles: discoverAllBundles(), agents: selectedAgents, method });
+    } catch (e) {
+        console.error(pc.red((e as Error).message));
+        return { code: 1, selectedAgents };
+    }
     if (result.skipped.length > 0) {
         for (const sk of result.skipped) console.log(pc.yellow(`  ⚠  Skipped: ${sk}`));
     }

@@ -245,4 +245,29 @@ describe('multi-agent targeting (add/remove/sync/update/doctor)', () => {
         });
         expect(outcome.code).toBe(1); // no silent catch{} — verifies Step 6's "no aborta" removal
     });
+
+    it('sync reports a syncProfile failure and returns a non-zero exit code instead of crashing uncaught', async () => {
+        writePrefs(['claude-code'], 'claude-code');
+        const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-sync-project-'));
+        fs.mkdirSync(path.join(projectRoot, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(projectRoot, '.awm', 'profile.json'), JSON.stringify({ extensions: ['demo'] }));
+        const { runSyncCore } = require('../../src/commands/sync');
+
+        let outcome;
+        try {
+            outcome = await runSyncCore(
+                { cwd: projectRoot },
+                {
+                    syncRegistries: async () => [],
+                    verifyMinCliVersions: () => [],
+                    verifyProjectPins: async () => [],
+                    syncProfile: () => { throw new Error('physical target already claimed by a different source'); },
+                },
+            );
+        } finally {
+            fs.rmSync(projectRoot, { recursive: true, force: true });
+        }
+
+        expect(outcome.code).toBe(1); // no silent catch{} — syncProfile's throw must not propagate uncaught
+    });
 });
