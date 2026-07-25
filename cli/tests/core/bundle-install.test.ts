@@ -5,24 +5,26 @@ import { discoverBundles } from '../../src/core/bundles';
 import { installBundle, addBundle, syncProfile, InstallSummary } from '../../src/core/bundle-install';
 import { readProfile, writeProfile } from '../../src/core/profile';
 import { installArtifact } from '../../src/core/executor';
-import { InstallPlan } from '../../src/core/install-planner';
+import * as executor from '../../src/core/executor';
+import { InstallPlan, planInstall } from '../../src/core/install-planner';
 
 /**
- * Task 5 note: `installBundle` is now a thin façade — it expands the bundle
- * closure into artifact intents, runs them through `planInstall` (dedup +
- * ownership + shared-skill-group gating), and hands the resulting plan to
- * `applyInstallPlan` to actually touch the filesystem. The real,
- * transactional `applyInstallPlan` (backups/rollback, artifact-state
- * persistence) is Task 6's job — until it lands, `installBundle` throws
- * unless a caller injects `applyPlan`. This fixture supplies a minimal test
- * double so most of these tests keep exercising real behavior; a handful
- * that specifically depended on the *previous* installBundle's line-format
- * or on the pre-Task-4 Codex-agent-renderer gate are noted inline as
- * expected-red pending Task 6 (see this task's final report for the full list).
+ * `installBundle` is a thin façade — it expands the bundle closure into
+ * artifact intents, runs them through `planInstall` (dedup + ownership +
+ * shared-skill-group gating), and hands the resulting plan to
+ * `applyInstallPlan` (install-transaction.ts) to actually touch the
+ * filesystem. Most tests below use this simpler test double instead — it
+ * skips per-artifact on a missing source (unlike the real, transactional
+ * applyInstallPlan, which aborts the whole plan) and doesn't render
+ * `codex-agent-toml` targets, which keeps the fixtures here from needing
+ * valid canonical-agent frontmatter for every scenario. Tests that
+ * specifically exercise the REAL default applyInstallPlan pass no
+ * `applyPlan` override at all — see below.
  */
 function testApplyPlan(plan: InstallPlan): InstallSummary {
     const installed: string[] = [];
     const skipped: string[] = [];
+    const modifiedFiles: string[] = [];
     for (const op of plan.operations) {
         if (!fs.existsSync(op.sourcePath)) {
             skipped.push(`${op.name} (source missing: ${op.sourcePath})`);
@@ -30,8 +32,9 @@ function testApplyPlan(plan: InstallPlan): InstallSummary {
         }
         installArtifact(op.sourcePath, op.targetPath, op.method);
         installed.push(`${op.name} → ${op.owners.join(',')} (${op.scope})`);
+        modifiedFiles.push(op.targetPath);
     }
-    return { installed, skipped };
+    return { installed, skipped, transactionId: 'test-fixture', modifiedFiles };
 }
 
 // Per CLAUDE.md: no test may touch the real ~/.awm. installBundle now calls
@@ -82,7 +85,10 @@ function makeFixture() {
     fs.mkdirSync(path.join(content, 'workflows'), { recursive: true });
     fs.writeFileSync(path.join(content, 'workflows', 'wf-ext.md'), '# wf');
     fs.mkdirSync(path.join(content, 'agents'), { recursive: true });
-    fs.writeFileSync(path.join(content, 'agents', 'ag-ext.md'), '# agent');
+    fs.writeFileSync(
+        path.join(content, 'agents', 'ag-ext.md'),
+        '---\nname: ag-ext\ndescription: Test agent for bundle-install fixtures\n---\nDo the thing.\n',
+    );
 
     fs.writeFileSync(path.join(content, 'catalog.json'), JSON.stringify({
         version: 1,
@@ -125,12 +131,16 @@ describe('installBundle', () => {
             method: 'symlink', projectRoot, contentDir: content, applyPlan: testApplyPlan,
         });
         expect(fs.existsSync(path.join(projectRoot, '.claude', 'agents', 'ag-ext.md'))).toBe(true);
-        // KNOWN RED (Task 6): claude-code has no `workflow` provider config, so
-        // planInstall silently drops wf-ext for this agent — InstallPlan has no
-        // field to surface "artifact type unsupported by this agent" the way the
-        // old per-artifact `skipped` list did. Left here as a documented gap
-        // rather than deleted, so Task 6 can decide whether to reintroduce it.
-        expect(result.skipped.some((l) => l.includes('wf-ext'))).toBe(true);
+        // ACCEPTED GAP (Task 5, confirmed unchanged by Task 6): claude-code has
+        // no `workflow` provider config, so planInstall (install-planner.ts)
+        // silently drops wf-ext for this agent before a plan/operations ever
+        // exist for it — there is no "unsupported for this agent" signal for
+        // applyInstallPlan to surface as `skipped`, by design (install-planner.ts
+        // mirrors the legacy installBundle skip semantics for this exact case).
+        // Fixing this would mean adding a skip-reason channel to InstallPlan
+        // itself, which is install-planner.ts's contract (Task 5), not Task 6's.
+        expect(result.skipped.some((l) => l.includes('wf-ext'))).toBe(false);
+        expect(fs.existsSync(path.join(projectRoot, '.claude', 'workflows', 'wf-ext.md'))).toBe(false);
     });
 
     it('is idempotent: a second run leaves valid symlinks and does not throw', () => {
@@ -155,14 +165,7 @@ describe('installBundle', () => {
         expect(fs.existsSync(path.join(projectRoot, '.claude', 'skills', 's-ext'))).toBe(true);
     });
 
-    it('does not materialize anything until applyInstallPlan (Task 6) is supplied', () => {
-        // Pre-Task-5 this threw UnsupportedRendererError for the codex-agent-toml
-        // renderer (that renderer didn't exist yet). Task 4 has since implemented
-        // it (src/core/renderers/codex-agent.ts) and planInstall no longer gates
-        // on renderer support — but nothing wires the real renderer into the
-        // apply step until Task 6 lands `applyInstallPlan`, so calling
-        // installBundle without an injected `applyPlan` still throws before any
-        // write happens, just with a different (interim) message.
+    it('materializes a Codex agent as rendered TOML via the real default applyInstallPlan (no applyPlan override)', () => {
         const { content, projectRoot, bundles } = makeFixture();
         const ext = bundles.find((bundle) => bundle.name === 'ext')!;
         const agentOnly = [{
@@ -172,16 +175,21 @@ describe('installBundle', () => {
             workflows: [],
         }];
 
-        expect(() => installBundle({
+        const result = installBundle({
             bundleName: 'ext',
             bundles: agentOnly,
             agents: ['codex'],
             method: 'symlink',
             projectRoot,
             contentDir: content,
-        })).toThrow('applyInstallPlan is not implemented yet (Task 6)');
+        });
+
+        const tomlPath = path.join(projectRoot, '.codex/agents/ag-ext.toml');
         expect(fs.existsSync(path.join(projectRoot, '.codex/agents/ag-ext.md'))).toBe(false);
-        expect(fs.existsSync(path.join(projectRoot, '.codex/agents/ag-ext.toml'))).toBe(false);
+        expect(fs.existsSync(tomlPath)).toBe(true);
+        expect(fs.readFileSync(tomlPath, 'utf8')).toContain('name = "ag-ext"');
+        expect(result.transactionId).toBeTruthy();
+        expect(result.modifiedFiles).toContain(tomlPath);
     });
 
     it('keeps Codex skill installs on the legacy link renderer', () => {
@@ -205,22 +213,56 @@ describe('installBundle', () => {
         expect(result.installed).toContain('s-base → codex (local)');
     });
 
-    it('does not apply before an applyPlan is supplied, even for mixed Codex bundles', () => {
+    it('applies real filesystem changes for mixed Codex bundles when no applyPlan is supplied', () => {
         const { content, projectRoot, bundles } = makeFixture();
 
-        expect(() => addBundle({
+        const result = addBundle({
             bundleName: 'ext',
             bundles,
             agents: ['codex'],
             method: 'symlink',
             projectRoot,
             contentDir: content,
-        })).toThrow('applyInstallPlan is not implemented yet (Task 6)');
-        expect(fs.existsSync(path.join(projectRoot, '.agents/skills/s-base'))).toBe(false);
-        expect(fs.existsSync(path.join(projectRoot, '.agents/skills/s-ext'))).toBe(false);
-        expect(fs.existsSync(path.join(projectRoot, '.codex/agents/ag-ext.md'))).toBe(false);
-        expect(fs.existsSync(path.join(projectRoot, '.awm/profile.json'))).toBe(false);
-        expect(fs.existsSync(path.join(projectRoot, '.gitignore'))).toBe(false);
+        });
+
+        expect(fs.existsSync(path.join(projectRoot, '.agents/skills/s-base'))).toBe(true);
+        expect(fs.existsSync(path.join(projectRoot, '.agents/skills/s-ext'))).toBe(true);
+        expect(fs.existsSync(path.join(projectRoot, '.codex/agents/ag-ext.toml'))).toBe(true);
+        expect(result.recordedExtension).toBe('ext');
+        expect(fs.existsSync(path.join(projectRoot, '.awm/profile.json'))).toBe(true);
+        expect(fs.existsSync(path.join(projectRoot, '.gitignore'))).toBe(true);
+    });
+
+    it('installs a skill shared by two agents (OpenCode + Codex) with exactly one replaceArtifact call, but both providers own it', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+        const base = bundles.find((bundle) => bundle.name === 'base')!;
+        const replaceSpy = jest.spyOn(executor, 'replaceArtifact');
+
+        const result = installBundle({
+            bundleName: 'base',
+            bundles: [base],
+            agents: ['opencode', 'codex'],
+            method: 'symlink',
+            projectRoot,
+            contentDir: content,
+        });
+
+        const skillTarget = path.join(projectRoot, '.agents/skills/s-base');
+        expect(fs.existsSync(skillTarget)).toBe(true);
+        expect(replaceSpy).toHaveBeenCalledTimes(1);
+        replaceSpy.mockRestore();
+
+        const plan = planInstall({
+            artifacts: [{ name: 's-base', type: 'skill', installName: 's-base', sourcePath: path.join(content, 'skills', 's-base') }],
+            selectedAgents: ['opencode', 'codex'],
+            enabledAgents: ['opencode', 'codex'],
+            scope: 'local',
+            projectRoot,
+            method: 'symlink',
+        });
+        const owners = plan.reports.filter((r) => r.targetPath === skillTarget).map((r) => r.owner);
+        expect(owners).toEqual(expect.arrayContaining(['opencode', 'codex']));
+        expect(result.modifiedFiles).toContain(skillTarget);
     });
 });
 

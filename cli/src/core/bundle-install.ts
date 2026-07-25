@@ -1,15 +1,19 @@
 // src/core/bundle-install.ts
+import fs from 'fs';
+import path from 'path';
 import {
     BundleDefinition,
     defaultScopeForBundle,
     resolveBundleClosure,
 } from './bundles';
-import { AgentTarget, Scope } from '../providers';
+import { AgentTarget, providerFor, Scope } from '../providers';
 import { addExtension, ensureSkillsGitignored, readProfile, shouldRecordExtension } from './profile';
 import { contentRoots } from './registries';
 import { getPreferences } from '../utils/config';
 import { ArtifactIntent, InstallPlan, planInstall } from './install-planner';
-import path from 'path';
+import { applyInstallPlan as realApplyInstallPlan, InstallSummary } from './install-transaction';
+
+export type { InstallSummary } from './install-transaction';
 
 export type InstallMethod = 'symlink' | 'copy';
 
@@ -24,18 +28,11 @@ export interface InstallBundleOptions {
     /** Registry content root (defaults to the real cache). Overridable for tests. */
     contentDir?: string;
     /**
-     * Injectable seam for the not-yet-implemented Task 6 `applyInstallPlan`
-     * (transactional filesystem apply + backups/rollback + artifact-state
-     * persistence). Tests that need `installBundle`/`addBundle`/`syncProfile`
-     * to actually materialize artifacts must supply this until Task 6 lands
-     * the real implementation. Omitting it throws.
+     * Injectable seam over the real `applyInstallPlan` (install-transaction.ts)
+     * — defaults to it. Tests inject a fake here when they want to assert on
+     * the computed InstallPlan without touching the filesystem.
      */
     applyPlan?: (plan: InstallPlan) => InstallSummary;
-}
-
-export interface InstallSummary {
-    installed: string[];
-    skipped: string[];
 }
 
 function bundleArtifacts(b: BundleDefinition, contentDir: string): ArtifactIntent[] {
@@ -64,27 +61,15 @@ export function expandBundleArtifacts(opts: InstallBundleOptions): ArtifactInten
     return closure.flatMap((b) => bundleArtifacts(b, b.contentRoot ?? fallbackContentDir));
 }
 
-// KNOWN RED (Task 6): every real caller of installBundle/addBundle/syncProfile
-// that doesn't inject `opts.applyPlan` hits this throw — that includes actual
-// CLI code paths, not just test fixtures: `awm init`'s defaultActions
-// (src/core/init/steps.ts), `awm add`'s post-add bundle install
-// (src/commands/registry/install-bundles.ts), and multi-root bundle installs.
-// Those code paths are non-functional until Task 6 lands the real
-// applyInstallPlan (transactional filesystem apply + backups/rollback +
-// artifact-state persistence).
-function applyInstallPlan(_plan: InstallPlan): InstallSummary {
-    throw new Error('applyInstallPlan is not implemented yet (Task 6)');
-}
-
 /**
  * Materializes a bundle and its dependency closure into the target agents.
  *
- * TASK 5 INTERIM STATE: this is now a thin façade — `expandBundleArtifacts`
- * turns the bundle closure into artifact intents, `planInstall` turns those
- * into a deduped, ownership-tracked plan (see install-planner.ts for the
- * shared-target and ownership rules), and the actual transactional
- * filesystem apply is Task 6's `applyInstallPlan`. Until Task 6 lands, pass
- * `opts.applyPlan` to inject a stub/fake; without it this throws.
+ * `expandBundleArtifacts` turns the bundle closure into artifact intents,
+ * `planInstall` turns those into a deduped, ownership-tracked plan (see
+ * install-planner.ts for the shared-target and ownership rules), and
+ * `applyInstallPlan` (install-transaction.ts) performs the actual
+ * transactional filesystem apply — backups before any replace, rollback on
+ * verification failure, artifact-state persistence on success.
  *
  * Note: unlike the pre-Task-5 implementation, scope is now resolved once for
  * the whole call (the named bundle's own scope, or `scopeOverride`) rather
@@ -106,7 +91,7 @@ export function installBundle(opts: InstallBundleOptions): InstallSummary {
         projectRoot: opts.projectRoot,
         method: opts.method,
     });
-    const apply = opts.applyPlan ?? applyInstallPlan;
+    const apply = opts.applyPlan ?? realApplyInstallPlan;
     return apply(plan);
 }
 
@@ -125,16 +110,20 @@ export function addBundle(opts: InstallBundleOptions): AddBundleResult {
     const target = opts.bundles.find((b) => b.name === opts.bundleName);
 
     let recordedExtension: string | null = null;
-    // Check the named bundle's own artifacts (not just closure deps) were installed.
-    // KNOWN GAP (Task 6): this greps `summary.installed` for a `[bundleName]`
-    // suffix, but ArtifactIntent/PlannedOperation (install-planner.ts) carry no
-    // bundle provenance — only artifact name/type/owners — so no applyPlan
-    // implementation can produce that suffix anymore. `ownInstalled` is
-    // therefore always empty and `recordedExtension` always null until Task 6
-    // either adds bundle provenance to the plan or redesigns this check to
-    // compare against the named bundle's own artifact list directly.
-    const ownInstalled = summary.installed.filter((line) => line.endsWith(`[${opts.bundleName}]`));
-    if (target && ownInstalled.length > 0) {
+    // Check the named bundle's OWN artifacts (not the dependency closure) were
+    // installed — i.e. at least one own artifact has a source on disk AND a
+    // type supported by at least one selected agent (matching what planInstall
+    // would actually materialize). ArtifactIntent/PlannedOperation carry no
+    // bundle provenance (install-planner.ts groups purely by physical target),
+    // so this is computed directly from the bundle's own artifact list rather
+    // than by inspecting `summary.installed`.
+    const ownInstalled = target
+        ? bundleArtifacts(target, target.contentRoot ?? opts.contentDir ?? contentRoots()[0] ?? '')
+            .some((artifact) =>
+                fs.existsSync(artifact.sourcePath) &&
+                opts.agents.some((agent) => providerFor(agent)[artifact.type] !== null))
+        : false;
+    if (target && ownInstalled) {
         const effective: Scope = opts.scopeOverride ?? defaultScopeForBundle(target.scope);
         if (shouldRecordExtension(target.scope, effective)) {
             addExtension(opts.projectRoot, opts.bundleName);
@@ -168,6 +157,8 @@ export function syncProfile(opts: SyncProfileOptions): SyncResult {
     const profile = readProfile(opts.projectRoot);
     const installed: string[] = [];
     const skipped: string[] = [];
+    const modifiedFiles: string[] = [];
+    let transactionId = '';
 
     for (const ext of profile.extensions) {
         if (!opts.bundles.some((b) => b.name === ext)) {
@@ -185,9 +176,11 @@ export function syncProfile(opts: SyncProfileOptions): SyncResult {
         });
         installed.push(...summary.installed);
         skipped.push(...summary.skipped);
+        modifiedFiles.push(...summary.modifiedFiles);
+        transactionId = summary.transactionId;
     }
 
     if (profile.extensions.length > 0) ensureSkillsGitignored(opts.projectRoot, opts.agents);
 
-    return { installed, skipped, extensions: profile.extensions };
+    return { installed, skipped, extensions: profile.extensions, transactionId, modifiedFiles };
 }
