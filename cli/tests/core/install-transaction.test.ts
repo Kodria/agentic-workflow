@@ -135,6 +135,27 @@ describe('applyInstallPlan', () => {
         expect(summary.modifiedFiles).toEqual([]);
         expect(summary.transactionId).toBeTruthy();
     });
+
+    it('keeps rolling back remaining targets, and still surfaces the original error, when one rollback itself fails', () => {
+        const calls: string[] = [];
+        const plan = planWithTwoTargets();
+
+        expect(() => applyInstallPlan(plan, {
+            validate: () => {},
+            backup: () => null,
+            stage: (op) => `/staged/${op.name}`,
+            replace: (op) => calls.push(`replace:${op.name}`),
+            verify: (op) => { if (op.name === 'b') throw new Error('verification failed: forced'); },
+            rollback: (op) => {
+                calls.push(`rollback:${op.name}`);
+                if (op.name === 'a') throw new Error('rollback failed for a (simulated)');
+            },
+        })).toThrow('verification failed: forced');
+
+        // Both replaced ops (a, b) got a rollback attempt, in reverse order,
+        // even though rolling back 'a' itself throws.
+        expect(calls).toEqual(['replace:a', 'replace:b', 'rollback:b', 'rollback:a']);
+    });
 });
 
 describe('beginBackupSession / restoreBackup', () => {
