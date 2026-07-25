@@ -1,7 +1,7 @@
 // src/core/diagnostics/context.ts
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { HarnessContext, MachineFacts, ProjectFacts, GitState } from './types';
 import { AGENT_TARGETS, AgentTarget, providerFor } from '../../providers';
 import { capabilityRoot, listRegistries, contentRoots } from '../registries';
@@ -12,6 +12,7 @@ import { findProjectRoot, readProfile } from '../profile';
 import { discoverAllBundles, resolveBundleSkills, BundleDefinition } from '../bundles';
 import { classifyGlobalSkills } from '../skill-integrity';
 import { awmHome } from '../paths';
+import { gatherProviderFacts, ScanSkills } from './provider-checks';
 
 // Estado de un artefacto en <dir>/<skill>: link vivo / symlink colgante / ausente.
 function linkState(dir: string, skill: string): 'present' | 'broken' | 'absent' {
@@ -35,11 +36,11 @@ function classifyLinks(skillNames: string[], dir: string): { linked: string[]; b
 
 function detectGitState(repoDir: string): GitState {
     try {
-        const porcelain = execSync('git status --porcelain', { cwd: repoDir, stdio: ['ignore', 'pipe', 'ignore'] })
+        const porcelain = execFileSync('git', ['status', '--porcelain'], { cwd: repoDir, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' })
             .toString().trim();
         if (porcelain.length > 0) return 'dirty';
         try {
-            const behind = execSync('git rev-list --count HEAD..@{u}', { cwd: repoDir, stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 })
+            const behind = execFileSync('git', ['rev-list', '--count', 'HEAD..@{u}'], { cwd: repoDir, stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000, encoding: 'utf8' })
                 .toString().trim();
             if (behind !== '' && behind !== '0') return 'behind';
         } catch { /* sin upstream configurado */ }
@@ -83,11 +84,16 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
     const cachePresent = !!first && fs.existsSync(path.join(first.contentRoot, '.git'));
     const gitState = cachePresent ? detectGitState(first.contentRoot) : undefined;
 
-    // hook (reutiliza computeHookStatus)
+    // hook (reutiliza computeHookStatus) — Task 9 fix: this used to be hardcoded to
+    // 'claude-code' regardless of `agent`, so `awm init --agent codex`'s own hook
+    // precondition silently read CLAUDE's hook status instead of Codex's. Whenever
+    // Claude's hook was already installed, stepHook would then wrongly conclude
+    // Codex's hook was "already present" and skip installing it (R18 regression —
+    // caught while building this task's real end-to-end init test).
     let hookPresent = false;
     let hookDegraded = false;
     try {
-        const hs = computeHookStatus('claude-code');
+        const hs = computeHookStatus(agent);
         hookPresent = hs.checks.settingsEntry.ok;
         hookDegraded = hs.overall === 'DEGRADED';
     } catch { /* sin soporte de hooks → ausente */ }
@@ -159,6 +165,12 @@ export interface GatherOptions {
     cwd?: string;
     bundles?: BundleDefinition[];
     agent?: AgentTarget;
+    /** Task 9: agents to build the `.providers` diagnostic matrix for. Defaults to `[agent]`
+     *  (or `['claude-code']`) so existing single-agent callers (init/steps.ts) are unaffected. */
+    agents?: AgentTarget[];
+    /** Injectable seam over the physical skills-dir scan (default: classifyGlobalSkills) —
+     *  tests spy on this to assert a directory shared by two providers is scanned once. */
+    scanSkills?: ScanSkills;
 }
 
 export function gatherContext(opts: GatherOptions = {}): HarnessContext {
@@ -166,8 +178,11 @@ export function gatherContext(opts: GatherOptions = {}): HarnessContext {
     const bundles = opts.bundles ?? discoverAllBundles();
     const agent = opts.agent ?? 'claude-code';
     const root = findProjectRoot(cwd);
+    const agents = opts.agents ?? [agent];
+    const scanSkills = opts.scanSkills ?? ((dir: string) => classifyGlobalSkills(dir, contentRoots()));
     return {
         machine: gatherMachine(bundles, agent),
         project: root ? gatherProject(root, bundles, agent) : null,
+        providers: gatherProviderFacts(agents, scanSkills),
     };
 }

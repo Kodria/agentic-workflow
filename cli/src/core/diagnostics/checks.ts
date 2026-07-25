@@ -1,6 +1,6 @@
 // src/core/diagnostics/checks.ts
 import path from 'path';
-import { HarnessContext, MachineFacts, ProjectFacts, CheckResult, CheckReport, Remedy } from './types';
+import { HarnessContext, MachineFacts, ProjectFacts, CheckResult, CheckReport, Remedy, ProviderFacts, ProviderCheckState } from './types';
 
 const cmd = (value: string): Remedy => ({ kind: 'command', value });
 const skillRemedy = (value: string): Remedy => ({ kind: 'skill', value });
@@ -123,6 +123,23 @@ function projectChecks(p: ProjectFacts): CheckResult[] {
     }
 
     return out;
+}
+
+// --- Task 9: overall status for the per-provider diagnostic matrix --------
+//
+// Kept separate from `overall` above: that one degrades `CheckReport` (the
+// machine+project report `init` renders before/after each run) on any
+// 'missing' CheckResult. This one degrades the NEW provider matrix
+// (doctor-only) on any check state that represents something genuinely
+// broken/absent/unsupported — 'pending-trust'/'stale'/'pending' are
+// actionable-but-expected transient states (rendered with ◷/⚠, not ✖) and
+// do not by themselves degrade `overall`, mirroring how a 'warn' CheckResult
+// doesn't degrade the machine+project report either.
+const DEGRADING_PROVIDER_STATES: ProviderCheckState[] = ['missing', 'unsupported', 'broken', 'absent', 'conflict'];
+
+export function computeProviderOverall(providers: ProviderFacts[]): 'healthy' | 'degraded' {
+    const degraded = providers.some((p) => p.checks.some((c) => DEGRADING_PROVIDER_STATES.includes(c.state)));
+    return degraded ? 'degraded' : 'healthy';
 }
 
 export function runChecks(ctx: HarnessContext): CheckReport {

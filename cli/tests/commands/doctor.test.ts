@@ -1,5 +1,6 @@
 import { renderReport, runDoctor } from '../../src/commands/doctor';
 import type { CheckReport } from '../../src/core/diagnostics/types';
+import type { AwmPreferences } from '../../src/utils/config';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -62,12 +63,33 @@ describe('renderReport', () => {
 
 describe('runDoctor', () => {
     let tmpHome: string;
+    let tmpWork: string;
     let originalHome: string | undefined;
     let originalAwmHome: string | undefined;
     let writeSpy: jest.SpyInstance;
 
+    function stdout(): string {
+        return writeSpy.mock.calls.map((c) => c[0]).join('');
+    }
+
+    function prefsWith(enabledAgents: AwmPreferences['enabledAgents']): AwmPreferences {
+        return {
+            defaultAgent: enabledAgents[0],
+            enabledAgents,
+            installMethod: 'symlink',
+            defaultScope: 'local',
+        };
+    }
+
+    function writePrefs(prefs: AwmPreferences): void {
+        const dir = path.join(tmpHome, '.awm');
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'preferences.json'), JSON.stringify(prefs, null, 2) + '\n');
+    }
+
     beforeEach(() => {
         tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-doctor-run-'));
+        tmpWork = tmpHome;
         originalHome = process.env.HOME;
         originalAwmHome = process.env.AWM_HOME;
         process.env.HOME = tmpHome;
@@ -87,12 +109,29 @@ describe('runDoctor', () => {
         expect(code).toBe(1);
     });
 
-    it('--json emits a parseable CheckReport and keeps the same exit code', () => {
+    it('--json emits a parseable provider report and keeps the same exit code', () => {
         const code = runDoctor({ cwd: tmpHome, json: true });
-        const written = writeSpy.mock.calls.map((c) => c[0]).join('');
-        const parsed = JSON.parse(written);
+        const parsed = JSON.parse(stdout());
         expect(parsed.overall).toBe('degraded');
-        expect(Array.isArray(parsed.results)).toBe(true);
+        expect(Array.isArray(parsed.providers)).toBe(true);
+        expect(code).toBe(1);
+    });
+
+    it('reports every enabled provider and stable remediation codes in JSON', () => {
+        writePrefs(prefsWith(['claude-code', 'opencode', 'codex']));
+        const code = runDoctor({ cwd: tmpWork, json: true });
+        const report = JSON.parse(stdout());
+        expect(report.providers.map((provider: { id: string }) => provider.id))
+            .toEqual(['claude-code', 'opencode', 'codex']); // verifies R12
+        expect(report.providers.find((provider: { id: string }) => provider.id === 'codex'))
+            .toMatchObject({
+                checks: expect.arrayContaining([
+                    expect.objectContaining({ id: 'binary.version' }),
+                    expect.objectContaining({ id: 'skills.global' }),
+                    expect.objectContaining({ id: 'agents.native' }),
+                    expect.objectContaining({ id: 'hook.trust' }),
+                ]),
+            }); // verifies R2, R7, R8, R18
         expect(code).toBe(1);
     });
 

@@ -102,8 +102,13 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
         : enableAgent(loaded.prefs, agent);
 
     // R19: Claude's baseline is read-only from every OTHER agent's init run —
-    // snapshotted before any write, compared after every step ran.
-    const beforeClaudeFacts = gatherProviderFacts('claude-code');
+    // snapshotted before any write, compared after every step ran. Only meaningful
+    // when THIS run targets a different agent: a claude-code init run is expected
+    // to change claude-code's own managed paths (that's the point of running it),
+    // so the guard would otherwise misfire on the CLI's own default/most common
+    // path — every fresh `awm init` (no --agent) genuinely mutates its baseline
+    // and would incorrectly be flagged as a violation.
+    const beforeClaudeFacts = agent === 'claude-code' ? null : gatherProviderFacts('claude-code');
 
     let outcome: InitOutcome;
     try {
@@ -168,7 +173,9 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
                 throw new Error('one or more init steps failed');
             }
 
-            assertClaudeBaselinePreserved(beforeClaudeFacts, gatherProviderFacts('claude-code'));
+            if (beforeClaudeFacts) {
+                assertClaudeBaselinePreserved(beforeClaudeFacts, gatherProviderFacts('claude-code'));
+            }
 
             backup.commit();
             outcome.transactionId = backup.transactionId;

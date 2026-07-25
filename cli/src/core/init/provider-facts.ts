@@ -16,7 +16,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { AgentTarget, providerFor } from '../../providers';
+import { AGENT_TARGETS, AgentTarget, providerFor } from '../../providers';
 
 export type ProviderFacts = {
     agent: AgentTarget;
@@ -34,42 +34,58 @@ function hashFileContent(target: string): string {
  * Recursively walks `dir`, producing a digest that changes if ANY nested
  * file's content changes at ANY depth, or any entry is added/removed/renamed/
  * changes kind (file/dir/symlink) — not just the top-level entries.
+ *
+ * `exclude` names absolute paths to omit entirely — not just their content,
+ * but their very presence as an entry — from the hash. This exists because
+ * Codex's hook scripts directory (`~/.awm/hooks/codex/`) is physically NESTED
+ * inside Claude's own hook scripts directory (`~/.awm/hooks/` —
+ * providers/index.ts), so a naive full recursive hash of Claude's scriptsDir
+ * would flag a REAL Codex hook install as "Claude's baseline changed" — first
+ * by content, and (if merely masked to a placeholder rather than fully
+ * dropped) still by the sibling directory's mere appearance/disappearance as
+ * an entry — either way making R19's guard permanently unsatisfiable for any
+ * Codex init that actually installs its hook (caught via Task 9's real
+ * end-to-end init test). Fully omitting another agent's own managed paths
+ * keeps the guard scoped to what it's meant to protect — content Claude
+ * itself owns — without weakening it for genuine Claude-owned changes.
  */
-function hashDirectoryTree(dir: string): string {
+function hashDirectoryTree(dir: string, exclude: Set<string>): string {
     let entries: string[];
     try {
         entries = fs.readdirSync(dir).sort();
     } catch {
         return 'unreadable';
     }
-    const parts = entries.map((name) => {
-        const p = path.join(dir, name);
-        let s: fs.Stats;
-        try {
-            s = fs.lstatSync(p);
-        } catch {
-            return `${name}:missing`;
-        }
-        if (s.isSymbolicLink()) {
+    const parts = entries
+        .filter((name) => !exclude.has(path.resolve(path.join(dir, name))))
+        .map((name) => {
+            const p = path.join(dir, name);
+            let s: fs.Stats;
             try {
-                return `${name}:l:${fs.readlinkSync(p)}`;
+                s = fs.lstatSync(p);
             } catch {
-                return `${name}:l:unreadable`;
+                return `${name}:missing`;
             }
-        }
-        if (s.isDirectory()) {
-            return `${name}:d:${hashDirectoryTree(p)}`;
-        }
-        try {
-            return `${name}:f:${hashFileContent(p)}`;
-        } catch {
-            return `${name}:f:unreadable`;
-        }
-    });
+            if (s.isSymbolicLink()) {
+                try {
+                    return `${name}:l:${fs.readlinkSync(p)}`;
+                } catch {
+                    return `${name}:l:unreadable`;
+                }
+            }
+            if (s.isDirectory()) {
+                return `${name}:d:${hashDirectoryTree(p, exclude)}`;
+            }
+            try {
+                return `${name}:f:${hashFileContent(p)}`;
+            } catch {
+                return `${name}:f:unreadable`;
+            }
+        });
     return parts.join('|');
 }
 
-function hashPath(target: string): string {
+function hashPath(target: string, exclude: Set<string>): string {
     let stat: fs.Stats;
     try {
         stat = fs.lstatSync(target);
@@ -80,7 +96,7 @@ function hashPath(target: string): string {
         return `symlink:${fs.readlinkSync(target)}`;
     }
     if (stat.isDirectory()) {
-        return `dir:${hashDirectoryTree(target)}`;
+        return `dir:${hashDirectoryTree(target, exclude)}`;
     }
     return `file:${hashFileContent(target)}`;
 }
@@ -103,12 +119,26 @@ function providerManagedPaths(agent: AgentTarget): string[] {
     return Array.from(paths).sort();
 }
 
+/** Every OTHER agent's own managed paths, resolved — see hashDirectoryTree's docstring:
+ *  these get excluded from `agent`'s recursive hash so a sibling agent's writes to a
+ *  path nested inside `agent`'s own managed directory (Codex's scriptsDir under
+ *  Claude's, today) don't register as a change to `agent`'s baseline. */
+function otherAgentManagedPaths(agent: AgentTarget): Set<string> {
+    const out = new Set<string>();
+    for (const other of AGENT_TARGETS) {
+        if (other === agent) continue;
+        for (const p of providerManagedPaths(other)) out.add(path.resolve(p));
+    }
+    return out;
+}
+
 /** Snapshots `agent`'s managed AWM state. Pure read — never writes. */
 export function gatherProviderFacts(agent: AgentTarget): ProviderFacts {
     const paths = providerManagedPaths(agent);
+    const exclude = otherAgentManagedPaths(agent);
     const hash = crypto.createHash('sha256');
     for (const p of paths) {
-        hash.update(p).update('\0').update(hashPath(p)).update('\0');
+        hash.update(p).update('\0').update(hashPath(p, exclude)).update('\0');
     }
     return { agent, paths, hash: hash.digest('hex') };
 }

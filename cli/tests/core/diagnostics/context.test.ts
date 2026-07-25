@@ -153,6 +153,53 @@ describe('gatherContext', () => {
     });
 });
 
+describe('gatherContext — providers matrix (Task 9)', () => {
+    let tmpHome: string;
+    let originalHome: string | undefined;
+    let originalAwmHome: string | undefined;
+
+    beforeEach(() => {
+        tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-doctor-providers-'));
+        originalHome = process.env.HOME;
+        originalAwmHome = process.env.AWM_HOME;
+        process.env.HOME = tmpHome;
+        process.env.AWM_HOME = path.join(tmpHome, '.awm');
+        jest.resetModules();
+    });
+
+    afterEach(() => {
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+        if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+        if (originalAwmHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = originalAwmHome;
+    });
+
+    function healthySharedSkills() {
+        return { valid: ['development-process'], repairable: [], dead: [] };
+    }
+
+    it('reports shared skills for both owners without scanning twice', () => {
+        // OpenCode and Codex both read/write ~/.agents/skills (providers/index.ts) —
+        // the physical directory must be scanned once and attributed to both owners.
+        const scan = jest.fn(() => healthySharedSkills());
+        const { gatherContext } = require('../../../src/core/diagnostics/context');
+        const report = gatherContext({ cwd: tmpHome, bundles: [], agents: ['opencode', 'codex'], scanSkills: scan });
+        expect(scan).toHaveBeenCalledTimes(1);
+        expect(report.providers.every((provider: { checks: { state: string }[] }) =>
+            provider.checks.some((check) => check.state === 'shared'))).toBe(true);
+    });
+
+    it('marks skills.global healthy (not shared) for a single unshared provider', () => {
+        const scan = jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
+        const { gatherContext } = require('../../../src/core/diagnostics/context');
+        const report = gatherContext({ cwd: tmpHome, bundles: [], agents: ['claude-code'], scanSkills: scan });
+        expect(scan).toHaveBeenCalledTimes(1);
+        const claude = report.providers.find((p: { id: string }) => p.id === 'claude-code');
+        const skillsCheck = claude.checks.find((c: { id: string }) => c.id === 'skills.global');
+        expect(skillsCheck.state).not.toBe('shared');
+        expect(skillsCheck.owners).toBeUndefined();
+    });
+});
+
 describe('gatherMachine — agnostic skill health (#4)', () => {
     it('classifies the target agent skills dir, not always Claude', () => {
         const home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-home-'));
