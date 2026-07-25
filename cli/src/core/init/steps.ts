@@ -20,6 +20,7 @@ import { getInjection, providerFor } from '../../providers';
 import { repairGlobalSkills as realRepairGlobalSkills } from '../skill-integrity';
 import { contentRoots } from '../registries';
 import { injectProjectConstitution as realInjectProjectConstitution } from '../context/project-constitution-inject';
+import { CodexAgentsStrategy } from '../context/strategies/codex-agents';
 
 // ---------------------------------------------------------------------------
 // defaultActions — bridges the real functions to the InitActions interface
@@ -68,7 +69,12 @@ export const defaultActions: InitActions = {
 
     installContext: (op) => { realInjectionOrchestrator.installContext(op); },
     repairGlobalSkills: (skillsDir, registryContentDirs) => realRepairGlobalSkills(skillsDir, registryContentDirs),
-    injectProjectConstitution: (o) => realInjectProjectConstitution(o.projectRoot, o.agent),
+    injectProjectConstitution: (o) => {
+        if (getInjection(o.agent)?.type === 'managed-agents-md') {
+            return new CodexAgentsStrategy().injectProject(o.projectRoot) === 'injected' ? 'injected' : 'already';
+        }
+        return realInjectProjectConstitution(o.projectRoot, o.agent);
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -247,17 +253,16 @@ export function stepConstitution(d: InitDeps): StepResult {
     return ok('project.constitution', 'project', 'pending', 'skill: project-constitution');
 }
 
-/** Step 8b – Entregar CONSTITUTION.md a agentes con inyección config-instructions
- *  (opencode) vía un opencode.json local del proyecto. Claude lo recibe por el hook. */
+/** Step 8b – Deliver project guidance via the provider-specific context mechanism. */
 export function stepConstitutionInjection(d: InitDeps): StepResult {
     const proj = d.ctx.project;
     if (!proj) return ok('project.constitutionInjection', 'project', 'skipped', 'no project');
 
     const inj = getInjection(d.agent);
-    if (!inj || inj.type !== 'config-instructions') {
+    if (!inj || inj.type === 'cc-settings-merge') {
         return ok('project.constitutionInjection', 'project', 'skipped', 'covered by hook');
     }
-    if (!proj.constitution.present) {
+    if (inj.type === 'config-instructions' && !proj.constitution.present) {
         return ok('project.constitutionInjection', 'project', 'skipped', 'no CONSTITUTION.md');
     }
 

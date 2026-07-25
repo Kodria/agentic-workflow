@@ -142,3 +142,38 @@ describe('InjectionOrchestrator (opencode, real strategy)', () => {
         expect((cfg.instructions ?? []).includes(absPath)).toBe(false);
     });
 });
+
+describe('InjectionOrchestrator (codex, managed AGENTS.md strategy)', () => {
+    it('owns only the managed block and never dispatches to Claude hooks', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-codex-orch-'));
+        const registryRoot = tmpRegistry();
+        const agentsPath = path.join(dir, 'AGENTS.md');
+        const contextPath = path.join(dir, 'awm-context.md');
+        fs.writeFileSync(agentsPath, '# User rules\n');
+        const orch = new InjectionOrchestrator({
+            providerOverride: {
+                label: 'Codex', skill: { global: '', local: '', renderer: 'link' }, workflow: null, agent: null,
+                injection: { type: 'managed-agents-md', globalPath: agentsPath, localFile: 'AGENTS.md' },
+            },
+            contextPathOverride: contextPath,
+        });
+        const op = {
+            agent: 'codex' as const,
+            scope: 'global' as const,
+            registryRoot,
+            installMethod: 'copy' as const,
+            profileExtensions: [],
+        };
+
+        orch.installContext(op);
+
+        expect(fs.readFileSync(agentsPath, 'utf8')).toContain('# User rules\n');
+        expect(fs.readFileSync(agentsPath, 'utf8')).toContain('BODY');
+        expect(installHook).not.toHaveBeenCalled();
+        expect(orch.contextStatus(op)).toBe('injected');
+
+        orch.uninstallContext(op);
+        expect(fs.readFileSync(agentsPath, 'utf8')).toContain('# User rules\n');
+        expect(fs.readFileSync(agentsPath, 'utf8')).not.toContain('<!-- AWM:');
+    });
+});

@@ -3,6 +3,7 @@ import { AgentTarget, Scope, ProviderConfig, getInjection, providerFor } from '.
 import { InjectionStrategy } from './strategies/strategy';
 import { HookMergeStrategy } from './strategies/hook-merge';
 import { ConfigInstructionsStrategy } from './strategies/config-instructions';
+import { CodexAgentsStrategy } from './strategies/codex-agents';
 import { buildContext } from './provider';
 import { materialize, globalContextPath } from './materializer';
 import { InjectionInput, InjectionState, MaterializedRef } from './types';
@@ -32,8 +33,7 @@ export class InjectionOrchestrator {
         switch (inj.type) {
             case 'cc-settings-merge': return new HookMergeStrategy();
             case 'config-instructions': return new ConfigInstructionsStrategy();
-            case 'managed-agents-md':
-                throw new Error(`injection strategy '${inj.type}' is not implemented`);
+            case 'managed-agents-md': return new CodexAgentsStrategy();
         }
     }
 

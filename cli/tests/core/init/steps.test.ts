@@ -335,6 +335,15 @@ describe('stepConstitutionInjection (#6)', () => {
         expect(a.injectProjectConstitution).not.toHaveBeenCalled();
     });
 
+    it('installs Codex project guidance before CONSTITUTION.md exists', () => {
+        const a = spies();
+        const r = stepConstitutionInjection(
+            deps({ machine: machine(), project: project({ constitution: { present: false } }) }, a, { agent: 'codex' }),
+        );
+        expect(r.action).toBe('applied');
+        expect(a.injectProjectConstitution).toHaveBeenCalledWith({ projectRoot: '/repo', agent: 'codex' });
+    });
+
     it('maps already → skipped when CONSTITUTION.md was already in opencode.json', () => {
         const a = spies();
         a.injectProjectConstitution.mockReturnValue('already');
@@ -383,5 +392,13 @@ describe('stepContextInjection', () => {
         const r = stepContextInjection(deps({ machine: machine(), project: null }, a, { agent: 'opencode' }));
         expect(r.action).toBe('applied');
         expect(a.installContext).toHaveBeenCalled();
+    });
+
+    it('installs the Codex global managed block when absent', () => {
+        const a = spies();
+        a.contextStatus.mockReturnValue('absent');
+        const r = stepContextInjection(deps({ machine: machine(), project: null }, a, { agent: 'codex' }));
+        expect(r.action).toBe('applied');
+        expect(a.installContext).toHaveBeenCalledWith(expect.objectContaining({ agent: 'codex', scope: 'global' }));
     });
 });
