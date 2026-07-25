@@ -59,7 +59,12 @@ export function planReconciliation(params: PlanReconciliationParams): InstallPla
                 contentDir,
             });
         } catch {
-            continue; // unresolvable closure (e.g. dangling dependsOn) — skip, don't abort the whole reconciliation
+            // A plain dangling `dependsOn` name doesn't reach here — resolveBundleClosure
+            // (bundles.ts) silently drops it before this point. This only fires on a
+            // genuinely malformed bundle definition (e.g. `dependsOn` not an array), which
+            // throws while walking the closure. Skip that one bundle rather than aborting
+            // reconciliation for every other bundle (see tests/core/reconciliation.test.ts).
+            continue;
         }
         for (const intent of intents) {
             const key = intentKey(intent);
