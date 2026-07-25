@@ -11,6 +11,7 @@ export function parseCanonicalAgent(source: string): CanonicalAgent {
     for (const line of match[1].split(/\r?\n/)) {
         const field = line.match(/^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/);
         if (!field) throw new Error(`invalid canonical agent frontmatter line: ${line}`);
+        if (fields.has(field[1])) throw new Error(`duplicate canonical agent frontmatter key: ${field[1]}`);
         fields.set(field[1], field[2].replace(/^(['"])(.*)\1$/, '$2').trim());
     }
     const name = fields.get('name') ?? '';

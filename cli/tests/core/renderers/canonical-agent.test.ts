@@ -55,6 +55,7 @@ it.each([
     ['---\nname: ok\ndescription: x\n---\n', 'non-empty instruction body'],
     ['name: ok', 'frontmatter'],
     ['---\nname: ok\nnot a field\n---\nbody', 'invalid canonical agent frontmatter line'],
+    ['---\nname: ok\ndescription: first\ndescription: second\n---\nbody', 'duplicate canonical agent frontmatter key: description'],
 ])('rejects invalid canonical agent sources', (source, message) => {
     expect(() => parseCanonicalAgent(source)).toThrow(message); // verifies R17
 });

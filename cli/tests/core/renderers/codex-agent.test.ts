@@ -31,3 +31,54 @@ it.each([
 ])('rejects invalid canonical agents before rendering', (source, message) => {
     expect(() => renderCodexAgent(source)).toThrow(message); // verifies R17
 });
+
+it('escapes an embedded backslash and runs of double quotes of varying length in the instructions body', () => {
+    const instructionsBody = [
+        'Backslash: \\',
+        'One quote: "',
+        'Three quotes: """',
+        'Four quotes: """"',
+        'Five quotes: """""',
+        'Seven quotes: """""""',
+        'Eight quotes: """"""""',
+    ].join('\n');
+    const source = `---
+name: quote-agent
+description: Handles many quotes
+---
+
+${instructionsBody}
+`;
+
+    expect(renderCodexAgent(source)).toBe(
+`name = "quote-agent"
+description = "Handles many quotes"
+developer_instructions = """
+Backslash: \\\\
+One quote: \\"
+Three quotes: \\"\\"\\"
+Four quotes: \\"\\"\\"\\"
+Five quotes: \\"\\"\\"\\"\\"
+Seven quotes: \\"\\"\\"\\"\\"\\"\\"
+Eight quotes: \\"\\"\\"\\"\\"\\"\\"\\"
+"""
+`); // verifies R8, R9 (guards against greedy triple-quote-run escaping producing invalid TOML)
+});
+
+it('escapes U+007F (DEL) in single-line TOML string fields', () => {
+    const source = `---
+name: ok
+description: hasdel
+---
+
+Body text.
+`;
+
+    expect(renderCodexAgent(source)).toBe(
+`name = "ok"
+description = "has\\u007fdel"
+developer_instructions = """
+Body text.
+"""
+`); // verifies R8, R9
+});
