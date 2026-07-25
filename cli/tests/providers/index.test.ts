@@ -1,67 +1,172 @@
-// tests/providers/index.test.ts
-import { getTargetPath, PROVIDERS } from '../../src/providers';
+import fs from 'fs';
 import os from 'os';
+import path from 'path';
+import {
+    AGENT_TARGETS,
+    getTargetPath,
+    providerFor,
+    providers,
+} from '../../src/providers';
 
 describe('Providers Routing', () => {
-    // ── Existing Antigravity tests (preserved) ──
-    it('routes antigravity global skills correctly', () => {
-        const result = getTargetPath('skill', 'antigravity', 'global');
-        expect(result).toBe(`${os.homedir()}/.gemini/antigravity/skills`);
+    const originalHome = process.env.HOME;
+    const originalAwmHome = process.env.AWM_HOME;
+    let tmpHome: string;
+    let tmpWork: string;
+
+    beforeEach(() => {
+        tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-provider-home-'));
+        tmpWork = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-provider-work-'));
+        process.env.HOME = tmpHome;
+        process.env.AWM_HOME = path.join(tmpHome, '.awm-test');
     });
 
-    it('routes opencode local skills correctly', () => {
-        const result = getTargetPath('skill', 'opencode', 'local');
-        expect(result).toBe('.agents/skills');
+    afterEach(() => {
+        if (originalHome === undefined) delete process.env.HOME;
+        else process.env.HOME = originalHome;
+        if (originalAwmHome === undefined) delete process.env.AWM_HOME;
+        else process.env.AWM_HOME = originalAwmHome;
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+        fs.rmSync(tmpWork, { recursive: true, force: true });
     });
 
-    it('routes antigravity global workflows correctly', () => {
-        const result = getTargetPath('workflow', 'antigravity', 'global');
-        expect(result).toBe(`${os.homedir()}/.gemini/antigravity/global_workflows`);
+    it('resolves Codex paths from the current HOME at call time', () => {
+        const first = fs.mkdtempSync(path.join(tmpWork, 'awm-home-a-'));
+        const second = fs.mkdtempSync(path.join(tmpWork, 'awm-home-b-'));
+        process.env.HOME = first;
+        expect(getTargetPath('skill', 'codex', 'global'))
+            .toBe(path.join(first, '.agents/skills'));
+        process.env.HOME = second;
+        expect(getTargetPath('agent', 'codex', 'global'))
+            .toBe(path.join(second, '.codex/agents'));
     });
 
-    it('throws on opencode workflow', () => {
+    it('returns a fresh provider graph using current HOME and AWM_HOME', () => {
+        const first = providers();
+        const nextHome = path.join(tmpWork, 'next-home');
+        const nextAwmHome = path.join(tmpWork, 'next-awm');
+        process.env.HOME = nextHome;
+        process.env.AWM_HOME = nextAwmHome;
+
+        const second = providers();
+
+        expect(second).not.toBe(first);
+        expect(second.codex.skill.global).toBe(path.join(nextHome, '.agents/skills'));
+        expect(second.codex.hooks?.scriptsDir).toBe(path.join(nextAwmHome, 'hooks/codex'));
+        expect(first.codex.skill.global).toBe(path.join(tmpHome, '.agents/skills'));
+    });
+
+    it('declares the complete Codex capability metadata', () => {
+        expect(providerFor('codex')).toEqual({
+            label: 'Codex',
+            minimumVersion: '0.145.0',
+            versionCommand: { command: 'codex', args: ['--version'] },
+            skill: {
+                global: path.join(tmpHome, '.agents/skills'),
+                local: '.agents/skills',
+                renderer: 'link',
+            },
+            workflow: null,
+            agent: {
+                global: path.join(tmpHome, '.codex/agents'),
+                local: '.codex/agents',
+                renderer: 'codex-agent-toml',
+            },
+            hooks: {
+                type: 'codex-hooks-json',
+                settingsPath: path.join(tmpHome, '.codex/hooks.json'),
+                scriptsDir: path.join(process.env.AWM_HOME!, 'hooks/codex'),
+                matcher: 'startup|resume|clear|compact',
+                eventName: 'SessionStart',
+            },
+            injection: {
+                type: 'managed-agents-md',
+                globalPath: path.join(tmpHome, '.codex/AGENTS.md'),
+                localFile: 'AGENTS.md',
+            },
+        });
+    });
+
+    it('keeps Claude Code, OpenCode, and Antigravity contracts unchanged', () => {
+        const graph = providers();
+        expect(graph.antigravity).toEqual({
+            label: 'Antigravity',
+            skill: {
+                global: path.join(tmpHome, '.gemini/antigravity/skills'),
+                local: '.agent/skills',
+                renderer: 'link',
+            },
+            workflow: {
+                global: path.join(tmpHome, '.gemini/antigravity/global_workflows'),
+                local: '.agent/workflows',
+                renderer: 'link',
+            },
+            agent: null,
+        });
+        expect(graph.opencode).toEqual({
+            label: 'OpenCode',
+            skill: {
+                global: path.join(tmpHome, '.agents/skills'),
+                local: '.agents/skills',
+                renderer: 'link',
+            },
+            workflow: null,
+            agent: {
+                global: path.join(tmpHome, '.config/opencode/agents'),
+                local: '.agents/profiles',
+                renderer: 'link',
+            },
+            injection: {
+                type: 'config-instructions',
+                configPath: path.join(tmpHome, '.config/opencode/opencode.json'),
+                field: 'instructions',
+            },
+        });
+        expect(graph['claude-code']).toEqual({
+            label: 'Claude Code',
+            skill: {
+                global: path.join(tmpHome, '.claude/skills'),
+                local: '.claude/skills',
+                renderer: 'link',
+            },
+            workflow: null,
+            agent: {
+                global: path.join(tmpHome, '.claude/agents'),
+                local: '.claude/agents',
+                renderer: 'link',
+            },
+            hooks: {
+                type: 'cc-settings-merge',
+                settingsPath: path.join(tmpHome, '.claude/settings.json'),
+                scriptsDir: path.join(process.env.AWM_HOME!, 'hooks/claude-code'),
+                matcher: 'startup|clear|compact',
+                eventName: 'SessionStart',
+            },
+            injection: { type: 'cc-settings-merge' },
+        });
+    });
+
+    it('keeps Claude Code and OpenCode destinations unchanged', () => {
+        expect(getTargetPath('skill', 'claude-code', 'global'))
+            .toBe(path.join(process.env.HOME!, '.claude/skills'));
+        expect(getTargetPath('skill', 'opencode', 'global'))
+            .toBe(path.join(process.env.HOME!, '.agents/skills'));
+    });
+
+    it('uses AGENT_TARGETS as the single iterable target catalog', () => {
+        expect(AGENT_TARGETS).toEqual(['antigravity', 'opencode', 'claude-code', 'codex']);
+        expect(Object.keys(providers())).toEqual([...AGENT_TARGETS]);
+    });
+
+    it('throws on unsupported artifacts', () => {
         expect(() => getTargetPath('workflow', 'opencode', 'global')).toThrow('not supported');
-    });
-
-    // ── New Claude Code tests ──
-    it('routes claude-code global skills correctly', () => {
-        const result = getTargetPath('skill', 'claude-code', 'global');
-        expect(result).toBe(`${os.homedir()}/.claude/skills`);
-    });
-
-    it('routes claude-code local skills correctly', () => {
-        const result = getTargetPath('skill', 'claude-code', 'local');
-        expect(result).toBe('.claude/skills');
-    });
-
-    it('routes claude-code global agents correctly', () => {
-        const result = getTargetPath('agent', 'claude-code', 'global');
-        expect(result).toBe(`${os.homedir()}/.claude/agents`);
-    });
-
-    it('routes claude-code local agents correctly', () => {
-        const result = getTargetPath('agent', 'claude-code', 'local');
-        expect(result).toBe('.claude/agents');
-    });
-
-    it('throws on claude-code workflow', () => {
         expect(() => getTargetPath('workflow', 'claude-code', 'global')).toThrow('not supported');
+        expect(() => getTargetPath('agent', 'antigravity', 'local')).toThrow('not supported');
     });
 
-    it('throws on unknown agent target', () => {
-        expect(() => getTargetPath('skill', 'unknown-agent' as any, 'global')).toThrow('Unknown agent target');
-    });
-
-    // ── PROVIDERS map structure tests ──
-    it('exports PROVIDERS with all three targets', () => {
-        expect(Object.keys(PROVIDERS)).toEqual(
-            expect.arrayContaining(['antigravity', 'opencode', 'claude-code'])
-        );
-    });
-
-    it('marks unsupported artifact types as null', () => {
-        expect(PROVIDERS['antigravity'].agent).toBeNull();
-        expect(PROVIDERS['opencode'].workflow).toBeNull();
-        expect(PROVIDERS['claude-code'].workflow).toBeNull();
+    it('fails loudly for invalid runtime provider input', () => {
+        expect(() => providerFor('unknown-agent' as any)).toThrow('Unknown agent target');
+        expect(() => getTargetPath('skill', 'unknown-agent' as any, 'global'))
+            .toThrow('Unknown agent target');
     });
 });

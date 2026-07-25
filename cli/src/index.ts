@@ -7,7 +7,14 @@ import { buildGroupedOptions } from './utils/grouping';
 import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, packagePickerItems, artifactPickerItems, resolveLevel2Selection, ALL_SENTINEL, ArtifactView, artifactValue } from './utils/registry-view';
 import { isInteractive } from './ui/tty';
 import { multiselectPicker } from './ui/picker';
-import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
+import {
+  AGENT_TARGETS,
+  getTargetPath,
+  providerFor,
+  AgentTarget,
+  Scope,
+  ArtifactType,
+} from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
 import { regenerateGlobalContext } from './core/context/regenerate';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
@@ -69,7 +76,7 @@ function resolveSelectedArtifacts(selections: any[]): any[] {
 program.command('add [name]')
   .description('Add a skill, workflow, or process interactively (or non-interactively with flags)')
   .option('-t, --type <type>', 'Artifact type: skill, workflow, or process')
-  .option('-a, --agent <agent>', `Target agent: ${Object.keys(PROVIDERS).join(', ')}`)
+  .option('-a, --agent <agent>', `Target agent: ${AGENT_TARGETS.join(', ')}`)
   .option('-s, --scope <scope>', 'Scope: local or global')
   .option('-m, --method <method>', 'Install method: symlink or copy')
   .option('-y, --yes', 'Skip confirmation prompts')
@@ -95,7 +102,7 @@ program.command('add [name]')
 
               let bundleAgents: AgentTarget[];
               if (options.agent) {
-                  const valid = Object.keys(PROVIDERS);
+                  const valid: readonly string[] = AGENT_TARGETS;
                   const parsed = options.agent.split(',').map((a) => a.trim());
                   for (const a of parsed) {
                       if (!valid.includes(a)) {
@@ -169,7 +176,7 @@ program.command('add [name]')
       if (options.all) {
           let targetAgents: AgentTarget[];
           if (options.agent) {
-              const validAgents = Object.keys(PROVIDERS);
+              const validAgents: readonly string[] = AGENT_TARGETS;
               const parsed = options.agent.split(',').map((a) => a.trim());
               for (const a of parsed) {
                   if (!validAgents.includes(a)) {
@@ -204,8 +211,8 @@ program.command('add [name]')
               methodVal = scopeVal === 'local' ? 'copy' : 'symlink';
           }
 
-          const includeWorkflows = targetAgents.some((a) => PROVIDERS[a].workflow !== null);
-          const includeAgents = targetAgents.some((a) => PROVIDERS[a].agent !== null);
+          const includeWorkflows = targetAgents.some((a) => providerFor(a).workflow !== null);
+          const includeAgents = targetAgents.some((a) => providerFor(a).agent !== null);
           const allView = buildPackageView(
               skills,
               includeWorkflows ? workflows : [],
@@ -240,7 +247,7 @@ program.command('add [name]')
 
               for (const currentAgent of targetAgents) {
                   for (const artifact of artifactsToInstall) {
-                      if (PROVIDERS[currentAgent][artifact.type] === null) {
+                      if (providerFor(currentAgent)[artifact.type] === null) {
                           skipped.push(`${artifact.name} (${currentAgent})`);
                           continue;
                       }
@@ -289,7 +296,7 @@ program.command('add [name]')
       // 3. Agent & Scope Prompts (Moved up)
       let targetAgents: AgentTarget[];
       if (options.agent) {
-          const validAgents = Object.keys(PROVIDERS);
+          const validAgents: readonly string[] = AGENT_TARGETS;
           const parsed = options.agent.split(',').map(a => a.trim());
           for (const a of parsed) {
               if (!validAgents.includes(a)) {
@@ -301,9 +308,9 @@ program.command('add [name]')
       } else {
           const agentChoice = await multiselect({
               message: 'Which agent(s) do you want to install to?',
-              options: Object.entries(PROVIDERS).map(([key, config]) => ({
-                  value: key as AgentTarget,
-                  label: config.label
+              options: AGENT_TARGETS.map((key) => ({
+                  value: key,
+                  label: providerFor(key).label
               })),
               initialValues: [prefs.defaultAgent],
               required: true
@@ -333,8 +340,8 @@ program.command('add [name]')
       }
 
       // 4. Build the package view, filtered to artifact types the target agent(s) support
-      const includeWorkflows = targetAgents.some(a => PROVIDERS[a].workflow !== null);
-      const includeAgents = targetAgents.some(a => PROVIDERS[a].agent !== null);
+      const includeWorkflows = targetAgents.some(a => providerFor(a).workflow !== null);
+      const includeAgents = targetAgents.some(a => providerFor(a).agent !== null);
       const view = buildPackageView(
           skills,
           includeWorkflows ? workflows : [],
@@ -424,7 +431,7 @@ program.command('add [name]')
           for (const currentAgent of targetAgents) {
               for (const artifact of artifactsToInstall) {
                   // Skip artifacts not supported by this agent
-                  if (PROVIDERS[currentAgent][artifact.type] === null) {
+                  if (providerFor(currentAgent)[artifact.type] === null) {
                       skipped.push(`${artifact.name} (${currentAgent})`);
                       continue;
                   }
@@ -518,7 +525,7 @@ program.command('update')
 
 program.command('sync')
   .description('Rebuild local skill symlinks from .awm/profile.json (e.g. after cloning on a new machine)')
-  .option('-a, --agent <agent>', `Target agent: ${Object.keys(PROVIDERS).join(', ')}`)
+  .option('-a, --agent <agent>', `Target agent: ${AGENT_TARGETS.join(', ')}`)
   .option('-m, --method <method>', 'Install method: symlink or copy', 'symlink')
   .action(async (options: { agent?: string; method?: string }) => {
       intro(pc.bgCyan(pc.black(' AWM - Sync Project Profile ')));
@@ -588,7 +595,7 @@ program.command('sync')
       const prefs = getPreferences();
       let agents: AgentTarget[];
       if (options.agent) {
-          const valid = Object.keys(PROVIDERS);
+          const valid: readonly string[] = AGENT_TARGETS;
           const parsed = options.agent.split(',').map((a) => a.trim());
           for (const a of parsed) {
               if (!valid.includes(a)) {
@@ -685,9 +692,9 @@ program.command('remove')
       // Multi-agent selection (matching the add command flow)
       const agentChoice = await multiselect({
           message: 'From which agent(s)?',
-          options: Object.entries(PROVIDERS).map(([key, config]) => ({
-              value: key as AgentTarget,
-              label: config.label
+          options: AGENT_TARGETS.map((key) => ({
+              value: key,
+              label: providerFor(key).label
           })),
           initialValues: [prefs.defaultAgent],
           required: true

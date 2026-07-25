@@ -9,7 +9,7 @@ import {
 import type { InitDeps, InitActions } from '../../../src/core/init/types';
 import type { HarnessContext, ProjectFacts } from '../../../src/core/diagnostics/types';
 import type { BundleDefinition } from '../../../src/core/bundles';
-import { PROVIDERS } from '../../../src/providers';
+import { providerFor } from '../../../src/providers';
 
 function bundle(name: string, scope: BundleDefinition['scope'], skills: string[]): BundleDefinition {
     return {
@@ -303,7 +303,7 @@ describe('stepGlobalSkillsRepair', () => {
         m.globalSkills = { valid: [], repairable: ['b'], dead: [] };
         const r = stepGlobalSkillsRepair(deps({ machine: m, project: null }, a, { agent: 'opencode' }));
         expect(r.action).toBe('applied');
-        expect(a.repairGlobalSkills).toHaveBeenCalledWith(PROVIDERS['opencode'].skill.global, expect.any(Array));
+        expect(a.repairGlobalSkills).toHaveBeenCalledWith(providerFor('opencode').skill.global, expect.any(Array));
     });
 });
 

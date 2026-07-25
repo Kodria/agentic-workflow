@@ -7,7 +7,7 @@ import {
     resolveBundleClosure,
 } from './bundles';
 import { installArtifact } from './executor';
-import { AgentTarget, ArtifactType, Scope, getTargetPath, PROVIDERS } from '../providers';
+import { AgentTarget, ArtifactType, Scope, getTargetPath, providerFor } from '../providers';
 import { addExtension, ensureSkillsGitignored, readProfile, shouldRecordExtension } from './profile';
 import { contentRoots } from './registries';
 
@@ -78,7 +78,7 @@ export function installBundle(opts: InstallBundleOptions): InstallSummary {
                 continue;
             }
             for (const agent of opts.agents) {
-                if (PROVIDERS[agent][art.type] === null) {
+                if (providerFor(agent)[art.type] === null) {
                     skipped.push(`${art.name} (${agent}: ${art.type} unsupported)`);
                     continue;
                 }

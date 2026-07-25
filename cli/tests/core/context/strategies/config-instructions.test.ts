@@ -15,7 +15,7 @@ function setup(opencodeJson?: object) {
     fs.mkdirSync(path.dirname(absPath), { recursive: true });
     fs.writeFileSync(absPath, 'CTX');
     const provider: ProviderConfig = {
-        label: 'OpenCode', skill: { global: '', local: '' }, workflow: null, agent: null,
+        label: 'OpenCode', skill: { global: '', local: '', renderer: 'link' }, workflow: null, agent: null,
         injection: { type: 'config-instructions', configPath, field: 'instructions' },
     };
     const input: InjectionInput = {

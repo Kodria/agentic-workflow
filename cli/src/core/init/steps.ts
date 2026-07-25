@@ -16,7 +16,7 @@ import { detectExtensions } from './detector';
 import type { InitDeps, InitActions, StepResult } from './types';
 import type { ProjectFacts } from '../diagnostics/types';
 import { InjectionOrchestrator, ContextOp } from '../context/orchestrator';
-import { getInjection, PROVIDERS } from '../../providers';
+import { getInjection, providerFor } from '../../providers';
 import { repairGlobalSkills as realRepairGlobalSkills } from '../skill-integrity';
 import { contentRoots } from '../registries';
 import { injectProjectConstitution as realInjectProjectConstitution } from '../context/project-constitution-inject';
@@ -143,7 +143,7 @@ export function stepGlobalSkillsRepair(d: InitDeps): StepResult {
     const broken = globalSkills.repairable.length + globalSkills.dead.length;
     if (broken === 0) return ok('machine.globalSkills', 'machine', 'skipped');
 
-    const skillsDir = PROVIDERS[d.agent].skill.global;
+    const skillsDir = providerFor(d.agent).skill.global;
     const r = d.actions.repairGlobalSkills(skillsDir, contentRoots());
     return ok('machine.globalSkills', 'machine', 'applied', `re-linked ${r.relinked.length}, pruned ${r.pruned.length}`);
 }

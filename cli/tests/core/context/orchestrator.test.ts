@@ -24,7 +24,7 @@ function tmpRegistry(): string {
 
 describe('InjectionOrchestrator (claude-code dispatch via HookMergeStrategy)', () => {
     const ccOverride = {
-        label: 'Claude Code', skill: { global: '', local: '' }, workflow: null, agent: null,
+        label: 'Claude Code', skill: { global: '', local: '', renderer: 'link' as const }, workflow: null, agent: null,
         injection: { type: 'cc-settings-merge' as const },
         hooks: { type: 'cc-settings-merge' as const, settingsPath: '', scriptsDir: '', matcher: '', eventName: '' },
     };
@@ -66,7 +66,12 @@ describe('InjectionOrchestrator (claude-code dispatch via HookMergeStrategy)', (
     });
 
     it('throws when providerOverride has no injection (does not fall through to real agent config)', () => {
-        const noInjection = { label: 'Test', skill: { global: '', local: '' }, workflow: null, agent: null };
+        const noInjection = {
+            label: 'Test',
+            skill: { global: '', local: '', renderer: 'link' as const },
+            workflow: null,
+            agent: null,
+        };
         const orch = new InjectionOrchestrator({ providerOverride: noInjection });
         expect(() => orch.installContext({ agent: 'claude-code', scope: 'global', registryRoot: '/any', installMethod: 'symlink', profileExtensions: [] }))
             .toThrow('no injection mechanism');
@@ -86,7 +91,7 @@ describe('InjectionOrchestrator (opencode, real strategy)', () => {
         registryRoot = tmpRegistry();
         orch = new InjectionOrchestrator({
             providerOverride: {
-                label: 'OpenCode', skill: { global: '', local: '' }, workflow: null, agent: null,
+                label: 'OpenCode', skill: { global: '', local: '', renderer: 'link' }, workflow: null, agent: null,
                 injection: { type: 'config-instructions', configPath, field: 'instructions' },
             },
             contextPathOverride: absPath,

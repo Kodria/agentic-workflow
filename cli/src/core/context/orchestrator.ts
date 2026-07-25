@@ -1,5 +1,5 @@
 // cli/src/core/context/orchestrator.ts
-import { AgentTarget, Scope, ProviderConfig, PROVIDERS, getInjection } from '../../providers';
+import { AgentTarget, Scope, ProviderConfig, getInjection, providerFor } from '../../providers';
 import { InjectionStrategy } from './strategies/strategy';
 import { HookMergeStrategy } from './strategies/hook-merge';
 import { ConfigInstructionsStrategy } from './strategies/config-instructions';
@@ -21,7 +21,7 @@ export class InjectionOrchestrator {
     constructor(private overrides: Overrides = {}) {}
 
     private provider(agent: AgentTarget): ProviderConfig {
-        return this.overrides.providerOverride ?? PROVIDERS[agent];
+        return this.overrides.providerOverride ?? providerFor(agent);
     }
 
     private strategy(agent: AgentTarget): InjectionStrategy {
@@ -32,6 +32,8 @@ export class InjectionOrchestrator {
         switch (inj.type) {
             case 'cc-settings-merge': return new HookMergeStrategy();
             case 'config-instructions': return new ConfigInstructionsStrategy();
+            case 'managed-agents-md':
+                throw new Error(`injection strategy '${inj.type}' is not implemented`);
         }
     }
 

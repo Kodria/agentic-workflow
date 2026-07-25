@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { AgentTarget, PROVIDERS, getHookConfig } from '../../providers';
+import { AGENT_TARGETS, AgentTarget, getHookConfig } from '../../providers';
 import { computeHookStatus } from './status';
 import { syncFile } from './install';
 
@@ -22,9 +22,9 @@ function detectInstallMethod(scriptsDir: string): 'symlink' | 'copy' {
 export function resyncInstalledHooks(registryRoot: string): ResyncResult[] {
     const results: ResyncResult[] = [];
 
-    for (const agent of Object.keys(PROVIDERS) as AgentTarget[]) {
+    for (const agent of AGENT_TARGETS) {
         const config = getHookConfig(agent);
-        if (!config) continue;
+        if (!config || config.type !== 'cc-settings-merge') continue;
 
         const status = computeHookStatus(agent);
         if (!status.checks.settingsEntry.ok) {

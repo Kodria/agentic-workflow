@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import { HarnessContext, MachineFacts, ProjectFacts, GitState } from './types';
-import { PROVIDERS, AgentTarget } from '../../providers';
+import { AGENT_TARGETS, AgentTarget, providerFor } from '../../providers';
 import { capabilityRoot, listRegistries, contentRoots } from '../registries';
 import { InjectionOrchestrator } from '../context/orchestrator';
 import { InjectionState } from '../context/types';
@@ -55,8 +55,8 @@ function detectGitState(repoDir: string): GitState {
 function gatherContextInjection(): { agent: AgentTarget; state: InjectionState }[] {
     const out: { agent: AgentTarget; state: InjectionState }[] = [];
     const orch = new InjectionOrchestrator();
-    for (const agent of Object.keys(PROVIDERS) as AgentTarget[]) {
-        const inj = PROVIDERS[agent].injection;
+    for (const agent of AGENT_TARGETS) {
+        const inj = providerFor(agent).injection;
         if (!inj || inj.type !== 'config-instructions') continue;
         if (!fs.existsSync(inj.configPath)) continue;
         let state: InjectionState = 'absent';
@@ -93,7 +93,7 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
     } catch { /* sin soporte de hooks → ausente */ }
 
     // devCore (bundle baseline)
-    const skillsDir = PROVIDERS[agent].skill.global;
+    const skillsDir = providerFor(agent).skill.global;
     const baseline = bundles.find((b) => b.scope === 'baseline');
     let devCorePresent = false;
     let brokenLinks: string[] = [];
@@ -134,7 +134,7 @@ function gatherProject(root: string, bundles: BundleDefinition[], agent: AgentTa
     const profile = readProfile(root);
     const profilePresent = fs.existsSync(path.join(root, '.awm', 'profile.json'));
 
-    const localSkillsDir = path.join(root, PROVIDERS[agent].skill.local);
+    const localSkillsDir = path.join(root, providerFor(agent).skill.local);
     const expected: string[] = [];
     for (const ext of profile.extensions) {
         for (const s of resolveBundleSkills(ext, bundles)) if (!expected.includes(s)) expected.push(s);

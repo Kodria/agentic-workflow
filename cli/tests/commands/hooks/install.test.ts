@@ -47,7 +47,7 @@ describe('installHook (happy path + merge)', () => {
 
         expect(result.status).toBe('installed');
 
-        const scriptsDir = path.join(tmpHome, '.awm/hooks');
+        const scriptsDir = path.join(tmpHome, '.awm/hooks/claude-code');
         expect(fs.existsSync(path.join(scriptsDir, 'session-start'))).toBe(true);
         expect(fs.existsSync(path.join(scriptsDir, 'run-hook.cmd'))).toBe(true);
         expect(fs.lstatSync(path.join(scriptsDir, 'using-awm.md')).isSymbolicLink()).toBe(true);
@@ -106,7 +106,7 @@ describe('installHook (happy path + merge)', () => {
     it('replaces a stale AWM entry when paths change', () => {
         const claudeDir = path.join(tmpHome, '.claude');
         fs.mkdirSync(claudeDir, { recursive: true });
-        const scriptsDir = path.join(tmpHome, '.awm/hooks');
+        const scriptsDir = path.join(tmpHome, '.awm/hooks/claude-code');
         fs.writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({
             hooks: {
                 SessionStart: [{
@@ -156,7 +156,7 @@ describe('installHook (happy path + merge)', () => {
     it('symlinks using-awm.md even when installMethod is copy (UX choice)', () => {
         const { installHook } = require('../../../src/commands/hooks/install');
         installHook({ agent: 'claude-code', registryRoot: tmpRegistry, installMethod: 'copy' });
-        const skillPath = path.join(tmpHome, '.awm/hooks/using-awm.md');
+        const skillPath = path.join(tmpHome, '.awm/hooks/claude-code/using-awm.md');
         expect(fs.lstatSync(skillPath).isSymbolicLink()).toBe(true);
     });
 
