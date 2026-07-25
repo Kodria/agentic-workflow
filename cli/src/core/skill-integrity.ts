@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { PROVIDERS, AgentTarget } from '../providers';
+import { AGENT_TARGETS, AgentTarget, providerFor } from '../providers';
 
 export type SkillIntegrity = {
     valid: string[];
@@ -73,9 +73,10 @@ export function reconcileAllSkillLinks(
     registryContentDirs: string[],
 ): { agent: AgentTarget; result: RepairResult }[] {
     const out: { agent: AgentTarget; result: RepairResult }[] = [];
-    for (const agent of Object.keys(PROVIDERS) as AgentTarget[]) {
-        if (!fs.existsSync(PROVIDERS[agent].skill.global)) continue;
-        out.push({ agent, result: repairGlobalSkills(PROVIDERS[agent].skill.global, registryContentDirs) });
+    for (const agent of AGENT_TARGETS) {
+        const skillsDir = providerFor(agent).skill.global;
+        if (!fs.existsSync(skillsDir)) continue;
+        out.push({ agent, result: repairGlobalSkills(skillsDir, registryContentDirs) });
     }
     return out;
 }

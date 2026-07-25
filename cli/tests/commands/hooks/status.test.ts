@@ -86,4 +86,15 @@ describe('computeHookStatus', () => {
         const { computeHookStatus } = require('../../../src/commands/hooks/status');
         expect(() => computeHookStatus('antigravity')).toThrow(/hooks not supported/i);
     });
+
+    it('dispatches Codex targets to the Codex status checks (not the Claude ones)', () => {
+        // No Codex hook installed in this tmpHome — should report NOT/DEGRADED
+        // via the Codex-specific checks (sessionStartScript, settingsEntry),
+        // never touching Claude's settings.json path.
+        const { computeHookStatus } = require('../../../src/commands/hooks/status');
+        const result = computeHookStatus('codex');
+        expect(result.checks.settingsEntry.detail).toContain('.codex/hooks.json');
+        expect(result.checks.bootstrapSkill).toBeUndefined();
+        expect(result.checks.runHookWrapper).toBeUndefined();
+    });
 });

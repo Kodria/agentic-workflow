@@ -17,22 +17,47 @@ export function removeArtifact(targetPath: string): void {
     fs.rmSync(targetPath, { recursive: true, force: true });
 }
 
-export function installArtifact(sourcePath: string, targetPath: string, method: 'symlink' | 'copy'): void {
+/**
+ * Stages `sourcePath` next to `targetPath` (same parent directory) WITHOUT
+ * touching `targetPath` itself (R17): the live target is never removed until
+ * a stage has already succeeded. Returns the staged path, ready to be swapped
+ * in via `replaceArtifact`.
+ */
+export function stageArtifact(
+    sourcePath: string,
+    targetPath: string,
+    method: 'symlink' | 'copy',
+): string {
     if (!fs.existsSync(sourcePath)) {
         throw new Error(`Source path does not exist: ${sourcePath}`);
     }
 
-    const parentDir = path.dirname(targetPath);
-    if (!fs.existsSync(parentDir)) {
-        fs.mkdirSync(parentDir, { recursive: true });
-    }
+    const parent = path.dirname(targetPath);
+    fs.mkdirSync(parent, { recursive: true });
 
-    // Clean up existing if it exists
-    fs.rmSync(targetPath, { recursive: true, force: true });
+    const staged = path.join(parent, `.${path.basename(targetPath)}.${process.pid}.staged`);
+    fs.rmSync(staged, { recursive: true, force: true });
 
     if (method === 'symlink') {
-        fs.symlinkSync(sourcePath, targetPath, 'dir');
+        fs.symlinkSync(sourcePath, staged, 'dir');
     } else {
-        fs.cpSync(sourcePath, targetPath, { recursive: true });
+        fs.cpSync(sourcePath, staged, { recursive: true });
     }
+    return staged;
+}
+
+/** Atomically swaps a staged artifact into `targetPath`, replacing whatever is there. */
+export function replaceArtifact(staged: string, targetPath: string): void {
+    fs.rmSync(targetPath, { recursive: true, force: true });
+    fs.renameSync(staged, targetPath);
+}
+
+/**
+ * Convenience wrapper over `stageArtifact` + `replaceArtifact` for callers
+ * that don't need transactional multi-target coordination (see
+ * install-transaction.ts's `applyInstallPlan` for the transactional path).
+ */
+export function installArtifact(sourcePath: string, targetPath: string, method: 'symlink' | 'copy'): void {
+    const staged = stageArtifact(sourcePath, targetPath, method);
+    replaceArtifact(staged, targetPath);
 }

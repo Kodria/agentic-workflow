@@ -72,7 +72,7 @@ describe('runInitSteps — orchestrator', () => {
         const contentDir = roots[0] ?? '';
         const ctx = gatherContext({ cwd, bundles });
         return {
-            cwd, ctx, bundles, agent: 'claude-code', installMethod: 'symlink',
+            cwd, ctx, bundles, agent: 'claude-code', enabledAgents: ['claude-code'], installMethod: 'symlink',
             registryRoot: contentRoot, contentDir, sensorPacksRoot: contentRoot,
             confirmExtensions: async (p: string[]) => p,
             // syncCache es no-op: el cache ya está sembrado en disco

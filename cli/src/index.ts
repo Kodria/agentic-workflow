@@ -2,38 +2,50 @@
 
 import { intro, outro, spinner, select, multiselect, confirm, isCancel } from '@clack/prompts';
 import { Command } from 'commander';
-import { getPreferences, savePreferences } from './utils/config';
+import { enableAgent, getPreferences, savePreferences } from './utils/config';
 import { buildGroupedOptions } from './utils/grouping';
 import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, packagePickerItems, artifactPickerItems, resolveLevel2Selection, ALL_SENTINEL, ArtifactView, artifactValue } from './utils/registry-view';
 import { isInteractive } from './ui/tty';
 import { multiselectPicker } from './ui/picker';
-import { getTargetPath, AgentTarget, Scope, ArtifactType, PROVIDERS } from './providers';
+import {
+  AGENT_TARGETS,
+  assertLinkRenderer,
+  providerFor,
+  AgentTarget,
+  Scope,
+  ArtifactType,
+} from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
-import { regenerateGlobalContext } from './core/context/regenerate';
+import {
+  scanLegacyArtifacts,
+} from './core/provider-artifacts';
+import { preflightLinkArtifactsForCli } from './ui/provider-preflight';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
-import { discoverAllBundles, defaultScopeForBundle } from './core/bundles';
-import { reconcileAllSkillLinks } from './core/skill-integrity';
-import { contentRoots, syncRegistries, readRegistriesConfig, verifyMinCliVersions, capabilityRoot } from './core/registries';
-import { cliVersion } from './core/cli-version';
-import { addBundle, syncProfile } from './core/bundle-install';
-import { findProjectRoot, readProfile } from './core/profile';
+import { discoverAllBundles } from './core/bundles';
+import { syncRegistries } from './core/registries';
 import path from 'path';
 import pc from 'picocolors';
 import fs from 'fs';
 import { parseStoryMap, updateMiroFrameId } from './core/story-map-parser';
 import { syncToMiro } from './core/miro';
 import { registerHooksCommand } from './commands/hooks';
-import { resyncInstalledHooks } from './commands/hooks/resync';
 import { registerSensorsCommand } from './commands/sensors';
 import { registerLedgerCommand } from './commands/ledger';
 import { registerDoctorCommand } from './commands/doctor';
+import { registerBackupCommand } from './commands/backup';
 import { registerInitCommand } from './commands/init';
 import { registerRegistryCommand } from './commands/registry';
 import { registerPinCommands } from './commands/pin';
 import { registerExportCommand } from './commands/export';
-import { verifyProjectPins } from './core/profile-pins';
-import { maybeNotifyUpdate, offerSelfUpdate } from './core/update-check';
+import { registerAgentCommand } from './commands/agent';
+import { runAddBundleCore } from './commands/add';
+import { runSyncCore } from './commands/sync';
+import { runUpdateCore } from './commands/update';
+import { resolveAgentTargetsOrError } from './core/agent-targets';
+import type { AwmPreferences } from './utils/config';
+import { maybeNotifyUpdate } from './core/update-check';
 import { warnIfUnsupportedPlatform } from './core/paths';
+import { cliVersion } from './core/cli-version';
 
 const program = new Command();
 program.name('awm').description('Agentic Workflow Manager').version(cliVersion());
@@ -41,6 +53,18 @@ program.name('awm').description('Agentic Workflow Manager').version(cliVersion()
 program.hook('postAction', () => {
     try { maybeNotifyUpdate(); } catch { /* el aviso nunca rompe un comando */ }
 });
+
+/** Shared resolve-or-exit for the 3 index.ts call sites that need `--agent` targeting
+ *  outside an already-testable `run*Core` function (which returns `{ code: 1, ... }`
+ *  instead — see `core/agent-targets.ts`'s `resolveAgentTargetsOrError`). */
+function resolveTargetsOrExit(prefs: AwmPreferences, explicit: string | undefined): AgentTarget[] {
+    const resolved = resolveAgentTargetsOrError({ prefs, explicit });
+    if (!resolved.ok) {
+        console.error(pc.red(resolved.error));
+        process.exit(1);
+    }
+    return resolved.targets;
+}
 
 function handleCancel(value: unknown): void {
     if (isCancel(value)) {
@@ -69,7 +93,7 @@ function resolveSelectedArtifacts(selections: any[]): any[] {
 program.command('add [name]')
   .description('Add a skill, workflow, or process interactively (or non-interactively with flags)')
   .option('-t, --type <type>', 'Artifact type: skill, workflow, or process')
-  .option('-a, --agent <agent>', `Target agent: ${Object.keys(PROVIDERS).join(', ')}`)
+  .option('-a, --agent <agent>', `Target agent: ${AGENT_TARGETS.join(', ')}`)
   .option('-s, --scope <scope>', 'Scope: local or global')
   .option('-m, --method <method>', 'Install method: symlink or copy')
   .option('-y, --yes', 'Skip confirmation prompts')
@@ -89,68 +113,11 @@ program.command('add [name]')
       // 1b. If `name` matches a bundle, run the bundle-activation flow and exit.
       if (name) {
           const allBundles = discoverAllBundles();
-          const matchedBundle = allBundles.find((b) => b.name === name);
-          if (matchedBundle) {
-              const prefs = getPreferences();
-
-              let bundleAgents: AgentTarget[];
-              if (options.agent) {
-                  const valid = Object.keys(PROVIDERS);
-                  const parsed = options.agent.split(',').map((a) => a.trim());
-                  for (const a of parsed) {
-                      if (!valid.includes(a)) {
-                          console.error(pc.red(`Invalid agent "${a}". Use: ${valid.join(', ')}.`));
-                          process.exit(1);
-                      }
-                  }
-                  bundleAgents = parsed as AgentTarget[];
-              } else {
-                  bundleAgents = [prefs.defaultAgent];
-              }
-
-              let scopeOverride: Scope | undefined;
-              if (options.scope) {
-                  if (!['local', 'global'].includes(options.scope)) {
-                      console.error(pc.red(`Invalid scope "${options.scope}". Use: local or global.`));
-                      process.exit(1);
-                  }
-                  scopeOverride = options.scope as Scope;
-              }
-
-              const effective = scopeOverride ?? defaultScopeForBundle(matchedBundle.scope);
-              const projectRoot = findProjectRoot(process.cwd());
-              if (effective === 'local' && !projectRoot) {
-                  console.error(pc.red('No project root found (need a .git/, package.json, or .awm/profile.json here). Run inside a project, or pass --global.'));
-                  process.exit(1);
-              }
-
-              const result = addBundle({
-                  bundleName: matchedBundle.name,
-                  bundles: allBundles,
-                  agents: bundleAgents,
-                  method: 'symlink',
-                  projectRoot: projectRoot ?? process.cwd(),
-                  scopeOverride,
-              });
-
-              if (result.skipped.length > 0) {
-                  for (const s of result.skipped) console.log(pc.yellow(`  ⚠  Skipped: ${s}`));
-              }
-              if (result.installed.length === 0) {
-                  outro(pc.yellow(`Nothing installed for bundle "${matchedBundle.name}".`));
-                  return;
-              }
-              const lines = result.installed.map((n) => pc.green(n)).join('\n  ');
-              const recordNote = result.recordedExtension
-                  ? `\n\n${pc.dim('Recorded as a project extension in .awm/profile.json (commit it; symlinks are gitignored).')}`
-                  : '';
-              outro(`✅ Installed bundle ${pc.cyan(matchedBundle.name)}:\n  ${lines}${recordNote}`);
-              return;
-          }
-          // name given but no matching bundle found — report clearly regardless of TTY
-          console.error(pc.red(`Bundle "${name}" not found in registry.`));
-          console.error(pc.dim('Run `awm list` to see available packages.'));
-          process.exit(1);
+          const prefs = getPreferences();
+          const outcome = runAddBundleCore({ name, agent: options.agent, scope: options.scope }, prefs, allBundles);
+          if (outcome.code !== 0) process.exit(outcome.code);
+          outro('Done.');
+          return;
       }
 
       // 2. Discover artifacts
@@ -167,20 +134,7 @@ program.command('add [name]')
 
       // --all: install everything from every package headlessly
       if (options.all) {
-          let targetAgents: AgentTarget[];
-          if (options.agent) {
-              const validAgents = Object.keys(PROVIDERS);
-              const parsed = options.agent.split(',').map((a) => a.trim());
-              for (const a of parsed) {
-                  if (!validAgents.includes(a)) {
-                      console.error(pc.red(`Invalid agent "${a}". Use: ${validAgents.join(', ')}.`));
-                      process.exit(1);
-                  }
-              }
-              targetAgents = parsed as AgentTarget[];
-          } else {
-              targetAgents = [prefs.defaultAgent];
-          }
+          const targetAgents = resolveTargetsOrExit(prefs, options.agent);
 
           let scopeVal: Scope;
           if (options.scope) {
@@ -204,8 +158,8 @@ program.command('add [name]')
               methodVal = scopeVal === 'local' ? 'copy' : 'symlink';
           }
 
-          const includeWorkflows = targetAgents.some((a) => PROVIDERS[a].workflow !== null);
-          const includeAgents = targetAgents.some((a) => PROVIDERS[a].agent !== null);
+          const includeWorkflows = targetAgents.some((a) => providerFor(a).workflow !== null);
+          const includeAgents = targetAgents.some((a) => providerFor(a).agent !== null);
           const allView = buildPackageView(
               skills,
               includeWorkflows ? workflows : [],
@@ -231,6 +185,11 @@ program.command('add [name]')
               return;
           }
 
+          const preflightOk = preflightLinkArtifactsForCli(targetAgents.flatMap((agent) =>
+              artifactsToInstall.map((artifact) => ({ agent, artifact })),
+          ));
+          if (!preflightOk) return;
+
           const installSpinner = spinner();
           installSpinner.start('Installing artifacts...');
 
@@ -240,18 +199,28 @@ program.command('add [name]')
 
               for (const currentAgent of targetAgents) {
                   for (const artifact of artifactsToInstall) {
-                      if (PROVIDERS[currentAgent][artifact.type] === null) {
+                      const config = assertLinkRenderer(artifact.type, currentAgent);
+                      if (config === null) {
                           skipped.push(`${artifact.name} (${currentAgent})`);
                           continue;
                       }
-                      const targetDir = getTargetPath(artifact.type, currentAgent, scopeVal);
+                      const targetDir = config[scopeVal];
                       const finalDest = path.join(targetDir, artifact.name);
                       installArtifact(artifact.sourcePath, finalDest, methodVal);
                       installed.push(`${artifact.name} → ${currentAgent} (${scopeVal})`);
                   }
               }
 
-              savePreferences({ defaultAgent: targetAgents[0], defaultScope: scopeVal, installMethod: methodVal });
+              const updatedPrefs = targetAgents.reduce(
+                  (current, agent) => enableAgent(current, agent),
+                  prefs,
+              );
+              savePreferences({
+                  ...updatedPrefs,
+                  defaultAgent: targetAgents[0],
+                  defaultScope: scopeVal,
+                  installMethod: methodVal,
+              });
               installSpinner.stop('Installation complete!');
 
               if (skipped.length > 0) {
@@ -280,23 +249,15 @@ program.command('add [name]')
       // 3. Agent & Scope Prompts (Moved up)
       let targetAgents: AgentTarget[];
       if (options.agent) {
-          const validAgents = Object.keys(PROVIDERS);
-          const parsed = options.agent.split(',').map(a => a.trim());
-          for (const a of parsed) {
-              if (!validAgents.includes(a)) {
-                  console.error(pc.red(`Invalid agent "${a}". Use: ${validAgents.join(', ')}.`));
-                  process.exit(1);
-              }
-          }
-          targetAgents = parsed as AgentTarget[];
+          targetAgents = resolveTargetsOrExit(prefs, options.agent);
       } else {
           const agentChoice = await multiselect({
               message: 'Which agent(s) do you want to install to?',
-              options: Object.entries(PROVIDERS).map(([key, config]) => ({
-                  value: key as AgentTarget,
-                  label: config.label
+              options: AGENT_TARGETS.map((key) => ({
+                  value: key,
+                  label: providerFor(key).label
               })),
-              initialValues: [prefs.defaultAgent],
+              initialValues: [...prefs.enabledAgents],
               required: true
           });
           handleCancel(agentChoice);
@@ -324,8 +285,8 @@ program.command('add [name]')
       }
 
       // 4. Build the package view, filtered to artifact types the target agent(s) support
-      const includeWorkflows = targetAgents.some(a => PROVIDERS[a].workflow !== null);
-      const includeAgents = targetAgents.some(a => PROVIDERS[a].agent !== null);
+      const includeWorkflows = targetAgents.some(a => providerFor(a).workflow !== null);
+      const includeAgents = targetAgents.some(a => providerFor(a).agent !== null);
       const view = buildPackageView(
           skills,
           includeWorkflows ? workflows : [],
@@ -372,6 +333,11 @@ program.command('add [name]')
           return;
       }
 
+      const preflightOk = preflightLinkArtifactsForCli(targetAgents.flatMap((agent) =>
+          artifactsToInstall.map((artifact) => ({ agent, artifact })),
+      ));
+      if (!preflightOk) return;
+
       // 6. Installation Method
       let methodVal: 'symlink' | 'copy';
       if (options.method) {
@@ -415,18 +381,28 @@ program.command('add [name]')
           for (const currentAgent of targetAgents) {
               for (const artifact of artifactsToInstall) {
                   // Skip artifacts not supported by this agent
-                  if (PROVIDERS[currentAgent][artifact.type] === null) {
+                  const config = assertLinkRenderer(artifact.type, currentAgent);
+                  if (config === null) {
                       skipped.push(`${artifact.name} (${currentAgent})`);
                       continue;
                   }
-                  const targetDir = getTargetPath(artifact.type, currentAgent, scopeVal);
+                  const targetDir = config[scopeVal];
                   const finalDest = path.join(targetDir, artifact.name);
                   installArtifact(artifact.sourcePath, finalDest, methodVal);
                   installed.push(`${artifact.name} → ${currentAgent} (${scopeVal})`);
               }
           }
 
-          savePreferences({ defaultAgent: targetAgents[0], defaultScope: scopeVal, installMethod: methodVal });
+          const updatedPrefs = targetAgents.reduce(
+              (current, agent) => enableAgent(current, agent),
+              prefs,
+          );
+          savePreferences({
+              ...updatedPrefs,
+              defaultAgent: targetAgents[0],
+              defaultScope: scopeVal,
+              installMethod: methodVal,
+          });
 
           installSpinner.stop('Installation complete!');
 
@@ -446,151 +422,26 @@ program.command('add [name]')
 });
 
 program.command('update')
-  .description('Sync all configured registries with their remotes')
-  .action(async () => {
+  .description('Sync all configured registries, reconcile artifacts and re-sync hooks')
+  .option('-a, --agent <agent>', `Target agent(s), comma-separated: ${AGENT_TARGETS.join(', ')} (defaults to every enabled agent)`)
+  .action(async (options: { agent?: string }) => {
       intro(pc.bgCyan(pc.black(' AWM - Update Registries ')));
-
-      const s = spinner();
-      s.start('Syncing registries...');
-      const results = await syncRegistries();
-      s.stop('Registries synced.');
-
-      if (results.length === 0) {
-          console.log(pc.yellow('  No registries configured — run `awm init` (seeds baseline) or `awm registry add <remote>`.'));
-      }
-      for (const r of results) {
-          if (r.action === 'error') {
-              console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
-          } else {
-              console.log(pc.green(`  ✓ Registry ${r.name} ${r.action === 'pulled' ? 'updated' : 're-cloned'} @ ${r.version}`));
-          }
-      }
-
-      for (const f of verifyMinCliVersions()) {
-          console.warn(pc.yellow(`  ⚠  Registry ${f.name} requires CLI ≥ ${f.min} (you have ${cliVersion()}) — run: npm i -g agentic-workflow-manager`));
-      }
-
-      try {
-          const regen = regenerateGlobalContext();
-          const refreshed = regen.filter((r) => r.action === 'refreshed').map((r) => r.agent);
-          if (refreshed.length > 0) console.log(pc.green(`  ✓ Regenerated AWM context for: ${refreshed.join(', ')}`));
-      } catch { /* no aborta */ }
-
-      try {
-          for (const { agent, result } of reconcileAllSkillLinks(contentRoots())) {
-              const touched = result.relinked.length + result.pruned.length;
-              if (touched > 0) console.log(pc.green(`  ✓ Reconciled ${agent} skill links: re-linked ${result.relinked.length}, pruned ${result.pruned.length}`));
-          }
-      } catch { /* no aborta */ }
-
-      try {
-          const hooksRoot = capabilityRoot('hooks');
-          if (hooksRoot) {
-              for (const r of resyncInstalledHooks(hooksRoot)) {
-                  if (r.action === 'resynced') console.log(pc.green(`  ✓ Re-synced ${r.agent} hook scripts`));
-                  else if (r.action === 'registry-missing') console.warn(pc.yellow(`  ⚠  ${r.agent} hook installed but registry hooks missing — run 'awm hooks install'`));
-              }
-          }
-      } catch { /* no aborta */ }
-
-      await offerSelfUpdate();   // capa 2 — Task 13
-
-      outro('✅ Registries, skills and hooks updated.');
+      warnIfUnsupportedPlatform((m) => console.warn(pc.yellow(`⚠ ${m}`)));
+      const result = await runUpdateCore(options);
+      outro(result.code === 0 ? '✅ Registries, skills and hooks updated.' : pc.red('Update failed — see errors above.'));
+      process.exitCode = result.code;
   });
 
 program.command('sync')
   .description('Rebuild local skill symlinks from .awm/profile.json (e.g. after cloning on a new machine)')
-  .option('-a, --agent <agent>', `Target agent: ${Object.keys(PROVIDERS).join(', ')}`)
+  .option('-a, --agent <agent>', `Target agent(s), comma-separated: ${AGENT_TARGETS.join(', ')} (defaults to every enabled agent)`)
   .option('-m, --method <method>', 'Install method: symlink or copy', 'symlink')
   .action(async (options: { agent?: string; method?: string }) => {
       intro(pc.bgCyan(pc.black(' AWM - Sync Project Profile ')));
       warnIfUnsupportedPlatform((m) => console.warn(pc.yellow(`⚠ ${m}`)));
-
-      const projectRoot = findProjectRoot(process.cwd());
-      if (!projectRoot) {
-          console.error(pc.red('No project root found (need a .git/, package.json, or .awm/profile.json here).'));
-          process.exit(1);
-      }
-
-      let profile;
-      try {
-          profile = readProfile(projectRoot);
-      } catch (e: any) {
-          console.error(pc.red(e.message));
-          process.exit(1);
-      }
-      const s = spinner();
-      s.start('Syncing registries...');
-      const syncResults = await syncRegistries();
-      s.stop('Registries synced.');
-      for (const r of syncResults) {
-          if (r.action === 'error') console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
-      }
-
-      // Gate minCliVersion (WS-4): un registry puede exigir una versión mínima del CLI.
-      // Corre ANTES del gate de pins — gates de contrato primero (CONSTITUTION).
-      const cliFailures = verifyMinCliVersions();
-      if (cliFailures.length > 0) {
-          for (const f of cliFailures) {
-              console.error(pc.red(`Registry ${f.name} requires CLI ≥ ${f.min} (you have ${cliVersion()}).`));
-              console.error(pc.red('  Run: npm i -g agentic-workflow-manager'));
-          }
-          process.exit(1);
-      }
-
-      // Gate de versión (WS-3): el pin del profile es el lock del proyecto.
-      // Runs before the empty-extensions early-exit so pinned projects always fail fast.
-      const pins = profile.registries ?? {};
-      if (Object.keys(pins).length > 0) {
-          const failures = await verifyProjectPins(pins);
-          if (failures.length > 0) {
-              for (const f of failures) {
-                  if (f.reason === 'missing-registry') {
-                      const registriesConfig = readRegistriesConfig();
-                      const isConfigured = registriesConfig.some((r: {name: string}) => r.name === f.name);
-                      if (isConfigured) {
-                          console.error(pc.red(`The registry "${f.name}" is configured but not yet synced on this machine. Run: awm update`));
-                      } else {
-                          console.error(pc.red(`The registry "${f.name}" is not configured on this machine. Run: awm registry add <remote>`));
-                      }
-                  } else {
-                      console.error(pc.red(`This machine has ${f.name} @ ${f.actual ? `v${f.actual}` : 'HEAD (no tag)'} but the project requires v${f.required}.`));
-                      console.error(pc.red(`  Run: awm pin ${f.name} ${f.required} && awm update`));
-                  }
-              }
-              process.exit(1);
-          }
-      }
-
-      if (profile.extensions.length === 0) {
-          outro(pc.yellow('No extensions in .awm/profile.json — nothing to sync. Use `awm add <bundle>` first.'));
-          return;
-      }
-
-      const prefs = getPreferences();
-      let agents: AgentTarget[];
-      if (options.agent) {
-          const valid = Object.keys(PROVIDERS);
-          const parsed = options.agent.split(',').map((a) => a.trim());
-          for (const a of parsed) {
-              if (!valid.includes(a)) {
-                  console.error(pc.red(`Invalid agent "${a}". Use: ${valid.join(', ')}.`));
-                  process.exit(1);
-              }
-          }
-          agents = parsed as AgentTarget[];
-      } else {
-          agents = [prefs.defaultAgent];
-      }
-      const method = options.method === 'copy' ? 'copy' : 'symlink';
-
-      const result = syncProfile({ projectRoot, bundles: discoverAllBundles(), agents, method });
-      if (result.skipped.length > 0) {
-          for (const sk of result.skipped) console.log(pc.yellow(`  ⚠  Skipped: ${sk}`));
-      }
-      const lines = result.installed.map((n) => pc.green(n)).join('\n  ');
-      const installedNote = lines ? `\n  ${lines}` : pc.dim(' (all up to date)');
-      outro(`✅ Synced extensions [${result.extensions.join(', ')}]:${installedNote}`);
+      const { code } = await runSyncCore(options);
+      outro(code === 0 ? 'Done.' : pc.red('Sync failed — see errors above.'));
+      process.exitCode = code;
   });
 
 program.command('list [package]')
@@ -659,23 +510,30 @@ program.command('list [package]')
 
 program.command('remove')
   .description('Remove an installed skill or workflow')
-  .action(async () => {
+  .option('-a, --agent <agent>', `Target agent(s), comma-separated: ${AGENT_TARGETS.join(', ')} (defaults to every enabled agent)`)
+  .action(async (options: { agent?: string }) => {
       intro(pc.bgCyan(pc.black(' AWM - Remove Artifact ')));
 
       const prefs = getPreferences();
 
-      // Multi-agent selection (matching the add command flow)
-      const agentChoice = await multiselect({
-          message: 'From which agent(s)?',
-          options: Object.entries(PROVIDERS).map(([key, config]) => ({
-              value: key as AgentTarget,
-              label: config.label
-          })),
-          initialValues: [prefs.defaultAgent],
-          required: true
-      });
-      handleCancel(agentChoice);
-      const targetAgents = agentChoice as AgentTarget[];
+      // Multi-agent selection (matching the add command flow). --agent skips
+      // the interactive prompt and resolves the same way as add/sync/update/doctor (R12/R13).
+      let targetAgents: AgentTarget[];
+      if (options.agent) {
+          targetAgents = resolveTargetsOrExit(prefs, options.agent);
+      } else {
+          const agentChoice = await multiselect({
+              message: 'From which agent(s)?',
+              options: AGENT_TARGETS.map((key) => ({
+                  value: key,
+                  label: providerFor(key).label
+              })),
+              initialValues: [...prefs.enabledAgents],
+              required: true
+          });
+          handleCancel(agentChoice);
+          targetAgents = agentChoice as AgentTarget[];
+      }
 
       const scopeChoice = await select({
           message: 'Scope?',
@@ -688,40 +546,7 @@ program.command('remove')
       handleCancel(scopeChoice);
       const scopeVal = scopeChoice as Scope;
 
-      // Scan installed artifacts across all selected agents, aggregating by name
-      const artifactMap = new Map<string, {
-          name: string;
-          type: ArtifactType;
-          installedIn: AgentTarget[];
-          fullPaths: string[];
-      }>();
-
-      const scanDir = (dir: string, type: ArtifactType, agent: AgentTarget) => {
-          if (!fs.existsSync(dir)) return;
-          const entries = fs.readdirSync(dir, { withFileTypes: true });
-          for (const entry of entries) {
-              const existing = artifactMap.get(entry.name);
-              if (existing) {
-                  existing.installedIn.push(agent);
-                  existing.fullPaths.push(path.join(dir, entry.name));
-              } else {
-                  artifactMap.set(entry.name, {
-                      name: entry.name,
-                      type,
-                      installedIn: [agent],
-                      fullPaths: [path.join(dir, entry.name)]
-                  });
-              }
-          }
-      };
-
-      for (const targetAgent of targetAgents) {
-          try { scanDir(getTargetPath('skill', targetAgent, scopeVal), 'skill', targetAgent); } catch { /* ok */ }
-          try { scanDir(getTargetPath('workflow', targetAgent, scopeVal), 'workflow', targetAgent); } catch { /* ok */ }
-          try { scanDir(getTargetPath('agent', targetAgent, scopeVal), 'agent', targetAgent); } catch { /* ok */ }
-      }
-
-      const installed = Array.from(artifactMap.values());
+      const installed = scanLegacyArtifacts(targetAgents, scopeVal);
 
       if (installed.length === 0) {
           outro(pc.yellow('No installed artifacts found for the selected agents/scope.'));
@@ -855,9 +680,11 @@ registerHooksCommand(program);
 registerSensorsCommand(program);
 registerLedgerCommand(program);
 registerDoctorCommand(program);
+registerBackupCommand(program);
 registerInitCommand(program);
 registerRegistryCommand(program);
 registerPinCommands(program);
 registerExportCommand(program);
+registerAgentCommand(program);
 
 program.parse();

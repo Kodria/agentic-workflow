@@ -16,10 +16,12 @@ import { detectExtensions } from './detector';
 import type { InitDeps, InitActions, StepResult } from './types';
 import type { ProjectFacts } from '../diagnostics/types';
 import { InjectionOrchestrator, ContextOp } from '../context/orchestrator';
-import { getInjection, PROVIDERS } from '../../providers';
+import { AgentTarget, getInjection, providerFor } from '../../providers';
+import { agentsSharingSkillTarget } from '../install-planner';
 import { repairGlobalSkills as realRepairGlobalSkills } from '../skill-integrity';
 import { contentRoots } from '../registries';
 import { injectProjectConstitution as realInjectProjectConstitution } from '../context/project-constitution-inject';
+import { CodexAgentsStrategy } from '../context/strategies/codex-agents';
 
 // ---------------------------------------------------------------------------
 // defaultActions — bridges the real functions to the InitActions interface
@@ -36,6 +38,9 @@ export const defaultActions: InitActions = {
         installMethod: o.installMethod,
     }),
 
+    // No `applyPlan` override here — installBundle defaults to the real
+    // applyInstallPlan (install-transaction.ts, Task 6), so this materializes
+    // for real on the `awm init` code path.
     installBundle: (o) => realInstallBundle({
         bundleName: o.bundleName,
         bundles: o.bundles,
@@ -45,6 +50,7 @@ export const defaultActions: InitActions = {
         contentDir: o.contentDir,
     }),
 
+    // Same as installBundle above — defaults to the real applyInstallPlan.
     syncProfile: (o) => realSyncProfile({
         projectRoot: o.projectRoot,
         bundles: o.bundles,
@@ -68,7 +74,12 @@ export const defaultActions: InitActions = {
 
     installContext: (op) => { realInjectionOrchestrator.installContext(op); },
     repairGlobalSkills: (skillsDir, registryContentDirs) => realRepairGlobalSkills(skillsDir, registryContentDirs),
-    injectProjectConstitution: (o) => realInjectProjectConstitution(o.projectRoot, o.agent),
+    injectProjectConstitution: (o) => {
+        if (getInjection(o.agent)?.type === 'managed-agents-md') {
+            return new CodexAgentsStrategy().injectProject(o.projectRoot) === 'injected' ? 'injected' : 'already';
+        }
+        return realInjectProjectConstitution(o.projectRoot, o.agent);
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -87,6 +98,44 @@ function failed(id: string, level: StepResult['level'], error: string): StepResu
 // Machine-level steps
 // ---------------------------------------------------------------------------
 
+/**
+ * Agents to pass as `agents` when auto-installing a global-scope bundle for
+ * `d.agent`: `d.agent` itself, plus every other currently-enabled agent that
+ * shares `d.agent`'s physical skill directory (today: OpenCode and Codex
+ * both resolve to `~/.agents/skills`, see providers/index.ts). Baseline/
+ * ambient bundles always install at 'global' scope (bundles.ts's
+ * `defaultScopeForBundle` — 'baseline'/'ambient' never map to 'local'), so
+ * scope is fixed here rather than threaded through InitDeps.
+ *
+ * Without this, a `[d.agent]` singleton would make install-planner.ts's
+ * `assertCompleteSharedGroup` (R14) refuse the install outright whenever a
+ * co-owner is independently enabled (e.g. `awm init --agent codex` on a
+ * machine with OpenCode already enabled) — that was a BLOCKER: it broke the
+ * exact "multiple providers coexist on one machine" scenario this plan
+ * exists to deliver. Including the co-owner here is safe: it already has
+ * this exact skill installed from its own prior init (same source, same
+ * target), so `planInstall`'s dedup (R15/R15.1) collapses it into the same
+ * physical operation and simply re-confirms ownership — it does not change
+ * the co-owner's installed content.
+ */
+function sharedInstallAgents(d: InitDeps): AgentTarget[] {
+    const group = agentsSharingSkillTarget(d.agent, d.enabledAgents, 'global', d.cwd);
+    return group.includes(d.agent) ? group : [d.agent, ...group];
+}
+
+/**
+ * Same reasoning as `sharedInstallAgents`, but for LOCAL-scope project
+ * extension bundles (`stepActivation`'s `syncProfile` call). OpenCode and
+ * Codex share both their global AND local skill directories
+ * (`providers/index.ts`), so a project with a skill-bearing extension hits
+ * the identical R14 refusal `sharedInstallAgents` was added to avoid — just
+ * scoped to `proj.root` instead of the machine-global directory.
+ */
+function sharedActivationAgents(d: InitDeps, projectRoot: string): AgentTarget[] {
+    const group = agentsSharingSkillTarget(d.agent, d.enabledAgents, 'local', projectRoot);
+    return group.includes(d.agent) ? group : [d.agent, ...group];
+}
+
 /** Step 1 – Sync the registry cache (clone / pull). */
 export async function stepCache(d: InitDeps): Promise<StepResult> {
     const { registryCache } = d.ctx.machine;
@@ -104,6 +153,16 @@ export async function stepCache(d: InitDeps): Promise<StepResult> {
 
 /** Step 2 – Install the session-start hook for the target agent. */
 export function stepHook(d: InitDeps): StepResult {
+    // Not every agent has a hook mechanism (today: OpenCode, Antigravity —
+    // providers/index.ts's `hooks` is optional). Mirrors provider-checks.ts's
+    // `hookTrustCheck`, which treats a missing `hooks` config as "not
+    // applicable" rather than a failure. Without this guard, a real
+    // (unstubbed) `awm init --agent opencode` throws "hooks not supported for
+    // agent target: opencode" from `installHook` — a real, previously-latent
+    // bug caught while building this plan's real end-to-end init test
+    // (tests/integration/codex-provider-isolated.test.ts).
+    if (!providerFor(d.agent).hooks) return ok('machine.hook', 'machine', 'skipped', 'no hook mechanism for this agent');
+
     const { hook } = d.ctx.machine;
     if (hook.present && !hook.degraded) return ok('machine.hook', 'machine', 'skipped');
 
@@ -129,7 +188,7 @@ export function stepDevCore(d: InitDeps): StepResult {
     d.actions.installBundle({
         bundleName,
         bundles: d.bundles,
-        agents: [d.agent],
+        agents: sharedInstallAgents(d),
         method: d.installMethod,
         projectRoot: d.cwd,
         contentDir: d.contentDir,
@@ -143,7 +202,7 @@ export function stepGlobalSkillsRepair(d: InitDeps): StepResult {
     const broken = globalSkills.repairable.length + globalSkills.dead.length;
     if (broken === 0) return ok('machine.globalSkills', 'machine', 'skipped');
 
-    const skillsDir = PROVIDERS[d.agent].skill.global;
+    const skillsDir = providerFor(d.agent).skill.global;
     const r = d.actions.repairGlobalSkills(skillsDir, contentRoots());
     return ok('machine.globalSkills', 'machine', 'applied', `re-linked ${r.relinked.length}, pruned ${r.pruned.length}`);
 }
@@ -160,7 +219,7 @@ export function stepAmbient(d: InitDeps): StepResult {
         d.actions.installBundle({
             bundleName,
             bundles: d.bundles,
-            agents: [d.agent],
+            agents: sharedInstallAgents(d),
             method: d.installMethod,
             projectRoot: d.cwd,
             contentDir: d.contentDir,
@@ -221,7 +280,7 @@ export function stepActivation(d: InitDeps): StepResult {
     d.actions.syncProfile({
         projectRoot: proj.root,
         bundles: d.bundles,
-        agents: [d.agent],
+        agents: sharedActivationAgents(d, proj.root),
         method: d.installMethod,
         contentDir: d.contentDir,
     });
@@ -247,17 +306,16 @@ export function stepConstitution(d: InitDeps): StepResult {
     return ok('project.constitution', 'project', 'pending', 'skill: project-constitution');
 }
 
-/** Step 8b – Entregar CONSTITUTION.md a agentes con inyección config-instructions
- *  (opencode) vía un opencode.json local del proyecto. Claude lo recibe por el hook. */
+/** Step 8b – Deliver project guidance via the provider-specific context mechanism. */
 export function stepConstitutionInjection(d: InitDeps): StepResult {
     const proj = d.ctx.project;
     if (!proj) return ok('project.constitutionInjection', 'project', 'skipped', 'no project');
 
     const inj = getInjection(d.agent);
-    if (!inj || inj.type !== 'config-instructions') {
+    if (!inj || inj.type === 'cc-settings-merge') {
         return ok('project.constitutionInjection', 'project', 'skipped', 'covered by hook');
     }
-    if (!proj.constitution.present) {
+    if (inj.type === 'config-instructions' && !proj.constitution.present) {
         return ok('project.constitutionInjection', 'project', 'skipped', 'no CONSTITUTION.md');
     }
 

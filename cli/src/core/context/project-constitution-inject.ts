@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { AgentTarget, PROVIDERS } from '../../providers';
+import { AgentTarget, providerFor } from '../../providers';
 
 export type ConstitutionInjectResult =
     | 'injected'        // se agregó la entrada
@@ -17,7 +17,7 @@ export type ConstitutionInjectResult =
  * cualquier agente futuro con inyección `config-instructions` hereda el trato.
  */
 export function injectProjectConstitution(projectRoot: string, agent: AgentTarget): ConstitutionInjectResult {
-    const inj = PROVIDERS[agent].injection;
+    const inj = providerFor(agent).injection;
     if (!inj || inj.type !== 'config-instructions') return 'not-applicable';
     if (!fs.existsSync(path.join(projectRoot, 'CONSTITUTION.md'))) return 'no-constitution';
 

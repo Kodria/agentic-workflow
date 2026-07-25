@@ -75,6 +75,36 @@ describe('gatherContext', () => {
         expect(ctx.machine.devCore.brokenLinks).toContain('brainstorming');
     });
 
+    // Regression coverage for the second BLOCKER-adjacent bug found while
+    // building the real Codex+OpenCode coexistence E2E test: OpenCode and
+    // Codex share ~/.agents/skills, but agent-type artifacts are per-agent
+    // (never shared, R12/R13). Before this fix, devCorePresent only looked
+    // at the skill link, so once OpenCode's own init had already linked the
+    // shared skill, Codex's gatherContext wrongly reported devCore as fully
+    // present/no-broken-links even though Codex's own native .toml had never
+    // been rendered — causing stepDevCore to skip forever.
+    it('machine: devCore surfaces a missing per-agent artifact even when the shared skill link is already present', () => {
+        const bundleWithAgent = (): BundleDefinition => ({
+            name: 'dev-core', description: '', version: '1.0.0', scope: 'baseline', visibility: 'public',
+            dependsOn: [], skills: [{ name: 'development-process', onSignal: false }],
+            workflows: [], agents: ['development-process'],
+        });
+        // Simulate OpenCode having already linked the shared ~/.agents/skills dir.
+        const sharedSkillsDir = path.join(tmpHome, '.agents', 'skills');
+        fs.mkdirSync(sharedSkillsDir, { recursive: true });
+        const target = path.join(tmpHome, 'targets', 'development-process');
+        fs.mkdirSync(target, { recursive: true });
+        fs.symlinkSync(target, path.join(sharedSkillsDir, 'development-process'), 'dir');
+
+        const { gatherContext } = require('../../../src/core/diagnostics/context');
+        const ctx = gatherContext({ cwd: tmpHome, bundles: [bundleWithAgent()], agent: 'codex' });
+        // The skill itself is linked (shared with OpenCode)...
+        expect(ctx.machine.devCore.present).toBe(true);
+        // ...but Codex's own native agent artifact was never installed, so it
+        // must surface as a broken/missing link — NOT a clean, skippable state.
+        expect(ctx.machine.devCore.brokenLinks).toContain('development-process.toml');
+    });
+
     it('machine: ambient wanted read from ~/.awm/config.json, installed reflects links', () => {
         fs.mkdirSync(path.join(tmpHome, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(tmpHome, '.awm', 'config.json'), JSON.stringify({ ambient: ['personal-notion'] }));
@@ -150,6 +180,53 @@ describe('gatherContext', () => {
         const { gatherContext } = require('../../../src/core/diagnostics/context');
         const ctx = gatherContext({ cwd: root, bundles: [] });
         expect(ctx.project.context).toEqual({ present: true, file: 'CLAUDE.md' });
+    });
+});
+
+describe('gatherContext — providers matrix (Task 9)', () => {
+    let tmpHome: string;
+    let originalHome: string | undefined;
+    let originalAwmHome: string | undefined;
+
+    beforeEach(() => {
+        tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-doctor-providers-'));
+        originalHome = process.env.HOME;
+        originalAwmHome = process.env.AWM_HOME;
+        process.env.HOME = tmpHome;
+        process.env.AWM_HOME = path.join(tmpHome, '.awm');
+        jest.resetModules();
+    });
+
+    afterEach(() => {
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+        if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+        if (originalAwmHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = originalAwmHome;
+    });
+
+    function healthySharedSkills() {
+        return { valid: ['development-process'], repairable: [], dead: [] };
+    }
+
+    it('reports shared skills for both owners without scanning twice', () => {
+        // OpenCode and Codex both read/write ~/.agents/skills (providers/index.ts) —
+        // the physical directory must be scanned once and attributed to both owners.
+        const scan = jest.fn(() => healthySharedSkills());
+        const { gatherContext } = require('../../../src/core/diagnostics/context');
+        const report = gatherContext({ cwd: tmpHome, bundles: [], agents: ['opencode', 'codex'], scanSkills: scan });
+        expect(scan).toHaveBeenCalledTimes(1);
+        expect(report.providers.every((provider: { checks: { state: string }[] }) =>
+            provider.checks.some((check) => check.state === 'shared'))).toBe(true);
+    });
+
+    it('marks skills.global healthy (not shared) for a single unshared provider', () => {
+        const scan = jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
+        const { gatherContext } = require('../../../src/core/diagnostics/context');
+        const report = gatherContext({ cwd: tmpHome, bundles: [], agents: ['claude-code'], scanSkills: scan });
+        expect(scan).toHaveBeenCalledTimes(1);
+        const claude = report.providers.find((p: { id: string }) => p.id === 'claude-code');
+        const skillsCheck = claude.checks.find((c: { id: string }) => c.id === 'skills.global');
+        expect(skillsCheck.state).not.toBe('shared');
+        expect(skillsCheck.owners).toBeUndefined();
     });
 });
 

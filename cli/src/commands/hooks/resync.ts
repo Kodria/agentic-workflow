@@ -1,8 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { AgentTarget, PROVIDERS, getHookConfig } from '../../providers';
+import { AGENT_TARGETS, AgentTarget, getHookConfig } from '../../providers';
 import { computeHookStatus } from './status';
-import { syncFile } from './install';
+import { claudeResyncSourcesExist, resyncClaudeHookFiles } from './claude';
+import { codexResyncSourcesExist, resyncCodexHookFiles } from './codex';
 
 export type ResyncAction = 'resynced' | 'not-installed' | 'registry-missing';
 
@@ -19,10 +20,13 @@ function detectInstallMethod(scriptsDir: string): 'symlink' | 'copy' {
     }
 }
 
-export function resyncInstalledHooks(registryRoot: string): ResyncResult[] {
+export function resyncInstalledHooks(
+    registryRoot: string,
+    targets: AgentTarget[] = [...AGENT_TARGETS],
+): ResyncResult[] {
     const results: ResyncResult[] = [];
 
-    for (const agent of Object.keys(PROVIDERS) as AgentTarget[]) {
+    for (const agent of targets) {
         const config = getHookConfig(agent);
         if (!config) continue;
 
@@ -32,23 +36,33 @@ export function resyncInstalledHooks(registryRoot: string): ResyncResult[] {
             continue;
         }
 
-        const sourceHooks = path.join(registryRoot, 'hooks');
-        const sourceSkill = path.join(registryRoot, 'skills/using-awm/SKILL.md');
-        if (!fs.existsSync(path.join(sourceHooks, 'session-start')) || !fs.existsSync(path.join(sourceHooks, 'run-hook.cmd')) || !fs.existsSync(sourceSkill)) {
-            results.push({ agent, action: 'registry-missing' });
-            continue;
-        }
-
         const method = detectInstallMethod(config.scriptsDir);
-        fs.mkdirSync(config.scriptsDir, { recursive: true });
-        syncFile(path.join(sourceHooks, 'session-start'), path.join(config.scriptsDir, 'session-start'), method);
-        syncFile(path.join(sourceHooks, 'run-hook.cmd'), path.join(config.scriptsDir, 'run-hook.cmd'), method);
 
-        const skillDest = path.join(config.scriptsDir, 'using-awm.md');
-        try { fs.unlinkSync(skillDest); } catch { /* not exists */ }
-        fs.symlinkSync(sourceSkill, skillDest);
-
-        results.push({ agent, action: 'resynced' });
+        switch (config.type) {
+            case 'cc-settings-merge': {
+                if (!claudeResyncSourcesExist(registryRoot)) {
+                    results.push({ agent, action: 'registry-missing' });
+                    continue;
+                }
+                resyncClaudeHookFiles(config, registryRoot, method);
+                results.push({ agent, action: 'resynced' });
+                break;
+            }
+            case 'codex-hooks-json': {
+                if (!codexResyncSourcesExist(registryRoot)) {
+                    results.push({ agent, action: 'registry-missing' });
+                    continue;
+                }
+                resyncCodexHookFiles(config, registryRoot, method);
+                results.push({ agent, action: 'resynced' });
+                break;
+            }
+            /* istanbul ignore next -- HookConfig['type'] is exhaustively handled above */
+            default: {
+                const exhaustive: never = config.type;
+                throw new Error(`Unknown hook config type: ${String(exhaustive)}`);
+            }
+        }
     }
 
     return results;

@@ -2,9 +2,11 @@
 import { Command } from 'commander';
 import pc from 'picocolors';
 import { gatherContext } from '../core/diagnostics/context';
-import { runChecks } from '../core/diagnostics/checks';
-import { CheckReport, CheckResult } from '../core/diagnostics/types';
+import { computeProviderOverall } from '../core/diagnostics/checks';
+import { CheckReport, CheckResult, ProviderCheck, ProviderCheckState, ProviderDiagnosticReport } from '../core/diagnostics/types';
 import { platformLabel } from '../core/paths';
+import { getPreferences } from '../utils/config';
+import { resolveAgentTargets } from '../core/agent-targets';
 
 function glyph(status: CheckResult['status']): string {
     if (status === 'ok') return pc.green('✔');
@@ -45,15 +47,95 @@ export function renderReport(report: CheckReport): string {
     return lines.join('\n');
 }
 
+// --- Task 9: per-provider report rendering ---------------------------------
+//
+// Separate from renderReport/CheckReport above (which `init.ts` still uses,
+// unchanged, for its before/after machine+project display). `doctor`'s own
+// text/JSON output is provider-centric.
+
+const CHECK_LABELS: Record<ProviderCheck['id'], string> = {
+    'binary.version': 'binary/version',
+    'skills.global': 'global skills',
+    'agents.native': 'native agents',
+    'context.global': 'global context',
+    'hook.trust': 'hook SessionStart',
+    'guidance.project': 'project guidance',
+    'constitution.delivery': 'constitution delivery',
+};
+
+const OK_STATES: ProviderCheckState[] = ['supported', 'healthy', 'shared', 'delivered'];
+const PENDING_STATES: ProviderCheckState[] = ['pending', 'pending-trust'];
+const WARN_STATES: ProviderCheckState[] = ['stale'];
+
+function providerGlyph(state: ProviderCheckState): string {
+    if (OK_STATES.includes(state)) return pc.green('✔');
+    if (PENDING_STATES.includes(state)) return pc.yellow('◷');
+    if (WARN_STATES.includes(state)) return pc.yellow('⚠');
+    return pc.red('✖');
+}
+
+function providerCheckDetail(check: ProviderCheck): string {
+    if (check.id === 'binary.version' && check.target) return pc.dim(` (${check.target})`);
+    if (check.state === 'pending-trust') return pc.dim(' (pending trust)');
+    if (check.detail) return pc.dim(` (${check.detail})`);
+    return '';
+}
+
+function providerCheckRemedy(check: ProviderCheck): string {
+    return check.remediationCode ? pc.dim(`   → ${check.remediationCode}`) : '';
+}
+
+function providerCheckLine(check: ProviderCheck): string {
+    return `  ${providerGlyph(check.state)} ${CHECK_LABELS[check.id]}${providerCheckDetail(check)}${providerCheckRemedy(check)}`;
+}
+
+export function renderProviderReport(report: ProviderDiagnosticReport): string {
+    const lines: string[] = [];
+    lines.push(pc.bold('AWM · harness status'));
+    lines.push('');
+    for (const provider of report.providers) {
+        lines.push(`Provider: ${provider.label}`);
+        for (const check of provider.checks) lines.push(providerCheckLine(check));
+        lines.push('');
+    }
+    const status = report.overall === 'healthy' ? pc.green('healthy') : pc.red('degraded');
+    lines.push(`status: ${status}`);
+    return lines.join('\n');
+}
+
 export interface RunDoctorOptions {
     json?: boolean;
     cwd?: string;
+    /** Comma-separated agent subset (R12/R13) — defaults to every enabled agent. */
+    agent?: string;
+    /** Injectable seam over `resolveAgentTargets` (core/agent-targets.ts) — tests spy on this
+     *  to observe which targets `doctor` resolved. The resolved list drives which providers'
+     *  `.providers[]` rows `gatherContext` builds (Task 9). */
+    resolveTargets?: typeof resolveAgentTargets;
 }
 
 export function runDoctor(opts: RunDoctorOptions = {}): number {
-    let report: CheckReport;
+    const resolveTargets = opts.resolveTargets ?? resolveAgentTargets;
+
+    // Validates --agent separately from the general diagnostic gathering below:
+    // an unknown or disabled agent is a normal input-validation failure (the
+    // user typo'd or forgot `awm init --agent <x>`), not an "internal error" —
+    // give it its own clear message rather than lumping it under the generic
+    // internal-error catch further down.
+    let targets: ReturnType<typeof resolveAgentTargets>;
     try {
-        report = runChecks(gatherContext({ cwd: opts.cwd }));
+        const prefs = getPreferences();
+        targets = resolveTargets({ prefs, explicit: opts.agent });
+    } catch (err) {
+        process.stderr.write(`awm doctor: ${(err as Error).message}\n`);
+        return 2;
+    }
+
+    let report: ProviderDiagnosticReport;
+    try {
+        const ctx = gatherContext({ cwd: opts.cwd, agents: targets });
+        const providers = ctx.providers ?? [];
+        report = { providers, overall: computeProviderOverall(providers) };
     } catch (err) {
         process.stderr.write(`awm doctor: internal error: ${(err as Error).message}\n`);
         return 2;
@@ -61,16 +143,17 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
     if (opts.json) {
         process.stdout.write(JSON.stringify(report, null, 2) + '\n');
     } else {
-        process.stdout.write(renderReport(report) + '\n');
+        process.stdout.write(renderProviderReport(report) + '\n');
     }
     return report.overall === 'healthy' ? 0 : 1;
 }
 
 export function registerDoctorCommand(program: Command): void {
     program.command('doctor')
-        .description('Read-only dashboard of the AWM harness state (machine + project)')
+        .description('Read-only dashboard of the AWM harness state, per provider')
         .option('--json', 'Emit the diagnostic report as JSON')
-        .action((options: { json?: boolean }) => {
-            process.exitCode = runDoctor({ json: options.json });
+        .option('-a, --agent <agent>', 'Target agent subset (comma-separated); defaults to every enabled agent')
+        .action((options: { json?: boolean; agent?: string }) => {
+            process.exitCode = runDoctor({ json: options.json, agent: options.agent });
         });
 }

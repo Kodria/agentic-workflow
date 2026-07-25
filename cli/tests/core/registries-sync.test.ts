@@ -106,7 +106,7 @@ describe('syncRegistries (git fixtures locales)', () => {
         fs.mkdirSync(awmDir, { recursive: true });
         fs.writeFileSync(
             path.join(awmDir, 'preferences.json'),
-            JSON.stringify({ defaultAgent: 'claude', installMethod: 'symlink', defaultScope: 'local', pins: { personal: '9.9.9' } })
+            JSON.stringify({ defaultAgent: 'claude-code', installMethod: 'symlink', defaultScope: 'local', pins: { personal: '9.9.9' } })
         );
 
         const results = await m.syncRegistries();
@@ -129,7 +129,7 @@ describe('syncRegistries (git fixtures locales)', () => {
         fs.mkdirSync(awmDir, { recursive: true });
         fs.writeFileSync(
             path.join(awmDir, 'preferences.json'),
-            JSON.stringify({ defaultAgent: 'claude', installMethod: 'symlink', defaultScope: 'local', pins: { personal: '1.0.0' } })
+            JSON.stringify({ defaultAgent: 'claude-code', installMethod: 'symlink', defaultScope: 'local', pins: { personal: '1.0.0' } })
         );
 
         const results = await m.syncRegistries();
@@ -209,7 +209,7 @@ describe('syncRegistries (git fixtures locales)', () => {
         const awmDir = path.join(tmpHome, '.awm');
         fs.writeFileSync(
             path.join(awmDir, 'preferences.json'),
-            JSON.stringify({ defaultAgent: 'claude', installMethod: 'symlink', defaultScope: 'local', pins: { personal: '1.0.0' } })
+            JSON.stringify({ defaultAgent: 'claude-code', installMethod: 'symlink', defaultScope: 'local', pins: { personal: '1.0.0' } })
         );
 
         // segunda sync con pin: retrocede a v1.0.0
@@ -228,7 +228,7 @@ describe('syncRegistries (git fixtures locales)', () => {
         fs.mkdirSync(awmDir, { recursive: true });
         fs.writeFileSync(
             path.join(awmDir, 'preferences.json'),
-            JSON.stringify({ defaultAgent: 'claude', installMethod: 'symlink', defaultScope: 'local', channel: 'dev' })
+            JSON.stringify({ defaultAgent: 'claude-code', installMethod: 'symlink', defaultScope: 'local', channel: 'dev' })
         );
 
         // primera sync en canal dev: queda en HEAD (no en el tag)

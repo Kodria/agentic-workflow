@@ -164,7 +164,7 @@ describe('versioning core', () => {
             fs.mkdirSync(awmDir, { recursive: true });
             fs.writeFileSync(
                 path.join(awmDir, 'preferences.json'),
-                JSON.stringify({ defaultAgent: 'claude', installMethod: 'symlink', defaultScope: 'local', channel: 'dev', pins: { base: '1.2.0', equipo: '0.3.0' } })
+                JSON.stringify({ defaultAgent: 'claude-code', installMethod: 'symlink', defaultScope: 'local', channel: 'dev', pins: { base: '1.2.0', equipo: '0.3.0' } })
             );
             const { machineVersionOpts } = require('../../src/core/versioning');
             expect(machineVersionOpts('base')).toEqual({ pin: '1.2.0', channel: 'dev' });

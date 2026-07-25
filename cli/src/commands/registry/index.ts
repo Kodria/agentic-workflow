@@ -13,7 +13,7 @@ import { removeRegistry } from './remove';
 import { overrideStatus } from './status';
 import { getPreferences } from '../../utils/config';
 import { findProjectRoot } from '../../core/profile';
-import { AgentTarget, PROVIDERS } from '../../providers';
+import { AGENT_TARGETS, AgentTarget } from '../../providers';
 import { bundlesInRegistry, installBundlesFromRegistry } from './install-bundles';
 
 export function registerRegistryCommand(program: Command): void {
@@ -67,7 +67,7 @@ export function registerRegistryCommand(program: Command): void {
                             const agentPick = await select({
                                 message: 'Target agent',
                                 initialValue: prefs.defaultAgent,
-                                options: Object.keys(PROVIDERS).map((a) => ({ value: a, label: a })),
+                                options: AGENT_TARGETS.map((a) => ({ value: a, label: a })),
                             });
                             if (!isCancel(agentPick)) agents = [agentPick as AgentTarget];
                             else selection = null;

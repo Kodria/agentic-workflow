@@ -6,10 +6,14 @@ import {
     defaultScopeForBundle,
     resolveBundleClosure,
 } from './bundles';
-import { installArtifact } from './executor';
-import { AgentTarget, ArtifactType, Scope, getTargetPath, PROVIDERS } from '../providers';
+import { AgentTarget, providerFor, Scope } from '../providers';
 import { addExtension, ensureSkillsGitignored, readProfile, shouldRecordExtension } from './profile';
 import { contentRoots } from './registries';
+import { getPreferences } from '../utils/config';
+import { ArtifactIntent, InstallPlan, planInstall } from './install-planner';
+import { applyInstallPlan as realApplyInstallPlan, InstallSummary } from './install-transaction';
+
+export type { InstallSummary } from './install-transaction';
 
 export type InstallMethod = 'symlink' | 'copy';
 
@@ -23,22 +27,16 @@ export interface InstallBundleOptions {
     scopeOverride?: Scope;
     /** Registry content root (defaults to the real cache). Overridable for tests. */
     contentDir?: string;
+    /**
+     * Injectable seam over the real `applyInstallPlan` (install-transaction.ts)
+     * — defaults to it. Tests inject a fake here when they want to assert on
+     * the computed InstallPlan without touching the filesystem.
+     */
+    applyPlan?: (plan: InstallPlan) => InstallSummary;
 }
 
-export interface InstallSummary {
-    installed: string[];
-    skipped: string[];
-}
-
-interface ArtifactRef {
-    name: string;
-    type: ArtifactType;
-    installName: string;
-    sourcePath: string;
-}
-
-function bundleArtifacts(b: BundleDefinition, contentDir: string): ArtifactRef[] {
-    const refs: ArtifactRef[] = [];
+function bundleArtifacts(b: BundleDefinition, contentDir: string): ArtifactIntent[] {
+    const refs: ArtifactIntent[] = [];
     for (const s of b.skills) {
         refs.push({ name: s.name, type: 'skill', installName: s.name, sourcePath: path.join(contentDir, 'skills', s.name) });
     }
@@ -52,46 +50,49 @@ function bundleArtifacts(b: BundleDefinition, contentDir: string): ArtifactRef[]
 }
 
 /**
- * Materializes a bundle and its dependency closure into the target agents.
- * The named bundle uses `scopeOverride` if given; dependencies always use
- * their own default scope (baseline→global, project→local, ambient→global).
- * Local installs resolve under `projectRoot`; global installs use the
- * provider's absolute global path. Unsupported artifact types per agent and
- * missing sources are skipped (never thrown).
+ * Expands a bundle and its dependency closure into the flat list of artifact
+ * intents to install. Pure — resolves the closure and content roots but
+ * performs no filesystem writes and no agent/scope resolution; that's
+ * `planInstall`'s job.
  */
-export function installBundle(opts: InstallBundleOptions): InstallSummary {
+export function expandBundleArtifacts(opts: InstallBundleOptions): ArtifactIntent[] {
     const fallbackContentDir = opts.contentDir ?? contentRoots()[0] ?? '';
     const closure = resolveBundleClosure(opts.bundleName, opts.bundles);
-    const installed: string[] = [];
-    const skipped: string[] = [];
+    return closure.flatMap((b) => bundleArtifacts(b, b.contentRoot ?? fallbackContentDir));
+}
 
-    for (const b of closure) {
-        const contentDir = b.contentRoot ?? fallbackContentDir;
-        const scope: Scope =
-            b.name === opts.bundleName
-                ? opts.scopeOverride ?? defaultScopeForBundle(b.scope)
-                : defaultScopeForBundle(b.scope);
-
-        for (const art of bundleArtifacts(b, contentDir)) {
-            if (!fs.existsSync(art.sourcePath)) {
-                skipped.push(`${art.name} (source missing: ${art.sourcePath})`);
-                continue;
-            }
-            for (const agent of opts.agents) {
-                if (PROVIDERS[agent][art.type] === null) {
-                    skipped.push(`${art.name} (${agent}: ${art.type} unsupported)`);
-                    continue;
-                }
-                const rel = getTargetPath(art.type, agent, scope);
-                const baseDir = scope === 'local' ? path.join(opts.projectRoot, rel) : rel;
-                const dest = path.join(baseDir, art.installName);
-                installArtifact(art.sourcePath, dest, opts.method);
-                installed.push(`${art.name} → ${agent} (${scope}) [${b.name}]`);
-            }
-        }
-    }
-
-    return { installed, skipped };
+/**
+ * Materializes a bundle and its dependency closure into the target agents.
+ *
+ * `expandBundleArtifacts` turns the bundle closure into artifact intents,
+ * `planInstall` turns those into a deduped, ownership-tracked plan (see
+ * install-planner.ts for the shared-target and ownership rules), and
+ * `applyInstallPlan` (install-transaction.ts) performs the actual
+ * transactional filesystem apply — backups before any replace, rollback on
+ * verification failure, artifact-state persistence on success.
+ *
+ * Note: unlike the pre-Task-5 implementation, scope is now resolved once for
+ * the whole call (the named bundle's own scope, or `scopeOverride`) rather
+ * than per-bundle-in-closure; dependency bundles with a *different* default
+ * scope than the named bundle no longer get their own scope. This matches
+ * the plan for Task 5's `planInstall` signature (single `scope` param) and is
+ * expected to be revisited if that distinction turns out to matter.
+ */
+export function installBundle(opts: InstallBundleOptions): InstallSummary {
+    const intents = expandBundleArtifacts(opts);
+    const enabledAgents = getPreferences().enabledAgents;
+    const plan = planInstall({
+        artifacts: intents,
+        selectedAgents: opts.agents,
+        enabledAgents,
+        scope: opts.scopeOverride ?? defaultScopeForBundle(
+            opts.bundles.find((bundle) => bundle.name === opts.bundleName)?.scope ?? 'baseline',
+        ),
+        projectRoot: opts.projectRoot,
+        method: opts.method,
+    });
+    const apply = opts.applyPlan ?? realApplyInstallPlan;
+    return apply(plan);
 }
 
 export interface AddBundleResult extends InstallSummary {
@@ -109,9 +110,20 @@ export function addBundle(opts: InstallBundleOptions): AddBundleResult {
     const target = opts.bundles.find((b) => b.name === opts.bundleName);
 
     let recordedExtension: string | null = null;
-    // Check the named bundle's own artifacts (not just closure deps) were installed.
-    const ownInstalled = summary.installed.filter((line) => line.endsWith(`[${opts.bundleName}]`));
-    if (target && ownInstalled.length > 0) {
+    // Check the named bundle's OWN artifacts (not the dependency closure) were
+    // installed — i.e. at least one own artifact has a source on disk AND a
+    // type supported by at least one selected agent (matching what planInstall
+    // would actually materialize). ArtifactIntent/PlannedOperation carry no
+    // bundle provenance (install-planner.ts groups purely by physical target),
+    // so this is computed directly from the bundle's own artifact list rather
+    // than by inspecting `summary.installed`.
+    const ownInstalled = target
+        ? bundleArtifacts(target, target.contentRoot ?? opts.contentDir ?? contentRoots()[0] ?? '')
+            .some((artifact) =>
+                fs.existsSync(artifact.sourcePath) &&
+                opts.agents.some((agent) => providerFor(agent)[artifact.type] !== null))
+        : false;
+    if (target && ownInstalled) {
         const effective: Scope = opts.scopeOverride ?? defaultScopeForBundle(target.scope);
         if (shouldRecordExtension(target.scope, effective)) {
             addExtension(opts.projectRoot, opts.bundleName);
@@ -129,10 +141,14 @@ export interface SyncProfileOptions {
     agents: AgentTarget[];
     method: InstallMethod;
     contentDir?: string;
+    /** See InstallBundleOptions.applyPlan. */
+    applyPlan?: (plan: InstallPlan) => InstallSummary;
 }
 
-export interface SyncResult extends InstallSummary {
+export interface SyncResult extends Omit<InstallSummary, 'transactionId'> {
     extensions: string[];
+    /** One transaction ID per bundle actually installed during this sync, in order — a multi-bundle sync runs one applyInstallPlan transaction per bundle. */
+    transactionIds: string[];
 }
 
 /**
@@ -143,6 +159,8 @@ export function syncProfile(opts: SyncProfileOptions): SyncResult {
     const profile = readProfile(opts.projectRoot);
     const installed: string[] = [];
     const skipped: string[] = [];
+    const modifiedFiles: string[] = [];
+    const transactionIds: string[] = [];
 
     for (const ext of profile.extensions) {
         if (!opts.bundles.some((b) => b.name === ext)) {
@@ -156,12 +174,15 @@ export function syncProfile(opts: SyncProfileOptions): SyncResult {
             method: opts.method,
             projectRoot: opts.projectRoot,
             contentDir: opts.contentDir,
+            applyPlan: opts.applyPlan,
         });
         installed.push(...summary.installed);
         skipped.push(...summary.skipped);
+        modifiedFiles.push(...summary.modifiedFiles);
+        transactionIds.push(summary.transactionId);
     }
 
     if (profile.extensions.length > 0) ensureSkillsGitignored(opts.projectRoot, opts.agents);
 
-    return { installed, skipped, extensions: profile.extensions };
+    return { installed, skipped, extensions: profile.extensions, transactionIds, modifiedFiles };
 }

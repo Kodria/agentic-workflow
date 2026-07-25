@@ -24,6 +24,10 @@ export interface InitOutcome {
     failed: number;
     before: CheckReport;
     after: CheckReport;
+    /** Basename of the backup-session transaction wrapping this run's writes. Set on success. */
+    transactionId?: string;
+    /** Every target path the backup session snapshotted before this run's writes. Set on success. */
+    modifiedFiles?: string[];
 }
 
 // Efectos de I/O inyectables — defaultActions delega en las funciones reales;
@@ -54,6 +58,16 @@ export interface InitDeps {
     ctx: HarnessContext;
     bundles: BundleDefinition[];
     agent: AgentTarget;
+    /**
+     * Every agent enabled on this machine (preferences.json's `enabledAgents`
+     * as of the start of this run — includes `agent` itself). Used by
+     * `stepDevCore`/`stepAmbient` to compute the complete shared-skill-target
+     * group when auto-installing the baseline/ambient bundles, so a co-owner
+     * agent (e.g. OpenCode sharing Codex's `~/.agents/skills`) that's already
+     * enabled doesn't trip install-planner.ts's `assertCompleteSharedGroup`
+     * (R14) refusal.
+     */
+    enabledAgents: AgentTarget[];
     installMethod: InstallMethod;
     registryRoot: string;     // content root que provee hooks/ — para installHook
     contentDir: string;       // content root del primer registry — para installBundle/syncProfile

@@ -211,3 +211,12 @@ export function verifyMinCliVersions(current: string = cliVersion()): CliVersion
     }
     return failures;
 }
+
+/** Throwing form of `verifyMinCliVersions`'s failure list — lets callers treat the
+ *  min-CLI-version gate uniformly with other gates (version-gate, backup session, …)
+ *  in a single try/catch rather than a bespoke console.warn loop. */
+export function assertRegistryGates(failures: CliVersionFailure[]): void {
+    if (failures.length === 0) return;
+    const detail = failures.map((f) => `${f.name} requires CLI >= ${f.min}`).join('; ');
+    throw new Error(`Registry version gate failed: ${detail}. Run: npm i -g agentic-workflow-manager`);
+}

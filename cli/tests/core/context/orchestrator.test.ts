@@ -24,7 +24,7 @@ function tmpRegistry(): string {
 
 describe('InjectionOrchestrator (claude-code dispatch via HookMergeStrategy)', () => {
     const ccOverride = {
-        label: 'Claude Code', skill: { global: '', local: '' }, workflow: null, agent: null,
+        label: 'Claude Code', skill: { global: '', local: '', renderer: 'link' as const }, workflow: null, agent: null,
         injection: { type: 'cc-settings-merge' as const },
         hooks: { type: 'cc-settings-merge' as const, settingsPath: '', scriptsDir: '', matcher: '', eventName: '' },
     };
@@ -66,7 +66,12 @@ describe('InjectionOrchestrator (claude-code dispatch via HookMergeStrategy)', (
     });
 
     it('throws when providerOverride has no injection (does not fall through to real agent config)', () => {
-        const noInjection = { label: 'Test', skill: { global: '', local: '' }, workflow: null, agent: null };
+        const noInjection = {
+            label: 'Test',
+            skill: { global: '', local: '', renderer: 'link' as const },
+            workflow: null,
+            agent: null,
+        };
         const orch = new InjectionOrchestrator({ providerOverride: noInjection });
         expect(() => orch.installContext({ agent: 'claude-code', scope: 'global', registryRoot: '/any', installMethod: 'symlink', profileExtensions: [] }))
             .toThrow('no injection mechanism');
@@ -86,7 +91,7 @@ describe('InjectionOrchestrator (opencode, real strategy)', () => {
         registryRoot = tmpRegistry();
         orch = new InjectionOrchestrator({
             providerOverride: {
-                label: 'OpenCode', skill: { global: '', local: '' }, workflow: null, agent: null,
+                label: 'OpenCode', skill: { global: '', local: '', renderer: 'link' }, workflow: null, agent: null,
                 injection: { type: 'config-instructions', configPath, field: 'instructions' },
             },
             contextPathOverride: absPath,
@@ -135,5 +140,51 @@ describe('InjectionOrchestrator (opencode, real strategy)', () => {
         // After removal the sentinel must be gone from opencode.json
         const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
         expect((cfg.instructions ?? []).includes(absPath)).toBe(false);
+    });
+});
+
+describe('InjectionOrchestrator (codex, managed AGENTS.md strategy)', () => {
+    let roots: string[];
+
+    beforeEach(() => {
+        roots = [];
+        jest.clearAllMocks();
+    });
+
+    afterEach(() => {
+        for (const root of roots) fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    it('owns only the managed block and never dispatches to Claude hooks', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-codex-orch-'));
+        const registryRoot = tmpRegistry();
+        roots.push(dir, registryRoot);
+        const agentsPath = path.join(dir, 'AGENTS.md');
+        const contextPath = path.join(dir, 'awm-context.md');
+        fs.writeFileSync(agentsPath, '# User rules\n');
+        const orch = new InjectionOrchestrator({
+            providerOverride: {
+                label: 'Codex', skill: { global: '', local: '', renderer: 'link' }, workflow: null, agent: null,
+                injection: { type: 'managed-agents-md', globalPath: agentsPath, localFile: 'AGENTS.md' },
+            },
+            contextPathOverride: contextPath,
+        });
+        const op = {
+            agent: 'codex' as const,
+            scope: 'global' as const,
+            registryRoot,
+            installMethod: 'copy' as const,
+            profileExtensions: [],
+        };
+
+        orch.installContext(op);
+
+        expect(fs.readFileSync(agentsPath, 'utf8')).toContain('# User rules\n');
+        expect(fs.readFileSync(agentsPath, 'utf8')).toContain('BODY');
+        expect(installHook).not.toHaveBeenCalled();
+        expect(orch.contextStatus(op)).toBe('injected');
+
+        orch.uninstallContext(op);
+        expect(fs.readFileSync(agentsPath, 'utf8')).toBe('# User rules\n');
     });
 });

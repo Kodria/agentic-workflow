@@ -91,6 +91,23 @@ export function resolveBundleSkills(bundleName: string, bundles: BundleDefinitio
     return Array.from(skills);
 }
 
+/** Same closure-walk as `resolveBundleSkills`, over `agent`-type artifact names. */
+export function resolveBundleAgents(bundleName: string, bundles: BundleDefinition[]): string[] {
+    const byName = new Map(bundles.map((b) => [b.name, b]));
+    const seen = new Set<string>();
+    const agents = new Set<string>();
+    const visit = (name: string) => {
+        if (seen.has(name)) return;
+        seen.add(name);
+        const b = byName.get(name);
+        if (!b) return;
+        for (const dep of b.dependsOn) visit(dep);
+        for (const a of b.agents) agents.add(a);
+    };
+    visit(bundleName);
+    return Array.from(agents);
+}
+
 /**
  * Default install scope for a bundle, derived from its scope class.
  * baseline/ambient install globally; project bundles install locally.

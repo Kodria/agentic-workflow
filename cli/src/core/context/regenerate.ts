@@ -5,7 +5,7 @@
 //   - 'absent'   (sentinel ausente)                                       → no inyecta (eso es `awm init`).
 // Solo scope global. Defensivo: nunca rompe `awm update` por una falla de un agente.
 import fs from 'fs';
-import { PROVIDERS, AgentTarget } from '../../providers';
+import { AGENT_TARGETS, AgentTarget, providerFor } from '../../providers';
 import { capabilityRoot } from '../registries';
 import { InjectionOrchestrator, ContextOp } from './orchestrator';
 
@@ -13,14 +13,15 @@ export type RegenAction = 'refreshed' | 'fresh' | 'skipped';
 export type RegenResult = { agent: AgentTarget; action: RegenAction };
 
 export function regenerateGlobalContext(
+    targets: AgentTarget[] = [...AGENT_TARGETS],
     orch: InjectionOrchestrator = new InjectionOrchestrator(),
 ): RegenResult[] {
     const skillsRoot = capabilityRoot('skills');
     if (!skillsRoot) return [];
 
     const out: RegenResult[] = [];
-    for (const agent of Object.keys(PROVIDERS) as AgentTarget[]) {
-        const inj = PROVIDERS[agent].injection;
+    for (const agent of targets) {
+        const inj = providerFor(agent).injection;
         if (!inj || inj.type !== 'config-instructions') continue;
         if (!fs.existsSync(inj.configPath)) continue;
 

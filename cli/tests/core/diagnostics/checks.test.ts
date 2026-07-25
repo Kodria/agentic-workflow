@@ -1,5 +1,5 @@
-import { runChecks } from '../../../src/core/diagnostics/checks';
-import { HarnessContext, ProjectFacts } from '../../../src/core/diagnostics/types';
+import { runChecks, computeProviderOverall } from '../../../src/core/diagnostics/checks';
+import { HarnessContext, ProjectFacts, ProviderFacts } from '../../../src/core/diagnostics/types';
 import { AgentTarget } from '../../../src/providers';
 import { InjectionState } from '../../../src/core/context/types';
 
@@ -198,6 +198,30 @@ describe('machineChecks — global skill integrity', () => {
         expect(row?.status).toBe('warn');
         expect(row?.detail).toContain('2'); // 1 repairable + 1 dead
         expect(row?.remedy).toEqual({ kind: 'command', value: 'awm init' });
+    });
+});
+
+describe('computeProviderOverall (Task 9)', () => {
+    const CHECK_IDS = ['binary.version', 'skills.global', 'agents.native', 'hook.trust', 'context.global'] as const;
+
+    function providerWith(states: ProviderFacts['checks'][number]['state'][]): ProviderFacts {
+        return {
+            id: 'codex',
+            label: 'Codex',
+            checks: states.map((state, i) => ({ id: CHECK_IDS[i % CHECK_IDS.length], state })),
+        };
+    }
+
+    it('healthy when every check is in an ok/pending/warn state', () => {
+        expect(computeProviderOverall([providerWith(['supported', 'healthy', 'shared', 'pending-trust', 'stale'])])).toBe('healthy');
+    });
+
+    it('degrades on a single broken/missing/absent/unsupported/conflict check', () => {
+        expect(computeProviderOverall([providerWith(['supported', 'absent'])])).toBe('degraded');
+    });
+
+    it('healthy for an empty provider list', () => {
+        expect(computeProviderOverall([])).toBe('healthy');
     });
 });
 

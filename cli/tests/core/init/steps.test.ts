@@ -9,7 +9,7 @@ import {
 import type { InitDeps, InitActions } from '../../../src/core/init/types';
 import type { HarnessContext, ProjectFacts } from '../../../src/core/diagnostics/types';
 import type { BundleDefinition } from '../../../src/core/bundles';
-import { PROVIDERS } from '../../../src/providers';
+import { providerFor } from '../../../src/providers';
 
 function bundle(name: string, scope: BundleDefinition['scope'], skills: string[]): BundleDefinition {
     return {
@@ -62,7 +62,7 @@ function spies(): jest.Mocked<InitActions> {
 function deps(ctx: HarnessContext, actions: InitActions, over: Partial<InitDeps> = {}): InitDeps {
     return {
         cwd: '/repo', ctx, bundles: [bundle('dev', 'baseline', ['brainstorming'])],
-        agent: 'claude-code', installMethod: 'symlink',
+        agent: 'claude-code', enabledAgents: ['claude-code'], installMethod: 'symlink',
         registryRoot: '/cache', contentDir: '/cache/registry', sensorPacksRoot: '/cache/registry',
         confirmExtensions: async (p) => p, actions, ...over,
     };
@@ -115,6 +115,21 @@ describe('stepHook / stepDevCore / stepAmbient', () => {
         expect(stepHook(deps({ machine: m, project: null }, a)).action).toBe('applied');
         expect(a.installHook).toHaveBeenCalled();
     });
+    // Regression: a real (unstubbed) `awm init --agent opencode` used to throw
+    // "hooks not supported for agent target: opencode" from installHook,
+    // because stepHook never checked whether the target agent has a hook
+    // mechanism at all before calling installHook (providers/index.ts:
+    // OpenCode/Antigravity have no `hooks` config). Found while building the
+    // real Codex+OpenCode coexistence E2E test — mirrors provider-checks.ts's
+    // `hookTrustCheck`, which already treats a missing `hooks` config as "not
+    // applicable" rather than a failure.
+    it('hook skips (not calls installHook) for an agent with no hook mechanism', () => {
+        const a = spies();
+        const m = machine(); m.hook = { present: false };
+        const r = stepHook(deps({ machine: m, project: null }, a, { agent: 'opencode', enabledAgents: ['opencode'] }));
+        expect(r.action).toBe('skipped');
+        expect(a.installHook).not.toHaveBeenCalled();
+    });
     it('devCore installs baseline when links broken', () => {
         const a = spies();
         const m = machine(); m.devCore = { present: true, brokenLinks: ['brainstorming'] };
@@ -137,6 +152,58 @@ describe('stepHook / stepDevCore / stepAmbient', () => {
     it('ambient skips when nothing wanted', () => {
         const a = spies();
         expect(stepAmbient(deps({ machine: machine(), project: null }, a)).action).toBe('skipped');
+    });
+
+    // Regression coverage for the BLOCKER found in post-implementation QA:
+    // stepDevCore/stepAmbient used to pass a `[d.agent]` singleton as
+    // `agents`, which install-planner.ts's `assertCompleteSharedGroup` (R14)
+    // refuses whenever a co-owner sharing the same physical skill directory
+    // (OpenCode and Codex both resolve to ~/.agents/skills) is independently
+    // enabled — making `awm init --agent codex` structurally fail once
+    // OpenCode was already enabled, and vice versa.
+    it('devCore includes a co-enabled agent sharing the same skill target (codex + opencode)', () => {
+        const a = spies();
+        const m = machine(); m.devCore = { present: false, brokenLinks: [] };
+        const r = stepDevCore(deps({ machine: m, project: null }, a, {
+            agent: 'codex', enabledAgents: ['claude-code', 'opencode', 'codex'],
+        }));
+        expect(r.action).toBe('applied');
+        expect(a.installBundle).toHaveBeenCalledWith(
+            expect.objectContaining({ agents: expect.arrayContaining(['codex', 'opencode']) }),
+        );
+        const call = a.installBundle.mock.calls[0][0];
+        expect(call.agents).toHaveLength(2); // claude-code is NOT included — it doesn't share the skill target
+    });
+
+    it('devCore does not add a co-owner that is not currently enabled', () => {
+        const a = spies();
+        const m = machine(); m.devCore = { present: false, brokenLinks: [] };
+        const r = stepDevCore(deps({ machine: m, project: null }, a, {
+            agent: 'codex', enabledAgents: ['claude-code', 'codex'],
+        }));
+        expect(r.action).toBe('applied');
+        expect(a.installBundle).toHaveBeenCalledWith(expect.objectContaining({ agents: ['codex'] }));
+    });
+
+    it('devCore never adds a co-owner for claude-code (its skill dir is never shared)', () => {
+        const a = spies();
+        const m = machine(); m.devCore = { present: false, brokenLinks: [] };
+        const r = stepDevCore(deps({ machine: m, project: null }, a, {
+            agent: 'claude-code', enabledAgents: ['claude-code', 'opencode', 'codex'],
+        }));
+        expect(r.action).toBe('applied');
+        expect(a.installBundle).toHaveBeenCalledWith(expect.objectContaining({ agents: ['claude-code'] }));
+    });
+
+    it('ambient includes a co-enabled agent sharing the same skill target (codex + opencode)', () => {
+        const a = spies();
+        const m = machine(); m.ambient = { wanted: ['docs'], installed: [] };
+        const r = stepAmbient(deps({ machine: m, project: null }, a, {
+            agent: 'opencode', enabledAgents: ['claude-code', 'opencode', 'codex'],
+        }));
+        expect(r.action).toBe('applied');
+        const call = a.installBundle.mock.calls[0][0];
+        expect(call.agents.sort()).toEqual(['codex', 'opencode']);
     });
 });
 
@@ -239,6 +306,33 @@ describe('stepActivation', () => {
         stepActivation(deps(ctx, a, { agent: 'opencode' }));
         expect(a.gatherProject).toHaveBeenCalledWith(expect.any(String), expect.any(Array), 'opencode');
     });
+
+    // Same class of bug as stepDevCore/stepAmbient's shared-group regression
+    // above, in the LOCAL-scope (project) code path: OpenCode and Codex share
+    // both their global AND local skill directories, so a project extension
+    // with a skill artifact hits the identical R14 refusal whenever
+    // syncProfile is called with a `[d.agent]` singleton and a co-owner is
+    // independently enabled.
+    it('activation includes a co-enabled agent sharing the same LOCAL skill target (codex + opencode)', () => {
+        const a = spies();
+        a.gatherProject = jest.fn((_cwd: string, _bundles: any) => project({ activeBundles: { expected: ['x'], linked: [], broken: [] } }));
+        const r = stepActivation(deps({ machine: machine(), project: project() }, a, {
+            agent: 'codex', enabledAgents: ['claude-code', 'opencode', 'codex'],
+        }));
+        expect(r.action).toBe('applied');
+        const call = a.syncProfile.mock.calls[0][0];
+        expect(call.agents.sort()).toEqual(['codex', 'opencode']);
+    });
+
+    it('activation does not add a co-owner that is not currently enabled', () => {
+        const a = spies();
+        a.gatherProject = jest.fn((_cwd: string, _bundles: any) => project({ activeBundles: { expected: ['x'], linked: [], broken: [] } }));
+        const r = stepActivation(deps({ machine: machine(), project: project() }, a, {
+            agent: 'codex', enabledAgents: ['claude-code', 'codex'],
+        }));
+        expect(r.action).toBe('applied');
+        expect(a.syncProfile).toHaveBeenCalledWith(expect.objectContaining({ agents: ['codex'] }));
+    });
 });
 
 describe('stepSensors', () => {
@@ -303,7 +397,7 @@ describe('stepGlobalSkillsRepair', () => {
         m.globalSkills = { valid: [], repairable: ['b'], dead: [] };
         const r = stepGlobalSkillsRepair(deps({ machine: m, project: null }, a, { agent: 'opencode' }));
         expect(r.action).toBe('applied');
-        expect(a.repairGlobalSkills).toHaveBeenCalledWith(PROVIDERS['opencode'].skill.global, expect.any(Array));
+        expect(a.repairGlobalSkills).toHaveBeenCalledWith(providerFor('opencode').skill.global, expect.any(Array));
     });
 });
 
@@ -333,6 +427,15 @@ describe('stepConstitutionInjection (#6)', () => {
         );
         expect(r.action).toBe('skipped');
         expect(a.injectProjectConstitution).not.toHaveBeenCalled();
+    });
+
+    it('installs Codex project guidance before CONSTITUTION.md exists', () => {
+        const a = spies();
+        const r = stepConstitutionInjection(
+            deps({ machine: machine(), project: project({ constitution: { present: false } }) }, a, { agent: 'codex' }),
+        );
+        expect(r.action).toBe('applied');
+        expect(a.injectProjectConstitution).toHaveBeenCalledWith({ projectRoot: '/repo', agent: 'codex' });
     });
 
     it('maps already → skipped when CONSTITUTION.md was already in opencode.json', () => {
@@ -383,5 +486,13 @@ describe('stepContextInjection', () => {
         const r = stepContextInjection(deps({ machine: machine(), project: null }, a, { agent: 'opencode' }));
         expect(r.action).toBe('applied');
         expect(a.installContext).toHaveBeenCalled();
+    });
+
+    it('installs the Codex global managed block when absent', () => {
+        const a = spies();
+        a.contextStatus.mockReturnValue('absent');
+        const r = stepContextInjection(deps({ machine: machine(), project: null }, a, { agent: 'codex' }));
+        expect(r.action).toBe('applied');
+        expect(a.installContext).toHaveBeenCalledWith(expect.objectContaining({ agent: 'codex', scope: 'global' }));
     });
 });

@@ -5,6 +5,7 @@ import {
     discoverBundles,
     readCatalog,
     resolveBundleSkills,
+    resolveBundleAgents,
     resolveBundleClosure,
     defaultScopeForBundle,
     BundleDefinition,
@@ -75,6 +76,20 @@ describe('resolveBundleSkills', () => {
         const content = makeFixture();
         const bundles = discoverBundles(content);
         expect(resolveBundleSkills('dev', bundles).sort()).toEqual(['architecture-advisor', 'brainstorming']);
+    });
+});
+
+describe('resolveBundleAgents', () => {
+    it('follows dependsOn transitively and dedupes, mirroring resolveBundleSkills', () => {
+        const content = makeFixture();
+        const bundles = discoverBundles(content);
+        expect(resolveBundleAgents('frontend', bundles)).toEqual(['development-process']); // via dep on 'dev'
+    });
+
+    it('returns own agents when no deps', () => {
+        const content = makeFixture();
+        const bundles = discoverBundles(content);
+        expect(resolveBundleAgents('dev', bundles)).toEqual(['development-process']);
     });
 });
 

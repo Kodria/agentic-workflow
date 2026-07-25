@@ -109,4 +109,18 @@ describe('uninstallHook', () => {
         expect(result.backupPath).not.toBeNull();
         expect(fs.existsSync(result.backupPath!)).toBe(true);
     });
+
+    it('is a no-op for Codex when hooks.json has no AWM entry (dispatch sanity check)', () => {
+        const codexDir = path.join(tmpHome, '.codex');
+        const hooksPath = path.join(codexDir, 'hooks.json');
+        const original = '{ "description": "user content" }\n';
+        fs.mkdirSync(codexDir, { recursive: true });
+        fs.writeFileSync(hooksPath, original);
+        const { uninstallHook } = require('../../../src/commands/hooks/uninstall');
+
+        const result = uninstallHook({ agent: 'codex' });
+        expect(result.status).toBe('not-installed');
+        expect(fs.readFileSync(hooksPath, 'utf-8')).toBe(original);
+        expect(fs.existsSync(path.join(tmpHome, '.awm/backups'))).toBe(false);
+    });
 });

@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import type { BundleScope } from './bundles';
 import type { Scope, ArtifactType, AgentTarget } from '../providers';
-import { PROVIDERS } from '../providers';
+import { providerFor } from '../providers';
 
 export interface ProjectProfile {
     extensions: string[];
@@ -125,7 +125,7 @@ export function ensureSkillsGitignored(root: string, agents: AgentTarget[]): voi
 
     const toIgnore: string[] = [];
     for (const agent of agents) {
-        const provider = PROVIDERS[agent];
+        const provider = providerFor(agent);
         for (const type of ['skill', 'workflow', 'agent'] as ArtifactType[]) {
             const config = provider[type];
             if (!config) continue;
