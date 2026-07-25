@@ -226,3 +226,51 @@ describe('gatherProviderChecks — shared skills.global does not mask broken lin
         expect(skillsStates).toEqual(['shared', 'shared']);
     });
 });
+
+describe('gatherProviderChecks — agents.native reports broken on a malformed Codex .toml', () => {
+    let tmpHome: string;
+    let originalHome: string | undefined;
+    let originalAwmHome: string | undefined;
+
+    beforeEach(() => {
+        tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-provider-checks-broken-agent-'));
+        originalHome = process.env.HOME;
+        originalAwmHome = process.env.AWM_HOME;
+        process.env.HOME = tmpHome;
+        process.env.AWM_HOME = path.join(tmpHome, '.awm');
+        jest.resetModules();
+    });
+
+    afterEach(() => {
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+        if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+        if (originalAwmHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = originalAwmHome;
+    });
+
+    it('reports state: broken and remediationCode: reinstall-native-agents for a hand-edited/truncated .toml', () => {
+        // Codex's agent renderer is 'codex-agent-toml' (providers/index.ts) — its global
+        // dir is ~/.codex/agents. tomlAgentsHealthy (provider-checks.ts) treats a .toml as
+        // broken when it can't be read, or when it's missing the `developer_instructions = `
+        // key that renderCodexAgent (Task 4) always emits — i.e. hand-edited/truncated.
+        const agentsDir = path.join(tmpHome, '.codex/agents');
+        fs.mkdirSync(agentsDir, { recursive: true });
+        fs.writeFileSync(
+            path.join(agentsDir, 'development-process.toml'),
+            'name = "development-process"\n# missing the developer_instructions key entirely\n',
+        );
+
+        const { gatherContext } = require('../../../src/core/diagnostics/context');
+        const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
+        const ctx = gatherContext({ cwd: tmpHome, bundles: [], agents: ['codex'], scanSkills });
+
+        const codex = ctx.providers.find((p: { id: string }) => p.id === 'codex');
+        const agentsNative = codex.checks.find((c: { id: string }) => c.id === 'agents.native');
+        expect(agentsNative).toMatchObject({
+            id: 'agents.native',
+            state: 'broken',
+            target: agentsDir,
+            detail: '1 malformed .toml',
+            remediationCode: 'reinstall-native-agents',
+        });
+    });
+});
