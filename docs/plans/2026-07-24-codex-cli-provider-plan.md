@@ -703,7 +703,7 @@ _Requirements: R8, R9, R17_
 - Create: `cli/tests/core/renderers/canonical-agent.test.ts`
 - Create: `cli/tests/core/renderers/codex-agent.test.ts`
 
-- [ ] **Step 1: Escribir tests rojos de validación y render determinista**
+- [x] **Step 1: Escribir tests rojos de validación y render determinista**
 
 Crear `cli/tests/core/renderers/codex-agent.test.ts`:
 
@@ -743,13 +743,13 @@ it.each([
 });
 ```
 
-- [ ] **Step 2: Ejecutar el test para comprobar RED**
+- [x] **Step 2: Ejecutar el test para comprobar RED**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/renderers/codex-agent.test.ts`
 
 Expected: FAIL porque el renderer no existe.
 
-- [ ] **Step 3: Implementar parser estricto y renderer**
+- [x] **Step 3: Implementar parser estricto y renderer**
 
 Crear `cli/src/core/renderers/canonical-agent.ts`:
 
@@ -804,7 +804,7 @@ export function renderCodexAgent(source: string): string {
 }
 ```
 
-- [ ] **Step 4: Añadir round-trip básico con el agente real fixture**
+- [x] **Step 4: Añadir round-trip básico con el agente real fixture**
 
 En `cli/tests/core/renderers/canonical-agent.test.ts`, copiar el contenido canónico mínimo del agente `development-process` en un fixture temporal y verificar:
 
@@ -819,13 +819,13 @@ it('ignores provider-only mode while retaining canonical instructions', () => {
 });
 ```
 
-- [ ] **Step 5: Ejecutar tests y build**
+- [x] **Step 5: Ejecutar tests y build**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/renderers/canonical-agent.test.ts tests/core/renderers/codex-agent.test.ts && npm run build`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cli/src/core/renderers cli/tests/core/renderers
@@ -844,7 +844,7 @@ _Requirements: R12, R13, R14, R15, R15.1, R16_
 - Create: `cli/tests/core/install-planner.test.ts`
 - Modify: `cli/tests/core/bundle-install.test.ts`
 
-- [ ] **Step 1: Escribir los tests rojos del planner**
+- [x] **Step 1: Escribir los tests rojos del planner**
 
 Crear `cli/tests/core/install-planner.test.ts`:
 
@@ -897,7 +897,7 @@ it('retains a target while a non-selected enabled owner remains', () => {
 });
 ```
 
-- [ ] **Step 2: Definir estado administrado atómico**
+- [x] **Step 2: Definir estado administrado atómico**
 
 Crear `cli/src/core/artifact-state.ts`:
 
@@ -940,7 +940,7 @@ export function writeArtifactState(records: ManagedArtifactRecord[], file = arti
 }
 ```
 
-- [ ] **Step 3: Implementar las estructuras y reglas puras del planner**
+- [x] **Step 3: Implementar las estructuras y reglas puras del planner**
 
 Crear `cli/src/core/install-planner.ts` con estas interfaces y funciones:
 
@@ -997,7 +997,7 @@ function assertCompleteSharedGroup(
 
 `planInstall` debe ejecutar `assertCompleteSharedGroup` para todos los intents antes de producir operaciones, agrupar por `targetPath + renderer + sourcePath`, unir owners sin duplicados y emitir un report por owner. `planRemoval` debe calcular owners restantes antes de producir un unlink; sólo crea una operación de borrado cuando no queda ningún owner habilitado.
 
-- [ ] **Step 4: Integrar expansión de bundles sin escribir**
+- [x] **Step 4: Integrar expansión de bundles sin escribir**
 
 Exportar `bundleArtifacts` desde `cli/src/core/bundle-install.ts` como `expandBundleArtifacts`, hacer que reciba el closure ya resuelto y retorne `ArtifactIntent[]`. Mantener `installBundle` temporalmente como façade:
 
@@ -1021,13 +1021,13 @@ export function installBundle(opts: InstallBundleOptions): InstallSummary {
 
 El `applyInstallPlan` de este façade se implementa en Task 6. Hasta entonces, usar un stub inyectable en tests del planner y conservar los tests legacy en rojo únicamente dentro de la rama de trabajo de ese task.
 
-- [ ] **Step 5: Ejecutar tests del planner y estado**
+- [x] **Step 5: Ejecutar tests del planner y estado**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/artifact-state.test.ts tests/core/install-planner.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cli/src/core/artifact-state.ts cli/src/core/install-planner.ts cli/src/core/bundle-install.ts cli/tests/core/artifact-state.test.ts cli/tests/core/install-planner.test.ts cli/tests/core/bundle-install.test.ts
@@ -1049,7 +1049,7 @@ _Requirements: R15, R17, R24.1, R25_
 - Modify: `cli/tests/core/executor.test.ts`
 - Modify: `cli/tests/core/bundle-install.test.ts`
 
-- [ ] **Step 1: Escribir tests rojos de orden, backup y rollback**
+- [x] **Step 1: Escribir tests rojos de orden, backup y rollback**
 
 Crear `cli/tests/core/install-transaction.test.ts`:
 
@@ -1087,7 +1087,7 @@ it('never removes the live target before staging succeeds', () => {
 });
 ```
 
-- [ ] **Step 2: Implementar staging seguro en el executor**
+- [x] **Step 2: Implementar staging seguro en el executor**
 
 Cambiar `cli/src/core/executor.ts` para no borrar el destino antes del staging:
 
@@ -1115,7 +1115,7 @@ export function replaceArtifact(staged: string, targetPath: string): void {
 
 Mantener `installArtifact` como wrapper `stageArtifact` + `replaceArtifact` para compatibilidad de callers no migrados, pero el planner debe usar la transacción.
 
-- [ ] **Step 3: Implementar la transacción**
+- [x] **Step 3: Implementar la transacción**
 
 Crear `cli/src/core/install-transaction.ts`:
 
@@ -1212,7 +1212,7 @@ export function beginBackupSession(targetPaths: string[]): BackupSession {
 `createBackupManifest` debe copiar todos los targets existentes antes de retornar. Esta sesión envuelve preferencias, provider configs y artefactos durante `init`; `applyInstallPlan` puede reutilizar una sesión existente para no crear backups parciales anidados.
 Crear `backupDir` con mode `0700` y `manifest.json` con mode `0600`; el manifest contiene paths/hashes, nunca contenido ni variables de entorno.
 
-- [ ] **Step 4: Implementar restore explícito y acotado**
+- [x] **Step 4: Implementar restore explícito y acotado**
 
 En `cli/src/core/install-transaction.ts`, exportar:
 
@@ -1247,17 +1247,17 @@ it('restores only manifest targets and rejects path traversal ids', () => {
 });
 ```
 
-- [ ] **Step 5: Conectar bundle install y conservar reportes por owner**
+- [x] **Step 5: Conectar bundle install y conservar reportes por owner**
 
 Reemplazar el stub de Task 5 en `cli/src/core/bundle-install.ts` por el `applyInstallPlan` real. En tests, comprobar que un bundle `dev` para OpenCode+Codex sólo llama una vez a `replaceArtifact` por skill pero el summary contiene ambos providers.
 
-- [ ] **Step 6: Ejecutar tests de executor, transacción, restore y bundles**
+- [x] **Step 6: Ejecutar tests de executor, transacción, restore y bundles**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/executor.test.ts tests/core/install-transaction.test.ts tests/commands/backup.test.ts tests/core/bundle-install.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add cli/src/core/executor.ts cli/src/core/install-transaction.ts cli/src/core/bundle-install.ts cli/src/commands/backup.ts cli/src/index.ts cli/tests/core/executor.test.ts cli/tests/core/install-transaction.test.ts cli/tests/commands/backup.test.ts cli/tests/core/bundle-install.test.ts
@@ -1281,7 +1281,7 @@ _Requirements: R3, R3.1, R17, R18, R19_
 - Modify: `cli/tests/commands/hooks/status.test.ts`
 - Modify: `cli/tests/commands/hooks/resync.test.ts`
 
-- [ ] **Step 1: Congelar el comportamiento Claude con characterization tests**
+- [x] **Step 1: Congelar el comportamiento Claude con characterization tests**
 
 En `cli/tests/commands/hooks/install.test.ts`, agregar asserts de orden y preservación:
 
@@ -1299,7 +1299,7 @@ it('keeps the Claude SessionStart matcher and unrelated settings unchanged', () 
 });
 ```
 
-- [ ] **Step 2: Extraer el adapter Claude sin cambiar su salida**
+- [x] **Step 2: Extraer el adapter Claude sin cambiar su salida**
 
 Mover el merge actual de `install.ts` a `cli/src/commands/hooks/claude.ts` y exportar:
 
@@ -1311,7 +1311,7 @@ export function uninstallClaudeHook(agent: 'claude-code'): UninstallResult;
 
 `install.ts`, `status.ts` y `uninstall.ts` deben despachar por `getHookConfig(agent).type`; los tests existentes deben pasar sin actualizar sus snapshots salvo rutas deliberadamente movidas a `~/.awm/hooks/claude-code`.
 
-- [ ] **Step 3: Escribir tests rojos del merge y trust de Codex**
+- [x] **Step 3: Escribir tests rojos del merge y trust de Codex**
 
 Crear `cli/tests/commands/hooks/codex.test.ts`:
 
@@ -1352,7 +1352,7 @@ it.each([
 });
 ```
 
-- [ ] **Step 4: Implementar el adapter Codex**
+- [x] **Step 4: Implementar el adapter Codex**
 
 Crear `cli/src/commands/hooks/codex.ts` con:
 
@@ -1403,17 +1403,17 @@ export function installCodexHook(options: InstallOptions): InstallResult {
 
 El status Codex debe comparar hash del script con el hash registrado en `~/.awm/hooks/codex/heartbeat.json` y retornar `pending-trust` si el hook/config existen pero no hay heartbeat, `stale` si el hash no coincide y `healthy` sólo si coincide.
 
-- [ ] **Step 5: Actualizar resync/uninstall por estrategia**
+- [x] **Step 5: Actualizar resync/uninstall por estrategia**
 
 `resyncInstalledHooks` debe recorrer `AGENT_TARGETS`, refrescar sólo hooks instalados y delegar según `config.type`. `uninstall` debe remover sólo la entrada AWM del JSON correspondiente, preservar hooks ajenos y no borrar un directorio con archivos no administrados.
 
-- [ ] **Step 6: Ejecutar toda la suite de hooks**
+- [x] **Step 6: Ejecutar toda la suite de hooks**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/commands/hooks/install.test.ts tests/commands/hooks/status.test.ts tests/commands/hooks/resync.test.ts tests/commands/hooks/codex.test.ts`
 
 Expected: PASS; la suite Claude original y la nueva suite Codex quedan verdes.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add cli/src/commands/hooks cli/tests/commands/hooks
@@ -1437,7 +1437,7 @@ _Requirements: R1, R2, R11, R12, R13, R14, R15, R15.1, R16, R19, R19.1, R20_
 - Modify: `cli/tests/core/init/steps.test.ts`
 - Modify: `cli/tests/core/init/orchestrator.test.ts`
 
-- [ ] **Step 1: Escribir el test de orden del gate y coexistencia**
+- [x] **Step 1: Escribir el test de orden del gate y coexistencia**
 
 En `cli/tests/commands/init.test.ts`:
 
@@ -1473,7 +1473,7 @@ it('enables Codex without changing the existing default or Claude files', async 
 });
 ```
 
-- [ ] **Step 2: Cambiar `runInit` para gatear y habilitar**
+- [x] **Step 2: Cambiar `runInit` para gatear y habilitar**
 
 Extender `RunInitOptions` con una dependencia inyectable:
 
@@ -1536,7 +1536,7 @@ try {
 
 El test de orden debe comprobar `version-gate < begin-backup < save-preferences < install-hook < install-bundle`. El baseline Claude es read-only y se compara aunque el agent solicitado sea Codex.
 
-- [ ] **Step 3: Escribir tests del comando `agent`**
+- [x] **Step 3: Escribir tests del comando `agent`**
 
 Crear `cli/tests/commands/agent.test.ts`:
 
@@ -1565,7 +1565,7 @@ it('disables management state without deleting provider files', () => {
 });
 ```
 
-- [ ] **Step 4: Implementar `awm agent list|disable`**
+- [x] **Step 4: Implementar `awm agent list|disable`**
 
 Crear `cli/src/commands/agent.ts` con funciones puras exportadas y registro Commander:
 
@@ -1595,7 +1595,7 @@ export function disableAgent(agent: AgentTarget, replacement?: AgentTarget): voi
 }
 ```
 
-- [ ] **Step 5: Escribir tests de targeting de los cinco comandos**
+- [x] **Step 5: Escribir tests de targeting de los cinco comandos**
 
 Crear `cli/tests/commands/multi-agent-targeting.test.ts` con una tabla:
 
@@ -1619,7 +1619,7 @@ it.each(['add', 'remove', 'sync', 'update', 'doctor'] as const)(
 
 Añadir casos específicos que comprueben que `add/remove` con sólo `codex` fallan para skills cuando OpenCode también está habilitado, y que `update` actualiza cada registry una vez antes de reconciliar cada target físico una vez.
 
-- [ ] **Step 6: Cablear resolver y planner en los comandos**
+- [x] **Step 6: Cablear resolver y planner en los comandos**
 
 En `cli/src/index.ts`:
 
@@ -1651,13 +1651,13 @@ const hookResult = resyncInstalledHooks(capabilityRoot('hooks') ?? '', targets);
 
 No envolver context, reconciliación o hooks en `catch {}` silenciosos: reportar el provider fallido y retornar exit code no-cero.
 
-- [ ] **Step 7: Ejecutar integración de init y comandos**
+- [x] **Step 7: Ejecutar integración de init y comandos**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/commands/init.test.ts tests/commands/agent.test.ts tests/commands/multi-agent-targeting.test.ts tests/core/init/steps.test.ts tests/core/init/orchestrator.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add cli/src/commands/agent.ts cli/src/commands/init.ts cli/src/core/init cli/src/index.ts cli/tests/commands cli/tests/core/init
@@ -1678,7 +1678,7 @@ _Requirements: R2, R7, R8, R18, R19, R19.1, R20, R23_
 - Modify: `cli/tests/commands/doctor.test.ts`
 - Create: `cli/tests/integration/codex-provider-isolated.test.ts`
 
-- [ ] **Step 1: Escribir tests rojos de la matriz estable**
+- [x] **Step 1: Escribir tests rojos de la matriz estable**
 
 En `cli/tests/commands/doctor.test.ts`:
 
@@ -1709,7 +1709,7 @@ it('reports shared skills for both owners without scanning twice', () => {
 });
 ```
 
-- [ ] **Step 2: Cambiar tipos a matriz por provider**
+- [x] **Step 2: Cambiar tipos a matriz por provider**
 
 En `cli/src/core/diagnostics/types.ts` definir:
 
@@ -1743,7 +1743,7 @@ export type HarnessContext = {
 };
 ```
 
-- [ ] **Step 3: Implementar gathering deduplicado y comandos externos seguros**
+- [x] **Step 3: Implementar gathering deduplicado y comandos externos seguros**
 
 En `cli/src/core/diagnostics/context.ts`:
 
@@ -1755,7 +1755,7 @@ En `cli/src/core/diagnostics/context.ts`:
 - comprobar `.toml` de agentes Codex y el bloque gestionado de `AGENTS.md`;
 - no modificar ningún archivo.
 
-- [ ] **Step 4: Actualizar checks y render**
+- [x] **Step 4: Actualizar checks y render**
 
 `runChecks` debe mantener `overall: 'healthy' | 'degraded'`, pero agrupar resultados bajo `providers`. `renderReport` debe producir:
 
@@ -1772,7 +1772,7 @@ Provider: Codex
 
 Registrar `--agent <agent>` en doctor y resolverlo con `resolveAgentTargets`. JSON debe incluir IDs, paths, states, owners y `remediationCode`, no strings coloreados.
 
-- [ ] **Step 5: Escribir el E2E automatizado de home aislado**
+- [x] **Step 5: Escribir el E2E automatizado de home aislado**
 
 Crear `cli/tests/integration/codex-provider-isolated.test.ts`:
 
@@ -1797,7 +1797,7 @@ it('initializes Codex beside Claude and OpenCode without touching live homes', a
 });
 ```
 
-- [ ] **Step 6: Ejecutar suite completa, build, diff check y sensores**
+- [x] **Step 6: Ejecutar suite completa, build, diff check y sensores**
 
 Run: `cd cli && npm test -- --runInBand`
 
@@ -1815,7 +1815,7 @@ Run: `awm sensors run`
 
 Expected: `overall: "passed"`. Si el sensor de seguridad vuelve a quedar `skipped` por trust anchors vacíos, registrar el bloqueo exacto y no representar el gate como aprobado.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add cli/src/core/diagnostics cli/src/commands/doctor.ts cli/tests/core/diagnostics cli/tests/commands/doctor.test.ts cli/tests/integration/codex-provider-isolated.test.ts
