@@ -1,16 +1,15 @@
 // src/core/bundle-install.ts
-import fs from 'fs';
-import path from 'path';
 import {
     BundleDefinition,
     defaultScopeForBundle,
     resolveBundleClosure,
 } from './bundles';
-import { installArtifact } from './executor';
-import { AgentTarget, ArtifactType, Scope, assertLinkRenderer } from '../providers';
-import { preflightLinkArtifactPairs } from './provider-artifacts';
+import { AgentTarget, Scope } from '../providers';
 import { addExtension, ensureSkillsGitignored, readProfile, shouldRecordExtension } from './profile';
 import { contentRoots } from './registries';
+import { getPreferences } from '../utils/config';
+import { ArtifactIntent, InstallPlan, planInstall } from './install-planner';
+import path from 'path';
 
 export type InstallMethod = 'symlink' | 'copy';
 
@@ -24,6 +23,14 @@ export interface InstallBundleOptions {
     scopeOverride?: Scope;
     /** Registry content root (defaults to the real cache). Overridable for tests. */
     contentDir?: string;
+    /**
+     * Injectable seam for the not-yet-implemented Task 6 `applyInstallPlan`
+     * (transactional filesystem apply + backups/rollback + artifact-state
+     * persistence). Tests that need `installBundle`/`addBundle`/`syncProfile`
+     * to actually materialize artifacts must supply this until Task 6 lands
+     * the real implementation. Omitting it throws.
+     */
+    applyPlan?: (plan: InstallPlan) => InstallSummary;
 }
 
 export interface InstallSummary {
@@ -31,15 +38,8 @@ export interface InstallSummary {
     skipped: string[];
 }
 
-interface ArtifactRef {
-    name: string;
-    type: ArtifactType;
-    installName: string;
-    sourcePath: string;
-}
-
-function bundleArtifacts(b: BundleDefinition, contentDir: string): ArtifactRef[] {
-    const refs: ArtifactRef[] = [];
+function bundleArtifacts(b: BundleDefinition, contentDir: string): ArtifactIntent[] {
+    const refs: ArtifactIntent[] = [];
     for (const s of b.skills) {
         refs.push({ name: s.name, type: 'skill', installName: s.name, sourcePath: path.join(contentDir, 'skills', s.name) });
     }
@@ -53,54 +53,53 @@ function bundleArtifacts(b: BundleDefinition, contentDir: string): ArtifactRef[]
 }
 
 /**
- * Materializes a bundle and its dependency closure into the target agents.
- * The named bundle uses `scopeOverride` if given; dependencies always use
- * their own default scope (baseline→global, project→local, ambient→global).
- * Local installs resolve under `projectRoot`; global installs use the
- * provider's absolute global path. Unsupported artifact types per agent and
- * missing sources are skipped (never thrown).
+ * Expands a bundle and its dependency closure into the flat list of artifact
+ * intents to install. Pure — resolves the closure and content roots but
+ * performs no filesystem writes and no agent/scope resolution; that's
+ * `planInstall`'s job.
  */
-export function installBundle(opts: InstallBundleOptions): InstallSummary {
+export function expandBundleArtifacts(opts: InstallBundleOptions): ArtifactIntent[] {
     const fallbackContentDir = opts.contentDir ?? contentRoots()[0] ?? '';
     const closure = resolveBundleClosure(opts.bundleName, opts.bundles);
-    const installed: string[] = [];
-    const skipped: string[] = [];
+    return closure.flatMap((b) => bundleArtifacts(b, b.contentRoot ?? fallbackContentDir));
+}
 
-    preflightLinkArtifactPairs(closure.flatMap((bundle) => {
-        const contentDir = bundle.contentRoot ?? fallbackContentDir;
-        return bundleArtifacts(bundle, contentDir).flatMap((artifact) =>
-            opts.agents.map((agent) => ({ agent, artifact })),
-        );
-    }));
+function applyInstallPlan(_plan: InstallPlan): InstallSummary {
+    throw new Error('applyInstallPlan is not implemented yet (Task 6)');
+}
 
-    for (const b of closure) {
-        const contentDir = b.contentRoot ?? fallbackContentDir;
-        const scope: Scope =
-            b.name === opts.bundleName
-                ? opts.scopeOverride ?? defaultScopeForBundle(b.scope)
-                : defaultScopeForBundle(b.scope);
-
-        for (const art of bundleArtifacts(b, contentDir)) {
-            if (!fs.existsSync(art.sourcePath)) {
-                skipped.push(`${art.name} (source missing: ${art.sourcePath})`);
-                continue;
-            }
-            for (const agent of opts.agents) {
-                const config = assertLinkRenderer(art.type, agent);
-                if (config === null) {
-                    skipped.push(`${art.name} (${agent}: ${art.type} unsupported)`);
-                    continue;
-                }
-                const rel = config[scope];
-                const baseDir = scope === 'local' ? path.join(opts.projectRoot, rel) : rel;
-                const dest = path.join(baseDir, art.installName);
-                installArtifact(art.sourcePath, dest, opts.method);
-                installed.push(`${art.name} → ${agent} (${scope}) [${b.name}]`);
-            }
-        }
-    }
-
-    return { installed, skipped };
+/**
+ * Materializes a bundle and its dependency closure into the target agents.
+ *
+ * TASK 5 INTERIM STATE: this is now a thin façade — `expandBundleArtifacts`
+ * turns the bundle closure into artifact intents, `planInstall` turns those
+ * into a deduped, ownership-tracked plan (see install-planner.ts for the
+ * shared-target and ownership rules), and the actual transactional
+ * filesystem apply is Task 6's `applyInstallPlan`. Until Task 6 lands, pass
+ * `opts.applyPlan` to inject a stub/fake; without it this throws.
+ *
+ * Note: unlike the pre-Task-5 implementation, scope is now resolved once for
+ * the whole call (the named bundle's own scope, or `scopeOverride`) rather
+ * than per-bundle-in-closure; dependency bundles with a *different* default
+ * scope than the named bundle no longer get their own scope. This matches
+ * the plan for Task 5's `planInstall` signature (single `scope` param) and is
+ * expected to be revisited if that distinction turns out to matter.
+ */
+export function installBundle(opts: InstallBundleOptions): InstallSummary {
+    const intents = expandBundleArtifacts(opts);
+    const enabledAgents = getPreferences().enabledAgents;
+    const plan = planInstall({
+        artifacts: intents,
+        selectedAgents: opts.agents,
+        enabledAgents,
+        scope: opts.scopeOverride ?? defaultScopeForBundle(
+            opts.bundles.find((bundle) => bundle.name === opts.bundleName)?.scope ?? 'baseline',
+        ),
+        projectRoot: opts.projectRoot,
+        method: opts.method,
+    });
+    const apply = opts.applyPlan ?? applyInstallPlan;
+    return apply(plan);
 }
 
 export interface AddBundleResult extends InstallSummary {
@@ -119,6 +118,13 @@ export function addBundle(opts: InstallBundleOptions): AddBundleResult {
 
     let recordedExtension: string | null = null;
     // Check the named bundle's own artifacts (not just closure deps) were installed.
+    // KNOWN GAP (Task 6): this greps `summary.installed` for a `[bundleName]`
+    // suffix, but ArtifactIntent/PlannedOperation (install-planner.ts) carry no
+    // bundle provenance — only artifact name/type/owners — so no applyPlan
+    // implementation can produce that suffix anymore. `ownInstalled` is
+    // therefore always empty and `recordedExtension` always null until Task 6
+    // either adds bundle provenance to the plan or redesigns this check to
+    // compare against the named bundle's own artifact list directly.
     const ownInstalled = summary.installed.filter((line) => line.endsWith(`[${opts.bundleName}]`));
     if (target && ownInstalled.length > 0) {
         const effective: Scope = opts.scopeOverride ?? defaultScopeForBundle(target.scope);
@@ -138,6 +144,8 @@ export interface SyncProfileOptions {
     agents: AgentTarget[];
     method: InstallMethod;
     contentDir?: string;
+    /** See InstallBundleOptions.applyPlan. */
+    applyPlan?: (plan: InstallPlan) => InstallSummary;
 }
 
 export interface SyncResult extends InstallSummary {
@@ -165,6 +173,7 @@ export function syncProfile(opts: SyncProfileOptions): SyncResult {
             method: opts.method,
             projectRoot: opts.projectRoot,
             contentDir: opts.contentDir,
+            applyPlan: opts.applyPlan,
         });
         installed.push(...summary.installed);
         skipped.push(...summary.skipped);
