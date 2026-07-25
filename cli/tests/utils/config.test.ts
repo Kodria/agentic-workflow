@@ -73,6 +73,7 @@ describe('Preferences Manager', () => {
             baseRemote: 'https://example.test/baseline.git',
             channel: 'dev',
             pins: { baseline: '1.4.0' },
+            futurePreference: { mode: 'preview' },
         }));
 
         const { getPreferences } = require('../../src/utils/config');
@@ -82,6 +83,8 @@ describe('Preferences Manager', () => {
         expect(prefs.baseRemote).toBe('https://example.test/baseline.git');
         expect(prefs.channel).toBe('dev');
         expect(prefs.pins).toEqual({ baseline: '1.4.0' });
+        expect((prefs as unknown as Record<string, unknown>).futurePreference)
+            .toEqual({ mode: 'preview' });
         expect(JSON.parse(fs.readFileSync(path.join(tmpHome, 'preferences.json'), 'utf8')))
             .toEqual(prefs);
     });
@@ -152,6 +155,52 @@ describe('Preferences Manager', () => {
         const { getPreferences } = require('../../src/utils/config');
 
         expect(() => getPreferences()).toThrow(message);
+    });
+
+    it.each([
+        ['an empty baseRemote', { baseRemote: '' }, 'preferences.json has an invalid baseRemote'],
+        ['a non-string baseRemote', { baseRemote: 42 }, 'preferences.json has an invalid baseRemote'],
+        ['an invalid channel', { channel: 'preview' }, 'preferences.json has an invalid channel'],
+        ['an array pins value', { pins: [] }, 'preferences.json has invalid pins'],
+        ['a null pins value', { pins: null }, 'preferences.json has invalid pins'],
+        ['an empty pin name', { pins: { '': '1.2.3' } }, 'preferences.json has invalid pins'],
+        ['an empty pin value', { pins: { baseline: '' } }, 'preferences.json has invalid pins'],
+        ['a non-string pin value', { pins: { baseline: 123 } }, 'preferences.json has invalid pins'],
+    ])('rejects %s without overwriting the file', (_name, invalidField, message) => {
+        const file = path.join(tmpHome, 'preferences.json');
+        const before = JSON.stringify({
+            defaultAgent: 'claude-code',
+            enabledAgents: ['claude-code'],
+            installMethod: 'symlink',
+            defaultScope: 'local',
+            ...invalidField,
+        });
+        fs.writeFileSync(file, before);
+        const { getPreferences } = require('../../src/utils/config');
+
+        expect(() => getPreferences()).toThrow(message);
+        expect(fs.readFileSync(file, 'utf8')).toBe(before);
+    });
+
+    it('rejects incomplete updates without dropping enabled agents', () => {
+        const config: typeof import('../../src/utils/config') = require('../../src/utils/config');
+        config.savePreferences({
+            defaultAgent: 'claude-code',
+            enabledAgents: ['claude-code', 'codex'],
+            installMethod: 'symlink',
+            defaultScope: 'local',
+        });
+
+        const incomplete = {
+            defaultAgent: 'opencode',
+            installMethod: 'copy',
+            defaultScope: 'global',
+        };
+        expect(() => {
+            // @ts-expect-error enabledAgents is required for every preference update
+            config.savePreferences(incomplete);
+        }).toThrow('preferences.json has an invalid enabledAgents');
+        expect(config.getPreferences().enabledAgents).toEqual(['claude-code', 'codex']);
     });
 
     it('validates preferences before saving them', () => {

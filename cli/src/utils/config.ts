@@ -40,7 +40,20 @@ export function preferencesExist(): boolean {
     return fs.existsSync(prefsFile());
 }
 
-function normalizePreferences(value: unknown): { prefs: AwmPreferences; changed: boolean } {
+function isNonEmptyString(value: unknown): value is string {
+    return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+}
+
+function normalizePreferences(
+    value: unknown,
+    allowEnabledAgentsMigration = true,
+): { prefs: AwmPreferences; changed: boolean } {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new Error('preferences.json must contain a JSON object');
     }
@@ -55,7 +68,23 @@ function normalizePreferences(value: unknown): { prefs: AwmPreferences; changed:
     if (raw.defaultScope !== 'global' && raw.defaultScope !== 'local') {
         throw new Error('preferences.json has an invalid defaultScope');
     }
+    if (raw.baseRemote !== undefined && !isNonEmptyString(raw.baseRemote)) {
+        throw new Error('preferences.json has an invalid baseRemote');
+    }
+    if (raw.channel !== undefined && raw.channel !== 'stable' && raw.channel !== 'dev') {
+        throw new Error('preferences.json has an invalid channel');
+    }
+    if (raw.pins !== undefined && (
+        !isPlainObject(raw.pins) ||
+        !Object.entries(raw.pins).every(([name, version]) =>
+            isNonEmptyString(name) && isNonEmptyString(version))
+    )) {
+        throw new Error('preferences.json has invalid pins');
+    }
 
+    if (raw.enabledAgents === undefined && !allowEnabledAgentsMigration) {
+        throw new Error('preferences.json has an invalid enabledAgents');
+    }
     const source = raw.enabledAgents === undefined ? [raw.defaultAgent] : raw.enabledAgents;
     if (!Array.isArray(source) || !source.every(isAgentTarget)) {
         throw new Error('preferences.json has an invalid enabledAgents');
@@ -114,14 +143,8 @@ export function loadPreferences(initialAgent: AgentTarget = 'claude-code'): {
     return { prefs: result.prefs, exists: true, migrationRequired: result.changed };
 }
 
-type LegacyAwmPreferences = Omit<AwmPreferences, 'enabledAgents'> & {
-    enabledAgents?: AgentTarget[];
-};
-
-export function savePreferences(prefs: AwmPreferences): void;
-export function savePreferences(prefs: LegacyAwmPreferences): void;
-export function savePreferences(prefs: AwmPreferences | LegacyAwmPreferences): void {
-    const normalized = normalizePreferences(prefs).prefs;
+export function savePreferences(prefs: AwmPreferences): void {
+    const normalized = normalizePreferences(prefs, false).prefs;
     const file = prefsFile();
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const temp = `${file}.${process.pid}.tmp`;

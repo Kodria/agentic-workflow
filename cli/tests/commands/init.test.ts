@@ -104,9 +104,35 @@ describe('runInit', () => {
 
     it('#7: re-init without -a does NOT clobber an existing explicit preference', async () => {
         const { savePreferences } = require('../../src/utils/config');
-        savePreferences({ defaultAgent: 'opencode', installMethod: 'symlink', defaultScope: 'local' });
+        savePreferences({
+            defaultAgent: 'opencode',
+            enabledAgents: ['opencode'],
+            installMethod: 'symlink',
+            defaultScope: 'local',
+        });
         const { runInit } = require('../../src/commands/init');
         await runInit({ cwd: tmpHome, yes: true, actions: { syncCache: async () => {} } });
         expect(readAgent()).toBe('opencode');
+    });
+
+    it('enabling a new default preserves every previously enabled agent', async () => {
+        const { savePreferences } = require('../../src/utils/config');
+        savePreferences({
+            defaultAgent: 'claude-code',
+            enabledAgents: ['claude-code', 'codex'],
+            installMethod: 'symlink',
+            defaultScope: 'local',
+        });
+        const { runInit } = require('../../src/commands/init');
+
+        await runInit({
+            cwd: tmpHome,
+            yes: true,
+            agent: 'opencode',
+            actions: { syncCache: async () => {} },
+        });
+
+        expect(readPreferences().enabledAgents)
+            .toEqual(['claude-code', 'codex', 'opencode']);
     });
 });

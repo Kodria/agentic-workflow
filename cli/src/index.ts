@@ -2,7 +2,7 @@
 
 import { intro, outro, spinner, select, multiselect, confirm, isCancel } from '@clack/prompts';
 import { Command } from 'commander';
-import { getPreferences, savePreferences } from './utils/config';
+import { enableAgent, getPreferences, savePreferences } from './utils/config';
 import { buildGroupedOptions } from './utils/grouping';
 import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, packagePickerItems, artifactPickerItems, resolveLevel2Selection, ALL_SENTINEL, ArtifactView, artifactValue } from './utils/registry-view';
 import { isInteractive } from './ui/tty';
@@ -251,7 +251,16 @@ program.command('add [name]')
                   }
               }
 
-              savePreferences({ defaultAgent: targetAgents[0], defaultScope: scopeVal, installMethod: methodVal });
+              const updatedPrefs = targetAgents.reduce(
+                  (current, agent) => enableAgent(current, agent),
+                  prefs,
+              );
+              savePreferences({
+                  ...updatedPrefs,
+                  defaultAgent: targetAgents[0],
+                  defaultScope: scopeVal,
+                  installMethod: methodVal,
+              });
               installSpinner.stop('Installation complete!');
 
               if (skipped.length > 0) {
@@ -426,7 +435,16 @@ program.command('add [name]')
               }
           }
 
-          savePreferences({ defaultAgent: targetAgents[0], defaultScope: scopeVal, installMethod: methodVal });
+          const updatedPrefs = targetAgents.reduce(
+              (current, agent) => enableAgent(current, agent),
+              prefs,
+          );
+          savePreferences({
+              ...updatedPrefs,
+              defaultAgent: targetAgents[0],
+              defaultScope: scopeVal,
+              installMethod: methodVal,
+          });
 
           installSpinner.stop('Installation complete!');
 
