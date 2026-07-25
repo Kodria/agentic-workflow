@@ -43,13 +43,18 @@ function binaryVersionCheck(agent: AgentTarget): ProviderCheck {
 function skillsGlobalCheck(dir: string, owners: AgentTarget[], integrity: SkillIntegrity): ProviderCheck {
     const shared = owners.length > 1;
     const broken = integrity.repairable.length + integrity.dead.length;
+    // Broken links are checked BEFORE shared: 'shared' is a non-degrading/OK state
+    // (see checks.ts's DEGRADING_PROVIDER_STATES), so if it were set unconditionally
+    // for a shared dir it would silently mask real broken/dead symlinks — a green
+    // checkmark next to "N broken links → repair-global-skills" would contradict its
+    // own trailing text, and `overall` would never degrade despite real breakage.
     let state: ProviderCheckState;
-    if (shared) {
+    if (broken > 0) {
+        state = 'broken';
+    } else if (shared) {
         state = 'shared';
     } else if (!fs.existsSync(dir)) {
         state = 'absent';
-    } else if (broken > 0) {
-        state = 'broken';
     } else {
         state = 'healthy';
     }
@@ -79,9 +84,21 @@ function tomlAgentsHealthy(dir: string, entries: string[]): { broken: number } {
     return { broken };
 }
 
-function agentsNativeCheck(agent: AgentTarget): ProviderCheck {
+/**
+ * Returns `null` when a check doesn't structurally apply to `agent` (e.g. Antigravity
+ * has no `agent`/`hooks`/`injection` config; OpenCode has no hooks; Claude Code's global
+ * context rides its SessionStart hook, already covered by hook.trust). `null` rows are
+ * dropped by `gatherProviderChecks` — omitted entirely, not rendered as a failure. This
+ * is deliberately distinct from `state: 'unsupported'`, which `binaryVersionCheck` still
+ * uses for a genuine failure (an installed CLI version below the required minimum) — that
+ * state correctly degrades `overall` (see checks.ts's DEGRADING_PROVIDER_STATES) and must
+ * never be reused to mean "not applicable", or a fully-healthy single-provider `awm doctor`
+ * run (e.g. claude-code-only, opencode-only, antigravity-only) would always render
+ * inapplicable rows as red ✖ and `overall` could never be 'healthy'.
+ */
+function agentsNativeCheck(agent: AgentTarget): ProviderCheck | null {
     const provider = providerFor(agent);
-    if (!provider.agent) return { id: 'agents.native', state: 'unsupported' };
+    if (!provider.agent) return null;
 
     const dir = provider.agent.global;
     let entries: string[];
@@ -105,9 +122,9 @@ function agentsNativeCheck(agent: AgentTarget): ProviderCheck {
     return { id: 'agents.native', state: 'healthy', target: dir };
 }
 
-function hookTrustCheck(agent: AgentTarget): ProviderCheck {
+function hookTrustCheck(agent: AgentTarget): ProviderCheck | null {
     const provider = providerFor(agent);
-    if (!provider.hooks) return { id: 'hook.trust', state: 'unsupported' };
+    if (!provider.hooks) return null;
 
     let status;
     try {
@@ -131,11 +148,12 @@ function hookTrustCheck(agent: AgentTarget): ProviderCheck {
 
 /** R7: reflects the provider's global context-delivery mechanism (config-instructions /
  *  managed-agents-md). claude-code's context rides the SessionStart hook — already
- *  covered by hook.trust, so 'unsupported' here avoids double-reporting the same fact. */
-function contextGlobalCheck(agent: AgentTarget): ProviderCheck {
+ *  covered by hook.trust, so this check is OMITTED (returns null) rather than reported,
+ *  to avoid double-reporting the same fact as a separate, redundant row. */
+function contextGlobalCheck(agent: AgentTarget): ProviderCheck | null {
     const injection = providerFor(agent).injection;
     if (!injection || injection.type === 'cc-settings-merge') {
-        return { id: 'context.global', state: 'unsupported' };
+        return null;
     }
     let state: ProviderCheckState = 'absent';
     try {
@@ -195,7 +213,7 @@ export function gatherProviderChecks(agents: AgentTarget[], scanSkills: ScanSkil
             agentsNativeCheck(agent),
             hookTrustCheck(agent),
             contextGlobalCheck(agent),
-        ];
+        ].filter((check): check is ProviderCheck => check !== null);
 
         return { id: agent, label: provider.label, checks };
     });
