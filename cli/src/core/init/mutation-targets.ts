@@ -12,9 +12,10 @@
 // under-enumeration: a real write to a path NOT in this list would land
 // outside the backup session and survive a rollback.
 import path from 'path';
-import { AgentTarget, providerFor } from '../../providers';
+import { AgentTarget, ArtifactType, providerFor } from '../../providers';
 import { defaultScopeForBundle, type BundleDefinition } from '../bundles';
 import { expandBundleArtifacts } from '../bundle-install';
+import { physicalTarget as resolvePhysicalTarget } from '../install-planner';
 import { artifactStateFile } from '../artifact-state';
 import { awmHome } from '../paths';
 import { findProjectRoot, readProfile } from '../profile';
@@ -26,20 +27,28 @@ export type PlanInitMutationTargetsParams = {
     bundles: BundleDefinition[];
 };
 
+// Thin wrapper over install-planner.ts's `physicalTarget` (the single source
+// of truth for the dir+filename computation, including the `.toml` rename for
+// codex-agent-toml) — adapts its throw-on-unsupported contract to this
+// module's null-on-unsupported one, and drops the `renderer` field this
+// module's callers never needed.
 function physicalTarget(
-    type: 'skill' | 'workflow' | 'agent',
+    type: ArtifactType,
     agent: AgentTarget,
     scope: 'global' | 'local',
     installName: string,
     projectRoot?: string,
 ): string | null {
-    const config = providerFor(agent)[type];
-    if (!config) return null;
-    const dir = scope === 'local' ? path.join(projectRoot ?? '', config.local) : config.global;
-    const filename = config.renderer === 'codex-agent-toml'
-        ? `${path.parse(installName).name}.toml`
-        : installName;
-    return path.join(dir, filename);
+    try {
+        return resolvePhysicalTarget(
+            { name: installName, installName, type, sourcePath: '' },
+            agent,
+            scope,
+            projectRoot ?? '',
+        ).targetPath;
+    } catch {
+        return null;
+    }
 }
 
 function addBundleTargets(

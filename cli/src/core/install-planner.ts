@@ -63,7 +63,14 @@ export type PlanRemovalParams = {
 };
 
 /** Resolves the single physical filesystem location an intent renders to for one agent. */
-function physicalTarget(intent: ArtifactIntent, agent: AgentTarget, scope: Scope, projectRoot: string): {
+/**
+ * Resolves the physical target path + renderer for one artifact intent on one
+ * agent (dir + filename, applying the `.toml` rename for `codex-agent-toml`).
+ * Shared with `core/init/mutation-targets.ts`, which needs the exact same
+ * dir/filename computation to enumerate paths before a real `awm init` run —
+ * duplicating this logic there would let the two silently diverge.
+ */
+export function physicalTarget(intent: ArtifactIntent, agent: AgentTarget, scope: Scope, projectRoot: string): {
     targetPath: string;
     renderer: RendererId;
 } {
