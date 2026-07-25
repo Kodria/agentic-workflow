@@ -82,3 +82,22 @@ Body text.
 """
 `); // verifies R8, R9
 });
+
+it('escapes U+007F (DEL) embedded in the multiline instructions body', () => {
+    const del = String.fromCharCode(0x7f);
+    const source = `---
+name: ok
+description: fine
+---
+
+Body${del}text.
+`;
+
+    expect(renderCodexAgent(source)).toBe(
+`name = "ok"
+description = "fine"
+developer_instructions = """
+Body\\u007ftext.
+"""
+`); // verifies R8, R9
+});
