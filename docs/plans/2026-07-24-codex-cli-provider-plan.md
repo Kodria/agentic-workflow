@@ -69,7 +69,13 @@ _Requirements: R10, R11, R12, R13, R20_
 - Modify: `cli/tests/utils/config.test.ts`
 - Create: `cli/tests/core/agent-targets.test.ts`
 
-- [ ] **Step 1: Escribir los tests rojos de migración y validación**
+**Plan drift autorizado durante ejecución:** la validación estricta reveló dos
+call-sites parciales en `cli/src/index.ts`, una transición inválida en
+`cli/src/commands/init.ts` y fixtures con el target obsoleto `claude`. Se
+actualizaron esos consumidores y sus tests para preservar `enabledAgents`; no se
+adelantó la factory de providers de Task 2.
+
+- [x] **Step 1: Escribir los tests rojos de migración y validación**
 
 Agregar a `cli/tests/utils/config.test.ts` casos con imports tardíos que usen `tmpHome` y `tmpWork` distintos:
 
@@ -115,13 +121,13 @@ it('deduplicates enabled agents and requires the default to remain enabled', () 
 });
 ```
 
-- [ ] **Step 2: Ejecutar los tests para comprobar RED**
+- [x] **Step 2: Ejecutar los tests para comprobar RED**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/utils/config.test.ts`
 
 Expected: FAIL porque `enabledAgents` no existe y las preferencias inválidas no producen el mensaje requerido.
 
-- [ ] **Step 3: Implementar parsing, migración y escritura atómica**
+- [x] **Step 3: Implementar parsing, migración y escritura atómica**
 
 En `cli/src/utils/config.ts`, conservar los campos opcionales existentes y sustituir el flujo de lectura/escritura por esta API:
 
@@ -224,7 +230,7 @@ export function enableAgent(prefs: AwmPreferences, agent: AgentTarget): AwmPrefe
 
 Importar `isAgentTarget` desde el provider creado en Task 2; mientras ese task no exista, declarar y exportar temporalmente el type guard junto a `AgentTarget` en `cli/src/providers/index.ts`.
 
-- [ ] **Step 4: Escribir los tests rojos del resolver**
+- [x] **Step 4: Escribir los tests rojos del resolver**
 
 Crear `cli/tests/core/agent-targets.test.ts`:
 
@@ -256,7 +262,7 @@ it('rejects an explicit disabled provider', () => {
 });
 ```
 
-- [ ] **Step 5: Implementar el resolver puro**
+- [x] **Step 5: Implementar el resolver puro**
 
 Crear `cli/src/core/agent-targets.ts`:
 
@@ -282,13 +288,13 @@ export function resolveAgentTargets(input: {
 }
 ```
 
-- [ ] **Step 6: Ejecutar los tests del task**
+- [x] **Step 6: Ejecutar los tests del task**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/utils/config.test.ts tests/core/agent-targets.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add cli/src/utils/config.ts cli/src/core/agent-targets.ts cli/src/providers/index.ts cli/tests/utils/config.test.ts cli/tests/core/agent-targets.test.ts
