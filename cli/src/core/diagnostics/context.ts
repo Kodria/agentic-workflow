@@ -12,7 +12,7 @@ import { findProjectRoot, readProfile } from '../profile';
 import { discoverAllBundles, resolveBundleSkills, BundleDefinition } from '../bundles';
 import { classifyGlobalSkills } from '../skill-integrity';
 import { awmHome } from '../paths';
-import { gatherProviderFacts, ScanSkills } from './provider-checks';
+import { gatherProviderChecks, ScanSkills } from './provider-checks';
 
 // Estado de un artefacto en <dir>/<skill>: link vivo / symlink colgante / ausente.
 function linkState(dir: string, skill: string): 'present' | 'broken' | 'absent' {
@@ -183,6 +183,6 @@ export function gatherContext(opts: GatherOptions = {}): HarnessContext {
     return {
         machine: gatherMachine(bundles, agent),
         project: root ? gatherProject(root, bundles, agent) : null,
-        providers: gatherProviderFacts(agents, scanSkills),
+        providers: gatherProviderChecks(agents, scanSkills),
     };
 }

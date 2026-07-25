@@ -163,8 +163,13 @@ function contextGlobalCheck(agent: AgentTarget): ProviderCheck {
  * between providers (OpenCode + Codex both use `~/.agents/skills`) are scanned exactly
  * once via `scanSkills` and every owner's `skills.global` check is marked `state: 'shared'`
  * — mirrors the dedup principle `install-planner.ts` (Task 5) already applies to writes.
+ *
+ * Named `gatherProviderChecks` (not `gatherProviderFacts`) to avoid colliding with the
+ * unrelated `gatherProviderFacts` in `core/init/provider-facts.ts` (Task 8, baseline-hash
+ * snapshot for rollback comparison — a different shape, a different purpose). No file
+ * currently imports both, but the names are close enough to trip up a future reader/editor.
  */
-export function gatherProviderFacts(agents: AgentTarget[], scanSkills: ScanSkills): ProviderFacts[] {
+export function gatherProviderChecks(agents: AgentTarget[], scanSkills: ScanSkills): ProviderFacts[] {
     const ownersByDir = new Map<string, AgentTarget[]>();
     for (const agent of agents) {
         const dir = providerFor(agent).skill.global;

@@ -83,4 +83,62 @@ describe('gatherProviderFacts / assertClaudeBaselinePreserved', () => {
         const codex = gatherProviderFacts('codex');
         expect(() => assertClaudeBaselinePreserved(claude, codex)).toThrow('mismatched agents');
     });
+
+    // -----------------------------------------------------------------------
+    // Nested-scriptsDir exclusion (Task 9 fix) — Codex's hook scriptsDir
+    // (~/.awm/hooks/codex) is physically nested inside Claude's own hook
+    // scriptsDir (~/.awm/hooks — providers/index.ts). A naive recursive hash
+    // of Claude's scriptsDir would pick up every Codex hook write as a
+    // "Claude baseline changed" false positive. These two tests pin that
+    // exclusion directly, rather than relying only on the E2E's indirect
+    // before/after tree-snapshot check.
+    // -----------------------------------------------------------------------
+
+    it('does NOT flag a write inside Codex\'s nested scriptsDir as a Claude baseline change', () => {
+        const { gatherProviderFacts, assertClaudeBaselinePreserved } = require('../../../src/core/init/provider-facts');
+
+        // Seed Claude's own scriptsDir first (mirrors a real prior Claude hook install).
+        const claudeScripts = path.join(tmpHome, '.awm', 'hooks');
+        fs.mkdirSync(claudeScripts, { recursive: true });
+        fs.writeFileSync(path.join(claudeScripts, 'session-start'), '#!/bin/sh\n');
+        fs.writeFileSync(path.join(claudeScripts, 'run-hook.cmd'), '#!/bin/sh\n');
+
+        const before = gatherProviderFacts('claude-code');
+
+        // Codex's own scriptsDir is nested one level inside Claude's — simulate a
+        // real Codex hook install writing there for the first time.
+        const codexScripts = path.join(tmpHome, '.awm', 'hooks', 'codex');
+        fs.mkdirSync(codexScripts, { recursive: true });
+        fs.writeFileSync(path.join(codexScripts, 'session-start'), '#!/bin/sh\necho codex\n');
+
+        const afterAdd = gatherProviderFacts('claude-code');
+        expect(afterAdd.hash).toBe(before.hash);
+        expect(() => assertClaudeBaselinePreserved(before, afterAdd)).not.toThrow();
+
+        // Modifying the Codex-owned nested file's content must also stay invisible.
+        fs.writeFileSync(path.join(codexScripts, 'session-start'), '#!/bin/sh\necho codex v2\n');
+        const afterModify = gatherProviderFacts('claude-code');
+        expect(afterModify.hash).toBe(before.hash);
+        expect(() => assertClaudeBaselinePreserved(before, afterModify)).not.toThrow();
+    });
+
+    it('still flags a genuinely Claude-owned change alongside an untouched Codex nested dir', () => {
+        const { gatherProviderFacts, assertClaudeBaselinePreserved } = require('../../../src/core/init/provider-facts');
+
+        const claudeScripts = path.join(tmpHome, '.awm', 'hooks');
+        const codexScripts = path.join(claudeScripts, 'codex');
+        fs.mkdirSync(codexScripts, { recursive: true });
+        fs.writeFileSync(path.join(claudeScripts, 'session-start'), '#!/bin/sh\n');
+        fs.writeFileSync(path.join(codexScripts, 'session-start'), '#!/bin/sh\necho codex\n');
+
+        const before = gatherProviderFacts('claude-code');
+
+        // A genuinely Claude-owned file (a sibling of the codex/ subdir, not inside it)
+        // changes — the exclusion must not swallow this.
+        fs.writeFileSync(path.join(claudeScripts, 'session-start'), '#!/bin/sh\necho mutated claude script\n');
+        const after = gatherProviderFacts('claude-code');
+
+        expect(after.hash).not.toBe(before.hash);
+        expect(() => assertClaudeBaselinePreserved(before, after)).toThrow(/must never happen \(R19\)/);
+    });
 });
