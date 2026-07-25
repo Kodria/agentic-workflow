@@ -101,3 +101,45 @@ Body\\u007ftext.
 """
 `); // verifies R8, R9
 });
+
+it('escapes other C0 control characters (e.g. NUL, U+000B) embedded in the multiline instructions body while leaving tab and newline raw', () => {
+    const nul = String.fromCharCode(0x00);
+    const vt = String.fromCharCode(0x0b);
+    const unitSep = String.fromCharCode(0x1f);
+    const source = `---
+name: ok
+description: fine
+---
+
+Body${nul}with${vt}control${unitSep}chars\tand\na newline.
+`;
+
+    expect(renderCodexAgent(source)).toBe(
+`name = "ok"
+description = "fine"
+developer_instructions = """
+Body\\u0000with\\u000bcontrol\\u001fchars\tand
+a newline.
+"""
+`); // verifies R8, R9
+});
+
+it('escapes other C0 control characters (e.g. NUL, U+000B) in single-line TOML string fields', () => {
+    const nul = String.fromCharCode(0x00);
+    const vt = String.fromCharCode(0x0b);
+    const source = `---
+name: ok
+description: has${nul}nul${vt}vt
+---
+
+Body text.
+`;
+
+    expect(renderCodexAgent(source)).toBe(
+`name = "ok"
+description = "has\\u0000nul\\u000bvt"
+developer_instructions = """
+Body text.
+"""
+`); // verifies R8, R9
+});
