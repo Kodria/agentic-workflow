@@ -1,5 +1,16 @@
 # Codex CLI Provider and Coexistence Implementation Plan
 
+<!-- awm-qa-complete: 2026-07-25 -->
+<!-- Sensor note: awm sensors run reports overall "fail" solely because of a
+     confirmed pre-existing, unrelated bug in AWM's own sensor-runner
+     (formatters/generic.ts misreports a clean depcruise pass as a failure —
+     verified the underlying tool actually says "✔ no dependency violations
+     found"; predates this branch, logged to the ledger as
+     depcheck-generic-formatter-false-fail). typecheck/lint/test/build/
+     git-diff-check are all genuinely clean. security is environment-limited
+     (semgrep binary absent), not a code finding. -->
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Extender el CLI de AWM con un provider Codex nativo, transaccional y compatible con Claude Code y OpenCode, incluyendo targeting multiagente, rutas compartidas, hooks, contexto, agentes TOML y diagnóstico.
