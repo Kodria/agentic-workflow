@@ -4,6 +4,7 @@ import path from 'path';
 import {
     ManagedArtifactRecord,
     artifactStateFile,
+    mergeArtifactRecords,
     readArtifactState,
     writeArtifactState,
 } from '../../src/core/artifact-state';
@@ -102,6 +103,69 @@ describe('artifact-state', () => {
             writeArtifactState([record('s', path.join(tmpHome, '.agents/skills/s'), ['codex'])], stateFile);
             expect(fs.existsSync(stateFile)).toBe(true);
             expect(fs.statSync(stateFile).mode & 0o777).toBe(0o600);
+        });
+    });
+
+    describe('mergeArtifactRecords', () => {
+        it('preserves existing records whose targetPath is not touched by incoming', () => {
+            const a = record('a-skill', path.join(tmpHome, '.agents/skills/a-skill'), ['codex']);
+            const b = record('b-skill', path.join(tmpHome, '.agents/skills/b-skill'), ['opencode']);
+
+            const merged = mergeArtifactRecords([a], [b]);
+
+            expect(merged).toEqual(expect.arrayContaining([a, b]));
+            expect(merged).toHaveLength(2);
+        });
+
+        it('replaces the existing record for a targetPath shared with an incoming record, without duplicating it', () => {
+            const targetPath = path.join(tmpHome, '.agents/skills/shared');
+            const before = record('shared', targetPath, ['codex']);
+            const after = record('shared', targetPath, ['codex', 'opencode']);
+
+            const merged = mergeArtifactRecords([before], [after]);
+
+            expect(merged).toHaveLength(1);
+            expect(merged[0]).toEqual(after);
+        });
+
+        it('simulates a multi-bundle awm init: sequential applyInstallPlan-style merges accumulate, not overwrite', () => {
+            // Mirrors the real bug: several separate applyInstallPlan calls,
+            // each only knowing about the artifacts IT touched, must not
+            // discard each other's records when persisted in sequence.
+            const bundle1 = record('dev-core', path.join(tmpHome, '.agents/skills/dev-core'), ['claude-code']);
+            const bundle2 = record('ambient', path.join(tmpHome, '.agents/skills/ambient'), ['codex']);
+
+            let state = mergeArtifactRecords(readArtifactState(stateFile), [bundle1]);
+            writeArtifactState(state, stateFile);
+
+            state = mergeArtifactRecords(readArtifactState(stateFile), [bundle2]);
+            writeArtifactState(state, stateFile);
+
+            expect(readArtifactState(stateFile)).toEqual(
+                expect.arrayContaining([bundle1, bundle2]),
+            );
+            expect(readArtifactState(stateFile)).toHaveLength(2);
+        });
+
+        it('updating the same targetPath twice (e.g. re-running init) replaces without duplicating or losing unrelated records', () => {
+            const unrelated = record('unrelated', path.join(tmpHome, '.agents/skills/unrelated'), ['codex']);
+            const targetPath = path.join(tmpHome, '.agents/skills/dev-core');
+            const v1 = record('dev-core', targetPath, ['claude-code']);
+            const v2 = record('dev-core', targetPath, ['claude-code', 'opencode']);
+
+            let state = mergeArtifactRecords(readArtifactState(stateFile), [unrelated]);
+            writeArtifactState(state, stateFile);
+
+            state = mergeArtifactRecords(readArtifactState(stateFile), [v1]);
+            writeArtifactState(state, stateFile);
+
+            state = mergeArtifactRecords(readArtifactState(stateFile), [v2]);
+            writeArtifactState(state, stateFile);
+
+            const final = readArtifactState(stateFile);
+            expect(final).toHaveLength(2);
+            expect(final).toEqual(expect.arrayContaining([unrelated, v2]));
+            expect(final).not.toEqual(expect.arrayContaining([v1]));
         });
     });
 });

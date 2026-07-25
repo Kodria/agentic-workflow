@@ -9,6 +9,7 @@ import {
     restoreBackup,
 } from '../../src/core/install-transaction';
 import { InstallPlan, PlannedOperation } from '../../src/core/install-planner';
+import { readArtifactState } from '../../src/core/artifact-state';
 
 // Per CLAUDE.md: no test may touch the real ~/.awm. Every test here backs up
 // or transacts through awmHome(), so HOME/AWM_HOME must point at an isolated
@@ -169,6 +170,54 @@ describe('applyInstallPlan', () => {
         // including 'a', which runs strictly after 'b' throws, proving the
         // loop doesn't stop or skip ahead when a non-terminal rollback fails.
         expect(calls).toEqual(['replace:a', 'replace:b', 'replace:c', 'rollback:c', 'rollback:b', 'rollback:a']);
+    });
+
+    describe('artifact-state persistence across multiple calls (BLOCKER regression)', () => {
+        // A real `awm init` run makes several separate applyInstallPlan calls
+        // in sequence — one per bundle (dev-core, each ambient bundle, each
+        // synced project extension). Each call's plan.records only covers the
+        // artifacts THAT call touched. Persisting must be additive: an
+        // earlier call's ownership records must survive a later call, not be
+        // silently discarded by a wholesale overwrite of state/artifacts.json.
+        function sourceFor(name: string): string {
+            const src = path.join(tmpWork, `${name}-source`);
+            fs.mkdirSync(src, { recursive: true });
+            fs.writeFileSync(path.join(src, 'file.txt'), name);
+            return src;
+        }
+
+        function planFor(name: string, targetPath: string): InstallPlan {
+            const op = makeOp(name, { targetPath, sourcePath: sourceFor(name) });
+            return { operations: [op], records: [op], reports: [{ owner: 'claude-code', targetPath, action: 'install' }] };
+        }
+
+        it('preserves an earlier applyInstallPlan call’s records after a later call for a DIFFERENT target', () => {
+            const targetA = path.join(tmpWork, 'target-a');
+            const targetB = path.join(tmpWork, 'target-b');
+
+            applyInstallPlan(planFor('a', targetA));
+            applyInstallPlan(planFor('b', targetB));
+
+            const state = readArtifactState();
+            expect(state.map((r) => r.targetPath).sort()).toEqual([targetA, targetB].sort());
+        });
+
+        it('replaces (does not duplicate) the record for a targetPath touched by two separate applyInstallPlan calls', () => {
+            const targetA = path.join(tmpWork, 'target-a');
+
+            applyInstallPlan(planFor('a', targetA));
+            const secondOp = makeOp('a', { targetPath: targetA, sourcePath: sourceFor('a2'), owners: ['claude-code', 'codex'] });
+            applyInstallPlan({
+                operations: [secondOp],
+                records: [secondOp],
+                reports: [{ owner: 'codex', targetPath: targetA, action: 'retain' }],
+            });
+
+            const state = readArtifactState();
+            expect(state).toHaveLength(1);
+            expect(state[0].targetPath).toBe(targetA);
+            expect(state[0].owners).toEqual(['claude-code', 'codex']);
+        });
     });
 });
 

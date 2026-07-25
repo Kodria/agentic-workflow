@@ -18,7 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { InstallPlan, PlannedOperation } from './install-planner';
-import { writeArtifactState } from './artifact-state';
+import { mergeArtifactRecords, readArtifactState, writeArtifactState } from './artifact-state';
 import { awmHome } from './paths';
 import { writeFileAtomic } from './atomic-file';
 import { renderCodexAgent } from './renderers/codex-agent';
@@ -183,7 +183,9 @@ function restoreManifestEntry(backupDir: string, entry: BackupManifestEntry): vo
  *   3. stage every op's replacement                (source untouched, target untouched — R17)
  *   4. replace every op's target with its staged replacement
  *   5. verify every op
- *   6. persist artifact-state records
+ *   6. persist artifact-state records — merged into the existing ledger
+ *      (upsert by targetPath, see mergeArtifactRecords), not a wholesale
+ *      overwrite, so earlier applyInstallPlan calls' records survive
  * Any failure from step 4 onward rolls back every already-replaced target, in
  * reverse order, using the backups captured in step 2 (R25). Rollback is
  * best-effort: a rollback failure for one target does not stop the others
@@ -226,7 +228,13 @@ export function applyInstallPlan(
             replaced.push(op);
         }
         for (const op of plan.operations) deps.verify(op);
-        writeArtifactState(plan.records);
+        // Upsert this plan's records into the EXISTING persisted ledger,
+        // keyed by targetPath — a real `awm init` run makes several separate
+        // applyInstallPlan calls (one per bundle), and each one only knows
+        // about the artifacts IT touched. Writing plan.records wholesale
+        // would silently discard every earlier call's ownership records
+        // (BLOCKER found in post-implementation QA); merging preserves them.
+        writeArtifactState(mergeArtifactRecords(readArtifactState(), plan.records));
     } catch (error) {
         for (const op of [...replaced].reverse()) {
             try {
