@@ -135,6 +135,24 @@ describe('installBundle', () => {
         expect(fs.existsSync(path.join(projectRoot, '.agents/skills/s-base'))).toBe(true);
         expect(result.installed).toContain('s-base → codex (local) [base]');
     });
+
+    it('preflights mixed Codex bundles before physical or profile writes', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+
+        expect(() => addBundle({
+            bundleName: 'ext',
+            bundles,
+            agents: ['codex'],
+            method: 'symlink',
+            projectRoot,
+            contentDir: content,
+        })).toThrow("Renderer 'codex-agent-toml' for codex agent artifacts is not implemented yet");
+        expect(fs.existsSync(path.join(projectRoot, '.agents/skills/s-base'))).toBe(false);
+        expect(fs.existsSync(path.join(projectRoot, '.agents/skills/s-ext'))).toBe(false);
+        expect(fs.existsSync(path.join(projectRoot, '.codex/agents/ag-ext.md'))).toBe(false);
+        expect(fs.existsSync(path.join(projectRoot, '.awm/profile.json'))).toBe(false);
+        expect(fs.existsSync(path.join(projectRoot, '.gitignore'))).toBe(false);
+    });
 });
 
 describe('addBundle', () => {

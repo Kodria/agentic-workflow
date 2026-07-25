@@ -25,7 +25,7 @@ describe('computeHookStatus', () => {
     });
 
     function setupInstalledHook(scriptContent = '#!/usr/bin/env bash\necho "{}"') {
-        const hooksDir = path.join(tmpHome, '.awm/hooks/claude-code');
+        const hooksDir = path.join(tmpHome, '.awm/hooks');
         fs.mkdirSync(hooksDir, { recursive: true });
         fs.writeFileSync(path.join(hooksDir, 'session-start'), scriptContent, { mode: 0o755 });
         fs.writeFileSync(path.join(hooksDir, 'run-hook.cmd'), '#!/usr/bin/env bash\nexec bash "$1"', { mode: 0o755 });
@@ -56,7 +56,7 @@ describe('computeHookStatus', () => {
 
     it('reports DEGRADED when bootstrap skill is missing', () => {
         setupInstalledHook();
-        fs.unlinkSync(path.join(tmpHome, '.awm/hooks/claude-code/using-awm.md'));
+        fs.unlinkSync(path.join(tmpHome, '.awm/hooks/using-awm.md'));
         const { computeHookStatus } = require('../../../src/commands/hooks/status');
         const result = computeHookStatus('claude-code');
         expect(result.overall).toBe('DEGRADED');
@@ -75,7 +75,7 @@ describe('computeHookStatus', () => {
 
     it('reports DEGRADED when script is missing executable bit', () => {
         setupInstalledHook();
-        fs.chmodSync(path.join(tmpHome, '.awm/hooks/claude-code/session-start'), 0o644);
+        fs.chmodSync(path.join(tmpHome, '.awm/hooks/session-start'), 0o644);
         const { computeHookStatus } = require('../../../src/commands/hooks/status');
         const result = computeHookStatus('claude-code');
         expect(result.overall).toBe('DEGRADED');

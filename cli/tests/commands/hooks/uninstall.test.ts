@@ -35,7 +35,7 @@ describe('uninstallHook', () => {
     }
 
     it('removes only the AWM entry, preserves other SessionStart entries', () => {
-        const scriptsDir = path.join(tmpHome, '.awm/hooks/claude-code');
+        const scriptsDir = path.join(tmpHome, '.awm/hooks');
         writeSettings({
             theme: 'dark',
             hooks: {
@@ -57,7 +57,7 @@ describe('uninstallHook', () => {
     });
 
     it('removes the SessionStart key entirely if AWM was the only entry', () => {
-        const scriptsDir = path.join(tmpHome, '.awm/hooks/claude-code');
+        const scriptsDir = path.join(tmpHome, '.awm/hooks');
         writeSettings({
             hooks: {
                 SessionStart: [
@@ -95,7 +95,7 @@ describe('uninstallHook', () => {
     });
 
     it('creates a backup before modifying', () => {
-        const scriptsDir = path.join(tmpHome, '.awm/hooks/claude-code');
+        const scriptsDir = path.join(tmpHome, '.awm/hooks');
         writeSettings({
             hooks: {
                 SessionStart: [

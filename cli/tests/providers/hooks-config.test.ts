@@ -33,10 +33,10 @@ describe('Hook configuration in providers', () => {
         expect(cc.hooks?.matcher).toBe('startup|clear|compact');
     });
 
-    it('claude-code paths use current HOME and normalized AWM_HOME directory', () => {
+    it('preserves the legacy Claude Code AWM_HOME hooks directory', () => {
         const cc = providerFor('claude-code');
         expect(cc.hooks?.settingsPath).toBe(path.join(tmpHome, '.claude/settings.json'));
-        expect(cc.hooks?.scriptsDir).toBe(path.join(process.env.AWM_HOME!, 'hooks/claude-code'));
+        expect(cc.hooks?.scriptsDir).toBe(path.join(process.env.AWM_HOME!, 'hooks'));
     });
 
     it('antigravity and opencode have no hooks', () => {
@@ -58,6 +58,6 @@ describe('Hook configuration in providers', () => {
         const nextAwmHome = path.join(tmpWork, 'next-awm');
         process.env.AWM_HOME = nextAwmHome;
         expect(getHookConfig('claude-code')?.scriptsDir)
-            .toBe(path.join(nextAwmHome, 'hooks/claude-code'));
+            .toBe(path.join(nextAwmHome, 'hooks'));
     });
 });

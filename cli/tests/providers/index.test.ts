@@ -138,7 +138,7 @@ describe('Providers Routing', () => {
             hooks: {
                 type: 'cc-settings-merge',
                 settingsPath: path.join(tmpHome, '.claude/settings.json'),
-                scriptsDir: path.join(process.env.AWM_HOME!, 'hooks/claude-code'),
+                scriptsDir: path.join(process.env.AWM_HOME!, 'hooks'),
                 matcher: 'startup|clear|compact',
                 eventName: 'SessionStart',
             },

@@ -51,6 +51,8 @@ export type ProviderConfig = {
     };
 };
 
+export class UnsupportedRendererError extends Error {}
+
 export function providers(): Record<AgentTarget, ProviderConfig> {
     const home = homeDir();
     const awm = awmHome();
@@ -105,7 +107,7 @@ export function providers(): Record<AgentTarget, ProviderConfig> {
             hooks: {
                 type: 'cc-settings-merge',
                 settingsPath: path.join(home, '.claude/settings.json'),
-                scriptsDir: path.join(awm, 'hooks/claude-code'),
+                scriptsDir: path.join(awm, 'hooks'),
                 matcher: 'startup|clear|compact',
                 eventName: 'SessionStart',
             },
@@ -188,7 +190,7 @@ export function assertLinkRenderer(
     }
     const config = providerFor(agent)[type];
     if (config && config.renderer !== 'link') {
-        throw new Error(
+        throw new UnsupportedRendererError(
             `Renderer '${config.renderer}' for ${agent} ${type} artifacts is not implemented yet`,
         );
     }

@@ -10,13 +10,16 @@ import { multiselectPicker } from './ui/picker';
 import {
   AGENT_TARGETS,
   assertLinkRenderer,
-  getTargetPath,
   providerFor,
   AgentTarget,
   Scope,
   ArtifactType,
 } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
+import {
+  preflightLinkArtifactPairs,
+  scanLegacyArtifacts,
+} from './core/provider-artifacts';
 import { regenerateGlobalContext } from './core/context/regenerate';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
 import { discoverAllBundles, defaultScopeForBundle } from './core/bundles';
@@ -239,6 +242,10 @@ program.command('add [name]')
               return;
           }
 
+          preflightLinkArtifactPairs(targetAgents.flatMap((agent) =>
+              artifactsToInstall.map((artifact) => ({ agent, artifact })),
+          ));
+
           const installSpinner = spinner();
           installSpinner.start('Installing artifacts...');
 
@@ -389,6 +396,10 @@ program.command('add [name]')
           outro(pc.yellow('No artifacts selected.'));
           return;
       }
+
+      preflightLinkArtifactPairs(targetAgents.flatMap((agent) =>
+          artifactsToInstall.map((artifact) => ({ agent, artifact })),
+      ));
 
       // 6. Installation Method
       let methodVal: 'symlink' | 'copy';
@@ -716,40 +727,7 @@ program.command('remove')
       handleCancel(scopeChoice);
       const scopeVal = scopeChoice as Scope;
 
-      // Scan installed artifacts across all selected agents, aggregating by name
-      const artifactMap = new Map<string, {
-          name: string;
-          type: ArtifactType;
-          installedIn: AgentTarget[];
-          fullPaths: string[];
-      }>();
-
-      const scanDir = (dir: string, type: ArtifactType, agent: AgentTarget) => {
-          if (!fs.existsSync(dir)) return;
-          const entries = fs.readdirSync(dir, { withFileTypes: true });
-          for (const entry of entries) {
-              const existing = artifactMap.get(entry.name);
-              if (existing) {
-                  existing.installedIn.push(agent);
-                  existing.fullPaths.push(path.join(dir, entry.name));
-              } else {
-                  artifactMap.set(entry.name, {
-                      name: entry.name,
-                      type,
-                      installedIn: [agent],
-                      fullPaths: [path.join(dir, entry.name)]
-                  });
-              }
-          }
-      };
-
-      for (const targetAgent of targetAgents) {
-          try { scanDir(getTargetPath('skill', targetAgent, scopeVal), 'skill', targetAgent); } catch { /* ok */ }
-          try { scanDir(getTargetPath('workflow', targetAgent, scopeVal), 'workflow', targetAgent); } catch { /* ok */ }
-          try { scanDir(getTargetPath('agent', targetAgent, scopeVal), 'agent', targetAgent); } catch { /* ok */ }
-      }
-
-      const installed = Array.from(artifactMap.values());
+      const installed = scanLegacyArtifacts(targetAgents, scopeVal);
 
       if (installed.length === 0) {
           outro(pc.yellow('No installed artifacts found for the selected agents/scope.'));

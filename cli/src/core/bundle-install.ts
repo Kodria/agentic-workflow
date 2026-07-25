@@ -8,6 +8,7 @@ import {
 } from './bundles';
 import { installArtifact } from './executor';
 import { AgentTarget, ArtifactType, Scope, assertLinkRenderer } from '../providers';
+import { preflightLinkArtifactPairs } from './provider-artifacts';
 import { addExtension, ensureSkillsGitignored, readProfile, shouldRecordExtension } from './profile';
 import { contentRoots } from './registries';
 
@@ -64,6 +65,13 @@ export function installBundle(opts: InstallBundleOptions): InstallSummary {
     const closure = resolveBundleClosure(opts.bundleName, opts.bundles);
     const installed: string[] = [];
     const skipped: string[] = [];
+
+    preflightLinkArtifactPairs(closure.flatMap((bundle) => {
+        const contentDir = bundle.contentRoot ?? fallbackContentDir;
+        return bundleArtifacts(bundle, contentDir).flatMap((artifact) =>
+            opts.agents.map((agent) => ({ agent, artifact })),
+        );
+    }));
 
     for (const b of closure) {
         const contentDir = b.contentRoot ?? fallbackContentDir;

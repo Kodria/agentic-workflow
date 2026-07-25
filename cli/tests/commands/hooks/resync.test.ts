@@ -52,7 +52,7 @@ describe('resyncInstalledHooks', () => {
 
     it('refreshes stale COPIED hook scripts when the settings entry is present', () => {
         writeRegistry('#!/usr/bin/env bash\necho "NEW VERSION"');
-        const scriptsDir = path.join(tmpHome, '.awm/hooks/claude-code');
+        const scriptsDir = path.join(tmpHome, '.awm/hooks');
         fs.mkdirSync(scriptsDir, { recursive: true });
         fs.writeFileSync(path.join(scriptsDir, 'session-start'), '#!/usr/bin/env bash\necho "OLD VERSION"', { mode: 0o755 });
         fs.writeFileSync(path.join(scriptsDir, 'run-hook.cmd'), '#!/usr/bin/env bash\nexec bash "$1"', { mode: 0o755 });
@@ -76,12 +76,12 @@ describe('resyncInstalledHooks', () => {
         const results = resyncInstalledHooks(tmpRegistry);
 
         expect(results).toEqual([{ agent: 'claude-code', action: 'not-installed' }]);
-        expect(fs.existsSync(path.join(tmpHome, '.awm/hooks/claude-code/session-start'))).toBe(false);
+        expect(fs.existsSync(path.join(tmpHome, '.awm/hooks/session-start'))).toBe(false);
     });
 
     it('preserves symlink install method', () => {
         writeRegistry('#!/usr/bin/env bash\necho "V2"');
-        const scriptsDir = path.join(tmpHome, '.awm/hooks/claude-code');
+        const scriptsDir = path.join(tmpHome, '.awm/hooks');
         fs.mkdirSync(scriptsDir, { recursive: true });
         fs.symlinkSync(path.join(tmpRegistry, 'hooks/session-start'), path.join(scriptsDir, 'session-start'));
         fs.symlinkSync(path.join(tmpRegistry, 'hooks/run-hook.cmd'), path.join(scriptsDir, 'run-hook.cmd'));
@@ -96,7 +96,7 @@ describe('resyncInstalledHooks', () => {
     });
 
     it('skips with registry-missing when the registry has no hooks dir', () => {
-        const scriptsDir = path.join(tmpHome, '.awm/hooks/claude-code');
+        const scriptsDir = path.join(tmpHome, '.awm/hooks');
         fs.mkdirSync(scriptsDir, { recursive: true });
         fs.writeFileSync(path.join(scriptsDir, 'session-start'), '#!/usr/bin/env bash\necho "OLD"', { mode: 0o755 });
         writeSettingsWithAwmEntry(scriptsDir);
@@ -110,7 +110,7 @@ describe('resyncInstalledHooks', () => {
 
     it('re-creates session-start as copy when scriptsDir exists but session-start is missing', () => {
         writeRegistry('#!/usr/bin/env bash\necho "FRESH"');
-        const scriptsDir = path.join(tmpHome, '.awm/hooks/claude-code');
+        const scriptsDir = path.join(tmpHome, '.awm/hooks');
         fs.mkdirSync(scriptsDir, { recursive: true });
         // session-start intentionally absent — only run-hook.cmd exists
         fs.writeFileSync(path.join(scriptsDir, 'run-hook.cmd'), '#!/usr/bin/env bash\nexec bash "$1"', { mode: 0o755 });
@@ -135,7 +135,7 @@ describe('resyncInstalledHooks', () => {
         // run-hook.cmd intentionally NOT written
         fs.writeFileSync(path.join(regSkill, 'SKILL.md'), '---\nname: using-awm\n---');
 
-        const scriptsDir = path.join(tmpHome, '.awm/hooks/claude-code');
+        const scriptsDir = path.join(tmpHome, '.awm/hooks');
         fs.mkdirSync(scriptsDir, { recursive: true });
         fs.writeFileSync(path.join(scriptsDir, 'session-start'), '#!/usr/bin/env bash\necho "OLD"', { mode: 0o755 });
         writeSettingsWithAwmEntry(scriptsDir);
