@@ -1,3 +1,42 @@
+## v3.2.0 - 2026-07-25
+
+### Features
+- diagnose Codex coexistence
+- converge all enabled agents
+- install and diagnose Codex hooks
+- apply artifact plans transactionally
+- plan shared multi-agent artifacts
+- render canonical agents for Codex
+- inject managed Codex guidance
+- add call-time Codex provider
+- track enabled agent targets
+
+### Fixes
+- stepActivation trips the same shared-group refusal as stepDevCore
+- don't refuse init when a co-owner agent shares the skill target
+- escape full C0 control-character range in TOML multiline strings
+- enumerate the global skills directory in planInitMutationTargets
+- wrap sync.ts's syncProfile call in try/catch
+- merge artifact-state records instead of wholesale overwrite
+- break circular type import in hooks dispatcher/adapter split
+- share physicalTarget between install-planner and mutation-targets
+- distinguish not-applicable from unsupported; don't mask broken shared skills
+- add hash-exclusion unit test, deconflict gatherProviderFacts naming
+- recursive baseline hashing, reconciliation test coverage, and CLI polish
+- Codex hook idempotence, trust gating, and label display
+- harden rollback test, manifest hashes, and timestamp sanitization
+- report all owners of a shared-target install
+- prevent target-path collisions and document init gap
+- use escaped NUL separator in planner group key
+- escape control characters in multiline TOML strings
+- correct TOML escaping and validation in Codex agent renderer
+- validate managed boundary metadata
+- harden managed Codex guidance writes
+- report provider preflight failures
+- preflight legacy provider operations
+- gate unsupported Codex provider mechanics
+- validate complete preferences
+
 ## v3.1.0 - 2026-07-23
 
 ### Features
