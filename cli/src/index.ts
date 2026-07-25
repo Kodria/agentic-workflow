@@ -17,9 +17,9 @@ import {
 } from './providers';
 import { installArtifact, removeArtifact } from './core/executor';
 import {
-  preflightLinkArtifactPairs,
   scanLegacyArtifacts,
 } from './core/provider-artifacts';
+import { preflightLinkArtifactsForCli } from './ui/provider-preflight';
 import { regenerateGlobalContext } from './core/context/regenerate';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
 import { discoverAllBundles, defaultScopeForBundle } from './core/bundles';
@@ -242,9 +242,10 @@ program.command('add [name]')
               return;
           }
 
-          preflightLinkArtifactPairs(targetAgents.flatMap((agent) =>
+          const preflightOk = preflightLinkArtifactsForCli(targetAgents.flatMap((agent) =>
               artifactsToInstall.map((artifact) => ({ agent, artifact })),
           ));
+          if (!preflightOk) return;
 
           const installSpinner = spinner();
           installSpinner.start('Installing artifacts...');
@@ -397,9 +398,10 @@ program.command('add [name]')
           return;
       }
 
-      preflightLinkArtifactPairs(targetAgents.flatMap((agent) =>
+      const preflightOk = preflightLinkArtifactsForCli(targetAgents.flatMap((agent) =>
           artifactsToInstall.map((artifact) => ({ agent, artifact })),
       ));
+      if (!preflightOk) return;
 
       // 6. Installation Method
       let methodVal: 'symlink' | 'copy';
