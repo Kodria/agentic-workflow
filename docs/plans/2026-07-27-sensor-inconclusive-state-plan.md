@@ -1,5 +1,7 @@
 # `inconclusive` — Implementation Plan
 
+<!-- awm-qa-complete: 2026-07-27 -->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Separar el estado "no aplica" del estado "no pude certificar" en los sensores, para que un sensor que no corrió deje de leerse como verde en el `overall`.
