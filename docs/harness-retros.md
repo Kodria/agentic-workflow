@@ -262,3 +262,35 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
 - **Sensor:** agents-md (entregado a cada agente vía contexto)
 - **Detalle:** cuando el orden de un bloque de gates está dictado por CONSTITUTION, un comentario inline `// CONSTITUTION: gates de contrato antes de early-exits` hace visible el invariante, previene reordenamientos accidentales y permite a reviewers verificar sin buscar la regla. Derivado del win W2 de WS-4: el handler `awm sync` ya incluye este comentario y fue el único gate-order correcto en toda la sesión. WS-3 tuvo B1 por exactamente este antipatrón (early-exit antes del gate de pins).
 - **Dismissed:** 5 findings (todos cosmetics o ya resueltos durante la sesión: F1 compareSemver NaN — docstring documenta contrato; F2 bySemverAsc duplication — YAGNI; F3 tmpWork muerto — cosmético; F4 non-null en test — no prod; F5 test title — sin impacto comportamental).
+
+## 2026-07-27 — un test que "cree" discriminar un fix no es evidencia sin revertir y ver rojo
+
+- **Class:** process (proceso)
+- **Occurrences (ledger count):** 6 (`domain-test-redundant-scenario`, `r9-r11-identical-scenario`, `r11-redundant-domain-assertions`, `r11-precedence-mutation-not-caught` — todas sobre el mismo test R11 a lo largo de 4 rondas de fix — más `task9-test-cannot-distinguish-explicit-guard` y `r14-baseline-early-return-vacuous-test`, mismo patrón sobre el test de R14, detectado independientemente por el spec-reviewer de Task 9 y por la lente de tests de post-implementation-qa)
+- **Rule:** `CONSTITUTION.md` → "Implementación", bullet fortalecido de "todo fix debe incluir un test que reproduzca el caso" — ahora exige el ciclo empírico revertir→rojo→restaurar→verde, y nombra las dos causas raíz confirmadas (fixture compartido con un test hermano más fuerte; interacción incidental que neutraliza la rama nueva).
+- **Sensor:** ninguno mecánico — es un juicio sobre si un test discrimina, no un patrón estático que ESLint/semgrep pueda atrapar. Verificación es el propio ciclo revertir/rojo/restaurar/verde, aplicado manualmente por cada implementador.
+- **Detalle:** en el plan `inconclusive`, el test de R11 pasó por 4 rondas de fix antes de que alguien realmente revirtiera el código y confirmara que el test fallaba — cada ronda anterior "parecía" correcta pero no lo era, porque reusaba el fixture de un test hermano (R8 o R9) cuya aserción ya dominaba cualquier mutante que R11 pudiera atrapar. El mismo patrón exacto resurgió en el test de R14 (`applyBaseline`), donde los 4 productores de `inconclusive` siempre emiten `errors: []`, así que un guard incidental preexistente (`suppressed === 0`) ya devolvía el resultado sin tocar, independientemente de si el guard explícito nuevo existía o no. El fix real requirió exportar `applyBaseline` (siguiendo el patrón ya existente de `reconcilePack`/`findManifestDir` en el mismo archivo) y escribir un test unitario que construye a mano un `SensorResult` con `errors` no vacíos — un estado que ningún productor real genera hoy, pero necesario para que el test pueda distinguir la rama explícita de la incidental.
+- **Descartes (modo desatendido):** ninguno relacionado a este patrón — las 6 ocurrencias fueron curadas.
+
+## 2026-07-27 — auditar TODAS las assertions contra el valor viejo al extender un enum, no solo los archivos del plan
+
+- **Class:** process (proceso)
+- **Occurrences (ledger count):** 2 (`enum-value-stale-assertion-audit`: Tasks 1 y 3 del plan `inconclusive` cada una encontró un test preexistente, en un archivo que el plan NO había listado, con una aserción fijada al valor viejo del enum)
+- **Rule:** `CONSTITUTION.md` → "Implementación", nuevo bullet sibling a la regla existente sobre enums que significan dos cosas.
+- **Sensor:** ninguno mecánico — requiere reconocer semánticamente "esto es una extensión de enum" antes de saber qué grepear; no es un patrón AST estático.
+- **Detalle:** al mover una rama de `'skipped'` a `'inconclusive'` en Task 1, un test preexistente en `run.test.ts` (no listado en el plan) tenía `expect(status).toBe('skipped')` sobre el mismo caso de timeout y rompió recién al correr la suite completa. El mismo patrón exacto — un test no listado por el plan, en un archivo distinto, con la misma aserción fijada al valor viejo — volvió a aparecer en Task 3 sobre `run-tool-missing.test.ts`. Ambas veces el implementador lo manejó bien (actualizó la aserción y lo reportó como consecuencia necesaria, no como scope creep), pero ninguna de las dos veces el plan lo había anticipado.
+- **Descartes (modo desatendido):** ninguno relacionado a este patrón.
+
+## 2026-07-27 — `awm` en PATH puede ser una instalación global obsoleta, desconectada del working tree
+
+- **Class:** agent (proceso, win estructuralizado en AGENTS.md)
+- **Occurrences (ledger count):** 1, pero de alto impacto — afectó el sensor-gate de las 10 tareas del plan
+- **Rule:** `AGENTS.md` → nueva sección "Auto-verificación del CLI (dogfooding)"
+- **Sensor:** n/a — es una instrucción de workflow para el agente, no un check automatizado
+- **Detalle:** en este sandbox, `which awm` resolvía a una instalación global npm en v3.2.0, completamente desconectada del working tree local (v3.2.2, sin publicar). Correr `awm sensors run` bare para auto-verificar el propio trabajo durante el desarrollo del CLI habría probado código viejo, no el diff real — confirmado comparando la salida del binario global (`security: skipped`, el bug que este mismo plan arregla) contra el build local (`security: fail`, correcto). Todas las tareas de este plan usaron `node dist/src/index.js sensors run` desde `cli/` en su lugar.
+- **Descartes (modo desatendido):** ninguno.
+
+## Resueltos durante la sesión, sin curación adicional
+
+- `task6-r1-test-unneeded-third-sensor` (minor): test de R1 incluía un tercer sensor sin uso — simplificado durante la sesión, no requiere regla — cosmético y ya cerrado.
+- `skipped-plus-inconclusive-overall-untested` (minor): test sin assert de `overall` — agregado durante el fix loop de QA, no requiere regla — gap puntual ya cerrado.

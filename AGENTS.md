@@ -56,6 +56,10 @@ Lecciones y patrones confirmados en este repo. Todo agente que trabaje aquí deb
 
 - **El release del CLI es automático en `main` — no hay paso manual de `npm publish`.** `.github/workflows/release.yml` (trigger `push` a `main`) buildea `cli/` y corre `cli/src/release/index.js`: bump por conventional commits + `npm publish` vía OIDC Trusted Publisher + commit de bump con `[skip ci]`. **Antes de decir "publicá a mano" o de proponer/crear un workflow de release, verificá que `release.yml` ya lo cubre** — ya existe y es completo (esta nota nace de haber afirmado por error que el publish era manual, contradiciendo el propio `release.yml`). El nivel de versión sale del prefijo de conventional commit del merge; regla no-negociable en `CONSTITUTION.md` → "Release del CLI".
 
+## Auto-verificación del CLI (dogfooding)
+
+- **`awm` en el PATH puede ser una instalación global publicada, desconectada del working tree que estás editando.** Al desarrollar este mismo CLI, el binario que resuelve `which awm` suele venir de una instalación global de npm (`npm i -g agentic-workflow-manager`) con una versión publicada anterior — no del código que acabás de cambiar en `cli/src/`. Correr `awm sensors run` "en carne propia" contra ese binario prueba una versión vieja, no tu diff: un bug ya arreglado localmente (ej. exit 127 clasificado como `fail`) puede seguir viéndose roto (`skipped`) porque el binario global nunca se actualizó. Confirmado en el plan `inconclusive` (2026-07-27): comparar la salida de `awm sensors run` (global, v3.2.0) contra `node dist/src/index.js sensors run` (build local) mostró resultados distintos para el mismo sensor. **Al auto-verificar este CLI durante su propio desarrollo, siempre `npm run build && node dist/src/index.js <comando>` desde `cli/` — nunca confiar en `awm` bare del PATH.**
+
 ## Layout del repo y de la instalación
 
 - **Este repo** contiene solo el CLI TypeScript (`cli/`). El contenido (skills, bundles, sensor-packs, hooks) vive en repos externos: `awm-baseline-registry` y `awm-documentation-registry`.

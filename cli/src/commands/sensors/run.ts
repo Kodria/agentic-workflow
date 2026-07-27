@@ -30,11 +30,13 @@ export type RunOptions = {
 
 /**
  * Apply the baseline to a sensor result: keep only findings not already accepted.
- * `status` becomes 'pass' when every finding was baseline-suppressed. Skipped
- * sensors are returned untouched.
+ * `status` becomes 'pass' when every finding was baseline-suppressed. Results
+ * without a verdict of their own — skipped and inconclusive — are returned
+ * untouched: there is nothing to ratchet, and letting them through here would
+ * hand back a `pass` for a sensor that never reported anything.
  */
-function applyBaseline(result: SensorResult, accepted: string[] | undefined): SensorResult {
-    if (result.status === 'skipped') return result;
+export function applyBaseline(result: SensorResult, accepted: string[] | undefined): SensorResult {
+    if (result.status === 'skipped' || result.status === 'inconclusive') return result;
     const { newErrors, suppressed } = partition(result.name, result.errors, accepted);
     if (suppressed === 0) return result;
     return {
@@ -124,12 +126,14 @@ function runSensor(name: string, cmd: string, timeout: number, cwd: string): Sen
     } catch (err: any) {
         // Output exceeded maxBuffer — child is killed before output can be read.
         // Check this BEFORE the SIGTERM branch (ENOBUFS kills with SIGTERM too).
+        // Nothing could be read, so nothing was certified.
         if (err.code === 'ENOBUFS') {
-            return { name, status: 'skipped', errors: [], skipReason: `output exceeded ${MAX_BUFFER} bytes` };
+            return { name, status: 'inconclusive', errors: [], skipReason: `output exceeded ${MAX_BUFFER} bytes` };
         }
-        // Genuine timeout: execSync kills with SIGTERM after `timeout` ms.
+        // Genuine timeout: execSync kills with SIGTERM after `timeout` ms. The
+        // sensor produced no verdict — inconclusive, not a benign skip.
         if (err.code === 'ETIMEDOUT' || (err.killed && err.signal === 'SIGTERM')) {
-            return { name, status: 'skipped', errors: [], skipReason: `timeout after ${timeout}ms` };
+            return { name, status: 'inconclusive', errors: [], skipReason: `timeout after ${timeout}ms` };
         }
         // Non-zero exit — the normal path for linters/typecheckers that found
         // findings. Parse the output; if it yields findings, that's a fail.
@@ -138,10 +142,29 @@ function runSensor(name: string, cmd: string, timeout: number, cwd: string): Sen
         if (errors.length > 0) return { name, status: 'fail', errors };
         // A missing tool (binary not installed) must NOT pass silently — the gate
         // cannot certify what it could not run. Treat it as a fail with a clear message.
+        //
+        // Exit 127 is the POSIX signal for "command not found" and is the only check
+        // here that holds across shells and locales: bash writes `command not found`
+        // but dash — `/bin/sh` on Debian/Ubuntu, hence most CI runners and containers
+        // — writes `not found`, so matching shell text alone read an absent tool as a
+        // benign skip. `err.code` does not cover it either: that is ENOENT only when
+        // spawning the shell itself fails, not when the shell starts and the command
+        // inside it is missing. The ENOBUFS and timeout branches are evaluated above,
+        // so reaching here with status 127 means the command did not exist.
+        //
+        // A wrapper (`npm test`, `npx …`) that exits 127 because a binary it invokes
+        // is absent is classified the same way, deliberately: the gate still ran
+        // nothing and still cannot certify anything.
         const lower = raw.toLowerCase();
         const toolMissing =
+            err.status === 127 ||                          // POSIX: command not found
             (err as any).code === 'ENOENT' ||               // execSync spawn failure (no shell)
-            lower.includes('command not found') ||
+            lower.includes('command not found') ||          // bash, zsh
+            // cmd.exe reports an absent binary with exit 1, so 127 does not cover
+            // Windows; this exact phrase does. Kept narrow on purpose — a loose
+            // `not found` would also match a tool that ran and said "not found"
+            // for reasons of its own.
+            lower.includes('is not recognized as an internal or external command') ||
             lower.includes('enoent') ||
             lower.includes('could not determine executable');
         if (toolMissing) {
@@ -156,7 +179,10 @@ function runSensor(name: string, cmd: string, timeout: number, cwd: string): Sen
         if (isExitCodeSensor(name)) {
             return { name, status: 'fail', errors: [{ message: `SENSOR[${name}] failed (exit ${err.status})` }] };
         }
-        return { name, status: 'skipped', errors: [], skipReason: `exit ${err.status}: ${raw.slice(0, 200)}` };
+        // Residual case: it exited non-zero, the tool exists, and no finding
+        // could be parsed. We do not know what happened — say so instead of
+        // reporting a benign skip.
+        return { name, status: 'inconclusive', errors: [], skipReason: `exit ${err.status}: ${raw.slice(0, 200)}` };
     }
 }
 
@@ -185,7 +211,9 @@ export function runSensors(opts: RunOptions = {}): RunOutput {
             continue;
         }
         if (!config.cmd) {
-            results.push({ name, status: 'skipped', errors: [], skipReason: 'no cmd configured' });
+            // Enabled but with nothing to run: broken config, not a deliberate
+            // opt-out. `enabled: false` is how a sensor is turned off.
+            results.push({ name, status: 'inconclusive', errors: [], skipReason: 'no cmd configured' });
             continue;
         }
 
@@ -195,7 +223,10 @@ export function runSensors(opts: RunOptions = {}): RunOutput {
         results.push(result);
     }
 
+    // `fail` outranks `inconclusive`: when something is broken AND something
+    // could not be measured, the broken thing is the actionable verdict.
     let overall: RunOutput['overall'] = results.some(r => r.status === 'fail') ? 'fail'
+        : results.some(r => r.status === 'inconclusive') ? 'not_certified'
         : results.length > 0 && results.every(r => r.status === 'skipped') ? 'skipped'
         : results.length === 0 ? 'skipped'
         : 'pass';
