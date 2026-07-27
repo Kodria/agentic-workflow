@@ -1,3 +1,15 @@
+## v3.3.0 - 2026-07-27
+
+### Features
+- **sensors:** an enabled sensor with no cmd is inconclusive, not skipped
+- **sensors:** an uninterpretable sensor exit is inconclusive
+- **sensors:** truncated sensor output is inconclusive, not a benign skip
+- **sensors:** add inconclusive status so a sensor that could not certify is never green
+
+### Fixes
+- **sensors:** keep the baseline away from results with no verdict
+- treat exit 127 as a missing sensor tool so dash hosts stop reading absent tools as green
+
 ## v3.2.2 - 2026-07-25
 
 ### Fixes
