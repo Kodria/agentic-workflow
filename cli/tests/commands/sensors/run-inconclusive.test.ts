@@ -174,4 +174,40 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         expect(DOMAIN).toContain(out.overall);
         expect(out.overall).not.toBe('inconclusive');
     });
+
+    it('keeps a deliberately disabled sensor apart from one that could not certify', () => {  // verifies R1, R6
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), JSON.stringify({
+            pack: 'js-ts',
+            sensors: {
+                security: { cmd: 'semgrep .', fast: false },
+                mutation: { cmd: 'npx stryker run', enabled: false },
+            },
+        }));
+        mockExecSyncFn.mockImplementationOnce(timeoutError);   // security: times out
+                                                                // mutation: never invoked
+
+        const { runSensors } = load();
+        const out = runSensors({ cwd: root });
+
+        // Same run, two different meanings — the whole point of the split.
+        expect(out.sensors.find((s: any) => s.name === 'mutation').status).toBe('skipped');
+        expect(out.sensors.find((s: any) => s.name === 'mutation').skipReason).toBe('disabled');
+        expect(out.sensors.find((s: any) => s.name === 'security').status).toBe('inconclusive');
+    });
+
+    it('does not degrade the verdict for a disabled sensor alongside healthy ones', () => {  // verifies R6
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), JSON.stringify({
+            pack: 'js-ts',
+            sensors: {
+                typecheck: { cmd: 'npx tsc --noEmit', fast: true },
+                mutation: { cmd: 'npx stryker run', enabled: false },
+            },
+        }));
+        mockExecSyncFn.mockReturnValueOnce('' as any);
+
+        const { runSensors } = load();
+        const out = runSensors({ cwd: root });
+
+        expect(out.overall).toBe('pass');
+    });
 });
