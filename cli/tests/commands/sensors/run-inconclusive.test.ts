@@ -121,4 +121,57 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         expect(depcheck.skipReason).toBe('no cmd configured');
         expect(out.overall).toBe('not_certified');
     });
+
+    it('reports fail, not not_certified, when something is broken and something could not run', () => {  // verifies R9
+        mockExecSyncFn
+            .mockImplementationOnce(() => {   // typecheck: real findings
+                throw Object.assign(new Error(), {
+                    stdout: 'src/a.ts(1,1): error TS0001: Bad type.', stderr: '', status: 1,
+                });
+            })
+            .mockImplementationOnce(timeoutError);   // security: times out
+
+        const { runSensors } = load();
+        const out = runSensors({ cwd: root });
+
+        expect(out.sensors.find((s: any) => s.name === 'typecheck').status).toBe('fail');
+        expect(out.sensors.find((s: any) => s.name === 'security').status).toBe('inconclusive');
+        expect(out.overall).toBe('fail');
+    });
+
+    it('never emits an overall value outside the published domain', () => {  // verifies R11
+        // `inconclusive` is a per-sensor status only. External consumers (the
+        // registry skills) read `overall`, whose domain must not grow — this
+        // pins that invariant at runtime on a three-sensor pass+fail+inconclusive
+        // mix, a combination neither R8 (pass+inconclusive) nor R9
+        // (fail+inconclusive) exercises. R9's own assertion already catches a
+        // fail/inconclusive precedence regression specifically; what this test
+        // adds is runtime coverage of the domain claim itself, on a fixture
+        // neither of those covers — not independent detection of every
+        // aggregation mutation.
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), JSON.stringify({
+            pack: 'js-ts',
+            sensors: {
+                typecheck: { cmd: 'npx tsc --noEmit', fast: true },
+                lint: { cmd: 'npx eslint . --format json', fast: true },
+                security: { cmd: 'semgrep .', fast: false },
+            },
+        }));
+        const DOMAIN = ['pass', 'fail', 'skipped', 'not_certified'];
+
+        mockExecSyncFn
+            .mockImplementationOnce(() => {              // typecheck: real findings → fail
+                throw Object.assign(new Error(), {
+                    stdout: 'src/a.ts(1,1): error TS0001: Bad type.', stderr: '', status: 1,
+                });
+            })
+            .mockReturnValueOnce('' as any)               // lint: clean → pass
+            .mockImplementationOnce(timeoutError);         // security: times out → inconclusive
+
+        const { runSensors } = load();
+        const out = runSensors({ cwd: root });
+
+        expect(DOMAIN).toContain(out.overall);
+        expect(out.overall).not.toBe('inconclusive');
+    });
 });
