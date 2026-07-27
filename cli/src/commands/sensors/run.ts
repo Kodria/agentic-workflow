@@ -209,7 +209,9 @@ export function runSensors(opts: RunOptions = {}): RunOutput {
             continue;
         }
         if (!config.cmd) {
-            results.push({ name, status: 'skipped', errors: [], skipReason: 'no cmd configured' });
+            // Enabled but with nothing to run: broken config, not a deliberate
+            // opt-out. `enabled: false` is how a sensor is turned off.
+            results.push({ name, status: 'inconclusive', errors: [], skipReason: 'no cmd configured' });
             continue;
         }
 

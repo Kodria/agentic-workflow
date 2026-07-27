@@ -102,4 +102,23 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         expect(security.skipReason).toMatch(/exit 2/);
         expect(out.overall).toBe('not_certified');
     });
+
+    it('reports an enabled sensor with no cmd as inconclusive', () => {  // verifies R5
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), JSON.stringify({
+            pack: 'js-ts',
+            sensors: {
+                typecheck: { cmd: 'npx tsc --noEmit', fast: true },
+                depcheck: { fast: false },   // enabled, but nothing to run
+            },
+        }));
+        mockExecSyncFn.mockReturnValueOnce('' as any);   // typecheck: clean
+
+        const { runSensors } = load();
+        const out = runSensors({ cwd: root });
+
+        const depcheck = out.sensors.find((s: any) => s.name === 'depcheck');
+        expect(depcheck.status).toBe('inconclusive');
+        expect(depcheck.skipReason).toBe('no cmd configured');
+        expect(out.overall).toBe('not_certified');
+    });
 });
