@@ -127,9 +127,10 @@ function runSensor(name: string, cmd: string, timeout: number, cwd: string): Sen
         if (err.code === 'ENOBUFS') {
             return { name, status: 'skipped', errors: [], skipReason: `output exceeded ${MAX_BUFFER} bytes` };
         }
-        // Genuine timeout: execSync kills with SIGTERM after `timeout` ms.
+        // Genuine timeout: execSync kills with SIGTERM after `timeout` ms. The
+        // sensor produced no verdict — inconclusive, not a benign skip.
         if (err.code === 'ETIMEDOUT' || (err.killed && err.signal === 'SIGTERM')) {
-            return { name, status: 'skipped', errors: [], skipReason: `timeout after ${timeout}ms` };
+            return { name, status: 'inconclusive', errors: [], skipReason: `timeout after ${timeout}ms` };
         }
         // Non-zero exit — the normal path for linters/typecheckers that found
         // findings. Parse the output; if it yields findings, that's a fail.
@@ -214,7 +215,10 @@ export function runSensors(opts: RunOptions = {}): RunOutput {
         results.push(result);
     }
 
+    // `fail` outranks `inconclusive`: when something is broken AND something
+    // could not be measured, the broken thing is the actionable verdict.
     let overall: RunOutput['overall'] = results.some(r => r.status === 'fail') ? 'fail'
+        : results.some(r => r.status === 'inconclusive') ? 'not_certified'
         : results.length > 0 && results.every(r => r.status === 'skipped') ? 'skipped'
         : results.length === 0 ? 'skipped'
         : 'pass';

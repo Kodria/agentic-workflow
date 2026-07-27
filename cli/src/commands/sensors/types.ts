@@ -20,7 +20,26 @@ export type SensorError = {
 
 export type SensorResult = {
     name: string;
-    status: 'pass' | 'fail' | 'skipped';
+    /**
+     * The boundary is not "did it run?" but "do I know what happened?".
+     *
+     * `pass`         — ran, no findings.
+     * `fail`         — a defined, attributable, actionable problem: findings in
+     *                  the code, an absent binary (you know exactly what to
+     *                  install), or an exit-code sensor that exited non-zero.
+     * `inconclusive` — it was attempted and the outcome is unknown: timeout,
+     *                  truncated output, uninterpretable exit code, no `cmd`
+     *                  configured. Never green — it degrades `overall` to
+     *                  `not_certified`, because the gate certified nothing.
+     * `skipped`      — does not apply, by deliberate operator choice
+     *                  (`enabled: false`). Informational: on its own it does
+     *                  not degrade the verdict.
+     *
+     * Keeping these last two apart is the point: one value meaning both
+     * "not applicable" and "broken" is how an absent check reads as a clean one
+     * (CONSTITUTION.md, "Implementación").
+     */
+    status: 'pass' | 'fail' | 'inconclusive' | 'skipped';
     errors: SensorError[];
     skipReason?: string;
     /** New findings (not in baseline). Present only when a baseline is applied. */

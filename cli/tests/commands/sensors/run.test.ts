@@ -71,13 +71,13 @@ describe('runSensors', () => {
         expect(tc!.errors[0].message).toMatch('SENSOR[typecheck]');
     });
 
-    it('marks sensor as skipped on timeout', () => {
+    it('marks sensor as inconclusive on timeout', () => {
         mockExecSyncFn.mockImplementationOnce(() => { throw Object.assign(new Error('killed'), { code: 'ETIMEDOUT' }); });
         mockExecSyncFn.mockReturnValueOnce('' as any);
         const { runSensors } = load();
         const result = runSensors({ fast: true, cwd: tmpDir });
         const tc = result.sensors.find((s: any) => s.name === 'typecheck');
-        expect(tc!.status).toBe('skipped');
+        expect(tc!.status).toBe('inconclusive');
         expect(tc!.skipReason).toMatch('timeout');
     });
 
