@@ -30,11 +30,13 @@ export type RunOptions = {
 
 /**
  * Apply the baseline to a sensor result: keep only findings not already accepted.
- * `status` becomes 'pass' when every finding was baseline-suppressed. Skipped
- * sensors are returned untouched.
+ * `status` becomes 'pass' when every finding was baseline-suppressed. Results
+ * without a verdict of their own — skipped and inconclusive — are returned
+ * untouched: there is nothing to ratchet, and letting them through here would
+ * hand back a `pass` for a sensor that never reported anything.
  */
 function applyBaseline(result: SensorResult, accepted: string[] | undefined): SensorResult {
-    if (result.status === 'skipped') return result;
+    if (result.status === 'skipped' || result.status === 'inconclusive') return result;
     const { newErrors, suppressed } = partition(result.name, result.errors, accepted);
     if (suppressed === 0) return result;
     return {

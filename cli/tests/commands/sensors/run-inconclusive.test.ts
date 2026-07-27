@@ -228,4 +228,21 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         expect(out.overall).toBe('not_certified');
         expect(mockExecSyncFn).not.toHaveBeenCalled();
     });
+
+    it('leaves an inconclusive result untouched when a baseline is applied', () => {  // verifies R14
+        const { writeBaseline } = require('../../../src/commands/sensors/baseline');
+        writeBaseline(root, { security: ['some-accepted-fingerprint'] });
+
+        mockExecSyncFn
+            .mockReturnValueOnce('' as any)
+            .mockImplementationOnce(timeoutError);
+
+        const { runSensors } = load();
+        const out = runSensors({ cwd: root });
+
+        const security = out.sensors.find((s: any) => s.name === 'security');
+        expect(security.status).toBe('inconclusive');
+        expect(security.baselineCount).toBeUndefined();
+        expect(out.overall).toBe('not_certified');
+    });
 });
