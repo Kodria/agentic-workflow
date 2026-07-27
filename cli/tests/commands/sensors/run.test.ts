@@ -149,30 +149,38 @@ describe('runSensors — missing tool is a fail, not a skip', () => {
 
     beforeEach(() => {
         mockExecSyncFn.mockReset();
-        // Simulate shell exit 127 "command not found" — matches what Node's execSync
-        // captures in err.stderr when the binary does not exist on PATH.
+        // What Node's execSync actually throws when the binary is absent and `/bin/sh`
+        // is dash (Debian/Ubuntu, hence most CI runners): status 127, `not found`
+        // rather than bash's `command not found`, and no `code` — ENOENT is set only
+        // when spawning the shell itself fails, not the command inside it.
         mockExecSyncFn.mockImplementation(() => {
-            throw Object.assign(new Error('Command failed: awm-nonexistent-binary-xyz --check'), {
+            throw Object.assign(new Error('Command failed: awm-nonexistent-binary-xyz .'), {
                 stdout: '',
-                stderr: '/bin/sh: awm-nonexistent-binary-xyz: command not found\n',
+                stderr: '/bin/sh: 1: awm-nonexistent-binary-xyz: not found\n',
                 status: 127,
             });
         });
     });
 
+    // The sensor is named `security` so it uses the semgrep formatter, which returns
+    // zero findings for unparseable shell noise and lets execution reach the
+    // tool-missing branch. Under the generic formatter any stderr becomes a finding,
+    // so a sensor named `ghost` would report `fail` without that branch ever running —
+    // green for a reason unrelated to what this test claims to cover.
     it('marks a sensor whose binary is missing as fail', () => {
         root = mkTmp();
         fs.mkdirSync(path.join(root, '.awm'));
         fs.writeFileSync(
             path.join(root, '.awm', 'sensors.json'),
             JSON.stringify({
-                pack: 'test',
-                sensors: { ghost: { cmd: 'awm-nonexistent-binary-xyz --check', fast: true } },
+                pack: 'js-ts',
+                sensors: { security: { cmd: 'awm-nonexistent-binary-xyz .', fast: true } },
             }),
         );
         const out = runSensors({ cwd: root });
-        const ghost = out.sensors.find((s) => s.name === 'ghost');
-        expect(ghost?.status).toBe('fail');
+        const security = out.sensors.find((s) => s.name === 'security');
+        expect(security?.status).toBe('fail');
+        expect(security?.errors[0].message).toMatch(/not available/i);
         expect(out.overall).toBe('fail');
     });
 });

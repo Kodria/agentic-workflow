@@ -138,10 +138,29 @@ function runSensor(name: string, cmd: string, timeout: number, cwd: string): Sen
         if (errors.length > 0) return { name, status: 'fail', errors };
         // A missing tool (binary not installed) must NOT pass silently — the gate
         // cannot certify what it could not run. Treat it as a fail with a clear message.
+        //
+        // Exit 127 is the POSIX signal for "command not found" and is the only check
+        // here that holds across shells and locales: bash writes `command not found`
+        // but dash — `/bin/sh` on Debian/Ubuntu, hence most CI runners and containers
+        // — writes `not found`, so matching shell text alone read an absent tool as a
+        // benign skip. `err.code` does not cover it either: that is ENOENT only when
+        // spawning the shell itself fails, not when the shell starts and the command
+        // inside it is missing. The ENOBUFS and timeout branches are evaluated above,
+        // so reaching here with status 127 means the command did not exist.
+        //
+        // A wrapper (`npm test`, `npx …`) that exits 127 because a binary it invokes
+        // is absent is classified the same way, deliberately: the gate still ran
+        // nothing and still cannot certify anything.
         const lower = raw.toLowerCase();
         const toolMissing =
+            err.status === 127 ||                          // POSIX: command not found
             (err as any).code === 'ENOENT' ||               // execSync spawn failure (no shell)
-            lower.includes('command not found') ||
+            lower.includes('command not found') ||          // bash, zsh
+            // cmd.exe reports an absent binary with exit 1, so 127 does not cover
+            // Windows; this exact phrase does. Kept narrow on purpose — a loose
+            // `not found` would also match a tool that ran and said "not found"
+            // for reasons of its own.
+            lower.includes('is not recognized as an internal or external command') ||
             lower.includes('enoent') ||
             lower.includes('could not determine executable');
         if (toolMissing) {
