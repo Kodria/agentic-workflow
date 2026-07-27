@@ -193,6 +193,7 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         expect(out.sensors.find((s: any) => s.name === 'mutation').status).toBe('skipped');
         expect(out.sensors.find((s: any) => s.name === 'mutation').skipReason).toBe('disabled');
         expect(out.sensors.find((s: any) => s.name === 'security').status).toBe('inconclusive');
+        expect(out.overall).toBe('not_certified');
     });
 
     it('does not degrade the verdict for a disabled sensor alongside healthy ones', () => {  // verifies R6
@@ -244,5 +245,35 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         expect(security.status).toBe('inconclusive');
         expect(security.baselineCount).toBeUndefined();
         expect(out.overall).toBe('not_certified');
+    });
+
+    it('applyBaseline leaves an inconclusive result untouched even if it somehow carried findings', () => {  // verifies R14 (discriminating unit test)
+        // Every current `inconclusive` producer sets `errors: []`, so a test built
+        // on the public `runSensors()` API can't tell "the explicit guard fired"
+        // apart from "fell through to partition() and incidentally suppressed 0
+        // findings." This unit-tests applyBaseline directly, with a hand-built
+        // result that has `errors` populated, to prove the guard itself — not an
+        // accidental empty-array interaction — is what keeps inconclusive inert.
+        const { applyBaseline } = load();
+        const { buildBaseline } = require('../../../src/commands/sensors/baseline');
+
+        const result = {
+            name: 'security',
+            status: 'inconclusive' as const,
+            errors: [{ message: 'hypothetical finding that should never be ratcheted', rule: 'some-rule', file: 'src/x.ts' }],
+            skipReason: 'timeout after 10000ms',
+        };
+
+        // Build a baseline that partition() WOULD genuinely match/suppress for
+        // this exact finding, so the old code (without the inconclusive guard)
+        // would have mutated the result — proving the new guard, not an
+        // incidental "suppressed === 0", is what keeps it untouched.
+        const accepted = buildBaseline([{ name: result.name, errors: result.errors }])[result.name];
+
+        const out = applyBaseline(result, accepted);
+
+        expect(out).toBe(result);
+        expect(out.status).toBe('inconclusive');
+        expect(out.baselineCount).toBeUndefined();
     });
 });

@@ -35,7 +35,7 @@ export type RunOptions = {
  * untouched: there is nothing to ratchet, and letting them through here would
  * hand back a `pass` for a sensor that never reported anything.
  */
-function applyBaseline(result: SensorResult, accepted: string[] | undefined): SensorResult {
+export function applyBaseline(result: SensorResult, accepted: string[] | undefined): SensorResult {
     if (result.status === 'skipped' || result.status === 'inconclusive') return result;
     const { newErrors, suppressed } = partition(result.name, result.errors, accepted);
     if (suppressed === 0) return result;
