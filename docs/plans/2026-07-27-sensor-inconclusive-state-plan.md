@@ -31,7 +31,7 @@
 | `cli/src/commands/sensors/run.ts` | Ejecución de sensores y agregación del veredicto | Modificar: `runSensor` (3 ramas), `runSensors` (rama sin `cmd` + agregación), `applyBaseline` (early-return) |
 | `cli/tests/commands/sensors/run-inconclusive.test.ts` | Tests del estado nuevo y de la agregación. `execSync` mockeado — timeout y ENOBUFS no se provocan barato contra un shell real | Crear |
 | `cli/tests/commands/sensors/index.test.ts` | Tests del mapeo a exit code | Modificar: sumar caso `not_certified` |
-| `cli/tests/commands/sensors/run-tool-missing.test.ts` | Tests contra `/bin/sh` real (herramienta ausente) | No tocar — sirve de red de no-regresión |
+| `cli/tests/commands/sensors/run-tool-missing.test.ts` | Tests contra `/bin/sh` real (herramienta ausente) | Sirve de red de no-regresión para R12. Task 3 le toca UNA aserción (ver nota abajo) — las otras dos, que son las que efectivamente guardan R12, no se tocan |
 | `awm-baseline-registry` → `skills/subagent-driven-development/implementer-prompt.md` | Instrucción de lectura del veredicto para el implementador | Modificar: 4 líneas |
 
 **Nota de aislamiento (CLAUDE.md):** el archivo de tests nuevo sobreescribe `process.env.AWM_HOME` a un tmpdir. Ningún test puede tocar el `~/.awm` real.
@@ -286,6 +286,7 @@ _Requirements: R4_
 **Files:**
 - Modify: `cli/src/commands/sensors/run.ts:178` (el `return` final de `runSensor`)
 - Test: `cli/tests/commands/sensors/run-inconclusive.test.ts`
+- Modify: `cli/tests/commands/sensors/run-tool-missing.test.ts` — su tercer test ("does not misread a tool that ran and merely printed 'not found' as an absent tool") ya exercita esta misma rama residual; su aserción `status).toBe('skipped')` pasa a `toBe('inconclusive')`. Es una consecuencia inevitable de este mismo paso, no una tarea aparte — los otros dos tests del archivo (los que efectivamente guardan R12: binario ausente → `fail`) NO se tocan.
 
 Es el caso residual: salió no-cero, la herramienta existe, no es sensor de exit-code, y el formatter no pudo sacar ni un hallazgo. No sabemos qué pasó.
 
@@ -606,19 +607,21 @@ git commit -m "test(sensors): pin the honest floor against the new aggregation b
 _Requirements: R12, R13_
 
 **Files:**
-- Verify (no editar): `cli/tests/commands/sensors/run-tool-missing.test.ts`, `cli/tests/commands/sensors/index.test.ts:12-19`
+- Verify (no editar más allá de lo que Task 3 ya tocó): `cli/tests/commands/sensors/run-tool-missing.test.ts`, `cli/tests/commands/sensors/index.test.ts:12-19`
 
 Las dos decisiones tomadas en el diseño, ancladas en tests: la herramienta ausente NO se muda al estado nuevo, y `not_certified` NO cambia de exit code.
 
+**Nota post-Task 3:** `run-tool-missing.test.ts` ya no llega a esta tarea 100% intacto — Task 3 le editó una aserción (ver esa sección), porque su tercer test exercitaba la misma rama residual que Task 3 cambia. Eso es correcto y esperado, no una regresión: los dos tests que efectivamente guardan R12 (`marks a sensor whose binary is absent as fail, not skipped` y `does not let a healthy sensor carry the run to pass while another tool is absent`) siguen intactos y siguen afirmando `'fail'`. Esta tarea verifica que esos dos —no los tres— sigan en pie.
+
 **Esta tarea no escribe tests nuevos** — los que hacen falta ya existen. Escribir duplicados sería scope creep. Lo que la tarea hace es correrlos como red de no-regresión y dejar constancia de que cubren R12 y R13.
 
-- [ ] **Step 1: Run the real-shell suite unchanged**
+- [ ] **Step 1: Run the real-shell suite**
 
 ```bash
 cd cli && npx jest tests/commands/sensors/run-tool-missing.test.ts
 ```
 
-Expected: PASS, 3/3 — sin editar el archivo. Si alguno cae, la herramienta ausente se mudó a `inconclusive` por accidente y viola R12.
+Expected: PASS, 3/3. Los dos tests de binario ausente siguen afirmando `'fail'` sin cambios; el tercero (rama residual, no binario ausente) afirma `'inconclusive'` desde Task 3. Si alguno de los DOS PRIMEROS cae, la herramienta ausente se mudó de `'fail'` por accidente y viola R12 — eso sí sería una regresión real.
 
 - [ ] **Step 2: Run the existing exit-code suite**
 
@@ -804,7 +807,7 @@ git push -u origin claude/agentic-workflow-issue-1a31ru
 | R9 | T5 | `reports fail, not not_certified, when something is broken and something could not run` |
 | R10 | T7 | `still refuses to certify a tree whose sensors are all disabled` |
 | R11 | T5 | `never emits an overall value outside the published domain` |
-| R12 | T8 | `run-tool-missing.test.ts` completo, sin editar (3 tests contra `/bin/sh` real) |
+| R12 | T8 | `run-tool-missing.test.ts` — los dos tests de binario ausente (`marks a sensor whose binary is absent as fail, not skipped`, `does not let a healthy sensor carry...`), sin editar. El tercer test SÍ fue editado por T3 (rama distinta, no binario ausente) |
 | R13 | T8 | `index.test.ts:16-18` — `not_certified → 0`, `fail → 1` (preexistentes, se corren como no-regresión) |
 | R14 | T9 | `leaves an inconclusive result untouched when a baseline is applied` |
 | R15 | T10 | `grep -n "inconclusive" implementer-prompt.md` — verificación por lectura, no automatizada |
