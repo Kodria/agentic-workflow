@@ -124,8 +124,9 @@ function runSensor(name: string, cmd: string, timeout: number, cwd: string): Sen
     } catch (err: any) {
         // Output exceeded maxBuffer — child is killed before output can be read.
         // Check this BEFORE the SIGTERM branch (ENOBUFS kills with SIGTERM too).
+        // Nothing could be read, so nothing was certified.
         if (err.code === 'ENOBUFS') {
-            return { name, status: 'skipped', errors: [], skipReason: `output exceeded ${MAX_BUFFER} bytes` };
+            return { name, status: 'inconclusive', errors: [], skipReason: `output exceeded ${MAX_BUFFER} bytes` };
         }
         // Genuine timeout: execSync kills with SIGTERM after `timeout` ms. The
         // sensor produced no verdict — inconclusive, not a benign skip.

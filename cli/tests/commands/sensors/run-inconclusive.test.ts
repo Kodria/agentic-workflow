@@ -67,4 +67,18 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         expect(out.sensors.find((s: any) => s.name === 'typecheck').status).toBe('pass');
         expect(out.overall).toBe('not_certified');
     });
+
+    it('reports a sensor whose output was truncated as inconclusive', () => {  // verifies R3
+        mockExecSyncFn
+            .mockReturnValueOnce('' as any)
+            .mockImplementationOnce(() => { throw Object.assign(new Error('too big'), { code: 'ENOBUFS' }); });
+
+        const { runSensors } = load();
+        const out = runSensors({ cwd: root });
+
+        const security = out.sensors.find((s: any) => s.name === 'security');
+        expect(security.status).toBe('inconclusive');
+        expect(security.skipReason).toMatch(/exceeded/);
+        expect(out.overall).toBe('not_certified');
+    });
 });
