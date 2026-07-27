@@ -210,4 +210,22 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
 
         expect(out.overall).toBe('pass');
     });
+
+    it('still refuses to certify a tree whose sensors are all disabled', () => {  // verifies R10
+        fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), JSON.stringify({
+            pack: 'js-ts',
+            sensors: {
+                typecheck: { cmd: 'npx tsc --noEmit', enabled: false },
+                security: { cmd: 'semgrep .', enabled: false },
+            },
+        }));
+        fs.writeFileSync(path.join(root, 'package.json'), '{}');   // real stack indicator
+
+        const { runSensors } = load();
+        const out = runSensors({ cwd: root });
+
+        expect(out.sensors.every((s: any) => s.status === 'skipped')).toBe(true);
+        expect(out.overall).toBe('not_certified');
+        expect(mockExecSyncFn).not.toHaveBeenCalled();
+    });
 });
