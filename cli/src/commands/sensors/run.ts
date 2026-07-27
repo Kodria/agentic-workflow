@@ -177,7 +177,10 @@ function runSensor(name: string, cmd: string, timeout: number, cwd: string): Sen
         if (isExitCodeSensor(name)) {
             return { name, status: 'fail', errors: [{ message: `SENSOR[${name}] failed (exit ${err.status})` }] };
         }
-        return { name, status: 'skipped', errors: [], skipReason: `exit ${err.status}: ${raw.slice(0, 200)}` };
+        // Residual case: it exited non-zero, the tool exists, and no finding
+        // could be parsed. We do not know what happened — say so instead of
+        // reporting a benign skip.
+        return { name, status: 'inconclusive', errors: [], skipReason: `exit ${err.status}: ${raw.slice(0, 200)}` };
     }
 }
 

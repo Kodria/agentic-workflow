@@ -63,7 +63,10 @@ describe('runSensors — an absent tool never reads as green (real /bin/sh)', ()
 
     it('does not misread a tool that ran and merely printed "not found" as an absent tool', () => {
         // Exits 1, not 127: the binary existed and reported something of its own.
-        // Classifying this as a missing tool would be a false accusation.
+        // Classifying this as a missing tool would be a false accusation. It also
+        // must not read as a benign 'skipped': the formatter parsed no findings
+        // from a genuine non-zero exit, which is the residual "I don't know" case
+        // (Task 3) — 'inconclusive', not 'fail' and not 'skipped'.
         const root = project({
             security: { cmd: `node -e "console.error('rule pack not found'); process.exit(1)"`, fast: true },
         });
@@ -71,7 +74,7 @@ describe('runSensors — an absent tool never reads as green (real /bin/sh)', ()
         const out = runSensors({ cwd: root });
 
         const security = out.sensors.find(s => s.name === 'security');
-        expect(security!.status).toBe('skipped');
+        expect(security!.status).toBe('inconclusive');
         expect(security!.errors).toEqual([]);
     });
 });
