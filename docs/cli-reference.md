@@ -27,7 +27,20 @@ awm init [--agent <agent>] [--machine-only] [--yes] [--json]
 | `-a, --agent <agent>` | Target agent. Default `claude-code`. |
 | `--machine-only` | Run only machine-level steps; skip all project steps. |
 | `-y, --yes` | Skip confirmation prompts (for scripts). |
-| `--json` | Emit the full `InitOutcome` as JSON instead of the rendered report. |
+| `--json` | Emit the full `InitOutcome` as JSON instead of the rendered report — on success **and** on failure. |
+
+**Exit codes:** `0` healthy · `1` degraded (ran to completion, some checks still missing) · `2` failed (one or more steps failed; every write was rolled back).
+
+**`--json` contract.** Both documents carry a `result` field mirroring the exit code, so a bootstrap script can branch on one value:
+
+| `result` | Exit | Document |
+|---|---|---|
+| `ok` / `degraded` | 0 / 1 | The `InitOutcome`: `steps`, `applied`/`pending`/`failed`, `before`, `after`, `transactionId`, `modifiedFiles`. |
+| `failed` | 2 | A failure envelope: `error` (names the failed steps), `steps`, `failedSteps` (the `action: "failed"` subset, each with `id` and `error`), `before`, `after`, and `transaction`. |
+
+On `result: "failed"`, `transaction` records what happened to the machine: `committed` is always `false`, `rolledBack` says whether every path in `restoredFiles` was restored to its pre-init state, and `rollbackError` appears only if the restore itself failed (recover with `awm backup restore <transactionId>`). `after` is the state observed at the end of the step pipeline — *before* the rollback ran — so it describes what the failing run produced, not what is on disk now.
+
+Human mode renders the same evidence: on failure the three-panel report is printed as usual, with the failing step marked `✖` and its error inline, followed by the summary on stderr.
 
 **What it does:** syncs the registry cache · installs the agent's context mechanism (Claude: `SessionStart` hook; OpenCode: global `opencode.json` `instructions[]`) · installs the `dev` **baseline** skill pack · bootstraps `.awm/profile.json` · detects the stack and writes `.awm/sensors.json` · wires `CONSTITUTION.md` into the repo-local `opencode.json` (OpenCode). It **flags** (but does not perform) the steps that need an agent or a deliberate choice: generating `CONSTITUTION.md` / agent context, and installing the Claude per-edit sensor hook.
 

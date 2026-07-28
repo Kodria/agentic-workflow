@@ -6,6 +6,7 @@ import type { InstallMethod, InstallSummary, SyncResult } from '../bundle-instal
 import type { ContextOp } from '../context/orchestrator';
 import type { InjectionState } from '../context/types';
 import type { ConstitutionInjectResult } from '../context/project-constitution-inject';
+import type { RegistrySyncResult } from '../registries';
 
 export type StepAction = 'applied' | 'skipped' | 'pending' | 'failed';
 
@@ -33,7 +34,13 @@ export interface InitOutcome {
 // Efectos de I/O inyectables — defaultActions delega en las funciones reales;
 // los tests pasan espías. Mantiene los steps puros respecto de la UI y testeables.
 export interface InitActions {
-    syncCache: () => Promise<void>;
+    /**
+     * Returns `syncRegistries()`'s per-registry results so the caller can see
+     * WHICH registry failed — that function reports failures as results, never
+     * as throws. `void` stays allowed for the many test stubs that only care
+     * that a sync was attempted.
+     */
+    syncCache: () => Promise<RegistrySyncResult[] | void>;
     installHook: (o: { agent: AgentTarget; registryRoot: string; installMethod: InstallMethod }) => { status: string };
     installBundle: (o: {
         bundleName: string; bundles: BundleDefinition[]; agents: AgentTarget[];

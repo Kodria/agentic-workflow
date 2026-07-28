@@ -146,6 +146,54 @@ export async function syncRegistries(): Promise<RegistrySyncResult[]> {
     return results;
 }
 
+/** The errored entries of a `syncRegistries()` run, in `listRegistries()` order. */
+export function registrySyncErrors(
+    results: RegistrySyncResult[],
+): { name: string; error: string }[] {
+    return results
+        .filter((r): r is Extract<RegistrySyncResult, { action: 'error' }> => r.action === 'error')
+        .map((r) => ({ name: r.name, error: r.error }));
+}
+
+/** `name: reason; name: reason` — the shape both init and stepCache report errors in. */
+export function describeRegistrySyncErrors(errors: { name: string; error: string }[]): string {
+    return errors.map((e) => `${e.name}: ${e.error}`).join('; ');
+}
+
+/**
+ * Registries that both errored during sync AND have no content on disk
+ * afterwards — i.e. genuinely unusable, as opposed to merely stale.
+ *
+ * `syncRegistries()` deliberately reports per-registry failures as results
+ * rather than throwing, so a flaky secondary registry never aborts a whole
+ * run. Callers that go on to READ registry content (init) still need to know
+ * whether what they are about to read exists: otherwise a missing registry
+ * resurfaces much later as an unrelated step's failure, with its real cause
+ * already discarded. Note that "usable" is deliberately about content on disk,
+ * not about being a healthy git clone — a seeded content root with no `.git`
+ * fails to sync every time and is still perfectly readable.
+ */
+export function unusableSyncedRegistries(
+    results: RegistrySyncResult[],
+): { name: string; error: string }[] {
+    const errors = registrySyncErrors(results);
+    if (errors.length === 0) return [];
+    const roots = new Map(listRegistries().map((r) => [r.name, r.contentRoot]));
+    return errors.filter((e) => {
+        const root = roots.get(e.name);
+        return root === undefined || !fs.existsSync(root);
+    });
+}
+
+/** `unusableSyncedRegistries` as a guard: throws naming every unusable registry. */
+export function assertSyncedRegistriesUsable(results: RegistrySyncResult[]): void {
+    const unusable = unusableSyncedRegistries(results);
+    if (unusable.length === 0) return;
+    throw new Error(
+        `registry sync failed and left no content on disk — ${describeRegistrySyncErrors(unusable)}`,
+    );
+}
+
 export const REGISTRY_MANIFEST_NAME = 'awm-registry.json';
 
 export interface RegistryManifest {

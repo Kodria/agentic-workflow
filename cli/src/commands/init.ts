@@ -5,9 +5,16 @@ import pc from 'picocolors';
 import { renderReport } from './doctor';
 import { gatherContext } from '../core/diagnostics/context';
 import { discoverAllBundles } from '../core/bundles';
-import { contentRoots, listRegistries, seedBaselineRegistry, capabilityRoot } from '../core/registries';
+import {
+    contentRoots, listRegistries, seedBaselineRegistry, capabilityRoot,
+    assertSyncedRegistriesUsable,
+} from '../core/registries';
 import { runInitSteps } from '../core/init/orchestrator';
 import { defaultActions } from '../core/init/steps';
+import {
+    InitStepsFailedError, buildInitFailureOutput, transactionNote,
+    type InitFailureTransaction,
+} from '../core/init/failure';
 import { planInitMutationTargets } from '../core/init/mutation-targets';
 import { gatherProviderFacts, assertClaudeBaselinePreserved } from '../core/init/provider-facts';
 import { beginBackupSession } from '../core/install-transaction';
@@ -63,6 +70,43 @@ export function renderInitOutcome(o: InitOutcome): string {
 }
 
 // ---------------------------------------------------------------------------
+// Failure reporting
+// ---------------------------------------------------------------------------
+
+/**
+ * Single exit point for every failed `awm init`. Honours `--json`'s contract on
+ * the error path — the whole point of the flag for a headless bootstrap is to
+ * learn WHICH step failed — and, in human mode, renders the same evidence
+ * through the normal init dashboard instead of discarding it.
+ *
+ * stdout carries the machine-readable document (JSON mode) or the dashboard
+ * (human mode); stderr always carries the one-line summary plus the
+ * transaction verdict, so `2>&1`-free scripts still see a reason.
+ */
+function reportInitFailure(o: {
+    error: Error;
+    outcome?: InitOutcome;
+    transaction?: InitFailureTransaction;
+    json?: boolean;
+}): number {
+    const payload = buildInitFailureOutput({
+        error: o.error,
+        outcome: o.outcome,
+        transaction: o.transaction,
+    });
+
+    if (o.json) {
+        process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+    } else if (o.outcome) {
+        process.stdout.write(renderInitOutcome(o.outcome) + '\n');
+    }
+
+    process.stderr.write(`awm init: ${payload.error}\n`);
+    process.stderr.write(`awm init: ${payload.transaction.note}\n`);
+    return 2;
+}
+
+// ---------------------------------------------------------------------------
 // RunInit
 // ---------------------------------------------------------------------------
 
@@ -111,6 +155,11 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
     const beforeClaudeFacts = agent === 'claude-code' ? null : gatherProviderFacts('claude-code');
 
     let outcome: InitOutcome;
+    // Populated as soon as each becomes available, so the failure reporter can
+    // emit whatever evidence THIS run got far enough to produce.
+    let pipelineOutcome: InitOutcome | undefined;
+    let transaction: InitFailureTransaction | undefined;
+
     try {
         const mergedActions: InitActions = {
             ...defaultActions,
@@ -144,7 +193,11 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
 
             seedBaselineRegistry();
             if (listRegistries().some((r) => !fs.existsSync(r.contentRoot))) {
-                await mergedActions.syncCache();
+                // `syncRegistries()` reports per-registry failures as RESULTS,
+                // never as throws (core/registries.ts) — swallowing them here
+                // let an unavailable registry degrade silently into some later
+                // step's failure instead of being reported as its own cause.
+                assertSyncedRegistriesUsable((await mergedActions.syncCache()) ?? []);
             }
 
             const bundles = discoverAllBundles();
@@ -170,8 +223,13 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
                 confirmExtensions,
                 actions: mergedActions,
             });
+            pipelineOutcome = outcome;
             if (outcome.failed > 0) {
-                throw new Error('one or more init steps failed');
+                // Typed so the outcome — the only record of WHICH step failed
+                // and why — survives the rollback below and reaches the
+                // reporter. A bare Error here is what made `--json` emit
+                // nothing on the one path that most needed it.
+                throw new InitStepsFailedError(outcome);
             }
 
             if (beforeClaudeFacts) {
@@ -182,21 +240,49 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
             outcome.transactionId = backup.transactionId;
             outcome.modifiedFiles = backup.targetPaths;
         } catch (error) {
-            backup.rollback();
+            // Rollback is best-effort and must never mask the original failure
+            // (same policy as applyInstallPlan's own rollback loop): the
+            // operator needs the step that failed, not the restore that also did.
+            let rollbackError: string | undefined;
+            try {
+                backup.rollback();
+            } catch (e) {
+                rollbackError = e instanceof Error ? e.message : String(e);
+            }
+            transaction = {
+                committed: false,
+                rolledBack: rollbackError === undefined,
+                transactionId: backup.transactionId,
+                restoredFiles: backup.targetPaths,
+                ...(rollbackError === undefined ? {} : { rollbackError }),
+                note: transactionNote(rollbackError === undefined),
+            };
             throw error;
         }
     } catch (err) {
-        process.stderr.write(`awm init: internal error: ${(err as Error).message}\n`);
-        return 2;
+        // The typed error carries its own outcome (so it stays self-sufficient
+        // for any caller of runInit); `pipelineOutcome` covers the other way a
+        // run can fail *after* the pipeline produced one — e.g. the R19
+        // Claude-baseline assertion.
+        return reportInitFailure({
+            error: err as Error,
+            outcome: err instanceof InitStepsFailedError ? err.outcome : pipelineOutcome,
+            transaction,
+            json: opts.json,
+        });
     }
 
+    // `result` mirrors the exit code, so a consumer can branch on one field
+    // instead of correlating stdout with $?: ok → 0, degraded → 1, failed → 2.
+    const result = outcome.after.overall === 'healthy' ? 'ok' : 'degraded';
+
     if (opts.json) {
-        process.stdout.write(JSON.stringify(outcome, null, 2) + '\n');
+        process.stdout.write(JSON.stringify({ result, ...outcome }, null, 2) + '\n');
     } else {
         process.stdout.write(renderInitOutcome(outcome) + '\n');
     }
 
-    return outcome.after.overall === 'healthy' ? 0 : 1;
+    return result === 'ok' ? 0 : 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,7 +323,7 @@ export function registerInitCommand(program: Command): void {
         .option('-y, --yes', 'Skip confirmation prompts')
         .option('-a, --agent <agent>', 'Target agent (default: claude-code)')
         .option('--machine-only', 'Only run machine-level steps (skip project steps)')
-        .option('--json', 'Emit the InitOutcome as JSON')
+        .option('--json', 'Emit the InitOutcome as JSON — on success and on failure (failed steps + rollback)')
         .action(async (options: { yes?: boolean; agent?: string; machineOnly?: boolean; json?: boolean }) => {
             warnIfUnsupportedPlatform((m) => console.warn(pc.yellow(`⚠ ${m}`)));
             const code = await runInit({
