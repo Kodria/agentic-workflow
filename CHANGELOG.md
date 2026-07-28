@@ -1,3 +1,8 @@
+## v3.3.1 - 2026-07-28
+
+### Fixes
+- **init:** preserve and emit failed-step evidence on `awm init --json`
+
 ## v3.3.0 - 2026-07-27
 
 ### Features
