@@ -90,6 +90,7 @@ describe('runInit', () => {
         const parsed = JSON.parse(written);
         expect(Array.isArray(parsed.steps)).toBe(true);
         expect(parsed.after.overall).toBe('degraded');
+        expect(parsed.result).toBe('degraded'); // success envelope is self-describing too
         expect(code).toBe(1);
     });
 
@@ -315,5 +316,105 @@ describe('runInit', () => {
         // settings.json WAS genuinely modified mid-run (real installHook ran) —
         // rollback must restore its exact pre-run content, not just leave it be.
         expect(JSON.parse(fs.readFileSync(settingsPath, 'utf8'))).toEqual({ pristine: true, unrelated: 'keep' });
+    });
+
+    // -----------------------------------------------------------------------
+    // Failure evidence — `--json` must honour its contract on the ERROR path
+    // -----------------------------------------------------------------------
+
+    describe('failure evidence', () => {
+        let errSpy: jest.SpyInstance;
+
+        beforeEach(() => {
+            errSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        });
+        afterEach(() => errSpy.mockRestore());
+
+        const stdout = () => writeSpy.mock.calls.map((c) => c[0]).join('');
+        const stderr = () => errSpy.mock.calls.map((c) => c[0]).join('');
+
+        /** InitActions whose `machine.hook` step blows up inside the step pipeline. */
+        function actionsWithFailingHook() {
+            const actions = fakeActions([]);
+            actions.installHook = () => { throw new Error('hook boom'); };
+            return actions;
+        }
+
+        it('--json emits parseable JSON carrying the failed step id and error', async () => {
+            const { runInit } = require('../../src/commands/init');
+            const code = await runInit({
+                cwd: tmpHome,
+                yes: true,
+                json: true,
+                actions: actionsWithFailingHook(),
+            });
+
+            expect(code).not.toBe(0);
+            expect(code).toBe(2);
+
+            const parsed = JSON.parse(stdout());
+            expect(parsed.result).toBe('failed');
+
+            const failedStep = parsed.steps.find((s: { action: string }) => s.action === 'failed');
+            expect(failedStep.id).toBe('machine.hook');
+            expect(failedStep.error).toBe('hook boom');
+            expect(parsed.failedSteps).toEqual([failedStep]);
+            expect(parsed.failed).toBe(1);
+
+            // The top-level message names the step too — no generic "internal error".
+            expect(parsed.error).toContain('machine.hook');
+            expect(parsed.error).toContain('hook boom');
+
+            // `before` is the pre-run snapshot the issue asks for.
+            expect(parsed.before.results.length).toBeGreaterThan(0);
+        });
+
+        it('--json reports the transaction as not committed and rolled back', async () => {
+            const { runInit } = require('../../src/commands/init');
+            await runInit({ cwd: tmpHome, yes: true, json: true, actions: actionsWithFailingHook() });
+
+            const { transaction } = JSON.parse(stdout());
+            expect(transaction.committed).toBe(false);
+            expect(transaction.rolledBack).toBe(true);
+            expect(typeof transaction.transactionId).toBe('string');
+            expect(Array.isArray(transaction.restoredFiles)).toBe(true);
+            expect(transaction.note).toBeTruthy();
+
+            // The backup manifest on disk agrees: nothing was committed.
+            const { listBackups } = require('../../src/core/install-transaction');
+            const backups = listBackups();
+            expect(backups.length).toBeGreaterThan(0);
+            expect(backups.every((b: { committed: boolean }) => b.committed)).toBe(false);
+            // …and the run really did not persist anything.
+            expect(fs.existsSync(prefsFile())).toBe(false);
+        });
+
+        it('--json still emits a failure envelope when init fails before the step pipeline', async () => {
+            const actions = fakeActions([]);
+            actions.syncCache = async () => { throw new Error('registry unreachable'); };
+
+            const { runInit } = require('../../src/commands/init');
+            const code = await runInit({ cwd: tmpHome, yes: true, json: true, actions });
+
+            expect(code).toBe(2);
+            const parsed = JSON.parse(stdout());
+            expect(parsed.result).toBe('failed');
+            expect(parsed.error).toContain('registry unreachable');
+            expect(parsed.steps).toEqual([]);
+            expect(parsed.before).toBeNull();
+            expect(parsed.transaction.committed).toBe(false);
+        });
+
+        it('human mode renders the failed outcome instead of swallowing it', async () => {
+            const { runInit } = require('../../src/commands/init');
+            const code = await runInit({ cwd: tmpHome, yes: true, actions: actionsWithFailingHook() });
+
+            expect(code).toBe(2);
+            expect(stdout()).toContain('AWM · init');
+            expect(stdout()).toContain('machine.hook');
+            expect(stdout()).toContain('hook boom');
+            expect(stderr()).toContain('machine.hook');
+            expect(stderr()).toContain('hook boom');
+        });
     });
 });

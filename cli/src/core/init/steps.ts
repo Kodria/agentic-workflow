@@ -6,7 +6,10 @@
 //
 // defaultActions wires the real I/O implementations; tests inject spies.
 
-import { syncRegistries } from '../registries';
+import {
+    syncRegistries, registrySyncErrors, describeRegistrySyncErrors, unusableSyncedRegistries,
+    type RegistrySyncResult,
+} from '../registries';
 import { installHook as realInstallHook } from '../../commands/hooks/install';
 import { installBundle as realInstallBundle, syncProfile as realSyncProfile } from '../bundle-install';
 import { initSensors as realInitSensors } from '../../commands/sensors/init';
@@ -30,7 +33,7 @@ import { CodexAgentsStrategy } from '../context/strategies/codex-agents';
 const realInjectionOrchestrator = new InjectionOrchestrator();
 
 export const defaultActions: InitActions = {
-    syncCache: async () => { await syncRegistries(); },
+    syncCache: async () => syncRegistries(),
 
     installHook: (o) => realInstallHook({
         agent: o.agent,
@@ -142,13 +145,33 @@ export async function stepCache(d: InitDeps): Promise<StepResult> {
     const needsSync = !registryCache.present || registryCache.gitState === 'behind';
     if (!needsSync) return ok('machine.cache', 'machine', 'skipped');
 
+    let results: RegistrySyncResult[];
     try {
-        await d.actions.syncCache();
-        return ok('machine.cache', 'machine', 'applied');
+        results = (await d.actions.syncCache()) ?? [];
     } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         return failed('machine.cache', 'machine', msg);
     }
+
+    // `syncRegistries()` reports per-registry failures as RESULTS, not throws
+    // (registries.ts), so the `try` above catches none of them. Ignoring them
+    // is what let an unavailable base registry degrade silently into some
+    // later step's failure — with its own cause already gone.
+    const errors = registrySyncErrors(results);
+    if (errors.length === 0) return ok('machine.cache', 'machine', 'applied');
+
+    // A registry that errored and has no content on disk is unusable, and every
+    // later step that reads it will fail for a reason that no longer names this
+    // cause — so machine.cache owns it here. One that errored but still has
+    // content is stale, not broken: record it and carry on.
+    const unusable = unusableSyncedRegistries(results);
+    if (unusable.length > 0) {
+        return failed(
+            'machine.cache', 'machine',
+            `registry unavailable — ${describeRegistrySyncErrors(unusable)}`,
+        );
+    }
+    return ok('machine.cache', 'machine', 'applied', `stale registries — ${describeRegistrySyncErrors(errors)}`);
 }
 
 /** Step 2 – Install the session-start hook for the target agent. */
