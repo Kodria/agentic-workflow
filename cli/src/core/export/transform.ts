@@ -101,5 +101,7 @@ export function claudeAiTransform(skillMd: string, skillName: string): string {
       : `${value} ${deference}`;
   fmLines[descIdx] = `description: ${newValue}`;
 
-  return `---\n${fmLines.join('\n')}\n---\n${body}`;
+  // Solo el body: el frontmatter ya se editó arriba y sus campos no son prosa
+  // navegable (R2.4).
+  return `---\n${fmLines.join('\n')}\n---\n${stripIntraRegistryPaths(body)}`;
 }

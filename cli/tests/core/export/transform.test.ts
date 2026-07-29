@@ -84,6 +84,35 @@ describe('claudeAiTransform', () => {
     const input = FM(['name: x', 'portable: true', 'description: "Does things." # a comment']);
     expect(() => claudeAiTransform(input, 'x')).toThrow(/trailing content|comment/i);
   });
+
+    test('cleans intra-registry paths in the body', () => {  // verifies R2.1, R2.4
+        const md = [
+            '---',
+            'name: product-discovery',
+            'version: "1.0.0"',
+            'portable: true',
+            'description: "Explores problem space."',
+            '---',
+            'Hand off to `product-brief` (see `skills/product-brief/SKILL.md`) at the end.',
+            '',
+        ].join('\n');
+        const out = claudeAiTransform(md, 'product-discovery');
+        expect(out).toContain('Hand off to `product-brief` at the end.');
+        expect(out).not.toContain('skills/product-brief/SKILL.md');
+    });
+
+    test('leaves the frontmatter block free of body rewriting', () => {  // verifies R2.4
+        const md = [
+            '---',
+            'name: weird',
+            'description: "Mentions skills/readiness-gate/SKILL.md inside the description."',
+            '---',
+            'Body with no paths.',
+            '',
+        ].join('\n');
+        const out = claudeAiTransform(md, 'weird');
+        expect(out).toContain('Mentions skills/readiness-gate/SKILL.md inside the description.');
+    });
 });
 
 describe('stripIntraRegistryPaths', () => {
