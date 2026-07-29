@@ -144,4 +144,14 @@ describe('stripIntraRegistryPaths', () => {
             'hand off to `product-brief` (`skills/product-brief/SKILL.md`) then invoke `skills/readiness-gate/SKILL.md`.',
         )).toBe('hand off to `product-brief` then invoke the `readiness-gate` skill.');
     });
+
+    test('rewrites a path immediately following a dropped parenthetical, even with no separator', () => {  // verifies R2.1, R2.2, R2.6 (regression: two-pass splicing bug found in code review)
+        // Regression guard: a naive two-pass implementation (drop parentheticals,
+        // THEN rewrite bare paths on the already-mutated string) can splice a
+        // URL's trailing "/" directly against this path with zero separator,
+        // making the URL-embedding guard misfire and silently skip the rewrite.
+        expect(stripIntraRegistryPaths(
+            'See http://x.com/y/ (see `skills/a/SKILL.md`)skills/b/SKILL.md now.',
+        )).toBe('See http://x.com/y/the `b` skill now.');
+    });
 });

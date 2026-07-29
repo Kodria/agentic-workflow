@@ -10,40 +10,49 @@ export const DEFERENCE_LINE = (skillName: string): string =>
 // disco) y nunca en claude.ai, donde solo se sube la skill portable. Se limpian
 // en el artefacto exportado en vez de editar el SKILL.md canónico, que en Claude
 // Code sí los necesita.
-const PATH_SRC = '(?:skills\\/[a-z0-9][a-z0-9-]*\\/references\\/[A-Za-z0-9._-]+\\.md'
-    + '|skills\\/[a-z0-9][a-z0-9-]*\\/SKILL\\.md)';
-/** `(see <path>)` o `(<path>)` — el paréntesis entero se va, junto con el
- * espacio horizontal previo, porque la oración ya nombra la skill. */
-const PAREN_ONLY = new RegExp('[ \\t]*\\((?:see[ \\t]+)?`?(' + PATH_SRC + ')`?\\)', 'g');
-/** Cualquier otra aparición: se reescribe en el lugar, conservando la oración. */
-const IN_PLACE = new RegExp('`?(' + PATH_SRC + ')`?', 'g');
+const SKILL_NAME = '[a-z0-9][a-z0-9-]*';
+const REF_FILE = '[A-Za-z0-9._-]+';
+const PATH_SRC = '(?:skills\\/' + SKILL_NAME + '\\/references\\/' + REF_FILE + '\\.md'
+  + '|skills\\/' + SKILL_NAME + '\\/SKILL\\.md)';
+
+/** Reconoce, en una sola pasada sobre el body ORIGINAL, tanto el caso
+ * "paréntesis cuyo único contenido es un path" (grupo 1) como el path suelto
+ * en cualquier otra posición (grupo 2). Una sola pasada evita un bug real de
+ * splicing encontrado en code review: si se borrara el paréntesis en una
+ * pasada separada, un path inmediatamente siguiente podría quedar pegado a
+ * texto que antes terminaba en `/` (el cierre de una URL, p. ej.), y el guard
+ * de "embebido en URL" (que mira el carácter previo) confundiría eso con un
+ * path genuinamente embebido. Matcheando todo en una sola pasada contra el
+ * string original, cada offset que llega a `isEmbeddedInUrl` es siempre real,
+ * nunca un artefacto de un borrado previo. */
+const PATH_OR_DROPPED_PAREN = new RegExp(
+  '([ \\t]*\\((?:see[ \\t]+)?`?' + PATH_SRC + '`?\\))' + '|' + '(`?' + PATH_SRC + '`?)',
+  'g',
+);
 
 /** Un path precedido por `/` es el final de una URL o de un path más largo (un
  * enlace a GitHub, por ejemplo). Esas referencias SÍ resuelven para quien lee la
  * skill en claude.ai, así que no se tocan. */
 function isEmbeddedInUrl(haystack: string, matchStart: number, matched: string): boolean {
-    const pathStart = matchStart + matched.indexOf('skills/');
-    return pathStart > 0 && haystack[pathStart - 1] === '/';
+  const pathStart = matchStart + matched.indexOf('skills/');
+  return pathStart > 0 && haystack[pathStart - 1] === '/';
 }
 
 function pathlessForm(p: string): string {
-    const skillMd = /^skills\/([a-z0-9][a-z0-9-]*)\/SKILL\.md$/.exec(p);
-    if (skillMd) return `the \`${skillMd[1]}\` skill`;
-    const ref = /^skills\/([a-z0-9][a-z0-9-]*)\/references\/([A-Za-z0-9._-]+)\.md$/.exec(p);
-    if (!ref) throw new Error(`unreachable: "${p}" matched PATH_SRC but neither shape`);
-    return `the \`${ref[1]}\` skill's ${ref[2].replace(/-/g, ' ')} reference`;
+  const skillMd = /^skills\/([a-z0-9][a-z0-9-]*)\/SKILL\.md$/.exec(p);
+  if (skillMd) return `the \`${skillMd[1]}\` skill`;
+  const ref = /^skills\/([a-z0-9][a-z0-9-]*)\/references\/([A-Za-z0-9._-]+)\.md$/.exec(p);
+  if (!ref) throw new Error(`unreachable: "${p}" matched PATH_SRC but neither shape`);
+  return `the \`${ref[1]}\` skill's ${ref[2].replace(/-/g, ' ')} reference`;
 }
 
 export function stripIntraRegistryPaths(body: string): string {
-    const withoutParentheticals = body.replace(
-        PAREN_ONLY,
-        (match, _p: string, offset: number) => (isEmbeddedInUrl(body, offset, match) ? match : ''),
-    );
-    return withoutParentheticals.replace(
-        IN_PLACE,
-        (match, p: string, offset: number) =>
-            (isEmbeddedInUrl(withoutParentheticals, offset, match) ? match : pathlessForm(p)),
-    );
+  return body.replace(PATH_OR_DROPPED_PAREN, (match, parenForm, bareForm, offset) => {
+    if (isEmbeddedInUrl(body, offset, match)) return match;
+    if (parenForm !== undefined) return '';
+    const path = bareForm.replace(/^`|`$/g, '');
+    return pathlessForm(path);
+  });
 }
 
 export function claudeAiTransform(skillMd: string, skillName: string): string {
