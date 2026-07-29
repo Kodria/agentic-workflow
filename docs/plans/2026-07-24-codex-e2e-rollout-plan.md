@@ -21,6 +21,36 @@
 
 ---
 
+## Estado — 2026-07-29: parcialmente superado, alcance vivo reducido
+
+**Este plan no se ejecutó como está escrito, y ya no debe ejecutarse completo.** Los planes 1 y 2 se completaron y publicaron, y la verificación end-to-end que este plan iba a automatizar se hizo **manualmente** en el proceso, con veredicto GO. Lo que queda vivo es un subconjunto, y está condicionado a una decisión de uso.
+
+### Qué ya ocurrió por otra vía
+
+| Referencia | Estado |
+|---|---|
+| Plan 1 (CLI provider) | Completo y publicado. `agentic-workflow-manager@3.2.1` vía el release automático (OIDC Trusted Publisher), sin publicación manual |
+| Plan 2 (portabilidad baseline) | Completo. `awm-baseline-registry` PR #16 → tag `v1.7.0`, con `hooks/codex-session-start` presente en el árbol del tag y permisos `100755` preservados |
+| Verificación aislada | Hecha a mano, dos veces, documentada en [`awm-baseline-registry#15`](https://github.com/Kodria/awm-baseline-registry/issues/15). La segunda corrida instaló el **paquete npm publicado** (no un build local) sobre `HOME`/`AWM_HOME`/cwd todos en `mktemp -d`, con `codex-cli 0.145.0` real |
+| Bloqueante encontrado y resuelto | El guard R19 abortaba `awm init --agent codex` en máquina fresca por el nesting de `~/.awm/hooks/codex/` dentro de `~/.awm/hooks/`. Arreglado en el PR #15 de este repo → `v3.2.1`. Re-verificado: init limpio en primera invocación sobre un home que nunca corrió Claude Code |
+| Integridad del baseline de Claude | Confirmada al cierre de la verificación: `~/.awm/hooks/` quedó conteniendo únicamente `codex` |
+
+Esa verificación manual cubrió el **propósito** de los Tasks 1, 4, 5 y 6 (empaquetado aislado, release sin publicación manual, sesión real, activación sin degradar Claude Code) para el caso de un operador único. No cubrió su **forma**: no existe runner automatizado, ni schema de evidencia, ni preflight/rollback scriptado.
+
+### Qué queda vivo
+
+Sólo **Task 2** (`docs/codex-cloud-setup.sh` — bootstrap público e idempotente) y, si se usara cloud, **Task 7** (`@codex review`). Ambos siguen sin implementar, y son la única razón por la que el veredicto es **NO-GO para Codex Cloud** — el GO para máquina real ya está dado.
+
+**Decisión pendiente del dueño:** si Codex Cloud no entra en uso, este plan se archiva completo y el NO-GO deja de ser una brecha. Si entra, se implementa Task 2 (y Task 7) y se descarta el resto.
+
+### Qué se descarta explícitamente
+
+Los Tasks 1, 3, 4, 5 y 6 — runner E2E aislado, schema de evidencia estructurada, preflight/compare/rollback scriptados, coordinación de releases y activación transaccional del home real. Es andamiaje de verificación repetible que no se justifica para un operador único cuyo camino ya quedó verificado a mano y cuyo release ya es automático. Si AWM llegara a tener varios operadores o entornos de despliegue, este plan es el punto de partida para reconstruirlos.
+
+**Lo que sigue debajo es el plan original, conservado como registro y como base si se reactiva.** Los checkboxes sin marcar no son deuda: son alcance descartado, salvo los del Task 2.
+
+---
+
 ## Orden y límites
 
 Este es el plan 3 de 3. Requiere:

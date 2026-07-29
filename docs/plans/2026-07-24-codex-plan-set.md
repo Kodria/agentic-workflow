@@ -15,7 +15,12 @@ execution plan.
    vocabulary, Codex reference and recovery hook.
 3. [`2026-07-24-codex-e2e-rollout-plan.md`](./2026-07-24-codex-e2e-rollout-plan.md)
    — isolated packaging, public releases, real local/cloud/GitHub evidence and
-   controlled live activation.
+   controlled live activation. **Partially superseded as of 2026-07-29** — plans
+   1 and 2 shipped (`agentic-workflow-manager@3.2.1`, registry `v1.7.0`) and the
+   end-to-end verification was done manually with a GO verdict, so most of this
+   plan's scaffolding is discarded scope. Only the cloud bootstrap task stays
+   live, gated on whether Codex Cloud is actually adopted. See its "Estado —
+   2026-07-29" section before executing anything from it.
 
 The CLI and baseline plans can be reviewed independently, but their release
 order is fixed: CLI stable release first, then baseline `minCliVersion` is set
