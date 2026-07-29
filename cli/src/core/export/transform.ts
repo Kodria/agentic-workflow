@@ -6,6 +6,46 @@
 export const DEFERENCE_LINE = (skillName: string): string =>
   `In environments with AWM installed (Claude Code), defer to the registry's ${skillName} skill — this port is for environments without filesystem access.`;
 
+// Paths intra-registry: resuelven en Claude Code (donde el registry está en
+// disco) y nunca en claude.ai, donde solo se sube la skill portable. Se limpian
+// en el artefacto exportado en vez de editar el SKILL.md canónico, que en Claude
+// Code sí los necesita.
+const PATH_SRC = '(?:skills\\/[a-z0-9][a-z0-9-]*\\/references\\/[A-Za-z0-9._-]+\\.md'
+    + '|skills\\/[a-z0-9][a-z0-9-]*\\/SKILL\\.md)';
+/** `(see <path>)` o `(<path>)` — el paréntesis entero se va, junto con el
+ * espacio horizontal previo, porque la oración ya nombra la skill. */
+const PAREN_ONLY = new RegExp('[ \\t]*\\((?:see[ \\t]+)?`?(' + PATH_SRC + ')`?\\)', 'g');
+/** Cualquier otra aparición: se reescribe en el lugar, conservando la oración. */
+const IN_PLACE = new RegExp('`?(' + PATH_SRC + ')`?', 'g');
+
+/** Un path precedido por `/` es el final de una URL o de un path más largo (un
+ * enlace a GitHub, por ejemplo). Esas referencias SÍ resuelven para quien lee la
+ * skill en claude.ai, así que no se tocan. */
+function isEmbeddedInUrl(haystack: string, matchStart: number, matched: string): boolean {
+    const pathStart = matchStart + matched.indexOf('skills/');
+    return pathStart > 0 && haystack[pathStart - 1] === '/';
+}
+
+function pathlessForm(p: string): string {
+    const skillMd = /^skills\/([a-z0-9][a-z0-9-]*)\/SKILL\.md$/.exec(p);
+    if (skillMd) return `the \`${skillMd[1]}\` skill`;
+    const ref = /^skills\/([a-z0-9][a-z0-9-]*)\/references\/([A-Za-z0-9._-]+)\.md$/.exec(p);
+    if (!ref) throw new Error(`unreachable: "${p}" matched PATH_SRC but neither shape`);
+    return `the \`${ref[1]}\` skill's ${ref[2].replace(/-/g, ' ')} reference`;
+}
+
+export function stripIntraRegistryPaths(body: string): string {
+    const withoutParentheticals = body.replace(
+        PAREN_ONLY,
+        (match, _p: string, offset: number) => (isEmbeddedInUrl(body, offset, match) ? match : ''),
+    );
+    return withoutParentheticals.replace(
+        IN_PLACE,
+        (match, p: string, offset: number) =>
+            (isEmbeddedInUrl(withoutParentheticals, offset, match) ? match : pathlessForm(p)),
+    );
+}
+
 export function claudeAiTransform(skillMd: string, skillName: string): string {
   // \r?\n-tolerant, same rationale as readArtifactDescription in discovery.ts:
   // SKILL.md files may be CRLF-terminated and that's still valid frontmatter.
