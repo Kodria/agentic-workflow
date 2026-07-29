@@ -259,4 +259,12 @@ describe('clusterEntries — representative and ordering', () => {
     test('an empty ledger yields no clusters', () => {  // verifies R1.1
         expect(clusterEntries([], 2)).toEqual([]);
     });
+
+    test('min <= 0 still returns every group, including size-1 groups', () => {
+        const solo = entry({ signature: 'lonely', desc: 'nobody else mentions this', ref: 'z.ts:1' });
+        expect(clusterEntries([solo], 0)).toEqual([
+            { signature: 'lonely', count: 1, kind: 'exact', signatures: ['lonely'], entries: [solo] },
+        ]);
+        expect(clusterEntries([solo], -5)).toEqual(clusterEntries([solo], 0));
+    });
 });

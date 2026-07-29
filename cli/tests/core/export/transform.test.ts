@@ -183,4 +183,12 @@ describe('stripIntraRegistryPaths', () => {
       'See http://x.com/y/ (see `skills/a/SKILL.md`)skills/b/SKILL.md now.',
     )).toBe('See http://x.com/y/the `b` skill now.');
   });
+
+  it('rewrites a path that is the very first characters of the body', () => {
+    // Exercises the pathStart === 0 boundary in isEmbeddedInUrl (pathStart > 0
+    // must be false, not true, when the path opens the string) — every other
+    // test in this file has text preceding the path, so this was untested.
+    expect(stripIntraRegistryPaths('skills/readiness-gate/SKILL.md is required.'))
+      .toBe('the `readiness-gate` skill is required.');
+  });
 });

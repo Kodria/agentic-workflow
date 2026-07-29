@@ -38,12 +38,17 @@ function isEmbeddedInUrl(haystack: string, matchStart: number, matched: string):
   return pathStart > 0 && haystack[pathStart - 1] === '/';
 }
 
+const PATH_MATCHER = new RegExp(
+  '^skills\\/(' + SKILL_NAME + ')\\/references\\/(' + REF_FILE + ')\\.md$'
+  + '|^skills\\/(' + SKILL_NAME + ')\\/SKILL\\.md$',
+);
+
 function pathlessForm(p: string): string {
-  const skillMd = /^skills\/([a-z0-9][a-z0-9-]*)\/SKILL\.md$/.exec(p);
-  if (skillMd) return `the \`${skillMd[1]}\` skill`;
-  const ref = /^skills\/([a-z0-9][a-z0-9-]*)\/references\/([A-Za-z0-9._-]+)\.md$/.exec(p);
-  if (!ref) throw new Error(`unreachable: "${p}" matched PATH_SRC but neither shape`);
-  return `the \`${ref[1]}\` skill's ${ref[2].replace(/-/g, ' ')} reference`;
+  const m = PATH_MATCHER.exec(p);
+  if (!m) throw new Error(`unreachable: "${p}" matched PATH_SRC but not PATH_MATCHER — the two must stay in sync`);
+  const [, refSkill, refFile, skillOnlyName] = m;
+  if (skillOnlyName !== undefined) return `the \`${skillOnlyName}\` skill`;
+  return `the \`${refSkill}\` skill's ${refFile.replace(/-/g, ' ')} reference`;
 }
 
 export function stripIntraRegistryPaths(body: string): string {
