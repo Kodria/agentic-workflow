@@ -58,6 +58,18 @@ describe('ledger store — add/list', () => {
         expect(got).toHaveLength(2);
         expect(got.map(e => e.signature)).toEqual(['public-fn-returns-infinity', 's2']);
     });
+
+    test('listEntries skips a shape-invalid (but syntactically valid) entry without throwing', () => {
+        const p = ledgerPath(cwd, 'feat-x');
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        const missingDesc = JSON.stringify({ ts: 't', branch: 'feat-x', phase: 'p', source_skill: 's', polarity: 'finding', class: 'logica', signature: 'missing-desc', severity: 'minor', ref: 'a.ts:1' });
+        const nullDesc = JSON.stringify({ ...entry(), desc: null });
+        const numericSignature = JSON.stringify({ ...entry(), signature: 42 });
+        fs.writeFileSync(p, [missingDesc, nullDesc, numericSignature, JSON.stringify(entry({ signature: 's2' }))].join('\n') + '\n');
+        const got = listEntries(cwd, 'feat-x');
+        expect(got).toHaveLength(1);
+        expect(got[0].signature).toBe('s2');
+    });
 });
 
 describe('ledger store — detectBranch', () => {
@@ -128,6 +140,15 @@ describe('ledger store — recurring', () => {
         expect(clusters).toHaveLength(1);
         expect(clusters[0]).toMatchObject({ count: 2, kind: 'convergent' });
         expect(clusters[0].signatures).toEqual(['gate-walks-skills-only', 'validator-scope-skills-only']);
+    });
+
+    test('recurring does not crash on a shape-invalid entry mixed into an otherwise valid ledger', () => {
+        addEntry(cwd, entry({ signature: 'dup', desc: 'alpha slug mismatch', ref: 'src/a.ts:1' }));
+        addEntry(cwd, entry({ signature: 'dup', desc: 'alpha slug mismatch', ref: 'src/a.ts:1' }));
+        const p = ledgerPath(cwd, 'feat-x');
+        fs.appendFileSync(p, JSON.stringify({ ts: 't', branch: 'feat-x', phase: 'p', source_skill: 's', polarity: 'finding', class: 'logica', signature: 'no-desc', severity: 'minor', ref: 'b.ts:1' }) + '\n');
+        expect(() => recurring(cwd, 'feat-x', 2)).not.toThrow();
+        expect(recurring(cwd, 'feat-x', 2)).toEqual([expect.objectContaining({ signature: 'dup', count: 2 })]);
     });
 });
 
