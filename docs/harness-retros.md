@@ -3,6 +3,36 @@
 Auditable log of recurring/structural harness gaps converted into rules. See the
 `harness-retro` skill for the process. Newest first.
 
+## 2026-07-29 — ledger-clustering-and-export-path-cleanup plan: shape validation, file-convention drift, and a concurrent-git corruption incident
+
+- **Class:** security (1 blocker) + process (1 systemic, CONSTITUTION.md) + agent (1 incident, AGENTS.md)
+- **Branch:** `claude/agentic-workflow-awm-issues-dqka6l`
+- **Ledger:** 36 entries (13 findings, 23 wins) across 7 plan tasks (each with per-task spec+quality review), one whole-diff final code review, and post-implementation-qa's Track A (fidelity, 0 findings) + Track B 3-lens panel (robustness/security: 1 blocker + 1 minor; logic: 0; tests: 2 minor).
+
+### 1. Malformed-but-JSON-valid ledger entries crash `awm ledger recurring`
+
+- **Occurrences (ledger count):** 1, but `blocker` severity — cures regardless of recurrence per modo desatendido triage.
+- **Rule:** `CONSTITUTION.md` → "Validación de entrada", new bullet on shape-validating deserialized data before use.
+- **Sensor:** `test` (regression tests added directly in the fix: `cli/tests/core/ledger/store.test.ts`).
+- **Detalle:** `listEntries()`'s existing `try/catch` around `JSON.parse` only ever caught syntax errors; a syntactically-valid-but-shape-invalid entry (missing `desc`, `desc: null`, numeric `signature`) passed through untouched. The new clustering code (`normalizeTokens`, added by this same plan) calls `.toLowerCase()` on `signature`/`desc` unconditionally, so such an entry crashed `awm ledger recurring` with an uncaught `TypeError`, exit 1 — a genuine regression, since the pre-diff `Map`-keyed grouping never touched `desc` and tolerated the same input. Fixed with `isWellFormedEntry()`, extending the existing "skip malformed line" policy from JSON-syntax-only to shape validation of the 4 fields downstream code actually reads unconditionally.
+- **Descartes (modo desatendido):** ninguno relacionado a este hallazgo.
+
+### 2. 4-space-vs-2-space indentation drift recurred 3 times before being fully caught
+
+- **Occurrences (ledger count):** 3 (`transform-ts-mixed-indentation-introduced` in Task 5's production code; `transform-test-indentation-mismatch-recurs` in two tests appended to an existing block in Task 6; `transform-test-strip-block-still-4space-test-style` in an entire 11-test `describe` block added by Task 5 that survived two rounds of partial fixes untouched, caught only by the whole-diff final review).
+- **Rule:** `CONSTITUTION.md` → "Implementación", new bullet: match the target file's own established convention, not a sibling module's, when appending new code — and re-sweep the whole file (not just the lines a fix touched) when reviewing a partial fix to a shared file.
+- **Sensor:** ninguno mecánico — this repo's `eslint.config.awm.mjs` has no `indent` rule (only `no-unused-vars`/`no-undef`/`no-unreachable`); adding a blanket AST indent rule retroactively across the whole codebase without prior audit was considered and rejected as disproportionate scope for this cure (risk of flooding `lint` with unrelated baseline noise).
+- **Detalle:** Release A (`cluster.ts`/`cluster.test.ts`, new files) and Release B (`transform.ts`, an existing file) were implemented in the same session with different conventions — 4-space/`test()` for A, 2-space/`it()` already established in B. Code added to B copied A's convention instead of B's own. Each per-task fix (`b1d684b`, `5c582a6`) only re-indented the specific lines its own task had touched, never re-swept the file it was editing — so a whole block added two tasks earlier survived two separate "fixed" commits before the third, whole-diff-level review caught it.
+- **Descartes (modo desatendido):** ninguno relacionado a este patrón — las 3 ocurrencias fueron curadas (2 en código durante la sesión, 1 como regla de proceso acá).
+
+### 3. Concurrent QA subagents racing `git` commands corrupted the working tree, undetected by any subagent report
+
+- **Occurrences:** 1, not from the ledger (this was a controller-level observation, not emitted by any reviewer) — cured anyway given severity: it silently produced 7 reverted files mid-QA, and every affected subagent's own report gave no indication anything was wrong.
+- **Rule:** `AGENTS.md` → new section "Subagentes concurrentes y git".
+- **Sensor:** n/a — workflow/process instruction for the controller, not a code pattern.
+- **Detalle:** 4 QA lens subagents ran in parallel with Bash access to the same repo checkout. One ran `git checkout <base-commit> -- .` to inspect pre-existing-baseline sensor behavior and never fully restored — plausibly racing with its 3 siblings' own concurrent `git diff`/`git show` calls on the same tree. Commit history (HEAD, reflog) was never touched; only the working tree + index reverted to an older state across 7 files, silent until a routine `git status --short` surfaced it. Cured as: prefer `git show <ref>:<path>` (read-only) over `git checkout <ref> -- <path>` (mutates) when a subagent needs historical file content; isolate genuinely mutating comparisons in a `git worktree`; and the controller must `git status --short` after every round of parallel Bash-capable subagents, before trusting their reports.
+- **Descartes (modo desatendido):** ninguno.
+
 ## 2026-07-25 — Codex CLI provider plan: shared-state overwrite, R14 singleton-agent refusal, and the fix-needs-a-test gap
 
 - **Class:** logic (2 blockers) + structural (systemic duplication, escaping) + process (CONSTITUTION.md) + agent/API-pattern (AGENTS.md)
@@ -294,3 +324,5 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
 
 - `task6-r1-test-unneeded-third-sensor` (minor): test de R1 incluía un tercer sensor sin uso — simplificado durante la sesión, no requiere regla — cosmético y ya cerrado.
 - `skipped-plus-inconclusive-overall-untested` (minor): test sin assert de `overall` — agregado durante el fix loop de QA, no requiere regla — gap puntual ya cerrado.
+- **Plan `ledger-clustering-and-export-path-cleanup` (2026-07-29), 10 findings resueltos en código sin regla adicional:** `ledger-cluster-unused-ledgerentry-import` (falso positivo — deliberado, resuelto dando contexto al reviewer), `cluster-representative-cast-instead-of-non-null-assertion` (nit de estilo, fix de una línea), `url-guard-false-negative-after-parenthetical-strip` (bug real, fix estructural: regex de una sola pasada + test de regresión — ancla suficiente sin regla adicional), `path-shape-duplicated-across-path-src-and-pathlessform` (residuo de Task 5, cerrado en el fix loop de QA derivando `pathlessForm` de `PATH_SRC`), `export-pathlessform-unreachable-throw-aborts-bundle` (mismo fix que el anterior — el desync que lo hacía posible quedó estructuralmente cerrado), `cluster-no-min-boundary-test` y `url-guard-pathstart-zero-untested` (gaps de test coverage puntuales, cerrados con un test cada uno). Ninguno generaliza a una clase de bug repetible más allá del fix aplicado — cada uno queda anclado por su propio test de regresión, consistente con la regla ya vigente en `CONSTITUTION.md` ("todo fix debe incluir un test que reproduzca el caso").
+- Wins de diseño reforzados en el ledger pero no curados a AGENTS.md (`ledger-cluster-overlap-coefficient-choice`, `ledger-cluster-union-find-deterministic`, `whole-diff-two-releases-genuinely-independent`, y las 5 wins de `strip-intra-registry-paths-core-logic-sound`): decisiones correctas específicas del código de este plan, no patrones reusables por sesiones futuras — mantener AGENTS.md como índice curado, no diario de sesión.
