@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import type { LedgerEntry } from './types';
+import { clusterEntries } from './cluster';
+import type { RecurringCluster } from './cluster';
 
 const LEDGER_DIR = path.join('.awm', 'ledger');
 
@@ -40,23 +42,10 @@ export function listEntries(cwd: string, branch: string): LedgerEntry[] {
     return out;
 }
 
-export interface RecurringCluster {
-    signature: string;
-    count: number;
-    entries: LedgerEntry[];
-}
+export type { RecurringCluster, ClusterKind } from './cluster';
 
 export function recurring(cwd: string, branch: string, min: number): RecurringCluster[] {
-    const bySig = new Map<string, LedgerEntry[]>();
-    for (const e of listEntries(cwd, branch)) {
-        const arr = bySig.get(e.signature) ?? [];
-        arr.push(e);
-        bySig.set(e.signature, arr);
-    }
-    return [...bySig.entries()]
-        .map(([signature, entries]) => ({ signature, count: entries.length, entries }))
-        .filter(c => c.count >= min)
-        .sort((a, b) => b.count - a.count);
+    return clusterEntries(listEntries(cwd, branch), min);
 }
 
 export function archiveLedger(cwd: string, branch: string, label: string): boolean {

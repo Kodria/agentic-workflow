@@ -87,30 +87,47 @@ describe('ledger store — recurring', () => {
     beforeEach(() => { cwd = mkTmp(); });
     afterEach(() => { fs.rmSync(cwd, { recursive: true, force: true }); });
 
-    test('groups by signature and reports clusters with count >= min', () => {
+    test('groups by signature and reports clusters with count >= min', () => {  // verifies R1.1
         addEntry(cwd, entry({ signature: 'dup' }));
         addEntry(cwd, entry({ signature: 'dup' }));
-        addEntry(cwd, entry({ signature: 'solo' }));
+        addEntry(cwd, entry({ signature: 'solo', ref: 'src/other.ts:3', desc: 'pagination cursor skips a page' }));
         const clusters = recurring(cwd, 'feat-x', 2);
         expect(clusters).toHaveLength(1);
-        expect(clusters[0]).toMatchObject({ signature: 'dup', count: 2 });
+        expect(clusters[0]).toMatchObject({ signature: 'dup', count: 2, kind: 'exact' });
         expect(clusters[0].entries).toHaveLength(2);
     });
 
-    test('respects --min: count 2 is excluded when min is 3', () => {
+    test('respects --min: count 2 is excluded when min is 3', () => {  // verifies R1.1
         addEntry(cwd, entry({ signature: 'dup' }));
         addEntry(cwd, entry({ signature: 'dup' }));
         expect(recurring(cwd, 'feat-x', 3)).toEqual([]);
     });
 
-    test('sorts clusters by count descending', () => {
-        addEntry(cwd, entry({ signature: 'a' }));
-        addEntry(cwd, entry({ signature: 'a' }));
-        addEntry(cwd, entry({ signature: 'b' }));
-        addEntry(cwd, entry({ signature: 'b' }));
-        addEntry(cwd, entry({ signature: 'b' }));
+    test('sorts clusters by count descending', () => {  // verifies R1.9
+        addEntry(cwd, entry({ signature: 'a', ref: 'src/a.ts:1', desc: 'alpha slug mismatch' }));
+        addEntry(cwd, entry({ signature: 'a', ref: 'src/a.ts:1', desc: 'alpha slug mismatch' }));
+        addEntry(cwd, entry({ signature: 'b', ref: 'src/b.ts:1', desc: 'beta timeout on retry' }));
+        addEntry(cwd, entry({ signature: 'b', ref: 'src/b.ts:1', desc: 'beta timeout on retry' }));
+        addEntry(cwd, entry({ signature: 'b', ref: 'src/b.ts:1', desc: 'beta timeout on retry' }));
         const clusters = recurring(cwd, 'feat-x', 2);
         expect(clusters.map(c => c.signature)).toEqual(['b', 'a']);
+    });
+
+    test('reports independent lenses on one file as a single convergent cluster', () => {  // verifies R1.2, R1.5
+        addEntry(cwd, entry({
+            signature: 'validator-scope-skills-only',
+            desc: 'validator scope covers skills only',
+            ref: 'scripts/validate-portability.mjs:41',
+        }));
+        addEntry(cwd, entry({
+            signature: 'gate-walks-skills-only',
+            desc: 'the gate walks skills and nothing else',
+            ref: 'scripts/validate-portability.mjs:58',
+        }));
+        const clusters = recurring(cwd, 'feat-x', 2);
+        expect(clusters).toHaveLength(1);
+        expect(clusters[0]).toMatchObject({ count: 2, kind: 'convergent' });
+        expect(clusters[0].signatures).toEqual(['gate-walks-skills-only', 'validator-scope-skills-only']);
     });
 });
 
