@@ -123,7 +123,11 @@ when the system `zip` binary is available (folder-only fallback otherwise).
   skill explicitly is an error.
 - If `skills/<name>/port.claude-ai.md` exists in the registry, it is used verbatim;
   otherwise a mechanical transform strips AWM-only frontmatter fields (`version`,
-  `portable`) and appends a deference line to the description.
+  `portable`), appends a deference line to the description, and rewrites
+  intra-registry paths in the body (`skills/<other>/SKILL.md`,
+  `skills/<other>/references/<file>.md`) into pathless prose — those paths resolve
+  in Claude Code but never in claude.ai, where only the portable skill is uploaded.
+  Paths embedded in a URL are left alone, since those do resolve for the reader.
 - `--target <target>` (default `claude-ai`, the only target today) · `--out <dir>`
   (default `./awm-export`; artifacts are written under `<out>/<target>/`). Reads from
   the installed registry content roots.
