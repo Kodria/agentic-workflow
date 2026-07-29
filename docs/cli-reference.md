@@ -267,11 +267,24 @@ Print the current branch's ledger as JSON.
 
 ### `awm ledger recurring`
 
-Print signature clusters whose count meets a threshold (the recurrence signal `harness-retro` reads).
+Print recurrence clusters whose count meets a threshold (the recurrence signal `harness-retro` reads).
 
 ```
 awm ledger recurring [--min <n>]    # default --min 2
 ```
+
+Clustering uses three signals, in order of confidence: identical `signature`, then a shared
+source file in `ref` plus at least one word in common, then strong word overlap alone. Each
+cluster carries a `kind`:
+
+| `kind` | Meaning |
+|---|---|
+| `exact` | One distinct signature — the same emitter recurring across tasks. |
+| `convergent` | Two or more distinct signatures — independent reviewers landing on one defect, the stronger signal of a systemic problem. |
+
+Convergent clusters also list every distinct signature in `signatures`; `signature` itself is the
+most frequent one in the cluster. A `ref` that is not a file locus (e.g. `PR #16`) contributes no
+clustering signal, and a win is never merged with a finding on the strength of a shared file.
 
 ### `awm ledger archive`
 

@@ -56,7 +56,7 @@ export function registerLedgerCommand(program: Command): void {
 
     ledger
         .command('recurring')
-        .description('print signature clusters with count >= min (recurrence signal)')
+        .description('print recurrence clusters with count >= min (exact signature repeats and cross-reviewer convergence)')
         .option('--min <n>', 'minimum occurrences', '2')
         .option('--branch <branch>', 'override branch (default: git current branch)')
         .action((opts: { min: string; branch?: string }) => {
