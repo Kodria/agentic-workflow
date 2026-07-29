@@ -116,71 +116,71 @@ describe('claudeAiTransform', () => {
 });
 
 describe('stripIntraRegistryPaths', () => {
-    test('drops a parenthetical whose only content is a see-path', () => {  // verifies R2.1
-        expect(stripIntraRegistryPaths(
-            'crystallize into a `product-brief` (see `skills/product-brief/SKILL.md`) — the handoff.',
-        )).toBe('crystallize into a `product-brief` — the handoff.');
-    });
+  it('drops a parenthetical whose only content is a see-path', () => {  // verifies R2.1
+    expect(stripIntraRegistryPaths(
+      'crystallize into a `product-brief` (see `skills/product-brief/SKILL.md`) — the handoff.',
+    )).toBe('crystallize into a `product-brief` — the handoff.');
+  });
 
-    test('drops a bare-path parenthetical without leaving a space before the comma', () => {  // verifies R2.1
-        expect(stripIntraRegistryPaths(
-            'Same discipline as `brainstorming` (see `skills/brainstorming/SKILL.md`), applied at the business level.',
-        )).toBe('Same discipline as `brainstorming`, applied at the business level.');
-    });
+  it('drops a bare-path parenthetical without leaving a space before the comma', () => {  // verifies R2.1
+    expect(stripIntraRegistryPaths(
+      'Same discipline as `brainstorming` (see `skills/brainstorming/SKILL.md`), applied at the business level.',
+    )).toBe('Same discipline as `brainstorming`, applied at the business level.');
+  });
 
-    test('drops a parenthetical holding only a references path', () => {  // verifies R2.1
-        expect(stripIntraRegistryPaths(
-            "conforming to the brief contract's frontmatter (`skills/readiness-gate/references/brief-contract.md`), using:",
-        )).toBe("conforming to the brief contract's frontmatter, using:");
-    });
+  it('drops a parenthetical holding only a references path', () => {  // verifies R2.1
+    expect(stripIntraRegistryPaths(
+      "conforming to the brief contract's frontmatter (`skills/readiness-gate/references/brief-contract.md`), using:",
+    )).toBe("conforming to the brief contract's frontmatter, using:");
+  });
 
-    test('rewrites a path in place when the parenthetical carries more text', () => {  // verifies R2.2, R2.3
-        expect(stripIntraRegistryPaths(
-            'the literal YAML block below (see `skills/readiness-gate/references/brief-contract.md` for the full normative rules).',
-        )).toBe(
-            "the literal YAML block below (see the `readiness-gate` skill's brief contract reference for the full normative rules).",
-        );
-    });
+  it('rewrites a path in place when the parenthetical carries more text', () => {  // verifies R2.2, R2.3
+    expect(stripIntraRegistryPaths(
+      'the literal YAML block below (see `skills/readiness-gate/references/brief-contract.md` for the full normative rules).',
+    )).toBe(
+      "the literal YAML block below (see the `readiness-gate` skill's brief contract reference for the full normative rules).",
+    );
+  });
 
-    test('rewrites a bare unquoted path in prose', () => {  // verifies R2.2, R2.3
-        expect(stripIntraRegistryPaths(
-            'shape are normative — see skills/readiness-gate/references/brief-contract.md.',
-        )).toBe("shape are normative — see the `readiness-gate` skill's brief contract reference.");
-    });
+  it('rewrites a bare unquoted path in prose', () => {  // verifies R2.2, R2.3
+    expect(stripIntraRegistryPaths(
+      'shape are normative — see skills/readiness-gate/references/brief-contract.md.',
+    )).toBe("shape are normative — see the `readiness-gate` skill's brief contract reference.");
+  });
 
-    test('renders a SKILL.md path as a nameless skill reference', () => {  // verifies R2.3
-        expect(stripIntraRegistryPaths('invoke `skills/readiness-gate/SKILL.md` to certify it.'))
-            .toBe('invoke the `readiness-gate` skill to certify it.');
-    });
+  it('renders a SKILL.md path as a nameless skill reference', () => {  // verifies R2.3
+    expect(stripIntraRegistryPaths('invoke `skills/readiness-gate/SKILL.md` to certify it.'))
+      .toBe('invoke the `readiness-gate` skill to certify it.');
+  });
 
-    test('leaves a GitHub URL containing the same path untouched', () => {  // verifies R2.6
-        const url = 'see https://github.com/Kodria/awm-baseline-registry/blob/main/skills/readiness-gate/SKILL.md for the source.';
-        expect(stripIntraRegistryPaths(url)).toBe(url);
-    });
+  it('leaves a GitHub URL containing the same path untouched', () => {  // verifies R2.6
+    const url = 'see https://github.com/Kodria/awm-baseline-registry/blob/main/skills/readiness-gate/SKILL.md for the source.';
+    expect(stripIntraRegistryPaths(url)).toBe(url);
+  });
 
-    test('leaves a markdown link whose target is a URL untouched', () => {  // verifies R2.6
-        const link = '[the gate](https://github.com/Kodria/awm-baseline-registry/blob/main/skills/readiness-gate/references/brief-contract.md)';
-        expect(stripIntraRegistryPaths(link)).toBe(link);
-    });
+  it('leaves a markdown link whose target is a URL untouched', () => {  // verifies R2.6
+    const link = '[the gate](https://github.com/Kodria/awm-baseline-registry/blob/main/skills/readiness-gate/references/brief-contract.md)';
+    expect(stripIntraRegistryPaths(link)).toBe(link);
+  });
 
-    test('leaves prose with no intra-registry path byte-identical', () => {  // verifies R2.2
-        const body = '# Heading\n\nA body that cites `docs/plans/x.md` and nothing else.\n';
-        expect(stripIntraRegistryPaths(body)).toBe(body);
-    });
+  it('leaves prose with no intra-registry path byte-identical', () => {  // verifies R2.2
+    const body = '# Heading\n\nA body that cites `docs/plans/x.md` and nothing else.\n';
+    expect(stripIntraRegistryPaths(body)).toBe(body);
+  });
 
-    test('handles several paths in one body', () => {  // verifies R2.1, R2.2
-        expect(stripIntraRegistryPaths(
-            'hand off to `product-brief` (`skills/product-brief/SKILL.md`) then invoke `skills/readiness-gate/SKILL.md`.',
-        )).toBe('hand off to `product-brief` then invoke the `readiness-gate` skill.');
-    });
+  it('handles several paths in one body', () => {  // verifies R2.1, R2.2
+    expect(stripIntraRegistryPaths(
+      'hand off to `product-brief` (`skills/product-brief/SKILL.md`) then invoke `skills/readiness-gate/SKILL.md`.',
+    )).toBe('hand off to `product-brief` then invoke the `readiness-gate` skill.');
+  });
 
-    test('rewrites a path immediately following a dropped parenthetical, even with no separator', () => {  // verifies R2.1, R2.2, R2.6 (regression: two-pass splicing bug found in code review)
-        // Regression guard: a naive two-pass implementation (drop parentheticals,
-        // THEN rewrite bare paths on the already-mutated string) can splice a
-        // URL's trailing "/" directly against this path with zero separator,
-        // making the URL-embedding guard misfire and silently skip the rewrite.
-        expect(stripIntraRegistryPaths(
-            'See http://x.com/y/ (see `skills/a/SKILL.md`)skills/b/SKILL.md now.',
-        )).toBe('See http://x.com/y/the `b` skill now.');
-    });
+  it('rewrites a path immediately following a dropped parenthetical, even with no separator', () => {  // verifies R2.1, R2.2, R2.6 (regression: two-pass splicing bug found in code review)
+    // Regression guard: a naive two-pass implementation (drop parentheticals,
+    // THEN rewrite bare paths on the already-mutated string) can splice a
+    // URL's trailing "/" directly against this path with zero separator,
+    // making the URL-embedding guard misfire and silently skip the rewrite.
+    expect(stripIntraRegistryPaths(
+      'See http://x.com/y/ (see `skills/a/SKILL.md`)skills/b/SKILL.md now.',
+    )).toBe('See http://x.com/y/the `b` skill now.');
+  });
 });
