@@ -195,6 +195,25 @@ describe('clusterEntries — lexical convergence without a shared file', () => {
         ], 2);
         expect(clusters).toEqual([]);
     });
+
+    test('merges A and C transitively through B, though A and C alone would not cluster', () => {  // verifies R1.9 (regression guard on union-find transitivity)
+        const chain = [
+            entry({ signature: 'aaa-marker', desc: 'alpha beta gamma delta', ref: 'src/a.ts:1' }),
+            entry({ signature: 'bbb-marker', desc: 'beta gamma delta epsilon', ref: 'src/b.ts:1' }),
+            entry({ signature: 'ccc-marker', desc: 'gamma delta epsilon zeta', ref: 'src/c.ts:1' }),
+        ];
+        const clusters = clusterEntries(chain, 2);
+        expect(clusters).toHaveLength(1);
+        expect(clusters[0]).toMatchObject({ count: 3, kind: 'convergent' });
+        expect(clusters[0].signatures).toEqual(['aaa-marker', 'bbb-marker', 'ccc-marker']);
+
+        // Control: without the bridging entry, A and C do not satisfy the
+        // threshold on their own (affinity 0.5 < LEXICAL_AFFINITY_MIN 0.6) —
+        // proving the merge above genuinely relies on transitive closure
+        // through B, not a coincidence of the threshold being lenient.
+        const withoutBridge = clusterEntries([chain[0], chain[2]], 2);
+        expect(withoutBridge).toEqual([]);
+    });
 });
 
 describe('clusterEntries — representative and ordering', () => {

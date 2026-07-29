@@ -137,7 +137,7 @@ export function clusterEntries(entries: LedgerEntry[], min: number): RecurringCl
         // signatures viene ascendente y la comparación es estricta, así que un
         // empate de frecuencia deja parada la primera lexicográfica (R1.8).
         const representative = signatures.reduce(
-            (best, s) => ((freq.get(s) as number) > (freq.get(best) as number) ? s : best),
+            (best, s) => (freq.get(s)! > freq.get(best)! ? s : best),
             signatures[0],
         );
         clusters.push({
