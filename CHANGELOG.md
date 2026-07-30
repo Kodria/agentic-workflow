@@ -1,3 +1,17 @@
+## v3.4.0 - 2026-07-30
+
+### Features
+- **export:** add pathless rewriting of intra-registry references
+- **ledger:** cluster by ref and lexical affinity, labelling convergence
+- **ledger:** add pure similarity primitives for recurrence clustering
+
+### Fixes
+- **export:** derive pathlessForm from PATH_SRC's own fragments, closing the desync risk
+- **ledger:** stop crashing on shape-invalid-but-valid-JSON ledger entries
+- **export:** strip dead intra-registry paths from mechanically exported bodies
+- **export:** make path stripping a single pass, closing a splicing bug
+- **ledger:** recurring groups by similarity, not exact signature only
+
 ## v3.3.1 - 2026-07-28
 
 ### Fixes
