@@ -33,7 +33,7 @@ function makeRoot(): string {
     fs.mkdirSync(path.join(mermaid, 'references'));
     fs.writeFileSync(path.join(mermaid, 'references/flow.md'), 'flow reference bytes');
     const ported = mk('ported', ['name: ported', 'portable: true', 'description: "Ported."']);
-    fs.writeFileSync(path.join(ported, 'port.claude-ai.md'), '---\nname: ported\ndescription: "Custom port."\n---\nOverride body, verbatim.\n');
+    fs.writeFileSync(path.join(ported, 'port.claude-ai.md'), '---\nname: ported\ndescription: "Custom port."\n---\nOverride body, verbatim, citing `skills/readiness-gate/SKILL.md` on purpose.\n');
     return root;
 }
 
@@ -62,7 +62,7 @@ describe('runExport (engine end-to-end)', () => {
         expect(fs.readFileSync(path.join(out, 'claude-ai/mermaid/references/flow.md'), 'utf-8')).toBe('flow reference bytes');
 
         const portedMd = fs.readFileSync(path.join(out, 'claude-ai/ported/SKILL.md'), 'utf-8');
-        expect(portedMd).toBe('---\nname: ported\ndescription: "Custom port."\n---\nOverride body, verbatim.\n');  // cero transforms
+        expect(portedMd).toBe('---\nname: ported\ndescription: "Custom port."\n---\nOverride body, verbatim, citing `skills/readiness-gate/SKILL.md` on purpose.\n');  // cero transforms
     });
 
     it('rejects an unknown target listing the valid ones', () => {  // verifies R1.3
@@ -105,5 +105,11 @@ describe('runExport (engine end-to-end)', () => {
             process.chdir(originalCwd);
             fs.rmSync(cwdTmp, { recursive: true, force: true });
         }
+    });
+
+    it('does not rewrite paths inside a verbatim override', () => {  // verifies R2.5
+        runExport({ name: 'dev', out, roots: [root], zip: okZip });
+        const portedMd = fs.readFileSync(path.join(out, 'claude-ai/ported/SKILL.md'), 'utf-8');
+        expect(portedMd).toContain('citing `skills/readiness-gate/SKILL.md` on purpose');
     });
 });

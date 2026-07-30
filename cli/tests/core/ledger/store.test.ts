@@ -58,6 +58,18 @@ describe('ledger store — add/list', () => {
         expect(got).toHaveLength(2);
         expect(got.map(e => e.signature)).toEqual(['public-fn-returns-infinity', 's2']);
     });
+
+    test('listEntries skips a shape-invalid (but syntactically valid) entry without throwing', () => {
+        const p = ledgerPath(cwd, 'feat-x');
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        const missingDesc = JSON.stringify({ ts: 't', branch: 'feat-x', phase: 'p', source_skill: 's', polarity: 'finding', class: 'logica', signature: 'missing-desc', severity: 'minor', ref: 'a.ts:1' });
+        const nullDesc = JSON.stringify({ ...entry(), desc: null });
+        const numericSignature = JSON.stringify({ ...entry(), signature: 42 });
+        fs.writeFileSync(p, [missingDesc, nullDesc, numericSignature, JSON.stringify(entry({ signature: 's2' }))].join('\n') + '\n');
+        const got = listEntries(cwd, 'feat-x');
+        expect(got).toHaveLength(1);
+        expect(got[0].signature).toBe('s2');
+    });
 });
 
 describe('ledger store — detectBranch', () => {
@@ -87,30 +99,56 @@ describe('ledger store — recurring', () => {
     beforeEach(() => { cwd = mkTmp(); });
     afterEach(() => { fs.rmSync(cwd, { recursive: true, force: true }); });
 
-    test('groups by signature and reports clusters with count >= min', () => {
+    test('groups by signature and reports clusters with count >= min', () => {  // verifies R1.1
         addEntry(cwd, entry({ signature: 'dup' }));
         addEntry(cwd, entry({ signature: 'dup' }));
-        addEntry(cwd, entry({ signature: 'solo' }));
+        addEntry(cwd, entry({ signature: 'solo', ref: 'src/other.ts:3', desc: 'pagination cursor skips a page' }));
         const clusters = recurring(cwd, 'feat-x', 2);
         expect(clusters).toHaveLength(1);
-        expect(clusters[0]).toMatchObject({ signature: 'dup', count: 2 });
+        expect(clusters[0]).toMatchObject({ signature: 'dup', count: 2, kind: 'exact' });
         expect(clusters[0].entries).toHaveLength(2);
     });
 
-    test('respects --min: count 2 is excluded when min is 3', () => {
+    test('respects --min: count 2 is excluded when min is 3', () => {  // verifies R1.1
         addEntry(cwd, entry({ signature: 'dup' }));
         addEntry(cwd, entry({ signature: 'dup' }));
         expect(recurring(cwd, 'feat-x', 3)).toEqual([]);
     });
 
-    test('sorts clusters by count descending', () => {
-        addEntry(cwd, entry({ signature: 'a' }));
-        addEntry(cwd, entry({ signature: 'a' }));
-        addEntry(cwd, entry({ signature: 'b' }));
-        addEntry(cwd, entry({ signature: 'b' }));
-        addEntry(cwd, entry({ signature: 'b' }));
+    test('sorts clusters by count descending', () => {  // verifies R1.9
+        addEntry(cwd, entry({ signature: 'a', ref: 'src/a.ts:1', desc: 'alpha slug mismatch' }));
+        addEntry(cwd, entry({ signature: 'a', ref: 'src/a.ts:1', desc: 'alpha slug mismatch' }));
+        addEntry(cwd, entry({ signature: 'b', ref: 'src/b.ts:1', desc: 'beta timeout on retry' }));
+        addEntry(cwd, entry({ signature: 'b', ref: 'src/b.ts:1', desc: 'beta timeout on retry' }));
+        addEntry(cwd, entry({ signature: 'b', ref: 'src/b.ts:1', desc: 'beta timeout on retry' }));
         const clusters = recurring(cwd, 'feat-x', 2);
         expect(clusters.map(c => c.signature)).toEqual(['b', 'a']);
+    });
+
+    test('reports independent lenses on one file as a single convergent cluster', () => {  // verifies R1.2, R1.5
+        addEntry(cwd, entry({
+            signature: 'validator-scope-skills-only',
+            desc: 'validator scope covers skills only',
+            ref: 'scripts/validate-portability.mjs:41',
+        }));
+        addEntry(cwd, entry({
+            signature: 'gate-walks-skills-only',
+            desc: 'the gate walks skills and nothing else',
+            ref: 'scripts/validate-portability.mjs:58',
+        }));
+        const clusters = recurring(cwd, 'feat-x', 2);
+        expect(clusters).toHaveLength(1);
+        expect(clusters[0]).toMatchObject({ count: 2, kind: 'convergent' });
+        expect(clusters[0].signatures).toEqual(['gate-walks-skills-only', 'validator-scope-skills-only']);
+    });
+
+    test('recurring does not crash on a shape-invalid entry mixed into an otherwise valid ledger', () => {
+        addEntry(cwd, entry({ signature: 'dup', desc: 'alpha slug mismatch', ref: 'src/a.ts:1' }));
+        addEntry(cwd, entry({ signature: 'dup', desc: 'alpha slug mismatch', ref: 'src/a.ts:1' }));
+        const p = ledgerPath(cwd, 'feat-x');
+        fs.appendFileSync(p, JSON.stringify({ ts: 't', branch: 'feat-x', phase: 'p', source_skill: 's', polarity: 'finding', class: 'logica', signature: 'no-desc', severity: 'minor', ref: 'b.ts:1' }) + '\n');
+        expect(() => recurring(cwd, 'feat-x', 2)).not.toThrow();
+        expect(recurring(cwd, 'feat-x', 2)).toEqual([expect.objectContaining({ signature: 'dup', count: 2 })]);
     });
 });
 

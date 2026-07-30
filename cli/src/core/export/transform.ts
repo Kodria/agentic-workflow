@@ -6,6 +6,60 @@
 export const DEFERENCE_LINE = (skillName: string): string =>
   `In environments with AWM installed (Claude Code), defer to the registry's ${skillName} skill — this port is for environments without filesystem access.`;
 
+// Paths intra-registry: resuelven en Claude Code (donde el registry está en
+// disco) y nunca en claude.ai, donde solo se sube la skill portable. Se limpian
+// en el artefacto exportado en vez de editar el SKILL.md canónico, que en Claude
+// Code sí los necesita.
+const SKILL_NAME = '[a-z0-9][a-z0-9-]*';
+const REF_FILE = '[A-Za-z0-9._-]+';
+const PATH_SRC = '(?:skills\\/' + SKILL_NAME + '\\/references\\/' + REF_FILE + '\\.md'
+  + '|skills\\/' + SKILL_NAME + '\\/SKILL\\.md)';
+
+/** Reconoce, en una sola pasada sobre el body ORIGINAL, tanto el caso
+ * "paréntesis cuyo único contenido es un path" (grupo 1) como el path suelto
+ * en cualquier otra posición (grupo 2). Una sola pasada evita un bug real de
+ * splicing encontrado en code review: si se borrara el paréntesis en una
+ * pasada separada, un path inmediatamente siguiente podría quedar pegado a
+ * texto que antes terminaba en `/` (el cierre de una URL, p. ej.), y el guard
+ * de "embebido en URL" (que mira el carácter previo) confundiría eso con un
+ * path genuinamente embebido. Matcheando todo en una sola pasada contra el
+ * string original, cada offset que llega a `isEmbeddedInUrl` es siempre real,
+ * nunca un artefacto de un borrado previo. */
+const PATH_OR_DROPPED_PAREN = new RegExp(
+  '([ \\t]*\\((?:see[ \\t]+)?`?' + PATH_SRC + '`?\\))' + '|' + '(`?' + PATH_SRC + '`?)',
+  'g',
+);
+
+/** Un path precedido por `/` es el final de una URL o de un path más largo (un
+ * enlace a GitHub, por ejemplo). Esas referencias SÍ resuelven para quien lee la
+ * skill en claude.ai, así que no se tocan. */
+function isEmbeddedInUrl(haystack: string, matchStart: number, matched: string): boolean {
+  const pathStart = matchStart + matched.indexOf('skills/');
+  return pathStart > 0 && haystack[pathStart - 1] === '/';
+}
+
+const PATH_MATCHER = new RegExp(
+  '^skills\\/(' + SKILL_NAME + ')\\/references\\/(' + REF_FILE + ')\\.md$'
+  + '|^skills\\/(' + SKILL_NAME + ')\\/SKILL\\.md$',
+);
+
+function pathlessForm(p: string): string {
+  const m = PATH_MATCHER.exec(p);
+  if (!m) throw new Error(`unreachable: "${p}" matched PATH_SRC but not PATH_MATCHER — the two must stay in sync`);
+  const [, refSkill, refFile, skillOnlyName] = m;
+  if (skillOnlyName !== undefined) return `the \`${skillOnlyName}\` skill`;
+  return `the \`${refSkill}\` skill's ${refFile.replace(/-/g, ' ')} reference`;
+}
+
+export function stripIntraRegistryPaths(body: string): string {
+  return body.replace(PATH_OR_DROPPED_PAREN, (match, parenForm, bareForm, offset) => {
+    if (isEmbeddedInUrl(body, offset, match)) return match;
+    if (parenForm !== undefined) return '';
+    const path = bareForm.replace(/^`|`$/g, '');
+    return pathlessForm(path);
+  });
+}
+
 export function claudeAiTransform(skillMd: string, skillName: string): string {
   // \r?\n-tolerant, same rationale as readArtifactDescription in discovery.ts:
   // SKILL.md files may be CRLF-terminated and that's still valid frontmatter.
@@ -52,5 +106,7 @@ export function claudeAiTransform(skillMd: string, skillName: string): string {
       : `${value} ${deference}`;
   fmLines[descIdx] = `description: ${newValue}`;
 
-  return `---\n${fmLines.join('\n')}\n---\n${body}`;
+  // Solo el body: el frontmatter ya se editó arriba y sus campos no son prosa
+  // navegable (R2.4).
+  return `---\n${fmLines.join('\n')}\n---\n${stripIntraRegistryPaths(body)}`;
 }
