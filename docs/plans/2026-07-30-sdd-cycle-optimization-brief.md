@@ -3,7 +3,7 @@ awm: product-brief
 schema: 1
 title: Optimización del ciclo SDD sin pérdida de calidad
 mode: brief
-readiness: draft
+readiness: ready
 created: 2026-07-30
 updated: 2026-07-30
 open_decisions: [DA-1, DA-2, DA-3, DA-4, DA-5, DA-6]
@@ -56,6 +56,8 @@ Casos borde que el diseño debe cubrir:
 - **Split contenido/CLI**: los cambios de proceso (skills, prompts, packs) viven en `awm-baseline-registry` y llegan vía tag + `awm update`; solo la pata de comando de la detección vive en el CLI (`agentic-workflow`), cuyo publish a npm es automático en CI.
 - **Multi-provider como criterio de aceptación, no como aspiración**: toda capacidad declara su comportamiento en los tres providers (soportado / degradado explícito), verificado contra la matriz de capacidades de R0.
 - **Retrocompatibilidad de contenido**: planes existentes sin los campos nuevos deben ejecutar exactamente igual que hoy.
+- **Costo**: sin infraestructura paga nueva ni suscripciones adicionales. El presupuesto de tokens por ciclo debe bajar o mantenerse — es parte de N1; una optimización que compre velocidad subiendo el gasto de tokens no cumple la necesidad.
+- **Privacidad**: sin dimensión nueva — el ledger, los planes y la evidencia de gates ya viven dentro del repositorio del proyecto y no salen de él. La detección de cobertura no exporta contenido del proyecto a ningún servicio externo.
 
 ## Non-Assumption Mandate
 
@@ -184,9 +186,9 @@ flowchart TD
 | DA-1 | Métrica de no-regresión de calidad y ventana de medición: ¿hallazgos de QA post-implementación por ciclo? ¿bugs escapados a producción/uso? ¿ambos? ¿cuántos ciclos de ventana? | Release 1 | (a) findings del panel de QA por ciclo, ventana de 3 ciclos; (b) bugs reportados post-merge, ventana de 30 días; (c) combinación |
 | DA-2 | ¿La degradación a no-op reportado satisface el criterio del dueño "funcional en todo o no sirve" para el tiering de modelo, o el tiering se retiene hasta que los tres providers soporten selección nativa? | Release 4 | (a) no-op reportado es aceptable (la intención viaja en el plan, agnóstica); (b) retener hasta soporte pleno confirmado por R0 |
 | DA-3 | Aislamiento por worktree para paralelismo: ¿requisito duro (sin worktree no hay feature) o fallback a serial aceptable como degradación? | Release 5 | (a) fallback a serial (propuesto: el plan sigue siendo válido en los tres providers); (b) requisito duro |
-| DA-4 | ¿Dónde viven los sets de referencia de sensores y quién los mantiene? | Release 3 | (a) dentro de cada sensor-pack del registry baseline, mantenidos con el pack (propuesto); (b) archivo separado por stack en el registry; (c) en el CLI |
+| DA-4 | ¿Dónde viven los sets de referencia de sensores y quién los mantiene? | Release 2 | (a) dentro de cada sensor-pack del registry baseline, mantenidos con el pack (propuesto); (b) archivo separado por stack en el registry; (c) en el CLI |
 | DA-5 | Umbral de la detección empírica: ¿cuántos hallazgos convergentes manuales de una clase disparan el reporte de "sensor faltante"? | none | Configurable con default (propuesto: cluster convergente de ≥2, alineado con `--min 2` de `awm ledger recurring`) |
-| DA-6 | ¿La detección solo reporta el gap, o además sugiere la remediación (comando/config propuesto, sin ejecutarlo)? | Release 3 | (a) reporte + sugerencia no ejecutada (propuesto); (b) solo reporte |
+| DA-6 | ¿La detección solo reporta el gap, o además sugiere la remediación (comando/config propuesto, sin ejecutarlo)? | Release 2 | (a) reporte + sugerencia no ejecutada (propuesto); (b) solo reporte |
 
 ## Out of Scope
 
@@ -225,7 +227,7 @@ El orden es por valor de negocio: primero lo que reduce el dolor de N1 en *todos
 
 - **Value:** convierte el ledger en detector de gaps: la recurrencia manual convergente —visible desde v3.4.0— se vuelve señal automática de sensor faltante, cerrando el loop de aprendizaje del harness.
 - **Scope:** RF-1.2, RF-1.3 · RNF-T.2. (CLI, sobre la base de Release 2.)
-- **Blocked by:** DA-5 (resoluble por default configurable).
+- **Blocked by:** none — DA-5 queda abierta pero no bloquea: se implementa con el default propuesto (configurable) y el dueño lo ajusta cuando decida.
 - **Acceptance:** CA-1.2, CA-1.3 — contra el ledger archivado real citado.
 
 ### Release 4 — Tier declarativo de modelo (condicionado)
