@@ -3,7 +3,7 @@ awm: product-brief
 schema: 1
 title: Optimización del ciclo SDD sin pérdida de calidad
 mode: brief
-readiness: draft
+readiness: ready
 created: 2026-07-30
 updated: 2026-07-30
 open_decisions: [DA-1, DA-2, DA-3, DA-4, DA-5, DA-6]
