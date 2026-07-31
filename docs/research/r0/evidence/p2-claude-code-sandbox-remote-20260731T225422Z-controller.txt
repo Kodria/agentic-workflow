@@ -1,0 +1,2 @@
+modelo de la sesión (controlador): claude-fable-5
+procedencia: metadato del harness — el system prompt de esta sesión declara "The exact model ID is claude-fable-5", y el comando local /model del turno vigente confirmó "Set model to claude-fable-5". No es inferencia ni el nombre solicitado a un despacho.
