@@ -70,6 +70,10 @@ function main() {
       const out = path.join(dir, `mech-${provider}-${envLabel}-${stamp}.json`);
       fs.writeFileSync(out, JSON.stringify(result, null, 2) + '\n');
       process.stdout.write(`${out}\n`);
+    })
+    .catch((e) => {
+      process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`);
+      process.exit(1);
     });
 }
 
