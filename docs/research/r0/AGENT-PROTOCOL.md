@@ -11,7 +11,7 @@ Preparación: `STAMP=$(date -u +%Y%m%dT%H%M%SZ)`; los artefactos van en
 Alcance de sistema operativo: macOS y Linux. Windows queda fuera de alcance de este protocolo (ver `RUNBOOK.md`).
 
 ## P1 — Despacho y paralelismo de subagentes
-1. Despachá DOS subagentes a la vez (si tu harness lo permite), cada uno con esta instrucción exacta: "Durante 20 segundos, cada ~1s, agregá una línea `$(date +%s%3N)` al archivo `<evidence>/p1-<provider>-<env>-<STAMP>-<a|b>.log`, luego terminá".
+1. Despachá DOS subagentes a la vez (si tu harness lo permite), cada uno con esta instrucción exacta: "Durante 20 segundos, cada ~1s, agregá una línea `$(node -e 'process.stdout.write(String(Date.now()))')` al archivo `<evidence>/p1-<provider>-<env>-<STAMP>-<a|b>.log`, luego terminá". (Se usa Node y no `date +%s%3N` porque el `date` BSD de macOS no soporta `%N` y deja el sufijo como literal — hallazgo real de la corrida `codex@owner-mac`; Node ≥20 ya es prerequisito del kit.)
 2. Verdad: si existen ambos logs y sus rangos de timestamps se SOLAPAN, hay paralelismo real. Si ambos logs existen pero sus rangos NO se solapan (corrieron uno tras otro), `p1Dispatch: soportado` pero `p1Parallel: no-soportado` — el despacho existe, el paralelismo no. Si solo se pudo despachar de a uno, `p1Parallel: no-soportado` y `p1Dispatch: soportado`. Si no hay despacho de subagentes, ambos `no-soportado`.
 
 ## P2 — Override de modelo por despacho
