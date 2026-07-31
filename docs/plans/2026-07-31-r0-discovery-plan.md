@@ -747,7 +747,7 @@ _Requirements: R9_
 |---|---|---|
 | R1 | T1 | Estructura bajo `docs/research/r0/` (Step 6 de T1 commitea solo ese árbol); ninguna task toca `cli/` ni configs — auditable por `git diff --stat` del branch |
 | R2 | T1, T6 | T1 Step 5: JSON estampado creado con args válidos; T6 Step 2: fingerprint + tres sondas en corrida real |
-| R2.1 | T1, T2 | Revisión de imports: solo `node:*` (verificable con `grep -rn "from '" docs/research/r0/probes/ \| grep -v node:` → vacío) |
+| R2.1 | T1, T2 | Revisión de imports: solo `node:*` o relativos entre archivos del propio kit, cero paquetes npm (verificable con `grep -rn "from '" docs/research/r0/probes/ \| grep -v node: \| grep -v "\./"` → vacío; ausencia de `package.json`/`node_modules` confirma cero dependencias externas) |
 | R2.2 | T1 | Step 5: dos corridas ⇒ dos archivos distintos |
 | R3 | T2 | Step 4: tres sondas con estado real en sandbox |
 | R3.1 | T2, T6 | Step 4/2: codex/opencode ausentes ⇒ `no-verificable-aquí: binario ausente`, corrida completa exit 0 |
