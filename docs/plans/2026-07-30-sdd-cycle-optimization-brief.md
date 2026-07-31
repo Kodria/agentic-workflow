@@ -5,7 +5,7 @@ title: Optimización del ciclo SDD sin pérdida de calidad
 mode: brief
 readiness: ready
 created: 2026-07-30
-updated: 2026-07-30
+updated: 2026-07-31
 open_decisions: [DA-1, DA-2, DA-3, DA-4, DA-5, DA-6]
 project: awm-sdd-optimization
 ---
@@ -18,7 +18,7 @@ Audiencia: agente de análisis/pair (provider-neutral) · Metodología: brief-sp
 
 - **N1** — El dueño del framework AWM ejecuta desarrollos vía el ciclo `subagent-driven-development` (SDD: un subagente implementador + dos subagentes revisores por tarea, más un panel de QA multi-lente al cierre) y cada desarrollo está tardando **horas**. En la única sesión instrumentada de punta a punta (2026-07-29, rama `claude/agentic-workflow-awm-issues-dqka6l`, PR agentic-workflow#19), un diff de +1878/−35 líneas en 15 archivos costó ~115 minutos post-plan (77 de ejecución SDD, 18 de QA, 7 de retro, más 13 de plan), 23 despachos de subagente, ~1.57M tokens reportados por subagentes y una relación revisión:implementación de 4.2:1. El costo de no resolverlo: cada ciclo de desarrollo paga ese sobreprecio, y el dueño lo paga en tiempo de calendario.
 - **N2** — El rigor del proceso de calidad **es la fuente de su valor y no puede perderse**: el dueño reporta que cada vez se encuentran menos bugs al terminar un desarrollo, y en la sesión medida el aparato de revisión atrapó 3 defectos reales que ningún sensor mecánico habría detectado (un bug sutil de regex que venía especificado *en el plan mismo*, un crash con datos históricos mal formados, un gap de cobertura en la propiedad transitiva de un algoritmo). Cualquier optimización que degrade esa capacidad es una no-solución.
-- **N3** — El dueño opera AWM con **tres providers**: Claude Code, Codex y OpenCode. Una optimización que solo funcione en uno no sirve: toda capacidad nueva debe funcionar en los tres o degradar de forma explícita y segura donde falte soporte.
+- **N3** — El dueño opera AWM con **dos providers**: Claude Code y Codex. Una optimización que solo funcione en uno no sirve: toda capacidad nueva debe funcionar en ambos o degradar de forma explícita y segura donde falte soporte. *(Actualizado 2026-07-31 por decisión del dueño, registrada en issue #20 durante R0: OpenCode — originalmente tercer provider de este requisito — queda desestimado y fuera del alcance de la iniciativa.)*
 - **N4** — El ciclo no es delegable de forma desatendida si su continuidad depende de que un agente, turno o invocación permanezca vivo: una revisión puede quedar sin veredicto, una verificación legítimamente larga puede superar los límites de una invocación, o el controlador puede perder su punto exacto de continuación. AWM debe conservar estado y resultados fuera de la memoria del agente, reanudar idempotentemente y prohibir un cierre silencioso mientras exista trabajo pendiente, sin introducir semántica exclusiva de ningún provider.
 
 ## Business Cases
@@ -51,7 +51,7 @@ Casos borde que el diseño debe cubrir:
 
 ## Users & Context
 
-- **El dueño del framework** (operador único hoy) — lanza ciclos SDD desde Claude Code, Codex u OpenCode según el contexto; sufre N1 en tiempo de calendario y depende de N2 para confiar en merges sin re-revisión manual.
+- **El dueño del framework** (operador único hoy) — lanza ciclos SDD desde Claude Code o Codex según el contexto (OpenCode desestimado 2026-07-31, ver N3); sufre N1 en tiempo de calendario y depende de N2 para confiar en merges sin re-revisión manual.
 - **El agente controlador** — el agente que orquesta el ciclo SDD dentro de una sesión: despacha subagentes, aplica gates, marca tareas completas. Es el usuario directo de PR-2 y PR-4.
 - **Los subagentes** (implementadores y revisores) — reciben prompts construidos desde templates del registry; son los destinatarios de PR-3 (tier) y del cambio de alcance de verificación en PR-2.
 - **El runner durable de verificaciones** — componente provider-neutral que registra, ejecuta y conserva el estado/salida de verificaciones mecánicas por `job-id`; su vida no depende de la del agente que solicitó el trabajo.
@@ -99,7 +99,7 @@ Cualquier contradicción entre este brief y el sistema real encontrada durante R
 | Sensor-pack | Conjunto de configuraciones de sensores por stack, distribuido vía registry (`sensor-packs/js-ts/`, etc.). |
 | Ledger | Registro por-rama (`awm ledger`) donde revisores y QA emiten hallazgos y aciertos; insumo de `harness-retro`. |
 | Cluster convergente | Grupo de hallazgos del ledger con firmas distintas que `awm ledger recurring` (v3.4.0+) une por archivo compartido o afinidad léxica: la señal de que revisores independientes encontraron el mismo defecto. |
-| Provider / runtime | El agente-host donde corre AWM: Claude Code, Codex u OpenCode. |
+| Provider / runtime | El agente-host donde corre AWM: Claude Code o Codex (OpenCode desestimado 2026-07-31, ver N3). |
 | Worktree | Checkout adicional de git (`git worktree add`) que aísla un árbol de trabajo del principal. |
 | Tier | Declaración de complejidad por tarea del plan que expresa qué capacidad de modelo necesita su implementador. |
 | Gate | Condición verificable que debe cumplirse antes de avanzar de fase; "mecánico" = su incumplimiento bloquea por construcción, no por memoria del agente. |

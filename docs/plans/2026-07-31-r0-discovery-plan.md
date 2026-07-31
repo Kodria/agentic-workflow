@@ -30,7 +30,7 @@
 
 - **Requirements R1–R10** = los del design doc `2026-07-31-r0-discovery-design.md` (no confundir con los `RF-x.y` del brief).
 - **Ejecutor: controlador inline** — las Tasks 7–9 ejercitan primitivas del propio harness (despacho paralelo, fin de turno, override de modelo) que un subagente no puede ejercitar con fidelidad (no puede terminar el turno de la sesión, y su capacidad de despacho anidado no es representativa). Las ejecuta el controlador; el spec-review posterior audita los **artefactos**, que son la verdad (R4), no el relato.
-- **Fase C condicionada** — las Tasks 12–13 verifican primero que exista evidencia de Fase B (`evidence/mech-codex-*` y `mech-opencode-*`); si no existe, reportan BLOCKED y el ciclo se detiene ahí legítimamente (es el corte natural: la Fase B es del dueño). La Task 14 (validación del dueño, R9) es autoridad externa: siempre interactiva, el modo desatendido no la salta.
+- **Fase C condicionada** — las Tasks 12–13 verifican primero que exista evidencia de Fase B (`evidence/mech-codex-*`; el requisito original de `mech-opencode-*` quedó desestimado el 2026-07-31 por decisión del dueño — OpenCode fuera del alcance de la iniciativa, ver R10 del design doc e issue #20); si no existe, reportan BLOCKED y el ciclo se detiene ahí legítimamente (es el corte natural: la Fase B es del dueño). La Task 14 (validación del dueño, R9) es autoridad externa: siempre interactiva, el modo desatendido no la salta.
 - **Verificación del kit**: proporcional por diseño (ver §Verificación del design doc) — smoke real + caso de conflicto fabricado para el consolidador; sin suite Jest (el kit es tooling descartable de descubrimiento, no producto; acoplarlo a `cli/tests/` violaría esa frontera).
 
 ## Estructura de archivos
@@ -726,7 +726,7 @@ git push
 
 _Requirements: R5.2, R10_
 
-- [ ] **Step 1: Gate de evidencia.** `ls docs/research/r0/evidence/ | grep -c 'codex-'` y `grep -c 'opencode-'` → si alguno es 0, **BLOCKED**: reportar "esperando evidencia de Fase B (dueño)" y detener el ciclo aquí — corte legítimo, no fallo.
+- [ ] **Step 1: Gate de evidencia.** `ls docs/research/r0/evidence/ | grep -c 'codex-'` → si es 0, **BLOCKED**: reportar "esperando evidencia de Fase B (dueño)" y detener el ciclo aquí — corte legítimo, no fallo. *(El gate original también exigía `opencode-`; desestimado 2026-07-31 por decisión del dueño — ver R10 del design doc.)*
 - [ ] **Step 2:** Reconsolidar; revisar conflictos (si los hay, se muestran — R5.2); commit de la matriz completa.
 
 ### Task 13 (condicionada a Fase B): report.md
@@ -762,7 +762,7 @@ _Requirements: R9_
 | R7, R7.1 | T13 | Step 2: secciones presentes incl. Contradicciones (grep proxy + validación del dueño en T14) |
 | R8 | T5, T13 | T5 Step 2: declaración Windows; T13: repetida en el informe |
 | R9 | T14 | Comentario de validación del dueño en #20 — sin proxy automatizable, es el gate humano |
-| R10 | T5, T6, T11, T12, T13 | Corridas obligatorias: T6/T11 (fila A), T12 gate codex+opencode, T13 declara las existentes |
+| R10 | T5, T6, T11, T12, T13 | Corridas obligatorias: T6/T11 (fila A), T12 gate codex (opencode desestimado 2026-07-31), T13 declara las existentes |
 
 ## Analyze gate
 

@@ -1,11 +1,13 @@
 # RUNBOOK — Fase B (corridas del dueño)
 
-Objetivo: completar las filas `codex@owner-mac` y `opencode@owner-mac` de la
-matriz (obligatorias — design doc R10) y, opcional, `claude-code@owner-mac`.
+Objetivo: completar la fila `codex@owner-mac` de la matriz (obligatoria —
+design doc R10) y, opcional, `claude-code@owner-mac`. *(La fila
+`opencode@owner-mac` fue desestimada el 2026-07-31 por decisión del dueño:
+OpenCode queda fuera del alcance de la iniciativa — issue #20.)*
 Windows está fuera de alcance (decisión de diseño, R8). Cada corrida son
 minutos, no horas.
 
-## Por cada provider (Codex primero, luego OpenCode)
+## Por cada provider (Codex; OpenCode desestimado)
 
 1. Abrí una sesión del provider sobre este repo, rama
    `claude/agentic-workflow-awm-issues-dqka6l`, actualizada (`git pull`).

@@ -29,7 +29,7 @@ donde una fila materializa la aceptación del brief para Release 0, se cita.
   - **R7.1** — IF la evidencia contradice un supuesto del brief, THEN la contradicción SHALL registrarse en el informe y reportarse al dueño — SHALL NOT resolverse asumiendo; si amerita, nace una `DA-#` nueva en el brief.
 - **R8** — THE estudio de portabilidad del runner SHALL cubrir macOS y Linux; Windows SHALL declararse fuera de alcance en el informe.
 - **R9** — WHILE el dueño no haya validado `report.md`, THE Release 0 SHALL considerarse incompleto — la validación se registra en el issue #20. *(Materializa: "validado por el dueño" de la aceptación.)*
-- **R10** — THE corridas obligatorias de la matriz SHALL ser `claude-code@sandbox-remoto` (Fase A), `codex@máquina-del-dueño` y `opencode@máquina-del-dueño` (Fase B); `claude-code@mac-del-dueño` SHALL ser opcional y el informe SHALL declarar qué corridas existieron.
+- **R10** — THE corridas obligatorias de la matriz SHALL ser `claude-code@sandbox-remoto` (Fase A) y `codex@máquina-del-dueño` (Fase B); `claude-code@mac-del-dueño` SHALL ser opcional y el informe SHALL declarar qué corridas existieron. *(Modificado 2026-07-31 por decisión del dueño, registrada en issue #20: OpenCode queda fuera del alcance de la iniciativa — el set de providers es Claude Code + Codex. La fila `opencode@máquina-del-dueño`, originalmente obligatoria, se desestima.)*
 
 ## Estructura
 
@@ -67,7 +67,7 @@ no el relato del agente).
 | Fase | Quién / dónde | Contenido |
 |---|---|---|
 | **A** | Esta sesión (Claude Code sandbox) | Construir el kit · correrlo aquí (primera fila de la matriz) · ejecutar P1–P5 aquí · análisis sandbox-only (R6) · commit del kit + runbook |
-| **B** | Dueño, sus máquinas | `git pull` de la rama · correr `run.mjs` + protocolo en Codex y OpenCode (opcional: Claude Code local) · commitear `evidence/` — minutos por corrida |
+| **B** | Dueño, sus máquinas | `git pull` de la rama · correr `run.mjs` + protocolo en Codex (opcional: Claude Code local; OpenCode desestimado 2026-07-31) · commitear `evidence/` — minutos por corrida |
 | **C** | Sesión de consolidación | `consolidate.mjs` → matriz final · `report.md` con contradicciones y plan técnico · validación del dueño en #20 |
 
 Entre A y B el trabajo queda pausado sin deuda: el kit commiteado es el
