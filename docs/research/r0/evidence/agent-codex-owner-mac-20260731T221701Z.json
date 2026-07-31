@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "kind": "agent",
+  "provider": "codex",
+  "environment": "owner-mac",
+  "date": "2026-07-31T22:40:25.000Z",
+  "harnessVersion": "codex-cli 0.145.0",
+  "exercises": {
+    "p1Dispatch": {
+      "state": "soportado",
+      "detail": "Dos subagentes despachados produjeron 20 marcas cada uno.",
+      "artifacts": [
+        "p1-codex-owner-mac-20260731T221701Z-a.log",
+        "p1-codex-owner-mac-20260731T221701Z-b.log"
+      ]
+    },
+    "p1Parallel": {
+      "state": "soportado",
+      "detail": "macOS dejo %3N como literal; usando el prefijo epoch-seconds observable: A=[1785536272,1785536291], B=[1785536259,1785536279], con 7 s de solapamiento.",
+      "artifacts": [
+        "p1-codex-owner-mac-20260731T221701Z-a.log",
+        "p1-codex-owner-mac-20260731T221701Z-b.log"
+      ]
+    },
+    "p2ModelOverride": {
+      "state": "no-certificado",
+      "detail": "El controlador y el worker no exponen identificadores exactos del modelo ejecutado; el despacho conserva gpt-5.6-terra como modelo solicitado, pero no como modelo observado.",
+      "artifacts": [
+        "p2-codex-owner-mac-20260731T221701Z-controller.txt",
+        "p2-codex-owner-mac-20260731T221701Z-worker.txt",
+        "p2-codex-owner-mac-20260731T221701Z-dispatch.txt"
+      ]
+    },
+    "p3TurnEnd": {
+      "state": "no-soportado",
+      "detail": "El writer produjo un solo heartbeat 7 ms anterior al corte y ninguno posterior; no sobrevivio al fin del turno.",
+      "artifacts": [
+        "p3-codex-owner-mac-20260731T221701Z.log",
+        "p3-codex-owner-mac-20260731T221701Z-turnend.txt",
+        "p3-codex-owner-mac-20260731T221701Z-resumed.json"
+      ]
+    },
+    "p4Worktree": {
+      "state": "soportado",
+      "detail": "La transcripcion literal muestra que el marcador solo aparecio en el worktree detached, no en el status del worktree principal, y que la limpieza termino con exit 0.",
+      "artifacts": [
+        "p4-codex-owner-mac-20260731T221701Z.txt"
+      ]
+    },
+    "p5Recovery": {
+      "state": "soportado",
+      "detail": "Sesion real nueva: el owner confirmo cierre completo de la aplicacion y apertura de una sesion Codex totalmente nueva; el contexto nuevo encontro el marker leyendo solo evidence y recupero el stamp sin recibirlo. El harness no expuso identificadores de turno o sesion.",
+      "artifacts": [
+        "p5-codex-owner-mac-20260731T221701Z-marker.json",
+        "p5-codex-owner-mac-20260731T221701Z-resumed.txt"
+      ]
+    },
+    "p6WaitPolling": {
+      "state": "no-certificado",
+      "detail": "No hay artefacto durable de notificacion o polling; P3 confirma que el writer no sobrevivio al fin del turno.",
+      "artifacts": []
+    }
+  }
+}
