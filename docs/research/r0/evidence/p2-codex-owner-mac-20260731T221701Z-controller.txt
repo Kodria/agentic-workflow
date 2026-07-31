@@ -1,0 +1,2 @@
+modelo observado: no disponible
+procedencia: el harness de esta sesion expone identidad generica Codex/GPT-5, pero no un identificador exacto de modelo verificable; no se usa inferencia ni el modelo solicitado como observado

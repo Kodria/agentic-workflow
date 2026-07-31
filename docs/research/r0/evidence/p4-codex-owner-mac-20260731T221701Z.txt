@@ -1,0 +1,28 @@
+$ git worktree add --detach /tmp/r0-wt-20260731T221701Z HEAD
+Preparing worktree (detached HEAD fd218ce)
+HEAD is now at fd218ce fix(r0): correct evidence and harden probes
+[exit 0]
+
+[native filesystem apply_patch] Add File: /tmp/r0-wt-20260731T221701Z/p4-isolation-marker.txt
+Done!
+
+$ git -C /Users/cencosud/Developments/personal/agentic-workflow/.worktrees/sdd-cycle-optimization status --short --untracked-files=all
+?? docs/research/r0/evidence/detached-heartbeats-20260731T221635Z-06b15d.log
+?? docs/research/r0/evidence/mech-codex-owner-mac-20260731T221635Z-06b15d.json
+?? docs/research/r0/evidence/p1-codex-owner-mac-20260731T221701Z-a.log
+?? docs/research/r0/evidence/p1-codex-owner-mac-20260731T221701Z-b.log
+?? docs/research/r0/evidence/p2-codex-owner-mac-20260731T221701Z-controller.txt
+?? docs/research/r0/evidence/p2-codex-owner-mac-20260731T221701Z-dispatch.txt
+?? docs/research/r0/evidence/p2-codex-owner-mac-20260731T221701Z-worker.txt
+?? docs/research/r0/evidence/p3-codex-owner-mac-20260731T221701Z-resumed.json
+?? docs/research/r0/evidence/p3-codex-owner-mac-20260731T221701Z-turnend.txt
+?? docs/research/r0/evidence/p3-codex-owner-mac-20260731T221701Z.log
+[exit 0]
+
+$ git -C /tmp/r0-wt-20260731T221701Z status --short --untracked-files=all
+?? p4-isolation-marker.txt
+[exit 0]
+
+$ git worktree remove --force /tmp/r0-wt-20260731T221701Z
+[no stdout/stderr]
+[exit 0]

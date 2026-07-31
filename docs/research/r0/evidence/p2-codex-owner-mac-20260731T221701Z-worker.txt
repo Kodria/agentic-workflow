@@ -1,0 +1,2 @@
+no disponible
+Procedencia: el runtime de esta ejecucion solo declara que el agente esta basado en GPT-5; no expone un identificador exacto y verificable del modelo.

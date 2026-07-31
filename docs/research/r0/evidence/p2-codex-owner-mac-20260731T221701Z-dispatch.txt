@@ -1,0 +1,2 @@
+modelo solicitado: gpt-5.6-terra
+metadato de despacho expuesto: task_name=/root/p2_owner_mac_worker; fork_turns=none; el resultado de spawn no expuso identificador observado del modelo ejecutado
