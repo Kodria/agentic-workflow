@@ -15,8 +15,10 @@ minutos, no horas.
    libre estable — usá siempre la misma para tu Mac).
 3. Protocolo de agente — decile al agente:
    "Ejecutá `docs/research/r0/AGENT-PROTOCOL.md` de punta a punta y escribí el
-   formulario final". P5 hacelo en serio: cerrá la sesión/app de verdad y
-   retomá en una nueva.
+   formulario final". Conservá las salidas literales y metadatos pedidos:
+   un nombre solicitado por el agente no sustituye el modelo observado, ni un
+   timestamp sustituye evidencia de cambio de turno. P5 hacelo en serio: cerrá
+   la sesión/app de verdad y retomá en una nueva sin memoria de la anterior.
 4. Commiteá TODO lo nuevo bajo `docs/research/r0/evidence/` y pusheá la rama:
    `git add docs/research/r0/evidence/ && git commit -m "evidence(r0): <provider>@owner-mac" && git push`
 
@@ -30,3 +32,11 @@ la Fase C consolida, redacta el informe y te lo trae a validación (R9).
 No arregles el kit acá: anotá el error como comentario en el issue #20 con el
 comando exacto y su salida. El kit se corrige en la sesión de desarrollo y
 re-corres solo lo afectado (las corridas se acumulan, nada se pisa).
+
+## Estado para retomar después de la auditoría 2026-07-31
+
+La corrida `codex@agentmobile-linux` es evidencia suplementaria de sandbox,
+no la fila obligatoria `codex@owner-mac` de R10. P1 quedó certificado; P2–P5
+quedaron `no-certificado` por artefactos insuficientes. En la máquina del dueño
+se debe crear una corrida nueva — no renombrar ni reutilizar esos archivos — y
+después repetir el protocolo completo con las reglas endurecidas de arriba.

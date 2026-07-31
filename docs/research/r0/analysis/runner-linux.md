@@ -18,30 +18,34 @@ Evidencia: `evidence/mech-claude-code-sandbox-remote-20260731T024434Z-df8007.jso
 
 Umbral de la sonda era 3 heartbeats; se observaron 11 — más de 3x margen sobre el umbral, en una ventana de sonda controlada (script Node puro, `probes/lib/detached.mjs`). Esto confirma en Linux la primitiva mínima que un runner durable (RF-2.6 del brief: *"si desaparece el agente, turno o contexto que solicitó un job, el job SHALL conservar identidad, heartbeat, log y resultado"*) necesita del sistema operativo: un proceso hijo desatendido (`disown`/`detached: true` equivalente) sigue vivo y siguiendo produciendo heartbeats después de que su proceso lanzador termina.
 
-### 2. Atomicidad de rename-replace en el filesystem local
+### 2. Integridad final de rename-replace; atomicidad concurrente no certificada
 
 Misma evidencia JSON:
 
 ```json
-"renameReplace": { "state": "soportado", "detail": "rename-replace entrega el contenido nuevo íntegro en el fs de evidence/", "artifacts": [] }
+"renameReplace": { "state": "no-certificado", "detail": "la sonda original no tuvo lector concurrente", "artifacts": [] }
 ```
 
-Confirma que `fs.renameSync` (o equivalente) sobre el filesystem que respalda `docs/research/r0/evidence/` en este sandbox entrega el contenido nuevo de forma íntegra — sin lectura parcial/corrupta intermedia. Relevante para RF-2.10 (*"el journal, logs y transiciones SHALL escribirse atómicamente"*): confirma que el patrón "escribir a archivo temporal + rename" es viable como primitiva de escritura atómica de journal en este filesystem Linux.
+La corrida original solo confirma que el contenido final leído después de
+`fs.renameSync` es íntegro. Como no existía un lector concurrente, no podía
+observar una ausencia o contenido parcial durante el reemplazo y no certifica
+RF-2.10. La sonda fue endurecida después de la auditoría; las corridas nuevas
+informan cantidad de lecturas concurrentes y observaciones viejo/nuevo.
 
-### 3. Supervivencia real más allá del fin de turno del agente (no solo simulada)
+### 3. Continuidad posterior al timestamp; cambio de turno no certificado por archivo
 
 Evidencia: `evidence/p3-claude-code-sandbox-remote-20260731T024648Z.log` (181 líneas de heartbeats, timestamps epoch-ms consecutivos, de `1785466009002` a `1785466189359` — un rango de **180,357 ms ≈ 180.4 segundos** de heartbeats registrados) y `evidence/p3-claude-code-sandbox-remote-20260731T024648Z-turnend.txt` (contiene un único timestamp, `1785466056689`, el marcador del fin de turno real de la sesión de agente).
 
-Restando: `1785466189359 - 1785466056689 = 132,670 ms ≈ 132.7 segundos` de heartbeats del proceso detached **después** del timestamp de fin de turno — muy por encima del umbral declarado de ≥30s en la nota de contexto de esta tarea, y consistente con "133 heartbeats past the recorded cutoff" citado en el brief de la tarea. A diferencia de la sonda mecánica §1 (que mide supervivencia a la muerte de un proceso padre simulado dentro de un mismo script), este es el ejercicio P3 del `AGENT-PROTOCOL.md` real: un proceso detached lanzado por el agente sobrevivió el **fin de turno real** de la conversación (el punto en que el agente que lo lanzó deja de estar activo), no solo un `SIGTERM` simulado al padre.
+Restando: `1785466189359 - 1785466056689 = 132,670 ms ≈ 132.7 segundos` de heartbeats posteriores al timestamp. Esto prueba continuidad temporal, pero los artefactos originales no incluyen identidad de turno/sesión ni un archivo de reanudación; la misma evidencia podría existir sin que el turno hubiese terminado. Por R4, el cambio real de turno queda `no-certificado` hasta repetir P3 con el protocolo endurecido.
 
-**Conclusión combinada de evidencia (1) y (3):** en este sandbox Linux, un job/runner detached puede sobrevivir tanto (a) la terminación explícita del proceso que lo lanzó, como (b) el fin de turno del agente en una sesión real — las dos formas de "desaparición del solicitante" que RF-2.6 exige tolerar. Esto es la base empírica mínima para que el diseño de PR-2 (controlador durable + runner) asuma que "lanzar un job detached y reconciliarlo después" es viable en Linux, sin necesitar todavía un daemon/servicio de sistema separado.
+**Conclusión combinada de evidencia (1) y (3):** en este sandbox Linux sí está certificada la supervivencia a la terminación del proceso padre. También se observaron heartbeats durante más de dos minutos tras un timestamp declarado como corte, pero la desaparición del turno/agente no quedó certificada por artefactos durables.
 
 ## Qué queda abierto para macOS (Fase B — corrida del dueño)
 
 Ninguna de las tres evidencias de arriba fue producida en macOS; son 100% Linux (`"platform": "linux", "release": "6.18.5"` en el JSON de evidencia). El diseño (`docs/plans/2026-07-31-r0-discovery-design.md` R8) exige explícitamente que el estudio de portabilidad del runner cubra macOS y Linux (Windows queda fuera de alcance, R8). Preguntas concretas que solo la corrida del dueño en macOS puede cerrar:
 
 1. **¿El mismo mecanismo de detach (`disown`/spawn detached) sobrevive igual en macOS?** macOS (BSD-derived) tiene semántica de proceso huérfano distinta de Linux en algunos bordes (reparenting a `launchd` en vez de `init`/PID 1) — la sonda mecánica (`probes/lib/detached.mjs`) es Node puro y portable, pero el *resultado* (soporta/no soporta, cuántos heartbeats de margen) es una pregunta empírica, no algo que se pueda inferir del código.
-2. **¿Rename-replace es igual de atómico sobre el filesystem por defecto de macOS (APFS) que sobre el filesystem de este sandbox?** APFS y el filesystem Linux del sandbox tienen garantías de atomicidad de `rename(2)` en principio equivalentes por POSIX, pero comportamiento real bajo condiciones de carrera/red (si el dueño corre sobre un volumen de red o iCloud Drive) no está probado aquí.
+2. **¿Rename-replace es atómico bajo lectores concurrentes en el filesystem de la máquina del dueño?** La nueva sonda lo mide de forma empírica; debe correrse sobre el volumen real donde vive el checkout, especialmente si es un volumen de red o sincronizado.
 3. **¿El ejercicio P3 (fin de turno real con proceso vivo) da un margen de supervivencia comparable (~130s) en Claude Code corriendo nativo en macOS,** o hay throttling/cleanup de proceso más agresivo del lado del SO o del cliente de escritorio que reduzca ese margen?
 4. **¿Hay diferencias de manejo de señales (SIGHUP en particular)** entre cómo una terminal/sesión de macOS despide a sus hijos vs. cómo lo hace este sandbox Linux — relevante porque `disown` en bash depende de que el shell no reenvíe `SIGHUP` al grupo de procesos.
 
@@ -49,4 +53,4 @@ Estas cuatro preguntas son exactamente el contenido que `RUNBOOK.md` (`docs/rese
 
 ## Conclusión
 
-**Lo que Linux garantiza aquí, con evidencia real y no supuesta:** detached-survival soportado con amplio margen (11/3 heartbeats en sonda mecánica, ~132.7s tras fin de turno real en P3), y rename-replace atómico sobre el filesystem del sandbox. **Lo que queda abierto:** si esas mismas dos garantías (y el margen de supervivencia observado) se sostienen igual en macOS — pregunta que este análisis sandbox-only no puede cerrar por diseño (R6 lo declara explícitamente: "macOS se completa con la corrida del kit del dueño") y que corresponde a Fase B, no a esta tarea.
+**Lo certificado aquí:** detached-survival frente a muerte del padre, con amplio margen (11/3 heartbeats). **No certificado por las corridas históricas:** atomicidad concurrente de rename y supervivencia al fin real de turno. Ambos deben repetirse en la máquina del dueño con la sonda y el protocolo endurecidos antes de cerrar Fase B.

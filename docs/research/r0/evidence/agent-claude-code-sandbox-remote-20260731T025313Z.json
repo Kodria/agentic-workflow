@@ -23,15 +23,15 @@
       ]
     },
     "p2ModelOverride": {
-      "state": "soportado",
-      "detail": "sesión corre bajo claude-fable-5; subagente despachado con override model:haiku escribió claude-haiku-4-5-20251001 (distinto)",
+      "state": "no-certificado",
+      "detail": "Auditoría 2026-07-31: el artefacto solo contiene el modelo reportado por el worker; no conserva modelo/procedencia del controlador ni metadatos del despacho.",
       "artifacts": [
         "p2-claude-code-sandbox-remote-20260731T024505Z.txt"
       ]
     },
     "p3TurnEnd": {
-      "state": "soportado",
-      "detail": "133 heartbeats posteriores al corte de turno, 132.21s de continuidad real (umbral ≥30s)",
+      "state": "no-certificado",
+      "detail": "Auditoría 2026-07-31: hay 133 heartbeats posteriores al timestamp, pero no existe artefacto de reanudación que pruebe el cambio real de turno.",
       "artifacts": [
         "p3-claude-code-sandbox-remote-20260731T024648Z.log",
         "p3-claude-code-sandbox-remote-20260731T024648Z-turnend.txt"
@@ -45,16 +45,16 @@
       ]
     },
     "p5Recovery": {
-      "state": "degradado",
-      "detail": "solo-turno/subagente-fresco — sesión real cerrada queda para Fase B",
+      "state": "no-certificado",
+      "detail": "Auditoría 2026-07-31: marker y resumed no prueban por sí mismos que el segundo contexto fuera fresco y sin briefing.",
       "artifacts": [
         "p5-claude-code-sandbox-remote-20260731T025206Z-marker.json",
         "p5-claude-code-sandbox-remote-20260731T025206Z-resumed.txt"
       ]
     },
     "p6WaitPolling": {
-      "state": "soportado",
-      "detail": "notificaciones de finalización de tareas en background para subagentes despachados, más un trigger programado (send_later) para reanudar la sesión tras espera de reloj real (usado en P3) — no hay sleep bloqueante disponible al loop principal",
+      "state": "no-certificado",
+      "detail": "Auditoría 2026-07-31: no hay artefacto durable que respalde el mecanismo de notificación/polling y P3 también quedó no-certificado.",
       "artifacts": []
     }
   }

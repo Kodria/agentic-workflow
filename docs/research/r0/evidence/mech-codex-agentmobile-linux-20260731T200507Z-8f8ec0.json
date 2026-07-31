@@ -17,8 +17,8 @@
       ]
     },
     "renameReplace": {
-      "state": "soportado",
-      "detail": "rename-replace entrega el contenido nuevo íntegro en el fs de evidence/",
+      "state": "no-certificado",
+      "detail": "Auditoría 2026-07-31: la sonda original solo leyó después del rename; no hubo lector concurrente y por tanto no certifica atomicidad.",
       "artifacts": []
     },
     "cliInspection": {
