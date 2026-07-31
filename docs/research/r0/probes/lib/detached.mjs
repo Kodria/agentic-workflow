@@ -1,2 +1,51 @@
-// TODO(Task 2): replaced by the real detached-process-survival probe.
-export async function probeDetachedSurvival() { return { state: 'no-verificable-aquí', detail: 'stub' }; }
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const WRITER = `
+const fs = require('fs');
+const f = process.argv[2];
+const end = Date.now() + 4000;
+(function tick() {
+  fs.appendFileSync(f, Date.now() + '\\n');
+  if (Date.now() < end) setTimeout(tick, 200);
+})();
+`;
+
+const MID = `
+const { spawn } = require('child_process');
+const fs = require('fs');
+const [writerPath, hbFile, exitFile] = process.argv.slice(2);
+const c = spawn(process.execPath, [writerPath, hbFile], { detached: true, stdio: 'ignore' });
+c.unref();
+fs.writeFileSync(exitFile, String(Date.now()));
+`;
+
+export async function probeDetachedSurvival(ctx) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'r0-detached-'));
+  const writerPath = path.join(tmp, 'writer.cjs');
+  const midPath = path.join(tmp, 'mid.cjs');
+  const hbFile = path.join(ctx.evidenceDir, `detached-heartbeats-${ctx.stamp}.log`);
+  const exitFile = path.join(tmp, 'mid-exit.txt');
+  fs.writeFileSync(writerPath, WRITER);
+  fs.writeFileSync(midPath, MID);
+
+  const mid = spawn(process.execPath, [midPath, writerPath, hbFile, exitFile], { stdio: 'ignore' });
+  await new Promise((res) => mid.on('exit', res));
+  const midExit = Number(fs.readFileSync(exitFile, 'utf-8'));
+
+  await new Promise((res) => setTimeout(res, 2500));
+  fs.rmSync(tmp, { recursive: true, force: true });
+
+  if (!fs.existsSync(hbFile)) {
+    return { state: 'no-soportado', detail: 'el writer detached nunca escribió', artifacts: [] };
+  }
+  const beats = fs.readFileSync(hbFile, 'utf-8').trim().split('\n').map(Number);
+  const after = beats.filter((t) => t > midExit + 300).length;
+  return {
+    state: after >= 3 ? 'soportado' : 'no-soportado',
+    detail: `${after} heartbeats posteriores a la muerte del padre (umbral: 3)`,
+    artifacts: [path.basename(hbFile)],
+  };
+}
