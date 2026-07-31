@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 import { fingerprint } from './lib/fingerprint.mjs';
 import { probeDetachedSurvival } from './lib/detached.mjs';
 import { probeRenameReplace } from './lib/rename.mjs';
@@ -44,7 +45,11 @@ function main() {
     : fileURLToPath(new URL('../evidence/', import.meta.url));
   fs.mkdirSync(dir, { recursive: true });
 
-  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  // Segundo-nivel de fecha para legibilidad humana + sufijo aleatorio para
+  // unicidad real: dos corridas en el mismo segundo (o el mismo ms) no pueden
+  // pisarse (R2.2 — "nunca sobrescribirse" es absoluto, no "normalmente").
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')
+    + '-' + crypto.randomBytes(3).toString('hex');
   const ctx = { evidenceDir: dir, stamp };
 
   Promise.resolve()
