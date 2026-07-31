@@ -60,5 +60,5 @@ Escribí `evidence/agent-<provider>-<env>-<STAMP>.json`:
 ```
 
 Estados válidos: `soportado | no-soportado | degradado | no-verificable-aquí | no-certificado`.
-Para ejercicios de agente (P1–P6), usá `no-verificable-aquí` cuando el ejercicio en sí no se puede intentar en este entorno (p. ej., no hay forma de cerrar la sesión de verdad para P5 en un contexto automatizado) — distinto de `no-soportado`, que significa que SÍ se intentó y se confirmó ausente.
+Para ejercicios de agente (P1–P6), usá `no-verificable-aquí` cuando el ejercicio en sí no se puede intentar en este entorno (p. ej., el entorno no persiste `evidence/` entre turnos, por lo que P5 no puede ni siquiera intentarse) — distinto del caso normal de P5 paso 3, donde el ejercicio SÍ se intenta pero solo se logra cambio de turno y el resultado correcto es `degradado`, y distinto de `no-soportado`, que significa que SÍ se intentó y se confirmó ausente.
 Un `state` con `artifacts: []` solo es válido para P6 — en P1–P5, sin artefacto ⇒ `no-certificado`.
