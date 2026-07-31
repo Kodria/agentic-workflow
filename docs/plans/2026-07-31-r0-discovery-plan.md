@@ -1,5 +1,7 @@
 # R0 Discovery — Probe Kit Implementation Plan
 
+<!-- awm-qa-complete: 2026-07-31 (Phase A, Tasks 1-11; Tasks 12-14 gated on Phase B) -->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
 > use checkbox (`- [ ]`) syntax for tracking.
