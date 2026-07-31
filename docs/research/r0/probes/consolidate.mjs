@@ -25,30 +25,54 @@ function argValue(argv, flag) {
   const i = argv.indexOf(flag);
   if (i === -1) return undefined;
   const v = argv[i + 1];
-  if (v === undefined || v.startsWith('--')) throw new Error(`${flag} requiere un valor`);
+  if (v === undefined || v === '' || v.startsWith('--')) throw new Error(`${flag} requiere un valor`);
   return v;
 }
 
 const argv = process.argv.slice(2);
-const dir = argValue(argv, '--evidence-dir')
-  ? path.resolve(argValue(argv, '--evidence-dir'))
+const evidenceDirArg = argValue(argv, '--evidence-dir');
+const dir = evidenceDirArg
+  ? path.resolve(evidenceDirArg)
   : fileURLToPath(new URL('../evidence/', import.meta.url));
-const out = argValue(argv, '--out')
-  ? path.resolve(argValue(argv, '--out'))
+const outArg = argValue(argv, '--out');
+const out = outArg
+  ? path.resolve(outArg)
   : fileURLToPath(new URL('../capability-matrix.md', import.meta.url));
+
+if (!fs.existsSync(dir)) {
+  process.stderr.write(`No existe el directorio de evidencia: ${dir}\n`);
+  process.exit(1);
+}
 
 const runs = fs.readdirSync(dir)
   .filter((f) => f.endsWith('.json'))
   .sort() // determinism (Issue 2): filesystem order is not guaranteed
   .flatMap((f) => {
+    let parsed;
     try {
-      return [{ file: f, json: JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')) }];
+      parsed = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8'));
     } catch (e) {
       process.stderr.write(`consolidate: omitiendo ${f}, JSON inválido: ${e.message}\n`);
       return [];
     }
-  })
-  .filter((r) => r.json.schema === 1 && ['mech', 'agent'].includes(r.json.kind));
+    // JSON.parse solo garantiza sintaxis válida — null/number/string/array son
+    // JSON válido pero no tienen shape de evidencia (CONSTITUTION: validar shape,
+    // no solo sintaxis).
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      const shape = parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed;
+      process.stderr.write(`consolidate: omitiendo ${f}, JSON no es un objeto de evidencia (${shape})\n`);
+      return [];
+    }
+    if (parsed.schema !== 1 || !['mech', 'agent'].includes(parsed.kind)) {
+      return [];
+    }
+    if (typeof parsed.provider !== 'string' || parsed.provider.trim() === ''
+      || typeof parsed.environment !== 'string' || parsed.environment.trim() === '') {
+      process.stderr.write(`consolidate: omitiendo ${f}, falta provider/environment válido\n`);
+      return [];
+    }
+    return [{ file: f, json: parsed }];
+  });
 
 // (capability, provider, environment) → [{state, file, detail}]
 const grouped = new Map();

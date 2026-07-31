@@ -17,7 +17,7 @@ function argValue(argv, flag) {
   const i = argv.indexOf(flag);
   if (i === -1) return undefined;
   const v = argv[i + 1];
-  if (v === undefined || v.startsWith('--')) {
+  if (v === undefined || v === '' || v.startsWith('--')) {
     throw new Error(`${flag} requiere un valor`);
   }
   return v;
@@ -52,6 +52,21 @@ function main() {
     + '-' + crypto.randomBytes(3).toString('hex');
   const ctx = { evidenceDir: dir, stamp };
 
+  // Una sonda que revienta no debe descartar la evidencia de las otras dos:
+  // cada probe se aísla en su propio try/catch, y una falla se registra como
+  // estado de error en SU celda en vez de abortar todo el objeto de resultado.
+  let anyProbeFailed = false;
+  async function safeProbe(name, fn) {
+    try {
+      return await fn();
+    } catch (e) {
+      anyProbeFailed = true;
+      const detail = e instanceof Error ? e.message : String(e);
+      process.stderr.write(`sonda ${name} falló: ${detail}\n`);
+      return { state: 'no-certificado', detail: `sonda falló: ${detail}` };
+    }
+  }
+
   Promise.resolve()
     .then(async () => ({
       schema: 1,
@@ -60,9 +75,9 @@ function main() {
       environment: envLabel,
       ...fingerprint(),
       probes: {
-        detachedSurvival: await probeDetachedSurvival(ctx),
-        renameReplace: probeRenameReplace(ctx),
-        cliInspection: probeCliInspection(ctx),
+        detachedSurvival: await safeProbe('detachedSurvival', () => probeDetachedSurvival(ctx)),
+        renameReplace: await safeProbe('renameReplace', () => probeRenameReplace(ctx)),
+        cliInspection: await safeProbe('cliInspection', () => probeCliInspection(ctx)),
       },
     }))
     .then((result) => {
@@ -70,6 +85,7 @@ function main() {
       const out = path.join(dir, `mech-${provider}-${envLabel}-${stamp}.json`);
       fs.writeFileSync(out, JSON.stringify(result, null, 2) + '\n');
       process.stdout.write(`${out}\n`);
+      if (anyProbeFailed) process.exitCode = 1;
     })
     .catch((e) => {
       process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`);

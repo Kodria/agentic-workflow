@@ -3,10 +3,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// Presupuesto del writer (7000ms) y espera antes de chequear (5000ms, ver
+// abajo) fueron ampliados: overhead observado del spawn anidado (~1.6s) contra
+// un margen previo demasiado ajustado (2500ms de espera / 4000ms de writer)
+// podía dar falso-negativo "no-soportado" bajo carga. Duplicar ambos deja un
+// margen de observación cómodo (~3s) sin volver la sonda lenta de correr.
 const WRITER = `
 const fs = require('fs');
 const f = process.argv[2];
-const end = Date.now() + 4000;
+const end = Date.now() + 7000;
 (function tick() {
   fs.appendFileSync(f, Date.now() + '\\n');
   if (Date.now() < end) setTimeout(tick, 200);
@@ -18,6 +23,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const [writerPath, hbFile, exitFile] = process.argv.slice(2);
 const c = spawn(process.execPath, [writerPath, hbFile], { detached: true, stdio: 'ignore' });
+c.on('error', () => {}); // spawn del writer falló: no debe crashear este proceso intermedio detached.
 c.unref();
 fs.writeFileSync(exitFile, String(Date.now()));
 `;
@@ -32,10 +38,18 @@ export async function probeDetachedSurvival(ctx) {
   fs.writeFileSync(midPath, MID);
 
   const mid = spawn(process.execPath, [midPath, writerPath, hbFile, exitFile], { stdio: 'ignore' });
-  await new Promise((res) => mid.on('exit', res));
+  let midSpawnError = null;
+  await new Promise((res) => {
+    mid.on('exit', res);
+    mid.on('error', (err) => { midSpawnError = err; res(); });
+  });
+  if (midSpawnError) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    return { state: 'no-certificado', detail: `spawn del proceso intermedio falló: ${midSpawnError.message}`, artifacts: [] };
+  }
   const midExit = Number(fs.readFileSync(exitFile, 'utf-8'));
 
-  await new Promise((res) => setTimeout(res, 2500));
+  await new Promise((res) => setTimeout(res, 5000));
   fs.rmSync(tmp, { recursive: true, force: true });
 
   if (!fs.existsSync(hbFile)) {
