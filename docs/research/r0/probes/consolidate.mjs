@@ -106,12 +106,19 @@ for (const [cap] of CELLS) {
     const [provider, environment] = col.split('@');
     const entries = grouped.get(`${cap}|${provider}|${environment}`) ?? [];
     if (entries.length === 0) { row.push('—'); continue; }
-    const states = [...new Set(entries.map((e) => e.state))];
+    // Semántica de conflicto (R5.2): solo los estados DEFINITIVOS pueden
+    // contradecirse entre sí. `no-certificado` / `no-verificable-aquí` son
+    // ausencia de respaldo, no una observación — una corrida posterior
+    // certificada los supera sin conflicto (el protocolo define
+    // no-certificado como "sin artefacto que respalde", no "probado ausente").
+    const definitive = entries.filter((e) => !['no-certificado', 'no-verificable-aquí'].includes(e.state));
+    const effective = definitive.length > 0 ? definitive : entries;
+    const states = [...new Set(effective.map((e) => e.state))];
     if (states.length > 1) {
       // R5.2: el conflicto se muestra, jamás gana en silencio la más reciente.
-      row.push(`⚠ CONFLICTO: ${entries.map((e) => `${e.state} (${e.file})`).join(' vs ')}`);
+      row.push(`⚠ CONFLICTO: ${effective.map((e) => `${e.state} (${e.file})`).join(' vs ')}`);
     } else {
-      row.push(`${states[0]} ([${entries[0].file}](evidence/${entries[0].file}))`);
+      row.push(`${states[0]} ([${effective[0].file}](evidence/${effective[0].file}))`);
     }
   }
   lines.push(`| ${row.join(' | ')} |`);

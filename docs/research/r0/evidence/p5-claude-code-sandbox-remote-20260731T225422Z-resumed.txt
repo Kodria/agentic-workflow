@@ -1,0 +1,2 @@
+Resumed confirmation for stamp 20260731T225422Z (provider=claude-code, env=sandbox-remote).
+This was written by a fresh context that located the marker solely by reading the evidence directory.
