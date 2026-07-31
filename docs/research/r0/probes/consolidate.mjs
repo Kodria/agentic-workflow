@@ -39,7 +39,15 @@ const out = argValue(argv, '--out')
 
 const runs = fs.readdirSync(dir)
   .filter((f) => f.endsWith('.json'))
-  .map((f) => ({ file: f, json: JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')) }))
+  .sort() // determinism (Issue 2): filesystem order is not guaranteed
+  .flatMap((f) => {
+    try {
+      return [{ file: f, json: JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')) }];
+    } catch (e) {
+      process.stderr.write(`consolidate: omitiendo ${f}, JSON inválido: ${e.message}\n`);
+      return [];
+    }
+  })
   .filter((r) => r.json.schema === 1 && ['mech', 'agent'].includes(r.json.kind));
 
 // (capability, provider, environment) → [{state, file, detail}]
