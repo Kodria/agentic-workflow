@@ -1,0 +1,12 @@
+$ git worktree add /tmp/r0-wt-20260731T025206Z HEAD
+Preparing worktree (detached HEAD 124fd3a)
+HEAD is now at 124fd3a evidence(r0): P3 turn-end claude-code@sandbox-remote
+
+$ echo 'r0-p4-probe' > /tmp/r0-wt-20260731T025206Z/r0-p4-marker.txt
+(escrito sin salida)
+
+$ git status --short   # (árbol principal, debe NO ver el archivo del worktree)
+?? docs/research/r0/evidence/p4-claude-code-sandbox-remote-20260731T025206Z.txt
+
+$ git worktree remove --force /tmp/r0-wt-20260731T025206Z
+(sin salida = ok)

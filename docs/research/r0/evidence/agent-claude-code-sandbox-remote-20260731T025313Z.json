@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "kind": "agent",
+  "provider": "claude-code",
+  "environment": "sandbox-remote",
+  "date": "2026-07-31T02:53:13.000Z",
+  "harnessVersion": "2.1.220 (Claude Code)",
+  "exercises": {
+    "p1Dispatch": {
+      "state": "soportado",
+      "detail": "dos subagentes despachados en un mismo mensaje (paralelo), ambos completaron y escribieron su log",
+      "artifacts": [
+        "p1-claude-code-sandbox-remote-20260731T024505Z-a.log",
+        "p1-claude-code-sandbox-remote-20260731T024505Z-b.log"
+      ]
+    },
+    "p1Parallel": {
+      "state": "soportado",
+      "detail": "rango A [1785465922196..1785465941286] ∩ rango B [1785465921349..1785465940424] = 18228ms de solape real",
+      "artifacts": [
+        "p1-claude-code-sandbox-remote-20260731T024505Z-a.log",
+        "p1-claude-code-sandbox-remote-20260731T024505Z-b.log"
+      ]
+    },
+    "p2ModelOverride": {
+      "state": "soportado",
+      "detail": "sesión corre bajo claude-fable-5; subagente despachado con override model:haiku escribió claude-haiku-4-5-20251001 (distinto)",
+      "artifacts": [
+        "p2-claude-code-sandbox-remote-20260731T024505Z.txt"
+      ]
+    },
+    "p3TurnEnd": {
+      "state": "soportado",
+      "detail": "133 heartbeats posteriores al corte de turno, 132.21s de continuidad real (umbral ≥30s)",
+      "artifacts": [
+        "p3-claude-code-sandbox-remote-20260731T024648Z.log",
+        "p3-claude-code-sandbox-remote-20260731T024648Z-turnend.txt"
+      ]
+    },
+    "p4Worktree": {
+      "state": "soportado",
+      "detail": "git worktree add/escritura aislada/remove ok; git status --short del árbol principal no vio el archivo del worktree",
+      "artifacts": [
+        "p4-claude-code-sandbox-remote-20260731T025206Z.txt"
+      ]
+    },
+    "p5Recovery": {
+      "state": "degradado",
+      "detail": "solo-turno/subagente-fresco — sesión real cerrada queda para Fase B",
+      "artifacts": [
+        "p5-claude-code-sandbox-remote-20260731T025206Z-marker.json",
+        "p5-claude-code-sandbox-remote-20260731T025206Z-resumed.txt"
+      ]
+    },
+    "p6WaitPolling": {
+      "state": "soportado",
+      "detail": "notificaciones de finalización de tareas en background para subagentes despachados, más un trigger programado (send_later) para reanudar la sesión tras espera de reloj real (usado en P3) — no hay sleep bloqueante disponible al loop principal",
+      "artifacts": []
+    }
+  }
+}
