@@ -174,6 +174,30 @@ describe('reconcile — matriz unica R1.8 (R3.3)', () => {
         expect(s.jobs[nuevo.id]).toBe(nuevo);
     });
 
+    test('claim+resultado con forma invalida (JSON valido pero sin exitCode numerico) => orphaned, jamas fabricar verdict (R1.6)', () => {  // verifies R1.6
+        const s = emptyState('r');
+        const deadRef = { pid: 999999, startTime: 'gone', spawnNonce: 'nD', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
+        s.jobs['d'] = job({ id: 'd', executionState: 'running', spawnNonce: 'nD', processRef: { ...deadRef, spawnNonce: 'nD' } });
+        fs.writeFileSync(path.join(logs, 'd.nD.claim'), '{}');
+        fs.writeFileSync(path.join(logs, 'd.nD.result.json'), JSON.stringify({}));  // sin exitCode: forma invalida
+        const out = reconcileJobs(s, logs);
+        expect(out.decisions.find((d) => d.jobId === 'd')!.action).toBe('orphaned-authorization-required');
+        expect(s.jobs['d'].executionState).toBe('orphaned');
+        expect(s.jobs['d'].verdict).toBeUndefined();   // jamas fabricado de un sidecar sin forma
+    });
+
+    test('claim+resultado con JSON invalido (parse error) => orphaned, no crashea (R1.6)', () => {  // verifies R1.6
+        const s = emptyState('r');
+        const deadRef = { pid: 999999, startTime: 'gone', spawnNonce: 'nE', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
+        s.jobs['e'] = job({ id: 'e', executionState: 'running', spawnNonce: 'nE', processRef: { ...deadRef, spawnNonce: 'nE' } });
+        fs.writeFileSync(path.join(logs, 'e.nE.claim'), '{}');
+        fs.writeFileSync(path.join(logs, 'e.nE.result.json'), '{ esto no es json valido');
+        let out: ReturnType<typeof reconcileJobs>;
+        expect(() => { out = reconcileJobs(s, logs); }).not.toThrow();
+        expect(out!.decisions.find((d) => d.jobId === 'e')!.action).toBe('orphaned-authorization-required');
+        expect(s.jobs['e'].executionState).toBe('orphaned');
+    });
+
     test('adopt-result respalda spawnNonce resuelto via processRef, para que la evidencia siga siendo observable (R1.3, RNF-T.9)', () => {  // verifies R1.3
         const s = emptyState('r');
         const deadRef = { pid: 999999, startTime: 'gone', spawnNonce: 'nR', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };

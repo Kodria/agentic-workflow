@@ -44,7 +44,12 @@ export function spawnPendingWrappers(repoRoot: string, branch: string, spawner: 
     }
     writeJournal(repoRoot, branch, s);   // intent DURABLE antes del primer spawn
     const logs = logsDir(repoRoot, branch);
-    for (const j of received) spawner(j, j.spawnNonce!, logs, repoRoot);
+    for (const j of received) {
+        // Un spawn que lanza sincronicamente NO debe abortar el resto del lote:
+        // el spawn-intent de cada job ya quedo durable arriba: el proximo tick
+        // lo recoge (claim=>claimed) o la matriz lo declara never-started.
+        try { spawner(j, j.spawnNonce!, logs, repoRoot); } catch { /* ver comentario: el intent ya persistio, el proximo tick decide */ }
+    }
     return received.length;
 }
 
@@ -74,7 +79,7 @@ export function collectAndReconcile(repoRoot: string, branch: string, opts: { re
         if (fs.existsSync(resultPath(logs, j.id, nonce))) {
             try {
                 const parsed = JSON.parse(fs.readFileSync(resultPath(logs, j.id, nonce), 'utf8'));
-                if (typeof parsed.exitCode !== 'number') continue;   // shape invalido: lo vera reconcile como corrupt via gate
+                if (typeof parsed.exitCode !== 'number') continue;   // shape invalido: se deja para reconcileJobs, que valida el sidecar defensivamente y cae a orphaned-authorization-required en vez de fabricar un verdict (R1.6)
                 j.executionState = 'exited';
                 j.result = parsed;
                 j.verdict = parsed.exitCode === 0 ? 'pass' : 'fail';

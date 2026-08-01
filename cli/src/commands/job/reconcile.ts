@@ -1,9 +1,26 @@
 // LA UNICA matriz de recuperacion (design R3.3 = R1.8, sin excepciones).
 import fs from 'fs';
 import crypto from 'crypto';
-import type { Job, JournalState } from '../../core/journal/types';
+import type { Job, JobResult, JournalState } from '../../core/journal/types';
 import { refIsAlive } from '../../core/journal/process';
 import { replayVerdict, resultPath } from './exec-wrapper';
+
+/** El sidecar de resultado lo escribe un proceso EXTERNO no coordinado
+ *  (exec-wrapper): existencia del archivo (`replayVerdict`) no es prueba de
+ *  contenido bien formado. Nunca fabricar un pass/fail de JSON invalido o de
+ *  forma incorrecta (R1.6) — un resultado no verificable cae al mismo
+ *  disposition que "unprovable": orphaned-authorization-required. */
+function isWellFormedJobResult(x: unknown): x is JobResult {
+    return typeof x === 'object' && x !== null && typeof (x as { exitCode?: unknown }).exitCode === 'number';
+}
+
+function readCompletedResult(logsRoot: string, jobId: string, nonce: string): JobResult | null {
+    let raw: string;
+    try { raw = fs.readFileSync(resultPath(logsRoot, jobId, nonce), 'utf8'); } catch { return null; }
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); } catch { return null; }
+    return isWellFormedJobResult(parsed) ? parsed : null;
+}
 
 export type ReconcileAction = 'still-alive' | 'retry-new-attempt' | 'adopt-result' | 'orphaned-authorization-required';
 export interface ReconcileDecision { jobId: string; action: ReconcileAction; }
@@ -31,10 +48,10 @@ export function reconcileJobs(state: JournalState, logsRoot: string, opts: Recon
         }
         const nonce = j.spawnNonce ?? j.processRef?.spawnNonce ?? 'sin-nonce';
         const verdict = replayVerdict(logsRoot, j.id, nonce);
+        const result = verdict === 'completed' ? readCompletedResult(logsRoot, j.id, nonce) : null;
         if (verdict === 'never-started') {
             decisions.push({ jobId: j.id, action: 'retry-new-attempt' });   // seguro: nunca ejecuto
-        } else if (verdict === 'completed') {
-            const result = JSON.parse(fs.readFileSync(resultPath(logsRoot, j.id, nonce), 'utf8'));
+        } else if (result !== null) {
             j.executionState = 'exited';
             j.spawnNonce = nonce;
             j.result = result;
@@ -42,7 +59,10 @@ export function reconcileJobs(state: JournalState, logsRoot: string, opts: Recon
             j.phaseTimestamps.exited = j.phaseTimestamps.exited ?? new Date().toISOString();
             decisions.push({ jobId: j.id, action: 'adopt-result' });
         } else {
-            j.executionState = 'orphaned';                                   // jamas relanzar solo (R1.8)
+            // 'unprovable' O 'completed' con sidecar corrupto/mal formado:
+            // ambos son evidencia no verificable — jamas fabricar un pass/fail
+            // de JSON invalido, jamas relanzar solo (R1.6, R1.8).
+            j.executionState = 'orphaned';
             decisions.push({ jobId: j.id, action: 'orphaned-authorization-required' });
         }
     }

@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { spawnPendingWrappers, collectAndReconcile, runnerTick, WrapperSpawner } from '../../../src/commands/watch/runner';
-import { runExecWrapper, claimPath } from '../../../src/commands/job/exec-wrapper';
+import { runExecWrapper, claimPath, identityPath, resultPath } from '../../../src/commands/job/exec-wrapper';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { logsDir } from '../../../src/core/journal/paths';
 import { Job } from '../../../src/core/journal/types';
@@ -93,6 +93,66 @@ describe('runner concurrente', () => {
         const out = collectAndReconcile(repo, 'rama', { reconcileGraceMs: 1000 });
         expect(out.decisions.find((d) => d.action === 'orphaned-authorization-required')).toBeDefined();
         expect(readJournal(repo, 'rama').state!.jobs['j1'].executionState).toBe('orphaned');
+    });
+
+    test('identity sidecar a medio escribir (JSON invalido) => no avanza esta vuelta, no crashea; tick siguiente con identidad valida si avanza', () => {  // verifies R1.8
+        seedJob(repo, {
+            executionState: 'claimed', spawnNonce: 'nI',
+            phaseTimestamps: { claimed: new Date().toISOString() },
+        });
+        fs.writeFileSync(identityPath(logsDir(repo, 'rama'), 'j1', 'nI'), '{ esto no es json valido');
+        expect(() => collectAndReconcile(repo, 'rama', { reconcileGraceMs: 60000 })).not.toThrow();
+        const mid = readJournal(repo, 'rama').state!.jobs['j1'];
+        expect(mid.executionState).toBe('claimed');   // sin avance: el sidecar aun no es legible
+        expect(mid.processRef).toBeUndefined();
+
+        const validIdentity = {
+            jobId: 'j1', nonce: 'nI',
+            wrapper: { pid: 111, startTime: 'x', spawnNonce: 'nI', argvDigest: 'd', processGroup: 111, psArgsDigest: 'e' },
+            command: { pid: 112, startTime: 'x', spawnNonce: 'nI', argvDigest: 'd', processGroup: 111, psArgsDigest: 'e' },
+        };
+        fs.writeFileSync(identityPath(logsDir(repo, 'rama'), 'j1', 'nI'), JSON.stringify(validIdentity));
+        collectAndReconcile(repo, 'rama', { reconcileGraceMs: 60000 });
+        const done = readJournal(repo, 'rama').state!.jobs['j1'];
+        expect(done.executionState).toBe('running');
+        expect(done.processRef!.pid).toBe(112);
+    });
+
+    test('identity sidecar con JSON valido pero forma invalida (ProcessRef incompleto) => no avanza, no crashea (R1.8)', () => {  // verifies R1.8
+        seedJob(repo, {
+            executionState: 'claimed', spawnNonce: 'nJ',
+            phaseTimestamps: { claimed: new Date().toISOString() },
+        });
+        fs.writeFileSync(identityPath(logsDir(repo, 'rama'), 'j1', 'nJ'), JSON.stringify({ jobId: 'j1', nonce: 'nJ', wrapper: {}, command: {} }));
+        expect(() => collectAndReconcile(repo, 'rama', { reconcileGraceMs: 60000 })).not.toThrow();
+        const mid = readJournal(repo, 'rama').state!.jobs['j1'];
+        expect(mid.executionState).toBe('claimed');
+        expect(mid.processRef).toBeUndefined();
+    });
+
+    test('claim sidecar a medio escribir (contenido no-JSON) igual dispara claimed — el contenido nunca se parsea (R1.8)', () => {  // verifies R1.8
+        seedJob(repo, {
+            executionState: 'spawn-intent', spawnNonce: 'nK',
+            phaseTimestamps: { 'spawn-intent': new Date().toISOString() },
+        });
+        fs.writeFileSync(claimPath(logsDir(repo, 'rama'), 'j1', 'nK'), '{"jobId":"j1truncado-sin-cerrar');
+        expect(() => collectAndReconcile(repo, 'rama', { reconcileGraceMs: 60000 })).not.toThrow();
+        expect(readJournal(repo, 'rama').state!.jobs['j1'].executionState).toBe('claimed');
+    });
+
+    test('resultado con forma invalida (sin exitCode numerico) => el scan no lo adopta; fuera de gracia la matriz lo cae a orphaned, jamas fabrica verdict (R1.6)', () => {  // verifies R1.6
+        const dead = { pid: 999999, startTime: 'gone', spawnNonce: 'nL', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
+        seedJob(repo, {
+            executionState: 'running', spawnNonce: 'nL', processRef: dead,
+            phaseTimestamps: { running: new Date(Date.now() - 60000).toISOString() },
+        });
+        fs.writeFileSync(claimPath(logsDir(repo, 'rama'), 'j1', 'nL'), '{}');
+        fs.writeFileSync(resultPath(logsDir(repo, 'rama'), 'j1', 'nL'), JSON.stringify({}));   // sin exitCode
+        const out = collectAndReconcile(repo, 'rama', { reconcileGraceMs: 1000 });
+        expect(out.decisions.find((d) => d.action === 'orphaned-authorization-required')).toBeDefined();
+        const done = readJournal(repo, 'rama').state!.jobs['j1'];
+        expect(done.executionState).toBe('orphaned');
+        expect(done.verdict).toBeUndefined();   // jamas fabricado de un sidecar sin forma
     });
 
     test('runnerTick combina recoleccion + spawn en un tick sin esperar (R4.4)', async () => {  // verifies R4.4
