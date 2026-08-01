@@ -6,6 +6,8 @@ import { findLiteralSecretFlag, redactArgv } from './redact';
 import { fsyncDirSync } from '../atomic-file';
 import type { AppliedRequest, JournalState } from './types';
 
+let requestSeq = 0;
+
 export interface RequestEnvelope {
     kind: 'job-request' | 'register-entity' | 'controller-heartbeat' | 'verdict';
     generationToken: string;
@@ -28,7 +30,8 @@ export function emitRequest(repoRoot: string, branch: string, env: RequestEnvelo
         if (secretFlag !== null) throw new Error(`secreto literal en ${secretFlag}: pasalo por referencia (-env), no por valor`);
         payload.argv = redactArgv(payload.argv as string[]);
     }
-    const requestId = `req-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const seq = (requestSeq++).toString().padStart(10, '0');
+    const requestId = `req-${Date.now()}-${seq}-${crypto.randomBytes(4).toString('hex')}`;
     const body = JSON.stringify({ requestId, ...env, payload }, null, 2) + '\n';
     const dir = requestsDir(repoRoot, branch);
     const tmp = path.join(dir, `.${requestId}.tmp`);

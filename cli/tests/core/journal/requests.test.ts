@@ -49,4 +49,17 @@ describe('requests', () => {
         applyOutcome(s, { requestId: 'req-x', idempotencyKey: 'kx', payloadDigest: 'd', outcome: 'applied', resultRef: 'job-9' });
         expect(Object.keys(s.appliedRequests)).toHaveLength(1);
     });
+
+    test('emitRequest preserva orden de emision incluso con Date.now() colisionado (RNF-T.7)', () => {  // verifies R1.3
+        const originalNow = Date.now;
+        Date.now = () => 1700000000000;
+        try {
+            const a = emitRequest(repo, 'rama', { kind: 'job-request', generationToken: 'g1', idempotencyKey: 'ka', payload: { argv: ['npm', 'test'] } });
+            const b = emitRequest(repo, 'rama', { kind: 'job-request', generationToken: 'g1', idempotencyKey: 'kb', payload: { argv: ['npm', 'test'] } });
+            const listed = listPendingRequests(repo, 'rama').map((p) => p.requestId);
+            expect(listed.indexOf(a.requestId)).toBeLessThan(listed.indexOf(b.requestId));
+        } finally {
+            Date.now = originalNow;
+        }
+    });
 });
