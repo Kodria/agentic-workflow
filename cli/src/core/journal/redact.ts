@@ -4,25 +4,31 @@
 const SECRET_WORD = /(password|passwd|secret|api[-_]?key|apikey|token|credential)/i;
 const ASSIGNMENT = new RegExp(`([a-z0-9_-]*(?:password|passwd|secret|api[-_]?key|apikey|token|credential)[a-z0-9_-]*)(\\s*[=:]\\s*)(\\S+)`, 'gi');
 
-export function redactText(text: string): string {
-    return text.replace(ASSIGNMENT, (_m, key: string, sep: string) => `${key}${sep}[REDACTED]`);
-}
-
 // Distinto de SECRET_WORD (substring, para nombres de flag reales): aquí el
 // keyword debe ser un segmento completo delimitado por -, _ o los bordes del
-// string — así un valor literal que solo CONTIENE la palabra como substring
-// (ej. "abc123secretvalue") no se confunde con un flag hermano real.
+// string. Se usa SOLO dentro de redactArgv para decidir hasta dónde extender
+// la redacción en cadena — nunca para decidir SI redactar: ver comentario en
+// redactArgv sobre por qué la ambigüedad siempre se resuelve redactando de
+// más, nunca de menos.
 const SECRET_FLAG_SEGMENT = /(^|[-_])(password|passwd|secret|api[-_]?key|apikey|token|credential)($|[-_])/i;
 
-function isSensitiveFlagToken(token: string | undefined): boolean {
-    if (token === undefined || !token.startsWith('--')) return false;
+function looksLikeSensitiveFlag(token: string): boolean {
+    if (!token.startsWith('--')) return false;
     const eq = token.indexOf('=');
     const flag = eq === -1 ? token : token.slice(0, eq);
     return SECRET_FLAG_SEGMENT.test(flag.slice(2));
 }
 
+export function redactText(text: string): string {
+    return text.replace(ASSIGNMENT, (_m, key: string, sep: string) => `${key}${sep}[REDACTED]`);
+}
+
 /** Flag sensible que porta un secreto LITERAL (no una referencia `-env`):
- *  la request se rechaza, no se persiste ni redactada (R2.3). */
+ *  la request se rechaza, no se persiste ni redactada (R2.3). Deliberadamente
+ *  NO intenta distinguir "el siguiente token es un flag hermano" de "es el
+ *  valor literal": el rechazo es todo-o-nada (emitRequest lanza antes de
+ *  persistir nada), así que la ambigüedad nunca importa — cualquier token
+ *  después de un flag sensible ya es motivo suficiente de rechazo. */
 export function findLiteralSecretFlag(argv: string[]): string | null {
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
@@ -32,27 +38,50 @@ export function findLiteralSecretFlag(argv: string[]): string | null {
         const inlineValue = eq === -1 ? undefined : arg.slice(eq + 1);
         if (!SECRET_WORD.test(flag)) continue;
         if (/-env$/i.test(flag)) continue;                 // referencia, permitida (R4.7)
-        if (inlineValue !== undefined) return flag;
-        const next = argv[i + 1];
-        if (next !== undefined && !isSensitiveFlagToken(next)) return flag;
+        const value = inlineValue !== undefined ? inlineValue : argv[i + 1];
+        if (value !== undefined) return flag;
     }
     return null;
 }
 
+/** A diferencia de findLiteralSecretFlag (todo-o-nada), esta función SÍ debe
+ *  devolver un array persistible — no puede simplemente rechazar. Cuando el
+ *  token que sigue a un flag sensible también PARECE un flag sensible, es
+ *  imposible distinguir por texto solo "es un flag hermano real" de "es el
+ *  valor literal (adversario) del flag anterior disfrazado de flag" — ambas
+ *  lecturas son indistinguibles sin un esquema de flags real (hallazgo de
+ *  spec-review, R2.3). Ante esa ambigüedad se redacta TODA la cadena de
+ *  tokens con forma de flag sensible más el token final que la cierra,
+ *  nunca menos: sobre-redactar un nombre de flag es un costo cosmético,
+ *  dejar pasar un secreto no lo es. */
 export function redactArgv(argv: string[]): string[] {
     const out: string[] = [];
-    for (let i = 0; i < argv.length; i++) {
+    let i = 0;
+    while (i < argv.length) {
         const arg = argv[i];
         const eq = arg.indexOf('=');
         const flag = eq === -1 ? arg : arg.slice(0, eq);
-        if (arg.startsWith('--') && SECRET_WORD.test(flag) && !/-env$/i.test(flag)) {
-            if (eq !== -1) { out.push(`${flag}=[REDACTED]`); continue; }
-            out.push(arg);
-            const next = argv[i + 1];
-            if (next !== undefined && !isSensitiveFlagToken(next)) { out.push('[REDACTED]'); i++; }
+        const isSensitive = arg.startsWith('--') && SECRET_WORD.test(flag) && !/-env$/i.test(flag);
+        if (!isSensitive) {
+            out.push(redactText(arg));
+            i++;
             continue;
         }
-        out.push(redactText(arg));
+        if (eq !== -1) {
+            out.push(`${flag}=[REDACTED]`);
+            i++;
+            continue;
+        }
+        out.push(arg);
+        i++;
+        while (i < argv.length && looksLikeSensitiveFlag(argv[i])) {
+            out.push('[REDACTED]');
+            i++;
+        }
+        if (i < argv.length) {
+            out.push('[REDACTED]');
+            i++;
+        }
     }
     return out;
 }
