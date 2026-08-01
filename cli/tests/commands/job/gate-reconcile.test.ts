@@ -188,13 +188,37 @@ describe('reap — limpieza explicita con identidad validada (R2.2)', () => {
         expect(m.aliveWithIdentity).toBe(false);
     });
 
+    test('planReap reporta aliveWithIdentity: true para un proceso genuinamente vivo', () => {
+        const { spawnStructured } = require('../../../src/core/journal/process');
+        const s = emptyState('r');
+        const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 5000)'], process.cwd(), 'nLive');
+        s.jobs['vivo'] = job({ id: 'vivo', executionState: 'running', processRef: ref });
+        try {
+            const plan = planReap(s);
+            const m = plan.find((p) => p.jobId === 'vivo')!;
+            expect(m.pid).toBe(ref.pid);
+            expect(m.aliveWithIdentity).toBe(true);
+        } finally {
+            child.kill('SIGKILL');
+        }
+    });
+
     test('executeReap nunca señaliza sin processRef ni sin identidad viva confirmada (R2.1, R2.2)', async () => {
         const s = emptyState('r');
         const deadRef = { pid: 999999, startTime: 'gone', spawnNonce: 'n1', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
         s.jobs['sinRef'] = job({ id: 'sinRef', executionState: 'running' });
         s.jobs['muerto'] = job({ id: 'muerto', executionState: 'running', processRef: deadRef });
-        const killed = await executeReap(s, ['sinRef', 'muerto', 'no-existe']);
-        expect(killed).toEqual([]);
+        const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => true);
+        try {
+            const killed = await executeReap(s, ['sinRef', 'muerto', 'no-existe']);
+            expect(killed).toEqual([]);
+            // no solo el resultado: nunca se INTENTO ninguna señal (R2.1) —
+            // la ausencia de identidad viva confirmada corta antes de llamar
+            // a terminateGroupConfirmed/process.kill, no despues.
+            expect(killSpy).not.toHaveBeenCalled();
+        } finally {
+            killSpy.mockRestore();
+        }
     });
 
     test('executeReap mata y reporta solo jobs con muerte confirmada', async () => {
