@@ -114,7 +114,8 @@ export function groupIsGone(pgid: number): boolean {
 export interface ActivitySnapshot { cpuTime: string; groupSize: number; }
 export function activitySnapshot(ref: ProcessRef): ActivitySnapshot | null {
     if (!refIsAlive(ref)) return null;
-    const cpu = psField(ref.pid, 'time') ?? '0';
+    let cpu = '0';
+    try { cpu = psField(ref.pid, 'time') ?? '0'; } catch { cpu = '0'; }
     let groupSize = 1;
     try {
         groupSize = execFileSync('pgrep', ['-g', String(ref.processGroup)], { encoding: 'utf8' })

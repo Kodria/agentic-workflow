@@ -61,4 +61,24 @@ describe('process identity', () => {
             spy.mockRestore();
         }
     });
+
+    test('activitySnapshot no crashea si ps falla en la lectura de cpu time (R2.1)', () => {  // verifies R2.1
+        const cp = require('child_process');
+        const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 3000)'], process.cwd(), 'n5');
+        const spy = jest.spyOn(cp, 'execFileSync').mockImplementation((...args) => {
+            const cmd = args[0];
+            if (cmd === 'ps') {
+                const err: any = new Error('spawn ps ENOENT');
+                err.code = 'ENOENT';
+                throw err;
+            }
+            throw new Error('unexpected execFileSync call in this test: ' + cmd);
+        });
+        try {
+            expect(() => activitySnapshot(ref)).not.toThrow();
+        } finally {
+            spy.mockRestore();
+            child.kill('SIGKILL');
+        }
+    });
 });
