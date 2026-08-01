@@ -161,7 +161,7 @@ flowchart TD
     L -->|no| M[Interlock final → COMPLETE]
 ```
 
-- **PR-3 — Tier declarativo de complejidad por tarea** *(condicionado a R0 + DA-2)*. El plan transporta la intención; el runtime la honra con lo que tenga:
+- **PR-3 — Tier declarativo de complejidad por tarea** *(DESESTIMADO 2026-07-31 al resolverse DA-2 — se conserva como especificación por si el panorama de providers cambia)*. El plan transporta la intención; el runtime la honra con lo que tenga:
   - `writing-plans` admite un campo opcional por tarea (p. ej. `**Complejidad:** mecánica | integración | diseño`), análogo a los campos `**Skills:**`/`**Modo de ejecución:**` ya existentes.
   - Donde el runtime soporta selección de modelo por despacho, el controlador la aplica **solo al implementador** — los revisores corren siempre a plena capacidad (el aparato de revisión riguroso es justamente lo que hace seguro abaratar la implementación).
   - Donde no hay soporte, degradación a no-op **reportado**: el ciclo completa normal y la evidencia registra que el campo se ignoró. Si R0 confirma soporte en los tres providers, la degradación será excepcional; si no, DA-2 decide si el no-op satisface el criterio del dueño ("funcional en todo o no sirve").
@@ -215,8 +215,8 @@ flowchart TD
   - **CA-4.2** — Mismo plan sin aislamiento ejecuta serial según eventos del scheduler; el test no depende de que el repositorio esté limpio de cambios deliberados.
 - **RF-4.3** — THE verificación de independencia SHALL comparar declaración previa y archivos/recursos reales modificados, y SHALL ejecutar un gate de integración después de reunir los tracks.
   - **CA-4.3** — Un track que toca lockfile, manifest, migración, snapshot, generado o archivo no declarado compartido invalida el paralelismo aunque `Files:` iniciales fueran disjuntos.
-- **RNF-T.1** — (transversal) THE optimización SHALL preservar la capacidad de detección de defectos del proceso: ninguna etapa de revisión eliminada ni fusionada, y la métrica de no-regresión de calidad (DA-1) no empeora en la ventana de medición acordada.
-  - **CA-T.1** — Comparación de la métrica DA-1 entre ciclos pre- y post-cambio, sobre desarrollos reales.
+- **RNF-T.1** — (transversal) THE optimización SHALL preservar la capacidad de detección de defectos del proceso: ninguna etapa de revisión eliminada ni fusionada, y toda deduplicación de verificación SHALL saltar únicamente comandos con fingerprint idéntico. *(Redactado según la resolución de DA-1, 2026-07-31: garantía por diseño + prueba mecánica, sin métrica permanente.)*
+  - **CA-T.1** — Test mecánico que demuestra que el dedup ejecuta el comando ante cualquier diferencia de fingerprint y solo lo omite ante identidad exacta (fingerprint + comando).
 - **RNF-T.2** — (transversal) THE framework SHALL declarar, para cada capacidad nueva, su comportamiento en cada uno de los tres providers (soportado / degradado explícito), verificado contra la matriz de capacidades de R0 — nunca "no probado".
   - **CA-T.2** — Cada estado declarado enlaza evidencia E2E reproducible por provider; nombrar el provider en documentación sin ejecución no satisface el criterio.
 - **RNF-T.3** — (transversal) THE sets de referencia de sensores SHALL contener exclusivamente clases genéricas de defecto, reutilizables entre proyectos — jamás reglas nacidas de un bug puntual (doctrina existente del framework).
@@ -232,7 +232,7 @@ flowchart TD
 - **RNF-T.8** — (transversal) THE fixtures y evidencia de aceptación SHALL estar versionados, sanitizados y acompañados de hash/comando de reproducción; ningún CA SHALL depender exclusivamente de transcripts, ledgers o estado local invisible.
   - **CA-T.8** — Un checkout limpio reproduce las aceptaciones sin acceso a la sesión que diseñó o implementó el cambio.
 - **RNF-T.9** — (transversal) THE optimización SHALL medir por ciclo wall time, tokens por rol, despachos y cantidad de ejecuciones mecánicas, separando input/output/cache cuando el provider lo exponga.
-  - **CA-T.9** — Tras la ventana acordada en DA-1, el reporte compara baseline y ciclos posteriores con la misma metodología y declara cualquier dimensión no observable, sin inventar equivalencias entre providers.
+  - **CA-T.9** — El reporte de cada ciclo posterior compara contra el baseline medido (2026-07-29) con la misma metodología y declara cualquier dimensión no observable, sin inventar equivalencias entre providers. *(La ventana de medición de la DA-1 original quedó sin efecto al resolverse DA-1 sin métrica permanente.)*
 
 ## Open Decisions
 
@@ -307,7 +307,7 @@ El orden es por valor de negocio: primero lo que reduce el dolor de N1 en *todos
 
 - **Value:** la porción del costo correspondiente a implementadores corre en la capacidad que cada tarea necesita, no en el máximo por defecto; revisores permanecen fuera del tiering y a plena capacidad como red. El ahorro se mide sobre tokens reales por rol, sin atribuirle consumo de revisores que esta release no modifica.
 - **Scope:** RF-3.1, RF-3.2, RF-3.3 · RNF-T.2. (Registry: `writing-plans` + skill SDD.)
-- **Blocked by:** DA-2 + matriz de capacidades de R0.
+- **Blocked by:** n/a — release desestimado (DA-2 resuelta 2026-07-31).
 - **Acceptance:** CA-3.1, CA-3.2, CA-3.3 — CA-3.1/3.2 ejecutados en los providers que la matriz de R0 marque como soportado/no-soportado respectivamente.
 
 ### Release 5 — Paralelismo entre tracks independientes (condicionado)
@@ -322,7 +322,7 @@ El orden es por valor de negocio: primero lo que reduce el dolor de N1 en *todos
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | Contradicciones entre este brief y el sistema real (capacidades de providers, estructura de packs, esquema del ledger) | Retrabajo; diseño inaplicable en algún runtime | Mandato de no-asunción + R0 read-only antes de todo compromiso; releases 4–5 explícitamente condicionados a la matriz |
-| Baseline de n=1 sesión: los ahorros estimados pueden no generalizar | Expectativas infladas; optimizar el caso equivocado | RNF-T.4 hace medibles los ciclos siguientes; DA-1 fija la métrica antes de Release 1; revisar estimaciones tras 2–3 ciclos medidos |
+| Baseline de n=1 sesión: los ahorros estimados pueden no generalizar | Expectativas infladas; optimizar el caso equivocado | RNF-T.4 hace medibles los ciclos siguientes; revisar estimaciones tras 2–3 ciclos medidos |
 | Presión de optimización erosionando gates con el tiempo ("ya que ahorramos acá, saltemos esto") | Pérdida gradual de N2 — el valor central del proceso | RNF-T.1 como requisito transversal con CA propio; Out of Scope explícito sobre etapas de revisión; tier jamás aplica a revisores |
 | Corrupción de estado por concurrencia (incidente real: 7 archivos revertidos por `git checkout` concurrente de subagentes) | Trabajo perdido, evidencia contaminada, difícil de detectar | RF-4.2 (aislamiento o serial, sin tercera opción); RF-4.3 (independencia mecánica); regla ya curada en `AGENTS.md` del CLI |
 | Sets de referencia degenerando en reglas específicas de proyecto | Viola la doctrina del framework; convierte hallazgos locales en obligaciones globales | RNF-T.3 con CA de revisión por entrada; doctrina existente citada en Constraints |
