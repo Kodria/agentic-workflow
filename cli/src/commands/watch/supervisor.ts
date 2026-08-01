@@ -4,7 +4,7 @@
 import { readJournal, writeJournal, appendEvent } from '../../core/journal/store';
 import { computeFingerprint } from '../../core/journal/fingerprint';
 import { adapterFor } from '../../core/journal/adapter';
-import { refIsAlive, terminateGroupConfirmed } from '../../core/journal/process';
+import { groupIsGone, terminateGroupConfirmed } from '../../core/journal/process';
 import { computeGate, FingerprintNow } from '../job/gate';
 import { acquireLock, releaseLock, verifyBranchInvariant } from './lock';
 import { consumePendingRequests } from './apply';
@@ -68,6 +68,15 @@ export class Supervisor {
         const liveJobs = r.state === null ? 1 : Object.values(r.state.jobs).filter((j) => LIVE.includes(j.executionState)).length;
         if (gate.pass && liveJobs === 0) {   // gate verde YA implica cero vivos; doble cinturon (R4.5)
             const s = r.state!;
+            for (const generation of s.generations) {
+                if (generation.processRef === undefined || groupIsGone(generation.processRef.processGroup)) continue;
+                const confirmed = await terminateGroupConfirmed(generation.processRef, { termGraceMs: this.cfg.termGraceMs, killGraceMs: this.cfg.killGraceMs });
+                if (!confirmed) {
+                    enterCustody(this.repoRoot, this.branch, `no se pudo terminar con identidad confirmada la generacion ${generation.n} antes de COMPLETE`);
+                    return 'custody';
+                }
+                generation.state = 'terminated';
+            }
             s.cycle.status = 'COMPLETE';
             s.cycle.completedAt = new Date().toISOString();
             writeJournal(this.repoRoot, this.branch, s);
@@ -135,7 +144,10 @@ export async function runSupervisorLoop(repoRoot: string, branch: string, cfg: S
     if (r.corrupt || r.state === null) throw new Error('journal ausente o corrupto: corre `awm watch --init` primero');
     verifyBranchInvariant(repoRoot, r.state.branch);
     const handle = acquireLock(repoRoot);
-    const onSignal = () => { releaseLock(repoRoot, handle); process.exit(130); };
+    let shutdownRequested = false;
+    let wakeSleep: (() => void) | null = null;
+    let safeToRelease = false;
+    const onSignal = () => { shutdownRequested = true; wakeSleep?.(); };
     process.on('SIGINT', onSignal);
     process.on('SIGTERM', onSignal);
     const sup = new Supervisor(repoRoot, branch, cfg, spawner);
@@ -147,22 +159,32 @@ export async function runSupervisorLoop(repoRoot: string, branch: string, cfg: S
             launchControllerGeneration(repoRoot, branch, cfg.provider, prompt);
         }
         for (;;) {
+            if (shutdownRequested) break;
             const out = await sup.tick();
             if (out === 'complete') break;
             // 'custody': NO liberar lock, NO salir — seguir auditando (R4.5)
-            await new Promise((res) => setTimeout(res, cfg.tickMs));
+            await new Promise<void>((resolve) => {
+                let settled = false;
+                const finish = () => { if (!settled) { settled = true; clearTimeout(timer); wakeSleep = null; resolve(); } };
+                const timer = setTimeout(finish, cfg.tickMs);
+                wakeSleep = finish;
+            });
         }
-        // gate verde: terminar la generacion PROPIA antes de salir (es hija
-        // nuestra y el ciclo cerro — cero procesos huerfanos).
+        // En shutdown explicito, drenar ownership ANTES de liberar el lock. En
+        // COMPLETE, tick() ya hizo exactamente esta confirmacion antes de
+        // persistir el estado terminal; el loop solo verifica el invariante.
         const sEnd = readJournal(repoRoot, branch).state!;
         for (const g of sEnd.generations) {
-            if (g.processRef !== undefined && refIsAlive(g.processRef)) {
-                await terminateGroupConfirmed(g.processRef, { termGraceMs: cfg.termGraceMs, killGraceMs: cfg.killGraceMs });
-            }
+            if (g.processRef === undefined || groupIsGone(g.processRef.processGroup)) continue;
+            const confirmed = await terminateGroupConfirmed(g.processRef, { termGraceMs: cfg.termGraceMs, killGraceMs: cfg.killGraceMs });
+            if (!confirmed) throw new Error(`ownership retenido: generacion ${g.n} sigue viva o su identidad es indemostrable`);
+            g.state = 'terminated';
         }
+        if (shutdownRequested) writeJournal(repoRoot, branch, sEnd);
+        safeToRelease = true;
     } finally {
         process.removeListener('SIGINT', onSignal);
         process.removeListener('SIGTERM', onSignal);
-        releaseLock(repoRoot, handle);
+        if (safeToRelease) releaseLock(repoRoot, handle);
     }
 }

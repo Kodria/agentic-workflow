@@ -9,7 +9,7 @@ import { Job } from '../../../src/core/journal/types';
 
 const fakeSpawner: WrapperSpawner = (job, nonce, logsRoot, repoRoot) => {
     // Mismo contrato que el spawner real: dispara el wrapper y NO espera.
-    void runExecWrapper({ logsRoot, jobId: job.id, nonce, argv: job.argv, cwd: repoRoot }).catch(() => { /* el resultado 127 ya quedo en sidecar */ });
+    void runExecWrapper({ logsRoot, jobId: job.id, nonce, argv: job.argv, cwd: job.cwd, repoRoot }).catch(() => { /* el resultado 127 ya quedo en sidecar */ });
 };
 
 async function until(fn: () => boolean, ms = 8000): Promise<void> {

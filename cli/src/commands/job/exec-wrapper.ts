@@ -5,7 +5,8 @@
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
-import { captureSelfRef, captureRefFor, NONCE_ENV } from '../../core/journal/process';
+import { captureSelfRef, captureRefFor, NONCE_ENV, terminatePreviouslyOwnedGroup } from '../../core/journal/process';
+import { resolveWorkingDirectory } from '../../core/journal/fingerprint';
 import { redactText } from '../../core/journal/redact';
 import { writeFileAtomicDurable, fsyncDirSync } from '../../core/atomic-file';
 import type { ProcessRef } from '../../core/journal/types';
@@ -40,8 +41,9 @@ const MAX_LOG_BYTES = 1024 * 1024;   // retencion acotada (R2.5)
 // una espera perceptible si un descendiente hereda los fds y nunca cierra.
 const STDIO_GRACE_MS = 300;
 
-export async function runExecWrapper(opts: { logsRoot: string; jobId: string; nonce: string; argv: string[]; cwd: string }): Promise<WrappedResult> {
+export async function runExecWrapper(opts: { logsRoot: string; jobId: string; nonce: string; argv: string[]; cwd: string; repoRoot?: string }): Promise<WrappedResult> {
     const { logsRoot, jobId, nonce, argv, cwd } = opts;
+    const repoRoot = opts.repoRoot ?? process.cwd();
     if (argv.length === 0) throw new Error('argv vacio');
     fs.mkdirSync(logsRoot, { recursive: true, mode: 0o700 });
     // (1) claim exclusivo DURABLE — wx + fsync de archivo y de directorio
@@ -68,8 +70,9 @@ export async function runExecWrapper(opts: { logsRoot: string; jobId: string; no
     // process group por job, independiente del supervisor (R4.7: shell:false,
     // argv como array, secretos solo por referencia de entorno).
     const [exe, ...args] = argv;
+    const safeCwd = resolveWorkingDirectory(repoRoot, cwd).absolute;
     const child = spawn(exe, args, {
-        cwd, shell: false, detached: false,
+        cwd: safeCwd, shell: false, detached: true,
         env: { ...process.env, [NONCE_ENV]: nonce },
         stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -112,5 +115,9 @@ export async function runExecWrapper(opts: { logsRoot: string; jobId: string; no
         const timer = setTimeout(() => resolve(), STDIO_GRACE_MS);
         child.once('close', () => { clearTimeout(timer); resolve(); });
     });
-    return finish(exitCode);
+    // El resultado terminal no se publica mientras queden descendientes en el
+    // grupo propio del comando. Como el wrapper vive en otro PGID, puede drenar
+    // el grupo completo sin auto-terminarse.
+    const drained = await terminatePreviouslyOwnedGroup(identity.command, { termGraceMs: 500, killGraceMs: 500 });
+    return finish(drained ? exitCode : 125);
 }

@@ -18,11 +18,22 @@ describe('process identity', () => {
         expect(refIsAlive(ref)).toBe(false);
     });
 
-    test('refIsAlive rechaza identidad parcial: startTime O psArgsDigest distintos (R2.1)', () => {  // verifies R2.1
+    test('refIsAlive rechaza cualquier campo distinto de la tupla completa (R2.1)', () => {  // verifies R2.1
         const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 3000)'], process.cwd(), 'n2');
         expect(refIsAlive({ ...ref, startTime: 'otro-momento' })).toBe(false);
+        expect(refIsAlive({ ...ref, spawnNonce: 'otro-nonce' })).toBe(false);
+        expect(refIsAlive({ ...ref, argvDigest: 'ffffffffffffffff' })).toBe(false);
         expect(refIsAlive({ ...ref, psArgsDigest: 'ffffffffffffffff' })).toBe(false);
         expect(refIsAlive({ ...ref, processGroup: ref.processGroup + 1 })).toBe(false);
+        child.kill('SIGKILL');
+    });
+
+    test('terminateGroupConfirmed no senializa un PGID si la identidad del lider no coincide', async () => {
+        const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 5000)'], process.cwd(), 'n-no-kill');
+        const mismatched = { ...ref, startTime: 'identidad-de-otro-proceso' };
+        const confirmed = await terminateGroupConfirmed(mismatched, { termGraceMs: 20, killGraceMs: 20 });
+        expect(confirmed).toBe(false);
+        expect(refIsAlive(ref)).toBe(true);
         child.kill('SIGKILL');
     });
 

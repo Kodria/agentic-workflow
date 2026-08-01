@@ -77,10 +77,14 @@ export function argvDigest(argv: string[]): string {
  *  refIsAlive, que ya envuelve en su propio try/catch fail-safe — cualquier
  *  caller NUEVO que la use standalone debe hacer lo mismo (ver comentario
  *  de psField) o usar psFieldSafe si esta en un contexto de captura. */
-export function psArgsDigestOf(pid: number): string | null {
+function identityDigest(psArgs: string, spawnNonce: string, requestedArgvDigest: string): string {
+    return crypto.createHash('sha256').update(`${psArgs}\0${spawnNonce}\0${requestedArgvDigest}`).digest('hex').slice(0, 16);
+}
+
+export function psArgsDigestOf(pid: number, spawnNonce = '', requestedArgvDigest = ''): string | null {
     const args = psField(pid, 'args');
     if (args === null) return null;
-    return crypto.createHash('sha256').update(args).digest('hex').slice(0, 16);
+    return identityDigest(args, spawnNonce, requestedArgvDigest);
 }
 
 /** Captura la identidad COMPLETA de un pid recien spawneado (R2.1):
@@ -93,13 +97,16 @@ export function captureRefFor(pid: number, nonce: string, argv: string[]): Proce
     }
     const pgid = psFieldSafe(pid, 'pgid');
     const args = stablePsArgs(pid);
+    const requestedArgvDigest = argvDigest(argv);
     return {
         pid,
         startTime: start ?? 'unknown',
         spawnNonce: nonce,
-        argvDigest: argvDigest(argv),
+        argvDigest: requestedArgvDigest,
         processGroup: pgid !== null ? Number(pgid) : pid,
-        psArgsDigest: args !== null ? crypto.createHash('sha256').update(args).digest('hex').slice(0, 16) : 'unknown',
+        // Liga nonce + argv solicitado con la observacion real de ps. Alterar
+        // cualquier miembro de la tupla invalida la identidad completa.
+        psArgsDigest: args !== null ? identityDigest(args, nonce, requestedArgvDigest) : 'unknown',
     };
 }
 
@@ -133,7 +140,7 @@ export function refIsAlive(ref: ProcessRef): boolean {
         if (start === null || start !== ref.startTime) return false;
         const pgid = psField(ref.pid, 'pgid');
         if (pgid === null || Number(pgid) !== ref.processGroup) return false;
-        const argsDig = psArgsDigestOf(ref.pid);
+        const argsDig = psArgsDigestOf(ref.pid, ref.spawnNonce, ref.argvDigest);
         if (argsDig === null || argsDig !== ref.psArgsDigest) return false;
         return true;
     } catch {
@@ -173,13 +180,40 @@ export function activitySnapshot(ref: ProcessRef): ActivitySnapshot | null {
  *  true <=> lider muerto por identidad Y grupo entero desaparecido (pgrep -g
  *  vacio) — jamas confirmar solo el lider (bloqueador 6). */
 export async function terminateGroupConfirmed(ref: ProcessRef, opts: { termGraceMs: number; killGraceMs: number }): Promise<boolean> {
-    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    const confirmed = () => !refIsAlive(ref) && groupIsGone(ref.processGroup);
-    if (confirmed()) return true;
+    const waitUntilGone = async (maxMs: number): Promise<boolean> => {
+        const deadline = Date.now() + maxMs;
+        while (Date.now() < deadline) {
+            if (groupIsGone(ref.processGroup)) return true;
+            await new Promise((resolve) => setTimeout(resolve, Math.min(25, Math.max(1, deadline - Date.now()))));
+        }
+        return groupIsGone(ref.processGroup);
+    };
+    if (groupIsGone(ref.processGroup)) return true;
+    // Un PGID ocupado con lider de identidad distinta NO es nuestro. Nunca
+    // usar la falta de match como autorizacion para senializar ese grupo.
+    if (!refIsAlive(ref)) return false;
     try { process.kill(-ref.processGroup, 'SIGTERM'); } catch { /* grupo ya ausente */ }
-    await wait(opts.termGraceMs);
-    if (confirmed()) return true;
+    if (await waitUntilGone(opts.termGraceMs)) return true;
     try { process.kill(-ref.processGroup, 'SIGKILL'); } catch { /* idem */ }
-    await wait(opts.killGraceMs);
-    return confirmed();
+    return waitUntilGone(opts.killGraceMs);
+}
+
+/** Drena un grupo cuya propiedad fue capturada por el caller mientras el
+ * lider aun estaba vivo. Se usa inmediatamente tras el exit del lider para
+ * eliminar descendientes remanentes; el PGID no puede reutilizarse mientras
+ * esos miembros sigan presentes. */
+export async function terminatePreviouslyOwnedGroup(ref: ProcessRef, opts: { termGraceMs: number; killGraceMs: number }): Promise<boolean> {
+    const waitUntilGone = async (maxMs: number): Promise<boolean> => {
+        const deadline = Date.now() + maxMs;
+        while (Date.now() < deadline) {
+            if (groupIsGone(ref.processGroup)) return true;
+            await new Promise((resolve) => setTimeout(resolve, Math.min(25, Math.max(1, deadline - Date.now()))));
+        }
+        return groupIsGone(ref.processGroup);
+    };
+    if (groupIsGone(ref.processGroup)) return true;
+    try { process.kill(-ref.processGroup, 'SIGTERM'); } catch { /* ya ausente */ }
+    if (await waitUntilGone(opts.termGraceMs)) return true;
+    try { process.kill(-ref.processGroup, 'SIGKILL'); } catch { /* ya ausente */ }
+    return waitUntilGone(opts.killGraceMs);
 }

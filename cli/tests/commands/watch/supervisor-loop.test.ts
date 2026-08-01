@@ -12,11 +12,12 @@ import { emitRequest } from '../../../src/core/journal/requests';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { supervisorLockPath } from '../../../src/core/journal/paths';
 import { spawnStructured } from '../../../src/core/journal/process';
+import { computeFingerprint } from '../../../src/core/journal/fingerprint';
 
 jest.setTimeout(60000);
 
 const fakeSpawner: WrapperSpawner = (job, nonce, logsRoot, repoRoot) => {
-    void runExecWrapper({ logsRoot, jobId: job.id, nonce, argv: job.argv, cwd: repoRoot }).catch(() => {});
+    void runExecWrapper({ logsRoot, jobId: job.id, nonce, argv: job.argv, cwd: job.cwd, repoRoot }).catch(() => {});
 };
 
 function git(cwd: string, ...args: string[]): void {
@@ -28,7 +29,17 @@ function setupRepo(): string {
     git(repo, 'init', '-q', '-b', 'main');
     fs.writeFileSync(path.join(repo, 'f.txt'), 'x');
     git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'c');
+    fs.mkdirSync(path.join(repo, '.awm'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"' } }));
+    fs.writeFileSync(path.join(repo, '.awm', 'sensors.json'), '{}');
     return repo;
+}
+
+function emitVerdict(repo: string, token: string, obligationId: string, verdictId: string): void {
+    const argv = ['awm-review', obligationId];
+    const fp = computeFingerprint(repo, argv, [], '.').fingerprint;
+    emitRequest(repo, 'main', { kind: 'verdict', generationToken: token, idempotencyKey: verdictId,
+        payload: { verdictId, obligationId, result: 'pass', detail: 'ok', fingerprint: fp, argv, paths: [], cwd: '.' } });
 }
 
 async function until(fn: () => boolean, ms = 30000): Promise<void> {
@@ -62,11 +73,15 @@ describe('supervisor loop', () => {
         const sup = new Supervisor(repo, 'main', cfg, fakeSpawner);
         // el controlador (aqui: el test) registra plan de ciclo + task + jobs enlazados
         emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e1',
-            payload: { entity: 'task', taskId: 'T1', title: 't', verificationPlan: [{ id: 'v1', kind: 'test' }], reviewObligations: [] } });
+            payload: { entity: 'task', taskId: 'T1', title: 't', verificationPlan: [{ id: 'v1', kind: 'test' }, { id: 'v-sensors', kind: 'sensors' }], reviewObligations: [{ id: 'o-spec', kind: 'spec' }, { id: 'o-quality', kind: 'quality' }] } });
         emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e2',
-            payload: { entity: 'cycle-plan', items: [{ id: 'cv1', kind: 'qa' }] } });
+            payload: { entity: 'cycle-plan', items: [{ id: 'cv1', kind: 'qa' }, { id: 'cv-interlock', kind: 'interlock' }] } });
         requestJob(repo, 'main', 'g0', ['node', '-e', 'setTimeout(()=>process.exit(0), 400)'], [], '.', { satisfies: 'v1' });
+        requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v-sensors' });
         requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv1' });
+        requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv-interlock' });
+        emitVerdict(repo, 'g0', 'o-spec', 'verd-spec');
+        emitVerdict(repo, 'g0', 'o-quality', 'verd-quality');
         emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e3',
             payload: { entity: 'task-status', taskId: 'T1', status: 'done' } });
         let sawContinueWithLiveJob = false;
@@ -119,8 +134,11 @@ describe('supervisor loop', () => {
         });
         const token = activeGeneration(readJournal(repo, 'main').state!)!.token;
         emitRequest(repo, 'main', { kind: 'register-entity', generationToken: token, idempotencyKey: 'e1',
-            payload: { entity: 'cycle-plan', items: [{ id: 'cv1', kind: 'qa' }] } });
+            payload: { entity: 'cycle-plan', items: [{ id: 'cv1', kind: 'qa' }, { id: 'cv2', kind: 'interlock' }, { id: 'cv3', kind: 'test' }, { id: 'cv4', kind: 'sensors' }] } });
         requestJob(repo, 'main', token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv1' });
+        requestJob(repo, 'main', token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv2' });
+        requestJob(repo, 'main', token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv3' });
+        requestJob(repo, 'main', token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv4' });
         await loop;                                             // auto-exit tras COMPLETE
         expect(fs.existsSync(supervisorLockPath(repo))).toBe(false);   // lock liberado
         const final = readJournal(repo, 'main').state!;

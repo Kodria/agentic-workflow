@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { spawn, execFileSync, ChildProcess } from 'child_process';
+import { refIsAlive } from '../../../src/core/journal/process';
 
 jest.setTimeout(180000);
 
@@ -130,7 +131,10 @@ describe('E2E real: crash/restart del supervisor', () => {
                 return args.includes('claude');
             } catch { return false; }
         }, 30000, 'stub claude lanzado por el adapter');
-        process.kill(sup.pid!, 'SIGTERM');                     // handler de senial: libera lock y sale
+        const active = (readState(repo)!.generations as Array<{ state: string; processRef?: Parameters<typeof refIsAlive>[0] }>).find((g) => g.state === 'active')!;
+        const controllerRef = active.processRef!;
+        process.kill(sup.pid!, 'SIGTERM');                     // handler de senial: primero drena ownership, luego libera
         await until(() => !fs.existsSync(lockPath), 30000, 'lock liberado tras SIGTERM');
+        expect(refIsAlive(controllerRef)).toBe(false);
     });
 });

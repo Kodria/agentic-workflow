@@ -18,7 +18,7 @@ import { logsDir } from '../../../src/core/journal/paths';
 jest.setTimeout(30000);
 
 const fakeSpawner: WrapperSpawner = (job, nonce, logsRoot, repoRoot) => {
-    void runExecWrapper({ logsRoot, jobId: job.id, nonce, argv: job.argv, cwd: repoRoot }).catch(() => {});
+    void runExecWrapper({ logsRoot, jobId: job.id, nonce, argv: job.argv, cwd: job.cwd, repoRoot }).catch(() => {});
 };
 
 function git(cwd: string, ...args: string[]): void {
