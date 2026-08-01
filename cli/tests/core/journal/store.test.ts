@@ -1,0 +1,58 @@
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import { initJournal, readJournal, writeJournal, appendEvent } from '../../../src/core/journal/store';
+import { statePath, journalDir, eventsPath } from '../../../src/core/journal/paths';
+
+describe('journal store', () => {
+    let repo: string;
+    beforeEach(() => { repo = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-store-')); });
+    afterEach(() => { fs.rmSync(repo, { recursive: true, force: true }); });
+
+    test('initJournal crea 0700/0600 y estado inicial valido (R1.2)', () => {  // verifies R1.2
+        initJournal(repo, 'rama');
+        const dir = journalDir(repo, 'rama');
+        expect(fs.statSync(dir).mode & 0o777).toBe(0o700);
+        expect(fs.statSync(statePath(repo, 'rama')).mode & 0o777).toBe(0o600);
+        const r = readJournal(repo, 'rama');
+        expect(r.corrupt).toBe(false);
+        expect(r.state!.revision).toBe(0);
+    });
+
+    test('writeJournal incrementa revision y rechaza revision vieja (R1.2)', () => {  // verifies R1.2
+        initJournal(repo, 'rama');
+        const s1 = readJournal(repo, 'rama').state!;
+        writeJournal(repo, 'rama', s1);                       // rev 0 -> 1
+        const s2 = readJournal(repo, 'rama').state!;
+        expect(s2.revision).toBe(1);
+        expect(() => writeJournal(repo, 'rama', s1)).toThrow(/revision/);  // CAS: s1 quedo vieja
+    });
+
+    test('nextAction persiste estructurado (R1.5)', () => {                // verifies R1.5
+        initJournal(repo, 'rama');
+        const s = readJournal(repo, 'rama').state!;
+        s.cycle.nextAction = { actionId: 'a1', type: 'implement-task', target: 'T1', preconditions: [], attempt: 1, state: 'pending' };
+        writeJournal(repo, 'rama', s);
+        expect(readJournal(repo, 'rama').state!.cycle.nextAction!.actionId).toBe('a1');
+    });
+
+    test('estado corrupto se reporta, jamas se descarta en silencio (R1.6)', () => {  // verifies R1.6
+        initJournal(repo, 'rama');
+        fs.writeFileSync(statePath(repo, 'rama'), 'null');    // JSON valido, shape invalido
+        const r = readJournal(repo, 'rama');
+        expect(r.corrupt).toBe(true);
+        expect(r.state).toBeNull();
+        fs.writeFileSync(statePath(repo, 'rama'), '{roto');   // sintaxis invalida
+        expect(readJournal(repo, 'rama').corrupt).toBe(true);
+    });
+
+    test('appendEvent agrega lineas de auditoria best-effort (R4.6)', () => {  // verifies R4.6
+        initJournal(repo, 'rama');
+        appendEvent(repo, 'rama', { kind: 'generation-launched', n: 1 });
+        appendEvent(repo, 'rama', { kind: 'request-rejected-stale' });
+        const lines = fs.readFileSync(eventsPath(repo, 'rama'), 'utf8').trim().split('\n');
+        expect(lines).toHaveLength(2);
+        expect(JSON.parse(lines[0]).kind).toBe('generation-launched');
+        expect(typeof JSON.parse(lines[0]).at).toBe('string');
+    });
+});
