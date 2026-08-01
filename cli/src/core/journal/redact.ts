@@ -20,7 +20,7 @@ export function findLiteralSecretFlag(argv: string[]): string | null {
         if (!SECRET_WORD.test(flag)) continue;
         if (/-env$/i.test(flag)) continue;                 // referencia, permitida (R4.7)
         const value = inlineValue !== undefined ? inlineValue : argv[i + 1];
-        if (value !== undefined && !value.startsWith('--')) return flag;
+        if (value !== undefined) return flag;
     }
     return null;
 }
@@ -34,7 +34,7 @@ export function redactArgv(argv: string[]): string[] {
         if (arg.startsWith('--') && SECRET_WORD.test(flag) && !/-env$/i.test(flag)) {
             if (eq !== -1) { out.push(`${flag}=[REDACTED]`); continue; }
             out.push(arg);
-            if (argv[i + 1] !== undefined && !argv[i + 1].startsWith('--')) { out.push('[REDACTED]'); i++; }
+            if (argv[i + 1] !== undefined) { out.push('[REDACTED]'); i++; }
             continue;
         }
         out.push(redactText(arg));
