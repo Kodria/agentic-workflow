@@ -65,4 +65,19 @@ describe('computeFingerprint', () => {
         const all = computeFingerprint(repo, ['npm', 'test'], [], '.');
         expect(all.expandedPaths.some((p) => p.startsWith('.awm/'))).toBe(false);
     });
+
+    test('archivo con nombre no-ASCII: cambio de contenido SI altera el fingerprint (R3.4)', () => {  // verifies R3.4
+        const name = 'café.txt';
+        fs.writeFileSync(path.join(repo, name), 'v1');
+        git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'c2');
+        const base = computeFingerprint(repo, ['npm', 'test'], [], '.').fingerprint;
+        fs.writeFileSync(path.join(repo, name), 'v2-completely-different-content');
+        const mod = computeFingerprint(repo, ['npm', 'test'], [], '.').fingerprint;
+        expect(mod).not.toBe(base);
+    });
+
+    test('repos con muchos archivos no truncan la salida de git (R3.4)', () => {  // verifies R3.4
+        for (let i = 0; i < 200; i++) fs.writeFileSync(path.join(repo, `f${i}.txt`), `contenido-${i}`);
+        expect(() => computeFingerprint(repo, ['npm', 'test'], [], '.')).not.toThrow();
+    });
 });

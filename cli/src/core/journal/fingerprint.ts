@@ -5,8 +5,10 @@ import { execFileSync } from 'child_process';
 function sha(parts: string[]): string {
     return crypto.createHash('sha256').update(parts.join('\0')).digest('hex');
 }
+// Sin ceiling de maxBuffer: repos grandes (`ls-files` / `ls-files --stage` en
+// miles de archivos) pueden superar el default de Node (1MB) y abortar con ENOBUFS.
 function git(cwd: string, args: string[]): string {
-    return execFileSync('git', args, { cwd, encoding: 'utf8' });
+    return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: Infinity });
 }
 
 export interface FingerprintResult {
@@ -35,8 +37,8 @@ export function computeFingerprint(repoRoot: string, argv: string[], pathGlobs: 
     // worktree idéntico produce salida distinta aquí.
     const indexRaw = git(repoRoot, ['ls-files', '--stage', '--', ...pathspecs, EXCLUDE_JOURNAL]);
     const indexDigest = sha([indexRaw]);
-    const expandedPaths = git(repoRoot, ['ls-files', '--cached', '--others', '--exclude-standard', '--', ...pathspecs, EXCLUDE_JOURNAL])
-        .split('\n').filter(Boolean).sort();
+    const expandedPaths = git(repoRoot, ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', ...pathspecs, EXCLUDE_JOURNAL])
+        .split('\0').filter(Boolean).sort();
     const perFile = expandedPaths.map((p) => {
         try {
             return `${p}:${git(repoRoot, ['hash-object', '--', p]).trim()}`;
