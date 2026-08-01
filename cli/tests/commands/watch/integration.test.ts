@@ -40,7 +40,10 @@ describe('integracion supervisor + jobs', () => {
         repo = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-int-'));
         git(repo, 'init', '-q', '-b', 'main');
         fs.writeFileSync(path.join(repo, 'f.txt'), 'x');
+        fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"' } }));
         git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'c');
+        fs.mkdirSync(path.join(repo, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(repo, '.awm', 'sensors.json'), '{}');
         initWatch(repo, 'main');   // gitignorea .awm ANTES del primer fingerprint
         fpNow = (argv, paths, cwd) => {
             try { return computeFingerprint(repo, argv, paths, cwd).fingerprint; } catch { return null; }
@@ -70,7 +73,7 @@ describe('integracion supervisor + jobs', () => {
 
     test('job fallido ENLAZADO al plan bloquea el gate por adverse-verdict (R1.4c)', async () => {  // verifies R1.4c
         emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'e1',
-            payload: { entity: 'task', taskId: 'T1', title: 't', verificationPlan: [{ id: 'v1', kind: 'test' }], reviewObligations: [] } });
+            payload: { entity: 'task', taskId: 'T1', title: 't', verificationPlan: [{ id: 'v1', kind: 'test' }, { id: 'v-sensors', kind: 'sensors' }], reviewObligations: [] } });
         emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'e2',
             payload: { entity: 'cycle-plan', items: [{ id: 'cv1', kind: 'qa' }] } });
         // job largo que FALLA, enlazado a v1 (bloqueador 5: el test v1 no enlazaba)
@@ -86,13 +89,13 @@ describe('integracion supervisor + jobs', () => {
 
     test('evidencia pass con arbol cambiado despues => stale-fingerprint, historica (RF-2.8)', async () => {  // verifies R6
         emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'e1',
-            payload: { entity: 'task', taskId: 'T1', title: 't', verificationPlan: [{ id: 'v1', kind: 'test' }], reviewObligations: [] } });
-        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'e2',
-            payload: { entity: 'cycle-plan', items: [{ id: 'cv1', kind: 'qa' }] } });
-        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'e3',
-            payload: { entity: 'task-status', taskId: 'T1', status: 'done' } });
-        requestJob(repo, 'main', 'g1', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v1' });
-        requestJob(repo, 'main', 'g1', ['node', '-e', 'setTimeout(()=>process.exit(0),100)'], [], '.', { satisfies: 'cv1' });
+            payload: { entity: 'cycle-plan', items: [
+                { id: 'cv-qa', kind: 'qa' }, { id: 'cv-interlock', kind: 'interlock' },
+                { id: 'cv-test', kind: 'test' }, { id: 'cv-sensors', kind: 'sensors' },
+            ] } });
+        for (const item of ['cv-qa', 'cv-interlock', 'cv-test', 'cv-sensors']) {
+            requestJob(repo, 'main', 'g1', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: item });
+        }
         consumePendingRequests(repo, 'main', 'g1');
         await drainJobs();
         expect(computeGate(readJournal(repo, 'main').state!, false, fpNow).pass).toBe(true);
@@ -116,6 +119,6 @@ describe('integracion supervisor + jobs', () => {
         s.jobs[jid].executionState = 'spawn-intent';         // crash simulado: intent persistido, spawn jamas ocurrio
         s.jobs[jid].spawnNonce = 'nunca-uso';
         const out = reconcileJobs(s, logsDir(repo, 'main'));
-        expect(out.decisions[0].action).toBe('retry-new-attempt');   // sin claim => nunca ejecuto => seguro
+        expect(out.decisions[0].action).toBe('retry-same-intent');  // mismo nonce: el claim wx impide duplicar
     });
 });

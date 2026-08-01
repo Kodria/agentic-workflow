@@ -20,6 +20,7 @@ describe('journal types', () => {
         expect(s.revision).toBe(0);
         expect(s.cycle.status).toBe('IN_PROGRESS');
         expect(typeof s.cycle.startedAt).toBe('string');
+        expect(s.cycle.nextAction?.actionId).toBe('bootstrap-cycle');
         expect(s.requiredVerifiers).toEqual([]);
         expect(s.dispatches).toEqual([]);
     });
@@ -64,5 +65,20 @@ describe('journal types', () => {
             expect(isWellFormedJob(broken)).toBe(false);
         }
         expect(isWellFormedJob({ ...full, phaseTimestamps: [] })).toBe(false);
+        expect(isWellFormedJob({ ...full, argv: [42] })).toBe(false);
+        expect(isWellFormedJob({ ...full, paths: [{ glob: '**/*' }] })).toBe(false);
+        expect(isWellFormedJob({ ...full, observationState: 'stuck' })).toBe(false);
+        expect(isWellFormedJob({ ...full, verdict: 'maybe' })).toBe(false);
+        expect(isWellFormedJob({ ...full, result: { exitCode: 0 } })).toBe(false);
+        expect(isWellFormedJob({ ...full, processRef: { pid: 1 } })).toBe(false);
+    });
+
+    test('IN_PROGRESS exige nextAction estructurada y status del ciclo conocido (R1.5/R1.6)', () => {
+        const missing = emptyState('x');
+        delete missing.cycle.nextAction;
+        expect(isWellFormedState(missing)).toBe(false);
+        const badStatus = emptyState('x') as unknown as { cycle: { status: string } };
+        badStatus.cycle.status = 'FINISHED';
+        expect(isWellFormedState(badStatus)).toBe(false);
     });
 });

@@ -5,13 +5,13 @@ import path from 'path';
 import crypto from 'crypto';
 import { readJournal, writeJournal } from '../../core/journal/store';
 import { logsDir } from '../../core/journal/paths';
-import { spawnStructured } from '../../core/journal/process';
+import { spawnStructured, argvDigest } from '../../core/journal/process';
 import { claimPath, identityPath, resultPath, logPath } from '../job/exec-wrapper';
-import { reconcileJobs, materializeRetry, ReconcileDecision } from '../job/reconcile';
+import { reconcileJobs, ReconcileDecision } from '../job/reconcile';
 import { isWellFormedProcessRef } from '../../core/journal/types';
-import type { Job } from '../../core/journal/types';
+import type { Job, ProcessRef } from '../../core/journal/types';
 
-export type WrapperSpawner = (job: Job, nonce: string, logsRoot: string, repoRoot: string) => void;
+export type WrapperSpawner = (job: Job, nonce: string, logsRoot: string, repoRoot: string) => ProcessRef | void;
 
 /** Spawner real: `awm job exec-wrapper` como proceso EXTERNO detached via el
  *  CLI compilado. fire-and-forget: unref + stdio propio del wrapper. */
@@ -22,8 +22,9 @@ export function defaultWrapperSpawner(cliEntry = path.resolve(__dirname, '..', '
             '--job', job.id, '--nonce', nonce, '--logs', logsRoot, '--cwd', job.cwd,
             '--', ...job.argv,
         ];
-        const { child } = spawnStructured(argv, repoRoot, nonce);
+        const { child, ref } = spawnStructured(argv, repoRoot, nonce);
         child.unref();   // el supervisor NO espera; el wrapper sobrevive incluso si el supervisor muere
+        return ref;
     };
 }
 
@@ -103,10 +104,10 @@ export function collectAndReconcile(repoRoot: string, branch: string, opts: { re
     for (const j of Object.values(s.jobs)) {
         if (!SCANNABLE.includes(j.executionState)) continue;
         const nonce = j.spawnNonce ?? 'sin-nonce';
-        if (fs.existsSync(resultPath(logs, j.id, nonce))) {
+        if (fs.existsSync(claimPath(logs, j.id, nonce)) && fs.existsSync(resultPath(logs, j.id, nonce))) {
             try {
                 const parsed = JSON.parse(fs.readFileSync(resultPath(logs, j.id, nonce), 'utf8'));
-                if (typeof parsed.exitCode !== 'number') continue;   // shape invalido: se deja para reconcileJobs, que valida el sidecar defensivamente y cae a orphaned-authorization-required en vez de fabricar un verdict (R1.6)
+                if (typeof parsed.exitCode !== 'number' || typeof parsed.endedAt !== 'string' || typeof parsed.resultPath !== 'string') continue;
                 j.executionState = 'exited';
                 j.result = parsed;
                 j.verdict = parsed.exitCode === 0 ? 'pass' : 'fail';
@@ -118,7 +119,10 @@ export function collectAndReconcile(repoRoot: string, branch: string, opts: { re
         if (fs.existsSync(identityPath(logs, j.id, nonce)) && j.executionState !== 'running') {
             try {
                 const identity = JSON.parse(fs.readFileSync(identityPath(logs, j.id, nonce), 'utf8'));
-                if (isWellFormedProcessRef(identity.wrapper) && isWellFormedProcessRef(identity.command)) {
+                if (identity.jobId === j.id && identity.nonce === nonce
+                    && isWellFormedProcessRef(identity.wrapper) && isWellFormedProcessRef(identity.command)
+                    && identity.wrapper.spawnNonce === nonce && identity.command.spawnNonce === nonce
+                    && identity.command.argvDigest === argvDigest(j.argv)) {
                     j.wrapperRef = identity.wrapper;
                     j.processRef = identity.command;   // identidad REAL, nunca pid 0 (bloqueador 3)
                     j.executionState = 'running';
@@ -146,9 +150,6 @@ export function collectAndReconcile(repoRoot: string, branch: string, opts: { re
     // Matriz unica SOLO fuera de la gracia post-spawn: un wrapper recien
     // spawneado que aun no claimeo NO es un never-started.
     const out = reconcileJobs(s, logs, { eligible: (j) => lastPhaseAgeMs(j) > graceMs });
-    for (const d of out.decisions) {
-        if (d.action === 'retry-new-attempt') materializeRetry(s, d.jobId);
-    }
     if (advanced > 0 || observationTouched || out.decisions.some((d) => d.action !== 'still-alive')) {
         writeJournal(repoRoot, branch, s);
     }
@@ -159,6 +160,15 @@ export interface RunnerTickOutput { spawned: number; advanced: number; decisions
 
 export function runnerTick(repoRoot: string, branch: string, spawner: WrapperSpawner, opts: { reconcileGraceMs?: number; stallObservationMs?: number } = {}): RunnerTickOutput {
     const collected = collectAndReconcile(repoRoot, branch, opts);
+    const r = readJournal(repoRoot, branch);
+    if (r.corrupt || r.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
+    const logs = logsDir(repoRoot, branch);
+    for (const decision of collected.decisions) {
+        if (decision.action !== 'retry-same-intent') continue;
+        const job = r.state.jobs[decision.jobId];
+        if (job?.executionState !== 'spawn-intent' || job.spawnNonce === undefined) continue;
+        try { spawner(job, job.spawnNonce, logs, repoRoot); } catch { /* el mismo intent durable se reintentara en otro tick */ }
+    }
     const spawned = spawnPendingWrappers(repoRoot, branch, spawner);
     return { spawned, advanced: collected.advanced, decisions: collected.decisions };
 }

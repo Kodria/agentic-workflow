@@ -88,6 +88,9 @@ export function listPendingRequests(repoRoot: string, branch: string): PendingRe
             if (!isWellFormedEnvelope(parsed)) {
                 return { requestId: f, envelope: null as never, file, corrupt: true };
             }
+            if (f !== `${parsed.requestId}.json`) {
+                return { requestId: f, envelope: null as never, file, corrupt: true };
+            }
             return { requestId: parsed.requestId, envelope: parsed, file, corrupt: false };
         } catch {
             return { requestId: f, envelope: null as never, file, corrupt: true };

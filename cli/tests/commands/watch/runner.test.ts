@@ -6,6 +6,7 @@ import { runExecWrapper, claimPath, identityPath, resultPath, logPath } from '..
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { logsDir } from '../../../src/core/journal/paths';
 import { Job } from '../../../src/core/journal/types';
+import { argvDigest } from '../../../src/core/journal/process';
 
 const fakeSpawner: WrapperSpawner = (job, nonce, logsRoot, repoRoot) => {
     // Mismo contrato que el spawner real: dispara el wrapper y NO espera.
@@ -70,17 +71,19 @@ describe('runner concurrente', () => {
         });
     });
 
-    test('spawn-intent sin claim fuera de gracia => retry con Attempt nuevo (matriz unica, R3.3)', () => {  // verifies R3.3
+    test('spawn-intent sin claim fuera de gracia => re-spawn del MISMO intent y nonce (R3.3/R1.8)', () => {  // verifies R3.3
         seedJob(repo, {
             executionState: 'spawn-intent', spawnNonce: 'nunca-claimeo',
             phaseTimestamps: { 'spawn-intent': new Date(Date.now() - 60000).toISOString() },
         });
-        const out = collectAndReconcile(repo, 'rama', { reconcileGraceMs: 1000 });
-        expect(out.decisions.find((d) => d.action === 'retry-new-attempt')).toBeDefined();
+        const calls: Array<{ id: string; nonce: string }> = [];
+        const out = runnerTick(repo, 'rama', (job, nonce) => { calls.push({ id: job.id, nonce }); }, { reconcileGraceMs: 1000 });
+        expect(out.decisions.find((d) => d.action === 'retry-same-intent')).toBeDefined();
         const s = readJournal(repo, 'rama').state!;
-        expect(s.jobs['j1'].executionState).toBe('cancelled');
-        const fresh = Object.values(s.jobs).find((j) => j.attemptOf === 'j1')!;
-        expect(fresh.executionState).toBe('received');
+        expect(Object.keys(s.jobs)).toEqual(['j1']);
+        expect(s.jobs['j1'].executionState).toBe('spawn-intent');
+        expect(s.jobs['j1'].spawnNonce).toBe('nunca-claimeo');
+        expect(calls).toEqual([{ id: 'j1', nonce: 'nunca-claimeo' }]);
     });
 
     test('claim sin resultado con procesos muertos => orphaned, jamas relanzar (R1.8)', () => {  // verifies R1.8
@@ -109,7 +112,7 @@ describe('runner concurrente', () => {
         const validIdentity = {
             jobId: 'j1', nonce: 'nI',
             wrapper: { pid: 111, startTime: 'x', spawnNonce: 'nI', argvDigest: 'd', processGroup: 111, psArgsDigest: 'e' },
-            command: { pid: 112, startTime: 'x', spawnNonce: 'nI', argvDigest: 'd', processGroup: 111, psArgsDigest: 'e' },
+            command: { pid: 112, startTime: 'x', spawnNonce: 'nI', argvDigest: argvDigest(['node', '-e', 'process.exit(0)']), processGroup: 111, psArgsDigest: 'e' },
         };
         fs.writeFileSync(identityPath(logsDir(repo, 'rama'), 'j1', 'nI'), JSON.stringify(validIdentity));
         collectAndReconcile(repo, 'rama', { reconcileGraceMs: 60000 });
@@ -140,19 +143,34 @@ describe('runner concurrente', () => {
         expect(readJournal(repo, 'rama').state!.jobs['j1'].executionState).toBe('claimed');
     });
 
-    test('resultado con forma invalida (sin exitCode numerico) => el scan no lo adopta; fuera de gracia la matriz lo cae a orphaned, jamas fabrica verdict (R1.6)', () => {  // verifies R1.6
+    test('resultado parcial con solo exitCode => el scan no lo adopta; fuera de gracia cae a orphaned, jamas fabrica pass (R1.6)', () => {  // verifies R1.6
         const dead = { pid: 999999, startTime: 'gone', spawnNonce: 'nL', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
         seedJob(repo, {
             executionState: 'running', spawnNonce: 'nL', processRef: dead,
             phaseTimestamps: { running: new Date(Date.now() - 60000).toISOString() },
         });
         fs.writeFileSync(claimPath(logsDir(repo, 'rama'), 'j1', 'nL'), '{}');
-        fs.writeFileSync(resultPath(logsDir(repo, 'rama'), 'j1', 'nL'), JSON.stringify({}));   // sin exitCode
+        fs.writeFileSync(resultPath(logsDir(repo, 'rama'), 'j1', 'nL'), JSON.stringify({ exitCode: 0 }));
         const out = collectAndReconcile(repo, 'rama', { reconcileGraceMs: 1000 });
         expect(out.decisions.find((d) => d.action === 'orphaned-authorization-required')).toBeDefined();
         const done = readJournal(repo, 'rama').state!.jobs['j1'];
         expect(done.executionState).toBe('orphaned');
         expect(done.verdict).toBeUndefined();   // jamas fabricado de un sidecar sin forma
+    });
+
+    test('resultado completo sin claim no se adopta como evidencia', () => {
+        seedJob(repo, {
+            executionState: 'spawn-intent', spawnNonce: 'nNoClaim',
+            phaseTimestamps: { 'spawn-intent': new Date(Date.now() - 60000).toISOString() },
+        });
+        fs.writeFileSync(resultPath(logsDir(repo, 'rama'), 'j1', 'nNoClaim'), JSON.stringify({
+            exitCode: 0, endedAt: new Date().toISOString(), resultPath: 'forged',
+        }));
+        const out = collectAndReconcile(repo, 'rama', { reconcileGraceMs: 1000 });
+        expect(out.decisions).toContainEqual({ jobId: 'j1', action: 'retry-same-intent' });
+        const job = readJournal(repo, 'rama').state!.jobs.j1;
+        expect(job.executionState).toBe('spawn-intent');
+        expect(job.verdict).toBeUndefined();
     });
 
     test('runnerTick combina recoleccion + spawn en un tick sin esperar (R4.4)', async () => {  // verifies R4.4
@@ -228,6 +246,7 @@ describe('runner concurrente', () => {
             expect(readJournal(repo, 'rama').state!.jobs['j1'].observationState).toBe('suspected-stall');
 
             const logs = logsDir(repo, 'rama');
+            fs.writeFileSync(claimPath(logs, 'j1', 'nStall4'), '{}');
             fs.writeFileSync(resultPath(logs, 'j1', 'nStall4'), JSON.stringify({ exitCode: 0, endedAt: new Date().toISOString(), resultPath: 'x' }));
             collectAndReconcile(repo, 'rama', { reconcileGraceMs: 60000, stallObservationMs: 10 });
             const j = readJournal(repo, 'rama').state!.jobs['j1'];

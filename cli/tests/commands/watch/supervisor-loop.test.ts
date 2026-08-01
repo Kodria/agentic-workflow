@@ -101,6 +101,40 @@ describe('supervisor loop', () => {
         expect(Object.values(final.jobs).every((j) => j.executionState === 'exited' && j.verdict === 'pass')).toBe(true);
     });
 
+    test('tick verifica branch antes del launch y un ciclo COMPLETE no lanza otro controller', async () => {
+        initWatch(repo, 'main');
+        let calls = 0;
+        const spy: WrapperSpawner = () => { calls++; };
+        const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10 };
+        const s = readJournal(repo, 'main').state!;
+        s.cycle.status = 'COMPLETE';
+        writeJournal(repo, 'main', s);
+        expect(await new Supervisor(repo, 'main', cfg, spy).tick()).toBe('complete');
+        expect(calls).toBe(0);
+
+        const reset = readJournal(repo, 'main').state!;
+        reset.cycle.status = 'IN_PROGRESS';
+        writeJournal(repo, 'main', reset);
+        git(repo, 'checkout', '-qb', 'otra');
+        await expect(new Supervisor(repo, 'main', cfg, spy).tick()).rejects.toThrow(/rama|branch/i);
+        expect(calls).toBe(0);
+    });
+
+    test('fallo de launch queda durable y entra en backoff sin tumbar el supervisor (R4.3)', async () => {
+        initWatch(repo, 'main');
+        beginGeneration(repo, 'main');
+        let calls = 0;
+        const failing: WrapperSpawner = () => { calls++; throw new Error('provider unavailable'); };
+        const sup = new Supervisor(repo, 'main', { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10 }, failing);
+        await expect(sup.tick()).resolves.toBe('continue');
+        expect(calls).toBe(1);
+        const intent = activeGeneration(readJournal(repo, 'main').state!)!;
+        expect(intent.controllerJobId).toBeDefined();
+        expect(intent.spawnNonce).toBeDefined();
+        await expect(sup.tick()).resolves.toBe('continue');
+        expect(calls).toBe(1); // primer backoff es 60 s: no hace hot-loop
+    });
+
     test('custodia: doble senial + indeterminate => tick custody, lock retenido, proceso intacto (R4.2b/R4.5)', async () => {  // verifies R4.2b
         initJournal(repo, 'main');
         beginGeneration(repo, 'main');
@@ -147,5 +181,29 @@ describe('supervisor loop', () => {
         // generacion propia terminada: cero procesos codex huerfanos (R2.4)
         const { refIsAlive } = require('../../../src/core/journal/process');
         expect(gen.processRef === undefined || !refIsAlive(gen.processRef)).toBe(true);
+    });
+
+    test('reinicio tras crash entre beginGeneration y spawn recupera la misma generacion sin quedar wedged', async () => {
+        initWatch(repo, 'main');
+        const begun = beginGeneration(repo, 'main');               // crash simulado: intent durable, sin ProcessRef
+        const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', tickMs: 25, reconcileGraceMs: 300,
+            termGraceMs: 300, killGraceMs: 300 };
+        const loop = runSupervisorLoop(repo, 'main', cfg, fakeSpawner);
+        let recovered = false;
+        try {
+            await until(() => {
+                const active = activeGeneration(readJournal(repo, 'main').state!);
+                recovered = active?.token === begun.token && active.processRef !== undefined;
+                return recovered;
+            }, 1500);
+        } catch { /* la asercion de abajo conserva un fallo limpio y permite apagar el loop */ }
+        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: begun.token, idempotencyKey: 'recover-plan',
+            payload: { entity: 'cycle-plan', items: [{ id: 'r-qa', kind: 'qa' }, { id: 'r-interlock', kind: 'interlock' }, { id: 'r-test', kind: 'test' }, { id: 'r-sensors', kind: 'sensors' }] } });
+        for (const item of ['r-qa', 'r-interlock', 'r-test', 'r-sensors']) {
+            requestJob(repo, 'main', begun.token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: item });
+        }
+        await loop;
+        expect(recovered).toBe(true);
+        expect(readJournal(repo, 'main').state!.generations).toHaveLength(1);
     });
 });

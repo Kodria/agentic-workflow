@@ -1,10 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { decideStall, Backoff, beginGeneration, activeGeneration, resolveGeneration, enterCustody } from '../../../src/commands/watch/generations';
+import { decideStall, Backoff, beginGeneration, activeGeneration, resolveGeneration, enterCustody, launchControllerGeneration, controllerGenerationHasUnresolvedClaim, ensureControllerGeneration } from '../../../src/commands/watch/generations';
 import { adapterFor } from '../../../src/core/journal/adapter';
 import { spawnStructured } from '../../../src/core/journal/process';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
+import { logsDir } from '../../../src/core/journal/paths';
+import { claimPath, resultPath } from '../../../src/commands/job/exec-wrapper';
 
 describe('generaciones', () => {
     let repo: string;
@@ -40,6 +42,50 @@ describe('generaciones', () => {
         const s = readJournal(repo, 'rama').state!;
         expect(s.generations.find((g) => g.n === 1)!.state).toBe('superseded');
         expect(activeGeneration(s)!.n).toBe(2);
+    });
+
+    test('beginGeneration reinicia el heartbeat al cambiar el fencing token', () => {
+        const s0 = readJournal(repo, 'rama').state!;
+        s0.controllerHeartbeatAt = new Date().toISOString();
+        writeJournal(repo, 'rama', s0);
+        beginGeneration(repo, 'rama');
+        expect(readJournal(repo, 'rama').state!.controllerHeartbeatAt).toBeUndefined();
+    });
+
+    test('el intent de launch queda durable y el prompt entrega el generation token al controller', () => {
+        const begun = beginGeneration(repo, 'rama');
+        let captured: { argv: string[]; nonce: string } | undefined;
+        const wrapperRef = { pid: 42, startTime: 't', spawnNonce: 'wrapper-nonce', argvDigest: 'a', processGroup: 42, psArgsDigest: 'p' };
+        launchControllerGeneration(repo, 'rama', 'codex', 'continua el ciclo', (job, nonce) => {
+            const duringSpawn = activeGeneration(readJournal(repo, 'rama').state!)!;
+            expect(duringSpawn.controllerJobId).toBe(job.id);       // persistido ANTES del spawn
+            expect(duringSpawn.spawnNonce).toBe(nonce);
+            captured = { argv: job.argv, nonce };
+            return wrapperRef;
+        });
+        expect(captured!.argv.join(' ')).toContain(begun.token);
+        expect(captured!.argv.join(' ')).toContain(`--generation ${begun.token}`);
+        expect(activeGeneration(readJournal(repo, 'rama').state!)!.wrapperRef).toEqual(wrapperRef);
+    });
+
+    test('claim sin identidad/resultado conserva ownership ambiguo; usa la edad del claim, no la de begin', () => {
+        beginGeneration(repo, 'rama');
+        launchControllerGeneration(repo, 'rama', 'codex', 'continua', () => {});
+        let s = readJournal(repo, 'rama').state!;
+        const gen = activeGeneration(s)!;
+        gen.launchedAt = new Date(Date.now() - 3600000).toISOString();
+        writeJournal(repo, 'rama', s);
+        fs.mkdirSync(logsDir(repo, 'rama'), { recursive: true });
+        fs.writeFileSync(claimPath(logsDir(repo, 'rama'), gen.controllerJobId!, gen.spawnNonce!), '{}');
+        expect(controllerGenerationHasUnresolvedClaim(repo, 'rama', gen)).toBe(true);
+        ensureControllerGeneration(repo, 'rama', 'codex', 'continua', () => {}, 10000);
+        expect(readJournal(repo, 'rama').state!.cycle.status).toBe('IN_PROGRESS'); // claim recien creado: aun dentro de gracia
+        const old = new Date(Date.now() - 20000);
+        fs.utimesSync(claimPath(logsDir(repo, 'rama'), gen.controllerJobId!, gen.spawnNonce!), old, old);
+        ensureControllerGeneration(repo, 'rama', 'codex', 'continua', () => {}, 10000);
+        expect(readJournal(repo, 'rama').state!.cycle.status).toBe('BLOCKED');
+        fs.writeFileSync(resultPath(logsDir(repo, 'rama'), gen.controllerJobId!, gen.spawnNonce!), JSON.stringify({ exitCode: 1 }));
+        expect(controllerGenerationHasUnresolvedClaim(repo, 'rama', gen)).toBe(false);
     });
 
     test('resolveGeneration: muerte probada => proven-dead; vivo+indeterminate => custodia con estado BLOCKED (R4.2b)', async () => {  // verifies R4.2b

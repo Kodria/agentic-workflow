@@ -2,11 +2,16 @@
 // kill; custodia BLOCKED conserva lock y ownership (el loop de supervisor.ts
 // sigue vivo auditando — jamas sale dejando un vivo sin duenio).
 import crypto from 'crypto';
+import fs from 'fs';
 import { readJournal, writeJournal, appendEvent } from '../../core/journal/store';
-import { refIsAlive, groupIsGone, terminateGroupConfirmed, spawnStructured } from '../../core/journal/process';
+import { refIsAlive, groupIsGone, terminateGroupConfirmed, argvDigest } from '../../core/journal/process';
 import { adapterFor } from '../../core/journal/adapter';
+import { logsDir } from '../../core/journal/paths';
+import { claimPath, identityPath, resultPath } from '../job/exec-wrapper';
+import { defaultWrapperSpawner, WrapperSpawner } from './runner';
 import type { ControllerAdapter, SafeToReplace } from '../../core/journal/adapter';
-import type { Generation, JournalState, ProcessRef } from '../../core/journal/types';
+import { isWellFormedProcessRef } from '../../core/journal/types';
+import type { Generation, Job, JournalState } from '../../core/journal/types';
 
 /** Lectura obligatoria del journal (patron repetido en todo este archivo):
  *  el supervisor jamas opera sobre corrupcion (R1.6) — falla ruidoso, nunca
@@ -68,21 +73,121 @@ export function beginGeneration(repoRoot: string, branch: string): Generation {
         state: 'active', launchedAt: new Date().toISOString(),
     };
     s.generations.push(gen);
+    s.controllerHeartbeatAt = undefined; // el heartbeat pertenece al fencing token anterior
     writeJournal(repoRoot, branch, s);
     appendEvent(repoRoot, branch, { kind: 'generation-begun', n: gen.n });
     return gen;
 }
 
-export function launchControllerGeneration(repoRoot: string, branch: string, provider: string, resumePrompt: string): ProcessRef {
-    const adapter = adapterFor(provider);
-    const argv = adapter.launchArgv(resumePrompt);
-    const { ref } = spawnStructured(argv, repoRoot, crypto.randomBytes(8).toString('hex'));
+function promptForGeneration(gen: Generation): string {
+    return `${gen.resumePrompt}\nGeneracion activa: ${gen.token}. Incluye --generation ${gen.token} en cada comando awm job.`;
+}
+
+/** Persiste el intent completo ANTES de delegarlo al wrapper. El wrapper usa
+ * claim exclusivo por (controllerJobId, spawnNonce), por lo que reemitir este
+ * mismo intent tras un crash nunca lanza dos controllers. */
+export function launchControllerGeneration(
+    repoRoot: string,
+    branch: string,
+    provider: string,
+    resumePrompt: string,
+    spawner: WrapperSpawner = defaultWrapperSpawner(),
+): void {
     const s = requireState(repoRoot, branch);
     const gen = activeGeneration(s);
-    if (gen !== undefined) gen.processRef = ref;
+    if (gen === undefined) throw new Error('no hay generacion activa para lanzar');
+    gen.controllerJobId = gen.controllerJobId ?? `controller-gen-${gen.n}`;
+    gen.spawnNonce = gen.spawnNonce ?? crypto.randomBytes(8).toString('hex');
+    gen.provider = gen.provider ?? provider;
+    gen.resumePrompt = gen.resumePrompt ?? resumePrompt;
     writeJournal(repoRoot, branch, s);
-    appendEvent(repoRoot, branch, { kind: 'generation-launched', provider, pid: ref.pid });
-    return ref;
+    const argv = adapterFor(gen.provider).launchArgv(promptForGeneration(gen));
+    const job: Job = {
+        id: gen.controllerJobId, fingerprint: `generation:${gen.token}`, commandDigest: `generation:${gen.token}`,
+        argv, cwd: '.', paths: [], expandedPaths: [], executionState: 'spawn-intent',
+        observationState: 'progressing', spawnNonce: gen.spawnNonce,
+        phaseTimestamps: { 'spawn-intent': gen.launchedAt },
+    };
+    const wrapperRef = spawner(job, gen.spawnNonce, logsDir(repoRoot, branch), repoRoot);
+    if (wrapperRef !== undefined) {
+        const afterSpawn = requireState(repoRoot, branch);
+        const same = afterSpawn.generations.find((candidate) => candidate.token === gen.token);
+        if (same !== undefined) same.wrapperRef = wrapperRef;
+        writeJournal(repoRoot, branch, afterSpawn);
+    }
+    appendEvent(repoRoot, branch, { kind: 'generation-launch-requested', provider: gen.provider, n: gen.n });
+}
+
+/** Adopta la identidad que el wrapper externo persistio. Nunca inventa PID y
+ * valida que el sidecar corresponda exactamente al intent de la generacion. */
+export function collectControllerGeneration(repoRoot: string, branch: string): boolean {
+    const s = requireState(repoRoot, branch);
+    const gen = activeGeneration(s);
+    if (gen?.controllerJobId === undefined || gen.spawnNonce === undefined) return false;
+    let parsed: unknown;
+    try { parsed = JSON.parse(fs.readFileSync(identityPath(logsDir(repoRoot, branch), gen.controllerJobId, gen.spawnNonce), 'utf8')); }
+    catch { return false; }
+    if (typeof parsed !== 'object' || parsed === null) return false;
+    const identity = parsed as { jobId?: unknown; nonce?: unknown; wrapper?: unknown; command?: unknown };
+    if (identity.jobId !== gen.controllerJobId || identity.nonce !== gen.spawnNonce
+        || !isWellFormedProcessRef(identity.wrapper) || !isWellFormedProcessRef(identity.command)
+        || identity.wrapper.spawnNonce !== gen.spawnNonce || identity.command.spawnNonce !== gen.spawnNonce
+        || gen.provider === undefined || gen.resumePrompt === undefined
+        || identity.command.argvDigest !== argvDigest(adapterFor(gen.provider).launchArgv(promptForGeneration(gen)))) return false;
+    const changed = gen.wrapperRef?.pid !== identity.wrapper.pid || gen.processRef?.pid !== identity.command.pid;
+    gen.wrapperRef = identity.wrapper;
+    gen.processRef = identity.command;
+    if (changed) {
+        writeJournal(repoRoot, branch, s);
+        appendEvent(repoRoot, branch, { kind: 'generation-launched', provider: gen.provider, pid: gen.processRef.pid, n: gen.n });
+    }
+    return true;
+}
+
+export function controllerGenerationHasUnresolvedClaim(repoRoot: string, branch: string, gen: Generation): boolean {
+    if (gen.controllerJobId === undefined || gen.spawnNonce === undefined || gen.processRef !== undefined) return false;
+    const logs = logsDir(repoRoot, branch);
+    return fs.existsSync(claimPath(logs, gen.controllerJobId, gen.spawnNonce))
+        && !fs.existsSync(resultPath(logs, gen.controllerJobId, gen.spawnNonce));
+}
+
+/** Recupera tanto crash-before-spawn como crash-after-spawn-before-journal.
+ * Claim sin identidad queda ambiguo y se conserva bajo custodia tras la gracia;
+ * nunca se resuelve lanzando otro token/nonce a ciegas. */
+export function ensureControllerGeneration(
+    repoRoot: string,
+    branch: string,
+    provider: string,
+    resumePrompt: string,
+    spawner: WrapperSpawner,
+    ambiguityGraceMs: number,
+): void {
+    if (collectControllerGeneration(repoRoot, branch)) return;
+    let gen = activeGeneration(requireState(repoRoot, branch));
+    if (gen === undefined) return;
+    if (gen.processRef !== undefined || gen.wrapperRef !== undefined) return;
+    if (gen.controllerJobId === undefined || gen.spawnNonce === undefined) {
+        launchControllerGeneration(repoRoot, branch, provider, resumePrompt, spawner);
+        return;
+    }
+    const logs = logsDir(repoRoot, branch);
+    if (fs.existsSync(resultPath(logs, gen.controllerJobId, gen.spawnNonce))) {
+        enterCustody(repoRoot, branch, `controller ${gen.n} termino sin identidad adoptable: decision explicita requerida`);
+        return;
+    }
+    const claim = claimPath(logs, gen.controllerJobId, gen.spawnNonce);
+    if (fs.existsSync(claim)) {
+        let claimAgeMs = Number.POSITIVE_INFINITY;
+        try { claimAgeMs = Date.now() - fs.statSync(claim).mtimeMs; } catch { /* si no se puede probar reciente, falla cerrado */ }
+        if (claimAgeMs > ambiguityGraceMs) {
+            enterCustody(repoRoot, branch, `claim de controller ${gen.n} sin identidad demostrable: custodia`);
+        }
+        return;
+    }
+    // El intent ya estaba durable pero el spawn no ocurrio: es seguro reemitir
+    // exactamente el mismo nonce. Si el wrapper original solo estaba demorado,
+    // su claim wx arbitra cual de ambos ejecuta.
+    launchControllerGeneration(repoRoot, branch, gen.provider ?? provider, gen.resumePrompt ?? resumePrompt, spawner);
 }
 
 /** Custodia (R4.5): ciclo BLOCKED con razon auditada. QUIEN NO HACE NADA:

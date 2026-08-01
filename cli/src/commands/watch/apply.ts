@@ -14,10 +14,37 @@ export interface ApplySummary { applied: number; rejectedStale: number; rejected
 
 function now(): string { return new Date().toISOString(); }
 
+const VERIFICATION_KINDS = ['test', 'lint', 'sensors', 'review', 'qa', 'interlock'] as const;
+
+function verificationItems(value: unknown, field: string): VerificationItem[] {
+    if (!Array.isArray(value) || !value.every((item) => typeof item === 'object' && item !== null
+        && typeof (item as { id?: unknown }).id === 'string'
+        && VERIFICATION_KINDS.includes((item as { kind?: typeof VERIFICATION_KINDS[number] }).kind as typeof VERIFICATION_KINDS[number])
+        && ((item as { satisfiedBy?: unknown }).satisfiedBy === undefined || typeof (item as { satisfiedBy?: unknown }).satisfiedBy === 'string'))) {
+        throw new Error(`${field} requiere items de verificacion validos`);
+    }
+    return value as VerificationItem[];
+}
+
+function reviewObligations(value: unknown, taskId: string): ReviewObligation[] {
+    if (!Array.isArray(value) || !value.every((item) => typeof item === 'object' && item !== null
+        && typeof (item as { id?: unknown }).id === 'string'
+        && ((item as { kind?: unknown }).kind === 'spec' || (item as { kind?: unknown }).kind === 'quality'))) {
+        throw new Error('reviewObligations requiere obligaciones spec|quality validas');
+    }
+    return (value as Array<{ id: string; kind: 'spec' | 'quality' }>).map((item) => ({ ...item, taskId }));
+}
+
+function stringArray(value: unknown, field: string): string[] {
+    if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) throw new Error(`${field} requiere array de strings`);
+    return value;
+}
+
 function linkSatisfies(s: JournalState, itemId: string, jobId: string): void {
     const items: VerificationItem[] = [...s.tasks.flatMap((t) => t.verificationPlan), ...s.cycleVerificationPlan];
     const item = items.find((i) => i.id === itemId);
-    if (item !== undefined) item.satisfiedBy = jobId;
+    if (item === undefined) throw new Error(`VerificationItem desconocido: ${itemId}`);
+    item.satisfiedBy = jobId;
 }
 
 function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId: string }, digest: string): void {
@@ -40,7 +67,9 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
         if (typeof p.fingerprint !== 'string' || typeof p.commandDigest !== 'string') throw new Error('job-request requiere fingerprint y commandDigest');
         // Un mismo resultado mecanico puede satisfacer mas de un item. La
         // request sigue teniendo identidad propia, pero no duplica ejecucion.
-        const equivalent = Object.values(s.jobs).find((j) => j.fingerprint === p.fingerprint && j.commandDigest === p.commandDigest);
+        const equivalent = Object.values(s.jobs).find((j) => j.fingerprint === p.fingerprint && j.commandDigest === p.commandDigest
+            && (['received', 'spawn-intent', 'claimed', 'running'].includes(j.executionState)
+                || (j.executionState === 'exited' && j.verdict === 'pass')));
         if (equivalent !== undefined) {
             if (typeof p.satisfies === 'string') linkSatisfies(s, p.satisfies, equivalent.id);
             applyOutcome(s, { ...base, outcome: 'applied', resultRef: equivalent.id });
@@ -52,8 +81,8 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
             fingerprint: String(p.fingerprint), commandDigest: String(p.commandDigest),
             argv: p.argv as string[],
             cwd: typeof p.cwd === 'string' ? p.cwd : '.',
-            paths: Array.isArray(p.paths) ? p.paths as string[] : [],
-            expandedPaths: Array.isArray(p.expandedPaths) ? p.expandedPaths as string[] : [],
+            paths: p.paths === undefined ? [] : stringArray(p.paths, 'job-request paths'),
+            expandedPaths: p.expandedPaths === undefined ? [] : stringArray(p.expandedPaths, 'job-request expandedPaths'),
             executionState: 'received', observationState: 'progressing',
             phaseTimestamps: { received: now() },
             ...(typeof p.satisfies === 'string' ? { satisfies: p.satisfies } : {}),
@@ -69,15 +98,14 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
             if (typeof p.taskId !== 'string' || p.taskId.length === 0) throw new Error('register --entity task requiere taskId (string no vacio)');
             const taskId = p.taskId;
             if (!s.tasks.some((t) => t.id === taskId)) {
-                const plan = Array.isArray(p.verificationPlan) ? p.verificationPlan as VerificationItem[] : [];
+                const plan = p.verificationPlan === undefined ? [] : verificationItems(p.verificationPlan, 'verificationPlan');
                 // R1.4b/R3.6: rechazo EN REGISTRO (no solo en gate) si el plan no
                 // cubre los verificadores mecanicamente requeridos por el repo.
                 const missingKinds = s.requiredVerifiers.filter((k) => !plan.some((item) => item.kind === k));
                 if (missingKinds.length > 0) {
                     throw new Error(`register --entity task: verificationPlan no cubre los verificadores requeridos: ${missingKinds.join(', ')}`);
                 }
-                const obligations = (Array.isArray(p.reviewObligations) ? p.reviewObligations as Array<{ id: string; kind: 'spec' | 'quality' }> : [])
-                    .map((o): ReviewObligation => ({ id: o.id, taskId, kind: o.kind }));
+                const obligations = p.reviewObligations === undefined ? [] : reviewObligations(p.reviewObligations, taskId);
                 s.tasks.push({
                     id: taskId, title: String(p.title ?? taskId), status: 'pending', attempts: 0,
                     verificationPlan: plan, reviewObligations: obligations, createdAt: now(),
@@ -87,12 +115,12 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
             return;
         }
         if (p.entity === 'cycle-plan') {
-            if (!Array.isArray(p.items)) throw new Error('register --entity cycle-plan requiere items (array)');
+            const items = verificationItems(p.items, 'register --entity cycle-plan items');
             // Idempotente por creacion-unica (Task 4): un re-registro defensivo
             // (ej. tras crash sin memoria de si ya se registro) NUNCA debe pisar
             // un plan ya existente y perder los `satisfiedBy` ya enlazados.
             if (s.cycleVerificationPlan.length === 0) {
-                s.cycleVerificationPlan = p.items as VerificationItem[];
+                s.cycleVerificationPlan = items;
             }
             applyOutcome(s, { ...base, outcome: 'applied' });
             return;
@@ -102,6 +130,7 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
             if (typeof p.taskId !== 'string' || p.taskId.length === 0) throw new Error('register --entity dispatch requiere taskId (string no vacio)');
             const dispatchId = p.dispatchId;
             const taskId = p.taskId;
+            if (!s.tasks.some((task) => task.id === taskId)) throw new Error('register --entity dispatch: taskId desconocido');
             if (!s.dispatches.some((d) => d.id === dispatchId)) {
                 s.dispatches.push({ id: dispatchId, taskId, at: now() });
                 const task = s.tasks.find((t) => t.id === taskId);
@@ -133,32 +162,52 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
                 actionId: p.actionId,
                 type: p.type,
                 target: p.target,
-                preconditions: Array.isArray(p.preconditions) ? p.preconditions as string[] : [],
+                preconditions: p.preconditions === undefined ? [] : stringArray(p.preconditions, 'next-action preconditions'),
                 attempt: typeof p.attempt === 'number' ? p.attempt : 0,
                 state: p.state === 'in-progress' ? 'in-progress' : 'pending',
             };
             applyOutcome(s, { ...base, outcome: 'applied', resultRef: p.actionId });
             return;
         }
-        applyOutcome(s, { ...base, outcome: 'applied' });
-        return;
+        if (p.entity === 'custody-decision') {
+            if (p.decision !== 'resume' || typeof p.reason !== 'string' || p.reason.trim().length === 0) {
+                throw new Error('register --entity custody-decision requiere decision=resume y reason no vacio');
+            }
+            if (s.cycle.status !== 'BLOCKED') throw new Error('custody-decision solo aplica a un ciclo BLOCKED');
+            s.custodyDecisions ??= [];
+            s.custodyDecisions.push({ at: now(), decision: 'resume', reason: p.reason, generationToken: env.generationToken });
+            for (const generation of s.generations) {
+                if (generation.state === 'active' || generation.state === 'controller-suspected-stall') generation.state = 'superseded';
+            }
+            s.cycle.status = 'IN_PROGRESS';
+            s.cycle.blockedReason = undefined;
+            applyOutcome(s, { ...base, outcome: 'applied' });
+            return;
+        }
+        throw new Error(`register-entity desconocida: ${String(p.entity)}`);
     }
     if (env.kind === 'verdict') {
         const p = env.payload;
         if (typeof p.verdictId !== 'string' || p.verdictId.length === 0) throw new Error('verdict requiere verdictId');
         if (typeof p.obligationId !== 'string' || p.obligationId.length === 0) throw new Error('verdict requiere obligationId');
-        if (typeof p.fingerprint !== 'string' || !Array.isArray(p.argv) || !Array.isArray(p.paths) || typeof p.cwd !== 'string') {
+        if (typeof p.fingerprint !== 'string' || typeof p.cwd !== 'string') {
             throw new Error('verdict requiere evidencia de fingerprint reproducible');
         }
+        const verdictArgv = stringArray(p.argv, 'verdict argv');
+        const verdictPaths = stringArray(p.paths, 'verdict paths');
+        if (p.result !== 'pass' && p.result !== 'fail' && p.result !== 'inconclusive') throw new Error('verdict requiere result pass|fail|inconclusive');
         const verdictId = String(p.verdictId);
         const obligationId = String(p.obligationId);
+        if (!s.tasks.some((task) => task.reviewObligations.some((obligation) => obligation.id === obligationId))) {
+            throw new Error(`verdict refiere obligationId desconocido: ${obligationId}`);
+        }
         if (!s.verdicts.some((v) => v.id === verdictId)) {
-            const result = p.result === 'pass' || p.result === 'fail' || p.result === 'inconclusive' ? p.result : 'inconclusive';
+            const result = p.result;
             // R2.3: redaccion tambien en el `detail` de texto libre humano, no
             // solo en argv — antes de cualquier escritura durable.
             s.verdicts.push({
                 id: verdictId, obligationId, result, detail: redactText(String(p.detail ?? '')), receivedAt: now(),
-                fingerprint: p.fingerprint, argv: p.argv as string[], paths: p.paths as string[], cwd: p.cwd,
+                fingerprint: p.fingerprint, argv: verdictArgv, paths: verdictPaths, cwd: p.cwd,
             });
             for (const t of s.tasks) {
                 const o = t.reviewObligations.find((x) => x.id === obligationId);
@@ -194,17 +243,20 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
 export function consumePendingRequests(repoRoot: string, branch: string, activeToken: string | null): ApplySummary {
     const r = readJournal(repoRoot, branch);
     if (r.corrupt || r.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
-    const s = r.state;
+    let s = r.state;
     const pending = listPendingRequests(repoRoot, branch);
     const processedFiles: string[] = [];
+    const deferredRenames: Array<{ from: string; to: string }> = [];
     let applied = 0, rejectedStale = 0, rejectedDigest = 0, rejectedInvalid = 0, corrupt = 0;
     let dirChanged = false;   // corrupt-rename O borrado normal: cualquiera muta el directorio
     let stateTouched = false;
     for (const p of pending) {
         if (p.corrupt) {
             corrupt++;
-            fs.renameSync(p.file, `${p.file}.corrupt`);   // visible, jamas descartado (R1.6)
-            s.requestProblems.push({ file: p.file, kind: 'corrupt', detail: 'request JSON/shape invalido', at: now() });
+            deferredRenames.push({ from: p.file, to: `${p.file}.corrupt` });
+            if (!s.requestProblems.some((problem) => problem.file === p.file && problem.kind === 'corrupt')) {
+                s.requestProblems.push({ file: p.file, kind: 'corrupt', detail: 'request JSON/shape invalido', at: now() });
+            }
             appendEvent(repoRoot, branch, { kind: 'request-corrupt', file: p.file });
             dirChanged = true;
             stateTouched = true;
@@ -239,17 +291,24 @@ export function consumePendingRequests(repoRoot: string, branch: string, activeT
             // jamas descartado en silencio — pero con sufijo distinto porque
             // esto es rechazo de CONTENIDO, no de forma (R1.6).
             try {
-                applyRequestToState(s, env, digest);
+                // Toda request se valida/muta sobre una copia. Un fallo profundo
+                // nunca deja un estado parcialmente contaminado que luego no se
+                // pueda serializar o reintentar.
+                const candidate = structuredClone(s);
+                applyRequestToState(candidate, env, digest);
+                s = candidate;
                 applied++;
                 stateTouched = true;
             } catch (e) {
                 rejectedInvalid++;
-                fs.renameSync(p.file, `${p.file}.rejected`);
-                s.requestProblems.push({ file: p.file, kind: 'rejected', detail: redactText((e as Error).message), at: now() });
+                deferredRenames.push({ from: p.file, to: `${p.file}.rejected` });
+                if (!s.requestProblems.some((problem) => problem.file === p.file && problem.kind === 'rejected')) {
+                    s.requestProblems.push({ file: p.file, kind: 'rejected', detail: redactText((e as Error).message), at: now() });
+                }
                 appendEvent(repoRoot, branch, { kind: 'request-rejected-invalid', requestId: env.requestId, detail: (e as Error).message });
                 dirChanged = true;
                 stateTouched = true;
-                continue;   // ya removido del directorio por el rename: NO pushear a processedFiles
+                continue;
             }
         }
         processedFiles.push(p.file);
@@ -257,6 +316,9 @@ export function consumePendingRequests(repoRoot: string, branch: string, activeT
     }
     if (processedFiles.length > 0 || stateTouched) {
         writeJournal(repoRoot, branch, s);                 // (2) journal ANTES del borrado
+    }
+    for (const rename of deferredRenames) {
+        if (fs.existsSync(rename.from)) fs.renameSync(rename.from, rename.to);
     }
     for (const f of processedFiles) fs.rmSync(f, { force: true });   // (3)
     if (dirChanged) fsyncDirSync(requestsDir(repoRoot, branch));     // (4) — incluye batches solo-corrupt

@@ -3,6 +3,15 @@
 Auditable log of recurring/structural harness gaps converted into rules. See the
 `harness-retro` skill for the process. Newest first.
 
+## 2026-08-01 — R1 review final: límites durables validados y mutación transaccional
+
+- **Class:** structural/logic/security.
+- **Occurrences (ledger count):** 4 hallazgos convergentes en requests (`corrupt-request-prestate-rename`, `request-quarantine-before-state`, `request-rename-before-journal`, `nested-request-shape-wedge`), más blockers relacionados en cycle/job/result/identity shapes.
+- **Rule:** `CONSTITUTION.md` → “Validación de entrada”, regla existente fusionada y fortalecida: todo dato deserializado entra como `unknown`, se valida recursivamente, se aplica sobre copia y cualquier cuarentena ocurre después del journal durable.
+- **Sensor:** corpus negativo en `cli/tests/core/journal/types.test.ts`, `cli/tests/core/journal/store.test.ts`, `cli/tests/commands/watch/apply.test.ts` y `cli/tests/commands/watch/runner.test.ts`. Cubre nested payloads, enums inválidos, sidecars parciales/sin claim, compatibilidad schema 1 y crash antes de quarantine. El gate final además reprodujo `zombie-group-false-ownership`; `process.test.ts` ahora fija que un grupo compuesto solo por zombies está terminado y el E2E confirma shutdown + liberación del lock.
+- **Verification:** prueba roja fabricada al debilitar temporalmente `isWellFormedJob` para aceptar `argv` no-string; `types.test.ts` detectó el shape inválido. Restaurado el guard, el corpus focalizado quedó verde.
+- **Descartes (modo desatendido):** `adapter-contract-incomplete`, `missing-explicit-attempt-qa-entities`, `provider-neutrality-battery-missing` — gaps amplios del diseño original que requieren decisión de producto; `detached-descendant-unasserted` — un proceso que crea deliberadamente un PGID nuevo escapa al contrato portable de process-group ownership, por lo que no se disfrazó como fix parcial; `controller-exactly-once-unproven`, `shutdown-lock-retention-uncovered`, `reconcile-generation-output-untested`, `activity-read-failure-semantics-unasserted` — deuda adicional de cobertura, mientras los invariantes concretos sí tienen regresiones directas en este lote. Los demás hallazgos blocker/important del ledger fueron corregidos y cubiertos en código.
+
 ## 2026-08-01 — R1 durable-controller plan: EPIPE-relay stdio defaults + redact.ts fail-closed whack-a-mole
 
 - **Class:** security/structural (1 systemic, new `tests/structural` sensor) + process (1 systemic, CONSTITUTION.md)

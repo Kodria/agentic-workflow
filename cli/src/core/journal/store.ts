@@ -5,6 +5,34 @@ import { journalDir, statePath, requestsDir, acksDir, logsDir, exportDir, events
 
 export interface ReadResult { state: JournalState | null; corrupt: boolean; raw?: string; }
 
+/** Schema 1 evoluciono de forma aditiva durante R1. Normalizamos solamente
+ * campos que antes no existian; evidencia legacy queda deliberadamente con
+ * fingerprint vacio para que el gate la considere stale, nunca certificada. */
+function normalizeSchemaOne(value: unknown): unknown {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+    const parsed = structuredClone(value) as Record<string, unknown>;
+    if (parsed.schema !== 1) return parsed;
+    if (parsed.requestProblems === undefined) parsed.requestProblems = [];
+    if (parsed.custodyDecisions === undefined) parsed.custodyDecisions = [];
+    if (typeof parsed.cycle === 'object' && parsed.cycle !== null && !Array.isArray(parsed.cycle)) {
+        const cycle = parsed.cycle as Record<string, unknown>;
+        if (cycle.status === 'IN_PROGRESS' && cycle.nextAction === undefined) {
+            cycle.nextAction = { actionId: 'bootstrap-cycle', type: 'plan-cycle', target: 'cycle', preconditions: [], attempt: 0, state: 'pending' };
+        }
+    }
+    if (Array.isArray(parsed.verdicts)) {
+        for (const item of parsed.verdicts) {
+            if (typeof item !== 'object' || item === null || Array.isArray(item)) continue;
+            const verdict = item as Record<string, unknown>;
+            if (verdict.fingerprint === undefined) verdict.fingerprint = '';
+            if (verdict.argv === undefined) verdict.argv = [];
+            if (verdict.paths === undefined) verdict.paths = [];
+            if (verdict.cwd === undefined) verdict.cwd = '.';
+        }
+    }
+    return parsed;
+}
+
 export function initJournal(repoRoot: string, branch: string): void {
     for (const d of [journalDir(repoRoot, branch), requestsDir(repoRoot, branch), acksDir(repoRoot, branch), logsDir(repoRoot, branch), exportDir(repoRoot, branch)]) {
         fs.mkdirSync(d, { recursive: true, mode: 0o700 });
@@ -23,7 +51,7 @@ export function readJournal(repoRoot: string, branch: string): ReadResult {
     let raw: string;
     try { raw = fs.readFileSync(sp, 'utf8'); } catch { return { state: null, corrupt: true }; }
     let parsed: unknown;
-    try { parsed = JSON.parse(raw); } catch { return { state: null, corrupt: true, raw }; }
+    try { parsed = normalizeSchemaOne(JSON.parse(raw)); } catch { return { state: null, corrupt: true, raw }; }
     if (!isWellFormedState(parsed)) return { state: null, corrupt: true, raw };
     return { state: parsed, corrupt: false, raw };
 }

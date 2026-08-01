@@ -11,7 +11,9 @@ import { replayVerdict, resultPath } from './exec-wrapper';
  *  forma incorrecta (R1.6) — un resultado no verificable cae al mismo
  *  disposition que "unprovable": orphaned-authorization-required. */
 function isWellFormedJobResult(x: unknown): x is JobResult {
-    return typeof x === 'object' && x !== null && typeof (x as { exitCode?: unknown }).exitCode === 'number';
+    return typeof x === 'object' && x !== null && typeof (x as { exitCode?: unknown }).exitCode === 'number'
+        && typeof (x as { endedAt?: unknown }).endedAt === 'string'
+        && typeof (x as { resultPath?: unknown }).resultPath === 'string';
 }
 
 function readCompletedResult(logsRoot: string, jobId: string, nonce: string): JobResult | null {
@@ -22,7 +24,7 @@ function readCompletedResult(logsRoot: string, jobId: string, nonce: string): Jo
     return isWellFormedJobResult(parsed) ? parsed : null;
 }
 
-export type ReconcileAction = 'still-alive' | 'retry-new-attempt' | 'adopt-result' | 'orphaned-authorization-required';
+export type ReconcileAction = 'still-alive' | 'retry-same-intent' | 'adopt-result' | 'orphaned-authorization-required';
 export interface ReconcileDecision { jobId: string; action: ReconcileAction; }
 export interface ReconcileOutput { decisions: ReconcileDecision[]; }
 
@@ -50,7 +52,10 @@ export function reconcileJobs(state: JournalState, logsRoot: string, opts: Recon
         const verdict = replayVerdict(logsRoot, j.id, nonce);
         const result = verdict === 'completed' ? readCompletedResult(logsRoot, j.id, nonce) : null;
         if (verdict === 'never-started') {
-            decisions.push({ jobId: j.id, action: 'retry-new-attempt' });   // seguro: nunca ejecuto
+            // Reemitir exactamente el mismo intent/nonce. El claim `wx` del
+            // wrapper hace que un spawn original demorado y este retry no
+            // puedan ejecutar ambos el comando.
+            decisions.push({ jobId: j.id, action: 'retry-same-intent' });
         } else if (result !== null) {
             j.executionState = 'exited';
             j.spawnNonce = nonce;
@@ -87,5 +92,13 @@ export function materializeRetry(state: JournalState, jobId: string): Job {
         attemptOf: old.id,
     };
     state.jobs[fresh.id] = fresh;
+    for (const task of state.tasks) {
+        for (const item of task.verificationPlan) {
+            if (item.satisfiedBy === old.id) item.satisfiedBy = fresh.id;
+        }
+    }
+    for (const item of state.cycleVerificationPlan) {
+        if (item.satisfiedBy === old.id) item.satisfiedBy = fresh.id;
+    }
     return fresh;
 }

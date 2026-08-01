@@ -136,6 +136,8 @@ export function spawnStructured(argv: string[], cwd: string, nonce: string, extr
  *  bloqueador 6): startTime + pgid + digest de ps args. */
 export function refIsAlive(ref: ProcessRef): boolean {
     try {
+        const stat = psField(ref.pid, 'stat');
+        if (stat === null || stat.startsWith('Z')) return false; // zombie = proceso terminado, solo espera reap
         const start = psField(ref.pid, 'lstart');
         if (start === null || start !== ref.startTime) return false;
         const pgid = psField(ref.pid, 'pgid');
@@ -150,16 +152,31 @@ export function refIsAlive(ref: ProcessRef): boolean {
     }
 }
 
-/** true <=> pgrep -g no encuentra NINGUN proceso en el grupo. Un fallo de
- *  pgrep distinto de "sin matches" devuelve false: sin confirmacion no hay
- *  muerte declarada (R2.1). */
+/** true <=> pgrep no encuentra miembros ejecutables en el grupo. Los zombies
+ *  ya terminaron y solo esperan reap; no pueden responder seniales ni retener
+ *  trabajo. Un fallo de observacion devuelve false (R2.1). */
+export function processStatesAreGone(states: Array<string | null>): boolean {
+    return states.every((stat) => stat === null || stat.startsWith('Z'));
+}
+
 export function groupIsGone(pgid: number): boolean {
+    let pids: number[];
     try {
         const out = execFileSync('pgrep', ['-g', String(pgid)], { encoding: 'utf8', stdio: EXEC_STDIO });
-        return out.trim().length === 0;
+        pids = out.split('\n').filter(Boolean).map(Number).filter(Number.isInteger);
     } catch (error) {
         const status = (error as { status?: number | null }).status;
         return status === 1;   // pgrep exit 1 = cero matches; cualquier otra cosa NO confirma
+    }
+    if (pids.length === 0) return true;
+    try {
+        // `pgrep` tambien devuelve zombies. No pueden ejecutar, mantener FDs ni
+        // responder seniales; contarlos como vivos fuerza esperas completas y
+        // custodia falsa hasta que el parent haga reap. Solo un miembro no-zombie
+        // conserva ownership ejecutable del grupo.
+        return processStatesAreGone(pids.map((pid) => psField(pid, 'stat')));
+    } catch {
+        return false; // sin observacion completa, falla cerrado
     }
 }
 

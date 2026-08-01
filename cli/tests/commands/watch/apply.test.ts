@@ -145,6 +145,21 @@ describe('aplicacion transaccional de requests', () => {
         expect(state.tasks[0].verificationPlan.map((item) => item.satisfiedBy)).toEqual([Object.keys(state.jobs)[0], Object.keys(state.jobs)[0]]);
     });
 
+    test('un job fallido no se reutiliza como evidencia: una request nueva crea ejecucion nueva', () => {
+        emitRequest(repo, 'rama', { kind: 'job-request', generationToken: 'g1', idempotencyKey: 'k1', payload: jobPayload(['npm', 'test']) });
+        consumePendingRequests(repo, 'rama', 'g1');
+        let s = readJournal(repo, 'rama').state!;
+        const failed = Object.values(s.jobs)[0];
+        failed.executionState = 'exited';
+        failed.verdict = 'fail';
+        writeJournal(repo, 'rama', s);
+        emitRequest(repo, 'rama', { kind: 'job-request', generationToken: 'g1', idempotencyKey: 'k2', payload: jobPayload(['npm', 'test']) });
+        consumePendingRequests(repo, 'rama', 'g1');
+        s = readJournal(repo, 'rama').state!;
+        expect(Object.keys(s.jobs)).toHaveLength(2);
+        expect(Object.values(s.jobs).some((job) => job.executionState === 'received')).toBe(true);
+    });
+
     test('kind no reconocido (sintacticamente valido) se trata como corrupt, jamas se descarta en silencio (R1.6)', () => {  // verifies R1.6
         const r = emitRequest(repo, 'rama', { kind: 'job-request', generationToken: 'g1', idempotencyKey: 'k1', payload: jobPayload(['npm', 'test']) });
         // simula un kind forward-incompatible/corrupto pero JSON sintacticamente valido
@@ -172,6 +187,38 @@ describe('aplicacion transaccional de requests', () => {
         expect(out.corrupt).toBe(1);
         expect(spy).toHaveBeenCalledWith(requestsDir(repo, 'rama'));
         spy.mockRestore();
+    });
+
+    test('si falla la escritura durable, una request corrupta conserva su .json original para replay', () => {
+        const file = path.join(requestsDir(repo, 'rama'), 'req-roto.json');
+        fs.writeFileSync(file, '{no-json');
+        const spy = jest.spyOn(atomicFile, 'writeFileAtomicDurable').mockImplementationOnce(() => { throw new Error('disk full'); });
+        expect(() => consumePendingRequests(repo, 'rama', 'g1')).toThrow('disk full');
+        expect(fs.existsSync(file)).toBe(true);
+        expect(fs.existsSync(`${file}.corrupt`)).toBe(false);
+        spy.mockRestore();
+    });
+
+    test('shape anidada invalida se rechaza sin mutacion parcial ni journal corrupto', () => {
+        const request = emitRequest(repo, 'rama', {
+            kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'bad-shape',
+            payload: { entity: 'task', taskId: 'T1', verificationPlan: [{ id: 'v1', kind: { nested: true } }], reviewObligations: [] },
+        });
+        expect(consumePendingRequests(repo, 'rama', 'g1').rejectedInvalid).toBe(1);
+        const read = readJournal(repo, 'rama');
+        expect(read.corrupt).toBe(false);
+        expect(read.state!.tasks).toHaveLength(0);
+        expect(fs.existsSync(`${request.file}.rejected`)).toBe(true);
+    });
+
+    test('verdict para una obligacion inexistente se rechaza en vez de fabricar evidencia', () => {
+        const request = emitRequest(repo, 'rama', {
+            kind: 'verdict', generationToken: 'g1', idempotencyKey: 'orphan-verdict',
+            payload: verdictPayload('verd-orphan', 'missing', 'pass', 'no existe'),
+        });
+        expect(consumePendingRequests(repo, 'rama', 'g1').rejectedInvalid).toBe(1);
+        expect(readJournal(repo, 'rama').state!.verdicts).toHaveLength(0);
+        expect(fs.existsSync(`${request.file}.rejected`)).toBe(true);
     });
 
     // ---- post-implementation-qa: fixes 1-8 (cluster apply.ts/requests.ts/job/index.ts/types.ts) ----
@@ -323,5 +370,23 @@ describe('aplicacion transaccional de requests', () => {
         s = readJournal(repo, 'rama').state!;
         // libremente sobre-escribible (a diferencia de cycle-plan, Fix4): es el "puntero de resumen" vigente
         expect(s.cycle.nextAction).toEqual({ actionId: 'a2', type: 'run-qa', target: 'ciclo', preconditions: [], attempt: 0, state: 'pending' });
+    });
+
+    test('custodia solo se reanuda mediante una decision explicita y auditada', () => {
+        const before = readJournal(repo, 'rama').state!;
+        before.cycle.status = 'BLOCKED';
+        before.cycle.blockedReason = 'identidad ambigua';
+        before.generations.push({ n: 1, token: 'g1', state: 'active', launchedAt: new Date().toISOString() });
+        writeJournal(repo, 'rama', before);
+        emitRequest(repo, 'rama', {
+            kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'resume-1',
+            payload: { entity: 'custody-decision', decision: 'resume', reason: 'operador verifico que no hay llamada en vuelo' },
+        });
+        expect(consumePendingRequests(repo, 'rama', 'g1').applied).toBe(1);
+        const s = readJournal(repo, 'rama').state!;
+        expect(s.cycle.status).toBe('IN_PROGRESS');
+        expect(s.cycle.blockedReason).toBeUndefined();
+        expect(s.generations[0].state).toBe('superseded');
+        expect(s.custodyDecisions).toEqual([expect.objectContaining({ decision: 'resume', reason: 'operador verifico que no hay llamada en vuelo', generationToken: 'g1' })]);
     });
 });

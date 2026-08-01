@@ -55,9 +55,9 @@ export function registerJobCommand(program: Command): void {
         });
 
     job.command('register')
-        .description('registra una entidad del ciclo (task | cycle-plan | dispatch | task-status | next-action) ANTES de actuar')
+        .description('registra una entidad del ciclo (task | cycle-plan | dispatch | task-status | next-action | custody-decision) ANTES de actuar')
         .requiredOption('--generation <token>')
-        .requiredOption('--entity <kind>', 'task | cycle-plan | dispatch | task-status | next-action')
+        .requiredOption('--entity <kind>', 'task | cycle-plan | dispatch | task-status | next-action | custody-decision')
         .requiredOption('--json <payload>', 'payload JSON de la entidad')
         .action((opts) => {
             let payload: unknown;
@@ -140,7 +140,13 @@ export function registerJobCommand(program: Command): void {
             // copia en memoria: reconcileJobs muta SU copia, jamas el disco (R3.1)
             const clone = JSON.parse(JSON.stringify(r.state));
             const out = reconcileJobs(clone, logsDir(repo, branch));
-            process.stdout.write(JSON.stringify({ decisions: out.decisions, nextAction: r.state.cycle.nextAction ?? null, cycleStatus: r.state.cycle.status }, null, 2) + '\n');
+            const active = r.state.generations.find((g) => g.state === 'active' || g.state === 'controller-suspected-stall');
+            process.stdout.write(JSON.stringify({
+                decisions: out.decisions,
+                nextAction: r.state.cycle.nextAction ?? null,
+                cycleStatus: r.state.cycle.status,
+                generation: active === undefined ? null : { n: active.n, token: active.token },
+            }, null, 2) + '\n');
         });
 
     job.command('gate')

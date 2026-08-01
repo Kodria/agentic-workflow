@@ -60,6 +60,7 @@ export interface Verdict {
 }
 export interface FixObligation { id: string; verdictId: string; closed: boolean; }
 export interface RequestProblem { file: string; kind: 'corrupt' | 'rejected'; detail: string; at: string; }
+export interface CustodyDecision { at: string; decision: 'resume'; reason: string; generationToken: string; }
 
 export interface TaskEntity {
     id: string;
@@ -104,7 +105,12 @@ export interface Generation {
     n: number;
     token: string;
     state: GenerationState;
+    controllerJobId?: string; // intent durable del wrapper que lanza al controller
+    spawnNonce?: string;
+    provider?: string;
+    resumePrompt?: string;
     processRef?: ProcessRef;
+    wrapperRef?: ProcessRef;
     launchedAt: string;
 }
 
@@ -132,15 +138,19 @@ export interface JournalState {
     fixes: FixObligation[];
     appliedRequests: Record<string, AppliedRequest>;  // por requestId (los alias duplican entrada)
     requestProblems: RequestProblem[];                // corrupcion/rechazos de contenido bloquean el gate
+    custodyDecisions?: CustodyDecision[];             // compatible con journals previos; decisiones humanas auditadas
     controllerHeartbeatAt?: string;
 }
 
 export function emptyState(branch: string): JournalState {
     return {
         schema: 1, revision: 0, branch,
-        cycle: { status: 'IN_PROGRESS', startedAt: new Date().toISOString() },
+        cycle: {
+            status: 'IN_PROGRESS', startedAt: new Date().toISOString(),
+            nextAction: { actionId: 'bootstrap-cycle', type: 'plan-cycle', target: 'cycle', preconditions: [], attempt: 0, state: 'pending' },
+        },
         cycleVerificationPlan: [], requiredVerifiers: [], generations: [], tasks: [],
-        dispatches: [], jobs: {}, verdicts: [], fixes: [], appliedRequests: {}, requestProblems: [],
+        dispatches: [], jobs: {}, verdicts: [], fixes: [], appliedRequests: {}, requestProblems: [], custodyDecisions: [],
     };
 }
 
@@ -153,17 +163,34 @@ export function isWellFormedState(x: unknown): x is JournalState {
     if (x.schema !== 1) return false;
     if (typeof x.revision !== 'number') return false;
     if (typeof x.branch !== 'string') return false;
-    if (!isObj(x.cycle) || typeof (x.cycle as Record<string, unknown>).status !== 'string') return false;
+    if (!isObj(x.cycle) || !['IN_PROGRESS', 'COMPLETE', 'BLOCKED'].includes(String(x.cycle.status))
+        || typeof x.cycle.startedAt !== 'string'
+        || (x.cycle.completedAt !== undefined && typeof x.cycle.completedAt !== 'string')
+        || (x.cycle.blockedReason !== undefined && typeof x.cycle.blockedReason !== 'string')
+        || (x.cycle.nextAction !== undefined && !isWellFormedNextAction(x.cycle.nextAction))
+        || (x.cycle.status === 'IN_PROGRESS' && x.cycle.nextAction === undefined)) return false;
     if (!Array.isArray(x.generations) || !Array.isArray(x.tasks)) return false;
     if (!Array.isArray(x.cycleVerificationPlan) || !Array.isArray(x.verdicts) || !Array.isArray(x.fixes)) return false;
-    if (!Array.isArray(x.requiredVerifiers) || !Array.isArray(x.dispatches)) return false;
+    if (!Array.isArray(x.requiredVerifiers) || !x.requiredVerifiers.every((kind) => ['test', 'lint', 'sensors', 'review', 'qa', 'interlock'].includes(String(kind)))
+        || !Array.isArray(x.dispatches) || !x.dispatches.every(isWellFormedDispatch)) return false;
     if (!isObj(x.jobs) || !Object.values(x.jobs).every(isWellFormedJob)) return false;
     if (!isObj(x.appliedRequests) || !Object.values(x.appliedRequests).every(isWellFormedAppliedRequest)) return false;
     if (!Array.isArray(x.requestProblems) || !x.requestProblems.every(isWellFormedRequestProblem)) return false;
+    if (x.custodyDecisions !== undefined && (!Array.isArray(x.custodyDecisions) || !x.custodyDecisions.every(isWellFormedCustodyDecision))) return false;
     if (!x.generations.every(isWellFormedGeneration) || !x.tasks.every(isWellFormedTask)) return false;
     if (!x.cycleVerificationPlan.every(isWellFormedVerificationItem)) return false;
     if (!x.verdicts.every(isWellFormedVerdict) || !x.fixes.every(isWellFormedFix)) return false;
     return true;
+}
+
+function isWellFormedNextAction(x: unknown): x is NextAction {
+    return isObj(x) && typeof x.actionId === 'string' && typeof x.type === 'string' && typeof x.target === 'string'
+        && strings(x.preconditions) && typeof x.attempt === 'number'
+        && (x.state === 'pending' || x.state === 'in-progress');
+}
+
+function isWellFormedDispatch(x: unknown): x is DispatchRecord {
+    return isObj(x) && typeof x.id === 'string' && typeof x.taskId === 'string' && typeof x.at === 'string';
 }
 
 function strings(x: unknown): x is string[] {
@@ -194,7 +221,12 @@ function isWellFormedGeneration(x: unknown): x is Generation {
     return isObj(x) && typeof x.n === 'number' && typeof x.token === 'string'
         && (GENERATION_STATES as readonly string[]).includes(String(x.state))
         && typeof x.launchedAt === 'string'
-        && (x.processRef === undefined || isWellFormedProcessRef(x.processRef));
+        && (x.controllerJobId === undefined || typeof x.controllerJobId === 'string')
+        && (x.spawnNonce === undefined || typeof x.spawnNonce === 'string')
+        && (x.provider === undefined || typeof x.provider === 'string')
+        && (x.resumePrompt === undefined || typeof x.resumePrompt === 'string')
+        && (x.processRef === undefined || isWellFormedProcessRef(x.processRef))
+        && (x.wrapperRef === undefined || isWellFormedProcessRef(x.wrapperRef));
 }
 
 function isWellFormedVerdict(x: unknown): x is Verdict {
@@ -220,13 +252,18 @@ function isWellFormedRequestProblem(x: unknown): x is RequestProblem {
         && typeof x.detail === 'string' && typeof x.at === 'string';
 }
 
+function isWellFormedCustodyDecision(x: unknown): x is CustodyDecision {
+    return isObj(x) && typeof x.at === 'string' && x.decision === 'resume'
+        && typeof x.reason === 'string' && typeof x.generationToken === 'string';
+}
+
 export function isWellFormedProcessRef(x: unknown): x is ProcessRef {
     if (!isObj(x)) return false;
-    return typeof x.pid === 'number'
+    return typeof x.pid === 'number' && Number.isInteger(x.pid) && x.pid > 0
         && typeof x.startTime === 'string'
         && typeof x.spawnNonce === 'string'
         && typeof x.argvDigest === 'string'
-        && typeof x.processGroup === 'number'
+        && typeof x.processGroup === 'number' && Number.isInteger(x.processGroup) && x.processGroup > 0
         && typeof x.psArgsDigest === 'string';
 }
 
@@ -235,11 +272,22 @@ export function isWellFormedJob(x: unknown): x is Job {
     return typeof x.id === 'string'
         && typeof x.fingerprint === 'string'
         && typeof x.commandDigest === 'string'
-        && Array.isArray(x.argv)
+        && strings(x.argv)
         && typeof x.cwd === 'string'
-        && Array.isArray(x.paths)
-        && Array.isArray(x.expandedPaths)
-        && typeof x.observationState === 'string'
-        && isObj(x.phaseTimestamps)
+        && strings(x.paths)
+        && strings(x.expandedPaths)
+        && (x.observationState === 'progressing' || x.observationState === 'suspected-stall')
+        && isObj(x.phaseTimestamps) && Object.entries(x.phaseTimestamps).every(([state, at]) =>
+            (EXECUTION_STATES as readonly string[]).includes(state) && typeof at === 'string')
+        && (x.verdict === undefined || ['pass', 'fail', 'inconclusive'].includes(String(x.verdict)))
+        && (x.spawnNonce === undefined || typeof x.spawnNonce === 'string')
+        && (x.processRef === undefined || isWellFormedProcessRef(x.processRef))
+        && (x.wrapperRef === undefined || isWellFormedProcessRef(x.wrapperRef))
+        && (x.lastProgressAt === undefined || typeof x.lastProgressAt === 'string')
+        && (x.logPath === undefined || typeof x.logPath === 'string')
+        && (x.result === undefined || (isObj(x.result) && typeof x.result.exitCode === 'number'
+            && typeof x.result.endedAt === 'string' && typeof x.result.resultPath === 'string'))
+        && (x.satisfies === undefined || typeof x.satisfies === 'string')
+        && (x.attemptOf === undefined || typeof x.attemptOf === 'string')
         && (EXECUTION_STATES as readonly string[]).includes(x.executionState as string);
 }

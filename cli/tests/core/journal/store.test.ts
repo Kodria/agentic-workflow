@@ -46,6 +46,21 @@ describe('journal store', () => {
         expect(readJournal(repo, 'rama').corrupt).toBe(true);
     });
 
+    test('normaliza campos aditivos de snapshots schema 1 sin certificar evidencia legacy', () => {
+        initJournal(repo, 'rama');
+        const legacy = readJournal(repo, 'rama').state! as unknown as Record<string, unknown>;
+        delete legacy.requestProblems;
+        delete legacy.custodyDecisions;
+        delete (legacy.cycle as Record<string, unknown>).nextAction;
+        (legacy.verdicts as unknown[]).push({ id: 'v-old', obligationId: 'o-old', result: 'pass', detail: 'legacy', receivedAt: new Date().toISOString() });
+        fs.writeFileSync(statePath(repo, 'rama'), JSON.stringify(legacy));
+        const read = readJournal(repo, 'rama');
+        expect(read.corrupt).toBe(false);
+        expect(read.state!.requestProblems).toEqual([]);
+        expect(read.state!.cycle.nextAction?.actionId).toBe('bootstrap-cycle');
+        expect(read.state!.verdicts[0]).toEqual(expect.objectContaining({ fingerprint: '', argv: [], paths: [], cwd: '.' }));
+    });
+
     test('appendEvent agrega lineas de auditoria best-effort (R4.6)', () => {  // verifies R4.6
         initJournal(repo, 'rama');
         appendEvent(repo, 'rama', { kind: 'generation-launched', n: 1 });

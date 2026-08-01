@@ -25,6 +25,7 @@ describe('job verbs', () => {
         const a = requestJob(repo, 'rama', 'gen-1', ['npm', 'test'], [], '.');
         const b = requestJob(repo, 'rama', 'gen-1', ['npm', 'test'], [], '.');
         expect(a.idempotencyKey).toBe(b.idempotencyKey);      // mismo fingerprint+cmd => misma key (RNF-T.7)
+        fs.mkdirSync(path.join(repo, 'otro-cwd-logico'));
         const c = requestJob(repo, 'rama', 'gen-1', ['npm', 'test'], [], 'otro-cwd-logico');
         expect(c.idempotencyKey).not.toBe(a.idempotencyKey);  // cwd distinto => key distinta (R3.4)
         expect(listPendingRequests(repo, 'rama').length).toBe(3);  // el supervisor colapsa por key

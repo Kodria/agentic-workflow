@@ -36,6 +36,7 @@
 - **Separadores en hashes:** el separador de partes en los digests es la SECUENCIA de escape `\0` escrita como texto dentro del string literal TS (`join('\0')`) — jamás un byte NUL crudo en este documento ni en los fuentes.
 - **T20 (E2E real) exige `npm run build` previo** — lanza el CLI compilado como proceso real. Su primer paso lo hace explícito.
 - **T21 se ejecuta en el repo hermano** `awm-baseline-registry` (su primer paso descubre/clona el checkout; el tag y `awm update` los decide el dueño después).
+- **Errata post-code-review PR #22 (2026-08-01):** las referencias históricas de los snippets a `retry-new-attempt` para un `spawn-intent` sin claim quedan sustituidas por `retry-same-intent`: se reemite el mismo `jobId` + `spawnNonce`, y el claim `wx` evita que un wrapper original demorado duplique la ejecución. `materializeRetry` sigue creando un Attempt nuevo únicamente para una re-reclamación explícita y religa sus ítems de verificación. La definición normativa actualizada está en R3.3 del design v5.
 
 ## Estructura de archivos
 

@@ -92,17 +92,20 @@ export async function runExecWrapper(opts: { logsRoot: string; jobId: string; no
     };
     writeFileAtomicDurable(identityPath(logsRoot, jobId, nonce), JSON.stringify(identity, null, 2) + '\n', 0o600);
 
-    // ejecucion con salida redactada y acotada (R2.3, R2.5)
-    let logged = 0;
+    // Salida acotada en memoria y redactada como UN flujo antes de la primera
+    // escritura durable. Redactar cada chunk aisladamente filtra asignaciones
+    // partidas por el pipe (p.ej. `API_` + `KEY=secreto`).
+    let captured = 0;
+    const outputChunks: Buffer[] = [];
     const logFile = logPath(logsRoot, jobId, nonce);
-    const append = (chunk: Buffer) => {
-        if (logged >= MAX_LOG_BYTES) return;
-        const text = redactText(chunk.toString('utf8'));
-        logged += Buffer.byteLength(text);
-        fs.appendFileSync(logFile, text, { mode: 0o600 });
+    const capture = (chunk: Buffer) => {
+        if (captured >= MAX_LOG_BYTES) return;
+        const accepted = chunk.subarray(0, MAX_LOG_BYTES - captured);
+        outputChunks.push(accepted);
+        captured += accepted.length;
     };
-    child.stdout?.on('data', append);
-    child.stderr?.on('data', append);
+    child.stdout?.on('data', capture);
+    child.stderr?.on('data', capture);
     const exitCode: number = await new Promise((resolve) => {
         child.on('exit', (code) => resolve(code ?? 1));
         child.on('error', () => resolve(127));
@@ -115,6 +118,9 @@ export async function runExecWrapper(opts: { logsRoot: string; jobId: string; no
         const timer = setTimeout(() => resolve(), STDIO_GRACE_MS);
         child.once('close', () => { clearTimeout(timer); resolve(); });
     });
+    if (outputChunks.length > 0) {
+        fs.writeFileSync(logFile, redactText(Buffer.concat(outputChunks).toString('utf8')), { mode: 0o600 });
+    }
     // El resultado terminal no se publica mientras queden descendientes en el
     // grupo propio del comando. Como el wrapper vive en otro PGID, puede drenar
     // el grupo completo sin auto-terminarse.

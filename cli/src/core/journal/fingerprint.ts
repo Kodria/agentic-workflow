@@ -71,6 +71,7 @@ export function computeFingerprint(repoRoot: string, argv: string[], pathGlobs: 
             return `${p}:deleted`;   // listado pero ilegible/borrado del worktree: cuenta como cambio
         }
     });
-    const fingerprint = sha([commandDigest, `cwd:${cwdNorm}`, `head:${head}`, `index:${indexDigest}`, ...perFile]);
+    const declaredPaths = pathGlobs.length > 0 ? pathGlobs : ['.'];
+    const fingerprint = sha([commandDigest, `cwd:${cwdNorm}`, `paths:${JSON.stringify(declaredPaths)}`, `head:${head}`, `index:${indexDigest}`, ...perFile]);
     return { fingerprint, commandDigest, expandedPaths };
 }

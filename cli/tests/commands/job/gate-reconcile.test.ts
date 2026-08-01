@@ -191,7 +191,7 @@ describe('reconcile — matriz unica R1.8 (R3.3)', () => {
     beforeEach(() => { logs = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rec-')); });
     afterEach(() => { fs.rmSync(logs, { recursive: true, force: true }); });
 
-    test('sin claim => retry; claim+resultado => adoptar; claim sin resultado => orphaned', () => {  // verifies R3.3
+    test('sin claim => reintenta mismo intent; claim+resultado => adoptar; claim sin resultado => orphaned', () => {  // verifies R3.3
         const s = emptyState('r');
         const deadRef = { pid: 999999, startTime: 'gone', spawnNonce: 'n1', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
         s.jobs['a'] = job({ id: 'a', executionState: 'spawn-intent', spawnNonce: 'nA', processRef: { ...deadRef, spawnNonce: 'nA' } });
@@ -203,7 +203,7 @@ describe('reconcile — matriz unica R1.8 (R3.3)', () => {
         // c: claim sin resultado => orphaned
         fs.writeFileSync(path.join(logs, 'c.nC.claim'), '{}');
         const out = reconcileJobs(s, logs);
-        expect(out.decisions.find((d) => d.jobId === 'a')!.action).toBe('retry-new-attempt');
+        expect(out.decisions.find((d) => d.jobId === 'a')!.action).toBe('retry-same-intent');
         expect(out.decisions.find((d) => d.jobId === 'b')!.action).toBe('adopt-result');
         expect(s.jobs['b'].executionState).toBe('exited');
         expect(s.jobs['b'].verdict).toBe('pass');
@@ -214,12 +214,17 @@ describe('reconcile — matriz unica R1.8 (R3.3)', () => {
     test('materializeRetry crea Attempt NUEVO enlazado, nunca reutiliza (R1.7)', () => {  // verifies R1.7
         const s = emptyState('r');
         s.jobs['a'] = job({ id: 'a', executionState: 'spawn-intent', spawnNonce: 'nA' });
+        s.tasks.push({ id: 'T1', title: 't', status: 'in-progress', attempts: 1,
+            verificationPlan: [{ id: 'v1', kind: 'test', satisfiedBy: 'a' }], reviewObligations: [] });
+        s.cycleVerificationPlan.push({ id: 'cv1', kind: 'qa', satisfiedBy: 'a' });
         const nuevo = materializeRetry(s, 'a');
         expect(s.jobs['a'].executionState).toBe('cancelled');       // el intento viejo se retira
         expect(nuevo.attemptOf).toBe('a');
         expect(nuevo.executionState).toBe('received');
         expect(nuevo.spawnNonce).toBeUndefined();                   // nonce fresco lo asigna el runner
         expect(s.jobs[nuevo.id]).toBe(nuevo);
+        expect(s.tasks[0].verificationPlan[0].satisfiedBy).toBe(nuevo.id);
+        expect(s.cycleVerificationPlan[0].satisfiedBy).toBe(nuevo.id);
     });
 
     test('claim+resultado con forma invalida (JSON valido pero sin exitCode numerico) => orphaned, jamas fabricar verdict (R1.6)', () => {  // verifies R1.6

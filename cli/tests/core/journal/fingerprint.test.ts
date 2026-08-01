@@ -76,6 +76,13 @@ describe('computeFingerprint', () => {
         expect(all.expandedPaths.some((p) => p.startsWith('.awm/'))).toBe(false);
     });
 
+    test('globs declarados distintos no comparten fingerprint aunque hoy expandan al mismo archivo', () => {
+        const narrow = computeFingerprint(repo, ['npm', 'test'], ['a.txt'], '.');
+        const broad = computeFingerprint(repo, ['npm', 'test'], ['*.txt'], '.');
+        expect(narrow.expandedPaths).toEqual(broad.expandedPaths);
+        expect(narrow.fingerprint).not.toBe(broad.fingerprint);
+    });
+
     test('archivo con nombre no-ASCII: cambio de contenido SI altera el fingerprint (R3.4)', () => {  // verifies R3.4
         const name = 'café.txt';
         fs.writeFileSync(path.join(repo, name), 'v1');

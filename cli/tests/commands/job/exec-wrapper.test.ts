@@ -48,6 +48,14 @@ describe('exec-wrapper', () => {
         expect(log).toContain('linea-final-no-se-debe-perder');
     });
 
+    test('redacta secretos aunque la asignacion llegue dividida entre chunks de stdout (R2.3)', async () => {
+        const script = "process.stdout.write('API_'); setTimeout(()=>{process.stdout.write('KEY=hunter2\\n'); process.exit(0)}, 80)";
+        await runExecWrapper({ logsRoot: dir, jobId: 'job-split', nonce: 'nonce-split', argv: ['node', '-e', script], cwd: '.' });
+        const log = fs.readFileSync(logPath(dir, 'job-split', 'nonce-split'), 'utf8');
+        expect(log).toContain('API_KEY=[REDACTED]');
+        expect(log).not.toContain('hunter2');
+    });
+
     test('el log se acota aprox. en MAX_LOG_BYTES cuando la salida supera el limite, no crece sin cota (R2.5)', async () => {  // verifies R2.5
         const MAX_LOG_BYTES = 1024 * 1024;
         const bytesToWrite = 2 * MAX_LOG_BYTES;  // 2MB, muy por encima del cap de 1MB

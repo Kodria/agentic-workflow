@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawn } from 'child_process';
-import { spawnStructured, refIsAlive, terminateGroupConfirmed, groupIsGone, activitySnapshot, captureSelfRef } from '../../../src/core/journal/process';
+import { spawnStructured, refIsAlive, terminateGroupConfirmed, groupIsGone, activitySnapshot, captureSelfRef, processStatesAreGone } from '../../../src/core/journal/process';
 
 describe('process identity', () => {
     test('spawnStructured produce ProcessRef con tupla completa (R2.1, R4.7)', async () => {  // verifies R2.1
@@ -83,6 +83,12 @@ describe('process identity', () => {
         const self = captureSelfRef('nonce-self');
         expect(self.pid).toBe(process.pid);
         expect(refIsAlive(self)).toBe(true);
+    });
+
+    test('un grupo compuesto solo por zombies esta terminado; no espera una senial imposible', () => {
+        expect(processStatesAreGone(['Z', 'Z+','Zs', null])).toBe(true);
+        expect(processStatesAreGone(['Z', 'S'])).toBe(false);
+        expect(processStatesAreGone(['R'])).toBe(false);
     });
 
     test('refIsAlive nunca declara muerte si ps falla en ejecutarse (no ENOENT como prueba) (R2.1)', () => {  // verifies R2.1
