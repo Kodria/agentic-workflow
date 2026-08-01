@@ -75,7 +75,10 @@ export interface Job {
     executionState: ExecutionState;
     observationState: ObservationState;
     verdict?: JobVerdict;
-    spawnNonce?: string;    // persistido en spawn-intent ANTES del spawn (R1.8)
+    spawnNonce?: string;    // persistido en spawn-intent ANTES del spawn (R1.8);
+                            // tambien puede respaldarse post-hoc en reconcile.ts
+                            // al adoptar un resultado via processRef.spawnNonce,
+                            // para que export.ts pueda ubicar la evidencia
     processRef?: ProcessRef;   // identidad REAL del comando (del identity sidecar)
     wrapperRef?: ProcessRef;   // identidad REAL del wrapper externo
     phaseTimestamps: Partial<Record<ExecutionState, string>>;  // RNF-T.4

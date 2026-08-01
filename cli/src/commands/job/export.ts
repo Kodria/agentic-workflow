@@ -52,25 +52,40 @@ function compare(current: number | 'unobservable', baseline: number | undefined)
     return { current, baseline: base, delta: current - base };
 }
 
-export function buildExport(state: JournalState, provider: string, opts: { logsRoot: string | null; baseline: BaselineMetrics | null }): CycleExport {
-    const jobs = Object.values(state.jobs);
+type JobRow = CycleExport['jobs'][number];
+
+/** Dedup por fingerprint+commandDigest: el primero visto es el mecanico
+ *  real, cualquier repetido queda marcado (RNF-T.8/T.9). */
+function buildJobRows(jobs: JournalState['jobs'][string][]): JobRow[] {
     const seen = new Set<string>();
-    const jobRows = jobs.map((j) => {
+    return jobs.map((j) => {
         const k = `${j.fingerprint}:${j.commandDigest}`;
         const deduplicated = seen.has(k);
         seen.add(k);
         return { id: j.id, fingerprint: j.fingerprint, executionState: j.executionState, verdict: j.verdict, phaseTimestamps: j.phaseTimestamps as Record<string, string>, deduplicated };
     });
-    const evidence: EvidenceEntry[] = jobs.map((j) => {
+}
+
+/** Hash del resultado real en disco (respaldado por reconcile.ts al adoptar,
+ *  ver spawnNonce en types.ts) + comando reproducible. Sin resultado
+ *  observable => 'unobservable', jamas un hash inventado (RNF-T.9). */
+function buildEvidence(jobs: JournalState['jobs'][string][], logsRoot: string | null): EvidenceEntry[] {
+    return jobs.map((j) => {
         let resultHash: string | 'unobservable' = 'unobservable';
-        if (opts.logsRoot !== null && j.spawnNonce !== undefined) {
+        if (logsRoot !== null && j.spawnNonce !== undefined) {
             try {
-                resultHash = crypto.createHash('sha256').update(fs.readFileSync(resultPath(opts.logsRoot, j.id, j.spawnNonce), 'utf8')).digest('hex');
+                resultHash = crypto.createHash('sha256').update(fs.readFileSync(resultPath(logsRoot, j.id, j.spawnNonce), 'utf8')).digest('hex');
             } catch { resultHash = 'unobservable'; }
         }
         // argv ya redactado por el emisor: reproducible sin secretos (R2.3)
         return { jobId: j.id, resultHash, reproduce: `cd ${j.cwd} && ${j.argv.join(' ')}` };
     });
+}
+
+export function buildExport(state: JournalState, provider: string, opts: { logsRoot: string | null; baseline: BaselineMetrics | null }): CycleExport {
+    const jobs = Object.values(state.jobs);
+    const jobRows = buildJobRows(jobs);
+    const evidence = buildEvidence(jobs, opts.logsRoot);
     const cycleWall = wallMs(state.cycle.startedAt, state.cycle.completedAt);
     const mechanicalRuns = jobRows.filter((j) => !j.deduplicated).length;
     return {
