@@ -61,6 +61,8 @@ export function emitRequest(repoRoot: string, branch: string, env: RequestEnvelo
 
 export interface PendingRequest { requestId: string; envelope: RequestEnvelope & { requestId: string }; file: string; corrupt: boolean; }
 
+const KNOWN_KINDS: ReadonlyArray<RequestEnvelope['kind']> = ['job-request', 'register-entity', 'controller-heartbeat', 'verdict'];
+
 export function listPendingRequests(repoRoot: string, branch: string): PendingRequest[] {
     const dir = requestsDir(repoRoot, branch);
     return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort().map((f) => {
@@ -68,6 +70,13 @@ export function listPendingRequests(repoRoot: string, branch: string): PendingRe
         try {
             const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
             if (typeof parsed !== 'object' || parsed === null || typeof parsed.requestId !== 'string') {
+                return { requestId: f, envelope: null as never, file, corrupt: true };
+            }
+            // shape validation antes de usar campos deserializados (types.ts:2,
+            // R1.6): un `kind` no reconocido (forward-incompatible o corrupto
+            // pero sintacticamente valido JSON) se trata como corrupt — jamas
+            // sale "no-corrupt" para que apply.ts lo descarte en silencio.
+            if (!KNOWN_KINDS.includes(parsed.kind)) {
                 return { requestId: f, envelope: null as never, file, corrupt: true };
             }
             return { requestId: parsed.requestId, envelope: parsed, file, corrupt: false };

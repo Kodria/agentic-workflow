@@ -130,11 +130,13 @@ export function consumePendingRequests(repoRoot: string, branch: string, activeT
     const pending = listPendingRequests(repoRoot, branch);
     const processedFiles: string[] = [];
     let applied = 0, rejectedStale = 0, corrupt = 0;
+    let dirChanged = false;   // corrupt-rename O borrado normal: cualquiera muta el directorio
     for (const p of pending) {
         if (p.corrupt) {
             corrupt++;
             fs.renameSync(p.file, `${p.file}.corrupt`);   // visible, jamas descartado (R1.6)
             appendEvent(repoRoot, branch, { kind: 'request-corrupt', file: p.file });
+            dirChanged = true;
             continue;
         }
         const env = p.envelope;
@@ -142,6 +144,7 @@ export function consumePendingRequests(repoRoot: string, branch: string, activeT
         if (s.appliedRequests[env.requestId] !== undefined) {
             // replay tras crash post-journal/pre-borrado: ya aplicada, solo borrar
             processedFiles.push(p.file);
+            dirChanged = true;
             continue;
         }
         if (activeToken !== null && env.generationToken !== activeToken) {
@@ -153,11 +156,12 @@ export function consumePendingRequests(repoRoot: string, branch: string, activeT
             applied++;
         }
         processedFiles.push(p.file);
+        dirChanged = true;
     }
     if (applied + rejectedStale > 0 || processedFiles.length > 0) {
         writeJournal(repoRoot, branch, s);                 // (2) journal ANTES del borrado
     }
     for (const f of processedFiles) fs.rmSync(f, { force: true });   // (3)
-    if (processedFiles.length > 0) fsyncDirSync(requestsDir(repoRoot, branch));  // (4)
+    if (dirChanged) fsyncDirSync(requestsDir(repoRoot, branch));     // (4) — incluye batches solo-corrupt
     return { applied, rejectedStale, corrupt };
 }

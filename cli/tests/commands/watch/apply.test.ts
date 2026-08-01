@@ -4,7 +4,8 @@ import os from 'os';
 import { consumePendingRequests } from '../../../src/commands/watch/apply';
 import { emitRequest } from '../../../src/core/journal/requests';
 import { initJournal, readJournal } from '../../../src/core/journal/store';
-import { requestsDir } from '../../../src/core/journal/paths';
+import { requestsDir, eventsPath } from '../../../src/core/journal/paths';
+import * as atomicFile from '../../../src/core/atomic-file';
 
 function jobPayload(argv: string[]): Record<string, unknown> {
     return { argv, paths: [], cwd: '.', fingerprint: 'fp-1', commandDigest: 'cd-1', expandedPaths: [] };
@@ -112,5 +113,34 @@ describe('aplicacion transaccional de requests', () => {
         expect(out.corrupt).toBe(1);
         const files = fs.readdirSync(requestsDir(repo, 'rama'));
         expect(files.some((f) => f.endsWith('.corrupt'))).toBe(true);
+    });
+
+    test('kind no reconocido (sintacticamente valido) se trata como corrupt, jamas se descarta en silencio (R1.6)', () => {  // verifies R1.6
+        const r = emitRequest(repo, 'rama', { kind: 'job-request', generationToken: 'g1', idempotencyKey: 'k1', payload: jobPayload(['npm', 'test']) });
+        // simula un kind forward-incompatible/corrupto pero JSON sintacticamente valido
+        const raw = JSON.parse(fs.readFileSync(r.file, 'utf8'));
+        raw.kind = 'kind-desconocido-xyz';
+        fs.writeFileSync(r.file, JSON.stringify(raw, null, 2) + '\n');
+
+        const out = consumePendingRequests(repo, 'rama', 'g1');
+        expect(out).toEqual({ applied: 0, rejectedStale: 0, corrupt: 1 });   // NUNCA "applied: 1" silencioso
+        expect(fs.existsSync(r.file)).toBe(false);                          // el .json original ya no esta
+        const files = fs.readdirSync(requestsDir(repo, 'rama'));
+        expect(files.some((f) => f.endsWith('.corrupt'))).toBe(true);       // visible, jamas descartado
+
+        const s = readJournal(repo, 'rama').state!;
+        expect(s.appliedRequests[r.requestId]).toBeUndefined();             // NO se contamina con 'applied'
+
+        const events = fs.readFileSync(eventsPath(repo, 'rama'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+        expect(events.some((e) => e.kind === 'request-corrupt')).toBe(true);
+    });
+
+    test('batch solo-corrupt igual hace fsync del directorio (durabilidad del rename a .corrupt)', () => {
+        fs.writeFileSync(path.join(requestsDir(repo, 'rama'), 'req-roto.json'), '{no-json');
+        const spy = jest.spyOn(atomicFile, 'fsyncDirSync');
+        const out = consumePendingRequests(repo, 'rama', 'g1');
+        expect(out.corrupt).toBe(1);
+        expect(spy).toHaveBeenCalledWith(requestsDir(repo, 'rama'));
+        spy.mockRestore();
     });
 });
