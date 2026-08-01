@@ -25,4 +25,12 @@ describe('redact', () => {
     test('redactArgv redacta un valor literal que empieza con -- (R2.3)', () => {  // verifies R2.3
         expect(redactArgv(['cmd', '--token', '--abc123secretvalue'])).toEqual(['cmd', '--token', '[REDACTED]']);
     });
+
+    test('findLiteralSecretFlag no confunde un flag sensible vecino con el valor del anterior (R2.3)', () => {  // verifies R2.3
+        expect(findLiteralSecretFlag(['cmd', '--token', '--password', 'hunter2'])).toBe('--password');
+    });
+
+    test('redactArgv no traga un flag sensible vecino como valor del anterior, y sigue redactando el vecino (R2.3)', () => {  // verifies R2.3
+        expect(redactArgv(['cmd', '--token', '--password', 'hunter2'])).toEqual(['cmd', '--token', '--password', '[REDACTED]']);
+    });
 });
