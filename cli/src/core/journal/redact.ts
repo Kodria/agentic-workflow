@@ -2,7 +2,7 @@
 // Patrones alineados con el sensor-pack de secretos del registry baseline.
 
 const SECRET_WORD = /(password|passwd|secret|api[-_]?key|apikey|token|credential)/i;
-const ASSIGNMENT = new RegExp(`([a-z0-9_-]{0,64}(?:password|passwd|secret|api[-_]?key|apikey|token|credential)[a-z0-9_-]{0,64})(\\s*[=:]\\s*)(\\S+)`, 'gi');
+const ASSIGNMENT = new RegExp(`([a-z0-9_-]{0,64}(?:password|passwd|secret|api[-_]?key|apikey|token|credential)[a-z0-9_-]*)(\\s*[=:]\\s*)(\\S+)`, 'gi');
 
 // Distinto de SECRET_WORD (substring, para nombres de flag reales): aquí el
 // keyword debe ser un segmento completo delimitado por -, _ o los bordes del

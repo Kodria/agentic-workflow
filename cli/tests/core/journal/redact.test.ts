@@ -52,4 +52,11 @@ describe('redact', () => {
         redactText('x'.repeat(100000));
         expect(Date.now() - start).toBeLessThan(500);
     });
+
+    test('redactText no pierde secretos con identificadores largos entre keyword y separador (R2.3)', () => {  // verifies R2.3
+        const text = 'api_key' + 'x'.repeat(70) + '=sk-VERY-REAL-SECRET-VALUE-12345';
+        const result = redactText(text);
+        expect(result).not.toContain('sk-VERY-REAL-SECRET-VALUE-12345');
+        expect(result).toContain('[REDACTED]');
+    });
 });
