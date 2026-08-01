@@ -2,7 +2,16 @@
 // Patrones alineados con el sensor-pack de secretos del registry baseline.
 
 const SECRET_WORD = /(password|passwd|secret|api[-_]?key|apikey|token|credential)/i;
-const ASSIGNMENT = new RegExp(`([a-z0-9_-]{0,64}(?:password|passwd|secret|api[-_]?key|apikey|token|credential)[a-z0-9_-]*)(\\s*[=:]\\s*)(\\S+)`, 'gi');
+
+// ASSIGNMENT (regex de único backtracking) tuvo 3 rondas de fallas reales:
+// sin cota => ReDoS cuadrático (corridas largas sin match, o muchas
+// ocurrencias sueltas del keyword sin separador); cotado en ambos lados =>
+// fuga de secretos con identificadores largos entre el keyword y el "=".
+// Sustituido por escaneo manual caracter-a-caracter: O(n) sin backtracking,
+// sin cota de longitud posible en ningún lado, inmune a ambos hallazgos.
+const KEYWORD_RE = /password|passwd|secret|api[-_]?key|apikey|token|credential/gi;
+const IDENT_CHAR = /[a-z0-9_-]/i;
+const WHITESPACE = /\s/;
 
 // Distinto de SECRET_WORD (substring, para nombres de flag reales): aquí el
 // keyword debe ser un segmento completo delimitado por -, _ o los bordes del
@@ -20,7 +29,36 @@ function looksLikeSensitiveFlag(token: string): boolean {
 }
 
 export function redactText(text: string): string {
-    return text.replace(ASSIGNMENT, (_m, key: string, sep: string) => `${key}${sep}[REDACTED]`);
+    let result = '';
+    let cursor = 0;
+    KEYWORD_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = KEYWORD_RE.exec(text)) !== null) {
+        if (m.index < cursor) continue;
+        let start = m.index;
+        while (start > cursor && IDENT_CHAR.test(text[start - 1])) start--;
+        let keyEnd = m.index + m[0].length;
+        while (keyEnd < text.length && IDENT_CHAR.test(text[keyEnd])) keyEnd++;
+        let sepStart = keyEnd;
+        while (sepStart < text.length && WHITESPACE.test(text[sepStart])) sepStart++;
+        if (sepStart >= text.length || (text[sepStart] !== '=' && text[sepStart] !== ':')) {
+            KEYWORD_RE.lastIndex = keyEnd;
+            continue;
+        }
+        let valueStart = sepStart + 1;
+        while (valueStart < text.length && WHITESPACE.test(text[valueStart])) valueStart++;
+        if (valueStart >= text.length) {
+            KEYWORD_RE.lastIndex = keyEnd;
+            continue;
+        }
+        let valueEnd = valueStart;
+        while (valueEnd < text.length && !WHITESPACE.test(text[valueEnd])) valueEnd++;
+        result += text.slice(cursor, valueStart) + '[REDACTED]';
+        cursor = valueEnd;
+        KEYWORD_RE.lastIndex = cursor;
+    }
+    result += text.slice(cursor);
+    return result;
 }
 
 /** Flag sensible que porta un secreto LITERAL (no una referencia `-env`):

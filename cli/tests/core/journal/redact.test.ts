@@ -59,4 +59,11 @@ describe('redact', () => {
         expect(result).not.toContain('sk-VERY-REAL-SECRET-VALUE-12345');
         expect(result).toContain('[REDACTED]');
     });
+
+    test('redactText no sufre backtracking cuadratico con muchas ocurrencias del keyword sin separador (R2.3)', () => {  // verifies R2.3
+        const start = Date.now();
+        const result = redactText('token'.repeat(2400));
+        expect(Date.now() - start).toBeLessThan(500);
+        expect(result).toBe('token'.repeat(2400));   // sin separador en ningun lado: nada que redactar
+    });
 });
