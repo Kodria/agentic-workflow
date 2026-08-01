@@ -46,4 +46,10 @@ describe('redact', () => {
         // Documenta el limite, no lo intenta cerrar: ver comentario en redact.ts.
         expect(findLiteralSecretFlag(['cmd', '-p', 'hunter2secret'])).toBeNull();
     });
+
+    test('redactText no sufre backtracking catastrofico con corridas largas sin match (R2.3)', () => {  // verifies R2.3
+        const start = Date.now();
+        redactText('x'.repeat(100000));
+        expect(Date.now() - start).toBeLessThan(500);
+    });
 });

@@ -104,9 +104,9 @@ export async function runExecWrapper(opts: { logsRoot: string; jobId: string; no
     // dispararse antes que termine el flush de 'data') SIN bloquear indefinidamente
     // si un descendiente hereda los fds y no los cierra — el wrapper SIEMPRE debe
     // terminar (R1.8). 'close' sin cota reintroduce el riesgo de cuelgue.
-    await Promise.race([
-        new Promise<void>((resolve) => { child.once('close', () => resolve()); }),
-        new Promise<void>((resolve) => { setTimeout(resolve, STDIO_GRACE_MS); }),
-    ]);
+    await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => resolve(), STDIO_GRACE_MS);
+        child.once('close', () => { clearTimeout(timer); resolve(); });
+    });
     return finish(exitCode);
 }
