@@ -34,7 +34,11 @@ export interface WrapperIdentity { jobId: string; nonce: string; wrapper: Proces
 export interface WrappedResult { exitCode: number; endedAt: string; resultPath: string; }
 
 const MAX_LOG_BYTES = 1024 * 1024;   // retencion acotada (R2.5)
-const STDIO_GRACE_MS = 300;   // ventana acotada post-exit para el flush de stdio (R1.8, R2.5)
+// Ventana acotada post-exit para el flush de stdio (R1.8, R2.5). 300ms es
+// generoso frente al caso real (datos ya en vuelo en el pipe cuando 'exit'
+// dispara, tipicamente entregados en 1 tick del event loop) sin acercarse a
+// una espera perceptible si un descendiente hereda los fds y nunca cierra.
+const STDIO_GRACE_MS = 300;
 
 export async function runExecWrapper(opts: { logsRoot: string; jobId: string; nonce: string; argv: string[]; cwd: string }): Promise<WrappedResult> {
     const { logsRoot, jobId, nonce, argv, cwd } = opts;
