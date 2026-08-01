@@ -79,7 +79,16 @@ export function computeGate(state: JournalState | null, corrupt: boolean, finger
     }
     for (const t of state.tasks) {
         for (const o of t.reviewObligations) {
-            if (o.verdictId === undefined) reasons.push({ category: 'open-obligation', detail: `obligacion ${o.id} sin verdict` });
+            if (o.verdictId === undefined) {
+                reasons.push({ category: 'open-obligation', detail: `obligacion ${o.id} sin verdict` });
+                continue;
+            }
+            const v = state.verdicts.find((x) => x.id === o.verdictId);
+            if (v === undefined) {
+                reasons.push({ category: 'dangling-reference', detail: `obligacion ${o.id} cita verdict inexistente ${o.verdictId}` });
+            } else if (v.result !== 'pass') {
+                reasons.push({ category: 'adverse-verdict', detail: `obligacion ${o.id} citada por verdict ${v.id} con result ${v.result}` });
+            }
         }
     }
     for (const v of state.verdicts) {

@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { computeGate, FingerprintNow } from '../../../src/commands/job/gate';
 import { reconcileJobs, materializeRetry } from '../../../src/commands/job/reconcile';
+import { planReap, executeReap } from '../../../src/commands/job/reap';
 import { emptyState, Job, JournalState } from '../../../src/core/journal/types';
 
 function job(partial: Partial<Job>): Job {
@@ -121,6 +122,20 @@ describe('gate', () => {
         expect(g.pass).toBe(false);
         expect(g.reasons.some((r) => r.category === 'missing-verifier' && /sensors/.test(r.detail))).toBe(true);
     });
+
+    test('reviewObligation con verdictId colgante o adverso bloquea, no solo si esta ausente (R3.2, R1.4c)', () => {  // verifies R3.2
+        const s = passingState();
+        s.tasks[0].reviewObligations.push({ id: 'o1', taskId: 'T1', kind: 'spec', verdictId: 'verd-fantasma' });
+        const g = computeGate(s, false, fpCurrent);
+        expect(g.pass).toBe(false);
+        expect(g.reasons.some((r) => r.category === 'dangling-reference')).toBe(true);
+        const s2 = passingState();
+        s2.verdicts.push({ id: 'verd-2', obligationId: 'o2', result: 'fail', detail: 'no', receivedAt: 'now' });
+        s2.tasks[0].reviewObligations.push({ id: 'o2', taskId: 'T1', kind: 'spec', verdictId: 'verd-2' });
+        const g2 = computeGate(s2, false, fpCurrent);
+        expect(g2.pass).toBe(false);
+        expect(g2.reasons.some((r) => r.category === 'adverse-verdict')).toBe(true);
+    });
 });
 
 describe('reconcile — matriz unica R1.8 (R3.3)', () => {
@@ -157,5 +172,38 @@ describe('reconcile — matriz unica R1.8 (R3.3)', () => {
         expect(nuevo.executionState).toBe('received');
         expect(nuevo.spawnNonce).toBeUndefined();                   // nonce fresco lo asigna el runner
         expect(s.jobs[nuevo.id]).toBe(nuevo);
+    });
+});
+
+describe('reap — limpieza explicita con identidad validada (R2.2)', () => {
+    test('planReap reporta aliveWithIdentity via refIsAlive, solo para jobs con processRef', () => {
+        const s = emptyState('r');
+        const deadRef = { pid: 999999, startTime: 'gone', spawnNonce: 'n1', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
+        s.jobs['sinRef'] = job({ id: 'sinRef', executionState: 'running' });
+        s.jobs['muerto'] = job({ id: 'muerto', executionState: 'running', processRef: deadRef });
+        const plan = planReap(s);
+        expect(plan.find((p) => p.jobId === 'sinRef')).toBeUndefined();
+        const m = plan.find((p) => p.jobId === 'muerto')!;
+        expect(m.pid).toBe(999999);
+        expect(m.aliveWithIdentity).toBe(false);
+    });
+
+    test('executeReap nunca señaliza sin processRef ni sin identidad viva confirmada (R2.1, R2.2)', async () => {
+        const s = emptyState('r');
+        const deadRef = { pid: 999999, startTime: 'gone', spawnNonce: 'n1', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
+        s.jobs['sinRef'] = job({ id: 'sinRef', executionState: 'running' });
+        s.jobs['muerto'] = job({ id: 'muerto', executionState: 'running', processRef: deadRef });
+        const killed = await executeReap(s, ['sinRef', 'muerto', 'no-existe']);
+        expect(killed).toEqual([]);
+    });
+
+    test('executeReap mata y reporta solo jobs con muerte confirmada', async () => {
+        const { spawnStructured } = require('../../../src/core/journal/process');
+        const s = emptyState('r');
+        const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 5000)'], process.cwd(), 'nX');
+        s.jobs['vivo'] = job({ id: 'vivo', executionState: 'running', processRef: ref });
+        const killed = await executeReap(s, ['vivo']);
+        expect(killed).toEqual(['vivo']);
+        child.kill('SIGKILL');
     });
 });
