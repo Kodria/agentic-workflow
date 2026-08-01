@@ -166,8 +166,13 @@ export function registerJobCommand(program: Command): void {
             if (r.corrupt || r.state === null) { process.stderr.write('journal corrupto\n'); process.exit(1); }
             let baseline: BaselineMetrics | null = null;
             if (opts.baseline !== undefined) {
-                const parsed = JSON.parse(fs.readFileSync(opts.baseline, 'utf8'));
-                if (typeof parsed !== 'object' || parsed === null || typeof parsed.source !== 'string') {
+                let parsed: unknown;
+                try {
+                    parsed = JSON.parse(fs.readFileSync(opts.baseline, 'utf8'));
+                } catch (e) {
+                    throw new Error(`--baseline: no se pudo leer o parsear ${opts.baseline} como JSON (${(e as Error).message})`);
+                }
+                if (typeof parsed !== 'object' || parsed === null || typeof (parsed as { source?: unknown }).source !== 'string') {
                     throw new Error('--baseline requiere un JSON con al menos {source: string}');
                 }
                 baseline = parsed as BaselineMetrics;
