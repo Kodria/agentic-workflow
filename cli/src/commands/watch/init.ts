@@ -6,15 +6,25 @@ import { initJournal, readJournal, writeJournal } from '../../core/journal/store
 import type { VerificationKind } from '../../core/journal/types';
 
 export function detectRequiredVerifiers(repoRoot: string): VerificationKind[] {
-    const kinds: VerificationKind[] = [];
-    try {
-        const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
-        if (typeof pkg === 'object' && pkg !== null && typeof pkg.scripts === 'object' && pkg.scripts !== null && typeof pkg.scripts.test === 'string') {
-            kinds.push('test');
+    const kinds = new Set<VerificationKind>();
+    const visit = (dir: string): void => {
+        const sensors = path.join(dir, '.awm', 'sensors.json');
+        if (fs.existsSync(sensors)) kinds.add('sensors');
+        let entries: fs.Dirent[];
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const entry of entries) {
+            if (entry.isSymbolicLink()) continue;
+            if (entry.isFile() && entry.name === 'package.json') {
+                try {
+                    const pkg = JSON.parse(fs.readFileSync(path.join(dir, entry.name), 'utf8'));
+                    if (typeof pkg === 'object' && pkg !== null && typeof pkg.scripts === 'object' && pkg.scripts !== null && typeof pkg.scripts.test === 'string') kinds.add('test');
+                } catch { /* package ilegible: no prueba disponibilidad */ }
+            }
+            if (entry.isDirectory() && !['node_modules', '.git', '.awm'].includes(entry.name)) visit(path.join(dir, entry.name));
         }
-    } catch { /* sin package.json legible: no se exige suite */ }
-    if (fs.existsSync(path.join(repoRoot, '.awm', 'sensors.json'))) kinds.push('sensors');
-    return kinds;
+    };
+    visit(repoRoot);
+    return (['test', 'sensors'] as VerificationKind[]).filter((kind) => kinds.has(kind));
 }
 
 /** El journal es gitignoreado (R1.1): sus escrituras jamas alteran fingerprints. */

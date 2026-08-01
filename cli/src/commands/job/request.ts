@@ -8,7 +8,9 @@ import { emitRequest, EmittedRequest } from '../../core/journal/requests';
  *  job con el item de VerificationPlan que pretende satisfacer (R1.4c). */
 export function requestJob(repoRoot: string, branch: string, generationToken: string, argv: string[], paths: string[], cwdRel: string, opts: { satisfies?: string } = {}): EmittedRequest {
     const fp = computeFingerprint(repoRoot, argv, paths, cwdRel);
-    const idempotencyKey = crypto.createHash('sha256').update(`${fp.fingerprint}:${fp.commandDigest}`).digest('hex');
+    // La obligacion es parte de la identidad de la REQUEST, no de la ejecucion:
+    // apply.ts reutiliza el job mecanicamente equivalente y enlaza el nuevo item.
+    const idempotencyKey = crypto.createHash('sha256').update(`${fp.fingerprint}:${fp.commandDigest}:${opts.satisfies ?? ''}`).digest('hex');
     return emitRequest(repoRoot, branch, {
         kind: 'job-request', generationToken, idempotencyKey,
         payload: {

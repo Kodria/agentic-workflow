@@ -47,8 +47,19 @@ export interface VerificationItem {
 }
 
 export interface ReviewObligation { id: string; taskId: string; kind: 'spec' | 'quality'; verdictId?: string; }
-export interface Verdict { id: string; obligationId: string; result: JobVerdict; detail: string; receivedAt: string; }
+export interface Verdict {
+    id: string;
+    obligationId: string;
+    result: JobVerdict;
+    detail: string;
+    receivedAt: string;
+    fingerprint: string;
+    argv: string[];
+    paths: string[];
+    cwd: string;
+}
 export interface FixObligation { id: string; verdictId: string; closed: boolean; }
+export interface RequestProblem { file: string; kind: 'corrupt' | 'rejected'; detail: string; at: string; }
 
 export interface TaskEntity {
     id: string;
@@ -120,6 +131,7 @@ export interface JournalState {
     verdicts: Verdict[];
     fixes: FixObligation[];
     appliedRequests: Record<string, AppliedRequest>;  // por requestId (los alias duplican entrada)
+    requestProblems: RequestProblem[];                // corrupcion/rechazos de contenido bloquean el gate
     controllerHeartbeatAt?: string;
 }
 
@@ -128,7 +140,7 @@ export function emptyState(branch: string): JournalState {
         schema: 1, revision: 0, branch,
         cycle: { status: 'IN_PROGRESS', startedAt: new Date().toISOString() },
         cycleVerificationPlan: [], requiredVerifiers: [], generations: [], tasks: [],
-        dispatches: [], jobs: {}, verdicts: [], fixes: [], appliedRequests: {},
+        dispatches: [], jobs: {}, verdicts: [], fixes: [], appliedRequests: {}, requestProblems: [],
     };
 }
 
@@ -145,8 +157,67 @@ export function isWellFormedState(x: unknown): x is JournalState {
     if (!Array.isArray(x.generations) || !Array.isArray(x.tasks)) return false;
     if (!Array.isArray(x.cycleVerificationPlan) || !Array.isArray(x.verdicts) || !Array.isArray(x.fixes)) return false;
     if (!Array.isArray(x.requiredVerifiers) || !Array.isArray(x.dispatches)) return false;
-    if (!isObj(x.jobs) || !isObj(x.appliedRequests)) return false;
+    if (!isObj(x.jobs) || !Object.values(x.jobs).every(isWellFormedJob)) return false;
+    if (!isObj(x.appliedRequests) || !Object.values(x.appliedRequests).every(isWellFormedAppliedRequest)) return false;
+    if (!Array.isArray(x.requestProblems) || !x.requestProblems.every(isWellFormedRequestProblem)) return false;
+    if (!x.generations.every(isWellFormedGeneration) || !x.tasks.every(isWellFormedTask)) return false;
+    if (!x.cycleVerificationPlan.every(isWellFormedVerificationItem)) return false;
+    if (!x.verdicts.every(isWellFormedVerdict) || !x.fixes.every(isWellFormedFix)) return false;
     return true;
+}
+
+function strings(x: unknown): x is string[] {
+    return Array.isArray(x) && x.every((item) => typeof item === 'string');
+}
+
+function isWellFormedVerificationItem(x: unknown): x is VerificationItem {
+    return isObj(x) && typeof x.id === 'string'
+        && ['test', 'lint', 'sensors', 'review', 'qa', 'interlock'].includes(String(x.kind))
+        && (x.satisfiedBy === undefined || typeof x.satisfiedBy === 'string');
+}
+
+function isWellFormedReviewObligation(x: unknown): x is ReviewObligation {
+    return isObj(x) && typeof x.id === 'string' && typeof x.taskId === 'string'
+        && (x.kind === 'spec' || x.kind === 'quality')
+        && (x.verdictId === undefined || typeof x.verdictId === 'string');
+}
+
+function isWellFormedTask(x: unknown): x is TaskEntity {
+    return isObj(x) && typeof x.id === 'string' && typeof x.title === 'string'
+        && ['pending', 'in-progress', 'done'].includes(String(x.status))
+        && typeof x.attempts === 'number'
+        && Array.isArray(x.verificationPlan) && x.verificationPlan.every(isWellFormedVerificationItem)
+        && Array.isArray(x.reviewObligations) && x.reviewObligations.every(isWellFormedReviewObligation);
+}
+
+function isWellFormedGeneration(x: unknown): x is Generation {
+    return isObj(x) && typeof x.n === 'number' && typeof x.token === 'string'
+        && (GENERATION_STATES as readonly string[]).includes(String(x.state))
+        && typeof x.launchedAt === 'string'
+        && (x.processRef === undefined || isWellFormedProcessRef(x.processRef));
+}
+
+function isWellFormedVerdict(x: unknown): x is Verdict {
+    return isObj(x) && typeof x.id === 'string' && typeof x.obligationId === 'string'
+        && ['pass', 'fail', 'inconclusive'].includes(String(x.result))
+        && typeof x.detail === 'string' && typeof x.receivedAt === 'string'
+        && typeof x.fingerprint === 'string' && strings(x.argv) && strings(x.paths) && typeof x.cwd === 'string';
+}
+
+function isWellFormedFix(x: unknown): x is FixObligation {
+    return isObj(x) && typeof x.id === 'string' && typeof x.verdictId === 'string' && typeof x.closed === 'boolean';
+}
+
+function isWellFormedAppliedRequest(x: unknown): x is AppliedRequest {
+    return isObj(x) && typeof x.requestId === 'string' && typeof x.idempotencyKey === 'string'
+        && typeof x.payloadDigest === 'string'
+        && ['applied', 'rejected-stale-generation', 'rejected-digest-mismatch', 'rejected-secret'].includes(String(x.outcome))
+        && (x.resultRef === undefined || typeof x.resultRef === 'string');
+}
+
+function isWellFormedRequestProblem(x: unknown): x is RequestProblem {
+    return isObj(x) && typeof x.file === 'string' && (x.kind === 'corrupt' || x.kind === 'rejected')
+        && typeof x.detail === 'string' && typeof x.at === 'string';
 }
 
 export function isWellFormedProcessRef(x: unknown): x is ProcessRef {

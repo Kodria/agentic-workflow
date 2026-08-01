@@ -81,6 +81,8 @@ export function registerJobCommand(program: Command): void {
         .action((opts) => {
             if (!['pass', 'fail', 'inconclusive'].includes(opts.result)) throw new Error('--result debe ser pass | fail | inconclusive');
             const repo = process.cwd();
+            const reviewArgv = ['awm-review', opts.obligation];
+            const reviewFingerprint = computeFingerprint(repo, reviewArgv, [], '.');
             // Determinista a partir de los MISMOS inputs que idempotencyKey, INCLUYENDO
             // generation en ambos (alineado — bug post-624a4c0: idempotencyKey se habia
             // quedado sin generation mientras verdictId si la incluia, lo que hacia que
@@ -91,11 +93,14 @@ export function registerJobCommand(program: Command): void {
             // byte-identico, no un rejected-digest-mismatch espurio (Fix 3); una
             // generation distinta produce una idempotencyKey ENTERAMENTE distinta, no
             // una colision con digest distinto.
-            const verdictId = `verd-${crypto.createHash('sha256').update(`${opts.generation}:${opts.obligation}:${opts.result}:${opts.detail}`).digest('hex').slice(0, 16)}`;
+            const verdictId = `verd-${crypto.createHash('sha256').update(`${opts.generation}:${opts.obligation}:${opts.result}:${opts.detail}:${reviewFingerprint.fingerprint}`).digest('hex').slice(0, 16)}`;
             emitRequest(repo, branchOf(repo), {
                 kind: 'verdict', generationToken: opts.generation,
-                idempotencyKey: crypto.createHash('sha256').update(`verdict:${opts.generation}:${opts.obligation}:${opts.result}:${opts.detail}`).digest('hex'),
-                payload: { verdictId, obligationId: opts.obligation, result: opts.result, detail: opts.detail },
+                idempotencyKey: crypto.createHash('sha256').update(`verdict:${opts.generation}:${opts.obligation}:${opts.result}:${opts.detail}:${reviewFingerprint.fingerprint}`).digest('hex'),
+                payload: {
+                    verdictId, obligationId: opts.obligation, result: opts.result, detail: opts.detail,
+                    fingerprint: reviewFingerprint.fingerprint, argv: reviewArgv, paths: [], cwd: '.',
+                },
             });
             process.stdout.write(JSON.stringify({ verdictId }, null, 2) + '\n');
         });

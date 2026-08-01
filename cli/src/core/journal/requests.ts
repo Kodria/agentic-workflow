@@ -63,20 +63,29 @@ export interface PendingRequest { requestId: string; envelope: RequestEnvelope &
 
 const KNOWN_KINDS: ReadonlyArray<RequestEnvelope['kind']> = ['job-request', 'register-entity', 'controller-heartbeat', 'verdict'];
 
+function isRecord(x: unknown): x is Record<string, unknown> {
+    return typeof x === 'object' && x !== null && !Array.isArray(x);
+}
+
+function isWellFormedEnvelope(x: unknown): x is RequestEnvelope & { requestId: string } {
+    if (!isRecord(x)) return false;
+    return typeof x.requestId === 'string' && x.requestId.length > 0
+        && KNOWN_KINDS.includes(x.kind as RequestEnvelope['kind'])
+        && typeof x.generationToken === 'string' && x.generationToken.length > 0
+        && typeof x.idempotencyKey === 'string' && x.idempotencyKey.length > 0
+        && isRecord(x.payload);
+}
+
 export function listPendingRequests(repoRoot: string, branch: string): PendingRequest[] {
     const dir = requestsDir(repoRoot, branch);
     return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort().map((f) => {
         const file = path.join(dir, f);
         try {
             const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-            if (typeof parsed !== 'object' || parsed === null || typeof parsed.requestId !== 'string') {
-                return { requestId: f, envelope: null as never, file, corrupt: true };
-            }
-            // shape validation antes de usar campos deserializados (types.ts:2,
-            // R1.6): un `kind` no reconocido (forward-incompatible o corrupto
-            // pero sintacticamente valido JSON) se trata como corrupt — jamas
-            // sale "no-corrupt" para que apply.ts lo descarte en silencio.
-            if (!KNOWN_KINDS.includes(parsed.kind)) {
+            // Shape completa antes de cualquier uso downstream. JSON valido no
+            // implica envelope valido: payload/generation/idempotency ausentes
+            // tambien son corrupcion visible, no una excepcion del supervisor.
+            if (!isWellFormedEnvelope(parsed)) {
                 return { requestId: f, envelope: null as never, file, corrupt: true };
             }
             return { requestId: parsed.requestId, envelope: parsed, file, corrupt: false };

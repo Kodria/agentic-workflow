@@ -21,6 +21,14 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         expect(detectRequiredVerifiers(repo)).toEqual(['test', 'sensors']);
     });
 
+    test('descubre suite y sensors en paquetes anidados del repositorio', () => {
+        const cli = path.join(repo, 'cli');
+        fs.mkdirSync(path.join(cli, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(cli, 'package.json'), JSON.stringify({ scripts: { test: 'jest' } }));
+        fs.writeFileSync(path.join(cli, '.awm', 'sensors.json'), '{}');
+        expect(detectRequiredVerifiers(repo)).toEqual(['test', 'sensors']);
+    });
+
     test('repo sin verificadores => lista vacia (el gate degrada por empty-cycle-plan igualmente, R3.6)', () => {  // verifies R3.6
         expect(detectRequiredVerifiers(repo)).toEqual([]);
     });

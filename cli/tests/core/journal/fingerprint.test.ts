@@ -57,6 +57,16 @@ describe('computeFingerprint', () => {
         expect(() => computeFingerprint(repo, ['npm', 'test'], [], '/abs')).toThrow(/cwd/);
     });
 
+    test('cwd que escapa mediante symlink se rechaza antes de persistir o ejecutar', () => {
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-fp-outside-'));
+        fs.symlinkSync(outside, path.join(repo, 'escape'));
+        try {
+            expect(() => computeFingerprint(repo, ['pwd'], [], 'escape')).toThrow(/symlink|fuera del repo/);
+        } finally {
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
+
     test('la expansion de paths queda persistida y excluye .awm (R3.4)', () => {          // verifies R3.4
         fs.mkdirSync(path.join(repo, '.awm', 'journal'), { recursive: true });
         fs.writeFileSync(path.join(repo, '.awm', 'journal', 'state.json'), '{}');

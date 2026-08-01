@@ -36,6 +36,16 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
             return;
         }
         const p = env.payload;
+        if (!Array.isArray(p.argv) || !p.argv.every((arg) => typeof arg === 'string') || p.argv.length === 0) throw new Error('job-request requiere argv no vacio');
+        if (typeof p.fingerprint !== 'string' || typeof p.commandDigest !== 'string') throw new Error('job-request requiere fingerprint y commandDigest');
+        // Un mismo resultado mecanico puede satisfacer mas de un item. La
+        // request sigue teniendo identidad propia, pero no duplica ejecucion.
+        const equivalent = Object.values(s.jobs).find((j) => j.fingerprint === p.fingerprint && j.commandDigest === p.commandDigest);
+        if (equivalent !== undefined) {
+            if (typeof p.satisfies === 'string') linkSatisfies(s, p.satisfies, equivalent.id);
+            applyOutcome(s, { ...base, outcome: 'applied', resultRef: equivalent.id });
+            return;
+        }
         const jobId = `job-${Object.keys(s.jobs).length + 1}-${crypto.randomBytes(3).toString('hex')}`;
         const job: Job = {
             id: jobId,
@@ -135,16 +145,27 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
     }
     if (env.kind === 'verdict') {
         const p = env.payload;
+        if (typeof p.verdictId !== 'string' || p.verdictId.length === 0) throw new Error('verdict requiere verdictId');
+        if (typeof p.obligationId !== 'string' || p.obligationId.length === 0) throw new Error('verdict requiere obligationId');
+        if (typeof p.fingerprint !== 'string' || !Array.isArray(p.argv) || !Array.isArray(p.paths) || typeof p.cwd !== 'string') {
+            throw new Error('verdict requiere evidencia de fingerprint reproducible');
+        }
         const verdictId = String(p.verdictId);
         const obligationId = String(p.obligationId);
         if (!s.verdicts.some((v) => v.id === verdictId)) {
             const result = p.result === 'pass' || p.result === 'fail' || p.result === 'inconclusive' ? p.result : 'inconclusive';
             // R2.3: redaccion tambien en el `detail` de texto libre humano, no
             // solo en argv — antes de cualquier escritura durable.
-            s.verdicts.push({ id: verdictId, obligationId, result, detail: redactText(String(p.detail ?? '')), receivedAt: now() });
+            s.verdicts.push({
+                id: verdictId, obligationId, result, detail: redactText(String(p.detail ?? '')), receivedAt: now(),
+                fingerprint: p.fingerprint, argv: p.argv as string[], paths: p.paths as string[], cwd: p.cwd,
+            });
             for (const t of s.tasks) {
                 const o = t.reviewObligations.find((x) => x.id === obligationId);
                 if (o !== undefined) o.verdictId = verdictId;
+                for (const item of t.verificationPlan) {
+                    if (item.kind === 'review' && item.id === obligationId) item.satisfiedBy = verdictId;
+                }
             }
             // Veredicto adverso => FixObligation ATOMICA: misma mutacion, misma
             // escritura de estado (R1.4c, bloqueador 5).
@@ -178,12 +199,15 @@ export function consumePendingRequests(repoRoot: string, branch: string, activeT
     const processedFiles: string[] = [];
     let applied = 0, rejectedStale = 0, rejectedDigest = 0, rejectedInvalid = 0, corrupt = 0;
     let dirChanged = false;   // corrupt-rename O borrado normal: cualquiera muta el directorio
+    let stateTouched = false;
     for (const p of pending) {
         if (p.corrupt) {
             corrupt++;
             fs.renameSync(p.file, `${p.file}.corrupt`);   // visible, jamas descartado (R1.6)
+            s.requestProblems.push({ file: p.file, kind: 'corrupt', detail: 'request JSON/shape invalido', at: now() });
             appendEvent(repoRoot, branch, { kind: 'request-corrupt', file: p.file });
             dirChanged = true;
+            stateTouched = true;
             continue;
         }
         const env = p.envelope;
@@ -217,18 +241,21 @@ export function consumePendingRequests(repoRoot: string, branch: string, activeT
             try {
                 applyRequestToState(s, env, digest);
                 applied++;
+                stateTouched = true;
             } catch (e) {
                 rejectedInvalid++;
                 fs.renameSync(p.file, `${p.file}.rejected`);
+                s.requestProblems.push({ file: p.file, kind: 'rejected', detail: redactText((e as Error).message), at: now() });
                 appendEvent(repoRoot, branch, { kind: 'request-rejected-invalid', requestId: env.requestId, detail: (e as Error).message });
                 dirChanged = true;
+                stateTouched = true;
                 continue;   // ya removido del directorio por el rename: NO pushear a processedFiles
             }
         }
         processedFiles.push(p.file);
         dirChanged = true;
     }
-    if (processedFiles.length > 0) {
+    if (processedFiles.length > 0 || stateTouched) {
         writeJournal(repoRoot, branch, s);                 // (2) journal ANTES del borrado
     }
     for (const f of processedFiles) fs.rmSync(f, { force: true });   // (3)

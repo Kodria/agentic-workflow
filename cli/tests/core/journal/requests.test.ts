@@ -60,6 +60,14 @@ describe('requests', () => {
         expect(listPendingRequests(repo, 'rama')).toHaveLength(0);
     });
 
+    test('JSON con kind conocido pero envelope incompleto se clasifica corrupto antes de consumirlo', () => {
+        const file = path.join(requestsDir(repo, 'rama'), 'bad.json');
+        fs.writeFileSync(file, JSON.stringify({ requestId: 'bad', kind: 'job-request', generationToken: 'g1', idempotencyKey: 'k1' }));
+        const [pending] = listPendingRequests(repo, 'rama');
+        expect(pending.corrupt).toBe(true);
+        expect(pending.requestId).toBe('bad.json');
+    });
+
     test('idempotencyKey repetida: digest distinto se rechaza; mismo digest registra ALIAS con el mismo resultRef (R1.3)', () => {  // verifies R1.3
         const r1 = emitRequest(repo, 'rama', { kind: 'job-request', generationToken: 'g1', idempotencyKey: 'k3', payload: { argv: ['npm', 'test'] } });
         let s = readJournal(repo, 'rama').state!;

@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import path from 'path';
+import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { EXEC_STDIO } from './process';
 
@@ -22,6 +23,25 @@ export interface FingerprintResult {
     expandedPaths: string[];
 }
 
+export function resolveWorkingDirectory(repoRoot: string, cwdRel: string): { relative: string; absolute: string } {
+    if (typeof cwdRel !== 'string' || cwdRel.length === 0) throw new Error('cwd relativo requerido');
+    const relative = path.normalize(cwdRel);
+    if (path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${path.sep}`)) {
+        throw new Error(`cwd fuera del repo: ${JSON.stringify(cwdRel)}`);
+    }
+    const root = fs.realpathSync(repoRoot);
+    let cursor = root;
+    for (const segment of relative.split(path.sep).filter((part) => part !== '.')) {
+        cursor = path.join(cursor, segment);
+        const stat = fs.lstatSync(cursor);
+        if (stat.isSymbolicLink()) throw new Error(`cwd contiene symlink no permitido: ${JSON.stringify(cwdRel)}`);
+    }
+    const absolute = fs.realpathSync(path.join(root, relative));
+    if (absolute !== root && !absolute.startsWith(`${root}${path.sep}`)) throw new Error(`cwd fuera del repo: ${JSON.stringify(cwdRel)}`);
+    if (!fs.statSync(absolute).isDirectory()) throw new Error(`cwd no es directorio: ${JSON.stringify(cwdRel)}`);
+    return { relative: relative.split(path.sep).join('/'), absolute };
+}
+
 /** El journal jamás invalida evidencia: .awm/ queda fuera de toda expansión. */
 const EXCLUDE_JOURNAL = ':(exclude).awm';
 
@@ -30,11 +50,7 @@ const EXCLUDE_JOURNAL = ':(exclude).awm';
  *  hasheado) + digest de contenido por archivo tracked/untracked/deleted. */
 export function computeFingerprint(repoRoot: string, argv: string[], pathGlobs: string[], cwdRel: string): FingerprintResult {
     if (!Array.isArray(argv) || argv.length === 0) throw new Error('argv vacio');
-    if (typeof cwdRel !== 'string' || cwdRel.length === 0) throw new Error('cwd relativo requerido');
-    const cwdNorm = path.posix.normalize(cwdRel);
-    if (path.isAbsolute(cwdNorm) || cwdNorm === '..' || cwdNorm.startsWith('../')) {
-        throw new Error(`cwd fuera del repo: ${JSON.stringify(cwdRel)}`);
-    }
+    const cwdNorm = resolveWorkingDirectory(repoRoot, cwdRel).relative;
     const commandDigest = sha(argv);
     const head = git(repoRoot, ['rev-parse', 'HEAD']).trim();
     const pathspecs = pathGlobs.length > 0 ? pathGlobs : ['.'];

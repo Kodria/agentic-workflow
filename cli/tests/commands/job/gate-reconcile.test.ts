@@ -21,14 +21,30 @@ const fpStale: FingerprintNow = () => 'fp-cambiado'; // el arbol cambio => histo
  *  vigente, verificador requerido cubierto, cero vivos, cero obligaciones. */
 function passingState(): JournalState {
     const s = emptyState('r');
-    s.requiredVerifiers = ['test'];
-    s.cycleVerificationPlan = [{ id: 'cv1', kind: 'qa', satisfiedBy: 'j2' }];
+    s.requiredVerifiers = ['test', 'sensors'];
+    s.cycleVerificationPlan = [
+        { id: 'cv1', kind: 'qa', satisfiedBy: 'j2' },
+        { id: 'cv2', kind: 'interlock', satisfiedBy: 'j3' },
+    ];
     s.tasks.push({
         id: 'T1', title: 't', status: 'done', attempts: 1,
-        verificationPlan: [{ id: 'v1', kind: 'test', satisfiedBy: 'j1' }], reviewObligations: [],
+        verificationPlan: [
+            { id: 'v1', kind: 'test', satisfiedBy: 'j1' },
+            { id: 'v-sensors', kind: 'sensors', satisfiedBy: 'j4' },
+        ],
+        reviewObligations: [
+            { id: 'o-spec', taskId: 'T1', kind: 'spec', verdictId: 'verd-spec' },
+            { id: 'o-quality', taskId: 'T1', kind: 'quality', verdictId: 'verd-quality' },
+        ],
     });
     s.jobs['j1'] = job({ id: 'j1', executionState: 'exited', verdict: 'pass' });
     s.jobs['j2'] = job({ id: 'j2', executionState: 'exited', verdict: 'pass' });
+    s.jobs['j3'] = job({ id: 'j3', executionState: 'exited', verdict: 'pass' });
+    s.jobs['j4'] = job({ id: 'j4', executionState: 'exited', verdict: 'pass' });
+    s.verdicts.push(
+        { id: 'verd-spec', obligationId: 'o-spec', result: 'pass', detail: 'ok', receivedAt: 'now', fingerprint: 'fp', argv: ['review', 'o-spec'], paths: [], cwd: '.' } as never,
+        { id: 'verd-quality', obligationId: 'o-quality', result: 'pass', detail: 'ok', receivedAt: 'now', fingerprint: 'fp', argv: ['review', 'o-quality'], paths: [], cwd: '.' } as never,
+    );
     return s;
 }
 
@@ -46,6 +62,38 @@ describe('gate', () => {
         const g = computeGate(s, false, fpCurrent);
         expect(g.pass).toBe(false);
         expect(g.reasons.some((r) => r.category === 'empty-cycle-plan')).toBe(true);
+    });
+
+    test('CycleVerificationPlan exige QA e interlock, no solo cualquier item aprobado (R1.4b/R3.2)', () => {
+        const s = passingState();
+        s.cycleVerificationPlan = s.cycleVerificationPlan.filter((item) => item.kind !== 'interlock');
+        const g = computeGate(s, false, fpCurrent);
+        expect(g.pass).toBe(false);
+        expect(g.reasons.some((r) => r.category === 'missing-verifier' && /interlock/.test(r.detail))).toBe(true);
+    });
+
+    test('cada tarea exige obligaciones spec y quality, no certifica por omision', () => {
+        const s = passingState();
+        s.tasks[0].reviewObligations = [];
+        const g = computeGate(s, false, fpCurrent);
+        expect(g.pass).toBe(false);
+        expect(g.reasons.filter((r) => r.category === 'open-obligation')).toHaveLength(2);
+    });
+
+    test('review pass con fingerprint historico no certifica', () => {
+        const s = passingState();
+        const fingerprintByArgv: FingerprintNow = (argv) => argv[0] === 'review' ? 'fp-cambiado' : 'fp';
+        const g = computeGate(s, false, fingerprintByArgv);
+        expect(g.pass).toBe(false);
+        expect(g.reasons.some((r) => r.category === 'stale-fingerprint' && /verd-spec/.test(r.detail))).toBe(true);
+    });
+
+    test('ausencia de suite o sensors configurados bloquea aunque el plan restante este verde (R3.6)', () => {
+        const s = passingState();
+        s.requiredVerifiers = ['test'];
+        const g = computeGate(s, false, fpCurrent);
+        expect(g.pass).toBe(false);
+        expect(g.reasons.some((r) => r.category === 'missing-verifier' && /sensors/.test(r.detail))).toBe(true);
     });
 
     test('satisfiedBy colgante (job inexistente) bloquea (R3.2)', () => {   // verifies R3.2
@@ -93,7 +141,7 @@ describe('gate', () => {
     test('item kind review se satisface con VERDICT pass, no con job (R1.4c)', () => {  // verifies R1.4c
         const s = passingState();
         s.tasks[0].verificationPlan.push({ id: 'v2', kind: 'review', satisfiedBy: 'verd-1' });
-        s.verdicts.push({ id: 'verd-1', obligationId: 'o1', result: 'pass', detail: 'ok', receivedAt: 'now' });
+        s.verdicts.push({ id: 'verd-1', obligationId: 'o1', result: 'pass', detail: 'ok', receivedAt: 'now', fingerprint: 'fp', argv: ['review', 'o1'], paths: [], cwd: '.' } as never);
         expect(computeGate(s, false, fpCurrent).pass).toBe(true);
         s.verdicts[0].result = 'fail';
         const g = computeGate(s, false, fpCurrent);
@@ -117,7 +165,7 @@ describe('gate', () => {
 
     test('verificador requerido por el repo sin item en ningun plan bloquea (R1.4b, R3.6)', () => {  // verifies R3.6
         const s = passingState();
-        s.requiredVerifiers = ['test', 'sensors'];   // el repo tiene suite Y sensors.json
+        s.tasks[0].verificationPlan = s.tasks[0].verificationPlan.filter((item) => item.kind !== 'sensors');
         const g = computeGate(s, false, fpCurrent);  // ningun item kind 'sensors' existe
         expect(g.pass).toBe(false);
         expect(g.reasons.some((r) => r.category === 'missing-verifier' && /sensors/.test(r.detail))).toBe(true);
@@ -130,7 +178,7 @@ describe('gate', () => {
         expect(g.pass).toBe(false);
         expect(g.reasons.some((r) => r.category === 'dangling-reference')).toBe(true);
         const s2 = passingState();
-        s2.verdicts.push({ id: 'verd-2', obligationId: 'o2', result: 'fail', detail: 'no', receivedAt: 'now' });
+        s2.verdicts.push({ id: 'verd-2', obligationId: 'o2', result: 'fail', detail: 'no', receivedAt: 'now', fingerprint: 'fp', argv: ['review', 'o2'], paths: [], cwd: '.' });
         s2.tasks[0].reviewObligations.push({ id: 'o2', taskId: 'T1', kind: 'spec', verdictId: 'verd-2' });
         const g2 = computeGate(s2, false, fpCurrent);
         expect(g2.pass).toBe(false);

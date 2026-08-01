@@ -12,6 +12,10 @@ function jobPayload(argv: string[]): Record<string, unknown> {
     return { argv, paths: [], cwd: '.', fingerprint: 'fp-1', commandDigest: 'cd-1', expandedPaths: [] };
 }
 
+function verdictPayload(verdictId: string, obligationId: string, result: 'pass' | 'fail' | 'inconclusive', detail: string): Record<string, unknown> {
+    return { verdictId, obligationId, result, detail, fingerprint: 'fp-review', argv: ['awm-review', obligationId], paths: [], cwd: '.' };
+}
+
 describe('aplicacion transaccional de requests', () => {
     let repo: string;
     beforeEach(() => { repo = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-apply-')); initJournal(repo, 'rama'); });
@@ -73,7 +77,7 @@ describe('aplicacion transaccional de requests', () => {
         const revBefore = readJournal(repo, 'rama').state!.revision;
         emitRequest(repo, 'rama', {
             kind: 'verdict', generationToken: 'g1', idempotencyKey: 'e2',
-            payload: { verdictId: 'verd-1', obligationId: 'o1', result: 'fail', detail: 'rompe X' },
+            payload: verdictPayload('verd-1', 'o1', 'fail', 'rompe X'),
         });
         consumePendingRequests(repo, 'rama', 'g1');
         const s = readJournal(repo, 'rama').state!;
@@ -114,6 +118,31 @@ describe('aplicacion transaccional de requests', () => {
         expect(out.corrupt).toBe(1);
         const files = fs.readdirSync(requestsDir(repo, 'rama'));
         expect(files.some((f) => f.endsWith('.corrupt'))).toBe(true);
+        const state = readJournal(repo, 'rama').state!;
+        expect((state as unknown as { requestProblems: unknown[] }).requestProblems).toHaveLength(1);
+        const gate = computeGate(state, false, () => 'fp-1');
+        expect(gate.reasons.some((r) => (r.category as string) === 'request-problem')).toBe(true);
+    });
+
+    test('reutiliza un job mecanicamente identico para dos items sin digest mismatch ni segunda ejecucion', () => {
+        emitRequest(repo, 'rama', {
+            kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'task',
+            payload: { entity: 'task', taskId: 'T1', title: 't', verificationPlan: [{ id: 'v1', kind: 'test' }, { id: 'v2', kind: 'test' }], reviewObligations: [] },
+        });
+        emitRequest(repo, 'rama', {
+            kind: 'job-request', generationToken: 'g1', idempotencyKey: 'job:v1',
+            payload: { ...jobPayload(['npm', 'test']), satisfies: 'v1' },
+        });
+        consumePendingRequests(repo, 'rama', 'g1');
+        emitRequest(repo, 'rama', {
+            kind: 'job-request', generationToken: 'g1', idempotencyKey: 'job:v2',
+            payload: { ...jobPayload(['npm', 'test']), satisfies: 'v2' },
+        });
+        const out = consumePendingRequests(repo, 'rama', 'g1');
+        const state = readJournal(repo, 'rama').state!;
+        expect(out.rejectedDigest).toBe(0);
+        expect(Object.keys(state.jobs)).toHaveLength(1);
+        expect(state.tasks[0].verificationPlan.map((item) => item.satisfiedBy)).toEqual([Object.keys(state.jobs)[0], Object.keys(state.jobs)[0]]);
     });
 
     test('kind no reconocido (sintacticamente valido) se trata como corrupt, jamas se descarta en silencio (R1.6)', () => {  // verifies R1.6
@@ -186,7 +215,7 @@ describe('aplicacion transaccional de requests', () => {
         consumePendingRequests(repo, 'rama', 'g1');
         emitRequest(repo, 'rama', {
             kind: 'verdict', generationToken: 'g1', idempotencyKey: 'v1',
-            payload: { verdictId: 'verd-1', obligationId: 'o1', result: 'fail', detail: 'rompe X' },
+            payload: verdictPayload('verd-1', 'o1', 'fail', 'rompe X'),
         });
         consumePendingRequests(repo, 'rama', 'g1');
         const fpNull = () => null;
@@ -197,7 +226,7 @@ describe('aplicacion transaccional de requests', () => {
 
         emitRequest(repo, 'rama', {
             kind: 'verdict', generationToken: 'g1', idempotencyKey: 'v2',
-            payload: { verdictId: 'verd-2', obligationId: 'o1', result: 'pass', detail: 'arreglado' },
+            payload: verdictPayload('verd-2', 'o1', 'pass', 'arreglado'),
         });
         consumePendingRequests(repo, 'rama', 'g1');
         s = readJournal(repo, 'rama').state!;
@@ -230,7 +259,7 @@ describe('aplicacion transaccional de requests', () => {
         consumePendingRequests(repo, 'rama', 'g1');
         emitRequest(repo, 'rama', {
             kind: 'verdict', generationToken: 'g1', idempotencyKey: 'v1',
-            payload: { verdictId: 'verd-1', obligationId: 'o1', result: 'fail', detail: 'export API_KEY=abc123secreto' },
+            payload: verdictPayload('verd-1', 'o1', 'fail', 'export API_KEY=abc123secreto'),
         });
         consumePendingRequests(repo, 'rama', 'g1');
         const s = readJournal(repo, 'rama').state!;
