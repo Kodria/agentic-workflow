@@ -96,7 +96,7 @@ export async function runExecWrapper(opts: { logsRoot: string; jobId: string; no
     child.stdout?.on('data', append);
     child.stderr?.on('data', append);
     const exitCode: number = await new Promise((resolve) => {
-        child.on('exit', (code) => resolve(code ?? 1));
+        child.on('close', (code) => resolve(code ?? 1));
         child.on('error', () => resolve(127));
     });
     return finish(exitCode);

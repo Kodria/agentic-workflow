@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { runExecWrapper, claimPath, identityPath, resultPath, replayVerdict } from '../../../src/commands/job/exec-wrapper';
+import { runExecWrapper, claimPath, identityPath, resultPath, replayVerdict, logPath } from '../../../src/commands/job/exec-wrapper';
 
 describe('exec-wrapper', () => {
     let dir: string;
@@ -39,5 +39,11 @@ describe('exec-wrapper', () => {
         expect(replayVerdict(dir, 'jobY', 'n2')).toBe('completed');           // adoptar resultado
         fs.writeFileSync(claimPath(dir, 'jobZ', 'n3'), '{"claimed":true}');   // claim sin resultado
         expect(replayVerdict(dir, 'jobZ', 'n3')).toBe('unprovable');          // orphaned, jamas relanzar solo
+    });
+
+    test('el log captura la salida completa incluso si exit llega antes que el flush de stdio (R2.5)', async () => {  // verifies R2.5
+        await runExecWrapper({ logsRoot: dir, jobId: 'job4', nonce: 'nonceD', argv: ['node', '-e', "process.stdout.write('linea-final-no-se-debe-perder'); process.exit(0)"], cwd: process.cwd() });
+        const log = fs.readFileSync(logPath(dir, 'job4', 'nonceD'), 'utf8');
+        expect(log).toContain('linea-final-no-se-debe-perder');
     });
 });
