@@ -19,17 +19,25 @@ function sleepSync(seconds: string): void {
     try { execFileSync('sleep', [seconds]); } catch { /* sin sleep: seguimos */ }
 }
 
+/** Variante de psField para contextos de CAPTURA de identidad (spawn time):
+ *  aqui "no se pudo determinar" ya tiene un fallback seguro documentado
+ *  ('unknown') — no es un contexto de declaracion de muerte, asi que
+ *  cualquier fallo de ps se traga, igual que siempre. */
+function psFieldSafe(pid: number, field: string): string | null {
+    try { return psField(pid, field); } catch { return null; }
+}
+
 /** ps args estable: dos lecturas consecutivas iguales (evita capturar el
  *  estado pre-exec del fork). null si el proceso ya no existe. */
 function stablePsArgs(pid: number): string | null {
     for (let i = 0; i < 5; i++) {
-        const a = psField(pid, 'args');
+        const a = psFieldSafe(pid, 'args');
         if (a === null) return null;
         sleepSync('0.05');
-        const b = psField(pid, 'args');
+        const b = psFieldSafe(pid, 'args');
         if (b === a) return a;
     }
-    return psField(pid, 'args');
+    return psFieldSafe(pid, 'args');
 }
 
 export function argvDigest(argv: string[]): string {
@@ -47,10 +55,10 @@ export function psArgsDigestOf(pid: number): string | null {
 export function captureRefFor(pid: number, nonce: string, argv: string[]): ProcessRef {
     let start: string | null = null;
     for (let i = 0; i < 5 && start === null; i++) {
-        start = psField(pid, 'lstart');
+        start = psFieldSafe(pid, 'lstart');
         if (start === null) sleepSync('0.05');
     }
-    const pgid = psField(pid, 'pgid');
+    const pgid = psFieldSafe(pid, 'pgid');
     const args = stablePsArgs(pid);
     return {
         pid,
