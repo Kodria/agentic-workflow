@@ -31,6 +31,7 @@ export function readJournal(repoRoot: string, branch: string): ReadResult {
 /** Escritura canonica: SOLO el supervisor la invoca (single-writer). CAS por
  *  revision monotonica: el snapshot que traes debe ser el vigente. */
 export function writeJournal(repoRoot: string, branch: string, state: JournalState): void {
+    if (state.branch !== branch) throw new Error(`writeJournal: branch del estado (${state.branch}) no coincide con branch destino (${branch})`);
     const current = readJournal(repoRoot, branch);
     if (current.corrupt) throw new Error('journal corrupto: no se escribe sobre corrupcion (R1.6)');
     if (current.state !== null && current.state.revision !== state.revision) {

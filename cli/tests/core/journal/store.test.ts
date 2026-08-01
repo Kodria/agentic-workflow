@@ -67,4 +67,11 @@ describe('journal store', () => {
         expect(after.corrupt).toBe(false);
         expect(after.state!.revision).toBe(s.revision);
     });
+
+    test('writeJournal rechaza un estado cuyo branch no coincide con el branch destino (R1.2)', () => {  // verifies R1.2
+        initJournal(repo, 'rama');
+        const s = readJournal(repo, 'rama').state!;
+        const wrongBranch = { ...s, branch: 'otra-rama' };
+        expect(() => writeJournal(repo, 'rama', wrongBranch)).toThrow(/branch/);
+    });
 });
