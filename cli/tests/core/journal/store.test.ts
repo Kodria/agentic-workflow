@@ -55,4 +55,16 @@ describe('journal store', () => {
         expect(JSON.parse(lines[0]).kind).toBe('generation-launched');
         expect(typeof JSON.parse(lines[0]).at).toBe('string');
     });
+
+    test('writeJournal rechaza un estado propuesto con forma invalida, nunca lo persiste (R1.6)', () => {  // verifies R1.6
+        initJournal(repo, 'rama');
+        const s = readJournal(repo, 'rama').state!;
+        const malformed = { ...s } as unknown as Record<string, unknown>;
+        delete malformed.tasks;
+        expect(() => writeJournal(repo, 'rama', malformed as any)).toThrow(/forma invalida/);
+        // el journal sigue intacto y legible tras el intento rechazado
+        const after = readJournal(repo, 'rama');
+        expect(after.corrupt).toBe(false);
+        expect(after.state!.revision).toBe(s.revision);
+    });
 });

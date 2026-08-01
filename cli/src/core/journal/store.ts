@@ -37,6 +37,7 @@ export function writeJournal(repoRoot: string, branch: string, state: JournalSta
         throw new Error(`revision desactualizada: disco=${current.state.revision} propuesta=${state.revision}`);
     }
     const next: JournalState = { ...state, revision: state.revision + 1 };
+    if (!isWellFormedState(next)) throw new Error('writeJournal: estado propuesto con forma invalida, no se persiste (R1.6)');
     writeFileAtomicDurable(statePath(repoRoot, branch), JSON.stringify(next, null, 2) + '\n', 0o600);
 }
 
