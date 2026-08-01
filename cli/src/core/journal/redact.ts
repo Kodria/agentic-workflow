@@ -32,7 +32,7 @@ export function redactText(text: string): string {
  *
  *  LIMITACIÓN ACEPTADA (no es un bug pendiente): esta función solo reconoce
  *  secretos cuyo NOMBRE de flag contiene una palabra clave (password/token/
- *  secret/api-key/credential), sea con uno o dos guiones (-token, --token).
+ *  secret/api-key/credential), sea con cualquier cantidad de guiones (-token, --token).
  *  Mnemónicos de una sola letra sin texto ninguno (ej. `-p` de mysql, `-i` de
  *  ssh, `-u` de curl) son indistinguibles de cualquier otro flag corto por
  *  texto solo — cerrar ese caso exigiría una tabla fija de convenciones por
