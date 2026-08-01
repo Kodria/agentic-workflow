@@ -104,7 +104,11 @@ export function spawnStructured(argv: string[], cwd: string, nonce: string, extr
     const child = spawn(exe, args, {
         cwd, shell: false, detached: true,
         env: { ...process.env, [NONCE_ENV]: nonce, ...extraEnv },
-        stdio: ['ignore', 'pipe', 'pipe'],
+        // stdio:'ignore' completo (nada de pipes): un pipe destruido/abandonado
+        // por el padre puede EPIPE-crashear al hijo si este escribe a su propio
+        // stdout/stderr despues (ver defaultWrapperSpawner) — el hijo maneja su
+        // stdio propio, el padre no necesita capturarlo.
+        stdio: 'ignore',
     });
     if (child.pid === undefined) throw new Error(`spawn fallo para ${exe}`);
     return { child, ref: captureRefFor(child.pid, nonce, argv) };

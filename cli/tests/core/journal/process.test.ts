@@ -82,6 +82,15 @@ describe('process identity', () => {
         }
     });
 
+    test('spawnStructured usa stdio:ignore — sin pipes que destruir ni EPIPE posible en el hijo (regresion: wrapper detached moria silenciosamente al escribir a un pipe destruido por el padre)', () => {
+        const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 3000)'], process.cwd(), 'n-stdio-ignore');
+        expect(child.stdout).toBeNull();
+        expect(child.stderr).toBeNull();
+        expect(child.stdin).toBeNull();
+        expect(refIsAlive(ref)).toBe(true);
+        child.kill('SIGKILL');
+    });
+
     test('captureRefFor degrada a unknown si ps falla, nunca crashea al capturar identidad (R2.1)', () => {  // verifies R2.1
         const cp = require('child_process');
         const spy = jest.spyOn(cp, 'execFileSync').mockImplementation((...args) => {

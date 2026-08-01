@@ -23,8 +23,6 @@ export function defaultWrapperSpawner(cliEntry = path.resolve(__dirname, '..', '
             '--', ...job.argv,
         ];
         const { child } = spawnStructured(argv, repoRoot, nonce);
-        child.stdout?.destroy();
-        child.stderr?.destroy();
         child.unref();   // el supervisor NO espera; el wrapper sobrevive incluso si el supervisor muere
     };
 }
