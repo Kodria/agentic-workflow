@@ -34,7 +34,11 @@ export function computeFingerprint(repoRoot: string, argv: string[], pathGlobs: 
     const head = git(repoRoot, ['rev-parse', 'HEAD']).trim();
     const pathspecs = pathGlobs.length > 0 ? pathGlobs : ['.'];
     // Índice REAL: modos + blobs + stages + paths — un cambio staged-only con
-    // worktree idéntico produce salida distinta aquí.
+    // worktree idéntico produce salida distinta aquí. Sin -z a propósito: esta
+    // salida se hashea completa como texto opaco, nunca se separa en paths
+    // individuales, así que el quoting de core.quotePath es inofensivo aquí
+    // (a diferencia de expandedPaths abajo, cuyos paths SÍ se re-extraen para
+    // pasarlos a `hash-object` — por eso ese caso sí necesita -z).
     const indexRaw = git(repoRoot, ['ls-files', '--stage', '--', ...pathspecs, EXCLUDE_JOURNAL]);
     const indexDigest = sha([indexRaw]);
     const expandedPaths = git(repoRoot, ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', ...pathspecs, EXCLUDE_JOURNAL])
