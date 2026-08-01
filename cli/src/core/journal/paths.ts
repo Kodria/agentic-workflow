@@ -5,7 +5,14 @@ export function branchSlug(branch: string): string {
     if (!branch || branch === '.' || branch.includes('..')) {
         throw new Error(`branch inválida para slug: ${JSON.stringify(branch)}`);
     }
-    return branch.replace(/[/\\]/g, '__');
+    // Escapa PRIMERO el propio caracter de escape (_), despues / y \ — así
+    // ningún guion bajo literal sobrevive sin escapar, lo que hace la
+    // codificación biyectiva: dos ramas distintas nunca pueden colisionar
+    // (bloqueador encontrado en code-quality review de Task 3).
+    return branch
+        .replace(/_/g, '_5F')
+        .replace(/\//g, '_2F')
+        .replace(/\\/g, '_5C');
 }
 
 export function journalDir(repoRoot: string, branch: string): string {
