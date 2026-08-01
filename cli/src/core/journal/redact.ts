@@ -35,8 +35,6 @@ export function redactText(text: string): string {
     let m: RegExpExecArray | null;
     while ((m = KEYWORD_RE.exec(text)) !== null) {
         if (m.index < cursor) continue;
-        let start = m.index;
-        while (start > cursor && IDENT_CHAR.test(text[start - 1])) start--;
         let keyEnd = m.index + m[0].length;
         while (keyEnd < text.length && IDENT_CHAR.test(text[keyEnd])) keyEnd++;
         let sepStart = keyEnd;
