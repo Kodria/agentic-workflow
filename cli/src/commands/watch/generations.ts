@@ -8,6 +8,15 @@ import { adapterFor } from '../../core/journal/adapter';
 import type { ControllerAdapter, SafeToReplace } from '../../core/journal/adapter';
 import type { Generation, JournalState, ProcessRef } from '../../core/journal/types';
 
+/** Lectura obligatoria del journal (patron repetido en todo este archivo):
+ *  el supervisor jamas opera sobre corrupcion (R1.6) — falla ruidoso, nunca
+ *  sigue con un estado indemostrable. */
+function requireState(repoRoot: string, branch: string): JournalState {
+    const r = readJournal(repoRoot, branch);
+    if (r.corrupt || r.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
+    return r.state;
+}
+
 export type StallDecision = 'healthy' | 'suspected-stall-observe' | 'custody-blocked' | 'resolve-generation';
 export interface StallSignals { heartbeatAgeMs: number; activityFrozenMs: number; safeToReplace: SafeToReplace; }
 export interface StallConfig { heartbeatTimeoutMs: number; activityWindowMs: number; }
@@ -49,9 +58,7 @@ export function activeGeneration(s: JournalState): Generation | undefined {
 /** Emite generacion N+1: toda anterior queda superseded (fencing). NO lanza el
  *  proceso aqui — launchControllerGeneration lo hace con el adapter. */
 export function beginGeneration(repoRoot: string, branch: string): Generation {
-    const r = readJournal(repoRoot, branch);
-    if (r.corrupt || r.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
-    const s = r.state;
+    const s = requireState(repoRoot, branch);
     for (const g of s.generations) {
         if (g.state === 'active' || g.state === 'controller-suspected-stall') g.state = 'superseded';
     }
@@ -70,9 +77,7 @@ export function launchControllerGeneration(repoRoot: string, branch: string, pro
     const adapter = adapterFor(provider);
     const argv = adapter.launchArgv(resumePrompt);
     const { ref } = spawnStructured(argv, repoRoot, crypto.randomBytes(8).toString('hex'));
-    const r = readJournal(repoRoot, branch);
-    if (r.corrupt || r.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
-    const s = r.state;
+    const s = requireState(repoRoot, branch);
     const gen = activeGeneration(s);
     if (gen !== undefined) gen.processRef = ref;
     writeJournal(repoRoot, branch, s);
@@ -83,9 +88,7 @@ export function launchControllerGeneration(repoRoot: string, branch: string, pro
 /** Custodia (R4.5): ciclo BLOCKED con razon auditada. QUIEN NO HACE NADA:
  *  no mata, no relanza, no libera lock — el loop sigue vivo auditando. */
 export function enterCustody(repoRoot: string, branch: string, reason: string): void {
-    const r = readJournal(repoRoot, branch);
-    if (r.corrupt || r.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
-    const s = r.state;
+    const s = requireState(repoRoot, branch);
     if (s.cycle.status !== 'BLOCKED' || s.cycle.blockedReason !== reason) {
         s.cycle.status = 'BLOCKED';
         s.cycle.blockedReason = reason;
@@ -100,9 +103,7 @@ export type ResolveOutcome = 'proven-dead' | 'terminated-confirmed' | 'custody-b
  *  'safe' solo ocurre con muerte probada; la escalera queda para adapters
  *  que puedan observar llamadas en vuelo. */
 export async function resolveGeneration(repoRoot: string, branch: string, adapter: ControllerAdapter, grace: { termGraceMs: number; killGraceMs: number }): Promise<ResolveOutcome> {
-    const r = readJournal(repoRoot, branch);
-    if (r.corrupt || r.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
-    const gen = activeGeneration(r.state);
+    const gen = activeGeneration(requireState(repoRoot, branch));
     if (gen?.processRef === undefined) return 'proven-dead';   // nunca se lanzo: relanzar es seguro
     const ref = gen.processRef;
     if (adapter.safeToReplace(ref) !== 'safe') {
