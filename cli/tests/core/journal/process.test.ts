@@ -26,6 +26,29 @@ describe('process identity', () => {
         child.kill('SIGKILL');
     });
 
+    test('refIsAlive rechaza un ProcessRef que simula reutilizacion de PID: el pid actual esta vivo, pero pertenecia a un proceso YA MUERTO con identidad distinta (R6)', () => {  // verifies R6
+        // El fixture de R6 explicito en el design doc: los PIDs son reciclados
+        // por el SO, asi que la identidad JAMAS puede confiarse solo del pid.
+        // Simulacion deterministica (evita depender de que el SO realmente
+        // recicle un pid dentro del test): un proceso REAL y vivo ahora mismo
+        // (mismo pid), pero un ProcessRef que describe un proceso DISTINTO,
+        // ya finalizado, que alguna vez tuvo ese mismo pid — startTime, nonce,
+        // digest de argv, grupo y digest de `ps args` todos DISTINTOS del
+        // proceso real que hoy ocupa ese pid.
+        const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 3000)'], process.cwd(), 'n-reuse-real');
+        const reusedPidStaleRef = {
+            pid: ref.pid,                                  // el numero de pid SI esta vivo hoy...
+            startTime: 'Mon Jan  1 00:00:00 2024',          // ...pero como un proceso YA MUERTO distinto
+            spawnNonce: 'nonce-de-un-job-anterior-ya-terminado',
+            argvDigest: 'deadbeefdeadbeef',
+            processGroup: ref.processGroup + 9999,
+            psArgsDigest: 'cafebabecafebabe',
+        };
+        expect(refIsAlive(reusedPidStaleRef)).toBe(false);   // no es prueba de vida DE ESE proceso logico
+        expect(refIsAlive(ref)).toBe(true);                  // el pid real, con su identidad real, sigue vivo
+        child.kill('SIGKILL');
+    });
+
     test('terminateGroupConfirmed confirma el GRUPO entero, no solo el lider (R2.1)', async () => {  // verifies R2.1
         // El hijo spawnea un nieto en su mismo grupo; la confirmacion exige pgrep -g vacio.
         const spawnGrandchild = "require('child_process').spawn(process.execPath, ['-e', 'setTimeout(()=>{},5000)']); setTimeout(()=>{}, 5000)";

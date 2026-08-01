@@ -47,6 +47,24 @@ describe('exec-wrapper', () => {
         expect(log).toContain('linea-final-no-se-debe-perder');
     });
 
+    test('el log se acota aprox. en MAX_LOG_BYTES cuando la salida supera el limite, no crece sin cota (R2.5)', async () => {  // verifies R2.5
+        const MAX_LOG_BYTES = 1024 * 1024;
+        const bytesToWrite = 2 * MAX_LOG_BYTES;  // 2MB, muy por encima del cap de 1MB
+        const out = await runExecWrapper({
+            logsRoot: dir, jobId: 'job6', nonce: 'nonceF',
+            argv: ['node', '-e', `process.stdout.write('x'.repeat(${bytesToWrite}))`],
+            cwd: process.cwd(),
+        });
+        expect(out.exitCode).toBe(0);
+        const size = fs.statSync(logPath(dir, 'job6', 'nonceF')).size;
+        // el append corta apenas se cruza el cap (chequeo ANTES de cada chunk),
+        // asi que el tamano final ronda MAX_LOG_BYTES +/- un ultimo chunk de
+        // pipe, jamas los 2MB reales escritos por el comando (R2.5).
+        expect(size).toBeGreaterThanOrEqual(MAX_LOG_BYTES);
+        expect(size).toBeLessThan(MAX_LOG_BYTES * 1.5);
+        expect(size).toBeLessThan(bytesToWrite);
+    }, 10000);
+
     test('no se cuelga si un descendiente hereda stdio y no lo cierra (R1.8)', async () => {  // verifies R1.8
         const script = "const {spawn}=require('child_process'); const gc=spawn('sleep',['3'],{stdio:'inherit',detached:true}); gc.unref(); process.exit(0);";
         const out = await runExecWrapper({ logsRoot: dir, jobId: 'job5', nonce: 'nonceE', argv: ['node', '-e', script], cwd: process.cwd() });
