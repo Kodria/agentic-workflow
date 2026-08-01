@@ -2,9 +2,13 @@ import { Command } from 'commander';
 import { execFileSync } from 'child_process';
 import { initWatch } from './init';
 import { runSupervisorLoop, DEFAULT_SUPERVISOR_CONFIG } from './supervisor';
+import { EXEC_STDIO } from '../../core/journal/process';
 
 function currentBranch(cwd: string): string {
-    const b = execFileSync('git', ['branch', '--show-current'], { cwd, encoding: 'utf8' }).trim();
+    // stdio explicito (ver EXEC_STDIO en journal/process.ts): evita el relay
+    // default de execFileSync del stderr de git hacia el stderr del llamante,
+    // que EPIPE-crashea si ese fd es un pipe roto.
+    const b = execFileSync('git', ['branch', '--show-current'], { cwd, encoding: 'utf8', stdio: EXEC_STDIO }).trim();
     if (b.length === 0) throw new Error('no hay rama actual (HEAD detached): el journal es por rama');
     return b;
 }

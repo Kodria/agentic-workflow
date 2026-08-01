@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { computeFingerprint } from '../../../src/core/journal/fingerprint';
 
 function git(cwd: string, ...args: string[]): void {
@@ -79,5 +79,76 @@ describe('computeFingerprint', () => {
     test('repos con muchos archivos no truncan la salida de git (R3.4)', () => {  // verifies R3.4
         for (let i = 0; i < 200; i++) fs.writeFileSync(path.join(repo, `f${i}.txt`), `contenido-${i}`);
         expect(() => computeFingerprint(repo, ['npm', 'test'], [], '.')).not.toThrow();
+    });
+});
+
+/** Defense-in-depth (post-implementation-qa, follow-up a Task 20): el `git()`
+ *  interno de este archivo backea `computeFingerprint`, invocado en CADA tick
+ *  del supervisor via `FingerprintNow`/`computeGate` (job/gate.ts). Sin stdio
+ *  explicito, `execFileSync` relayea el stderr de git hacia el stderr DEL
+ *  SUPERVISOR (`inheritStderr`, el default de Node cuando no se pasa `stdio`)
+ *  — si ese fd fuera un pipe roto/destruido, el relay mismo dispara un `write
+ *  EPIPE` no catcheable (throw asincronico via el evento 'error' del stream,
+ *  invisible a try/catch sincronico) que tumbaria TODO el proceso `awm watch`
+ *  en el tick siguiente, no solo un job. Este test reproduce esa condicion
+ *  contra el `dist/` compilado REAL: un hijo real con stdio pipe cuyos
+ *  extremos el padre destruye, corriendo `computeFingerprint` contra un `git`
+ *  stub que emite ruido a stderr en cada invocacion (simulando warnings/locale
+ *  de un git real) — sin el fix, esto tumba al hijo; con el fix, sobrevive. */
+describe('fingerprint.ts git(): stdio explicito evita inheritStderr hacia un pipe roto', () => {
+    const DIST_ENTRY = path.resolve(__dirname, '..', '..', '..', 'dist', 'src', 'core', 'journal', 'fingerprint.js');
+    const REAL_GIT = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+
+    beforeAll(() => {
+        if (!fs.existsSync(DIST_ENTRY)) {
+            throw new Error('dist ausente: corre `cd cli && npm run build` antes de este test (verifica el dist compilado real, no el source transpilado por ts-jest)');
+        }
+    });
+
+    test('computeFingerprint sobrevive un git que escribe a stderr, corriendo en un hijo con stdio pipe destruido por su padre (regresion: inheritStderr de execFileSync sin stdio explicito)', async () => {
+        const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-fp-execfilesync-hardening-'));
+        const repoDir = path.join(workDir, 'repo');
+        fs.mkdirSync(repoDir);
+        execFileSync(REAL_GIT, ['init', '-q'], { cwd: repoDir });
+        execFileSync(REAL_GIT, ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'c1'], { cwd: repoDir });
+        fs.writeFileSync(path.join(repoDir, 'a.txt'), 'contenido');
+
+        // git "real" que, ademas de delegar al git del sistema, tambien emite
+        // algo en stderr en TODA invocacion — plausible en entornos reales
+        // (locale warnings, hooks, etc.) y suficiente para ejercitar inheritStderr.
+        const stubBin = path.join(workDir, 'git');
+        fs.writeFileSync(stubBin, `#!/bin/sh\necho "warning: ruido de stderr" 1>&2\nexec "${REAL_GIT}" "$@"\n`, { mode: 0o755 });
+
+        const outFile = path.join(workDir, 'out.txt');
+        const childScript = path.join(workDir, 'child.js');
+        fs.writeFileSync(childScript, `
+            const fs = require('fs');
+            const { computeFingerprint } = require(${JSON.stringify(DIST_ENTRY)});
+            try {
+                const result = computeFingerprint(${JSON.stringify(repoDir)}, ['npm', 'test'], [], '.');
+                fs.writeFileSync(${JSON.stringify(outFile)}, 'RESULT:' + result.fingerprint);
+            } catch (e) {
+                fs.writeFileSync(${JSON.stringify(outFile)}, 'THREW:' + e.message);
+            }
+        `);
+        const child = spawn(process.execPath, [childScript], {
+            cwd: workDir,
+            env: { ...process.env, PATH: `${workDir}:${process.env.PATH}` },
+            stdio: ['ignore', 'pipe', 'pipe'],
+            detached: true,
+        });
+        // El patron exacto que causaba el crash original: el padre destruye
+        // su extremo de los pipes del hijo, cerrando el read-end — cualquier
+        // escritura del hijo a su propio stdout/stderr despues de esto EPIPE-ea.
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+            child.on('exit', (code, signal) => resolve({ code, signal }));
+        });
+        expect(exit.signal).toBeNull();
+        expect(exit.code).toBe(0);   // el hijo debe sobrevivir y salir limpio, NO crashear por EPIPE no catcheable
+        const out = fs.readFileSync(outFile, 'utf8');
+        expect(out.startsWith('RESULT:')).toBe(true);   // logica de negocio intacta: computeFingerprint devolvio normalmente
+        fs.rmSync(workDir, { recursive: true, force: true });
     });
 });

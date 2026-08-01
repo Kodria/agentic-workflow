@@ -4,7 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { execFileSync } from 'child_process';
 import { supervisorLockPath } from '../../core/journal/paths';
-import { captureSelfRef, refIsAlive } from '../../core/journal/process';
+import { captureSelfRef, refIsAlive, EXEC_STDIO } from '../../core/journal/process';
 import { isWellFormedProcessRef, ProcessRef } from '../../core/journal/types';
 import { fsyncDirSync } from '../../core/atomic-file';
 
@@ -66,7 +66,11 @@ export function releaseLock(repoRoot: string, handle: LockHandle): void {
 /** WHILE el supervisor este activo, el cambio de rama del worktree se bloquea:
  *  gate/reconcile/watch verifican rama actual == rama del journal (R1.1). */
 export function verifyBranchInvariant(repoRoot: string, journalBranch: string): void {
-    const current = execFileSync('git', ['branch', '--show-current'], { cwd: repoRoot, encoding: 'utf8' }).trim();
+    // stdio explicito (ver EXEC_STDIO en journal/process.ts): sin esto, execFileSync
+    // relayea el stderr del subproceso git al stderr DEL SUPERVISOR — si ese fd es
+    // un pipe roto, el relay dispara un EPIPE no catcheable que crashea el proceso
+    // ENTERO (verifyBranchInvariant corre en cada tick, via supervisor.ts).
+    const current = execFileSync('git', ['branch', '--show-current'], { cwd: repoRoot, encoding: 'utf8', stdio: EXEC_STDIO }).trim();
     if (current !== journalBranch) {
         throw new Error(`BLOCKED: rama actual (${current}) != rama del journal (${journalBranch}) — cambio de rama con journal activo (R1.1)`);
     }

@@ -1,14 +1,19 @@
 import crypto from 'crypto';
 import path from 'path';
 import { execFileSync } from 'child_process';
+import { EXEC_STDIO } from './process';
 
 function sha(parts: string[]): string {
     return crypto.createHash('sha256').update(parts.join('\0')).digest('hex');
 }
 // Sin ceiling de maxBuffer: repos grandes (`ls-files` / `ls-files --stage` en
 // miles de archivos) pueden superar el default de Node (1MB) y abortar con ENOBUFS.
+// stdio explicito (ver EXEC_STDIO en process.ts): sin esto, execFileSync relayea
+// el stderr de git hacia el stderr DEL SUPERVISOR — si ese fd es un pipe roto, el
+// relay dispara un EPIPE no catcheable que crashea el proceso ENTERO (este helper
+// backea computeFingerprint, invocado en CADA tick via FingerprintNow/computeGate).
 function git(cwd: string, args: string[]): string {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: Infinity });
+    return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: Infinity, stdio: EXEC_STDIO });
 }
 
 export interface FingerprintResult {

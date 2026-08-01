@@ -27,7 +27,7 @@ export const NONCE_ENV = 'AWM_SPAWN_NONCE';
  *  de via el spawn del hijo. Con stdio explicito ('pipe' para stdout/stderr)
  *  ese relay jamas ocurre: `execFileSync` captura el stderr del subproceso
  *  internamente y listo, sin tocar el fd real del proceso actual. */
-const EXEC_STDIO: ['ignore', 'pipe', 'pipe'] = ['ignore', 'pipe', 'pipe'];
+export const EXEC_STDIO: ['ignore', 'pipe', 'pipe'] = ['ignore', 'pipe', 'pipe'];
 
 function psField(pid: number, field: string): string | null {
     try {

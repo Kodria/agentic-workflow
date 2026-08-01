@@ -12,6 +12,7 @@ import { buildExport, BaselineMetrics } from './export';
 import { runExecWrapper } from './exec-wrapper';
 import { emitRequest } from '../../core/journal/requests';
 import { computeFingerprint } from '../../core/journal/fingerprint';
+import { EXEC_STDIO } from '../../core/journal/process';
 import { readJournal } from '../../core/journal/store';
 import { exportDir, logsDir } from '../../core/journal/paths';
 import { verifyBranchInvariant } from '../watch/lock';
@@ -19,7 +20,10 @@ import { writeFileAtomicDurable } from '../../core/atomic-file';
 import fs from 'fs';
 
 function branchOf(cwd: string): string {
-    const b = execFileSync('git', ['branch', '--show-current'], { cwd, encoding: 'utf8' }).trim();
+    // stdio explicito (ver EXEC_STDIO en journal/process.ts): evita el relay
+    // default de execFileSync del stderr de git hacia el stderr del llamante,
+    // que EPIPE-crashea si ese fd es un pipe roto.
+    const b = execFileSync('git', ['branch', '--show-current'], { cwd, encoding: 'utf8', stdio: EXEC_STDIO }).trim();
     if (b.length === 0) throw new Error('no hay rama actual (HEAD detached): el journal es por rama');
     return b;
 }
