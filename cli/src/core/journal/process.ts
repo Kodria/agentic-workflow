@@ -4,6 +4,20 @@ import type { ProcessRef } from './types';
 
 export const NONCE_ENV = 'AWM_SPAWN_NONCE';
 
+/** Contrato dual, a proposito (tomo 3 rondas de fixes reales llegar aca —
+ *  ver historial de Task 10): devuelve `null` SOLO cuando `ps` corrio y
+ *  confirmo positivamente que el pid no existe (exit status 1). Cualquier
+ *  otro fallo (ENOENT del binario, permisos, error transitorio) se
+ *  RELANZA — nunca se traduce a `null`, porque un `null` aca significaria
+ *  "muerte confirmada" para cualquier caller que no distinga los casos.
+ *  Hay DOS formas correctas de consumir esto, segun el contexto:
+ *  - Declaracion de muerte (`refIsAlive`, `activitySnapshot`): el caller
+ *    DEBE envolver en su propio try/catch y fallar A FAVOR de "vivo" —
+ *    nunca asumir muerto por un throw. El silencio jamas es prueba.
+ *  - Captura de identidad en spawn (`captureRefFor`, `stablePsArgs`): usar
+ *    `psFieldSafe` en vez de esta funcion — ahi "no se pudo determinar" ya
+ *    tiene un fallback seguro documentado ('unknown'), sin riesgo de
+ *    declarar muerte por error. */
 function psField(pid: number, field: string): string | null {
     try {
         const out = execFileSync('ps', ['-o', `${field}=`, '-p', String(pid)], { encoding: 'utf8' }).trim();
@@ -28,7 +42,10 @@ function psFieldSafe(pid: number, field: string): string | null {
 }
 
 /** ps args estable: dos lecturas consecutivas iguales (evita capturar el
- *  estado pre-exec del fork). null si el proceso ya no existe. */
+ *  estado pre-exec del fork). null si el proceso ya no existe O si ps
+ *  fallo en ejecutarse (via psFieldSafe) — ambos casos son "no se pudo
+ *  determinar" aca, sin riesgo: este es un contexto de captura, no de
+ *  declaracion de muerte. */
 function stablePsArgs(pid: number): string | null {
     for (let i = 0; i < 5; i++) {
         const a = psFieldSafe(pid, 'args');
@@ -44,6 +61,11 @@ export function argvDigest(argv: string[]): string {
     return crypto.createHash('sha256').update(argv.join('\0')).digest('hex').slice(0, 16);
 }
 
+/** EXPORTADA pero hereda el contrato crudo de psField (throws si ps falla
+ *  en ejecutarse, mas alla de "pid no existe"). Hoy el unico caller es
+ *  refIsAlive, que ya envuelve en su propio try/catch fail-safe — cualquier
+ *  caller NUEVO que la use standalone debe hacer lo mismo (ver comentario
+ *  de psField) o usar psFieldSafe si esta en un contexto de captura. */
 export function psArgsDigestOf(pid: number): string | null {
     const args = psField(pid, 'args');
     if (args === null) return null;
