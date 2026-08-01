@@ -79,6 +79,19 @@ describe('requests', () => {
             .toThrow(/digest/);
     });
 
+    test('Fix1 Parte A: idempotencyKey repetida con digest distinto es SEGURA de registrar cuando el outcome NO es applied (ninguna mutacion ocurrio)', () => {  // verifies bloqueador QA Fix1
+        const s = readJournal(repo, 'rama').state!;
+        applyOutcome(s, { requestId: 'req-a', idempotencyKey: 'kdup', payloadDigest: 'digest-a', outcome: 'applied', resultRef: 'job-1' });
+        // digest DISTINTO, pero outcome de rechazo: no debe tirar (a diferencia de 'applied')
+        expect(() => applyOutcome(s, { requestId: 'req-b', idempotencyKey: 'kdup', payloadDigest: 'digest-b', outcome: 'rejected-digest-mismatch' }))
+            .not.toThrow();
+        expect(s.appliedRequests['req-b'].outcome).toBe('rejected-digest-mismatch');
+        expect(s.appliedRequests['req-b'].payloadDigest).toBe('digest-b');   // registra SU PROPIO digest, no el de la entrada previa
+        // 'applied' con digest distinto sigue tirando (comportamiento previo intacto)
+        expect(() => applyOutcome(s, { requestId: 'req-c', idempotencyKey: 'kdup', payloadDigest: 'digest-c', outcome: 'applied' }))
+            .toThrow(/digest/);
+    });
+
     test('replay del MISMO requestId es no-op (R1.3)', () => {              // verifies R1.3
         const s = readJournal(repo, 'rama').state!;
         applyOutcome(s, { requestId: 'req-x', idempotencyKey: 'kx', payloadDigest: 'd', outcome: 'applied', resultRef: 'job-9' });

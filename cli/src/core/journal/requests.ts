@@ -98,7 +98,12 @@ export function applyOutcome(state: JournalState, applied: AppliedRequest): Jour
     if (state.appliedRequests[applied.requestId] !== undefined) return state;
     const prior = Object.values(state.appliedRequests).find((a) => a.idempotencyKey === applied.idempotencyKey);
     if (prior !== undefined && prior.payloadDigest !== applied.payloadDigest) {
-        throw new Error(`idempotencyKey ${applied.idempotencyKey} reutilizada con payload digest distinto`);
+        if (applied.outcome === 'applied') {
+            throw new Error(`idempotencyKey ${applied.idempotencyKey} reutilizada con payload digest distinto`);
+        }
+        // outcome de rechazo: ninguna mutacion ocurrio, seguro registrar aun con digest distinto
+        state.appliedRequests[applied.requestId] = applied;
+        return state;
     }
     if (prior !== undefined) {
         state.appliedRequests[applied.requestId] = { ...applied, outcome: prior.outcome, resultRef: prior.resultRef };
