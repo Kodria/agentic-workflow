@@ -8,7 +8,11 @@ function psField(pid: number, field: string): string | null {
     try {
         const out = execFileSync('ps', ['-o', `${field}=`, '-p', String(pid)], { encoding: 'utf8' }).trim();
         return out.length > 0 ? out : null;
-    } catch { return null; }
+    } catch (error) {
+        const status = (error as { status?: number | null }).status;
+        if (status === 1) return null;   // ps corrio y confirmo: el pid no existe
+        throw error;   // ps no pudo ejecutarse (ENOENT/permisos/etc): NO es prueba de nada
+    }
 }
 
 function sleepSync(seconds: string): void {
@@ -79,13 +83,19 @@ export function spawnStructured(argv: string[], cwd: string, nonce: string, extr
 /** Vivo Y con la MISMA identidad — tupla completa, nunca PID solo (R2.1,
  *  bloqueador 6): startTime + pgid + digest de ps args. */
 export function refIsAlive(ref: ProcessRef): boolean {
-    const start = psField(ref.pid, 'lstart');
-    if (start === null || start !== ref.startTime) return false;
-    const pgid = psField(ref.pid, 'pgid');
-    if (pgid === null || Number(pgid) !== ref.processGroup) return false;
-    const argsDig = psArgsDigestOf(ref.pid);
-    if (argsDig === null || argsDig !== ref.psArgsDigest) return false;
-    return true;
+    try {
+        const start = psField(ref.pid, 'lstart');
+        if (start === null || start !== ref.startTime) return false;
+        const pgid = psField(ref.pid, 'pgid');
+        if (pgid === null || Number(pgid) !== ref.processGroup) return false;
+        const argsDig = psArgsDigestOf(ref.pid);
+        if (argsDig === null || argsDig !== ref.psArgsDigest) return false;
+        return true;
+    } catch {
+        // ps no pudo ejecutarse: sin evidencia, jamas declarar muerte — se
+        // trata como vivo (R2.1, bloqueador de Task 10: silencio no es prueba).
+        return true;
+    }
 }
 
 /** true <=> pgrep -g no encuentra NINGUN proceso en el grupo. Un fallo de

@@ -46,4 +46,19 @@ describe('process identity', () => {
         expect(self.pid).toBe(process.pid);
         expect(refIsAlive(self)).toBe(true);
     });
+
+    test('refIsAlive nunca declara muerte si ps falla en ejecutarse (no ENOENT como prueba) (R2.1)', () => {  // verifies R2.1
+        const cp = require('child_process');
+        const self = captureSelfRef('nonce-ps-fail');
+        const spy = jest.spyOn(cp, 'execFileSync').mockImplementation(() => {
+            const err: any = new Error('spawn ps ENOENT');
+            err.code = 'ENOENT';
+            throw err;
+        });
+        try {
+            expect(refIsAlive(self)).toBe(true);
+        } finally {
+            spy.mockRestore();
+        }
+    });
 });
