@@ -6,8 +6,6 @@ import { findLiteralSecretFlag, redactArgv } from './redact';
 import { fsyncDirSync } from '../atomic-file';
 import type { AppliedRequest, JournalState } from './types';
 
-let requestSeq = 0;
-
 export interface RequestEnvelope {
     kind: 'job-request' | 'register-entity' | 'controller-heartbeat' | 'verdict';
     generationToken: string;
@@ -20,9 +18,24 @@ export function digestOf(payload: unknown): string {
     return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
+function countPendingRequests(dir: string): number {
+    try { return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).length; } catch { return 0; }
+}
+
 /** Publicacion atomica Y durable (R1.3, bloqueador 4): tmp + fsync + close +
  *  rename + fsync del DIRECTORIO. Redaccion EN EL EMISOR; secreto literal en
- *  flag sensible => rechazo sin persistir (R2.3). */
+ *  flag sensible => rechazo sin persistir (R2.3). El segmento `seq` es un
+ *  conteo del directorio de requests AL MOMENTO DE EMITIR (no un contador
+ *  en memoria del proceso): las emisiones causalmente dependientes son, por
+ *  definicion, secuenciales desde la perspectiva del emisor (el agente
+ *  orquestador espera a que el proceso A termine — incluyendo su
+ *  fsyncDirSync — antes de lanzar el proceso B), asi que el archivo de A ya
+ *  esta durablemente presente cuando B escanea el directorio. Esto preserva
+ *  el orden causal AUN ENTRE PROCESOS SEPARADOS, a diferencia de un
+ *  contador en memoria por proceso (que reinicia en 0 en cada invocacion
+ *  nueva de la CLI). Emisores genuinamente independientes/concurrentes
+ *  pueden empatar en el conteo y caer al sufijo hex aleatorio — aceptable,
+ *  porque requests independientes no requieren orden relativo. */
 export function emitRequest(repoRoot: string, branch: string, env: RequestEnvelope): EmittedRequest {
     const payload = { ...env.payload };
     if (Array.isArray(payload.argv)) {
@@ -30,10 +43,10 @@ export function emitRequest(repoRoot: string, branch: string, env: RequestEnvelo
         if (secretFlag !== null) throw new Error(`secreto literal en ${secretFlag}: pasalo por referencia (-env), no por valor`);
         payload.argv = redactArgv(payload.argv as string[]);
     }
-    const seq = (requestSeq++).toString().padStart(10, '0');
+    const dir = requestsDir(repoRoot, branch);
+    const seq = countPendingRequests(dir).toString().padStart(10, '0');
     const requestId = `req-${Date.now()}-${seq}-${crypto.randomBytes(4).toString('hex')}`;
     const body = JSON.stringify({ requestId, ...env, payload }, null, 2) + '\n';
-    const dir = requestsDir(repoRoot, branch);
     const tmp = path.join(dir, `.${requestId}.tmp`);
     const final = path.join(dir, `${requestId}.json`);
     const fd = fs.openSync(tmp, 'wx', 0o600);

@@ -1,9 +1,45 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
+import { execFileSync } from 'child_process';
 import { emitRequest, listPendingRequests, applyOutcome, ackFor } from '../../../src/core/journal/requests';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { requestsDir } from '../../../src/core/journal/paths';
+
+// Bootstrap para invocar el codigo REAL de src/ (.ts) desde procesos `node`
+// separados sin depender de un build previo (dist/ esta gitignored) ni de
+// ts-node (no instalado): registra un require.extensions['.ts'] que
+// transpila on-demand via el compilador de TypeScript (devDependency ya
+// presente). NODE_PATH apunta a cli/node_modules para que el propio script
+// bootstrap pueda resolver 'typescript' aunque viva fuera del arbol del repo.
+const CLI_ROOT = path.resolve(__dirname, '../../..');
+const REQUESTS_TS = path.join(CLI_ROOT, 'src/core/journal/requests.ts');
+const TS_BOOTSTRAP = `
+const fs = require('fs');
+const ts = require('typescript');
+require.extensions['.ts'] = function (mod, filename) {
+    const source = fs.readFileSync(filename, 'utf8');
+    const { outputText } = ts.transpileModule(source, {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
+        fileName: filename,
+    });
+    mod._compile(outputText, filename);
+};
+`;
+
+function runInSeparateProcess(script: string, args: string[]): string {
+    const scriptFile = path.join(os.tmpdir(), `awm-cross-proc-${crypto.randomUUID()}.js`);
+    fs.writeFileSync(scriptFile, TS_BOOTSTRAP + script);
+    try {
+        return execFileSync('node', [scriptFile, ...args], {
+            encoding: 'utf8',
+            env: { ...process.env, NODE_PATH: path.join(CLI_ROOT, 'node_modules') },
+        }).trim();
+    } finally {
+        fs.rmSync(scriptFile, { force: true });
+    }
+}
 
 describe('requests', () => {
     let repo: string;
@@ -61,5 +97,21 @@ describe('requests', () => {
         } finally {
             Date.now = originalNow;
         }
+    });
+
+    test('emitRequest preserva orden causal entre procesos SEPARADOS (RNF-T.7)', () => {  // verifies R1.3
+        // El propio directorio de requests YA fue inicializado por initJournal
+        // en beforeEach (mismo proceso jest); lo que importa es que emitRequest
+        // A y B corran en procesos `node` DISTINTOS, uno tras otro.
+        const emitScript = `
+            const { emitRequest } = require(${JSON.stringify(REQUESTS_TS)});
+            const [, , repoArg, keyArg] = process.argv;
+            const r = emitRequest(repoArg, 'rama', { kind: 'job-request', generationToken: 'g1', idempotencyKey: keyArg, payload: { argv: ['npm', 'test'] } });
+            console.log(r.requestId);
+        `;
+        const idA = runInSeparateProcess(emitScript, [repo, 'proc-a']);
+        const idB = runInSeparateProcess(emitScript, [repo, 'proc-b']);
+        const listed = listPendingRequests(repo, 'rama').map((p) => p.requestId);
+        expect(listed.indexOf(idA)).toBeLessThan(listed.indexOf(idB));
     });
 });
