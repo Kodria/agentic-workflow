@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { spawnPendingWrappers, collectAndReconcile, runnerTick, WrapperSpawner } from '../../../src/commands/watch/runner';
-import { runExecWrapper, claimPath, identityPath, resultPath } from '../../../src/commands/job/exec-wrapper';
+import { runExecWrapper, claimPath, identityPath, resultPath, logPath } from '../../../src/commands/job/exec-wrapper';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { logsDir } from '../../../src/core/journal/paths';
 import { Job } from '../../../src/core/journal/types';
@@ -161,5 +161,78 @@ describe('runner concurrente', () => {
         expect(out.spawned).toBe(1);
         await until(() => runnerTick(repo, 'rama', fakeSpawner, { reconcileGraceMs: 10000 }).advanced > 0
             || readJournal(repo, 'rama').state!.jobs['j1'].executionState === 'exited');
+    });
+
+    describe('observationState: suspected-stall por staleness del log, puramente observacional (R3.5)', () => {
+        function seedRunning(nonce: string, runningAt: string): void {
+            const dead = { pid: 999999, startTime: 'gone', spawnNonce: nonce, argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
+            seedJob(repo, {
+                executionState: 'running', spawnNonce: nonce, processRef: dead, wrapperRef: { ...dead, pid: 999998 },
+                phaseTimestamps: { running: runningAt }, lastProgressAt: runningAt,
+            });
+        }
+
+        test('log que sigue creciendo (mtime avanza cada tick) queda progressing aun pasado el umbral', async () => {
+            const oldIso = new Date(Date.now() - 60000).toISOString();
+            seedRunning('nStall1', oldIso);
+            const logs = logsDir(repo, 'rama');
+            fs.mkdirSync(logs, { recursive: true });
+            const file = logPath(logs, 'j1', 'nStall1');
+            fs.writeFileSync(file, 'salida inicial\n');
+            // umbral MUY corto (10ms): si el job estuviera realmente stalled, cualquiera
+            // de estos 3 ticks lo marcaria suspected-stall — pero el log sigue creciendo.
+            for (let i = 0; i < 3; i++) {
+                await new Promise((res) => setTimeout(res, 20));   // > stallObservationMs entre escrituras
+                fs.appendFileSync(file, `linea ${i}\n`);
+                collectAndReconcile(repo, 'rama', { reconcileGraceMs: 60000, stallObservationMs: 10 });
+                expect(readJournal(repo, 'rama').state!.jobs['j1'].observationState).toBe('progressing');
+            }
+        });
+
+        // El log se escribe con un mtime EXPLICITAMENTE anterior a `lastProgressAt`
+        // (utimesSync, no timing de reloj real) — determinista, sin flakiness por
+        // resolucion de mtime del filesystem. Misma semantica que el runner real:
+        // el log no avanzo desde la ultima marca de progreso conocida.
+        function seedRunningWithStaleLog(nonce: string, content: string): void {
+            const logs = logsDir(repo, 'rama');
+            fs.mkdirSync(logs, { recursive: true });
+            const file = logPath(logs, 'j1', nonce);
+            fs.writeFileSync(file, content);
+            const past = new Date(Date.now() - 5000);
+            fs.utimesSync(file, past, past);
+            seedRunning(nonce, new Date(Date.now() - 1000).toISOString());
+        }
+
+        test('log sin crecer por mas del umbral => suspected-stall, executionState intacto (jamas mata nada)', () => {
+            seedRunningWithStaleLog('nStall2', 'salida unica, nunca mas crece\n');
+            collectAndReconcile(repo, 'rama', { reconcileGraceMs: 60000, stallObservationMs: 10 });
+            const j = readJournal(repo, 'rama').state!.jobs['j1'];
+            expect(j.observationState).toBe('suspected-stall');
+            expect(j.executionState).toBe('running');   // observacional puro: nunca produce transicion terminal (R3.5)
+        });
+
+        test('un job stalled vuelve a progressing si el log retoma crecimiento', () => {
+            seedRunningWithStaleLog('nStall3', 'salida vieja\n');
+            collectAndReconcile(repo, 'rama', { reconcileGraceMs: 60000, stallObservationMs: 10 });
+            expect(readJournal(repo, 'rama').state!.jobs['j1'].observationState).toBe('suspected-stall');
+
+            const logs = logsDir(repo, 'rama');
+            fs.appendFileSync(logPath(logs, 'j1', 'nStall3'), 'output nuevo: el job seguia vivo\n');
+            collectAndReconcile(repo, 'rama', { reconcileGraceMs: 60000, stallObservationMs: 10 });
+            expect(readJournal(repo, 'rama').state!.jobs['j1'].observationState).toBe('progressing');
+        });
+
+        test('un job stalled que termina llega a exited via el sidecar de resultado normal, sin intervencion de staleness', () => {
+            seedRunningWithStaleLog('nStall4', 'salida vieja\n');
+            collectAndReconcile(repo, 'rama', { reconcileGraceMs: 60000, stallObservationMs: 10 });
+            expect(readJournal(repo, 'rama').state!.jobs['j1'].observationState).toBe('suspected-stall');
+
+            const logs = logsDir(repo, 'rama');
+            fs.writeFileSync(resultPath(logs, 'j1', 'nStall4'), JSON.stringify({ exitCode: 0, endedAt: new Date().toISOString(), resultPath: 'x' }));
+            collectAndReconcile(repo, 'rama', { reconcileGraceMs: 60000, stallObservationMs: 10 });
+            const j = readJournal(repo, 'rama').state!.jobs['j1'];
+            expect(j.executionState).toBe('exited');
+            expect(j.verdict).toBe('pass');
+        });
     });
 });

@@ -82,7 +82,7 @@ export interface Job {
     processRef?: ProcessRef;   // identidad REAL del comando (del identity sidecar)
     wrapperRef?: ProcessRef;   // identidad REAL del wrapper externo
     phaseTimestamps: Partial<Record<ExecutionState, string>>;  // RNF-T.4
-    lastProgressAt?: string;
+    lastProgressAt?: string;   // ultima vez que el log del job crecio/mtime avanzo (R3.5, observacional)
     logPath?: string;
     result?: JobResult;
     satisfies?: string;     // id de VerificationItem que este job pretende satisfacer

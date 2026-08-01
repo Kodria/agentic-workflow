@@ -6,7 +6,7 @@ import crypto from 'crypto';
 import { readJournal, writeJournal } from '../../core/journal/store';
 import { logsDir } from '../../core/journal/paths';
 import { spawnStructured } from '../../core/journal/process';
-import { claimPath, identityPath, resultPath } from '../job/exec-wrapper';
+import { claimPath, identityPath, resultPath, logPath } from '../job/exec-wrapper';
 import { reconcileJobs, materializeRetry, ReconcileDecision } from '../job/reconcile';
 import { isWellFormedProcessRef } from '../../core/journal/types';
 import type { Job } from '../../core/journal/types';
@@ -61,16 +61,45 @@ function lastPhaseAgeMs(j: Job): number {
     return Date.now() - Math.max(...stamps);
 }
 
+// Observacional puro (R3.5): la duracion NUNCA produce transicion terminal.
+// Señal de progreso = mtime del log del job (analogo al "output consumido por
+// el supervisor" del stall de CONTROLADOR en generations.ts, pero para el job
+// mismo). Sin campo nuevo de tracking de bytes: el propio `lastProgressAt` ya
+// persistido sirve de referencia — si el log crecio (mtime mas nuevo que la
+// ultima marca), hay progreso; si no, y ya paso el umbral, es sospecha de
+// estancamiento. `suspected-stall` jamas mata ni reintenta nada — eso solo lo
+// hace `awm job reap`, invocado por un humano.
+export const DEFAULT_STALL_OBSERVATION_MS = 5 * 60000;   // orden de magnitud de heartbeatTimeoutMs, pero independiente (jobs != controlador)
+
+function updateJobObservation(j: Job, logs: string, stallObservationMs: number): void {
+    if (j.executionState !== 'running') return;
+    const nonce = j.spawnNonce ?? 'sin-nonce';
+    let mtimeMs = 0;
+    try { mtimeMs = fs.statSync(logPath(logs, j.id, nonce)).mtimeMs; } catch { /* log aun no existe: sin progreso nuevo */ }
+    const baselineIso = j.lastProgressAt ?? j.phaseTimestamps.running;
+    const baselineMs = baselineIso !== undefined ? Date.parse(baselineIso) : Number.NEGATIVE_INFINITY;
+    if (mtimeMs > baselineMs) {
+        j.lastProgressAt = new Date().toISOString();
+        j.observationState = 'progressing';
+        return;
+    }
+    if (Date.now() - baselineMs > stallObservationMs) {
+        j.observationState = 'suspected-stall';
+    }
+}
+
 /** Cada tick: sidecars primero (claim=>claimed, identity=>running con identidad
  *  REAL, result=>exited+verdict), reconciliacion (matriz unica) despues — solo
  *  para jobs fuera de su ventana de gracia post-spawn. */
-export function collectAndReconcile(repoRoot: string, branch: string, opts: { reconcileGraceMs?: number } = {}): CollectOutput {
+export function collectAndReconcile(repoRoot: string, branch: string, opts: { reconcileGraceMs?: number; stallObservationMs?: number } = {}): CollectOutput {
     const graceMs = opts.reconcileGraceMs ?? 10000;
+    const stallObservationMs = opts.stallObservationMs ?? DEFAULT_STALL_OBSERVATION_MS;
     const r = readJournal(repoRoot, branch);
     if (r.corrupt || r.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
     const s = r.state;
     const logs = logsDir(repoRoot, branch);
     let advanced = 0;
+    let observationTouched = false;
     for (const j of Object.values(s.jobs)) {
         if (!SCANNABLE.includes(j.executionState)) continue;
         const nonce = j.spawnNonce ?? 'sin-nonce';
@@ -106,13 +135,21 @@ export function collectAndReconcile(repoRoot: string, branch: string, opts: { re
             advanced++;
         }
     }
+    // observationState (R3.5): puramente informativo, corre para TODO job aun
+    // 'running' tras el scan de arriba — jamas toca executionState ni participa
+    // de la matriz de abajo.
+    for (const j of Object.values(s.jobs)) {
+        const before = `${j.observationState}|${j.lastProgressAt ?? ''}`;
+        updateJobObservation(j, logs, stallObservationMs);
+        if (`${j.observationState}|${j.lastProgressAt ?? ''}` !== before) observationTouched = true;
+    }
     // Matriz unica SOLO fuera de la gracia post-spawn: un wrapper recien
     // spawneado que aun no claimeo NO es un never-started.
     const out = reconcileJobs(s, logs, { eligible: (j) => lastPhaseAgeMs(j) > graceMs });
     for (const d of out.decisions) {
         if (d.action === 'retry-new-attempt') materializeRetry(s, d.jobId);
     }
-    if (advanced > 0 || out.decisions.some((d) => d.action !== 'still-alive')) {
+    if (advanced > 0 || observationTouched || out.decisions.some((d) => d.action !== 'still-alive')) {
         writeJournal(repoRoot, branch, s);
     }
     return { advanced, decisions: out.decisions };
@@ -120,7 +157,7 @@ export function collectAndReconcile(repoRoot: string, branch: string, opts: { re
 
 export interface RunnerTickOutput { spawned: number; advanced: number; decisions: ReconcileDecision[]; }
 
-export function runnerTick(repoRoot: string, branch: string, spawner: WrapperSpawner, opts: { reconcileGraceMs?: number } = {}): RunnerTickOutput {
+export function runnerTick(repoRoot: string, branch: string, spawner: WrapperSpawner, opts: { reconcileGraceMs?: number; stallObservationMs?: number } = {}): RunnerTickOutput {
     const collected = collectAndReconcile(repoRoot, branch, opts);
     const spawned = spawnPendingWrappers(repoRoot, branch, spawner);
     return { spawned, advanced: collected.advanced, decisions: collected.decisions };

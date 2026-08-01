@@ -19,6 +19,7 @@ export interface SupervisorConfig {
     termGraceMs: number;
     killGraceMs: number;
     reconcileGraceMs: number;
+    jobStallObservationMs: number;   // R3.5: umbral observacional de suspected-stall por job (nunca mata nada)
 }
 
 export const DEFAULT_SUPERVISOR_CONFIG: SupervisorConfig = {
@@ -29,6 +30,7 @@ export const DEFAULT_SUPERVISOR_CONFIG: SupervisorConfig = {
     termGraceMs: 30000,                  // R4.2b flush 30 s
     killGraceMs: 5000,
     reconcileGraceMs: 10000,
+    jobStallObservationMs: 5 * 60000,   // R3.5 default: mismo orden de magnitud que heartbeatTimeoutMs, concern independiente
 };
 
 export type TickOutcome = 'continue' | 'custody' | 'complete';
@@ -58,7 +60,7 @@ export class Supervisor {
         verifyBranchInvariant(this.repoRoot, r0.state.branch);   // R1.1: rama clavada
         const gen = activeGeneration(r0.state);
         consumePendingRequests(this.repoRoot, this.branch, gen?.token ?? null);
-        runnerTick(this.repoRoot, this.branch, this.spawner, { reconcileGraceMs: this.cfg.reconcileGraceMs });
+        runnerTick(this.repoRoot, this.branch, this.spawner, { reconcileGraceMs: this.cfg.reconcileGraceMs, stallObservationMs: this.cfg.jobStallObservationMs });
         const custody = await this.superviseController();
         if (custody) return 'custody';
         const r = readJournal(this.repoRoot, this.branch);
