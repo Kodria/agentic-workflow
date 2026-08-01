@@ -56,7 +56,7 @@ export function acquireLock(repoRoot: string): LockHandle {
 }
 
 export function releaseLock(repoRoot: string, handle: LockHandle): void {
-    const lp = supervisorLockPath(repoRoot);
+    const lp = handle.path;
     try {
         const onDisk = JSON.parse(fs.readFileSync(lp, 'utf8')) as ProcessRef;
         if (onDisk.spawnNonce === handle.ref.spawnNonce) fs.rmSync(lp);
