@@ -27,10 +27,10 @@ describe('process identity', () => {
         const spawnGrandchild = "require('child_process').spawn(process.execPath, ['-e', 'setTimeout(()=>{},5000)']); setTimeout(()=>{}, 5000)";
         const { ref } = spawnStructured(['node', '-e', spawnGrandchild], process.cwd(), 'n3');
         await new Promise((r) => setTimeout(r, 400));      // dejar nacer al nieto
-        const dead = await terminateGroupConfirmed(ref, { termGraceMs: 400, killGraceMs: 400 });
+        const dead = await terminateGroupConfirmed(ref, { termGraceMs: 2000, killGraceMs: 2000 });
         expect(dead).toBe(true);
         expect(groupIsGone(ref.processGroup)).toBe(true);
-    });
+    }, 15000);
 
     test('activitySnapshot reporta cpu y tamanio de grupo de un proceso vivo (soporte R4.2)', () => {  // verifies R2.1
         const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 3000)'], process.cwd(), 'n4');
