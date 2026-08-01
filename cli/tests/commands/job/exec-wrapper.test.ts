@@ -46,4 +46,10 @@ describe('exec-wrapper', () => {
         const log = fs.readFileSync(logPath(dir, 'job4', 'nonceD'), 'utf8');
         expect(log).toContain('linea-final-no-se-debe-perder');
     });
+
+    test('no se cuelga si un descendiente hereda stdio y no lo cierra (R1.8)', async () => {  // verifies R1.8
+        const script = "const {spawn}=require('child_process'); const gc=spawn('sleep',['3'],{stdio:'inherit',detached:true}); gc.unref(); process.exit(0);";
+        const out = await runExecWrapper({ logsRoot: dir, jobId: 'job5', nonce: 'nonceE', argv: ['node', '-e', script], cwd: process.cwd() });
+        expect(out.exitCode).toBe(0);
+    }, 10000);
 });

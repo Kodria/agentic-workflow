@@ -34,6 +34,7 @@ export interface WrapperIdentity { jobId: string; nonce: string; wrapper: Proces
 export interface WrappedResult { exitCode: number; endedAt: string; resultPath: string; }
 
 const MAX_LOG_BYTES = 1024 * 1024;   // retencion acotada (R2.5)
+const STDIO_GRACE_MS = 300;   // ventana acotada post-exit para el flush de stdio (R1.8, R2.5)
 
 export async function runExecWrapper(opts: { logsRoot: string; jobId: string; nonce: string; argv: string[]; cwd: string }): Promise<WrappedResult> {
     const { logsRoot, jobId, nonce, argv, cwd } = opts;
@@ -96,8 +97,16 @@ export async function runExecWrapper(opts: { logsRoot: string; jobId: string; no
     child.stdout?.on('data', append);
     child.stderr?.on('data', append);
     const exitCode: number = await new Promise((resolve) => {
-        child.on('close', (code) => resolve(code ?? 1));
+        child.on('exit', (code) => resolve(code ?? 1));
         child.on('error', () => resolve(127));
     });
+    // Ventana acotada para dejar llegar los ultimos chunks de stdio (exit puede
+    // dispararse antes que termine el flush de 'data') SIN bloquear indefinidamente
+    // si un descendiente hereda los fds y no los cierra — el wrapper SIEMPRE debe
+    // terminar (R1.8). 'close' sin cota reintroduce el riesgo de cuelgue.
+    await Promise.race([
+        new Promise<void>((resolve) => { child.once('close', () => resolve()); }),
+        new Promise<void>((resolve) => { setTimeout(resolve, STDIO_GRACE_MS); }),
+    ]);
     return finish(exitCode);
 }
