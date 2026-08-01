@@ -66,4 +66,12 @@ describe('export', () => {
         expect(noBase.baselineComparison.wallTimeMs.delta).toBe('unobservable');
         expect(noBase.metrics.tokensPerRole).toBe('unobservable');
     });
+
+    test('wallMs declara unobservable ante timestamps invertidos, nunca un numero negativo (R3.7)', () => {  // verifies R3.7
+        const s = emptyState('r');
+        s.cycle.startedAt = '2026-08-01T10:30:00.000Z';
+        s.cycle.completedAt = '2026-08-01T10:00:00.000Z';   // invertido: dato corrupto/anomalo
+        const e = buildExport(s, 'codex', { logsRoot: null, baseline: null });
+        expect(e.cycle.wallTimeMs).toBe('unobservable');
+    });
 });

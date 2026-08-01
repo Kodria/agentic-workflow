@@ -173,6 +173,17 @@ describe('reconcile — matriz unica R1.8 (R3.3)', () => {
         expect(nuevo.spawnNonce).toBeUndefined();                   // nonce fresco lo asigna el runner
         expect(s.jobs[nuevo.id]).toBe(nuevo);
     });
+
+    test('adopt-result respalda spawnNonce resuelto via processRef, para que la evidencia siga siendo observable (R1.3, RNF-T.9)', () => {  // verifies R1.3
+        const s = emptyState('r');
+        const deadRef = { pid: 999999, startTime: 'gone', spawnNonce: 'nR', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
+        s.jobs['r1'] = job({ id: 'r1', executionState: 'running', processRef: deadRef });  // spawnNonce propio ausente adrede
+        fs.writeFileSync(path.join(logs, 'r1.nR.claim'), '{}');
+        fs.writeFileSync(path.join(logs, 'r1.nR.result.json'), JSON.stringify({ exitCode: 0, endedAt: 'x', resultPath: 'p' }));
+        reconcileJobs(s, logs);
+        expect(s.jobs['r1'].spawnNonce).toBe('nR');
+        expect(s.jobs['r1'].executionState).toBe('exited');
+    });
 });
 
 describe('reap — limpieza explicita con identidad validada (R2.2)', () => {

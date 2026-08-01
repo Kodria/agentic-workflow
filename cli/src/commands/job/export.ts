@@ -42,7 +42,7 @@ export interface CycleExport {
 function wallMs(from?: string, to?: string): number | 'unobservable' {
     if (from === undefined || to === undefined) return 'unobservable';
     const a = Date.parse(from); const b = Date.parse(to);
-    if (Number.isNaN(a) || Number.isNaN(b)) return 'unobservable';
+    if (Number.isNaN(a) || Number.isNaN(b) || b < a) return 'unobservable';
     return b - a;
 }
 

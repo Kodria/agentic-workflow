@@ -36,6 +36,7 @@ export function reconcileJobs(state: JournalState, logsRoot: string, opts: Recon
         } else if (verdict === 'completed') {
             const result = JSON.parse(fs.readFileSync(resultPath(logsRoot, j.id, nonce), 'utf8'));
             j.executionState = 'exited';
+            j.spawnNonce = nonce;
             j.result = result;
             j.verdict = result.exitCode === 0 ? 'pass' : 'fail';
             j.phaseTimestamps.exited = j.phaseTimestamps.exited ?? new Date().toISOString();
