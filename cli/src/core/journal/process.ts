@@ -18,9 +18,20 @@ export const NONCE_ENV = 'AWM_SPAWN_NONCE';
  *    `psFieldSafe` en vez de esta funcion — ahi "no se pudo determinar" ya
  *    tiene un fallback seguro documentado ('unknown'), sin riesgo de
  *    declarar muerte por error. */
+/** stdio explicito en TODOS los execFileSync de este archivo (ver EXEC_STDIO):
+ *  sin esto, `execFileSync` por defecto hace `inheritStderr` — relayea el
+ *  stderr del subproceso hacia el stderr DEL PROCESO LLAMANTE. Si ese stderr
+ *  llegara a ser un pipe roto/destruido (ej. wrapper detached, ver
+ *  spawnStructured), el relay mismo dispara el EPIPE que crashea al
+ *  llamante — el mismo bug de raiz, reintroducido via esta funcion en vez
+ *  de via el spawn del hijo. Con stdio explicito ('pipe' para stdout/stderr)
+ *  ese relay jamas ocurre: `execFileSync` captura el stderr del subproceso
+ *  internamente y listo, sin tocar el fd real del proceso actual. */
+const EXEC_STDIO: ['ignore', 'pipe', 'pipe'] = ['ignore', 'pipe', 'pipe'];
+
 function psField(pid: number, field: string): string | null {
     try {
-        const out = execFileSync('ps', ['-o', `${field}=`, '-p', String(pid)], { encoding: 'utf8' }).trim();
+        const out = execFileSync('ps', ['-o', `${field}=`, '-p', String(pid)], { encoding: 'utf8', stdio: EXEC_STDIO }).trim();
         return out.length > 0 ? out : null;
     } catch (error) {
         const status = (error as { status?: number | null }).status;
@@ -30,7 +41,7 @@ function psField(pid: number, field: string): string | null {
 }
 
 function sleepSync(seconds: string): void {
-    try { execFileSync('sleep', [seconds]); } catch { /* sin sleep: seguimos */ }
+    try { execFileSync('sleep', [seconds], { stdio: EXEC_STDIO }); } catch { /* sin sleep: seguimos */ }
 }
 
 /** Variante de psField para contextos de CAPTURA de identidad (spawn time):
@@ -137,7 +148,7 @@ export function refIsAlive(ref: ProcessRef): boolean {
  *  muerte declarada (R2.1). */
 export function groupIsGone(pgid: number): boolean {
     try {
-        const out = execFileSync('pgrep', ['-g', String(pgid)], { encoding: 'utf8' });
+        const out = execFileSync('pgrep', ['-g', String(pgid)], { encoding: 'utf8', stdio: EXEC_STDIO });
         return out.trim().length === 0;
     } catch (error) {
         const status = (error as { status?: number | null }).status;
@@ -152,7 +163,7 @@ export function activitySnapshot(ref: ProcessRef): ActivitySnapshot | null {
     try { cpu = psField(ref.pid, 'time') ?? '0'; } catch { cpu = '0'; }
     let groupSize = 1;
     try {
-        groupSize = execFileSync('pgrep', ['-g', String(ref.processGroup)], { encoding: 'utf8' })
+        groupSize = execFileSync('pgrep', ['-g', String(ref.processGroup)], { encoding: 'utf8', stdio: EXEC_STDIO })
             .split('\n').filter(Boolean).length;
     } catch { groupSize = 1; }
     return { cpuTime: cpu, groupSize };
