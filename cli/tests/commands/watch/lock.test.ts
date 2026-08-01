@@ -49,4 +49,12 @@ describe('supervisor lock + branch invariant', () => {
         git(repo, 'checkout', '-qb', 'otra');
         expect(() => verifyBranchInvariant(repo, 'main')).toThrow(/BLOCKED/);
     });
+
+    test('branch invariant: HEAD detached => BLOCKED, jamas matchea (R1.1)', () => {  // verifies R1.1
+        git(repo, 'init', '-q', '-b', 'main');
+        fs.writeFileSync(path.join(repo, 'f.txt'), 'x');
+        git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'c');
+        git(repo, 'checkout', '-q', '--detach', 'HEAD');
+        expect(() => verifyBranchInvariant(repo, 'main')).toThrow(/BLOCKED/);
+    });
 });
