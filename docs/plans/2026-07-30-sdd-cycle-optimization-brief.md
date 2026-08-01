@@ -6,7 +6,7 @@ mode: brief
 readiness: ready
 created: 2026-07-30
 updated: 2026-07-31
-open_decisions: [DA-1, DA-2, DA-3, DA-4, DA-5, DA-6]
+open_decisions: [DA-3, DA-4, DA-5, DA-6]
 project: awm-sdd-optimization
 ---
 
@@ -238,8 +238,8 @@ flowchart TD
 
 | ID | Decision | Blocks | Known Positions |
 |----|----------|--------|------------------|
-| DA-1 | Métrica de no-regresión de calidad y ventana de medición: ¿capacidad de detectar defectos conocidos/controlados? ¿bugs escapados post-merge? ¿ambos? ¿cuántos ciclos/días? | Release 1 | (a) batería de defectos controlados por ciclo; (b) bugs escapados post-merge, ventana de 30 días; (c) combinación (propuesta; el conteo bruto de hallazgos QA no prueba calidad por sí solo) |
-| DA-2 | ¿La degradación a no-op reportado satisface el criterio del dueño "funcional en todo o no sirve" para el tiering de modelo, o el tiering se retiene hasta que los tres providers soporten selección nativa? | Release 4 | (a) no-op reportado es aceptable (la intención viaja en el plan, agnóstica); (b) retener hasta soporte pleno confirmado por R0 |
+| DA-1 | **RESUELTA 2026-07-31 (dueño):** sin infraestructura de métrica permanente — no tendría acción real. La calidad se preserva por diseño: (1) etapas de revisión intocables (ya en Fuera de alcance firme); (2) la deduplicación de verificación de Release 1 solo puede saltar comandos con fingerprint idéntico, probado con test mecánico (CA de R1). La batería de defectos controlados queda especificada en el report de R0 como recurso reutilizable si alguna optimización futura tocara el aparato de detección. | ~~Release 1~~ ninguna | — |
+| DA-2 | **RESUELTA 2026-07-31 (dueño):** el tiering de modelo se **desestima** — la matriz de R0 muestra soporte certificable solo en Claude Code, y el criterio del dueño es "funcional en todo o no sirve". Release 4 queda desestimado. | ~~Release 4~~ ninguna | — |
 | DA-3 | Aislamiento por worktree para paralelismo: ¿requisito duro (sin worktree no hay feature) o fallback a serial aceptable como degradación? | Release 5 | (a) fallback a serial (propuesto: el plan sigue siendo válido en los tres providers); (b) requisito duro |
 | DA-4 | ¿Dónde viven los sets de referencia de sensores y quién los mantiene? | Release 2 | (a) dentro de cada sensor-pack del registry baseline, mantenidos con el pack (propuesto); (b) archivo separado por stack en el registry; (c) en el CLI |
 | DA-5 | Umbral de la detección empírica: ¿cuántos hallazgos convergentes manuales de una clase disparan el reporte de "sensor faltante"? | Release 3 | Configurable con default (propuesto: cluster convergente de ≥2, alineado con `--min 2` de `awm ledger recurring`) |
@@ -259,6 +259,17 @@ flowchart TD
 
 El orden es por valor de negocio: primero lo que reduce el dolor de N1 en *todos* los ciclos futuros (incluidos los que implementan el resto de este brief) y cierra el hueco de calidad observado; después la capacidad nueva; al final lo condicionado a decisiones abiertas y a la matriz de R0.
 
+> **Re-priorización del dueño (2026-07-31, post-R0, registrada en issue #20):** los dos
+> dolores prioritarios son (1) **tiempo de ciclo** — un desarrollo de ~12 tareas hoy tarda
+> 4–6 horas; reducirlo sin perder calidad es el foco — y (2) **continuidad del orquestador
+> en Codex** — despacha tareas en secuencia y en algún punto simplemente se detiene y
+> nunca retoma, imposibilitando el trabajo desatendido (es exactamente el hueco que la
+> matriz de R0 certificó: sin espera/notificaciones certificables en Codex, la
+> continuidad debe venir de estado durable + reanudar-y-reconciliar). Orden de ejecución
+> resultante: **Release 1** (cura el dolor 2 y deduplica verificación), luego
+> **Release 5** (paralelismo — la palanca grande restante del dolor 1), luego
+> Releases 2–3 (cobertura de sensores). **Release 4 queda desestimado** (DA-2).
+
 ### Release 0 — Descubrimiento (read-only)
 
 - **Value:** independiente por sí mismo: la matriz de capacidades por provider (selección de modelo, despacho paralelo, worktrees, espera/polling, terminación, recuperación y mecánica de gates), el mapeo conceptual→real de sensor-packs/ledger y el estudio portable de runner/fingerprint definen la forma segura de R1–R5.
@@ -270,7 +281,7 @@ El orden es por valor de negocio: primero lo que reduce el dolor de N1 en *todos
 
 - **Value:** hace delegable el ciclo: preserva estado/resultados aunque un agente o turno desaparezca, tolera verificaciones de duración arbitraria sin cortarlas, evita cierres/veredictos perdidos y elimina ejecuciones mecánicas duplicadas por fingerprint — continuidad y *subida* de calidad sin quitar ninguna verificación.
 - **Scope:** RF-2.1–RF-2.10 · RNF-T.1, RNF-T.4–RNF-T.9. (CLI: journal, runner, estados e interlocks · Registry: skill SDD + prompts + contrato de consumo.)
-- **Blocked by:** DA-1 (la aceptación necesita la métrica de no-regresión definida).
+- **Blocked by:** none — DA-1 resuelta 2026-07-31: la aceptación usa el criterio mecánico (dedup solo con fingerprint idéntico, probado con test) en lugar de una métrica permanente.
 - **Acceptance:** CA-2.1–CA-2.10, CA-T.1, CA-T.4–CA-T.9 — fixtures deterministas + ciclo SDD real por provider; la duración nunca es timeout terminal y el cierre nunca depende de memoria conversacional.
 
 ### Release 2 — Detección estática de cobertura de sensores (core, mitad 1)
@@ -287,7 +298,12 @@ El orden es por valor de negocio: primero lo que reduce el dolor de N1 en *todos
 - **Blocked by:** Release 0 + Release 2 + DA-5.
 - **Acceptance:** CA-1.2, CA-1.3 — contra fixture sanitizado/versionado derivado del ledger real citado, con hash y comando de reproducción.
 
-### Release 4 — Tier declarativo de modelo (condicionado)
+### Release 4 — Tier declarativo de modelo (DESESTIMADO 2026-07-31)
+
+> Desestimado por decisión del dueño al resolver DA-2: la matriz de R0 muestra
+> override de modelo certificable solo en Claude Code, y el criterio es
+> "funcional en todo o no sirve". Se conserva la especificación por si el
+> panorama de providers cambia.
 
 - **Value:** la porción del costo correspondiente a implementadores corre en la capacidad que cada tarea necesita, no en el máximo por defecto; revisores permanecen fuera del tiering y a plena capacidad como red. El ahorro se mide sobre tokens reales por rol, sin atribuirle consumo de revisores que esta release no modifica.
 - **Scope:** RF-3.1, RF-3.2, RF-3.3 · RNF-T.2. (Registry: `writing-plans` + skill SDD.)
