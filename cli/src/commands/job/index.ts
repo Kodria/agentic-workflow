@@ -55,9 +55,9 @@ export function registerJobCommand(program: Command): void {
         });
 
     job.command('register')
-        .description('registra una entidad del ciclo (task | cycle-plan | dispatch | task-status) ANTES de actuar')
+        .description('registra una entidad del ciclo (task | cycle-plan | dispatch | task-status | next-action) ANTES de actuar')
         .requiredOption('--generation <token>')
-        .requiredOption('--entity <kind>', 'task | cycle-plan | dispatch | task-status')
+        .requiredOption('--entity <kind>', 'task | cycle-plan | dispatch | task-status | next-action')
         .requiredOption('--json <payload>', 'payload JSON de la entidad')
         .action((opts) => {
             let payload: unknown;
@@ -81,7 +81,12 @@ export function registerJobCommand(program: Command): void {
         .action((opts) => {
             if (!['pass', 'fail', 'inconclusive'].includes(opts.result)) throw new Error('--result debe ser pass | fail | inconclusive');
             const repo = process.cwd();
-            const verdictId = `verd-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+            // Determinista a partir de los MISMOS inputs que idempotencyKey (mas
+            // generation, para que veredictos de generaciones distintas sobre la
+            // misma obligacion+result+detail no colisionen): un retry genuino del
+            // mismo comando produce un payload byte-identico, no un
+            // rejected-digest-mismatch espurio (Fix 3).
+            const verdictId = `verd-${crypto.createHash('sha256').update(`${opts.generation}:${opts.obligation}:${opts.result}:${opts.detail}`).digest('hex').slice(0, 16)}`;
             emitRequest(repo, branchOf(repo), {
                 kind: 'verdict', generationToken: opts.generation,
                 idempotencyKey: crypto.createHash('sha256').update(`verdict:${opts.obligation}:${opts.result}:${opts.detail}`).digest('hex'),
