@@ -36,4 +36,14 @@ describe('redact', () => {
         expect(redactArgv(['cmd', '--token', '--my-secret-data'])).toEqual(['cmd', '--token', '[REDACTED]']);
         expect(redactArgv(['cmd', '--api-key', '--secret'])).toEqual(['cmd', '--api-key', '[REDACTED]']);
     });
+
+    test('findLiteralSecretFlag y redactArgv reconocen flags de un solo guion con palabra clave (R2.3)', () => {  // verifies R2.3
+        expect(findLiteralSecretFlag(['cmd', '-token', 'abc123'])).toBe('-token');
+        expect(redactArgv(['cmd', '-token', 'abc123'])).toEqual(['cmd', '-token', '[REDACTED]']);
+    });
+
+    test('findLiteralSecretFlag NO reconoce mnemonicos de una letra sin palabra clave — limitacion aceptada (R2.3)', () => {  // verifies R2.3
+        // Documenta el limite, no lo intenta cerrar: ver comentario en redact.ts.
+        expect(findLiteralSecretFlag(['cmd', '-p', 'hunter2secret'])).toBeNull();
+    });
 });

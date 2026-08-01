@@ -13,10 +13,10 @@ const ASSIGNMENT = new RegExp(`([a-z0-9_-]*(?:password|passwd|secret|api[-_]?key
 const SECRET_FLAG_SEGMENT = /(^|[-_])(password|passwd|secret|api[-_]?key|apikey|token|credential)($|[-_])/i;
 
 function looksLikeSensitiveFlag(token: string): boolean {
-    if (!token.startsWith('--')) return false;
+    if (!token.startsWith('-')) return false;
     const eq = token.indexOf('=');
     const flag = eq === -1 ? token : token.slice(0, eq);
-    return SECRET_FLAG_SEGMENT.test(flag.slice(2));
+    return SECRET_FLAG_SEGMENT.test(flag.replace(/^-+/, ''));
 }
 
 export function redactText(text: string): string {
@@ -28,11 +28,22 @@ export function redactText(text: string): string {
  *  NO intenta distinguir "el siguiente token es un flag hermano" de "es el
  *  valor literal": el rechazo es todo-o-nada (emitRequest lanza antes de
  *  persistir nada), así que la ambigüedad nunca importa — cualquier token
- *  después de un flag sensible ya es motivo suficiente de rechazo. */
+ *  después de un flag sensible ya es motivo suficiente de rechazo.
+ *
+ *  LIMITACIÓN ACEPTADA (no es un bug pendiente): esta función solo reconoce
+ *  secretos cuyo NOMBRE de flag contiene una palabra clave (password/token/
+ *  secret/api-key/credential), sea con uno o dos guiones (-token, --token).
+ *  Mnemónicos de una sola letra sin texto ninguno (ej. `-p` de mysql, `-i` de
+ *  ssh, `-u` de curl) son indistinguibles de cualquier otro flag corto por
+ *  texto solo — cerrar ese caso exigiría una tabla fija de convenciones por
+ *  herramienta externa, que es enumeración no acotada y no pertenece a un
+ *  mecanismo genérico (ver CLAUDE.md, frontera genérico/específico). Si esto
+ *  resulta ser un problema real y recurrente en este proyecto, se resuelve
+ *  vía harness-retro con una regla específica, no aquí. */
 export function findLiteralSecretFlag(argv: string[]): string | null {
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
-        if (!arg.startsWith('--')) continue;
+        if (!arg.startsWith('-')) continue;
         const eq = arg.indexOf('=');
         const flag = eq === -1 ? arg : arg.slice(0, eq);
         const inlineValue = eq === -1 ? undefined : arg.slice(eq + 1);
@@ -61,7 +72,7 @@ export function redactArgv(argv: string[]): string[] {
         const arg = argv[i];
         const eq = arg.indexOf('=');
         const flag = eq === -1 ? arg : arg.slice(0, eq);
-        const isSensitive = arg.startsWith('--') && SECRET_WORD.test(flag) && !/-env$/i.test(flag);
+        const isSensitive = arg.startsWith('-') && SECRET_WORD.test(flag) && !/-env$/i.test(flag);
         if (!isSensitive) {
             out.push(redactText(arg));
             i++;
