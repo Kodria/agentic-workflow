@@ -109,9 +109,18 @@ export async function resolveGeneration(repoRoot: string, branch: string, adapte
         enterCustody(repoRoot, branch, 'stall confirmado pero el adapter no afirma safeToReplace: custodia sin matar (R4.2b)');
         return 'custody-blocked';
     }
-    // muerte confirmada sin intervencion nuestra: la generacion queda 'active'
-    // hasta que el proximo beginGeneration la supersede al relanzar — no hace
-    // falta (ni corresponde) marcarla 'terminated' aca, porque nadie la mato.
+    // muerte confirmada sin intervencion nuestra: no corresponde marcarla
+    // 'terminated' aca, porque nadie la mato (esa transicion es solo para la
+    // rama con kill real, mas abajo). Queda 'active' hasta el proximo
+    // beginGeneration exitoso, que la supersede al relanzar. CAVEAT para
+    // Task 18 (superviseController): beginGeneration esta gateado por
+    // backoff/relanzamiento — si el backoff se agota, el loop entra en
+    // custodia SIN llamar beginGeneration, y esta generacion queda 'active'
+    // en el journal indefinidamente (superseded, nunca terminated, cuando
+    // eventualmente se relance). Hoy es inerte (ningun consumidor lee
+    // generation.state para reportar), pero cualquier futuro consumidor de
+    // observabilidad debe cruzar con cycle.status, no confiar en
+    // generation.state === 'active' como "puede seguir vivo un proceso".
     if (!refIsAlive(ref) && groupIsGone(ref.processGroup)) return 'proven-dead';
     // vivo + safe positivo (adapters futuros): SIGTERM -> gracia -> SIGKILL, confirmando
     const confirmed = await terminateGroupConfirmed(ref, grace);
