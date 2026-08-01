@@ -163,5 +163,9 @@ export function isWellFormedJob(x: unknown): x is Job {
         && typeof x.commandDigest === 'string'
         && Array.isArray(x.argv)
         && typeof x.cwd === 'string'
+        && Array.isArray(x.paths)
+        && Array.isArray(x.expandedPaths)
+        && typeof x.observationState === 'string'
+        && isObj(x.phaseTimestamps)
         && (EXECUTION_STATES as readonly string[]).includes(x.executionState as string);
 }

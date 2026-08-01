@@ -1,5 +1,5 @@
 import {
-    EXECUTION_STATES, GENERATION_STATES, isWellFormedState, isWellFormedProcessRef, emptyState,
+    EXECUTION_STATES, GENERATION_STATES, isWellFormedState, isWellFormedProcessRef, isWellFormedJob, emptyState,
 } from '../../../src/core/journal/types';
 
 describe('journal types', () => {
@@ -42,5 +42,27 @@ describe('journal types', () => {
         expect(isWellFormedProcessRef({ ...full, psArgsDigest: undefined })).toBe(false);
         expect(isWellFormedProcessRef({ ...full, processGroup: 'uno' })).toBe(false);
         expect(isWellFormedProcessRef(null)).toBe(false);
+    });
+
+    test('isWellFormedJob exige TODOS los campos requeridos, no un subset (R1.6)', () => {  // verifies R1.6
+        const full = {
+            id: 'j1',
+            fingerprint: 'f',
+            commandDigest: 'c',
+            argv: ['x'],
+            cwd: '.',
+            paths: ['**/*.ts'],
+            expandedPaths: ['a.ts'],
+            executionState: 'received',
+            observationState: 'progressing',
+            phaseTimestamps: {},
+        };
+        expect(isWellFormedJob(full)).toBe(true);
+        for (const key of ['paths', 'expandedPaths', 'observationState', 'phaseTimestamps']) {
+            const broken = { ...full } as Record<string, unknown>;
+            delete broken[key];
+            expect(isWellFormedJob(broken)).toBe(false);
+        }
+        expect(isWellFormedJob({ ...full, phaseTimestamps: [] })).toBe(false);
     });
 });
