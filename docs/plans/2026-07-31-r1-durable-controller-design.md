@@ -1,4 +1,4 @@
-# R1 — Controlador durable: journal, `awm job`, supervisor `awm watch` — diseño (v3)
+# R1 — Controlador durable: journal, `awm job`, supervisor `awm watch` — diseño (v4)
 
 > Ejecuta el **Release 1** del brief certificado
 > [`2026-07-30-sdd-cycle-optimization-brief.md`](2026-07-30-sdd-cycle-optimization-brief.md)
@@ -11,11 +11,16 @@
 >
 > **v2 (2026-07-31):** supervisor durable single-writer dueño de los jobs,
 > gate fail-closed, fencing por generación, identidad completa de procesos.
-> **v3 (2026-07-31):** incorpora la segunda revisión del dueño — 3 bloqueantes
-> (exclusión física de controladores, atomicidad por transición, secretos y
-> permisos) y 6 importantes (idempotencia real, bootstrap, state machine
-> tripartita, ReviewObligation, neutralidad probada en ambos providers,
-> RNF-T.8/T.9).
+> **v3 (2026-07-31):** exclusión física de controladores, atomicidad por
+> transición (snapshot único), secretos/permisos, idempotencia real, bootstrap,
+> state machine tripartita, ReviewObligation, neutralidad probada.
+> **v4 (2026-07-31):** tercera revisión del dueño — el silencio nunca autoriza
+> kill por sí solo (doble señal + escalera de gracia), claim durable por
+> `spawnNonce` (la no-ejecución se prueba, no se asume), publicación de
+> requests con fsync+rename y acks regenerables desde `state.json`,
+> `VerificationPlan` autoritativo (el gate no puede quedar verde por omisión),
+> `ControllerAdapter` por provider, ejecución segura estructurada, `COMPLETE`
+> ⇒ cero jobs vivos.
 
 ## Arquitectura
 
@@ -54,12 +59,13 @@ IDs propios de este diseño (`R1`–`R8`); donde materializan un RF del brief, s
 
 - **R1.1** — THE journal SHALL vivir en `<repo>/.awm/journal/<branch-slug>/` (local al proyecto, gitignoreado; nada bajo `~/.awm`). Estructura: `state.json` (snapshot canónico único), `requests/`, `acks/`, `logs/`, `events.jsonl`, `supervisor.lock`.
 - **R1.2** — THE estado canónico SHALL ser un único snapshot `state.json` con revisión monotónica, escrito exclusivamente por el supervisor vía `writeFileAtomic`; una transición que toca N entidades SHALL materializarse en UNA escritura. THE directorios del journal SHALL crearse `0700` y los archivos escribirse `0600`. *(RF-2.10; bloqueantes v3-2 y v3-3)*
-- **R1.3** — THE requests SHALL ser inmutables (`wx`), con `requestId` único y `idempotencyKey` separada; WHEN el supervisor aplica una request, SHALL verificar generación (fencing) + revisión y SHALL persistir un ack durable por `requestId`; IF llega una request con `idempotencyKey` ya aplicada, THEN SHALL responder el ack existente — nunca re-aplicar. *(RNF-T.7; importante v3-1)*
-- **R1.4** — THE modelo durable SHALL registrar como entidades explícitas: ciclo, tarea, intento, despacho, **ReviewObligation** (la obligación de revisión se registra ANTES del despacho; el **Verdict** nace al recibirse — nunca antes de existir), fix, QA y job. *(RF-2.1, RF-2.3; importante v3-4)*
+- **R1.3** — THE requests SHALL publicarse atómicamente: escribir `*.tmp`, `fsync`, cerrar y `rename` al nombre final (nunca `wx` directo sobre el nombre final — el supervisor jamás puede leer JSON parcial); `requestId` único y `idempotencyKey` separada; el registro de request aplicada dentro de `state.json` SHALL incluir `idempotencyKey` + digest del payload, de modo que IF el estado persistió pero el ack se perdió, THEN el ack SHALL regenerarse determinísticamente desde `state.json` — nunca re-aplicar. *(RNF-T.7; bloqueante v4-3)*
+- **R1.4** — THE modelo durable SHALL registrar como entidades explícitas: ciclo, tarea, intento, despacho, **ReviewObligation** (la obligación de revisión se registra ANTES del despacho; el **Verdict** nace al recibirse — nunca antes de existir), **VerificationPlan**, fix, QA y job. *(RF-2.1, RF-2.3)*
+- **R1.4b** — WHEN una tarea se registra, THE controlador SHALL registrar con ella su **VerificationPlan** autoritativo: las verificaciones esperadas (suite de tests, lint, `awm sensors run` si hay `sensors.json`, y las ReviewObligations de la tarea) derivadas del plan y de la configuración real del repo. THE gate SHALL exigir cada ítem del VerificationPlan satisfecho por un job/veredicto terminal con fingerprint vigente — IF el controlador omite solicitar una verificación planificada, THEN el ítem queda insatisfecho y el gate falla: el verde por omisión es imposible por construcción. *(RF-2.4, RF-2.9; bloqueante v4-4)*
 - **R1.5** — WHILE el ciclo esté `IN_PROGRESS`, THE `state.json` SHALL contener `next_action` estructurado `{actionId, type, target, preconditions, attempt, state}`, idempotente y ejecutable sin memoria conversacional. *(RF-2.6, N4)*
 - **R1.6** — IF una lectura encuentra JSON/shape inválido, THEN las consultas (`list/show/ps`) SHALL mostrarlo como `corrupt` (visible, jamás descartado en silencio) y THE certificación (`gate`, `reconcile`) SHALL tratarlo como bloqueo. *(bloqueante v2-2, se conserva)*
-- **R1.7** — THE job SHALL separar tres dimensiones de estado, nunca un enum sobrecargado: `executionState` (`received | spawn-intent | claimed | running | exited | cancel-requested | cancelled`), `observationState` (`progressing | suspected-stall`), y `verdict` (`pass | fail | inconclusive`, presente solo tras `exited`). Re-reclamar trabajo SHALL crear un **Attempt nuevo enlazado**, nunca reutilizar el anterior. *(regla CONSTITUTION; importante v3-3)*
-- **R1.8** — WHEN el supervisor va a hacer spawn de un job, THE transición SHALL ser durable: persistir `spawn-intent` (con `spawnNonce`) ANTES del spawn; tras el spawn, persistir `running` con la identidad completa. IF hay replay con un `spawn-intent` sin `running`, THEN SHALL buscarse un proceso vivo portando ese `spawnNonce` (inyectado en el entorno del hijo): si existe se adopta, si no existe el re-spawn es seguro — nunca un segundo proceso por crash entre spawn y persistencia. *(bloqueante v3-2)*
+- **R1.7** — THE job SHALL separar tres dimensiones de estado, nunca un enum sobrecargado: `executionState` (`received | spawn-intent | claimed | running | exited | cancel-requested | cancelled | orphaned`), `observationState` (`progressing | suspected-stall`), y `verdict` (`pass | fail | inconclusive`, presente solo tras `exited`). THE generación de controlador SHALL tener su propio estado: `active | controller-suspected-stall | terminated | superseded`. Re-reclamar trabajo SHALL crear un **Attempt nuevo enlazado**, nunca reutilizar el anterior. *(regla CONSTITUTION; importante v4-1)*
+- **R1.8** — THE spawn SHALL ser demostrable, no inferible: el supervisor nunca ejecuta el comando crudo — lo envuelve en un wrapper durable (`awm job exec-wrapper --job <id> --nonce <n>`) que (1) reclama en exclusiva un claim-file por `spawnNonce` (`wx`, con identidad completa), (2) ejecuta el comando, (3) escribe el resultado terminal atómicamente (temp+fsync+rename) junto al claim. WHEN hay replay de un `spawn-intent` sin `running`: sin claim ⇒ nunca ejecutó ⇒ re-spawn seguro; claim + resultado ⇒ adoptar el resultado; claim sin resultado y proceso probado muerto ⇒ ejecución parcial no demostrable ⇒ `orphaned` con autorización requerida — **jamás relanzar lo que no se puede probar que no ejecutó**. *(bloqueante v4-2)*
 
 ### R2 — Identidad de procesos, higiene y secretos
 
@@ -77,16 +83,19 @@ IDs propios de este diseño (`R1`–`R8`); donde materializan un RF del brief, s
 - **R3.4** — THE fingerprint SHALL computarse de: argv exacto + cwd relativo + `HEAD` + digest del índice + digest de tracked/untracked/deleted de los paths declarados (`--paths`, expansión persistida; default árbol completo). Reutilización solo ante identidad exacta; resultado tardío tras cambio de estado queda histórico y no certifica. *(RF-2.2, RF-2.8; CA-T.1)*
 - **R3.5** — WHILE un job viva, THE duración SHALL NOT producir transición terminal. Señales separadas: `controllerHeartbeat` (vía `awm job controller-heartbeat`), liveness real del runner (la valida el supervisor contra R2.1) y `lastProgressAt`. `suspected-stall` = vivo + sin progreso, observacional. *(RF-2.5)*
 - **R3.6** — IF el proyecto carece de suite o sensores, THEN `gate` SHALL degradar declarando qué verificador falta — nunca verde por ausencia. *(RF-2.4)*
-- **R3.7** — THE journal SHALL registrar por entidad los datos de RNF-T.4/T.8/T.9: timestamps por fase, tokens por rol cuando el harness los reporte (input/output/cache), número de despachos, ejecuciones mecánicas (reales vs deduplicadas), y toda evidencia referenciada con hash + comando reproducible — la comparación contra el baseline 2026-07-29 sale del journal, sin telemetría. *(importante v3-6)*
+- **R3.7** — THE journal SHALL registrar por entidad los datos de RNF-T.4/T.8/T.9: timestamps por fase, tokens por rol cuando el harness los reporte (input/output/cache), número de despachos, ejecuciones mecánicas (reales vs deduplicadas), y toda evidencia referenciada con hash + comando reproducible. THE comando `awm job export` SHALL producir una exportación sanitizada (redactada) y versionable del ciclo, reproducible desde un checkout limpio — la comparación contra el baseline 2026-07-29 se hace sobre ese artefacto, sin telemetría. *(importante v4-4)*
 
 ### R4 — Supervisor `awm watch`
 
 - **R4.1** — THE bootstrap SHALL ser `awm watch --init` (el único writer crea el `state.json` inicial); `supervisor.lock` con identidad completa R2.1; lock con identidad muerta probada ⇒ se reclama con aviso. *(importante v3-2)*
-- **R4.2** — WHEN `controllerHeartbeat` venza (default 5 min), THE supervisor SHALL resolver la generación vigente ANTES de relanzar, en este orden: (a) process group del controlador probado muerto ⇒ relanzar generación N+1; (b) vivo ⇒ marcar `controller-suspected-stall`, terminar el process group (SIGTERM → confirmar → SIGKILL → confirmar, con identidad R2.1) y solo con muerte confirmada relanzar; (c) IF la terminación no puede confirmarse, THEN ciclo `BLOCKED` con evidencia — SHALL NOT coexistir dos controladores sobre el mismo worktree, jamás. El fencing de requests se mantiene como segunda línea, no como única defensa. *(bloqueante v3-1)*
+- **R4.2** — THE silencio de heartbeat por sí solo SHALL producir únicamente `controller-suspected-stall` — nunca autoriza kill. THE decisión de relevo SHALL usar doble señal: heartbeat vencido (default 5 min) **y** ausencia de actividad observable del process group del controlador (CPU acumulada congelada, sin crecimiento de output consumido por el supervisor, sin hijos nuevos) durante una ventana de actividad propia (default 10 min adicionales, configurable) — una llamada larga legítima con heartbeat silencioso pero actividad viva NO se toca. *(RF-2.5 aplicado al controlador; bloqueante v4-1)*
+- **R4.2b** — WHEN ambas señales confirman el stall, THE supervisor SHALL resolver la generación en este orden: (a) process group probado muerto ⇒ relanzar N+1; (b) vivo ⇒ escalera de gracia: SIGTERM → ventana de flush (default 30 s) → confirmar → solo entonces SIGKILL → confirmar, con identidad R2.1; (c) terminación inconfirmable ⇒ ciclo `BLOCKED` con evidencia. Dos controladores SHALL NOT coexistir sobre el mismo worktree, jamás; el fencing de requests es segunda línea. *(bloqueante v3-1, endurecido)*
 - **R4.3** — THE relanzamientos SHALL aplicar backoff (1 → 5 → 15 min) y tope por hora; fallo de relanzamiento ⇒ error auditado + backoff.
 - **R4.4** — THE supervisor SHALL reclamar y ejecutar toda intención pendiente en process groups propios (sobreviven a cualquier turno), con la transición durable de R1.8. *(bloqueante v2-1)*
-- **R4.5** — WHEN el ciclo llegue a `COMPLETE`/`BLOCKED`, THE supervisor SHALL drenar jobs vivos, liberar el lock y terminarse — nada eterno, ningún hijo abandonado.
-- **R4.6** — THE `events.jsonl` SHALL escribirlo solo el supervisor (append serializado); la superficie concurrente son las requests inmutables.
+- **R4.5** — THE transición a `COMPLETE` SHALL exigir cero jobs vivos: el gate incluye "todo job en estado terminal" entre sus condiciones, y el drenaje ocurre ANTES de declarar `COMPLETE` — nunca después (sin contradicción gate/drenado). Tras `COMPLETE`/`BLOCKED` el supervisor libera el lock y se termina — nada eterno, ningún hijo abandonado. *(importante v4-5)*
+- **R4.6** — THE `events.jsonl` SHALL escribirlo solo el supervisor (append serializado). Es **auditoría derivada best-effort para observabilidad** — la autoridad es `state.json`; un evento perdido no se reconstruye ni invalida el estado. *(importante v4-6)*
+- **R4.7** — THE ejecución de comandos SHALL ser estructurada y segura: executable + argv como array (`shell: false`, sin interpolación — regla `execFileSync` de AGENTS.md extendida a spawn), `cwd` validado dentro del repo, rechazo de symlinks en paths de trabajo del journal (mismo criterio que `writeFileAtomic`), y secretos entregados por referencia (nombre de variable que el proceso resuelve en su propio entorno) — el valor jamás viaja por argv ni se persiste. *(importante v4-2)*
+- **R4.8** — THE interacción con cada provider SHALL pasar por una interfaz `ControllerAdapter` (launch/resume, señales de actividad observables, consumo de output, terminación del process group, capacidades declaradas), con implementaciones `codex` y `claude-code` — la lógica del supervisor no conoce providers, conoce el adapter. *(importante v4-3)*
 
 ### R5 — Integración con el skill SDD (registry) y neutralidad de provider
 
@@ -97,17 +106,20 @@ IDs propios de este diseño (`R1`–`R8`); donde materializan un RF del brief, s
 
 ### R6 — Tests (tmpdir + HOME override; ningún test toca `~/.awm`)
 
-Fixtures: los 4 de R0 (job largo / mudo / orphaned / fingerprint) + los de la
-segunda revisión: crash entre spawn y persistencia (replay sin duplicar, R1.8),
-controlador zombie terminado y confirmado antes del relevo (R4.2, con caso (c)
-bloqueando), reintento con misma `idempotencyKey` (ack, no re-aplicación),
-secreto literal en flag sensible (request rechazada; nada persiste sin
-redactar), permisos `0700/0600` verificados, review perdido (gate bloquea),
-proyecto sin verificadores, interrupción en cada fase con reanudación,
-resultado tardío histórico, corrupción (gate cerrado), requests concurrentes
-(get-or-create), generación vieja rechazada, reutilización de PID (identidad
-completa), y batería semántica completa en modo journal bajo ambos providers +
-opt-out sin cambios en ambos (R5.4).
+Fixtures: los 4 de R0 (job largo / mudo / orphaned / fingerprint) + segunda
+revisión: reintento con misma `idempotencyKey` (ack, no re-aplicación), secreto
+literal en flag sensible (request rechazada), permisos `0700/0600`, review
+perdido (gate bloquea), proyecto sin verificadores, interrupción en cada fase
+con reanudación, resultado tardío histórico, corrupción (gate cerrado),
+requests concurrentes (get-or-create), generación vieja rechazada,
+reutilización de PID + tercera revisión: **heartbeat silencioso con actividad
+viva ⇒ no se toca** (R4.2), escalera SIGTERM/gracia/SIGKILL confirmada (R4.2b),
+claim sin resultado con proceso muerto ⇒ `orphaned`, jamás relanzado (R1.8),
+request `*.tmp` truncada ⇒ invisible para el supervisor (R1.3), ack perdido
+regenerado desde `state.json` (R1.3), ítem de VerificationPlan nunca solicitado
+⇒ gate rojo (R1.4b), `COMPLETE` imposible con job vivo (R4.5), export
+sanitizado reproducible (R3.7), y batería semántica completa en modo journal
+bajo ambos providers + opt-out sin cambios en ambos (R5.4).
 
 ### R7 — Métricas
 
@@ -122,24 +134,32 @@ opt-out sin cambios en ambos (R5.4).
 ```
 cli/src/core/journal/
   types.ts          Cycle, Task, Attempt, Dispatch, ReviewObligation, Verdict,
-                    Job {executionState, observationState, verdict}, Generation,
-                    ProcessRef, NextAction, Ack
+                    VerificationPlan, Job {executionState, observationState,
+                    verdict}, Generation {active|controller-suspected-stall|
+                    terminated|superseded}, ProcessRef, NextAction, Ack
   store.ts          snapshot state.json: lectura + shape validation + escritura
                     canónica (solo supervisor) sobre writeFileAtomic, revisión
                     monotónica, permisos 0700/0600
-  requests.ts       emisión (con redacción previa + rechazo de secretos) y
-                    consumo de requests; acks durables por requestId
+  requests.ts       emisión (redacción previa + rechazo de secretos; publicación
+                    tmp+fsync+rename) y consumo; acks durables regenerables
+                    desde state.json (idempotencyKey + payload digest)
   fingerprint.ts    argv + cwd + HEAD + índice + digests (expansión persistida)
-  process.ts        ProcessRef completo, liveness, spawn con nonce en entorno,
-                    terminación confirmada de process groups
-  redact.ts         redacción en el emisor; detección de secretos en flags
+  process.ts        ProcessRef completo, liveness, señales de actividad del
+                    process group (CPU/output/hijos), spawn estructurado
+                    shell:false, terminación confirmada con escalera de gracia
+  adapter.ts        ControllerAdapter + implementaciones codex / claude-code
+  redact.ts         redacción en el emisor; detección de secretos en flags;
+                    secretos por referencia, nunca por valor
 cli/src/commands/job/
-  index.ts request.ts list.ts show.ts ps.ts
+  index.ts request.ts list.ts show.ts ps.ts export.ts
+  exec-wrapper.ts   wrapper durable por spawnNonce: claim exclusivo + ejecución
+                    + resultado terminal atómico
   controller-heartbeat.ts reconcile.ts gate.ts reap.ts
 cli/src/commands/watch/
-  index.ts          supervisor: --init (bootstrap), lock, loop, resolución de
-                    generación (muerte probada / terminar+confirmar / BLOCKED),
-                    claim+spawn durable de jobs, backoff, drenaje, auto-exit
+  index.ts          supervisor: --init (bootstrap), lock, loop, doble señal de
+                    stall, resolución de generación (muerte probada /
+                    SIGTERM→gracia→SIGKILL confirmados / BLOCKED), claim+spawn
+                    vía exec-wrapper, backoff, drenaje pre-COMPLETE, auto-exit
 cli/tests/core/journal/  + cli/tests/commands/job|watch/
 ```
 
@@ -155,9 +175,12 @@ comandos exactos, protocolo de `controller-heartbeat` y ReviewObligation.
    `controller-heartbeat`, y pide verificaciones con `awm job request` — el
    supervisor las ejecuta en sus process groups con transición durable de spawn.
 3. Codex se detiene. Los jobs siguen corriendo (son del supervisor).
-4. Heartbeat vencido → el supervisor **resuelve** la generación 1: muerta
-   probada ⇒ relanza; viva ⇒ la termina y confirma; inconfirmable ⇒ `BLOCKED`
-   con evidencia. Solo entonces emite la generación 2.
+4. Heartbeat vencido → `controller-suspected-stall` (solo observación). Si
+   además el process group no muestra actividad durante la ventana propia, el
+   supervisor **resuelve** la generación 1: muerta probada ⇒ relanza; viva ⇒
+   SIGTERM → gracia → SIGKILL, confirmando cada paso; inconfirmable ⇒ `BLOCKED`
+   con evidencia. Solo entonces emite la generación 2. Una llamada larga con
+   actividad viva nunca se interrumpe.
 5. El orquestador gen-2 abre con `reconcile` + `next_action`. Requests tardías
    de gen-1: rechazadas y auditadas (fencing, segunda línea).
 6. `gate` verde (sin pendientes, sin obligaciones sin veredicto, sin corruptos)
