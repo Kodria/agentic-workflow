@@ -81,15 +81,20 @@ export function registerJobCommand(program: Command): void {
         .action((opts) => {
             if (!['pass', 'fail', 'inconclusive'].includes(opts.result)) throw new Error('--result debe ser pass | fail | inconclusive');
             const repo = process.cwd();
-            // Determinista a partir de los MISMOS inputs que idempotencyKey (mas
-            // generation, para que veredictos de generaciones distintas sobre la
-            // misma obligacion+result+detail no colisionen): un retry genuino del
-            // mismo comando produce un payload byte-identico, no un
-            // rejected-digest-mismatch espurio (Fix 3).
+            // Determinista a partir de los MISMOS inputs que idempotencyKey, INCLUYENDO
+            // generation en ambos (alineado — bug post-624a4c0: idempotencyKey se habia
+            // quedado sin generation mientras verdictId si la incluia, lo que hacia que
+            // un veredicto genuinamente distinto en otra generacion colisionara en
+            // idempotencyKey pero difiriera en payloadDigest, cayendo a
+            // rejected-digest-mismatch en vez de aplicarse como veredicto nuevo):
+            // un retry genuino del mismo comando (misma generation) produce un payload
+            // byte-identico, no un rejected-digest-mismatch espurio (Fix 3); una
+            // generation distinta produce una idempotencyKey ENTERAMENTE distinta, no
+            // una colision con digest distinto.
             const verdictId = `verd-${crypto.createHash('sha256').update(`${opts.generation}:${opts.obligation}:${opts.result}:${opts.detail}`).digest('hex').slice(0, 16)}`;
             emitRequest(repo, branchOf(repo), {
                 kind: 'verdict', generationToken: opts.generation,
-                idempotencyKey: crypto.createHash('sha256').update(`verdict:${opts.obligation}:${opts.result}:${opts.detail}`).digest('hex'),
+                idempotencyKey: crypto.createHash('sha256').update(`verdict:${opts.generation}:${opts.obligation}:${opts.result}:${opts.detail}`).digest('hex'),
                 payload: { verdictId, obligationId: opts.obligation, result: opts.result, detail: opts.detail },
             });
             process.stdout.write(JSON.stringify({ verdictId }, null, 2) + '\n');

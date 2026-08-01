@@ -109,7 +109,7 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
             // Fake-success eliminado: una referencia a un taskId inexistente NO
             // es un no-op silencioso con outcome 'applied' — se rechaza (Fix 1
             // Parte C lo captura sin tumbar el supervisor).
-            if (task === undefined) throw new Error(`register --entity task-status: taskId desconocido: ${taskId}`);
+            if (task === undefined) throw new Error('register --entity task-status: taskId desconocido');
             task.status = status;
             if (status === 'done') task.completedAt = now();
             applyOutcome(s, { ...base, outcome: 'applied' });
