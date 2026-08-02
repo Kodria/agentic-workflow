@@ -10,7 +10,7 @@
 
 **Tech Stack:** TypeScript 5.9 en `cli/` (Node ≥20, commander, `execFileSync`/`spawn` con argv estructurado, cero dependencias runtime nuevas), Jest 30 con repos Git y tmpdirs aislados; Markdown + tests Node del repo hermano `awm-baseline-registry` para las skills.
 
-**Modo de ejecución:** interactivo
+**Modo de ejecución:** desatendido
 
 ---
 
