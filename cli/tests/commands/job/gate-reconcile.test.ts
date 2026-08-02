@@ -1,10 +1,16 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { computeGate, FingerprintNow } from '../../../src/commands/job/gate';
+import { execFileSync } from 'child_process';
+import { Command } from 'commander';
+import { computeGate, computeTrackGate, FingerprintNow } from '../../../src/commands/job/gate';
 import { reconcileJobs, materializeRetry } from '../../../src/commands/job/reconcile';
 import { planReap, executeReap } from '../../../src/commands/job/reap';
-import { emptyState, Job, JournalState } from '../../../src/core/journal/types';
+import { registerJobCommand } from '../../../src/commands/job';
+import { registerWatchCommand } from '../../../src/commands/watch';
+import { emptyState, Job, JournalState, TrackRef } from '../../../src/core/journal/types';
+import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
+import { writeDescriptor, TrackDescriptor } from '../../../src/core/tracks/descriptor';
 
 function job(partial: Partial<Job>): Job {
     return {
@@ -184,6 +190,89 @@ describe('gate', () => {
         expect(g2.pass).toBe(false);
         expect(g2.reasons.some((r) => r.category === 'adverse-verdict')).toBe(true);
     });
+
+    test('computeGate produce el mismo conjunto de categorias que antes de la extraccion de evaluateEvidence (regresion R1)', () => {
+        const s = passingState();
+        s.cycle.status = 'BLOCKED';
+        s.cycle.blockedReason = 'custodia';
+        s.cycleVerificationPlan = [];
+        s.tasks[0].status = 'pending';
+        s.tasks[0].reviewObligations = [];
+        s.jobs['live'] = job({ id: 'live', executionState: 'running' });
+        const g = computeGate(s, false, fpCurrent);
+        const categories = [...new Set(g.reasons.map((r) => r.category))].sort();
+        expect(categories).toEqual(
+            ['cycle-blocked', 'empty-cycle-plan', 'live-job', 'missing-verifier', 'open-obligation', 'pending-task'].sort(),
+        );
+    });
+});
+
+/** Estado de journal de un TRACK individual (C6, R3.5): trackContext con la
+ *  tarea asignada ya `done`, cycleVerificationPlan VACIO (un track no exige
+ *  QA/interlock de ambito de plan), y evidencia local completa (item de
+ *  test/sensors satisfecho, obligaciones spec/quality con verdict pass) —
+ *  todo con el MISMO fingerprint que el gate va a recomputar ('same'). */
+function stateWithCompletedTrackTask(): JournalState {
+    const s = emptyState('track/cli');
+    s.trackContext = { trackId: 'cli', taskIds: ['T1'], planDigest: 'x', baseSha: 'y', planJournalId: 'j-1' };
+    s.requiredVerifiers = ['test', 'sensors'];
+    s.tasks.push({
+        id: 'T1', title: 't', status: 'done', attempts: 1,
+        verificationPlan: [
+            { id: 'v1', kind: 'test', satisfiedBy: 'j1' },
+            { id: 'v-sensors', kind: 'sensors', satisfiedBy: 'j2' },
+        ],
+        reviewObligations: [
+            { id: 'o-spec', taskId: 'T1', kind: 'spec', verdictId: 'verd-spec' },
+            { id: 'o-quality', taskId: 'T1', kind: 'quality', verdictId: 'verd-quality' },
+        ],
+    });
+    s.jobs['j1'] = job({ id: 'j1', fingerprint: 'same', executionState: 'exited', verdict: 'pass' });
+    s.jobs['j2'] = job({ id: 'j2', fingerprint: 'same', executionState: 'exited', verdict: 'pass' });
+    s.verdicts.push(
+        { id: 'verd-spec', obligationId: 'o-spec', result: 'pass', detail: 'ok', receivedAt: 'now', fingerprint: 'same', argv: ['review', 'o-spec'], paths: [], cwd: '.' },
+        { id: 'verd-quality', obligationId: 'o-quality', result: 'pass', detail: 'ok', receivedAt: 'now', fingerprint: 'same', argv: ['review', 'o-quality'], paths: [], cwd: '.' },
+    );
+    return s;
+}
+
+describe('computeTrackGate — gate local de un track (C6, R3.5)', () => {
+    test('computeTrackGate no exige qa/interlock global (R3.5, C6)', () => {
+        const s = stateWithCompletedTrackTask();
+        expect(computeTrackGate(s, false, () => 'same')).toEqual({ pass: true, reasons: [] });
+        expect(computeGate(s, false, () => 'same').pass).toBe(false);
+    });
+
+    test('corrupcion o journal ausente bloquea con categoria propia (corrupt-state)', () => {
+        const g = computeTrackGate(null, true, () => 'same');
+        expect(g.pass).toBe(false);
+        expect(g.reasons).toEqual([{ category: 'corrupt-state', detail: expect.any(String) }]);
+    });
+
+    test('journal sin trackContext no es un journal de track: bloquea con wrong-context', () => {
+        const s = stateWithCompletedTrackTask();
+        delete s.trackContext;
+        const g = computeTrackGate(s, false, () => 'same');
+        expect(g.pass).toBe(false);
+        expect(g.reasons).toEqual([{ category: 'wrong-context', detail: expect.any(String) }]);
+    });
+
+    test('una tarea ajena colada en el journal del track se rechaza, jamas certifica por ella (R2.3)', () => {
+        const s = stateWithCompletedTrackTask();
+        s.tasks.push({ id: 'ajena', title: 'x', status: 'done', attempts: 1, verificationPlan: [], reviewObligations: [] });
+        const g = computeTrackGate(s, false, () => 'same');
+        expect(g.pass).toBe(false);
+        expect(g.reasons).toEqual([{ category: 'foreign-task', detail: expect.stringContaining('ajena') }]);
+    });
+
+    test('sigue exigiendo verificadores mecanicos y fingerprint vigente localmente (no es un gate vacio)', () => {
+        const s = stateWithCompletedTrackTask();
+        s.jobs['j1'].fingerprint = 'cambiado';
+        expect(computeTrackGate(s, false, () => 'same').reasons.some((r) => r.category === 'stale-fingerprint')).toBe(true);
+        const s2 = stateWithCompletedTrackTask();
+        s2.requiredVerifiers = ['test', 'sensors', 'lint'];
+        expect(computeTrackGate(s2, false, () => 'same').reasons.some((r) => r.category === 'missing-verifier' && /lint/.test(r.detail))).toBe(true);
+    });
 });
 
 describe('reconcile — matriz unica R1.8 (R3.3)', () => {
@@ -317,5 +406,141 @@ describe('reap — limpieza explicita con identidad validada (R2.2)', () => {
         const killed = await executeReap(s, ['vivo']);
         expect(killed).toEqual(['vivo']);
         child.kill('SIGKILL');
+    });
+});
+
+// El guard de contexto (R9.4) se prueba a nivel de comando REGISTRADO: `job
+// gate` y `watch --init` deben rechazar un cwd cuyo descriptor no autentica,
+// y deben proceder EXACTAMENTE igual que antes cuando no hay descriptor
+// (caso comun) o cuando el descriptor si autentica.
+class ExitSignal extends Error { constructor(public code: number) { super(`process.exit(${code})`); } }
+
+function gitInitAt(repo: string, branch: string): void {
+    execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'init', '-q', '-b', branch], { cwd: repo });
+    fs.writeFileSync(path.join(repo, 'f.txt'), 'x');
+    execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'add', '.'], { cwd: repo });
+    execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'c'], { cwd: repo });
+}
+
+function trackRefFixture(overrides: Partial<TrackRef>, worktreePath: string): TrackRef {
+    return {
+        trackId: 'cli', worktreePath, branch: 'track/cli', ownership: [], sharedResources: [], dependsOn: [],
+        fencingToken: 'f'.repeat(32), phase: 'ACTIVE', readinessNonce: 'n'.repeat(8), ...overrides,
+    };
+}
+
+function descriptorFixture(overrides: Partial<TrackDescriptor>, planRoot: string): TrackDescriptor {
+    return { schema: 1, planRoot, planBranch: 'main', trackId: 'cli', planJournalId: 'j-1', fencingToken: 'f'.repeat(32), ...overrides };
+}
+
+async function runCommand(register: (prog: Command) => void, argv: string[], cwd: string): Promise<{ out: string; err: string; exitCode: number | null }> {
+    const prog = new Command();
+    prog.exitOverride();
+    register(prog);
+    const outSpy = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const errSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue(cwd);
+    let exitCode: number | null = null;
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+        exitCode = code ?? 0;
+        throw new ExitSignal(exitCode);
+    }) as never);
+    try {
+        await prog.parseAsync(['node', 'awm', ...argv]);
+    } catch (e) {
+        if (!(e instanceof ExitSignal)) throw e;
+    } finally {
+        cwdSpy.mockRestore();
+        exitSpy.mockRestore();
+    }
+    const out = outSpy.mock.calls.map((c) => String(c[0])).join('');
+    const err = errSpy.mock.calls.map((c) => String(c[0])).join('');
+    outSpy.mockRestore();
+    errSpy.mockRestore();
+    return { out, err, exitCode };
+}
+
+const runJob = (argv: string[], cwd: string) => runCommand(registerJobCommand, ['job', ...argv], cwd);
+const runWatch = (argv: string[], cwd: string) => runCommand(registerWatchCommand, ['watch', ...argv], cwd);
+
+describe('guard de contexto en awm job / awm watch (R9.4)', () => {
+    let planRoot: string;
+    let trackRoot: string;
+    let otherRoot: string;
+
+    beforeEach(() => {
+        planRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-guard-plan-'));
+        trackRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-guard-track-'));
+        otherRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-guard-other-'));
+        gitInitAt(planRoot, 'main');
+        gitInitAt(trackRoot, 'track/cli');
+        gitInitAt(otherRoot, 'track/cli');
+
+        initJournal(planRoot, 'main');
+        const planState = readJournal(planRoot, 'main').state!;
+        planState.journalId = 'j-1';
+        planState.tracks = [trackRefFixture({ fencingToken: 'f'.repeat(32) }, trackRoot)];
+        writeJournal(planRoot, 'main', planState);
+
+        initJournal(trackRoot, 'track/cli');
+        const trackState = readJournal(trackRoot, 'track/cli').state!;
+        trackState.trackContext = { trackId: 'cli', taskIds: [], planDigest: 'x', baseSha: 'y', planJournalId: 'j-1' };
+        writeJournal(trackRoot, 'track/cli', trackState);
+        writeDescriptor(trackRoot, descriptorFixture({ planJournalId: 'j-1', fencingToken: 'f'.repeat(32) }, planRoot));
+
+        // otherRoot: mismo descriptor (mismo plan/trackId/fencing) pero NO es
+        // el worktree que el TrackRef del plan declara — su realpath jamas
+        // puede autenticar (R9.4), aunque el resto del descriptor "calce".
+        initJournal(otherRoot, 'track/cli');
+        const otherState = readJournal(otherRoot, 'track/cli').state!;
+        otherState.trackContext = { trackId: 'cli', taskIds: [], planDigest: 'x', baseSha: 'y', planJournalId: 'j-1' };
+        writeJournal(otherRoot, 'track/cli', otherState);
+        writeDescriptor(otherRoot, descriptorFixture({ planJournalId: 'j-1', fencingToken: 'f'.repeat(32) }, planRoot));
+    });
+
+    afterEach(() => {
+        for (const dir of [planRoot, trackRoot, otherRoot]) fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    test('`job gate` desde un cwd cuyo descriptor no autentica (realpath no coincide con el TrackRef) rechaza con "cwd no autenticado"', async () => {
+        const { err, exitCode } = await runJob(['gate'], otherRoot);
+        expect(exitCode).toBe(1);
+        expect(err).toContain('cwd no autenticado');
+    });
+
+    test('`job gate` desde el cwd autenticado (trackRoot) atraviesa el guard sin bloquear por autenticacion', async () => {
+        const { out, err, exitCode } = await runJob(['gate'], trackRoot);
+        // el guard NO bloqueo (nunca imprime "cwd no autenticado"); computeGate
+        // (todavia global, sin distinguir modo track — eso es de otra task)
+        // bloquea por otras razones, lo cual es esperado y no es objeto de este test.
+        expect(err).not.toContain('cwd no autenticado');
+        expect(exitCode).toBe(1);
+        expect(JSON.parse(out).pass).toBe(false);
+    });
+
+    test('`watch --init` desde un cwd SIN descriptor (repo comun, sin tracks) procede exactamente como antes de esta task', async () => {
+        const plainRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-guard-plain-'));
+        try {
+            gitInitAt(plainRepo, 'main');
+            const { out, err, exitCode } = await runWatch(['--init'], plainRepo);
+            expect(exitCode).toBeNull();
+            expect(err).toBe('');
+            expect(out).toContain('journal inicializado');
+        } finally {
+            fs.rmSync(plainRepo, { recursive: true, force: true });
+        }
+    });
+
+    test('`watch --init` desde el cwd autenticado (trackRoot) procede con normalidad', async () => {
+        const { out, err, exitCode } = await runWatch(['--init'], trackRoot);
+        expect(err).not.toContain('cwd no autenticado');
+        expect(exitCode).toBeNull();
+        expect(out).toContain('journal inicializado');
+    });
+
+    test('`watch --init` desde un cwd cuyo descriptor no autentica rechaza con "cwd no autenticado"', async () => {
+        const { err, exitCode } = await runWatch(['--init'], otherRoot);
+        expect(exitCode).toBe(1);
+        expect(err).toContain('cwd no autenticado');
     });
 });

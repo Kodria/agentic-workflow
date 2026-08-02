@@ -17,6 +17,7 @@ import { readJournal } from '../../core/journal/store';
 import { exportDir, logsDir } from '../../core/journal/paths';
 import { verifyBranchInvariant } from '../watch/lock';
 import { writeFileAtomicDurable } from '../../core/atomic-file';
+import { resolveCommandContext } from '../../core/tracks/context';
 import fs from 'fs';
 
 function branchOf(cwd: string): string {
@@ -35,6 +36,20 @@ function realFingerprintNow(repo: string): FingerprintNow {
     };
 }
 
+/** Guard de entrada (R9.4): sin descriptor de track, es un no-op — el caso
+ *  comun de siempre no paga costo ni riesgo nuevo. Con descriptor presente
+ *  que no autentica (fencing/realpath/journalId no coinciden), rechaza ANTES
+ *  de que el verbo emita o consulte nada, mismo patron de salida que
+ *  verifyBranchInvariant mas abajo (stderr + exit 1). */
+function assertAuthenticatedCwd(repo: string, branch: string): void {
+    try {
+        resolveCommandContext(repo, branch);
+    } catch (e) {
+        process.stderr.write(`${(e as Error).message}\n`);
+        process.exit(1);
+    }
+}
+
 // CONSTITUTION: commander valida los tokens de las options declaradas; los
 // variadicos van tras `--`. Los flags numericos/JSON se validan fail-fast.
 
@@ -50,7 +65,9 @@ export function registerJobCommand(program: Command): void {
         .argument('<cmd...>', 'comando tras --')
         .action((cmd: string[], opts) => {
             const repo = process.cwd();
-            const r = requestJob(repo, branchOf(repo), opts.generation, cmd, opts.paths ?? [], opts.cwd, { satisfies: opts.satisfies });
+            const branch = branchOf(repo);
+            assertAuthenticatedCwd(repo, branch);
+            const r = requestJob(repo, branch, opts.generation, cmd, opts.paths ?? [], opts.cwd, { satisfies: opts.satisfies });
             process.stdout.write(JSON.stringify({ requestId: r.requestId, idempotencyKey: r.idempotencyKey }, null, 2) + '\n');
         });
 
@@ -64,7 +81,9 @@ export function registerJobCommand(program: Command): void {
             try { payload = JSON.parse(opts.json); } catch { throw new Error('--json requiere un objeto JSON valido'); }
             if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) throw new Error('--json requiere un objeto JSON');
             const repo = process.cwd();
-            const r = emitRequest(repo, branchOf(repo), {
+            const branch = branchOf(repo);
+            assertAuthenticatedCwd(repo, branch);
+            const r = emitRequest(repo, branch, {
                 kind: 'register-entity', generationToken: opts.generation,
                 idempotencyKey: crypto.createHash('sha256').update(`${opts.entity}:${opts.json}`).digest('hex'),
                 payload: { entity: opts.entity, ...(payload as Record<string, unknown>) },
@@ -81,6 +100,8 @@ export function registerJobCommand(program: Command): void {
         .action((opts) => {
             if (!['pass', 'fail', 'inconclusive'].includes(opts.result)) throw new Error('--result debe ser pass | fail | inconclusive');
             const repo = process.cwd();
+            const branch = branchOf(repo);
+            assertAuthenticatedCwd(repo, branch);
             const reviewArgv = ['awm-review', opts.obligation];
             const reviewFingerprint = computeFingerprint(repo, reviewArgv, [], '.');
             // Determinista a partir de los MISMOS inputs que idempotencyKey, INCLUYENDO
@@ -94,7 +115,7 @@ export function registerJobCommand(program: Command): void {
             // generation distinta produce una idempotencyKey ENTERAMENTE distinta, no
             // una colision con digest distinto.
             const verdictId = `verd-${crypto.createHash('sha256').update(`${opts.generation}:${opts.obligation}:${opts.result}:${opts.detail}:${reviewFingerprint.fingerprint}`).digest('hex').slice(0, 16)}`;
-            emitRequest(repo, branchOf(repo), {
+            emitRequest(repo, branch, {
                 kind: 'verdict', generationToken: opts.generation,
                 idempotencyKey: crypto.createHash('sha256').update(`verdict:${opts.generation}:${opts.obligation}:${opts.result}:${opts.detail}:${reviewFingerprint.fingerprint}`).digest('hex'),
                 payload: {
@@ -107,20 +128,34 @@ export function registerJobCommand(program: Command): void {
 
     job.command('controller-heartbeat')
         .requiredOption('--generation <token>')
-        .action((opts) => { emitHeartbeat(process.cwd(), branchOf(process.cwd()), opts.generation); });
+        .action((opts) => {
+            const repo = process.cwd();
+            const branch = branchOf(repo);
+            assertAuthenticatedCwd(repo, branch);
+            emitHeartbeat(repo, branch, opts.generation);
+        });
 
     job.command('ps').action(() => {
-        process.stdout.write(JSON.stringify(queryPs(process.cwd(), branchOf(process.cwd())), null, 2) + '\n');
+        const repo = process.cwd();
+        const branch = branchOf(repo);
+        assertAuthenticatedCwd(repo, branch);
+        process.stdout.write(JSON.stringify(queryPs(repo, branch), null, 2) + '\n');
     });
 
     job.command('list').action(() => {
-        process.stdout.write(JSON.stringify(queryList(process.cwd(), branchOf(process.cwd())), null, 2) + '\n');
+        const repo = process.cwd();
+        const branch = branchOf(repo);
+        assertAuthenticatedCwd(repo, branch);
+        process.stdout.write(JSON.stringify(queryList(repo, branch), null, 2) + '\n');
     });
 
     job.command('show')
         .argument('<jobId>')
         .action((jobId: string) => {
-            const out = queryShow(process.cwd(), branchOf(process.cwd()), jobId);
+            const repo = process.cwd();
+            const branch = branchOf(repo);
+            assertAuthenticatedCwd(repo, branch);
+            const out = queryShow(repo, branch, jobId);
             process.stdout.write(JSON.stringify(out, null, 2) + '\n');
             if (out.corruptState || out.job === null) process.exit(1);
         });
@@ -130,6 +165,7 @@ export function registerJobCommand(program: Command): void {
         .action(() => {
             const repo = process.cwd();
             const branch = branchOf(repo);
+            assertAuthenticatedCwd(repo, branch);
             const r = readJournal(repo, branch);
             if (r.corrupt || r.state === null) {
                 process.stdout.write(JSON.stringify({ corruptState: true }, null, 2) + '\n');
@@ -154,6 +190,7 @@ export function registerJobCommand(program: Command): void {
         .action(() => {
             const repo = process.cwd();
             const branch = branchOf(repo);
+            assertAuthenticatedCwd(repo, branch);
             const r = readJournal(repo, branch);
             if (r.state !== null) {
                 try { verifyBranchInvariant(repo, r.state.branch); }
@@ -170,7 +207,9 @@ export function registerJobCommand(program: Command): void {
         .option('--jobs <ids...>', 'ids de jobs a terminar (obligatorio con --execute)')
         .action(async (opts) => {
             const repo = process.cwd();
-            const r = readJournal(repo, branchOf(repo));
+            const branch = branchOf(repo);
+            assertAuthenticatedCwd(repo, branch);
+            const r = readJournal(repo, branch);
             if (r.corrupt || r.state === null) { process.stderr.write('journal corrupto o ausente\n'); process.exit(1); }
             const plan = planReap(r.state);
             process.stdout.write(JSON.stringify(plan, null, 2) + '\n');   // R2.2: listar SIEMPRE primero
@@ -187,6 +226,7 @@ export function registerJobCommand(program: Command): void {
         .action((opts) => {
             const repo = process.cwd();
             const branch = branchOf(repo);
+            assertAuthenticatedCwd(repo, branch);
             const r = readJournal(repo, branch);
             if (r.corrupt || r.state === null) { process.stderr.write('journal corrupto\n'); process.exit(1); }
             let baseline: BaselineMetrics | null = null;

@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process';
 import { initWatch } from './init';
 import { runSupervisorLoop, DEFAULT_SUPERVISOR_CONFIG } from './supervisor';
 import { EXEC_STDIO } from '../../core/journal/process';
+import { resolveCommandContext } from '../../core/tracks/context';
 
 function currentBranch(cwd: string): string {
     // stdio explicito (ver EXEC_STDIO en journal/process.ts): evita el relay
@@ -30,6 +31,15 @@ export function registerWatchCommand(program: Command): void {
         .action(async (opts) => {
             const repo = process.cwd();
             const branch = currentBranch(repo);
+            // R9.4: sin descriptor de track, no-op (modo plan de siempre); con
+            // descriptor presente que no autentica, rechaza ANTES de tocar el
+            // journal — mismo patron de salida que el resto de `awm job`.
+            try {
+                resolveCommandContext(repo, branch);
+            } catch (e) {
+                process.stderr.write(`${(e as Error).message}\n`);
+                process.exit(1);
+            }
             if (opts.init) {
                 const out = initWatch(repo, branch);
                 process.stdout.write(`journal inicializado para ${branch}; verificadores requeridos: ${JSON.stringify(out.requiredVerifiers)}\n`);
