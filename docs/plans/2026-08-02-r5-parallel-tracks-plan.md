@@ -101,7 +101,7 @@ _Requirements: R4.1, R4.2, R4.4, R6.2, R6.3, R6.8, R6.9, R7.7, R8.1, R8.2, C1, C
 - Create: `cli/src/core/tracks/protocol.ts`
 - Create: `cli/tests/core/tracks/protocol.test.ts`
 
-- [ ] **Step 1: Escribir los tests rojos de invariantes y reconciliación**
+- [x] **Step 1: Escribir los tests rojos de invariantes y reconciliación**
 
 ```ts
 // cli/tests/core/tracks/protocol.test.ts
@@ -289,13 +289,13 @@ function observationsFor(effect: ReturnType<typeof nextProtocolEffect>): Protoco
 }
 ```
 
-- [ ] **Step 2: Ejecutar el test y verificar RED**
+- [x] **Step 2: Ejecutar el test y verificar RED**
 
 Run: `cd cli && npx jest tests/core/tracks/protocol.test.ts --runInBand`
 
 Expected: FAIL con `Cannot find module '../../../src/core/tracks/protocol'`.
 
-- [ ] **Step 3: Definir tipos cerrados para estados, intents, efectos y observaciones**
+- [x] **Step 3: Definir tipos cerrados para estados, intents, efectos y observaciones**
 
 ```ts
 // cli/src/core/tracks/types.ts
@@ -383,7 +383,7 @@ export type JoinDecision =
     | { action: 'block'; reason: string };
 ```
 
-- [ ] **Step 4: Implementar el reducer total y sus invariantes**
+- [x] **Step 4: Implementar el reducer total y sus invariantes**
 
 **Regla de autoridad única.** `protocol.ts` es el **único** reconciliador del sistema. Las funciones de decisión que las Tasks 9, 11 y 13 necesitan (`decidePrepare`, `decideJoinReconciliation`, `decideTeardown`) se declaran y viven **acá**, y el reducer las llama; esas tasks las refinan en este archivo y vuelven a correr la exploración de estados como regresión. Ninguna task posterior puede implementar una decisión de protocolo paralela en otro módulo: si lo hiciera, lo que T1 prueba dejaría de ser lo que corre en producción.
 
@@ -644,7 +644,7 @@ export function observeProtocolEffect(s: CohortProtocol, effect: ProtocolEffect,
 }
 ```
 
-- [ ] **Step 5: Completar el generador de observaciones hasta cubrir cada effect y corregir el reducer hasta GREEN**
+- [x] **Step 5: Completar el generador de observaciones hasta cubrir cada effect y corregir el reducer hasta GREEN**
 
 **Exhaustividad de observaciones — no opcional.** Toda variante declarada en `ProtocolObservation` debe tener rama en `reconcileProtocol`. Una variante declarada y no manejada no rompe la compilación: devuelve el estado sin cambios, el BFS la deduplica y la rama entera del espacio de estados queda **silenciosamente inalcanzable**. Así es exactamente como `ARMED` puede volverse imposible sin que ningún test rojo lo denuncie. Agregar al final de la cadena de `else if` un guard explícito:
 
@@ -661,7 +661,7 @@ Run: `cd cli && npx jest tests/core/tracks/protocol.test.ts --runInBand --covera
 
 Expected: PASS, `states.length > 50`, sin estado alcanzable que viole las invariantes. Si el conteo queda en decenas bajas, la causa casi siempre es una observación declarada sin rama, no un espacio de estados chico.
 
-- [ ] **Step 6: Verificar que cada frontera realmente participa del recorrido**
+- [x] **Step 6: Verificar que cada frontera realmente participa del recorrido**
 
 `exploreCohort` ya acumula los effects observados. Agregar esta aserción exacta:
 
@@ -678,7 +678,7 @@ Run: `cd cli && npx jest tests/core/tracks/protocol.test.ts --runInBand`
 
 Expected: PASS. Si falta un effect, el recorrido no se considera completo aunque los demás asserts estén verdes.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add cli/src/core/tracks/types.ts cli/src/core/tracks/protocol.ts cli/tests/core/tracks/protocol.test.ts
