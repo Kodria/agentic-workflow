@@ -19,38 +19,42 @@ function branchOf(cwd: string): string {
     return b;
 }
 
-/** Guard de entrada (R9.4), identico al de `awm job`/`awm watch`: sin
- *  descriptor de track es un no-op (caso comun); con descriptor presente
- *  que no autentica, rechaza ANTES de que el verbo emita o consulte nada. */
-function assertAuthenticatedCwd(repo: string, branch: string): void {
+/** Unico punto que escribe a stderr y sale != 0 por un fallo de guard —
+ *  ambos guards de abajo comparten esta forma (R9.4). */
+function failGuard(message: string): never {
+    process.stderr.write(`${message}\n`);
+    process.exit(1);
+}
+
+/** Autentica el cwd (R9.4) y devuelve el contexto resuelto: sin descriptor
+ *  de track es un no-op que resuelve a modo plan (caso comun); con
+ *  descriptor presente que no autentica, rechaza ANTES de que el verbo
+ *  emita o consulte nada. */
+function resolveGuardedContext(repo: string, branch: string): CommandContext {
     try {
-        resolveCommandContext(repo, branch);
+        return resolveCommandContext(repo, branch);
     } catch (e) {
-        process.stderr.write(`${(e as Error).message}\n`);
-        process.exit(1);
+        failGuard((e as Error).message);
     }
+}
+
+/** Guard de entrada identico al de `awm job`/`awm watch`: solo autentica. */
+function assertAuthenticatedCwd(repo: string, branch: string): void {
+    resolveGuardedContext(repo, branch);
 }
 
 /** Guard mas estricto para `list`/`status`: ambos verbos agregan el journal
  *  del PLAN (R9.5/R9.6 — `tracks` solo existe ahi, nunca en el journal de un
  *  track individual). Sin esto, correrlos desde el worktree de un track
  *  produce silenciosamente "sin tracks declarados" — indistinguible de un
- *  plan serial/vacio genuino. `assertAuthenticatedCwd` ya prueba que el cwd
- *  autentica; esto ademas exige que autentique como PLAN, no como track. */
+ *  plan serial/vacio genuino. */
 function assertPlanCwd(repo: string, branch: string): void {
-    let ctx: CommandContext;
-    try {
-        ctx = resolveCommandContext(repo, branch);
-    } catch (e) {
-        process.stderr.write(`${(e as Error).message}\n`);
-        process.exit(1);
-    }
+    const ctx = resolveGuardedContext(repo, branch);
     if (ctx.mode === 'track') {
-        process.stderr.write(
+        failGuard(
             `este cwd es el worktree del track '${ctx.context.trackContext.trackId}', no la raiz del plan: `
-            + `'awm track list'/'status' agregan el journal del PLAN — corre el comando desde ahi\n`,
+            + `'awm track list'/'status' agregan el journal del PLAN — corre el comando desde ahi`,
         );
-        process.exit(1);
     }
 }
 
@@ -136,42 +140,15 @@ export function registerTrackCommand(program: Command): void {
         .description('R5.10: verifica independencia declarada de un plan de tracks; invocable por argv, sale != 0 ante cualquier violacion')
         .requiredOption('--plan <file>', 'ruta al plan markdown con membresia de Track y tabla ## Tracks')
         .action((opts) => {
-            // R5.10 exige "invocable por argv y sale != 0 ante CUALQUIER
-            // violacion" — TODA la tuberia leer-plan -> parsear -> evaluar
-            // independencia puede lanzar sincronicamente con un input
-            // malformo, no solo el parser: `assessDeclaredIndependence`
-            // (via `canonicalResource`, ownership.ts) lanza si una celda de
-            // `Shared resources` no tiene forma `<clase>:<valor>` — un
-            // formato que el parser NUNCA valida (bloqueador encontrado en
-            // re-review: la primera version de este fix envolvia solo
-            // read+parse y dejaba escapar exactamente el mismo tipo de
-            // stack trace crudo un paso mas adelante en el pipeline). Por
-            // eso el try/catch envuelve la tuberia ENTERA — nada que pueda
-            // tirar queda fuera — y el `process.exit` de cada rama vive
-            // AFUERA del try: en los tests `process.exit` esta mockeado
-            // para *lanzar* (para poder capturar el exit code sin matar el
-            // proceso de jest), y si esos exits vivieran dentro del try,
-            // ese throw de control de flujo se re-atraparia como si fuera
-            // un fallo de dominio, produciendo un JSON duplicado.
-            //
-            // Se reporta con el mismo shape {parallel, reasons} que el resto
-            // del verbo (consistencia de salida) en vez de partir a stderr;
-            // se usa el MISMO exit code (1) para cualquier violacion —
-            // parseo fallido, plan serial, ownership solapado o resource
-            // compartido malformado — a proposito: todas significan lo
-            // mismo para quien invoca por argv, "no se puede certificar
-            // paralelismo ahora", y un solo exit code evita que un script
-            // necesite ramificar entre variantes para decidir si aborta. El
-            // reason de una excepcion (parseo O evaluacion) se prefija
-            // `parse-error:` deliberadamente con el MISMO prefijo para
-            // ambas etapas: desde la perspectiva del caller, "el archivo de
-            // plan no produce un veredicto valido" es un unico modo de
-            // fallo, sea cual sea la etapa interna que lo detecto: separar
-            // en `parse-error`/`assessment-error` no le agrega ninguna
-            // decision distinta a quien lee el JSON, solo mas prefijos que
-            // aprender. El mensaje original de la excepcion (siempre
-            // incluido despues del prefijo) ya deja clarisimo cual etapa
-            // fallo para quien depura a mano.
+            // R5.10: sale != 0 ante CUALQUIER violacion, incluyendo que la
+            // tuberia leer-plan -> parsear -> evaluar independencia lance
+            // sincronicamente (id de track peligroso, `Integration argv`
+            // no-JSON, `Shared resources` sin forma `<clase>:<valor>`, etc.)
+            // — nunca un stack trace crudo. El try envuelve la tuberia
+            // ENTERA a proposito (no solo el parseo) y el `process.exit` de
+            // abajo vive AFUERA de el: los tests mockean `process.exit` para
+            // que *lance*, y si ese exit ocurriera dentro del try se
+            // re-atraparia como un fallo de dominio mas.
             let result: { parallel: boolean; reasons: string[] };
             try {
                 const source = fs.readFileSync(opts.plan, 'utf8');

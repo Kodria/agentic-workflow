@@ -7,8 +7,8 @@ import { registerTrackCommand } from '../../../src/commands/track';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { statePath } from '../../../src/core/journal/paths';
 import { listPendingRequests } from '../../../src/core/journal/requests';
-import { writeDescriptor, type TrackDescriptor } from '../../../src/core/tracks/descriptor';
-import type { TrackRef } from '../../../src/core/journal/types';
+import { writeDescriptor } from '../../../src/core/tracks/descriptor';
+import { trackRefFixture, descriptorFixture } from './fixtures';
 
 // Superficie `awm track` (R5.10, R6.1, R9.5, R9.6): los verbos mutantes
 // (add/join/remove) SOLO emiten una request inmutable — jamas tocan Git ni
@@ -30,17 +30,6 @@ function gitInit(repo: string, branch: string): void {
 
 function readPendingKinds(repo: string, branch: string): string[] {
     return listPendingRequests(repo, branch).filter((p) => !p.corrupt).map((p) => p.envelope.kind);
-}
-
-function trackRefFixture(overrides: Partial<TrackRef>, worktreePath: string): TrackRef {
-    return {
-        trackId: 'cli', worktreePath, branch: 'track/cli', ownership: [], sharedResources: [], dependsOn: [],
-        fencingToken: 'f'.repeat(32), phase: 'ACTIVE', readinessNonce: 'n'.repeat(8), ...overrides,
-    };
-}
-
-function descriptorFixture(overrides: Partial<TrackDescriptor>, planRoot: string): TrackDescriptor {
-    return { schema: 1, planRoot, planBranch: 'main', trackId: 'cli', planJournalId: 'j-1', fencingToken: 'f'.repeat(32), ...overrides };
 }
 
 async function runCli(repo: string, argv: string[]): Promise<{ out: string; err: string; exitCode: number }> {

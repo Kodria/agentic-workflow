@@ -7,6 +7,7 @@ import { computeFingerprint } from '../../../src/core/journal/fingerprint';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { statePath } from '../../../src/core/journal/paths';
 import type { JournalState, TrackRef } from '../../../src/core/journal/types';
+import { trackRefFixture } from './fixtures';
 
 // R9.5/R9.6: `aggregateTrackStatus` COMPONE el gate de cada journal de track
 // leyendolo al momento de necesitarlo — jamas escribe de vuelta al journal
@@ -22,13 +23,6 @@ function gitInitAt(repo: string, branch: string): void {
     fs.writeFileSync(path.join(repo, 'f.txt'), 'x');
     git(repo, 'add', '.');
     git(repo, 'commit', '-qm', 'c');
-}
-
-function trackRefFixture(overrides: Partial<TrackRef>, worktreePath: string): TrackRef {
-    return {
-        trackId: 'cli', worktreePath, branch: 'track/cli', ownership: [], sharedResources: [], dependsOn: [],
-        fencingToken: 'f'.repeat(32), phase: 'ACTIVE', readinessNonce: 'n'.repeat(8), ...overrides,
-    };
 }
 
 describe('aggregateTrackStatus — agregado read-only (R9.5, R9.6)', () => {
