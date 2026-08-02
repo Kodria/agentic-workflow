@@ -5,7 +5,7 @@ import { emitTrackRequest } from './emit';
 import { aggregateTrackStatus } from './status';
 import { readJournal } from '../../core/journal/store';
 import { EXEC_STDIO } from '../../core/journal/process';
-import { resolveCommandContext } from '../../core/tracks/context';
+import { resolveCommandContext, type CommandContext } from '../../core/tracks/context';
 import { parseTrackPlan } from '../../core/tracks/plan-parser';
 import { assessDeclaredIndependence } from '../../core/tracks/ownership';
 import { gitCheckTrackId } from '../../core/tracks/git';
@@ -27,6 +27,29 @@ function assertAuthenticatedCwd(repo: string, branch: string): void {
         resolveCommandContext(repo, branch);
     } catch (e) {
         process.stderr.write(`${(e as Error).message}\n`);
+        process.exit(1);
+    }
+}
+
+/** Guard mas estricto para `list`/`status`: ambos verbos agregan el journal
+ *  del PLAN (R9.5/R9.6 — `tracks` solo existe ahi, nunca en el journal de un
+ *  track individual). Sin esto, correrlos desde el worktree de un track
+ *  produce silenciosamente "sin tracks declarados" — indistinguible de un
+ *  plan serial/vacio genuino. `assertAuthenticatedCwd` ya prueba que el cwd
+ *  autentica; esto ademas exige que autentique como PLAN, no como track. */
+function assertPlanCwd(repo: string, branch: string): void {
+    let ctx: CommandContext;
+    try {
+        ctx = resolveCommandContext(repo, branch);
+    } catch (e) {
+        process.stderr.write(`${(e as Error).message}\n`);
+        process.exit(1);
+    }
+    if (ctx.mode === 'track') {
+        process.stderr.write(
+            `este cwd es el worktree del track '${ctx.context.trackContext.trackId}', no la raiz del plan: `
+            + `'awm track list'/'status' agregan el journal del PLAN — corre el comando desde ahi\n`,
+        );
         process.exit(1);
     }
 }
@@ -80,7 +103,7 @@ export function registerTrackCommand(program: Command): void {
         .action(() => {
             const repo = process.cwd();
             const branch = branchOf(repo);
-            assertAuthenticatedCwd(repo, branch);
+            assertPlanCwd(repo, branch);
             const r = readJournal(repo, branch);
             if (r.corrupt || r.state === null) {
                 process.stdout.write(JSON.stringify({ corruptState: true }, null, 2) + '\n');
@@ -94,7 +117,7 @@ export function registerTrackCommand(program: Command): void {
         .action(() => {
             const repo = process.cwd();
             const branch = branchOf(repo);
-            assertAuthenticatedCwd(repo, branch);
+            assertPlanCwd(repo, branch);
             const r = readJournal(repo, branch);
             if (r.corrupt || r.state === null) {
                 process.stdout.write(JSON.stringify({ corruptState: true }, null, 2) + '\n');
@@ -113,8 +136,28 @@ export function registerTrackCommand(program: Command): void {
         .description('R5.10: verifica independencia declarada de un plan de tracks; invocable por argv, sale != 0 ante cualquier violacion')
         .requiredOption('--plan <file>', 'ruta al plan markdown con membresia de Track y tabla ## Tracks')
         .action((opts) => {
-            const source = fs.readFileSync(opts.plan, 'utf8');
-            const parsed = parseTrackPlan(source, gitCheckTrackId);
+            // R5.10 exige "invocable por argv y sale != 0 ante CUALQUIER
+            // violacion" — un plan que ni siquiera parsea (id de track
+            // peligroso, `Files:` sin `Track:`, `Integration argv` no-JSON,
+            // archivo inexistente, etc.) es, con mas razon, una violacion:
+            // jamas debe escapar como una excepcion cruda con stack trace.
+            // Se reporta con el mismo shape {parallel, reasons} que el resto
+            // del verbo (consistencia de salida) en vez de partir a stderr;
+            // se usa el MISMO exit code (1) que "declarado pero no
+            // independiente" a proposito — ambos casos significan lo mismo
+            // para quien invoca por argv: "no se puede certificar
+            // paralelismo ahora", y un solo exit code evita que un script
+            // necesite ramificar entre "malformado" y "colisiona" para
+            // decidir si aborta. El reason se prefija `parse-error:` para
+            // quien SI quiera distinguir el caso inspeccionando el JSON.
+            let parsed: ReturnType<typeof parseTrackPlan>;
+            try {
+                const source = fs.readFileSync(opts.plan, 'utf8');
+                parsed = parseTrackPlan(source, gitCheckTrackId);
+            } catch (e) {
+                process.stdout.write(JSON.stringify({ parallel: false, reasons: [`parse-error:${(e as Error).message}`] }, null, 2) + '\n');
+                process.exit(1);
+            }
             if (parsed.mode === 'serial') {
                 // Un plan que ni siquiera califica como candidato paralelo
                 // (recursos compartidos sin declarar, dependencias entre
