@@ -2,13 +2,16 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
+import { EXEC_STDIO } from '../../src/core/journal/process';
 
 /** Identidad de commit local al tmpdir del fixture — jamas toca ~/.gitconfig
  *  ni ninguna config global (CLAUDE.md: `~/.awm` y el entorno real del dueño
- *  son territorio prohibido para sesiones de desarrollo/tests). */
+ *  son territorio prohibido para sesiones de desarrollo/tests). `EXEC_STDIO`
+ *  explicito por la misma razon que en git.ts (ver process.ts): sin esto
+ *  execFileSync hereda el stderr del proceso llamante. */
 const git = (repo: string, args: string[]): string =>
     execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args],
-        { cwd: repo, encoding: 'utf8' });
+        { cwd: repo, encoding: 'utf8', stdio: EXEC_STDIO });
 
 /** Crea un repo git aislado en un tmpdir propio. El caller es responsable de
  *  `fs.rmSync(repo, { recursive: true, force: true })` en su `afterEach`. */

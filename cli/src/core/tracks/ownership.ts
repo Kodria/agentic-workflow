@@ -44,7 +44,10 @@ const proves = (owner: string, actual: string): boolean => {
 export function canonicalResource(raw: string): string {
     const match = raw.match(/^([a-z][a-z0-9-]*):(.+)$/i);
     if (match === null || match[2].trim().length === 0) throw new Error(`recurso debe usar <clase>:<valor>: ${raw}`);
-    return `${match[1].toLowerCase()}:${match[2].trim()}`;
+    // Case-fold el valor igual que `key()` hace con paths: sin esto, `db:Dev`
+    // y `db:dev` producen strings distintos y el Set.has() de
+    // assessDeclaredIndependence no detecta la colision (fail-open).
+    return `${match[1].toLowerCase()}:${match[2].trim().toLocaleLowerCase('en-US')}`;
 }
 
 export function assessDeclaredIndependence(tracks: ParsedTrack[]): { parallel: boolean; reasons: string[] } {

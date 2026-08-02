@@ -51,6 +51,13 @@ test('recursos usan clase:valor canónico y colisionan por igualdad (R5.5, R5.6)
     ])).toMatchObject({ parallel: false, reasons: ['resource:db:dev'] });
 });
 
+test('canonicalResource case-folds el valor, no solo la clase (R5.5, R5.6)', () => {
+    expect(canonicalResource('db:Dev')).toBe(canonicalResource('db:dev'));
+    expect(assessDeclaredIndependence([
+        track('a', ['a'], ['db:Dev']), track('b', ['b'], ['db:dev']),
+    ])).toMatchObject({ parallel: false, reasons: ['resource:db:dev'] });
+});
+
 test('no afirma observar recursos runtime no declarados (C10)', () => {
     const out = assessDeclaredIndependence([track('a', ['a']), track('b', ['b'])]);
     expect(out).toEqual({ parallel: true, reasons: [] });
@@ -81,6 +88,14 @@ test('migraciones y snapshots también cuentan como clase global (C5)', () => {
     expect(assessDeclaredIndependence([
         track('a', ['src/a.ts']), track('b', ['__snapshots__/a.snap']),
     ])).toMatchObject({ parallel: false, reasons: ['global:snapshot:__snapshots__/a.snap'] });
+});
+
+test('directorios generados (dist/generated/coverage) también cuentan como clase global (C5)', () => {
+    expect(assessDeclaredIndependence([
+        track('a', ['src/a.ts']), track('b', ['dist/bundle.js']),
+    ])).toMatchObject({ parallel: false, reasons: ['global:generated:dist/bundle.js'] });
+    expect(assessActualOwnership(track('a', ['src/a.ts']), [{ status: 'M', path: 'coverage/lcov.info' }]).globalClasses)
+        .toEqual(['generated:coverage/lcov.info']);
 });
 
 test('recursos declarados distintos no colisionan; ownership propio no reporta outsideOwnership', () => {
