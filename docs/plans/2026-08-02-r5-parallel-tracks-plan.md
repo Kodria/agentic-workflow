@@ -1080,7 +1080,7 @@ _Requirements: R1.3, R1.4, R5.1, R5.2, R5.3, R5.4, R5.5, R5.6, R5.7, R5.10, C5, 
 - Create: `cli/tests/core/tracks/ownership.test.ts`
 - Create: `cli/tests/core/tracks/git.test.ts`
 
-- [ ] **Step 1: Escribir tests rojos para ownership y clases globales**
+- [x] **Step 1: Escribir tests rojos para ownership y clases globales**
 
 ```ts
 // cli/tests/core/tracks/ownership.test.ts
@@ -1163,13 +1163,13 @@ test.each(['valid-track', '..', '-x', 'a/b'])('git check-ref-format participa pa
 });
 ```
 
-- [ ] **Step 2: Ejecutar RED**
+- [x] **Step 2: Ejecutar RED**
 
 Run: `cd cli && npx jest tests/core/tracks/{ownership,git}.test.ts --runInBand`
 
 Expected: FAIL por módulos ausentes.
 
-- [ ] **Step 3: Implementar el adaptador Git con argv estructurado**
+- [x] **Step 3: Implementar el adaptador Git con argv estructurado**
 
 ```ts
 // cli/src/core/tracks/git.ts
@@ -1208,7 +1208,7 @@ export function changedPaths(repo: string, base: string, head: string): ChangedP
 
 Mover cualquier llamada Git nueva de tareas posteriores a este archivo; no usar `execSync` ni strings de shell.
 
-- [ ] **Step 4: Implementar normalización y decisión fail-closed**
+- [x] **Step 4: Implementar normalización y decisión fail-closed**
 
 ```ts
 // cli/src/core/tracks/ownership.ts
@@ -1291,7 +1291,7 @@ export function assessActualOwnership(track: ParsedTrack, changes: ChangedPath[]
 }
 ```
 
-- [ ] **Step 5: Agregar casos Windows/case, globs, manifests y recursos no declarados**
+- [x] **Step 5: Agregar casos Windows/case, globs, manifests y recursos no declarados**
 
 El test de recursos no declarados fija C10 así:
 
@@ -1307,7 +1307,7 @@ Run: `cd cli && npx jest tests/core/tracks/{ownership,git}.test.ts --runInBand &
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cli/src/core/tracks cli/tests/core/tracks
