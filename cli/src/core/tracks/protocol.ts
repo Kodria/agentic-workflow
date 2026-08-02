@@ -11,6 +11,14 @@ const WORKING: readonly TrackPhase[] = [
 ];
 /** Fases que ya fijaron un SHA congelado y no pueden volver a mutar el worktree. */
 const FROZEN_OR_LATER: readonly TrackPhase[] = ['FROZEN', 'JOIN_INTENT', 'MERGED_UNVERIFIED', 'JOINED'];
+/** Efecto aplicado exitosamente → fase resultante del track, para las transiciones puramente mecánicas. */
+const EFFECT_APPLIED_PHASE: Partial<Record<ProtocolEffect['kind'], TrackPhase>> = {
+    'persist-prepare-intent': 'PREPARE_INTENT', 'create-worktree': 'WORKTREE_CREATED',
+    'create-track-journal': 'JOURNAL_CREATED', 'spawn-track-supervisor': 'SUPERVISOR_STARTING',
+    'activate-track': 'ACTIVE',
+    'freeze-track': 'FREEZE_REQUESTED', 'persist-join-intent': 'JOIN_INTENT',
+    'begin-teardown': 'TEARDOWN_INTENT',
+};
 
 const token = (journalId: string, trackId: string, purpose: string): string =>
     crypto.createHash('sha256').update(`${journalId}\0${trackId}\0${purpose}`).digest('hex').slice(0, 32);
@@ -18,6 +26,14 @@ const token = (journalId: string, trackId: string, purpose: string): string =>
 const required = <T>(value: T | undefined, name: string): T => {
     if (value === undefined) throw new Error(`invariante rota: falta ${name}`);
     return value;
+};
+
+/** C2: un fallo demostrable no bloquea, entra al teardown probatorio de C9 — salvo que ya sea terminal o BLOCKED. */
+const markTeardownRequested = (tracks: CohortProtocol['tracks'], trackId: string | undefined): void => {
+    const failed = trackId === undefined ? undefined : tracks[trackId];
+    if (failed !== undefined && !['DECLARED', 'REMOVED', 'BLOCKED'].includes(failed.phase)) {
+        failed.phase = 'TEARDOWN_REQUESTED';
+    }
 };
 
 /** Autoridad única de reconciliación de join; T11 agrega su matriz de tests sobre esta función. */
@@ -130,19 +146,12 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
     if (observation.kind === 'prepare-failed') {
         out.cohortPhase = 'FALLBACK_PENDING';
         out.fallbackReason = `prepare-failed:${observation.trackId}`;
-        // C2: un fallo demostrable no bloquea, entra al teardown probatorio de C9.
-        const failed = out.tracks[observation.trackId];
-        if (failed !== undefined && !['DECLARED', 'REMOVED', 'BLOCKED'].includes(failed.phase)) {
-            failed.phase = 'TEARDOWN_REQUESTED';
-        }
+        markTeardownRequested(out.tracks, observation.trackId);
     } else if (observation.kind === 'effect-failed') {
         if (out.cohortPhase === 'PREPARING') {
             out.cohortPhase = 'FALLBACK_PENDING';
             out.fallbackReason = `effect-failed:${observation.effect}`;
-            const failed = observation.trackId === undefined ? undefined : out.tracks[observation.trackId];
-            if (failed !== undefined && !['DECLARED', 'REMOVED', 'BLOCKED'].includes(failed.phase)) {
-                failed.phase = 'TEARDOWN_REQUESTED';
-            }
+            markTeardownRequested(out.tracks, observation.trackId);
         }
         // effect-failed fuera de PREPARING: sin transición definida todavía (no ejercitado por T1).
     } else if (observation.kind === 'worktree-observed') {
@@ -228,28 +237,22 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
 }
 
 export function observeProtocolEffect(s: CohortProtocol, effect: ProtocolEffect, observation: ProtocolObservation): CohortProtocol {
-    const out = structuredClone(s);
     if (observation.kind === 'effect-failed' || observation.kind === 'prepare-failed' || observation.kind === 'join-observation'
         || observation.kind === 'freeze-observation' || observation.kind === 'join-requested'
         || observation.kind === 'supervisor-observed' || observation.kind === 'worktree-observed'
         || observation.kind === 'track-removed' || observation.kind === 'teardown-blocked'
         || observation.kind === 'global-qa-pass'
         || observation.kind === 'integration-pass' || observation.kind === 'interlock-pass') {
-        return reconcileProtocol(out, observation);
+        // reconcileProtocol clona internamente: pasar `s` sin clonar acá evita un structuredClone redundante.
+        return reconcileProtocol(s, observation);
     }
+    const out = structuredClone(s);
     if (observation.kind !== 'effect-applied') return out;
     const e = effect;
     if ('trackId' in e) {
         const t = out.tracks[e.trackId];
         if (t === undefined) throw new Error(`track desconocido: ${e.trackId}`);
-        const map: Partial<Record<ProtocolEffect['kind'], TrackPhase>> = {
-            'persist-prepare-intent': 'PREPARE_INTENT', 'create-worktree': 'WORKTREE_CREATED',
-            'create-track-journal': 'JOURNAL_CREATED', 'spawn-track-supervisor': 'SUPERVISOR_STARTING',
-            'activate-track': 'ACTIVE',
-            'freeze-track': 'FREEZE_REQUESTED', 'persist-join-intent': 'JOIN_INTENT',
-            'begin-teardown': 'TEARDOWN_INTENT',
-        };
-        const phase = map[e.kind];
+        const phase = EFFECT_APPLIED_PHASE[e.kind];
         if (phase !== undefined) t.phase = phase;
         if (e.kind === 'persist-join-intent') {
             t.expectedPlanHeadSha = e.expectedPlanHeadSha;
