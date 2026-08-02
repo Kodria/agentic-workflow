@@ -26,7 +26,7 @@
 ## Resoluciones normativas de convergencia
 
 - **C1 — Barrera ARMED:** preparar un track no lo activa. El supervisor del plan genera el `readinessNonce`, lanza cada wrapper con ese nonce y espera que todos los journals lo acrediten como `ARMED`; solo entonces persiste `cohortState: ACTIVE`. Después promueve de `ARMED` a track `ACTIVE` hasta el tope configurado; los excedentes permanecen armados pero sin loop de fingerprint ni despachos. No hay ejecución parcial antes de que la cohorte completa esté preparada.
-- **C2 — Fallback tras bootstrap parcial:** si cualquier preparación falla antes de `ACTIVE`, el supervisor persiste `fallback-intent`, congela nuevos spawns, ejecuta el teardown durable de todos los recursos demostrablemente propios y solo después retorna a ejecución serial. Nunca corre serial mientras quedan supervisores o worktrees de la cohorte activos.
+- **C2 — Fallback tras bootstrap parcial:** si cualquier preparación falla antes de `ACTIVE`, el supervisor persiste `fallback-intent`, congela nuevos spawns, ejecuta el teardown durable de todos los recursos demostrablemente propios y solo después retorna a ejecución serial. Nunca corre serial mientras quedan supervisores o worktrees de la cohorte activos. Un fallo de preparación **no** produce `BLOCKED`: lleva al track a `TEARDOWN_REQUESTED` y lo hace pasar por el mismo state machine de C9, que prueba propiedad antes de borrar. `BLOCKED` significa exactamente “no pude probar de quién es este recurso”, y por eso **jamás** habilita serial: mientras cualquier track esté `BLOCKED`, la cohorte queda detenida esperando evidencia del operador. Serial solo se persiste cuando todos los tracks están `REMOVED` o nunca superaron `DECLARED`.
 - **C3 — Orden final único:** `todos frozen → todos MERGED_UNVERIFIED → QA global y fixes → commit limpio → un job canónico track-integration → interlock → COMPLETE`. No se produce evidencia global entre merges y ninguna mutación puede ocurrir después del fingerprint final.
 - **C4 — Comando canónico mecánico:** el plan declara una única `Integration argv:` como array JSON de strings y `Integration paths:` como array JSON de strings. El parser persiste ambos; el supervisor los pasa sin shell a `requestJob`; el job resultante satisface todos los items `track-integration:*`. Prosa libre no puede seleccionar el comando.
 - **C5 — Clasificadores globales fail-closed:** tocar una clase global observable (lockfile, manifest, migración, snapshot o generado) en cualquier track invalida el paralelismo de toda la cohorte, aunque solo un track la toque. Esta es la interpretación que hace verdadero CA-4.3.
@@ -53,13 +53,13 @@ termine en PASS, incluidos el recorrido acotado de estados y la inyección de cr
 | Archivo | Responsabilidad |
 |---|---|
 | `cli/src/core/tracks/types.ts` | Tipos de cohorte, tracks, intents, efectos y contratos del plan |
-| `cli/src/core/tracks/protocol.ts` | Reducer puro, reconciliación y chequeo de invariantes |
+| `cli/src/core/tracks/protocol.ts` | **Autoridad única de decisión**: reducer puro, `decidePrepare`/`decideJoinReconciliation`/`decideTeardown`, invariantes |
 | `cli/src/core/tracks/plan-parser.ts` | Parser de `## Tracks`, `**Track:**`, Files e Integration argv/paths |
 | `cli/src/core/tracks/ownership.ts` | Normalización, globs/directorios, recursos y clasificadores globales |
 | `cli/src/core/tracks/descriptor.ts` | `.awm/track.json`, realpaths, autenticación y fencing |
 | `cli/src/core/tracks/context.ts` | Resolución plan/track y validación del cwd para `awm job/watch/track` |
 | `cli/src/core/tracks/git.ts` | Único adaptador Git; argv estructurado, freeze, diff, merge y cleanup |
-| `cli/src/core/tracks/teardown.ts` | Observaciones y efectos idempotentes del state machine de remove |
+| `cli/src/core/tracks/teardown.ts` | Observaciones y efectos idempotentes del remove (la decisión vive en `protocol.ts`) |
 | `cli/src/commands/job/gate.ts` | `computeTrackGate` además del gate global existente |
 | `cli/src/core/journal/{types,store,requests}.ts` | Esquema aditivo, migración, nuevos request kinds y guards |
 | `cli/src/commands/watch/{init,apply,supervisor,runner}.ts` | Registro de cohorte y ejecución single-writer de P1/P2/finalización |
@@ -109,7 +109,7 @@ import {
     assertProtocolInvariants, initialCohort, nextProtocolEffect,
     observeProtocolEffect, reconcileProtocol,
 } from '../../../src/core/tracks/protocol';
-import type { CohortProtocol, ProtocolObservation } from '../../../src/core/tracks/types';
+import type { CohortProtocol, ProtocolEffect, ProtocolObservation } from '../../../src/core/tracks/types';
 
 const ids = ['cli', 'docs'];
 
@@ -125,64 +125,165 @@ describe('parallel-track protocol model', () => {
     test('un fallo pre-ACTIVE entra a teardown y solo luego a serial (R4.5, C2)', () => {
         let s = initialCohort('journal-1', ids);
         s.tracks.cli.phase = 'WORKTREE_CREATED';
-        s.tracks.docs.phase = 'BLOCKED';
+        s.tracks.docs.phase = 'WORKTREE_CREATED';
         s = reconcileProtocol(s, { kind: 'prepare-failed', trackId: 'docs', detail: 'disk full' });
         expect(s.cohortPhase).toBe('FALLBACK_PENDING');
+        expect(s.tracks.docs.phase).toBe('TEARDOWN_REQUESTED'); // no BLOCKED: el fallo es demostrable
         expect(nextProtocolEffect(s)).toEqual({ kind: 'begin-teardown', trackId: 'cli' });
         s.tracks.cli.phase = 'REMOVED';
+        expect(nextProtocolEffect(s)).toEqual({ kind: 'begin-teardown', trackId: 'docs' });
+        s.tracks.docs.phase = 'REMOVED';
         expect(nextProtocolEffect(s)).toEqual({ kind: 'enter-serial', reason: 'prepare-failed:docs' });
+    });
+
+    test('un track BLOCKED nunca habilita serial (R4.6, C2)', () => {
+        let s = initialCohort('journal-1', ids);
+        s.tracks.cli.phase = 'REMOVED';
+        s.tracks.docs.phase = 'BLOCKED';
+        s.cohortPhase = 'FALLBACK_PENDING';
+        s.fallbackReason = 'prepare-failed:cli';
+        // Propiedad indemostrable: la cohorte se detiene, no serializa con recursos vivos.
+        expect(nextProtocolEffect(s)).toBeNull();
+        expect(() => observeProtocolEffect(s, { kind: 'enter-serial', reason: 'x' }, { kind: 'effect-applied', effect: { kind: 'enter-serial', reason: 'x' } }))
+            .toThrow(/SERIAL prohíbe recursos paralelos activos/);
+    });
+
+    test('ningún merge empieza antes de que todos los tracks estén FROZEN (C3)', () => {
+        const s = initialCohort('journal-1', ids);
+        s.cohortPhase = 'JOINING';
+        s.planHeadSha = 'plan-head';
+        s.tracks.cli.phase = 'FROZEN';
+        s.tracks.cli.frozenHeadSha = 'cli-head';
+        s.tracks.docs.phase = 'ACTIVE';
+        expect(nextProtocolEffect(s)).toBeNull(); // docs todavía trabaja: no se persiste join intent
+        s.tracks.docs.phase = 'JOIN_REQUESTED';
+        expect(nextProtocolEffect(s)).toEqual({ kind: 'freeze-track', trackId: 'docs' });
+    });
+
+    test('los joins son serie estricta: un solo JOIN_INTENT vivo (R6.3, C7)', () => {
+        const s = initialCohort('journal-1', ids);
+        s.cohortPhase = 'JOINING';
+        s.planHeadSha = 'plan-head';
+        for (const t of Object.values(s.tracks)) { t.phase = 'FROZEN'; t.frozenHeadSha = `${t.trackId}-head`; }
+        const first = nextProtocolEffect(s)!;
+        expect(first).toEqual({
+            kind: 'persist-join-intent', trackId: 'cli',
+            expectedPlanHeadSha: 'plan-head', expectedTrackHeadSha: 'cli-head',
+        });
+        const armed = observeProtocolEffect(s, first, { kind: 'effect-applied', effect: first });
+        expect(nextProtocolEffect(armed)).toMatchObject({ kind: 'merge-track', trackId: 'cli' });
+        expect(() => assertProtocolInvariants({
+            ...armed, tracks: { ...armed.tracks, docs: { ...armed.tracks.docs, phase: 'JOIN_INTENT' } },
+        })).toThrow(/un solo JOIN_INTENT/);
     });
 
     test('el orden final no produce evidencia antes del HEAD final (R7.7, C3)', () => {
         const s = initialCohort('journal-1', ids);
-        s.cohortPhase = 'ACTIVE';
+        s.cohortPhase = 'JOINING';
+        s.planHeadSha = 'plan-head';
         s.tracks.cli.phase = 'MERGED_UNVERIFIED';
+        s.tracks.cli.frozenHeadSha = 'cli-head';
         s.tracks.docs.phase = 'FROZEN';
+        s.tracks.docs.frozenHeadSha = 'docs-head';
         expect(nextProtocolEffect(s)).not.toMatchObject({ kind: 'request-global-qa' });
         s.tracks.docs.phase = 'MERGED_UNVERIFIED';
         expect(nextProtocolEffect(s)).toEqual({ kind: 'request-global-qa' });
     });
 
     test('una observación indemostrable bloquea sin efecto destructivo (R6.9, C11)', () => {
-        const s = initialCohort('journal-1', ['cli']);
+        const s = initialCohort('journal-1', ids);
         s.cohortPhase = 'JOINING';
+        s.planHeadSha = 'plan-head';
+        for (const t of Object.values(s.tracks)) { t.phase = 'FROZEN'; t.frozenHeadSha = `${t.trackId}-head`; }
         s.tracks.cli.phase = 'JOIN_INTENT';
+        s.tracks.cli.expectedPlanHeadSha = 'plan-head';
+        s.tracks.cli.expectedTrackHeadSha = 'cli-head';
         const out = reconcileProtocol(s, { kind: 'join-observation', trackId: 'cli', mergeHead: 'other', planHead: 'other' });
         expect(out.tracks.cli.phase).toBe('BLOCKED');
+        expect(out.cohortPhase).toBe('BLOCKED');
         expect(nextProtocolEffect(out)).toBeNull();
     });
 
     test('ningún estado alcanzable viola invariantes al crashear entre fronteras (R4.2, R6.8, C9, C11)', () => {
-        const queue: CohortProtocol[] = [initialCohort('journal-1', ids)];
-        const seen = new Set<string>();
-        while (queue.length > 0 && seen.size < 5000) {
-            const state = queue.shift()!;
-            const key = JSON.stringify(state);
-            if (seen.has(key)) continue;
-            seen.add(key);
-            expect(() => assertProtocolInvariants(state)).not.toThrow();
-            const effect = nextProtocolEffect(state);
-            if (effect === null) continue;
-            for (const observation of observationsFor(effect)) {
-                queue.push(observeProtocolEffect(structuredClone(state), effect, observation));
-                queue.push(reconcileProtocol(structuredClone(state), observation)); // crash antes de result
-            }
+        const { states } = exploreCohort(ids);
+        for (const state of states) expect(() => assertProtocolInvariants(state)).not.toThrow();
+        expect(states.length).toBeGreaterThan(50);
+    });
+
+    test('SERIAL solo es alcanzable con la cohorte desmantelada (R4.5, C2)', () => {
+        const serial = exploreCohort(ids).states.filter((s) => s.cohortPhase === 'SERIAL');
+        expect(serial.length).toBeGreaterThan(0);
+        for (const s of serial) {
+            expect(Object.values(s.tracks).every((t) => ['REMOVED', 'DECLARED'].includes(t.phase))).toBe(true);
         }
-        expect(seen.size).toBeGreaterThan(50);
     });
 });
+
+/** Recorrido acotado del espacio de estados con crash inyectado en cada frontera. */
+function exploreCohort(ids: string[]): { states: CohortProtocol[]; effects: Set<ProtocolEffect['kind']> } {
+    const queue: CohortProtocol[] = [{ ...initialCohort('journal-1', ids), planHeadSha: 'plan-head' }];
+    const seen = new Map<string, CohortProtocol>();
+    const effects = new Set<ProtocolEffect['kind']>();
+    while (queue.length > 0 && seen.size < 20000) {
+        const state = queue.shift()!;
+        const key = JSON.stringify(state);
+        if (seen.has(key)) continue;
+        seen.set(key, state);
+        const effect = nextProtocolEffect(state);
+        if (effect === null) {
+            // Quiescencia: solo avanza si llega un request externo (un track pide unirse).
+            for (const observation of externalObservationsFor(state)) {
+                queue.push(reconcileProtocol(structuredClone(state), observation));
+            }
+            continue;
+        }
+        effects.add(effect.kind);
+        for (const observation of observationsFor(effect)) {
+            queue.push(observeProtocolEffect(structuredClone(state), effect, observation));
+            queue.push(reconcileProtocol(structuredClone(state), observation)); // crash antes de result
+        }
+    }
+    return { states: [...seen.values()], effects };
+}
+
+/** Requests que nacen fuera del reducer y por eso no son consecuencia de ningún effect. */
+function externalObservationsFor(state: CohortProtocol): ProtocolObservation[] {
+    return Object.values(state.tracks)
+        .filter((t) => t.phase === 'ACTIVE')
+        .map((t): ProtocolObservation => ({ kind: 'join-requested', trackId: t.trackId }));
+}
 
 function observationsFor(effect: ReturnType<typeof nextProtocolEffect>): ProtocolObservation[] {
     if (effect === null) return [];
     switch (effect.kind) {
         case 'create-worktree': return [
+            { kind: 'effect-applied', effect },
             { kind: 'worktree-observed', trackId: effect.trackId, owned: true },
+            { kind: 'worktree-observed', trackId: effect.trackId, owned: false },
             { kind: 'effect-failed', trackId: effect.trackId, effect: effect.kind, detail: 'injected' },
         ];
         case 'merge-track': return [
             { kind: 'join-observation', trackId: effect.trackId, mergeHead: null, planHead: 'merged', trackIsAncestor: true },
             { kind: 'join-observation', trackId: effect.trackId, mergeHead: effect.expectedTrackHeadSha, planHead: effect.expectedPlanHeadSha },
         ];
+        case 'freeze-track': return [
+            { kind: 'effect-applied', effect },
+            { kind: 'freeze-observation', trackId: effect.trackId, frozenHeadSha: `${effect.trackId}-head` },
+        ];
+        case 'spawn-track-supervisor': return [
+            { kind: 'effect-applied', effect },
+            { kind: 'supervisor-observed', trackId: effect.trackId, identity: 'expected', readinessNonce: effect.readinessNonce },
+            { kind: 'supervisor-observed', trackId: effect.trackId, identity: 'expected', readinessNonce: 'nonce-ajeno' },
+            { kind: 'supervisor-observed', trackId: effect.trackId, identity: 'other' },
+        ];
+        case 'begin-teardown': return [
+            { kind: 'effect-applied', effect },
+            { kind: 'track-removed', trackId: effect.trackId },
+            { kind: 'teardown-blocked', trackId: effect.trackId, detail: 'identidad ajena' },
+        ];
+        case 'request-global-qa': return [{ kind: 'global-qa-pass', headSha: 'H-qa', clean: true }];
+        case 'request-final-integration': return [{ kind: 'integration-pass', jobId: 'job-1', headSha: 'H-qa' }];
+        case 'run-final-interlock': return [{ kind: 'interlock-pass', headSha: 'H-qa' }];
         default: return [{ kind: 'effect-applied', effect }];
     }
 }
@@ -217,6 +318,7 @@ export interface TrackProtocolState {
     phase: TrackPhase;
     fencingToken: string;
     readinessNonce: string;
+    frozenHeadSha?: string;
     expectedPlanHeadSha?: string;
     expectedTrackHeadSha?: string;
     joinedCommitSha?: string;
@@ -229,6 +331,7 @@ export interface CohortProtocol {
     maxParallel: number;
     fallbackReason?: string;
     tracks: Record<string, TrackProtocolState>;
+    planHeadSha?: string;
     globalQaHeadSha?: string;
     finalIntegrationJobId?: string;
 }
@@ -255,24 +358,67 @@ export type ProtocolObservation =
     | { kind: 'prepare-failed'; trackId: string; detail: string }
     | { kind: 'worktree-observed'; trackId: string; owned: boolean }
     | { kind: 'supervisor-observed'; trackId: string; identity: 'expected' | 'other' | 'absent'; readinessNonce?: string }
+    | { kind: 'join-requested'; trackId: string }
+    | { kind: 'freeze-observation'; trackId: string; frozenHeadSha: string }
     | { kind: 'join-observation'; trackId: string; mergeHead: string | null; planHead: string; trackIsAncestor?: boolean }
+    | { kind: 'track-removed'; trackId: string }
+    | { kind: 'teardown-blocked'; trackId: string; detail: string }
     | { kind: 'global-qa-pass'; headSha: string; clean: boolean }
     | { kind: 'integration-pass'; jobId: string; headSha: string }
     | { kind: 'interlock-pass'; headSha: string };
+
+export interface JoinIntent {
+    expectedPlanHeadSha: string;
+    expectedTrackHeadSha: string;
+    strategy: 'no-ff';
+}
+
+/** `join-observation` sin `trackId`: lo que se observa del repo tras intentar el merge. */
+export type JoinObservation = Omit<Extract<ProtocolObservation, { kind: 'join-observation' }>, 'kind' | 'trackId'>;
+
+export type JoinDecision =
+    | { action: 'retry-merge' }
+    | { action: 'abort-own-merge' }
+    | { action: 'accept-merge'; joinedCommitSha: string }
+    | { action: 'block'; reason: string };
 ```
 
 - [ ] **Step 4: Implementar el reducer total y sus invariantes**
+
+**Regla de autoridad única.** `protocol.ts` es el **único** reconciliador del sistema. Las funciones de decisión que las Tasks 9, 11 y 13 necesitan (`decidePrepare`, `decideJoinReconciliation`, `decideTeardown`) se declaran y viven **acá**, y el reducer las llama; esas tasks las refinan en este archivo y vuelven a correr la exploración de estados como regresión. Ninguna task posterior puede implementar una decisión de protocolo paralela en otro módulo: si lo hiciera, lo que T1 prueba dejaría de ser lo que corre en producción.
 
 ```ts
 // cli/src/core/tracks/protocol.ts
 import crypto from 'crypto';
 import type {
-    CohortProtocol, ProtocolEffect, ProtocolObservation, TrackPhase,
+    CohortProtocol, JoinDecision, JoinIntent, JoinObservation,
+    ProtocolEffect, ProtocolObservation, TrackPhase,
 } from './types';
 
-const terminal = new Set<TrackPhase>(['JOINED', 'REMOVED', 'BLOCKED']);
+/** Fases en las que un track de una cohorte activa puede estar. */
+const WORKING: readonly TrackPhase[] = [
+    'ARMED', 'ACTIVE', 'FREEZE_REQUESTED', 'FROZEN',
+    'JOIN_REQUESTED', 'JOIN_INTENT', 'MERGED_UNVERIFIED', 'JOINED',
+];
+/** Fases que ya fijaron un SHA congelado y no pueden volver a mutar el worktree. */
+const FROZEN_OR_LATER: readonly TrackPhase[] = ['FROZEN', 'JOIN_INTENT', 'MERGED_UNVERIFIED', 'JOINED'];
+
 const token = (journalId: string, trackId: string, purpose: string): string =>
     crypto.createHash('sha256').update(`${journalId}\0${trackId}\0${purpose}`).digest('hex').slice(0, 32);
+
+const required = <T>(value: T | undefined, name: string): T => {
+    if (value === undefined) throw new Error(`invariante rota: falta ${name}`);
+    return value;
+};
+
+/** Autoridad única de reconciliación de join; T11 agrega su matriz de tests sobre esta función. */
+export function decideJoinReconciliation(intent: JoinIntent, o: JoinObservation): JoinDecision {
+    if (o.mergeHead === null && o.planHead === intent.expectedPlanHeadSha && !o.trackIsAncestor) return { action: 'retry-merge' };
+    if (o.mergeHead === intent.expectedTrackHeadSha && o.planHead === intent.expectedPlanHeadSha) return { action: 'abort-own-merge' };
+    if (o.mergeHead === null && o.trackIsAncestor === true) return { action: 'accept-merge', joinedCommitSha: o.planHead };
+    if (o.mergeHead !== null && o.mergeHead !== intent.expectedTrackHeadSha) return { action: 'block', reason: 'MERGE_HEAD ajeno' };
+    return { action: 'block', reason: 'estado de join indemostrable' };
+}
 
 export function initialCohort(planJournalId: string, trackIds: string[], maxParallel = trackIds.length): CohortProtocol {
     if (planJournalId.length === 0 || trackIds.length < 2 || new Set(trackIds).size !== trackIds.length
@@ -292,10 +438,17 @@ export function initialCohort(planJournalId: string, trackIds: string[], maxPara
 export function assertProtocolInvariants(s: CohortProtocol): void {
     const tracks = Object.values(s.tracks);
     if (tracks.length < 2) throw new Error('cohorte paralela requiere al menos dos tracks');
-    if (s.cohortPhase === 'ACTIVE' && tracks.some((t) => !['ARMED', 'ACTIVE', 'FREEZE_REQUESTED', 'FROZEN', 'JOIN_REQUESTED', 'JOIN_INTENT', 'MERGED_UNVERIFIED', 'JOINED'].includes(t.phase))) {
+    if ((s.cohortPhase === 'ACTIVE' || s.cohortPhase === 'JOINING') && tracks.some((t) => !WORKING.includes(t.phase))) {
         throw new Error('ACTIVE prohíbe tracks sin armar');
     }
     if (tracks.filter((t) => t.phase === 'ACTIVE').length > s.maxParallel) throw new Error('tracks ACTIVE exceden maxParallel');
+    if (tracks.filter((t) => t.phase === 'JOIN_INTENT').length > 1) {
+        throw new Error('un solo JOIN_INTENT vivo por cohorte'); // C7: los merges son serie estricta
+    }
+    if (tracks.some((t) => FROZEN_OR_LATER.includes(t.phase) && t.frozenHeadSha === undefined)) {
+        throw new Error('un track congelado exige frozenHeadSha');
+    }
+    // C2: SERIAL solo con la cohorte demostrablemente desmantelada. BLOCKED nunca cuenta como limpio.
     if (s.cohortPhase === 'SERIAL' && tracks.some((t) => !['REMOVED', 'DECLARED'].includes(t.phase))) {
         throw new Error('SERIAL prohíbe recursos paralelos activos');
     }
@@ -310,8 +463,11 @@ export function assertProtocolInvariants(s: CohortProtocol): void {
 export function nextProtocolEffect(s: CohortProtocol): ProtocolEffect | null {
     assertProtocolInvariants(s);
     const tracks = Object.values(s.tracks).sort((a, b) => a.trackId.localeCompare(b.trackId));
+    if (s.cohortPhase === 'BLOCKED' || s.cohortPhase === 'SERIAL' || s.cohortPhase === 'COMPLETE') return null;
     if (s.cohortPhase === 'FALLBACK_PENDING') {
-        const owned = tracks.find((t) => !['DECLARED', 'REMOVED', 'BLOCKED'].includes(t.phase));
+        // C2: propiedad indemostrable detiene la cohorte; nunca se serializa con recursos posiblemente vivos.
+        if (tracks.some((t) => t.phase === 'BLOCKED')) return null;
+        const owned = tracks.find((t) => !['DECLARED', 'REMOVED'].includes(t.phase));
         return owned !== undefined
             ? { kind: 'begin-teardown', trackId: owned.trackId }
             : { kind: 'enter-serial', reason: s.fallbackReason ?? 'prepare-failed' };
@@ -326,10 +482,33 @@ export function nextProtocolEffect(s: CohortProtocol): ProtocolEffect | null {
             return { kind: 'spawn-track-supervisor', trackId: t.trackId, readinessNonce: t.readinessNonce };
         }
     }
-    if (s.cohortPhase === 'ACTIVE') {
-        const active = tracks.filter((t) => t.phase === 'ACTIVE').length;
-        const waiting = tracks.find((t) => t.phase === 'ARMED');
-        if (waiting !== undefined && active < s.maxParallel) return { kind: 'activate-track', trackId: waiting.trackId };
+    if (s.cohortPhase === 'ACTIVE' || s.cohortPhase === 'JOINING') {
+        if (s.cohortPhase === 'ACTIVE') {
+            const active = tracks.filter((t) => t.phase === 'ACTIVE').length;
+            const waiting = tracks.find((t) => t.phase === 'ARMED');
+            if (waiting !== undefined && active < s.maxParallel) return { kind: 'activate-track', trackId: waiting.trackId };
+        }
+        const requested = tracks.find((t) => t.phase === 'JOIN_REQUESTED');
+        if (requested !== undefined) return { kind: 'freeze-track', trackId: requested.trackId };
+        // C3: ningún merge empieza hasta que la cohorte entera esté congelada.
+        if (tracks.every((t) => FROZEN_OR_LATER.includes(t.phase))) {
+            const open = tracks.find((t) => t.phase === 'JOIN_INTENT');
+            if (open !== undefined) {
+                return {
+                    kind: 'merge-track', trackId: open.trackId,
+                    expectedPlanHeadSha: required(open.expectedPlanHeadSha, 'expectedPlanHeadSha'),
+                    expectedTrackHeadSha: required(open.expectedTrackHeadSha, 'expectedTrackHeadSha'),
+                };
+            }
+            const next = tracks.find((t) => t.phase === 'FROZEN');
+            if (next !== undefined) {
+                return {
+                    kind: 'persist-join-intent', trackId: next.trackId,
+                    expectedPlanHeadSha: required(s.planHeadSha, 'planHeadSha'),
+                    expectedTrackHeadSha: required(next.frozenHeadSha, 'frozenHeadSha'),
+                };
+            }
+        }
     }
     if (tracks.every((t) => t.phase === 'MERGED_UNVERIFIED') && s.globalQaHeadSha === undefined) return { kind: 'request-global-qa' };
     if (s.globalQaHeadSha !== undefined && s.finalIntegrationJobId === undefined) return { kind: 'request-final-integration' };
@@ -343,17 +522,73 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
         out.cohortPhase = 'FALLBACK_PENDING';
         out.fallbackReason = observation.kind === 'prepare-failed'
             ? `prepare-failed:${observation.trackId}` : `effect-failed:${observation.effect}`;
+        // C2: un fallo demostrable no bloquea, entra al teardown probatorio de C9.
+        const failed = observation.trackId === undefined ? undefined : out.tracks[observation.trackId];
+        if (failed !== undefined && !['DECLARED', 'REMOVED', 'BLOCKED'].includes(failed.phase)) {
+            failed.phase = 'TEARDOWN_REQUESTED';
+        }
+    } else if (observation.kind === 'worktree-observed') {
+        const t = out.tracks[observation.trackId];
+        if (t === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
+        // R4.6: un worktree que no es demostrablemente nuestro nunca se adopta ni se borra.
+        if (observation.owned) t.phase = 'WORKTREE_CREATED';
+        else {
+            t.phase = 'BLOCKED';
+            t.blockedReason = 'worktree preexistente ajeno';
+        }
+    } else if (observation.kind === 'supervisor-observed') {
+        const t = out.tracks[observation.trackId];
+        if (t === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
+        if (observation.identity === 'other') {
+            t.phase = 'BLOCKED';
+            t.blockedReason = 'identidad de supervisor ajena';
+        } else if (observation.identity === 'expected') {
+            // C8: el readiness solo se acredita con el nonce que emitió el supervisor del plan.
+            if (observation.readinessNonce === t.readinessNonce) t.phase = 'ARMED';
+            else {
+                t.phase = 'BLOCKED';
+                t.blockedReason = 'readinessNonce no coincide';
+            }
+        }
+        // 'absent' no mueve fase: el mismo supervisorIntent se reintenta (C11).
+    } else if (observation.kind === 'join-requested') {
+        const t = out.tracks[observation.trackId];
+        if (t === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
+        if (t.phase === 'ACTIVE') t.phase = 'JOIN_REQUESTED';
+    } else if (observation.kind === 'track-removed') {
+        const t = out.tracks[observation.trackId];
+        if (t === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
+        t.phase = 'REMOVED'; // T13 refina los pasos intermedios; acá importa el resultado probado
+    } else if (observation.kind === 'teardown-blocked') {
+        const t = out.tracks[observation.trackId];
+        if (t === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
+        t.phase = 'BLOCKED';
+        t.blockedReason = observation.detail;
+    } else if (observation.kind === 'freeze-observation') {
+        const t = out.tracks[observation.trackId];
+        if (t === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
+        t.frozenHeadSha = observation.frozenHeadSha;
+        t.phase = 'FROZEN';
+        out.cohortPhase = 'JOINING';
     } else if (observation.kind === 'join-observation') {
         const t = out.tracks[observation.trackId];
         if (t === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
-        if (observation.mergeHead === null && observation.trackIsAncestor === true) {
+        // Autoridad única: la misma función que T11 prueba con su matriz completa.
+        const decision = decideJoinReconciliation({
+            expectedPlanHeadSha: required(t.expectedPlanHeadSha, 'expectedPlanHeadSha'),
+            expectedTrackHeadSha: required(t.expectedTrackHeadSha, 'expectedTrackHeadSha'),
+            strategy: 'no-ff',
+        }, observation);
+        if (decision.action === 'accept-merge') {
             t.phase = 'MERGED_UNVERIFIED';
-            t.joinedCommitSha = observation.planHead;
-        } else if (observation.mergeHead !== t.expectedTrackHeadSha || observation.planHead !== t.expectedPlanHeadSha) {
+            t.joinedCommitSha = decision.joinedCommitSha;
+            out.planHeadSha = decision.joinedCommitSha;
+        } else if (decision.action === 'block') {
             t.phase = 'BLOCKED';
-            t.blockedReason = 'join observation indemostrable';
+            t.blockedReason = decision.reason;
             out.cohortPhase = 'BLOCKED';
         }
+        // 'retry-merge' y 'abort-own-merge' no mueven fase: el próximo tick reintenta el mismo intent.
     } else if (observation.kind === 'global-qa-pass') {
         if (!observation.clean) throw new Error('QA global no puede cerrar con worktree sucio');
         out.globalQaHeadSha = observation.headSha;
@@ -374,7 +609,11 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
 export function observeProtocolEffect(s: CohortProtocol, effect: ProtocolEffect, observation: ProtocolObservation): CohortProtocol {
     const out = structuredClone(s);
     if (observation.kind === 'effect-failed' || observation.kind === 'prepare-failed' || observation.kind === 'join-observation'
-        || observation.kind === 'global-qa-pass' || observation.kind === 'integration-pass' || observation.kind === 'interlock-pass') {
+        || observation.kind === 'freeze-observation' || observation.kind === 'join-requested'
+        || observation.kind === 'supervisor-observed' || observation.kind === 'worktree-observed'
+        || observation.kind === 'track-removed' || observation.kind === 'teardown-blocked'
+        || observation.kind === 'global-qa-pass'
+        || observation.kind === 'integration-pass' || observation.kind === 'interlock-pass') {
         return reconcileProtocol(out, observation);
     }
     if (observation.kind !== 'effect-applied') return out;
@@ -391,6 +630,10 @@ export function observeProtocolEffect(s: CohortProtocol, effect: ProtocolEffect,
         };
         const phase = map[e.kind];
         if (phase !== undefined) t.phase = phase;
+        if (e.kind === 'persist-join-intent') {
+            t.expectedPlanHeadSha = e.expectedPlanHeadSha;
+            t.expectedTrackHeadSha = e.expectedTrackHeadSha;
+        }
     }
     if (e.kind === 'activate-cohort') {
         out.cohortPhase = 'ACTIVE';
@@ -403,16 +646,27 @@ export function observeProtocolEffect(s: CohortProtocol, effect: ProtocolEffect,
 
 - [ ] **Step 5: Completar el generador de observaciones hasta cubrir cada effect y corregir el reducer hasta GREEN**
 
+**Exhaustividad de observaciones — no opcional.** Toda variante declarada en `ProtocolObservation` debe tener rama en `reconcileProtocol`. Una variante declarada y no manejada no rompe la compilación: devuelve el estado sin cambios, el BFS la deduplica y la rama entera del espacio de estados queda **silenciosamente inalcanzable**. Así es exactamente como `ARMED` puede volverse imposible sin que ningún test rojo lo denuncie. Agregar al final de la cadena de `else if` un guard explícito:
+
+```ts
+else if (observation.kind !== 'effect-applied') {
+    const unhandled: never = observation; // el compilador exige una rama por variante
+    throw new Error(`observación no manejada: ${JSON.stringify(unhandled)}`);
+}
+```
+
+Y en `observationsFor`, todo effect cuyo resultado sea una observación específica (no `effect-applied`) debe listar **también** el camino feliz; si solo se generan las variantes de fallo, la exploración recorre únicamente el árbol de errores y el conteo de estados se desploma sin que ninguna aserción falle.
+
 Run: `cd cli && npx jest tests/core/tracks/protocol.test.ts --runInBand --coverage=false`
 
-Expected: PASS, `seen.size > 50`, sin estado alcanzable que viole las cuatro invariantes.
+Expected: PASS, `states.length > 50`, sin estado alcanzable que viole las invariantes. Si el conteo queda en decenas bajas, la causa casi siempre es una observación declarada sin rama, no un espacio de estados chico.
 
 - [ ] **Step 6: Verificar que cada frontera realmente participa del recorrido**
 
-Agregar al test un `Set<ProtocolEffect['kind']>` y estas aserciones exactas:
+`exploreCohort` ya acumula los effects observados. Agregar esta aserción exacta:
 
 ```ts
-expect([...effectsSeen].sort()).toEqual([
+expect([...exploreCohort(ids).effects].sort()).toEqual([
     'activate-cohort', 'activate-track', 'begin-teardown', 'create-track-journal', 'create-worktree',
     'enter-serial', 'freeze-track', 'merge-track', 'persist-join-intent',
     'persist-prepare-intent', 'request-final-integration', 'request-global-qa',
@@ -642,10 +896,16 @@ import { parseTrackPlan } from '../../../src/core/tracks/plan-parser';
 
 const fixture = (name: string) => fs.readFileSync(path.join(__dirname, '../../fixtures/tracks', name), 'utf8');
 
+/** Narrowing explícito: el retorno es una unión discriminada y `strict` no deja acceder sin estrecharla. */
+const parallel = (source: string) => {
+    const parsed = parseTrackPlan(source, () => true);
+    if (parsed.mode !== 'parallel-candidate') throw new Error(`esperaba parallel-candidate, obtuve ${parsed.mode}`);
+    return parsed;
+};
+
 describe('parseTrackPlan', () => {
     test('parsea membresía, ownership y argv sin shell (R1.1, R1.4, C4)', () => {
-        const p = parseTrackPlan(fixture('two-independent.md'), () => true);
-        expect(p.mode).toBe('parallel-candidate');
+        const p = parallel(fixture('two-independent.md'));
         expect(p.integration).toEqual({
             argv: ['npm', 'test', '--', '--runInBand'],
             paths: ['cli/src/**', 'cli/tests/**'],
@@ -678,6 +938,13 @@ describe('parseTrackPlan', () => {
     test('integration argv debe ser JSON string[] no vacío (C4)', () => {
         const src = fixture('two-independent.md').replace('["npm","test","--","--runInBand"]', 'npm test');
         expect(() => parseTrackPlan(src, () => true)).toThrow(/Integration argv/);
+    });
+
+    test('la ÚLTIMA task con Files y sin Track también se rechaza (R1.6)', () => {
+        // El chequeo del loop solo dispara al ver el siguiente `### Task`; sin este caso
+        // la última task del documento entra a paralelo con sus archivos sin dueño.
+        const src = fixture('two-independent.md').replace('**Track:** docs\n', '');
+        expect(() => parseTrackPlan(src, () => true)).toThrow(/tiene Files pero no Track/);
     });
 });
 ```
@@ -781,6 +1048,8 @@ export function parseTrackPlan(source: string, checkRef: (id: string) => boolean
             else declared.get(member)!.ownership.push(canonical);
         }
     }
+    // La última task del documento no tiene un `### Task` siguiente que dispare el chequeo del loop.
+    if (taskId !== null && pendingFiles.length > 0 && member === null) throw new Error(`task ${taskId} tiene Files pero no Track`);
     const members = new Set([...declared.values()].flatMap((t) => t.taskIds.length > 0 ? [t.trackId] : []));
     if (members.size !== declared.size) throw new Error('membresía y filas de ## Tracks requieren coincidencia exacta');
     if ([...declared.values()].some((t) => t.dependsOn.length > 0)) return { mode: 'serial', reason: 'track-dependency' };
@@ -816,8 +1085,30 @@ _Requirements: R1.3, R1.4, R5.1, R5.2, R5.3, R5.4, R5.5, R5.6, R5.7, R5.10, C5, 
 ```ts
 // cli/tests/core/tracks/ownership.test.ts
 import {
-    assessDeclaredIndependence, assessActualOwnership, canonicalResource,
+    assessDeclaredIndependence, assessActualOwnership, canonicalResource, ownershipPrefix,
 } from '../../../src/core/tracks/ownership';
+
+test('sopa de globs soportados: dir/, dir/*, dir/** cubren descendientes (R5.1, R5.4)', () => {
+    for (const owner of ['cli/src/', 'cli/src/*', 'cli/src/**']) {
+        expect(ownershipPrefix(owner)).toBe('cli/src/');
+    }
+    expect(ownershipPrefix('cli/src/a.ts')).toBe('cli/src/a.ts');
+});
+
+test('un glob intermedio NO habilita paralelismo: falla cerrado (R5.1, R5.3)', () => {
+    // Antes esto no colisionaba con nada y dejaba pasar la cohorte entera.
+    expect(() => ownershipPrefix('src/**/a.ts')).toThrow(/no soporta este glob/);
+    expect(assessDeclaredIndependence([
+        track('a', ['src/**/a.ts']), track('b', ['src/lib/a.ts']),
+    ])).toMatchObject({ parallel: false });
+    expect(assessDeclaredIndependence([track('a', ['src/**/a.ts']), track('b', ['docs/'])]).reasons)
+        .toContain('unsupported-glob:src/**/a.ts');
+});
+
+test('un glob inexpandible tampoco PRUEBA propiedad post-hoc (R5.8)', () => {
+    expect(assessActualOwnership(track('a', ['src/**/a.ts']), [{ status: 'M', path: 'src/lib/a.ts' }]))
+        .toMatchObject({ outsideOwnership: ['src/lib/a.ts'] });
+});
 
 test('colisiona exacto, case-insensitive y por descendiente (R5.1, R5.3, R5.4)', () => {
     expect(assessDeclaredIndependence([
@@ -935,10 +1226,33 @@ const GLOBAL = [
 
 const canon = (p: string): string => path.posix.normalize(p.replaceAll('\\', '/')).replace(/^\.\//, '');
 const key = (p: string): string => canon(p).toLocaleLowerCase('en-US');
+const GLOB_CHARS = /[*?[\]{}]/;
+
+/**
+ * Formas soportadas: `dir/sub/file.ts`, `dir/`, `dir/*`, `dir/**`. Cualquier otro glob
+ * (intermedio, `?`, clases, llaves) se rechaza: un patrón que no sabemos expandir no puede
+ * usarse para AFIRMAR que dos tracks no se pisan.
+ */
+export function ownershipPrefix(owner: string): string {
+    const trimmed = canon(owner).replace(/\/(?:\*\*|\*)$/, '/');
+    if (GLOB_CHARS.test(trimmed)) throw new Error(`ownership no soporta este glob: ${owner}`);
+    return key(trimmed);
+}
+
 const covers = (owner: string, actual: string): boolean => {
-    const o = key(owner).replace(/\*\*?[^/]*$/g, '');
+    const o = ownershipPrefix(owner);
     const a = key(actual);
-    return a === o || a.startsWith(o.endsWith('/') ? o : `${o}/`);
+    return o.endsWith('/') ? a === o.slice(0, -1) || a.startsWith(o) : a === o;
+};
+
+/** Un patrón inexpandible cuenta como intersección: nunca habilita paralelismo por ignorancia. */
+const intersects = (left: string, right: string): boolean => {
+    try { return covers(left, right) || covers(right, left); } catch { return true; }
+};
+
+/** Simétrico del anterior: un patrón inexpandible nunca prueba propiedad. */
+const proves = (owner: string, actual: string): boolean => {
+    try { return covers(owner, actual); } catch { return false; }
 };
 
 export function canonicalResource(raw: string): string {
@@ -951,13 +1265,14 @@ export function assessDeclaredIndependence(tracks: ParsedTrack[]): { parallel: b
     const reasons = new Set<string>();
     for (const t of tracks) {
         for (const owner of t.ownership) {
+            try { ownershipPrefix(owner); } catch { reasons.add(`unsupported-glob:${canon(owner)}`); }
             const global = GLOBAL.find((g) => g.re.test(canon(owner)));
             if (global !== undefined) reasons.add(`global:${global.kind}:${canon(owner)}`);
         }
     }
     for (let i = 0; i < tracks.length; i++) for (let j = i + 1; j < tracks.length; j++) {
         for (const left of tracks[i].ownership) for (const right of tracks[j].ownership) {
-            if (covers(left, right) || covers(right, left)) reasons.add(`path:${canon(right)}`);
+            if (intersects(left, right)) reasons.add(`path:${canon(right)}`);
         }
         const rightResources = new Set(tracks[j].sharedResources.map(canonicalResource));
         for (const resource of tracks[i].sharedResources.map(canonicalResource)) {
@@ -970,7 +1285,7 @@ export function assessDeclaredIndependence(tracks: ParsedTrack[]): { parallel: b
 export function assessActualOwnership(track: ParsedTrack, changes: ChangedPath[]): { outsideOwnership: string[]; globalClasses: string[] } {
     const actual = changes.flatMap((c) => c.oldPath === undefined ? [c.path] : [c.oldPath, c.path]);
     return {
-        outsideOwnership: actual.filter((p) => !track.ownership.some((o) => covers(o, p))).sort(),
+        outsideOwnership: actual.filter((p) => !track.ownership.some((o) => proves(o, p))).sort(),
         globalClasses: actual.flatMap((p) => GLOBAL.filter((g) => g.re.test(canon(p))).map((g) => `${g.kind}:${canon(p)}`)).sort(),
     };
 }
@@ -1549,7 +1864,7 @@ Expected: al menos un FAIL en `after-supervisor-claim` o `after-readiness` antes
 
 - [ ] **Step 3: Implementar la matriz observable de P1**
 
-Agregar una función pura a `tracks.ts`:
+Agregar esta función pura a **`cli/src/core/tracks/protocol.ts`**, no a `tracks.ts` — por la regla de autoridad única de Task 1. `nextProtocolEffect` la llama en su rama `PREPARING`, y `tracks.ts` solo traduce la decisión a efectos:
 
 ```ts
 export type PrepareDecision =
@@ -1571,6 +1886,12 @@ export function decidePrepare(ref: TrackRef, observed: PrepareObservation): Prep
 ```
 
 La observación de muerte usa la tupla `ProcessRef`; un error de `ps` equivale a identidad indemostrable y bloquea.
+
+Agregar los casos de `decidePrepare` a `observationsFor` en `protocol.test.ts` y volver a correr la exploración: si el reducer y esta matriz divergen, el test de T1 lo denuncia acá, no en producción.
+
+Run: `cd cli && npx jest tests/core/tracks/protocol.test.ts --runInBand`
+
+Expected: PASS con los 14 effects todavía cubiertos.
 
 - [ ] **Step 4: Escribir el test rojo del fallback completo**
 
@@ -1595,7 +1916,7 @@ Hasta Task 13, `TrackRuntime.teardownOwned(ref)` ejecuta pasos observables uno p
 
 - [ ] **Step 6: Ejecutar la matriz completa dos veces**
 
-Run: `cd cli && npx jest tests/commands/watch/track-bootstrap-crash.test.ts --runInBand && npx jest tests/commands/watch/track-bootstrap-crash.test.ts --runInBand`
+Run: `cd cli && npx jest tests/core/tracks/protocol.test.ts tests/commands/watch/track-bootstrap-crash.test.ts --runInBand && npx jest tests/commands/watch/track-bootstrap-crash.test.ts --runInBand`
 
 Expected: ambas corridas PASS; no dependen de timing aleatorio ni dejan entradas en `git worktree list`.
 
@@ -1641,8 +1962,24 @@ test('dirty paths se nombran y nunca se descartan (R6.5)', () => {
 });
 
 test('ownership real fuera de scope serializa joins restantes, no ejecución (R5.8, R5.9)', () => {
-    const out = planJoinOrder(['a', 'b'], { a: ['outside.ts'], b: [] });
-    expect(out).toEqual({ mode: 'serial-joins', order: ['a', 'b'], violations: { a: ['outside.ts'] } });
+    const out = planJoinOrder(['a', 'b'], {
+        a: { outsideOwnership: ['outside.ts'], globalClasses: [] },
+        b: { outsideOwnership: [], globalClasses: [] },
+    });
+    expect(out).toEqual({
+        mode: 'serial-joins', order: ['a', 'b'],
+        violations: { a: ['outside.ts'] }, parallelInvalidatedBy: [],
+    });
+});
+
+test('una clase global tocada de verdad invalida el paralelismo de la cohorte (R5.7, C5)', () => {
+    // Declarar limpio y tocar package-lock igual: C5 no puede quedar solo en el chequeo declarativo.
+    const out = planJoinOrder(['a', 'b'], {
+        a: { outsideOwnership: ['package-lock.json'], globalClasses: ['lockfile:package-lock.json'] },
+        b: { outsideOwnership: [], globalClasses: [] },
+    });
+    expect(out.mode).toBe('serial-joins');
+    expect(out.parallelInvalidatedBy).toEqual(['a:lockfile:package-lock.json']);
 });
 ```
 
@@ -1717,6 +2054,19 @@ const actual = assessActualOwnership(parsed.tracks[ref.trackId], changes);
 
 No consultar `git status` para ownership; `status` solo participa del guard de limpieza.
 
+`assessActualOwnership` devuelve **dos** cosas y las dos tienen consumidor:
+
+- `outsideOwnership` no vacío ⇒ `mode: 'serial-joins'` y el evento nombra los paths.
+- `globalClasses` no vacío ⇒ además de serializar los joins, la cohorte queda **invalidada para
+  paralelismo** (C5): el supervisor persiste `cohortParallelInvalidatedBy` con `<trackId>:<clase>:<path>`,
+  emite `parallel-invalidated`, y cualquier `awm watch` posterior sobre este plan corre serial aunque
+  el análisis declarativo diga que puede paralelizar. Los merges ya hechos no se revierten — el
+  conflicto real, si existe, aparece en el merge `no-ff` siguiente y produce `BLOCKED`; lo que C5
+  garantiza es que el hallazgo no se pierda ni se repita en el próximo ciclo.
+
+Sin este consumidor, un track que declara `src/a.ts` y commitea `package-lock.json` pasaba el chequeo
+declarativo de T4 y no volvía a ser observado nunca.
+
 - [ ] **Step 7: Tests y commit**
 
 Run: `cd cli && npx jest tests/core/tracks/join.test.ts tests/commands/watch/track-freeze.test.ts tests/commands/watch/lock.test.ts --runInBand && npm run build`
@@ -1767,17 +2117,16 @@ Run: `cd cli && npx jest tests/core/tracks/join-reconcile.test.ts --runInBand`
 
 Expected: FAIL por función ausente.
 
-- [ ] **Step 3: Implementar decisión pura y precedencia**
+- [ ] **Step 3: Verificar precedencia sobre la función que ya existe**
+
+`decideJoinReconciliation` **ya vive en `protocol.ts` desde Task 1** y `reconcileProtocol` la llama: por la regla de autoridad única, esta task **no** crea una segunda copia en `join.ts`. Lo que agrega T11 es la matriz de tests de arriba, los efectos Git y el import:
 
 ```ts
-export function decideJoinReconciliation(intent: JoinIntent, o: JoinObservation): JoinDecision {
-    if (o.mergeHead === null && o.planHead === intent.expectedPlanHeadSha && !o.trackIsAncestor) return { action: 'retry-merge' };
-    if (o.mergeHead === intent.expectedTrackHeadSha && o.planHead === intent.expectedPlanHeadSha) return { action: 'abort-own-merge' };
-    if (o.mergeHead === null && o.trackIsAncestor) return { action: 'accept-merge', joinedCommitSha: o.planHead };
-    if (o.mergeHead !== null && o.mergeHead !== intent.expectedTrackHeadSha) return { action: 'block', reason: 'MERGE_HEAD ajeno' };
-    return { action: 'block', reason: 'estado de join indemostrable' };
-}
+// cli/src/core/tracks/join.ts
+export { decideJoinReconciliation } from './protocol';
 ```
+
+Si la matriz descubre un caso que la función no cubre, se corrige **en `protocol.ts`** y se vuelve a correr la exploración de T1 en el mismo commit. Un fix que solo viva en `join.ts` invalidaría la prueba del gate.
 
 En `Supervisor.tick`, llamar `reconcileOpenJoin()` **antes** de cualquier guard general que rechace `MERGE_HEAD`.
 
@@ -1820,7 +2169,7 @@ Para `during-conflict`, el fixture modifica la misma línea en plan y track; el 
 
 - [ ] **Step 6: Tests y commit**
 
-Run: `cd cli && npx jest tests/core/tracks/join-reconcile.test.ts tests/commands/watch/track-join-crash.test.ts --runInBand && npm run build`
+Run: `cd cli && npx jest tests/core/tracks/protocol.test.ts tests/core/tracks/join-reconcile.test.ts tests/commands/watch/track-join-crash.test.ts --runInBand && npm run build`
 
 Expected: PASS dos veces consecutivas.
 
@@ -1945,7 +2294,26 @@ const idempotencyKey = crypto.createHash('sha256')
     .update(`${fp.fingerprint}:${fp.commandDigest}:${satisfies.join('\0')}`).digest('hex');
 ```
 
-En `apply.ts`, si un job equivalente ya existe, enlazar **todos** los items solicitados a ese job sin duplicarlo. `Job.satisfies` migra aditivamente a `satisfies: string[]`; `store.ts` normaliza el string legacy a array de un elemento.
+El set de satisfiers sigue siendo parte de la identidad, exactamente como en R1 (`hash(fingerprint + commandDigest + satisfies)`). Eso obliga a una regla explícita, porque de lo contrario dos pedidos del mismo comando con distinto set producirían **dos** jobs:
+
+> **El finalizer siempre pide con el conjunto COMPLETO y ordenado** de ids `track-integration:*` de la cohorte. No existe un camino que pida un subconjunto, y por eso no existe el caso “ya hay un job equivalente con otros satisfiers”.
+
+Como el conjunto es una función determinista del journal (todos los tracks, ordenados), cualquier restart recomputa la misma key y encuentra el mismo job. `apply.ts` enlaza los ids que vienen en el payload — ni más ni menos — y no intenta adoptar jobs preexistentes con otro set. `Job.satisfies` migra aditivamente a `satisfies: string[]`; `store.ts` normaliza el string legacy a array de un elemento.
+
+Test explícito de esta regla:
+
+```ts
+test('el finalizer nunca pide un subconjunto de satisfiers (C4, R7.6)', async () => {
+    const h = finalizerHarness(['a', 'b']);
+    h.allMergedAt('H2');
+    h.reportQaPass({ headSha: 'H3', clean: true });
+    await h.tick();
+    await h.crashAndRestart();
+    await h.tick();
+    expect(h.requestedJobs()).toHaveLength(1);
+    expect(h.requestedJobs()[0].satisfies).toEqual(['track-integration:a', 'track-integration:b']);
+});
+```
 
 - [ ] **Step 6: Guardar el contrato canónico y rechazar pedidos prematuros**
 
@@ -2032,6 +2400,8 @@ Expected: FAIL por módulo ausente.
 
 - [ ] **Step 3: Implementar decisiones sin side effects**
 
+También en **`protocol.ts`** (autoridad única de T1); `teardown.ts` la reexporta y solo aporta los efectos. `reconcileProtocol` reemplaza las observaciones gruesas `track-removed` / `teardown-blocked` de T1 por los pasos que devuelve esta función, y la exploración de T1 se vuelve a correr en este commit.
+
 ```ts
 export type TeardownDecision =
     | 'persist-intent' | 'stop-own-supervisor' | 'accept-supervisor-stopped'
@@ -2048,6 +2418,8 @@ export function decideTeardown(ref: TrackRef, o: TeardownObservation): TeardownD
     throw new Error(`teardown no válido desde ${ref.phase}`);
 }
 ```
+
+`BLOCKED` cae deliberadamente en el `throw`: un track bloqueado **no** entra a teardown automático. La propiedad es indemostrable justamente ahí, y borrar sería el error que C9 existe para evitar. Sale de `BLOCKED` solo con evidencia del operador, que lo devuelve a `TEARDOWN_REQUESTED` de forma explícita.
 
 - [ ] **Step 4: Implementar efectos con prueba de propiedad**
 
@@ -2085,7 +2457,7 @@ Eliminar el cuerpo temporal `TrackRuntime.teardownOwned` de Task 9 y delegar en 
 
 - [ ] **Step 7: Tests y commit**
 
-Run: `cd cli && npx jest tests/core/tracks/teardown.test.ts tests/commands/watch/track-teardown-crash.test.ts tests/commands/watch/track-bootstrap-crash.test.ts --runInBand && npm run build`
+Run: `cd cli && npx jest tests/core/tracks/protocol.test.ts tests/core/tracks/teardown.test.ts tests/commands/watch/track-teardown-crash.test.ts tests/commands/watch/track-bootstrap-crash.test.ts --runInBand && npm run build`
 
 Expected: PASS; el fixture extranjero permanece byte-idéntico.
 
@@ -2359,6 +2731,8 @@ git commit -m "test(tracks): certify serial parity fallback and global collision
 
 _Requirements: R10.1, R10.4, CA-T.5, RNF-T.2, RNF-T.5_
 
+> **Dependencia humana — planificarla, no descubrirla.** El Step 4 corre Codex en la Mac del dueño: ninguna sesión agéntica remota puede producir `codex-owner-mac.json`. Como el test de evidencia falla mientras falte cualquiera de los dos JSON, **T16 bloquea el `npm test` completo de T17**. Coordinar la ventana con el dueño **antes** de empezar T15, no al llegar acá. Mientras la evidencia no exista, T17 puede correr sus suites focalizadas (Step 2) pero **no** puede declararse completa, y la evidencia faltante nunca se sustituye por documentación.
+
 **Files:**
 - Create: `docs/research/r5/provider-run.mjs`
 - Create: `docs/research/r5/provider-protocol.md`
@@ -2566,7 +2940,7 @@ Con todas las tasks marcadas, ejecutar `post-implementation-qa`; debe auditar ca
 | R1.3 | T3, T4 | table test ids `'' . .. -x a/b a\\b`; `git check-ref-format participa` |
 | R1.4 | T3, T4 | ownership derivado de Files; normalización/descendientes/rename |
 | R1.5 | T3, T14 | fixture `## Tracks`; contract test de Depends on/Shared resources |
-| R1.6 | T3 | `rechaza membresía sin fila y fila sin membresía` + duplicate rows |
+| R1.6 | T3 | `rechaza membresía sin fila y fila sin membresía` + duplicate rows + última task sin Track |
 | R1.7 | T3 | `degrada a serial si shared resources falta` |
 | R1.8 | T3 | `Depends on no es none` produce serial |
 | R2.1 | T2 | shape guard de `TrackContext` y round-trip journal |
@@ -2592,14 +2966,14 @@ Con todas las tasks marcadas, ejecutar `post-implementation-qa`; debe auditar ca
 | R4.8 | T8, T9 | wrapper detached con ProcessRef real; crash test |
 | R4.9 | T8, T9 | readiness nonce errado bloquea; no dispatch antes de ARMED |
 | R4.10 | T8, T9, T13 | ausencia recuperable por claim/identity; `ps` ambiguo bloquea |
-| R5.1 | T4 | path exacto/descendiente interseca |
+| R5.1 | T4 | path exacto/descendiente interseca; glob intermedio falla cerrado |
 | R5.2 | T4, T10 | `changedPaths(base, frozenHead)` ignora worktree sucio |
 | R5.3 | T4 | colisión `src/api` vs `SRC/API` |
 | R5.4 | T4 | rename cuenta old/new; directorio/glob cubre descendiente |
 | R5.5 | T4 | `canonicalResource` acepta clase:valor y rechaza forma inválida |
 | R5.6 | T4 | dos `db:dev` producen serial |
-| R5.7 | T4, T15 | un solo `package-lock.json` invalida cohorte (CA-4.3) |
-| R5.8 | T10, T15 | actual fuera de ownership serializa joins restantes |
+| R5.7 | T4, T10, T15 | un solo `package-lock.json` invalida cohorte (CA-4.3); `globalClasses` post-hoc la invalida igual |
+| R5.8 | T10, T15 | actual fuera de ownership serializa joins; glob inexpandible no prueba propiedad |
 | R5.9 | T10, T15 | ambos worktrees terminan antes de integración serial |
 | R5.10 | T4, T6 | `verify-independence` sale 1 con violaciones |
 | R6.1 | T6, T15 | add/join/remove solo emiten; HEAD/state permanecen iguales |
@@ -2632,10 +3006,10 @@ Con todas las tasks marcadas, ejecutar `post-implementation-qa`; debe auditar ca
 | R10.3 | T7 | algoritmo deriva default del JSON medido, no constante manual |
 | R10.4 | T16 | evidence tests de Claude Code y Codex con bootstrap/recovery/join |
 | C1 | T1, T8, T9 | barrera ARMED sin activación parcial |
-| C2 | T1, T9, T13 | fallback solo después de teardown completo |
-| C3 | T1, T12, T14 | orden final y stale-after-mutation |
+| C2 | T1, T9, T13 | fallback solo tras teardown completo; ningún estado alcanzable combina SERIAL con BLOCKED |
+| C3 | T1, T12, T14 | ningún merge antes de todos FROZEN; orden final y stale-after-mutation |
 | C4 | T3, T12, T14 | JSON argv parseado, persistido y comparado por digest |
-| C5 | T4, T15 | CA-4.3 con un solo archivo global |
+| C5 | T4, T10, T15 | CA-4.3 declarativo + consumidor post-hoc de `globalClasses` |
 | C6 | T5, T14 | gate local no exige QA/interlock |
 | C7 | T1, T10, T11 | freeze + integration lease + HEAD assertions |
 | C8 | T2, T5, T8 | autoridad de journal/fencing/spawn/readiness fijada por tests |
@@ -2677,3 +3051,7 @@ Expected: `OK: 70 design requirements and 17 tasks traced` (si el diseño agrega
 ## Handoff de ejecución
 
 El primer checkpoint de ejecución es Task 1. Si el modelo no converge, no se autoriza “seguir y arreglar luego”: se corrige el protocolo puro y se vuelve a correr su exploración. Después de T1, los checkpoints recomendados son T5 (contratos puros completos), T9 (bootstrap/fallback), T13 (protocolos Git completos), T15 (aceptación local) y T16 (providers reales).
+
+**Regla de autoridad única, transversal a todo el plan.** `protocol.ts` es el único lugar donde se decide qué hacer a continuación. T9, T11 y T13 refinan `decidePrepare`, `decideJoinReconciliation` y `decideTeardown` **ahí**, y cada una de esas tasks vuelve a correr `tests/core/tracks/protocol.test.ts` en su propio commit. En cuanto una decisión de protocolo viva fuera de ese archivo, lo que T1 prueba deja de ser lo que corre, y el gate pierde todo su valor.
+
+**Dependencia humana única.** T16 Step 4 requiere una ventana con el dueño para correr Codex en su Mac. Agendarla antes de T15. Es la única parte del plan que ninguna sesión agéntica puede completar sola, y el cierre de T17 depende de ella.
