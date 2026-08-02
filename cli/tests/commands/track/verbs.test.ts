@@ -212,6 +212,28 @@ describe('awm track verify-independence — R5.10', () => {
         expect(parsed).toEqual({ parallel: false, reasons: [expect.stringMatching(/^parse-error:/)] });
     });
 
+    test('shared resource sin forma <clase>:<valor> (canonicalResource, ownership.ts) tambien reporta JSON estructurado, no un stack trace (bug hermano post-fix)', async () => {
+        // El parser NUNCA valida la forma de "Shared resources" — solo revisa
+        // que la celda no este vacia (plan-parser.ts). `canonicalResource`
+        // lanza recien DENTRO de assessDeclaredIndependence, un paso despues
+        // del parseo: el primer fix de este verbo envolvia solo
+        // read+parseTrackPlan y dejaba escapar exactamente este throw.
+        const malformed = fs.readFileSync(fixture('two-independent.md'), 'utf8')
+            .replace('| cli | none | [] |', '| cli | none | badresource |');
+        const tmp = path.join(os.tmpdir(), `awm-badresource-${Date.now()}.md`);
+        fs.writeFileSync(tmp, malformed);
+        try {
+            const out = await runCli(process.cwd(), ['track', 'verify-independence', '--plan', tmp]);
+            expect(out.exitCode).toBe(1);
+            const parsed = JSON.parse(out.out);
+            expect(parsed.parallel).toBe(false);
+            expect(parsed.reasons).toHaveLength(1);
+            expect(parsed.reasons[0]).toMatch(/^parse-error:.*recurso debe usar/);
+        } finally {
+            fs.rmSync(tmp, { force: true });
+        }
+    });
+
     test('verify-independence no emite requests ni exige journal/branch', async () => {
         // deliberadamente NO se llama gitInit/initJournal en process.cwd(): el
         // verbo es puro sobre el archivo de plan, no toca .awm/journal.

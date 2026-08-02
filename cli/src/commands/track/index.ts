@@ -137,36 +137,55 @@ export function registerTrackCommand(program: Command): void {
         .requiredOption('--plan <file>', 'ruta al plan markdown con membresia de Track y tabla ## Tracks')
         .action((opts) => {
             // R5.10 exige "invocable por argv y sale != 0 ante CUALQUIER
-            // violacion" — un plan que ni siquiera parsea (id de track
-            // peligroso, `Files:` sin `Track:`, `Integration argv` no-JSON,
-            // archivo inexistente, etc.) es, con mas razon, una violacion:
-            // jamas debe escapar como una excepcion cruda con stack trace.
+            // violacion" — TODA la tuberia leer-plan -> parsear -> evaluar
+            // independencia puede lanzar sincronicamente con un input
+            // malformo, no solo el parser: `assessDeclaredIndependence`
+            // (via `canonicalResource`, ownership.ts) lanza si una celda de
+            // `Shared resources` no tiene forma `<clase>:<valor>` — un
+            // formato que el parser NUNCA valida (bloqueador encontrado en
+            // re-review: la primera version de este fix envolvia solo
+            // read+parse y dejaba escapar exactamente el mismo tipo de
+            // stack trace crudo un paso mas adelante en el pipeline). Por
+            // eso el try/catch envuelve la tuberia ENTERA — nada que pueda
+            // tirar queda fuera — y el `process.exit` de cada rama vive
+            // AFUERA del try: en los tests `process.exit` esta mockeado
+            // para *lanzar* (para poder capturar el exit code sin matar el
+            // proceso de jest), y si esos exits vivieran dentro del try,
+            // ese throw de control de flujo se re-atraparia como si fuera
+            // un fallo de dominio, produciendo un JSON duplicado.
+            //
             // Se reporta con el mismo shape {parallel, reasons} que el resto
             // del verbo (consistencia de salida) en vez de partir a stderr;
-            // se usa el MISMO exit code (1) que "declarado pero no
-            // independiente" a proposito — ambos casos significan lo mismo
-            // para quien invoca por argv: "no se puede certificar
+            // se usa el MISMO exit code (1) para cualquier violacion —
+            // parseo fallido, plan serial, ownership solapado o resource
+            // compartido malformado — a proposito: todas significan lo
+            // mismo para quien invoca por argv, "no se puede certificar
             // paralelismo ahora", y un solo exit code evita que un script
-            // necesite ramificar entre "malformado" y "colisiona" para
-            // decidir si aborta. El reason se prefija `parse-error:` para
-            // quien SI quiera distinguir el caso inspeccionando el JSON.
-            let parsed: ReturnType<typeof parseTrackPlan>;
+            // necesite ramificar entre variantes para decidir si aborta. El
+            // reason de una excepcion (parseo O evaluacion) se prefija
+            // `parse-error:` deliberadamente con el MISMO prefijo para
+            // ambas etapas: desde la perspectiva del caller, "el archivo de
+            // plan no produce un veredicto valido" es un unico modo de
+            // fallo, sea cual sea la etapa interna que lo detecto: separar
+            // en `parse-error`/`assessment-error` no le agrega ninguna
+            // decision distinta a quien lee el JSON, solo mas prefijos que
+            // aprender. El mensaje original de la excepcion (siempre
+            // incluido despues del prefijo) ya deja clarisimo cual etapa
+            // fallo para quien depura a mano.
+            let result: { parallel: boolean; reasons: string[] };
             try {
                 const source = fs.readFileSync(opts.plan, 'utf8');
-                parsed = parseTrackPlan(source, gitCheckTrackId);
+                const parsed = parseTrackPlan(source, gitCheckTrackId);
+                result = parsed.mode === 'serial'
+                    // Un plan que ni siquiera califica como candidato paralelo
+                    // (recursos compartidos sin declarar, dependencias entre
+                    // tracks, etc.) es, por definicion, una violacion de R5.10.
+                    ? { parallel: false, reasons: [parsed.reason] }
+                    : assessDeclaredIndependence(Object.values(parsed.tracks));
             } catch (e) {
-                process.stdout.write(JSON.stringify({ parallel: false, reasons: [`parse-error:${(e as Error).message}`] }, null, 2) + '\n');
-                process.exit(1);
+                result = { parallel: false, reasons: [`parse-error:${(e as Error).message}`] };
             }
-            if (parsed.mode === 'serial') {
-                // Un plan que ni siquiera califica como candidato paralelo
-                // (recursos compartidos sin declarar, dependencias entre
-                // tracks, etc.) es, por definicion, una violacion de R5.10.
-                process.stdout.write(JSON.stringify({ parallel: false, reasons: [parsed.reason] }, null, 2) + '\n');
-                process.exit(1);
-            }
-            const out = assessDeclaredIndependence(Object.values(parsed.tracks));
-            process.stdout.write(JSON.stringify(out, null, 2) + '\n');
-            if (!out.parallel) process.exit(1);
+            process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+            if (!result.parallel) process.exit(1);
         });
 }
