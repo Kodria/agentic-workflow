@@ -697,7 +697,7 @@ _Requirements: R2.1, R7.1, R9.1, R9.2, R9.3, R9.7, C8_
 - Modify: `cli/tests/core/journal/store.test.ts`
 - Modify: `cli/tests/core/journal/requests.test.ts`
 
-- [ ] **Step 1: Escribir tests rojos de migración e identidad**
+- [x] **Step 1: Escribir tests rojos de migración e identidad**
 
 ```ts
 test('emptyState genera journalId estable y único (R9.1)', () => {
@@ -734,7 +734,7 @@ Run: `cd cli && npx jest tests/core/journal/{types,store,requests}.test.ts --run
 
 Expected: FAIL porque `journalId`, `tracks` y los nuevos request kinds no existen.
 
-- [ ] **Step 2: Agregar los tipos de journal reutilizando `TrackPhase`**
+- [x] **Step 2: Agregar los tipos de journal reutilizando `TrackPhase`**
 
 ```ts
 // imports en cli/src/core/journal/types.ts
@@ -792,7 +792,7 @@ Cambiar `VerificationKind` y sus guards para incluir exactamente `'track-integra
 journalId: `j-${crypto.randomUUID()}`,
 ```
 
-- [ ] **Step 3: Normalizar journals legacy de forma determinista**
+- [x] **Step 3: Normalizar journals legacy de forma determinista**
 
 En `normalizeSchemaOne`, después de validar `schema`, agregar:
 
@@ -809,7 +809,7 @@ if (parsed.journalId === undefined) {
 
 Importar `crypto` en `store.ts`. Normalizar `tracks` y `trackContext` solo por ausencia; no inventar tracks para un journal legacy. Persistir el `journalId` materializado en la siguiente escritura CAS normal; la lectura por sí sola continúa read-only.
 
-- [ ] **Step 4: Extender el envelope con requests de track y guards exhaustivos**
+- [x] **Step 4: Extender el envelope con requests de track y guards exhaustivos**
 
 ```ts
 export type RequestKind =
@@ -833,13 +833,13 @@ const KNOWN_KINDS: readonly RequestKind[] = [
 
 Agregar tests que emitan cada kind, relean el JSON y prueben que un kind desconocido queda `.corrupt` al consumirlo.
 
-- [ ] **Step 5: Ejecutar suites y build**
+- [x] **Step 5: Ejecutar suites y build**
 
 Run: `cd cli && npx jest tests/core/journal/{types,store,requests}.test.ts --runInBand && npm run build`
 
 Expected: PASS y build sin casts `any` nuevos.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cli/src/core/journal cli/tests/core/journal
