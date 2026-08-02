@@ -87,6 +87,17 @@ describe('parseTrackPlan', () => {
         expect(() => parseTrackPlan(src, () => true)).toThrow(/Integration paths/);
     });
 
+    test('rechaza track declarado en la tabla que ninguna task reclama vía **Track:** (R1.6)', () => {
+        // Guarda específicamente la rama `members.size !== declared.size`: una fila de
+        // ## Tracks ("extra") sin ninguna task que la reclame debe fallar por
+        // coincidencia exacta, distinto del caso ya cubierto de membresía sin fila.
+        const src = fixture('two-independent.md').replace(
+            '| docs | none | [] |',
+            '| docs | none | [] |\n| extra | none | [] |',
+        );
+        expect(() => parseTrackPlan(src, () => true)).toThrow(/coincidencia exacta/);
+    });
+
     test('un segundo encabezado ## Tracks hace que sus filas se ignoren silenciosamente; ' +
         'la membresía a la fila "perdida" sigue fallando por coincidencia exacta (documenta comportamiento real, no deseado idealmente)', () => {
         // El parser de tabla solo usa el PRIMER `## Tracks` (findIndex) y corta en la

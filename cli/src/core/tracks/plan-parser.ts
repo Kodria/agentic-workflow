@@ -14,6 +14,7 @@ export type ParsedTrackPlan =
 const taskHeading = /^### Task ([^:]+):/;
 const trackLine = /^\*\*Track:\*\*\s*(.*)$/;
 const fileLine = /^- (?:Create|Modify|Test|Delete):\s+`([^`]+)`/;
+const EXACT_MATCH_ERROR = 'membresía y filas de ## Tracks requieren coincidencia exacta';
 
 function jsonStrings(label: string, raw: string | undefined): string[] {
     if (raw === undefined) throw new Error(`${label} es obligatorio para paralelismo`);
@@ -74,7 +75,7 @@ export function parseTrackPlan(source: string, checkRef: (id: string) => boolean
             if (taskId === null || member !== null) throw new Error('cada task admite exactamente un Track');
             member = membership[1].trim();
             const track = declared.get(member);
-            if (track === undefined) throw new Error('membresía y filas de ## Tracks requieren coincidencia exacta');
+            if (track === undefined) throw new Error(EXACT_MATCH_ERROR);
             track.taskIds.push(taskId);
             track.ownership.push(...pendingFiles);
         }
@@ -88,7 +89,7 @@ export function parseTrackPlan(source: string, checkRef: (id: string) => boolean
     // La última task del documento no tiene un `### Task` siguiente que dispare el chequeo del loop.
     if (taskId !== null && pendingFiles.length > 0 && member === null) throw new Error(`task ${taskId} tiene Files pero no Track`);
     const members = new Set([...declared.values()].flatMap((t) => t.taskIds.length > 0 ? [t.trackId] : []));
-    if (members.size !== declared.size) throw new Error('membresía y filas de ## Tracks requieren coincidencia exacta');
+    if (members.size !== declared.size) throw new Error(EXACT_MATCH_ERROR);
     if ([...declared.values()].some((t) => t.dependsOn.length > 0)) return { mode: 'serial', reason: 'track-dependency' };
     return { mode: 'parallel-candidate', tracks: Object.fromEntries(declared), integration };
 }
