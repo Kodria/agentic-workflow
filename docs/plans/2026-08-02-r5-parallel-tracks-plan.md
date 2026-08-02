@@ -856,7 +856,7 @@ _Requirements: R1.1, R1.2, R1.3, R1.4, R1.5, R1.6, R1.7, R1.8, R7.4, R7.5, C4_
 - Create: `cli/tests/fixtures/tracks/two-independent.md`
 - Create: `cli/tests/fixtures/tracks/legacy-serial.md`
 
-- [ ] **Step 1: Crear fixtures canónicos**
+- [x] **Step 1: Crear fixtures canónicos**
 
 ```markdown
 <!-- cli/tests/fixtures/tracks/two-independent.md -->
@@ -887,7 +887,7 @@ _Requirements: R1.1, R1.2, R1.3, R1.4, R1.5, R1.6, R1.7, R1.8, R7.4, R7.5, C4_
 
 `legacy-serial.md` contiene una tarea normal con `**Files:**`, sin `## Tracks` ni `**Track:**`.
 
-- [ ] **Step 2: Escribir los tests rojos del parser**
+- [x] **Step 2: Escribir los tests rojos del parser**
 
 ```ts
 import fs from 'fs';
@@ -951,13 +951,13 @@ describe('parseTrackPlan', () => {
 
 Inyectar `checkRef: (id) => boolean` en tests; producción lo conecta a `git check-ref-format --branch` en Task 4.
 
-- [ ] **Step 3: Verificar RED**
+- [x] **Step 3: Verificar RED**
 
 Run: `cd cli && npx jest tests/core/tracks/plan-parser.test.ts --runInBand`
 
 Expected: FAIL por módulo ausente.
 
-- [ ] **Step 4: Implementar parser lineal con retorno discriminado**
+- [x] **Step 4: Implementar parser lineal con retorno discriminado**
 
 ```ts
 // cli/src/core/tracks/plan-parser.ts
@@ -1057,13 +1057,13 @@ export function parseTrackPlan(source: string, checkRef: (id: string) => boolean
 }
 ```
 
-- [ ] **Step 5: Agregar casos de duplicate Track, path absoluto, `../`, JSON con números y bloque Tracks duplicado**
+- [x] **Step 5: Agregar casos de duplicate Track, path absoluto, `../`, JSON con números y bloque Tracks duplicado**
 
 Run: `cd cli && npx jest tests/core/tracks/plan-parser.test.ts --runInBand`
 
 Expected: PASS con al menos 14 casos.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cli/src/core/tracks/plan-parser.ts cli/tests/core/tracks/plan-parser.test.ts cli/tests/fixtures/tracks
