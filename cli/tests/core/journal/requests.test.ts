@@ -4,6 +4,7 @@ import os from 'os';
 import crypto from 'crypto';
 import { execFileSync } from 'child_process';
 import { emitRequest, listPendingRequests, applyOutcome, ackFor } from '../../../src/core/journal/requests';
+import type { RequestKind } from '../../../src/core/journal/requests';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { requestsDir } from '../../../src/core/journal/paths';
 
@@ -134,5 +135,28 @@ describe('requests', () => {
         const idB = runInSeparateProcess(emitScript, [repo, 'proc-b']);
         const listed = listPendingRequests(repo, 'rama').map((p) => p.requestId);
         expect(listed.indexOf(idA)).toBeLessThan(listed.indexOf(idB));
+    });
+
+    test('emitRequest soporta los nuevos kinds del protocolo de tracks (R9.2)', () => {  // verifies R9.2
+        const kinds: RequestKind[] = [
+            'track-prepare-request', 'track-freeze-request', 'track-join-request',
+            'track-teardown-request', 'track-finalize-request',
+        ];
+        for (const kind of kinds) {
+            const r = emitRequest(repo, 'rama', { kind, generationToken: 'g1', idempotencyKey: `k-${kind}`, payload: { trackId: 'cli' } });
+            const pending = listPendingRequests(repo, 'rama').find((p) => p.requestId === r.requestId);
+            expect(pending?.corrupt).toBe(false);
+            expect(pending?.envelope.kind).toBe(kind);
+        }
+    });
+
+    test('un kind desconocido en el JSON se clasifica corrupto antes de consumirlo (R9.2)', () => {  // verifies R9.2
+        const file = path.join(requestsDir(repo, 'rama'), 'unknown-kind.json');
+        fs.writeFileSync(file, JSON.stringify({
+            requestId: 'unknown-kind', kind: 'track-vaporize-request', generationToken: 'g1', idempotencyKey: 'k1', payload: {},
+        }));
+        const [pending] = listPendingRequests(repo, 'rama');
+        expect(pending.corrupt).toBe(true);
+        expect(pending.requestId).toBe('unknown-kind.json');
     });
 });

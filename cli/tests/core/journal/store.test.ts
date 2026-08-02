@@ -89,4 +89,35 @@ describe('journal store', () => {
         const wrongBranch = { ...s, branch: 'otra-rama' };
         expect(() => writeJournal(repo, 'rama', wrongBranch)).toThrow(/branch/);
     });
+
+    test('schema 1 legacy recibe journalId determinista sin perder evidencia (R9.3)', () => {  // verifies R9.3
+        initJournal(repo, 'legacy');
+        const legacy = readJournal(repo, 'legacy').state! as unknown as Record<string, unknown>;
+        delete legacy.journalId;
+        fs.writeFileSync(statePath(repo, 'legacy'), JSON.stringify(legacy));
+        const first = readJournal(repo, 'legacy').state!;
+        const second = readJournal(repo, 'legacy').state!;
+        expect(first.journalId).toBe(second.journalId);
+        expect(first.journalId).toMatch(/^legacy-[0-9a-f]{32}$/);
+    });
+
+    test('journalId legacy materializado se persiste en la siguiente escritura CAS normal (R9.3)', () => {  // verifies R9.3
+        initJournal(repo, 'legacy2');
+        const legacy = readJournal(repo, 'legacy2').state! as unknown as Record<string, unknown>;
+        delete legacy.journalId;
+        fs.writeFileSync(statePath(repo, 'legacy2'), JSON.stringify(legacy));
+        const read = readJournal(repo, 'legacy2').state!;
+        // la lectura por si sola sigue siendo read-only: el disco AUN no tiene journalId
+        expect(JSON.parse(fs.readFileSync(statePath(repo, 'legacy2'), 'utf8')).journalId).toBeUndefined();
+        writeJournal(repo, 'legacy2', read);
+        const onDisk = JSON.parse(fs.readFileSync(statePath(repo, 'legacy2'), 'utf8'));
+        expect(onDisk.journalId).toBe(read.journalId);
+    });
+
+    test('normalizeSchemaOne no inventa tracks/trackContext para un journal legacy que nunca los tuvo (R9.2)', () => {
+        initJournal(repo, 'legacy3');
+        const read = readJournal(repo, 'legacy3').state!;
+        expect(read.tracks).toBeUndefined();
+        expect(read.trackContext).toBeUndefined();
+    });
 });

@@ -1,6 +1,10 @@
 // Única fuente de tipos del journal. CONSTITUTION: estados separados, nunca
 // sobrecargados; shape validation antes de usar campos deserializados.
 
+import crypto from 'crypto';
+import { TRACK_PHASES } from '../tracks/types';
+import type { CohortPhase, TrackPhase } from '../tracks/types';
+
 export const EXECUTION_STATES = [
     'received', 'spawn-intent', 'claimed', 'running',
     'exited', 'cancel-requested', 'cancelled', 'orphaned',
@@ -28,6 +32,58 @@ export interface ProcessRef {
     psArgsDigest: string;   // sha de `ps -o args=` observado tras el spawn
 }
 
+/** Debe permanecer sincronizado con el union type `CohortPhase` de
+ *  `../tracks/types` — ese módulo no exporta un const array propio (a
+ *  diferencia de TRACK_PHASES), así que replicamos la lista SOLO para shape
+ *  validation en el journal (nunca para lógica de protocolo, que vive en
+ *  tracks/protocol.ts). */
+const COHORT_PHASES = [
+    'PREPARING', 'ACTIVE', 'JOINING', 'FINAL_QA',
+    'FINAL_INTEGRATION', 'FINAL_INTERLOCK', 'COMPLETE',
+    'FALLBACK_PENDING', 'SERIAL', 'BLOCKED',
+] as const;
+
+/** Identidad y proveniencia de un journal de track (R9.1/R9.2): a qué plan
+ *  pertenece, qué tasks ejecuta y sobre qué base/plan-digest se declaró. */
+export interface TrackContext {
+    trackId: string;
+    taskIds: string[];
+    planDigest: string;
+    baseSha: string;
+    planJournalId: string;
+}
+
+/** Referencia del supervisor de plan a un track (R9.2/R9.7): identidad
+ *  completa del worktree/branch, fencing token y readiness nonce — nunca
+ *  parciales, igual que ProcessRef exige la tupla completa (R2.1). */
+export interface TrackRef {
+    trackId: string;
+    worktreePath: string;
+    branch: string;
+    ownership: string[];
+    sharedResources: string[];
+    dependsOn: string[];
+    fencingToken: string;
+    phase: TrackPhase;
+    readinessNonce: string;
+    readinessAt?: string;
+    frozenHeadSha?: string;
+    supervisorIntent?: { nonce: string; argv: string[]; claimPath: string };
+    supervisorProcessRef?: ProcessRef;
+    joinIntent?: {
+        expectedPlanHeadSha: string;
+        expectedTrackHeadSha: string;
+        strategy: 'no-ff';
+    };
+    teardownIntent?: {
+        worktreePath: string;
+        branch: string;
+        supervisorNonce?: string;
+    };
+    joinedCommitSha?: string;
+    blockedReason?: string;
+}
+
 export interface NextAction {
     actionId: string;
     type: string;           // ej. 'implement-task' | 'dispatch-review' | 'run-qa'
@@ -37,7 +93,8 @@ export interface NextAction {
     state: 'pending' | 'in-progress';
 }
 
-export type VerificationKind = 'test' | 'lint' | 'sensors' | 'review' | 'qa' | 'interlock';
+export type VerificationKind = 'test' | 'lint' | 'sensors' | 'review' | 'qa' | 'interlock' | 'track-integration';
+const VERIFICATION_KINDS: readonly VerificationKind[] = ['test', 'lint', 'sensors', 'review', 'qa', 'interlock', 'track-integration'];
 export interface VerificationItem {
     id: string;
     kind: VerificationKind;
@@ -126,6 +183,7 @@ export interface AppliedRequest {
 export interface JournalState {
     schema: 1;
     revision: number;
+    journalId: string;         // identidad estable del journal (R9.1); legacy la recibe determinista (R9.3)
     branch: string;
     cycle: { status: CycleStatus; startedAt: string; completedAt?: string; nextAction?: NextAction; blockedReason?: string };
     cycleVerificationPlan: VerificationItem[];   // QA + interlock a nivel ciclo (R1.4b)
@@ -140,11 +198,16 @@ export interface JournalState {
     requestProblems: RequestProblem[];                // corrupcion/rechazos de contenido bloquean el gate
     custodyDecisions?: CustodyDecision[];             // compatible con journals previos; decisiones humanas auditadas
     controllerHeartbeatAt?: string;
+    tracks?: TrackRef[];                              // solo presente en el journal del PLAN que orquesta tracks (R9.2)
+    trackContext?: TrackContext;                      // solo presente en el journal de un TRACK individual (R9.1)
+    cohortPhase?: CohortPhase;
+    cohortBaseSha?: string;
+    trackIntegration?: { argv: string[]; paths: string[]; planDigest: string };
 }
 
 export function emptyState(branch: string): JournalState {
     return {
-        schema: 1, revision: 0, branch,
+        schema: 1, revision: 0, journalId: `j-${crypto.randomUUID()}`, branch,
         cycle: {
             status: 'IN_PROGRESS', startedAt: new Date().toISOString(),
             nextAction: { actionId: 'bootstrap-cycle', type: 'plan-cycle', target: 'cycle', preconditions: [], attempt: 0, state: 'pending' },
@@ -162,6 +225,7 @@ export function isWellFormedState(x: unknown): x is JournalState {
     if (!isObj(x)) return false;
     if (x.schema !== 1) return false;
     if (typeof x.revision !== 'number') return false;
+    if (typeof x.journalId !== 'string' || x.journalId.length === 0) return false;
     if (typeof x.branch !== 'string') return false;
     if (!isObj(x.cycle) || !['IN_PROGRESS', 'COMPLETE', 'BLOCKED'].includes(String(x.cycle.status))
         || typeof x.cycle.startedAt !== 'string'
@@ -171,7 +235,7 @@ export function isWellFormedState(x: unknown): x is JournalState {
         || (x.cycle.status === 'IN_PROGRESS' && x.cycle.nextAction === undefined)) return false;
     if (!Array.isArray(x.generations) || !Array.isArray(x.tasks)) return false;
     if (!Array.isArray(x.cycleVerificationPlan) || !Array.isArray(x.verdicts) || !Array.isArray(x.fixes)) return false;
-    if (!Array.isArray(x.requiredVerifiers) || !x.requiredVerifiers.every((kind) => ['test', 'lint', 'sensors', 'review', 'qa', 'interlock'].includes(String(kind)))
+    if (!Array.isArray(x.requiredVerifiers) || !x.requiredVerifiers.every((kind) => VERIFICATION_KINDS.includes(kind as VerificationKind))
         || !Array.isArray(x.dispatches) || !x.dispatches.every(isWellFormedDispatch)) return false;
     if (!isObj(x.jobs) || !Object.values(x.jobs).every(isWellFormedJob)) return false;
     if (!isObj(x.appliedRequests) || !Object.values(x.appliedRequests).every(isWellFormedAppliedRequest)) return false;
@@ -180,6 +244,11 @@ export function isWellFormedState(x: unknown): x is JournalState {
     if (!x.generations.every(isWellFormedGeneration) || !x.tasks.every(isWellFormedTask)) return false;
     if (!x.cycleVerificationPlan.every(isWellFormedVerificationItem)) return false;
     if (!x.verdicts.every(isWellFormedVerdict) || !x.fixes.every(isWellFormedFix)) return false;
+    if (x.tracks !== undefined && (!Array.isArray(x.tracks) || !x.tracks.every(isWellFormedTrackRef))) return false;
+    if (x.trackContext !== undefined && !isWellFormedTrackContext(x.trackContext)) return false;
+    if (x.cohortPhase !== undefined && !(COHORT_PHASES as readonly string[]).includes(String(x.cohortPhase))) return false;
+    if (x.cohortBaseSha !== undefined && typeof x.cohortBaseSha !== 'string') return false;
+    if (x.trackIntegration !== undefined && !isWellFormedTrackIntegration(x.trackIntegration)) return false;
     return true;
 }
 
@@ -199,7 +268,7 @@ function strings(x: unknown): x is string[] {
 
 function isWellFormedVerificationItem(x: unknown): x is VerificationItem {
     return isObj(x) && typeof x.id === 'string'
-        && ['test', 'lint', 'sensors', 'review', 'qa', 'interlock'].includes(String(x.kind))
+        && VERIFICATION_KINDS.includes(x.kind as VerificationKind)
         && (x.satisfiedBy === undefined || typeof x.satisfiedBy === 'string');
 }
 
@@ -290,4 +359,52 @@ export function isWellFormedJob(x: unknown): x is Job {
         && (x.satisfies === undefined || typeof x.satisfies === 'string')
         && (x.attemptOf === undefined || typeof x.attemptOf === 'string')
         && (EXECUTION_STATES as readonly string[]).includes(x.executionState as string);
+}
+
+function isWellFormedTrackContext(x: unknown): x is TrackContext {
+    return isObj(x) && typeof x.trackId === 'string' && x.trackId.length > 0
+        && strings(x.taskIds)
+        && typeof x.planDigest === 'string'
+        && typeof x.baseSha === 'string'
+        && typeof x.planJournalId === 'string' && x.planJournalId.length > 0;
+}
+
+function isWellFormedSupervisorIntent(x: unknown): x is NonNullable<TrackRef['supervisorIntent']> {
+    return isObj(x) && typeof x.nonce === 'string' && x.nonce.length > 0
+        && strings(x.argv) && typeof x.claimPath === 'string';
+}
+
+function isWellFormedJoinIntent(x: unknown): x is NonNullable<TrackRef['joinIntent']> {
+    return isObj(x) && typeof x.expectedPlanHeadSha === 'string' && typeof x.expectedTrackHeadSha === 'string'
+        && x.strategy === 'no-ff';
+}
+
+function isWellFormedTeardownIntent(x: unknown): x is NonNullable<TrackRef['teardownIntent']> {
+    return isObj(x) && typeof x.worktreePath === 'string' && typeof x.branch === 'string'
+        && (x.supervisorNonce === undefined || typeof x.supervisorNonce === 'string');
+}
+
+/** Shape completa (R9.2/R9.7): fencingToken y readinessNonce nunca vacios —
+ *  igual criterio que ProcessRef, la identidad es todo-o-nada. */
+function isWellFormedTrackRef(x: unknown): x is TrackRef {
+    if (!isObj(x)) return false;
+    return typeof x.trackId === 'string' && x.trackId.length > 0
+        && typeof x.worktreePath === 'string' && x.worktreePath.length > 0
+        && typeof x.branch === 'string' && x.branch.length > 0
+        && strings(x.ownership) && strings(x.sharedResources) && strings(x.dependsOn)
+        && typeof x.fencingToken === 'string' && x.fencingToken.length > 0
+        && (TRACK_PHASES as readonly string[]).includes(x.phase as string)
+        && typeof x.readinessNonce === 'string' && x.readinessNonce.length > 0
+        && (x.readinessAt === undefined || typeof x.readinessAt === 'string')
+        && (x.frozenHeadSha === undefined || typeof x.frozenHeadSha === 'string')
+        && (x.supervisorIntent === undefined || isWellFormedSupervisorIntent(x.supervisorIntent))
+        && (x.supervisorProcessRef === undefined || isWellFormedProcessRef(x.supervisorProcessRef))
+        && (x.joinIntent === undefined || isWellFormedJoinIntent(x.joinIntent))
+        && (x.teardownIntent === undefined || isWellFormedTeardownIntent(x.teardownIntent))
+        && (x.joinedCommitSha === undefined || typeof x.joinedCommitSha === 'string')
+        && (x.blockedReason === undefined || typeof x.blockedReason === 'string');
+}
+
+function isWellFormedTrackIntegration(x: unknown): x is NonNullable<JournalState['trackIntegration']> {
+    return isObj(x) && strings(x.argv) && strings(x.paths) && typeof x.planDigest === 'string';
 }
