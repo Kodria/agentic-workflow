@@ -1328,7 +1328,7 @@ _Requirements: R2.2, R2.3, R2.4, R2.5, R2.6, R2.7, R3.1, R3.2, R3.3, R3.4, R3.5,
 - Create: `cli/tests/core/tracks/context.test.ts`
 - Modify: `cli/tests/commands/job/gate-reconcile.test.ts`
 
-- [ ] **Step 1: Escribir tests rojos de autenticación y scope**
+- [x] **Step 1: Escribir tests rojos de autenticación y scope**
 
 ```ts
 test('descriptor debe coincidir por realpath, journalId y fencing (R2.5, R2.6, R9.4)', () => {
@@ -1353,13 +1353,13 @@ test('computeTrackGate no exige qa/interlock global (R3.5, C6)', () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar RED**
+- [x] **Step 2: Ejecutar RED**
 
 Run: `cd cli && npx jest tests/core/tracks/{descriptor,context}.test.ts tests/commands/job/gate-reconcile.test.ts --runInBand`
 
 Expected: FAIL por exports ausentes.
 
-- [ ] **Step 3: Implementar descriptor 0600 con escritura durable**
+- [x] **Step 3: Implementar descriptor 0600 con escritura durable**
 
 ```ts
 // cli/src/core/tracks/descriptor.ts
@@ -1398,7 +1398,7 @@ export function readDescriptor(trackRoot: string): TrackDescriptor | null {
 }
 ```
 
-- [ ] **Step 4: Resolver contexto sin leer progreso de otros tracks**
+- [x] **Step 4: Resolver contexto sin leer progreso de otros tracks**
 
 ```ts
 // cli/src/core/tracks/context.ts
@@ -1440,7 +1440,7 @@ export function resolveAuthenticatedContext(cwd: string, localState: JournalStat
 
 La autenticación contra `TrackRef` se realiza leyendo **solo** el journal del plan indicado por el descriptor; un track nunca enumera ni abre journals hermanos.
 
-- [ ] **Step 5: Extraer un evaluador común y definir `computeTrackGate`**
+- [x] **Step 5: Extraer un evaluador común y definir `computeTrackGate`**
 
 En `gate.ts`, extraer la validación de items/tareas/reviews/fixes a `evaluateEvidence(state, fingerprintNow, scope)`. Mantener `computeGate` byte-compatible en conducta y agregar:
 
@@ -1457,7 +1457,7 @@ export function computeTrackGate(state: JournalState | null, corruptState: boole
 
 Agregar asserts de orden/compatibilidad a los tests existentes de `computeGate` para demostrar que R1 no regresiona.
 
-- [ ] **Step 6: Aplicar el guard de contexto al inicio de cada verbo `job` y `watch`**
+- [x] **Step 6: Aplicar el guard de contexto al inicio de cada verbo `job` y `watch`**
 
 Crear un helper `resolveCommandContext(process.cwd())` que localice la raíz Git, journal y descriptor antes de emitir o consultar. Tests de commander deben probar:
 
@@ -1470,7 +1470,7 @@ Run: `cd cli && npx jest tests/core/tracks/{descriptor,context}.test.ts tests/co
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add cli/src/core/tracks cli/src/commands/job cli/src/commands/watch cli/tests/core/tracks cli/tests/commands/job cli/tests/commands/watch
