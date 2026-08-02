@@ -1,3 +1,62 @@
+## v3.5.0 - 2026-08-02
+
+### Features
+- **watch:** implement job observationState suspected-stall via log staleness (R3.5)
+- **cli:** wire all awm job verbs (incl. list/show/reconcile/reap/exec-wrapper) and awm watch
+- **watch:** foreground loop with drain-before-complete, custody retains lock, mechanical plan-vs-repo init
+- **watch:** generation state machine, dual-signal stall, custody BLOCKED, confirmed ladder
+- **watch:** concurrent runner — detached wrapper spawn, sidecar collection, integrated reconcile
+- **watch:** transactional request application — state, journal, then delete; entity-creating handlers
+- **watch:** exclusive wx lock with full-identity validation and branch invariant
+- **job:** cycle export with phase timestamps, real dispatch counts, evidence hashes, baseline comparison
+- **job:** fail-closed gate with fingerprint currency, single recovery matrix, explicit reap
+- **job:** agent verbs — request intent with real cwd, heartbeat, ps/list/show queries
+- **journal:** ControllerAdapter with positive-evidence safeToReplace
+- **job:** external exec-wrapper with durable claim/identity/result handshake
+- **journal:** durable request publication, idempotency aliases, state-derived acks
+- **journal:** canonical snapshot store with monotonic revision, corrupt-aware reads, best-effort events
+- **journal:** full-tuple process identity, whole-group confirmed termination
+- **journal:** fingerprint with real index digest, parametric cwd, journal exclusion
+- **journal:** emitter-side secret redaction and literal-secret rejection
+- **journal:** branch-scoped paths, worktree-scoped supervisor lock
+- **core:** writeFileAtomicDurable with throwing directory fsync
+- **journal:** entity types, separated state enums, full-tuple ProcessRef, shape guards
+
+### Fixes
+- **watch:** harden durable controller recovery
+- **watch:** retain ownership through process shutdown
+- **watch:** close fail-open verification gaps
+- **job:** align verdict idempotencyKey scope with generation-scoped verdictId; drop taskId from unredacted rejection message
+- **job:** deterministic verdictId + next-action in register help text (Fix3, Fix8)
+- **journal:** post-implementation-qa cluster fixes 1,2,4,5,6,7,8 in apply.ts/requests.ts
+- **process:** harden remaining execFileSync git calls against EPIPE relay (lock.ts, job/index.ts, watch/index.ts, fingerprint.ts)
+- **process:** explicit stdio on execFileSync calls prevents inheritStderr EPIPE relay to caller
+- **process:** spawnStructured uses stdio:ignore — pipe+destroy caused silent EPIPE crash in detached wrapper
+- **cli:** job export --baseline guards unreadable/malformed JSON with a clear error
+- **watch:** guard reconcile's result-sidecar shape before adopting completion; test malformed sidecar reads in runner
+- **watch:** reject unrecognized request kind as corrupt instead of silently discarding; fsync dir on corrupt-only batches
+- **journal:** emitRequest uses directory-scan sequence, not in-process counter, to preserve causal order across separate CLI processes
+- **journal:** emitRequest uses monotonic counter to guarantee emission-order sorting under timestamp collisions
+- **watch:** releaseLock uses handle.path instead of recomputing it
+- **job:** reconcile backfills spawnNonce for adopted results; export declares unobservable for reversed timestamps
+- **job:** gate validates reviewObligation verdictId referential integrity; add reap.ts test coverage
+- **journal:** capture-time psField calls degrade to unknown, never propagate ps execution failures
+- **journal:** activitySnapshot degrades gracefully if ps fails reading cpu time
+- **journal:** refIsAlive never treats a ps execution failure as proof of death
+- **journal:** only bound the prefix ASSIGNMENT quantifier, unbounded suffix caused long-identifier secret leak
+- **journal:** bound ASSIGNMENT regex quantifiers to prevent ReDoS; clear stdio grace timer on close
+- **job:** exec-wrapper uses exit + bounded stdio grace window, not unbounded close, to avoid hang on inherited descendant fds
+- **job:** exec-wrapper waits for stdio close, not exit, before finalizing result
+- **journal:** writeJournal rejects state.branch mismatched with target branch
+- **journal:** writeJournal validates outgoing state shape before persisting
+- **journal:** fingerprint uses -z for unquoted paths (fixes non-ASCII collision), removes maxBuffer ceiling
+- **journal:** recognize single-dash keyword flags; document single-letter-mnemonic limitation
+- **journal:** redesign redactArgv as fail-closed chain redaction, revert findLiteralSecretFlag to simple all-or-nothing reject
+- **journal:** anchor sibling-flag detection to word boundaries, not substring match
+- **journal:** redact.ts value-token heuristic no longer bypassed by -- prefixed secrets
+- **journal:** branchSlug uses collision-free bijective encoding
+- **journal:** isWellFormedJob validates all required fields, not a subset
+
 ## v3.4.0 - 2026-07-30
 
 ### Features
