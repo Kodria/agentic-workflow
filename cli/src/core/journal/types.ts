@@ -43,6 +43,18 @@ const COHORT_PHASES = [
     'FALLBACK_PENDING', 'SERIAL', 'BLOCKED',
 ] as const;
 
+/** Chequeo EN TIEMPO DE COMPILACION, no runtime: si `CohortPhase` gana un
+ *  miembro que `COHORT_PHASES` no cubre, `ActualArray[number]` deja de
+ *  cubrir `Expected` y `Exclude<Expected, ActualArray[number]>` deja de ser
+ *  `never` — tsc falla aca con el miembro faltante en el mensaje, en vez de
+ *  dejar un gap silencioso en isWellFormedState. La direccion inversa (un
+ *  string en COHORT_PHASES que NO es un CohortPhase valido) ya la cubre el
+ *  constraint `ActualArray extends readonly Expected[]` del propio generic:
+ *  `typeof COHORT_PHASES` no calzaria y tsc fallaria en el uso de abajo. */
+type AssertCovers<Expected extends string, ActualArray extends readonly Expected[]> =
+    [Exclude<Expected, ActualArray[number]>] extends [never] ? true : ['missing from COHORT_PHASES', Exclude<Expected, ActualArray[number]>];
+const _cohortPhasesComplete: AssertCovers<CohortPhase, typeof COHORT_PHASES> = true;
+
 /** Identidad y proveniencia de un journal de track (R9.1/R9.2): a qué plan
  *  pertenece, qué tasks ejecuta y sobre qué base/plan-digest se declaró. */
 export interface TrackContext {

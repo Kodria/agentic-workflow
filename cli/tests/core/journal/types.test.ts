@@ -115,6 +115,39 @@ describe('journal types', () => {
         expect(isWellFormedState(state)).toBe(false);
     });
 
+    test('TrackRef y TrackContext rechazan una key requerida AUSENTE, no solo vaciada (R9.2, R9.7)', () => {  // verifies R9.2, R9.7
+        const fullTrack: Record<string, unknown> = {
+            trackId: 'cli', worktreePath: '/tmp/wt', branch: 'awm-track/cli', ownership: ['cli/'],
+            sharedResources: [], dependsOn: [], fencingToken: 'f'.repeat(32), phase: 'DECLARED',
+            readinessNonce: 'r'.repeat(32),
+        };
+        // sanity: la shape completa sigue siendo valida por si misma
+        const sane = emptyState('main');
+        sane.tracks = [{ ...fullTrack } as never];
+        expect(isWellFormedState(sane)).toBe(true);
+
+        for (const key of Object.keys(fullTrack)) {
+            const partial = { ...fullTrack };
+            delete partial[key];   // key AUSENTE por completo, no ''
+            const state = emptyState('main');
+            state.tracks = [partial as never];
+            expect(isWellFormedState(state)).toBe(false);
+        }
+
+        const fullContext: Record<string, unknown> = { trackId: 'cli', taskIds: ['t1'], planDigest: 'd', baseSha: 'abc', planJournalId: 'j-plan' };
+        const saneContext = emptyState('main');
+        saneContext.trackContext = { ...fullContext } as never;
+        expect(isWellFormedState(saneContext)).toBe(true);
+
+        for (const key of Object.keys(fullContext)) {
+            const partial = { ...fullContext };
+            delete partial[key];
+            const state = emptyState('main');
+            state.trackContext = partial as never;
+            expect(isWellFormedState(state)).toBe(false);
+        }
+    });
+
     test('TrackRef valida intents opcionales cuando presentes (R9.2, R9.7)', () => {  // verifies R9.2, R9.7
         const state = emptyState('main');
         state.tracks = [{
