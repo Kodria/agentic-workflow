@@ -1,0 +1,11 @@
+{
+  "reviewedAt": "2026-07-31T22:28:21.137Z",
+  "reviewContext": "new user turn in the same Codex conversation",
+  "turnId": "no disponible",
+  "sessionId": "no disponible",
+  "cutoffEpochMs": 1785536416630,
+  "heartbeatCount": 1,
+  "heartbeatsAfterCutoff": 0,
+  "state": "no-soportado",
+  "detail": "el writer produjo un solo heartbeat anterior al corte y no permanecio vivo tras terminar el turno"
+}

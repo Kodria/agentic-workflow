@@ -8,6 +8,13 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import { ZipFn, ZipResult } from './types';
 
+// stdio explicito: sin esto, spawnSync relayea el stderr del `zip` hijo hacia
+// el stderr del proceso llamante (default `inheritStderr` de Node cuando no
+// se pasa `stdio`) — si ese fd fuera un pipe roto/destruido, el relay mismo
+// dispara un EPIPE no catcheable que crashea al llamante (mismo bug de raiz
+// que motivo EXEC_STDIO en core/journal/process.ts).
+const EXEC_STDIO: ['ignore', 'pipe', 'pipe'] = ['ignore', 'pipe', 'pipe'];
+
 /** Refuses symlinks anywhere in the tree — copying/zipping them could dereference
  * into content outside the registry (info-leak) or embed a broken/unexpected
  * link for the recipient. Exported artifacts are plain files only. */
@@ -25,7 +32,7 @@ function assertNoSymlinks(dir: string): void {
 
 /** Capa 1: binario `zip` del sistema. ENOENT → missing (capa 2: carpeta). */
 export const defaultZip: ZipFn = (cwd, zipName, folderName): ZipResult => {
-    const r = spawnSync('zip', ['-r', '-q', zipName, folderName], { cwd });
+    const r = spawnSync('zip', ['-r', '-q', zipName, folderName], { cwd, stdio: EXEC_STDIO });
     if (r.error && (r.error as NodeJS.ErrnoException).code === 'ENOENT') {
         return { ok: false, missing: true };
     }

@@ -1,0 +1,129 @@
+// PROCESO EXTERNO real (bloqueador 3): el supervisor lo spawnea detached y no
+// lo espera. Hace el spawn demostrable (design R1.8): claim exclusivo por
+// spawnNonce -> identidad real persistida -> ejecucion independiente ->
+// resultado terminal atomico. La matriz de replay es LA UNICA (R3.3).
+import fs from 'fs';
+import path from 'path';
+import { spawn } from 'child_process';
+import { captureSelfRef, captureRefFor, NONCE_ENV, terminatePreviouslyOwnedGroup } from '../../core/journal/process';
+import { resolveWorkingDirectory } from '../../core/journal/fingerprint';
+import { redactText } from '../../core/journal/redact';
+import { writeFileAtomicDurable, fsyncDirSync } from '../../core/atomic-file';
+import type { ProcessRef } from '../../core/journal/types';
+
+export function claimPath(logsRoot: string, jobId: string, nonce: string): string {
+    return path.join(logsRoot, `${jobId}.${nonce}.claim`);
+}
+export function identityPath(logsRoot: string, jobId: string, nonce: string): string {
+    return path.join(logsRoot, `${jobId}.${nonce}.identity.json`);
+}
+export function resultPath(logsRoot: string, jobId: string, nonce: string): string {
+    return path.join(logsRoot, `${jobId}.${nonce}.result.json`);
+}
+export function logPath(logsRoot: string, jobId: string, nonce: string): string {
+    return path.join(logsRoot, `${jobId}.${nonce}.log`);
+}
+
+export type ReplayVerdict = 'never-started' | 'completed' | 'unprovable';
+export function replayVerdict(logsRoot: string, jobId: string, nonce: string): ReplayVerdict {
+    if (!fs.existsSync(claimPath(logsRoot, jobId, nonce))) return 'never-started';
+    if (fs.existsSync(resultPath(logsRoot, jobId, nonce))) return 'completed';
+    return 'unprovable';
+}
+
+export interface WrapperIdentity { jobId: string; nonce: string; wrapper: ProcessRef; command: ProcessRef; }
+export interface WrappedResult { exitCode: number; endedAt: string; resultPath: string; }
+
+const MAX_LOG_BYTES = 1024 * 1024;   // retencion acotada (R2.5)
+// Ventana acotada post-exit para el flush de stdio (R1.8, R2.5). 300ms es
+// generoso frente al caso real (datos ya en vuelo en el pipe cuando 'exit'
+// dispara, tipicamente entregados en 1 tick del event loop) sin acercarse a
+// una espera perceptible si un descendiente hereda los fds y nunca cierra.
+const STDIO_GRACE_MS = 300;
+
+export async function runExecWrapper(opts: { logsRoot: string; jobId: string; nonce: string; argv: string[]; cwd: string; repoRoot?: string }): Promise<WrappedResult> {
+    const { logsRoot, jobId, nonce, argv, cwd } = opts;
+    const repoRoot = opts.repoRoot ?? process.cwd();
+    if (argv.length === 0) throw new Error('argv vacio');
+    fs.mkdirSync(logsRoot, { recursive: true, mode: 0o700 });
+    // (1) claim exclusivo DURABLE — wx + fsync de archivo y de directorio
+    let fd: number;
+    try {
+        fd = fs.openSync(claimPath(logsRoot, jobId, nonce), 'wx', 0o600);
+    } catch {
+        throw new Error(`claim ya existe para ${jobId}/${nonce}: spawn previo no descartable (R1.8)`);
+    }
+    try {
+        fs.writeFileSync(fd, JSON.stringify({ jobId, nonce, claimedAt: new Date().toISOString(), wrapperPid: process.pid }) + '\n');
+        fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    fsyncDirSync(logsRoot);
+
+    const finish = (exitCode: number): WrappedResult => {
+        const result: WrappedResult = { exitCode, endedAt: new Date().toISOString(), resultPath: resultPath(logsRoot, jobId, nonce) };
+        // (4) resultado terminal atomico junto al claim
+        writeFileAtomicDurable(result.resultPath, JSON.stringify(result, null, 2) + '\n', 0o600);
+        return result;
+    };
+
+    // (2) spawn del comando EN EL GRUPO DEL WRAPPER (detached:false): un solo
+    // process group por job, independiente del supervisor (R4.7: shell:false,
+    // argv como array, secretos solo por referencia de entorno).
+    const [exe, ...args] = argv;
+    const safeCwd = resolveWorkingDirectory(repoRoot, cwd).absolute;
+    const child = spawn(exe, args, {
+        cwd: safeCwd, shell: false, detached: true,
+        env: { ...process.env, [NONCE_ENV]: nonce },
+        stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const spawnFailed: Promise<number | null> = new Promise((resolve) => {
+        child.on('error', () => resolve(127));
+        child.on('spawn', () => resolve(null));
+    });
+    const failed = await spawnFailed;
+    if (failed !== null || child.pid === undefined) return finish(127);
+
+    // (3) identidad REAL persistida ANTES de esperar el resultado: ProcessRef
+    // del wrapper Y del comando (bloqueador 3: nunca mas pid/pgid cero).
+    const identity: WrapperIdentity = {
+        jobId, nonce,
+        wrapper: captureSelfRef(nonce),
+        command: captureRefFor(child.pid, nonce, argv),
+    };
+    writeFileAtomicDurable(identityPath(logsRoot, jobId, nonce), JSON.stringify(identity, null, 2) + '\n', 0o600);
+
+    // Salida acotada en memoria y redactada como UN flujo antes de la primera
+    // escritura durable. Redactar cada chunk aisladamente filtra asignaciones
+    // partidas por el pipe (p.ej. `API_` + `KEY=secreto`).
+    let captured = 0;
+    const outputChunks: Buffer[] = [];
+    const logFile = logPath(logsRoot, jobId, nonce);
+    const capture = (chunk: Buffer) => {
+        if (captured >= MAX_LOG_BYTES) return;
+        const accepted = chunk.subarray(0, MAX_LOG_BYTES - captured);
+        outputChunks.push(accepted);
+        captured += accepted.length;
+    };
+    child.stdout?.on('data', capture);
+    child.stderr?.on('data', capture);
+    const exitCode: number = await new Promise((resolve) => {
+        child.on('exit', (code) => resolve(code ?? 1));
+        child.on('error', () => resolve(127));
+    });
+    // Ventana acotada para dejar llegar los ultimos chunks de stdio (exit puede
+    // dispararse antes que termine el flush de 'data') SIN bloquear indefinidamente
+    // si un descendiente hereda los fds y no los cierra — el wrapper SIEMPRE debe
+    // terminar (R1.8). 'close' sin cota reintroduce el riesgo de cuelgue.
+    await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => resolve(), STDIO_GRACE_MS);
+        child.once('close', () => { clearTimeout(timer); resolve(); });
+    });
+    if (outputChunks.length > 0) {
+        fs.writeFileSync(logFile, redactText(Buffer.concat(outputChunks).toString('utf8')), { mode: 0o600 });
+    }
+    // El resultado terminal no se publica mientras queden descendientes en el
+    // grupo propio del comando. Como el wrapper vive en otro PGID, puede drenar
+    // el grupo completo sin auto-terminarse.
+    const drained = await terminatePreviouslyOwnedGroup(identity.command, { termGraceMs: 500, killGraceMs: 500 });
+    return finish(drained ? exitCode : 125);
+}

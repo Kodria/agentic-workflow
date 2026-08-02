@@ -1,0 +1,2 @@
+claude-haiku-4-5-20251001
+procedencia: system prompt context provided at agent execution initialization

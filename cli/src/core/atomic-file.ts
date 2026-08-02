@@ -63,3 +63,31 @@ export function writeFileAtomic(file: string, content: string, mode = 0o644): vo
         throw error;
     }
 }
+
+/** fsync del directorio contenedor: garantiza que una ENTRADA creada/renombrada
+ *  sobrevive un crash del OS. Falla LANZANDO — la durabilidad de la transición
+ *  es parte del contrato, nunca un best-effort silencioso (design R1.2,
+ *  bloqueador 4 de la review del plan). */
+export function fsyncDirSync(dir: string): void {
+    let dirFd: number | undefined;
+    try {
+        dirFd = fs.openSync(dir, 'r');
+        fs.fsyncSync(dirFd);
+    } catch (error) {
+        throw new Error(`fsync de directorio fallo para ${dir}: ${(error as Error).message}`);
+    } finally {
+        if (dirFd !== undefined) {
+            try {
+                fs.closeSync(dirFd);
+            } catch {
+                // best-effort SOLO el close: el fsync ya ocurrio o ya lanzo.
+            }
+        }
+    }
+}
+
+/** writeFileAtomic + fsync del directorio contenedor tras el rename. */
+export function writeFileAtomicDurable(file: string, content: string, mode = 0o644): void {
+    writeFileAtomic(file, content, mode);
+    fsyncDirSync(path.dirname(file));
+}

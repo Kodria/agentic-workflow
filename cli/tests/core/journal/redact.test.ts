@@ -1,0 +1,69 @@
+import { redactText, redactArgv, findLiteralSecretFlag } from '../../../src/core/journal/redact';
+
+describe('redact', () => {
+    test('redactText enmascara asignaciones sospechosas (R2.3)', () => {   // verifies R2.3
+        expect(redactText('export API_KEY=abc123secreto')).toContain('[REDACTED]');
+        expect(redactText('password: hunter2')).toContain('[REDACTED]');
+        expect(redactText('linea inocente')).toBe('linea inocente');
+    });
+
+    test('findLiteralSecretFlag detecta flags sensibles con valor literal (R2.3)', () => {  // verifies R2.3
+        expect(findLiteralSecretFlag(['cmd', '--token', 'abc123'])).toBe('--token');
+        expect(findLiteralSecretFlag(['cmd', '--api-key=xyz'])).toBe('--api-key');
+        expect(findLiteralSecretFlag(['cmd', '--token-env', 'MY_TOKEN'])).toBeNull();
+        expect(findLiteralSecretFlag(['npm', 'test'])).toBeNull();
+    });
+
+    test('findLiteralSecretFlag detecta un valor literal que empieza con -- (R2.3)', () => {  // verifies R2.3
+        expect(findLiteralSecretFlag(['cmd', '--token', '--abc123secretvalue'])).toBe('--token');
+    });
+
+    test('findLiteralSecretFlag rechaza sin importar si el siguiente token parece otro flag (R2.3)', () => {  // verifies R2.3
+        expect(findLiteralSecretFlag(['cmd', '--token', '--password', 'hunter2'])).toBe('--token');
+        expect(findLiteralSecretFlag(['cmd', '--token', '--my-secret-data'])).toBe('--token');
+    });
+
+    test('redactArgv nunca deja el valor de un flag sensible (R2.3)', () => {  // verifies R2.3
+        expect(redactArgv(['x', '--password', 'hunter2'])).toEqual(['x', '--password', '[REDACTED]']);
+    });
+
+    test('redactArgv redacta un valor literal que empieza con -- (R2.3)', () => {  // verifies R2.3
+        expect(redactArgv(['cmd', '--token', '--abc123secretvalue'])).toEqual(['cmd', '--token', '[REDACTED]']);
+    });
+
+    test('redactArgv redacta TODA la cadena ambigua cuando el valor parece otro flag sensible, sin dejar pasar el secreto real (R2.3)', () => {  // verifies R2.3
+        expect(redactArgv(['cmd', '--token', '--password', 'hunter2'])).toEqual(['cmd', '--token', '[REDACTED]', '[REDACTED]']);
+        expect(redactArgv(['cmd', '--token', '--my-secret-data'])).toEqual(['cmd', '--token', '[REDACTED]']);
+        expect(redactArgv(['cmd', '--api-key', '--secret'])).toEqual(['cmd', '--api-key', '[REDACTED]']);
+    });
+
+    test('findLiteralSecretFlag y redactArgv reconocen flags de un solo guion con palabra clave (R2.3)', () => {  // verifies R2.3
+        expect(findLiteralSecretFlag(['cmd', '-token', 'abc123'])).toBe('-token');
+        expect(redactArgv(['cmd', '-token', 'abc123'])).toEqual(['cmd', '-token', '[REDACTED]']);
+    });
+
+    test('findLiteralSecretFlag NO reconoce mnemonicos de una letra sin palabra clave — limitacion aceptada (R2.3)', () => {  // verifies R2.3
+        // Documenta el limite, no lo intenta cerrar: ver comentario en redact.ts.
+        expect(findLiteralSecretFlag(['cmd', '-p', 'hunter2secret'])).toBeNull();
+    });
+
+    test('redactText no sufre backtracking catastrofico con corridas largas sin match (R2.3)', () => {  // verifies R2.3
+        const start = Date.now();
+        redactText('x'.repeat(100000));
+        expect(Date.now() - start).toBeLessThan(500);
+    });
+
+    test('redactText no pierde secretos con identificadores largos entre keyword y separador (R2.3)', () => {  // verifies R2.3
+        const text = 'api_key' + 'x'.repeat(70) + '=sk-VERY-REAL-SECRET-VALUE-12345';
+        const result = redactText(text);
+        expect(result).not.toContain('sk-VERY-REAL-SECRET-VALUE-12345');
+        expect(result).toContain('[REDACTED]');
+    });
+
+    test('redactText no sufre backtracking cuadratico con muchas ocurrencias del keyword sin separador (R2.3)', () => {  // verifies R2.3
+        const start = Date.now();
+        const result = redactText('token'.repeat(2400));
+        expect(Date.now() - start).toBeLessThan(500);
+        expect(result).toBe('token'.repeat(2400));   // sin separador en ningun lado: nada que redactar
+    });
+});

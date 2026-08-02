@@ -1,0 +1,5 @@
+stamp=20260731T221701Z
+recovery_context=aplicacion cerrada por completo y sesion Codex totalmente nueva, confirmado por el owner
+discovery=marker encontrado leyendo exclusivamente docs/research/r0/evidence; stamp no provisto al contexto nuevo
+turn_id=no disponible
+session_id=no disponible

@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "kind": "agent",
+  "provider": "claude-code",
+  "environment": "sandbox-remote",
+  "date": "2026-07-31T23:01:22.000Z",
+  "harnessVersion": "2.1.220 (Claude Code)",
+  "note": "Re-certificación bajo el protocolo endurecido (fd218ce). Sustituye a agent-claude-code-sandbox-remote-20260731T025313Z.json, cuyos P2/P3/P5/P6 quedaron no-certificado bajo la vara nueva.",
+  "exercises": {
+    "p1Dispatch": {
+      "state": "soportado",
+      "detail": "Dos subagentes despachados en un mismo mensaje; ambos logs con 20 timestamps en milisegundos.",
+      "artifacts": ["p1-claude-code-sandbox-remote-20260731T024505Z-a.log", "p1-claude-code-sandbox-remote-20260731T024505Z-b.log"]
+    },
+    "p1Parallel": {
+      "state": "soportado",
+      "detail": "Rango A [1785465922196..1785465941286] ∩ rango B [1785465921349..1785465940424] = 18228 ms de solape real; timestamps en ms, sin ambigüedad de precisión.",
+      "artifacts": ["p1-claude-code-sandbox-remote-20260731T024505Z-a.log", "p1-claude-code-sandbox-remote-20260731T024505Z-b.log"]
+    },
+    "p2ModelOverride": {
+      "state": "soportado",
+      "detail": "Controlador claude-fable-5 (metadato del harness, procedencia registrada) vs worker claude-haiku-4-5-20251001 (identificador reportado por el runtime del worker, no inferido); dispatch.txt conserva el modelo solicitado (haiku) y el enum de modelos que expone la herramienta de despacho. Tres piezas presentes y distintas.",
+      "artifacts": ["p2-claude-code-sandbox-remote-20260731T225422Z-controller.txt", "p2-claude-code-sandbox-remote-20260731T225422Z-worker.txt", "p2-claude-code-sandbox-remote-20260731T225422Z-dispatch.txt"]
+    },
+    "p3TurnEnd": {
+      "state": "soportado",
+      "detail": "179 heartbeats posteriores al corte, 178.3 s de continuidad (umbral ≥30 s); resumed.json registra la identidad durable del turno de revisión (sessionId CCR + triggerId del send_later que lo inició).",
+      "artifacts": ["p3-claude-code-sandbox-remote-20260731T225422Z.log", "p3-claude-code-sandbox-remote-20260731T225422Z-turnend.txt", "p3-claude-code-sandbox-remote-20260731T225422Z-resumed.json"]
+    },
+    "p4Worktree": {
+      "state": "soportado",
+      "detail": "Transcripción literal con stdout/stderr y exit codes: el marker solo existe en el worktree, git status --short del árbol principal no lo lista, remove exit 0.",
+      "artifacts": ["p4-claude-code-sandbox-remote-20260731T225422Z.txt"]
+    },
+    "p5Recovery": {
+      "state": "degradado",
+      "detail": "contexto-fresco: subagente nuevo sin briefing localizó el marker leyendo solo evidence/ (distinguió el único marker sin resumed entre 4) y ejecutó su next_action. Proxy válido fuera de Fase B; la prueba sesión-real quedó cubierta por codex@owner-mac (soportado).",
+      "artifacts": ["p5-claude-code-sandbox-remote-20260731T225422Z-marker.json", "p5-claude-code-sandbox-remote-20260731T225422Z-resumed.txt"]
+    },
+    "p6WaitPolling": {
+      "state": "soportado",
+      "detail": "Mecanismo dual respaldado por artefactos de P3: notificaciones de finalización de tareas en background (despertaron al controlador tras cada subagente) y trigger programado send_later — el triggerId y fire_at que despertaron el turno de revisión de P3 quedaron registrados en resumed.json. Sin sleep bloqueante disponible en el loop principal.",
+      "artifacts": ["p3-claude-code-sandbox-remote-20260731T225422Z-resumed.json"]
+    }
+  }
+}

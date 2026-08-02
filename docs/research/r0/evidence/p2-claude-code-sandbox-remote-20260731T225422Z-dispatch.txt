@@ -1,0 +1,2 @@
+modelo solicitado en el despacho: haiku (alias del harness; parámetro 'model' de la herramienta Agent, subagent_type general-purpose)
+metadato del despacho expuesto por el harness: la herramienta Agent acepta enum de modelos ["sonnet","opus","haiku","fable"]; se despachó con model=haiku sin revelar al worker el identificador solicitado.

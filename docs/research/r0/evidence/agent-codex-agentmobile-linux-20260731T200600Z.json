@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "kind": "agent",
+  "provider": "codex",
+  "environment": "agentmobile-linux",
+  "date": "2026-07-31T20:28:16.259Z",
+  "harnessVersion": "codex-cli 0.145.0",
+  "exercises": {
+    "p1Dispatch": {
+      "state": "soportado",
+      "detail": "Dos subagentes fueron despachados y produjeron 20 marcas cada uno.",
+      "artifacts": [
+        "p1-codex-agentmobile-linux-20260731T200600Z-a.log",
+        "p1-codex-agentmobile-linux-20260731T200600Z-b.log"
+      ]
+    },
+    "p1Parallel": {
+      "state": "soportado",
+      "detail": "A=[1785528326362,1785528345468], B=[1785528330309,1785528349406]; los rangos se solapan durante 15.159 s.",
+      "artifacts": [
+        "p1-codex-agentmobile-linux-20260731T200600Z-a.log",
+        "p1-codex-agentmobile-linux-20260731T200600Z-b.log"
+      ]
+    },
+    "p2ModelOverride": {
+      "state": "no-certificado",
+      "detail": "El artefacto solo registra gpt-5.6-terra; no contiene el modelo de la sesión controladora ni metadatos del despacho que prueben que el runtime aplicado fue distinto.",
+      "artifacts": [
+        "p2-codex-agentmobile-linux-20260731T200600Z.txt"
+      ]
+    },
+    "p3TurnEnd": {
+      "state": "no-certificado",
+      "detail": "Hay 181 heartbeats y 180.287 s posteriores al timestamp 1785528411378, pero los artefactos no prueban que ese timestamp coincida con el fin real del turno ni que la revisión ocurriera en otro turno.",
+      "artifacts": [
+        "p3-codex-agentmobile-linux-20260731T200600Z.log",
+        "p3-codex-agentmobile-linux-20260731T200600Z-turnend.txt"
+      ]
+    },
+    "p4Worktree": {
+      "state": "no-certificado",
+      "detail": "La transcripción reemplazó la salida crítica de git status del árbol principal por un comentario del autor; el aislamiento no queda demostrado por el archivo.",
+      "artifacts": [
+        "p4-codex-agentmobile-linux-20260731T200600Z.txt"
+      ]
+    },
+    "p5Recovery": {
+      "state": "no-certificado",
+      "detail": "El marker y resumed existen, pero se crearon dentro de la misma conversación con memoria previa; no hubo cierre real de app ni contexto nuevo sin memoria.",
+      "artifacts": [
+        "p5-codex-agentmobile-linux-20260731T200600Z-marker.json",
+        "p5-codex-agentmobile-linux-20260731T200600Z-resumed.txt"
+      ]
+    },
+    "p6WaitPolling": {
+      "state": "no-certificado",
+      "detail": "La reactivación observada fue por un nuevo mensaje del usuario; este harness no expone un mecanismo verificable de polling o notificación de trabajos en background.",
+      "artifacts": []
+    }
+  }
+}

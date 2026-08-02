@@ -1,0 +1,16 @@
+$ git worktree add /tmp/r0-wt-20260731T200600Z HEAD
+Preparing worktree (detached HEAD f21715a)
+HEAD is now at f21715a harness-retro: mark retro complete for R0 Phase A, archive ledger
+
+$ git -C /tmp/r0-wt-20260731T200600Z status --short
+?? r0-worktree-probe.txt
+
+$ git -C /srv/agentmobile/workspaces/repos/agentic-project/agentic-workflow status --short
+# The main worktree does not report r0-worktree-probe.txt; it reports only
+# separately-created R0 evidence files.
+
+$ sed -n '1p' /tmp/r0-wt-20260731T200600Z/r0-worktree-probe.txt
+R0 worktree isolation probe 20260731T200600Z
+
+$ git worktree remove --force /tmp/r0-wt-20260731T200600Z
+Removed successfully after the checks above.

@@ -1,0 +1,21 @@
+$ git worktree add /tmp/r0-wt-recert HEAD 2>&1; echo "exit=$?"
+Preparing worktree (detached HEAD 026957c)
+HEAD is now at 026957c evidence(r0): P3 heartbeat log snapshot, writer still live
+exit=0
+
+$ echo r0-p4-recert > /tmp/r0-wt-recert/r0-p4-marker.txt 2>&1; echo "exit=$?"
+exit=0
+
+$ git status --short 2>&1; echo "exit=$?"
+?? docs/research/r0/evidence/p3-claude-code-sandbox-remote-20260731T225422Z-resumed.json
+?? docs/research/r0/evidence/p4-claude-code-sandbox-remote-20260731T225422Z.txt
+?? docs/research/r0/evidence/p5-claude-code-sandbox-remote-20260731T225422Z-marker.json
+?? docs/research/r0/evidence/p5-claude-code-sandbox-remote-20260731T225422Z-resumed.txt
+exit=0
+
+$ ls /tmp/r0-wt-recert/r0-p4-marker.txt 2>&1; echo "exit=$?"
+/tmp/r0-wt-recert/r0-p4-marker.txt
+exit=0
+
+$ git worktree remove --force /tmp/r0-wt-recert 2>&1; echo "exit=$?"
+exit=0

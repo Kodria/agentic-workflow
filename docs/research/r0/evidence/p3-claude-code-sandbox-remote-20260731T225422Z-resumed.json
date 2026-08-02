@@ -1,0 +1,13 @@
+{
+  "reviewedAt": 1785538806429,
+  "reviewedAtIso": "2026-07-31T23:00:06Z",
+  "turnChangeEvidence": {
+    "mechanism": "send_later (trigger programado del harness CCR) — el turno que lanzó el writer terminó de verdad; este turno fue iniciado por el trigger, no por continuidad del anterior",
+    "sessionId": "c5f202a7-3696-5f50-b4f1-73dc78fdc698",
+    "triggerId": "trig_01RSGGqZ1qtUJp5HbLaWJh9Q",
+    "triggerFireAt": "2026-07-31T22:58:00Z"
+  },
+  "cutoffMs": 1785538493647,
+  "heartbeatsPostCutoff": 179,
+  "postCutoffSpanSeconds": 178.327
+}

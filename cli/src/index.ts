@@ -38,6 +38,8 @@ import { registerRegistryCommand } from './commands/registry';
 import { registerPinCommands } from './commands/pin';
 import { registerExportCommand } from './commands/export';
 import { registerAgentCommand } from './commands/agent';
+import { registerJobCommand } from './commands/job';
+import { registerWatchCommand } from './commands/watch';
 import { runAddBundleCore } from './commands/add';
 import { runSyncCore } from './commands/sync';
 import { runUpdateCore } from './commands/update';
@@ -686,5 +688,7 @@ registerRegistryCommand(program);
 registerPinCommands(program);
 registerExportCommand(program);
 registerAgentCommand(program);
+registerJobCommand(program);
+registerWatchCommand(program);
 
 program.parse();

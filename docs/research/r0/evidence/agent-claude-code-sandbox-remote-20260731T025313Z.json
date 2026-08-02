@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "kind": "agent",
+  "provider": "claude-code",
+  "environment": "sandbox-remote",
+  "date": "2026-07-31T02:53:13.000Z",
+  "harnessVersion": "2.1.220 (Claude Code)",
+  "exercises": {
+    "p1Dispatch": {
+      "state": "soportado",
+      "detail": "dos subagentes despachados en un mismo mensaje (paralelo), ambos completaron y escribieron su log",
+      "artifacts": [
+        "p1-claude-code-sandbox-remote-20260731T024505Z-a.log",
+        "p1-claude-code-sandbox-remote-20260731T024505Z-b.log"
+      ]
+    },
+    "p1Parallel": {
+      "state": "soportado",
+      "detail": "rango A [1785465922196..1785465941286] ∩ rango B [1785465921349..1785465940424] = 18228ms de solape real",
+      "artifacts": [
+        "p1-claude-code-sandbox-remote-20260731T024505Z-a.log",
+        "p1-claude-code-sandbox-remote-20260731T024505Z-b.log"
+      ]
+    },
+    "p2ModelOverride": {
+      "state": "no-certificado",
+      "detail": "Auditoría 2026-07-31: el artefacto solo contiene el modelo reportado por el worker; no conserva modelo/procedencia del controlador ni metadatos del despacho.",
+      "artifacts": [
+        "p2-claude-code-sandbox-remote-20260731T024505Z.txt"
+      ]
+    },
+    "p3TurnEnd": {
+      "state": "no-certificado",
+      "detail": "Auditoría 2026-07-31: hay 133 heartbeats posteriores al timestamp, pero no existe artefacto de reanudación que pruebe el cambio real de turno.",
+      "artifacts": [
+        "p3-claude-code-sandbox-remote-20260731T024648Z.log",
+        "p3-claude-code-sandbox-remote-20260731T024648Z-turnend.txt"
+      ]
+    },
+    "p4Worktree": {
+      "state": "soportado",
+      "detail": "git worktree add/escritura aislada/remove ok; git status --short del árbol principal no vio el archivo del worktree",
+      "artifacts": [
+        "p4-claude-code-sandbox-remote-20260731T025206Z.txt"
+      ]
+    },
+    "p5Recovery": {
+      "state": "no-certificado",
+      "detail": "Auditoría 2026-07-31: marker y resumed no prueban por sí mismos que el segundo contexto fuera fresco y sin briefing.",
+      "artifacts": [
+        "p5-claude-code-sandbox-remote-20260731T025206Z-marker.json",
+        "p5-claude-code-sandbox-remote-20260731T025206Z-resumed.txt"
+      ]
+    },
+    "p6WaitPolling": {
+      "state": "no-certificado",
+      "detail": "Auditoría 2026-07-31: no hay artefacto durable que respalde el mecanismo de notificación/polling y P3 también quedó no-certificado.",
+      "artifacts": []
+    }
+  }
+}
