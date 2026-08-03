@@ -2373,7 +2373,7 @@ _Requirements: R4.2, R4.3, R4.6, R4.10, C2, C9_
 - Create: `cli/tests/core/tracks/teardown.test.ts`
 - Create: `cli/tests/commands/watch/track-teardown-crash.test.ts`
 
-- [ ] **Step 1: Escribir matriz de teardown pura**
+- [x] **Step 1: Escribir matriz de teardown pura**
 
 ```ts
 const cases = [
@@ -2392,13 +2392,13 @@ test.each(cases)('%s (R4.3, C9)', (_name, ref, observation, action) => {
 });
 ```
 
-- [ ] **Step 2: Verificar RED**
+- [x] **Step 2: Verificar RED**
 
 Run: `cd cli && npx jest tests/core/tracks/teardown.test.ts --runInBand`
 
 Expected: FAIL por módulo ausente.
 
-- [ ] **Step 3: Implementar decisiones sin side effects**
+- [x] **Step 3: Implementar decisiones sin side effects**
 
 También en **`protocol.ts`** (autoridad única de T1); `teardown.ts` la reexporta y solo aporta los efectos. `reconcileProtocol` reemplaza las observaciones gruesas `track-removed` / `teardown-blocked` de T1 por los pasos que devuelve esta función, y la exploración de T1 se vuelve a correr en este commit.
 
@@ -2421,7 +2421,7 @@ export function decideTeardown(ref: TrackRef, o: TeardownObservation): TeardownD
 
 `BLOCKED` cae deliberadamente en el `throw`: un track bloqueado **no** entra a teardown automático. La propiedad es indemostrable justamente ahí, y borrar sería el error que C9 existe para evitar. Sale de `BLOCKED` solo con evidencia del operador, que lo devuelve a `TEARDOWN_REQUESTED` de forma explícita.
 
-- [ ] **Step 4: Implementar efectos con prueba de propiedad**
+- [x] **Step 4: Implementar efectos con prueba de propiedad**
 
 `removeOwnedWorktree` requiere simultáneamente:
 
@@ -2432,7 +2432,7 @@ export function decideTeardown(ref: TrackRef, o: TeardownObservation): TeardownD
 
 Entonces ejecuta `git worktree remove <path>` sin `--force`. Si está sucio, bloquea nombrando paths. `removeOwnedBranch` verifica que no esté checked out y ejecuta `git branch -d <branch>`; nunca `-D`.
 
-- [ ] **Step 5: Inyectar crash después de cada frontera**
+- [x] **Step 5: Inyectar crash después de cada frontera**
 
 ```ts
 const teardownCrashPoints = [
@@ -2451,11 +2451,11 @@ test.each(teardownCrashPoints)('teardown converge desde %s (C9)', async (point) 
 });
 ```
 
-- [ ] **Step 6: Reutilizar este módulo para C2**
+- [x] **Step 6: Reutilizar este módulo para C2**
 
 Eliminar el cuerpo temporal `TrackRuntime.teardownOwned` de Task 9 y delegar en `decideTeardown` + efectos. Volver a correr el test de fallback parcial para probar que ambos caminos usan el mismo state machine.
 
-- [ ] **Step 7: Tests y commit**
+- [x] **Step 7: Tests y commit**
 
 Run: `cd cli && npx jest tests/core/tracks/protocol.test.ts tests/core/tracks/teardown.test.ts tests/commands/watch/track-teardown-crash.test.ts tests/commands/watch/track-bootstrap-crash.test.ts --runInBand && npm run build`
 
