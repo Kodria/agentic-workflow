@@ -1939,7 +1939,7 @@ _Requirements: R5.2, R5.8, R5.9, R6.3, R6.4, R6.5, C7_
 - Create: `cli/tests/core/tracks/join.test.ts`
 - Create: `cli/tests/commands/watch/track-freeze.test.ts`
 
-- [ ] **Step 1: Escribir tests rojos de precondiciones completas**
+- [x] **Step 1: Escribir tests rojos de precondiciones completas**
 
 ```ts
 test('join exige freeze SHA, árbol limpio, gate recalculado, cero jobs y lock libre (R6.4, R6.5)', () => {
@@ -1983,13 +1983,13 @@ test('una clase global tocada de verdad invalida el paralelismo de la cohorte (R
 });
 ```
 
-- [ ] **Step 2: Verificar RED**
+- [x] **Step 2: Verificar RED**
 
 Run: `cd cli && npx jest tests/core/tracks/join.test.ts tests/commands/watch/track-freeze.test.ts --runInBand`
 
 Expected: FAIL por `join.ts` ausente.
 
-- [ ] **Step 3: Implementar snapshot de join y validación pura**
+- [x] **Step 3: Implementar snapshot de join y validación pura**
 
 ```ts
 // cli/src/core/tracks/join.ts
@@ -2015,7 +2015,7 @@ export function validateJoinReadiness(x: JoinReadiness): { ok: true } | { ok: fa
 }
 ```
 
-- [ ] **Step 4: Implementar freeze como request/ack durable**
+- [x] **Step 4: Implementar freeze como request/ack durable**
 
 El supervisor del plan emite `track-freeze-request` al journal del track. El supervisor del track:
 
@@ -2028,7 +2028,7 @@ El supervisor del plan emite `track-freeze-request` al journal del track. El sup
 
 El supervisor del plan solo acepta freeze cuando observa los seis hechos. No escribe directamente el journal del track.
 
-- [ ] **Step 5: Pausar la generación del plan y adquirir `integration.lock`**
+- [x] **Step 5: Pausar la generación del plan y adquirir `integration.lock`**
 
 Agregar `integrationLockPath(planRoot)` en `journal/paths.ts`. Antes del primer join:
 
@@ -2042,7 +2042,7 @@ const integrationLock = acquireIntegrationLock(planRoot, {
 
 El lock usa `wx`, 0600, fsync y contiene `ProcessRef` + expected SHA. Antes y después de cada operación Git se ejecuta `assertPlanHead(expectedPlanHeadSha)`. Un humano puede mutar el repo, pero la mutación se detecta y bloquea; ningún controller administrado sigue corriendo durante el lease.
 
-- [ ] **Step 6: Comparar ownership post-hoc desde commits congelados**
+- [x] **Step 6: Comparar ownership post-hoc desde commits congelados**
 
 Usar exactamente:
 
@@ -2067,7 +2067,7 @@ No consultar `git status` para ownership; `status` solo participa del guard de l
 Sin este consumidor, un track que declara `src/a.ts` y commitea `package-lock.json` pasaba el chequeo
 declarativo de T4 y no volvía a ser observado nunca.
 
-- [ ] **Step 7: Tests y commit**
+- [x] **Step 7: Tests y commit**
 
 Run: `cd cli && npx jest tests/core/tracks/join.test.ts tests/commands/watch/track-freeze.test.ts tests/commands/watch/lock.test.ts --runInBand && npm run build`
 
