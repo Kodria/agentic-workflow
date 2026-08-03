@@ -20,6 +20,7 @@ export interface SupervisorConfig {
     killGraceMs: number;
     reconcileGraceMs: number;
     jobStallObservationMs: number;   // R3.5: umbral observacional de suspected-stall por job (nunca mata nada)
+    maxParallelTracks: number;       // R10.2/R10.3: tope de tracks ACTIVE simultáneos (ver core/tracks/concurrency.ts)
 }
 
 export const DEFAULT_SUPERVISOR_CONFIG: SupervisorConfig = {
@@ -31,6 +32,7 @@ export const DEFAULT_SUPERVISOR_CONFIG: SupervisorConfig = {
     killGraceMs: 5000,
     reconcileGraceMs: 10000,
     jobStallObservationMs: 5 * 60000,   // R3.5 default: mismo orden de magnitud que heartbeatTimeoutMs, concern independiente
+    maxParallelTracks: 1,                // overridden en tiempo de ejecución con loadDefaultParallelism() (watch/index.ts)
 };
 
 export type TickOutcome = 'continue' | 'custody' | 'complete';

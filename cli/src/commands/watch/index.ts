@@ -4,6 +4,7 @@ import { initWatch } from './init';
 import { runSupervisorLoop, DEFAULT_SUPERVISOR_CONFIG } from './supervisor';
 import { EXEC_STDIO } from '../../core/journal/process';
 import { resolveCommandContext } from '../../core/tracks/context';
+import { parseMaxParallel, loadDefaultParallelism } from '../../core/tracks/concurrency';
 
 function currentBranch(cwd: string): string {
     // stdio explicito (ver EXEC_STDIO en journal/process.ts): evita el relay
@@ -28,6 +29,7 @@ export function registerWatchCommand(program: Command): void {
         .option('--provider <p>', 'codex | claude-code', 'codex')
         .option('--heartbeat-timeout <min>', 'minutos de silencio de heartbeat', '5')
         .option('--activity-window <min>', 'minutos extra sin actividad de proceso', '10')
+        .option('--max-parallel <n>', 'tope de tracks ACTIVE simultáneos (default: derivado del benchmark empaquetado)')
         .action(async (opts) => {
             const repo = process.cwd();
             const branch = currentBranch(repo);
@@ -50,6 +52,7 @@ export function registerWatchCommand(program: Command): void {
                 provider: opts.provider,
                 heartbeatTimeoutMs: minutes('--heartbeat-timeout', opts.heartbeatTimeout),
                 activityWindowMs: minutes('--activity-window', opts.activityWindow),
+                maxParallelTracks: opts.maxParallel !== undefined ? parseMaxParallel(opts.maxParallel) : loadDefaultParallelism(),
             };
             process.stdout.write(`awm watch: supervisor activo (${cfg.provider}) — Ctrl-C para terminar\n`);
             await runSupervisorLoop(repo, branch, cfg);

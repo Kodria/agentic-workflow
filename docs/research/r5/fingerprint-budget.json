@@ -1,0 +1,30 @@
+{
+  "sourceHead": "630a8352ad9e737432800cbaf7fdbbbe6a5b9dc7",
+  "node": "v22.22.2",
+  "platform": "linux",
+  "cpuCount": 4,
+  "tickMs": 5000,
+  "samples": [
+    {
+      "supervisors": 1,
+      "p50Ms": 2371,
+      "p95Ms": 2636
+    },
+    {
+      "supervisors": 2,
+      "p50Ms": 2684,
+      "p95Ms": 2928
+    },
+    {
+      "supervisors": 3,
+      "p50Ms": 3404,
+      "p95Ms": 3720
+    },
+    {
+      "supervisors": 4,
+      "p50Ms": 4584,
+      "p95Ms": 5278
+    }
+  ],
+  "derivedDefault": 1
+}
