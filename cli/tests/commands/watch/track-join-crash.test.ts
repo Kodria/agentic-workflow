@@ -18,7 +18,7 @@ import { execFileSync } from 'child_process';
 import { initRepo, commitFile } from '../../helpers/git-fixture';
 import { reconcileTracks, defaultTrackRuntime, TrackRuntime } from '../../../src/commands/watch/tracks';
 import { mergeFrozenTrack, readMergeHead, dirtyPaths } from '../../../src/core/tracks/git';
-import { integrationLockPath } from '../../../src/core/journal/paths';
+import { integrationLockPath, eventsPath } from '../../../src/core/journal/paths';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import type { JournalState, TrackRef } from '../../../src/core/journal/types';
 import type { JoinIntent } from '../../../src/core/tracks/types';
@@ -231,5 +231,232 @@ describe('reconcileTracks — crash/restart de P2 (join) con git real (Task 11, 
         expect(mergeCommitCountFor(planRoot, aHead)).toBe(1);
         const bSecond = afterSecondAbort.tracks!.find((t) => t.trackId === 'b')!;
         expect(['JOIN_INTENT', 'BLOCKED']).toContain(bSecond.phase);
+    });
+
+    // --- Post-review fix (Finding 1, revisión de Task 11): `ensureIntegrationLock`
+    // y el intento de merge/abort son DOS fronteras `reconcileTracks()`
+    // distintas — antes, un `ensureIntegrationLock` que hacía trabajo real
+    // (primer tick de un proceso vivo) seguía, en el MISMO call, a intentar
+    // el merge/abort (dos mutaciones reales en una sola invocación). Estos
+    // tests usan un `TrackRuntime` fake para `ensureIntegrationLock`
+    // (controlando directamente 'acquired'/'already-held') pero delegan
+    // `mergeFrozenTrack`/`abortOwnedMerge` al `defaultTrackRuntime` REAL —
+    // mismo criterio de mezcla real/fake que `buildRuntime` en
+    // `track-bootstrap-crash.test.ts`. No se reimplementa la reclamación de
+    // identidad muerta acá (eso ya lo prueba `join.test.ts`/Task 10 en
+    // aislamiento, con `ProcessRef`s fabricados) — lo que se prueba es la
+    // consecuencia en `runMergeTrack`: NUNCA fundir "lock recién adquirido"
+    // con "intento de merge" en un mismo call, sin importar cuántas veces un
+    // restart real haya tenido que re-adquirir de verdad.
+    describe('runMergeTrack — adquisición del lock y merge son fronteras separadas (Finding 1)', () => {
+        function fakeMergeRuntime(
+            lockResult: 'acquired' | 'already-held',
+            calls: { lock: number; merge: string[]; abort: string[] },
+        ): TrackRuntime {
+            const real = defaultTrackRuntime(planRoot, BRANCH);
+            const unexpected = (what: string) => (): never => {
+                throw new Error(`no debería llamarse: ${what} (fixture ya en JOIN_INTENT, solo merge-track en juego)`);
+            };
+            return {
+                addWorktree: unexpected('addWorktree'),
+                initTrackJournal: unexpected('initTrackJournal'),
+                spawnSupervisor: unexpected('spawnSupervisor'),
+                observeSupervisor: unexpected('observeSupervisor'),
+                teardownOwned: async () => unexpected('teardownOwned')(),
+                emitFreezeRequest: unexpected('emitFreezeRequest'),
+                mergeFrozenTrack(repo, intent) {
+                    calls.merge.push(intent.expectedTrackHeadSha);
+                    real.mergeFrozenTrack(repo, intent);
+                },
+                abortOwnedMerge(repo, intent) {
+                    calls.abort.push(intent.expectedTrackHeadSha);
+                    real.abortOwnedMerge(repo, intent);
+                },
+                async ensureIntegrationLock() {
+                    calls.lock += 1;
+                    return lockResult;
+                },
+            };
+        }
+
+        function declareJoinIntentCohort(aHead: string, bHead: string): { s0: JournalState; intentA: JoinIntent } {
+            const refA = trackRef('a', { frozenHeadSha: aHead });
+            const refB = trackRef('b', { frozenHeadSha: bHead });
+            const intentA: JoinIntent = { expectedPlanHeadSha: baseSha, expectedTrackHeadSha: aHead, strategy: 'no-ff' };
+            const s0 = declareCohort([{ ...refA, phase: 'JOIN_INTENT', joinIntent: intentA }, refB]);
+            return { s0, intentA };
+        }
+
+        test('un call que adquiere el lock por primera vez NO intenta el merge en ese mismo call (R6.2/C7)', async () => {
+            const aHead = makeTrackHead('a', 'a.txt', 'A content\n');
+            const bHead = makeTrackHead('b', 'b.txt', 'B content\n');
+            const { s0 } = declareJoinIntentCohort(aHead, bHead);
+
+            const calls = { lock: 0, merge: [] as string[], abort: [] as string[] };
+            const runtime = fakeMergeRuntime('acquired', calls);
+            const result = await reconcileTracks(planRoot, BRANCH, s0, runtime, 2);
+
+            expect(calls.lock).toBe(1);
+            expect(calls.merge).toEqual([]);
+            expect(calls.abort).toEqual([]);
+            expect(readMergeHead(planRoot)).toBeNull();
+            expect(mergeCommitCountFor(planRoot, aHead)).toBe(0);
+            const a = result.state.tracks!.find((t) => t.trackId === 'a')!;
+            expect(a.phase).toBe('JOIN_INTENT'); // sin cambios: el intento de merge queda para el PRÓXIMO call
+        });
+
+        test('una vez el lock está confirmado held ("already-held"), el PRÓXIMO call sí intenta el merge (R6.2/C7)', async () => {
+            const aHead = makeTrackHead('a', 'a.txt', 'A content\n');
+            const bHead = makeTrackHead('b', 'b.txt', 'B content\n');
+            const { s0 } = declareJoinIntentCohort(aHead, bHead);
+
+            const calls = { lock: 0, merge: [] as string[], abort: [] as string[] };
+            const runtime = fakeMergeRuntime('already-held', calls);
+            const result = await reconcileTracks(planRoot, BRANCH, s0, runtime, 2);
+
+            expect(calls.lock).toBe(1);
+            expect(calls.merge).toEqual([aHead]);
+            const a = result.state.tracks!.find((t) => t.trackId === 'a')!;
+            expect(a.phase).toBe('MERGED_UNVERIFIED');
+        });
+
+        test('crash justo tras adquirir el lock + restart: el proceso nuevo tampoco funde adquisición y merge, y converge sin re-adquirir de más una vez confirmado held (Finding 1)', async () => {
+            const aHead = makeTrackHead('a', 'a.txt', 'A content\n');
+            const bHead = makeTrackHead('b', 'b.txt', 'B content\n');
+            const { s0 } = declareJoinIntentCohort(aHead, bHead);
+            let s = s0;
+
+            // "Proceso 1" (antes del crash): primer tick de un proceso vivo —
+            // `ensureIntegrationLock` hace trabajo real y devuelve 'acquired'.
+            // El "crash" ocurre justo acá: cero merges intentados todavía.
+            const callsP1 = { lock: 0, merge: [] as string[], abort: [] as string[] };
+            s = (await reconcileTracks(planRoot, BRANCH, s, fakeMergeRuntime('acquired', callsP1), 2)).state;
+            expect(callsP1.merge).toEqual([]);
+            expect(s.tracks!.find((t) => t.trackId === 'a')!.phase).toBe('JOIN_INTENT');
+
+            // "Proceso 2" (restart): closure de runtime NUEVA — el journal
+            // sigue mostrando JOIN_INTENT (nada se persiste sobre el lock en
+            // sí, por diseño: es un primitivo de filesystem ajeno al
+            // journal). Su PROPIO primer tick también adquiere de verdad
+            // (reclamo de identidad muerta del proceso 1 — esa lógica en
+            // aislamiento ya la prueba `join.test.ts`/Task 10) y por eso
+            // TAMBIÉN corta acá — nunca funde su propia adquisición con un
+            // intento de merge en el mismo call.
+            const callsP2a = { lock: 0, merge: [] as string[], abort: [] as string[] };
+            s = (await reconcileTracks(planRoot, BRANCH, s, fakeMergeRuntime('acquired', callsP2a), 2)).state;
+            expect(callsP2a.merge).toEqual([]);
+            expect(readMergeHead(planRoot)).toBeNull();
+            expect(mergeCommitCountFor(planRoot, aHead)).toBe(0);
+            expect(s.tracks!.find((t) => t.trackId === 'a')!.phase).toBe('JOIN_INTENT');
+
+            // Recién ahora, con el lock confirmado held DENTRO del proceso 2
+            // (misma memoización por closure que la implementación real), el
+            // SIGUIENTE call avanza al intento de merge — una única vez, sin
+            // re-adquirir ni doble-adquirir.
+            const callsP2b = { lock: 0, merge: [] as string[], abort: [] as string[] };
+            s = (await reconcileTracks(planRoot, BRANCH, s, fakeMergeRuntime('already-held', callsP2b), 2)).state;
+            expect(callsP2b.lock).toBe(1);
+            expect(callsP2b.merge).toEqual([aHead]);
+            expect(mergeCommitCountFor(planRoot, aHead)).toBe(1);
+            expect(s.tracks!.find((t) => t.trackId === 'a')!.phase).toBe('MERGED_UNVERIFIED');
+        });
+    });
+
+    // --- Post-review fix (Finding 2, revisión de Task 11): el mensaje de una
+    // excepción capturada de `mergeFrozenTrack`/`abortOwnedMerge` JAMÁS decide
+    // nada (la relectura vía `gatherJoinObservation` sigue siendo la única
+    // fuente de verdad, R6.8) — pero ahora SÍ queda como `detail` diagnóstico
+    // en el evento correspondiente, para que un operador pueda distinguir un
+    // conflicto benigno de un repo estructuralmente roto.
+    describe('runMergeTrack — el mensaje de una excepción capturada queda como detail diagnóstico, nunca decide (Finding 2)', () => {
+        function readEvents(): Array<Record<string, unknown>> {
+            let raw = '';
+            try { raw = fs.readFileSync(eventsPath(planRoot, BRANCH), 'utf8'); } catch { return []; }
+            return raw.split('\n').filter((l) => l.trim().length > 0).map((l) => JSON.parse(l));
+        }
+
+        function runtimeWithThrowingMerge(errorMessage: string): TrackRuntime {
+            const real = defaultTrackRuntime(planRoot, BRANCH);
+            return {
+                addWorktree: real.addWorktree, initTrackJournal: real.initTrackJournal,
+                spawnSupervisor: real.spawnSupervisor, observeSupervisor: real.observeSupervisor,
+                teardownOwned: real.teardownOwned, emitFreezeRequest: real.emitFreezeRequest,
+                // Deliberadamente NUNCA llama a `real.mergeFrozenTrack`: el repo
+                // real queda intacto, así la relectura post-catch ve EXACTAMENTE
+                // lo mismo que `before` — la única forma honesta de probar que
+                // el mensaje de la excepción no cambia la decisión.
+                mergeFrozenTrack() { throw new Error(errorMessage); },
+                abortOwnedMerge() { throw new Error(errorMessage); },
+                async ensureIntegrationLock() { return 'already-held'; },
+            };
+        }
+
+        test('retry-merge: fallo simulado ("disco lleno") queda como detail en track-merge-attempted, decisión sigue siendo retry (R6.8)', async () => {
+            const aHead = makeTrackHead('a', 'a.txt', 'A content\n');
+            const bHead = makeTrackHead('b', 'b.txt', 'B content\n');
+            const refA = trackRef('a', { frozenHeadSha: aHead });
+            const refB = trackRef('b', { frozenHeadSha: bHead });
+            const intentA: JoinIntent = { expectedPlanHeadSha: baseSha, expectedTrackHeadSha: aHead, strategy: 'no-ff' };
+            const s0 = declareCohort([{ ...refA, phase: 'JOIN_INTENT', joinIntent: intentA }, refB]);
+
+            const runtime = runtimeWithThrowingMerge('fallo simulado: disco lleno');
+            const result = await reconcileTracks(planRoot, BRANCH, s0, runtime, 2);
+
+            // Fail-safe: NUNCA se marca fundido por confiar en la excepción —
+            // el repo real nunca se tocó, así que la relectura post-catch
+            // sigue viendo "no fundido todavía" y el track queda reintentable.
+            expect(result.state.tracks!.find((t) => t.trackId === 'a')!.phase).toBe('JOIN_INTENT');
+            expect(mergeCommitCountFor(planRoot, aHead)).toBe(0);
+
+            // Fail-LOUD: el mensaje SÍ quedó como rastro diagnóstico del evento.
+            const attempted = readEvents().filter((e) => e.kind === 'track-merge-attempted');
+            expect(attempted).toHaveLength(1);
+            expect(attempted[0]!.detail).toBe('fallo simulado: disco lleno');
+        });
+
+        test('abort-own-merge: fallo simulado queda como detail en track-merge-aborted, decisión sigue siendo abort-own-merge (R6.8)', async () => {
+            // Conflicto REAL (misma técnica que 'during-conflict' arriba):
+            // necesitamos un MERGE_HEAD real apuntando a nuestro propio
+            // `expectedTrackHeadSha` para que `decideJoinReconciliation`
+            // devuelva 'abort-own-merge'.
+            const aHead = makeTrackHead('a', 'shared.txt', 'A-version\n');
+            const bHead = makeTrackHead('b', 'shared.txt', 'B-version\n');
+            const refA = trackRef('a', { frozenHeadSha: aHead });
+            const refB = trackRef('b', { frozenHeadSha: bHead });
+            declareCohort([refA, refB]);
+
+            const realRuntime = defaultTrackRuntime(planRoot, BRANCH);
+            let s = readJournal(planRoot, BRANCH).state!;
+            for (let i = 0; i < 20; i++) {
+                const a = s.tracks!.find((t) => t.trackId === 'a')!;
+                const b = s.tracks!.find((t) => t.trackId === 'b')!;
+                if (a.phase === 'MERGED_UNVERIFIED' && b.phase === 'JOIN_INTENT' && b.joinIntent !== undefined) break;
+                s = (await reconcileTracks(planRoot, BRANCH, s, realRuntime, 2)).state;
+            }
+            const intentB = s.tracks!.find((t) => t.trackId === 'b')!.joinIntent!;
+            expect(() => mergeFrozenTrack(planRoot, intentB)).toThrow();
+            expect(readMergeHead(planRoot)).toBe(bHead);
+
+            const runtime = runtimeWithThrowingMerge('fallo simulado: git binario roto');
+            const afterAbortAttempt = (await reconcileTracks(planRoot, BRANCH, s, runtime, 2)).state;
+
+            // Fail-safe: el fake NUNCA corrió `git merge --abort` de verdad
+            // (el MERGE_HEAD sigue siendo nuestro), así que la relectura
+            // post-catch decide 'abort-own-merge' de nuevo — el track sigue
+            // en JOIN_INTENT, jamás se asume abortado por la excepción sola.
+            expect(readMergeHead(planRoot)).toBe(bHead);
+            expect(afterAbortAttempt.tracks!.find((t) => t.trackId === 'b')!.phase).toBe('JOIN_INTENT');
+
+            // Fail-LOUD: el mensaje quedó como detail diagnóstico.
+            const aborted = readEvents().filter((e) => e.kind === 'track-merge-aborted');
+            expect(aborted).toHaveLength(1);
+            expect(aborted[0]!.detail).toBe('fallo simulado: git binario roto');
+
+            // Limpieza real: el índice sigue con el conflicto real dejado por
+            // el `mergeFrozenTrack` de arriba — un abort real (fuera del
+            // driver, mismo patrón que el resto de este archivo) lo deja
+            // limpio para no ensuciar los tests siguientes.
+            execFileSync('git', ['merge', '--abort'], { cwd: planRoot, stdio: 'pipe' });
+        });
     });
 });

@@ -79,7 +79,18 @@ export interface TrackRuntime {
     // mientras el mismo proceso siga vivo, son no-op). La liberación queda
     // para Task 12, tras el interlock final — este runtime nunca libera lo
     // que adquiere.
-    ensureIntegrationLock(planJournalId: string, expectedPlanHeadSha: string): Promise<void>;
+    //
+    // Post-review fix (Finding 1, revisión de Task 11): el valor de retorno
+    // distingue "esta llamada hizo trabajo real" (`'acquired'` — pausó la
+    // generación del plan Y escribió `integration.lock` en disco, ambos
+    // touches genuinos) de "ya estaba adquirido por este proceso, no-op"
+    // (`'already-held'`). `runMergeTrack` usa esto para separar la
+    // adquisición del lock del intento de merge en dos fronteras
+    // `reconcileTracks()` distintas — antes, un `'acquired'` seguido en el
+    // MISMO call de un `mergeFrozenTrack`/`abortOwnedMerge` colapsaba dos
+    // mutaciones reales en una sola invocación (exactamente la clase de bug
+    // que Task 8 encontró y arregló tres veces).
+    ensureIntegrationLock(planJournalId: string, expectedPlanHeadSha: string): Promise<'acquired' | 'already-held'>;
 }
 
 export interface ReconcileTracksResult { state: JournalState; effectExecuted: string | null; }
@@ -420,8 +431,8 @@ function gatherJoinObservation(
     return { mergeHead, planHead, trackIsAncestor };
 }
 
-/** R6.2/R6.3/R6.6-R6.9/C7 (Task 11): único touch REAL de `merge-track`.
- *  Autoridad de DECISIÓN sigue siendo `decideJoinReconciliation`
+/** R6.2/R6.3/R6.6-R6.9/C7 (Task 11): a lo sumo UN touch REAL de `merge-track`
+ *  por invocación. Autoridad de DECISIÓN sigue siendo `decideJoinReconciliation`
  *  (`protocol.ts`, reexportada por `join.ts`) — este driver la llama dos
  *  veces con el MISMO criterio que `runCreateWorktree` llama `decidePrepare`
  *  y luego, por separado, `observeProtocolEffect`: una vez sobre la
@@ -430,7 +441,25 @@ function gatherJoinObservation(
  *  siempre a través de `observeProtocolEffect` (que la recalcula sobre la
  *  observación real, nunca confía en la excepción de la llamada a
  *  `runtime` por sí sola — un `git merge` que tira no prueba ni éxito ni
- *  fallo, la única fuente de verdad es releer el repo). */
+ *  fallo, la única fuente de verdad es releer el repo).
+ *
+ *  Post-review fix (Finding 1, revisión de Task 11): `ensureIntegrationLock`
+ *  y el intento de merge/abort SON DOS fronteras `reconcileTracks()`
+ *  distintas, no una — mismo criterio que `runSpawnTrackSupervisor` separa
+ *  "persistir el supervisorIntent" de "spawnear/observar" (R1.8/C11). En el
+ *  PRIMER tick de un proceso vivo, `ensureIntegrationLock` hace trabajo real
+ *  (pausa la generación del plan + escribe `integration.lock`, dos
+ *  mutaciones genuinas) — devuelve `'acquired'` y este driver corta ACÁ,
+ *  `stop: true`, sin llegar siquiera a leer `gatherJoinObservation` ni a
+ *  decidir `retry-merge`/`abort-own-merge`. Recién el PRÓXIMO
+ *  `reconcileTracks()`, con el lock ya confirmado held (`'already-held'`,
+ *  no-op memoizado en el mismo proceso), este driver continúa y intenta el
+ *  merge/abort. Tras un crash real entre ambas fronteras, un proceso nuevo
+ *  repite el mismo `'acquired'` (reclamando identidad muerta, misma lógica
+ *  que `acquireIntegrationLock` ya prueba) y vuelve a cortar ahí — nunca
+ *  colapsa las dos mutaciones en un solo call. La liberación del lock sigue
+ *  siendo responsabilidad de Task 12 (después del interlock final) — este
+ *  driver JAMÁS libera lo que adquiere acá. */
 async function runMergeTrack(
     planRoot: string, branch: string, s: JournalState, protocol: CohortProtocol,
     effect: Extract<ProtocolEffect, { kind: 'merge-track' }>, runtime: TrackRuntime,
@@ -444,44 +473,58 @@ async function runMergeTrack(
 
     // C7: antes de la PRIMERA mutación real de la rama del plan — pausa la
     // generación del plan y adquiere `integration.lock` (primitivos de Task
-    // 10, sin ningún caller hasta acá). Memoizado por el runtime: no-op en
-    // cualquier tick posterior mientras el mismo proceso siga vivo; tras un
-    // crash real, un proceso nuevo reclama con la misma lógica de identidad
-    // muerta que `acquireIntegrationLock` ya prueba. La liberación es
-    // responsabilidad de Task 12 (después del interlock final) — este
-    // driver JAMÁS libera lo que adquiere acá.
-    await runtime.ensureIntegrationLock(s.journalId, intent.expectedPlanHeadSha);
+    // 10, sin ningún caller hasta acá). Si esta llamada tuvo que hacer
+    // trabajo real (`'acquired'`), ESE es el único touch de este tick: se
+    // corta acá (ver el comentario grande arriba) — el intento de merge
+    // queda para el próximo `reconcileTracks()`, una vez el lock ya esté
+    // `'already-held'` (no-op memoizado mientras el mismo proceso siga vivo).
+    const lockState = await runtime.ensureIntegrationLock(s.journalId, intent.expectedPlanHeadSha);
+    if (lockState === 'acquired') {
+        appendEvent(planRoot, branch, { kind: 'track-integration-lock-acquired', trackId });
+        return { state: s, stop: true, executed: effect.kind };
+    }
 
     const before = gatherJoinObservation(planRoot, intent.expectedTrackHeadSha);
     const decision = decideJoinReconciliation(intent, before);
 
     if (decision.action === 'retry-merge') {
+        let detail: string | undefined;
         try {
             runtime.mergeFrozenTrack(planRoot, intent);
-        } catch {
+        } catch (error) {
             // Conflicto real o HEAD del plan movido bajo nuestros pies: NUNCA
             // se asume cuál de los dos fue por la excepción sola — la
-            // relectura de abajo es la única fuente de verdad (R6.8).
+            // relectura de abajo es la única fuente de verdad (R6.8). El
+            // mensaje SÍ se conserva como `detail` diagnóstico en el evento
+            // (Finding 2) — nunca para decidir, solo para que un operador
+            // mirando el log pueda distinguir un conflicto benigno (que
+            // resuelve solo en el próximo retry) de un repo estructuralmente
+            // roto (permisos, disco lleno, git roto) que retrearía en
+            // silencio para siempre sin esto.
+            detail = (error as Error).message;
         }
         const after = gatherJoinObservation(planRoot, intent.expectedTrackHeadSha);
         const observed = observeProtocolEffect(protocol, effect, { kind: 'join-observation', trackId, ...after });
         const next = persist(planRoot, branch, applyProtocolToState(s, observed));
-        appendEvent(planRoot, branch, { kind: 'track-merge-attempted', trackId });
+        appendEvent(planRoot, branch, { kind: 'track-merge-attempted', trackId, detail });
         return { state: next, stop: true, executed: effect.kind };
     }
 
     if (decision.action === 'abort-own-merge') {
+        let detail: string | undefined;
         try {
             runtime.abortOwnedMerge(planRoot, intent);
-        } catch {
+        } catch (error) {
             // Igual criterio que arriba: la relectura decide, nunca la
             // excepción (ej. una carrera real donde el MERGE_HEAD dejó de
-            // ser nuestro entre `before` y este intento de abort).
+            // ser nuestro entre `before` y este intento de abort) — el
+            // mensaje se conserva solo como `detail` diagnóstico (Finding 2).
+            detail = (error as Error).message;
         }
         const after = gatherJoinObservation(planRoot, intent.expectedTrackHeadSha);
         const observed = observeProtocolEffect(protocol, effect, { kind: 'join-observation', trackId, ...after });
         const next = persist(planRoot, branch, applyProtocolToState(s, observed));
-        appendEvent(planRoot, branch, { kind: 'track-merge-aborted', trackId });
+        appendEvent(planRoot, branch, { kind: 'track-merge-aborted', trackId, detail });
         return { state: next, stop: true, executed: effect.kind };
     }
 
@@ -933,9 +976,10 @@ export function defaultTrackRuntime(planRoot: string, planBranch: string, grace:
             gitAbortOwnedMerge(repo, intent);
         },
         async ensureIntegrationLock(planJournalId, expectedPlanHeadSha) {
-            if (integrationLock !== null) return;   // ya adquirido por este proceso: no-op
+            if (integrationLock !== null) return 'already-held';   // ya adquirido por este proceso: no-op
             await stopControllerGenerationConfirmed(planRoot, planBranch, grace);
             integrationLock = acquireIntegrationLock(planRoot, { planJournalId, expectedPlanHeadSha });
+            return 'acquired';
         },
     };
 }
