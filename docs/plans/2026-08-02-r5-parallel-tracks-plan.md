@@ -1836,7 +1836,7 @@ _Requirements: R4.2, R4.3, R4.5, R4.6, R4.8, R4.9, R4.10, C1, C2, C11_
 - Modify: `cli/src/commands/watch/tracks.ts`
 - Modify: `cli/src/commands/watch/supervisor.ts`
 
-- [ ] **Step 1: Crear una tabla de crash points, no tests ad hoc**
+- [x] **Step 1: Crear una tabla de crash points, no tests ad hoc**
 
 ```ts
 const crashPoints = [
@@ -1856,13 +1856,13 @@ test.each(crashPoints)('restart converge desde %s sin duplicar recursos (R4.2, C
 });
 ```
 
-- [ ] **Step 2: Verificar que la matriz descubre los casos aún no reconciliados**
+- [x] **Step 2: Verificar que la matriz descubre los casos aún no reconciliados**
 
 Run: `cd cli && npx jest tests/commands/watch/track-bootstrap-crash.test.ts --runInBand`
 
 Expected: al menos un FAIL en `after-supervisor-claim` o `after-readiness` antes de completar la reconciliación.
 
-- [ ] **Step 3: Implementar la matriz observable de P1**
+- [x] **Step 3: Implementar la matriz observable de P1**
 
 Agregar esta función pura a **`cli/src/core/tracks/protocol.ts`**, no a `tracks.ts` — por la regla de autoridad única de Task 1. `nextProtocolEffect` la llama en su rama `PREPARING`, y `tracks.ts` solo traduce la decisión a efectos:
 
@@ -1893,7 +1893,7 @@ Run: `cd cli && npx jest tests/core/tracks/protocol.test.ts --runInBand`
 
 Expected: PASS con los 14 effects todavía cubiertos.
 
-- [ ] **Step 4: Escribir el test rojo del fallback completo**
+- [x] **Step 4: Escribir el test rojo del fallback completo**
 
 ```ts
 test('fallo del segundo track limpia el primero antes de serializar (R4.5, C2)', async () => {
@@ -1910,17 +1910,17 @@ test('fallo del segundo track limpia el primero antes de serializar (R4.5, C2)',
 });
 ```
 
-- [ ] **Step 5: Conectar fallback al mismo state machine de teardown de Task 13 mediante una interfaz temporal**
+- [x] **Step 5: Conectar fallback al mismo state machine de teardown de Task 13 mediante una interfaz temporal**
 
 Hasta Task 13, `TrackRuntime.teardownOwned(ref)` ejecuta pasos observables uno por tick y persiste las fases ya definidas. Task 13 reemplaza el cuerpo por el módulo dedicado sin cambiar esta interfaz. Serial solo se persiste cuando todos los refs están `REMOVED` o nunca superaron `DECLARED`.
 
-- [ ] **Step 6: Ejecutar la matriz completa dos veces**
+- [x] **Step 6: Ejecutar la matriz completa dos veces**
 
 Run: `cd cli && npx jest tests/core/tracks/protocol.test.ts tests/commands/watch/track-bootstrap-crash.test.ts --runInBand && npx jest tests/commands/watch/track-bootstrap-crash.test.ts --runInBand`
 
 Expected: ambas corridas PASS; no dependen de timing aleatorio ni dejan entradas en `git worktree list`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add cli/src/commands/watch cli/tests/commands/watch/track-bootstrap-crash.test.ts
