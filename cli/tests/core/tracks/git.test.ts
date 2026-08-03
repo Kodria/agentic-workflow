@@ -1,8 +1,21 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { initRepo, commitFile } from '../../helpers/git-fixture';
-import { changedPaths, gitCheckTrackId, mergeBase } from '../../../src/core/tracks/git';
+import {
+    addOwnedWorktree, changedPaths, foreignPathExists, gitCheckTrackId,
+    mergeBase, ownedWorktreeExists, removeOwnedBranch, removeOwnedWorktree,
+} from '../../../src/core/tracks/git';
+import type { TrackRef } from '../../../src/core/journal/types';
+
+function trackRef(worktreePath: string, branch: string): TrackRef {
+    return {
+        trackId: 'x', worktreePath, branch,
+        ownership: [], sharedResources: [], dependsOn: [],
+        fencingToken: 'f'.repeat(32), phase: 'PREPARE_INTENT', readinessNonce: 'r'.repeat(32),
+    };
+}
 
 describe('git adapter', () => {
     let repo: string;
@@ -46,5 +59,61 @@ describe('git adapter', () => {
 
     test.each(['valid-track', '..', '-x', 'a/b'])('git check-ref-format participa para %p (R1.3)', (id) => {
         expect(gitCheckTrackId(id)).toBe(id === 'valid-track');
+    });
+
+    describe('ownedWorktreeExists / removeOwnedBranch (Task 9, R4.2/R4.6/C11)', () => {
+        let worktreePath: string;
+
+        beforeEach(() => {
+            worktreePath = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-git-owned-wt-'));
+            fs.rmdirSync(worktreePath);
+        });
+
+        afterEach(() => {
+            fs.rmSync(worktreePath, { recursive: true, force: true });
+        });
+
+        test('false cuando el destino no existe (nada que reconocer como propio todavía)', () => {
+            repo = initRepo();
+            commitFile(repo, 'a.txt', 'x');
+            expect(ownedWorktreeExists(repo, worktreePath, 'awm-track/x')).toBe(false);
+        });
+
+        test('false cuando el destino existe pero es genuinamente ajeno (R4.6 fail-closed)', () => {
+            repo = initRepo();
+            commitFile(repo, 'a.txt', 'x');
+            fs.mkdirSync(worktreePath, { recursive: true });
+            fs.writeFileSync(path.join(worktreePath, 'foreign.txt'), 'ajeno');
+            expect(ownedWorktreeExists(repo, worktreePath, 'awm-track/x')).toBe(false);
+            expect(foreignPathExists(worktreePath)).toBe(true);
+        });
+
+        test('true cuando el destino YA es un worktree real registrado en la branch exacta (crash tras un `addWorktree` que sí corrió)', () => {
+            repo = initRepo();
+            const baseSha = commitFile(repo, 'a.txt', 'x');
+            const ref = trackRef(worktreePath, 'awm-track/x');
+            addOwnedWorktree(repo, ref, baseSha);
+
+            expect(ownedWorktreeExists(repo, worktreePath, 'awm-track/x')).toBe(true);
+            // Una branch distinta al mismo path, o el mismo path con otra
+            // branch, nunca cuentan como "nuestro" (identidad completa: path
+            // Y branch deterministas, no solo uno de los dos).
+            expect(ownedWorktreeExists(repo, worktreePath, 'awm-track/other')).toBe(false);
+        });
+
+        test('removeOwnedBranch borra la branch tras remover su worktree, y es idempotente si ya no existe', () => {
+            repo = initRepo();
+            const baseSha = commitFile(repo, 'a.txt', 'x');
+            const ref = trackRef(worktreePath, 'awm-track/x');
+            addOwnedWorktree(repo, ref, baseSha);
+            removeOwnedWorktree(repo, worktreePath);
+
+            expect(() => removeOwnedBranch(repo, 'awm-track/x')).not.toThrow();
+            const branches = execFileSync('git', ['branch', '--list', 'awm-track/x'], { cwd: repo, encoding: 'utf8' });
+            expect(branches.trim()).toBe('');
+
+            // Idempotente: ya no existe, un segundo llamado (retry tras crash) no lanza.
+            expect(() => removeOwnedBranch(repo, 'awm-track/x')).not.toThrow();
+        });
     });
 });

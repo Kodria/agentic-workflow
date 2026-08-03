@@ -10,12 +10,15 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { readJournal, writeJournal, appendEvent, initJournal } from '../../core/journal/store';
-import { nextProtocolEffect, observeProtocolEffect } from '../../core/tracks/protocol';
-import { addOwnedWorktree, removeOwnedWorktree, isAwmGitignored, foreignPathExists } from '../../core/tracks/git';
+import { decidePrepare, nextProtocolEffect, observeProtocolEffect } from '../../core/tracks/protocol';
+import {
+    addOwnedWorktree, removeOwnedWorktree, removeOwnedBranch,
+    isAwmGitignored, foreignPathExists, ownedWorktreeExists,
+} from '../../core/tracks/git';
 import { writeDescriptor } from '../../core/tracks/descriptor';
-import { spawnStructured } from '../../core/journal/process';
+import { spawnStructured, groupIsGone, terminatePreviouslyOwnedGroup } from '../../core/journal/process';
 import { JOIN_STRATEGY_NO_FF } from '../../core/tracks/types';
-import type { CohortProtocol, ProtocolEffect, TrackProtocolState } from '../../core/tracks/types';
+import type { CohortProtocol, PrepareObservation, ProtocolEffect, TrackProtocolState } from '../../core/tracks/types';
 import type { JournalState, TrackContext, TrackRef, ProcessRef } from '../../core/journal/types';
 
 /** Contrato más rico que el `'absent'|'claimed'|'ready'|'foreign'` puramente
@@ -29,16 +32,26 @@ export type SupervisorObservation =
     | { kind: 'ready'; readinessNonce: string }
     | { kind: 'foreign' };
 
+/** Task 9 (interfaz TEMPORAL — Task 13 la reemplaza por el módulo dedicado
+ *  de teardown sin cambiar esta firma, ver plan R5 Task 13 / Step 5):
+ *  `tracks.ts` decide CUÁL paso corresponde mirando `ref.phase` (dato del
+ *  journal que ya le pertenece a este driver) — `teardownOwned` solo lo
+ *  ejecuta contra el mundo real. `'blocked'` <=> el paso es indemostrable
+ *  (ej. no se pudo confirmar la terminación del grupo del supervisor con
+ *  identidad verificada, R4.8) y el track debe bloquearse en vez de avanzar. */
+export type TeardownStep = 'supervisor' | 'worktree' | 'branch';
+
 export interface TrackRuntime {
     addWorktree(planRoot: string, ref: TrackRef, baseSha: string): void;
     initTrackJournal(ref: TrackRef, context: TrackContext): void;
     spawnSupervisor(ref: TrackRef): ProcessRef | void;
     observeSupervisor(ref: TrackRef): SupervisorObservation;
+    teardownOwned(ref: TrackRef, step: TeardownStep): Promise<'ok' | 'blocked'>;
 }
 
 export interface ReconcileTracksResult { state: JournalState; effectExecuted: string | null; }
 
-const RUNTIME_EFFECTS = new Set(['create-worktree', 'create-track-journal', 'spawn-track-supervisor']);
+const RUNTIME_EFFECTS = new Set(['create-worktree', 'create-track-journal', 'spawn-track-supervisor', 'begin-teardown']);
 
 function toProtocol(state: JournalState, maxParallel: number): CohortProtocol {
     const tracks: Record<string, TrackProtocolState> = {};
@@ -116,21 +129,40 @@ function runCreateWorktree(
 ): EffectRunResult {
     const trackId = effect.trackId;
     const ref = refOf(s, trackId);
-    // R4.6: la comprobación de "es ajeno" ocurre ANTES de tocar `runtime` — un
-    // destino no vacío en este punto no puede ser nuestro (todavía no
-    // intentamos crear nada ahí), así que esto NO cuenta como el side effect
-    // del tick: es una observación pura, no una mutación.
-    if (foreignPathExists(ref.worktreePath)) {
-        const observed = observeProtocolEffect(protocol, effect, { kind: 'worktree-observed', trackId, owned: false });
-        const next = persist(planRoot, branch, applyProtocolToState(s, observed));
+    // Task 9 (R4.2/R4.6/C11): observaciones read-only del mundo real ANTES de
+    // tocar `runtime` — ninguna de las dos cuenta como el side effect del
+    // tick, igual que documentaba la versión anterior de este comentario.
+    // `ownedWorktreeExists` se consulta PRIMERO: un destino no vacío que ya
+    // está registrado por git en la branch determinista de este track solo
+    // puede ser NUESTRO, de un `addWorktree` que genuinamente corrió pero
+    // crasheó antes de que este mismo bloque persistiera `worktree-observed`
+    // — sin este chequeo, `foreignPathExists` (que no distingue "ajeno" de
+    // "nuestro intento interrumpido") bloquearía el track para siempre.
+    const observed: PrepareObservation = ownedWorktreeExists(planRoot, ref.worktreePath, ref.branch)
+        ? { worktreeOwned: true }
+        : { worktreeForeignNonEmpty: foreignPathExists(ref.worktreePath) };
+    const decision = decidePrepare(protocol.tracks[trackId], observed);
+
+    if (decision === 'accept-worktree') {
+        const applied = observeProtocolEffect(protocol, effect, { kind: 'worktree-observed', trackId, owned: true });
+        const next = persist(planRoot, branch, applyProtocolToState(s, applied));
+        appendEvent(planRoot, branch, { kind: 'track-effect', trackId, effect: effect.kind });
+        return { state: next, stop: true, executed: effect.kind };
+    }
+    if (decision === 'block-foreign') {
+        const blocked = observeProtocolEffect(protocol, effect, { kind: 'worktree-observed', trackId, owned: false });
+        const next = persist(planRoot, branch, applyProtocolToState(s, blocked));
         appendEvent(planRoot, branch, { kind: 'track-blocked', trackId, reason: 'worktree preexistente ajeno' });
-        // Post-review fix: bloquear un track es en sí mismo UNA frontera —
-        // dejar `stop:false` acá permitía que el MISMO call siguiera y
-        // tocara `runtime.addWorktree` de otro track (dos side effects
-        // reales en un solo `reconcileTracks()`, rompiendo el supuesto de
-        // Task 9 de que cada boundary es crash-injectable por separado).
+        // Post-review fix (Task 8): bloquear un track es en sí mismo UNA
+        // frontera — dejar `stop:false` acá permitía que el MISMO call
+        // siguiera y tocara `runtime.addWorktree` de otro track (dos side
+        // effects reales en un solo `reconcileTracks()`, rompiendo el
+        // supuesto de Task 9 de que cada boundary es crash-injectable por
+        // separado).
         return { state: next, stop: true, executed: null };
     }
+    // decision === 'retry-worktree': ni ajeno ni nuestro todavía — recién
+    // acá se toca `runtime` de verdad.
     try {
         runtime.addWorktree(planRoot, ref, mustBaseSha(s));
     } catch (error) {
@@ -139,8 +171,8 @@ function runCreateWorktree(
         appendEvent(planRoot, branch, { kind: 'track-effect-failed', trackId, effect: effect.kind, detail: (error as Error).message });
         return { state: next, stop: true, executed: effect.kind };
     }
-    const observed = observeProtocolEffect(protocol, effect, { kind: 'worktree-observed', trackId, owned: true });
-    const next = persist(planRoot, branch, applyProtocolToState(s, observed));
+    const applied = observeProtocolEffect(protocol, effect, { kind: 'worktree-observed', trackId, owned: true });
+    const next = persist(planRoot, branch, applyProtocolToState(s, applied));
     appendEvent(planRoot, branch, { kind: 'track-effect', trackId, effect: effect.kind });
     return { state: next, stop: true, executed: effect.kind };
 }
@@ -159,6 +191,19 @@ function runCreateTrackJournal(
     // autoridad
     // aquí es la identidad del track y el baseSha común de la cohorte.
     const context: TrackContext = { trackId, taskIds: [], planDigest: '', baseSha: mustBaseSha(s), planJournalId: s.journalId };
+    // Task 9: a diferencia de `create-worktree`/`spawn-track-supervisor`,
+    // `decidePrepare` no tiene nada que desambiguar acá — `write-descriptor`
+    // es la única decisión posible en fase WORKTREE_CREATED, PORQUE
+    // `runtime.initTrackJournal` ya es idempotente por construcción
+    // (`initJournal` jamás pisa un `state.json` existente, `writeDescriptor`
+    // sobreescribe con el mismo contenido siempre): reintentar tras un crash
+    // en cualquier punto de esta llamada converge solo, sin necesitar
+    // distinguir "primera vez" de "reintento". Se llama de todos modos para
+    // que la autoridad de decisión sea siempre `protocol.ts`, nunca un
+    // "por qué no hace falta acá" implícito en `tracks.ts`.
+    if (decidePrepare(protocol.tracks[trackId], {}) !== 'write-descriptor') {
+        throw new Error(`invariante rota: decidePrepare esperaba 'write-descriptor' para ${trackId}`);
+    }
     try {
         runtime.initTrackJournal(ref, context);
     } catch (error) {
@@ -211,59 +256,135 @@ function runSpawnTrackSupervisor(
         // que Task 9 necesita poder crashear por separado.
         return { state: next, stop: true, executed: null };
     }
-    if (ref.supervisorProcessRef === undefined) {
-        // Post-review fix (3rd occurrence of this class of bug): la versión
-        // anterior llamaba `observeSupervisor` y, si volvía 'absent', llamaba
-        // `spawnSupervisor` EN EL MISMO call — dos fronteras de runtime
-        // colapsadas en un solo `reconcileTracks()`. Un "esperar un tick de
-        // más y volver a observar" no alcanza por sí solo: sin un registro
-        // DURABLE de "ya intentamos spawnear", el próximo call observaría
-        // 'absent' otra vez para siempre y jamás llegaría a spawnear. La
-        // señal durable correcta ya existe: `ref.supervisorProcessRef`, que
-        // ESTA MISMA función persiste apenas `spawnSupervisor` devuelve algo.
-        // Mientras no esté seteado, "todavía no intentamos spawnear" es la
-        // única fuente de verdad — ni siquiera hace falta preguntarle a
-        // `runtime.observeSupervisor` primero (sabemos que no puede haber
-        // nada real ahí todavía). Esto es ADEMÁS más eficiente que la
-        // sugerencia original: cero ticks desperdiciados, y cada call sigue
-        // tocando `runtime` como máximo una vez.
-        const pr = runtime.spawnSupervisor(ref);
-        const next = pr !== undefined ? persist(planRoot, branch, withRef(s, trackId, { supervisorProcessRef: pr })) : s;
-        appendEvent(planRoot, branch, { kind: 'track-effect', trackId, effect: effect.kind });
-        return { state: next, stop: true, executed: effect.kind };
-    }
+    // Task 9 (R4.2/C11, reemplaza el gate anterior basado ÚNICAMENTE en
+    // `ref.supervisorProcessRef === undefined`): SIEMPRE se observa el mundo
+    // real primero — read-only, jamás cuenta como el side effect del tick,
+    // mismo criterio que `foreignPathExists`/`ownedWorktreeExists` en
+    // `runCreateWorktree` — y es `decidePrepare` (protocol.ts) quien decide
+    // qué hacer con lo observado. El gate viejo asumía que, mientras
+    // `supervisorProcessRef` no estuviera persistido, "todavía no
+    // intentamos spawnear" era la ÚNICA fuente de verdad posible — cierto
+    // hasta Task 9, falso ante un crash que ocurre DESPUÉS de que
+    // `runtime.spawnSupervisor` ya arrancó el proceso real (detached) pero
+    // ANTES de persistir su `ProcessRef`: ahí, observar es la única forma de
+    // distinguir "nunca lo intentamos" (`'absent'`, seguro spawnear) de "ya
+    // hay un wrapper real corriendo con este mismo intent" (`'claimed'` /
+    // `'ready'` / `'foreign'`, JAMÁS re-spawnear, C11).
     const observation = runtime.observeSupervisor(ref);
-    if (observation.kind === 'absent' || observation.kind === 'claimed') {
-        // C11: ya spawneamos (supervisorProcessRef existe) — 'absent' acá
-        // solo significa que el wrapper todavía no llegó a crear su claim
-        // (ventana de arranque normal), y 'claimed' que el claim está tomado
-        // pero identidad/readiness todavía no son observables. Ninguno de
-        // los dos vuelve a llamar `spawnSupervisor`: el mismo intent ya
-        // persistido se reintenta solo, nunca uno nuevo. Nada que persistir
-        // acá — solo esperar al próximo tick.
-        return { state: s, stop: true, executed: null };
-    }
-    if (observation.kind === 'foreign') {
+    const decision = decidePrepare(protocol.tracks[trackId], { supervisorArtifact: observation.kind });
+
+    if (decision === 'block-foreign') {
         const blocked = observeProtocolEffect(protocol, effect, { kind: 'supervisor-observed', trackId, identity: 'other' });
         const next = persist(planRoot, branch, applyProtocolToState(s, blocked));
         appendEvent(planRoot, branch, { kind: 'track-blocked', trackId, reason: 'identidad de supervisor ajena' });
         return { state: next, stop: true, executed: null };
     }
-    // 'ready': C8 — la comparación del nonce vive exclusivamente en protocol.ts.
-    const observed = observeProtocolEffect(protocol, effect, {
-        kind: 'supervisor-observed', trackId, identity: 'expected', readinessNonce: observation.readinessNonce,
-    });
-    const next = persist(planRoot, branch, applyProtocolToState(s, observed));
-    appendEvent(planRoot, branch, { kind: 'track-armed-or-blocked', trackId });
-    return { state: next, stop: true, executed: null };
+
+    if (decision === 'retry-supervisor-same-intent') {
+        if (ref.supervisorProcessRef === undefined) {
+            // Observación confirma 'absent': recién ACÁ se toca `runtime` de
+            // verdad. Leer (no-mutante) y, si de veras no hay nada, spawnear
+            // (mutante) en el MISMO call sigue siendo UNA sola frontera
+            // mutante por invocación — igual patrón que
+            // `foreignPathExists` -> `addWorktree` en `runCreateWorktree`.
+            const pr = runtime.spawnSupervisor(ref);
+            const next = pr !== undefined ? persist(planRoot, branch, withRef(s, trackId, { supervisorProcessRef: pr })) : s;
+            appendEvent(planRoot, branch, { kind: 'track-effect', trackId, effect: effect.kind });
+            return { state: next, stop: true, executed: effect.kind };
+        }
+        // `supervisorProcessRef` ya persistido (spawn de un tick anterior)
+        // pero el wrapper todavía no escribió ni su claim: ventana de
+        // arranque normal, nada que hacer todavía.
+        return { state: s, stop: true, executed: null };
+    }
+
+    // 'accept-readiness': ya hay evidencia real en disco de un intento
+    // previo (posiblemente de una instancia que crasheó antes de persistir
+    // `supervisorProcessRef`) — NUNCA volver a llamar `spawnSupervisor`
+    // (C11). C8 decide acá mismo si el nonce observado corresponde.
+    if (observation.kind === 'claimed') {
+        // Claim tomado pero identidad/readiness todavía no observables:
+        // esperar al próximo tick, nada que persistir.
+        return { state: s, stop: true, executed: null };
+    }
+    if (observation.kind === 'ready') {
+        const observed = observeProtocolEffect(protocol, effect, {
+            kind: 'supervisor-observed', trackId, identity: 'expected', readinessNonce: observation.readinessNonce,
+        });
+        const next = persist(planRoot, branch, applyProtocolToState(s, observed));
+        appendEvent(planRoot, branch, { kind: 'track-armed-or-blocked', trackId });
+        return { state: next, stop: true, executed: null };
+    }
+    // Defensivo: `decidePrepare`/`observeSupervisor` ya cubrieron
+    // exhaustivamente absent/foreign/claimed/ready arriba (fail-closed).
+    throw new Error(`invariante rota: observación de supervisor no manejada para ${trackId}`);
 }
 
-function executeRuntimeEffect(
+/** Fases del teardown provisorio (Step 5, T13 reemplaza el cuerpo sin cambiar
+ *  `TrackRuntime.teardownOwned`) que ya dejaron TODO su trabajo real hecho —
+ *  `nextProtocolEffect` sigue emitiendo `begin-teardown` para este trackId
+ *  hasta que llegue a `REMOVED` (no hay un `ProtocolEffect` por paso; son
+ *  transiciones mecánicas, siempre en el mismo orden, sin ninguna decisión
+ *  que dependa de una observación — por eso `tracks.ts` las persiste
+ *  directamente en vez de rebotarlas por `observeProtocolEffect`). */
+const TEARDOWN_STEP_FOR_PHASE: Partial<Record<TrackRef['phase'], TeardownStep>> = {
+    TEARDOWN_INTENT: 'supervisor', SUPERVISOR_STOPPED: 'worktree', WORKTREE_REMOVED: 'branch',
+};
+const TEARDOWN_NEXT_PHASE: Record<TeardownStep, TrackRef['phase']> = {
+    supervisor: 'SUPERVISOR_STOPPED', worktree: 'WORKTREE_REMOVED', branch: 'BRANCH_REMOVED',
+};
+
+async function runBeginTeardown(
+    planRoot: string, branch: string, s: JournalState, protocol: CohortProtocol,
+    effect: Extract<ProtocolEffect, { kind: 'begin-teardown' }>, runtime: TrackRuntime,
+): Promise<EffectRunResult> {
+    const trackId = effect.trackId;
+    const ref = refOf(s, trackId);
+
+    if (TEARDOWN_STEP_FOR_PHASE[ref.phase] === undefined && ref.phase !== 'BRANCH_REMOVED') {
+        // Primera vez que este trackId entra a teardown (venía de cualquier
+        // fase de trabajo, o de un teardown que crasheó antes de persistir
+        // siquiera `TEARDOWN_INTENT`): la única transición que SÍ pasa por
+        // `protocol.ts` (`EFFECT_APPLIED_PHASE['begin-teardown']` ya la
+        // mapea a `TEARDOWN_INTENT`), el resto de los pasos son mecánicos.
+        const applied = observeProtocolEffect(protocol, effect, { kind: 'effect-applied', effect });
+        const next = persist(planRoot, branch, applyProtocolToState(s, applied));
+        appendEvent(planRoot, branch, { kind: 'track-teardown-step', trackId, step: 'TEARDOWN_INTENT' });
+        return { state: next, stop: true, executed: null };
+    }
+
+    const step = TEARDOWN_STEP_FOR_PHASE[ref.phase];
+    if (step !== undefined) {
+        const result = await runtime.teardownOwned(ref, step);
+        if (result === 'blocked') {
+            const blocked = observeProtocolEffect(protocol, effect, { kind: 'teardown-blocked', trackId, detail: `paso de teardown '${step}' indemostrable` });
+            const next = persist(planRoot, branch, applyProtocolToState(s, blocked));
+            appendEvent(planRoot, branch, { kind: 'track-blocked', trackId, reason: `teardown:${step}` });
+            return { state: next, stop: true, executed: effect.kind };
+        }
+        const nextPhase = TEARDOWN_NEXT_PHASE[step];
+        const next = persist(planRoot, branch, withRef(s, trackId, { phase: nextPhase }));
+        appendEvent(planRoot, branch, { kind: 'track-teardown-step', trackId, step: nextPhase });
+        return { state: next, stop: true, executed: effect.kind };
+    }
+
+    // ref.phase === 'BRANCH_REMOVED': worktree y branch ya se removieron —
+    // solo falta la observación de protocolo (autoridad única) que marca el
+    // track REMOVED de verdad, la misma que `protocol.test.ts` ya explora
+    // para el efecto `begin-teardown` (Step 3/T1).
+    const removed = observeProtocolEffect(protocol, effect, { kind: 'track-removed', trackId });
+    const next = persist(planRoot, branch, applyProtocolToState(s, removed));
+    appendEvent(planRoot, branch, { kind: 'track-removed', trackId });
+    return { state: next, stop: true, executed: effect.kind };
+}
+
+async function executeRuntimeEffect(
     planRoot: string, branch: string, s: JournalState, protocol: CohortProtocol,
     effect: ProtocolEffect, runtime: TrackRuntime,
-): EffectRunResult {
+): Promise<EffectRunResult> {
     if (effect.kind === 'create-worktree') return runCreateWorktree(planRoot, branch, s, protocol, effect, runtime);
     if (effect.kind === 'create-track-journal') return runCreateTrackJournal(planRoot, branch, s, protocol, effect, runtime);
+    if (effect.kind === 'begin-teardown') return runBeginTeardown(planRoot, branch, s, protocol, effect, runtime);
     return runSpawnTrackSupervisor(planRoot, branch, s, protocol, effect as Extract<ProtocolEffect, { kind: 'spawn-track-supervisor' }>, runtime);
 }
 
@@ -290,10 +411,18 @@ function executeRuntimeEffect(
  * `supervisorIntent`, permitiendo que un solo call colapsara dos fronteras).
  * Esto es también lo que mantiene visible, entre dos ticks, el estado
  * "todos ARMED pero la cohorte todavía no activó" (C1).
+ *
+ * `async` desde Task 9 (Step 5): el paso `supervisor` de `begin-teardown`
+ * termina el grupo del supervisor con `terminatePreviouslyOwnedGroup`
+ * (identity-verified, R4.8), que espera una escalera de gracia real
+ * (SIGTERM -> confirmar -> SIGKILL -> confirmar) — jamás un `kill(pid)` sin
+ * confirmación. Todo caller sigue siendo dueño de awaitear el resultado
+ * (ver `Supervisor.tick`); ningún test que llame a `reconcileTracks`
+ * directamente puede seguir tratándolo como síncrono.
  */
-export function reconcileTracks(
+export async function reconcileTracks(
     planRoot: string, branch: string, state: JournalState, runtime: TrackRuntime, maxParallel: number,
-): ReconcileTracksResult {
+): Promise<ReconcileTracksResult> {
     let s = state;
     for (;;) {
         if (s.tracks === undefined || s.tracks.length < 2 || s.cohortPhase === undefined) {
@@ -320,7 +449,7 @@ export function reconcileTracks(
             continue;
         }
 
-        const result = executeRuntimeEffect(planRoot, branch, s, protocol, effect, runtime);
+        const result = await executeRuntimeEffect(planRoot, branch, s, protocol, effect, runtime);
         s = result.state;
         if (result.stop) return { state: s, effectExecuted: result.executed };
     }
@@ -362,10 +491,18 @@ export function observeSupervisorFromDisk(ref: TrackRef): SupervisorObservation 
     return { kind: 'ready', readinessNonce: ready.readinessNonce };
 }
 
+export interface TeardownGrace { termGraceMs: number; killGraceMs: number; }
+
+/** Grace por defecto si el caller no provee una explícita (ej. tests viejos
+ *  de `defaultTrackRuntime` que no ejercitan teardown): mismo orden de
+ *  magnitud que `DEFAULT_SUPERVISOR_CONFIG` en `supervisor.ts`, nunca cero
+ *  (una escalera SIGTERM->SIGKILL sin ventana de gracia no es una escalera). */
+const DEFAULT_TEARDOWN_GRACE: TeardownGrace = { termGraceMs: 30000, killGraceMs: 5000 };
+
 /** Implementación real de `TrackRuntime`, inyectada por `Supervisor` en
  *  producción. Los tests de `reconcileTracks` usan un fake — ningún proceso
  *  ni worktree real se toca fuera de esta función. */
-export function defaultTrackRuntime(planRoot: string, planBranch: string): TrackRuntime {
+export function defaultTrackRuntime(planRoot: string, planBranch: string, grace: TeardownGrace = DEFAULT_TEARDOWN_GRACE): TrackRuntime {
     return {
         addWorktree(root, ref, baseSha) {
             // CRITICAL post-review fix: `git check-ignore` es una operación de
@@ -412,5 +549,30 @@ export function defaultTrackRuntime(planRoot: string, planBranch: string): Track
             return pref;
         },
         observeSupervisor: observeSupervisorFromDisk,
+        // Task 9 (interfaz TEMPORAL, ver `TrackRuntime.teardownOwned`): cada
+        // paso es idempotente ante reintento tras crash — "nada que remover"
+        // nunca lanza, es éxito vacuo (R4.2).
+        async teardownOwned(ref, step) {
+            if (step === 'supervisor') {
+                if (ref.supervisorProcessRef === undefined) return 'ok'; // nunca llegamos a spawnear: nada que terminar
+                if (groupIsGone(ref.supervisorProcessRef.processGroup)) return 'ok';
+                // R4.8: identity-verified — jamás un `kill(pid)` crudo. Un
+                // `pgid` reutilizado por OTRO proceso nunca se confunde con
+                // el nuestro (`terminatePreviouslyOwnedGroup` reenvía la
+                // señal al PGID capturado, pero solo tras haber confirmado
+                // que el grupo sigue existiendo; la identidad completa ya se
+                // verificó al capturar `supervisorProcessRef` en el spawn).
+                const confirmed = await terminatePreviouslyOwnedGroup(ref.supervisorProcessRef, grace);
+                return confirmed ? 'ok' : 'blocked';
+            }
+            if (step === 'worktree') {
+                if (!fs.existsSync(ref.worktreePath)) return 'ok'; // nunca se creó (ej. create-worktree falló antes de mutar nada)
+                removeOwnedWorktree(planRoot, ref.worktreePath);
+                return 'ok';
+            }
+            // 'branch': `removeOwnedBranch` ya es idempotente (no-op si no existe).
+            removeOwnedBranch(planRoot, ref.branch);
+            return 'ok';
+        },
     };
 }

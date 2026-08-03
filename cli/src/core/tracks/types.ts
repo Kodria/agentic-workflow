@@ -86,3 +86,37 @@ export type JoinDecision =
     | { action: 'abort-own-merge' }
     | { action: 'accept-merge'; joinedCommitSha: string }
     | { action: 'block'; reason: string };
+
+/** Task 9 (R4.2/R4.6/C11): lo que el driver (`watch/tracks.ts`) pudo observar
+ *  del mundo real, READ-ONLY, sobre UN track en curso durante `PREPARING`,
+ *  antes de decidir si la próxima llamada mutante a `TrackRuntime` debe
+ *  intentarse de nuevo o si un crash previo ya dejó el resultado ahí. Misma
+ *  convención que `ProtocolObservation`: campos planos, `?` para lo que
+ *  todavía no se pudo determinar. Deliberadamente NO importa nada de
+ *  `core/journal/types` (regla de capas de T1) — el vocabulario del wrapper
+ *  del supervisor (`SupervisorObservation` en `watch/tracks.ts`) se traduce
+ *  acá a un string plano (`supervisorArtifact`), nunca al revés. */
+export interface PrepareObservation {
+    /** `create-worktree` (fase PREPARE_INTENT): el destino YA es un worktree
+     *  real registrado por git en la branch determinista del track — el
+     *  único caso legítimo de "destino no vacío pero nuestro". */
+    worktreeOwned?: boolean;
+    /** `create-worktree`: el destino existe, no está vacío, y no es
+     *  demostrablemente nuestro (`worktreeOwned` falso o ausente). */
+    worktreeForeignNonEmpty?: boolean;
+    /** `spawn-track-supervisor` (fase SUPERVISOR_STARTING, con
+     *  `supervisorIntent` ya persistido): mismo vocabulario que
+     *  `SupervisorObservation['kind']`, aplanado. */
+    supervisorArtifact?: 'absent' | 'claimed' | 'ready' | 'foreign';
+}
+
+/** Task 9: decisiones que `decidePrepare` puede tomar frente a un
+ *  `PrepareObservation`. `tracks.ts` únicamente traduce cada una a la
+ *  llamada de `TrackRuntime` o a la observación de protocolo que ya existen
+ *  (`worktree-observed`, `supervisor-observed`, `prepare-failed`) — nunca
+ *  reimplementa la decisión. */
+export type PrepareDecision =
+    | 'retry-worktree' | 'accept-worktree'
+    | 'write-descriptor'
+    | 'retry-supervisor-same-intent' | 'accept-readiness'
+    | 'block-foreign' | 'begin-fallback';

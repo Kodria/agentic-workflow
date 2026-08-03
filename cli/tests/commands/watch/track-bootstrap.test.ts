@@ -64,6 +64,7 @@ function harness(trackIds: string[], opts: { maxParallelTracks?: number } = {}) 
             const override = readinessOverrides.get(ref.trackId);
             return { kind: 'ready', readinessNonce: override ?? ref.readinessNonce };
         },
+        async teardownOwned() { return 'ok'; },
     };
 
     const maxParallelTracks = opts.maxParallelTracks ?? 2;
@@ -176,7 +177,7 @@ describe('reconcileTracks — P1 bootstrap durable + barrera ARMED (R4.1-R4.10, 
         expect(h.track('a').phase).toBe('BLOCKED');
     });
 
-    test('Repro 1 (post-review fix): persistir supervisorIntent, spawnear y observar son TRES fronteras separadas, nunca dos en el mismo call', async () => {
+    test('Repro 1 (post-review fix, revisado en Task 9): persistir supervisorIntent es su propia frontera; observar y spawnear pueden compartir call (una lectura + a lo sumo una escritura), pero nunca hay dos escrituras en un mismo call', async () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-track-repro1-'));
         try {
             initJournal(dir, BRANCH);
@@ -203,11 +204,15 @@ describe('reconcileTracks — P1 bootstrap durable + barrera ARMED (R4.1-R4.10, 
                 addWorktree: () => { throw new Error('no debería llamarse'); },
                 initTrackJournal: () => { throw new Error('no debería llamarse'); },
                 spawnSupervisor: (ref) => { spawnCalls++; return fakeProcessRef(ref.trackId); },
-                observeSupervisor: () => { observeCalls++; return { kind: 'claimed' }; },
+                // Simula el mundo real: 'absent' hasta que el (único) spawn
+                // ocurra, 'claimed' después — igual progresión que el wrapper
+                // real (claim se escribe recién tras el spawn).
+                observeSupervisor: () => { observeCalls++; return spawnCalls > 0 ? { kind: 'claimed' } : { kind: 'absent' }; },
+                async teardownOwned() { return 'ok'; },
             };
 
             // Call 1: solo persiste el supervisorIntent — CERO llamadas a runtime.
-            const afterIntent = reconcileTracks(dir, BRANCH, readJournal(dir, BRANCH).state!, runtime, 2);
+            const afterIntent = await reconcileTracks(dir, BRANCH, readJournal(dir, BRANCH).state!, runtime, 2);
             expect(observeCalls).toBe(0);
             expect(spawnCalls).toBe(0);
             const trackA1 = afterIntent.state.tracks!.find((t) => t.trackId === 'a')!;
@@ -216,18 +221,22 @@ describe('reconcileTracks — P1 bootstrap durable + barrera ARMED (R4.1-R4.10, 
             expect(trackA1.supervisorProcessRef).toBeUndefined();
 
             // Call 2: supervisorIntent ya existe, supervisorProcessRef todavía
-            // no — spawnea EXACTAMENTE una vez, y JAMÁS también consulta
-            // `observeSupervisor` en el mismo call (eso sería el bug reportado).
-            const afterSpawn = reconcileTracks(dir, BRANCH, afterIntent.state, runtime, 2);
+            // no — Task 9 SIEMPRE observa antes de decidir (read-only, no
+            // cuenta como el side effect del tick, mismo criterio que
+            // `foreignPathExists` en `runCreateWorktree`): la observación
+            // confirma 'absent' y RECIÉN AHÍ se spawnea, exactamente una vez,
+            // dentro del MISMO call — una lectura + a lo sumo UNA escritura,
+            // nunca dos escrituras (eso seguiría siendo el bug original).
+            const afterSpawn = await reconcileTracks(dir, BRANCH, afterIntent.state, runtime, 2);
+            expect(observeCalls).toBe(1);
             expect(spawnCalls).toBe(1);
-            expect(observeCalls).toBe(0);
             const trackA2 = afterSpawn.state.tracks!.find((t) => t.trackId === 'a')!;
             expect(trackA2.supervisorProcessRef).toBeDefined();
 
-            // Call 3: recién ahora, con supervisorProcessRef ya persistido,
-            // se consulta `observeSupervisor` — y NUNCA se vuelve a spawnear.
-            reconcileTracks(dir, BRANCH, afterSpawn.state, runtime, 2);
-            expect(observeCalls).toBe(1);
+            // Call 3: supervisorProcessRef ya persistido — se vuelve a
+            // observar (ahora 'claimed') y NUNCA se vuelve a spawnear.
+            await reconcileTracks(dir, BRANCH, afterSpawn.state, runtime, 2);
+            expect(observeCalls).toBe(2);
             expect(spawnCalls).toBe(1);
         } finally {
             fs.rmSync(dir, { recursive: true, force: true });
@@ -265,9 +274,10 @@ describe('reconcileTracks — P1 bootstrap durable + barrera ARMED (R4.1-R4.10, 
                 initTrackJournal: () => { throw new Error('no debería llamarse'); },
                 spawnSupervisor: () => { throw new Error('no debería llamarse'); },
                 observeSupervisor: () => ({ kind: 'absent' }),
+                async teardownOwned() { return 'ok'; },
             };
 
-            const result = reconcileTracks(dir, BRANCH, readJournal(dir, BRANCH).state!, runtime, 2);
+            const result = await reconcileTracks(dir, BRANCH, readJournal(dir, BRANCH).state!, runtime, 2);
             // 'a' se bloquea por ajeno; 'b' NO se toca en absoluto en este call
             // (ni siquiera su persist-prepare-intent, puramente en memoria).
             expect(addWorktreeCalls).toBe(0);
@@ -294,8 +304,9 @@ describe('reconcileTracks — P1 bootstrap durable + barrera ARMED (R4.1-R4.10, 
                 initTrackJournal: () => { throw new Error('no debería llamarse'); },
                 spawnSupervisor: () => { throw new Error('no debería llamarse'); },
                 observeSupervisor: () => ({ kind: 'absent' }),
+                async teardownOwned() { throw new Error('no debería llamarse'); },
             };
-            const result = reconcileTracks(bare, BRANCH, bareState, fakeRuntime, 1);
+            const result = await reconcileTracks(bare, BRANCH, bareState, fakeRuntime, 1);
             expect(result.effectExecuted).toBeNull();
             expect(result.state).toEqual(bareState);
         } finally {

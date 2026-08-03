@@ -2,7 +2,8 @@ import crypto from 'crypto';
 import { JOIN_STRATEGY_NO_FF } from './types';
 import type {
     CohortProtocol, JoinDecision, JoinIntent, JoinObservation,
-    ProtocolEffect, ProtocolObservation, TrackPhase,
+    PrepareDecision, PrepareObservation, ProtocolEffect, ProtocolObservation,
+    TrackPhase, TrackProtocolState,
 } from './types';
 
 /** Fases en las que un track de una cohorte activa puede estar. */
@@ -44,6 +45,59 @@ export function decideJoinReconciliation(intent: JoinIntent, o: JoinObservation)
     if (o.mergeHead === null && o.trackIsAncestor === true) return { action: 'accept-merge', joinedCommitSha: o.planHead };
     if (o.mergeHead !== null && o.mergeHead !== intent.expectedTrackHeadSha) return { action: 'block', reason: 'MERGE_HEAD ajeno' };
     return { action: 'block', reason: 'estado de join indemostrable' };
+}
+
+/**
+ * Autoridad única de recuperación de crash de P1 (Task 9, R4.2/R4.6/C11):
+ * dado el estado protocolar de UN track en curso durante `PREPARING` y lo
+ * que el driver pudo observar del mundo real (fs/git/wrapper, siempre
+ * read-only — la gathering nunca cuenta como el side effect del tick, mismo
+ * criterio que `foreignPathExists` en `runCreateWorktree`), decide si la
+ * próxima llamada mutante a `TrackRuntime` debe intentarse de nuevo, si el
+ * resultado de un intento previo ya está ahí (crash entre el efecto real y
+ * su persistencia), si hay que bloquear por ajeno, o si la fase es
+ * indemostrable y hay que abortar a fallback.
+ *
+ * NO se llama desde `nextProtocolEffect`: esa función solo decide QUÉ efecto
+ * sigue mirando la fase (eso no cambia con Task 9 — `create-worktree` /
+ * `create-track-journal` / `spawn-track-supervisor` son inambiguos por
+ * fase). `decidePrepare` decide, para ESE MISMO efecto ya elegido, si
+ * `tracks.ts` debe tocar `TrackRuntime` de verdad o si una observación ya
+ * resuelve el resultado — enhebrarla en `nextProtocolEffect` (devolviendo
+ * `null` para 'accept-worktree'/'block-foreign'/'begin-fallback') obligaría
+ * a `tracks.ts` a volver a invocar esta misma función para saber QUÉ hacer
+ * con ese `null`, sin ganar nada: el punto de entrada más simple, y el único
+ * que no sobrecarga el significado de "sin más trabajo" de `null`, es que el
+ * driver la llame directamente con la observación ya recolectada — exactamente
+ * el mismo patrón que ya usa con `observeProtocolEffect`/`reconcileProtocol`
+ * para las observaciones POST-efecto. Sigue siendo la única autoridad de
+ * decisión: `tracks.ts` únicamente traduce su resultado.
+ */
+export function decidePrepare(t: TrackProtocolState, observed: PrepareObservation): PrepareDecision {
+    if (t.phase === 'PREPARE_INTENT') {
+        if (observed.worktreeOwned === true) return 'accept-worktree';
+        if (observed.worktreeForeignNonEmpty === true) return 'block-foreign';
+        return 'retry-worktree';
+    }
+    if (t.phase === 'WORKTREE_CREATED') return 'write-descriptor';
+    if (t.phase === 'SUPERVISOR_STARTING') {
+        if (observed.supervisorArtifact === undefined || observed.supervisorArtifact === 'absent') {
+            return 'retry-supervisor-same-intent';
+        }
+        if (observed.supervisorArtifact === 'foreign') return 'block-foreign';
+        // 'claimed'/'ready': ya hay evidencia real en disco de un intento
+        // previo (el mismo `supervisorIntent`, posiblemente de una instancia
+        // que crasheó DESPUÉS de spawnear pero ANTES de persistir
+        // `supervisorProcessRef`) — jamás re-spawnear (C11); delegar al
+        // mismo camino de observación que ya usa el post-spawn normal (C8
+        // decide el nonce ahí, no acá).
+        return 'accept-readiness';
+    }
+    // Fase inesperada para un efecto de PREPARING (fail-closed, R4.6): nunca
+    // alcanzable desde `reconcileTracks` (que solo llama `decidePrepare` para
+    // las tres fases de arriba), pero si algún día lo fuera, abortar a
+    // fallback es la única opción segura.
+    return 'begin-fallback';
 }
 
 export function initialCohort(planJournalId: string, trackIds: string[], maxParallel = trackIds.length): CohortProtocol {

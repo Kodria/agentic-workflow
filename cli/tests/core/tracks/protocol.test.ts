@@ -1,8 +1,11 @@
 import {
-    assertProtocolInvariants, initialCohort, nextProtocolEffect,
+    assertProtocolInvariants, decidePrepare, initialCohort, nextProtocolEffect,
     observeProtocolEffect, reconcileProtocol,
 } from '../../../src/core/tracks/protocol';
-import type { CohortProtocol, ProtocolEffect, ProtocolObservation } from '../../../src/core/tracks/types';
+import type {
+    CohortProtocol, PrepareDecision, PrepareObservation, ProtocolEffect,
+    ProtocolObservation, TrackProtocolState,
+} from '../../../src/core/tracks/types';
 
 const ids = ['cli', 'docs'];
 
@@ -118,6 +121,51 @@ describe('parallel-track protocol model', () => {
             'persist-prepare-intent', 'request-final-integration', 'request-global-qa',
             'run-final-interlock', 'spawn-track-supervisor',
         ].sort());
+    });
+
+    describe('decidePrepare — Task 9 (R4.2, R4.6, C11): matriz observable de recuperación de crash', () => {
+        const track = (phase: TrackProtocolState['phase']): TrackProtocolState => ({
+            trackId: 'a', phase, fencingToken: 'f'.repeat(32), readinessNonce: 'r'.repeat(32),
+        });
+
+        const cases: Array<[TrackProtocolState['phase'], PrepareObservation, PrepareDecision]> = [
+            // PREPARE_INTENT (create-worktree): ownedWorktreeExists manda por
+            // sobre "no vacío" — un destino nuestro nunca se re-crea ni bloquea.
+            ['PREPARE_INTENT', {}, 'retry-worktree'],
+            ['PREPARE_INTENT', { worktreeOwned: true }, 'accept-worktree'],
+            ['PREPARE_INTENT', { worktreeOwned: true, worktreeForeignNonEmpty: true }, 'accept-worktree'],
+            ['PREPARE_INTENT', { worktreeForeignNonEmpty: true }, 'block-foreign'],
+            ['PREPARE_INTENT', { worktreeOwned: false, worktreeForeignNonEmpty: false }, 'retry-worktree'],
+            // WORKTREE_CREATED (create-track-journal): `initTrackJournal` ya es
+            // idempotente por construcción (initJournal no pisa un state.json
+            // existente, writeDescriptor sobreescribe igual siempre) — una
+            // sola decisión alcanza, sin necesitar distinguir "primera vez" de
+            // "reintento tras crash".
+            ['WORKTREE_CREATED', {}, 'write-descriptor'],
+            // SUPERVISOR_STARTING (spawn-track-supervisor, con supervisorIntent
+            // ya persistido): 'absent' es el ÚNICO caso seguro para
+            // (re)spawnear — cualquier otra cosa es evidencia real de un
+            // intento previo (mismo intent) que jamás se debe duplicar.
+            ['SUPERVISOR_STARTING', { supervisorArtifact: 'absent' }, 'retry-supervisor-same-intent'],
+            ['SUPERVISOR_STARTING', {}, 'retry-supervisor-same-intent'],
+            ['SUPERVISOR_STARTING', { supervisorArtifact: 'claimed' }, 'accept-readiness'],
+            ['SUPERVISOR_STARTING', { supervisorArtifact: 'ready' }, 'accept-readiness'],
+            ['SUPERVISOR_STARTING', { supervisorArtifact: 'foreign' }, 'block-foreign'],
+            // Fase inesperada para un efecto de PREPARING: fail-closed a fallback.
+            ['ACTIVE', {}, 'begin-fallback'],
+        ];
+
+        test.each(cases)('fase %s + observación %j -> %s', (phase, observed, expected) => {
+            expect(decidePrepare(track(phase), observed)).toBe(expected);
+        });
+
+        test('la matriz cubre las 7 decisiones posibles', () => {
+            const seen = new Set(cases.map(([, , decision]) => decision));
+            expect([...seen].sort()).toEqual([
+                'accept-readiness', 'accept-worktree', 'begin-fallback', 'block-foreign',
+                'retry-supervisor-same-intent', 'retry-worktree', 'write-descriptor',
+            ].sort());
+        });
     });
 });
 

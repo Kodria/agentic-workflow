@@ -55,7 +55,7 @@ export class Supervisor {
         private spawner: WrapperSpawner,
         trackRuntime?: TrackRuntime,
     ) {
-        this.trackRuntime = trackRuntime ?? defaultTrackRuntime(repoRoot, branch);
+        this.trackRuntime = trackRuntime ?? defaultTrackRuntime(repoRoot, branch, { termGraceMs: cfg.termGraceMs, killGraceMs: cfg.killGraceMs });
     }
 
     private fingerprintNow: FingerprintNow = (argv, paths, cwd) => {
@@ -105,7 +105,11 @@ export class Supervisor {
         // `Job` ya existentes; el bootstrap de tracks es un canal separado).
         const preTracks = readJournal(this.repoRoot, this.branch);
         if (!preTracks.corrupt && preTracks.state !== null) {
-            reconcileTracks(this.repoRoot, this.branch, preTracks.state, this.trackRuntime, this.cfg.maxParallelTracks);
+            // Task 9: `reconcileTracks` es `async` desde que `begin-teardown`
+            // puede terminar el grupo del supervisor de un track con
+            // `terminatePreviouslyOwnedGroup` (espera real de gracia,
+            // R4.8) — awaitear acá es obligatorio, nunca fire-and-forget.
+            await reconcileTracks(this.repoRoot, this.branch, preTracks.state, this.trackRuntime, this.cfg.maxParallelTracks);
         }
         const afterRequests = readJournal(this.repoRoot, this.branch);
         if (afterRequests.state !== null && activeGeneration(afterRequests.state) === undefined
