@@ -261,15 +261,20 @@ function runSpawnTrackSupervisor(
     // real primero — read-only, jamás cuenta como el side effect del tick,
     // mismo criterio que `foreignPathExists`/`ownedWorktreeExists` en
     // `runCreateWorktree` — y es `decidePrepare` (protocol.ts) quien decide
-    // qué hacer con lo observado. El gate viejo asumía que, mientras
-    // `supervisorProcessRef` no estuviera persistido, "todavía no
-    // intentamos spawnear" era la ÚNICA fuente de verdad posible — cierto
-    // hasta Task 9, falso ante un crash que ocurre DESPUÉS de que
-    // `runtime.spawnSupervisor` ya arrancó el proceso real (detached) pero
-    // ANTES de persistir su `ProcessRef`: ahí, observar es la única forma de
-    // distinguir "nunca lo intentamos" (`'absent'`, seguro spawnear) de "ya
-    // hay un wrapper real corriendo con este mismo intent" (`'claimed'` /
-    // `'ready'` / `'foreign'`, JAMÁS re-spawnear, C11).
+    // qué hacer con lo observado. Esto es una optimización real, no la
+    // garantía de correctitud: en el caso común (crash después de que el
+    // wrapper ya escribió claim/identity/ready en disco) evita un
+    // `spawnSupervisor` redundante. Pero sigue existiendo una ventana
+    // angosta entre que `runtime.spawnSupervisor` forkea el proceso real y
+    // que ESE proceso escribe su claim (`supervisor-wrapper.ts`, `fs.openSync`
+    // con `wx`) — un crash justo ahí deja `observeSupervisor` en `'absent'`
+    // y `decidePrepare` vuelve a pedir `retry-supervisor-same-intent`, o sea
+    // un segundo fork real. Lo que impide que eso deje dos supervisores
+    // vivos es el propio claim atómico `wx` del wrapper (mismo patrón que
+    // `job/exec-wrapper.ts`/`reconcile.ts`): el wrapper perdedor recibe
+    // `EEXIST` en su propio intento de claim y sale como "already-claimed"
+    // antes de escribir identity/ready o lanzar `awm watch` — inofensivo,
+    // no prevenido acá.
     const observation = runtime.observeSupervisor(ref);
     const decision = decidePrepare(protocol.tracks[trackId], { supervisorArtifact: observation.kind });
 

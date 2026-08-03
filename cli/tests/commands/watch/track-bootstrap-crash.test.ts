@@ -240,6 +240,63 @@ describe('reconcileTracks — crash/restart de P1 con git real (Task 9, R4.2/R4.
         for (const t of s.tracks!) expect(t.blockedReason).toBeUndefined();
     });
 
+    // No entra en `crashPoints`/`test.each` de arriba a propósito: esa matriz
+    // asume que un restart converge SIN volver a llamar `spawnSupervisor`
+    // (`spawnCalls === {a:1, b:1}`). Esta ventana es la excepción real —
+    // documentada acá en vez de forzarla dentro de esa tabla compartida.
+    test('crash entre el fork real del wrapper y su claim en disco: el restart re-spawnea de más; la exclusión de un segundo proceso VIVO la garantiza supervisor-wrapper.ts, no este driver (R4.2, C11)', async () => {
+        // Ventana real que `observeSupervisor`/`decidePrepare` NO pueden
+        // cerrar: entre que `runtime.spawnSupervisor` forkea el proceso
+        // detached de verdad y que ESE proceso llega a
+        // `fs.openSync(claimPath, 'wx', ...)` (`supervisor-wrapper.ts`), no
+        // hay ningún artefacto en disco. Si el supervisor del PLAN crashea
+        // justo ahí, el restart observa 'absent' (lo único honesto: no hay
+        // evidencia todavía) y `decidePrepare` vuelve a pedir
+        // 'retry-supervisor-same-intent' — `spawnSupervisor` se llama DE
+        // NUEVO, un segundo fork real. Este test no simula al segundo
+        // wrapper perdiendo la carrera de `wx`/`EEXIST` contra el primero
+        // (el fake de este archivo no modela dos procesos wrapper
+        // concurrentes) — esa exclusión, la que de verdad evita terminar con
+        // dos supervisores VIVOS, ya tiene cobertura dedicada en
+        // `cli/tests/commands/track/supervisor-wrapper.test.ts` ("un segundo
+        // wrapper con el mismo claim detecta el claim existente y sale sin
+        // lanzar otro supervisor (C11)"). Lo que se prueba acá es que la
+        // segunda llamada a `spawnSupervisor` es el comportamiento ESPERADO
+        // en esta ventana, no una regresión de C11.
+        const instr: RuntimeInstrumentation = { spawnCalls: new Map(), wrapperState: new Map(), teardownEvents: [] };
+        const runtime = buildRuntime(planRoot, instr);
+        let s = declareCohort(planRoot, root, baseSha, ['a', 'b']);
+
+        for (let i = 0; i < 50; i++) {
+            const a = s.tracks!.find((t) => t.trackId === 'a')!;
+            if (a.phase === 'SUPERVISOR_STARTING' && a.supervisorIntent !== undefined) break;
+            s = (await reconcileTracks(planRoot, BRANCH, s, runtime, 2)).state;
+        }
+        const refA = () => s.tracks!.find((t) => t.trackId === 'a')!;
+        expect(refA().phase).toBe('SUPERVISOR_STARTING');
+        expect(refA().supervisorProcessRef).toBeUndefined();
+
+        // Simular el fork real SIN claim en disco: a diferencia de
+        // 'after-supervisor-claim'/'after-supervisor-identity' (que llaman a
+        // `runtime.spawnSupervisor` y dejan que el fake avance
+        // `wrapperState`), acá solo se incrementa el contador de forks —
+        // `wrapperState` de 'a' queda 'absent' a propósito, representando la
+        // instantánea exacta ANTES de que el wrapper real escriba su claim.
+        instr.spawnCalls.set('a', 1);
+
+        for (let i = 0; i < 100 && s.cohortPhase !== 'ACTIVE'; i++) {
+            s = (await reconcileTracks(planRoot, BRANCH, s, runtime, 2)).state;
+        }
+        expect(s.cohortPhase).toBe('ACTIVE');
+
+        // El driver no tiene forma de saber que ya había un fork en vuelo:
+        // vuelve a spawnear. Dos llamadas reales a `spawnSupervisor` para
+        // 'a' es el resultado ESPERADO en esta ventana — no un bug de C11 —
+        // y por eso NO se afirma `spawnCalls === {a:1, b:1}` acá.
+        expect(instr.spawnCalls.get('a')).toBe(2);
+        expect(instr.spawnCalls.get('b')).toBe(1);
+    });
+
     test('fallo del segundo track limpia el primero antes de serializar (R4.5, C2)', async () => {
         const instr: RuntimeInstrumentation = { spawnCalls: new Map(), wrapperState: new Map(), teardownEvents: [] };
         const runtime = buildRuntime(planRoot, instr, { failWorktreeFor: 'b' });
