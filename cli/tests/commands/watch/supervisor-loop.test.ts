@@ -13,6 +13,7 @@ import { initJournal, readJournal, writeJournal } from '../../../src/core/journa
 import { supervisorLockPath } from '../../../src/core/journal/paths';
 import { spawnStructured } from '../../../src/core/journal/process';
 import { computeFingerprint } from '../../../src/core/journal/fingerprint';
+import type { TrackRef } from '../../../src/core/journal/types';
 
 jest.setTimeout(60000);
 
@@ -99,6 +100,61 @@ describe('supervisor loop', () => {
         expect(final.cycle.status).toBe('COMPLETE');
         expect(typeof final.cycle.completedAt).toBe('string');
         expect(Object.values(final.jobs).every((j) => j.executionState === 'exited' && j.verdict === 'pass')).toBe(true);
+    });
+
+    // Regresion (post-review, Task 12/R7): la primera version del guard de
+    // `cohortDone` en `supervisor.ts` usaba `(tracks?.length ?? 0) >= 2` como
+    // unico criterio de "cohorte gobernada" — pero ese array NUNCA se vacia
+    // ni se acorta cuando la cohorte cae a fallback SERIAL (Task 9), y
+    // `protocol.ts` (`nextProtocolEffect`) devuelve `null` incondicionalmente
+    // una vez en SERIAL: no hay (ni debe inventarse acá, single-authority)
+    // ningun camino de vuelta a `cohortPhase === 'COMPLETE'`. Con ese
+    // criterio viejo, CUALQUIER plan cuya cohorte degradara a SERIAL quedaba
+    // permanentemente incapaz de completar su ciclo — `cycle.status` solo se
+    // fija a `COMPLETE` en este unico lugar del codigo. Esta prueba arma
+    // exactamente ese escenario (cohorte con >= 2 tracks, YA en SERIAL, con
+    // los tracks demostrablemente desmantelados — REMOVED/DECLARED, el unico
+    // shape que `assertProtocolInvariants` acepta para SERIAL) y confirma que
+    // el ciclo llega a COMPLETE por el camino generico de siempre, tal como
+    // lo haria un plan sin tracks en absoluto.
+    test('una cohorte que cayo a fallback SERIAL no cuelga el ciclo: COMPLETE llega igual por el camino generico (regresion post-review R7)', async () => {  // verifies R7
+        initWatch(repo, 'main');    // sin package.json => requiredVerifiers []
+        const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', tickMs: 50, reconcileGraceMs: 10000 };
+        const sup = new Supervisor(repo, 'main', cfg, fakeSpawner);
+        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e1',
+            payload: { entity: 'task', taskId: 'T1', title: 't', verificationPlan: [{ id: 'v1', kind: 'test' }, { id: 'v-sensors', kind: 'sensors' }], reviewObligations: [{ id: 'o-spec', kind: 'spec' }, { id: 'o-quality', kind: 'quality' }] } });
+        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e2',
+            payload: { entity: 'cycle-plan', items: [{ id: 'cv1', kind: 'qa' }, { id: 'cv-interlock', kind: 'interlock' }] } });
+        requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v1' });
+        requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v-sensors' });
+        requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv1' });
+        requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv-interlock' });
+        emitVerdict(repo, 'g0', 'o-spec', 'verd-spec');
+        emitVerdict(repo, 'g0', 'o-quality', 'verd-quality');
+        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e3',
+            payload: { entity: 'task-status', taskId: 'T1', status: 'done' } });
+        // Simula el resultado de Task 9's fallback-a-SERIAL: >= 2 tracks
+        // presentes en el array (nunca se vacia), ambos demostrablemente
+        // desmantelados (REMOVED/DECLARED, unico shape que
+        // `assertProtocolInvariants` acepta junto a `cohortPhase: 'SERIAL'`).
+        const trackRef = (trackId: string, phase: TrackRef['phase']): TrackRef => ({
+            trackId, worktreePath: `/tmp/${trackId}`, branch: `awm-track/${trackId}`,
+            ownership: [], sharedResources: [], dependsOn: [],
+            fencingToken: `f-${trackId}`.padEnd(32, '0'), phase, readinessNonce: `r-${trackId}`.padEnd(32, '0'),
+        });
+        const s0 = readJournal(repo, 'main').state!;
+        s0.tracks = [trackRef('a', 'REMOVED'), trackRef('b', 'DECLARED')];
+        s0.cohortPhase = 'SERIAL';
+        writeJournal(repo, 'main', s0);
+        let outcome = 'continue';
+        for (let i = 0; i < 400 && outcome !== 'complete'; i++) {
+            outcome = await sup.tick();
+            await new Promise((r) => setTimeout(r, 50));
+        }
+        expect(outcome).toBe('complete');
+        const final = readJournal(repo, 'main').state!;
+        expect(final.cycle.status).toBe('COMPLETE');
+        expect(final.cohortPhase).toBe('SERIAL');   // nunca inventa una transicion SERIAL -> COMPLETE
     });
 
     test('tick verifica branch antes del launch y un ciclo COMPLETE no lanza otro controller', async () => {

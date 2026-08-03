@@ -12,7 +12,7 @@ import path from 'path';
 import os from 'os';
 import { execFileSync } from 'child_process';
 import { Supervisor, DEFAULT_SUPERVISOR_CONFIG } from '../../../src/commands/watch/supervisor';
-import { canCompleteCohort } from '../../../src/commands/watch/tracks';
+import { canCompleteCohort, reconcileTracks, defaultTrackRuntime } from '../../../src/commands/watch/tracks';
 import { WrapperSpawner } from '../../../src/commands/watch/runner';
 import { runExecWrapper } from '../../../src/commands/job/exec-wrapper';
 import { initWatch } from '../../../src/commands/watch/init';
@@ -278,7 +278,46 @@ describe('finalizer end-to-end (R7.1-R7.7, C3/C4, Task 12)', () => {
         void qaHead;
     });
 
-    test('el finalizer nunca pide un subconjunto de satisfiers, ni siquiera tras un crash/restart (C4, R7.6)', async () => {
+    // Matriz de crash del Step 8 (R7.1-R7.7, C3/C4): reusabilidad idempotente
+    // del job canónico probada en los CUATRO puntos que el plan nombra —
+    // "después de QA" (autoreporte aceptado, NINGÚN job pedido todavía),
+    // "después del request" (job pedido, aún sin correr/completar), "después
+    // del pass" (job pasó, interlock todavía no corrió) y "antes de COMPLETE"
+    // (interlock YA pasó — `cohortPhase` ya es `COMPLETE` — pero el chequeo
+    // genérico de `Supervisor.tick()` que fija `cycle.status = 'COMPLETE'`
+    // todavía no corrió sobre ese resultado). Las cuatro comparten el mismo
+    // rigor: git real, un contador REAL de invocaciones del wrapper (nunca
+    // solo una lectura del journal), y una assertion final de
+    // `integrationWrapperCalls() === 1` — el job canónico jamás corre dos
+    // veces sin importar en qué punto exacto "muere" el proceso.
+
+    test('crash "después de QA": el autoreporte ya se aceptó pero NINGÚN job se pidió todavía — el restart converge a un único job con todos los satisfiers (C4, R7.3)', async () => {
+        h = finalizerHarness(['a', 'b']);
+        h.allMerged();
+        await h.tick();
+        expect(h.nextAction()?.type).toBe('run-global-qa');
+
+        h.reportQaPass();   // emite el request `track-finalize-request` — SIN tickear todavía
+        // Punto de crash exacto: el autoreporte está en el journal, pero
+        // ningún tick lo procesó aún — cero jobs pedidos, wrapper jamás invocado.
+        expect(h.requestedJobs()).toEqual([]);
+        expect(h.integrationWrapperCalls()).toBe(0);
+
+        h.crashAndRestart();   // "restart": un proceso nuevo retoma desde el journal ya persistido
+        await h.tickUntil(() => h.requestedJobs().length === 1);
+        await h.tickUntil(() => {
+            const jobs = Object.values(readJournal(h.repo, 'main').state!.jobs)
+                .filter((j) => j.satisfies?.some((id) => id.startsWith('track-integration:')));
+            return jobs.length === 1 && jobs[0].executionState === 'exited';
+        });
+
+        const jobs = h.requestedJobs();
+        expect(jobs).toHaveLength(1);   // nunca un subconjunto, ni siquiera arrancando de cero tras el crash
+        expect(jobs[0].satisfies).toEqual(['track-integration:a', 'track-integration:b']);
+        expect(h.integrationWrapperCalls()).toBe(1);
+    });
+
+    test('crash "después del request": el job ya se pidió, todavía no corrió/completó — el restart nunca pide un subconjunto ni duplica la ejecución (C4, R7.6)', async () => {
         h = finalizerHarness(['a', 'b']);
         h.allMerged();
         await h.tick();
@@ -288,12 +327,18 @@ describe('finalizer end-to-end (R7.1-R7.7, C3/C4, Task 12)', () => {
         h.crashAndRestart();
         // varios ticks más, ya con un proceso "nuevo": el mismo job se
         // reconoce por idempotencyKey (fingerprint+commandDigest+satisfies) —
-        // jamás se pide un segundo job con un subconjunto.
-        for (let i = 0; i < 5; i++) await h.tick();
+        // jamás se pide un segundo job con un subconjunto, ni corre una
+        // segunda vez de verdad (contador del wrapper, no solo el journal).
+        await h.tickUntil(() => {
+            const jobs = Object.values(readJournal(h.repo, 'main').state!.jobs)
+                .filter((j) => j.satisfies?.some((id) => id.startsWith('track-integration:')));
+            return jobs.length === 1 && jobs[0].executionState === 'exited';
+        });
 
         const jobs = h.requestedJobs();
         expect(jobs).toHaveLength(1);
         expect(jobs[0].satisfies).toEqual(['track-integration:a', 'track-integration:b']);
+        expect(h.integrationWrapperCalls()).toBe(1);
     });
 
     test('el job canónico se ejecuta UNA sola vez (contador del wrapper) a través de un crash/restart', async () => {
@@ -333,6 +378,54 @@ describe('finalizer end-to-end (R7.1-R7.7, C3/C4, Task 12)', () => {
         expect(final.tracks!.every((t) => t.phase === 'JOINED')).toBe(true);
         // R7.5: integration.lock liberado al cerrar la cohorte.
         expect(fs.existsSync(integrationLockPath(h.repo))).toBe(false);
+    });
+
+    test('crash "antes de COMPLETE": el interlock YA pasó (cohortPhase COMPLETE persistido) pero cycle.status todavía no flipeó — el restart converge sin repetir el job canónico (R7.4/R7.5)', async () => {
+        h = finalizerHarness(['a', 'b']);
+        h.allMerged();
+        await h.tick();
+        h.reportQaPass();
+        await h.tickUntil(() => {
+            const jobs = Object.values(readJournal(h.repo, 'main').state!.jobs)
+                .filter((j) => j.satisfies?.some((id) => id.startsWith('track-integration:')));
+            return jobs.length === 1 && jobs[0].executionState === 'exited';
+        });
+        expect(h.integrationWrapperCalls()).toBe(1);
+        // Deja que los ticks normales lleven la cohorte hasta FINAL_INTERLOCK
+        // (integration-pass ya observado, `finalIntegrationJobId` fijado) —
+        // el único efecto que falta es `run-final-interlock` en sí.
+        await h.tickUntil(() => readJournal(h.repo, 'main').state!.cohortPhase === 'FINAL_INTERLOCK');
+        expect(readJournal(h.repo, 'main').state!.cycle.status).toBe('IN_PROGRESS');
+
+        // Punto de crash EXACTO que el Step 8 exige probar: `reconcileTracks`
+        // (la MISMA función que `Supervisor.tick()` invoca internamente,
+        // llamada acá directamente para poder detenernos a mitad de tick, algo
+        // que la API pública de `tick()` — atómica de punta a punta — no deja
+        // observar) corre el efecto `run-final-interlock` y persiste
+        // `cohortPhase = 'COMPLETE'` — pero el chequeo genérico de
+        // `Supervisor.tick()` (el ÚNICO lugar del código que fija
+        // `cycle.status = 'COMPLETE'`) todavía no se ejecutó sobre ese
+        // resultado. Un crash real (SIGKILL, sin puntos de `await` de por
+        // medio entre las dos escrituras) puede caer exactamente acá.
+        const before = readJournal(h.repo, 'main').state!;
+        const runtime = defaultTrackRuntime(h.repo, 'main');
+        const { state: afterInterlock, effectExecuted } = await reconcileTracks(
+            h.repo, 'main', before, runtime, DEFAULT_SUPERVISOR_CONFIG.maxParallelTracks,
+        );
+        expect(effectExecuted).toBe('run-final-interlock');
+        expect(afterInterlock.cohortPhase).toBe('COMPLETE');
+        expect(afterInterlock.cycle.status).toBe('IN_PROGRESS');   // la ventana exacta del crash: todavía no flipeó
+        expect(afterInterlock.tracks!.every((t) => t.phase === 'JOINED')).toBe(true);
+        expect(h.integrationWrapperCalls()).toBe(1);   // el freeze de arriba no re-ejecuta el job canónico
+
+        h.crashAndRestart();   // "restart": un Supervisor nuevo retoma sobre el journal ya persistido
+        await h.tickUntil(() => readJournal(h.repo, 'main').state!.cycle.status === 'COMPLETE');
+
+        const final = readJournal(h.repo, 'main').state!;
+        expect(final.cycle.status).toBe('COMPLETE');
+        expect(final.cohortPhase).toBe('COMPLETE');   // reconcileTracks no-opea (protocol.ts: null tras COMPLETE) — nunca retrocede
+        expect(final.tracks!.every((t) => t.phase === 'JOINED')).toBe(true);
+        expect(h.integrationWrapperCalls()).toBe(1);   // jamás una segunda ejecución real del job canónico
     });
 
     test('mutación DESPUÉS de que el job canónico pasó vuelve stale el cierre (R7.7)', async () => {

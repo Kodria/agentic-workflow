@@ -13,6 +13,32 @@ import { runnerTick, WrapperSpawner, defaultWrapperSpawner } from './runner';
 import { reconcileTracks, reconcileOpenJoin, defaultTrackRuntime, TrackRuntime } from './tracks';
 import { decideStall, Backoff, beginGeneration, activeGeneration, ensureControllerGeneration, collectControllerGeneration, controllerGenerationHasUnresolvedClaim, resolveGeneration, enterCustody } from './generations';
 import type { JournalState } from '../../core/journal/types';
+import type { CohortPhase } from '../../core/tracks/types';
+
+/** R7/C3/C4 (Task 12) + fix post-review (regresión de ciclo colgado): fases de
+ *  `CohortPhase` en las que una cohorte de tracks todavía puede "ganarle la
+ *  carrera" a su propio `run-final-interlock` — i.e., donde `computeGate`
+ *  puede certificar (por el enlace a REQUEST-time de `satisfiedBy`, ver
+ *  `apply.ts`) ANTES de que la cohorte misma haya llegado a
+ *  `cohortPhase === 'COMPLETE'`. Deliberadamente EXCLUYE:
+ *    - `'SERIAL'`: `protocol.ts` (`nextProtocolEffect`) devuelve `null`
+ *      incondicionalmente para SERIAL — no hay (ni debe haber, single-
+ *      authority) camino de vuelta a COMPLETE. Un plan cuya cohorte cayó a
+ *      fallback serial (Task 9) debe completar su ciclo por el camino
+ *      genérico de siempre, exactamente como un plan sin tracks.
+ *    - `'BLOCKED'`: custodia ya maneja este caso por separado (`enterCustody`
+ *      en otros puntos del loop); el guard genérico de abajo no es quien
+ *      decide el destino de una cohorte bloqueada.
+ *    - `'PREPARING'` / `'FALLBACK_PENDING'`: fases previas a que exista
+ *      siquiera un job canónico de integración enlazado a un `VerificationItem`
+ *      — no hay carrera posible que ganarle todavía.
+ *    - `'COMPLETE'`: ya no es "todavía corriendo", es el destino; tratarla
+ *      como gobernante volvería el guard un no-op permanente.
+ *  Solo estas cinco fases representan una cohorte VIVA que aún puede
+ *  adelantarse a su propio interlock. */
+const LIVE_COHORT_PHASES: ReadonlySet<CohortPhase> = new Set<CohortPhase>([
+    'ACTIVE', 'JOINING', 'FINAL_QA', 'FINAL_INTEGRATION', 'FINAL_INTERLOCK',
+]);
 
 export interface SupervisorConfig {
     provider: string;
@@ -183,10 +209,27 @@ export class Supervisor {
         // FINAL_INTERLOCK, los tracks nunca llegan a JOINED y
         // `integration.lock` queda retenido para siempre (este mismo check,
         // arriba en `tick()`, corta el loop apenas ve `cycle.status ===
-        // COMPLETE` y jamás vuelve a llamar `reconcileTracks`). Un journal
-        // SIN cohorte (`tracks` ausente o con un solo track, ni siquiera una
-        // cohorte válida) sigue el camino de siempre, sin cambios.
-        const cohortGoverned = r.state !== null && (r.state.tracks?.length ?? 0) >= 2;
+        // COMPLETE` y jamás vuelve a llamar `reconcileTracks`).
+        //
+        // Fix post-review: la primera versión de este guard usaba
+        // `(tracks?.length ?? 0) >= 2` como único criterio de "gobernada" —
+        // pero el array `tracks` NUNCA se vacía ni se acorta cuando la
+        // cohorte cae a fallback SERIAL (Task 9: los tracks quedan
+        // `REMOVED`/`DECLARED` en el array, ver `track-bootstrap-crash.test.ts`),
+        // y `protocol.ts` no tiene (ni debe inventarse acá — single-authority)
+        // ningún camino de SERIAL de vuelta a COMPLETE. Con el criterio viejo,
+        // CUALQUIER plan cuya cohorte degradara a SERIAL quedaba
+        // PERMANENTEMENTE incapaz de completar su ciclo por este único lugar
+        // del código que fija `cycle.status = 'COMPLETE'`. El criterio
+        // correcto no es "¿existe un array de tracks?" sino "¿está la
+        // cohorte, AHORA MISMO, en una fase viva del ciclo de vida paralelo
+        // que todavía podría adelantarse a su propio interlock?"
+        // (`LIVE_COHORT_PHASES`, arriba). Una cohorte en SERIAL, BLOCKED,
+        // PREPARING o FALLBACK_PENDING — o un journal sin cohorte real — sigue
+        // el camino de siempre, sin cambios, igual que si nunca hubiera
+        // tenido tracks.
+        const cohortGoverned = r.state !== null && (r.state.tracks?.length ?? 0) >= 2
+            && r.state.cohortPhase !== undefined && LIVE_COHORT_PHASES.has(r.state.cohortPhase);
         const cohortDone = !cohortGoverned || r.state!.cohortPhase === 'COMPLETE';
         if (gate.pass && liveJobs === 0 && cohortDone) {   // gate verde YA implica cero vivos; doble cinturon (R4.5)
             const s = r.state!;

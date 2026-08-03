@@ -207,6 +207,72 @@ describe('gate', () => {
     });
 });
 
+/** Task 12 (R7/C4) — brecha de scope cerrada: el file-list del plan
+ *  requeria tocar `gate.ts` para el nuevo `VerificationKind` 'track-integration',
+ *  pero `evaluateEvidence` (arriba, linea ~78-111) ya es generico sobre TODO
+ *  kind salvo 'review' — cae al mismo lookup `state.jobs[item.satisfiedBy]` +
+ *  chequeo de verdict/vigencia de fingerprint sin importar el kind. Como
+ *  `apply.ts` (`linkSatisfies`, llamado una vez por id en el bucle de
+ *  job-request) enlaza VARIOS items `track-integration:*` al MISMO jobId
+ *  cuando un solo job canonico de integracion satisface a toda la cohorte
+ *  (C4 — un unico job, nunca uno por track), el bucle generico por-item ya
+ *  evalua ese escenario correctamente: cada item hace su propio lookup
+ *  independiente del MISMO job, así que ambos certifican juntos cuando pasa
+ *  con fingerprint vigente, y ambos caen a 'stale-fingerprint' juntos cuando
+ *  ese UNICO job deja de estar vigente. Esta suite documenta esa conclusion
+ *  con evidencia real — CERO cambios de logica en gate.ts eran necesarios. */
+describe('track-integration: un unico job satisface a MULTIPLES items de cohorte (R7/C4, Task 12 — scope gap)', () => {
+    function stateWithSharedIntegrationJob(): JournalState {
+        const s = emptyState('r');
+        s.requiredVerifiers = ['test', 'sensors'];
+        s.cycleVerificationPlan = [
+            { id: 'qa', kind: 'qa', satisfiedBy: 'job-qa' },
+            { id: 'interlock', kind: 'interlock', satisfiedBy: 'job-interlock' },
+            { id: 'test', kind: 'test', satisfiedBy: 'job-test' },
+            { id: 'sensors', kind: 'sensors', satisfiedBy: 'job-sensors' },
+            // Dos tracks ('a', 'b'), UN solo job canonico de integracion
+            // (`job-integration`) satisface a AMBOS items — exactamente lo
+            // que `runRequestFinalIntegration` (watch/tracks.ts) produce vía
+            // `requestJob({ satisfies: ids, ... })` con `ids` = el conjunto
+            // COMPLETO y ordenado de `track-integration:*` de la cohorte.
+            { id: 'track-integration:a', kind: 'track-integration', satisfiedBy: 'job-integration' },
+            { id: 'track-integration:b', kind: 'track-integration', satisfiedBy: 'job-integration' },
+        ];
+        for (const id of ['job-qa', 'job-interlock', 'job-test', 'job-sensors', 'job-integration']) {
+            s.jobs[id] = job({ id, fingerprint: 'fp', executionState: 'exited', verdict: 'pass' });
+        }
+        return s;
+    }
+
+    test('un job pasando con fingerprint vigente certifica AMBOS items de track-integration a la vez, sin cambios en gate.ts', () => {
+        const s = stateWithSharedIntegrationJob();
+        const g = computeGate(s, false, fpCurrent);
+        expect(g.pass).toBe(true);
+        expect(g.reasons).toEqual([]);
+    });
+
+    test('cuando ESE UNICO job pierde vigencia, AMBOS items de track-integration caen a stale-fingerprint juntos (nunca uno sin el otro)', () => {
+        const s = stateWithSharedIntegrationJob();
+        const g = computeGate(s, false, fpStale);
+        expect(g.pass).toBe(false);
+        const staleTrackIntegration = g.reasons.filter(
+            (r) => r.category === 'stale-fingerprint' && /track-integration:/.test(r.detail),
+        );
+        expect(staleTrackIntegration).toHaveLength(2);
+        expect(staleTrackIntegration.some((r) => /track-integration:a/.test(r.detail))).toBe(true);
+        expect(staleTrackIntegration.some((r) => /track-integration:b/.test(r.detail))).toBe(true);
+    });
+
+    test('si el job compartido falla (verdict no-pass), AMBOS items de track-integration bloquean por adverse-verdict', () => {
+        const s = stateWithSharedIntegrationJob();
+        s.jobs['job-integration'].verdict = 'fail';
+        const g = computeGate(s, false, fpCurrent);
+        expect(g.pass).toBe(false);
+        const adverse = g.reasons.filter((r) => r.category === 'adverse-verdict' && /track-integration:/.test(r.detail));
+        expect(adverse).toHaveLength(2);
+    });
+});
+
 /** Estado de journal de un TRACK individual (C6, R3.5): trackContext con la
  *  tarea asignada ya `done`, cycleVerificationPlan VACIO (un track no exige
  *  QA/interlock de ambito de plan), y evidencia local completa (item de
