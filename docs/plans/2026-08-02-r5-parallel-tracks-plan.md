@@ -2090,7 +2090,7 @@ _Requirements: R6.2, R6.3, R6.6, R6.7, R6.8, R6.9, C7_
 - Create: `cli/tests/core/tracks/join-reconcile.test.ts`
 - Create: `cli/tests/commands/watch/track-join-crash.test.ts`
 
-- [ ] **Step 1: Codificar la matriz completa como table test**
+- [x] **Step 1: Codificar la matriz completa como table test**
 
 ```ts
 type JoinCase = {
@@ -2111,13 +2111,13 @@ test.each(cases)('$name (R6.8, R6.9)', ({ observation, expected }) => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar RED**
+- [x] **Step 2: Ejecutar RED**
 
 Run: `cd cli && npx jest tests/core/tracks/join-reconcile.test.ts --runInBand`
 
 Expected: FAIL por función ausente.
 
-- [ ] **Step 3: Verificar precedencia sobre la función que ya existe**
+- [x] **Step 3: Verificar precedencia sobre la función que ya existe**
 
 `decideJoinReconciliation` **ya vive en `protocol.ts` desde Task 1** y `reconcileProtocol` la llama: por la regla de autoridad única, esta task **no** crea una segunda copia en `join.ts`. Lo que agrega T11 es la matriz de tests de arriba, los efectos Git y el import:
 
@@ -2130,7 +2130,7 @@ Si la matriz descubre un caso que la función no cubre, se corrige **en `protoco
 
 En `Supervisor.tick`, llamar `reconcileOpenJoin()` **antes** de cualquier guard general que rechace `MERGE_HEAD`.
 
-- [ ] **Step 4: Implementar merge explícito `no-ff`**
+- [x] **Step 4: Implementar merge explícito `no-ff`**
 
 ```ts
 export function mergeFrozenTrack(repo: string, intent: JoinIntent): void {
@@ -2148,7 +2148,7 @@ export function abortOwnedMerge(repo: string, intent: JoinIntent): void {
 
 Persistir `joinIntent` antes de `mergeFrozenTrack`. Tras éxito o reconciliación, persistir `joinedCommitSha = currentHead` y fase `MERGED_UNVERIFIED`; no pedir todavía un job.
 
-- [ ] **Step 5: Inyectar crash en cada frontera de P2**
+- [x] **Step 5: Inyectar crash en cada frontera de P2**
 
 ```ts
 const joinCrashPoints = [
@@ -2167,7 +2167,7 @@ test.each(joinCrashPoints)('join converge desde %s sin doble merge (R6.2, R6.8)'
 
 Para `during-conflict`, el fixture modifica la misma línea en plan y track; el restart debe abortar únicamente el merge propio y quedar reintentable o `BLOCKED` con índice limpio.
 
-- [ ] **Step 6: Tests y commit**
+- [x] **Step 6: Tests y commit**
 
 Run: `cd cli && npx jest tests/core/tracks/protocol.test.ts tests/core/tracks/join-reconcile.test.ts tests/commands/watch/track-join-crash.test.ts --runInBand && npm run build`
 
