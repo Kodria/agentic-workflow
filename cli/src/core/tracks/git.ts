@@ -7,14 +7,19 @@ import type { TrackRef } from '../journal/types';
 const git = (repo: string, args: string[]): string =>
     execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: EXEC_STDIO });
 
-/** R4.1/C2: precondición dura antes de crear cualquier worktree — si `.awm`
- *  no está demostrablemente ignorado, el journal del track podría terminar
- *  versionado. `git check-ignore` exit 0 = ignorado; exit 1 = no ignorado;
- *  cualquier otro fallo (git ausente, etc.) tampoco prueba nada — todo lo
+/** R4.1/C2: `.awm` debe estar demostrablemente ignorado o el journal del
+ *  track podría terminar versionado. `git check-ignore` es una operación de
+ *  working-tree/index — responde por el árbol REALMENTE checkeado en `dir`,
+ *  nunca por un commit arbitrario. Por eso el caller (`defaultTrackRuntime`)
+ *  DEBE pasar el path del worktree ya creado (checkeado en `baseSha`), no el
+ *  repo del plan en su HEAD vivo: ese HEAD puede estar en un commit distinto
+ *  de `baseSha` y dar una respuesta stale (post-review: bug crítico
+ *  encontrado en la primera versión de esta función). `exit 0` = ignorado;
+ *  `exit 1` = no ignorado; cualquier otro fallo tampoco prueba nada — todo lo
  *  que no sea éxito confirmado se trata como "no ignorado" (fail-closed). */
-export function isAwmGitignored(repo: string): boolean {
+export function isAwmGitignored(dir: string): boolean {
     try {
-        git(repo, ['check-ignore', '-q', '.awm/probe']);
+        git(dir, ['check-ignore', '-q', '.awm/probe']);
         return true;
     } catch {
         return false;
@@ -61,6 +66,13 @@ export function addOwnedWorktree(repo: string, ref: TrackRef, baseSha: string): 
         throw new Error(`destino no vacío: ${ref.worktreePath}`);
     }
     git(repo, ['worktree', 'add', '-b', ref.branch, ref.worktreePath, baseSha]);
+}
+
+/** El worktree es NUESTRO (lo acabamos de crear en esta misma llamada) — esto
+ *  jamás borra algo ajeno (R4.6): es deshacer un intento propio que no pasó
+ *  una validación posterior (ej. C2, `.awm` no ignorado en `baseSha`). */
+export function removeOwnedWorktree(repo: string, worktreePath: string): void {
+    git(repo, ['worktree', 'remove', '--force', worktreePath]);
 }
 
 export function changedPaths(repo: string, base: string, head: string): ChangedPath[] {

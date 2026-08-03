@@ -66,10 +66,16 @@ export type ProtocolObservation =
     | { kind: 'integration-pass'; jobId: string; headSha: string }
     | { kind: 'interlock-pass'; headSha: string };
 
+// Única estrategia de merge soportada hoy (R6.x) — constante compartida para
+// que `protocol.ts` y `watch/tracks.ts` (el driver) nunca dupliquen el
+// literal (post-review, minor finding Task 8).
+export const JOIN_STRATEGY_NO_FF = 'no-ff' as const;
+export type JoinStrategy = typeof JOIN_STRATEGY_NO_FF;
+
 export interface JoinIntent {
     expectedPlanHeadSha: string;
     expectedTrackHeadSha: string;
-    strategy: 'no-ff';
+    strategy: JoinStrategy;
 }
 
 /** `join-observation` sin `trackId`: lo que se observa del repo tras intentar el merge. */

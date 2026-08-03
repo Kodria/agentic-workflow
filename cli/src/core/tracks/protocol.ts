@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { JOIN_STRATEGY_NO_FF } from './types';
 import type {
     CohortProtocol, JoinDecision, JoinIntent, JoinObservation,
     ProtocolEffect, ProtocolObservation, TrackPhase,
@@ -204,7 +205,7 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
         const decision = decideJoinReconciliation({
             expectedPlanHeadSha: required(t.expectedPlanHeadSha, 'expectedPlanHeadSha'),
             expectedTrackHeadSha: required(t.expectedTrackHeadSha, 'expectedTrackHeadSha'),
-            strategy: 'no-ff',
+            strategy: JOIN_STRATEGY_NO_FF,
         }, observation);
         if (decision.action === 'accept-merge') {
             t.phase = 'MERGED_UNVERIFIED';

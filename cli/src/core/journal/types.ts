@@ -2,8 +2,8 @@
 // sobrecargados; shape validation antes de usar campos deserializados.
 
 import crypto from 'crypto';
-import { TRACK_PHASES } from '../tracks/types';
-import type { CohortPhase, TrackPhase } from '../tracks/types';
+import { TRACK_PHASES, JOIN_STRATEGY_NO_FF } from '../tracks/types';
+import type { CohortPhase, TrackPhase, JoinStrategy } from '../tracks/types';
 
 export const EXECUTION_STATES = [
     'received', 'spawn-intent', 'claimed', 'running',
@@ -85,7 +85,7 @@ export interface TrackRef {
     joinIntent?: {
         expectedPlanHeadSha: string;
         expectedTrackHeadSha: string;
-        strategy: 'no-ff';
+        strategy: JoinStrategy;
     };
     teardownIntent?: {
         worktreePath: string;
@@ -388,7 +388,7 @@ function isWellFormedSupervisorIntent(x: unknown): x is NonNullable<TrackRef['su
 
 function isWellFormedJoinIntent(x: unknown): x is NonNullable<TrackRef['joinIntent']> {
     return isObj(x) && typeof x.expectedPlanHeadSha === 'string' && typeof x.expectedTrackHeadSha === 'string'
-        && x.strategy === 'no-ff';
+        && x.strategy === JOIN_STRATEGY_NO_FF;
 }
 
 function isWellFormedTeardownIntent(x: unknown): x is NonNullable<TrackRef['teardownIntent']> {

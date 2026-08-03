@@ -10,9 +10,18 @@ import os from 'os';
 import { reconcileTracks, TrackRuntime, SupervisorObservation, ReconcileTracksResult } from '../../../src/commands/watch/tracks';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { eventsPath } from '../../../src/core/journal/paths';
-import type { JournalState, TrackRef } from '../../../src/core/journal/types';
+import type { JournalState, TrackRef, ProcessRef } from '../../../src/core/journal/types';
 
 const BRANCH = 'main';
+
+/** `reconcileTracks` decide spawn-vs-observar mirando `ref.supervisorProcessRef`
+ *  (post-review fix) — un fake que devolviera `undefined` desde `spawnSupervisor`
+ *  jamás dejaría ese campo seteado y el driver reintentaría el spawn para
+ *  siempre. Un `ProcessRef` real de mentira alcanza; nada de esto se usa para
+ *  identidad real en estos tests (esa es responsabilidad de `defaultTrackRuntime`). */
+function fakeProcessRef(trackId: string): ProcessRef {
+    return { pid: 1, startTime: 'x', spawnNonce: trackId, argvDigest: 'x', processGroup: 1, psArgsDigest: 'x' };
+}
 
 function harness(trackIds: string[], opts: { maxParallelTracks?: number } = {}) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-track-bootstrap-'));
@@ -48,7 +57,7 @@ function harness(trackIds: string[], opts: { maxParallelTracks?: number } = {}) 
         },
         spawnSupervisor(ref) {
             spawned.add(ref.trackId);
-            return undefined;
+            return fakeProcessRef(ref.trackId);
         },
         observeSupervisor(ref): SupervisorObservation {
             if (!spawned.has(ref.trackId)) return { kind: 'absent' };
@@ -108,6 +117,12 @@ function harness(trackIds: string[], opts: { maxParallelTracks?: number } = {}) 
                 nonce: 'fake-intent-nonce', argv: [],
                 claimPath: path.join(ref.worktreePath, '.awm', 'supervisor.claim'),
             };
+            // Fast-forward a "ya spawneamos, ahora solo observamos" — sin esto
+            // el driver (post-review fix) vería `supervisorProcessRef`
+            // ausente y volvería a intentar spawnear en vez de consultar
+            // `observeSupervisor` directamente, que es lo que este test
+            // necesita ejercitar.
+            ref.supervisorProcessRef = fakeProcessRef(trackId);
             writeJournal(planRoot, BRANCH, s);
             spawned.add(trackId);
             readinessOverrides.set(trackId, nonce);
@@ -161,7 +176,7 @@ describe('reconcileTracks — P1 bootstrap durable + barrera ARMED (R4.1-R4.10, 
         expect(h.track('a').phase).toBe('BLOCKED');
     });
 
-    test('Repro 1 (post-review fix): persistir supervisorIntent y consultar/spawnear al supervisor son DOS fronteras separadas, nunca en el mismo call', async () => {
+    test('Repro 1 (post-review fix): persistir supervisorIntent, spawnear y observar son TRES fronteras separadas, nunca dos en el mismo call', async () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-track-repro1-'));
         try {
             initJournal(dir, BRANCH);
@@ -187,22 +202,33 @@ describe('reconcileTracks — P1 bootstrap durable + barrera ARMED (R4.1-R4.10, 
             const runtime: TrackRuntime = {
                 addWorktree: () => { throw new Error('no debería llamarse'); },
                 initTrackJournal: () => { throw new Error('no debería llamarse'); },
-                spawnSupervisor: () => { spawnCalls++; return undefined; },
-                observeSupervisor: () => { observeCalls++; return { kind: 'absent' }; },
+                spawnSupervisor: (ref) => { spawnCalls++; return fakeProcessRef(ref.trackId); },
+                observeSupervisor: () => { observeCalls++; return { kind: 'claimed' }; },
             };
 
-            const result = reconcileTracks(dir, BRANCH, readJournal(dir, BRANCH).state!, runtime, 2);
-            // El intent se persistió (phase avanzó, supervisorIntent quedó
-            // seteado) pero `runtime` JAMÁS se consultó en este mismo call.
+            // Call 1: solo persiste el supervisorIntent — CERO llamadas a runtime.
+            const afterIntent = reconcileTracks(dir, BRANCH, readJournal(dir, BRANCH).state!, runtime, 2);
             expect(observeCalls).toBe(0);
             expect(spawnCalls).toBe(0);
-            const trackA = result.state.tracks!.find((t) => t.trackId === 'a')!;
-            expect(trackA.phase).toBe('SUPERVISOR_STARTING');
-            expect(trackA.supervisorIntent).toBeDefined();
+            const trackA1 = afterIntent.state.tracks!.find((t) => t.trackId === 'a')!;
+            expect(trackA1.phase).toBe('SUPERVISOR_STARTING');
+            expect(trackA1.supervisorIntent).toBeDefined();
+            expect(trackA1.supervisorProcessRef).toBeUndefined();
 
-            // Recién en el SIGUIENTE call (frontera separada) se consulta al runtime.
-            reconcileTracks(dir, BRANCH, result.state, runtime, 2);
+            // Call 2: supervisorIntent ya existe, supervisorProcessRef todavía
+            // no — spawnea EXACTAMENTE una vez, y JAMÁS también consulta
+            // `observeSupervisor` en el mismo call (eso sería el bug reportado).
+            const afterSpawn = reconcileTracks(dir, BRANCH, afterIntent.state, runtime, 2);
+            expect(spawnCalls).toBe(1);
+            expect(observeCalls).toBe(0);
+            const trackA2 = afterSpawn.state.tracks!.find((t) => t.trackId === 'a')!;
+            expect(trackA2.supervisorProcessRef).toBeDefined();
+
+            // Call 3: recién ahora, con supervisorProcessRef ya persistido,
+            // se consulta `observeSupervisor` — y NUNCA se vuelve a spawnear.
+            reconcileTracks(dir, BRANCH, afterSpawn.state, runtime, 2);
             expect(observeCalls).toBe(1);
+            expect(spawnCalls).toBe(1);
         } finally {
             fs.rmSync(dir, { recursive: true, force: true });
         }

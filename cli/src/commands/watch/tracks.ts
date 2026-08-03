@@ -11,9 +11,10 @@ import path from 'path';
 import crypto from 'crypto';
 import { readJournal, writeJournal, appendEvent, initJournal } from '../../core/journal/store';
 import { nextProtocolEffect, observeProtocolEffect } from '../../core/tracks/protocol';
-import { addOwnedWorktree, isAwmGitignored, foreignPathExists } from '../../core/tracks/git';
+import { addOwnedWorktree, removeOwnedWorktree, isAwmGitignored, foreignPathExists } from '../../core/tracks/git';
 import { writeDescriptor } from '../../core/tracks/descriptor';
 import { spawnStructured } from '../../core/journal/process';
+import { JOIN_STRATEGY_NO_FF } from '../../core/tracks/types';
 import type { CohortProtocol, ProtocolEffect, TrackProtocolState } from '../../core/tracks/types';
 import type { JournalState, TrackContext, TrackRef, ProcessRef } from '../../core/journal/types';
 
@@ -78,7 +79,7 @@ function applyProtocolToState(state: JournalState, protocol: CohortProtocol): Jo
             blockedReason: t.blockedReason,
             joinedCommitSha: t.joinedCommitSha,
             joinIntent: t.expectedPlanHeadSha !== undefined && t.expectedTrackHeadSha !== undefined
-                ? { expectedPlanHeadSha: t.expectedPlanHeadSha, expectedTrackHeadSha: t.expectedTrackHeadSha, strategy: 'no-ff' as const }
+                ? { expectedPlanHeadSha: t.expectedPlanHeadSha, expectedTrackHeadSha: t.expectedTrackHeadSha, strategy: JOIN_STRATEGY_NO_FF }
                 : ref.joinIntent,
         };
     });
@@ -210,16 +211,36 @@ function runSpawnTrackSupervisor(
         // que Task 9 necesita poder crashear por separado.
         return { state: next, stop: true, executed: null };
     }
-    const observation = runtime.observeSupervisor(ref);
-    if (observation.kind === 'absent') {
+    if (ref.supervisorProcessRef === undefined) {
+        // Post-review fix (3rd occurrence of this class of bug): la versión
+        // anterior llamaba `observeSupervisor` y, si volvía 'absent', llamaba
+        // `spawnSupervisor` EN EL MISMO call — dos fronteras de runtime
+        // colapsadas en un solo `reconcileTracks()`. Un "esperar un tick de
+        // más y volver a observar" no alcanza por sí solo: sin un registro
+        // DURABLE de "ya intentamos spawnear", el próximo call observaría
+        // 'absent' otra vez para siempre y jamás llegaría a spawnear. La
+        // señal durable correcta ya existe: `ref.supervisorProcessRef`, que
+        // ESTA MISMA función persiste apenas `spawnSupervisor` devuelve algo.
+        // Mientras no esté seteado, "todavía no intentamos spawnear" es la
+        // única fuente de verdad — ni siquiera hace falta preguntarle a
+        // `runtime.observeSupervisor` primero (sabemos que no puede haber
+        // nada real ahí todavía). Esto es ADEMÁS más eficiente que la
+        // sugerencia original: cero ticks desperdiciados, y cada call sigue
+        // tocando `runtime` como máximo una vez.
         const pr = runtime.spawnSupervisor(ref);
         const next = pr !== undefined ? persist(planRoot, branch, withRef(s, trackId, { supervisorProcessRef: pr })) : s;
         appendEvent(planRoot, branch, { kind: 'track-effect', trackId, effect: effect.kind });
         return { state: next, stop: true, executed: effect.kind };
     }
-    if (observation.kind === 'claimed') {
-        // C11: reintentado ya en curso (claim tomado, identidad/readiness
-        // todavía no observables) — nada que persistir, hay que esperar.
+    const observation = runtime.observeSupervisor(ref);
+    if (observation.kind === 'absent' || observation.kind === 'claimed') {
+        // C11: ya spawneamos (supervisorProcessRef existe) — 'absent' acá
+        // solo significa que el wrapper todavía no llegó a crear su claim
+        // (ventana de arranque normal), y 'claimed' que el claim está tomado
+        // pero identidad/readiness todavía no son observables. Ninguno de
+        // los dos vuelve a llamar `spawnSupervisor`: el mismo intent ya
+        // persistido se reintenta solo, nunca uno nuevo. Nada que persistir
+        // acá — solo esperar al próximo tick.
         return { state: s, stop: true, executed: null };
     }
     if (observation.kind === 'foreign') {
@@ -347,12 +368,23 @@ export function observeSupervisorFromDisk(ref: TrackRef): SupervisorObservation 
 export function defaultTrackRuntime(planRoot: string, planBranch: string): TrackRuntime {
     return {
         addWorktree(root, ref, baseSha) {
-            if (!isAwmGitignored(root)) {
-                // C2: degradación fail-closed — nunca se crea el worktree si
-                // `.awm` podría terminar versionado en él.
-                throw new Error('`.awm` no está gitignoreado en el plan: no se crea el worktree (degradación C2)');
-            }
+            // CRITICAL post-review fix: `git check-ignore` es una operación de
+            // working-tree — solo puede responder por lo que está REALMENTE
+            // checkeado en algún lado. El repo del plan vive en su HEAD vivo,
+            // que puede ser un commit distinto (posterior) de `baseSha`; si un
+            // `.gitignore` para `.awm` se agregó (o quitó) entre `baseSha` y
+            // HEAD, chequear contra `root` responde por un árbol que el
+            // worktree que estamos por crear NUNCA va a tener. La única
+            // verificación honesta es contra el worktree YA CREADO, checkeado
+            // en `baseSha` de verdad — así que primero se crea, y recién
+            // después se verifica. Si falla, el worktree es NUESTRO (lo
+            // acabamos de crear en esta misma llamada) y se descarta —
+            // jamás queda vivo e inseguro (C2 fail-closed).
             addOwnedWorktree(root, ref, baseSha);
+            if (!isAwmGitignored(ref.worktreePath)) {
+                removeOwnedWorktree(root, ref.worktreePath);
+                throw new Error('`.awm` no está gitignoreado en el worktree recién creado (checkeado en baseSha): se descarta (degradación C2)');
+            }
         },
         initTrackJournal(ref, context) {
             initJournal(ref.worktreePath, ref.branch);
