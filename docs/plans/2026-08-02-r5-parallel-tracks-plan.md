@@ -2192,7 +2192,7 @@ _Requirements: R3.6, R7.1, R7.2, R7.3, R7.4, R7.5, R7.6, R7.7, R8.1, R8.2, C3, C
 - Modify: `cli/tests/commands/watch/apply.test.ts`
 - Modify: `cli/tests/commands/job/gate-reconcile.test.ts`
 
-- [ ] **Step 1: Escribir tests rojos de append idempotente**
+- [x] **Step 1: Escribir tests rojos de append idempotente**
 
 ```ts
 test('cycle plan agrega items por id sin borrar satisfiedBy (R7.2)', () => {
@@ -2219,7 +2219,7 @@ test('registrar tracks deja gate rojo desde el inicio (R7.3)', () => {
 });
 ```
 
-- [ ] **Step 2: Escribir tests rojos del orden final**
+- [x] **Step 2: Escribir tests rojos del orden final**
 
 ```ts
 test('solo el HEAD final recibe QA e integración (R7.7, C3)', async () => {
@@ -2261,13 +2261,13 @@ test('un track pendiente mantiene IN_PROGRESS y lo nombra (R8.1)', () => {
 });
 ```
 
-- [ ] **Step 3: Verificar RED**
+- [x] **Step 3: Verificar RED**
 
 Run: `cd cli && npx jest tests/commands/watch/track-finalize.test.ts tests/commands/watch/apply.test.ts --runInBand`
 
 Expected: FAIL en append y finalizer.
 
-- [ ] **Step 4: Reemplazar el guard “solo si vacío” por append transaccional**
+- [x] **Step 4: Reemplazar el guard “solo si vacío” por append transaccional**
 
 ```ts
 export function applyCyclePlanAppend(state: JournalState, incoming: VerificationItem[]): void {
@@ -2283,7 +2283,7 @@ export function applyCyclePlanAppend(state: JournalState, incoming: Verification
 
 La aplicación ocurre sobre el clone transaccional ya usado por `consumePendingRequests`; una colisión de kind rechaza el request completo.
 
-- [ ] **Step 5: Extender `requestJob` con varios satisfiers sin cambiar identidad mecánica**
+- [x] **Step 5: Extender `requestJob` con varios satisfiers sin cambiar identidad mecánica**
 
 ```ts
 export interface RequestJobOptions { satisfies?: string | string[] }
@@ -2315,7 +2315,7 @@ test('el finalizer nunca pide un subconjunto de satisfiers (C4, R7.6)', async ()
 });
 ```
 
-- [ ] **Step 6: Guardar el contrato canónico y rechazar pedidos prematuros**
+- [x] **Step 6: Guardar el contrato canónico y rechazar pedidos prematuros**
 
 Al registrar la cohorte, persistir en el journal:
 
@@ -2337,7 +2337,7 @@ if (dirtyPaths(repoRoot).length > 0) throw new Error('track-integration requiere
 if (argvDigest(argv) !== argvDigest(state.trackIntegration.argv)) throw new Error('argv de integración no canónico');
 ```
 
-- [ ] **Step 7: Implementar agenda final**
+- [x] **Step 7: Implementar agenda final**
 
 1. Todos `MERGED_UNVERIFIED`: persistir `nextAction: run-global-qa` y reanudar una controller generation del plan.
 2. El controller ejecuta `post-implementation-qa`, corrige hallazgos y commitea. Emite `track-finalize-request` con `qaHeadSha`; el supervisor exige árbol/índice limpio y `qaHeadSha === HEAD`.
@@ -2347,7 +2347,7 @@ if (argvDigest(argv) !== argvDigest(state.trackIntegration.argv)) throw new Erro
 
 No se relanza QA por cada merge. La semántica de R7.6 queda satisfecha por un único job posterior al último merge que enlaza todos los tracks integrados simultáneamente.
 
-- [ ] **Step 8: Probar crash después de QA, request, pass y antes de COMPLETE**
+- [x] **Step 8: Probar crash después de QA, request, pass y antes de COMPLETE**
 
 Cada restart debe reutilizar el mismo request/job por fingerprint + argv + conjunto de satisfiers; no debe ejecutar el comando dos veces. Agregar contador del wrapper y esperar `1` en los cuatro casos.
 
@@ -2355,7 +2355,7 @@ Run: `cd cli && npx jest tests/commands/watch/track-finalize.test.ts tests/comma
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add cli/src/core/journal cli/src/commands/job cli/src/commands/watch cli/tests/commands/job cli/tests/commands/watch
