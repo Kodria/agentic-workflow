@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import {
     deriveDefaultParallelism, parseMaxParallel, scheduleTracks, loadDefaultParallelism,
 } from '../../../src/core/tracks/concurrency';
@@ -17,6 +20,13 @@ describe('deriveDefaultParallelism (R10.3)', () => {
         expect(deriveDefaultParallelism({
             cpuCount: 2, tickMs: 100,
             samples: [{ supervisors: 1, p95Ms: 90 }, { supervisors: 2, p95Ms: 180 }],
+        })).toBe(1);
+    });
+
+    test('cpuCount:1 acota el tope aunque el costo esté dentro de budget', () => {
+        expect(deriveDefaultParallelism({
+            cpuCount: 1, tickMs: 5000,
+            samples: [{ supervisors: 1, p95Ms: 100 }, { supervisors: 2, p95Ms: 105 }],
         })).toBe(1);
     });
 
@@ -75,7 +85,66 @@ describe('scheduleTracks', () => {
 });
 
 describe('loadDefaultParallelism', () => {
-    test('devuelve un entero >= 1 (artefacto real o fallback serial)', () => {
+    // startDir es un tmpdir aislado en cada test — nunca toca ~/.awm ni depende
+    // del árbol real del repo (patrón de tmpdirs aislados de este repo, ver
+    // cli/tests/core/tracks/context.test.ts).
+    let tmp: string;
+    beforeEach(() => {
+        tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-concurrency-load-'));
+    });
+    afterEach(() => {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    });
+
+    function artifactPathUnder(dir: string): string {
+        return path.join(dir, 'docs', 'research', 'r5', 'fingerprint-budget.json');
+    }
+
+    test('artefacto ausente en todo el árbol de directorios -> serial (1)', () => {
+        expect(loadDefaultParallelism(tmp)).toBe(1);
+    });
+
+    test('artefacto con JSON inválido/corrupto -> serial (1)', () => {
+        const p = artifactPathUnder(tmp);
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(p, '{ esto no es json');
+        expect(loadDefaultParallelism(tmp)).toBe(1);
+    });
+
+    test('derivedDefault ausente -> serial (1)', () => {
+        const p = artifactPathUnder(tmp);
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(p, JSON.stringify({ cpuCount: 4, tickMs: 5000, samples: [] }));
+        expect(loadDefaultParallelism(tmp)).toBe(1);
+    });
+
+    test('derivedDefault no entero -> serial (1)', () => {
+        const p = artifactPathUnder(tmp);
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(p, JSON.stringify({ derivedDefault: 2.5 }));
+        expect(loadDefaultParallelism(tmp)).toBe(1);
+    });
+
+    test('derivedDefault fuera de rango (< 1) -> serial (1)', () => {
+        const p = artifactPathUnder(tmp);
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(p, JSON.stringify({ derivedDefault: 0 }));
+        expect(loadDefaultParallelism(tmp)).toBe(1);
+    });
+
+    test('artefacto válido -> devuelve el derivedDefault real, buscando hacia arriba desde un subdirectorio', () => {
+        const p = artifactPathUnder(tmp);
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(p, JSON.stringify({
+            sourceHead: 'a'.repeat(40), node: process.version, platform: process.platform,
+            cpuCount: 4, tickMs: 5000, samples: [{ supervisors: 1, p50Ms: 10, p95Ms: 12 }], derivedDefault: 3,
+        }));
+        const nested = path.join(tmp, 'cli', 'dist', 'src', 'core', 'tracks');
+        fs.mkdirSync(nested, { recursive: true });
+        expect(loadDefaultParallelism(nested)).toBe(3);
+    });
+
+    test('sin override, resuelve desde __dirname del propio módulo (integración real)', () => {
         const n = loadDefaultParallelism();
         expect(Number.isInteger(n)).toBe(true);
         expect(n).toBeGreaterThanOrEqual(1);

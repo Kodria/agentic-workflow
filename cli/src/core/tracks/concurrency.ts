@@ -43,12 +43,14 @@ export function scheduleTracks(tracks: string[], active: Set<string>, maxParalle
     return { start: candidates.slice(0, capacity), waiting: candidates.slice(capacity) };
 }
 
-/** Busca `docs/research/r5/fingerprint-budget.json` subiendo desde este
- *  archivo — funciona igual compilado en dist/ (empaquetado en el npm
- *  package) que corriendo desde src/ en dev/test, sin asumir una profundidad
- *  fija de directorios. */
-function findBudgetArtifact(): string | null {
-    let dir = __dirname;
+/** Busca `docs/research/r5/fingerprint-budget.json` subiendo desde `startDir`
+ *  (por defecto este archivo), sin asumir una profundidad fija de directorios.
+ *  `startDir` es parametrizable solo para poder testear los caminos de fallo
+ *  de `loadDefaultParallelism` con un árbol de directorios controlado —
+ *  ver docs/research/r5/benchmark-fingerprint.mjs para el estado real de
+ *  distribución de este artefacto (hoy NO viaja en el npm publish). */
+function findBudgetArtifact(startDir: string): string | null {
+    let dir = startDir;
     for (let i = 0; i < 8; i += 1) {
         const candidate = path.join(dir, 'docs', 'research', 'r5', 'fingerprint-budget.json');
         if (fs.existsSync(candidate)) return candidate;
@@ -59,10 +61,12 @@ function findBudgetArtifact(): string | null {
     return null;
 }
 
-/** `derivedDefault` del artefacto empaquetado. Si el artefacto no resuelve o
- *  está corrupto, cae a serial (1) — nunca crashea `awm watch` por esto. */
-export function loadDefaultParallelism(): number {
-    const artifactPath = findBudgetArtifact();
+/** `derivedDefault` del artefacto, si se puede resolver y es válido. Si el
+ *  artefacto no resuelve, tiene JSON corrupto, o `derivedDefault` falta / no
+ *  es entero / es < 1, cae a serial (1) — nunca crashea `awm watch` por esto.
+ *  `startDir` default = este archivo; solo se sobreescribe en tests. */
+export function loadDefaultParallelism(startDir: string = __dirname): number {
+    const artifactPath = findBudgetArtifact(startDir);
     if (artifactPath === null) return 1;
     try {
         const data = JSON.parse(fs.readFileSync(artifactPath, 'utf8')) as { derivedDefault?: unknown };
