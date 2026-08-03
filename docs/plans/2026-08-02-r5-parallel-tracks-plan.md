@@ -1695,7 +1695,7 @@ _Requirements: R4.1, R4.2, R4.4, R4.5, R4.6, R4.7, R4.8, R4.9, R4.10, C1, C2, C8
 - Create: `cli/tests/commands/watch/track-bootstrap.test.ts`
 - Create: `cli/tests/commands/track/supervisor-wrapper.test.ts`
 
-- [ ] **Step 1: Escribir tests rojos del happy path y barrera**
+- [x] **Step 1: Escribir tests rojos del happy path y barrera**
 
 ```ts
 test('P1 persiste cada fase antes del side effect y activa solo con todos ARMED (R4.1, R4.4, C1)', async () => {
@@ -1728,13 +1728,13 @@ test('worktree/lock ajeno nunca se borra (R4.3, R4.6)', async () => {
 });
 ```
 
-- [ ] **Step 2: Verificar RED**
+- [x] **Step 2: Verificar RED**
 
 Run: `cd cli && npx jest tests/commands/watch/track-bootstrap.test.ts tests/commands/track/supervisor-wrapper.test.ts --runInBand`
 
 Expected: FAIL por módulos ausentes.
 
-- [ ] **Step 3: Implementar efectos P1 como una operación por tick**
+- [x] **Step 3: Implementar efectos P1 como una operación por tick**
 
 `tracks.ts` expone dependencias inyectables:
 
@@ -1759,7 +1759,7 @@ export function reconcileTracks(
 
 No esconder varios side effects dentro de `addWorktree` o `initTrackJournal`: cada frontera de Task 1 debe ser observable en tests.
 
-- [ ] **Step 4: Implementar creación segura del worktree y journal**
+- [x] **Step 4: Implementar creación segura del worktree y journal**
 
 En `git.ts`:
 
@@ -1783,7 +1783,7 @@ fencingToken: crypto.randomBytes(32).toString('hex'),
 readinessNonce: crypto.randomBytes(32).toString('hex'),
 ```
 
-- [ ] **Step 5: Implementar wrapper detached con claim exact-once**
+- [x] **Step 5: Implementar wrapper detached con claim exact-once**
 
 El supervisor del plan persiste:
 
@@ -1798,7 +1798,7 @@ ref.supervisorIntent = {
 
 `supervisor-wrapper.ts` abre `claimPath` con `wx`, escribe/fsync identity sidecar, inicializa el journal local y persiste el readiness recibido como `ARMED`. Luego observa read-only únicamente su propio `TrackRef` en el journal del plan. Cuando ese ref pasa a `ACTIVE`, lanza `awm watch` para el worktree y espera que el lock quede adquirido. Mientras espera slot no ejecuta gate, fingerprint ni tareas. Un segundo wrapper con el mismo nonce detecta claim existente y sale 0 sin lanzar otro supervisor.
 
-- [ ] **Step 6: Integrar P1 en el orden del tick del supervisor**
+- [x] **Step 6: Integrar P1 en el orden del tick del supervisor**
 
 En `Supervisor.tick()` el orden queda:
 
@@ -1814,13 +1814,13 @@ finalizeIfEligible(...);
 
 Durante `PREPARING`, `ensureController` no puede despachar tareas de tracks; solo puede producir las requests de registro de cohorte. El test verifica orden con índices en `calls[]`, no solo presencia.
 
-- [ ] **Step 7: Green y build**
+- [x] **Step 7: Green y build**
 
 Run: `cd cli && npx jest tests/commands/watch/track-bootstrap.test.ts tests/commands/track/supervisor-wrapper.test.ts tests/commands/watch/supervisor-loop.test.ts --runInBand && npm run build`
 
 Expected: PASS; ningún proceso real queda vivo porque esta task usa spawners inyectados.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add cli/src/commands/watch cli/src/commands/track cli/src/core/tracks/git.ts cli/tests/commands/watch cli/tests/commands/track
