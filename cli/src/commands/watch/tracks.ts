@@ -1284,11 +1284,15 @@ export function defaultTrackRuntime(planRoot: string, planBranch: string, grace:
         async stopOwnSupervisor(ref) {
             if (ref.supervisorProcessRef === undefined) return true; // nunca llegamos a spawnear: nada que terminar
             // R4.8: identity-verified — jamás un `kill(pid)` crudo. Un `pgid`
-            // reutilizado por OTRO proceso nunca se confunde con el nuestro
-            // (`terminatePreviouslyOwnedGroup` reenvía la señal al PGID
-            // capturado, pero solo tras haber confirmado que el grupo sigue
-            // existiendo; la identidad completa ya se verificó al capturar
-            // `supervisorProcessRef` en el spawn).
+            // reutilizado por OTRO proceso nunca se confunde con el nuestro:
+            // post-review (hallazgo de revisión de Task 13), la identidad NO
+            // se da por buena solo por haberse capturado en el spawn —
+            // `supervisorProcessRef` se relee del journal persistido y este
+            // paso puede correr arbitrariamente tarde (incluso tras un
+            // restart completo), así que `terminatePreviouslyOwnedGroup`
+            // reverifica la identidad completa del slot de líder
+            // INMEDIATAMENTE antes de enviar cualquier señal (`process.ts`,
+            // `groupLeaderReused`) — nunca confía solo en `groupIsGone`.
             const confirmed = groupIsGone(ref.supervisorProcessRef.processGroup)
                 || await terminatePreviouslyOwnedGroup(ref.supervisorProcessRef, grace);
             if (confirmed) {

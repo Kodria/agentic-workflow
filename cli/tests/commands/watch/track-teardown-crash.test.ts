@@ -14,7 +14,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { initRepo, commitFile } from '../../helpers/git-fixture';
 import { reconcileTracks, defaultTrackRuntime, TrackRuntime } from '../../../src/commands/watch/tracks';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
@@ -33,12 +33,16 @@ function deadRef(): ProcessRef {
     return { pid: 999999, startTime: 'nunca-existió', spawnNonce: 'x', argvDigest: 'x', processGroup: 999999, psArgsDigest: 'dead' };
 }
 
-/** Runtime de producción para worktree/branch (git real vía
- *  `defaultTrackRuntime`) — `stopOwnSupervisor` queda fake (jamás corre
- *  `terminatePreviouslyOwnedGroup` de verdad: nada que matar en esta suite,
- *  el supervisor siempre llega ya "confirmado ausente" vía `deadRef`).
- *  Ningún otro método de `TrackRuntime` debería invocarse — esta suite solo
- *  ejercita `begin-teardown`. */
+/** Runtime de producción para worktree/branch Y para `stopOwnSupervisor`
+ *  (git real y `terminatePreviouslyOwnedGroup` real vía `defaultTrackRuntime`
+ *  — post-review (hallazgo de revisión de Task 13): un fake que nunca llama
+ *  al primitivo real no puede probar la propiedad de seguridad
+ *  "ninguna señal alcanza un proceso ajeno" para el camino que de verdad
+ *  corre en producción). Con `deadRef()` esto sigue resolviendo por el atajo
+ *  de `groupIsGone` (pid 999999 no existe de verdad) — cero espera, mismo
+ *  comportamiento observable que el fake anterior — pero ahora es el código
+ *  real, no una simulación. Ningún otro método de `TrackRuntime` debería
+ *  invocarse — esta suite solo ejercita `begin-teardown`. */
 function buildRuntime(planRoot: string, events: string[]): TrackRuntime {
     const real = defaultTrackRuntime(planRoot, BRANCH);
     const unexpected = (what: string) => (): never => {
@@ -50,8 +54,9 @@ function buildRuntime(planRoot: string, events: string[]): TrackRuntime {
         spawnSupervisor: unexpected('spawnSupervisor'),
         observeSupervisor: unexpected('observeSupervisor'),
         async stopOwnSupervisor(ref) {
+            const confirmed = await real.stopOwnSupervisor(ref);
             events.push(`stop-effect:${ref.trackId}`);
-            return true;
+            return confirmed;
         },
         removeOwnedWorktree(repo, ref) {
             real.removeOwnedWorktree(repo, ref);
@@ -314,5 +319,112 @@ describe('reconcileTracks — crash/restart de teardown con git real (Task 13, R
         const again = await reconcileTracks(planRoot, BRANCH, s, runtime, 2);
         expect(trackA(again.state).phase).toBe('BLOCKED');
         expect(fs.readFileSync(marker)).toEqual(markerBytesBefore);
+    });
+
+    // Post-review (hallazgo de revisión de Task 13): la prueba literal que el
+    // sketch del plan (Step 5) pedía — `h.signalledForeignProcess()).toBe(false)`
+    // — y que esta suite nunca ejercitaba porque `stopOwnSupervisor` era
+    // 100% fake. `supervisorProcessRef` en el journal describe un supervisor
+    // previo ya extinto cuyo pgid el SO recicló (simulado, mismo criterio que
+    // el fixture R6 de `process.test.ts`) hacia `bystander`, un proceso REAL,
+    // vivo y completamente ajeno.
+    //
+    // Con `defaultTrackRuntime` real, esta identidad-fabricada NUNCA llega a
+    // `stopOwnSupervisor`/`terminatePreviouslyOwnedGroup`: `gatherTeardownObservation`
+    // ya usa `refIsAlive` (identidad completa) para decidir `ownSupervisorAlive`
+    // en la MISMA tick, así que un pgid reciclado con identidad distinta se
+    // reporta como "nuestro supervisor ya está muerto" y el teardown avanza
+    // por `accept-supervisor-stopped` — nunca por `stop-own-supervisor` — sin
+    // jamás tocar al bystander (defensa en profundidad ya existente, ver el
+    // comentario de `gatherTeardownObservation`). Esta prueba confirma esa
+    // propiedad end-to-end (converge a REMOVED sin señal alguna al ajeno); la
+    // prueba siguiente confirma la MISMA propiedad un nivel más abajo, en el
+    // primitivo `defaultTrackRuntime(...).stopOwnSupervisor` en sí mismo (el
+    // fix real de `groupLeaderReused` en `process.ts`), sin depender de esa
+    // capa superior.
+    test('supervisor propio con PGID reciclado por un proceso ajeno: el teardown converge sin jamás señalizarlo (R4.8, post-review)', async () => {
+        let s = declareCohort(planRoot, root, baseSha);
+        materializeTrackA(s);
+        s = readJournal(planRoot, BRANCH).state!;
+        const ref = trackA(s);
+
+        const bystander = spawn(process.execPath, ['-e', 'setTimeout(()=>{}, 5000)'], { detached: true, stdio: 'ignore' });
+        if (bystander.pid === undefined) throw new Error('spawn de bystander falló');
+        const bystanderPid = bystander.pid;
+        await new Promise((resolve) => setTimeout(resolve, 150));   // dejar asentar identidad real vía ps
+
+        const staleSupervisorRef: ProcessRef = {
+            pid: bystanderPid,
+            startTime: 'Mon Jan  1 00:00:00 2024',                       // supervisor anterior, ya extinto
+            spawnNonce: 'nonce-de-un-supervisor-anterior-ya-muerto',
+            argvDigest: 'deadbeefdeadbeef',
+            processGroup: bystanderPid,                                  // MISMO número de pgid (reciclado)
+            psArgsDigest: 'cafebabecafebabe',
+        };
+
+        s = setTrackA(planRoot, {
+            phase: 'TEARDOWN_INTENT',
+            teardownIntent: { worktreePath: ref.worktreePath, branch: ref.branch, supervisorNonce: undefined },
+            supervisorProcessRef: staleSupervisorRef,
+        });
+
+        const killSpy = jest.spyOn(process, 'kill');
+        try {
+            const runtime = defaultTrackRuntime(planRoot, BRANCH, { termGraceMs: 100, killGraceMs: 100 });
+            for (let i = 0; i < 20 && trackA(s).phase !== 'REMOVED'; i++) {
+                s = (await reconcileTracks(planRoot, BRANCH, s, runtime, 2)).state;
+            }
+
+            expect(trackA(s).phase).toBe('REMOVED');
+            const signalledForeignProcess = killSpy.mock.calls.some(([target]) => Number(target) === -bystanderPid);
+            expect(signalledForeignProcess).toBe(false);
+            // El bystander sigue vivo: nunca fue tocado.
+            expect(() => process.kill(bystanderPid, 0)).not.toThrow();
+        } finally {
+            killSpy.mockRestore();
+            bystander.kill('SIGKILL');
+        }
+    });
+
+    // Complemento de la prueba anterior, un nivel más abajo: llama
+    // directamente a `defaultTrackRuntime(...).stopOwnSupervisor` (el mismo
+    // primitivo que `runBeginTeardown` invoca en producción para la decisión
+    // `stop-own-supervisor`), sin pasar por `gatherTeardownObservation`. Esto
+    // prueba el fix de `groupLeaderReused` (`process.ts`) en sí mismo — que
+    // el PRIMITIVO, no solo la capa de arriba, se niega a señalizar un pgid
+    // reciclado por un proceso ajeno vivo.
+    test('defaultTrackRuntime.stopOwnSupervisor jamás señaliza un pgid reciclado por un proceso ajeno, aunque se lo invoque directo (R4.8, post-review)', async () => {
+        let s = declareCohort(planRoot, root, baseSha);
+        materializeTrackA(s);
+        s = readJournal(planRoot, BRANCH).state!;
+        const ref = trackA(s);
+
+        const bystander = spawn(process.execPath, ['-e', 'setTimeout(()=>{}, 5000)'], { detached: true, stdio: 'ignore' });
+        if (bystander.pid === undefined) throw new Error('spawn de bystander falló');
+        const bystanderPid = bystander.pid;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+
+        const staleSupervisorRef: ProcessRef = {
+            pid: bystanderPid,
+            startTime: 'Mon Jan  1 00:00:00 2024',
+            spawnNonce: 'nonce-de-un-supervisor-anterior-ya-muerto',
+            argvDigest: 'deadbeefdeadbeef',
+            processGroup: bystanderPid,
+            psArgsDigest: 'cafebabecafebabe',
+        };
+
+        const killSpy = jest.spyOn(process, 'kill');
+        try {
+            const runtime = defaultTrackRuntime(planRoot, BRANCH, { termGraceMs: 100, killGraceMs: 100 });
+            const confirmed = await runtime.stopOwnSupervisor({ ...ref, supervisorProcessRef: staleSupervisorRef });
+
+            expect(confirmed).toBe(false);   // fail-closed: nunca declara "confirmado ausente" arriesgando un ajeno
+            const signalledForeignProcess = killSpy.mock.calls.some(([target]) => Number(target) === -bystanderPid);
+            expect(signalledForeignProcess).toBe(false);
+            expect(() => process.kill(bystanderPid, 0)).not.toThrow();
+        } finally {
+            killSpy.mockRestore();
+            bystander.kill('SIGKILL');
+        }
     });
 });

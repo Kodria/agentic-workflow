@@ -2,7 +2,10 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawn } from 'child_process';
-import { spawnStructured, refIsAlive, terminateGroupConfirmed, groupIsGone, activitySnapshot, captureSelfRef, processStatesAreGone } from '../../../src/core/journal/process';
+import {
+    spawnStructured, refIsAlive, terminateGroupConfirmed, terminatePreviouslyOwnedGroup,
+    groupIsGone, activitySnapshot, captureSelfRef, processStatesAreGone,
+} from '../../../src/core/journal/process';
 
 describe('process identity', () => {
     test('spawnStructured produce ProcessRef con tupla completa (R2.1, R4.7)', async () => {  // verifies R2.1
@@ -69,6 +72,42 @@ describe('process identity', () => {
         expect(dead).toBe(true);
         expect(groupIsGone(ref.processGroup)).toBe(true);
     }, 15000);
+
+    test('terminatePreviouslyOwnedGroup jamas senializa un PGID reciclado por un proceso ajeno vivo (post-review, hallazgo de revision de Task 13)', async () => {
+        // Mismo criterio de simulacion deterministica que el fixture de R6 de
+        // mas arriba (`reusedPidStaleRef`): un proceso REAL y vivo ahora mismo
+        // (mismo pid/pgid), pero un ProcessRef que describe un "lider"
+        // DISTINTO y ya extinto que alguna vez tuvo ese mismo numero —
+        // startTime, nonce, argvDigest y psArgsDigest todos ajenos al
+        // proceso real que hoy ocupa ese slot. Antes del fix, la ausencia de
+        // este chequeo en `terminatePreviouslyOwnedGroup` (a diferencia de
+        // `terminateGroupConfirmed`, que sí verifica `refIsAlive`) habría
+        // enviado la señal directo a `-pgid`, alcanzando a este proceso
+        // ajeno.
+        const bystander = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 5000)'], process.cwd(), 'n-bystander');
+        const stalePriorLeaderRef = {
+            pid: bystander.ref.pid,
+            startTime: 'Mon Jan  1 00:00:00 2024',                 // "lider" anterior, ya extinto
+            spawnNonce: 'nonce-de-un-supervisor-anterior-ya-muerto',
+            argvDigest: 'deadbeefdeadbeef',
+            processGroup: bystander.ref.processGroup,               // MISMO numero de pgid (reciclado)
+            psArgsDigest: 'cafebabecafebabe',
+        };
+        try {
+            const killSpy = jest.spyOn(process, 'kill');
+            try {
+                const confirmed = await terminatePreviouslyOwnedGroup(stalePriorLeaderRef, { termGraceMs: 50, killGraceMs: 50 });
+                expect(confirmed).toBe(false);   // fail-closed: nunca declara "confirmado ausente" a costa de arriesgar un ajeno
+                const signalledForeignProcess = killSpy.mock.calls.some(([target]) => Number(target) === -bystander.ref.processGroup);
+                expect(signalledForeignProcess).toBe(false);
+            } finally {
+                killSpy.mockRestore();
+            }
+            expect(refIsAlive(bystander.ref)).toBe(true);   // el ajeno sigue vivo, intacto
+        } finally {
+            bystander.child.kill('SIGKILL');
+        }
+    });
 
     test('activitySnapshot reporta cpu y tamanio de grupo de un proceso vivo (soporte R4.2)', () => {  // verifies R2.1
         const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 3000)'], process.cwd(), 'n4');

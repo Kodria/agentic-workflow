@@ -136,6 +136,17 @@ describe('parallel-track protocol model', () => {
         ].sort());
     });
 
+    test('Step 5 (Task 13): el recorrido también ejercita decideTeardown con las 7 decisiones posibles', () => {
+        // Mismo criterio que el test análogo de `prepareDecisions` (Step 3,
+        // Task 9): sin esta aserción, una regresión que dejara de alcanzar
+        // alguna `TeardownDecision` durante la exploración pasaría
+        // desapercibida, aunque el set se siguiera recolectando.
+        expect([...exploreCohort(ids).teardownDecisions].sort()).toEqual([
+            'accept-supervisor-stopped', 'block-foreign', 'mark-removed', 'persist-intent',
+            'remove-owned-branch', 'remove-owned-worktree', 'stop-own-supervisor',
+        ].sort());
+    });
+
     describe('decidePrepare — Task 9 (R4.2, R4.6, C11): matriz observable de recuperación de crash', () => {
         const track = (phase: TrackProtocolState['phase']): TrackProtocolState => ({
             trackId: 'a', phase, fencingToken: 'f'.repeat(32), readinessNonce: 'r'.repeat(32),
