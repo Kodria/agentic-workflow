@@ -113,7 +113,10 @@ const derivedDefault = deriveDefaultParallelism(budget);
 const sourceHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
 
 // Deliberadamente sin hostname/usuario/paths absolutos/env vars: este artefacto
-// se versiona y se empaqueta en el npm package (ver cli/package.json `files`).
+// se versiona en git, pero NO se empaqueta actualmente en el npm publish
+// (cli/package.json `files` es solo ["dist"], y este archivo vive fuera de
+// cli/). loadDefaultParallelism() cae a 1 (serial) si no puede resolverlo
+// post-install — el trabajo de distribución real queda pendiente.
 const result = {
     sourceHead,
     node: process.version,
