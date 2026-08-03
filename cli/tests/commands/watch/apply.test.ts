@@ -1,7 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { consumePendingRequests } from '../../../src/commands/watch/apply';
+import { execFileSync } from 'child_process';
+import { consumePendingRequests, applyCyclePlanAppend, registerTrackIntegrationItems } from '../../../src/commands/watch/apply';
+import { emptyState } from '../../../src/core/journal/types';
+import type { JournalState, TrackRef } from '../../../src/core/journal/types';
 import { emitRequest } from '../../../src/core/journal/requests';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { requestsDir, eventsPath } from '../../../src/core/journal/paths';
@@ -15,6 +18,64 @@ function jobPayload(argv: string[]): Record<string, unknown> {
 function verdictPayload(verdictId: string, obligationId: string, result: 'pass' | 'fail' | 'inconclusive', detail: string): Record<string, unknown> {
     return { verdictId, obligationId, result, detail, fingerprint: 'fp-review', argv: ['awm-review', obligationId], paths: [], cwd: '.' };
 }
+
+function trackRef(trackId: string): TrackRef {
+    return {
+        trackId, worktreePath: `/tmp/${trackId}`, branch: `awm-track/${trackId}`,
+        ownership: [], sharedResources: [], dependsOn: [],
+        fencingToken: `fence-${trackId}`.padEnd(32, '0'), phase: 'MERGED_UNVERIFIED', readinessNonce: `ready-${trackId}`.padEnd(32, '0'),
+    };
+}
+
+describe('applyCyclePlanAppend / registerTrackIntegrationItems (R7.2/R7.3, Task 12)', () => {
+    function stateWithCycleItems(items: JournalState['cycleVerificationPlan']): JournalState {
+        const s = emptyState('rama');
+        s.cycleVerificationPlan = items;
+        return s;
+    }
+
+    function stateWithTracks(trackIds: string[]): JournalState {
+        const s = emptyState('rama');
+        s.tracks = trackIds.map(trackRef);
+        return s;
+    }
+
+    test('cycle plan agrega items por id sin borrar satisfiedBy (R7.2)', () => {
+        const state = stateWithCycleItems([{ id: 'qa', kind: 'qa', satisfiedBy: 'job-qa' }]);
+        applyCyclePlanAppend(state, [
+            { id: 'qa', kind: 'qa' },
+            { id: 'track-integration:a', kind: 'track-integration' },
+        ]);
+        expect(state.cycleVerificationPlan).toEqual([
+            { id: 'qa', kind: 'qa', satisfiedBy: 'job-qa' },
+            { id: 'track-integration:a', kind: 'track-integration' },
+        ]);
+    });
+
+    test('una colision de kind para el mismo id lanza (rechaza el request completo)', () => {
+        const state = stateWithCycleItems([{ id: 'qa', kind: 'qa' }]);
+        expect(() => applyCyclePlanAppend(state, [{ id: 'qa', kind: 'interlock' }])).toThrow(/cambia kind/);
+        expect(state.cycleVerificationPlan).toEqual([{ id: 'qa', kind: 'qa' }]);   // sin mutar ante el throw
+    });
+
+    test('registrar tracks deja gate rojo desde el inicio (R7.3)', () => {
+        const s = stateWithTracks(['a', 'b']);
+        registerTrackIntegrationItems(s);
+        expect(s.cycleVerificationPlan.filter((x) => x.kind === 'track-integration'))
+            .toEqual([
+                { id: 'track-integration:a', kind: 'track-integration' },
+                { id: 'track-integration:b', kind: 'track-integration' },
+            ]);
+    });
+
+    test('registrar tracks es idempotente y aditivo: un track nuevo se agrega sin perder los previos', () => {
+        const s = stateWithTracks(['a']);
+        registerTrackIntegrationItems(s);
+        s.tracks = [...s.tracks!, trackRef('b')];
+        registerTrackIntegrationItems(s);
+        expect(s.cycleVerificationPlan.map((x) => x.id).sort()).toEqual(['track-integration:a', 'track-integration:b']);
+    });
+});
 
 describe('aplicacion transaccional de requests', () => {
     let repo: string;
@@ -100,7 +161,7 @@ describe('aplicacion transaccional de requests', () => {
         const s = readJournal(repo, 'rama').state!;
         const jobId = Object.keys(s.jobs)[0];
         expect(s.tasks[0].verificationPlan[0].satisfiedBy).toBe(jobId);
-        expect(s.jobs[jobId].satisfies).toBe('v1');
+        expect(s.jobs[jobId].satisfies).toEqual(['v1']);   // R7 Task 12: satisfies migró a array
     });
 
     test('fencing: token de generacion vieja => rejected-stale-generation auditado (R4.6)', () => {  // verifies R4.6
@@ -282,7 +343,7 @@ describe('aplicacion transaccional de requests', () => {
         expect(g.reasons.some((r) => r.category === 'open-fix')).toBe(false);       // ya no bloquea por open-fix
     });
 
-    test('Fix4: register-entity cycle-plan es idempotente — un re-registro NO pisa el plan existente ni pierde satisfiedBy ya enlazado', () => {  // verifies bloqueador QA Fix4
+    test('Fix4/R7.2 (Task 12): register-entity cycle-plan es un append transaccional — un re-registro NUNCA pisa un item existente ni pierde satisfiedBy ya enlazado, pero SÍ agrega ids nuevos', () => {  // verifies bloqueador QA Fix4, R7.2
         emitRequest(repo, 'rama', { kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'e1', payload: { entity: 'cycle-plan', items: [{ id: 'cv1', kind: 'qa' }] } });
         consumePendingRequests(repo, 'rama', 'g1');
         emitRequest(repo, 'rama', { kind: 'job-request', generationToken: 'g1', idempotencyKey: 'k1', payload: { ...jobPayload(['npm', 'run', 'qa']), satisfies: 'cv1' } });
@@ -291,11 +352,18 @@ describe('aplicacion transaccional de requests', () => {
         const jobId = Object.keys(s.jobs)[0];
         expect(s.cycleVerificationPlan[0].satisfiedBy).toBe(jobId);
 
-        // re-registro defensivo (ej. tras crash sin memoria de si ya se registro), incluso con items DISTINTOS
+        // re-registro defensivo (ej. tras crash sin memoria de si ya se registro), con un id NUEVO
         emitRequest(repo, 'rama', { kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'e2', payload: { entity: 'cycle-plan', items: [{ id: 'cv-otro', kind: 'interlock' }] } });
         consumePendingRequests(repo, 'rama', 'g1');
         s = readJournal(repo, 'rama').state!;
-        expect(s.cycleVerificationPlan).toEqual([{ id: 'cv1', kind: 'qa', satisfiedBy: jobId }]);   // plan original preservado
+        // el item original conserva su satisfiedBy Y el nuevo id se agregó (R7.2: union, nunca reemplazo)
+        expect(s.cycleVerificationPlan).toEqual([{ id: 'cv1', kind: 'qa', satisfiedBy: jobId }, { id: 'cv-otro', kind: 'interlock' }]);
+
+        // re-registrar el MISMO id con un kind DISTINTO se rechaza (colisión de kind rechaza el request completo)
+        const badKind = emitRequest(repo, 'rama', { kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'e3', payload: { entity: 'cycle-plan', items: [{ id: 'cv1', kind: 'interlock' }] } });
+        expect(consumePendingRequests(repo, 'rama', 'g1').rejectedInvalid).toBe(1);
+        expect(fs.existsSync(`${badKind.file}.rejected`)).toBe(true);
+        expect(readJournal(repo, 'rama').state!.cycleVerificationPlan).toEqual([{ id: 'cv1', kind: 'qa', satisfiedBy: jobId }, { id: 'cv-otro', kind: 'interlock' }]);
     });
 
     test('Fix5: verdict --detail se redacta antes de persistir en state.json (R2.3)', () => {  // verifies bloqueador QA Fix5 / R2.3
@@ -388,5 +456,65 @@ describe('aplicacion transaccional de requests', () => {
         expect(s.cycle.blockedReason).toBeUndefined();
         expect(s.generations[0].state).toBe('superseded');
         expect(s.custodyDecisions).toEqual([expect.objectContaining({ decision: 'resume', reason: 'operador verifico que no hay llamada en vuelo', generationToken: 'g1' })]);
+    });
+
+    // ---- R7/C3/C4 (Task 12): register-entity track-integration, track-finalize-request ----
+
+    test('register --entity track-integration crea el contrato canonico UNA sola vez (creacion-unica, como cycle-plan)', () => {
+        emitRequest(repo, 'rama', {
+            kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'ti1',
+            payload: { entity: 'track-integration', argv: ['npm', 'test', '--', '--runInBand'], paths: ['cli/src/**'], planDigest: 'd1' },
+        });
+        consumePendingRequests(repo, 'rama', 'g1');
+        expect(readJournal(repo, 'rama').state!.trackIntegration).toEqual({ argv: ['npm', 'test', '--', '--runInBand'], paths: ['cli/src/**'], planDigest: 'd1' });
+
+        // un segundo registro con OTRO contrato NUNCA lo pisa
+        emitRequest(repo, 'rama', {
+            kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'ti2',
+            payload: { entity: 'track-integration', argv: ['npm', 'run', 'otro'], paths: [], planDigest: 'd2' },
+        });
+        consumePendingRequests(repo, 'rama', 'g1');
+        expect(readJournal(repo, 'rama').state!.trackIntegration).toEqual({ argv: ['npm', 'test', '--', '--runInBand'], paths: ['cli/src/**'], planDigest: 'd1' });
+    });
+
+    test('register --entity track-integration rechaza argv vacio', () => {
+        const r = emitRequest(repo, 'rama', {
+            kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'ti-bad',
+            payload: { entity: 'track-integration', argv: [], paths: [], planDigest: 'd1' },
+        });
+        expect(consumePendingRequests(repo, 'rama', 'g1').rejectedInvalid).toBe(1);
+        expect(fs.existsSync(`${r.file}.rejected`)).toBe(true);
+        expect(readJournal(repo, 'rama').state!.trackIntegration).toBeUndefined();
+    });
+
+    test('track-finalize-request persiste el autoreporte del controller (qaFinalizeRequested) — puramente declarativo (R7.2)', () => {
+        emitRequest(repo, 'rama', {
+            kind: 'track-finalize-request', generationToken: 'g1', idempotencyKey: 'finalize-1',
+            payload: { qaHeadSha: 'sha-h3' },
+        });
+        expect(consumePendingRequests(repo, 'rama', 'g1').applied).toBe(1);
+        const s = readJournal(repo, 'rama').state!;
+        expect(s.qaFinalizeRequested).toEqual({ headSha: 'sha-h3', at: expect.any(String) });
+    });
+
+    test('declarar un track (track-prepare-request) agrega de inmediato su track-integration:* al cycle plan (R7.3)', () => {
+        // El segundo track dispara `headSha(repoRoot)` (armado de la cohorte,
+        // R4.1) — a diferencia del resto de esta suite, este repo SÍ necesita
+        // ser un repo git real para llegar a ese punto.
+        execFileSync('git', ['init', '-q', '-b', 'rama'], { cwd: repo });
+        execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', 'commit', '--allow-empty', '-qm', 'seed'], { cwd: repo });
+        emitRequest(repo, 'rama', { kind: 'track-prepare-request', generationToken: 'g1', idempotencyKey: 'tp-a', payload: { trackId: 'a' } });
+        consumePendingRequests(repo, 'rama', 'g1');
+        let s = readJournal(repo, 'rama').state!;
+        expect(s.cycleVerificationPlan).toEqual([{ id: 'track-integration:a', kind: 'track-integration' }]);
+
+        emitRequest(repo, 'rama', { kind: 'track-prepare-request', generationToken: 'g1', idempotencyKey: 'tp-b', payload: { trackId: 'b' } });
+        consumePendingRequests(repo, 'rama', 'g1');
+        s = readJournal(repo, 'rama').state!;
+        expect(s.cycleVerificationPlan.map((i) => i.id).sort()).toEqual(['track-integration:a', 'track-integration:b']);
+        // R3.6/R7.3: el gate global ya está rojo por estos items sin satisfacer, desde el momento en que se declaran
+        const gate = computeGate(s, false, () => 'fp-1');
+        expect(gate.pass).toBe(false);
+        expect(gate.reasons.some((r) => r.category === 'unsatisfied-plan' && /track-integration:a/.test(r.detail))).toBe(true);
     });
 });

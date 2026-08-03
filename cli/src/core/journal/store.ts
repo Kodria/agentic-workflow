@@ -39,6 +39,17 @@ function normalizeSchemaOne(value: unknown): unknown {
             cycle.nextAction = { actionId: 'bootstrap-cycle', type: 'plan-cycle', target: 'cycle', preconditions: [], attempt: 0, state: 'pending' };
         }
     }
+    // R7 Task 12: `Job.satisfies` migró de `string` a `string[]` (varios items
+    // satisfechos por un mismo job, ej. el job canónico de integración final).
+    // Un journal legacy con `satisfies` string se normaliza a un array de un
+    // elemento — jamás se pierde el enlace ya persistido.
+    if (typeof parsed.jobs === 'object' && parsed.jobs !== null && !Array.isArray(parsed.jobs)) {
+        for (const job of Object.values(parsed.jobs as Record<string, unknown>)) {
+            if (typeof job !== 'object' || job === null || Array.isArray(job)) continue;
+            const j = job as Record<string, unknown>;
+            if (typeof j.satisfies === 'string') j.satisfies = [j.satisfies];
+        }
+    }
     if (Array.isArray(parsed.verdicts)) {
         for (const item of parsed.verdicts) {
             if (typeof item !== 'object' || item === null || Array.isArray(item)) continue;

@@ -166,7 +166,10 @@ export interface Job {
     lastProgressAt?: string;   // ultima vez que el log del job crecio/mtime avanzo (R3.5, observacional)
     logPath?: string;
     result?: JobResult;
-    satisfies?: string;     // id de VerificationItem que este job pretende satisfacer
+    satisfies?: string[];   // ids de VerificationItem que este job pretende satisfacer (R7 Task 12: migra
+                            // aditivamente de string a array — un job puede satisfacer VARIOS items del
+                            // ciclo a la vez, ej. el job canónico de integración final satisface todos
+                            // los `track-integration:*` simultáneamente; store.ts normaliza legacy)
     attemptOf?: string;     // job-id del attempt anterior (re-claim = attempt nuevo, R1.7)
 }
 
@@ -225,6 +228,22 @@ export interface JournalState {
     // usa ESTE valor como su `expectedPlanHeadSha`, nunca el base original.
     cohortPlanHeadSha?: string;
     trackIntegration?: { argv: string[]; paths: string[]; planDigest: string };
+    // R7/C3/C4 (Task 12): espejo persistente de `CohortProtocol.globalQaHeadSha`/
+    // `finalIntegrationJobId` (`core/tracks/types.ts`, ya definidos desde Task 1) —
+    // `watch/tracks.ts::toProtocol`/`applyProtocolToState` los traduce en ambos
+    // sentidos. Sin esto, un restart perdería la evidencia de que el QA global o
+    // la integración final ya pasaron y repetiría el efecto (`request-global-qa`/
+    // `request-final-integration`) desde cero en vez de avanzar la cohorte.
+    globalQaHeadSha?: string;
+    finalIntegrationJobId?: string;
+    // R7.2/C3 (Task 12): autoreporte del controller del PLAN ("ya corrí QA,
+    // corregí hallazgos y comiteé en este HEAD") vía `track-finalize-request`
+    // — PLAN-scoped (a diferencia de `frozen`, que es de un track individual).
+    // Nunca se confía ciegamente: el driver de `request-global-qa` re-verifica
+    // independientemente HEAD real + árbol limpio antes de aceptarlo (mismo
+    // criterio fail-closed que el freeze de Task 10 aplica al autoreporte de
+    // un track).
+    qaFinalizeRequested?: { headSha: string; at: string };
     // R5.2/R6.3/R6.4 (Task 10): SOLO presentes en el journal de UN TRACK
     // individual — el supervisor del PLAN jamás los escribe directamente
     // (emite `track-freeze-request` al journal del track vía el mismo canal
@@ -291,6 +310,10 @@ export function isWellFormedState(x: unknown): x is JournalState {
     if (x.freezeRequested !== undefined && typeof x.freezeRequested !== 'boolean') return false;
     if (x.frozen !== undefined && !(isObj(x.frozen) && typeof x.frozen.headSha === 'string' && typeof x.frozen.at === 'string')) return false;
     if (x.cohortParallelInvalidatedBy !== undefined && !strings(x.cohortParallelInvalidatedBy)) return false;
+    if (x.globalQaHeadSha !== undefined && typeof x.globalQaHeadSha !== 'string') return false;
+    if (x.finalIntegrationJobId !== undefined && typeof x.finalIntegrationJobId !== 'string') return false;
+    if (x.qaFinalizeRequested !== undefined
+        && !(isObj(x.qaFinalizeRequested) && typeof x.qaFinalizeRequested.headSha === 'string' && typeof x.qaFinalizeRequested.at === 'string')) return false;
     return true;
 }
 
@@ -398,7 +421,7 @@ export function isWellFormedJob(x: unknown): x is Job {
         && (x.logPath === undefined || typeof x.logPath === 'string')
         && (x.result === undefined || (isObj(x.result) && typeof x.result.exitCode === 'number'
             && typeof x.result.endedAt === 'string' && typeof x.result.resultPath === 'string'))
-        && (x.satisfies === undefined || typeof x.satisfies === 'string')
+        && (x.satisfies === undefined || strings(x.satisfies))
         && (x.attemptOf === undefined || typeof x.attemptOf === 'string')
         && (EXECUTION_STATES as readonly string[]).includes(x.executionState as string);
 }

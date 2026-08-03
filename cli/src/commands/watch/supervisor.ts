@@ -141,7 +141,16 @@ export class Supervisor {
             }
         }
         const afterRequests = readJournal(this.repoRoot, this.branch);
-        if (afterRequests.state !== null && activeGeneration(afterRequests.state) === undefined
+        // R7/C3 (Task 12): mientras la cohorte corre el job canónico de
+        // integración final o espera el interlock, NADIE debe relanzar el
+        // controller — `runRequestFinalIntegration`/`runRunFinalInterlock`
+        // (watch/tracks.ts) ya pausaron esa generación explícitamente
+        // (R7.3/C3) precisamente para que el árbol quede quieto durante esa
+        // ventana; sin este guard, esta misma rama la revivía en el mismo
+        // tick (o el siguiente) apenas la generación quedaba `terminated`,
+        // exactamente la mutación concurrente que la pausa buscaba evitar.
+        const finalizing = afterRequests.state?.cohortPhase === 'FINAL_INTEGRATION' || afterRequests.state?.cohortPhase === 'FINAL_INTERLOCK';
+        if (!finalizing && afterRequests.state !== null && activeGeneration(afterRequests.state) === undefined
             && afterRequests.state.generations.length > 0 && afterRequests.state.cycle.status === 'IN_PROGRESS') {
             beginGeneration(this.repoRoot, this.branch);
             if (this.ensureController(resumePrompt) === 'custody') return 'custody';
@@ -163,7 +172,23 @@ export class Supervisor {
         const r = readJournal(this.repoRoot, this.branch);
         const gate = computeGate(r.state, r.corrupt, this.fingerprintNow);
         const liveJobs = r.state === null ? 1 : Object.values(r.state.jobs).filter((j) => LIVE.includes(j.executionState)).length;
-        if (gate.pass && liveJobs === 0) {   // gate verde YA implica cero vivos; doble cinturon (R4.5)
+        // R7/C3/C4 (Task 12): un journal de PLAN con cohorte de tracks NUNCA
+        // declara `cycle.status = COMPLETE` por este camino genérico mientras
+        // la cohorte no llegó ELLA MISMA a `cohortPhase === 'COMPLETE'` — sin
+        // este guard, `computeGate` certifica en cuanto el job canónico de
+        // integración se REQUIERE (apply.ts enlaza `satisfiedBy` al crear el
+        // job, antes de que termine) y pasa, ganándole la carrera al propio
+        // `run-final-interlock` (watch/tracks.ts): el ciclo se declararía
+        // COMPLETE mientras `cohortPhase` sigue en FINAL_INTEGRATION/
+        // FINAL_INTERLOCK, los tracks nunca llegan a JOINED y
+        // `integration.lock` queda retenido para siempre (este mismo check,
+        // arriba en `tick()`, corta el loop apenas ve `cycle.status ===
+        // COMPLETE` y jamás vuelve a llamar `reconcileTracks`). Un journal
+        // SIN cohorte (`tracks` ausente o con un solo track, ni siquiera una
+        // cohorte válida) sigue el camino de siempre, sin cambios.
+        const cohortGoverned = r.state !== null && (r.state.tracks?.length ?? 0) >= 2;
+        const cohortDone = !cohortGoverned || r.state!.cohortPhase === 'COMPLETE';
+        if (gate.pass && liveJobs === 0 && cohortDone) {   // gate verde YA implica cero vivos; doble cinturon (R4.5)
             const s = r.state!;
             const terminated = await this.terminateAllGenerationsConfirmed(s);
             if (!terminated.ok) {

@@ -13,22 +13,39 @@ import { readJournal, writeJournal, appendEvent, initJournal } from '../../core/
 import { emitRequest, listPendingRequests } from '../../core/journal/requests';
 import { supervisorLockPath } from '../../core/journal/paths';
 import { refIsAlive } from '../../core/journal/process';
+import { computeFingerprint } from '../../core/journal/fingerprint';
 import { decidePrepare, decideJoinReconciliation, nextProtocolEffect, observeProtocolEffect } from '../../core/tracks/protocol';
 import {
     addOwnedWorktree, removeOwnedWorktree, removeOwnedBranch,
     isAwmGitignored, foreignPathExists, ownedWorktreeExists,
-    mergeBase, changedPaths, headSha, readMergeHead, isAncestor,
+    mergeBase, changedPaths, headSha, readMergeHead, isAncestor, dirtyPaths,
     mergeFrozenTrack as gitMergeFrozenTrack, abortOwnedMerge as gitAbortOwnedMerge,
 } from '../../core/tracks/git';
 import { assessActualOwnership } from '../../core/tracks/ownership';
 import { writeDescriptor } from '../../core/tracks/descriptor';
-import { acquireIntegrationLock, stopControllerGenerationConfirmed } from '../../core/tracks/join';
+import { acquireIntegrationLock, releaseIntegrationLock, stopControllerGenerationConfirmed } from '../../core/tracks/join';
+import { requestJob } from '../job/request';
+import { computeGate, FingerprintNow } from '../job/gate';
 import { spawnStructured, groupIsGone, terminatePreviouslyOwnedGroup } from '../../core/journal/process';
 import { JOIN_STRATEGY_NO_FF } from '../../core/tracks/types';
 import type { CohortProtocol, JoinIntent, PrepareObservation, ProtocolEffect, TrackProtocolState } from '../../core/tracks/types';
 import type { IntegrationLockHandle } from '../../core/tracks/join';
 import type { ParsedTrack } from '../../core/tracks/plan-parser';
 import type { JournalState, TrackContext, TrackRef, ProcessRef } from '../../core/journal/types';
+
+/** R8.1 (Task 12): pura, sin I/O — nombra los tracks que todavía no llegaron a
+ *  `MERGED_UNVERIFIED` (el ciclo permanece IN_PROGRESS mientras existan). Vive
+ *  acá (no en `core/tracks/protocol.ts`) porque no es una decisión de
+ *  transición de fase — `nextProtocolEffect` YA calcula la misma condición
+ *  internamente para decidir `request-global-qa` (`protocol.ts` sigue siendo
+ *  la única autoridad de esa transición); esto es solo un helper de
+ *  DIAGNÓSTICO/consulta sobre el mismo criterio, para que un caller (CLI,
+ *  logging) pueda nombrar qué falta sin duplicar la condición a mano. */
+export function canCompleteCohort(state: JournalState): { complete: boolean; pendingTracks: string[] } {
+    const tracks = state.tracks ?? [];
+    const pendingTracks = tracks.filter((t) => t.phase !== 'MERGED_UNVERIFIED').map((t) => t.trackId).sort();
+    return { complete: tracks.length >= 2 && pendingTracks.length === 0, pendingTracks };
+}
 
 /** Contrato más rico que el `'absent'|'claimed'|'ready'|'foreign'` puramente
  *  ilustrativo del plan: `ready` necesita cargar el readinessNonce
@@ -91,11 +108,36 @@ export interface TrackRuntime {
     // mutaciones reales en una sola invocación (exactamente la clase de bug
     // que Task 8 encontró y arregló tres veces).
     ensureIntegrationLock(planJournalId: string, expectedPlanHeadSha: string): Promise<'acquired' | 'already-held'>;
+    // R7/C3 (Task 12): pausa ADMINISTRATIVA del controller del plan antes del
+    // job canónico de integración final — distinta de `ensureIntegrationLock`
+    // (que solo pausa la PRIMERA vez, antes del primer merge, y memoiza el
+    // lock por el resto de la vida del proceso). Acá el controller puede
+    // haber sido relanzado desde entonces (ej. entre merges, o para correr
+    // `post-implementation-qa`), así que esto se llama de nuevo,
+    // incondicionalmente, cada vez que el driver de `request-final-
+    // integration` necesita asegurarse de que nadie mute el árbol mientras
+    // corre el job. Devuelve `true` <=> hizo trabajo real (había una
+    // generación activa que se tuvo que terminar) — el driver lo trata como
+    // SU único touch de este tick, igual criterio que `ensureIntegrationLock`
+    // distingue `'acquired'` de `'already-held'`.
+    pauseControllerGeneration(): Promise<boolean>;
+    // R7.5 (Task 12): libera, si está retenido POR ESTE PROCESO, el
+    // `integration.lock` adquirido por `ensureIntegrationLock` — el
+    // complemento que Task 11 dejó explícitamente diferido ("este runtime
+    // nunca libera lo que adquiere"). No-op si nunca se adquirió o si ya se
+    // liberó (mismo criterio idempotente que el resto de esta interfaz).
+    releaseIntegrationLockIfHeld(): void;
 }
 
 export interface ReconcileTracksResult { state: JournalState; effectExecuted: string | null; }
 
-const RUNTIME_EFFECTS = new Set(['create-worktree', 'create-track-journal', 'spawn-track-supervisor', 'begin-teardown', 'freeze-track', 'merge-track']);
+const RUNTIME_EFFECTS = new Set([
+    'create-worktree', 'create-track-journal', 'spawn-track-supervisor', 'begin-teardown', 'freeze-track', 'merge-track',
+    // R7 (Task 12): las 3 fronteras finales — únicas de la cohorte, jamás por
+    // track (ver drivers `runRequestGlobalQa`/`runRequestFinalIntegration`/
+    // `runRunFinalInterlock` más abajo).
+    'request-global-qa', 'request-final-integration', 'run-final-interlock',
+]);
 
 function toProtocol(state: JournalState, maxParallel: number): CohortProtocol {
     const tracks: Record<string, TrackProtocolState> = {};
@@ -127,6 +169,12 @@ function toProtocol(state: JournalState, maxParallel: number): CohortProtocol {
         // adelante (C7 exige que cada join sucesivo valide contra el HEAD
         // real post-merge-anterior, no contra el punto de partida).
         planHeadSha: state.cohortPlanHeadSha ?? state.cohortBaseSha,
+        // R7/C3 (Task 12): espejo de `state.globalQaHeadSha`/
+        // `finalIntegrationJobId` — sin esto, un restart perdería la
+        // evidencia de que el QA global o la integración final ya pasaron y
+        // `nextProtocolEffect` repetiría el efecto desde cero.
+        globalQaHeadSha: state.globalQaHeadSha,
+        finalIntegrationJobId: state.finalIntegrationJobId,
     };
 }
 
@@ -141,6 +189,11 @@ function applyProtocolToState(state: JournalState, protocol: CohortProtocol): Jo
     // `cohortBaseSha` (stale) y el segundo join de la cohorte usaría un
     // `expectedPlanHeadSha` incorrecto.
     if (protocol.planHeadSha !== undefined) next.cohortPlanHeadSha = protocol.planHeadSha;
+    // R7/C3 (Task 12): mismo criterio que `cohortPlanHeadSha` arriba — valores
+    // que solo avanzan (nunca retroceden a `undefined` una vez fijados por
+    // `reconcileProtocol`).
+    if (protocol.globalQaHeadSha !== undefined) next.globalQaHeadSha = protocol.globalQaHeadSha;
+    if (protocol.finalIntegrationJobId !== undefined) next.finalIntegrationJobId = protocol.finalIntegrationJobId;
     next.tracks = (next.tracks ?? []).map((ref) => {
         const t = protocol.tracks[ref.trackId];
         if (t === undefined) return ref;
@@ -540,6 +593,151 @@ async function runMergeTrack(
     return { state: next, stop: true, executed: effect.kind };
 }
 
+function sameIdSet(a: string[] | undefined, b: string[]): boolean {
+    const left = [...(a ?? [])].sort();
+    const right = [...b].sort();
+    return left.length === right.length && left.every((v, i) => v === right[i]);
+}
+
+/** R7.1/R7.6/R7.7/C3 (Task 12): pura mutación de estado — jamás toca
+ *  `runtime`. "Solo el HEAD final recibe QA e integración": `nextProtocolEffect`
+ *  solo emite este efecto cuando TODOS los tracks llegaron a
+ *  `MERGED_UNVERIFIED` a la vez (R7.6/R7.7) — nunca por cada merge
+ *  individual. El primer branch acepta el autoreporte del controller
+ *  (`qaFinalizeRequested`, ver `track-finalize-request` en `apply.ts`) SOLO
+ *  tras re-verificar independientemente HEAD real + árbol limpio (fail-
+ *  closed, mismo criterio que el freeze de un track en `runFreezeTrack` —
+ *  nunca se confía ciegamente en el autoreporte); el segundo persiste el
+ *  `nextAction` que instruye al controller a correr `post-implementation-qa`
+ *  — el controller YA vivo (o el próximo que `Supervisor.ensureController`
+ *  relance por su propio mecanismo existente) lo recoge leyendo el journal,
+ *  sin que este driver necesite tocar ningún proceso. */
+function runRequestGlobalQa(
+    planRoot: string, branch: string, s: JournalState, protocol: CohortProtocol,
+    effect: Extract<ProtocolEffect, { kind: 'request-global-qa' }>,
+): EffectRunResult {
+    if (s.qaFinalizeRequested !== undefined) {
+        const reported = s.qaFinalizeRequested;
+        let actualHead: string;
+        let clean: boolean;
+        try {
+            actualHead = headSha(planRoot);
+            clean = dirtyPaths(planRoot).length === 0;
+        } catch {
+            return { state: s, stop: true, executed: null };   // indemostrable: esperar (fail-closed)
+        }
+        if (actualHead === reported.headSha && clean) {
+            const observed = observeProtocolEffect(protocol, effect, { kind: 'global-qa-pass', headSha: actualHead, clean: true });
+            const next = persist(planRoot, branch, applyProtocolToState(s, observed));
+            appendEvent(planRoot, branch, { kind: 'global-qa-passed', headSha: actualHead });
+            return { state: next, stop: true, executed: effect.kind };
+        }
+        // El autoreporte no coincide (todavía sucio, o HEAD distinto): nada
+        // que aceptar este tick — el controller sigue corrigiendo hallazgos.
+        return { state: s, stop: true, executed: null };
+    }
+    if (s.cycle.nextAction?.type === 'run-global-qa') {
+        return { state: s, stop: true, executed: null };   // ya pedido: esperar el autoreporte
+    }
+    const next: JournalState = {
+        ...s,
+        cycle: {
+            ...s.cycle,
+            nextAction: { actionId: 'finalize-global-qa', type: 'run-global-qa', target: 'cycle', preconditions: [], attempt: 0, state: 'pending' },
+        },
+    };
+    const persisted = persist(planRoot, branch, next);
+    appendEvent(planRoot, branch, { kind: 'global-qa-requested' });
+    return { state: persisted, stop: true, executed: effect.kind };
+}
+
+/** R7.3/R7.6/C4 (Task 12): a lo sumo UNA mutación real por tick — mismo
+ *  criterio que `runMergeTrack` separa `ensureIntegrationLock` del intento de
+ *  merge en dos fronteras distintas: acá la pausa del controller
+ *  (`pauseControllerGeneration`, que a diferencia de `ensureIntegrationLock`
+ *  se llama de nuevo cada vez porque el controller puede haberse relanzado
+ *  desde el último merge) y el pedido del job canónico son también DOS
+ *  fronteras separadas. El conjunto de satisfiers es SIEMPRE el completo y
+ *  ordenado de `track-integration:*` de la cohorte (C4) — nunca un
+ *  subconjunto, ni siquiera tras un crash/restart, porque `ids` es una
+ *  función determinista de `s.tracks` y la idempotencyKey de `requestJob` es
+ *  una función determinista de ese mismo conjunto. */
+async function runRequestFinalIntegration(
+    planRoot: string, branch: string, s: JournalState, protocol: CohortProtocol,
+    effect: Extract<ProtocolEffect, { kind: 'request-final-integration' }>, runtime: TrackRuntime,
+): Promise<EffectRunResult> {
+    const ids = [...new Set((s.tracks ?? []).map((t) => `track-integration:${t.trackId}`))].sort();
+    const existing = Object.values(s.jobs).find((j) => sameIdSet(j.satisfies, ids));
+    if (existing !== undefined) {
+        if (existing.executionState === 'exited' && existing.verdict === 'pass') {
+            let headNow: string;
+            try {
+                headNow = headSha(planRoot);
+            } catch {
+                return { state: s, stop: true, executed: null };
+            }
+            const observed = observeProtocolEffect(protocol, effect, { kind: 'integration-pass', jobId: existing.id, headSha: headNow });
+            const next = persist(planRoot, branch, applyProtocolToState(s, observed));
+            appendEvent(planRoot, branch, { kind: 'track-integration-passed', jobId: existing.id });
+            return { state: next, stop: true, executed: effect.kind };
+        }
+        // Sigue vivo, o terminó sin pass: nada que tocar este tick (fail-
+        // closed — un job canónico fallido requiere intervención humana, este
+        // driver jamás reintenta a ciegas con un job distinto).
+        return { state: s, stop: true, executed: null };
+    }
+    const pausedNow = await runtime.pauseControllerGeneration();
+    if (pausedNow) {
+        appendEvent(planRoot, branch, { kind: 'plan-generation-paused-for-integration' });
+        return { state: s, stop: true, executed: effect.kind };
+    }
+    if (s.trackIntegration === undefined) {
+        // Contrato canónico todavía no registrado (Step 6, `register --entity
+        // track-integration`): indemostrable qué comando correr — fail-closed,
+        // esperar a que se registre en vez de inventar un comando.
+        return { state: s, stop: true, executed: null };
+    }
+    const gen = s.generations.find((g) => g.state === 'active' || g.state === 'controller-suspected-stall');
+    try {
+        requestJob(planRoot, branch, gen?.token ?? 'no-active-generation', s.trackIntegration.argv, s.trackIntegration.paths, '.', {
+            satisfies: ids, verificationKind: 'track-integration',
+        });
+    } catch (error) {
+        // Precondición del Step 6 todavía no demostrable (merges pendientes,
+        // árbol sucio, argv no canónico): nada que tocar, reintentar el
+        // próximo tick con estado fresco.
+        appendEvent(planRoot, branch, { kind: 'track-integration-request-failed', detail: (error as Error).message });
+        return { state: s, stop: true, executed: null };
+    }
+    appendEvent(planRoot, branch, { kind: 'track-integration-requested', ids });
+    return { state: s, stop: true, executed: effect.kind };
+}
+
+/** R7.4/R7.5/C3 (Task 12): NO reimplementa el interlock — llama a
+ *  `computeGate`, el mismo mecanismo de R1/R3.2 que ya exige `qa`+`interlock`
+ *  en `cycleVerificationPlan` (y ahora también cada `track-integration:*`,
+ *  poblados por `registerTrackIntegrationItems`) y recomputa la vigencia de
+ *  CADA fingerprint contra el árbol real — "el interlock global existente"
+ *  al que se refiere el plan. Solo al pasar libera `integration.lock`
+ *  (R7.5), el complemento que Task 11 dejó explícitamente diferido. */
+function runRunFinalInterlock(
+    planRoot: string, branch: string, s: JournalState, protocol: CohortProtocol,
+    effect: Extract<ProtocolEffect, { kind: 'run-final-interlock' }>, runtime: TrackRuntime,
+): EffectRunResult {
+    const fingerprintNow: FingerprintNow = (argv, paths, cwd) => {
+        try { return computeFingerprint(planRoot, argv, paths, cwd).fingerprint; }
+        catch { return null; }
+    };
+    const gate = computeGate(s, false, fingerprintNow);
+    if (!gate.pass) return { state: s, stop: true, executed: null };   // fail-closed: esperar evidencia completa
+    if (protocol.globalQaHeadSha === undefined) throw new Error('invariante rota: globalQaHeadSha ausente en FINAL_INTERLOCK');
+    const observed = observeProtocolEffect(protocol, effect, { kind: 'interlock-pass', headSha: protocol.globalQaHeadSha });
+    const next = persist(planRoot, branch, applyProtocolToState(s, observed));
+    runtime.releaseIntegrationLockIfHeld();
+    appendEvent(planRoot, branch, { kind: 'cohort-complete' });
+    return { state: next, stop: true, executed: effect.kind };
+}
+
 /** cliEntry: mismo patrón que `defaultWrapperSpawner` en runner.ts — desde
  *  `dist/src/commands/watch/tracks.js`, `../../` resuelve a `dist/src/index.js`. */
 function defaultCliEntry(): string {
@@ -714,6 +912,9 @@ async function executeRuntimeEffect(
     if (effect.kind === 'begin-teardown') return runBeginTeardown(planRoot, branch, s, protocol, effect, runtime);
     if (effect.kind === 'freeze-track') return runFreezeTrack(planRoot, branch, s, protocol, effect, runtime);
     if (effect.kind === 'merge-track') return runMergeTrack(planRoot, branch, s, protocol, effect, runtime);
+    if (effect.kind === 'request-global-qa') return runRequestGlobalQa(planRoot, branch, s, protocol, effect);
+    if (effect.kind === 'request-final-integration') return runRequestFinalIntegration(planRoot, branch, s, protocol, effect, runtime);
+    if (effect.kind === 'run-final-interlock') return runRunFinalInterlock(planRoot, branch, s, protocol, effect, runtime);
     return runSpawnTrackSupervisor(planRoot, branch, s, protocol, effect as Extract<ProtocolEffect, { kind: 'spawn-track-supervisor' }>, runtime);
 }
 
@@ -980,6 +1181,32 @@ export function defaultTrackRuntime(planRoot: string, planBranch: string, grace:
             await stopControllerGenerationConfirmed(planRoot, planBranch, grace);
             integrationLock = acquireIntegrationLock(planRoot, { planJournalId, expectedPlanHeadSha });
             return 'acquired';
+        },
+        // R7/C3 (Task 12): a diferencia de `ensureIntegrationLock` (memoizado
+        // por el resto de la vida del proceso), esto se llama de nuevo cada
+        // vez que el driver de `request-final-integration` lo pide — el
+        // controller puede haberse relanzado desde el último merge (ej. para
+        // correr `post-implementation-qa`). `stopControllerGenerationConfirmed`
+        // ya es un no-op seguro sin generación activa; `hadActive` es lo que
+        // le permite al driver distinguir "hizo trabajo real" de "ya estaba
+        // pausado", mismo criterio que `'acquired'`/`'already-held'` arriba.
+        async pauseControllerGeneration() {
+            const r = readJournal(planRoot, planBranch);
+            if (r.corrupt || r.state === null) throw new Error('journal corrupto: no se puede pausar el controller del plan (R1.6)');
+            const hadActive = r.state.generations.some((g) => g.state === 'active' || g.state === 'controller-suspected-stall');
+            if (!hadActive) return false;
+            await stopControllerGenerationConfirmed(planRoot, planBranch, grace);
+            return true;
+        },
+        // R7.5 (Task 12): complemento de `ensureIntegrationLock` que Task 11
+        // dejó diferido — solo libera un lock que ESTE proceso adquirió
+        // (identidad verificada por `releaseIntegrationLock`, que compara
+        // `spawnNonce`), nunca uno ajeno.
+        releaseIntegrationLockIfHeld() {
+            if (integrationLock !== null) {
+                releaseIntegrationLock(integrationLock);
+                integrationLock = null;
+            }
         },
     };
 }

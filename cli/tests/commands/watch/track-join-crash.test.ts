@@ -276,6 +276,8 @@ describe('reconcileTracks — crash/restart de P2 (join) con git real (Task 11, 
                     calls.lock += 1;
                     return lockResult;
                 },
+                pauseControllerGeneration: async () => unexpected('pauseControllerGeneration')(),
+                releaseIntegrationLockIfHeld: unexpected('releaseIntegrationLockIfHeld'),
             };
         }
 
@@ -388,6 +390,8 @@ describe('reconcileTracks — crash/restart de P2 (join) con git real (Task 11, 
                 mergeFrozenTrack() { throw new Error(errorMessage); },
                 abortOwnedMerge() { throw new Error(errorMessage); },
                 async ensureIntegrationLock() { return 'already-held'; },
+                async pauseControllerGeneration() { return false; },
+                releaseIntegrationLockIfHeld() { /* no-op: sin cobertura en esta suite */ },
             };
         }
 
