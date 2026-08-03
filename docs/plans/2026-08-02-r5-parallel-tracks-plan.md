@@ -2478,7 +2478,7 @@ _Requirements: R1.1, R1.5, R2.2, R2.3, R2.4, R3.1, R3.2, R3.3, R3.4, R3.5, R3.6,
 - Modify: `../awm-baseline-registry/skills/post-implementation-qa/SKILL.md`
 - Create: `../awm-baseline-registry/tests/r5-track-contract.test.mjs`
 
-- [ ] **Step 1: Descubrir o clonar un checkout limpio y crear rama**
+- [x] **Step 1: Descubrir o clonar un checkout limpio y crear rama**
 
 ```bash
 test -e ../awm-baseline-registry/.git \
@@ -2494,7 +2494,7 @@ fi
 
 Expected: checkout limpio. Si `status --short` muestra cambios previos, detener esta task y preservar el trabajo ajeno; no usar reset/checkout destructivo.
 
-- [ ] **Step 2: Escribir primero el test de contrato**
+- [x] **Step 2: Escribir primero el test de contrato**
 
 ```js
 // ../awm-baseline-registry/tests/r5-track-contract.test.mjs
@@ -2533,7 +2533,7 @@ Run: `cd ../awm-baseline-registry && node --test tests/r5-track-contract.test.mj
 
 Expected: FAIL con los marcadores ausentes.
 
-- [ ] **Step 3: Extender `writing-plans` con gramática exacta**
+- [x] **Step 3: Extender `writing-plans` con gramática exacta**
 
 Agregar después de `Task Structure`:
 
@@ -2572,7 +2572,7 @@ must be explicit, including `[]`; omitted means serial. Resource IDs use
 
 No plan se marca paralelo por cantidad de tasks; se deriva del análisis de Files/recursos y conserva fallback serial.
 
-- [ ] **Step 4: Agregar modo track al skill SDD**
+- [x] **Step 4: Agregar modo track al skill SDD**
 
 Después de la sección journal-first existente, agregar:
 
@@ -2604,7 +2604,7 @@ In track mode:
   mutate until the plan supervisor reports the result.
 ```
 
-- [ ] **Step 5: Agregar guard final-head-only a post-implementation-qa**
+- [x] **Step 5: Agregar guard final-head-only a post-implementation-qa**
 
 Después de `When to Use`, agregar:
 
@@ -2624,7 +2624,7 @@ canonical integration argv and interlock; no mutation is allowed after that
 fingerprint is created.
 ```
 
-- [ ] **Step 6: Subir version de las tres skills y validar registry**
+- [x] **Step 6: Subir version de las tres skills y validar registry**
 
 Incrementar minor en el frontmatter `version` de cada skill porque cambia su contrato. No alterar nombres ni descripciones salvo que el validador lo exija.
 
@@ -2640,7 +2640,7 @@ bash scripts/check-skill-version-bumps.sh
 
 Expected: todas las pruebas PASS y `validate-portability` exit 0.
 
-- [ ] **Step 7: Commit en el registry**
+- [x] **Step 7: Commit en el registry**
 
 ```bash
 git -C ../awm-baseline-registry add skills/writing-plans/SKILL.md skills/subagent-driven-development/SKILL.md skills/post-implementation-qa/SKILL.md tests/r5-track-contract.test.mjs
