@@ -262,7 +262,9 @@ describe('reconcileTracks — crash/restart de P2 (join) con git real (Task 11, 
                 initTrackJournal: unexpected('initTrackJournal'),
                 spawnSupervisor: unexpected('spawnSupervisor'),
                 observeSupervisor: unexpected('observeSupervisor'),
-                teardownOwned: async () => unexpected('teardownOwned')(),
+                stopOwnSupervisor: async () => unexpected('stopOwnSupervisor')(),
+                removeOwnedWorktree: unexpected('removeOwnedWorktree'),
+                removeOwnedBranch: unexpected('removeOwnedBranch'),
                 emitFreezeRequest: unexpected('emitFreezeRequest'),
                 mergeFrozenTrack(repo, intent) {
                     calls.merge.push(intent.expectedTrackHeadSha);
@@ -382,7 +384,8 @@ describe('reconcileTracks — crash/restart de P2 (join) con git real (Task 11, 
             return {
                 addWorktree: real.addWorktree, initTrackJournal: real.initTrackJournal,
                 spawnSupervisor: real.spawnSupervisor, observeSupervisor: real.observeSupervisor,
-                teardownOwned: real.teardownOwned, emitFreezeRequest: real.emitFreezeRequest,
+                stopOwnSupervisor: real.stopOwnSupervisor, removeOwnedWorktree: real.removeOwnedWorktree,
+                removeOwnedBranch: real.removeOwnedBranch, emitFreezeRequest: real.emitFreezeRequest,
                 // Deliberadamente NUNCA llama a `real.mergeFrozenTrack`: el repo
                 // real queda intacto, así la relectura post-catch ve EXACTAMENTE
                 // lo mismo que `before` — la única forma honesta de probar que

@@ -1,10 +1,10 @@
 import {
-    assertProtocolInvariants, decidePrepare, initialCohort, nextProtocolEffect,
+    assertProtocolInvariants, decidePrepare, decideTeardown, initialCohort, nextProtocolEffect,
     observeProtocolEffect, reconcileProtocol,
 } from '../../../src/core/tracks/protocol';
 import type {
     CohortProtocol, PrepareDecision, PrepareObservation, ProtocolEffect,
-    ProtocolObservation, TrackProtocolState,
+    ProtocolObservation, TeardownDecision, TeardownObservation, TrackProtocolState,
 } from '../../../src/core/tracks/types';
 
 const ids = ['cli', 'docs'];
@@ -184,12 +184,14 @@ describe('parallel-track protocol model', () => {
 
 /** Recorrido acotado del espacio de estados con crash inyectado en cada frontera. */
 function exploreCohort(ids: string[]): {
-    states: CohortProtocol[]; effects: Set<ProtocolEffect['kind']>; prepareDecisions: Set<PrepareDecision>;
+    states: CohortProtocol[]; effects: Set<ProtocolEffect['kind']>;
+    prepareDecisions: Set<PrepareDecision>; teardownDecisions: Set<TeardownDecision>;
 } {
     const queue: CohortProtocol[] = [{ ...initialCohort('journal-1', ids), planHeadSha: 'plan-head' }];
     const seen = new Map<string, CohortProtocol>();
     const effects = new Set<ProtocolEffect['kind']>();
     const prepareDecisions = new Set<PrepareDecision>();
+    const teardownDecisions = new Set<TeardownDecision>();
     while (queue.length > 0 && seen.size < 20000) {
         const state = queue.shift()!;
         const key = JSON.stringify(state);
@@ -204,12 +206,12 @@ function exploreCohort(ids: string[]): {
             continue;
         }
         effects.add(effect.kind);
-        for (const observation of observationsFor(effect, state, prepareDecisions)) {
+        for (const observation of observationsFor(effect, state, prepareDecisions, teardownDecisions)) {
             queue.push(observeProtocolEffect(structuredClone(state), effect, observation));
             queue.push(reconcileProtocol(structuredClone(state), observation)); // crash antes de result
         }
     }
-    return { states: [...seen.values()], effects, prepareDecisions };
+    return { states: [...seen.values()], effects, prepareDecisions, teardownDecisions };
 }
 
 /** Requests que nacen fuera del reducer y por eso no son consecuencia de ningún effect. */
@@ -234,6 +236,27 @@ const PREPARE_OBSERVATIONS_FOR_WORKTREE: PrepareObservation[] = [
     {}, { worktreeOwned: true }, { worktreeOwned: true, worktreeForeignNonEmpty: true },
     { worktreeForeignNonEmpty: true }, { worktreeOwned: false, worktreeForeignNonEmpty: false },
 ];
+
+/** Las 7 decisiones que `decideTeardown` puede devolver (Task 13) — usado
+ *  para que la exploración denuncie si algún día devuelve algo fuera de este
+ *  conjunto, mismo criterio que `VALID_PREPARE_DECISIONS`. */
+const VALID_TEARDOWN_DECISIONS: readonly TeardownDecision[] = [
+    'persist-intent', 'stop-own-supervisor', 'accept-supervisor-stopped',
+    'remove-owned-worktree', 'remove-owned-branch', 'mark-removed', 'block-foreign',
+];
+
+/** Variantes de `TeardownObservation` relevantes a CADA fase de teardown —
+ *  mismo criterio que `PREPARE_OBSERVATIONS_FOR_WORKTREE`/`_SUPERVISOR`:
+ *  cubre lo que `gatherTeardownObservation` (`tracks.ts`) realmente puede
+ *  reunir en esa fase, más las variantes "ajeno" defensivas que
+ *  `decideTeardown` también contempla (Step 1 del plan T13). */
+const TEARDOWN_OBSERVATIONS_BY_PHASE: Partial<Record<TrackProtocolState['phase'], TeardownObservation[]>> = {
+    TEARDOWN_REQUESTED: [{}],
+    TEARDOWN_INTENT: [{}, { ownSupervisorAlive: true }, { ownSupervisorAlive: false }, { foreignSupervisor: true }],
+    SUPERVISOR_STOPPED: [{}, { ownedWorktreeExists: true }, { ownedWorktreeExists: false }, { foreignWorktree: true }],
+    WORKTREE_REMOVED: [{}, { ownedBranchExists: true }, { ownedBranchExists: false }],
+    BRANCH_REMOVED: [{}],
+};
 
 /** Idem para `spawn-track-supervisor` (fase SUPERVISOR_STARTING). */
 const PREPARE_OBSERVATIONS_FOR_SUPERVISOR: PrepareObservation[] = [
@@ -308,8 +331,45 @@ function decidePrepareObservationsFor(
     return out;
 }
 
+/**
+ * Task 13 (mismo criterio que `decidePrepareObservationsFor`, Task 9): llama
+ * a `decideTeardown` — la MISMA autoridad que usa `runBeginTeardown` — para
+ * cada `TeardownObservation` relevante a la fase ACTUAL del track en
+ * `begin-teardown`, y traduce cada decisión "ya resuelta" (`block-foreign`,
+ * `accept-supervisor-stopped`, `remove-owned-branch` desde SUPERVISOR_STOPPED,
+ * `mark-removed`) a la `teardown-observation` que un driver real produciría
+ * con ella (mismo mapeo que `runBeginTeardown` en `tracks.ts`). Las
+ * decisiones "falta trabajo real" (`stop-own-supervisor`,
+ * `remove-owned-worktree`, `remove-owned-branch` desde WORKTREE_REMOVED,
+ * `persist-intent`) no producen observación acá — su resultado real (éxito
+ * u `effect-failed`) ya lo cubre el `case 'begin-teardown'` de
+ * `observationsFor`.
+ */
+function decideTeardownObservationsFor(
+    effect: Exclude<ReturnType<typeof nextProtocolEffect>, null>, state: CohortProtocol, teardownDecisions: Set<TeardownDecision>,
+): ProtocolObservation[] {
+    if (effect.kind !== 'begin-teardown') return [];
+    const track = state.tracks[effect.trackId];
+    const variants = TEARDOWN_OBSERVATIONS_BY_PHASE[track.phase] ?? [{}];
+    const out: ProtocolObservation[] = [];
+    for (const observed of variants) {
+        const decision = decideTeardown(track, observed);
+        expect(VALID_TEARDOWN_DECISIONS).toContain(decision);
+        teardownDecisions.add(decision);
+        if (decision === 'block-foreign' || decision === 'accept-supervisor-stopped' || decision === 'mark-removed'
+            || (decision === 'remove-owned-branch' && track.phase === 'SUPERVISOR_STOPPED')) {
+            out.push({ kind: 'teardown-observation', trackId: effect.trackId, ...observed });
+        }
+        // 'persist-intent' / 'stop-own-supervisor' / 'remove-owned-worktree'
+        // / 'remove-owned-branch' (desde WORKTREE_REMOVED, branch real por
+        // remover): el driver TODAVÍA no completó el efecto real acá.
+    }
+    return out;
+}
+
 function observationsFor(
     effect: ReturnType<typeof nextProtocolEffect>, state: CohortProtocol, prepareDecisions: Set<PrepareDecision>,
+    teardownDecisions: Set<TeardownDecision>,
 ): ProtocolObservation[] {
     if (effect === null) return [];
     const base = ((): ProtocolObservation[] => {
@@ -334,10 +394,14 @@ function observationsFor(
                 { kind: 'supervisor-observed', trackId: effect.trackId, identity: 'expected', readinessNonce: 'nonce-ajeno' },
                 { kind: 'supervisor-observed', trackId: effect.trackId, identity: 'other' },
             ];
+            // T13: reemplaza las observaciones gruesas `track-removed`/
+            // `teardown-blocked` por el vocabulario fino de
+            // `TeardownObservation` — `decideTeardownObservationsFor` abajo
+            // agrega, además, las variantes específicas de la fase actual
+            // (mismo criterio que `decidePrepareObservationsFor`).
             case 'begin-teardown': return [
                 { kind: 'effect-applied', effect },
-                { kind: 'track-removed', trackId: effect.trackId },
-                { kind: 'teardown-blocked', trackId: effect.trackId, detail: 'identidad ajena' },
+                { kind: 'effect-failed', trackId: effect.trackId, effect: effect.kind, detail: 'worktree sucio: x' },
             ];
             case 'request-global-qa': return [{ kind: 'global-qa-pass', headSha: 'H-qa', clean: true }];
             case 'request-final-integration': return [{ kind: 'integration-pass', jobId: 'job-1', headSha: 'H-qa' }];
@@ -350,6 +414,10 @@ function observationsFor(
     // que este mismo `switch` ya listaba a mano.
     const seen = new Set(base.map((o) => JSON.stringify(o)));
     for (const observation of decidePrepareObservationsFor(effect, state, prepareDecisions)) {
+        const key = JSON.stringify(observation);
+        if (!seen.has(key)) { base.push(observation); seen.add(key); }
+    }
+    for (const observation of decideTeardownObservationsFor(effect, state, teardownDecisions)) {
         const key = JSON.stringify(observation);
         if (!seen.has(key)) { base.push(observation); seen.add(key); }
     }

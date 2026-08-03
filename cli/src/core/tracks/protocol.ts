@@ -3,6 +3,7 @@ import { JOIN_STRATEGY_NO_FF } from './types';
 import type {
     CohortProtocol, JoinDecision, JoinIntent, JoinObservation,
     PrepareDecision, PrepareObservation, ProtocolEffect, ProtocolObservation,
+    TeardownDecision, TeardownObservation,
     TrackPhase, TrackProtocolState,
 } from './types';
 
@@ -30,11 +31,18 @@ const required = <T>(value: T | undefined, name: string): T => {
     return value;
 };
 
-/** C2: un fallo demostrable no bloquea, entra al teardown probatorio de C9 — salvo que ya sea terminal o BLOCKED. */
-const markTeardownRequested = (tracks: CohortProtocol['tracks'], trackId: string | undefined): void => {
-    const failed = trackId === undefined ? undefined : tracks[trackId];
-    if (failed !== undefined && !['DECLARED', 'REMOVED', 'BLOCKED'].includes(failed.phase)) {
-        failed.phase = 'TEARDOWN_REQUESTED';
+/** C2: un fallo demostrable no bloquea, entra al teardown probatorio de C9 —
+ *  salvo que ya sea terminal o BLOCKED. T13 (R4.3/C9): marca TODOS los tracks
+ *  vivos de la cohorte (no solo el que falló) — `decideTeardown` exige la
+ *  fase `TEARDOWN_REQUESTED` literal como único punto de entrada al state
+ *  machine de teardown (Step 3 del plan), así que cualquier track que
+ *  `nextProtocolEffect` vaya a elegir para `begin-teardown` (uno a la vez,
+ *  ver el branch `FALLBACK_PENDING`) debe encontrarse YA en esa fase, sin
+ *  importar en qué punto de su propio trabajo estaba cuando la cohorte
+ *  entera cayó a fallback. */
+const markTeardownRequested = (tracks: CohortProtocol['tracks']): void => {
+    for (const t of Object.values(tracks)) {
+        if (!['DECLARED', 'REMOVED', 'BLOCKED'].includes(t.phase)) t.phase = 'TEARDOWN_REQUESTED';
     }
 };
 
@@ -98,6 +106,45 @@ export function decidePrepare(t: TrackProtocolState, observed: PrepareObservatio
     // las tres fases de arriba), pero si algún día lo fuera, abortar a
     // fallback es la única opción segura.
     return 'begin-fallback';
+}
+
+/**
+ * Autoridad única de teardown (Task 13, R4.2/R4.3/R4.6/R4.10/C2/C9): dado el
+ * estado protocolar de UN track y lo que el driver (`tracks.ts`/`teardown.ts`)
+ * pudo probar del mundo real (fs/git/proceso, siempre READ-ONLY — gathering
+ * nunca cuenta como el side effect del tick, mismo criterio que
+ * `decidePrepare`), decide el próximo paso durable. Ajeno gana SIEMPRE
+ * primero, sin importar la fase: nunca se avanza un teardown sobre una
+ * identidad de supervisor o un worktree cuyo ownership es indemostrable
+ * (R4.6/R4.10) — ni siquiera si esa fase normalmente ya habría progresado.
+ *
+ * `teardown.ts` reexporta esta función (mismo patrón que `join.ts` con
+ * `decideJoinReconciliation`) y solo aporta los efectos reales; `tracks.ts`
+ * (`runBeginTeardown`) la llama dos veces por transición real, igual que
+ * `runMergeTrack` llama `decideJoinReconciliation`: una vez ANTES de tocar
+ * `runtime` (para decidir CUÁL efecto —o ausencia de efecto— corresponde), y
+ * la fase final siempre se persiste a través de `reconcileProtocol`
+ * (`teardown-observation`), que vuelve a llamar a esta misma función sobre la
+ * observación fresca — nunca confía en el resultado de la llamada a
+ * `runtime` por sí solo.
+ *
+ * `BLOCKED` cae deliberadamente en el `throw` final: ninguna fase de entrada
+ * a esta función es alcanzable en `BLOCKED` (`nextProtocolEffect` ya filtra
+ * cualquier cohorte con un track `BLOCKED` ANTES de emitir `begin-teardown`
+ * para nadie, ver el branch `FALLBACK_PENDING`) — un track bloqueado nunca
+ * entra a teardown automático. La propiedad que lo bloqueó es indemostrable
+ * justamente ahí, y "arreglarlo" solo/a ciegas sería el error que C9 existe
+ * para evitar. Sale de `BLOCKED` únicamente con evidencia del operador, que
+ * lo devuelve a `TEARDOWN_REQUESTED` explícitamente — jamás automático.
+ */
+export function decideTeardown(ref: TrackProtocolState, o: TeardownObservation): TeardownDecision {
+    if (o.foreignSupervisor || o.foreignWorktree) return 'block-foreign';
+    if (ref.phase === 'TEARDOWN_REQUESTED') return 'persist-intent';
+    if (ref.phase === 'TEARDOWN_INTENT') return o.ownSupervisorAlive ? 'stop-own-supervisor' : 'accept-supervisor-stopped';
+    if (ref.phase === 'SUPERVISOR_STOPPED') return o.ownedWorktreeExists ? 'remove-owned-worktree' : 'remove-owned-branch';
+    if (ref.phase === 'WORKTREE_REMOVED') return o.ownedBranchExists ? 'remove-owned-branch' : 'mark-removed';
+    if (ref.phase === 'BRANCH_REMOVED') return 'mark-removed';
+    throw new Error(`teardown no válido desde ${ref.phase}`);
 }
 
 export function initialCohort(planJournalId: string, trackIds: string[], maxParallel = trackIds.length): CohortProtocol {
@@ -201,14 +248,26 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
     if (observation.kind === 'prepare-failed') {
         out.cohortPhase = 'FALLBACK_PENDING';
         out.fallbackReason = `prepare-failed:${observation.trackId}`;
-        markTeardownRequested(out.tracks, observation.trackId);
+        markTeardownRequested(out.tracks);
     } else if (observation.kind === 'effect-failed') {
         if (out.cohortPhase === 'PREPARING') {
             out.cohortPhase = 'FALLBACK_PENDING';
             out.fallbackReason = `effect-failed:${observation.effect}`;
-            markTeardownRequested(out.tracks, observation.trackId);
+            markTeardownRequested(out.tracks);
+        } else if (observation.effect === 'begin-teardown' && observation.trackId !== undefined) {
+            // T13 (C9): un paso de teardown que no pudo probarse seguro
+            // (worktree sucio, branch todavía checked-out, ownership
+            // indemostrable) bloquea ESE track — nunca se fuerza `--force`/
+            // `-D` para "resolver" el fallo (R4.10). Mismo dead-end que
+            // `decideTeardown` documenta para BLOCKED: solo el operador lo
+            // saca de acá.
+            const t = out.tracks[observation.trackId];
+            if (t !== undefined) {
+                t.phase = 'BLOCKED';
+                t.blockedReason = observation.detail;
+            }
         }
-        // effect-failed fuera de PREPARING: sin transición definida todavía (no ejercitado por T1).
+        // effect-failed fuera de PREPARING/begin-teardown: sin transición definida todavía (no ejercitado por T1).
     } else if (observation.kind === 'worktree-observed') {
         const t = out.tracks[observation.trackId];
         if (t === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
@@ -237,15 +296,34 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
         const t = out.tracks[observation.trackId];
         if (t === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
         if (t.phase === 'ACTIVE') t.phase = 'JOIN_REQUESTED';
-    } else if (observation.kind === 'track-removed') {
+    } else if (observation.kind === 'teardown-observation') {
         const t = out.tracks[observation.trackId];
         if (t === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
-        t.phase = 'REMOVED'; // T13 refina los pasos intermedios; acá importa el resultado probado
-    } else if (observation.kind === 'teardown-blocked') {
-        const t = out.tracks[observation.trackId];
-        if (t === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
-        t.phase = 'BLOCKED';
-        t.blockedReason = observation.detail;
+        // Autoridad única: la misma función que T13 prueba con su matriz
+        // pura completa (mismo criterio que `join-observation` arriba con
+        // `decideJoinReconciliation`) — nunca se reimplementa el mapeo acá.
+        const decision = decideTeardown(t, observation);
+        if (decision === 'block-foreign') {
+            t.phase = 'BLOCKED';
+            t.blockedReason = observation.foreignSupervisor ? 'identidad de supervisor ajena' : 'worktree preexistente ajeno';
+        } else if (decision === 'accept-supervisor-stopped') {
+            t.phase = 'SUPERVISOR_STOPPED';
+        } else if (decision === 'remove-owned-branch' && t.phase === 'SUPERVISOR_STOPPED') {
+            // Sin worktree propio que remover (nunca existió, o ya se quitó
+            // en un intento previo que crasheó antes de persistir esto):
+            // mecánicamente ya se alcanzó WORKTREE_REMOVED, nada más que probar.
+            t.phase = 'WORKTREE_REMOVED';
+        } else if (decision === 'mark-removed' && t.phase === 'WORKTREE_REMOVED') {
+            // Sin branch propia que remover: mecánicamente ya se alcanzó BRANCH_REMOVED.
+            t.phase = 'BRANCH_REMOVED';
+        } else if (decision === 'mark-removed' && t.phase === 'BRANCH_REMOVED') {
+            t.phase = 'REMOVED';
+        }
+        // 'persist-intent' / 'stop-own-supervisor' / 'remove-owned-worktree'
+        // / 'remove-owned-branch' (todavía desde WORKTREE_REMOVED, con la
+        // branch real por remover): el driver TODAVÍA no completó el efecto
+        // real — nada que avanzar en ESTA observación; el próximo
+        // re-observe (tras el efecto) sí lo hace.
     } else if (observation.kind === 'freeze-observation') {
         const t = out.tracks[observation.trackId];
         if (t === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
@@ -295,7 +373,7 @@ export function observeProtocolEffect(s: CohortProtocol, effect: ProtocolEffect,
     if (observation.kind === 'effect-failed' || observation.kind === 'prepare-failed' || observation.kind === 'join-observation'
         || observation.kind === 'freeze-observation' || observation.kind === 'join-requested'
         || observation.kind === 'supervisor-observed' || observation.kind === 'worktree-observed'
-        || observation.kind === 'track-removed' || observation.kind === 'teardown-blocked'
+        || observation.kind === 'teardown-observation'
         || observation.kind === 'global-qa-pass'
         || observation.kind === 'integration-pass' || observation.kind === 'interlock-pass') {
         // reconcileProtocol clona internamente: pasar `s` sin clonar acá evita un structuredClone redundante.

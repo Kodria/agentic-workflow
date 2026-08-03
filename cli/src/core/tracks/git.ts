@@ -116,21 +116,45 @@ export function ownedWorktreeExists(repo: string, worktreePath: string, branch: 
     return false;
 }
 
-/** Task 9 (paso BRANCH_REMOVED del teardown provisorio, T13 lo reemplaza):
- *  borra la branch local determinista de un track SOLO después de que su
- *  worktree ya se quitó (git rehúsa borrar una branch checked-out en un
- *  worktree vivo). `-D` porque a esta altura (fallback pre-merge) la branch
- *  de un track siempre tiene commits propios sin mergear a `main`. Nunca
- *  lanza si la branch ya no existe — idempotente ante reintentos tras crash
- *  (R4.2), igual criterio que `removeOwnedBranch`'s caller nunca reintenta
- *  sobre algo que ya desapareció. */
-export function removeOwnedBranch(repo: string, branch: string): void {
+/** Task 13 (R4.10/C9): `true` <=> la branch local determinista existe. Nombre
+ *  determinista (derivado 1:1 del trackId al declarar la cohorte), así que
+ *  su mera existencia ya es prueba de ownership — a diferencia de un
+ *  worktree (contenido de filesystem que SÍ podría ser ajeno), una branch es
+ *  solo un ref; nada más crea una con ese nombre exacto. */
+export function branchExists(repo: string, branch: string): boolean {
     try {
         git(repo, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`]);
+        return true;
     } catch {
-        return; // ya no existe: nada que hacer
+        return false;
     }
-    git(repo, ['branch', '-D', branch]);
+}
+
+/** Task 9 (paso BRANCH_REMOVED, Task 13 endurece el guard — R4.10/C9): borra
+ *  la branch local determinista de un track SOLO después de que su worktree
+ *  ya se quitó. `-d` (nunca `-D`, Step 4 del plan T13): un track que se
+ *  aborta durante el teardown durable normalmente nunca divergió de su
+ *  `baseSha` (si divergió, esos commits merecen quedar vivos hasta que un
+ *  operador decida, no borrarse a la fuerza) — `-d` rehúsa por sí solo si no
+ *  está mergeada, que es exactamente el comportamiento fail-closed que C9
+ *  exige. Verifica explícitamente que la branch no siga checked out en
+ *  ningún worktree ANTES de intentar el borrado (git también lo rehúsa
+ *  nativamente, pero el chequeo explícito produce un mensaje diagnóstico
+ *  claro y, sobre todo, trata un `git worktree list` indemostrable como
+ *  bloqueo — nunca como "no está checked out"). Nunca lanza si la branch ya
+ *  no existe — idempotente ante reintentos tras crash (R4.2). */
+export function removeOwnedBranch(repo: string, branch: string): void {
+    if (!branchExists(repo, branch)) return; // ya no existe: nada que hacer
+    let out: string;
+    try {
+        out = git(repo, ['worktree', 'list', '--porcelain']);
+    } catch (error) {
+        throw new Error(`no se pudo verificar si ${branch} sigue checked out — indemostrable: ${(error as Error).message}`);
+    }
+    if (out.split('\n').includes(`branch refs/heads/${branch}`)) {
+        throw new Error(`branch ${branch} sigue checked out en un worktree: no se borra`);
+    }
+    git(repo, ['branch', '-d', branch]);
 }
 
 export function gitCheckTrackId(id: string): boolean {
@@ -159,11 +183,22 @@ export function addOwnedWorktree(repo: string, ref: TrackRef, baseSha: string): 
     git(repo, ['worktree', 'add', '-b', ref.branch, ref.worktreePath, baseSha]);
 }
 
-/** El worktree es NUESTRO (lo acabamos de crear en esta misma llamada) — esto
- *  jamás borra algo ajeno (R4.6): es deshacer un intento propio que no pasó
- *  una validación posterior (ej. C2, `.awm` no ignorado en `baseSha`). */
+/** El worktree es NUESTRO — o recién creado en la misma llamada (C2, ej.
+ *  `.awm` no ignorado en `baseSha`), o probado por ownership completo antes
+ *  de llegar acá (Task 13, ver `worktreeOwnershipProven` en `teardown.ts`) —
+ *  esto jamás borra algo ajeno (R4.6). Task 13 (R4.10/C9, Step 4 del plan)
+ *  endurece el guard: YA NO fuerza (`--force` eliminado) — un worktree sucio
+ *  bloquea, nombrando los paths sin commitear, en vez de descartar trabajo
+ *  real sin dejar rastro. `dirtyPaths` sobre el WORKTREE mismo (no sobre
+ *  `repo`): cada worktree tiene su propio árbol de trabajo/index, así que
+ *  `git status` corrido ahí es la única fuente honesta de su propia
+ *  limpieza. */
 export function removeOwnedWorktree(repo: string, worktreePath: string): void {
-    git(repo, ['worktree', 'remove', '--force', worktreePath]);
+    const dirty = dirtyPaths(worktreePath);
+    if (dirty.length > 0) {
+        throw new Error(`worktree sucio, no se remueve sin --force: ${[...dirty].sort().join(', ')}`);
+    }
+    git(repo, ['worktree', 'remove', worktreePath]);
 }
 
 /** R6.2/R6.6-R6.9/C7 (Task 11): lee el `MERGE_HEAD` REAL del repo — no

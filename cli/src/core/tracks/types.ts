@@ -51,6 +51,41 @@ export type ProtocolEffect =
     | { kind: 'begin-teardown'; trackId: string }
     | { kind: 'enter-serial'; reason: string };
 
+/** T13 (R4.2/R4.3/R4.6/R4.10/C2/C9): lo que el driver pudo probar del mundo
+ *  real, READ-ONLY, sobre UN track en teardown — mismo vocabulario plano que
+ *  `PrepareObservation` (campos opcionales, `?` para "todavía no se pudo
+ *  determinar"). `foreignSupervisor`/`foreignWorktree` ganan primero en
+ *  `decideTeardown` sin importar la fase: identidad/ownership ajena nunca se
+ *  toca, sin importar en qué paso del teardown esté el track. */
+export interface TeardownObservation {
+    /** TEARDOWN_INTENT: el `supervisorProcessRef` propio sigue vivo con
+     *  identidad confirmada (`refIsAlive`). */
+    ownSupervisorAlive?: boolean;
+    /** Cualquier fase: el supervisor observado NO es el que este track
+     *  spawneó (defensivo — el driver real no produce este caso hoy, ver
+     *  comentario de `decideTeardown`, mismo criterio que `begin-fallback`
+     *  en `decidePrepare`). */
+    foreignSupervisor?: boolean;
+    /** SUPERVISOR_STOPPED: el worktree del track existe y es demostrablemente
+     *  nuestro (`teardownIntent` + `.awm/track.json` + `git worktree list`
+     *  coinciden). */
+    ownedWorktreeExists?: boolean;
+    /** SUPERVISOR_STOPPED: el worktree existe pero su ownership es
+     *  indemostrable — nunca se adopta ni se borra (R4.6/R4.10). */
+    foreignWorktree?: boolean;
+    /** WORKTREE_REMOVED: la branch determinista del track sigue existiendo. */
+    ownedBranchExists?: boolean;
+}
+
+/** T13: decisiones que `decideTeardown` puede tomar frente a un
+ *  `TeardownObservation` — `tracks.ts`/`teardown.ts` únicamente traducen cada
+ *  una al efecto real (o a la ausencia de efecto) correspondiente, nunca
+ *  reimplementan la decisión (regla de autoridad única de `protocol.ts`). */
+export type TeardownDecision =
+    | 'persist-intent' | 'stop-own-supervisor' | 'accept-supervisor-stopped'
+    | 'remove-owned-worktree' | 'remove-owned-branch' | 'mark-removed'
+    | 'block-foreign';
+
 export type ProtocolObservation =
     | { kind: 'effect-applied'; effect: ProtocolEffect }
     | { kind: 'effect-failed'; trackId?: string; effect: ProtocolEffect['kind']; detail: string }
@@ -60,8 +95,11 @@ export type ProtocolObservation =
     | { kind: 'join-requested'; trackId: string }
     | { kind: 'freeze-observation'; trackId: string; frozenHeadSha: string }
     | { kind: 'join-observation'; trackId: string; mergeHead: string | null; planHead: string; trackIsAncestor?: boolean }
-    | { kind: 'track-removed'; trackId: string }
-    | { kind: 'teardown-blocked'; trackId: string; detail: string }
+    // T13: reemplaza las observaciones gruesas `track-removed`/`teardown-
+    // blocked` de T1 — `reconcileProtocol` recalcula `decideTeardown` sobre
+    // ESTA observación para decidir el próximo paso durable (mismo criterio
+    // que `join-observation`/`decideJoinReconciliation`, T11).
+    | ({ kind: 'teardown-observation'; trackId: string } & TeardownObservation)
     | { kind: 'global-qa-pass'; headSha: string; clean: boolean }
     | { kind: 'integration-pass'; jobId: string; headSha: string }
     | { kind: 'interlock-pass'; headSha: string };

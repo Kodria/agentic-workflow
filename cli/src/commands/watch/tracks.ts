@@ -14,21 +14,22 @@ import { emitRequest, listPendingRequests } from '../../core/journal/requests';
 import { supervisorLockPath } from '../../core/journal/paths';
 import { refIsAlive } from '../../core/journal/process';
 import { computeFingerprint } from '../../core/journal/fingerprint';
-import { decidePrepare, decideJoinReconciliation, nextProtocolEffect, observeProtocolEffect } from '../../core/tracks/protocol';
+import { decidePrepare, decideJoinReconciliation, decideTeardown, nextProtocolEffect, observeProtocolEffect } from '../../core/tracks/protocol';
 import {
-    addOwnedWorktree, removeOwnedWorktree, removeOwnedBranch,
-    isAwmGitignored, foreignPathExists, ownedWorktreeExists,
+    addOwnedWorktree, isAwmGitignored, foreignPathExists, ownedWorktreeExists, branchExists,
     mergeBase, changedPaths, headSha, readMergeHead, isAncestor, dirtyPaths,
     mergeFrozenTrack as gitMergeFrozenTrack, abortOwnedMerge as gitAbortOwnedMerge,
+    removeOwnedWorktree as gitRemoveOwnedWorktree, removeOwnedBranch as gitRemoveOwnedBranch,
 } from '../../core/tracks/git';
 import { assessActualOwnership } from '../../core/tracks/ownership';
 import { writeDescriptor } from '../../core/tracks/descriptor';
 import { acquireIntegrationLock, releaseIntegrationLock, stopControllerGenerationConfirmed } from '../../core/tracks/join';
+import { worktreeOwnershipProven } from '../../core/tracks/teardown';
 import { requestJob } from '../job/request';
 import { computeGate, FingerprintNow } from '../job/gate';
 import { spawnStructured, groupIsGone, terminatePreviouslyOwnedGroup } from '../../core/journal/process';
 import { JOIN_STRATEGY_NO_FF } from '../../core/tracks/types';
-import type { CohortProtocol, JoinIntent, PrepareObservation, ProtocolEffect, TrackProtocolState } from '../../core/tracks/types';
+import type { CohortProtocol, JoinIntent, PrepareObservation, ProtocolEffect, TeardownObservation, TrackProtocolState } from '../../core/tracks/types';
 import type { IntegrationLockHandle } from '../../core/tracks/join';
 import type { ParsedTrack } from '../../core/tracks/plan-parser';
 import type { JournalState, TrackContext, TrackRef, ProcessRef } from '../../core/journal/types';
@@ -70,21 +71,30 @@ export type SupervisorObservation =
     | { kind: 'ready'; readinessNonce: string }
     | { kind: 'foreign' };
 
-/** Task 9 (interfaz TEMPORAL — Task 13 la reemplaza por el módulo dedicado
- *  de teardown sin cambiar esta firma, ver plan R5 Task 13 / Step 5):
- *  `tracks.ts` decide CUÁL paso corresponde mirando `ref.phase` (dato del
- *  journal que ya le pertenece a este driver) — `teardownOwned` solo lo
- *  ejecuta contra el mundo real. `'blocked'` <=> el paso es indemostrable
- *  (ej. no se pudo confirmar la terminación del grupo del supervisor con
- *  identidad verificada, R4.8) y el track debe bloquearse en vez de avanzar. */
-export type TeardownStep = 'supervisor' | 'worktree' | 'branch';
-
 export interface TrackRuntime {
     addWorktree(planRoot: string, ref: TrackRef, baseSha: string): void;
     initTrackJournal(ref: TrackRef, context: TrackContext): void;
     spawnSupervisor(ref: TrackRef): ProcessRef | void;
     observeSupervisor(ref: TrackRef): SupervisorObservation;
-    teardownOwned(ref: TrackRef, step: TeardownStep): Promise<'ok' | 'blocked'>;
+    // Task 13 (R4.2/R4.3/R4.6/R4.10/C2/C9): reemplaza el `teardownOwned(ref,
+    // step)` TEMPORAL de Task 9 por tres primitivos separados, uno por
+    // EFECTO real distinto — mismo criterio que `mergeFrozenTrack`/
+    // `abortOwnedMerge` (Task 11): la decisión de CUÁL llamar (o de no llamar
+    // ninguno) vive siempre en `decideTeardown`/`runBeginTeardown`, nunca acá.
+    // Identity-verified: jamás un `kill(pid)` crudo — `true` <=> el grupo del
+    // supervisor propio quedó confirmado ausente (recién ahora, o ya lo
+    // estaba: misma dualidad que el resto de esta interfaz, ej.
+    // `accept-worktree`/`accept-readiness`).
+    stopOwnSupervisor(ref: TrackRef): Promise<boolean>;
+    // El caller (`runBeginTeardown`) ya probó ownership completo
+    // (`worktreeOwnershipProven`: `teardownIntent` + `.awm/track.json` +
+    // `git worktree list`) ANTES de llamar esto — acá solo falta el efecto
+    // real (`git.ts`'s `removeOwnedWorktree` ya aplica el guard de limpieza,
+    // bloqueando si está sucio, y jamás usa `--force`).
+    removeOwnedWorktree(repo: string, ref: TrackRef): void;
+    // `git.ts`'s `removeOwnedBranch` ya verifica que no siga checked out y
+    // usa SIEMPRE `-d` (nunca `-D`, R4.10).
+    removeOwnedBranch(repo: string, branch: string): void;
     // R5.2/R6.3 (Task 10): único touch REAL de `freeze-track` — escribe
     // `track-freeze-request` al `requestsDir` PROPIO del track (cross-
     // worktree, mismo primitivo durable `emitRequest` que cualquier otra
@@ -857,61 +867,175 @@ function runSpawnTrackSupervisor(
     throw new Error(`invariante rota: observación de supervisor no manejada para ${trackId}`);
 }
 
-/** Fases del teardown provisorio (Step 5, T13 reemplaza el cuerpo sin cambiar
- *  `TrackRuntime.teardownOwned`) que ya dejaron TODO su trabajo real hecho —
- *  `nextProtocolEffect` sigue emitiendo `begin-teardown` para este trackId
- *  hasta que llegue a `REMOVED` (no hay un `ProtocolEffect` por paso; son
- *  transiciones mecánicas, siempre en el mismo orden, sin ninguna decisión
- *  que dependa de una observación — por eso `tracks.ts` las persiste
- *  directamente en vez de rebotarlas por `observeProtocolEffect`). */
-const TEARDOWN_STEP_FOR_PHASE: Partial<Record<TrackRef['phase'], TeardownStep>> = {
-    TEARDOWN_INTENT: 'supervisor', SUPERVISOR_STOPPED: 'worktree', WORKTREE_REMOVED: 'branch',
-};
-const TEARDOWN_NEXT_PHASE: Record<TeardownStep, TrackRef['phase']> = {
-    supervisor: 'SUPERVISOR_STOPPED', worktree: 'WORKTREE_REMOVED', branch: 'BRANCH_REMOVED',
-};
+/** Task 13 (R4.2/R4.3/R4.6/R4.10/C2/C9): gathering READ-ONLY del estado real
+ *  de UN track en teardown — jamás cuenta como el side effect del tick
+ *  (mismo criterio que `ownedWorktreeExists`/`foreignPathExists` en
+ *  `runCreateWorktree`). Solo reúne los campos que la fase ACTUAL necesita
+ *  (`decideTeardown` ignora el resto): `ownSupervisorAlive` en
+ *  `TEARDOWN_INTENT`, `ownedWorktreeExists`/`foreignWorktree` en
+ *  `SUPERVISOR_STOPPED`, `ownedBranchExists` en `WORKTREE_REMOVED`.
+ *  `foreignSupervisor` deliberadamente nunca se produce acá: `refIsAlive`
+ *  compara identidad completa (pid+startTime+pgid+argsDigest), así que un
+ *  PID reciclado por otro proceso ya se reporta como "nuestro está muerto"
+ *  (`ownSupervisorAlive: false`), nunca como "ajeno" — el campo existe en
+ *  `TeardownObservation`/`decideTeardown` para la matriz pura y como defensa
+ *  fail-closed, mismo criterio que `begin-fallback` en `decidePrepare`
+ *  (nunca seleccionado por el driver real, pero cubierto por la autoridad
+ *  única igual). */
+function gatherTeardownObservation(planRoot: string, s: JournalState, ref: TrackRef): TeardownObservation {
+    if (ref.phase === 'TEARDOWN_INTENT') {
+        // Step 4 del plan: "supervisor propio muerto confirmado Y lock
+        // ausente" — un proceso identity-verified muerto que dejó su lock
+        // advisory sin liberar (crash a mitad de su propia salida, mismo
+        // riesgo que `runFreezeTrack` ya trata con `supervisorAlive ||
+        // lockExists`) todavía no prueba que sea seguro tocar el worktree.
+        // `ownSupervisorAlive: true` acá simplemente reintenta
+        // `stop-own-supervisor` en el próximo tick — inofensivo si el
+        // proceso ya está muerto (`groupIsGone` ya es `true`, no-op real),
+        // fail-closed si el lock sigue de verdad retenido.
+        const processAlive = ref.supervisorProcessRef !== undefined && refIsAlive(ref.supervisorProcessRef);
+        // `supervisorLockPath` exige un directorio real (`fs.realpathSync`)
+        // — un track abandonado ANTES de que su worktree llegara a existir
+        // (ej. `create-worktree` falló para el track siguiente, R4.5) nunca
+        // tuvo dónde escribir un lock: ausencia de directorio = ausencia de
+        // lock, nunca "indemostrable".
+        const lockExists = fs.existsSync(ref.worktreePath) && fs.existsSync(supervisorLockPath(ref.worktreePath));
+        return { ownSupervisorAlive: processAlive || lockExists };
+    }
+    if (ref.phase === 'SUPERVISOR_STOPPED') {
+        if (!fs.existsSync(ref.worktreePath)) return { ownedWorktreeExists: false };
+        if (worktreeOwnershipProven(planRoot, ref, s.journalId)) return { ownedWorktreeExists: true };
+        // Existe, pero no se pudo probar que es nuestro (R4.6/R4.10): jamás
+        // se adopta ni se borra a ciegas — bloquea en vez de saltear.
+        return { foreignWorktree: true };
+    }
+    if (ref.phase === 'WORKTREE_REMOVED') {
+        return { ownedBranchExists: branchExists(planRoot, ref.branch) };
+    }
+    return {};
+}
 
+/** Task 13 (R4.2/R4.3/R4.6/R4.10/C2/C9): reemplaza el `teardownOwned(ref,
+ *  step)` TEMPORAL de Task 9 por el state machine completo de
+ *  `decideTeardown` (`protocol.ts`, autoridad única) — a lo sumo UN efecto
+ *  real por invocación, siempre persistido a través de `observeProtocolEffect`
+ *  (nunca un `withRef` directo con una fase inventada acá, salvo para el
+ *  snapshot no-decisional de `teardownIntent`), mismo criterio "gather ->
+ *  decide -> tocar el mundo real como mucho una vez -> persistir -> stop"
+ *  que `runCreateWorktree`/`runFreezeTrack`/`runMergeTrack`.
+ *
+ *  Cada llamada a `decideTeardown` ocurre sobre la observación YA reunida
+ *  (`observed`, antes de cualquier efecto): las decisiones "ya resuelto"
+ *  (`accept-supervisor-stopped`, `mark-removed`, `block-foreign`) no
+ *  necesitan tocar `runtime` — la observación existente alcanza para
+ *  persistir el avance. Las decisiones "falta trabajo real"
+ *  (`stop-own-supervisor`, `remove-owned-worktree`, `remove-owned-branch`)
+ *  ejecutan EXACTAMENTE un efecto y vuelven a observar el mundo real después,
+ *  persistiendo esa observación fresca — es `reconcileProtocol` quien, sobre
+ *  ESA observación, vuelve a llamar `decideTeardown` para fijar la fase
+ *  resultante (mismo patrón exacto que `runMergeTrack` con
+ *  `decideJoinReconciliation`, T11: nunca se confía en que el efecto en sí
+ *  haya funcionado, la relectura es la única fuente de verdad). */
 async function runBeginTeardown(
     planRoot: string, branch: string, s: JournalState, protocol: CohortProtocol,
     effect: Extract<ProtocolEffect, { kind: 'begin-teardown' }>, runtime: TrackRuntime,
 ): Promise<EffectRunResult> {
     const trackId = effect.trackId;
     const ref = refOf(s, trackId);
+    const observed = gatherTeardownObservation(planRoot, s, ref);
+    const decision = decideTeardown(protocol.tracks[trackId], observed);
 
-    if (TEARDOWN_STEP_FOR_PHASE[ref.phase] === undefined && ref.phase !== 'BRANCH_REMOVED') {
-        // Primera vez que este trackId entra a teardown (venía de cualquier
-        // fase de trabajo, o de un teardown que crasheó antes de persistir
-        // siquiera `TEARDOWN_INTENT`): la única transición que SÍ pasa por
-        // `protocol.ts` (`EFFECT_APPLIED_PHASE['begin-teardown']` ya la
-        // mapea a `TEARDOWN_INTENT`), el resto de los pasos son mecánicos.
+    if (decision === 'persist-intent') {
+        // Único paso que además de la fase (`EFFECT_APPLIED_PHASE` ya mapea
+        // `begin-teardown` -> `TEARDOWN_INTENT`) captura el snapshot durable
+        // que Step 4 exige para probar ownership del worktree más adelante —
+        // dato del journal, no del protocolo puro, así que se aplica con
+        // `withRef` en la MISMA persistencia (una sola frontera, no dos).
         const applied = observeProtocolEffect(protocol, effect, { kind: 'effect-applied', effect });
-        const next = persist(planRoot, branch, applyProtocolToState(s, applied));
+        const withIntent = withRef(applyProtocolToState(s, applied), trackId, {
+            teardownIntent: { worktreePath: ref.worktreePath, branch: ref.branch, supervisorNonce: ref.supervisorProcessRef?.spawnNonce },
+        });
+        const next = persist(planRoot, branch, withIntent);
         appendEvent(planRoot, branch, { kind: 'track-teardown-step', trackId, step: 'TEARDOWN_INTENT' });
-        return { state: next, stop: true, executed: null };
-    }
-
-    const step = TEARDOWN_STEP_FOR_PHASE[ref.phase];
-    if (step !== undefined) {
-        const result = await runtime.teardownOwned(ref, step);
-        if (result === 'blocked') {
-            const blocked = observeProtocolEffect(protocol, effect, { kind: 'teardown-blocked', trackId, detail: `paso de teardown '${step}' indemostrable` });
-            const next = persist(planRoot, branch, applyProtocolToState(s, blocked));
-            appendEvent(planRoot, branch, { kind: 'track-blocked', trackId, reason: `teardown:${step}` });
-            return { state: next, stop: true, executed: effect.kind };
-        }
-        const nextPhase = TEARDOWN_NEXT_PHASE[step];
-        const next = persist(planRoot, branch, withRef(s, trackId, { phase: nextPhase }));
-        appendEvent(planRoot, branch, { kind: 'track-teardown-step', trackId, step: nextPhase });
         return { state: next, stop: true, executed: effect.kind };
     }
 
-    // ref.phase === 'BRANCH_REMOVED': worktree y branch ya se removieron —
-    // solo falta la observación de protocolo (autoridad única) que marca el
-    // track REMOVED de verdad, la misma que `protocol.test.ts` ya explora
-    // para el efecto `begin-teardown` (Step 3/T1).
-    const removed = observeProtocolEffect(protocol, effect, { kind: 'track-removed', trackId });
-    const next = persist(planRoot, branch, applyProtocolToState(s, removed));
-    appendEvent(planRoot, branch, { kind: 'track-removed', trackId });
+    if (decision === 'block-foreign') {
+        const blocked = observeProtocolEffect(protocol, effect, { kind: 'teardown-observation', trackId, ...observed });
+        const next = persist(planRoot, branch, applyProtocolToState(s, blocked));
+        appendEvent(planRoot, branch, {
+            kind: 'track-blocked', trackId,
+            reason: observed.foreignSupervisor ? 'identidad de supervisor ajena' : 'worktree preexistente ajeno',
+        });
+        return { state: next, stop: true, executed: null };
+    }
+
+    if (decision === 'accept-supervisor-stopped' || decision === 'mark-removed') {
+        // Ya resuelto por la observación reunida — ningún touch nuevo de
+        // `runtime` este tick (mismo criterio que 'accept-worktree' en
+        // `runCreateWorktree`).
+        const applied = observeProtocolEffect(protocol, effect, { kind: 'teardown-observation', trackId, ...observed });
+        const next = persist(planRoot, branch, applyProtocolToState(s, applied));
+        appendEvent(planRoot, branch, { kind: 'track-teardown-step', trackId, step: refOf(next, trackId).phase });
+        return { state: next, stop: true, executed: effect.kind };
+    }
+
+    if (decision === 'stop-own-supervisor') {
+        // R4.8: identity-verified — jamás un `kill(pid)` crudo. `true` <=>
+        // grupo confirmado ausente (recién ahora, o ya lo estaba).
+        const confirmed = await runtime.stopOwnSupervisor(ref);
+        const after: TeardownObservation = { ownSupervisorAlive: !confirmed };
+        const applied = observeProtocolEffect(protocol, effect, { kind: 'teardown-observation', trackId, ...after });
+        const next = persist(planRoot, branch, applyProtocolToState(s, applied));
+        appendEvent(planRoot, branch, { kind: 'track-teardown-step', trackId, step: confirmed ? 'SUPERVISOR_STOPPED' : 'TEARDOWN_INTENT' });
+        return { state: next, stop: true, executed: effect.kind };
+    }
+
+    if (decision === 'remove-owned-worktree') {
+        // Ownership YA probado por `gatherTeardownObservation`
+        // (`worktreeOwnershipProven`) para que `decideTeardown` llegara acá —
+        // lo único que falta es el efecto real (`git.ts` aplica el guard de
+        // limpieza, bloqueando si está sucio, y nunca usa `--force`).
+        try {
+            runtime.removeOwnedWorktree(planRoot, ref);
+        } catch (error) {
+            const failed = observeProtocolEffect(protocol, effect, { kind: 'effect-failed', trackId, effect: effect.kind, detail: (error as Error).message });
+            const next = persist(planRoot, branch, applyProtocolToState(s, failed));
+            appendEvent(planRoot, branch, { kind: 'track-effect-failed', trackId, effect: effect.kind, detail: (error as Error).message });
+            return { state: next, stop: true, executed: effect.kind };
+        }
+        const applied = observeProtocolEffect(protocol, effect, { kind: 'teardown-observation', trackId, ownedWorktreeExists: false });
+        const next = persist(planRoot, branch, applyProtocolToState(s, applied));
+        appendEvent(planRoot, branch, { kind: 'track-teardown-step', trackId, step: 'WORKTREE_REMOVED' });
+        return { state: next, stop: true, executed: effect.kind };
+    }
+
+    // decision === 'remove-owned-branch': dos fases de origen posibles
+    // (mismo valor de decisión, mismo criterio de dualidad que el resto de
+    // esta interfaz — ver el comentario de `decideTeardown`).
+    if (ref.phase === 'SUPERVISOR_STOPPED') {
+        // Sin worktree propio que remover (nunca existió, o ya se quitó en
+        // un intento previo que crasheó antes de persistir esto): avance
+        // puramente mecánico a `WORKTREE_REMOVED`, sin tocar `runtime` — el
+        // próximo tick, ya en esa fase, decide la branch de nuevo con una
+        // observación fresca.
+        const applied = observeProtocolEffect(protocol, effect, { kind: 'teardown-observation', trackId, ownedWorktreeExists: false });
+        const next = persist(planRoot, branch, applyProtocolToState(s, applied));
+        appendEvent(planRoot, branch, { kind: 'track-teardown-step', trackId, step: 'WORKTREE_REMOVED' });
+        return { state: next, stop: true, executed: effect.kind };
+    }
+    // ref.phase === 'WORKTREE_REMOVED': la branch existe de verdad, efecto real.
+    try {
+        runtime.removeOwnedBranch(planRoot, ref.branch);
+    } catch (error) {
+        const failed = observeProtocolEffect(protocol, effect, { kind: 'effect-failed', trackId, effect: effect.kind, detail: (error as Error).message });
+        const next = persist(planRoot, branch, applyProtocolToState(s, failed));
+        appendEvent(planRoot, branch, { kind: 'track-effect-failed', trackId, effect: effect.kind, detail: (error as Error).message });
+        return { state: next, stop: true, executed: effect.kind };
+    }
+    const applied = observeProtocolEffect(protocol, effect, { kind: 'teardown-observation', trackId, ownedBranchExists: false });
+    const next = persist(planRoot, branch, applyProtocolToState(s, applied));
+    appendEvent(planRoot, branch, { kind: 'track-teardown-step', trackId, step: 'BRANCH_REMOVED' });
     return { state: next, stop: true, executed: effect.kind };
 }
 
@@ -1112,7 +1236,7 @@ export function defaultTrackRuntime(planRoot: string, planBranch: string, grace:
             // jamás queda vivo e inseguro (C2 fail-closed).
             addOwnedWorktree(root, ref, baseSha);
             if (!isAwmGitignored(ref.worktreePath)) {
-                removeOwnedWorktree(root, ref.worktreePath);
+                gitRemoveOwnedWorktree(root, ref.worktreePath);
                 throw new Error('`.awm` no está gitignoreado en el worktree recién creado (checkeado en baseSha): se descarta (degradación C2)');
             }
         },
@@ -1154,30 +1278,46 @@ export function defaultTrackRuntime(planRoot: string, planBranch: string, grace:
                 payload: { trackId: ref.trackId, fencingToken: ref.fencingToken },
             });
         },
-        // Task 9 (interfaz TEMPORAL, ver `TrackRuntime.teardownOwned`): cada
-        // paso es idempotente ante reintento tras crash — "nada que remover"
-        // nunca lanza, es éxito vacuo (R4.2).
-        async teardownOwned(ref, step) {
-            if (step === 'supervisor') {
-                if (ref.supervisorProcessRef === undefined) return 'ok'; // nunca llegamos a spawnear: nada que terminar
-                if (groupIsGone(ref.supervisorProcessRef.processGroup)) return 'ok';
-                // R4.8: identity-verified — jamás un `kill(pid)` crudo. Un
-                // `pgid` reutilizado por OTRO proceso nunca se confunde con
-                // el nuestro (`terminatePreviouslyOwnedGroup` reenvía la
-                // señal al PGID capturado, pero solo tras haber confirmado
-                // que el grupo sigue existiendo; la identidad completa ya se
-                // verificó al capturar `supervisorProcessRef` en el spawn).
-                const confirmed = await terminatePreviouslyOwnedGroup(ref.supervisorProcessRef, grace);
-                return confirmed ? 'ok' : 'blocked';
+        // Task 13 (reemplaza el `teardownOwned(ref, step)` TEMPORAL de Task
+        // 9): cada primitivo es idempotente ante reintento tras crash —
+        // "nada que remover"/"ya ausente" nunca lanza, es éxito vacuo (R4.2).
+        async stopOwnSupervisor(ref) {
+            if (ref.supervisorProcessRef === undefined) return true; // nunca llegamos a spawnear: nada que terminar
+            // R4.8: identity-verified — jamás un `kill(pid)` crudo. Un `pgid`
+            // reutilizado por OTRO proceso nunca se confunde con el nuestro
+            // (`terminatePreviouslyOwnedGroup` reenvía la señal al PGID
+            // capturado, pero solo tras haber confirmado que el grupo sigue
+            // existiendo; la identidad completa ya se verificó al capturar
+            // `supervisorProcessRef` en el spawn).
+            const confirmed = groupIsGone(ref.supervisorProcessRef.processGroup)
+                || await terminatePreviouslyOwnedGroup(ref.supervisorProcessRef, grace);
+            if (confirmed) {
+                // Step 4 del plan ("supervisor propio muerto confirmado Y
+                // lock ausente"): un lock advisory que el supervisor dejó sin
+                // liberar (crash a mitad de su propia salida) es, por
+                // definición, stale una vez que TODO su grupo está
+                // confirmado ausente por identidad — este path del lock vive
+                // dentro del worktree PROPIO del track (`ref.worktreePath`),
+                // nunca en un recurso compartido, así que reclamarlo acá
+                // nunca puede pisar algo ajeno. Sin esto, un crash exacto
+                // ahí dejaría el teardown reintentando `stop-own-supervisor`
+                // para siempre (C9: debe converger).
+                try { fs.rmSync(supervisorLockPath(ref.worktreePath), { force: true }); } catch { /* best-effort */ }
             }
-            if (step === 'worktree') {
-                if (!fs.existsSync(ref.worktreePath)) return 'ok'; // nunca se creó (ej. create-worktree falló antes de mutar nada)
-                removeOwnedWorktree(planRoot, ref.worktreePath);
-                return 'ok';
-            }
-            // 'branch': `removeOwnedBranch` ya es idempotente (no-op si no existe).
-            removeOwnedBranch(planRoot, ref.branch);
-            return 'ok';
+            return confirmed;
+        },
+        removeOwnedWorktree(repo, ref) {
+            // Ownership ya probado por el driver (`worktreeOwnershipProven`,
+            // ver `gatherTeardownObservation`) antes de que `decideTeardown`
+            // llegara a `remove-owned-worktree` — acá solo el efecto real;
+            // `git.ts` bloquea (nombrando paths) si el worktree está sucio, y
+            // nunca usa `--force` (R4.10).
+            gitRemoveOwnedWorktree(repo, ref.worktreePath);
+        },
+        removeOwnedBranch(repo, branchName) {
+            // `git.ts` ya verifica que no siga checked out y usa `-d`, nunca
+            // `-D` (R4.10) — no-op si la branch ya no existe.
+            gitRemoveOwnedBranch(repo, branchName);
         },
         // R6.2/R6.3/C7 (Task 11): delega 1:1 en `core/tracks/git.ts` — la
         // decisión de CUÁL llamar (o si bloquear en su lugar) es siempre de

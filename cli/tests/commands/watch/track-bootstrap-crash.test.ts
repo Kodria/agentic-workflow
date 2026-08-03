@@ -16,12 +16,20 @@ import { execFileSync } from 'child_process';
 import { initRepo, commitFile } from '../../helpers/git-fixture';
 import { reconcileTracks, defaultTrackRuntime, TrackRuntime, SupervisorObservation } from '../../../src/commands/watch/tracks';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
+import { captureSelfRef } from '../../../src/core/journal/process';
 import type { JournalState, TrackRef, ProcessRef } from '../../../src/core/journal/types';
 
 const BRANCH = 'main';
 
+/** T13: a diferencia de un `pid`/`startTime` totalmente inventados (que
+ *  `refIsAlive` — identity-verified, R4.8 — correctamente reportaría como
+ *  "muerto", porque ningún proceso real matchea esos campos), esto captura la
+ *  identidad REAL del propio proceso de test (siempre vivo mientras corre la
+ *  suite), con un nonce distinto por (trackId, intento) — deja ejercitar de
+ *  verdad el camino `stop-own-supervisor` de `runBeginTeardown` (Task 13) sin
+ *  depender de un supervisor real. */
 function fakeProcessRef(trackId: string, n: number): ProcessRef {
-    return { pid: 1, startTime: `x-${n}`, spawnNonce: trackId, argvDigest: 'x', processGroup: 1, psArgsDigest: `x-${n}` };
+    return captureSelfRef(`${trackId}-${n}`);
 }
 
 /** Estado simulado (persistente entre "crash" y "restart", igual que un
@@ -73,14 +81,22 @@ function buildRuntime(planRoot: string, instr: RuntimeInstrumentation, opts: { f
             instr.wrapperState.set(ref.trackId, 'ready');
             return { kind: 'claimed' };
         },
-        async teardownOwned(ref, step) {
-            if (step === 'supervisor') {
-                instr.teardownEvents.push(`supervisor-stopped:${ref.trackId}`);
-                return 'ok';
-            }
-            const result = await real.teardownOwned(ref, step);
-            instr.teardownEvents.push(`${step === 'worktree' ? 'worktree-removed' : 'branch-removed'}:${ref.trackId}`);
-            return result;
+        async stopOwnSupervisor(ref) {
+            instr.teardownEvents.push(`supervisor-stopped:${ref.trackId}`);
+            return true;
+        },
+        removeOwnedWorktree(repo, ref) {
+            real.removeOwnedWorktree(repo, ref);
+            instr.teardownEvents.push(`worktree-removed:${ref.trackId}`);
+        },
+        removeOwnedBranch(repo, branchName) {
+            real.removeOwnedBranch(repo, branchName);
+            // El fake no conoce el trackId acá (mismo dato que `git.ts` usa:
+            // solo el nombre de branch) — se reconstruye del nombre
+            // determinista `awm-track/<id>` para mantener el mismo formato
+            // de evento que el resto de esta suite.
+            const trackId = branchName.split('/').pop() ?? branchName;
+            instr.teardownEvents.push(`branch-removed:${trackId}`);
         },
         emitFreezeRequest() { throw new Error('no debería llamarse (Task 10, sin cobertura en esta suite)'); },
         mergeFrozenTrack() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },

@@ -93,10 +93,9 @@ function buildFallbackRuntime(
             wrapperState.set(ref.trackId, 'ready');
             return { kind: 'claimed' };
         },
-        async teardownOwned(ref, step) {
-            if (step === 'supervisor') return 'ok';
-            return real.teardownOwned(ref, step);
-        },
+        async stopOwnSupervisor() { return true; },
+        removeOwnedWorktree(repo, ref) { real.removeOwnedWorktree(repo, ref); },
+        removeOwnedBranch(repo, branch) { real.removeOwnedBranch(repo, branch); },
         emitFreezeRequest() { throw new Error('no deberia llamarse (fallback a SERIAL nunca llega a freeze)'); },
         mergeFrozenTrack() { throw new Error('no deberia llamarse (fallback a SERIAL nunca llega a merge)'); },
         abortOwnedMerge() { throw new Error('no deberia llamarse (fallback a SERIAL nunca llega a merge)'); },

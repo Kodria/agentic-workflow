@@ -4,7 +4,7 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 import { initRepo, commitFile } from '../../helpers/git-fixture';
 import {
-    addOwnedWorktree, changedPaths, foreignPathExists, gitCheckTrackId,
+    addOwnedWorktree, branchExists, changedPaths, foreignPathExists, gitCheckTrackId,
     mergeBase, ownedWorktreeExists, removeOwnedBranch, removeOwnedWorktree,
 } from '../../../src/core/tracks/git';
 import type { TrackRef } from '../../../src/core/journal/types';
@@ -114,6 +114,39 @@ describe('git adapter', () => {
 
             // Idempotente: ya no existe, un segundo llamado (retry tras crash) no lanza.
             expect(() => removeOwnedBranch(repo, 'awm-track/x')).not.toThrow();
+        });
+
+        // Task 13 (R4.10/C9): endurece el guard — nunca `--force`, nunca `-D`.
+        test('removeOwnedWorktree bloquea (nombrando paths) en vez de forzar si el worktree está sucio', () => {
+            repo = initRepo();
+            const baseSha = commitFile(repo, 'a.txt', 'x');
+            const ref = trackRef(worktreePath, 'awm-track/x');
+            addOwnedWorktree(repo, ref, baseSha);
+            fs.writeFileSync(path.join(worktreePath, 'dirty.txt'), 'sin commitear');
+
+            expect(() => removeOwnedWorktree(repo, worktreePath)).toThrow(/sucio/);
+            expect(() => removeOwnedWorktree(repo, worktreePath)).toThrow(/dirty\.txt/);
+            // El worktree sigue vivo: nada se descartó a la fuerza.
+            expect(fs.existsSync(worktreePath)).toBe(true);
+            expect(ownedWorktreeExists(repo, worktreePath, 'awm-track/x')).toBe(true);
+        });
+
+        test('removeOwnedBranch rehúsa borrar una branch que sigue checked out en un worktree vivo (nunca -D)', () => {
+            repo = initRepo();
+            const baseSha = commitFile(repo, 'a.txt', 'x');
+            const ref = trackRef(worktreePath, 'awm-track/x');
+            addOwnedWorktree(repo, ref, baseSha);
+
+            expect(() => removeOwnedBranch(repo, 'awm-track/x')).toThrow(/checked out/);
+            expect(branchExists(repo, 'awm-track/x')).toBe(true);
+        });
+
+        test('branchExists refleja existencia real de la branch determinista', () => {
+            repo = initRepo();
+            commitFile(repo, 'a.txt', 'x');
+            expect(branchExists(repo, 'awm-track/nope')).toBe(false);
+            execFileSync('git', ['branch', 'awm-track/x'], { cwd: repo });
+            expect(branchExists(repo, 'awm-track/x')).toBe(true);
         });
     });
 });
