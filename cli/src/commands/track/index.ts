@@ -9,6 +9,8 @@ import { resolveCommandContext, type CommandContext } from '../../core/tracks/co
 import { parseTrackPlan } from '../../core/tracks/plan-parser';
 import { assessDeclaredIndependence } from '../../core/tracks/ownership';
 import { gitCheckTrackId } from '../../core/tracks/git';
+import { readDescriptor } from '../../core/tracks/descriptor';
+import { runSupervisorWrapper } from './supervisor-wrapper';
 
 // Mismo patron que cli/src/commands/job/index.ts (branchOf/assertAuthenticatedCwd):
 // duplicado deliberadamente en vez de exportado desde job/index.ts, que no
@@ -164,5 +166,30 @@ export function registerTrackCommand(program: Command): void {
             }
             process.stdout.write(JSON.stringify(result, null, 2) + '\n');
             if (!result.parallel) process.exit(1);
+        });
+
+    // --- supervisor-wrapper: PROCESO EXTERNO detached (Step 5, R4.7-R4.10,
+    // C11). El supervisor del plan lo spawnea con el cwd fijado en el
+    // worktree del track — jamás se invoca a mano. Autentica el descriptor
+    // local (mismo patrón que R9.4) antes de reclamar nada: un cwd sin
+    // descriptor o con un descriptor que no coincide con el argv recibido
+    // jamás llega a tocar el claim.
+    track.command('supervisor-wrapper')
+        .description('PROCESO INTERNO: lanzado detached por el supervisor del plan (R4.7) — no invocar a mano')
+        .requiredOption('--track <id>')
+        .requiredOption('--readiness <nonce>')
+        .requiredOption('--fence <token>')
+        .action(async (opts) => {
+            const worktreePath = process.cwd();
+            const descriptor = readDescriptor(worktreePath);
+            if (descriptor === null) failGuard('supervisor-wrapper: sin descriptor de track en este cwd — no autenticado');
+            if (descriptor.trackId !== opts.track || descriptor.fencingToken !== opts.fence) {
+                failGuard('supervisor-wrapper: descriptor no coincide con los argumentos recibidos — abortando');
+            }
+            await runSupervisorWrapper({
+                worktreePath, trackId: opts.track, readinessNonce: opts.readiness, fencingToken: opts.fence,
+                planRoot: descriptor.planRoot, planBranch: descriptor.planBranch,
+            });
+            process.exit(0);   // C11: tanto "ya reclamado" como "arrancado" salen 0 — jamás un segundo supervisor
         });
 }

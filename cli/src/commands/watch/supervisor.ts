@@ -9,6 +9,7 @@ import { computeGate, FingerprintNow } from '../job/gate';
 import { acquireLock, releaseLock, verifyBranchInvariant } from './lock';
 import { consumePendingRequests } from './apply';
 import { runnerTick, WrapperSpawner, defaultWrapperSpawner } from './runner';
+import { reconcileTracks, defaultTrackRuntime, TrackRuntime } from './tracks';
 import { decideStall, Backoff, beginGeneration, activeGeneration, ensureControllerGeneration, collectControllerGeneration, controllerGenerationHasUnresolvedClaim, resolveGeneration, enterCustody } from './generations';
 
 export interface SupervisorConfig {
@@ -45,12 +46,17 @@ export class Supervisor {
     private lastActivity: { key: string; changedAt: number } | null = null;
     private lastGenerationToken: string | null = null;
 
+    private trackRuntime: TrackRuntime;
+
     constructor(
         private repoRoot: string,
         private branch: string,
         private cfg: SupervisorConfig,
         private spawner: WrapperSpawner,
-    ) {}
+        trackRuntime?: TrackRuntime,
+    ) {
+        this.trackRuntime = trackRuntime ?? defaultTrackRuntime(repoRoot, branch);
+    }
 
     private fingerprintNow: FingerprintNow = (argv, paths, cwd) => {
         try { return computeFingerprint(this.repoRoot, argv, paths, cwd).fingerprint; }
@@ -93,6 +99,14 @@ export class Supervisor {
         if (r0.corrupt || r0.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
         const gen = activeGeneration(r0.state);
         consumePendingRequests(this.repoRoot, this.branch, gen?.token ?? null);
+        // P1/P2 (R4.1-R4.10): a lo sumo un side effect de bootstrap de tracks
+        // por tick, ANTES de tocar jobs — mientras la cohorte está PREPARING,
+        // ningún job de track se despacha (eso lo maneja `runnerTick` con los
+        // `Job` ya existentes; el bootstrap de tracks es un canal separado).
+        const preTracks = readJournal(this.repoRoot, this.branch);
+        if (!preTracks.corrupt && preTracks.state !== null) {
+            reconcileTracks(this.repoRoot, this.branch, preTracks.state, this.trackRuntime, this.cfg.maxParallelTracks);
+        }
         const afterRequests = readJournal(this.repoRoot, this.branch);
         if (afterRequests.state !== null && activeGeneration(afterRequests.state) === undefined
             && afterRequests.state.generations.length > 0 && afterRequests.state.cycle.status === 'IN_PROGRESS') {
@@ -190,7 +204,10 @@ export class Supervisor {
 /** Foreground, visible, terminable (R2.4): sin daemons. SIGINT/SIGTERM libera
  *  el lock y sale; COMPLETE => auto-exit liberando lock y terminando la
  *  generacion propia (cero huerfanos). */
-export async function runSupervisorLoop(repoRoot: string, branch: string, cfg: SupervisorConfig, spawner: WrapperSpawner = defaultWrapperSpawner()): Promise<void> {
+export async function runSupervisorLoop(
+    repoRoot: string, branch: string, cfg: SupervisorConfig,
+    spawner: WrapperSpawner = defaultWrapperSpawner(), trackRuntime?: TrackRuntime,
+): Promise<void> {
     const r = readJournal(repoRoot, branch);
     if (r.corrupt || r.state === null) throw new Error('journal ausente o corrupto: corre `awm watch --init` primero');
     verifyBranchInvariant(repoRoot, r.state.branch);
@@ -202,7 +219,7 @@ export async function runSupervisorLoop(repoRoot: string, branch: string, cfg: S
     const onSignal = () => { shutdownRequested = true; wakeSleep?.(); };
     process.on('SIGINT', onSignal);
     process.on('SIGTERM', onSignal);
-    const sup = new Supervisor(repoRoot, branch, cfg, spawner);
+    const sup = new Supervisor(repoRoot, branch, cfg, spawner, trackRuntime);
     try {
         const s0 = readJournal(repoRoot, branch).state!;
         if (activeGeneration(s0) === undefined) {

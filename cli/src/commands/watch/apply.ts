@@ -2,13 +2,15 @@
 // writeJournal -> RECIEN AHI borrar archivos. El replay es seguro por
 // requestId + idempotencyKey + digest.
 import fs from 'fs';
+import path from 'path';
 import crypto from 'crypto';
 import { readJournal, writeJournal, appendEvent } from '../../core/journal/store';
 import { listPendingRequests, applyOutcome, digestOf, RequestEnvelope } from '../../core/journal/requests';
 import { requestsDir } from '../../core/journal/paths';
 import { fsyncDirSync } from '../../core/atomic-file';
 import { redactText } from '../../core/journal/redact';
-import type { Job, JournalState, ReviewObligation, VerificationItem } from '../../core/journal/types';
+import { gitCheckTrackId, headSha } from '../../core/tracks/git';
+import type { Job, JournalState, ReviewObligation, TrackRef, VerificationItem } from '../../core/journal/types';
 
 export interface ApplySummary { applied: number; rejectedStale: number; rejectedDigest: number; rejectedInvalid: number; corrupt: number; }
 
@@ -47,7 +49,19 @@ function linkSatisfies(s: JournalState, itemId: string, jobId: string): void {
     item.satisfiedBy = jobId;
 }
 
-function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId: string }, digest: string): void {
+/** Convención determinista, sibling del repo del plan — nunca DENTRO de su
+ *  working tree (git worktree add lo exige, y evita que el track pise el
+ *  árbol que el propio plan está observando). El trackId ya pasó
+ *  `gitCheckTrackId` antes de llegar acá, así que es seguro como segmento
+ *  de path. NOTA (ver `concerns` del reporte de Task 8): esta función NO
+ *  deriva ownership/dependsOn/sharedResources del plan — `reconcileTracks`
+ *  (P1) no los necesita; quedan en `[]` hasta que un mecanismo futuro (fuera
+ *  de alcance de R5-T8) los declare explícitamente. */
+function trackWorktreePath(repoRoot: string, trackId: string): string {
+    return path.join(path.dirname(repoRoot), `${path.basename(repoRoot)}.track-${trackId}`);
+}
+
+function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId: string }, digest: string, repoRoot: string): void {
     const base = { requestId: env.requestId, idempotencyKey: env.idempotencyKey, payloadDigest: digest };
     if (env.kind === 'controller-heartbeat') {
         s.controllerHeartbeatAt = now();
@@ -90,6 +104,41 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
         s.jobs[jobId] = job;
         if (typeof p.satisfies === 'string') linkSatisfies(s, p.satisfies, jobId);
         applyOutcome(s, { ...base, outcome: 'applied', resultRef: jobId });
+        return;
+    }
+    if (env.kind === 'track-prepare-request') {
+        // R4.1/R6.1: el ÚNICO efecto de esta request es declarar el TrackRef
+        // (fase DECLARED) — todo lo que sigue (worktree, journal, supervisor,
+        // ARMED, ACTIVE) es propiedad exclusiva de `reconcileTracks`
+        // (watch/tracks.ts), nunca de este consumo transaccional.
+        const p = env.payload;
+        if (typeof p.trackId !== 'string' || p.trackId.length === 0) throw new Error('track-prepare-request requiere trackId');
+        const trackId = p.trackId;
+        if (!gitCheckTrackId(trackId)) throw new Error(`track-prepare-request: trackId inválido: ${trackId}`);
+        if (!s.tracks?.some((t) => t.trackId === trackId)) {
+            const ref: TrackRef = {
+                trackId,
+                worktreePath: trackWorktreePath(repoRoot, trackId),
+                branch: `awm-track/${trackId}`,
+                ownership: [], sharedResources: [], dependsOn: [],
+                // R4.10: tokens criptográficamente aleatorios — los hashes
+                // deterministas de protocol.ts son solo valores opacos del
+                // modelo puro, jamás la fuente real de un token de producción.
+                fencingToken: crypto.randomBytes(32).toString('hex'),
+                phase: 'DECLARED',
+                readinessNonce: crypto.randomBytes(32).toString('hex'),
+            };
+            s.tracks = [...(s.tracks ?? []), ref];
+            // C1: la barrera ARMED solo tiene sentido con el conjunto COMPLETO
+            // de la cohorte conocido — recién con >= 2 tracks declarados
+            // existe algo que `reconcileTracks` pueda reconciliar (Task 1
+            // exige al menos dos tracks en cualquier CohortProtocol válido).
+            if (s.tracks.length >= 2 && s.cohortPhase === undefined) {
+                s.cohortPhase = 'PREPARING';
+                s.cohortBaseSha = headSha(repoRoot);
+            }
+        }
+        applyOutcome(s, { ...base, outcome: 'applied', resultRef: trackId });
         return;
     }
     if (env.kind === 'register-entity') {
@@ -295,7 +344,7 @@ export function consumePendingRequests(repoRoot: string, branch: string, activeT
                 // nunca deja un estado parcialmente contaminado que luego no se
                 // pueda serializar o reintentar.
                 const candidate = structuredClone(s);
-                applyRequestToState(candidate, env, digest);
+                applyRequestToState(candidate, env, digest, repoRoot);
                 s = candidate;
                 applied++;
                 stateTouched = true;
