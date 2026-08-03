@@ -66,6 +66,9 @@ function harness(trackIds: string[], opts: { maxParallelTracks?: number } = {}) 
         },
         async teardownOwned() { return 'ok'; },
         emitFreezeRequest() { throw new Error('no debería llamarse (Task 10, sin cobertura en esta suite)'); },
+        mergeFrozenTrack() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
+        abortOwnedMerge() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
+        async ensureIntegrationLock() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
     };
 
     const maxParallelTracks = opts.maxParallelTracks ?? 2;
@@ -211,6 +214,9 @@ describe('reconcileTracks — P1 bootstrap durable + barrera ARMED (R4.1-R4.10, 
                 observeSupervisor: () => { observeCalls++; return spawnCalls > 0 ? { kind: 'claimed' } : { kind: 'absent' }; },
                 async teardownOwned() { return 'ok'; },
                 emitFreezeRequest() { throw new Error('no debería llamarse (Task 10, sin cobertura en esta suite)'); },
+                mergeFrozenTrack() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
+                abortOwnedMerge() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
+                async ensureIntegrationLock() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
             };
 
             // Call 1: solo persiste el supervisorIntent — CERO llamadas a runtime.
@@ -278,6 +284,9 @@ describe('reconcileTracks — P1 bootstrap durable + barrera ARMED (R4.1-R4.10, 
                 observeSupervisor: () => ({ kind: 'absent' }),
                 async teardownOwned() { return 'ok'; },
                 emitFreezeRequest() { throw new Error('no debería llamarse (Task 10, sin cobertura en esta suite)'); },
+                mergeFrozenTrack() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
+                abortOwnedMerge() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
+                async ensureIntegrationLock() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
             };
 
             const result = await reconcileTracks(dir, BRANCH, readJournal(dir, BRANCH).state!, runtime, 2);
@@ -309,6 +318,9 @@ describe('reconcileTracks — P1 bootstrap durable + barrera ARMED (R4.1-R4.10, 
                 observeSupervisor: () => ({ kind: 'absent' }),
                 async teardownOwned() { throw new Error('no debería llamarse'); },
                 emitFreezeRequest() { throw new Error('no debería llamarse (Task 10, sin cobertura en esta suite)'); },
+                mergeFrozenTrack() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
+                abortOwnedMerge() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
+                async ensureIntegrationLock() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
             };
             const result = await reconcileTracks(bare, BRANCH, bareState, fakeRuntime, 1);
             expect(result.effectExecuted).toBeNull();

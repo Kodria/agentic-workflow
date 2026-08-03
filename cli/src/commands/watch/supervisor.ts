@@ -10,7 +10,7 @@ import { isWorktreeClean, headSha } from '../../core/tracks/git';
 import { acquireLock, releaseLock, verifyBranchInvariant } from './lock';
 import { consumePendingRequests } from './apply';
 import { runnerTick, WrapperSpawner, defaultWrapperSpawner } from './runner';
-import { reconcileTracks, defaultTrackRuntime, TrackRuntime } from './tracks';
+import { reconcileTracks, reconcileOpenJoin, defaultTrackRuntime, TrackRuntime } from './tracks';
 import { decideStall, Backoff, beginGeneration, activeGeneration, ensureControllerGeneration, collectControllerGeneration, controllerGenerationHasUnresolvedClaim, resolveGeneration, enterCustody } from './generations';
 import type { JournalState } from '../../core/journal/types';
 
@@ -95,17 +95,26 @@ export class Supervisor {
     }
 
     async tick(): Promise<TickOutcome> {
-        const before = readJournal(this.repoRoot, this.branch);
-        if (before.corrupt || before.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
-        verifyBranchInvariant(this.repoRoot, before.state.branch);
-        if (before.state.cycle.status === 'COMPLETE') return 'complete';
+        const before0 = readJournal(this.repoRoot, this.branch);
+        if (before0.corrupt || before0.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
+        // R6.2/R6.8/C7 (Task 11): reconciliar un `MERGE_HEAD` abierto por un
+        // crash a mitad de un merge ANTES de cualquier guard general — hoy
+        // ningún guard existente (`verifyBranchInvariant` incluido) rechaza
+        // por `MERGE_HEAD`, pero esto corre primero de todos modos para que
+        // uno agregado en el futuro nunca pueda rechazar un estado ya
+        // reconciliable. `openJoin.handled` evita una SEGUNDA mutación real
+        // de tracks más abajo en este mismo tick (a lo sumo una por tick).
+        const openJoin = await reconcileOpenJoin(this.repoRoot, this.branch, before0.state, this.trackRuntime, this.cfg.maxParallelTracks);
+        const before = openJoin.state;
+        verifyBranchInvariant(this.repoRoot, before.branch);
+        if (before.cycle.status === 'COMPLETE') return 'complete';
         // R5.2/R6.3 (Task 10): restart-safe — un track ya `frozen` (crash del
         // loop DESPUÉS de persistir el paso 6 pero ANTES de que
         // `runSupervisorLoop` liberara el lock/saliera) jamás debe relanzar
         // un controller nuevo ni volver a despachar; simplemente reafirma el
         // mismo resultado terminal.
-        if (before.state.frozen !== undefined) return 'frozen';
-        const pending = before.state?.cycle.nextAction;
+        if (before.frozen !== undefined) return 'frozen';
+        const pending = before.cycle.nextAction;
         const resumePrompt = pending !== undefined ? `el next_action ${pending.actionId} del journal` : 'el plan del ciclo desde el journal';
         if (this.ensureController(resumePrompt) === 'custody') return 'custody';
         const r0 = readJournal(this.repoRoot, this.branch);
@@ -116,13 +125,20 @@ export class Supervisor {
         // por tick, ANTES de tocar jobs — mientras la cohorte está PREPARING,
         // ningún job de track se despacha (eso lo maneja `runnerTick` con los
         // `Job` ya existentes; el bootstrap de tracks es un canal separado).
-        const preTracks = readJournal(this.repoRoot, this.branch);
-        if (!preTracks.corrupt && preTracks.state !== null) {
-            // Task 9: `reconcileTracks` es `async` desde que `begin-teardown`
-            // puede terminar el grupo del supervisor de un track con
-            // `terminatePreviouslyOwnedGroup` (espera real de gracia,
-            // R4.8) — awaitear acá es obligatorio, nunca fire-and-forget.
-            await reconcileTracks(this.repoRoot, this.branch, preTracks.state, this.trackRuntime, this.cfg.maxParallelTracks);
+        // Task 11: si `reconcileOpenJoin` ya ejecutó una mutación real este
+        // mismo tick (reconcilió un `MERGE_HEAD` abierto), no se vuelve a
+        // invocar `reconcileTracks` acá — a lo sumo una mutación real de
+        // tracks por tick, mismo invariante que ya sostenía `reconcileTracks`
+        // por sí solo antes de que existiera esta ruta temprana.
+        if (!openJoin.handled) {
+            const preTracks = readJournal(this.repoRoot, this.branch);
+            if (!preTracks.corrupt && preTracks.state !== null) {
+                // Task 9: `reconcileTracks` es `async` desde que `begin-teardown`
+                // puede terminar el grupo del supervisor de un track con
+                // `terminatePreviouslyOwnedGroup` (espera real de gracia,
+                // R4.8) — awaitear acá es obligatorio, nunca fire-and-forget.
+                await reconcileTracks(this.repoRoot, this.branch, preTracks.state, this.trackRuntime, this.cfg.maxParallelTracks);
+            }
         }
         const afterRequests = readJournal(this.repoRoot, this.branch);
         if (afterRequests.state !== null && activeGeneration(afterRequests.state) === undefined

@@ -13,17 +13,20 @@ import { readJournal, writeJournal, appendEvent, initJournal } from '../../core/
 import { emitRequest, listPendingRequests } from '../../core/journal/requests';
 import { supervisorLockPath } from '../../core/journal/paths';
 import { refIsAlive } from '../../core/journal/process';
-import { decidePrepare, nextProtocolEffect, observeProtocolEffect } from '../../core/tracks/protocol';
+import { decidePrepare, decideJoinReconciliation, nextProtocolEffect, observeProtocolEffect } from '../../core/tracks/protocol';
 import {
     addOwnedWorktree, removeOwnedWorktree, removeOwnedBranch,
     isAwmGitignored, foreignPathExists, ownedWorktreeExists,
-    mergeBase, changedPaths,
+    mergeBase, changedPaths, headSha, readMergeHead, isAncestor,
+    mergeFrozenTrack as gitMergeFrozenTrack, abortOwnedMerge as gitAbortOwnedMerge,
 } from '../../core/tracks/git';
 import { assessActualOwnership } from '../../core/tracks/ownership';
 import { writeDescriptor } from '../../core/tracks/descriptor';
+import { acquireIntegrationLock, stopControllerGenerationConfirmed } from '../../core/tracks/join';
 import { spawnStructured, groupIsGone, terminatePreviouslyOwnedGroup } from '../../core/journal/process';
 import { JOIN_STRATEGY_NO_FF } from '../../core/tracks/types';
-import type { CohortProtocol, PrepareObservation, ProtocolEffect, TrackProtocolState } from '../../core/tracks/types';
+import type { CohortProtocol, JoinIntent, PrepareObservation, ProtocolEffect, TrackProtocolState } from '../../core/tracks/types';
+import type { IntegrationLockHandle } from '../../core/tracks/join';
 import type { ParsedTrack } from '../../core/tracks/plan-parser';
 import type { JournalState, TrackContext, TrackRef, ProcessRef } from '../../core/journal/types';
 
@@ -62,11 +65,26 @@ export interface TrackRuntime {
     // requestsDir, consumido transaccionalmente por el propio
     // `Supervisor.tick()` del track en su próximo tick.
     emitFreezeRequest(ref: TrackRef, generationToken: string): void;
+    // R6.2/R6.3/R6.6-R6.9/C7 (Task 11): únicos touches REALES de `merge-track`
+    // — modelados 1:1 sobre `core/tracks/git.ts` (mismo criterio que
+    // `addWorktree`/`initTrackJournal` arriba: la decisión de CUÁL de las dos
+    // llamar sigue siendo de `decideJoinReconciliation`/`protocol.ts`, nunca
+    // de esta interfaz — acá solo se declara la frontera fakeable).
+    mergeFrozenTrack(repo: string, intent: JoinIntent): void;
+    abortOwnedMerge(repo: string, intent: JoinIntent): void;
+    // C7 (Task 11): "antes de mutar la rama del plan, el supervisor pausa su
+    // controller generation y adquiere `integration.lock`" — se llama, en
+    // efecto, una única vez por PROCESO vivo (la implementación de
+    // producción memoiza el handle en un closure; llamadas subsiguientes,
+    // mientras el mismo proceso siga vivo, son no-op). La liberación queda
+    // para Task 12, tras el interlock final — este runtime nunca libera lo
+    // que adquiere.
+    ensureIntegrationLock(planJournalId: string, expectedPlanHeadSha: string): Promise<void>;
 }
 
 export interface ReconcileTracksResult { state: JournalState; effectExecuted: string | null; }
 
-const RUNTIME_EFFECTS = new Set(['create-worktree', 'create-track-journal', 'spawn-track-supervisor', 'begin-teardown', 'freeze-track']);
+const RUNTIME_EFFECTS = new Set(['create-worktree', 'create-track-journal', 'spawn-track-supervisor', 'begin-teardown', 'freeze-track', 'merge-track']);
 
 function toProtocol(state: JournalState, maxParallel: number): CohortProtocol {
     const tracks: Record<string, TrackProtocolState> = {};
@@ -88,7 +106,16 @@ function toProtocol(state: JournalState, maxParallel: number): CohortProtocol {
         cohortPhase: state.cohortPhase ?? 'PREPARING',
         maxParallel,
         tracks,
-        planHeadSha: state.cohortBaseSha,
+        // R6.2/R6.3/C7 (Task 11): `cohortPlanHeadSha` es el HEAD real y
+        // AVANZANTE de la rama del plan tras cada join aceptado — antes del
+        // primer merge todavía no existe, y el HEAD real del plan en ese
+        // momento ES `cohortBaseSha` (nada mutó la rama todavía). Usar
+        // `cohortBaseSha` acá SIEMPRE (en vez de solo como fallback) sería el
+        // bug: congelaría `expectedPlanHeadSha` en el base original para
+        // TODOS los joins de la cohorte, rompiendo el segundo join en
+        // adelante (C7 exige que cada join sucesivo valide contra el HEAD
+        // real post-merge-anterior, no contra el punto de partida).
+        planHeadSha: state.cohortPlanHeadSha ?? state.cohortBaseSha,
     };
 }
 
@@ -97,6 +124,12 @@ function toProtocol(state: JournalState, maxParallel: number): CohortProtocol {
 function applyProtocolToState(state: JournalState, protocol: CohortProtocol): JournalState {
     const next = structuredClone(state);
     next.cohortPhase = protocol.cohortPhase;
+    // R6.2/R6.3/C7 (Task 11): persistir el HEAD del plan avanzado por
+    // `reconcileProtocol`'s `accept-merge` (`out.planHeadSha = decision.
+    // joinedCommitSha`) — sin esto, el siguiente `toProtocol` volvería a leer
+    // `cohortBaseSha` (stale) y el segundo join de la cohorte usaría un
+    // `expectedPlanHeadSha` incorrecto.
+    if (protocol.planHeadSha !== undefined) next.cohortPlanHeadSha = protocol.planHeadSha;
     next.tracks = (next.tracks ?? []).map((ref) => {
         const t = protocol.tracks[ref.trackId];
         if (t === undefined) return ref;
@@ -372,6 +405,98 @@ function runFreezeTrack(
     return { state: s, stop: true, executed: effect.kind };
 }
 
+/** R6.2/R6.6-R6.9/C7 (Task 11): gathering READ-ONLY del estado real de un
+ *  intento de join — jamás cuenta como el side effect del tick (mismo
+ *  criterio que `ownedWorktreeExists`/`foreignPathExists` en
+ *  `runCreateWorktree`). `trackIsAncestor` solo se calcula cuando no hay
+ *  `MERGE_HEAD` (si lo hay, la pregunta "¿ya se mergeó?" no aplica todavía —
+ *  `decideJoinReconciliation` ni siquiera la consulta en ese caso). */
+function gatherJoinObservation(
+    planRoot: string, expectedTrackHeadSha: string,
+): { mergeHead: string | null; planHead: string; trackIsAncestor: boolean } {
+    const mergeHead = readMergeHead(planRoot);
+    const planHead = headSha(planRoot);
+    const trackIsAncestor = mergeHead === null ? isAncestor(planRoot, expectedTrackHeadSha, planHead) : false;
+    return { mergeHead, planHead, trackIsAncestor };
+}
+
+/** R6.2/R6.3/R6.6-R6.9/C7 (Task 11): único touch REAL de `merge-track`.
+ *  Autoridad de DECISIÓN sigue siendo `decideJoinReconciliation`
+ *  (`protocol.ts`, reexportada por `join.ts`) — este driver la llama dos
+ *  veces con el MISMO criterio que `runCreateWorktree` llama `decidePrepare`
+ *  y luego, por separado, `observeProtocolEffect`: una vez sobre la
+ *  observación `before` para decidir CUÁL efecto git ejecutar (a lo sumo
+ *  UNO: `mergeFrozenTrack` o `abortOwnedMerge`), y la fase final se persiste
+ *  siempre a través de `observeProtocolEffect` (que la recalcula sobre la
+ *  observación real, nunca confía en la excepción de la llamada a
+ *  `runtime` por sí sola — un `git merge` que tira no prueba ni éxito ni
+ *  fallo, la única fuente de verdad es releer el repo). */
+async function runMergeTrack(
+    planRoot: string, branch: string, s: JournalState, protocol: CohortProtocol,
+    effect: Extract<ProtocolEffect, { kind: 'merge-track' }>, runtime: TrackRuntime,
+): Promise<EffectRunResult> {
+    const trackId = effect.trackId;
+    const intent: JoinIntent = {
+        expectedPlanHeadSha: effect.expectedPlanHeadSha,
+        expectedTrackHeadSha: effect.expectedTrackHeadSha,
+        strategy: JOIN_STRATEGY_NO_FF,
+    };
+
+    // C7: antes de la PRIMERA mutación real de la rama del plan — pausa la
+    // generación del plan y adquiere `integration.lock` (primitivos de Task
+    // 10, sin ningún caller hasta acá). Memoizado por el runtime: no-op en
+    // cualquier tick posterior mientras el mismo proceso siga vivo; tras un
+    // crash real, un proceso nuevo reclama con la misma lógica de identidad
+    // muerta que `acquireIntegrationLock` ya prueba. La liberación es
+    // responsabilidad de Task 12 (después del interlock final) — este
+    // driver JAMÁS libera lo que adquiere acá.
+    await runtime.ensureIntegrationLock(s.journalId, intent.expectedPlanHeadSha);
+
+    const before = gatherJoinObservation(planRoot, intent.expectedTrackHeadSha);
+    const decision = decideJoinReconciliation(intent, before);
+
+    if (decision.action === 'retry-merge') {
+        try {
+            runtime.mergeFrozenTrack(planRoot, intent);
+        } catch {
+            // Conflicto real o HEAD del plan movido bajo nuestros pies: NUNCA
+            // se asume cuál de los dos fue por la excepción sola — la
+            // relectura de abajo es la única fuente de verdad (R6.8).
+        }
+        const after = gatherJoinObservation(planRoot, intent.expectedTrackHeadSha);
+        const observed = observeProtocolEffect(protocol, effect, { kind: 'join-observation', trackId, ...after });
+        const next = persist(planRoot, branch, applyProtocolToState(s, observed));
+        appendEvent(planRoot, branch, { kind: 'track-merge-attempted', trackId });
+        return { state: next, stop: true, executed: effect.kind };
+    }
+
+    if (decision.action === 'abort-own-merge') {
+        try {
+            runtime.abortOwnedMerge(planRoot, intent);
+        } catch {
+            // Igual criterio que arriba: la relectura decide, nunca la
+            // excepción (ej. una carrera real donde el MERGE_HEAD dejó de
+            // ser nuestro entre `before` y este intento de abort).
+        }
+        const after = gatherJoinObservation(planRoot, intent.expectedTrackHeadSha);
+        const observed = observeProtocolEffect(protocol, effect, { kind: 'join-observation', trackId, ...after });
+        const next = persist(planRoot, branch, applyProtocolToState(s, observed));
+        appendEvent(planRoot, branch, { kind: 'track-merge-aborted', trackId });
+        return { state: next, stop: true, executed: effect.kind };
+    }
+
+    // 'accept-merge' / 'block': la observación YA leída (`before`) alcanza —
+    // ningún efecto git nuevo que ejecutar este tick (mismo criterio que
+    // `runCreateWorktree`'s ramas 'accept-worktree'/'block-foreign').
+    const observed = observeProtocolEffect(protocol, effect, { kind: 'join-observation', trackId, ...before });
+    const next = persist(planRoot, branch, applyProtocolToState(s, observed));
+    appendEvent(planRoot, branch, {
+        kind: decision.action === 'accept-merge' ? 'track-merged' : 'track-blocked',
+        trackId, ...(decision.action === 'block' ? { reason: decision.reason } : {}),
+    });
+    return { state: next, stop: true, executed: effect.kind };
+}
+
 /** cliEntry: mismo patrón que `defaultWrapperSpawner` en runner.ts — desde
  *  `dist/src/commands/watch/tracks.js`, `../../` resuelve a `dist/src/index.js`. */
 function defaultCliEntry(): string {
@@ -545,6 +670,7 @@ async function executeRuntimeEffect(
     if (effect.kind === 'create-track-journal') return runCreateTrackJournal(planRoot, branch, s, protocol, effect, runtime);
     if (effect.kind === 'begin-teardown') return runBeginTeardown(planRoot, branch, s, protocol, effect, runtime);
     if (effect.kind === 'freeze-track') return runFreezeTrack(planRoot, branch, s, protocol, effect, runtime);
+    if (effect.kind === 'merge-track') return runMergeTrack(planRoot, branch, s, protocol, effect, runtime);
     return runSpawnTrackSupervisor(planRoot, branch, s, protocol, effect as Extract<ProtocolEffect, { kind: 'spawn-track-supervisor' }>, runtime);
 }
 
@@ -615,6 +741,51 @@ export async function reconcileTracks(
     }
 }
 
+/**
+ * R6.2/R6.8/C7 (Task 11): reconcilia un `MERGE_HEAD` REAL dejado abierto por
+ * un crash a mitad de un `merge-track` — se llama desde `Supervisor.tick()`
+ * ANTES de `verifyBranchInvariant` (y de cualquier guard general futuro que
+ * pudiera rechazar el repo por estar "a mitad de un merge"): hoy ningún
+ * guard existente rechaza por `MERGE_HEAD` (ni `verifyBranchInvariant` — solo
+ * compara nombre de rama — ni ningún otro), pero esta función corre primero
+ * de todos modos para que uno agregado en el futuro nunca pueda rechazar un
+ * estado que ya es reconciliable.
+ *
+ * Deliberadamente NO reimplementa la decisión: si el `MERGE_HEAD` observado
+ * coincide con el `joinIntent.expectedTrackHeadSha` de un track propio en
+ * `JOIN_INTENT`, delega en el mismísimo `reconcileTracks` (que, sobre ese
+ * estado, computa `merge-track` como su próximo efecto y lo ejecuta vía
+ * `runMergeTrack` — CERO lógica duplicada). Si el `MERGE_HEAD` no es
+ * atribuible a ningún intent propio (ajeno o indemostrable), no toca nada —
+ * fail-closed, deja que el guard/operador que corresponda decida.
+ *
+ * Devuelve `handled: true` cuando efectivamente ejecutó `reconcileTracks` —
+ * el caller (`Supervisor.tick`) usa esto para NO volver a invocarlo más
+ * tarde en el mismo tick (a lo sumo UNA mutación real de tracks por tick,
+ * mismo invariante que ya sostiene `reconcileTracks` por sí solo).
+ */
+export async function reconcileOpenJoin(
+    planRoot: string, branch: string, state: JournalState, runtime: TrackRuntime, maxParallel: number,
+): Promise<{ handled: boolean; state: JournalState }> {
+    if (state.tracks === undefined || state.tracks.length < 2 || state.cohortPhase === undefined) {
+        return { handled: false, state };
+    }
+    let mergeHead: string | null;
+    try {
+        mergeHead = readMergeHead(planRoot);
+    } catch {
+        // Indemostrable acá: se deja para el `reconcileTracks` normal de este
+        // mismo tick (o el próximo) — esta función es un adelanto oportunista,
+        // nunca la única vía de reconciliación.
+        return { handled: false, state };
+    }
+    if (mergeHead === null) return { handled: false, state };
+    const ownsIt = state.tracks.some((t) => t.phase === 'JOIN_INTENT' && t.joinIntent?.expectedTrackHeadSha === mergeHead);
+    if (!ownsIt) return { handled: false, state }; // MERGE_HEAD ajeno o sin intent propio que lo explique (fail-closed)
+    const result = await reconcileTracks(planRoot, branch, state, runtime, maxParallel);
+    return { handled: true, state: result.state };
+}
+
 // --- Implementación de producción (wiring real de watch/supervisor.ts) -----
 
 function planDescriptorContext(planRoot: string, planBranch: string): { planRoot: string; planBranch: string } {
@@ -663,6 +834,12 @@ const DEFAULT_TEARDOWN_GRACE: TeardownGrace = { termGraceMs: 30000, killGraceMs:
  *  producción. Los tests de `reconcileTracks` usan un fake — ningún proceso
  *  ni worktree real se toca fuera de esta función. */
 export function defaultTrackRuntime(planRoot: string, planBranch: string, grace: TeardownGrace = DEFAULT_TEARDOWN_GRACE): TrackRuntime {
+    // C7 (Task 11): memoizado por CLOSURE — vive tanto como este runtime
+    // (creado una vez por `Supervisor`, ver su constructor). Un proceso
+    // nuevo tras un crash real construye un `defaultTrackRuntime` fresco
+    // (`integrationLock === null` de nuevo) y `acquireIntegrationLock`
+    // reclama con su propia lógica de identidad muerta probada — nunca acá.
+    let integrationLock: IntegrationLockHandle | null = null;
     return {
         addWorktree(root, ref, baseSha) {
             // CRITICAL post-review fix: `git check-ignore` es una operación de
@@ -745,6 +922,20 @@ export function defaultTrackRuntime(planRoot: string, planBranch: string, grace:
             // 'branch': `removeOwnedBranch` ya es idempotente (no-op si no existe).
             removeOwnedBranch(planRoot, ref.branch);
             return 'ok';
+        },
+        // R6.2/R6.3/C7 (Task 11): delega 1:1 en `core/tracks/git.ts` — la
+        // decisión de CUÁL llamar (o si bloquear en su lugar) es siempre de
+        // `decideJoinReconciliation`/`runMergeTrack`, nunca de acá.
+        mergeFrozenTrack(repo, intent) {
+            gitMergeFrozenTrack(repo, intent);
+        },
+        abortOwnedMerge(repo, intent) {
+            gitAbortOwnedMerge(repo, intent);
+        },
+        async ensureIntegrationLock(planJournalId, expectedPlanHeadSha) {
+            if (integrationLock !== null) return;   // ya adquirido por este proceso: no-op
+            await stopControllerGenerationConfirmed(planRoot, planBranch, grace);
+            integrationLock = acquireIntegrationLock(planRoot, { planJournalId, expectedPlanHeadSha });
         },
     };
 }

@@ -214,6 +214,16 @@ export interface JournalState {
     trackContext?: TrackContext;                      // solo presente en el journal de un TRACK individual (R9.1)
     cohortPhase?: CohortPhase;
     cohortBaseSha?: string;
+    // R6.2/R6.3/C7 (Task 11): HEAD REAL y AVANZANTE de la rama del plan a
+    // medida que cada join serial se acepta — DISTINTO de `cohortBaseSha`
+    // (que es el commit ESTÁTICO del que todos los tracks forkearon, usado
+    // solo para diffs de ownership post-hoc, ver `runFreezeTrack` en
+    // `watch/tracks.ts`). Antes del primer merge exitoso, coincide con
+    // `cohortBaseSha` (`toProtocol` cae a ese valor si este campo todavía es
+    // `undefined`); tras cada `accept-merge`, pasa a ser el SHA del commit de
+    // merge recién creado — el siguiente `persist-join-intent` de la cohorte
+    // usa ESTE valor como su `expectedPlanHeadSha`, nunca el base original.
+    cohortPlanHeadSha?: string;
     trackIntegration?: { argv: string[]; paths: string[]; planDigest: string };
     // R5.2/R6.3/R6.4 (Task 10): SOLO presentes en el journal de UN TRACK
     // individual — el supervisor del PLAN jamás los escribe directamente
@@ -276,6 +286,7 @@ export function isWellFormedState(x: unknown): x is JournalState {
     if (x.trackContext !== undefined && !isWellFormedTrackContext(x.trackContext)) return false;
     if (x.cohortPhase !== undefined && !(COHORT_PHASES as readonly string[]).includes(String(x.cohortPhase))) return false;
     if (x.cohortBaseSha !== undefined && typeof x.cohortBaseSha !== 'string') return false;
+    if (x.cohortPlanHeadSha !== undefined && typeof x.cohortPlanHeadSha !== 'string') return false;
     if (x.trackIntegration !== undefined && !isWellFormedTrackIntegration(x.trackIntegration)) return false;
     if (x.freezeRequested !== undefined && typeof x.freezeRequested !== 'boolean') return false;
     if (x.frozen !== undefined && !(isObj(x.frozen) && typeof x.frozen.headSha === 'string' && typeof x.frozen.at === 'string')) return false;

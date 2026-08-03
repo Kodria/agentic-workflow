@@ -83,6 +83,9 @@ function buildRuntime(planRoot: string, instr: RuntimeInstrumentation, opts: { f
             return result;
         },
         emitFreezeRequest() { throw new Error('no debería llamarse (Task 10, sin cobertura en esta suite)'); },
+        mergeFrozenTrack() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
+        abortOwnedMerge() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
+        async ensureIntegrationLock() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
     };
 }
 

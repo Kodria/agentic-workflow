@@ -3,6 +3,7 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 import { EXEC_STDIO } from '../journal/process';
 import type { TrackRef } from '../journal/types';
+import type { JoinIntent } from './types';
 
 const git = (repo: string, args: string[]): string =>
     execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: EXEC_STDIO });
@@ -163,6 +164,90 @@ export function addOwnedWorktree(repo: string, ref: TrackRef, baseSha: string): 
  *  una validación posterior (ej. C2, `.awm` no ignorado en `baseSha`). */
 export function removeOwnedWorktree(repo: string, worktreePath: string): void {
     git(repo, ['worktree', 'remove', '--force', worktreePath]);
+}
+
+/** R6.2/R6.6-R6.9/C7 (Task 11): lee el `MERGE_HEAD` REAL del repo — no
+ *  asume nada de un plain `.git/MERGE_HEAD` porque el plan del cohorte
+ *  siempre opera sobre el repo PRINCIPAL (nunca un worktree secundario acá),
+ *  pero `--git-path` es la única forma honesta de resolverlo sin asumir la
+ *  estructura de `.git` (podría ser un dir o, en teoría, otra cosa).
+ *  `null` <=> demostrablemente SIN merge en curso (el archivo no existe);
+ *  cualquier fallo en RESOLVER el path, o el archivo presente pero
+ *  ilegible, es indemostrable y BLOQUEA (fail-closed) — nunca se interpreta
+ *  silencio como "no hay merge". */
+export function readMergeHead(repo: string): string | null {
+    let gitPath: string;
+    try {
+        gitPath = git(repo, ['rev-parse', '--git-path', 'MERGE_HEAD']).trim();
+    } catch (error) {
+        throw new Error(`readMergeHead: no se pudo resolver el path de MERGE_HEAD en ${repo} — indemostrable: ${(error as Error).message}`);
+    }
+    const abs = path.isAbsolute(gitPath) ? gitPath : path.join(repo, gitPath);
+    if (!fs.existsSync(abs)) return null;
+    try {
+        return fs.readFileSync(abs, 'utf8').trim();
+    } catch (error) {
+        throw new Error(`readMergeHead: MERGE_HEAD existe en ${abs} pero es ilegible — indemostrable: ${(error as Error).message}`);
+    }
+}
+
+/** R6.4/R6.5 (Task 11, reutilizado por `abortOwnedMerge`): mismo criterio
+ *  fail-closed que `isWorktreeClean` pero devolviendo los paths (nunca se
+ *  descartan — R6.5). Un fallo de `git status` NUNCA prueba limpieza: un
+ *  centinela no vacío obliga a cualquier caller a tratar el árbol como
+ *  sucio en vez de asumir silenciosamente cero paths sucios. */
+export function dirtyPaths(repo: string): string[] {
+    let out: string;
+    try {
+        out = git(repo, ['status', '--porcelain']);
+    } catch {
+        return ['<estado indemostrable: git status falló>'];
+    }
+    return out.split('\n').filter((line) => line.length > 0).map((line) => line.slice(3));
+}
+
+/** R6.6/R6.7 (Task 11): `true` <=> `ancestor` es alcanzable desde
+ *  `descendant` — usado SOLO cuando `readMergeHead` ya probó que no hay
+ *  merge en curso, para distinguir "todavía no se intentó" de "ya se
+ *  mergeó" (un merge `--no-ff` exitoso siempre deja al track como ancestro
+ *  del nuevo HEAD). Fail-closed hacia `false`: cualquier fallo de git (SHA
+ *  inválido, repo corrupto) nunca se interpreta como ancestría probada —
+ *  eso empujaría a `decideJoinReconciliation` hacia `accept-merge` sin
+ *  evidencia real. */
+export function isAncestor(repo: string, ancestor: string, descendant: string): boolean {
+    try {
+        git(repo, ['merge-base', '--is-ancestor', ancestor, descendant]);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/** R6.2/R6.3/C7 (Task 11, Step 4 del plan — snippet reproducido exacto):
+ *  único punto que ejecuta el merge real `no-ff` de un track ya `FROZEN`
+ *  sobre la rama del plan. `assertPlanHead` ANTES de mutar nada (TOCTOU,
+ *  C7): un HEAD movido bajo nuestros pies bloquea en vez de mergear a
+ *  ciegas. Si `git merge` falla (conflicto real, u otra causa), la
+ *  excepción se propaga tal cual — el caller (`runMergeTrack` en
+ *  `watch/tracks.ts`) NUNCA interpreta la excepción por sí misma: relee el
+ *  estado real del repo después para decidir qué pasó de verdad. */
+export function mergeFrozenTrack(repo: string, intent: JoinIntent): void {
+    assertPlanHead(repo, intent.expectedPlanHeadSha);
+    git(repo, ['merge', '--no-ff', '--no-edit', intent.expectedTrackHeadSha]);
+}
+
+/** R6.2/R6.3/C7 (Task 11, Step 4 del plan — snippet exacto): aborta
+ *  ÚNICAMENTE un merge cuyo `MERGE_HEAD` observado coincide con el
+ *  `expectedTrackHeadSha` del intent propio — jamás un `MERGE_HEAD` ajeno
+ *  (protege contra abortar el merge de otro proceso). Verifica, tras el
+ *  abort, que el árbol quedó demostrablemente limpio (sin `MERGE_HEAD`, sin
+ *  paths sucios); si no, lanza en vez de reportar éxito sobre un estado que
+ *  no se pudo probar recuperado. */
+export function abortOwnedMerge(repo: string, intent: JoinIntent): void {
+    const observed = readMergeHead(repo);
+    if (observed !== intent.expectedTrackHeadSha) throw new Error('no se aborta MERGE_HEAD ajeno');
+    git(repo, ['merge', '--abort']);
+    if (readMergeHead(repo) !== null || dirtyPaths(repo).length > 0) throw new Error('merge --abort no restauró árbol limpio');
 }
 
 export function changedPaths(repo: string, base: string, head: string): ChangedPath[] {

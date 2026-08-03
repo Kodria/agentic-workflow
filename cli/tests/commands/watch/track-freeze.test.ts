@@ -106,6 +106,9 @@ describe('runFreezeTrack — driver del PLAN (R5.2/R5.7/R5.8/R5.9/C5)', () => {
             observeSupervisor: (): SupervisorObservation => ({ kind: 'absent' }),
             async teardownOwned() { throw new Error('no debería llamarse'); },
             emitFreezeRequest: real.emitFreezeRequest,
+            mergeFrozenTrack() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
+            abortOwnedMerge() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
+            async ensureIntegrationLock() { throw new Error('no debería llamarse (Task 11, sin cobertura en esta suite)'); },
             ...overrides,
         };
     }

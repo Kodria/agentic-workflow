@@ -18,6 +18,15 @@ import { fsyncDirSync } from '../atomic-file';
 import { isWellFormedProcessRef } from '../journal/types';
 import type { ProcessRef, Generation } from '../journal/types';
 
+// R6.8/R6.9/C7 (Task 11): `decideJoinReconciliation` YA vive en `protocol.ts`
+// desde Task 1 (`reconcileProtocol` la llama para su handler de
+// `join-observation`) — regla de autoridad única: esta task NO crea una
+// segunda copia acá. `join-reconcile.test.ts` prueba la matriz completa
+// IMPORTANDO este re-export, así que cualquier fix que la matriz descubra
+// tiene que vivir en `protocol.ts` (y volver a correr la exploración de
+// Task 1 en el mismo commit) para que el test del gate siga significando algo.
+export { decideJoinReconciliation } from './protocol';
+
 // --- Precondiciones puras de join (R6.4/R6.5) -------------------------------
 
 export interface JoinReadiness {
