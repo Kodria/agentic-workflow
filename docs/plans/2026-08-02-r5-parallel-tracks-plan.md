@@ -1591,7 +1591,7 @@ _Requirements: R10.2, R10.3_
 - Create: `cli/src/core/tracks/concurrency.ts`
 - Create: `cli/tests/core/tracks/concurrency.test.ts`
 
-- [ ] **Step 1: Escribir el algoritmo y su test antes de medir**
+- [x] **Step 1: Escribir el algoritmo y su test antes de medir**
 
 ```ts
 // cli/tests/core/tracks/concurrency.test.ts
@@ -1631,13 +1631,13 @@ export function deriveDefaultParallelism(budget: FingerprintBudget): number {
 }
 ```
 
-- [ ] **Step 2: Ejecutar RED, implementar y dejar GREEN**
+- [x] **Step 2: Ejecutar RED, implementar y dejar GREEN**
 
 Run: `cd cli && npx jest tests/core/tracks/concurrency.test.ts --runInBand`
 
 Expected antes del source: FAIL. Expected después: PASS.
 
-- [ ] **Step 3: Crear el benchmark que invoca el build local**
+- [x] **Step 3: Crear el benchmark que invoca el build local**
 
 `benchmark-fingerprint.mjs` debe:
 
@@ -1649,7 +1649,7 @@ Expected antes del source: FAIL. Expected después: PASS.
 
 La función que escribe el JSON usa `writeFileSync` porque este script produce un artefacto deliberado; el código runtime continúa usando helpers durables.
 
-- [ ] **Step 4: Ejecutar la medición real y validar su hash**
+- [x] **Step 4: Ejecutar la medición real y validar su hash**
 
 Run: `node docs/research/r5/benchmark-fingerprint.mjs`
 
@@ -1659,7 +1659,7 @@ Run: `node -e "const x=require('./docs/research/r5/fingerprint-budget.json');if(
 
 Expected: exit 0.
 
-- [ ] **Step 5: Conectar config y queue**
+- [x] **Step 5: Conectar config y queue**
 
 Agregar `maxParallelTracks` a `SupervisorConfig`; la CLI acepta `awm watch --max-parallel <n>`. Si se omite, carga `derivedDefault` del artefacto empaquetado. Validar `n` como entero `>=1`; todos los tracks alcanzan `ARMED`, pero solo hasta N pasan a `ACTIVE`. Los wrappers excedentes esperan sin arrancar el loop de watch/fingerprint hasta que un slot queda libre.
 
@@ -1670,7 +1670,7 @@ expect(scheduleTracks(['a', 'b', 'c'], new Set(['a']), 2)).toEqual({ start: ['b'
 expect(() => parseMaxParallel('0')).toThrow(/entero >= 1/);
 ```
 
-- [ ] **Step 6: Tests y commit**
+- [x] **Step 6: Tests y commit**
 
 Run: `cd cli && npx jest tests/core/tracks/concurrency.test.ts tests/commands/watch/supervisor-loop.test.ts --runInBand && npm run build`
 
