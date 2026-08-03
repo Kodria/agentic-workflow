@@ -7,9 +7,12 @@ import path from 'path';
 import os from 'os';
 import { execFileSync } from 'child_process';
 import { runSupervisorWrapper } from '../../../src/commands/track/supervisor-wrapper';
+import { observeSupervisorFromDisk } from '../../../src/commands/watch/tracks';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { supervisorLockPath } from '../../../src/core/journal/paths';
 import { trackRefFixture } from './fixtures';
+
+const NONCE = 'the-real-supervisor-intent-nonce';
 
 function git(repo: string, args: string[]): void {
     execFileSync('git', args, { cwd: repo });
@@ -52,7 +55,7 @@ describe('runSupervisorWrapper — claim exact-once + espera read-only del ACTIV
         seedTrackRef('ARMED');
         let launched: string | null = null;
         const wrapperPromise = runSupervisorWrapper({
-            worktreePath, trackId: 'cli', readinessNonce: 'nonce-cli'.padEnd(32, '0'), fencingToken: 'fence',
+            worktreePath, trackId: 'cli', nonce: NONCE, readinessNonce: 'nonce-cli'.padEnd(32, '0'), fencingToken: 'fence',
             planRoot, planBranch: 'main', pollMs: 5,
             launchWatch: (wt) => {
                 launched = wt;
@@ -79,7 +82,7 @@ describe('runSupervisorWrapper — claim exact-once + espera read-only del ACTIV
     test('un segundo wrapper con el mismo claim detecta el claim existente y sale sin lanzar otro supervisor (C11)', async () => {
         seedTrackRef('ACTIVE');
         const first = await runSupervisorWrapper({
-            worktreePath, trackId: 'cli', readinessNonce: 'nonce-cli'.padEnd(32, '0'), fencingToken: 'fence',
+            worktreePath, trackId: 'cli', nonce: NONCE, readinessNonce: 'nonce-cli'.padEnd(32, '0'), fencingToken: 'fence',
             planRoot, planBranch: 'main', pollMs: 5,
             launchWatch: () => {
                 fs.mkdirSync(path.dirname(supervisorLockPath(worktreePath)), { recursive: true });
@@ -90,7 +93,7 @@ describe('runSupervisorWrapper — claim exact-once + espera read-only del ACTIV
 
         let secondLaunched = false;
         const second = await runSupervisorWrapper({
-            worktreePath, trackId: 'cli', readinessNonce: 'nonce-cli'.padEnd(32, '0'), fencingToken: 'fence',
+            worktreePath, trackId: 'cli', nonce: NONCE, readinessNonce: 'nonce-cli'.padEnd(32, '0'), fencingToken: 'fence',
             planRoot, planBranch: 'main', pollMs: 5,
             launchWatch: () => { secondLaunched = true; },
         });
@@ -102,11 +105,46 @@ describe('runSupervisorWrapper — claim exact-once + espera read-only del ACTIV
         seedTrackRef('BLOCKED');
         let launched = false;
         const outcome = await runSupervisorWrapper({
-            worktreePath, trackId: 'cli', readinessNonce: 'nonce-cli'.padEnd(32, '0'), fencingToken: 'fence',
+            worktreePath, trackId: 'cli', nonce: NONCE, readinessNonce: 'nonce-cli'.padEnd(32, '0'), fencingToken: 'fence',
             planRoot, planBranch: 'main', pollMs: 5,
             launchWatch: () => { launched = true; },
         });
         expect(outcome).toBe('blocked');
         expect(launched).toBe(false);
+    });
+
+    test('BLOCKER fix: el nonce recibido viaja al identity sidecar y observeSupervisorFromDisk jamás clasifica un wrapper legítimo como foreign (R4.7, R4.9)', async () => {
+        seedTrackRef('ARMED');
+        const wrapperPromise = runSupervisorWrapper({
+            worktreePath, trackId: 'cli', nonce: NONCE, readinessNonce: 'nonce-cli'.padEnd(32, '0'), fencingToken: 'fence',
+            planRoot, planBranch: 'main', pollMs: 5,
+            launchWatch: (wt) => {
+                fs.mkdirSync(path.dirname(supervisorLockPath(wt)), { recursive: true });
+                fs.writeFileSync(supervisorLockPath(wt), '{}');
+            },
+        });
+        // El claim/identity/ready sidecar se escriben ANTES del loop de
+        // espera por ACTIVE — no hace falta llegar a ACTIVE para probar el
+        // eco del nonce.
+        await new Promise((r) => setTimeout(r, 30));
+
+        const identity = JSON.parse(fs.readFileSync(path.join(worktreePath, '.awm', 'supervisor.identity.json'), 'utf8'));
+        expect(identity.nonce).toBe(NONCE);   // el wrapper NUNCA genera el suyo propio
+
+        const claimPath = path.join(worktreePath, '.awm', 'supervisor.claim');
+        const matchingRef = trackRefFixture(
+            { trackId: 'cli', phase: 'SUPERVISOR_STARTING', supervisorIntent: { nonce: NONCE, argv: [], claimPath } },
+            worktreePath,
+        );
+        expect(observeSupervisorFromDisk(matchingRef)).toEqual({ kind: 'ready', readinessNonce: 'nonce-cli'.padEnd(32, '0') });
+
+        const foreignRef = trackRefFixture(
+            { trackId: 'cli', phase: 'SUPERVISOR_STARTING', supervisorIntent: { nonce: 'a-completely-different-nonce', argv: [], claimPath } },
+            worktreePath,
+        );
+        expect(observeSupervisorFromDisk(foreignRef).kind).toBe('foreign');
+
+        seedTrackRef('ACTIVE');
+        await wrapperPromise;
     });
 });

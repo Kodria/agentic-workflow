@@ -161,6 +161,99 @@ describe('reconcileTracks — P1 bootstrap durable + barrera ARMED (R4.1-R4.10, 
         expect(h.track('a').phase).toBe('BLOCKED');
     });
 
+    test('Repro 1 (post-review fix): persistir supervisorIntent y consultar/spawnear al supervisor son DOS fronteras separadas, nunca en el mismo call', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-track-repro1-'));
+        try {
+            initJournal(dir, BRANCH);
+            const s = readJournal(dir, BRANCH).state!;
+            s.cohortPhase = 'PREPARING';
+            s.cohortBaseSha = 'base-sha';
+            s.tracks = [
+                {
+                    trackId: 'a', worktreePath: path.join(dir, 'wt-a'), branch: 'awm-track/a',
+                    ownership: [], sharedResources: [], dependsOn: [],
+                    fencingToken: 'fa'.padEnd(32, '0'), phase: 'JOURNAL_CREATED', readinessNonce: 'ra'.padEnd(32, '0'),
+                },
+                {
+                    trackId: 'b', worktreePath: path.join(dir, 'wt-b'), branch: 'awm-track/b',
+                    ownership: [], sharedResources: [], dependsOn: [],
+                    fencingToken: 'fb'.padEnd(32, '0'), phase: 'ARMED', readinessNonce: 'rb'.padEnd(32, '0'),
+                },
+            ] satisfies TrackRef[];
+            writeJournal(dir, BRANCH, s);
+
+            let observeCalls = 0;
+            let spawnCalls = 0;
+            const runtime: TrackRuntime = {
+                addWorktree: () => { throw new Error('no debería llamarse'); },
+                initTrackJournal: () => { throw new Error('no debería llamarse'); },
+                spawnSupervisor: () => { spawnCalls++; return undefined; },
+                observeSupervisor: () => { observeCalls++; return { kind: 'absent' }; },
+            };
+
+            const result = reconcileTracks(dir, BRANCH, readJournal(dir, BRANCH).state!, runtime, 2);
+            // El intent se persistió (phase avanzó, supervisorIntent quedó
+            // seteado) pero `runtime` JAMÁS se consultó en este mismo call.
+            expect(observeCalls).toBe(0);
+            expect(spawnCalls).toBe(0);
+            const trackA = result.state.tracks!.find((t) => t.trackId === 'a')!;
+            expect(trackA.phase).toBe('SUPERVISOR_STARTING');
+            expect(trackA.supervisorIntent).toBeDefined();
+
+            // Recién en el SIGUIENTE call (frontera separada) se consulta al runtime.
+            reconcileTracks(dir, BRANCH, result.state, runtime, 2);
+            expect(observeCalls).toBe(1);
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test('Repro 2 (post-review fix): bloquear un track ajeno nunca se combina, en el mismo call, con el create-worktree de otro track', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-track-repro2-'));
+        try {
+            initJournal(dir, BRANCH);
+            const s = readJournal(dir, BRANCH).state!;
+            s.cohortPhase = 'PREPARING';
+            s.cohortBaseSha = 'base-sha';
+            const worktreeA = path.join(dir, 'wt-a');
+            const worktreeB = path.join(dir, 'wt-b');
+            fs.mkdirSync(worktreeA, { recursive: true });
+            fs.writeFileSync(path.join(worktreeA, 'foreign.marker'), 'ajeno\n');
+            s.tracks = [
+                {
+                    trackId: 'a', worktreePath: worktreeA, branch: 'awm-track/a',
+                    ownership: [], sharedResources: [], dependsOn: [],
+                    fencingToken: 'fa'.padEnd(32, '0'), phase: 'PREPARE_INTENT', readinessNonce: 'ra'.padEnd(32, '0'),
+                },
+                {
+                    trackId: 'b', worktreePath: worktreeB, branch: 'awm-track/b',
+                    ownership: [], sharedResources: [], dependsOn: [],
+                    fencingToken: 'fb'.padEnd(32, '0'), phase: 'DECLARED', readinessNonce: 'rb'.padEnd(32, '0'),
+                },
+            ] satisfies TrackRef[];
+            writeJournal(dir, BRANCH, s);
+
+            let addWorktreeCalls = 0;
+            const runtime: TrackRuntime = {
+                addWorktree: () => { addWorktreeCalls++; },
+                initTrackJournal: () => { throw new Error('no debería llamarse'); },
+                spawnSupervisor: () => { throw new Error('no debería llamarse'); },
+                observeSupervisor: () => ({ kind: 'absent' }),
+            };
+
+            const result = reconcileTracks(dir, BRANCH, readJournal(dir, BRANCH).state!, runtime, 2);
+            // 'a' se bloquea por ajeno; 'b' NO se toca en absoluto en este call
+            // (ni siquiera su persist-prepare-intent, puramente en memoria).
+            expect(addWorktreeCalls).toBe(0);
+            const a = result.state.tracks!.find((t) => t.trackId === 'a')!;
+            const b = result.state.tracks!.find((t) => t.trackId === 'b')!;
+            expect(a.phase).toBe('BLOCKED');
+            expect(b.phase).toBe('DECLARED');
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     test('reconcileTracks es no-op mientras la cohorte no está declarada (< 2 tracks o sin cohortPhase)', async () => {
         h = harness(['a', 'b']);
         // Journal recién creado sin tracks/cohortPhase: reconcileTracks jamás

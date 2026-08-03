@@ -179,6 +179,11 @@ export function registerTrackCommand(program: Command): void {
         .requiredOption('--track <id>')
         .requiredOption('--readiness <nonce>')
         .requiredOption('--fence <token>')
+        // R4.7/C11: el nonce del `supervisorIntent` persistido por el plan
+        // (tracks.ts) ANTES de spawnear este wrapper — NUNCA generado acá.
+        // Sin este flag, `observeSupervisorFromDisk` no tiene con qué
+        // comparar la identidad y todo wrapper legítimo quedaría 'foreign'.
+        .requiredOption('--nonce <n>')
         .action(async (opts) => {
             const worktreePath = process.cwd();
             const descriptor = readDescriptor(worktreePath);
@@ -187,7 +192,7 @@ export function registerTrackCommand(program: Command): void {
                 failGuard('supervisor-wrapper: descriptor no coincide con los argumentos recibidos — abortando');
             }
             await runSupervisorWrapper({
-                worktreePath, trackId: opts.track, readinessNonce: opts.readiness, fencingToken: opts.fence,
+                worktreePath, trackId: opts.track, nonce: opts.nonce, readinessNonce: opts.readiness, fencingToken: opts.fence,
                 planRoot: descriptor.planRoot, planBranch: descriptor.planBranch,
             });
             process.exit(0);   // C11: tanto "ya reclamado" como "arrancado" salen 0 — jamás un segundo supervisor

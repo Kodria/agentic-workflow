@@ -5,7 +5,6 @@
 // jamás lanza un segundo supervisor — solo detecta el claim y sale.
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
 import { spawn } from 'child_process';
 import { execFileSync } from 'child_process';
 import { captureSelfRef, EXEC_STDIO } from '../../core/journal/process';
@@ -16,6 +15,12 @@ import { supervisorLockPath } from '../../core/journal/paths';
 export interface SupervisorWrapperOptions {
     worktreePath: string;
     trackId: string;
+    // R4.7/C11: el MISMO nonce que el supervisor del plan persistió en
+    // `ref.supervisorIntent.nonce` (tracks.ts) ANTES de spawnear — nunca uno
+    // generado acá. `observeSupervisorFromDisk` compara este valor contra
+    // `supervisorIntent.nonce`: si el wrapper inventara el suyo, JAMÁS
+    // coincidiría y todo wrapper legítimo quedaría clasificado 'foreign'.
+    nonce: string;
     readinessNonce: string;
     fencingToken: string;
     planRoot: string;
@@ -57,7 +62,7 @@ export async function runSupervisorWrapper(opts: SupervisorWrapperOptions): Prom
     } catch {
         return 'already-claimed';
     }
-    const nonce = crypto.randomBytes(16).toString('hex');
+    const nonce = opts.nonce;
     try {
         fs.writeFileSync(fd, JSON.stringify({ trackId: opts.trackId, nonce, claimedAt: new Date().toISOString(), pid: process.pid }) + '\n');
         fs.fsyncSync(fd);

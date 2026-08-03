@@ -123,7 +123,12 @@ function runCreateWorktree(
         const observed = observeProtocolEffect(protocol, effect, { kind: 'worktree-observed', trackId, owned: false });
         const next = persist(planRoot, branch, applyProtocolToState(s, observed));
         appendEvent(planRoot, branch, { kind: 'track-blocked', trackId, reason: 'worktree preexistente ajeno' });
-        return { state: next, stop: false, executed: null };
+        // Post-review fix: bloquear un track es en sí mismo UNA frontera —
+        // dejar `stop:false` acá permitía que el MISMO call siguiera y
+        // tocara `runtime.addWorktree` de otro track (dos side effects
+        // reales en un solo `reconcileTracks()`, rompiendo el supuesto de
+        // Task 9 de que cada boundary es crash-injectable por separado).
+        return { state: next, stop: true, executed: null };
     }
     try {
         runtime.addWorktree(planRoot, ref, mustBaseSha(s));
@@ -145,9 +150,12 @@ function runCreateTrackJournal(
 ): EffectRunResult {
     const trackId = effect.trackId;
     const ref = refOf(s, trackId);
-    // R2.1/R9.1: la asignación real de tareas/planDigest de un track nace del
-    // plan parseado (Task 3/6) — esta función no lo re-parsea (fuera de
-    // alcance de Task 8, ver `concerns` del reporte); lo que SÍ es autoridad
+    // GAP CONOCIDO Y DELIBERADAMENTE DIFERIDO (ver el comentario largo en
+    // `apply.ts` junto a `track-prepare-request`): `taskIds`/`planDigest`
+    // deberían nacer del plan .md parseado, pero NINGÚN task (1-8) provee un
+    // mecanismo para que el supervisor localice ese archivo — decisión
+    // humana pendiente sobre qué task lo resuelve. R2.1/R9.1: lo que SÍ es
+    // autoridad
     // aquí es la identidad del track y el baseSha común de la cohorte.
     const context: TrackContext = { trackId, taskIds: [], planDigest: '', baseSha: mustBaseSha(s), planJournalId: s.journalId };
     try {
@@ -180,16 +188,27 @@ function runSpawnTrackSupervisor(
         // R1.8/C11: el intent (nonce + argv + claimPath) se persiste ANTES de
         // spawnear nada — si el supervisor del plan muere justo acá, el
         // próximo tick reintenta el MISMO intent, nunca uno nuevo.
+        const supervisorNonce = crypto.randomBytes(16).toString('hex');
         const intent = {
-            nonce: crypto.randomBytes(16).toString('hex'),
+            nonce: supervisorNonce,
+            // R4.7/C11: `--nonce` viaja explícito en el argv — es el MISMO
+            // valor que `observeSupervisorFromDisk` va a exigir de vuelta en
+            // el identity sidecar del wrapper (BLOCKER post-review: el
+            // wrapper NUNCA debe generar el suyo propio, o jamás matchea).
             argv: [process.execPath, defaultCliEntry(), 'track', 'supervisor-wrapper', '--track', ref.trackId,
-                '--readiness', ref.readinessNonce, '--fence', ref.fencingToken],
+                '--readiness', ref.readinessNonce, '--fence', ref.fencingToken, '--nonce', supervisorNonce],
             claimPath: path.join(ref.worktreePath, '.awm', 'supervisor.claim'),
         };
         const applied = observeProtocolEffect(protocol, effect, { kind: 'effect-applied', effect });
         const next = persist(planRoot, branch, withRef(applyProtocolToState(s, applied), trackId, { supervisorIntent: intent }));
         appendEvent(planRoot, branch, { kind: 'track-supervisor-intent', trackId });
-        return { state: next, stop: false, executed: null };
+        // Post-review fix: persistir el supervisorIntent es en sí mismo UNA
+        // frontera durable (R1.8/C11) — con `stop:false` el MISMO call podía
+        // seguir de largo y llamar a `runtime.observeSupervisor`/
+        // `spawnSupervisor` en la misma invocación, colapsando dos
+        // boundaries ("intent persistido" y "supervisor consultado/spawneado")
+        // que Task 9 necesita poder crashear por separado.
+        return { state: next, stop: true, executed: null };
     }
     const observation = runtime.observeSupervisor(ref);
     if (observation.kind === 'absent') {
@@ -229,20 +248,26 @@ function executeRuntimeEffect(
 
 /**
  * Driver de P1/P2: construye la vista pura desde el journal, pide la
- * siguiente decisión a `protocol.ts`, y la ejecuta. Transiciones puramente
- * en memoria (`persist-prepare-intent`, `activate-cohort`, `activate-track`,
- * la creación del `supervisorIntent`, el pre-chequeo de "destino ajeno" antes
- * de tocar git) se drenan dentro del mismo call —persistiendo cada una antes
- * de seguir— porque no necesitan preguntarle nada al mundo real.
+ * siguiente decisión a `protocol.ts`, y la ejecuta. SOLO las transiciones
+ * puramente en memoria y sin consecuencia observable fuera del journal
+ * (`persist-prepare-intent`, `activate-cohort`, `activate-track`) se drenan
+ * dentro del mismo call —persistiendo cada una antes de seguir—, porque no
+ * cruzan ninguna frontera con el mundo real ni bloquean nada.
  *
- * En cuanto una decisión SÍ requiere consultar a `runtime`
- * (`addWorktree`/`initTrackJournal`/`spawnSupervisor`/`observeSupervisor`),
- * esta función ejecuta esa consulta como máximo UNA vez y retorna
- * inmediatamente con su resultado ya persistido — nunca encadena una segunda
- * consulta a `runtime` en el mismo call. Esto hace que cada frontera con el
- * mundo exterior sea observable de a una (Task 1: "cada frontera debe ser
- * observable" — es lo que permite a Task 9 inyectar crashes exactamente acá),
- * y es también lo que mantiene visible, entre dos ticks, el estado
+ * TODO lo demás cuenta como UNA frontera y detiene el call ahí mismo, aunque
+ * en sí mismo no haya llamado a `runtime` todavía: persistir un
+ * `supervisorIntent` (R1.8 — el intent debe quedar durable ANTES de que
+ * cualquier llamada futura a `runtime.spawnSupervisor` pueda ocurrir, en un
+ * tick DISTINTO), bloquear un track por ajeno (R4.6), y por supuesto
+ * cualquier consulta real a `runtime`
+ * (`addWorktree`/`initTrackJournal`/`spawnSupervisor`/`observeSupervisor`).
+ * Un `reconcileTracks()` jamás cruza dos de estas fronteras en el mismo call
+ * — ni dos tracks distintos, ni dos pasos del mismo track — precisamente
+ * para que Task 9 pueda inyectar un crash exactamente después de cualquiera
+ * de ellas y probar que el restart converge (post-review fix: la versión
+ * original dejaba `stop:false` en el bloqueo por ajeno y en el persist del
+ * `supervisorIntent`, permitiendo que un solo call colapsara dos fronteras).
+ * Esto es también lo que mantiene visible, entre dos ticks, el estado
  * "todos ARMED pero la cohorte todavía no activó" (C1).
  */
 export function reconcileTracks(

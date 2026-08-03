@@ -111,6 +111,35 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
         // (fase DECLARED) — todo lo que sigue (worktree, journal, supervisor,
         // ARMED, ACTIVE) es propiedad exclusiva de `reconcileTracks`
         // (watch/tracks.ts), nunca de este consumo transaccional.
+        //
+        // ============================================================
+        // GAP CONOCIDO Y DELIBERADAMENTE DIFERIDO (post-review Task 8,
+        // item 3 — decisión: opción (b), NO implementar acá):
+        //
+        // `TrackContext.taskIds`/`planDigest` (asignados en
+        // `tracks.ts::runCreateTrackJournal`) y `TrackRef.ownership`/
+        // `dependsOn`/`sharedResources` (asignados acá abajo) quedan
+        // `[]`/`''` — NINGÚN task de 1 a 8 provee un mecanismo para que el
+        // supervisor localice y parsee "el" archivo de plan .md de la rama
+        // en ejecución. `parseTrackPlan` HOY solo se invoca desde
+        // `track verify-independence --plan <file>`, con el path pasado a
+        // mano; no existe convención de descubrimiento automático
+        // (ni glob de `docs/plans/*.md`, ni mapeo rama->archivo).
+        //
+        // Esto NO bloquea a Task 8 (el protocolo P1 de `nextProtocolEffect`
+        // jamás lee estos campos), pero SÍ va a romper en silencio:
+        //   - Task 5's `assertTrackTask`/`computeTrackGate` (gating por
+        //     `taskIds`/`planDigest` reales) una vez que algo intente usarlos
+        //     de verdad contra un track creado por esta vía.
+        //   - El supuesto de Task 14 (`docs/plans/2026-08-02-r5-parallel-
+        //     tracks-plan.md:2587-2591`) de que `trackContext.taskIds` ya es
+        //     confiable para ese momento.
+        //
+        // Requiere una decisión humana sobre qué task es dueño de: (a)
+        // definir la convención de descubrimiento del archivo de plan, y
+        // (b) extender `track add`/`emitTrackRequest` para llevarlo — o una
+        // enmienda al plan de 17 tasks. No se improvisa acá.
+        // ============================================================
         const p = env.payload;
         if (typeof p.trackId !== 'string' || p.trackId.length === 0) throw new Error('track-prepare-request requiere trackId');
         const trackId = p.trackId;
@@ -120,7 +149,7 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
                 trackId,
                 worktreePath: trackWorktreePath(repoRoot, trackId),
                 branch: `awm-track/${trackId}`,
-                ownership: [], sharedResources: [], dependsOn: [],
+                ownership: [], sharedResources: [], dependsOn: [],   // ver GAP arriba
                 // R4.10: tokens criptográficamente aleatorios — los hashes
                 // deterministas de protocol.ts son solo valores opacos del
                 // modelo puro, jamás la fuente real de un token de producción.
