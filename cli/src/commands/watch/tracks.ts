@@ -10,15 +10,21 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { readJournal, writeJournal, appendEvent, initJournal } from '../../core/journal/store';
+import { emitRequest, listPendingRequests } from '../../core/journal/requests';
+import { supervisorLockPath } from '../../core/journal/paths';
+import { refIsAlive } from '../../core/journal/process';
 import { decidePrepare, nextProtocolEffect, observeProtocolEffect } from '../../core/tracks/protocol';
 import {
     addOwnedWorktree, removeOwnedWorktree, removeOwnedBranch,
     isAwmGitignored, foreignPathExists, ownedWorktreeExists,
+    mergeBase, changedPaths,
 } from '../../core/tracks/git';
+import { assessActualOwnership } from '../../core/tracks/ownership';
 import { writeDescriptor } from '../../core/tracks/descriptor';
 import { spawnStructured, groupIsGone, terminatePreviouslyOwnedGroup } from '../../core/journal/process';
 import { JOIN_STRATEGY_NO_FF } from '../../core/tracks/types';
 import type { CohortProtocol, PrepareObservation, ProtocolEffect, TrackProtocolState } from '../../core/tracks/types';
+import type { ParsedTrack } from '../../core/tracks/plan-parser';
 import type { JournalState, TrackContext, TrackRef, ProcessRef } from '../../core/journal/types';
 
 /** Contrato más rico que el `'absent'|'claimed'|'ready'|'foreign'` puramente
@@ -47,11 +53,20 @@ export interface TrackRuntime {
     spawnSupervisor(ref: TrackRef): ProcessRef | void;
     observeSupervisor(ref: TrackRef): SupervisorObservation;
     teardownOwned(ref: TrackRef, step: TeardownStep): Promise<'ok' | 'blocked'>;
+    // R5.2/R6.3 (Task 10): único touch REAL de `freeze-track` — escribe
+    // `track-freeze-request` al `requestsDir` PROPIO del track (cross-
+    // worktree, mismo primitivo durable `emitRequest` que cualquier otra
+    // request — ver el comentario grande sobre el patrón de freeze en
+    // `apply.ts`). El supervisor del PLAN JAMÁS escribe el journal del track
+    // directamente; esto es lo más cerca que llega — un ARCHIVO en su
+    // requestsDir, consumido transaccionalmente por el propio
+    // `Supervisor.tick()` del track en su próximo tick.
+    emitFreezeRequest(ref: TrackRef, generationToken: string): void;
 }
 
 export interface ReconcileTracksResult { state: JournalState; effectExecuted: string | null; }
 
-const RUNTIME_EFFECTS = new Set(['create-worktree', 'create-track-journal', 'spawn-track-supervisor', 'begin-teardown']);
+const RUNTIME_EFFECTS = new Set(['create-worktree', 'create-track-journal', 'spawn-track-supervisor', 'begin-teardown', 'freeze-track']);
 
 function toProtocol(state: JournalState, maxParallel: number): CohortProtocol {
     const tracks: Record<string, TrackProtocolState> = {};
@@ -216,6 +231,145 @@ function runCreateTrackJournal(
     const next = persist(planRoot, branch, applyProtocolToState(s, applied));
     appendEvent(planRoot, branch, { kind: 'track-effect', trackId, effect: effect.kind });
     return { state: next, stop: true, executed: effect.kind };
+}
+
+/** R5.2/R5.7/R5.8/R5.9/R6.3/R6.4/R6.5/C5 (Task 10): "freeze del track,
+ *  quiescencia del plan y precondiciones de join". Deliberadamente NO usa
+ *  `decidePrepare`/una fase intermedia `FREEZE_REQUESTED` persistida vía
+ *  `effect-applied` — `nextProtocolEffect` solo re-emite `freeze-track`
+ *  mientras `t.phase === 'JOIN_REQUESTED'` (ver `protocol.ts`), así que este
+ *  driver progresa AL MISMO trackId en sucesivos ticks (como
+ *  `runSpawnTrackSupervisor` progresa dentro de `SUPERVISOR_STARTING`) y
+ *  recién transiciona la fase cuando emite `freeze-observation` (-> FROZEN),
+ *  nunca antes.
+ *
+ * "El supervisor del plan solo acepta freeze cuando observa los seis hechos.
+ *  No escribe directamente el journal del track" — este driver JAMÁS llama
+ *  `writeJournal(ref.worktreePath, ...)`: solo LEE el journal propio del
+ *  track (read-only, gathering nunca cuenta como el side effect del tick,
+ *  mismo criterio que `foreignPathExists` en `runCreateWorktree`) y, si
+ *  todavía no se pidió nada, escribe una `track-freeze-request` a su
+ *  requestsDir vía `runtime.emitFreezeRequest` (el ÚNICO touch real de este
+ *  efecto — el trabajo real de las 6 observaciones lo hace el propio
+ *  `Supervisor.tick()` del track, en su journal, en su propio proceso). */
+function runFreezeTrack(
+    planRoot: string, branch: string, s: JournalState, protocol: CohortProtocol,
+    effect: Extract<ProtocolEffect, { kind: 'freeze-track' }>, runtime: TrackRuntime,
+): EffectRunResult {
+    const trackId = effect.trackId;
+    const ref = refOf(s, trackId);
+
+    const r = readJournal(ref.worktreePath, ref.branch);
+    if (r.corrupt || r.state === null) {
+        // Journal del track todavía no legible (crash entre `create-track-
+        // journal` y esto no debería alcanzar acá — la cohorte exige ARMED
+        // antes de ACTIVE — pero fail-closed: sin evidencia legible, nada se
+        // asume, se reintenta en el próximo tick).
+        return { state: s, stop: true, executed: null };
+    }
+    const trackState = r.state;
+
+    if (trackState.frozen !== undefined) {
+        // El track ya completó, DURABLEMENTE en SU journal, los 6 hechos
+        // internos (drenado, gate local verde, worktree limpio, generación
+        // propia terminada) — el plan re-verifica acá lo barato e
+        // independientemente comprobable ANTES de aceptar (nunca confía
+        // ciegamente en el autoreporte del track para lo que puede probar
+        // por sí mismo): supervisor realmente caído + lock realmente
+        // liberado. Gate/limpieza/drenado NO se re-verifican acá — son caros
+        // de recomputar desde afuera (requieren el propio contexto de
+        // fingerprint del track) y el propio track ya los probó bajo su lock
+        // antes de persistir `frozen`.
+        const supervisorAlive = ref.supervisorProcessRef !== undefined && refIsAlive(ref.supervisorProcessRef);
+        const lockExists = fs.existsSync(supervisorLockPath(ref.worktreePath));
+        if (supervisorAlive || lockExists) {
+            // Paso 6 ("libera el lock y sale") todavía no confirmado desde
+            // afuera: esperar al próximo tick (fail-closed, R6.4).
+            return { state: s, stop: true, executed: null };
+        }
+
+        const observed = observeProtocolEffect(protocol, effect, {
+            kind: 'freeze-observation', trackId, frozenHeadSha: trackState.frozen.headSha,
+        });
+        let next = applyProtocolToState(s, observed);
+
+        // R5.7/R5.8/R5.9/C5 (Step 6): ownership REAL post-hoc, desde commits
+        // YA congelados — nunca `git status` para esto (esa es la
+        // herramienta de limpieza, no de ownership). `ref.ownership` es el
+        // mismo campo que el plan ya lleva por track (hoy `[]` por el gap
+        // conocido y deliberadamente diferido de `apply.ts` — parsear el .md
+        // del plan sigue sin convención de descubrimiento; una vez que algo
+        // lo popule, este consumidor funciona sin cambios).
+        const parsedTrack: ParsedTrack = { trackId, taskIds: [], ownership: ref.ownership, dependsOn: [], sharedResources: [] };
+        let actual: { outsideOwnership: string[]; globalClasses: string[] } = { outsideOwnership: [], globalClasses: [] };
+        if (s.cohortBaseSha !== undefined) {
+            try {
+                const base = mergeBase(planRoot, s.cohortBaseSha, trackState.frozen.headSha);
+                const changes = changedPaths(planRoot, base, trackState.frozen.headSha);
+                actual = assessActualOwnership(parsedTrack, changes);
+            } catch {
+                // git indemostrable: no se afirma nada sobre ownership — ni
+                // se bloquea el freeze por esto (Step 6 nunca revierte
+                // merges ya hechos ni el propio freeze), simplemente no hay
+                // evidencia nueva que registrar este tick.
+            }
+        }
+        if (actual.globalClasses.length > 0) {
+            const marks = actual.globalClasses.map((cls) => `${trackId}:${cls}`);
+            next = {
+                ...next,
+                cohortParallelInvalidatedBy: [...new Set([...(next.cohortParallelInvalidatedBy ?? []), ...marks])],
+            };
+        }
+
+        const persisted = persist(planRoot, branch, next);
+        appendEvent(planRoot, branch, { kind: 'track-frozen-observed', trackId, frozenHeadSha: trackState.frozen.headSha });
+        if (actual.outsideOwnership.length > 0) {
+            appendEvent(planRoot, branch, { kind: 'track-ownership-violation', trackId, paths: actual.outsideOwnership });
+        }
+        if (actual.globalClasses.length > 0) {
+            appendEvent(planRoot, branch, { kind: 'parallel-invalidated', trackId, classes: actual.globalClasses });
+        }
+        return { state: persisted, stop: true, executed: effect.kind };
+    }
+
+    if (trackState.freezeRequested === true) {
+        // Ya se pidió: el propio track todavía está drenando/verificando —
+        // nada nuevo que tocar este tick.
+        return { state: s, stop: true, executed: null };
+    }
+
+    // Todavía no se pidió nada (según el journal del track): antes de tocar
+    // `runtime`, un chequeo read-only barato — ¿ya hay una
+    // `track-freeze-request` sin consumir en su requestsDir? (misma
+    // convención que `ownedWorktreeExists`/`foreignPathExists` en
+    // `runCreateWorktree`: gathering nunca cuenta como el side effect).
+    // Sin esto, cada tick del plan mientras el track todavía no consumió
+    // re-emitiría una request nueva — inofensivo (idempotente en `apply.ts`)
+    // pero innecesario.
+    let alreadyPending = false;
+    try {
+        alreadyPending = listPendingRequests(ref.worktreePath, ref.branch).some((p) => !p.corrupt && p.envelope.kind === 'track-freeze-request');
+    } catch {
+        alreadyPending = false;   // requestsDir todavía no listable: nada pendiente que se pueda probar
+    }
+    if (alreadyPending) return { state: s, stop: true, executed: null };
+
+    // Emitir la request al journal PROPIO del track — único touch real de
+    // este efecto. El `generationToken` viaja con la generación activa QUE
+    // EL TRACK TIENE HOY; si no tiene ninguna, un sentinel no-vacío
+    // (`isWellFormedEnvelope` exige `generationToken` no-vacío para CUALQUIER
+    // request — R1.6, forma antes que contenido) que igual pasa el chequeo de
+    // `consumePendingRequests`, porque ese chequeo solo compara contra
+    // `activeToken` cuando `activeToken !== null`: sin generación activa,
+    // cualquier token (sentinel incluido) se acepta igual. Un desfasaje entre
+    // esta lectura y el consumo real produce, a lo sumo, un
+    // `rejected-stale-generation` inofensivo — nunca corrompe nada, y el
+    // próximo tick reintenta con una lectura fresca.
+    const activeGen = trackState.generations.find((g) => g.state === 'active' || g.state === 'controller-suspected-stall');
+    runtime.emitFreezeRequest(ref, activeGen?.token ?? 'no-active-generation');
+    appendEvent(planRoot, branch, { kind: 'track-freeze-requested', trackId });
+    return { state: s, stop: true, executed: effect.kind };
 }
 
 /** cliEntry: mismo patrón que `defaultWrapperSpawner` en runner.ts — desde
@@ -390,6 +544,7 @@ async function executeRuntimeEffect(
     if (effect.kind === 'create-worktree') return runCreateWorktree(planRoot, branch, s, protocol, effect, runtime);
     if (effect.kind === 'create-track-journal') return runCreateTrackJournal(planRoot, branch, s, protocol, effect, runtime);
     if (effect.kind === 'begin-teardown') return runBeginTeardown(planRoot, branch, s, protocol, effect, runtime);
+    if (effect.kind === 'freeze-track') return runFreezeTrack(planRoot, branch, s, protocol, effect, runtime);
     return runSpawnTrackSupervisor(planRoot, branch, s, protocol, effect as Extract<ProtocolEffect, { kind: 'spawn-track-supervisor' }>, runtime);
 }
 
@@ -554,6 +709,18 @@ export function defaultTrackRuntime(planRoot: string, planBranch: string, grace:
             return pref;
         },
         observeSupervisor: observeSupervisorFromDisk,
+        // R5.2/R6.3 (Task 10): `emitRequest` ya es el primitivo durable
+        // genérico de `core/journal/requests.ts` — cross-worktree acá solo
+        // significa "el primer argumento no es `planRoot`, es el worktree
+        // del TRACK" (`requestsDir` no distingue de quién es el journal).
+        emitFreezeRequest(ref, generationToken) {
+            emitRequest(ref.worktreePath, ref.branch, {
+                kind: 'track-freeze-request',
+                generationToken,
+                idempotencyKey: `freeze-${ref.trackId}-${ref.fencingToken}`,
+                payload: { trackId: ref.trackId, fencingToken: ref.fencingToken },
+            });
+        },
         // Task 9 (interfaz TEMPORAL, ver `TrackRuntime.teardownOwned`): cada
         // paso es idempotente ante reintento tras crash — "nada que remover"
         // nunca lanza, es éxito vacuo (R4.2).

@@ -158,17 +158,30 @@ export function collectAndReconcile(repoRoot: string, branch: string, opts: { re
 
 export interface RunnerTickOutput { spawned: number; advanced: number; decisions: ReconcileDecision[]; }
 
-export function runnerTick(repoRoot: string, branch: string, spawner: WrapperSpawner, opts: { reconcileGraceMs?: number; stallObservationMs?: number } = {}): RunnerTickOutput {
+/** `dispatch:false` (R5.2/R6.3, Task 10 — "el supervisor del track deja de
+ *  despachar" durante un freeze): el drenaje de jobs YA vivos sigue intacto
+ *  (`collectAndReconcile` siempre corre, y un job `spawn-intent` sin claim
+ *  aun se reintenta con el MISMO intent — nunca se lo abandona a medias),
+ *  pero jamás se arranca un job nuevo (`spawnPendingWrappers` para
+ *  `received`) mientras el freeze está en curso. Default `true`: ningún
+ *  caller existente (loop normal del supervisor) cambia de comportamiento. */
+export function runnerTick(
+    repoRoot: string, branch: string, spawner: WrapperSpawner,
+    opts: { reconcileGraceMs?: number; stallObservationMs?: number; dispatch?: boolean } = {},
+): RunnerTickOutput {
+    const dispatch = opts.dispatch ?? true;
     const collected = collectAndReconcile(repoRoot, branch, opts);
     const r = readJournal(repoRoot, branch);
     if (r.corrupt || r.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
     const logs = logsDir(repoRoot, branch);
-    for (const decision of collected.decisions) {
-        if (decision.action !== 'retry-same-intent') continue;
-        const job = r.state.jobs[decision.jobId];
-        if (job?.executionState !== 'spawn-intent' || job.spawnNonce === undefined) continue;
-        try { spawner(job, job.spawnNonce, logs, repoRoot); } catch { /* el mismo intent durable se reintentara en otro tick */ }
+    if (dispatch) {
+        for (const decision of collected.decisions) {
+            if (decision.action !== 'retry-same-intent') continue;
+            const job = r.state.jobs[decision.jobId];
+            if (job?.executionState !== 'spawn-intent' || job.spawnNonce === undefined) continue;
+            try { spawner(job, job.spawnNonce, logs, repoRoot); } catch { /* el mismo intent durable se reintentara en otro tick */ }
+        }
     }
-    const spawned = spawnPendingWrappers(repoRoot, branch, spawner);
+    const spawned = dispatch ? spawnPendingWrappers(repoRoot, branch, spawner) : 0;
     return { spawned, advanced: collected.advanced, decisions: collected.decisions };
 }

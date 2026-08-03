@@ -170,6 +170,24 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
         applyOutcome(s, { ...base, outcome: 'applied', resultRef: trackId });
         return;
     }
+    if (env.kind === 'track-freeze-request') {
+        // R5.2/R6.3 (Task 10): request administrativa CROSS-JOURNAL — el
+        // supervisor del PLAN la emite directamente al `requestsDir` de ESTE
+        // journal (el journal de UN track), vía el mismo primitivo durable
+        // (`emitRequest`) que cualquier otra request. El propio supervisor
+        // del track (SU `Supervisor.tick()`, corriendo en este mismo
+        // worktree) la consume acá como cualquier otra — el efecto es
+        // puramente declarativo (marcar la intención); las 6 observaciones
+        // reales (drenar jobs, recomputar gate, exigir árbol limpio,
+        // terminar la generación propia) las hace `Supervisor.tick()` en su
+        // propio loop, nunca este consumo transaccional (que no puede
+        // esperar terminaciones de proceso reales). Idempotente sin
+        // importar cuántas veces se re-emita, y jamás pisa un `frozen` ya
+        // persistido (R6.4: un track congelado no vuelve a mutar).
+        if (s.frozen === undefined) s.freezeRequested = true;
+        applyOutcome(s, { ...base, outcome: 'applied' });
+        return;
+    }
     if (env.kind === 'register-entity') {
         const p = env.payload;
         if (p.entity === 'task') {

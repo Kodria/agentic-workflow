@@ -215,6 +215,22 @@ export interface JournalState {
     cohortPhase?: CohortPhase;
     cohortBaseSha?: string;
     trackIntegration?: { argv: string[]; paths: string[]; planDigest: string };
+    // R5.2/R6.3/R6.4 (Task 10): SOLO presentes en el journal de UN TRACK
+    // individual — el supervisor del PLAN jamás los escribe directamente
+    // (emite `track-freeze-request` al journal del track vía el mismo canal
+    // durable de requests; el propio supervisor del track hace las 6
+    // observaciones reales y las persiste acá, en SU journal). `freezeRequested`
+    // marca que el track debe dejar de despachar trabajo nuevo; `frozen` solo
+    // se persiste una vez que gate local + worktree limpio + cero jobs vivos +
+    // generación propia terminada (confirmada) son TODOS demostrables.
+    freezeRequested?: boolean;
+    frozen?: { headSha: string; at: string };
+    // R5.7/C5 (Task 10): SOLO presente en el journal del PLAN — evidencia
+    // post-hoc de que un track ya congelado tocó una clase de recurso global
+    // fuera de su ownership declarado. Un `awm watch` posterior sobre este
+    // plan debe leer esto y correr serial, aunque el análisis declarativo de
+    // independencia (T4) haya dicho que podía paralelizar.
+    cohortParallelInvalidatedBy?: string[];
 }
 
 export function emptyState(branch: string): JournalState {
@@ -261,6 +277,9 @@ export function isWellFormedState(x: unknown): x is JournalState {
     if (x.cohortPhase !== undefined && !(COHORT_PHASES as readonly string[]).includes(String(x.cohortPhase))) return false;
     if (x.cohortBaseSha !== undefined && typeof x.cohortBaseSha !== 'string') return false;
     if (x.trackIntegration !== undefined && !isWellFormedTrackIntegration(x.trackIntegration)) return false;
+    if (x.freezeRequested !== undefined && typeof x.freezeRequested !== 'boolean') return false;
+    if (x.frozen !== undefined && !(isObj(x.frozen) && typeof x.frozen.headSha === 'string' && typeof x.frozen.at === 'string')) return false;
+    if (x.cohortParallelInvalidatedBy !== undefined && !strings(x.cohortParallelInvalidatedBy)) return false;
     return true;
 }
 

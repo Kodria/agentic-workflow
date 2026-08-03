@@ -30,6 +30,37 @@ export function headSha(repo: string): string {
     return git(repo, ['rev-parse', 'HEAD']).trim();
 }
 
+/** R6.4 (Task 10): guard de LIMPIEZA del worktree/index, distinto del guard
+ *  de OWNERSHIP (`changedPaths`/`assessActualOwnership`, que nunca consulta
+ *  `git status` — ver el comentario grande del plan R5-T10 Step 6). `status
+ *  --porcelain` vacío es la única prueba honesta de "nada sin commitear";
+ *  cualquier fallo de git (repo corrupto, permisos) NO prueba limpieza —
+ *  fail-closed, se trata como sucio. */
+export function isWorktreeClean(repo: string): boolean {
+    try {
+        return git(repo, ['status', '--porcelain']).trim().length === 0;
+    } catch {
+        return false;
+    }
+}
+
+/** R5.8/R5.9/C7 (Task 10): comparación fail-closed de HEAD. "Un humano puede
+ *  mutar el repo, pero la mutación se detecta y bloquea" — cualquier fallo de
+ *  `git rev-parse` (repo desaparecido, corrupto) NUNCA se interpreta como
+ *  "no cambió"; el silencio no es prueba, así que se bloquea igual que un
+ *  drift confirmado. */
+export function assertPlanHead(repo: string, expectedSha: string): void {
+    let actual: string;
+    try {
+        actual = headSha(repo);
+    } catch (error) {
+        throw new Error(`assertPlanHead: HEAD de ${repo} indemostrable — BLOQUEADO (no se asume sin cambios): ${(error as Error).message}`);
+    }
+    if (actual !== expectedSha) {
+        throw new Error(`assertPlanHead: HEAD del plan cambió — esperado ${expectedSha}, actual ${actual}: BLOQUEADO`);
+    }
+}
+
 /** R4.6: nada se considera "nuestro" antes de que lo hayamos creado — si el
  *  destino ya existe y no está vacío, es por definición ajeno (todavía no
  *  intentamos crear nada ahí). Devuelve `true` también si no se puede

@@ -82,6 +82,7 @@ function buildRuntime(planRoot: string, instr: RuntimeInstrumentation, opts: { f
             instr.teardownEvents.push(`${step === 'worktree' ? 'worktree-removed' : 'branch-removed'}:${ref.trackId}`);
             return result;
         },
+        emitFreezeRequest() { throw new Error('no debería llamarse (Task 10, sin cobertura en esta suite)'); },
     };
 }
 

@@ -5,12 +5,14 @@ import { readJournal, writeJournal, appendEvent } from '../../core/journal/store
 import { computeFingerprint } from '../../core/journal/fingerprint';
 import { adapterFor } from '../../core/journal/adapter';
 import { groupIsGone, terminateGroupConfirmed } from '../../core/journal/process';
-import { computeGate, FingerprintNow } from '../job/gate';
+import { computeGate, computeTrackGate, FingerprintNow } from '../job/gate';
+import { isWorktreeClean, headSha } from '../../core/tracks/git';
 import { acquireLock, releaseLock, verifyBranchInvariant } from './lock';
 import { consumePendingRequests } from './apply';
 import { runnerTick, WrapperSpawner, defaultWrapperSpawner } from './runner';
 import { reconcileTracks, defaultTrackRuntime, TrackRuntime } from './tracks';
 import { decideStall, Backoff, beginGeneration, activeGeneration, ensureControllerGeneration, collectControllerGeneration, controllerGenerationHasUnresolvedClaim, resolveGeneration, enterCustody } from './generations';
+import type { JournalState } from '../../core/journal/types';
 
 export interface SupervisorConfig {
     provider: string;
@@ -36,7 +38,12 @@ export const DEFAULT_SUPERVISOR_CONFIG: SupervisorConfig = {
     maxParallelTracks: 1,                // overridden en tiempo de ejecución con loadDefaultParallelism() (watch/index.ts)
 };
 
-export type TickOutcome = 'continue' | 'custody' | 'complete';
+// 'frozen' (R5.2/R6.3, Task 10): SOLO puede ocurrir en el journal de un
+// TRACK individual (nunca en el del plan) — el track terminó, con las 6
+// observaciones demostrables (cero jobs vivos, gate local verde, worktree
+// limpio, generación propia terminada con identidad confirmada), de
+// atender un `track-freeze-request` pedido por el supervisor del plan.
+export type TickOutcome = 'continue' | 'custody' | 'complete' | 'frozen';
 
 const LIVE = ['received', 'spawn-intent', 'claimed', 'running', 'cancel-requested'];
 
@@ -92,6 +99,12 @@ export class Supervisor {
         if (before.corrupt || before.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
         verifyBranchInvariant(this.repoRoot, before.state.branch);
         if (before.state.cycle.status === 'COMPLETE') return 'complete';
+        // R5.2/R6.3 (Task 10): restart-safe — un track ya `frozen` (crash del
+        // loop DESPUÉS de persistir el paso 6 pero ANTES de que
+        // `runSupervisorLoop` liberara el lock/saliera) jamás debe relanzar
+        // un controller nuevo ni volver a despachar; simplemente reafirma el
+        // mismo resultado terminal.
+        if (before.state.frozen !== undefined) return 'frozen';
         const pending = before.state?.cycle.nextAction;
         const resumePrompt = pending !== undefined ? `el next_action ${pending.actionId} del journal` : 'el plan del ciclo desde el journal';
         if (this.ensureController(resumePrompt) === 'custody') return 'custody';
@@ -117,27 +130,29 @@ export class Supervisor {
             beginGeneration(this.repoRoot, this.branch);
             if (this.ensureController(resumePrompt) === 'custody') return 'custody';
         }
-        runnerTick(this.repoRoot, this.branch, this.spawner, { reconcileGraceMs: this.cfg.reconcileGraceMs, stallObservationMs: this.cfg.jobStallObservationMs });
+        // R5.2/R6.3 (Task 10): recién leído tras `consumePendingRequests` —
+        // si el request `track-freeze-request` llegó en ESTE tick, `apply.ts`
+        // ya lo tradujo a `freezeRequested`. `dispatch:false` corta SOLO el
+        // arranque de trabajo NUEVO; el drenaje de lo ya vivo sigue intacto
+        // (paso 2 del freeze — "consume/reconcilia jobs existentes").
+        const freezeCheck = readJournal(this.repoRoot, this.branch);
+        const freezing = !freezeCheck.corrupt && freezeCheck.state !== null
+            && freezeCheck.state.freezeRequested === true && freezeCheck.state.frozen === undefined;
+        runnerTick(this.repoRoot, this.branch, this.spawner, {
+            reconcileGraceMs: this.cfg.reconcileGraceMs, stallObservationMs: this.cfg.jobStallObservationMs, dispatch: !freezing,
+        });
         const custody = await this.superviseController();
         if (custody) return 'custody';
+        if (freezing) return this.attemptFreeze();
         const r = readJournal(this.repoRoot, this.branch);
         const gate = computeGate(r.state, r.corrupt, this.fingerprintNow);
         const liveJobs = r.state === null ? 1 : Object.values(r.state.jobs).filter((j) => LIVE.includes(j.executionState)).length;
         if (gate.pass && liveJobs === 0) {   // gate verde YA implica cero vivos; doble cinturon (R4.5)
             const s = r.state!;
-            for (const generation of s.generations) {
-                for (const ref of [generation.processRef, generation.wrapperRef]) {
-                    // Los tests pueden ejecutar el wrapper in-process; nunca
-                    // enviar una senial al propio supervisor.
-                    if (ref?.pid === process.pid) continue;
-                    if (ref === undefined || groupIsGone(ref.processGroup)) continue;
-                    const confirmed = await terminateGroupConfirmed(ref, { termGraceMs: this.cfg.termGraceMs, killGraceMs: this.cfg.killGraceMs });
-                    if (!confirmed) {
-                        enterCustody(this.repoRoot, this.branch, `no se pudo terminar con identidad confirmada la generacion ${generation.n} antes de COMPLETE`);
-                        return 'custody';
-                    }
-                }
-                generation.state = 'terminated';
+            const terminated = await this.terminateAllGenerationsConfirmed(s);
+            if (!terminated.ok) {
+                enterCustody(this.repoRoot, this.branch, `no se pudo terminar con identidad confirmada la generacion ${terminated.n} antes de COMPLETE`);
+                return 'custody';
             }
             s.cycle.status = 'COMPLETE';
             s.cycle.completedAt = new Date().toISOString();
@@ -146,6 +161,60 @@ export class Supervisor {
             return 'complete';
         }
         return 'continue';
+    }
+
+    /** Termina, con identidad CONFIRMADA (jamás un `kill(pid)` crudo), toda
+     *  generación de `s` que todavía tenga un `processRef`/`wrapperRef` vivo
+     *  — muta `s` en memoria (incluye marcar `state = 'terminated'`) pero
+     *  JAMÁS persiste por sí sola: el caller combina esta mutación con la
+     *  suya propia (`cycle.status = 'COMPLETE'` o `frozen = {...}`) en UN
+     *  solo `writeJournal` (R1.3 — dos escrituras secuenciales sobre el
+     *  mismo objeto violarían el CAS por revisión de `writeJournal`).
+     *  Compartida entre el camino COMPLETE y el camino FROZEN (Task 10): el
+     *  mismo requisito ("ningún controller administrado sigue vivo") aplica
+     *  a ambos. */
+    private async terminateAllGenerationsConfirmed(s: JournalState): Promise<{ ok: true } | { ok: false; n: number }> {
+        for (const generation of s.generations) {
+            for (const ref of [generation.processRef, generation.wrapperRef]) {
+                // Los tests pueden ejecutar el wrapper in-process; nunca
+                // enviar una senial al propio supervisor.
+                if (ref?.pid === process.pid) continue;
+                if (ref === undefined || groupIsGone(ref.processGroup)) continue;
+                const confirmed = await terminateGroupConfirmed(ref, { termGraceMs: this.cfg.termGraceMs, killGraceMs: this.cfg.killGraceMs });
+                if (!confirmed) return { ok: false, n: generation.n };
+            }
+            generation.state = 'terminated';
+        }
+        return { ok: true };
+    }
+
+    /** Paso 2-6 del freeze (R5.2/R6.3, Task 10 — paso 1 "deja de despachar"
+     *  ya lo hizo `dispatch:false` en `runnerTick`, arriba en `tick()`):
+     *  fail-closed en cada paso — cualquier hecho todavía no demostrable
+     *  simplemente pospone (`'continue'`, el próximo tick reintenta), JAMÁS
+     *  fuerza `frozen` sobre evidencia incompleta. Solo cuando los 4 hechos
+     *  restantes (cero vivos, gate local verde, worktree/index limpios,
+     *  generación propia terminada CONFIRMADA) son TODOS demostrables se
+     *  persiste `frozenHeadSha` + el marcador `frozen` — en el MISMO
+     *  `writeJournal` que la terminación de generación de arriba. */
+    private async attemptFreeze(): Promise<TickOutcome> {
+        const r = readJournal(this.repoRoot, this.branch);
+        if (r.corrupt || r.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
+        const s = r.state;
+        const liveJobs = Object.values(s.jobs).filter((j) => LIVE.includes(j.executionState)).length;
+        if (liveJobs > 0) return 'continue';                         // paso 2: drenando todavía
+        const gate = computeTrackGate(s, false, this.fingerprintNow);
+        if (!gate.pass) return 'continue';                           // paso 3: gate local todavía rojo
+        if (!isWorktreeClean(this.repoRoot)) return 'continue';      // paso 4: worktree/index todavía sucios
+        const terminated = await this.terminateAllGenerationsConfirmed(s);   // paso 5
+        if (!terminated.ok) {
+            enterCustody(this.repoRoot, this.branch, `no se pudo terminar con identidad confirmada la generacion ${terminated.n} antes de FROZEN (R5.2/R6.3)`);
+            return 'custody';
+        }
+        s.frozen = { headSha: headSha(this.repoRoot), at: new Date().toISOString() };   // paso 4/6: SHA congelado, durable
+        writeJournal(this.repoRoot, this.branch, s);
+        appendEvent(this.repoRoot, this.branch, { kind: 'track-frozen', headSha: s.frozen.headSha });
+        return 'frozen';   // paso 6 ("libera el lock y sale"): runSupervisorLoop trata 'frozen' igual que 'complete'
     }
 
     /** true => custodia (el caller NO libera lock ni sale). */
@@ -232,7 +301,10 @@ export async function runSupervisorLoop(
         for (;;) {
             if (shutdownRequested) break;
             const out = await sup.tick();
-            if (out === 'complete') break;
+            // 'frozen' (Task 10): mismo camino de salida que 'complete' —
+            // drenar ownership y liberar el lock, el track ya cumplió su
+            // freeze y no debe seguir despachando ni corriendo su loop.
+            if (out === 'complete' || out === 'frozen') break;
             // 'custody': NO liberar lock, NO salir — seguir auditando (R4.5)
             await new Promise<void>((resolve) => {
                 let settled = false;
