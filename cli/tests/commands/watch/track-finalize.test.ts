@@ -16,8 +16,9 @@ import { canCompleteCohort, reconcileTracks, defaultTrackRuntime } from '../../.
 import { WrapperSpawner } from '../../../src/commands/watch/runner';
 import { runExecWrapper } from '../../../src/commands/job/exec-wrapper';
 import { initWatch } from '../../../src/commands/watch/init';
-import { emitRequest } from '../../../src/core/journal/requests';
-import { registerTrackIntegrationItems } from '../../../src/commands/watch/apply';
+import { emitRequest, listPendingRequests } from '../../../src/core/journal/requests';
+import { registerTrackIntegrationItems, consumePendingRequests } from '../../../src/commands/watch/apply';
+import { activeGeneration } from '../../../src/commands/watch/generations';
 import { readJournal, writeJournal } from '../../../src/core/journal/store';
 import { computeGate, GateResult } from '../../../src/commands/job/gate';
 import { computeFingerprint } from '../../../src/core/journal/fingerprint';
@@ -84,6 +85,8 @@ interface Harness {
     crashAndRestart(): void;
     interlock(): GateResult;
     moveHeadUnrelated(): string;
+    hasPendingCanonicalRequest(): boolean;
+    applyPendingRequestsOnly(): void;
     cleanup(): void;
 }
 
@@ -229,6 +232,27 @@ function finalizerHarness(trackIds: string[]): Harness {
             git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'unrelated change');
             return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
         },
+        // Finding 4 (ronda 2 de re-review): `runnerTick` (runner.ts) despacha
+        // TODO job en `received` (`spawnPendingWrappers`) en la MISMA llamada
+        // que lo colecciona/reconcilia — y esa llamada corre dentro del MISMO
+        // `Supervisor.tick()` que, antes, ya aplicó (`consumePendingRequests`)
+        // cualquier `job-request` pendiente escrito por un tick ANTERIOR. Por
+        // eso, vía la API pública `tick()`, jamás hay un tick completo que
+        // deje un job en `received` observable desde afuera — request
+        // (aplicación) y despacho colapsan en el mismo tick. La única forma
+        // honesta de reproducir ese punto exacto (el mismo que un crash real
+        // SIN puntos de `await` de por medio podría alcanzar) es llamar,
+        // directo, a la MISMA función que `tick()` invoca primero —
+        // `consumePendingRequests` — sin llegar a `runnerTick`.
+        hasPendingCanonicalRequest() {
+            return listPendingRequests(repo, 'main').some((p) => !p.corrupt && p.envelope.kind === 'job-request'
+                && Array.isArray((p.envelope.payload as { satisfies?: unknown }).satisfies)
+                && ((p.envelope.payload as { satisfies: unknown[] }).satisfies).some((id) => typeof id === 'string' && id.startsWith('track-integration:')));
+        },
+        applyPendingRequestsOnly() {
+            const gen = activeGeneration(readJournal(repo, 'main').state!);
+            consumePendingRequests(repo, 'main', gen?.token ?? null);
+        },
         cleanup() {
             process.env.PATH = oldPath;
             fs.rmSync(repo, { recursive: true, force: true });
@@ -291,15 +315,40 @@ describe('finalizer end-to-end (R7.1-R7.7, C3/C4, Task 12)', () => {
     // `integrationWrapperCalls() === 1` — el job canónico jamás corre dos
     // veces sin importar en qué punto exacto "muere" el proceso.
 
-    test('crash "después de QA": el autoreporte ya se aceptó pero NINGÚN job se pidió todavía — el restart converge a un único job con todos los satisfiers (C4, R7.3)', async () => {
+    test('crash "después de QA": el autoreporte ya fue ACEPTADO (HEAD/árbol re-verificados, cohortPhase ya en FINAL_INTEGRATION) pero NINGÚN job se pidió todavía — el restart converge a un único job con todos los satisfiers (C4, R7.3)', async () => {
         h = finalizerHarness(['a', 'b']);
         h.allMerged();
         await h.tick();
         expect(h.nextAction()?.type).toBe('run-global-qa');
 
-        h.reportQaPass();   // emite el request `track-finalize-request` — SIN tickear todavía
-        // Punto de crash exacto: el autoreporte está en el journal, pero
-        // ningún tick lo procesó aún — cero jobs pedidos, wrapper jamás invocado.
+        h.reportQaPass();   // emite el request `track-finalize-request`
+        // Post-review (Finding 3, ronda 2 de re-review): la version anterior
+        // crasheaba ACA MISMO, sin tickear — es decir, ANTES de que
+        // `consumePendingRequests` siquiera aplicara el autoreporte. Eso
+        // probaba un escenario distinto (y ya cubierto por el resto de la
+        // matriz vía el mismo idempotencyKey). El punto que el Step 8 pide
+        // ("el autoreporte YA se aceptó, ningún job pedido todavía") exige
+        // avanzar hasta que `reconcileTracks` haya corrido de verdad
+        // `runRequestGlobalQa`: aplica `track-finalize-request`
+        // (`s.qaFinalizeRequested`), RE-VERIFICA `qaHeadSha === HEAD real` y
+        // árbol limpio (no confía ciegamente en el autoreporte, ver
+        // `apply.ts`), y solo entonces observa `global-qa-pass` — el efecto
+        // OBSERVABLE de esa aceptación es `cohortPhase` pasando a
+        // `FINAL_INTEGRATION` (`protocol.ts::reconcileProtocol`, rama
+        // `global-qa-pass`, fija `globalQaHeadSha` Y `cohortPhase` en LA
+        // MISMA transición). Un solo tick real basta — probado
+        // empíricamente: el mismo `reconcileTracks` que aplica el request
+        // también ejecuta `request-global-qa` en esa misma llamada — pero
+        // `tickUntil` en vez de `tick()` fijo documenta la condición real en
+        // vez de un conteo de ticks frágil.
+        await h.tickUntil(() => readJournal(h.repo, 'main').state!.cohortPhase === 'FINAL_INTEGRATION', 20);
+        expect(readJournal(h.repo, 'main').state!.cohortPhase).toBe('FINAL_INTEGRATION');
+        expect(readJournal(h.repo, 'main').state!.qaFinalizeRequested).toBeDefined();
+        // El punto de crash exacto: el autoreporte ya fue aceptado Y
+        // re-verificado, pero el job canónico todavía no se pidió (el
+        // próximo efecto, `request-final-integration`, corre recién en un
+        // tick DISTINTO — `runRequestFinalIntegration` ni siquiera se
+        // invocó todavía).
         expect(h.requestedJobs()).toEqual([]);
         expect(h.integrationWrapperCalls()).toBe(0);
 
@@ -314,15 +363,43 @@ describe('finalizer end-to-end (R7.1-R7.7, C3/C4, Task 12)', () => {
         const jobs = h.requestedJobs();
         expect(jobs).toHaveLength(1);   // nunca un subconjunto, ni siquiera arrancando de cero tras el crash
         expect(jobs[0].satisfies).toEqual(['track-integration:a', 'track-integration:b']);
-        expect(h.integrationWrapperCalls()).toBe(1);
+        expect(h.integrationWrapperCalls()).toBe(1);   // exactamente una vez: ni cero (atascado), ni dos (duplicado)
     });
 
-    test('crash "después del request": el job ya se pidió, todavía no corrió/completó — el restart nunca pide un subconjunto ni duplica la ejecución (C4, R7.6)', async () => {
+    test('crash "después del request": el job ya fue CREADO en el journal (`received`) pero AÚN no se despachó — el restart nunca pide un subconjunto ni duplica la ejecución (C4, R7.6)', async () => {
         h = finalizerHarness(['a', 'b']);
         h.allMerged();
         await h.tick();
         h.reportQaPass();
-        await h.tickUntil(() => h.requestedJobs().length === 1);
+
+        // Post-review (Finding 4, ronda 2 de re-review): la version anterior
+        // usaba `tickUntil(() => h.requestedJobs().length === 1)` como punto
+        // de crash — pero `runner.ts::spawnPendingWrappers` despacha TODO job
+        // `received` (invoca el wrapper) en la MISMA llamada de
+        // `runnerTick` que ya corrió DENTRO del mismo tick que lo creó (ver
+        // `runnerTick`/`spawnPendingWrappers`, runner.ts): para cuando el job
+        // aparece en `requestedJobs()`, `integrationWrapperCalls()` YA es 1
+        // — es decir, ese punto de crash colapsaba con "después del pass",
+        // nunca representó "pedido pero sin despachar" (confirmado
+        // empíricamente: en este mismo harness, el job nace directo en
+        // `spawn-intent` con el wrapper ya invocado). La ÚNICA ventana real
+        // de "recibido, aún sin despachar" es la que un crash SIN puntos de
+        // `await` de por medio podría alcanzar dentro de un tick — entre que
+        // `consumePendingRequests` persiste el job en `received` y que
+        // `runnerTick` (más adelante en el MISMO `Supervisor.tick()`) lo
+        // despacha. Se reproduce llamando esa MISMA función (la primera
+        // mitad de ese tick) directo, sin completar el tick — mismo criterio
+        // que la prueba "antes de COMPLETE" de abajo usa con `reconcileTracks`.
+        for (let i = 0; i < 20 && !h.hasPendingCanonicalRequest(); i++) await h.tick();
+        expect(h.hasPendingCanonicalRequest()).toBe(true);   // el pedido ya esta en disco...
+        expect(h.requestedJobs()).toEqual([]);               // ...pero AUN no es un Job del journal
+
+        h.applyPendingRequestsOnly();   // == la primera mitad exacta del proximo tick
+        const created = Object.values(readJournal(h.repo, 'main').state!.jobs)
+            .filter((j) => j.satisfies?.some((id) => id.startsWith('track-integration:')));
+        expect(created).toHaveLength(1);
+        expect(created[0].executionState).toBe('received');   // pedido y CREADO, pero SIN despachar
+        expect(h.integrationWrapperCalls()).toBe(0);           // el wrapper jamas se invoco todavia
 
         h.crashAndRestart();
         // varios ticks más, ya con un proceso "nuevo": el mismo job se
@@ -338,7 +415,7 @@ describe('finalizer end-to-end (R7.1-R7.7, C3/C4, Task 12)', () => {
         const jobs = h.requestedJobs();
         expect(jobs).toHaveLength(1);
         expect(jobs[0].satisfies).toEqual(['track-integration:a', 'track-integration:b']);
-        expect(h.integrationWrapperCalls()).toBe(1);
+        expect(h.integrationWrapperCalls()).toBe(1);   // exactamente una vez: nunca corrio dos veces por el crash
     });
 
     test('el job canónico se ejecuta UNA sola vez (contador del wrapper) a través de un crash/restart', async () => {

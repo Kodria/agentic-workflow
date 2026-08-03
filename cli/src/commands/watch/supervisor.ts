@@ -15,29 +15,84 @@ import { decideStall, Backoff, beginGeneration, activeGeneration, ensureControll
 import type { JournalState } from '../../core/journal/types';
 import type { CohortPhase } from '../../core/tracks/types';
 
-/** R7/C3/C4 (Task 12) + fix post-review (regresión de ciclo colgado): fases de
- *  `CohortPhase` en las que una cohorte de tracks todavía puede "ganarle la
- *  carrera" a su propio `run-final-interlock` — i.e., donde `computeGate`
- *  puede certificar (por el enlace a REQUEST-time de `satisfiedBy`, ver
- *  `apply.ts`) ANTES de que la cohorte misma haya llegado a
- *  `cohortPhase === 'COMPLETE'`. Deliberadamente EXCLUYE:
- *    - `'SERIAL'`: `protocol.ts` (`nextProtocolEffect`) devuelve `null`
- *      incondicionalmente para SERIAL — no hay (ni debe haber, single-
- *      authority) camino de vuelta a COMPLETE. Un plan cuya cohorte cayó a
- *      fallback serial (Task 9) debe completar su ciclo por el camino
- *      genérico de siempre, exactamente como un plan sin tracks.
- *    - `'BLOCKED'`: custodia ya maneja este caso por separado (`enterCustody`
- *      en otros puntos del loop); el guard genérico de abajo no es quien
- *      decide el destino de una cohorte bloqueada.
- *    - `'PREPARING'` / `'FALLBACK_PENDING'`: fases previas a que exista
- *      siquiera un job canónico de integración enlazado a un `VerificationItem`
- *      — no hay carrera posible que ganarle todavía.
- *    - `'COMPLETE'`: ya no es "todavía corriendo", es el destino; tratarla
- *      como gobernante volvería el guard un no-op permanente.
- *  Solo estas cinco fases representan una cohorte VIVA que aún puede
- *  adelantarse a su propio interlock. */
+/** R7/C3/C4 (Task 12) + fix post-review #2 (re-derivado desde cero tras
+ *  encontrar que la justificación original no probaba lo que decía — ver
+ *  finding 1 del segundo round de re-review): fases de `CohortPhase` en las
+ *  que una cohorte de tracks todavía puede "ganarle la carrera" a su propio
+ *  `run-final-interlock`, es decir donde el `computeGate` GENÉRICO de este
+ *  mismo `tick()` (línea de abajo, calculado DESPUÉS de `runnerTick`) puede
+ *  certificar pass antes de que `reconcileTracks` (que corrió ANTES de
+ *  `runnerTick`, arriba en este mismo `tick()`) haya tenido chance de
+ *  observar ese mismo resultado y mover `cohortPhase` a `COMPLETE`.
+ *
+ *  Cadena causal EXACTA, trazada contra `protocol.ts`/`tracks.ts`/`apply.ts`:
+ *    1. `nextProtocolEffect` (protocol.ts) solo emite `request-final-integration`
+ *       cuando `s.globalQaHeadSha !== undefined` — y ese campo se asigna
+ *       (`reconcileProtocol`, observación `global-qa-pass`) EN LA MISMA
+ *       transición que pone `cohortPhase = 'FINAL_INTEGRATION'`. No existe
+ *       ningún camino donde `request-final-integration` se emita con
+ *       `cohortPhase` todavía en `'ACTIVE'`/`'JOINING'`.
+ *    2. `runRequestFinalIntegration` (tracks.ts) es quien llama a `requestJob`
+ *       con `verificationKind: 'track-integration'` — el ÚNICO lugar que
+ *       pide el job canónico. Por (1), esto solo puede ocurrir con
+ *       `cohortPhase === 'FINAL_INTEGRATION'`.
+ *    3. `apply.ts::applyRequestToState` (rama `job-request`) es quien enlaza
+ *       `VerificationItem.satisfiedBy` — y lo hace a REQUEST time (job recién
+ *       creado en `executionState: 'received'`, o job "equivalente" ya en
+ *       vuelo), nunca esperando a que el job termine. Por (2), el primer
+ *       tick en que esto puede pasar ya tiene `cohortPhase === 'FINAL_INTEGRATION'`.
+ *    4. Cada tick corre COMO MÁXIMO una mutación de protocolo por invocación
+ *       de `reconcileTracks` (invariante propio de esa función, ver su
+ *       comment de cabecera) y esa invocación sucede ANTES de `runnerTick`
+ *       (que despacha/recolecta jobs) y ANTES del `computeGate` genérico de
+ *       abajo. Entonces: en el tick donde el job canónico recién enlazado
+ *       pasa a `verdict: 'pass'` (recolectado por `runnerTick`, que corre
+ *       DESPUÉS de que `reconcileTracks` ya intentó — y no pudo, porque el
+ *       job seguía vivo — avanzar el protocolo este mismo tick), el
+ *       `computeGate` genérico de abajo puede certificar `pass` con
+ *       `liveJobs === 0` mientras `cohortPhase` sigue en
+ *       `'FINAL_INTEGRATION'` (el job pasó, pero `finalIntegrationJobId`
+ *       todavía no se asignó — eso requiere la observación `integration-pass`,
+ *       que recién corre el PRÓXIMO tick). Esta es la primera fase en riesgo.
+ *    5. Una vez que ese próximo tick observa `integration-pass` y mueve
+ *       `cohortPhase` a `'FINAL_INTERLOCK'` (dentro de `reconcileTracks`,
+ *       otra vez ANTES del `computeGate` genérico de ESE tick), el gate
+ *       genérico sigue viendo el mismo job ya-pasado satisfaciendo el mismo
+ *       item — sigue en riesgo de certificar en ESE tick, con `cohortPhase`
+ *       todavía en `'FINAL_INTERLOCK'` (la transición real a `COMPLETE` la
+ *       hace `runRunFinalInterlock`, que corre recién el tick SIGUIENTE,
+ *       otra vez antes que el gate genérico de ese tick). Segunda y última
+ *       fase en riesgo.
+ *    6. Cuando `runRunFinalInterlock` sí corre y su propio `computeGate`
+ *       interno pasa, mueve `cohortPhase` a `'COMPLETE'` SINCRÓNICAMENTE
+ *       dentro de `reconcileTracks`, antes de que el gate genérico de ese
+ *       mismo tick se calcule — por eso `'COMPLETE'` nunca necesita estar en
+ *       este set (ya lo cubre `cohortDone` por igualdad directa).
+ *
+ *  Por (1)-(3): `'ACTIVE'`/`'JOINING'` NO califican. Más fuerte todavía:
+ *  `registerTrackIntegrationItems` (apply.ts) agrega cada `track-integration:*`
+ *  al `cycleVerificationPlan` SIN `satisfiedBy` en cuanto el track se declara
+ *  (mucho antes de `ACTIVE`/`JOINING`) — mientras al menos uno siga sin
+ *  `satisfiedBy`, `computeGate` (gate.ts) nunca puede dar `pass`, así que el
+ *  gate genérico es estructuralmente incapaz de certificar durante
+ *  `ACTIVE`/`JOINING`, con o sin este guard.
+ *  `'FINAL_QA'` tampoco califica — y no es solo "no está en riesgo", es
+ *  DEAD: se rastreó cada asignación a `cohortPhase` en `protocol.ts`
+ *  (`initialCohort`, `reconcileProtocol`, `observeProtocolEffect`) y ese
+ *  valor nunca se produce; queda en el tipo `CohortPhase` pero ninguna
+ *  transición real lo alcanza.
+ *  Quedan fuera por lo ya documentado en la versión anterior de este
+ *  comentario (verificado de nuevo, sigue siendo cierto): `'SERIAL'` (sin
+ *  camino de vuelta a COMPLETE, `nextProtocolEffect` devuelve `null`
+ *  incondicional), `'BLOCKED'` (lo maneja `enterCustody` aparte),
+ *  `'PREPARING'`/`'FALLBACK_PENDING'` (todavía no existe job canónico
+ *  enlazable) y `'COMPLETE'` (es el destino, no una fase "todavía corriendo").
+ *
+ *  Las ÚNICAS dos fases donde el job canónico ya puede estar enlazado
+ *  (`satisfiedBy` set) sin que la cohorte misma haya llegado a `COMPLETE`
+ *  son `'FINAL_INTEGRATION'` y `'FINAL_INTERLOCK'`. */
 const LIVE_COHORT_PHASES: ReadonlySet<CohortPhase> = new Set<CohortPhase>([
-    'ACTIVE', 'JOINING', 'FINAL_QA', 'FINAL_INTEGRATION', 'FINAL_INTERLOCK',
+    'FINAL_INTEGRATION', 'FINAL_INTERLOCK',
 ]);
 
 export interface SupervisorConfig {
