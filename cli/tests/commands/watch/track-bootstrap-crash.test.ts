@@ -248,6 +248,14 @@ describe('reconcileTracks — crash/restart de P1 con git real (Task 9, R4.2/R4.
         for (let i = 0; i < 200 && s.cohortPhase !== 'SERIAL'; i++) {
             s = (await reconcileTracks(planRoot, BRANCH, s, runtime, 2)).state;
         }
+        // Marcador propio del test (no de `runtime`): registra el momento en
+        // que la cohorte se observa por primera vez en SERIAL, para poder
+        // comparar su índice contra el de 'branch-removed:a' más abajo —
+        // `nextProtocolEffect` solo emite 'enter-serial' una vez que TODOS
+        // los tracks owned llegan a REMOVED (ver el branch `FALLBACK_PENDING`
+        // en `protocol.ts`), así que este push siempre queda estrictamente
+        // después de cualquier evento de teardown real.
+        instr.teardownEvents.push('serial-entered');
         expect(s.cohortPhase).toBe('SERIAL');
         for (const t of s.tracks!) expect(['REMOVED', 'DECLARED']).toContain(t.phase);
 
@@ -257,7 +265,7 @@ describe('reconcileTracks — crash/restart de P1 con git real (Task 9, R4.2/R4.
         expect(instr.teardownEvents).toEqual(expect.arrayContaining([
             'supervisor-stopped:a', 'worktree-removed:a', 'branch-removed:a',
         ]));
-        expect(instr.teardownEvents.indexOf('branch-removed:a')).toBeLessThan(instr.teardownEvents.length);
+        expect(instr.teardownEvents.indexOf('branch-removed:a')).toBeLessThan(instr.teardownEvents.indexOf('serial-entered'));
 
         // Prueba REAL (no solo eventos): ni worktree ni branch de 'a' siguen vivos.
         const branches = realWorktreeBranches(planRoot);

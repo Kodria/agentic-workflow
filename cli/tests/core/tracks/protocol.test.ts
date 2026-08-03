@@ -123,6 +123,19 @@ describe('parallel-track protocol model', () => {
         ].sort());
     });
 
+    test('Step 3 (Task 9): el recorrido también ejercita decidePrepare, no solo nextProtocolEffect', () => {
+        // 'begin-fallback' queda deliberadamente afuera: es el fail-closed de
+        // una fase que `nextProtocolEffect` nunca selecciona para un efecto de
+        // PREPARING (ver el comentario de `decidePrepare`) — por diseño, la
+        // exploración (que solo llama `decidePrepare` con la fase que
+        // `nextProtocolEffect` ya eligió) jamás la alcanza; la matriz de
+        // arriba ('decidePrepare — Task 9') sí la cubre directamente.
+        expect([...exploreCohort(ids).prepareDecisions].sort()).toEqual([
+            'accept-readiness', 'accept-worktree', 'block-foreign',
+            'retry-supervisor-same-intent', 'retry-worktree', 'write-descriptor',
+        ].sort());
+    });
+
     describe('decidePrepare — Task 9 (R4.2, R4.6, C11): matriz observable de recuperación de crash', () => {
         const track = (phase: TrackProtocolState['phase']): TrackProtocolState => ({
             trackId: 'a', phase, fencingToken: 'f'.repeat(32), readinessNonce: 'r'.repeat(32),
@@ -170,10 +183,13 @@ describe('parallel-track protocol model', () => {
 });
 
 /** Recorrido acotado del espacio de estados con crash inyectado en cada frontera. */
-function exploreCohort(ids: string[]): { states: CohortProtocol[]; effects: Set<ProtocolEffect['kind']> } {
+function exploreCohort(ids: string[]): {
+    states: CohortProtocol[]; effects: Set<ProtocolEffect['kind']>; prepareDecisions: Set<PrepareDecision>;
+} {
     const queue: CohortProtocol[] = [{ ...initialCohort('journal-1', ids), planHeadSha: 'plan-head' }];
     const seen = new Map<string, CohortProtocol>();
     const effects = new Set<ProtocolEffect['kind']>();
+    const prepareDecisions = new Set<PrepareDecision>();
     while (queue.length > 0 && seen.size < 20000) {
         const state = queue.shift()!;
         const key = JSON.stringify(state);
@@ -188,12 +204,12 @@ function exploreCohort(ids: string[]): { states: CohortProtocol[]; effects: Set<
             continue;
         }
         effects.add(effect.kind);
-        for (const observation of observationsFor(effect)) {
+        for (const observation of observationsFor(effect, state, prepareDecisions)) {
             queue.push(observeProtocolEffect(structuredClone(state), effect, observation));
             queue.push(reconcileProtocol(structuredClone(state), observation)); // crash antes de result
         }
     }
-    return { states: [...seen.values()], effects };
+    return { states: [...seen.values()], effects, prepareDecisions };
 }
 
 /** Requests que nacen fuera del reducer y por eso no son consecuencia de ningún effect. */
@@ -203,37 +219,139 @@ function externalObservationsFor(state: CohortProtocol): ProtocolObservation[] {
         .map((t): ProtocolObservation => ({ kind: 'join-requested', trackId: t.trackId }));
 }
 
-function observationsFor(effect: ReturnType<typeof nextProtocolEffect>): ProtocolObservation[] {
-    if (effect === null) return [];
-    switch (effect.kind) {
-        case 'create-worktree': return [
-            { kind: 'effect-applied', effect },
-            { kind: 'worktree-observed', trackId: effect.trackId, owned: true },
-            { kind: 'worktree-observed', trackId: effect.trackId, owned: false },
-            { kind: 'effect-failed', trackId: effect.trackId, effect: effect.kind, detail: 'injected' },
-        ];
-        case 'merge-track': return [
-            { kind: 'join-observation', trackId: effect.trackId, mergeHead: null, planHead: 'merged', trackIsAncestor: true },
-            { kind: 'join-observation', trackId: effect.trackId, mergeHead: effect.expectedTrackHeadSha, planHead: effect.expectedPlanHeadSha },
-        ];
-        case 'freeze-track': return [
-            { kind: 'effect-applied', effect },
-            { kind: 'freeze-observation', trackId: effect.trackId, frozenHeadSha: `${effect.trackId}-head` },
-        ];
-        case 'spawn-track-supervisor': return [
-            { kind: 'effect-applied', effect },
-            { kind: 'supervisor-observed', trackId: effect.trackId, identity: 'expected', readinessNonce: effect.readinessNonce },
-            { kind: 'supervisor-observed', trackId: effect.trackId, identity: 'expected', readinessNonce: 'nonce-ajeno' },
-            { kind: 'supervisor-observed', trackId: effect.trackId, identity: 'other' },
-        ];
-        case 'begin-teardown': return [
-            { kind: 'effect-applied', effect },
-            { kind: 'track-removed', trackId: effect.trackId },
-            { kind: 'teardown-blocked', trackId: effect.trackId, detail: 'identidad ajena' },
-        ];
-        case 'request-global-qa': return [{ kind: 'global-qa-pass', headSha: 'H-qa', clean: true }];
-        case 'request-final-integration': return [{ kind: 'integration-pass', jobId: 'job-1', headSha: 'H-qa' }];
-        case 'run-final-interlock': return [{ kind: 'interlock-pass', headSha: 'H-qa' }];
-        default: return [{ kind: 'effect-applied', effect }];
+/** Los 7 valores que `decidePrepare` puede devolver (mismo catálogo que
+ *  `PrepareDecision`) — usado para que la exploración denuncie si algún día
+ *  devuelve algo fuera de este conjunto. */
+const VALID_PREPARE_DECISIONS: readonly PrepareDecision[] = [
+    'retry-worktree', 'accept-worktree', 'write-descriptor',
+    'retry-supervisor-same-intent', 'accept-readiness', 'block-foreign', 'begin-fallback',
+];
+
+/** Variantes de `PrepareObservation` que un driver real reuniría para
+ *  `create-worktree` (fase PREPARE_INTENT) — mismo catálogo que la matriz
+ *  `decidePrepare — Task 9` de más abajo. */
+const PREPARE_OBSERVATIONS_FOR_WORKTREE: PrepareObservation[] = [
+    {}, { worktreeOwned: true }, { worktreeOwned: true, worktreeForeignNonEmpty: true },
+    { worktreeForeignNonEmpty: true }, { worktreeOwned: false, worktreeForeignNonEmpty: false },
+];
+
+/** Idem para `spawn-track-supervisor` (fase SUPERVISOR_STARTING). */
+const PREPARE_OBSERVATIONS_FOR_SUPERVISOR: PrepareObservation[] = [
+    {}, { supervisorArtifact: 'absent' }, { supervisorArtifact: 'claimed' },
+    { supervisorArtifact: 'ready' }, { supervisorArtifact: 'foreign' },
+];
+
+/**
+ * Task 9 (Step 3 del plan): llama a `decidePrepare` — la MISMA autoridad que
+ * usa `tracks.ts` — para cada `PrepareObservation` relevante a la fase que
+ * `nextProtocolEffect` ya eligió, y traduce cada decisión a la
+ * `ProtocolObservation` que un driver real produciría con ella (mismo mapeo,
+ * letra por letra, que `runCreateWorktree`/`runSpawnTrackSupervisor` en
+ * `tracks.ts`). Sin esto, `nextProtocolEffect` (qué efecto sigue) y
+ * `decidePrepare` (qué hacer con ESE efecto) podían divergir en silencio —
+ * ningún test lo hubiera visto porque la exploración nunca invocaba
+ * `decidePrepare`. Las observaciones devueltas se mezclan con las de
+ * `observationsFor` y entran al mismo BFS: si alguna hiciera que
+ * `reconcileProtocol`/`observeProtocolEffect` tiraran, o llevara a un estado
+ * que viola invariantes, el test de exploración ya existente lo denuncia.
+ */
+function decidePrepareObservationsFor(
+    effect: Exclude<ReturnType<typeof nextProtocolEffect>, null>, state: CohortProtocol, prepareDecisions: Set<PrepareDecision>,
+): ProtocolObservation[] {
+    if (effect.kind !== 'create-worktree' && effect.kind !== 'create-track-journal' && effect.kind !== 'spawn-track-supervisor') {
+        return [];
     }
+    const track = state.tracks[effect.trackId];
+    // `spawn-track-supervisor` cubre DOS fases (JOURNAL_CREATED |
+    // SUPERVISOR_STARTING, ver `nextProtocolEffect`), pero `tracks.ts`
+    // (`runSpawnTrackSupervisor`) solo invoca `decidePrepare` en la SEGUNDA
+    // — la primera vez (JOURNAL_CREATED, `ref.supervisorIntent === undefined`)
+    // persiste el intent y retorna ANTES de siquiera considerar `decidePrepare`,
+    // porque el protocolo puro no distingue "intent ya persistido" (eso vive
+    // solo en `TrackRef.supervisorIntent`, un dato del journal — regla de
+    // capas de T1, `protocol.ts` no lo conoce). Llamar `decidePrepare` acá con
+    // JOURNAL_CREATED probaría un caso que el driver real NUNCA ejercita
+    // (decidePrepare cae a 'begin-fallback' porque no tiene rama para esa
+    // fase) — se salta, fiel al comportamiento real, no a lo que `protocol.ts`
+    // podría en teoría hacer con ella.
+    if (effect.kind === 'spawn-track-supervisor' && track.phase !== 'SUPERVISOR_STARTING') return [];
+    const variants: PrepareObservation[] = effect.kind === 'create-worktree' ? PREPARE_OBSERVATIONS_FOR_WORKTREE
+        : effect.kind === 'spawn-track-supervisor' ? PREPARE_OBSERVATIONS_FOR_SUPERVISOR
+            : [{}];
+    const out: ProtocolObservation[] = [];
+    for (const observed of variants) {
+        const decision = decidePrepare(track, observed);
+        expect(VALID_PREPARE_DECISIONS).toContain(decision);
+        prepareDecisions.add(decision);
+        if (effect.kind === 'create-worktree') {
+            if (decision === 'accept-worktree') out.push({ kind: 'worktree-observed', trackId: effect.trackId, owned: true });
+            else if (decision === 'block-foreign') out.push({ kind: 'worktree-observed', trackId: effect.trackId, owned: false });
+            // 'retry-worktree': recién ahí `tracks.ts` toca `runtime` de
+            // verdad — su resultado real (éxito u `effect-failed`) ya está
+            // en el `case 'create-worktree'` de `observationsFor`.
+        } else if (effect.kind === 'spawn-track-supervisor') {
+            if (decision === 'block-foreign') out.push({ kind: 'supervisor-observed', trackId: effect.trackId, identity: 'other' });
+            else if (decision === 'accept-readiness' && observed.supervisorArtifact === 'ready') {
+                out.push({ kind: 'supervisor-observed', trackId: effect.trackId, identity: 'expected', readinessNonce: effect.readinessNonce });
+            }
+            // 'retry-supervisor-same-intent' y 'accept-readiness' con
+            // 'claimed': ningún tick produce todavía una observación de
+            // protocolo (esperan al próximo, o recién ahí tocan `runtime`).
+        } else {
+            // create-track-journal: `write-descriptor` es la única decisión
+            // posible en WORKTREE_CREATED (initTrackJournal ya es idempotente
+            // por construcción) — su resultado ya lo cubre el `default` de
+            // `observationsFor`.
+            expect(decision).toBe('write-descriptor');
+        }
+    }
+    return out;
+}
+
+function observationsFor(
+    effect: ReturnType<typeof nextProtocolEffect>, state: CohortProtocol, prepareDecisions: Set<PrepareDecision>,
+): ProtocolObservation[] {
+    if (effect === null) return [];
+    const base = ((): ProtocolObservation[] => {
+        switch (effect.kind) {
+            case 'create-worktree': return [
+                { kind: 'effect-applied', effect },
+                { kind: 'worktree-observed', trackId: effect.trackId, owned: true },
+                { kind: 'worktree-observed', trackId: effect.trackId, owned: false },
+                { kind: 'effect-failed', trackId: effect.trackId, effect: effect.kind, detail: 'injected' },
+            ];
+            case 'merge-track': return [
+                { kind: 'join-observation', trackId: effect.trackId, mergeHead: null, planHead: 'merged', trackIsAncestor: true },
+                { kind: 'join-observation', trackId: effect.trackId, mergeHead: effect.expectedTrackHeadSha, planHead: effect.expectedPlanHeadSha },
+            ];
+            case 'freeze-track': return [
+                { kind: 'effect-applied', effect },
+                { kind: 'freeze-observation', trackId: effect.trackId, frozenHeadSha: `${effect.trackId}-head` },
+            ];
+            case 'spawn-track-supervisor': return [
+                { kind: 'effect-applied', effect },
+                { kind: 'supervisor-observed', trackId: effect.trackId, identity: 'expected', readinessNonce: effect.readinessNonce },
+                { kind: 'supervisor-observed', trackId: effect.trackId, identity: 'expected', readinessNonce: 'nonce-ajeno' },
+                { kind: 'supervisor-observed', trackId: effect.trackId, identity: 'other' },
+            ];
+            case 'begin-teardown': return [
+                { kind: 'effect-applied', effect },
+                { kind: 'track-removed', trackId: effect.trackId },
+                { kind: 'teardown-blocked', trackId: effect.trackId, detail: 'identidad ajena' },
+            ];
+            case 'request-global-qa': return [{ kind: 'global-qa-pass', headSha: 'H-qa', clean: true }];
+            case 'request-final-integration': return [{ kind: 'integration-pass', jobId: 'job-1', headSha: 'H-qa' }];
+            case 'run-final-interlock': return [{ kind: 'interlock-pass', headSha: 'H-qa' }];
+            default: return [{ kind: 'effect-applied', effect }];
+        }
+    })();
+    // Task 9 (Step 3): agrega las observaciones que `decidePrepare` ejercita
+    // para las 3 fronteras de PREPARING que gobierna, deduplicando contra las
+    // que este mismo `switch` ya listaba a mano.
+    const seen = new Set(base.map((o) => JSON.stringify(o)));
+    for (const observation of decidePrepareObservationsFor(effect, state, prepareDecisions)) {
+        const key = JSON.stringify(observation);
+        if (!seen.has(key)) { base.push(observation); seen.add(key); }
+    }
+    return base;
 }
