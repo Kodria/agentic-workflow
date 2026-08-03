@@ -1,6 +1,12 @@
 // Task 12 (R3.6, R7.1-R7.7, R8.1/R8.2, C3/C4): QA final, integración canónica
-// única e interlock. Dos frentes:
+// única e interlock. Tres frentes:
 //   A. `canCompleteCohort` — pura, sin I/O (R8.1).
+//   A2. `runRequestFinalIntegration` — fronteras `reconcileTracks()`
+//      aisladas con un `TrackRuntime` fake (mismo criterio que Task 11 en
+//      `track-join-crash.test.ts`, describe "adquisición del lock y merge
+//      son fronteras separadas"): prueba DIRECTAMENTE que pausar la
+//      generación del controller y pedir el job canónico son dos llamadas
+//      distintas, sin depender de un loop de convergencia end-to-end.
 //   B. El finalizer end-to-end: `Supervisor.tick()` real + `reconcileTracks`
 //      real, sobre un repo git real y un journal real — mismo criterio que
 //      `track-freeze.test.ts`/`track-runtime-git.test.ts`: la única forma
@@ -12,18 +18,19 @@ import path from 'path';
 import os from 'os';
 import { execFileSync } from 'child_process';
 import { Supervisor, DEFAULT_SUPERVISOR_CONFIG } from '../../../src/commands/watch/supervisor';
-import { canCompleteCohort, reconcileTracks, defaultTrackRuntime } from '../../../src/commands/watch/tracks';
+import { canCompleteCohort, reconcileTracks, defaultTrackRuntime, TrackRuntime } from '../../../src/commands/watch/tracks';
 import { WrapperSpawner } from '../../../src/commands/watch/runner';
 import { runExecWrapper } from '../../../src/commands/job/exec-wrapper';
 import { initWatch } from '../../../src/commands/watch/init';
 import { emitRequest, listPendingRequests } from '../../../src/core/journal/requests';
 import { registerTrackIntegrationItems, consumePendingRequests } from '../../../src/commands/watch/apply';
 import { activeGeneration } from '../../../src/commands/watch/generations';
-import { readJournal, writeJournal } from '../../../src/core/journal/store';
+import { readJournal, writeJournal, initJournal } from '../../../src/core/journal/store';
 import { computeGate, GateResult } from '../../../src/commands/job/gate';
 import { computeFingerprint } from '../../../src/core/journal/fingerprint';
-import { integrationLockPath } from '../../../src/core/journal/paths';
+import { integrationLockPath, eventsPath } from '../../../src/core/journal/paths';
 import { emptyState } from '../../../src/core/journal/types';
+import { initRepo, commitFile } from '../../helpers/git-fixture';
 import type { Job, JournalState, TrackRef } from '../../../src/core/journal/types';
 
 function git(cwd: string, ...args: string[]): void {
@@ -57,6 +64,11 @@ describe('canCompleteCohort (R8.1, Task 12)', () => {
             .toEqual({ complete: true, pendingTracks: [] });
     });
 
+    test('un track JOINED (más allá de MERGED_UNVERIFIED) no cuenta como pendiente', () => {
+        expect(canCompleteCohort(stateWithPhases({ a: 'JOINED', b: 'FROZEN' })))
+            .toEqual({ complete: false, pendingTracks: ['b'] });
+    });
+
     test('menos de dos tracks nunca se considera completo', () => {
         expect(canCompleteCohort(stateWithPhases({ a: 'MERGED_UNVERIFIED' })))
             .toEqual({ complete: false, pendingTracks: [] });
@@ -64,6 +76,152 @@ describe('canCompleteCohort (R8.1, Task 12)', () => {
 
     test('sin tracks (journal que no es de una cohorte): nunca completo', () => {
         expect(canCompleteCohort(emptyState('main'))).toEqual({ complete: false, pendingTracks: [] });
+    });
+});
+
+// --- Parte A2: `runRequestFinalIntegration` — pausa y pedido del job
+// canónico son DOS fronteras `reconcileTracks()` distintas (R7.3/R7.6/C4,
+// mismo criterio que Task 11 aplicó a `ensureIntegrationLock`/intento de
+// merge, ver el describe "fronteras separadas" en `track-join-crash.test.ts`)
+// ---------------------------------------------------------------------------
+//
+// Antes de este test, el split solo se ejercitaba INCIDENTALMENTE vía el
+// loop de convergencia `tickUntil` de la Parte B — eso prueba que el
+// RESULTADO FINAL converge, pero un colapso de las dos fronteras en una sola
+// llamada (la clase de bug que Task 8 encontró tres veces) podría pasar
+// desapercibido igual, porque `tickUntil` nunca aisla la llamada intermedia.
+// Este bloque usa un `TrackRuntime` fake — solo `pauseControllerGeneration`
+// controlado directamente, el resto son `unexpected()` porque el efecto
+// `request-final-integration` no toca ningún otro método de la interfaz —
+// y deja `requestJob`/`emitRequest` correr de verdad contra un repo git real
+// (necesario para que `computeFingerprint`/el guard de árbol limpio de
+// `requestJob` con `verificationKind: 'track-integration'` se ejerciten de
+// verdad, no se simulen).
+describe('runRequestFinalIntegration — pausa del controller y pedido del job canónico son fronteras separadas (Finding 2, revisión de Task 12)', () => {
+    const BRANCH = 'main';
+
+    function mergedTrackRef(id: string, headSha: string): TrackRef {
+        return {
+            trackId: id, worktreePath: `/tmp/${id}`, branch: `awm-track/${id}`,
+            ownership: [], sharedResources: [], dependsOn: [],
+            fencingToken: `f-${id}`.padEnd(32, '0'), phase: 'MERGED_UNVERIFIED', readinessNonce: `r-${id}`.padEnd(32, '0'),
+            frozenHeadSha: headSha, joinedCommitSha: headSha,
+        };
+    }
+
+    /** Journal ya en `FINAL_INTEGRATION` con ambos tracks `MERGED_UNVERIFIED`
+     *  y el contrato canónico registrado — exactamente el estado en el que
+     *  `nextProtocolEffect` produce `request-final-integration` (protocol.ts
+     *  línea `s.globalQaHeadSha !== undefined && s.finalIntegrationJobId ===
+     *  undefined`), sin pasar por freeze/merge/QA (fuera de alcance acá). */
+    function declareFinalIntegrationCohort(planRoot: string, headSha: string): JournalState {
+        initJournal(planRoot, BRANCH);
+        const s0 = readJournal(planRoot, BRANCH).state!;
+        s0.tracks = [mergedTrackRef('a', headSha), mergedTrackRef('b', headSha)];
+        s0.cohortPhase = 'FINAL_INTEGRATION';
+        s0.cohortBaseSha = headSha;
+        s0.cohortPlanHeadSha = headSha;
+        s0.globalQaHeadSha = headSha;
+        s0.trackIntegration = { argv: ['true'], paths: [], planDigest: 'plan-1' };
+        writeJournal(planRoot, BRANCH, s0);
+        return readJournal(planRoot, BRANCH).state!;
+    }
+
+    function fakePauseOnlyRuntime(pauseResult: boolean, calls: { pause: number }): TrackRuntime {
+        const unexpected = (what: string) => (): never => {
+            throw new Error(`no debería llamarse: ${what} (fixture ya en FINAL_INTEGRATION, solo request-final-integration en juego)`);
+        };
+        return {
+            addWorktree: unexpected('addWorktree'),
+            initTrackJournal: unexpected('initTrackJournal'),
+            spawnSupervisor: unexpected('spawnSupervisor'),
+            observeSupervisor: unexpected('observeSupervisor'),
+            teardownOwned: async () => unexpected('teardownOwned')(),
+            emitFreezeRequest: unexpected('emitFreezeRequest'),
+            mergeFrozenTrack: unexpected('mergeFrozenTrack'),
+            abortOwnedMerge: unexpected('abortOwnedMerge'),
+            ensureIntegrationLock: async () => unexpected('ensureIntegrationLock')(),
+            async pauseControllerGeneration() {
+                calls.pause += 1;
+                return pauseResult;
+            },
+            releaseIntegrationLockIfHeld: unexpected('releaseIntegrationLockIfHeld'),
+        };
+    }
+
+    function pendingCanonicalRequests(planRoot: string): unknown[] {
+        return listPendingRequests(planRoot, BRANCH).filter((p) => !p.corrupt && p.envelope.kind === 'job-request'
+            && Array.isArray((p.envelope.payload as { satisfies?: unknown }).satisfies)
+            && ((p.envelope.payload as { satisfies: unknown[] }).satisfies).some((id) => typeof id === 'string' && id.startsWith('track-integration:')));
+    }
+
+    function readEvents(planRoot: string): Array<Record<string, unknown>> {
+        let raw = '';
+        try { raw = fs.readFileSync(eventsPath(planRoot, BRANCH), 'utf8'); } catch { return []; }
+        return raw.split('\n').filter((l) => l.trim().length > 0).map((l) => JSON.parse(l));
+    }
+
+    let planRoot: string;
+    afterEach(() => { if (planRoot !== undefined) fs.rmSync(planRoot, { recursive: true, force: true }); });
+
+    test('(a) generación activa: un call SOLO pausa (stop:true) y NO pide el job canónico en ese mismo call', async () => {
+        planRoot = initRepo();
+        commitFile(planRoot, '.gitignore', '.awm/\n');
+        const headSha = commitFile(planRoot, 'seed.txt', 'seed');
+        const s0 = declareFinalIntegrationCohort(planRoot, headSha);
+
+        const calls = { pause: 0 };
+        const runtime = fakePauseOnlyRuntime(true, calls);
+        const result = await reconcileTracks(planRoot, BRANCH, s0, runtime, 2);
+
+        expect(calls.pause).toBe(1);
+        expect(result.effectExecuted).toBe('request-final-integration');
+        expect(result.state.finalIntegrationJobId).toBeUndefined();
+        // El único touch real de este call fue la pausa — ningún job-request
+        // quedó escrito en el requestsDir todavía.
+        expect(pendingCanonicalRequests(planRoot)).toEqual([]);
+        expect(readEvents(planRoot).some((e) => e.kind === 'plan-generation-paused-for-integration')).toBe(true);
+        expect(readEvents(planRoot).some((e) => e.kind === 'track-integration-requested')).toBe(false);
+    });
+
+    test('(b) una vez confirmada pausada (sin generación activa), el PRÓXIMO call recién ahí pide el job canónico', async () => {
+        planRoot = initRepo();
+        commitFile(planRoot, '.gitignore', '.awm/\n');
+        const headSha = commitFile(planRoot, 'seed.txt', 'seed');
+        const s0 = declareFinalIntegrationCohort(planRoot, headSha);
+
+        const callsA = { pause: 0 };
+        const afterPause = (await reconcileTracks(planRoot, BRANCH, s0, fakePauseOnlyRuntime(true, callsA), 2)).state;
+        expect(pendingCanonicalRequests(planRoot)).toEqual([]);   // precondición: (a) todavía no pidió nada
+
+        const callsB = { pause: 0 };
+        const result = await reconcileTracks(planRoot, BRANCH, afterPause, fakePauseOnlyRuntime(false, callsB), 2);
+
+        expect(callsB.pause).toBe(1);   // confirmado sin generación activa, no memoizado: se sigue llamando
+        expect(result.effectExecuted).toBe('request-final-integration');
+        expect(pendingCanonicalRequests(planRoot)).toHaveLength(1);
+        expect(readEvents(planRoot).some((e) => e.kind === 'track-integration-requested')).toBe(true);
+    });
+
+    test('sin generación que pausar desde el arranque, pausa y pedido colapsan en el mismo call (sin violar "a lo sumo una mutación real")', async () => {
+        // Caso borde documentado por el propio driver: cuando `hadActive` es
+        // `false` desde el primer call, `pauseControllerGeneration` no hizo
+        // NINGÚN touch real (nunca llamó a `stopControllerGenerationConfirmed`)
+        // — así que seguir en el mismo call al pedido del job no funde dos
+        // mutaciones reales, solo una (el job-request). Esto es DISTINTO del
+        // caso (a)/(b): ahí `pausedNow === true` SÍ fue un touch real, y por
+        // eso corta el call.
+        planRoot = initRepo();
+        commitFile(planRoot, '.gitignore', '.awm/\n');
+        const headSha = commitFile(planRoot, 'seed.txt', 'seed');
+        const s0 = declareFinalIntegrationCohort(planRoot, headSha);
+
+        const calls = { pause: 0 };
+        const result = await reconcileTracks(planRoot, BRANCH, s0, fakePauseOnlyRuntime(false, calls), 2);
+
+        expect(calls.pause).toBe(1);
+        expect(pendingCanonicalRequests(planRoot)).toHaveLength(1);
+        expect(result.effectExecuted).toBe('request-final-integration');
     });
 });
 

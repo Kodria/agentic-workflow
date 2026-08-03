@@ -40,10 +40,22 @@ import type { JournalState, TrackContext, TrackRef, ProcessRef } from '../../cor
  *  internamente para decidir `request-global-qa` (`protocol.ts` sigue siendo
  *  la única autoridad de esa transición); esto es solo un helper de
  *  DIAGNÓSTICO/consulta sobre el mismo criterio, para que un caller (CLI,
- *  logging) pueda nombrar qué falta sin duplicar la condición a mano. */
+ *  logging) pueda nombrar qué falta sin duplicar la condición a mano.
+ *
+ *  Semántica sutil de "pendiente": un track cuenta como pendiente si TODAVÍA
+ *  NO llegó a `MERGED_UNVERIFIED` **o más allá**. `JOINED` es la fase que
+ *  sigue a `MERGED_UNVERIFIED` (ver `TRACK_PHASES` en `core/tracks/types.ts`
+ *  y el observation `interlock-pass` en `protocol.ts`, que mueve TODOS los
+ *  tracks a `JOINED` a la vez al cerrar la cohorte) — un track `JOINED` ya
+ *  superó el hito que este helper vigila, así que NO es pendiente, aunque
+ *  `JOINED !== 'MERGED_UNVERIFIED'` textualmente. Comparar solo contra
+ *  `'MERGED_UNVERIFIED'` sin excluir también `'JOINED'` marcaría
+ *  incorrectamente como pendiente un track que ya terminó. */
 export function canCompleteCohort(state: JournalState): { complete: boolean; pendingTracks: string[] } {
     const tracks = state.tracks ?? [];
-    const pendingTracks = tracks.filter((t) => t.phase !== 'MERGED_UNVERIFIED').map((t) => t.trackId).sort();
+    const pendingTracks = tracks
+        .filter((t) => t.phase !== 'MERGED_UNVERIFIED' && t.phase !== 'JOINED')
+        .map((t) => t.trackId).sort();
     return { complete: tracks.length >= 2 && pendingTracks.length === 0, pendingTracks };
 }
 
