@@ -1489,7 +1489,7 @@ _Requirements: R5.10, R6.1, R9.5, R9.6_
 - Create: `cli/tests/commands/track/verbs.test.ts`
 - Create: `cli/tests/commands/track/status.test.ts`
 
-- [ ] **Step 1: Escribir tests rojos de verbos y no-mutación**
+- [x] **Step 1: Escribir tests rojos de verbos y no-mutación**
 
 ```ts
 test.each([
@@ -1512,13 +1512,13 @@ test('status compone journals al leer y no los espeja (R9.5, R9.6)', () => {
 });
 ```
 
-- [ ] **Step 2: Verificar RED**
+- [x] **Step 2: Verificar RED**
 
 Run: `cd cli && npx jest tests/commands/track/{verbs,status}.test.ts --runInBand`
 
 Expected: FAIL porque `track` no está registrado.
 
-- [ ] **Step 3: Implementar emisores con idempotency key ligada al journal/track/intent**
+- [x] **Step 3: Implementar emisores con idempotency key ligada al journal/track/intent**
 
 ```ts
 // cli/src/commands/track/emit.ts
@@ -1542,7 +1542,7 @@ export function emitTrackRequest(
 
 `add`, `join` y `remove` llaman este helper. `verify-independence`, `list` y `status` no aceptan generation y no emiten requests.
 
-- [ ] **Step 4: Implementar agregado read-only**
+- [x] **Step 4: Implementar agregado read-only**
 
 ```ts
 // cli/src/commands/track/status.ts
@@ -1566,7 +1566,7 @@ export function aggregateTrackStatus(planRoot: string, plan: JournalState): Aggr
 
 `fingerprintFor` usa `computeFingerprint` contra el worktree observado. Si un journal no puede leerse, su gate es rojo; nunca se copia el resultado al plan journal.
 
-- [ ] **Step 5: Registrar commander y verificar exit codes**
+- [x] **Step 5: Registrar commander y verificar exit codes**
 
 `verify-independence` imprime JSON `{parallel,reasons}` y sale 1 si `parallel:false`. `status` sale 1 si algún journal es corrupto/bloqueado, aunque imprime todo el agregado.
 
@@ -1574,7 +1574,7 @@ Run: `cd cli && npx jest tests/commands/track/{verbs,status}.test.ts --runInBand
 
 Expected: PASS; help lista `add`, `list`, `status`, `verify-independence`, `join`, `remove`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cli/src/commands/track cli/src/index.ts cli/tests/commands/track
