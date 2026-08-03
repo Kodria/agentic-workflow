@@ -25,6 +25,7 @@ import { requestJob } from '../../../src/commands/job/request';
 import { emitRequest, listPendingRequests } from '../../../src/core/journal/requests';
 import { computeFingerprint } from '../../../src/core/journal/fingerprint';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
+import { eventsPath } from '../../../src/core/journal/paths';
 import type { JournalState, TrackRef } from '../../../src/core/journal/types';
 
 function git(cwd: string, ...args: string[]): void {
@@ -63,6 +64,15 @@ describe('runFreezeTrack — driver del PLAN (R5.2/R5.7/R5.8/R5.9/C5)', () => {
     });
 
     function trackJournal(): JournalState { return readJournal(trackWorktree, TRACK_BRANCH).state!; }
+
+    // Mismo canal de auditoria que el resto del supervisor (`appendEvent`) —
+    // leemos DE AHI en vez de inferir eventos por diffing de estado (mismo
+    // patron que `track-bootstrap.test.ts`).
+    function readRawEvents(): Array<Record<string, unknown>> {
+        let raw = '';
+        try { raw = fs.readFileSync(eventsPath(planRoot, PLAN_BRANCH), 'utf8'); } catch { return []; }
+        return raw.split('\n').filter((l) => l.trim().length > 0).map((l) => JSON.parse(l));
+    }
 
     function declarePlan(ownership: string[] = []): JournalState {
         initJournal(planRoot, PLAN_BRANCH);
@@ -188,6 +198,25 @@ describe('runFreezeTrack — driver del PLAN (R5.2/R5.7/R5.8/R5.9/C5)', () => {
         const a = result.state.tracks!.find((t) => t.trackId === 'a')!;
         expect(a.phase).toBe('FROZEN');   // el freeze en sí NUNCA se revierte
         expect(result.state.cohortParallelInvalidatedBy ?? []).toEqual([]);   // outside.txt no es una clase global
+
+        // Consumidor `track-ownership-violation` (Step 6/R5.8/R5.9):
+        // `assessActualOwnership` reporta `outside.txt` como fuera de
+        // ownership declarada (`src/`), y ese hallazgo SI debe emitirse
+        // nombrando el path exacto — sin esto, una regresion en el wiring
+        // `mergeBase`/`changedPaths`/`assessActualOwnership` pasaria
+        // desapercibida (nadie mas lee este campo del evento).
+        const violation = readRawEvents().find((e) => e.kind === 'track-ownership-violation');
+        expect(violation).toEqual({ at: expect.any(String), kind: 'track-ownership-violation', trackId: 'a', paths: ['outside.txt'] });
+        // Efecto observable en el ordenamiento de join: una violacion de
+        // ownership NO bloquea ni reordena nada por si sola — el track
+        // sigue avanzando a FROZEN/JOINING exactamente igual que sin
+        // violacion (Step 6 solo la deja NOMBRADA en el log de eventos para
+        // revision humana, jamas revierte un freeze ya consumado).
+        expect(a.blockedReason).toBeUndefined();
+        expect(result.state.cohortPhase).toBe('JOINING');
+        // Ninguna clase global fue tocada: el consumidor `parallel-invalidated`
+        // (probado en el test siguiente) permanece silencioso acá.
+        expect(readRawEvents().some((e) => e.kind === 'parallel-invalidated')).toBe(false);
     });
 
     test('una clase global tocada de verdad invalida el paralelismo de la cohorte y se persiste para futuros awm watch (R5.7/C5)', async () => {
@@ -202,6 +231,23 @@ describe('runFreezeTrack — driver del PLAN (R5.2/R5.7/R5.8/R5.9/C5)', () => {
         const a = result.state.tracks!.find((t) => t.trackId === 'a')!;
         expect(a.phase).toBe('FROZEN');
         expect(result.state.cohortParallelInvalidatedBy).toEqual(['a:lockfile:package-lock.json']);
+
+        // Consumidor `parallel-invalidated` (Step 6/R5.7/C5): el evento
+        // nombra la(s) clase(s) global(es) realmente tocadas, y
+        // `cohortParallelInvalidatedBy` — la marca DURABLE que futuros
+        // `awm watch` deben leer para no volver a paralelizar esta cohorte
+        // — usa el formato `<trackId>:<clase>:<path>` que produce
+        // `assessActualOwnership`, no un formato inventado por el test.
+        const invalidated = readRawEvents().find((e) => e.kind === 'parallel-invalidated');
+        expect(invalidated).toEqual({ at: expect.any(String), kind: 'parallel-invalidated', trackId: 'a', classes: ['lockfile:package-lock.json'] });
+        // `package-lock.json` tambien esta fuera de la ownership declarada
+        // (`src/`) — ambos consumidores del mismo commit se ejercitan acá.
+        const violation = readRawEvents().find((e) => e.kind === 'track-ownership-violation');
+        expect(violation).toEqual({ at: expect.any(String), kind: 'track-ownership-violation', trackId: 'a', paths: ['package-lock.json'] });
+        // La invalidacion de paralelismo tampoco bloquea/reordena el join
+        // de ESTE track — persiste como marca para cohortes FUTURAS.
+        expect(a.blockedReason).toBeUndefined();
+        expect(result.state.cohortPhase).toBe('JOINING');
     });
 });
 
@@ -319,6 +365,51 @@ describe('Supervisor.tick() — freeze de un track individual (R5.2/R6.3)', () =
         expect(await sup.tick()).toBe('frozen');
     });
 
+    test('job varado en spawn-intent con refs muertas justo al pedirse el freeze SI se reintenta y drena — el freeze converge en vez de quedar en `continue` para siempre (regresión R6.3: `dispatch:false` no debe suprimir retry-same-intent)', async () => {
+        setUpGreenTrack();
+        const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10, provider: 'codex' };
+        const sup = new Supervisor(repo, BRANCH, cfg, fakeSpawner);
+        await tickUntil(sup, () => {
+            const s = readJournal(repo, BRANCH).state!;
+            return Object.values(s.jobs).length === 2 && Object.values(s.jobs).every((j) => j.executionState === 'exited' && j.verdict === 'pass');
+        });
+
+        // Simular un wrapper que crasheo EXACTAMENTE cuando se pidio el
+        // freeze: el job queda en `spawn-intent` con refs de PID que no
+        // existen y SIN ningun sidecar (`claim`/`identity`/`result`) en
+        // disco — `reconcileJobs` lo clasifica `never-started` =>
+        // `retry-same-intent`. Este job NO participa de ningun
+        // `verificationPlan` (el gate ya certifica con los 2 jobs de
+        // `setUpGreenTrack`) — lo unico que debe bloquear la convergencia
+        // del freeze es que siga contando como LIVE en `attemptFreeze`.
+        const dead = { pid: 999999, startTime: 'gone', spawnNonce: 'stuck-nonce', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
+        const s1 = readJournal(repo, BRANCH).state!;
+        s1.jobs['stuck-job'] = {
+            id: 'stuck-job', fingerprint: 'fp', commandDigest: 'cd', argv: ['node', '-e', 'process.exit(0)'], cwd: '.',
+            paths: [], expandedPaths: [], executionState: 'spawn-intent', observationState: 'progressing',
+            spawnNonce: 'stuck-nonce', processRef: dead, wrapperRef: dead,
+            phaseTimestamps: { received: new Date(Date.now() - 120000).toISOString(), 'spawn-intent': new Date(Date.now() - 120000).toISOString() },
+        };
+        writeJournal(repo, BRANCH, s1);
+
+        requestFreeze();
+
+        // Con el bug original, `dispatch:false` tambien suprimia el retry
+        // de `stuck-job`: jamas saldria de `spawn-intent`, `liveJobs` jamas
+        // llegaria a 0 en `attemptFreeze` y el freeze quedaria varado en
+        // `'continue'` para siempre (deadlock). Con el fix, el retry corre
+        // igual (drenaje de trabajo YA en vuelo, no arranque de trabajo
+        // nuevo) y el job converge a un estado terminal.
+        const outcome = await tickUntil(sup, () => readJournal(repo, BRANCH).state!.frozen !== undefined);
+
+        expect(outcome).toBe('frozen');
+        const final = readJournal(repo, BRANCH).state!;
+        expect(final.jobs['stuck-job'].executionState).toBe('exited');
+        expect(final.jobs['stuck-job'].verdict).toBe('pass');
+        expect(final.frozen).toBeDefined();
+        expect(final.frozen!.headSha).toBe(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim());
+    });
+
     test('deja de despachar trabajo NUEVO mientras el freeze está pendiente: un job-request llega pero no se spawnea (paso 1)', async () => {
         initWatch(repo, BRANCH);
         const s = readJournal(repo, BRANCH).state!;
@@ -372,5 +463,164 @@ describe('Supervisor.tick() — freeze de un track individual (R5.2/R6.3)', () =
         fs.rmSync(path.join(repo, 'dirty.txt'));
         const outcome = await tickUntil(sup, () => readJournal(repo, BRANCH).state!.frozen !== undefined);
         expect(outcome).toBe('frozen');
+    });
+});
+
+// --- Parte 3: loop end-to-end de DOS Supervisors reales ---------------------
+//
+// Las Partes 1 y 2 prueban, cada una con git real, solo UNA mitad del loop
+// completo: Parte 1 fuerza `frozen` directamente en el journal del track
+// (nunca deja que un `Supervisor` de track real lo produzca) y Parte 2
+// inyecta la request via `emitRequest` crudo (nunca deja que un driver real
+// del lado del PLAN, `reconcileTracks`, la emita). Este describe cierra esa
+// brecha: DOS worktrees reales (uno para el plan, uno para el track, mismo
+// object store via `git worktree add`), un `Supervisor` de track REAL cuyo
+// `.tick()` se llama en loop hasta drenar/gatear/limpiar/terminar/persistir
+// `frozen` por si mismo, y `reconcileTracks` (el mismo driver que
+// `Supervisor.tick()` del PLAN llama en producción) llamado en loop del lado
+// del plan hasta que observa y acepta ese `frozen` — probando que las dos
+// mitades, cada una ya cubierta por separado arriba, cierran el loop de
+// verdad cuando corren juntas.
+describe('loop end-to-end: plan (reconcileTracks) + track (Supervisor.tick) cierran el freeze juntos', () => {
+    jest.setTimeout(60000);
+
+    const PLAN_BRANCH = 'main';
+    const TRACK_BRANCH = 'awm-track/a';
+
+    const fakeSpawner: WrapperSpawner = (job, nonce, logsRoot, repoRoot) => {
+        void runExecWrapper({ logsRoot, jobId: job.id, nonce, argv: job.argv, cwd: job.cwd, repoRoot }).catch(() => {});
+    };
+
+    let planRoot: string;
+    let trackWorktree: string;
+    let baseSha: string;
+    let stubBin: string;
+    let oldPath: string | undefined;
+
+    beforeEach(() => {
+        planRoot = initRepo();
+        commitFile(planRoot, '.gitignore', '.awm/\n');   // `.awm` ya ignorado ANTES de crear el worktree del track
+        baseSha = commitFile(planRoot, 'seed.txt', 'seed');
+
+        trackWorktree = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-e2e-freeze-wt-'));
+        fs.rmdirSync(trackWorktree);
+        git(planRoot, 'worktree', 'add', '-b', TRACK_BRANCH, trackWorktree, baseSha);
+
+        // El track necesita sus propios verificadores REALES (mismo criterio
+        // que `setUpGreenTrack` de la Parte 2): `package.json` con script
+        // `test` (rastreado — coincide con la clase global `manifest`, a
+        // proposito: no es el foco de ESTE test, solo confirma que ese
+        // consumidor no interfiere con el loop) y `.awm/sensors.json`
+        // (ignorado por el `.gitignore` heredado de `baseSha`, no necesita
+        // commit — `detectRequiredVerifiers` lee el filesystem, no git).
+        fs.writeFileSync(path.join(trackWorktree, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"' } }));
+        git(trackWorktree, 'add', 'package.json'); git(trackWorktree, 'commit', '-qm', 'package.json');
+        fs.mkdirSync(path.join(trackWorktree, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(trackWorktree, '.awm', 'sensors.json'), '{}');
+
+        stubBin = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-e2e-stub-'));
+        fs.writeFileSync(path.join(stubBin, 'codex'), '#!/bin/sh\nwhile true; do sleep 1; done\n', { mode: 0o755 });
+        oldPath = process.env.PATH;
+        process.env.PATH = `${stubBin}:${process.env.PATH}`;
+    });
+
+    afterEach(() => {
+        process.env.PATH = oldPath;
+        try { execFileSync('git', ['worktree', 'remove', '--force', trackWorktree], { cwd: planRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+        try { execFileSync('git', ['worktree', 'prune'], { cwd: planRoot, stdio: 'pipe' }); } catch { /* best-effort */ }
+        fs.rmSync(planRoot, { recursive: true, force: true });
+        fs.rmSync(trackWorktree, { recursive: true, force: true });
+        fs.rmSync(stubBin, { recursive: true, force: true });
+    });
+
+    function emitVerdict(obligationId: string, verdictId: string): void {
+        const argv = ['awm-review', obligationId];
+        const fp = computeFingerprint(trackWorktree, argv, [], '.').fingerprint;
+        emitRequest(trackWorktree, TRACK_BRANCH, { kind: 'verdict', generationToken: 'g0', idempotencyKey: verdictId,
+            payload: { verdictId, obligationId, result: 'pass', detail: 'ok', fingerprint: fp, argv, paths: [], cwd: '.' } });
+    }
+
+    test('reconcileTracks real (plan) + Supervisor.tick real (track), en loop contra dos worktrees reales, cierran request -> drenaje -> persist -> observación -> FROZEN', async () => {
+        // --- lado TRACK: registrar el trabajo y drenarlo con un Supervisor REAL ---
+        initWatch(trackWorktree, TRACK_BRANCH);
+        const ts0 = readJournal(trackWorktree, TRACK_BRANCH).state!;
+        ts0.trackContext = { trackId: 'a', taskIds: ['T1'], planDigest: '', baseSha, planJournalId: 'j-plan' };
+        writeJournal(trackWorktree, TRACK_BRANCH, ts0);
+        emitRequest(trackWorktree, TRACK_BRANCH, { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e1',
+            payload: { entity: 'task', taskId: 'T1', title: 't', verificationPlan: [{ id: 'v1', kind: 'test' }, { id: 'v-sensors', kind: 'sensors' }], reviewObligations: [{ id: 'o-spec', kind: 'spec' }, { id: 'o-quality', kind: 'quality' }] } });
+        requestJob(trackWorktree, TRACK_BRANCH, 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v1' });
+        requestJob(trackWorktree, TRACK_BRANCH, 'g0', ['node', '-e', '0; process.exit(0)'], [], '.', { satisfies: 'v-sensors' });
+        emitVerdict('o-spec', 'verd-spec');
+        emitVerdict('o-quality', 'verd-quality');
+        emitRequest(trackWorktree, TRACK_BRANCH, { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e3',
+            payload: { entity: 'task-status', taskId: 'T1', status: 'done' } });
+
+        const trackCfg = { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10, provider: 'codex' };
+        const trackSup = new Supervisor(trackWorktree, TRACK_BRANCH, trackCfg, fakeSpawner);
+        for (let i = 0; i < 400; i++) {
+            const s = readJournal(trackWorktree, TRACK_BRANCH).state!;
+            if (Object.values(s.jobs).length === 2 && Object.values(s.jobs).every((j) => j.executionState === 'exited' && j.verdict === 'pass')) break;
+            await trackSup.tick();
+            await new Promise((r) => setTimeout(r, 15));
+        }
+        const drained = readJournal(trackWorktree, TRACK_BRANCH).state!;
+        expect(Object.values(drained.jobs)).toHaveLength(2);
+        expect(Object.values(drained.jobs).every((j) => j.executionState === 'exited' && j.verdict === 'pass')).toBe(true);
+
+        // --- lado PLAN: journal real, cohorte ACTIVE con track 'a' en JOIN_REQUESTED ---
+        initJournal(planRoot, PLAN_BRANCH);
+        let planState = readJournal(planRoot, PLAN_BRANCH).state!;
+        planState.cohortPhase = 'ACTIVE';
+        planState.cohortBaseSha = baseSha;
+        planState.tracks = [
+            {
+                trackId: 'a', worktreePath: trackWorktree, branch: TRACK_BRANCH,
+                ownership: [], sharedResources: [], dependsOn: [],
+                fencingToken: 'fence-a'.padEnd(32, '0'), phase: 'JOIN_REQUESTED', readinessNonce: 'ready-a'.padEnd(32, '0'),
+            },
+            {
+                // Segundo track: satisface el minimo de 2 de `initialCohort`
+                // y se mantiene ACTIVE — no participa de este freeze.
+                trackId: 'b', worktreePath: path.join(planRoot, 'nope-b'), branch: 'awm-track/b',
+                ownership: [], sharedResources: [], dependsOn: [],
+                fencingToken: 'fence-b'.padEnd(32, '0'), phase: 'ACTIVE', readinessNonce: 'ready-b'.padEnd(32, '0'),
+            },
+        ] satisfies TrackRef[];
+        writeJournal(planRoot, PLAN_BRANCH, planState);
+        planState = readJournal(planRoot, PLAN_BRANCH).state!;
+
+        // Runtime REAL (no un fake): `emitFreezeRequest` es el unico touch
+        // real que este loop necesita — el mismo `defaultTrackRuntime` que
+        // `Supervisor` del plan inyecta en producción.
+        const runtime = defaultTrackRuntime(planRoot, PLAN_BRANCH);
+
+        // --- el loop en si: plan emite/observa, track real drena/gatea/termina ---
+        let reachedFrozen = false;
+        for (let i = 0; i < 400 && !reachedFrozen; i++) {
+            const result = await reconcileTracks(planRoot, PLAN_BRANCH, planState, runtime, 2);
+            planState = result.state;
+            await trackSup.tick();
+            const a = planState.tracks!.find((t) => t.trackId === 'a')!;
+            if (a.phase === 'FROZEN' && a.frozenHeadSha !== undefined) reachedFrozen = true;
+            await new Promise((r) => setTimeout(r, 15));
+        }
+
+        expect(reachedFrozen).toBe(true);
+        const trackHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: trackWorktree, encoding: 'utf8' }).trim();
+
+        const finalPlan = readJournal(planRoot, PLAN_BRANCH).state!;
+        const a = finalPlan.tracks!.find((t) => t.trackId === 'a')!;
+        expect(a.phase).toBe('FROZEN');
+        expect(a.frozenHeadSha).toBe(trackHead);
+        expect(finalPlan.cohortPhase).toBe('JOINING');
+
+        // El track propio confirma el mismo hecho, INDEPENDIENTEMENTE — dos
+        // journals distintos, ambos de acuerdo (el plan jamás escribió el
+        // journal del track: solo la request cross-worktree y su propia
+        // observación read-only).
+        const trackFinal = readJournal(trackWorktree, TRACK_BRANCH).state!;
+        expect(trackFinal.frozen).toBeDefined();
+        expect(trackFinal.frozen!.headSha).toBe(trackHead);
+        expect(trackFinal.freezeRequested).toBe(true);
     });
 });

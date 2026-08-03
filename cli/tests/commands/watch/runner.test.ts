@@ -86,6 +86,31 @@ describe('runner concurrente', () => {
         expect(calls).toEqual([{ id: 'j1', nonce: 'nunca-claimeo' }]);
     });
 
+    test('dispatch:false retiene el retry-same-intent de un intent YA vivo, solo bloquea el spawn de jobs `received` (regresión R6.3 — el freeze no debe deadlockear en spawn-intent)', () => {
+        // Job `received`: trabajo GENUINAMENTE nuevo — debe quedar frenado.
+        seedJob(repo, { id: 'fresh', executionState: 'received' });
+        // Job `spawn-intent` sin claim, fuera de gracia: intent YA decidido
+        // ANTES del freeze (ej. un wrapper que crasheo justo al pedirse) —
+        // `reconcileJobs` lo clasifica `never-started` => `retry-same-intent`.
+        // Eso es DRENAJE de trabajo en vuelo, no arranque de trabajo nuevo:
+        // debe seguir corriendo aunque `dispatch:false`.
+        seedJob(repo, {
+            id: 'stuck', executionState: 'spawn-intent', spawnNonce: 'stuck-nonce',
+            phaseTimestamps: { 'spawn-intent': new Date(Date.now() - 60000).toISOString() },
+        });
+        const retried: string[] = [];
+        const out = runnerTick(repo, 'rama', (job) => { retried.push(job.id); }, { reconcileGraceMs: 1000, dispatch: false });
+
+        expect(out.decisions.find((d) => d.jobId === 'stuck' && d.action === 'retry-same-intent')).toBeDefined();
+        expect(retried).toEqual(['stuck']);   // el retry del intent ya vivo SI corrio...
+        expect(out.spawned).toBe(0);          // ...pero ningun job nuevo se despacho
+
+        const s = readJournal(repo, 'rama').state!;
+        expect(s.jobs['fresh'].executionState).toBe('received');       // nunca avanzo a spawn-intent
+        expect(s.jobs['stuck'].executionState).toBe('spawn-intent');   // mismo intent, reintentado, no abandonado
+        expect(s.jobs['stuck'].spawnNonce).toBe('stuck-nonce');
+    });
+
     test('claim sin resultado con procesos muertos => orphaned, jamas relanzar (R1.8)', () => {  // verifies R1.8
         const dead = { pid: 999999, startTime: 'gone', spawnNonce: 'nZ', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
         seedJob(repo, {
