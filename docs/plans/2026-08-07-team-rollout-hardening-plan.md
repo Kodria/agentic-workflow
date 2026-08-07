@@ -265,6 +265,18 @@ _Contexto: H3/D3. Python fuera del registry; shell inexistente; `generic` = gate
 >   honestidad del comentario del caso "sin corchete `[code]`" en el test de mypy.
 > Ledger acumulado (no archivado — R4-R7 siguen sobre la misma rama).
 
+> **harness-retro R3 (2026-08-07):** `awm ledger recurring --min 2` sobre el
+> ledger acumulado de R1-R3 (114 entradas) mostró 17 clusters convergentes.
+> Curados 2 en `AGENTS.md`: `defensive-guard-consistency` (nuevo bullet — una
+> guarda agregada a una función debe revisarse contra toda función hermana que
+> lea el mismo campo) y una tercera instancia confirmada de
+> `prefer-stdlib-over-hand-rolled-parsing` (extendido — un tipo TS sobre
+> `JSON.parse()` sin validación runtime es la misma clase de falla que la regex
+> hand-rolled de `shellQuote`/`extractHost`, ahora generalizada). El resto de
+> los clusters son wins/confirmaciones de verificación o hallazgos ya curados
+> como fix directo dentro del mismo ciclo de QA — no ameritan lección nueva.
+> Ledger sigue sin archivar — R4-R7 acumulan sobre la misma rama.
+
 ---
 
 ## R4 — Providers Cursor y GitHub Copilot (CLI + registry) — `feat`
