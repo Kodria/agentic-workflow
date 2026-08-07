@@ -85,7 +85,7 @@ _Contexto: H1/D1. Publicado roto en v3.9.0; en Windows preflight bloquea siempre
 
 - [x] `npx tsc --noEmit` + suite completa en verde. (145 suites / 1284 tests)
 - [x] Commit `fix(sensors): resolve sensor binaries portably on Windows` + push.
-- [ ] PR titulado `fix(...)` → patch release. Merge = hotfix publicado.
+- [x] PR titulado `fix(...)` → patch release: #27 (https://github.com/Kodria/agentic-workflow/pull/27). Merge = hotfix publicado.
 
 > **Nota de ciclo (no es el marcador de plan completo):** este plan cubre R1–R7;
 > `<!-- awm-qa-complete -->`/`<!-- awm-retro-complete -->` a nivel de plan (que
