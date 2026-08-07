@@ -83,9 +83,22 @@ _Contexto: H1/D1. Publicado roto en v3.9.0; en Windows preflight bloquea siempre
 
 ### Task 1.4: Cierre R1
 
-- [x] `npx tsc --noEmit` + suite completa en verde. (144 suites / 1277 tests)
+- [x] `npx tsc --noEmit` + suite completa en verde. (145 suites / 1284 tests)
 - [x] Commit `fix(sensors): resolve sensor binaries portably on Windows` + push.
 - [ ] PR titulado `fix(...)` → patch release. Merge = hotfix publicado.
+
+> **Nota de ciclo (no es el marcador de plan completo):** este plan cubre R1–R7;
+> `<!-- awm-qa-complete -->`/`<!-- awm-retro-complete -->` a nivel de plan (que
+> `development-process` lee para el plan ENTERO) solo corresponden cuando R7
+> también esté cerrado — ponerlos ahora leería mal el estado de R2–R7 en una
+> sesión futura. **R1 completa su propio ciclo QA + retro + PR** (release
+> independiente, según "Reglas de la corrida"): post-implementation-qa corrió
+> Track A + panel Track B completo sobre el diff de R1, encontró 2 blockers de
+> seguridad (shellQuote en Windows) resueltos vía systematic-debugging con
+> investigación de causa raíz contra fuentes primarias (algoritmo
+> `CommandLineToArgvW` de Microsoft + investigación BatBadBut/CVE-2024-27980),
+> más varios findings menores, todos cerrados y re-revisados. harness-retro
+> corre sobre el ledger acumulado de R1 a continuación, antes del PR.
 
 ---
 
