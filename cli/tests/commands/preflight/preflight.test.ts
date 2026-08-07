@@ -226,6 +226,34 @@ describe('preflight', () => {
             expect(check(report, 'host').detail).toContain('not recognized');
             expect(report.status).toBe('ready');
         });
+
+        it('does not misclassify a GitHub Enterprise host whose repo NAME contains "gitlab"', () => {
+            // The bug: a bare `remote.includes('gitlab')` matches the full remote URL
+            // string, so an org/repo name containing "gitlab" false-positives even though
+            // the actual host is unrelated. Hostname must be extracted first and matched
+            // in isolation.
+            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            gitRepo(dir, 'git@github.enterprise.internal:kodria/gitlab-migration-tool.git');
+
+            const report = preflight(dir);
+
+            expect(check(report, 'host').ok).toBe(true);
+            expect(check(report, 'host').detail).toContain('not recognized');
+            expect(report.status).toBe('ready');
+        });
+
+        it('does not misclassify a non-GitHub host whose repo NAME contains "github"', () => {
+            // Same class of bug on the github side: "something-github-tool" is a repo
+            // name, not the host.
+            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            gitRepo(dir, 'https://example.com/kodria/something-github-tool.git');
+
+            const report = preflight(dir);
+
+            expect(check(report, 'host').ok).toBe(true);
+            expect(check(report, 'host').detail).toContain('not recognized');
+            expect(report.status).toBe('ready');
+        });
     });
 
     it('tells the operator not to hand a broken harness to an unattended run', () => {

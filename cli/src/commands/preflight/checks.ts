@@ -1,9 +1,10 @@
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { computeSensorStatus, resolveOnPath } from '../sensors/status';
+import { computeSensorStatus } from '../sensors/status';
 import { detectStack } from '../sensors/init';
 import { SensorManifest } from '../sensors/types';
+import { resolveOnPath } from '../../core/paths';
 
 /**
  * Preflight: can this project be gated at all?
@@ -151,6 +152,28 @@ function checkPack(cwd: string, manifest: SensorManifest | null): PreflightCheck
 }
 
 /**
+ * Extract just the hostname portion of a git remote URL — never match against the
+ * full URL string. A bare substring check against the whole remote (`remote.includes
+ * ('gitlab')`) false-positives on an org/repo name that happens to contain the word,
+ * e.g. `git@github.enterprise.internal:kodria/gitlab-migration-tool.git` is a GitHub
+ * Enterprise remote, not GitLab — "gitlab" only appears in the repo name.
+ *
+ * Covers the two common remote URL shapes:
+ *   HTTPS: `https://github.com/org/repo.git`      -> `github.com`
+ *   SSH:   `git@github.com:org/repo.git`          -> `github.com`
+ *
+ * Returns `undefined` when neither shape matches, so callers fall through to the same
+ * "unrecognized host" handling as any other unmatched URL.
+ */
+function extractHost(remote: string): string | undefined {
+    const https = remote.match(/^[a-z][a-z0-9+.-]*:\/\/([^/]+)/i);
+    if (https) return https[1];
+    const ssh = remote.match(/^[^@\s]+@([^:\s]+):/);
+    if (ssh) return ssh[1];
+    return undefined;
+}
+
+/**
  * Advisory only — `ok` is ALWAYS `true` here, no matter what it finds. The
  * `finishing-a-development-branch`/`receiving-code-review` skills detect the git host
  * (GitHub vs GitLab) and shell out to `gh`/`glab` to open a PR/MR, degrading honestly
@@ -172,7 +195,9 @@ function checkHost(cwd: string): PreflightCheck {
         return { id: 'host', ok: true, detail: 'no git remote detected — PR/MR automation not applicable' };
     }
 
-    if (remote.includes('github.com')) {
+    const host = extractHost(remote);
+
+    if (host?.includes('github.com')) {
         return resolveOnPath('gh')
             ? { id: 'host', ok: true, detail: 'github detected, gh available' }
             : {
@@ -183,7 +208,7 @@ function checkHost(cwd: string): PreflightCheck {
             };
     }
 
-    if (remote.includes('gitlab')) {
+    if (host?.includes('gitlab')) {
         return resolveOnPath('glab')
             ? { id: 'host', ok: true, detail: 'gitlab detected, glab available' }
             : {

@@ -5,6 +5,7 @@
 // always honored and tests need no jest.resetModules().
 import os from 'os';
 import path from 'path';
+import { execSync } from 'child_process';
 
 /** User home directory with a robust fallback. Never returns a raw, possibly-empty process.env.HOME. */
 export function homeDir(): string {
@@ -48,4 +49,15 @@ export const WINDOWS_NATIVE_WARNING =
 /** Emit the unsupported-platform warning via the provided logger, only on native Windows. */
 export function warnIfUnsupportedPlatform(log: (msg: string) => void): void {
   if (isWindowsNative()) log(WINDOWS_NATIVE_WARNING);
+}
+
+/** Resolve a binary on PATH portably: `where` on win32, POSIX `command -v` elsewhere. */
+export function resolveOnPath(bin: string): boolean {
+  const cmd = isWindowsNative() ? `where ${bin}` : `command -v ${bin}`;
+  try {
+    execSync(cmd, { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
 }
