@@ -1,3 +1,8 @@
+## v3.9.0 - 2026-08-07
+
+### Features
+- **preflight:** verify the harness can gate before development starts
+
 ## v3.8.0 - 2026-08-07
 
 ### Features
