@@ -232,4 +232,17 @@ describe('initSensors — --pack override', () => {
         const result = initSensors({ pack: 'anything', cwd: tmpDir });
         expect(result.detection.pack).toBe('anything');
     });
+
+    it('throws a distinct message when the registry root has no sensor-packs directory at all', () => {
+        // Different failure shape from "pack not in the list": the registry root
+        // itself is missing sensor-packs/, so there's no list to show — must say
+        // so plainly instead of reporting an empty `available: `.
+        const emptyRegistryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-empty-reg-'));
+        try {
+            expect(() => initSensors({ pack: 'js-ts', registryRoot: emptyRegistryRoot, cwd: tmpDir }))
+                .toThrow(/no sensor-packs directory/);
+        } finally {
+            fs.rmSync(emptyRegistryRoot, { recursive: true });
+        }
+    });
 });

@@ -37,8 +37,10 @@ function findShellIndicators(cwd: string): string[] {
     for (const dir of SHELL_SCAN_DIRS) {
         const full = path.join(cwd, dir);
         if (!fs.existsSync(full) || !fs.statSync(full).isDirectory()) continue;
-        for (const f of fs.readdirSync(full)) {
-            if (f.endsWith('.sh')) found.push(dir === '.' ? f : path.join(dir, f));
+        for (const entry of fs.readdirSync(full, { withFileTypes: true })) {
+            if (entry.isFile() && entry.name.endsWith('.sh')) {
+                found.push(dir === '.' ? entry.name : path.join(dir, entry.name));
+            }
         }
     }
     return found;
