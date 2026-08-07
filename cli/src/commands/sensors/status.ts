@@ -1,7 +1,6 @@
-import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { isWindowsNative } from '../../core/paths';
+import { resolveOnPath } from '../../core/paths';
 import { SensorCheck, SensorStatusResult, SensorManifest } from './types';
 
 /** First non-flag token after `npx` — the tool the command actually runs. */
@@ -10,17 +9,6 @@ function npxTool(parts: string[]): string | undefined {
         if (!parts[i].startsWith('-')) return parts[i];
     }
     return undefined;
-}
-
-/** Resolve a binary on PATH portably: `where` on win32, POSIX `command -v` elsewhere. */
-function resolveOnPath(bin: string): boolean {
-    const cmd = isWindowsNative() ? `where ${bin}` : `command -v ${bin}`;
-    try {
-        execSync(cmd, { stdio: 'pipe' });
-        return true;
-    } catch {
-        return false;
-    }
 }
 
 /** If the command references `--config <file>`, that file must exist in the repo. */

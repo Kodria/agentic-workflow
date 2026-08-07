@@ -1,8 +1,10 @@
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { computeSensorStatus } from '../sensors/status';
 import { detectStack } from '../sensors/init';
 import { SensorManifest } from '../sensors/types';
+import { resolveOnPath } from '../../core/paths';
 
 /**
  * Preflight: can this project be gated at all?
@@ -25,7 +27,7 @@ import { SensorManifest } from '../sensors/types';
  */
 
 export type PreflightCheck = {
-    id: 'context' | 'manifest' | 'tools' | 'pack';
+    id: 'context' | 'manifest' | 'tools' | 'pack' | 'host';
     ok: boolean;
     detail: string;
     /** What the operator should do. Absent when `ok`. */
@@ -149,6 +151,93 @@ function checkPack(cwd: string, manifest: SensorManifest | null): PreflightCheck
     return { id: 'pack', ok: true, detail: `${manifest.pack} matches the detected stack` };
 }
 
+/**
+ * Extract just the hostname portion of a git remote URL — never match against the
+ * full URL string. A bare substring check against the whole remote (`remote.includes
+ * ('gitlab')`) false-positives on an org/repo name that happens to contain the word,
+ * e.g. `git@github.enterprise.internal:kodria/gitlab-migration-tool.git` is a GitHub
+ * Enterprise remote, not GitLab — "gitlab" only appears in the repo name.
+ *
+ * Covers the two common remote URL shapes:
+ *   HTTPS: `https://github.com/org/repo.git`      -> `github.com`
+ *   SSH:   `git@github.com:org/repo.git`          -> `github.com`
+ *
+ * Scheme-prefixed remotes (`https://`, `ssh://`, ...) are parsed with the built-in
+ * `URL` class rather than a hand-rolled regex — `.hostname` is spec-defined to exclude
+ * both userinfo (`user:pass@`/`user@`) and `:port`, so a userinfo or password/token
+ * that happens to contain "github"/"gitlab" (e.g. an SSH username `ssh://gitlab@host/`
+ * or a CI credential-injection URL `https://x-access-token:$TOKEN@host/...`) can never
+ * leak into the matched host, and IPv6 literals in brackets are also handled correctly.
+ *
+ * The SCP-style shorthand (`user@host:path`, no scheme — not a real URI, so `URL`
+ * rejects it) falls back to a regex whose host-capture group excludes `@`, so a second
+ * `@` in the remote (`user@host@evil:path`) can't smuggle a bogus "host" past the colon
+ * check either — it simply fails to match and returns `undefined`.
+ *
+ * Returns `undefined` when neither shape matches, so callers fall through to the same
+ * "unrecognized host" handling as any other unmatched URL.
+ */
+function extractHost(remote: string): string | undefined {
+    try {
+        return new URL(remote).hostname;
+    } catch {
+        // Not a valid URL — likely git's SCP-like shorthand (user@host:path, no scheme).
+        // Node's URL class does not parse this form (it's not a real URI).
+    }
+    const scpMatch = remote.match(/^[^@\s]+@([^:\s@]+):/);
+    return scpMatch?.[1];
+}
+
+/**
+ * Advisory only — `ok` is ALWAYS `true` here, no matter what it finds. The
+ * `finishing-a-development-branch`/`receiving-code-review` skills detect the git host
+ * (GitHub vs GitLab) and shell out to `gh`/`glab` to open a PR/MR, degrading honestly
+ * when neither is on PATH. This check tells the operator, in advance, whether that
+ * downstream step will actually work — but plenty of legitimate workflows never create
+ * a PR/MR at all (merge locally, keep the branch as-is), so gating the whole harness on
+ * missing tooling here would be wrong. It is FYI, never a blocker.
+ */
+function checkHost(cwd: string): PreflightCheck {
+    let remote: string;
+    try {
+        remote = execFileSync('git', ['remote', 'get-url', 'origin'], {
+            cwd,
+            encoding: 'utf-8',
+            stdio: ['ignore', 'pipe', 'ignore'], // no origin / not a repo prints to stderr — keep it off the operator's screen
+        }).trim();
+    } catch {
+        // No `origin`, or not a git repo at all — nothing to advise on.
+        return { id: 'host', ok: true, detail: 'no git remote detected — PR/MR automation not applicable' };
+    }
+
+    const host = extractHost(remote);
+
+    if (host?.includes('github.com')) {
+        return resolveOnPath('gh')
+            ? { id: 'host', ok: true, detail: 'github detected, gh available' }
+            : {
+                id: 'host',
+                ok: true,
+                detail: 'github detected, gh not on PATH — PR creation will require manual steps',
+                remedy: 'install the GitHub CLI (gh), or PR creation will need to be done manually',
+            };
+    }
+
+    if (host?.includes('gitlab')) {
+        return resolveOnPath('glab')
+            ? { id: 'host', ok: true, detail: 'gitlab detected, glab available' }
+            : {
+                id: 'host',
+                ok: true,
+                detail: 'gitlab detected, glab not on PATH — MR creation will require manual steps',
+                remedy: 'install the GitLab CLI (glab), or MR creation will need to be done manually',
+            };
+    }
+
+    // Bitbucket, Azure DevOps, an internal git server, etc. — don't overclaim support.
+    return { id: 'host', ok: true, detail: 'git host not recognized (github/gitlab) — PR/MR automation not applicable' };
+}
+
 export function preflight(cwd: string = process.cwd()): PreflightReport {
     const manifest = readManifest(cwd);
     const manifestExists = fs.existsSync(path.join(cwd, MANIFEST));
@@ -159,6 +248,9 @@ export function preflight(cwd: string = process.cwd()): PreflightReport {
         // Skipped when there is no manifest: reporting "tools broken" on a repo that was
         // never set up buries the one thing the operator needs to read.
         ...(manifestExists ? [checkTools(cwd), checkPack(cwd, manifest)] : []),
+        // Runs unconditionally — orthogonal to sensor configuration entirely, this is
+        // about PR/MR tooling, not sensors.
+        checkHost(cwd),
     ];
 
     const status = !manifestExists ? 'not_configured'
