@@ -16,7 +16,16 @@ directorio) — decisiones D1–D7. Dos repos: `agentic-workflow` (CLI) y
 **Tech Stack:** TypeScript/Node 22, Jest (CLI); Markdown skills + JSON packs +
 tests `.mjs` (registry). CI: GitHub Actions.
 
-**Modo de ejecución:** interactivo
+**Modo de ejecución:** desatendido
+
+> Mandato de ejecución desatendida: ejecución completa sin pausas de check-in
+> entre tareas, ni de confirmación entre fases (development-process rutea
+> automáticamente y subagent-driven-development no pregunta si continuar con
+> el cierre). harness-retro triagea con criterio propio del agente (solo valor
+> real, recurrente o sistémico — descarta el resto sin preguntar).
+> post-implementation-qa corrige TODOS los hallazgos que surjan, no solo algunos.
+> finishing-a-development-branch crea el PR directamente (opción "push + PR"),
+> sin presentar el menú de 4 opciones.
 
 **Reglas de la corrida (retomable en cualquier entorno):**
 - Cada release = commits propios + push inmediato a la rama. Nada vive solo en el
