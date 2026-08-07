@@ -86,12 +86,12 @@ export function changedFiles(cwd: string, base = 'HEAD'): ChangedFiles {
  * cmd.exe — it just splits on the space inside them — so a POSIX-only quote here
  * would silently hand eslint/semgrep two garbage arguments instead of one real
  * path. `'\''` (single quotes with the escape) is what POSIX shells treat as fully
- * literal; `""` (double quotes with doubled embedded quotes) is the cmd.exe
- * equivalent.
+ * literal; `"..."` with `\"` for embedded quotes is what `CommandLineToArgvW` (used
+ * by node.exe and most win32 tools) treats as the equivalent on that platform.
  */
 function shellQuote(file: string): string {
     if (isWindowsNative()) {
-        return `"${file.replace(/"/g, '""')}"`;
+        return `"${file.replace(/"/g, '\\"')}"`;
     }
     return `'${file.replace(/'/g, `'\\''`)}'`;
 }

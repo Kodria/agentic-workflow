@@ -20,8 +20,8 @@ describe('applyChangedCmd — Windows quoting', () => {
             .toBe(`eslint "my dir/a.ts"`);
     });
 
-    it('escapes an embedded double quote by doubling it', () => {
+    it('escapes an embedded double quote with a preceding backslash', () => {
         expect(applyChangedCmd('eslint {files}', ['weird"name.ts']))
-            .toBe(`eslint "weird""name.ts"`);
+            .toBe(`eslint "weird\\"name.ts"`);
     });
 });
