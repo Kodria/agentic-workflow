@@ -1,3 +1,8 @@
+## v3.10.0 - 2026-08-07
+
+### Features
+- **preflight:** advisory host check for gh/glab availability (#28)
+
 ## v3.9.1 - 2026-08-07
 
 ### Fixes
