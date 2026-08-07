@@ -117,12 +117,14 @@ _Contexto: H2/D2. `gh` hardcodeado; GitLab no puede cerrar el ciclo._
 **Files:**
 - Modify: `skills/finishing-a-development-branch/SKILL.md` (Opción 2 + paso previo)
 
-- [ ] Paso de detección ANTES de iniciar el cierre: `git remote get-url origin` →
+- [x] Paso de detección ANTES de iniciar el cierre: `git remote get-url origin` →
   `github.com` → `gh` | dominio con `gitlab` → `glab` | otro → modo degradado.
-- [ ] Opción 2 con las tres ramas: `gh pr create ...` / `glab mr create ...` /
+- [x] Opción 2 con las tres ramas: `gh pr create ...` / `glab mr create ...` /
   degradación honesta (push + URL de compare/new-MR + reporte de qué faltó).
-- [ ] Modo desatendido: la degradación es final VÁLIDO (pusheado + instrucción),
-  nunca fallo mudo. Actualizar el texto del mandato desatendido si nombra "PR".
+- [x] Modo desatendido: la degradación es final VÁLIDO (pusheado + instrucción),
+  nunca fallo mudo. Actualizado (incluye hedge simétrico gh/glab tras 2 rondas
+  de review). Registry: PR #23 mergeado (https://github.com/Kodria/awm-baseline-registry/pull/23),
+  bundle `dev` 2.6.0→2.7.0.
 
 ### Task 2.2: Check advisory `host` en preflight (CLI)
 
