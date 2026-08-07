@@ -31,6 +31,7 @@ import { syncToMiro } from './core/miro';
 import { registerHooksCommand } from './commands/hooks';
 import { registerSensorsCommand } from './commands/sensors';
 import { registerLedgerCommand } from './commands/ledger';
+import { registerContextBudgetCommand } from './commands/context-budget';
 import { registerDoctorCommand } from './commands/doctor';
 import { registerBackupCommand } from './commands/backup';
 import { registerInitCommand } from './commands/init';
@@ -681,6 +682,7 @@ miroCmd.command('sync <storyMapPath>')
 registerHooksCommand(program);
 registerSensorsCommand(program);
 registerLedgerCommand(program);
+registerContextBudgetCommand(program);
 registerDoctorCommand(program);
 registerBackupCommand(program);
 registerInitCommand(program);
