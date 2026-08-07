@@ -29,4 +29,21 @@ describe('applyChangedCmd — Windows quoting', () => {
         expect(applyChangedCmd('eslint {files}', ['my dir/it"s.ts']))
             .toBe(`eslint "my dir/it\\"s.ts"`);
     });
+
+    it('doubles a lone trailing backslash so the closing quote is not escaped away', () => {
+        // Bug 1 (correctness): a filename ending in a single `\` (e.g. a scoped path
+        // like `report\`), naively closed with `..."report\""`, puts an ODD number of
+        // backslashes (1) directly before the closing `"`. Per the documented
+        // CommandLineToArgvW rule (learn.microsoft.com/en-us/cpp/c-language/parsing-c-command-line-arguments),
+        // an odd backslash run before a `"` consumes the backslashes in pairs (0
+        // literal here) and the last one escapes the quote into a literal character —
+        // so the wrapper never closes and the argument is corrupted/unterminated.
+        //
+        // The correct output doubles the trailing run to an EVEN count (2) before the
+        // closing quote: even backslashes before a `"` collapse to half as many
+        // literal backslashes (1) and the `"` is read as a real delimiter, closing the
+        // wrapper cleanly and recovering exactly the original single trailing `\`.
+        expect(applyChangedCmd('eslint {files}', ['report\\']))
+            .toBe(`eslint "report\\\\"`);
+    });
 });

@@ -165,4 +165,48 @@ describe('runSensors --changed', () => {
 
         expect(mockChangedFiles).toHaveBeenCalledWith(dir, 'main');
     });
+
+    describe('on native Windows, with an unsafe changed filename', () => {
+        // Bug 2 (security): `runCommand` (exec.ts) spawns the sensor command with
+        // `shell: true`, which on win32 is cmd.exe — it parses `& | < > ^ %` as its
+        // OWN metacharacters BEFORE the target program ever sees argv, regardless of
+        // `"..."` wrapping in many cases (BatBadBut / CVE-2024-27980 research: `%`
+        // still triggers variable expansion inside double-quoted strings, and `&` can
+        // break out of a quoted string). Escaping these reliably is a known-unreliable
+        // approach, so the fix REFUSES: any changed file with one of these characters
+        // (on native Windows only) makes the whole scope unsafe to interpolate, and
+        // the run degrades to the sensor's full unscoped command instead — the exact
+        // fallback already used when `changedFiles()` cannot resolve the scope at all.
+        const originalPlatform = process.platform;
+
+        beforeEach(() => {
+            Object.defineProperty(process, 'platform', { value: 'win32' });
+        });
+
+        afterEach(() => {
+            Object.defineProperty(process, 'platform', { value: originalPlatform });
+        });
+
+        it('falls back to the full command instead of interpolating the unsafe filename', async () => {
+            dir = project({ lint: LINT });
+            mockChangedFiles.mockReturnValue({ files: ['src/a.ts', 'evil&name.ts'] });
+
+            const out = await load().runSensors({ cwd: dir, changed: true });
+
+            // The unsafe filename must never reach the dispatched command line, quoted
+            // or otherwise — assert on the actual command, not just "no crash".
+            expect(cmds()).toContain('eslint --format json .');
+            expect(cmds().join(' ')).not.toContain('evil&name.ts');
+            expect(out.sensors[0].scope).toBeUndefined();
+        });
+
+        it('reports the unsafe scope the same way an unresolved scope is reported', async () => {
+            dir = project({ lint: LINT });
+            mockChangedFiles.mockReturnValue({ files: ['evil&name.ts'] });
+
+            const out = await load().runSensors({ cwd: dir, changed: true });
+
+            expect(out.changedScope?.error).toBeDefined();
+        });
+    });
 });

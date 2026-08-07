@@ -9,9 +9,10 @@ import { parseSemgrepOutput } from './formatters/semgrep';
 import { parseGenericOutput } from './formatters/generic';
 import { parseTestOutput } from './formatters/test';
 import { readBaseline, partition } from './baseline';
-import { changedFiles, applyChangedCmd, filterByExtension } from './changed';
+import { changedFiles, applyChangedCmd, filterByExtension, hasUnsafeWin32Chars } from './changed';
 import { detectStack, initSensors } from './init';
 import { capabilityRoot } from '../../core/registries';
+import { isWindowsNative } from '../../core/paths';
 
 const MANIFEST_FILE = '.awm/sensors.json';
 const DEFAULT_FAST_TIMEOUT = 10_000;
@@ -276,6 +277,22 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     // Resolved once for the whole run, not per sensor: `git` is cheap but the answer
     // must be identical across sensors, or two of them scope to different file sets.
     const changed = opts.changed ? changedFiles(cwd, opts.base ?? 'HEAD') : null;
+
+    // Security (BatBadBut / CVE-2024-27980): on native Windows, `runCommand` spawns
+    // the sensor command through cmd.exe (`shell: true`), which parses `& | < > ^ %`
+    // as ITS OWN syntax before the target program ever sees argv — quoting does not
+    // reliably neutralize this layer (the primary research this fix is based on
+    // concludes escaping it is not safely possible). A changed filename carrying one
+    // of these is refused, not escaped: routed through the exact same fallback the
+    // module already has for "scope could not be resolved" (`changed.error`), so
+    // every sensor degrades to its full unscoped command rather than interpolating
+    // an unsafe path. POSIX is unaffected — single-quote quoting there is fully
+    // literal per POSIX shell grammar, no metacharacter exception exists.
+    if (changed && !changed.error && isWindowsNative() && changed.files.some(hasUnsafeWin32Chars)) {
+        changed.error = 'a changed filename contains a cmd.exe metacharacter (& | < > ^ % or newline/CR) '
+            + 'that quoting cannot reliably neutralize on native Windows — refusing to interpolate it, '
+            + 'falling back to the full unscoped command';
+    }
 
     // Sensors are independent processes over the same tree, so they run
     // concurrently rather than one-after-another: wall clock becomes the slowest
