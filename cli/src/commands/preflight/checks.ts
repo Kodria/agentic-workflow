@@ -162,15 +162,30 @@ function checkPack(cwd: string, manifest: SensorManifest | null): PreflightCheck
  *   HTTPS: `https://github.com/org/repo.git`      -> `github.com`
  *   SSH:   `git@github.com:org/repo.git`          -> `github.com`
  *
+ * Scheme-prefixed remotes (`https://`, `ssh://`, ...) are parsed with the built-in
+ * `URL` class rather than a hand-rolled regex — `.hostname` is spec-defined to exclude
+ * both userinfo (`user:pass@`/`user@`) and `:port`, so a userinfo or password/token
+ * that happens to contain "github"/"gitlab" (e.g. an SSH username `ssh://gitlab@host/`
+ * or a CI credential-injection URL `https://x-access-token:$TOKEN@host/...`) can never
+ * leak into the matched host, and IPv6 literals in brackets are also handled correctly.
+ *
+ * The SCP-style shorthand (`user@host:path`, no scheme — not a real URI, so `URL`
+ * rejects it) falls back to a regex whose host-capture group excludes `@`, so a second
+ * `@` in the remote (`user@host@evil:path`) can't smuggle a bogus "host" past the colon
+ * check either — it simply fails to match and returns `undefined`.
+ *
  * Returns `undefined` when neither shape matches, so callers fall through to the same
  * "unrecognized host" handling as any other unmatched URL.
  */
 function extractHost(remote: string): string | undefined {
-    const https = remote.match(/^[a-z][a-z0-9+.-]*:\/\/([^/]+)/i);
-    if (https) return https[1];
-    const ssh = remote.match(/^[^@\s]+@([^:\s]+):/);
-    if (ssh) return ssh[1];
-    return undefined;
+    try {
+        return new URL(remote).hostname;
+    } catch {
+        // Not a valid URL — likely git's SCP-like shorthand (user@host:path, no scheme).
+        // Node's URL class does not parse this form (it's not a real URI).
+    }
+    const scpMatch = remote.match(/^[^@\s]+@([^:\s@]+):/);
+    return scpMatch?.[1];
 }
 
 /**

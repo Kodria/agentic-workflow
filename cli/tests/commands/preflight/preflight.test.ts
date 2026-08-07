@@ -254,6 +254,101 @@ describe('preflight', () => {
             expect(check(report, 'host').detail).toContain('not recognized');
             expect(report.status).toBe('ready');
         });
+
+        it('does not misclassify a GitHub Enterprise host whose SSH USERNAME is "gitlab"', () => {
+            // The related bug: the scheme-based regex captured everything between
+            // `scheme://` and the first `/`, including `userinfo@` — so an SSH username
+            // of "gitlab" leaked into the matched "host" string and false-positived the
+            // `.includes('gitlab')` check even though the real host is GitHub
+            // Enterprise. `new URL(...).hostname` must exclude userinfo entirely.
+            //
+            // Note: `github.company-internal.com` legitimately contains the substring
+            // "github.com" (from "company"), so — with the userinfo bug fixed — this
+            // correctly classifies as github (checkHost's own substring matching is a
+            // separate, pre-existing design, not part of this fix). The regression this
+            // test guards is that it must never again read as gitlab.
+            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            gitRepo(dir, 'ssh://gitlab@github.company-internal.com:22/team/repo.git');
+            mockExecSync.mockImplementation((() => { throw new Error('not found'); }) as typeof execSync);
+
+            const report = preflight(dir);
+
+            expect(check(report, 'host').ok).toBe(true);
+            expect(check(report, 'host').detail).toContain('github detected');
+            expect(check(report, 'host').detail).not.toContain('gitlab');
+            expect(report.status).toBe('ready');
+        });
+
+        it('does not misclassify a host whose injected credential/token contains "gitlab"', () => {
+            // A realistic CI credential-injection remote:
+            // `git remote set-url origin https://x-access-token:$TOKEN@host/...`. If the
+            // token or password happens to contain "gitlab", it must not leak into the
+            // matched host either.
+            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            gitRepo(dir, 'https://user:gitlab@example-host.com/org/repo.git');
+
+            const report = preflight(dir);
+
+            expect(check(report, 'host').ok).toBe(true);
+            expect(check(report, 'host').detail).toContain('not recognized');
+            expect(report.status).toBe('ready');
+        });
+
+        it('does not misclassify an SCP-style remote with a second "@" in it', () => {
+            // `user@host:path` shorthand has no scheme for `URL` to parse, so it falls
+            // back to a regex. A second "@" (e.g. a malformed/adversarial remote) must
+            // not let a bogus "host@evil"-shaped capture slip past the colon check —
+            // the host-capture group excludes "@", so this fails to match at all and
+            // falls through to "unrecognized" rather than misclassifying as gitlab.
+            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            gitRepo(dir, 'user@github.com@gitlab.evil:org/repo.git');
+
+            const report = preflight(dir);
+
+            expect(check(report, 'host').ok).toBe(true);
+            expect(check(report, 'host').detail).toContain('not recognized');
+            expect(report.status).toBe('ready');
+        });
+
+        it('still detects github.com over HTTPS', () => {
+            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            gitRepo(dir, 'https://github.com/org/repo.git');
+            mockExecSync.mockImplementation((() => { throw new Error('not found'); }) as typeof execSync);
+
+            const report = preflight(dir);
+
+            expect(check(report, 'host').detail).toContain('github detected');
+        });
+
+        it('still detects github.com over SSH shorthand', () => {
+            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            gitRepo(dir, 'git@github.com:org/repo.git');
+            mockExecSync.mockImplementation((() => { throw new Error('not found'); }) as typeof execSync);
+
+            const report = preflight(dir);
+
+            expect(check(report, 'host').detail).toContain('github detected');
+        });
+
+        it('still detects gitlab over HTTPS', () => {
+            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            gitRepo(dir, 'https://gitlab.example.com/org/repo.git');
+            mockExecSync.mockImplementation((() => { throw new Error('not found'); }) as typeof execSync);
+
+            const report = preflight(dir);
+
+            expect(check(report, 'host').detail).toContain('gitlab detected');
+        });
+
+        it('still detects gitlab over SSH shorthand', () => {
+            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            gitRepo(dir, 'git@gitlab.example.com:org/repo.git');
+            mockExecSync.mockImplementation((() => { throw new Error('not found'); }) as typeof execSync);
+
+            const report = preflight(dir);
+
+            expect(check(report, 'host').detail).toContain('gitlab detected');
+        });
     });
 
     it('tells the operator not to hand a broken harness to an unattended run', () => {
