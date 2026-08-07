@@ -1,6 +1,7 @@
-import { execSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
+import { runCommand, ExecResult } from './exec';
 import { SensorManifest, SensorResult, RunOutput, SensorError } from './types';
 import { parseTscOutput } from './formatters/tsc';
 import { parseEslintOutput } from './formatters/eslint';
@@ -15,9 +16,11 @@ const MANIFEST_FILE = '.awm/sensors.json';
 const DEFAULT_FAST_TIMEOUT = 10_000;
 const DEFAULT_SLOW_TIMEOUT = 120_000;
 // Sensor JSON output can be several MB on large repos (e.g. `eslint --format json`
-// with thousands of findings). execSync defaults to a 1MB buffer and kills the
-// child with SIGTERM when exceeded — which previously surfaced as a false "timeout".
+// with thousands of findings). A 1MB cap killed the child with SIGTERM when
+// exceeded — which previously surfaced as a false "timeout".
 const MAX_BUFFER = 64 * 1024 * 1024;
+/** Hard ceiling on parallel sensors: past this, they only contend for the same cores. */
+const MAX_CONCURRENCY = 4;
 
 export type RunOptions = {
     fast?: boolean;
@@ -118,75 +121,123 @@ function isExitCodeSensor(name: string): boolean {
     return name === 'test';
 }
 
-function runSensor(name: string, cmd: string, timeout: number, cwd: string): SensorResult {
-    try {
-        const raw = execSync(cmd, { encoding: 'utf-8', timeout, cwd, maxBuffer: MAX_BUFFER, stdio: ['pipe', 'pipe', 'pipe'] });
-        const errors = getFormatter(name)(raw);
-        return { name, status: errors.length > 0 ? 'fail' : 'pass', errors };
-    } catch (err: any) {
-        // Output exceeded maxBuffer — child is killed before output can be read.
-        // Check this BEFORE the SIGTERM branch (ENOBUFS kills with SIGTERM too).
-        // Nothing could be read, so nothing was certified.
-        if (err.code === 'ENOBUFS') {
-            return { name, status: 'inconclusive', errors: [], skipReason: `output exceeded ${MAX_BUFFER} bytes` };
-        }
-        // Genuine timeout: execSync kills with SIGTERM after `timeout` ms. The
-        // sensor produced no verdict — inconclusive, not a benign skip.
-        if (err.code === 'ETIMEDOUT' || (err.killed && err.signal === 'SIGTERM')) {
-            return { name, status: 'inconclusive', errors: [], skipReason: `timeout after ${timeout}ms` };
-        }
-        // Non-zero exit — the normal path for linters/typecheckers that found
-        // findings. Parse the output; if it yields findings, that's a fail.
-        const raw = String((err.stdout ?? '') + (err.stderr ?? ''));
-        const errors = getFormatter(name)(raw);
-        if (errors.length > 0) return { name, status: 'fail', errors };
-        // A missing tool (binary not installed) must NOT pass silently — the gate
-        // cannot certify what it could not run. Treat it as a fail with a clear message.
-        //
-        // Exit 127 is the POSIX signal for "command not found" and is the only check
-        // here that holds across shells and locales: bash writes `command not found`
-        // but dash — `/bin/sh` on Debian/Ubuntu, hence most CI runners and containers
-        // — writes `not found`, so matching shell text alone read an absent tool as a
-        // benign skip. `err.code` does not cover it either: that is ENOENT only when
-        // spawning the shell itself fails, not when the shell starts and the command
-        // inside it is missing. The ENOBUFS and timeout branches are evaluated above,
-        // so reaching here with status 127 means the command did not exist.
-        //
-        // A wrapper (`npm test`, `npx …`) that exits 127 because a binary it invokes
-        // is absent is classified the same way, deliberately: the gate still ran
-        // nothing and still cannot certify anything.
-        const lower = raw.toLowerCase();
-        const toolMissing =
-            err.status === 127 ||                          // POSIX: command not found
-            (err as any).code === 'ENOENT' ||               // execSync spawn failure (no shell)
-            lower.includes('command not found') ||          // bash, zsh
-            // cmd.exe reports an absent binary with exit 1, so 127 does not cover
-            // Windows; this exact phrase does. Kept narrow on purpose — a loose
-            // `not found` would also match a tool that ran and said "not found"
-            // for reasons of its own.
-            lower.includes('is not recognized as an internal or external command') ||
-            lower.includes('enoent') ||
-            lower.includes('could not determine executable');
-        if (toolMissing) {
+async function runSensor(name: string, cmd: string, timeout: number, cwd: string): Promise<SensorResult> {
+    const res: ExecResult = await runCommand(cmd, { timeout, cwd, maxBuffer: MAX_BUFFER });
+    const format = getFormatter(name);
+
+    // The shell itself never started (bad cwd, no shell). Nothing ran.
+    if (res.spawnError) {
+        return {
+            name,
+            status: 'fail',
+            errors: [{ message: `sensor could not be started: ${res.spawnError.message}` }],
+        };
+    }
+
+    // Cut short by the deadline or the output cap. The run is NOT a verdict — but
+    // whatever it printed before being cut is still evidence, and throwing it away
+    // is what forced the caller to re-run the same command by hand to learn
+    // anything. Findings in the partial output are real findings; their absence
+    // proves nothing, so a clean partial can never be `pass`.
+    if (res.timedOut || res.overflowed) {
+        const reason = res.timedOut
+            ? `timeout after ${timeout}ms`
+            : `output exceeded ${MAX_BUFFER} bytes`;
+        const errors = format(res.stdout + res.stderr);
+        if (errors.length > 0) {
             return {
                 name,
                 status: 'fail',
-                errors: [{ message: `sensor tool not available: ${raw.slice(0, 200)}` }],
+                errors,
+                incomplete: `${reason} — findings below are from partial output; the run did not finish`,
             };
         }
-        // Exit-code sensors (tests): any genuine non-zero exit is a real failure,
-        // even when no per-line findings can be parsed from the output.
-        if (isExitCodeSensor(name)) {
-            return { name, status: 'fail', errors: [{ message: `SENSOR[${name}] failed (exit ${err.status})` }] };
-        }
-        // Residual case: it exited non-zero, the tool exists, and no finding
-        // could be parsed. We do not know what happened — say so instead of
-        // reporting a benign skip.
-        return { name, status: 'inconclusive', errors: [], skipReason: `exit ${err.status}: ${raw.slice(0, 200)}` };
+        return { name, status: 'inconclusive', errors: [], skipReason: reason };
     }
+
+    if (res.code === 0) {
+        const errors = format(res.stdout);
+        return { name, status: errors.length > 0 ? 'fail' : 'pass', errors };
+    }
+
+    // Non-zero exit — the normal path for linters/typecheckers that found
+    // findings. Parse the output; if it yields findings, that's a fail.
+    const raw = res.stdout + res.stderr;
+    const errors = format(raw);
+    if (errors.length > 0) return { name, status: 'fail', errors };
+
+    // A missing tool (binary not installed) must NOT pass silently — the gate
+    // cannot certify what it could not run. Treat it as a fail with a clear message.
+    //
+    // Exit 127 is the POSIX signal for "command not found" and is the only check
+    // here that holds across shells and locales: bash writes `command not found`
+    // but dash — `/bin/sh` on Debian/Ubuntu, hence most CI runners and containers
+    // — writes `not found`, so matching shell text alone read an absent tool as a
+    // benign skip. A failure to spawn the shell itself is a different thing and
+    // is handled above via `spawnError`. The cut-short branches are evaluated
+    // above too, so reaching here with status 127 means the command did not exist.
+    //
+    // A wrapper (`npm test`, `npx …`) that exits 127 because a binary it invokes
+    // is absent is classified the same way, deliberately: the gate still ran
+    // nothing and still cannot certify anything.
+    const lower = raw.toLowerCase();
+    const toolMissing =
+        res.code === 127 ||                             // POSIX: command not found
+        lower.includes('command not found') ||          // bash, zsh
+        // cmd.exe reports an absent binary with exit 1, so 127 does not cover
+        // Windows; this exact phrase does. Kept narrow on purpose — a loose
+        // `not found` would also match a tool that ran and said "not found"
+        // for reasons of its own.
+        lower.includes('is not recognized as an internal or external command') ||
+        lower.includes('enoent') ||
+        lower.includes('could not determine executable');
+    if (toolMissing) {
+        return {
+            name,
+            status: 'fail',
+            errors: [{ message: `sensor tool not available: ${raw.slice(0, 200)}` }],
+        };
+    }
+    // Exit-code sensors (tests): any genuine non-zero exit is a real failure,
+    // even when no per-line findings can be parsed from the output.
+    if (isExitCodeSensor(name)) {
+        return { name, status: 'fail', errors: [{ message: `SENSOR[${name}] failed (exit ${res.code})` }] };
+    }
+    // Residual case: it exited non-zero, the tool exists, and no finding
+    // could be parsed. We do not know what happened — say so instead of
+    // reporting a benign skip.
+    return { name, status: 'inconclusive', errors: [], skipReason: `exit ${res.code}: ${raw.slice(0, 200)}` };
 }
 
-export function runSensors(opts: RunOptions = {}): RunOutput {
+/**
+ * How many sensors may run at once. Sensors are separate processes over the same
+ * tree, so they parallelise cleanly — but each one (tsc, eslint, depcruise) is
+ * largely single-threaded, and oversubscribing the box just makes every sensor
+ * slower and more likely to hit its own deadline. Leave a core for the agent.
+ */
+export function resolveConcurrency(manifest: SensorManifest, sensorCount: number): number {
+    const configured = Number(process.env.AWM_SENSORS_CONCURRENCY ?? manifest.concurrency);
+    if (Number.isFinite(configured) && configured >= 1) return Math.min(Math.floor(configured), sensorCount);
+    const cores = os.cpus()?.length ?? 2;
+    return Math.max(1, Math.min(MAX_CONCURRENCY, cores - 1, sensorCount));
+}
+
+/** Run `tasks` with at most `limit` in flight, preserving input order in the output. */
+async function pooled<T>(tasks: Array<() => Promise<T>>, limit: number): Promise<T[]> {
+    const results = new Array<T>(tasks.length);
+    let next = 0;
+    const worker = async () => {
+        while (true) {
+            const i = next++;
+            if (i >= tasks.length) return;
+            results[i] = await tasks[i]();
+        }
+    };
+    await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+    return results;
+}
+
+export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     const startCwd = opts.cwd ?? process.cwd();
     const manifestDir = findManifestDir(startCwd);
     if (!manifestDir) return { sensors: [], overall: 'not_certified' };
@@ -196,32 +247,42 @@ export function runSensors(opts: RunOptions = {}): RunOutput {
     const activeManifest = reconciled.manifest;
     const cwd = manifestDir; // ejecutar sensores y baseline desde donde vive el manifest
 
-    const results: SensorResult[] = [];
     // Baseline suppresses already-accepted findings so sensors fail only on NEW
     // ones (essential on repos with a large pre-existing baseline). Absent file or
     // --ignore-baseline → every finding counts (backward-compatible).
     const baseline = opts.ignoreBaseline ? null : readBaseline(cwd);
+
+    // Sensors are independent processes over the same tree, so they run
+    // concurrently rather than one-after-another: wall clock becomes the slowest
+    // sensor instead of the sum of all of them. Tasks are built — and dispatched —
+    // in manifest order, so the reported order stays stable.
+    const tasks: Array<() => Promise<SensorResult>> = [];
+    const settled = (r: SensorResult) => () => Promise.resolve(r);
 
     for (const [name, config] of Object.entries(activeManifest.sensors)) {
         const isFast = config.fast ?? false;
         if (!shouldRun(isFast, opts)) continue;
 
         if (config.enabled === false) {
-            results.push({ name, status: 'skipped', errors: [], skipReason: 'disabled' });
+            tasks.push(settled({ name, status: 'skipped', errors: [], skipReason: 'disabled' }));
             continue;
         }
         if (!config.cmd) {
             // Enabled but with nothing to run: broken config, not a deliberate
             // opt-out. `enabled: false` is how a sensor is turned off.
-            results.push({ name, status: 'inconclusive', errors: [], skipReason: 'no cmd configured' });
+            tasks.push(settled({ name, status: 'inconclusive', errors: [], skipReason: 'no cmd configured' }));
             continue;
         }
 
+        const cmd = config.cmd;
         const timeout = config.timeout ?? (isFast ? DEFAULT_FAST_TIMEOUT : DEFAULT_SLOW_TIMEOUT);
-        let result = runSensor(name, config.cmd, timeout, cwd);
-        if (baseline) result = applyBaseline(result, baseline[name]);
-        results.push(result);
+        tasks.push(async () => {
+            const result = await runSensor(name, cmd, timeout, cwd);
+            return baseline ? applyBaseline(result, baseline[name]) : result;
+        });
     }
+
+    const results = await pooled(tasks, resolveConcurrency(activeManifest, tasks.length));
 
     // `fail` outranks `inconclusive`: when something is broken AND something
     // could not be measured, the broken thing is the actionable verdict.

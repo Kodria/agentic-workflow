@@ -26,8 +26,8 @@ export function registerSensorsCommand(program: Command): void {
         .option('--fast', 'run fast sensors only (tsc, lint)')
         .option('--slow', 'run slow sensors only (semgrep, mutation)')
         .option('--all', 'run all sensors regardless of speed')
-        .action((opts) => {
-            const output = runSensors({ fast: opts.fast, slow: opts.slow, all: opts.all });
+        .action(async (opts) => {
+            const output = await runSensors({ fast: opts.fast, slow: opts.slow, all: opts.all });
             // Emit the verdict ALWAYS — an empty `sensors` with overall:'not_certified'
             // must be visible, never a silent exit-0 that reads as "clean".
             process.stdout.write(JSON.stringify(output, null, 2) + '\n');
@@ -51,9 +51,9 @@ export function registerSensorsCommand(program: Command): void {
     sensors
         .command('baseline')
         .description('snapshot current findings as accepted — sensors then fail only on NEW ones')
-        .action(() => {
+        .action(async () => {
             const manifestDir = findManifestDir(process.cwd());
-            const output = runSensors({ all: true, ignoreBaseline: true });
+            const output = await runSensors({ all: true, ignoreBaseline: true });
             const baseline = buildBaseline(output.sensors.map(s => ({ name: s.name, errors: s.errors })));
             const writeDir = manifestDir ?? process.cwd();
             writeBaseline(writeDir, baseline);
