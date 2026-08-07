@@ -2,10 +2,12 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-const mockExecSyncFn = jest.fn();
-jest.mock('child_process', () => ({
-    execSync: (...args: any[]) => mockExecSyncFn(...args),
+const mockRunCommand = jest.fn();
+jest.mock('../../../src/commands/sensors/exec', () => ({
+    runCommand: (...args: any[]) => mockRunCommand(...args),
 }));
+
+const { ok, exited, timedOut, overflowed } = require('./exec-fixtures');
 
 /** Sensors run in manifest insertion order, so mocks are queued in that order. */
 const MANIFEST = {
@@ -16,7 +18,7 @@ const MANIFEST = {
     },
 };
 
-const timeoutError = () => { throw Object.assign(new Error('killed'), { code: 'ETIMEDOUT' }); };
+const timeoutError = () => timedOut();
 
 describe('runSensors — inconclusive: a sensor that could not certify is never green', () => {
     let root: string;
@@ -25,7 +27,7 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
 
     beforeEach(() => {
         jest.resetModules();
-        mockExecSyncFn.mockReset();
+        mockRunCommand.mockReset();
         root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-inconclusive-'));
         fs.mkdirSync(path.join(root, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), JSON.stringify(MANIFEST));
@@ -43,38 +45,38 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
 
     const load = () => require('../../../src/commands/sensors/run');
 
-    it('reports a timed-out sensor as inconclusive, keeping its reason', () => {  // verifies R2, R7
-        mockExecSyncFn
-            .mockReturnValueOnce('' as any)          // typecheck: clean
-            .mockImplementationOnce(timeoutError);   // security: times out
+    it('reports a timed-out sensor as inconclusive, keeping its reason', async () => {  // verifies R2, R7
+        mockRunCommand
+            .mockResolvedValueOnce(ok())          // typecheck: clean
+            .mockResolvedValueOnce(timeoutError());   // security: times out
 
         const { runSensors } = load();
-        const out = runSensors({ cwd: root });
+        const out = await runSensors({ cwd: root });
 
         const security = out.sensors.find((s: any) => s.name === 'security');
         expect(security.status).toBe('inconclusive');
         expect(security.skipReason).toMatch(/timeout/);
     });
 
-    it('does not let a healthy sensor carry the run to pass while another could not certify', () => {  // verifies R8
-        mockExecSyncFn
-            .mockReturnValueOnce('' as any)
-            .mockImplementationOnce(timeoutError);
+    it('does not let a healthy sensor carry the run to pass while another could not certify', async () => {  // verifies R8
+        mockRunCommand
+            .mockResolvedValueOnce(ok())
+            .mockResolvedValueOnce(timeoutError());
 
         const { runSensors } = load();
-        const out = runSensors({ cwd: root });
+        const out = await runSensors({ cwd: root });
 
         expect(out.sensors.find((s: any) => s.name === 'typecheck').status).toBe('pass');
         expect(out.overall).toBe('not_certified');
     });
 
-    it('reports a sensor whose output was truncated as inconclusive', () => {  // verifies R3
-        mockExecSyncFn
-            .mockReturnValueOnce('' as any)
-            .mockImplementationOnce(() => { throw Object.assign(new Error('too big'), { code: 'ENOBUFS' }); });
+    it('reports a sensor whose output was truncated as inconclusive', async () => {  // verifies R3
+        mockRunCommand
+            .mockResolvedValueOnce(ok())
+            .mockResolvedValueOnce(overflowed());
 
         const { runSensors } = load();
-        const out = runSensors({ cwd: root });
+        const out = await runSensors({ cwd: root });
 
         const security = out.sensors.find((s: any) => s.name === 'security');
         expect(security.status).toBe('inconclusive');
@@ -82,20 +84,16 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         expect(out.overall).toBe('not_certified');
     });
 
-    it('reports an uninterpretable non-zero exit as inconclusive', () => {  // verifies R4
-        mockExecSyncFn
-            .mockReturnValueOnce('' as any)
-            .mockImplementationOnce(() => {
-                // semgrep formatter yields no findings for non-JSON output, the
-                // tool is present (exit 2, not 127), and `security` is not an
-                // exit-code sensor — the residual "I don't know" case.
-                throw Object.assign(new Error('failed'), {
-                    stdout: '', stderr: 'internal error: rule engine crashed\n', status: 2,
-                });
-            });
+    it('reports an uninterpretable non-zero exit as inconclusive', async () => {  // verifies R4
+        mockRunCommand
+            .mockResolvedValueOnce(ok())
+            // semgrep formatter yields no findings for non-JSON output, the
+            // tool is present (exit 2, not 127), and `security` is not an
+            // exit-code sensor — the residual "I don't know" case.
+            .mockResolvedValueOnce(exited(2, '', 'internal error: rule engine crashed\n'));
 
         const { runSensors } = load();
-        const out = runSensors({ cwd: root });
+        const out = await runSensors({ cwd: root });
 
         const security = out.sensors.find((s: any) => s.name === 'security');
         expect(security.status).toBe('inconclusive');
@@ -103,7 +101,7 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         expect(out.overall).toBe('not_certified');
     });
 
-    it('reports an enabled sensor with no cmd as inconclusive', () => {  // verifies R5
+    it('reports an enabled sensor with no cmd as inconclusive', async () => {  // verifies R5
         fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), JSON.stringify({
             pack: 'js-ts',
             sensors: {
@@ -111,10 +109,10 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
                 depcheck: { fast: false },   // enabled, but nothing to run
             },
         }));
-        mockExecSyncFn.mockReturnValueOnce('' as any);   // typecheck: clean
+        mockRunCommand.mockResolvedValueOnce(ok());   // typecheck: clean
 
         const { runSensors } = load();
-        const out = runSensors({ cwd: root });
+        const out = await runSensors({ cwd: root });
 
         const depcheck = out.sensors.find((s: any) => s.name === 'depcheck');
         expect(depcheck.status).toBe('inconclusive');
@@ -122,24 +120,20 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         expect(out.overall).toBe('not_certified');
     });
 
-    it('reports fail, not not_certified, when something is broken and something could not run', () => {  // verifies R9
-        mockExecSyncFn
-            .mockImplementationOnce(() => {   // typecheck: real findings
-                throw Object.assign(new Error(), {
-                    stdout: 'src/a.ts(1,1): error TS0001: Bad type.', stderr: '', status: 1,
-                });
-            })
-            .mockImplementationOnce(timeoutError);   // security: times out
+    it('reports fail, not not_certified, when something is broken and something could not run', async () => {  // verifies R9
+        mockRunCommand
+            .mockResolvedValueOnce(exited(1, 'src/a.ts(1,1): error TS0001: Bad type.'))   // typecheck: real findings
+            .mockResolvedValueOnce(timeoutError());   // security: times out
 
         const { runSensors } = load();
-        const out = runSensors({ cwd: root });
+        const out = await runSensors({ cwd: root });
 
         expect(out.sensors.find((s: any) => s.name === 'typecheck').status).toBe('fail');
         expect(out.sensors.find((s: any) => s.name === 'security').status).toBe('inconclusive');
         expect(out.overall).toBe('fail');
     });
 
-    it('never emits an overall value outside the published domain', () => {  // verifies R11
+    it('never emits an overall value outside the published domain', async () => {  // verifies R11
         // `inconclusive` is a per-sensor status only. External consumers (the
         // registry skills) read `overall`, whose domain must not grow — this
         // pins that invariant at runtime on a three-sensor pass+fail+inconclusive
@@ -159,23 +153,19 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         }));
         const DOMAIN = ['pass', 'fail', 'skipped', 'not_certified'];
 
-        mockExecSyncFn
-            .mockImplementationOnce(() => {              // typecheck: real findings → fail
-                throw Object.assign(new Error(), {
-                    stdout: 'src/a.ts(1,1): error TS0001: Bad type.', stderr: '', status: 1,
-                });
-            })
-            .mockReturnValueOnce('' as any)               // lint: clean → pass
-            .mockImplementationOnce(timeoutError);         // security: times out → inconclusive
+        mockRunCommand
+            .mockResolvedValueOnce(exited(1, 'src/a.ts(1,1): error TS0001: Bad type.'))  // typecheck: real findings → fail
+            .mockResolvedValueOnce(ok())               // lint: clean → pass
+            .mockResolvedValueOnce(timeoutError());         // security: times out → inconclusive
 
         const { runSensors } = load();
-        const out = runSensors({ cwd: root });
+        const out = await runSensors({ cwd: root });
 
         expect(DOMAIN).toContain(out.overall);
         expect(out.overall).not.toBe('inconclusive');
     });
 
-    it('keeps a deliberately disabled sensor apart from one that could not certify', () => {  // verifies R1, R6
+    it('keeps a deliberately disabled sensor apart from one that could not certify', async () => {  // verifies R1, R6
         fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), JSON.stringify({
             pack: 'js-ts',
             sensors: {
@@ -183,11 +173,11 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
                 mutation: { cmd: 'npx stryker run', enabled: false },
             },
         }));
-        mockExecSyncFn.mockImplementationOnce(timeoutError);   // security: times out
+        mockRunCommand.mockResolvedValueOnce(timeoutError());   // security: times out
                                                                 // mutation: never invoked
 
         const { runSensors } = load();
-        const out = runSensors({ cwd: root });
+        const out = await runSensors({ cwd: root });
 
         // Same run, two different meanings — the whole point of the split.
         expect(out.sensors.find((s: any) => s.name === 'mutation').status).toBe('skipped');
@@ -196,7 +186,7 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         expect(out.overall).toBe('not_certified');
     });
 
-    it('does not degrade the verdict for a disabled sensor alongside healthy ones', () => {  // verifies R6
+    it('does not degrade the verdict for a disabled sensor alongside healthy ones', async () => {  // verifies R6
         fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), JSON.stringify({
             pack: 'js-ts',
             sensors: {
@@ -204,15 +194,15 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
                 mutation: { cmd: 'npx stryker run', enabled: false },
             },
         }));
-        mockExecSyncFn.mockReturnValueOnce('' as any);
+        mockRunCommand.mockResolvedValueOnce(ok());
 
         const { runSensors } = load();
-        const out = runSensors({ cwd: root });
+        const out = await runSensors({ cwd: root });
 
         expect(out.overall).toBe('pass');
     });
 
-    it('still refuses to certify a tree whose sensors are all disabled', () => {  // verifies R10
+    it('still refuses to certify a tree whose sensors are all disabled', async () => {  // verifies R10
         fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), JSON.stringify({
             pack: 'js-ts',
             sensors: {
@@ -223,23 +213,23 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         fs.writeFileSync(path.join(root, 'package.json'), '{}');   // real stack indicator
 
         const { runSensors } = load();
-        const out = runSensors({ cwd: root });
+        const out = await runSensors({ cwd: root });
 
         expect(out.sensors.every((s: any) => s.status === 'skipped')).toBe(true);
         expect(out.overall).toBe('not_certified');
-        expect(mockExecSyncFn).not.toHaveBeenCalled();
+        expect(mockRunCommand).not.toHaveBeenCalled();
     });
 
-    it('leaves an inconclusive result untouched when a baseline is applied', () => {  // verifies R14
+    it('leaves an inconclusive result untouched when a baseline is applied', async () => {  // verifies R14
         const { writeBaseline } = require('../../../src/commands/sensors/baseline');
         writeBaseline(root, { security: ['some-accepted-fingerprint'] });
 
-        mockExecSyncFn
-            .mockReturnValueOnce('' as any)
-            .mockImplementationOnce(timeoutError);
+        mockRunCommand
+            .mockResolvedValueOnce(ok())
+            .mockResolvedValueOnce(timeoutError());
 
         const { runSensors } = load();
-        const out = runSensors({ cwd: root });
+        const out = await runSensors({ cwd: root });
 
         const security = out.sensors.find((s: any) => s.name === 'security');
         expect(security.status).toBe('inconclusive');
@@ -247,7 +237,7 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         expect(out.overall).toBe('not_certified');
     });
 
-    it('applyBaseline leaves an inconclusive result untouched even if it somehow carried findings', () => {  // verifies R14 (discriminating unit test)
+    it('applyBaseline leaves an inconclusive result untouched even if it somehow carried findings', async () => {  // verifies R14 (discriminating unit test)
         // Every current `inconclusive` producer sets `errors: []`, so a test built
         // on the public `runSensors()` API can't tell "the explicit guard fired"
         // apart from "fell through to partition() and incidentally suppressed 0

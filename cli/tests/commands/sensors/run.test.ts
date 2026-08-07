@@ -8,11 +8,13 @@ function mkTmp(): string {
 }
 
 // Define stable mock before jest.mock hoisting
-const mockExecSyncFn = jest.fn();
+const mockRunCommand = jest.fn();
 
-jest.mock('child_process', () => ({
-    execSync: (...args: any[]) => mockExecSyncFn(...args),
+jest.mock('../../../src/commands/sensors/exec', () => ({
+    runCommand: (...args: any[]) => mockRunCommand(...args),
 }));
+
+const { ok, exited, timedOut } = require('./exec-fixtures');
 
 const MANIFEST = {
     pack: 'js-ts',
@@ -34,108 +36,108 @@ describe('runSensors', () => {
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-run-test-'));
         fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify(MANIFEST));
-        mockExecSyncFn.mockReset();
+        mockRunCommand.mockReset();
     });
     afterEach(() => { fs.rmSync(tmpDir, { recursive: true }); });
 
     const load = () => require('../../../src/commands/sensors/run');
 
-    it('returns not_certified output when manifest does not exist', () => {
+    it('returns not_certified output when manifest does not exist', async () => {
         const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-empty-'));
         try {
             const { runSensors } = load();
-            const result = runSensors({ fast: true, cwd: emptyDir });
+            const result = await runSensors({ fast: true, cwd: emptyDir });
             expect(result.overall).toBe('not_certified');
             expect(result.sensors).toHaveLength(0);
         } finally { fs.rmSync(emptyDir, { recursive: true }); }
     });
 
-    it('runs only fast sensors with --fast flag', () => {
-        mockExecSyncFn.mockReturnValue('' as any);
+    it('runs only fast sensors with --fast flag', async () => {
+        mockRunCommand.mockResolvedValue(ok());
         const { runSensors } = load();
-        const result = runSensors({ fast: true, cwd: tmpDir });
-        expect(mockExecSyncFn).toHaveBeenCalledTimes(2); // typecheck + lint (security disabled, mutation disabled)
+        const result = await runSensors({ fast: true, cwd: tmpDir });
+        expect(mockRunCommand).toHaveBeenCalledTimes(2); // typecheck + lint (security disabled, mutation disabled)
         expect(result.sensors.some((s: any) => s.name === 'security')).toBe(false);
         expect(result.overall).toBe('pass');
     });
 
-    it('returns fail when a fast sensor has errors', () => {
-        mockExecSyncFn
-            .mockImplementationOnce(() => { throw Object.assign(new Error(), { stdout: "src/a.ts(1,1): error TS0001: Bad type.", stderr: '', status: 1 }); })
-            .mockReturnValueOnce('' as any);
+    it('returns fail when a fast sensor has errors', async () => {
+        mockRunCommand
+            .mockResolvedValueOnce(exited(1, 'src/a.ts(1,1): error TS0001: Bad type.'))
+            .mockResolvedValueOnce(ok());
         const { runSensors } = load();
-        const result = runSensors({ fast: true, cwd: tmpDir });
+        const result = await runSensors({ fast: true, cwd: tmpDir });
         expect(result.overall).toBe('fail');
         const tc = result.sensors.find((s: any) => s.name === 'typecheck');
         expect(tc!.status).toBe('fail');
         expect(tc!.errors[0].message).toMatch('SENSOR[typecheck]');
     });
 
-    it('marks sensor as inconclusive on timeout', () => {
-        mockExecSyncFn.mockImplementationOnce(() => { throw Object.assign(new Error('killed'), { code: 'ETIMEDOUT' }); });
-        mockExecSyncFn.mockReturnValueOnce('' as any);
+    it('marks sensor as inconclusive on timeout', async () => {
+        mockRunCommand.mockResolvedValueOnce(timedOut());
+        mockRunCommand.mockResolvedValueOnce(ok());
         const { runSensors } = load();
-        const result = runSensors({ fast: true, cwd: tmpDir });
+        const result = await runSensors({ fast: true, cwd: tmpDir });
         const tc = result.sensors.find((s: any) => s.name === 'typecheck');
         expect(tc!.status).toBe('inconclusive');
         expect(tc!.skipReason).toMatch('timeout');
     });
 
-    it('skips disabled sensors', () => {
-        mockExecSyncFn.mockReturnValue('' as any);
+    it('skips disabled sensors', async () => {
+        mockRunCommand.mockResolvedValue(ok());
         const { runSensors } = load();
-        const result = runSensors({ all: true, cwd: tmpDir });
+        const result = await runSensors({ all: true, cwd: tmpDir });
         const sec = result.sensors.find((s: any) => s.name === 'security');
         expect(sec!.status).toBe('skipped');
         expect(sec!.skipReason).toBe('disabled');
     });
 
-    const tcError = () => { throw Object.assign(new Error(), { stdout: 'src/a.ts(1,1): error TS0001: Bad type.', stderr: '', status: 1 }); };
+    const tcError = () => exited(1, 'src/a.ts(1,1): error TS0001: Bad type.');
 
-    it('baseline suppresses accepted findings — sensor passes on no NEW findings', () => {
+    it('baseline suppresses accepted findings — sensor passes on no NEW findings', async () => {
         const { runSensors } = load();
         const { buildBaseline, writeBaseline } = require('../../../src/commands/sensors/baseline');
 
         // Run 1 (no baseline): typecheck reports a TS error → fail.
-        mockExecSyncFn.mockImplementationOnce(tcError).mockReturnValueOnce('' as any);
-        const first = runSensors({ fast: true, cwd: tmpDir });
+        mockRunCommand.mockResolvedValueOnce(tcError()).mockResolvedValueOnce(ok());
+        const first = await runSensors({ fast: true, cwd: tmpDir });
         expect(first.overall).toBe('fail');
 
         // Accept the current findings as baseline.
         writeBaseline(tmpDir, buildBaseline(first.sensors.map((s: any) => ({ name: s.name, errors: s.errors }))));
 
         // Run 2 (same finding): baseline-suppressed → pass.
-        mockExecSyncFn.mockImplementationOnce(tcError).mockReturnValueOnce('' as any);
-        const second = runSensors({ fast: true, cwd: tmpDir });
+        mockRunCommand.mockResolvedValueOnce(tcError()).mockResolvedValueOnce(ok());
+        const second = await runSensors({ fast: true, cwd: tmpDir });
         const tc = second.sensors.find((s: any) => s.name === 'typecheck');
         expect(tc!.status).toBe('pass');
         expect(tc!.baselineCount).toBe(1);
         expect(second.overall).toBe('pass');
     });
 
-    it('baseline lets NEW findings through (still fails)', () => {
+    it('baseline lets NEW findings through (still fails)', async () => {
         const { runSensors } = load();
         const { writeBaseline } = require('../../../src/commands/sensors/baseline');
         writeBaseline(tmpDir, { typecheck: ['some-unrelated-fingerprint'] });
 
-        mockExecSyncFn.mockImplementationOnce(tcError).mockReturnValueOnce('' as any);
-        const result = runSensors({ fast: true, cwd: tmpDir });
+        mockRunCommand.mockResolvedValueOnce(tcError()).mockResolvedValueOnce(ok());
+        const result = await runSensors({ fast: true, cwd: tmpDir });
         const tc = result.sensors.find((s: any) => s.name === 'typecheck');
         expect(tc!.status).toBe('fail');
         expect(result.overall).toBe('fail');
     });
 
-    it('--ignore-baseline reports all findings even when a baseline exists', () => {
+    it('--ignore-baseline reports all findings even when a baseline exists', async () => {
         const { runSensors } = load();
         const { buildBaseline, writeBaseline } = require('../../../src/commands/sensors/baseline');
         // First capture + accept the finding.
-        mockExecSyncFn.mockImplementationOnce(tcError).mockReturnValueOnce('' as any);
-        const first = runSensors({ fast: true, cwd: tmpDir });
+        mockRunCommand.mockResolvedValueOnce(tcError()).mockResolvedValueOnce(ok());
+        const first = await runSensors({ fast: true, cwd: tmpDir });
         writeBaseline(tmpDir, buildBaseline(first.sensors.map((s: any) => ({ name: s.name, errors: s.errors }))));
 
         // With ignoreBaseline, the accepted finding still counts → fail.
-        mockExecSyncFn.mockImplementationOnce(tcError).mockReturnValueOnce('' as any);
-        const result = runSensors({ fast: true, cwd: tmpDir, ignoreBaseline: true });
+        mockRunCommand.mockResolvedValueOnce(tcError()).mockResolvedValueOnce(ok());
+        const result = await runSensors({ fast: true, cwd: tmpDir, ignoreBaseline: true });
         expect(result.overall).toBe('fail');
     });
 });
@@ -148,18 +150,14 @@ describe('runSensors — missing tool is a fail, not a skip', () => {
     });
 
     beforeEach(() => {
-        mockExecSyncFn.mockReset();
+        mockRunCommand.mockReset();
         // What Node's execSync actually throws when the binary is absent and `/bin/sh`
         // is dash (Debian/Ubuntu, hence most CI runners): status 127, `not found`
         // rather than bash's `command not found`, and no `code` — ENOENT is set only
         // when spawning the shell itself fails, not the command inside it.
-        mockExecSyncFn.mockImplementation(() => {
-            throw Object.assign(new Error('Command failed: awm-nonexistent-binary-xyz .'), {
-                stdout: '',
-                stderr: '/bin/sh: 1: awm-nonexistent-binary-xyz: not found\n',
-                status: 127,
-            });
-        });
+        mockRunCommand.mockResolvedValue(
+            exited(127, '', '/bin/sh: 1: awm-nonexistent-binary-xyz: not found\n'),
+        );
     });
 
     // The sensor is named `security` so it uses the semgrep formatter, which returns
@@ -167,7 +165,7 @@ describe('runSensors — missing tool is a fail, not a skip', () => {
     // tool-missing branch. Under the generic formatter any stderr becomes a finding,
     // so a sensor named `ghost` would report `fail` without that branch ever running —
     // green for a reason unrelated to what this test claims to cover.
-    it('marks a sensor whose binary is missing as fail', () => {
+    it('marks a sensor whose binary is missing as fail', async () => {
         root = mkTmp();
         fs.mkdirSync(path.join(root, '.awm'));
         fs.writeFileSync(
@@ -177,7 +175,7 @@ describe('runSensors — missing tool is a fail, not a skip', () => {
                 sensors: { security: { cmd: 'awm-nonexistent-binary-xyz .', fast: true } },
             }),
         );
-        const out = runSensors({ cwd: root });
+        const out = await runSensors({ cwd: root });
         const security = out.sensors.find((s) => s.name === 'security');
         expect(security?.status).toBe('fail');
         expect(security?.errors[0].message).toMatch(/not available/i);
@@ -189,8 +187,8 @@ describe('runSensors — not_certified + auto-discovery', () => {
     let tmpDir: string | undefined;
 
     beforeEach(() => {
-        mockExecSyncFn.mockReset();
-        mockExecSyncFn.mockReturnValue('' as any);
+        mockRunCommand.mockReset();
+        mockRunCommand.mockResolvedValue(ok());
     });
 
     afterEach(() => {
@@ -200,14 +198,14 @@ describe('runSensors — not_certified + auto-discovery', () => {
         }
     });
 
-    it('returns not_certified when no manifest exists anywhere up the tree', () => {
+    it('returns not_certified when no manifest exists anywhere up the tree', async () => {
         tmpDir = mkTmp();
-        const out = runSensors({ cwd: tmpDir });
+        const out = await runSensors({ cwd: tmpDir });
         expect(out.overall).toBe('not_certified');
         expect(out.sensors).toEqual([]);
     });
 
-    it('discovers .awm/sensors.json in a parent directory (walk-up)', () => {
+    it('discovers .awm/sensors.json in a parent directory (walk-up)', async () => {
         tmpDir = mkTmp();
         fs.mkdirSync(path.join(tmpDir, '.awm'));
         fs.writeFileSync(
@@ -216,7 +214,7 @@ describe('runSensors — not_certified + auto-discovery', () => {
         );
         const nested = path.join(tmpDir, 'a', 'b');
         fs.mkdirSync(nested, { recursive: true });
-        const out = runSensors({ cwd: nested });
+        const out = await runSensors({ cwd: nested });
         expect(out.overall).toBe('pass');
         expect(out.sensors.length).toBe(1);
     });
@@ -268,7 +266,7 @@ describe('reconcilePack', () => {
         return dir;
     }
 
-    it('upgrades generic→js-ts when package.json is present', () => {
+    it('upgrades generic→js-ts when package.json is present', async () => {
         const { reconcilePack } = require('../../../src/commands/sensors/run');
         const dir = tmpProject('generic', true);
         try {
@@ -285,7 +283,7 @@ describe('reconcilePack', () => {
         } finally { fs.rmSync(dir, { recursive: true }); }
     });
 
-    it('is a no-op when pack is already real (idempotent)', () => {
+    it('is a no-op when pack is already real (idempotent)', async () => {
         const { reconcilePack } = require('../../../src/commands/sensors/run');
         const dir = tmpProject('js-ts', true);
         try {
@@ -296,7 +294,7 @@ describe('reconcilePack', () => {
         } finally { fs.rmSync(dir, { recursive: true }); }
     });
 
-    it('does not upgrade a truly generic project (no indicators)', () => {
+    it('does not upgrade a truly generic project (no indicators)', async () => {
         const { reconcilePack } = require('../../../src/commands/sensors/run');
         const dir = tmpProject('generic', false);
         try {
@@ -317,51 +315,39 @@ describe('runSensors — test sensor (exit-code)', () => {
         jest.resetModules();
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-run-test-'));
         fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
-        mockExecSyncFn.mockReset();
+        mockRunCommand.mockReset();
     });
     afterEach(() => { fs.rmSync(tmpDir, { recursive: true }); });
 
     const load = () => require('../../../src/commands/sensors/run');
 
-    it('test sensor: passing run (exit 0 with output) is pass, not fail', () => {
+    it('test sensor: passing run (exit 0 with output) is pass, not fail', async () => {
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'),
             JSON.stringify({ pack: 'js-ts', sensors: { test: { cmd: 'npm test', fast: false } } }));
-        mockExecSyncFn.mockReturnValue('Tests: 6 passed, 6 total\n'); // runner prints on success
+        mockRunCommand.mockResolvedValue(ok('Tests: 6 passed, 6 total\n')); // runner prints on success
         const { runSensors } = load();
-        const result = runSensors({ all: true, cwd: tmpDir });
+        const result = await runSensors({ all: true, cwd: tmpDir });
         const test = result.sensors.find((s: any) => s.name === 'test');
         expect(test.status).toBe('pass');
     });
 
-    it('test sensor: failing run (non-zero exit) is fail, not skipped', () => {
+    it('test sensor: failing run (non-zero exit) is fail, not skipped', async () => {
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'),
             JSON.stringify({ pack: 'js-ts', sensors: { test: { cmd: 'npm test', fast: false } } }));
-        mockExecSyncFn.mockImplementation(() => {
-            const err: any = new Error('jest failed');
-            err.status = 1;
-            err.stdout = 'Tests: 1 failed, 5 passed\n';
-            err.stderr = '';
-            throw err;
-        });
+        mockRunCommand.mockResolvedValue(exited(1, 'Tests: 1 failed, 5 passed\n'));
         const { runSensors } = load();
-        const result = runSensors({ all: true, cwd: tmpDir });
+        const result = await runSensors({ all: true, cwd: tmpDir });
         const test = result.sensors.find((s: any) => s.name === 'test');
         expect(test.status).toBe('fail');
         expect(result.overall).toBe('fail');
     });
 
-    it('test sensor: missing npm test script exits non-zero → fail, not skipped', () => {
+    it('test sensor: missing npm test script exits non-zero → fail, not skipped', async () => {
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'),
             JSON.stringify({ pack: 'js-ts', sensors: { test: { cmd: 'npm test', fast: false } } }));
-        mockExecSyncFn.mockImplementation(() => {
-            const err: any = new Error('npm test: missing script');
-            err.status = 1;
-            err.stdout = 'npm error Missing script: test\n';
-            err.stderr = '';
-            throw err;
-        });
+        mockRunCommand.mockResolvedValue(exited(1, 'npm error Missing script: test\n'));
         const { runSensors } = load();
-        const result = runSensors({ all: true, cwd: tmpDir });
+        const result = await runSensors({ all: true, cwd: tmpDir });
         const test = result.sensors.find((s: any) => s.name === 'test');
         expect(test.status).toBe('fail');
         expect(result.overall).toBe('fail');
@@ -373,11 +359,11 @@ describe('runSensors — honest floor (not_certified over real stack)', () => {
     const os = require('os');
 
     beforeEach(() => {
-        mockExecSyncFn.mockReset();
-        mockExecSyncFn.mockReturnValue('' as any);
+        mockRunCommand.mockReset();
+        mockRunCommand.mockResolvedValue(ok());
     });
 
-    it('returns not_certified (not skipped) for a generic manifest over a real stack', () => {
+    it('returns not_certified (not skipped) for a generic manifest over a real stack', async () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-floor-'));
         fs.mkdirSync(path.join(dir, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(dir, '.awm', 'sensors.json'),
@@ -389,7 +375,7 @@ describe('runSensors — honest floor (not_certified over real stack)', () => {
         try {
             jest.resetModules();
             const { runSensors } = require('../../../src/commands/sensors/run');
-            const result = runSensors({ fast: true, cwd: dir }); // --fast filters the fast:false security sensor → empty
+            const result = await runSensors({ fast: true, cwd: dir }); // --fast filters the fast:false security sensor → empty
             expect(result.overall).toBe('not_certified');
         } finally {
             process.env.AWM_HOME = prevHome;

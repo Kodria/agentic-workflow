@@ -39,29 +39,29 @@ describe('runSensors — an absent tool never reads as green (real /bin/sh)', ()
         return root;
     };
 
-    it('marks a sensor whose binary is absent as fail, not skipped', () => {
+    it('marks a sensor whose binary is absent as fail, not skipped', async () => {
         const root = project({ security: { cmd: `${MISSING_BIN} .`, fast: true } });
 
-        const out = runSensors({ cwd: root });
+        const out = await runSensors({ cwd: root });
 
         const security = out.sensors.find(s => s.name === 'security');
         expect(security!.status).toBe('fail');
         expect(security!.errors[0].message).toMatch(/not available/i);
     });
 
-    it('does not let a healthy sensor carry the run to pass while another tool is absent', () => {
+    it('does not let a healthy sensor carry the run to pass while another tool is absent', async () => {
         const root = project({
             typecheck: { cmd: 'node -e ""', fast: true },
             security: { cmd: `${MISSING_BIN} .`, fast: true },
         });
 
-        const out = runSensors({ cwd: root });
+        const out = await runSensors({ cwd: root });
 
         expect(out.sensors.find(s => s.name === 'typecheck')!.status).toBe('pass');
         expect(out.overall).toBe('fail');
     });
 
-    it('does not misread a tool that ran and merely printed "not found" as an absent tool', () => {
+    it('does not misread a tool that ran and merely printed "not found" as an absent tool', async () => {
         // Exits 1, not 127: the binary existed and reported something of its own.
         // Classifying this as a missing tool would be a false accusation. It also
         // must not read as a benign 'skipped': the formatter parsed no findings
@@ -71,7 +71,7 @@ describe('runSensors — an absent tool never reads as green (real /bin/sh)', ()
             security: { cmd: `node -e "console.error('rule pack not found'); process.exit(1)"`, fast: true },
         });
 
-        const out = runSensors({ cwd: root });
+        const out = await runSensors({ cwd: root });
 
         const security = out.sensors.find(s => s.name === 'security');
         expect(security!.status).toBe('inconclusive');

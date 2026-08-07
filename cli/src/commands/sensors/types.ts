@@ -8,6 +8,8 @@ export type SensorConfig = {
 export type SensorManifest = {
     pack: string;
     sensors: Record<string, SensorConfig>;
+    /** How many sensors may run at once. Defaults to a core-count-derived cap. */
+    concurrency?: number;
 };
 
 export type SensorError = {
@@ -42,6 +44,13 @@ export type SensorResult = {
     status: 'pass' | 'fail' | 'inconclusive' | 'skipped';
     errors: SensorError[];
     skipReason?: string;
+    /**
+     * The run was cut short (timeout, output cap) but the partial output still
+     * yielded findings. The findings listed are real; their *absence* proves
+     * nothing, so this can never accompany a `pass`. Holds the reason, so the
+     * caller can tell "clean" from "clean as far as we got".
+     */
+    incomplete?: string;
     /** New findings (not in baseline). Present only when a baseline is applied. */
     newCount?: number;
     /** Findings suppressed by the baseline. Present only when a baseline is applied. */
