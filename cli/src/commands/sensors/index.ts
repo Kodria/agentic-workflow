@@ -26,8 +26,13 @@ export function registerSensorsCommand(program: Command): void {
         .option('--fast', 'run fast sensors only (tsc, lint)')
         .option('--slow', 'run slow sensors only (semgrep, mutation)')
         .option('--all', 'run all sensors regardless of speed')
+        .option('--changed', 'scope sensors that support it to the files changed vs --base')
+        .option('--base <ref>', 'comparison point for --changed (default: HEAD, i.e. uncommitted work)')
         .action(async (opts) => {
-            const output = await runSensors({ fast: opts.fast, slow: opts.slow, all: opts.all });
+            const output = await runSensors({
+                fast: opts.fast, slow: opts.slow, all: opts.all,
+                changed: opts.changed, base: opts.base,
+            });
             // Emit the verdict ALWAYS — an empty `sensors` with overall:'not_certified'
             // must be visible, never a silent exit-0 that reads as "clean".
             process.stdout.write(JSON.stringify(output, null, 2) + '\n');

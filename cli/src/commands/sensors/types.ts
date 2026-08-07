@@ -3,6 +3,26 @@ export type SensorConfig = {
     fast?: boolean;
     enabled?: boolean;
     timeout?: number;
+    /**
+     * Opt-in scoped variant used by `awm sensors run --changed`, with `{files}`
+     * standing in for the changed file list (e.g. `eslint --format json {files}`).
+     *
+     * Opt-in, never inferred. Scoping is sound only where a finding is a property of
+     * the file it lives in — eslint, semgrep. A whole-program checker (`tsc`) handed a
+     * subset reports clean while the change breaks a caller it was never shown, which
+     * is a false green. A sensor that omits this key keeps running its full `cmd`
+     * under `--changed`: slower, but never wrong.
+     */
+    changedCmd?: string;
+    /**
+     * Extensions this sensor can actually be handed, e.g. `[".ts", ".tsx"]`. The
+     * changed set is every file the tree touched — a README, a lockfile, a PNG — and
+     * eslint given a `.md` does not skip it, it fails. Filtering is per sensor because
+     * the same diff means different things to eslint and to semgrep. When the filter
+     * empties the list, the sensor is skipped rather than run over the whole repo.
+     * Absent → the sensor accepts whatever changed.
+     */
+    changedExtensions?: string[];
 };
 
 export type SensorManifest = {
@@ -51,6 +71,13 @@ export type SensorResult = {
      * caller can tell "clean" from "clean as far as we got".
      */
     incomplete?: string;
+    /**
+     * Set to 'changed' when this sensor ran against the diff rather than the whole
+     * tree. Makes a scoped result self-describing: a `pass` here means "clean over
+     * the changed files", which is a weaker claim than an unscoped `pass`, and the
+     * reader must be able to tell them apart without knowing which flags were used.
+     */
+    scope?: 'changed';
     /** New findings (not in baseline). Present only when a baseline is applied. */
     newCount?: number;
     /** Findings suppressed by the baseline. Present only when a baseline is applied. */
@@ -63,6 +90,13 @@ export type RunOutput = {
     /** Set when reconcilePack upgraded the manifest off the `generic` fallback
      *  (e.g. "generic→js-ts"). Absent on no-op runs. */
     packUpgraded?: string;
+    /**
+     * Present only on a `--changed` run. `files` is how many changed files were in
+     * scope; `error` explains why the scope could not be resolved, in which case every
+     * sensor fell back to its full command. Emitted so a scoped run is never read as a
+     * full one just because it happened to come back green.
+     */
+    changedScope?: { files: number; error?: string };
 };
 
 export type SensorCheck = {

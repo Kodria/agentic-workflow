@@ -51,7 +51,13 @@ const FALLBACK_DEFAULTS: Record<string, SensorManifest['sensors']> = {
 };
 
 type PackJson = {
-    sensors?: Record<string, { defaultCmd?: string; fast?: boolean; enabled?: boolean }>;
+    sensors?: Record<string, {
+        defaultCmd?: string;
+        fast?: boolean;
+        enabled?: boolean;
+        changedCmd?: string;
+        changedExtensions?: string[];
+    }>;
 };
 
 /**
@@ -72,6 +78,12 @@ function readPackDefaults(pack: string, registryRoot: string, cwd: string): Sens
         if (def.defaultCmd) entry.cmd = def.defaultCmd.replace('{{SOURCE_DIRS}}', sourceDirs);
         if (def.fast !== undefined) entry.fast = def.fast;
         if (def.enabled !== undefined) entry.enabled = def.enabled;
+        // Carried through verbatim: without these in the written manifest, a pack can
+        // declare a sensor scopable and `--changed` would silently run it in full —
+        // the flag would look supported and do nothing. `{{SOURCE_DIRS}}` is not
+        // substituted here on purpose: a scoped command takes an explicit file list.
+        if (def.changedCmd) entry.changedCmd = def.changedCmd;
+        if (def.changedExtensions) entry.changedExtensions = def.changedExtensions;
         sensors[name] = entry;
     }
     return sensors;
