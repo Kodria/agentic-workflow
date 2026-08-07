@@ -48,31 +48,37 @@ _Contexto: H1/D1. Publicado roto en v3.9.0; en Windows preflight bloquea siempre
 **Files:**
 - Test: `cli/tests/commands/sensors/status-windows.test.ts` (nuevo)
 
-- [ ] Test con `process.platform` mockeado a `win32` (patrón de los tests de
+- [x] Test con `process.platform` mockeado a `win32` (patrón de los tests de
   `exec.ts`): un sensor `cmd: "semgrep ..."` con binario resoluble debe dar
   `ok: true`; hoy da `not found in PATH` porque `which` no existe en Windows.
   Mockear la capa de ejecución, no el FS.
-- [ ] Correrlo: debe FALLAR (rojo) contra el código actual.
+- [x] Correrlo: debe FALLAR (rojo) contra el código actual.
 
 ### Task 1.2: Resolución portable en `status.ts`
 
 **Files:**
 - Modify: `cli/src/commands/sensors/status.ts:44-55`
 
-- [ ] Extraer `resolveOnPath(bin): boolean`: `win32` → `where <bin>`; resto →
-  `command -v <bin>` (garantizado POSIX; `which` no lo está).
-- [ ] Test 1.1 en verde; casos existentes de `status` intactos.
+- [x] Extraer `resolveOnPath(bin): boolean`: `win32` → `where <bin>`; resto →
+  `command -v <bin>` (garantizado POSIX; `which` no lo está). Implementado vía
+  `isWindowsNative()` (ya existente en `core/paths.ts`), no un check inline nuevo.
+- [x] Test 1.1 en verde; casos existentes de `status` intactos.
 
 ### Task 1.3: Auditoría de POSIX-ismos en el camino preflight/status/exec
 
-- [ ] `grep -rnE "execSync|execFileSync|spawn" cli/src/commands/{sensors,preflight,context-budget}/`
+- [x] `grep -rnE "execSync|execFileSync|spawn" cli/src/commands/{sensors,preflight,context-budget}/`
   y revisar cada comando construido por plataforma. Corregir lo que aparezca con
   el mismo patrón; si no aparece nada, dejar constancia en el commit.
+  **Hallazgo real:** `changed.ts`'s `shellQuote()` tenía el mismo bug (quoting
+  POSIX-only en un string ejecutado con `shell:true`) — corregido, incluida una
+  ronda de fix sobre la convención de escape (`""` → `\"`, real Win32
+  `CommandLineToArgvW`). `preflight/` y `context-budget/` confirmados limpios
+  (cero `child_process`).
 
 ### Task 1.4: Cierre R1
 
-- [ ] `npx tsc --noEmit` + suite completa en verde.
-- [ ] Commit `fix(sensors): resolve sensor binaries portably on Windows` + push.
+- [x] `npx tsc --noEmit` + suite completa en verde. (144 suites / 1277 tests)
+- [x] Commit `fix(sensors): resolve sensor binaries portably on Windows` + push.
 - [ ] PR titulado `fix(...)` → patch release. Merge = hotfix publicado.
 
 ---
