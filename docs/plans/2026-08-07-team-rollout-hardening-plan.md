@@ -233,11 +233,37 @@ _Contexto: H3/D3. Python fuera del registry; shell inexistente; `generic` = gate
 
 ### Task 3.5: Cierre R3
 
-- [ ] E2E local: repo fixture python y repo fixture shell → `awm sensors init` copia
-  configs del pack correcto; `awm preflight` verde con tools presentes.
-- [ ] Suite CLI + validadores registry en verde. Commits + push + PRs (registry
+- [x] E2E local: repo fixture python y repo fixture shell → `awm sensors init` copia
+  configs del pack correcto; `awm preflight` verde con tools presentes. Confirmado
+  directo (no subagent): manifest generado correcto para ambos packs (`formatter`
+  incluido), `.semgrep.awm.yml` copiado, `awm preflight` → `ready` en ambos tras
+  agregar `AGENTS.md`. `awm sensors run --fast` confirmó extremo a extremo: mypy y
+  ruff parsean hallazgos reales correctamente vía los nuevos formatters; shell pack
+  corre limpio.
+- [x] Suite CLI + validadores registry en verde. Commits + push + PRs (registry
   primero o simultáneo; el CLI sin fallback depende de que el registry shippee
   `python`).
+
+> **post-implementation-qa (2026-08-07):** Track A (fidelidad vs prosa del plan,
+> sin IDs de requirement en este plan) + panel Track B (robustness/security, logic,
+> tests) sobre el diff completo de R3 en el lado CLI. Encontró 1 blocker + 5
+> important + 2 minor, todos corregidos y re-verificados (commit `7ab9ea3`):
+> - **Blocker:** `buildManifest` perdía el campo `formatter` al re-mergear sobre un
+>   manifest preexistente (el path de upgrade real de usuarios ya publicados en
+>   npm bajo el `FALLBACK_DEFAULTS` viejo) — merge cambiado de reemplazo de objeto
+>   completo por sensor a merge por campo.
+> - **Important (5):** `ruff`/`shellcheck` formatters crasheaban con JSON válido
+>   pero de forma inesperada (mismo patrón sistémico en los 2 archivos — sin
+>   validación de forma en runtime tras `JSON.parse`); `status.ts`/`run.ts` sin el
+>   guard `?? {}` que `checkManifest` ya tenía (mismo patrón sistémico, aplicado
+>   inconsistente); `STACK_DETECTORS` de python no incluía `requirements.txt`/
+>   `Pipfile` pese a que el propio `pack.json` del registry los declara en
+>   `detects`; `getFormatter` cascadeaba a mis-parseo silencioso ante un
+>   `formatter` no reconocido; `checkTools` no reflejaba el estado degradado
+>   honesto de manifest vacío.
+> - **Minor (2):** cobertura de regresión para el fix `isFile()` de Task 3.4;
+>   honestidad del comentario del caso "sin corchete `[code]`" en el test de mypy.
+> Ledger acumulado (no archivado — R4-R7 siguen sobre la misma rama).
 
 ---
 
