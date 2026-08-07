@@ -72,7 +72,13 @@ _Contexto: H1/D1. Publicado roto en v3.9.0; en Windows preflight bloquea siempre
 
 _Contexto: H2/D2. `gh` hardcodeado; GitLab no puede cerrar el ciclo._
 
-### Task 2.1: Detección de host en `finishing-a-development-branch`
+> **Corrección post-verificación (2026-08-07):** el barrido fino encontró un SEGUNDO
+> skill acoplado a GitHub: `receiving-code-review/SKILL.md:206` usa
+> `gh api repos/.../pulls/.../comments/.../replies` para responder review comments
+> inline. R2 lo cubre con la misma detección de host (equivalente `glab`, o
+> degradación: reportar la respuesta en el cuerpo del texto si no hay CLI del host).
+
+### Task 2.1: Detección de host en `finishing-a-development-branch` y `receiving-code-review`
 
 **Files:**
 - Modify: `skills/finishing-a-development-branch/SKILL.md` (Opción 2 + paso previo)
@@ -168,11 +174,19 @@ _Contexto: H4/D4. La mitad del equipo no puede ni instalar AWM._
 
 ### Task 4.0: Verificar formatos vigentes (gate de la release)
 
-- [ ] Contra docs oficiales actuales: formato de reglas de Cursor
-  (`.cursor/rules/*.mdc`, frontmatter, `alwaysApply`) y de instructions de Copilot
-  (`.github/instructions/*.instructions.md`, `applyTo`), y soporte real de
-  `AGENTS.md` en ambos. Registrar hallazgos como comentario en este plan ANTES de
-  implementar. Si algo difiere del diseño D4, ajustar D4 primero.
+- [x] **Verificado 2026-08-07 contra fuentes web** (no memoria de entrenamiento):
+  - **Cursor lee `AGENTS.md` nativamente**, y es el ÚNICO formato que su Agent
+    mode lee en corridas autónomas (no lee `.cursorrules`). `.cursor/rules/*.mdc`
+    vigente, con frontmatter y modos de activación; subdirectorios soportados.
+  - **Copilot coding agent soporta `AGENTS.md`** (changelog GitHub 2025-08-28),
+    además de `.github/copilot-instructions.md` y
+    `.github/instructions/**.instructions.md` con frontmatter `applyTo` (glob)
+    (changelog 2025-07-23). Bonus: dentro de `AGENTS.md` se pueden incluir otros
+    archivos con `@ruta/relativa` — mecanismo directo para referenciar SKILL.md.
+  - Conclusión: D4 validado. La estrategia `managed-agents-md` es el vehículo
+    correcto para ambos.
+- [ ] Al ejecutar R4, re-confirmar contra docs oficiales del día (los formatos de
+  estos agentes cambian rápido) antes de fijar los renderers en tests.
 
 ### Task 4.1: Provider configs
 
@@ -186,25 +200,39 @@ _Contexto: H4/D4. La mitad del equipo no puede ni instalar AWM._
 - [ ] Tests: rutas de instalación por scope; `global` en Copilot falla con el
   mensaje esperado; `getInjection` devuelve la estrategia correcta.
 
-### Task 4.2: Estrategia de contexto reutilizada
+### Task 4.2: Estrategia de contexto generalizada
 
 **Files:**
-- Modify: `cli/src/core/context/` (solo lo que la generalización exija)
+- Modify: `cli/src/core/context/strategies/codex-agents.ts`, `cli/src/core/init/steps.ts`
 - Test: `cli/tests/core/context/`
 
-- [ ] `CodexAgentsStrategy` parametrizada/reutilizada para cursor y copilot (si ya
-  es genérica sobre `AGENTS.md`, este task es solo tests de wiring). El bloque
-  gestionado instruye leer `SKILL.md` en los triggers (spine degradado a contexto
-  leído — D4).
+_Verificado 2026-08-07: NO es solo wiring. Tres acoplamientos reales a Codex:_
+- [ ] `injectGlobal()` hardcodea `~/.codex/AGENTS.md` (`codex-agents.ts:86`) →
+  parametrizar por `provider.injection.globalPath` (el camino `inject()` ya lo
+  hace bien — igualar).
+- [ ] `assertGlobalInput` solo acepta scope global → decidir scope por provider
+  (Copilot no tiene AGENTS.md global de repo; su bloque va a nivel proyecto).
+- [ ] `init/steps.ts:82` instancia `CodexAgentsStrategy` para `injectProject` —
+  revisar la condición de agente que lo rodea para que cubra cursor/copilot.
+- [ ] El bloque gestionado instruye leer `SKILL.md` en los triggers (spine
+  degradado a contexto leído — D4).
 
 ### Task 4.3: Renderers de skills por provider
 
 **Files:**
-- Modify: `cli/src/core/executor.ts` / renderers según arquitectura existente
+- Modify: `cli/src/providers/index.ts` (`RendererId`, `assertLinkRenderer`),
+  nuevo módulo de rendering (ubicación según convención al implementar)
 - Test: instalación e2e con tmpdir por provider
 
-- [ ] Cursor: `.mdc` con frontmatter mínimo que referencia el `SKILL.md` instalado.
-- [ ] Copilot: `.instructions.md` con `applyTo` equivalente.
+_Verificado 2026-08-07: `executor.ts` son 63 líneas de primitivas symlink/copy —
+NO es el punto de extensión. El renderer vive en providers:
+`RendererId = 'link' | 'codex-agent-toml'` y `assertLinkRenderer` TIRA para
+cualquier renderer no-link ("not implemented yet"). Esta task agrega renderer ids
+nuevos e implementa su rendering — no toca executor._
+- [ ] `RendererId` += `cursor-mdc`, `copilot-instructions`; implementar rendering
+  (Cursor: `.mdc` con frontmatter refiriendo el `SKILL.md`; Copilot:
+  `.instructions.md` con `applyTo`) y levantar la restricción de
+  `assertLinkRenderer` para los nuevos ids.
 - [ ] `awm add` / `awm init` e2e en tmpdir para ambos providers.
 
 ### Task 4.4: Tier de capacidades visible
