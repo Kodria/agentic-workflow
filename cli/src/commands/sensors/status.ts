@@ -1,6 +1,7 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { isWindowsNative } from '../../core/paths';
 import { SensorCheck, SensorStatusResult, SensorManifest } from './types';
 
 /** First non-flag token after `npx` — the tool the command actually runs. */
@@ -9,6 +10,17 @@ function npxTool(parts: string[]): string | undefined {
         if (!parts[i].startsWith('-')) return parts[i];
     }
     return undefined;
+}
+
+/** Resolve a binary on PATH portably: `where` on win32, POSIX `command -v` elsewhere. */
+function resolveOnPath(bin: string): boolean {
+    const cmd = isWindowsNative() ? `where ${bin}` : `command -v ${bin}`;
+    try {
+        execSync(cmd, { stdio: 'pipe' });
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 /** If the command references `--config <file>`, that file must exist in the repo. */
@@ -26,7 +38,7 @@ function configCheck(parts: string[], cwd: string): SensorCheck | null {
  * - `npx <tool>`: the tool MUST be installed locally (node_modules/.bin). Otherwise
  *   `npx` would fetch a remote package at run time (dependency-confusion risk) and
  *   the sensor would fail. A green status here would be a lie.
- * - other binaries: must resolve on PATH (`which`).
+ * - other binaries: must resolve on PATH (`where` on win32, `command -v` elsewhere).
  * - any `--config <file>` referenced must exist.
  */
 function checkCmd(cmd: string, cwd: string): SensorCheck {
@@ -46,9 +58,7 @@ function checkCmd(cmd: string, cwd: string): SensorCheck {
         return configCheck(parts, cwd) ?? { ok: true, detail: `${tool} (node_modules/.bin)` };
     }
 
-    try {
-        execSync(`which ${bin}`, { stdio: 'pipe' });
-    } catch {
+    if (!resolveOnPath(bin)) {
         return { ok: false, detail: `${bin} not found in PATH` };
     }
     return configCheck(parts, cwd) ?? { ok: true, detail: bin };

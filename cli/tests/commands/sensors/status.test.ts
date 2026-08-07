@@ -90,6 +90,35 @@ describe('computeSensorStatus', () => {
         expect(result.checks.security.ok).toBe(false);
     });
 
+    describe('on POSIX', () => {
+        const originalPlatform = process.platform;
+
+        beforeEach(() => {
+            Object.defineProperty(process, 'platform', { value: 'linux' });
+        });
+
+        afterEach(() => {
+            Object.defineProperty(process, 'platform', { value: originalPlatform });
+        });
+
+        it('resolves an installed binary using `command -v`, not `where`', () => {
+            fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+                pack: 'js-ts',
+                sensors: { security: { cmd: 'semgrep --json .', fast: false } }
+            }));
+
+            mockExecSync.mockImplementation(((cmd: string) => {
+                if (cmd === 'command -v semgrep') return Buffer.from('/usr/bin/semgrep');
+                throw new Error(`not found: ${cmd}`);
+            }) as typeof execSync);
+
+            const result = computeSensorStatus(tmpDir);
+            expect(result.overall).toBe('HEALTHY');
+            expect(result.checks.security.ok).toBe(true);
+        });
+    });
+
     it('marks disabled sensors as ok', () => {
         fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({

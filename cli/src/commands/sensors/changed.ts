@@ -1,5 +1,6 @@
 import { execFileSync } from 'child_process';
 import path from 'path';
+import { isWindowsNative } from '../../core/paths';
 
 /**
  * Resolving "what changed" for `awm sensors run --changed`.
@@ -20,7 +21,11 @@ import path from 'path';
 /** Union of committed diff vs `base`, staged, unstaged and untracked files. */
 export type ChangedFiles = {
     files: string[];
-    /** Set when the scope could not be resolved (not a repo, git absent, bad ref). */
+    /**
+     * Set when the scope could not be resolved (not a repo, git absent, bad ref),
+     * or when it resolved but a changed filename carries a cmd.exe metacharacter
+     * that is unsafe to interpolate into a shell command on native Windows.
+     */
     error?: string;
 };
 
@@ -75,13 +80,82 @@ export function changedFiles(cwd: string, base = 'HEAD'): ChangedFiles {
 }
 
 /**
+ * cmd.exe metacharacters that quoting does NOT reliably neutralize.
+ *
+ * Per the BatBadBut / CVE-2024-27980 research (flatt.tech/research/posts/batbadbut-
+ * you-cant-securely-execute-commands-on-windows/ — the paper Node's own CVE fix was
+ * based on), `%` still triggers environment-variable expansion *inside* a
+ * double-quoted string, and `&` can break a command out of quoting under certain
+ * conditions. cmd.exe parses these BEFORE the target program ever sees argv, so no
+ * amount of `"..."`/`\"` escaping at the argv layer (which is all `shellQuote` can
+ * touch) is a complete guarantee against them. Newline/CR are included because the
+ * same research flags them, and they are nonsensical in a real path regardless.
+ *
+ * This is a denylist, not an escaping table, on purpose: the responsible fix for
+ * this vulnerability class is to REFUSE (fall back to the full, unscoped command —
+ * see `run.ts`), not to hand-roll a smarter cmd.exe escaper. Node's own security
+ * team reached the same conclusion for the identical problem.
+ */
+const WIN32_UNSAFE_CHARS = /[&|<>^%\r\n]/;
+
+/** True when `file` contains a character cmd.exe would parse as its own syntax. */
+export function hasUnsafeWin32Chars(file: string): boolean {
+    return WIN32_UNSAFE_CHARS.test(file);
+}
+
+/**
+ * CommandLineToArgvW-safe quoting (the algorithm behind Python's
+ * `subprocess.list2cmdline`, Rust's `std::process::Command` on Windows, and .NET's
+ * argument escaper). Per the documented rule
+ * (learn.microsoft.com/en-us/cpp/c-language/parsing-c-command-line-arguments):
+ * an EVEN run of backslashes before a `"` collapses to half as many literal
+ * backslashes and the `"` is a real delimiter; an ODD run collapses the same way
+ * but the leftover backslash escapes the `"` into a literal character instead of a
+ * delimiter. Backslashes not followed by a `"` are always literal and untouched.
+ *
+ * This alone does not make interpolation safe on win32 — see `hasUnsafeWin32Chars`
+ * and its callers in `run.ts` for the metacharacter layer this cannot address.
+ */
+function win32ArgvQuote(arg: string): string {
+    let result = '"';
+    let backslashes = 0;
+    for (const ch of arg) {
+        if (ch === '\\') {
+            backslashes++;
+        } else if (ch === '"') {
+            result += '\\'.repeat(backslashes * 2 + 1) + '"';
+            backslashes = 0;
+        } else {
+            result += '\\'.repeat(backslashes) + ch;
+            backslashes = 0;
+        }
+    }
+    result += '\\'.repeat(backslashes * 2); // double any trailing run before the closing quote
+    result += '"';
+    return result;
+}
+
+/**
  * Quote a path for a shell command line. Sensor commands are strings run through a
  * shell, so a path with a space or a quote in it would otherwise split into two
  * arguments — or, worse, end the quoting and let the rest of the name be read as
- * shell syntax. Single quotes with the `'\''` escape are the only form POSIX shells
- * treat as fully literal.
+ * shell syntax.
+ *
+ * `runCommand` (see `exec.ts`) spawns this string with `shell: true`, which on
+ * win32 is `cmd.exe`, not a POSIX shell. Single quotes are not quoting syntax to
+ * cmd.exe — it just splits on the space inside them — so a POSIX-only quote here
+ * would silently hand eslint/semgrep two garbage arguments instead of one real
+ * path. `'\''` (single quotes with the escape) is what POSIX shells treat as fully
+ * literal — no exceptions, per POSIX shell grammar, so no metacharacter denylist is
+ * needed on that branch. On win32, `win32ArgvQuote` is the argv-layer half of
+ * safety; the metacharacter denylist above (enforced by the caller in `run.ts`,
+ * before this function is ever reached) is the other half this function cannot
+ * provide on its own.
  */
 function shellQuote(file: string): string {
+    if (isWindowsNative()) {
+        return win32ArgvQuote(file);
+    }
     return `'${file.replace(/'/g, `'\\''`)}'`;
 }
 
