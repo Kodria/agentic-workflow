@@ -74,6 +74,12 @@ _Contexto: H1/D1. Publicado roto en v3.9.0; en Windows preflight bloquea siempre
   ronda de fix sobre la convención de escape (`""` → `\"`, real Win32
   `CommandLineToArgvW`). `preflight/` y `context-budget/` confirmados limpios
   (cero `child_process`).
+  **Nota de atribución:** el `isWindowsNative()` swap en `exec.ts`
+  (`killTree`'s `taskkill` vs. `process.kill(-pid)`, y `detached: !isWindowsNative()`
+  en `spawn()`) no salió de este barrido — vino de la ronda de fixup
+  review-driven de las Tasks 1.1+1.2 (misma pasada que portó `status.ts` a
+  `where`/`command -v`). El hallazgo propio y nuevo de esta Task 1.3 es,
+  específicamente, el bug de `changed.ts`'s `shellQuote()` descrito arriba.
 
 ### Task 1.4: Cierre R1
 
