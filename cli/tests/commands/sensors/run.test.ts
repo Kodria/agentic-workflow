@@ -92,6 +92,47 @@ describe('runSensors', () => {
         expect(sec!.skipReason).toBe('disabled');
     });
 
+    it('dispatches by the formatter field, not the sensor name — ruff on a `lint` sensor', async () => {
+        // The whole point of the `formatter` field: a `lint` sensor is eslint for
+        // js-ts but ruff for python. Old name-based dispatch (lint -> eslint parser)
+        // would choke on ruff's flat JSON array (no `.messages` — TypeError) instead
+        // of parsing it. Real captured `ruff --output-format json` shape.
+        const pythonManifest = {
+            pack: 'python',
+            sensors: {
+                lint: { cmd: 'ruff check . --output-format json', fast: true, formatter: 'ruff' },
+            },
+        };
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify(pythonManifest));
+        const ruffJson = JSON.stringify([{
+            code: 'F401',
+            filename: path.join(tmpDir, 'bad.py'),
+            location: { row: 1, column: 8 },
+            message: '`os` imported but unused',
+        }]);
+        mockRunCommand.mockResolvedValueOnce(exited(1, ruffJson));
+        const { runSensors } = load();
+        const result = await runSensors({ fast: true, cwd: tmpDir });
+        const lint = result.sensors.find((s: any) => s.name === 'lint');
+        expect(lint!.status).toBe('fail');
+        expect(lint!.errors[0].rule).toBe('F401');
+        expect(lint!.errors[0].message).toMatch('SENSOR[lint]');
+        expect(lint!.errors[0].message).toMatch('imported but unused');
+    });
+
+    it('falls back to name-based dispatch when formatter is absent (pre-existing manifest)', async () => {
+        // A manifest written before the `formatter` field existed must keep working
+        // exactly as before: `lint` -> eslint parser, no `formatter` key anywhere.
+        mockRunCommand
+            .mockResolvedValueOnce(exited(1, 'src/a.ts(1,1): error TS0001: Bad type.'))
+            .mockResolvedValueOnce(exited(1, JSON.stringify([{ filePath: '/x/a.js', messages: [{ ruleId: 'no-unused-vars', severity: 2, message: 'unused', line: 1, column: 1 }] }])));
+        const { runSensors } = load();
+        const result = await runSensors({ fast: true, cwd: tmpDir });
+        const lint = result.sensors.find((s: any) => s.name === 'lint');
+        expect(lint!.status).toBe('fail');
+        expect(lint!.errors[0].rule).toBe('no-unused-vars');
+    });
+
     const tcError = () => exited(1, 'src/a.ts(1,1): error TS0001: Bad type.');
 
     it('baseline suppresses accepted findings — sensor passes on no NEW findings', async () => {

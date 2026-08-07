@@ -12,8 +12,8 @@ function makeRegistry(): string {
     fs.writeFileSync(path.join(packDir, 'pack.json'), JSON.stringify({
         name: 'js-ts',
         sensors: {
-            typecheck: { fast: true, defaultCmd: 'npx tsc --noEmit' },
-            lint:      { fast: true, defaultCmd: 'npx eslint . --config eslint.config.awm.mjs --cache --format json' },
+            typecheck: { fast: true, defaultCmd: 'npx tsc --noEmit', formatter: 'tsc' },
+            lint:      { fast: true, defaultCmd: 'npx eslint . --config eslint.config.awm.mjs --cache --format json', formatter: 'eslint-llm' },
             depcheck:  { fast: false, defaultCmd: 'npx depcruise --config .dep-cruiser.awm.js {{SOURCE_DIRS}}' },
             mutation:  { fast: false, enabled: false, defaultCmd: 'npx stryker run' },
         },
@@ -92,6 +92,17 @@ describe('buildManifest', () => {
         const m = buildManifest('js-ts', existing, registryRoot, cwd);
         expect(m.sensors.typecheck.cmd).toBe('custom-tsc');
         expect(m.sensors.lint).toBeDefined();
+    });
+
+    it('carries the formatter field through from pack.json into the built manifest', () => {
+        // readPackDefaults must copy `formatter` the same way it already copies
+        // `changedCmd`/`changedExtensions` — this is what lets run.ts's getFormatter
+        // dispatch by real tool (ruff/mypy/shellcheck) instead of guessing from the
+        // sensor name. Without this carry-through the field is read from pack.json but
+        // silently dropped before it ever reaches the manifest run.ts consumes.
+        const m = buildManifest('js-ts', undefined, registryRoot, cwd);
+        expect(m.sensors.typecheck.formatter).toBe('tsc');
+        expect(m.sensors.lint.formatter).toBe('eslint-llm');
     });
 
     it('returns an empty sensors object when the pack has no pack.json in the registry', () => {
