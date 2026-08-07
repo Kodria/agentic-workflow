@@ -132,17 +132,29 @@ _Contexto: H2/D2. `gh` hardcodeado; GitLab no puede cerrar el ciclo._
 - Modify: `cli/src/commands/preflight/checks.ts`, `cli/src/commands/preflight/index.ts`
 - Test: `cli/tests/commands/preflight/preflight.test.ts`
 
-- [ ] Check `host`: detecta remote y presencia del CLI correspondiente (`gh`/`glab`
+- [x] Check `host`: detecta remote y presencia del CLI correspondiente (`gh`/`glab`
   vía `resolveOnPath` de R1). **Advisory: nunca cambia el exit code** — el reporte
   lo dice explícitamente. Tests: github+gh ok / gitlab sin glab advierte sin
-  romper `ready` / sin remote silencioso.
+  romper `ready` / sin remote silencioso. `extractHost()` implementado con
+  `new URL(remote).hostname` (2 rondas de fix — ver harness-retro
+  `prefer-stdlib-over-hand-rolled-parsing`).
 
 ### Task 2.3: Cierre R2
 
-- [ ] Registry: bump `finishing-a-development-branch` + bundle `dev` (2 archivos);
-  validadores + `check-skill-version-bumps.sh` en verde. Commit + push.
-- [ ] CLI: suite en verde. Commit + push. PRs de ambos repos (CLI primero si 2.2
-  entra en el mismo tren que R1; si no, independientes — 2.1 no depende de 2.2).
+- [x] Registry: bump `finishing-a-development-branch` + bundle `dev` (2 archivos);
+  validadores + `check-skill-version-bumps.sh` en verde. Commit + push. PR #23
+  mergeado.
+- [x] CLI: suite en verde (145 suites / 1302 tests). Commit + push. PR
+  independiente (2.1 no dependía de 2.2, y R1/PR #27 ya está mergeado — sin
+  riesgo de mezclar trenes de release).
+
+> **Cierre R2 (2026-08-07):** post-implementation-qa corrió sobre Task 2.2
+> (robustness + logic lenses); encontró `extractHost` con manejo de userinfo
+> ambiguo (2 rondas de fix), resuelto reemplazando la regex hand-rolled por
+> `new URL(remote).hostname`. harness-retro curó la lección
+> `prefer-stdlib-over-hand-rolled-parsing` en AGENTS.md, conectándola con la de
+> R1 (shellQuote) — mismo patrón sistémico, dos ocurrencias en la misma sesión.
+> Ledger NO se archiva — R3-R7 acumulan sobre la misma rama.
 
 ---
 
