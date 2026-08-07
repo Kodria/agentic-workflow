@@ -105,6 +105,19 @@ function checkManifest(cwd: string, manifest: SensorManifest | null): PreflightC
     }
     const total = Object.keys(manifest.sensors ?? {}).length;
     const enabled = Object.values(manifest.sensors ?? {}).filter(s => s.enabled !== false).length;
+    // total === 0 is NOT an opt-out: a deliberate opt-out lists every known sensor NAME
+    // explicitly with `enabled: false` (total > 0, enabled === 0). Zero entries means
+    // nothing was ever configured — most commonly because the registry had no pack.json
+    // for the detected stack, so `awm sensors init` built an honest, empty manifest
+    // rather than inventing defaults. That must not read as "all sensors disabled".
+    if (total === 0) {
+        return {
+            id: 'manifest',
+            ok: false,
+            detail: `pack '${manifest.pack}' has no sensors — the registry has no pack.json for it`,
+            remedy: `registry has no pack for '${manifest.pack}': run \`awm update\` or add a registry that has it`,
+        };
+    }
     return {
         id: 'manifest',
         ok: true,

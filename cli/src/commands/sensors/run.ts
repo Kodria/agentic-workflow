@@ -8,6 +8,9 @@ import { parseEslintOutput } from './formatters/eslint';
 import { parseSemgrepOutput } from './formatters/semgrep';
 import { parseGenericOutput } from './formatters/generic';
 import { parseTestOutput } from './formatters/test';
+import { parseMypyOutput } from './formatters/mypy';
+import { parseRuffOutput } from './formatters/ruff';
+import { parseShellcheckOutput } from './formatters/shellcheck';
 import { readBaseline, partition } from './baseline';
 import { changedFiles, applyChangedCmd, filterByExtension, hasUnsafeWin32Chars } from './changed';
 import { detectStack, initSensors } from './init';
@@ -118,7 +121,23 @@ function shouldRun(isFast: boolean, opts: RunOptions): boolean {
     return false;
 }
 
-function getFormatter(name: string): (raw: string) => SensorError[] {
+/**
+ * Dispatch by the pack's `formatter` field (the real tool behind the sensor slot —
+ * `lint` is eslint on js-ts but ruff on python, shellcheck on shell) when present.
+ * Manifests written before this field existed carry no `formatter`, so they fall back
+ * to the pre-existing name-based dispatch — nothing already installed breaks.
+ */
+function getFormatter(name: string, formatterField?: string): (raw: string) => SensorError[] {
+    switch (formatterField) {
+        case 'tsc': return parseTscOutput;
+        case 'eslint-llm': return parseEslintOutput;
+        case 'semgrep': return parseSemgrepOutput;
+        case 'test': return parseTestOutput;
+        case 'mypy': return parseMypyOutput;
+        case 'ruff': return parseRuffOutput;
+        case 'shellcheck': return parseShellcheckOutput;
+        case 'generic': return parseGenericOutput;
+    }
     if (name === 'typecheck') return parseTscOutput;
     if (name === 'lint') return parseEslintOutput;
     if (name === 'security') return parseSemgrepOutput;
@@ -130,9 +149,9 @@ function isExitCodeSensor(name: string): boolean {
     return name === 'test';
 }
 
-async function runSensor(name: string, cmd: string, timeout: number, cwd: string): Promise<SensorResult> {
+async function runSensor(name: string, cmd: string, timeout: number, cwd: string, formatterField?: string): Promise<SensorResult> {
     const res: ExecResult = await runCommand(cmd, { timeout, cwd, maxBuffer: MAX_BUFFER });
-    const format = getFormatter(name);
+    const format = getFormatter(name, formatterField);
 
     // The shell itself never started (bad cwd, no shell). Nothing ran.
     if (res.spawnError) {
@@ -349,7 +368,7 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
 
         const timeout = config.timeout ?? (isFast ? DEFAULT_FAST_TIMEOUT : DEFAULT_SLOW_TIMEOUT);
         tasks.push(async () => {
-            const result = await runSensor(name, cmd, timeout, cwd);
+            const result = await runSensor(name, cmd, timeout, cwd, config.formatter);
             const scoped = scope ? { ...result, scope } : result;
             return baseline ? applyBaseline(scoped, baseline[name]) : scoped;
         });

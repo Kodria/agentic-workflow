@@ -38,18 +38,6 @@ export function detectSourceDirs(cwd: string): string[] {
     return found.length > 0 ? found : ['src'];
 }
 
-// Fallback defaults for packs that don't yet ship a pack.json in the registry
-// (today: python). js-ts/generic are sourced from
-// registry/sensor-packs/<pack>/pack.json — single source of truth.
-const FALLBACK_DEFAULTS: Record<string, SensorManifest['sensors']> = {
-    python: {
-        typecheck: { cmd: 'mypy .', fast: true },
-        lint:      { cmd: 'ruff check . --output-format json', fast: true },
-        security:  { cmd: 'semgrep --config .semgrep.awm.yml --json .', fast: false },
-        mutation:  { enabled: false },
-    },
-};
-
 type PackJson = {
     sensors?: Record<string, {
         defaultCmd?: string;
@@ -57,6 +45,7 @@ type PackJson = {
         enabled?: boolean;
         changedCmd?: string;
         changedExtensions?: string[];
+        formatter?: string;
     }>;
 };
 
@@ -84,6 +73,10 @@ function readPackDefaults(pack: string, registryRoot: string, cwd: string): Sens
         // substituted here on purpose: a scoped command takes an explicit file list.
         if (def.changedCmd) entry.changedCmd = def.changedCmd;
         if (def.changedExtensions) entry.changedExtensions = def.changedExtensions;
+        // Carries the real tool name (`mypy`, `ruff`, `shellcheck`…) so the runner can
+        // dispatch to the right output parser instead of guessing from the sensor name —
+        // see `SensorConfig.formatter`.
+        if (def.formatter) entry.formatter = def.formatter;
         sensors[name] = entry;
     }
     return sensors;
@@ -96,7 +89,11 @@ export function buildManifest(
     cwd: string = process.cwd(),
 ): SensorManifest {
     const fromPack = registryRoot ? readPackDefaults(pack, registryRoot, cwd) : null;
-    const defaults = fromPack ?? FALLBACK_DEFAULTS[pack] ?? {};
+    // No registry root, or the pack has no pack.json there → `{}` is the honest floor,
+    // not a bug to paper over with CLI-hardcoded defaults. `checkManifest` (preflight)
+    // and `computeSensorStatus` both surface a zero-sensor manifest as degraded, with a
+    // remedy pointing at the registry — never silently inventing sensors here instead.
+    const defaults = fromPack ?? {};
     const existingSensors = existing?.sensors ?? {};
     return { pack, sensors: { ...defaults, ...existingSensors } };
 }

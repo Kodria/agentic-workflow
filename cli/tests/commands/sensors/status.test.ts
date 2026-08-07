@@ -119,6 +119,20 @@ describe('computeSensorStatus', () => {
         });
     });
 
+    it('is DEGRADED (never HEALTHY) when the manifest has zero sensor entries', () => {
+        // `Object.values({}).every(...)` is vacuously true — guard against reading an
+        // empty manifest (the honest floor when the registry had no pack.json for the
+        // detected stack) as a clean run that found nothing wrong.
+        fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+            pack: 'python',
+            sensors: {},
+        }));
+        const result = computeSensorStatus(tmpDir);
+        expect(result.overall).toBe('DEGRADED');
+        expect(result.pack).toBe('python');
+    });
+
     it('marks disabled sensors as ok', () => {
         fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({

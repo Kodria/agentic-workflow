@@ -72,6 +72,13 @@ export function computeSensorStatus(cwd: string = process.cwd()): SensorStatusRe
         checks[name] = checkCmd(config.cmd, cwd);
     }
 
+    // `Object.values({}).every(...)` is vacuously true — a manifest with zero sensor
+    // entries (the registry had no pack.json for this stack; see init.ts) must not read
+    // as HEALTHY just because there was nothing to fail. Same false-green `checkManifest`
+    // guards against in preflight.
+    if (Object.keys(manifest.sensors).length === 0) {
+        return { overall: 'DEGRADED', pack: manifest.pack, checks };
+    }
     const allOk = Object.values(checks).every(c => c.ok);
     return { overall: allOk ? 'HEALTHY' : 'DEGRADED', pack: manifest.pack, checks };
 }

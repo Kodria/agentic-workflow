@@ -119,6 +119,24 @@ describe('preflight', () => {
         expect(check(report, 'manifest').detail).toContain('opt-out');
     });
 
+    it('flags a manifest with zero sensor entries as degraded, distinct from a deliberate opt-out', () => {
+        // Genuinely different manifest shape from the opt-out test above: no sensor
+        // NAMES at all, vs. an opt-out which lists every known sensor explicitly with
+        // `enabled: false`. This is the honest-floor case from init.ts — the registry
+        // had no pack.json for the detected stack — and must never read as "opted out".
+        const noPack = make({
+            manifest: { pack: 'python', sensors: {} },
+        });
+
+        const report = preflight(noPack);
+
+        expect(report.status).toBe('degraded');
+        expect(check(report, 'manifest').ok).toBe(false);
+        expect(check(report, 'manifest').detail).not.toContain('opt-out');
+        expect(check(report, 'manifest').detail).toContain('python');
+        expect(check(report, 'manifest').remedy).toContain('python');
+    });
+
     it('flags a manifest stuck on generic while the tree has a real stack', () => {
         // The gate would run, report green, and have checked almost nothing.
         const dir = make({
@@ -160,10 +178,15 @@ describe('preflight', () => {
     });
 
     describe('host check (advisory — never changes the exit code)', () => {
+        // Fixtures below use a non-empty, deliberately-opted-out manifest (one sensor
+        // entry, `enabled: false`), not `sensors: {}` — the host check is orthogonal to
+        // sensor configuration, and an empty sensors object now fails `checkManifest`
+        // (see the `total === 0` branch), which would drag `report.status` off 'ready'
+        // for reasons unrelated to what these tests exercise.
         beforeEach(() => { mockExecSync.mockReset(); });
 
         it('reports github + gh available, and does not affect status', () => {
-            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'git@github.com:kodria/agentic-workflow.git');
             mockExecSync.mockImplementation(((cmd: string) => {
                 if (cmd === 'command -v gh') return Buffer.from('/usr/bin/gh');
@@ -180,7 +203,7 @@ describe('preflight', () => {
         it('is still ok:true (advisory only) when gitlab is detected but glab is not on PATH, and status stays ready', () => {
             // The only thing "wrong" in this fixture is the missing `glab` — proving the
             // advisory contract: it must not drag an otherwise-clean repo to `degraded`.
-            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'https://gitlab.com/kodria/agentic-workflow.git');
             mockExecSync.mockImplementation((() => {
                 throw new Error('not found');
@@ -195,7 +218,7 @@ describe('preflight', () => {
         });
 
         it('handles no origin remote gracefully — no throw, ok:true, minimal detail', () => {
-            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             // Not a git repo at all — the common case for `execFileSync` failing here.
 
             const report = preflight(dir);
@@ -207,7 +230,7 @@ describe('preflight', () => {
         });
 
         it('handles a git repo with no origin remote configured gracefully', () => {
-            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir); // git init, no remote
 
             const report = preflight(dir);
@@ -217,7 +240,7 @@ describe('preflight', () => {
         });
 
         it('does not overclaim support for an unrecognized host', () => {
-            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'git@bitbucket.org:kodria/agentic-workflow.git');
 
             const report = preflight(dir);
@@ -232,7 +255,7 @@ describe('preflight', () => {
             // string, so an org/repo name containing "gitlab" false-positives even though
             // the actual host is unrelated. Hostname must be extracted first and matched
             // in isolation.
-            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'git@github.enterprise.internal:kodria/gitlab-migration-tool.git');
 
             const report = preflight(dir);
@@ -245,7 +268,7 @@ describe('preflight', () => {
         it('does not misclassify a non-GitHub host whose repo NAME contains "github"', () => {
             // Same class of bug on the github side: "something-github-tool" is a repo
             // name, not the host.
-            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'https://example.com/kodria/something-github-tool.git');
 
             const report = preflight(dir);
@@ -267,7 +290,7 @@ describe('preflight', () => {
             // correctly classifies as github (checkHost's own substring matching is a
             // separate, pre-existing design, not part of this fix). The regression this
             // test guards is that it must never again read as gitlab.
-            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'ssh://gitlab@github.company-internal.com:22/team/repo.git');
             mockExecSync.mockImplementation((() => { throw new Error('not found'); }) as typeof execSync);
 
@@ -284,7 +307,7 @@ describe('preflight', () => {
             // `git remote set-url origin https://x-access-token:$TOKEN@host/...`. If the
             // token or password happens to contain "gitlab", it must not leak into the
             // matched host either.
-            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'https://user:gitlab@example-host.com/org/repo.git');
 
             const report = preflight(dir);
@@ -300,7 +323,7 @@ describe('preflight', () => {
             // not let a bogus "host@evil"-shaped capture slip past the colon check —
             // the host-capture group excludes "@", so this fails to match at all and
             // falls through to "unrecognized" rather than misclassifying as gitlab.
-            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'user@github.com@gitlab.evil:org/repo.git');
 
             const report = preflight(dir);
@@ -311,7 +334,7 @@ describe('preflight', () => {
         });
 
         it('still detects github.com over HTTPS', () => {
-            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'https://github.com/org/repo.git');
             mockExecSync.mockImplementation((() => { throw new Error('not found'); }) as typeof execSync);
 
@@ -321,7 +344,7 @@ describe('preflight', () => {
         });
 
         it('still detects github.com over SSH shorthand', () => {
-            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'git@github.com:org/repo.git');
             mockExecSync.mockImplementation((() => { throw new Error('not found'); }) as typeof execSync);
 
@@ -331,7 +354,7 @@ describe('preflight', () => {
         });
 
         it('still detects gitlab over HTTPS', () => {
-            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'https://gitlab.example.com/org/repo.git');
             mockExecSync.mockImplementation((() => { throw new Error('not found'); }) as typeof execSync);
 
@@ -341,7 +364,7 @@ describe('preflight', () => {
         });
 
         it('still detects gitlab over SSH shorthand', () => {
-            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'git@gitlab.example.com:org/repo.git');
             mockExecSync.mockImplementation((() => { throw new Error('not found'); }) as typeof execSync);
 

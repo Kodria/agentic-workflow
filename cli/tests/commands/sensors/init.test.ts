@@ -94,9 +94,12 @@ describe('buildManifest', () => {
         expect(m.sensors.lint).toBeDefined();
     });
 
-    it('uses the python fallback when the pack has no pack.json', () => {
+    it('returns an empty sensors object when the pack has no pack.json in the registry', () => {
+        // No FALLBACK_DEFAULTS anymore: `python` has no pack dir in this fixture
+        // registry (only js-ts does — see makeRegistry) → the honest floor is `{}`,
+        // never CLI-hardcoded commands that can drift from what the registry ships.
         const m = buildManifest('python', undefined, registryRoot, cwd);
-        expect(m.sensors.typecheck.cmd).toBe('mypy .');
+        expect(m.sensors).toEqual({});
     });
 });
 
