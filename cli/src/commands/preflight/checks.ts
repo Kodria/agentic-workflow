@@ -132,6 +132,20 @@ function checkTools(cwd: string): PreflightCheck {
     if (status.overall === 'NOT_CONFIGURED') {
         return { id: 'tools', ok: false, detail: 'no manifest to check', remedy: 'run `awm sensors init`' };
     }
+    // A manifest with zero sensor entries (honest-degraded — no pack.json reachable in
+    // the registry for this stack) makes `Object.entries({}).filter(...)` vacuously
+    // empty, which used to read as "0 broken out of 0" — a clean pass for a manifest
+    // that checks nothing at all. Mirrors the same zero-sensors signal `checkManifest`
+    // already guards against; this defends the invariant independently rather than
+    // relying solely on `checkManifest`'s gate to catch this exact manifest shape.
+    if (Object.keys(status.checks).length === 0) {
+        return {
+            id: 'tools',
+            ok: false,
+            detail: 'no sensors configured to check (0 sensor entries in the manifest)',
+            remedy: `registry has no pack for '${status.pack}': run \`awm update\` or add a registry that has it`,
+        };
+    }
     const broken = Object.entries(status.checks).filter(([, c]) => !c.ok);
     if (broken.length > 0) {
         return {

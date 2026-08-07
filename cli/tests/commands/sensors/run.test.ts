@@ -133,6 +133,41 @@ describe('runSensors', () => {
         expect(lint!.errors[0].rule).toBe('no-unused-vars');
     });
 
+    it('degrades to the generic formatter (never a wrong-shape misparse) for an unrecognized formatter value', async () => {
+        // Regression for Finding 5: `formatter: 'bandit'` is present but not one of the
+        // 8 known values. The OLD behavior fell through to name-based dispatch — sensor
+        // name 'security' -> parseSemgrepOutput — which would silently misparse
+        // bandit's differently-shaped `results` entries (no `path`/`start`/`check_id`
+        // keys) into garbage findings (`file: undefined, line: 0`). The fix must use
+        // parseGenericOutput instead: an honest raw-wrap, never a wrong-shape guess.
+        const banditManifest = {
+            pack: 'python',
+            sensors: {
+                security: { cmd: 'bandit -r . -f json', fast: false, formatter: 'bandit' },
+            },
+        };
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify(banditManifest));
+        // Real bandit JSON shape (fields semgrep's parser does not know how to read).
+        const banditJson = JSON.stringify({
+            results: [
+                { filename: 'app.py', line_number: 12, test_id: 'B105', issue_text: 'hardcoded password' },
+            ],
+        });
+        mockRunCommand.mockResolvedValueOnce(exited(1, banditJson));
+        const { runSensors } = load();
+        const result = await runSensors({ all: true, cwd: tmpDir });
+        const sec = result.sensors.find((s: any) => s.name === 'security');
+        expect(sec!.status).toBe('fail');
+        expect(sec!.errors).toHaveLength(1);
+        // Never the semgrep-misparse shape (file: undefined, line: 0, rule: undefined).
+        expect(sec!.errors[0].file).toBeUndefined();
+        expect(sec!.errors[0].line).toBeUndefined();
+        expect(sec!.errors[0].rule).toBeUndefined();
+        // The honest generic raw-wrap: the raw JSON, verbatim, inside one message.
+        expect(sec!.errors[0].message).toMatch('SENSOR[raw]');
+        expect(sec!.errors[0].message).toContain('B105');
+    });
+
     const tcError = () => exited(1, 'src/a.ts(1,1): error TS0001: Bad type.');
 
     it('baseline suppresses accepted findings — sensor passes on no NEW findings', async () => {
@@ -221,6 +256,24 @@ describe('runSensors — missing tool is a fail, not a skip', () => {
         expect(security?.status).toBe('fail');
         expect(security?.errors[0].message).toMatch(/not available/i);
         expect(out.overall).toBe('fail');
+    });
+});
+
+describe('runSensors — sensors: null in a hand-edited manifest', () => {
+    // Regression for Finding 3: `checkManifest` (preflight) already guards
+    // `manifest.sensors ?? {}` — runSensors' `Object.entries(activeManifest.sensors)`
+    // needs the same guard, or a corrupted/hand-edited `.awm/sensors.json` with
+    // `"sensors": null` crashes `Object.entries(null)`, taking down the whole run.
+    it('degrades gracefully instead of throwing when sensors is null', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-null-sensors-'));
+        fs.mkdirSync(path.join(dir, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(dir, '.awm', 'sensors.json'), JSON.stringify({ pack: 'python', sensors: null }));
+        try {
+            const result = await runSensors({ cwd: dir, all: true });
+            expect(result.sensors).toEqual([]);
+        } finally {
+            fs.rmSync(dir, { recursive: true });
+        }
     });
 });
 

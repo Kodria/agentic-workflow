@@ -21,6 +21,23 @@ function makeRegistry(): string {
     return registryRoot;
 }
 
+// Mirrors makeRegistry()'s js-ts shape but for a python pack.json that declares
+// `formatter` on `typecheck` — needed for the buildManifest per-field-merge
+// regression test (a pre-`formatter`-era existing manifest must still inherit it).
+function makePythonRegistry(): string {
+    const registryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-reg-py-'));
+    const packDir = path.join(registryRoot, 'sensor-packs', 'python');
+    fs.mkdirSync(packDir, { recursive: true });
+    fs.writeFileSync(path.join(packDir, 'pack.json'), JSON.stringify({
+        name: 'python',
+        sensors: {
+            typecheck: { fast: true, defaultCmd: 'mypy .', formatter: 'mypy' },
+            lint:      { fast: true, defaultCmd: 'ruff check --output-format=json .', formatter: 'ruff' },
+        },
+    }));
+    return registryRoot;
+}
+
 describe('detectStack', () => {
     let tmpDir: string;
     beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-init-')); });
@@ -71,6 +88,37 @@ describe('detectStack', () => {
         fs.mkdirSync(path.join(tmpDir, 'scripts'));
         fs.writeFileSync(path.join(tmpDir, 'scripts', 'notes.txt'), 'not shell');
         expect(detectStack(tmpDir).pack).toBe('generic');
+    });
+
+    it('detects python from requirements.txt alone', () => {
+        fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), '');
+        expect(detectStack(tmpDir).pack).toBe('python');
+    });
+
+    it('detects python from Pipfile alone', () => {
+        fs.writeFileSync(path.join(tmpDir, 'Pipfile'), '');
+        expect(detectStack(tmpDir).pack).toBe('python');
+    });
+
+    it('python (via Pipfile) wins over shell when both a Pipfile and a root .sh file exist', () => {
+        fs.writeFileSync(path.join(tmpDir, 'Pipfile'), '');
+        fs.writeFileSync(path.join(tmpDir, 'deploy.sh'), '#!/bin/sh\n');
+        expect(detectStack(tmpDir).pack).toBe('python');
+    });
+
+    it('does not report a directory named "*.sh" as a shell indicator', () => {
+        // Directory literally named `something.sh` (not a file) — findShellIndicators'
+        // `entry.isFile()` guard must exclude it. Nothing else present → generic.
+        fs.mkdirSync(path.join(tmpDir, 'something.sh'));
+        expect(detectStack(tmpDir).pack).toBe('generic');
+    });
+
+    it('ignores a directory named "*.sh" but still finds a real .sh file alongside it', () => {
+        fs.mkdirSync(path.join(tmpDir, 'notreal.sh'));
+        fs.writeFileSync(path.join(tmpDir, 'deploy.sh'), '#!/bin/sh\n');
+        const result = detectStack(tmpDir);
+        expect(result.pack).toBe('shell');
+        expect(result.indicators).toEqual(['deploy.sh']);
     });
 });
 
@@ -144,6 +192,29 @@ describe('buildManifest', () => {
         // never CLI-hardcoded commands that can drift from what the registry ships.
         const m = buildManifest('python', undefined, registryRoot, cwd);
         expect(m.sensors).toEqual({});
+    });
+
+    it('per-field merge: an existing sensor missing a newer pack field still inherits it', () => {
+        // Regression for Finding 1: a manifest written by the old FALLBACK_DEFAULTS-era
+        // CLI has `typecheck: { cmd: 'mypy .', fast: true }` — no `formatter`, because
+        // that field didn't exist yet. A naive `{ ...defaults, ...existingSensors }`
+        // whole-sensor-object merge would replace `defaults.typecheck` wholesale,
+        // permanently dropping `formatter` even though the (upgraded) pack now declares
+        // it. The fix merges per FIELD within each sensor, so `formatter` — a field the
+        // existing manifest never specified — is inherited from the pack default.
+        const pyRegistryRoot = makePythonRegistry();
+        try {
+            const existing = {
+                pack: 'python',
+                sensors: { typecheck: { cmd: 'mypy .', fast: true } },
+            };
+            const m = buildManifest('python', existing, pyRegistryRoot, cwd);
+            expect(m.sensors.typecheck.formatter).toBe('mypy');
+            expect(m.sensors.typecheck.cmd).toBe('mypy .');
+            expect(m.sensors.typecheck.fast).toBe(true);
+        } finally {
+            fs.rmSync(pyRegistryRoot, { recursive: true });
+        }
     });
 });
 

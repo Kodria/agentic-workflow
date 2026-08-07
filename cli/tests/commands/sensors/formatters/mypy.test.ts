@@ -38,6 +38,17 @@ describe('parseMypyOutput', () => {
     });
 
     it('handles an error line with no trailing [code] bracket', () => {
+        // Synthetic case: attempted to reproduce a real mypy output line missing the
+        // bracketed error code against mypy 1.19.1 (syntax errors, import errors,
+        // `--warn-unused-ignores`, `--warn-redundant-casts`, unterminated strings,
+        // deep generic instantiation) — every error line this environment's mypy
+        // 1.19.1 produced included the `[code]` suffix (error codes have been attached
+        // to essentially all builtin error messages since they were introduced in
+        // mypy 0.730, per the mypy changelog). No real bracket-less line was found, so
+        // this fixture stays synthetic. The regex's optional bracket is kept
+        // defensively regardless — a plugin-emitted error, a third-party mypy
+        // extension, or an older mypy version could plausibly still omit it, and the
+        // parser must not crash or misparse if so.
         const raw = 'foo.py:3: error: some mypy error kinds omit the bracketed code';
         const errors = parseMypyOutput(raw);
         expect(errors).toHaveLength(1);

@@ -137,6 +137,24 @@ describe('preflight', () => {
         expect(check(report, 'manifest').remedy).toContain('python');
     });
 
+    it('flags the tools check as failing (not "0/0 runnable") for a manifest with zero sensor entries', () => {
+        // Regression for Finding 6: `checkTools` independently inspects
+        // `status.checks`, which is also `{}` for a zero-sensor manifest —
+        // `Object.entries({}).filter(...)` is vacuously `[]`, so before the fix this
+        // read as "0 broken out of 0 sensors" -> ok: true, a clean pass for a manifest
+        // that checks nothing at all. `checkManifest`'s own `total === 0` gate happens
+        // to also catch this exact manifest shape and keeps overall status degraded —
+        // but `checkTools` must defend the same invariant on its own.
+        const noPack = make({
+            manifest: { pack: 'python', sensors: {} },
+        });
+
+        const report = preflight(noPack);
+
+        expect(check(report, 'tools').ok).toBe(false);
+        expect(report.status).toBe('degraded');
+    });
+
     it('flags a manifest stuck on generic while the tree has a real stack', () => {
         // The gate would run, report green, and have checked almost nothing.
         const dir = make({

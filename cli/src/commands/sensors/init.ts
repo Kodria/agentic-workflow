@@ -22,7 +22,7 @@ export type StackDetection = {
 
 const STACK_DETECTORS: Array<{ pack: string; files: string[] }> = [
     { pack: 'js-ts', files: ['package.json'] },
-    { pack: 'python', files: ['pyproject.toml', 'setup.py', 'setup.cfg'] },
+    { pack: 'python', files: ['pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt', 'Pipfile'] },
 ];
 
 // Shell detection is a glob (`*.sh` in the repo root or in `scripts/`), unlike the
@@ -125,7 +125,20 @@ export function buildManifest(
     // remedy pointing at the registry — never silently inventing sensors here instead.
     const defaults = fromPack ?? {};
     const existingSensors = existing?.sensors ?? {};
-    return { pack, sensors: { ...defaults, ...existingSensors } };
+    // Per-FIELD merge, not whole-sensor-object replacement: if `existingSensors.foo`
+    // exists at all, a naive `{ ...defaults, ...existingSensors }` would replace
+    // `defaults.foo` wholesale, permanently dropping any field that only lives in the
+    // (newer) pack default — e.g. a pre-`formatter`-era manifest re-merged against a
+    // pack.json that now declares `formatter` would silently lose it forever. Merging
+    // field-by-field within each sensor entry lets a user's hand-edited field (e.g. a
+    // custom `cmd`) win, while still inheriting any field the existing manifest doesn't
+    // specify.
+    const sensorNames = new Set([...Object.keys(defaults), ...Object.keys(existingSensors)]);
+    const sensors: SensorManifest['sensors'] = {};
+    for (const name of sensorNames) {
+        sensors[name] = { ...defaults[name], ...existingSensors[name] };
+    }
+    return { pack, sensors };
 }
 
 /**

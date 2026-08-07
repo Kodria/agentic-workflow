@@ -133,6 +133,23 @@ describe('computeSensorStatus', () => {
         expect(result.pack).toBe('python');
     });
 
+    it('degrades gracefully (never throws) when sensors is null in a hand-edited manifest', () => {
+        // Regression for Finding 3: `checkManifest` (preflight) already guards
+        // `manifest.sensors ?? {}` — computeSensorStatus needs the same guard, or a
+        // corrupted/hand-edited manifest with `"sensors": null` crashes
+        // `Object.entries(null)`.
+        fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+            pack: 'python',
+            sensors: null,
+        }));
+        expect(() => computeSensorStatus(tmpDir)).not.toThrow();
+        const result = computeSensorStatus(tmpDir);
+        expect(result.overall).toBe('DEGRADED');
+        expect(result.pack).toBe('python');
+        expect(result.checks).toEqual({});
+    });
+
     it('marks disabled sensors as ok', () => {
         fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({

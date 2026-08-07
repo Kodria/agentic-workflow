@@ -128,15 +128,27 @@ function shouldRun(isFast: boolean, opts: RunOptions): boolean {
  * to the pre-existing name-based dispatch — nothing already installed breaks.
  */
 function getFormatter(name: string, formatterField?: string): (raw: string) => SensorError[] {
-    switch (formatterField) {
-        case 'tsc': return parseTscOutput;
-        case 'eslint-llm': return parseEslintOutput;
-        case 'semgrep': return parseSemgrepOutput;
-        case 'test': return parseTestOutput;
-        case 'mypy': return parseMypyOutput;
-        case 'ruff': return parseRuffOutput;
-        case 'shellcheck': return parseShellcheckOutput;
-        case 'generic': return parseGenericOutput;
+    // A `formatter` field that is PRESENT but unrecognized (a typo in a pack.json, or a
+    // future pack declaring a tool this CLI version doesn't know about yet) is a
+    // different situation from no field at all. Falling through to name-based dispatch
+    // in that case would silently misparse a foreign output shape via the wrong parser
+    // (e.g. a `bandit` formatter falling through to `parseSemgrepOutput`, reading
+    // bandit's differently-shaped JSON and producing garbage findings). Only the
+    // ABSENT case (old manifest, written before this field existed) gets name-based
+    // backward-compat dispatch; a present-but-unknown value degrades honestly to the
+    // generic raw-wrap formatter instead.
+    if (formatterField !== undefined) {
+        switch (formatterField) {
+            case 'tsc': return parseTscOutput;
+            case 'eslint-llm': return parseEslintOutput;
+            case 'semgrep': return parseSemgrepOutput;
+            case 'test': return parseTestOutput;
+            case 'mypy': return parseMypyOutput;
+            case 'ruff': return parseRuffOutput;
+            case 'shellcheck': return parseShellcheckOutput;
+            case 'generic': return parseGenericOutput;
+            default: return parseGenericOutput;
+        }
     }
     if (name === 'typecheck') return parseTscOutput;
     if (name === 'lint') return parseEslintOutput;
@@ -320,7 +332,7 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     const tasks: Array<() => Promise<SensorResult>> = [];
     const settled = (r: SensorResult) => () => Promise.resolve(r);
 
-    for (const [name, config] of Object.entries(activeManifest.sensors)) {
+    for (const [name, config] of Object.entries(activeManifest.sensors ?? {})) {
         const isFast = config.fast ?? false;
         if (!shouldRun(isFast, opts)) continue;
 

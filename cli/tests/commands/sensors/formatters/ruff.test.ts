@@ -61,4 +61,39 @@ describe('parseRuffOutput', () => {
     it('returns empty array for malformed JSON', () => {
         expect(parseRuffOutput('not json')).toEqual([]);
     });
+
+    // Regression for Finding 2: valid JSON that isn't the expected shape (object, null,
+    // number) must not throw when iterated — `JSON.parse` succeeding is not the same as
+    // the result being an array.
+    it.each([['{}'], ['null'], ['42'], ['"a string"']])('returns empty array for valid-but-non-array JSON: %s', (raw) => {
+        expect(() => parseRuffOutput(raw)).not.toThrow();
+        expect(parseRuffOutput(raw)).toEqual([]);
+    });
+
+    it('skips a null array element instead of crashing', () => {
+        expect(() => parseRuffOutput('[null]')).not.toThrow();
+        expect(parseRuffOutput('[null]')).toEqual([]);
+    });
+
+    it('skips an element with a null/missing location instead of crashing on .row/.column', () => {
+        const raw = JSON.stringify([
+            { code: 'F401', filename: '/home/user/project/a.py', location: null, message: 'x' },
+        ]);
+        expect(() => parseRuffOutput(raw)).not.toThrow();
+        expect(parseRuffOutput(raw)).toEqual([]);
+    });
+
+    it('skips a malformed element but still returns valid elements from the same array', () => {
+        const raw = JSON.stringify([
+            null,
+            { code: 'F401', filename: '/home/user/project/a.py', location: null, message: 'bad' },
+            {
+                code: 'F841', filename: '/home/user/project/bad.py',
+                location: { column: 5, row: 4 }, message: 'Local variable `x` is assigned to but never used',
+            },
+        ]);
+        const errors = parseRuffOutput(raw);
+        expect(errors).toHaveLength(1);
+        expect(errors[0].rule).toBe('F841');
+    });
 });

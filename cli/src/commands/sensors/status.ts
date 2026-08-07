@@ -66,7 +66,7 @@ export function computeSensorStatus(cwd: string = process.cwd()): SensorStatusRe
     }
 
     const checks: Record<string, SensorCheck> = {};
-    for (const [name, config] of Object.entries(manifest.sensors)) {
+    for (const [name, config] of Object.entries(manifest.sensors ?? {})) {
         if (config.enabled === false) { checks[name] = { ok: true, detail: 'disabled' }; continue; }
         if (!config.cmd) { checks[name] = { ok: false, detail: 'no cmd configured' }; continue; }
         checks[name] = checkCmd(config.cmd, cwd);
@@ -76,7 +76,7 @@ export function computeSensorStatus(cwd: string = process.cwd()): SensorStatusRe
     // entries (the registry had no pack.json for this stack; see init.ts) must not read
     // as HEALTHY just because there was nothing to fail. Same false-green `checkManifest`
     // guards against in preflight.
-    if (Object.keys(manifest.sensors).length === 0) {
+    if (Object.keys(manifest.sensors ?? {}).length === 0) {
         return { overall: 'DEGRADED', pack: manifest.pack, checks };
     }
     const allOk = Object.values(checks).every(c => c.ok);

@@ -44,4 +44,28 @@ describe('parseShellcheckOutput', () => {
     it('returns empty array for malformed JSON', () => {
         expect(parseShellcheckOutput('not json')).toEqual([]);
     });
+
+    // Regression for Finding 2: valid JSON that isn't the expected shape (object, null,
+    // number) must not throw when iterated — `JSON.parse` succeeding is not the same as
+    // the result being an array.
+    it.each([['{}'], ['null'], ['42'], ['"a string"']])('returns empty array for valid-but-non-array JSON: %s', (raw) => {
+        expect(() => parseShellcheckOutput(raw)).not.toThrow();
+        expect(parseShellcheckOutput(raw)).toEqual([]);
+    });
+
+    it('skips a null array element instead of crashing', () => {
+        expect(() => parseShellcheckOutput('[null]')).not.toThrow();
+        expect(parseShellcheckOutput('[null]')).toEqual([]);
+    });
+
+    it('skips a malformed element but still returns valid elements from the same array', () => {
+        const raw = JSON.stringify([
+            null,
+            { file: 'bad.sh', line: 7, column: 1, level: 'warning' }, // missing code/message
+            { file: 'bad.sh', line: 7, endLine: 7, column: 1, endColumn: 4, level: 'warning', code: 2034, message: 'FOO appears unused.', fix: null },
+        ]);
+        const errors = parseShellcheckOutput(raw);
+        expect(errors).toHaveLength(1);
+        expect(errors[0].rule).toBe('SC2034');
+    });
 });
