@@ -1,9 +1,25 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { execFileSync, execSync } from 'child_process';
 
 import { preflight } from '../../../src/commands/preflight/checks';
 import { exitCodeFor, formatReport } from '../../../src/commands/preflight';
+
+// Only `execSync` (used by `resolveOnPath` to check for `gh`/`glab`) is mocked — `git
+// remote get-url origin` runs for real via `execFileSync` against real tmpdir git repos,
+// same as every other check in this file exercises the real filesystem.
+jest.mock('child_process', () => ({
+    ...jest.requireActual('child_process'),
+    execSync: jest.fn(),
+}));
+const mockExecSync = execSync as jest.MockedFunction<typeof execSync>;
+
+/** Turn a tmpdir into a real git repo with (optionally) an `origin` remote. */
+function gitRepo(dir: string, remoteUrl?: string): void {
+    execFileSync('git', ['init'], { cwd: dir, stdio: 'pipe' });
+    if (remoteUrl) execFileSync('git', ['remote', 'add', 'origin', remoteUrl], { cwd: dir, stdio: 'pipe' });
+}
 
 /** CLAUDE.md: no test may reach the real ~/.awm. Everything here is a tmpdir. */
 function project(opts: {
@@ -141,6 +157,75 @@ describe('preflight', () => {
         expect(exitCodeFor({ status: 'not_configured', checks: [] })).toBe(1);
         expect(exitCodeFor({ status: 'degraded', checks: [] })).toBe(1);
         expect(exitCodeFor({ status: 'ready', checks: [] })).toBe(0);
+    });
+
+    describe('host check (advisory — never changes the exit code)', () => {
+        beforeEach(() => { mockExecSync.mockReset(); });
+
+        it('reports github + gh available, and does not affect status', () => {
+            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            gitRepo(dir, 'git@github.com:kodria/agentic-workflow.git');
+            mockExecSync.mockImplementation(((cmd: string) => {
+                if (cmd === 'command -v gh') return Buffer.from('/usr/bin/gh');
+                throw new Error(`not found: ${cmd}`);
+            }) as typeof execSync);
+
+            const report = preflight(dir);
+
+            expect(check(report, 'host').ok).toBe(true);
+            expect(check(report, 'host').detail).toBe('github detected, gh available');
+            expect(report.status).toBe('ready');
+        });
+
+        it('is still ok:true (advisory only) when gitlab is detected but glab is not on PATH, and status stays ready', () => {
+            // The only thing "wrong" in this fixture is the missing `glab` — proving the
+            // advisory contract: it must not drag an otherwise-clean repo to `degraded`.
+            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            gitRepo(dir, 'https://gitlab.com/kodria/agentic-workflow.git');
+            mockExecSync.mockImplementation((() => {
+                throw new Error('not found');
+            }) as typeof execSync);
+
+            const report = preflight(dir);
+
+            expect(check(report, 'host').ok).toBe(true);
+            expect(check(report, 'host').detail).toContain('glab not on PATH');
+            expect(check(report, 'host').remedy).toContain('glab');
+            expect(report.status).toBe('ready');
+        });
+
+        it('handles no origin remote gracefully — no throw, ok:true, minimal detail', () => {
+            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            // Not a git repo at all — the common case for `execFileSync` failing here.
+
+            const report = preflight(dir);
+
+            expect(check(report, 'host').ok).toBe(true);
+            expect(check(report, 'host').detail).toBe('no git remote detected — PR/MR automation not applicable');
+            expect(check(report, 'host').remedy).toBeUndefined();
+            expect(report.status).toBe('ready');
+        });
+
+        it('handles a git repo with no origin remote configured gracefully', () => {
+            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            gitRepo(dir); // git init, no remote
+
+            const report = preflight(dir);
+
+            expect(check(report, 'host').ok).toBe(true);
+            expect(check(report, 'host').detail).toContain('no git remote detected');
+        });
+
+        it('does not overclaim support for an unrecognized host', () => {
+            const dir = make({ manifest: { pack: 'generic', sensors: {} } });
+            gitRepo(dir, 'git@bitbucket.org:kodria/agentic-workflow.git');
+
+            const report = preflight(dir);
+
+            expect(check(report, 'host').ok).toBe(true);
+            expect(check(report, 'host').detail).toContain('not recognized');
+            expect(report.status).toBe('ready');
+        });
     });
 
     it('tells the operator not to hand a broken harness to an unattended run', () => {

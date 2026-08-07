@@ -13,7 +13,7 @@ function npxTool(parts: string[]): string | undefined {
 }
 
 /** Resolve a binary on PATH portably: `where` on win32, POSIX `command -v` elsewhere. */
-function resolveOnPath(bin: string): boolean {
+export function resolveOnPath(bin: string): boolean {
     const cmd = isWindowsNative() ? `where ${bin}` : `command -v ${bin}`;
     try {
         execSync(cmd, { stdio: 'pipe' });
