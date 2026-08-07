@@ -1,4 +1,5 @@
 import { spawn, execFile } from 'child_process';
+import { isWindowsNative } from '../../core/paths';
 
 /** Outcome of a sensor command. Never throws — every failure mode is a field. */
 export type ExecResult = {
@@ -44,7 +45,7 @@ const POST_KILL_GRACE_MS = 1_000;
  * negative-pid kill reaches every descendant at once.
  */
 function killTree(pid: number, signal: NodeJS.Signals): void {
-    if (process.platform === 'win32') {
+    if (isWindowsNative()) {
         // Windows has no process groups in the POSIX sense; taskkill /T walks the tree.
         try { execFile('taskkill', ['/pid', String(pid), '/T', '/F'], () => { /* best effort */ }); } catch { /* ignore */ }
         return;
@@ -83,7 +84,7 @@ export function runCommand(cmd: string, opts: ExecOptions): Promise<ExecResult> 
         const child = spawn(cmd, {
             shell: true,
             cwd: opts.cwd,
-            detached: process.platform !== 'win32',
+            detached: !isWindowsNative(),
             // stdin closed: a sensor must never block waiting for input, and the
             // EOF also tells watch-mode-capable tools (vitest, jest) to run once.
             stdio: ['ignore', 'pipe', 'pipe'],
