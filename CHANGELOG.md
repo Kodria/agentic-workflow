@@ -1,3 +1,12 @@
+## v3.9.1 - 2026-08-07
+
+### Fixes
+- **sensors:** win32-safe backslash quoting + refuse-not-escape for cmd.exe metachars
+- **sensors:** match CommandLineToArgvW quote-escaping on win32
+- **sensors:** quote --changed file args for cmd.exe, not just POSIX shells
+- **sensors:** reuse isWindowsNative, add POSIX success-path test
+- **sensors:** resolve PATH portably in status checks (Windows hotfix)
+
 ## v3.9.0 - 2026-08-07
 
 ### Features
