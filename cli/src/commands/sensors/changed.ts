@@ -1,5 +1,6 @@
 import { execFileSync } from 'child_process';
 import path from 'path';
+import { isWindowsNative } from '../../core/paths';
 
 /**
  * Resolving "what changed" for `awm sensors run --changed`.
@@ -78,10 +79,20 @@ export function changedFiles(cwd: string, base = 'HEAD'): ChangedFiles {
  * Quote a path for a shell command line. Sensor commands are strings run through a
  * shell, so a path with a space or a quote in it would otherwise split into two
  * arguments — or, worse, end the quoting and let the rest of the name be read as
- * shell syntax. Single quotes with the `'\''` escape are the only form POSIX shells
- * treat as fully literal.
+ * shell syntax.
+ *
+ * `runCommand` (see `exec.ts`) spawns this string with `shell: true`, which on
+ * win32 is `cmd.exe`, not a POSIX shell. Single quotes are not quoting syntax to
+ * cmd.exe — it just splits on the space inside them — so a POSIX-only quote here
+ * would silently hand eslint/semgrep two garbage arguments instead of one real
+ * path. `'\''` (single quotes with the escape) is what POSIX shells treat as fully
+ * literal; `""` (double quotes with doubled embedded quotes) is the cmd.exe
+ * equivalent.
  */
 function shellQuote(file: string): string {
+    if (isWindowsNative()) {
+        return `"${file.replace(/"/g, '""')}"`;
+    }
     return `'${file.replace(/'/g, `'\\''`)}'`;
 }
 
