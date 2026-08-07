@@ -38,4 +38,21 @@ describe('computeSensorStatus — Windows PATH resolution', () => {
         expect(result.overall).toBe('HEALTHY');
         expect(result.checks.security.ok).toBe(true);
     });
+
+    it('reports ok:false on win32 when `where` cannot find the binary', () => {
+        fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+            pack: 'js-ts',
+            sensors: { security: { cmd: 'semgrep --json .', fast: false } }
+        }));
+
+        mockExecSync.mockImplementation(((cmd: string) => {
+            if (cmd.startsWith('where ')) throw new Error(`not found: ${cmd}`);
+            throw new Error(`not found: ${cmd}`);
+        }) as typeof execSync);
+
+        const result = computeSensorStatus(tmpDir);
+        expect(result.overall).toBe('DEGRADED');
+        expect(result.checks.security.ok).toBe(false);
+    });
 });

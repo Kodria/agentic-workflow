@@ -105,6 +105,11 @@ describe('applyChangedCmd', () => {
         expect(applyChangedCmd('eslint {files}', ["it's.ts"]))
             .toBe(`eslint 'it'\\''s.ts'`);
     });
+
+    it('handles a filename with both a space and an embedded quote together', () => {
+        expect(applyChangedCmd('eslint {files}', ["my dir/it's.ts"]))
+            .toBe(`eslint 'my dir/it'\\''s.ts'`);
+    });
 });
 
 describe('filterByExtension', () => {
