@@ -1,3 +1,8 @@
+## v3.7.0 - 2026-08-07
+
+### Features
+- **sensors:** add --changed to scope opted-in sensors to the diff
+
 ## v3.6.0 - 2026-08-07
 
 ### Features
