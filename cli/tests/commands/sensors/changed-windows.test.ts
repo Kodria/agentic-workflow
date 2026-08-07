@@ -24,4 +24,9 @@ describe('applyChangedCmd — Windows quoting', () => {
         expect(applyChangedCmd('eslint {files}', ['weird"name.ts']))
             .toBe(`eslint "weird\\"name.ts"`);
     });
+
+    it('handles a filename with both a space and an embedded quote together', () => {
+        expect(applyChangedCmd('eslint {files}', ['my dir/it"s.ts']))
+            .toBe(`eslint "my dir/it\\"s.ts"`);
+    });
 });
