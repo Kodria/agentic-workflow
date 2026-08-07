@@ -21,7 +21,11 @@ import { isWindowsNative } from '../../core/paths';
 /** Union of committed diff vs `base`, staged, unstaged and untracked files. */
 export type ChangedFiles = {
     files: string[];
-    /** Set when the scope could not be resolved (not a repo, git absent, bad ref). */
+    /**
+     * Set when the scope could not be resolved (not a repo, git absent, bad ref),
+     * or when it resolved but a changed filename carries a cmd.exe metacharacter
+     * that is unsafe to interpolate into a shell command on native Windows.
+     */
     error?: string;
 };
 
