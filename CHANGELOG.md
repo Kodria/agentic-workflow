@@ -1,3 +1,8 @@
+## v3.6.0 - 2026-08-07
+
+### Features
+- **sensors:** kill the process tree on timeout, keep partial findings, run sensors in parallel
+
 ## v3.5.0 - 2026-08-02
 
 ### Features
