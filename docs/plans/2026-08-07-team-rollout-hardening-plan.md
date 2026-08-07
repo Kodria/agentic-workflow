@@ -65,7 +65,7 @@ _Contexto: H1/D1. Publicado roto en v3.9.0; en Windows preflight bloquea siempre
 
 ### Task 1.3: Auditoría de POSIX-ismos en el camino preflight/status/exec
 
-- [ ] `grep -rnE "execSync|spawn" cli/src/commands/{sensors,preflight,context-budget}/`
+- [ ] `grep -rnE "execSync|execFileSync|spawn" cli/src/commands/{sensors,preflight,context-budget}/`
   y revisar cada comando construido por plataforma. Corregir lo que aparezca con
   el mismo patrón; si no aparece nada, dejar constancia en el commit.
 
