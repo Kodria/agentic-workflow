@@ -3,6 +3,15 @@
 Auditable log of recurring/structural harness gaps converted into rules. See the
 `harness-retro` skill for the process. Newest first.
 
+## 2026-08-07 — R2: parsing hand-rolled falla contra casos adversariales no enumerados, dos veces en la misma sesión
+
+- **Class:** agent (working-style)
+- **Occurrences (ledger count):** 2 instancias independientes en la misma sesión (`shellQuote` en R1, `extractHost` en R2), cada una necesitando múltiples rondas de fix antes de estar bien
+- **Rule:** `AGENTS.md` → "Patrones de implementación", nuevo bullet `prefer-stdlib-over-hand-rolled-parsing` (sibling de `shell-quote-verify-against-primary-source`, curado antes en R1 el mismo día).
+- **Sensor:** ninguno mecánico — este repo no dogfoodea `.awm/sensors.json`.
+- **Detalle:** `extractHost()` (`cli/src/commands/preflight/checks.ts`) necesitó dos rondas de fix: la regex original hacía match contra la URL completa (bug encontrado en code-quality review), el fix "por hostname" seguía capturando `userinfo@host:puerto` como un bloque en vez de aislar el host real (bug encontrado por el lens de robustez de `post-implementation-qa`, con un repro concreto: `https://user:gitlab@example-host.com/...` — patrón real de inyección de credenciales en CI — se clasificaba mal por la substring "gitlab" en el token, no en el host). El fix final reemplazó la regex por `new URL(remote).hostname`, resolviendo la clase entera de una vez contra la especificación real, en vez de seguir puliendo la regex a mano. Mismo día, mismo patrón: `shellQuote()` de R1 necesitó TRES rondas antes de estar bien (ver retro anterior). Ambos casos comparten la misma forma: un subagente escribe lógica de parsing/quoting a mano que pasa contra los casos obvios del spec, y un review posterior (no el mismo que implementó) encuentra un caso adversarial que nadie había enumerado explícitamente. La lección no es "revisar mejor a mano" — ya se intentó, dos veces, en la misma sesión, y ambas veces la segunda ronda de revisión humana/agente encontró lo que la primera no vio. La lección es preferir, cuando existe, una implementación de librería estándar ya verificada contra la especificación completa (`URL`, `CommandLineToArgvW` documentado) en vez de regex/lógica hand-rolled, incluso cuando el caso parece "simple".
+- **Descartes (modo desatendido):** ninguno — ambas ocurrencias curadas en el mismo bullet de `AGENTS.md`, dado que son instancias del mismo patrón de fondo, no dos lecciones separadas.
+
 ## 2026-08-07 — R1 (hotfix Windows): quoting para `cmd.exe` mal derivado por intuición, tres veces en un release
 
 - **Class:** agent (working-style) + seguridad
