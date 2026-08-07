@@ -3,6 +3,24 @@
 Auditable log of recurring/structural harness gaps converted into rules. See the
 `harness-retro` skill for the process. Newest first.
 
+## 2026-08-07 — R3: guarda defensiva agregada a una función pero no a sus hermanas que leen el mismo campo
+
+- **Class:** structural
+- **Occurrences (ledger count):** 2 (cluster convergente en `awm ledger recurring`: `getformatter-unrecognized-value-silent-fallback`, `sensor-status-crash-null-sensors`, `sensors-run-crash-null-sensors`, todas ramificaciones del mismo hallazgo de robustez)
+- **Rule:** `AGENTS.md` → "Patrones de implementación", nuevo bullet `defensive-guard-consistency`.
+- **Sensor:** ninguno mecánico — este repo no dogfoodea `.awm/sensors.json`. Candidato a regla ESLint genérica ("todo `Object.entries(X.campo)` sin `?? {}` cuando existe ≥1 sibling con la guarda") pero demasiado específico del shape de este proyecto para el sensor-pack genérico de AWM — queda como recomendación, no aplicado.
+- **Detalle:** `checkManifest` (`cli/src/commands/preflight/checks.ts`) ya tenía `manifest.sensors ?? {}` desde antes de R3, para tolerar un `.awm/sensors.json` corrupto/editado a mano con `"sensors": null`. Al introducir el manifest honesto-degradado de Task 3.3 (`sensors: {}` cuando el registry no tiene pack), dos funciones HERMANAS que leen el mismo campo — `computeSensorStatus` (`status.ts`) y `runSensors` (`run.ts`) — no recibieron la misma guarda, y `sensors: null` las crasheaba (`TypeError: Cannot convert undefined or null to object`), tumbando `awm sensors status`, `awm sensors run`, y transitivamente `awm preflight`. El code-quality-reviewer de Task 3.3 revisó el diff de esa task en aislamiento y no lo cazó; lo encontró el lens de robustez de `post-implementation-qa`, que sí compara contra el árbol completo de consumidores del campo. La lección: al agregar una guarda defensiva, grep de TODAS las lecturas del mismo campo (`grep -rn "\.sensors\b"`) y confirmar que cada una la tiene — no asumir que arreglar el call site que se está tocando cubre a sus hermanos.
+- **Descartes (modo desatendido):** ninguno.
+
+## 2026-08-07 — R3: parsing hand-rolled falla contra JSON válido de forma inesperada — tercera ocurrencia del patrón, ahora sobre tipos TS sin validación runtime
+
+- **Class:** structural + seguridad (crash del proceso completo, no solo de un sensor)
+- **Occurrences (ledger count):** 3 (cluster convergente `ruff-formatter-crash-nonarray-json`: `ruff-formatter-crash-nonarray-json`, `ruff-formatter-crash-null-fields`, `shellcheck-formatter-crash-nonarray-json`)
+- **Rule:** `AGENTS.md` → "Patrones de implementación", extiende el bullet existente `prefer-stdlib-over-hand-rolled-parsing` (curado en R2) con esta tercera instancia — merge-and-prune, no bullet nuevo.
+- **Sensor:** ninguno mecánico — candidato a regla ESLint genérica del sensor-pack `js-ts` ("acceso a propiedad sobre el resultado de `JSON.parse` sin `Array.isArray`/guard de forma previo"), pero queda como recomendación por la misma frontera genérico/específico de `CLAUDE.md` — no aplicado en este repo.
+- **Detalle:** `parseRuffOutput`/`parseShellcheckOutput` (`cli/src/commands/sensors/formatters/{ruff,shellcheck}.ts`, ambos nuevos en R3) declaraban un tipo TypeScript (`RuffMessage[]`/`ShellcheckMessage[]`) sobre `JSON.parse(raw)` y leían sus campos directamente. El tipo es una promesa que el compilador no verifica en runtime: `JSON.parse('{}')`, `'null'`, `'42'`, o un elemento `null` dentro de un array son JSON *válido* que no calza esa forma — `for (const msg of parsed)` u otro acceso a propiedad crashea con una excepción no capturada que tumba el `awm sensors run` COMPLETO (todos los sensores, no solo el que falló), confirmado reproduciendo contra el pipeline real (`Promise.all` sin guard, `commander`'s `.action` sin try/catch). Encontrado por el lens de robustez de `post-implementation-qa`, no por spec-review — exactamente la clase de gap para la que ese lens existe. Mismo patrón de fondo que `shellQuote` (R1, 3 rondas) y `extractHost` (R2, 2 rondas): lógica hand-rolled — acá, una anotación de tipo sin guard runtime — que "funciona" contra los casos obvios pero falla contra una forma que nadie enumeró explícitamente. La contramedida sigue siendo la misma: preferir una implementación ya verificada contra la especificación completa cuando existe (URLs → `URL` estándar); cuando no existe (una forma de JSON externa, específica de una herramienta de terceros), validar la forma en runtime explícitamente ANTES de leer cualquier campo — un tipo TS sobre `JSON.parse()` nunca es una garantía.
+- **Descartes (modo desatendido):** ninguno — instancia curada extendiendo el bullet existente, no como lección separada, dado que es la misma raíz.
+
 ## 2026-08-07 — R2: parsing hand-rolled falla contra casos adversariales no enumerados, dos veces en la misma sesión
 
 - **Class:** agent (working-style)
