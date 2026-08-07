@@ -205,13 +205,17 @@ _Contexto: H3/D3. Python fuera del registry; shell inexistente; `generic` = gate
 - Modify: `cli/src/commands/sensors/init.ts`
 - Test: `cli/tests/commands/sensors/` (los que cubren init/fallback)
 
-- [ ] Borrar `FALLBACK_DEFAULTS`. Stack detectado sin pack en registry alcanzable →
+- [x] Borrar `FALLBACK_DEFAULTS`. Stack detectado sin pack en registry alcanzable →
   manifest mínimo honesto que preflight reporta como degradado con remedio
   ("registry sin pack `<x>`: corré `awm update` / agregá el registry"), jamás
   defaults inventados por el CLI.
-- [ ] Formatters: verificar que `ruff`/`shellcheck` JSON caen en un formatter
+- [x] Formatters: verificar que `ruff`/`shellcheck` JSON caen en un formatter
   razonable (¿`generic`? ¿nuevo formatter?). Si se necesita formatter nuevo, es
-  parte de esta task (TDD: fixture de salida real → parser).
+  parte de esta task (TDD: fixture de salida real → parser). Nuevos formatters
+  `mypy`/`ruff`/`shellcheck` + campo `SensorConfig.formatter` (dispatch por
+  campo, fallback a nombre de sensor para manifests preexistentes). commits
+  `1ccff19` + `abd1d3d` (gap de cobertura end-to-end encontrado por spec-review
+  y cerrado). spec-review + code-quality review: approved, 0 findings finales.
 
 ### Task 3.4: Detección + override explícito
 
