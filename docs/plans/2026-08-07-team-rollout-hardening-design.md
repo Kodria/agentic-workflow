@@ -34,9 +34,8 @@ La evaluación de esta sesión (contra código, no impresiones) encontró que el
 Node.js, TypeScript, NestJS, Next.js, React, AWS Lambdas (Node), **Python** y Shell.
 No se requieren otros lenguajes por ahora.
 
-> **Supuesto a confirmar:** el owner dictó "photon"; se interpreta **Python** (ya
-> existe medio-soportado vía fallback y encaja con Lambdas). Si era otra cosa,
-> ajustar R3 antes de ejecutarla.
+> **Confirmado por el owner (2026-08-07):** "photon" era **Python**. R3 procede
+> como está diseñada.
 
 NestJS/Next.js/React/Lambdas-Node son todos `package.json` → los cubre el pack
 `js-ts` existente. No se crean packs por framework: la frontera genérico/específico
