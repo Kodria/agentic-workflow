@@ -168,18 +168,36 @@ _Contexto: H3/D3. Python fuera del registry; shell inexistente; `generic` = gate
 - Create: `sensor-packs/python/pack.json`, `sensor-packs/python/.semgrep.awm.yml`
   (+ configs de mypy/ruff que el pack decida shippear)
 
-- [ ] `pack.json`: typecheck (mypy, fast), lint (ruff `--output-format json`, fast),
+- [x] `pack.json`: typecheck (mypy, fast), lint (ruff `--output-format json`, fast),
   security (semgrep), test (`pytest`, exit-code sensor), mutation disabled.
   `changedCmd`/`changedExtensions` (`.py`) en lint y security — mismo criterio D
-  que js-ts: mypy NO se acota (whole-program).
+  que js-ts: mypy NO se acota (whole-program). PR/merge:
+  `awm-baseline-registry@0a3f20d` (bundle `dev` 2.7.0→2.8.0).
 
 ### Task 3.2: Pack `shell` en el registry
 
 **Files:**
 - Create: `sensor-packs/shell/pack.json` (+ `.semgrep.awm.yml`)
 
-- [ ] lint: `shellcheck --format json` sobre `{files}`/glob; security: semgrep.
-  `changedExtensions`: `.sh`, `.bash`.
+- [x] lint: `shellcheck --format json` sobre `{files}`/glob; security: semgrep.
+  `changedExtensions`: `.sh`, `.bash`. Mismo commit que 3.1.
+
+> **Nota de cierre 3.1+3.2 (2026-08-07):** el implementador original (subagent en
+> background) quedó huérfano por un reinicio de sesión/contenedor a mitad de
+> tarea — sus archivos (packs + `tests/sensor-pack-shape.test.mjs`, nuevo) habían
+> quedado escritos en disco pero sin commit ni review. El controlador retomó
+> directamente: corrió los validadores, encontró y arregló un bug real en el test
+> nuevo (exigía `changedExtensions` siempre que hay `changedCmd`, rompía contra
+> `generic`/`js-ts`.security preexistentes que la omiten a propósito), y descubrió
+> dos gaps de tooling preexistentes no relacionados: `.gitignore`'s `*.awm.*`
+> ocultaba en silencio los archivos `.semgrep.awm.yml` nuevos de `git status`
+> (arreglado, eliminando la línea), y `check-skill-version-bumps.sh` usaba diff de
+> 3 puntos contra un merge-base obsoleto — falsaba en esta misma rama de
+> multi-release (arreglado a 2 puntos). spec-review: compliant. code-quality
+> review: 2 hallazgos importantes (CHANGELOG con el header 2.7.0 pisado en vez de
+> insertar uno nuevo; regla semgrep `awm-sh-no-eval` disparando doble sobre
+> `eval $(...)` junto con `awm-sh-unquoted-command-substitution`) — ambos
+> corregidos y re-revisados, verdict `approved`.
 
 ### Task 3.3: Eliminar `FALLBACK_DEFAULTS` del CLI
 
