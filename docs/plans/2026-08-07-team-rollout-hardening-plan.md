@@ -223,10 +223,13 @@ _Contexto: H3/D3. Python fuera del registry; shell inexistente; `generic` = gate
 - Modify: `cli/src/commands/sensors/init.ts`, `cli/src/commands/sensors/index.ts`
 - Test: init/detección
 
-- [ ] `detectStack`: agregar `shell` (archivos `*.sh` en raíz o `scripts/`, SOLO si
+- [x] `detectStack`: agregar `shell` (archivos `*.sh` en raíz o `scripts/`, SOLO si
   no hay marcador js-ts/python). Orden de especificidad testeado.
-- [ ] `awm sensors init --pack <name>`: override que salta la heurística; pack
-  inexistente en registry → error claro listando los disponibles.
+- [x] `awm sensors init --pack <name>`: override que salta la heurística; pack
+  inexistente en registry → error claro listando los disponibles. commits
+  `723bfc8` + `65220db` (2 fixes menores de code-quality-review: filtro
+  `isFile()` en detección shell, cobertura del throw de registry sin
+  `sensor-packs/`). spec-review + code-quality review: approved.
 
 ### Task 3.5: Cierre R3
 
