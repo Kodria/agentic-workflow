@@ -9,6 +9,7 @@ import { parseSemgrepOutput } from './formatters/semgrep';
 import { parseGenericOutput } from './formatters/generic';
 import { parseTestOutput } from './formatters/test';
 import { readBaseline, partition } from './baseline';
+import { changedFiles, applyChangedCmd, filterByExtension } from './changed';
 import { detectStack, initSensors } from './init';
 import { capabilityRoot } from '../../core/registries';
 
@@ -29,6 +30,13 @@ export type RunOptions = {
     cwd?: string;
     /** Skip baseline suppression (used by `awm sensors baseline` to capture all findings). */
     ignoreBaseline?: boolean;
+    /**
+     * Scope sensors that opt in (via `changedCmd`) to the files this tree changed.
+     * Sensors that do not opt in still run in full — see `SensorConfig.changedCmd`.
+     */
+    changed?: boolean;
+    /** Comparison point for `changed`. Defaults to `HEAD` (uncommitted work only). */
+    base?: string;
 };
 
 /**
@@ -252,6 +260,23 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     // --ignore-baseline → every finding counts (backward-compatible).
     const baseline = opts.ignoreBaseline ? null : readBaseline(cwd);
 
+    // A scoped run must never define the accepted set. `buildBaseline` snapshots the
+    // findings of the run it is given, so baselining a `--changed` run would write a
+    // baseline covering only the touched files and silently drop every accepted
+    // finding elsewhere in the repo — which then reports as NEW on the next full run.
+    // The two flags only ever meet by mistake, so refuse rather than pick a meaning.
+    if (opts.changed && opts.ignoreBaseline) {
+        throw new Error(
+            'refusing to combine --changed with a baseline capture: a partial run cannot define '
+            + 'the accepted set (it would drop every accepted finding outside the diff). '
+            + 'Run `awm sensors baseline` without --changed.',
+        );
+    }
+
+    // Resolved once for the whole run, not per sensor: `git` is cheap but the answer
+    // must be identical across sensors, or two of them scope to different file sets.
+    const changed = opts.changed ? changedFiles(cwd, opts.base ?? 'HEAD') : null;
+
     // Sensors are independent processes over the same tree, so they run
     // concurrently rather than one-after-another: wall clock becomes the slowest
     // sensor instead of the sum of all of them. Tasks are built — and dispatched —
@@ -274,11 +299,42 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
             continue;
         }
 
-        const cmd = config.cmd;
+        // Scoping applies only where the pack opted in AND the scope resolved. Any
+        // other combination falls back to the full command: slower, never wrong.
+        let cmd = config.cmd;
+        let scope: 'changed' | undefined;
+        if (changed && !changed.error && config.changedCmd) {
+            if (!config.changedCmd.includes('{files}')) {
+                // Running the template as-is would cover the whole repo while the
+                // result claimed to be scoped — a mislabel, not a slow path.
+                tasks.push(settled({
+                    name,
+                    status: 'inconclusive',
+                    errors: [],
+                    skipReason: 'changedCmd has no {files} placeholder',
+                }));
+                continue;
+            }
+            const inScope = filterByExtension(changed.files, config.changedExtensions);
+            if (inScope.length === 0) {
+                tasks.push(settled({
+                    name,
+                    status: 'skipped',
+                    errors: [],
+                    skipReason: 'no changed files in scope',
+                    scope: 'changed',
+                }));
+                continue;
+            }
+            cmd = applyChangedCmd(config.changedCmd, inScope);
+            scope = 'changed';
+        }
+
         const timeout = config.timeout ?? (isFast ? DEFAULT_FAST_TIMEOUT : DEFAULT_SLOW_TIMEOUT);
         tasks.push(async () => {
             const result = await runSensor(name, cmd, timeout, cwd);
-            return baseline ? applyBaseline(result, baseline[name]) : result;
+            const scoped = scope ? { ...result, scope } : result;
+            return baseline ? applyBaseline(scoped, baseline[name]) : scoped;
         });
     }
 
@@ -302,5 +358,10 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         sensors: results,
         overall,
         ...(reconciled.upgradedFrom ? { packUpgraded: `${reconciled.upgradedFrom}→${activeManifest.pack}` } : {}),
+        // Always emitted on a --changed run, including when the scope failed to
+        // resolve: a green that came back from an unscoped fallback and a green from a
+        // genuinely scoped run are different claims, and the caller cannot tell them
+        // apart from the sensor list alone.
+        ...(changed ? { changedScope: { files: changed.files.length, ...(changed.error ? { error: changed.error } : {}) } } : {}),
     };
 }
