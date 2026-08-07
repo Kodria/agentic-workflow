@@ -1,3 +1,8 @@
+## v3.8.0 - 2026-08-07
+
+### Features
+- **context-budget:** make the budget check a command so it can run where a human is
+
 ## v3.7.0 - 2026-08-07
 
 ### Features
