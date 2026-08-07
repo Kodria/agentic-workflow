@@ -39,6 +39,39 @@ describe('detectStack', () => {
     it('falls back to generic when no indicators found', () => {
         expect(detectStack(tmpDir).pack).toBe('generic');
     });
+
+    it('detects shell from a root-level *.sh file when no js-ts/python marker exists', () => {
+        fs.writeFileSync(path.join(tmpDir, 'deploy.sh'), '#!/bin/sh\n');
+        const result = detectStack(tmpDir);
+        expect(result.pack).toBe('shell');
+        expect(result.indicators).toEqual(['deploy.sh']);
+    });
+
+    it('detects shell from a scripts/*.sh file when root has nothing', () => {
+        fs.mkdirSync(path.join(tmpDir, 'scripts'));
+        fs.writeFileSync(path.join(tmpDir, 'scripts', 'build.sh'), '#!/bin/sh\n');
+        const result = detectStack(tmpDir);
+        expect(result.pack).toBe('shell');
+        expect(result.indicators).toEqual([path.join('scripts', 'build.sh')]);
+    });
+
+    it('js-ts wins over shell when both package.json and a root .sh file exist', () => {
+        fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
+        fs.writeFileSync(path.join(tmpDir, 'deploy.sh'), '#!/bin/sh\n');
+        expect(detectStack(tmpDir).pack).toBe('js-ts');
+    });
+
+    it('python wins over shell when both a python marker and a root .sh file exist', () => {
+        fs.writeFileSync(path.join(tmpDir, 'pyproject.toml'), '');
+        fs.writeFileSync(path.join(tmpDir, 'deploy.sh'), '#!/bin/sh\n');
+        expect(detectStack(tmpDir).pack).toBe('python');
+    });
+
+    it('falls through to generic when scripts/ has only non-.sh files (glob must not over-match)', () => {
+        fs.mkdirSync(path.join(tmpDir, 'scripts'));
+        fs.writeFileSync(path.join(tmpDir, 'scripts', 'notes.txt'), 'not shell');
+        expect(detectStack(tmpDir).pack).toBe('generic');
+    });
 });
 
 describe('detectSourceDirs', () => {
@@ -159,5 +192,44 @@ describe('initSensors', () => {
         const result = initSensors({ cwd: tmpDir, registryRoot, configure: false });
         expect(result.configured).toEqual([]);
         expect(fs.existsSync(path.join(tmpDir, 'tsconfig.awm.json'))).toBe(false);
+    });
+});
+
+describe('initSensors — --pack override', () => {
+    let tmpDir: string;
+    let registryRoot: string;
+    beforeEach(() => {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-init-pack-'));
+        registryRoot = makeRegistry(); // only ships a js-ts pack dir — see makeRegistry
+    });
+    afterEach(() => {
+        fs.rmSync(tmpDir, { recursive: true });
+        fs.rmSync(registryRoot, { recursive: true });
+    });
+
+    it('skips detection and uses the override pack when it exists in the registry', () => {
+        // No package.json/pyproject.toml here — if detection ran, this would be 'generic'.
+        const result = initSensors({ pack: 'js-ts', registryRoot, cwd: tmpDir });
+        expect(result.detection.pack).toBe('js-ts');
+        // Indicators must reflect an override, not file-based detection.
+        expect(result.detection.indicators).not.toEqual(['package.json']);
+        expect(result.detection.indicators.join(' ')).toMatch(/pack override/i);
+    });
+
+    it('throws listing available packs when the override pack is not in the registry', () => {
+        expect(() => initSensors({ pack: 'bogus', registryRoot, cwd: tmpDir })).toThrow(/js-ts/);
+        try {
+            initSensors({ pack: 'bogus', registryRoot, cwd: tmpDir });
+            throw new Error('expected initSensors to throw');
+        } catch (e) {
+            expect((e as Error).message).toContain('bogus');
+            expect((e as Error).message).toContain('js-ts');
+        }
+    });
+
+    it('does not throw when no registryRoot is given — nothing to validate against', () => {
+        expect(() => initSensors({ pack: 'anything', cwd: tmpDir })).not.toThrow();
+        const result = initSensors({ pack: 'anything', cwd: tmpDir });
+        expect(result.detection.pack).toBe('anything');
     });
 });
