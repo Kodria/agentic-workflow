@@ -98,7 +98,7 @@ _Contexto: H1/D1. Publicado roto en v3.9.0; en Windows preflight bloquea siempre
 > investigación de causa raíz contra fuentes primarias (algoritmo
 > `CommandLineToArgvW` de Microsoft + investigación BatBadBut/CVE-2024-27980),
 > más varios findings menores, todos cerrados y re-revisados. harness-retro
-> corre sobre el ledger acumulado de R1 a continuación, antes del PR.
+> corrió sobre el ledger acumulado de R1 (curó 2 lecciones en AGENTS.md: shell-quoting contra fuente primaria, y desduplicar `awm ledger list` antes de confiar en conteos de recurrencia) — ver `docs/harness-retros.md`. El ledger NO se archiva todavía: R2-R7 acumulan sobre la misma rama.
 
 ---
 
