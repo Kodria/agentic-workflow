@@ -1,3 +1,8 @@
+## v3.13.3 - 2026-08-08
+
+### Fixes
+- **windows:** bounded retry for pidExistsNative's ESRCH — real CI flake
+
 ## v3.13.2 - 2026-08-08
 
 ### Fixes
