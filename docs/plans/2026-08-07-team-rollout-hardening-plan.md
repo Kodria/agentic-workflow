@@ -401,11 +401,26 @@ NO es el punto de extensión. El renderer vive en providers:
 `RendererId = 'link' | 'codex-agent-toml'` y `assertLinkRenderer` TIRA para
 cualquier renderer no-link ("not implemented yet"). Esta task agrega renderer ids
 nuevos e implementa su rendering — no toca executor._
-- [ ] `RendererId` += `cursor-mdc`, `copilot-instructions`; implementar rendering
+- [x] `RendererId` += `cursor-mdc`, `copilot-instructions`; implementar rendering
   (Cursor: `.mdc` con frontmatter refiriendo el `SKILL.md`; Copilot:
   `.instructions.md` con `applyTo`) y levantar la restricción de
-  `assertLinkRenderer` para los nuevos ids.
-- [ ] `awm add` / `awm init` e2e en tmpdir para ambos providers.
+  `assertLinkRenderer` para los nuevos ids. **Corrección post-review:** la
+  restricción de `assertLinkRenderer` NO se levantó — ver nota abajo.
+- [x] `awm add` / `awm init` e2e en tmpdir para ambos providers. commits
+  `a7d00b7`+`c97bde2`. code-quality-review encontró 1 blocker + 2 important,
+  corregidos, re-revisado: approved.
+
+> **Corrección real vs. plan literal:** el plan pedía "levantar la restricción
+> de `assertLinkRenderer` para los nuevos ids" — implementado así en la primera
+> ronda, pero code-quality-review encontró que `assertLinkRenderer` es
+> exclusivo de callers legacy de copia/symlink cruda (`core/provider-artifacts.ts`,
+> `src/index.ts`'s `awm add` interactivo), que NUNCA pueden renderizar —
+> levantar la restricción ahí producía un archivo sin extensión `.mdc`/
+> `.instructions.md` ni frontmatter, que ni Cursor ni Copilot reconocen. El
+> pipeline real (`commands/add.ts` → `install-planner.ts` →
+> `install-transaction.ts`) nunca llama a `assertLinkRenderer` — no necesita el
+> permiso. Revertido: `assertLinkRenderer` sigue rechazando cursor-mdc/
+> copilot-instructions, igual que siempre rechazó `codex-agent-toml`.
 
 ### Task 4.4: Tier de capacidades visible
 
