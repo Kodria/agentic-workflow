@@ -325,11 +325,20 @@ _Contexto: H4/D4. La mitad del equipo no puede ni instalar AWM._
 - Modify: `cli/src/providers/index.ts`
 - Test: `cli/tests/providers/`
 
-- [ ] `AGENT_TARGETS` += `cursor`, `copilot`. Configs por la tabla D4: skills
+- [x] `AGENT_TARGETS` += `cursor`, `copilot`. Configs por la tabla D4: skills
   local-only en Copilot (global → error claro con mensaje de por qué), `workflow`/
   `agent` = `null`, sin `hooks`, `injection.type = 'managed-agents-md'`.
-- [ ] Tests: rutas de instalación por scope; `global` en Copilot falla con el
-  mensaje esperado; `getInjection` devuelve la estrategia correcta.
+  `ArtifactConfig.global`/`InjectionConfig.globalPath` ampliados a `string |
+  null` (Copilot sin global confirmado; Cursor sin global sin confirmar,
+  dejado `null` explícitamente en vez de adivinado).
+- [x] Tests: rutas de instalación por scope; `global` en Copilot falla con el
+  mensaje esperado; `getInjection` devuelve la estrategia correcta. commits
+  `ad1e819`+`6d109fe`+`e906ca6`. code-quality-review encontró 2 blockers reales
+  (`agentsSharingSkillTarget`/`assertCompleteSharedGroup` crasheaban el install
+  completo de CUALQUIER agente si Copilot estaba meramente habilitado, no
+  seleccionado — mismo patrón que un guard ya correcto en
+  `mutation-targets.ts`, no aplicado en estos 2 call sites) + 1 minor (mensaje
+  de error duplicado 3 veces). Todos corregidos, re-revisado: approved.
 
 ### Task 4.2: Estrategia de contexto generalizada
 
