@@ -99,19 +99,32 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
     } catch { /* sin soporte de hooks → ausente */ }
 
     // devCore (bundle baseline) — skillsDir is null only for providers with no global skill
-    // discovery mechanism (today: Copilot); treated the same as "nothing linked here yet".
+    // discovery mechanism (today: Copilot); for those, there is no global-scope devCore
+    // concept to satisfy at all, so it's treated as trivially satisfied (see below).
     const skillsDir = providerFor(agent).skill.global;
     const baseline = bundles.find((b) => b.scope === 'baseline');
     let devCorePresent = false;
     let brokenLinks: string[] = [];
     if (baseline) {
         const skillNames = resolveBundleSkills(baseline.name, bundles);
-        const { linked, broken } = skillsDir !== null
-            ? classifyLinks(skillNames, skillsDir)
-            : { linked: [], broken: [] };
-        const absent = skillNames.filter((s) => !linked.includes(s) && !broken.includes(s));
-        devCorePresent = skillNames.length > 0 && (linked.length + broken.length) > 0;
-        brokenLinks = [...broken, ...absent];
+        if (skillsDir === null) {
+            // No global skill directory for this agent (today: Copilot) — there is no
+            // global-scope devCore/baseline-bundle concept to satisfy for it at all, so
+            // "N/A" is reported as satisfied (present, nothing broken) rather than
+            // "missing". Mirrors globalSkills' treatment just below (empty valid/
+            // repairable/dead when skillsDir === null). Without this, devCorePresent
+            // was unconditionally false here (linked/broken forced to empty arrays),
+            // so `machine.devCore` could never be satisfied for Copilot — stepDevCore
+            // (init/steps.ts) would fall through on every run and call installBundle at
+            // global scope, which throws (skill.global === null), rolling back the
+            // ENTIRE `awm init -a copilot` transaction, 100% of the time.
+            devCorePresent = true;
+        } else {
+            const { linked, broken } = classifyLinks(skillNames, skillsDir);
+            const absent = skillNames.filter((s) => !linked.includes(s) && !broken.includes(s));
+            devCorePresent = skillNames.length > 0 && (linked.length + broken.length) > 0;
+            brokenLinks = [...broken, ...absent];
+        }
 
         // Agent-type artifacts are never shared across agents (R12/R13 —
         // install-planner.ts — unlike skills, where OpenCode and Codex both

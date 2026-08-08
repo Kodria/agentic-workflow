@@ -142,6 +142,33 @@ describe('stepHook / stepDevCore / stepAmbient', () => {
         expect(stepDevCore(deps({ machine: m, project: null }, a)).action).toBe('applied');
         expect(a.installBundle).toHaveBeenCalled();
     });
+    // Regression for the confirmed production bug: `awm init -a copilot` crashed
+    // 100% of the time with "machine.devCore: skill global scope is not
+    // supported by Copilot...", rolling back the ENTIRE init transaction (even
+    // project-local artifacts like AGENTS.md). Root cause: Copilot has no
+    // global skill directory (providerFor('copilot').skill.global === null),
+    // so gatherMachine's devCorePresent was permanently false for it, and
+    // stepDevCore fell through to installBundle at global scope on every run
+    // — an install that always throws. Fixed in diagnostics/context.ts:
+    // devCore.present is now reported `true` (N/A treated as satisfied) when
+    // skill.global is null, so this step's existing skip guard applies
+    // naturally. This test uses the machine facts context.ts now produces for
+    // Copilot to prove stepDevCore never calls installBundle for it — before
+    // the fix, `devCore: { present: true, brokenLinks: [] }` was never
+    // reachable for Copilot at all (context.ts forced present: false), so
+    // this exact InitDeps shape would have hit the `installBundle` call below
+    // and thrown "skill global scope is not supported by Copilot".
+    it('devCore skips cleanly (never calls installBundle) for an agent with no global skill directory (copilot)', () => {
+        const a = spies();
+        expect(providerFor('copilot').skill.global).toBeNull();
+        const m = machine(); // devCore: { present: true, brokenLinks: [] } — what context.ts now reports for copilot
+        const r = stepDevCore(deps({ machine: m, project: null }, a, {
+            agent: 'copilot', enabledAgents: ['copilot'],
+        }));
+        expect(r.action).toBe('skipped');
+        expect(a.installBundle).not.toHaveBeenCalled();
+    });
+
     it('ambient installs only missing wanted', () => {
         const a = spies();
         const m = machine(); m.ambient = { wanted: ['personal-notion', 'docs'], installed: ['docs'] };
