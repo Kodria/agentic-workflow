@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { planInstall, planRemoval, ArtifactIntent } from '../../src/core/install-planner';
+import { planInstall, planRemoval, agentsSharingSkillTarget, ArtifactIntent } from '../../src/core/install-planner';
 import { ManagedArtifactRecord } from '../../src/core/artifact-state';
 import { AgentTarget } from '../../src/providers';
 
@@ -72,6 +72,21 @@ describe('install-planner', () => {
         };
     }
 
+    describe('agentsSharingSkillTarget', () => {
+        it('excludes a candidate that does not support this scope at all, instead of throwing', () => {
+            // Regression: used to call skillTargetDir(candidate, ...) unguarded
+            // inside .filter() — Copilot at 'global' throws (no global skill
+            // dir), which crashed the whole call for every OTHER candidate too.
+            const group = agentsSharingSkillTarget('claude-code', ['claude-code', 'copilot'], 'global', tmpWork);
+            expect(group).toEqual(['claude-code']);
+        });
+
+        it('still finds real shared targets when a non-sharing, scope-unsupported candidate is also present', () => {
+            const group = agentsSharingSkillTarget('opencode', ['opencode', 'codex', 'copilot'], 'global', tmpWork);
+            expect(group.sort()).toEqual(['codex', 'opencode']);
+        });
+    });
+
     describe('planInstall', () => {
         it('deduplicates the OpenCode/Codex physical skill write and reports both owners', () => {
             const plan = planInstall({
@@ -107,6 +122,27 @@ describe('install-planner', () => {
                 method: 'symlink',
             });
             expect(plan.operations[0].owners).toEqual(['codex']); // verifies R13
+        });
+
+        it('does not crash when a provider with no global skill support (Copilot) is merely enabled, not selected', () => {
+            // Regression: assertCompleteSharedGroup's inner `enabled.filter(...)`
+            // used to call physicalTarget() unguarded for every enabled agent,
+            // including ones that don't support this scope at all (Copilot has
+            // no global skill directory — skill.global is null). That threw
+            // inside the filter callback, uncaught, crashing this ENTIRE
+            // install for claude-code even though Copilot has nothing to do
+            // with it — just having Copilot in enabledAgents (e.g. from an
+            // earlier local-scope install) broke every subsequent global
+            // install for every other agent.
+            const plan = planInstall({
+                artifacts: [skillArtifact('development-process')],
+                selectedAgents: ['claude-code'],
+                enabledAgents: ['claude-code', 'copilot'],
+                scope: 'global',
+                projectRoot: tmpWork,
+                method: 'symlink',
+            });
+            expect(plan.operations[0].owners).toEqual(['claude-code']);
         });
 
         it('returns no operations for an empty artifacts array', () => {

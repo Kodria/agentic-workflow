@@ -12,7 +12,7 @@
 // actual transactional filesystem writes, backups, and ManagedArtifactRecord
 // persistence (artifact-state.ts). This module only computes the plan.
 import path from 'path';
-import { AgentTarget, ArtifactType, RendererId, Scope, providerFor } from '../providers';
+import { AgentTarget, ArtifactType, RendererId, Scope, providerFor, unsupportedScopeError } from '../providers';
 import { ManagedArtifactRecord } from './artifact-state';
 
 export type ArtifactIntent = {
@@ -78,10 +78,7 @@ export function physicalTarget(intent: ArtifactIntent, agent: AgentTarget, scope
     if (!config) throw new Error(`${intent.type}s are not supported by ${providerFor(agent).label}`);
     const dir = scope === 'local' ? path.join(projectRoot, config.local) : config.global;
     if (dir === null) {
-        throw new Error(
-            `${intent.type} ${scope} scope is not supported by ${providerFor(agent).label}` +
-            (config.globalUnsupportedReason ? `: ${config.globalUnsupportedReason}` : '.'),
-        );
+        throw unsupportedScopeError(intent.type, scope, providerFor(agent).label, config.globalUnsupportedReason);
     }
     const filename = config.renderer === 'codex-agent-toml'
         ? `${path.parse(intent.installName).name}.toml`
@@ -103,10 +100,7 @@ export function skillTargetDir(agent: AgentTarget, scope: Scope, projectRoot: st
     const config = providerFor(agent).skill;
     if (scope === 'local') return path.join(projectRoot, config.local);
     if (config.global === null) {
-        throw new Error(
-            `skill ${scope} scope is not supported by ${providerFor(agent).label}` +
-            (config.globalUnsupportedReason ? `: ${config.globalUnsupportedReason}` : '.'),
-        );
+        throw unsupportedScopeError('skill', scope, providerFor(agent).label, config.globalUnsupportedReason);
     }
     return config.global;
 }
@@ -130,7 +124,19 @@ export function agentsSharingSkillTarget(
     projectRoot: string,
 ): AgentTarget[] {
     const target = skillTargetDir(agent, scope, projectRoot);
-    return candidates.filter((candidate) => skillTargetDir(candidate, scope, projectRoot) === target);
+    return candidates.filter((candidate) => {
+        // A candidate that doesn't support this scope at all (e.g. Copilot at
+        // `global` — skillTargetDir throws) trivially can't share `agent`'s
+        // target; it just isn't part of the group. Without this guard, a
+        // Copilot in `candidates` (enabled for some OTHER, valid install) would
+        // crash this whole computation for every unrelated agent, since the
+        // exception surfaces from inside `.filter()`'s callback uncaught.
+        try {
+            return skillTargetDir(candidate, scope, projectRoot) === target;
+        } catch {
+            return false;
+        }
+    });
 }
 
 /**
@@ -152,8 +158,19 @@ function assertCompleteSharedGroup(
     if (intent.type !== 'skill') return;
     for (const agent of selected) {
         const target = physicalTarget(intent, agent, scope, projectRoot).targetPath;
-        const group = enabled.filter((candidate) =>
-            physicalTarget(intent, candidate, scope, projectRoot).targetPath === target);
+        // Same reasoning as agentsSharingSkillTarget above: a candidate in
+        // `enabled` that doesn't support this scope (e.g. Copilot at `global`)
+        // can't be part of the shared-target group — it just isn't a
+        // candidate, not a hard failure of this assertion. Without this
+        // guard, having Copilot enabled at all would crash every OTHER
+        // agent's shared-group check.
+        const group = enabled.filter((candidate) => {
+            try {
+                return physicalTarget(intent, candidate, scope, projectRoot).targetPath === target;
+            } catch {
+                return false;
+            }
+        });
         if (group.some((candidate) => !selected.includes(candidate))) {
             throw new Error(`Shared skill target cannot diverge; select the complete shared target group: ${group.join(',')}`);
         }

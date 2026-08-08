@@ -63,6 +63,22 @@ export type ProviderConfig = {
 
 export class UnsupportedRendererError extends Error {}
 
+/** Shared message shape for "this scope isn't supported by this provider" —
+ *  used everywhere a `null` `ArtifactConfig.global` is resolved (this file's
+ *  `getTargetPath`, and `install-planner.ts`'s `physicalTarget`/`skillTargetDir`,
+ *  which duplicate the resolution logic for their own return-shape needs). */
+export function unsupportedScopeError(
+    artifactType: string,
+    scope: Scope,
+    providerLabel: string,
+    reason: string | undefined,
+): Error {
+    return new Error(
+        `${artifactType} ${scope} scope is not supported by ${providerLabel}` +
+        (reason ? `: ${reason}` : '.'),
+    );
+}
+
 export function providers(): Record<AgentTarget, ProviderConfig> {
     const home = homeDir();
     const awm = awmHome();
@@ -213,10 +229,7 @@ export function getTargetPath(type: ArtifactType, agent: AgentTarget, scope: Sco
 
     const targetPath = scope === 'global' ? config.global : config.local;
     if (targetPath === null) {
-        throw new Error(
-            `${type} ${scope} scope is not supported by ${provider.label}` +
-            (config.globalUnsupportedReason ? `: ${config.globalUnsupportedReason}` : '.'),
-        );
+        throw unsupportedScopeError(type, scope, provider.label, config.globalUnsupportedReason);
     }
     return targetPath;
 }
