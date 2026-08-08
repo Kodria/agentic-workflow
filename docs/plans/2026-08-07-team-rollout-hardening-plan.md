@@ -496,17 +496,37 @@ _Contexto: H5/D5. El trinquete existe; nadie lo descubre._
 - Modify: `cli/src/commands/preflight/checks.ts`
 - Test: `cli/tests/commands/preflight/preflight.test.ts`
 
-- [ ] Sensores habilitados sin `sensors.baseline.json` → advisory con el hint del
+- [x] Sensores habilitados sin `sensors.baseline.json` → advisory con el hint del
   trinquete. No corre sensores (preflight sigue barato), no cambia exit code.
+
+  Nuevo check `sensors-baseline` (`ok` siempre `true`, mismo contrato que
+  `checkHost`), omitido por completo sin manifest (mismo patrón que
+  `checkTools`/`checkPack`). spec+quality review encontró 1 gap important:
+  el trigger original disparaba también en un opt-out deliberado (todos
+  los sensores `enabled: false`) o un manifest no parseable — ambos casos
+  sin nada que baselinear, nudge engañoso. Corregido reusando el cálculo
+  `enabled`/`total` de `checkManifest`; 2 tests de regresión agregados.
+  `BASELINE_FILE` exportado desde `baseline.ts` en vez de duplicar el
+  path literal.
 
 ### Task 5.2: Guía de adopción
 
 **Files:**
-- Modify: registry `docs/runbook.md` (sección nueva en Cap. 2 o 4)
+- Modify: `docs/runbook.md` (nota: vive en `agentic-workflow`, no en el
+  registry — mismo error de etiqueta ya corregido en el cierre de R4)
 
-- [ ] "Adoptar AWM en un repo existente": init → primera corrida (esperá rojo
+- [x] "Adoptar AWM en un repo existente": init → primera corrida (esperá rojo
   masivo) → `awm sensors baseline` → el gate persigue solo hallazgos nuevos →
   re-baseline al reducir deuda. Con el porqué del diseño count-based.
+
+  Expandido §2.4/§2.7 con la mecánica real del fingerprint (`sensor|file|
+  rule`, sin línea/columna ni mensaje — verificado leyendo `baseline.ts`,
+  no asumido) y el matching por budget/conteo (`partition()`). Callout
+  explícito de por qué es count-based y no `file:line`-based (churn de
+  líneas des-baselinearía hallazgos no tocados). spec review (verificación
+  directa contra el código fuente, no solo el diff) encontró 1 gap minor:
+  afirmaba que `awm doctor` también flaggea un baseline faltante — falso,
+  solo `awm preflight` lo hace; corregido.
 
 ### Task 5.3: Cierre R5 — suite + validadores, commits, push, PRs.
 
