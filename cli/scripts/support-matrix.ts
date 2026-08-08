@@ -105,15 +105,22 @@ export function renderProviderTables(): string {
 }
 
 /** Reemplaza el bloque entre marcadores. Falla ruidosamente si faltan: un doc sin
- *  marcadores no se "arregla" agregando la tabla al final, se arregla avisando. */
+ *  marcadores no se "arregla" agregando la tabla al final, se arregla avisando.
+ *
+ *  Respeta el fin de linea del documento que recibe. Emitia LF siempre, asi que en un
+ *  checkout de Windows —donde git entrega el .md con CRLF por defecto— regenerar producia
+ *  un archivo de finales mezclados, y la comparacion del test fallaba por bytes que no
+ *  tienen nada que ver con el contenido de la tabla. */
 export function spliceGenerated(markdown: string, generated: string): string {
     const begin = markdown.indexOf(BEGIN_MARKER);
     const end = markdown.indexOf(END_MARKER);
     if (begin === -1 || end === -1 || end < begin) {
         throw new Error(`support-matrix.md no tiene los marcadores ${BEGIN_MARKER} / ${END_MARKER}`);
     }
+    const eol = markdown.includes('\r\n') ? '\r\n' : '\n';
+    const block = generated.split('\n').join(eol);
     return markdown.slice(0, begin + BEGIN_MARKER.length)
-        + '\n\n' + generated + '\n\n'
+        + eol + eol + block + eol + eol
         + markdown.slice(end);
 }
 

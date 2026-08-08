@@ -81,6 +81,18 @@ describe('docs/support-matrix.md refleja el codigo', () => {
         });
     });
 
+    it('respeta el fin de linea del documento (un checkout de Windows entrega CRLF)', () => {
+        // Sin esto, regenerar en Windows dejaba el archivo con finales mezclados y el test
+        // de arriba fallaba por bytes ajenos al contenido. Es el mismo error de fondo que
+        // el de los separadores: asumir la forma de POSIX para un dato que la plataforma
+        // decide.
+        const crlfDoc = `intro\r\n${BEGIN_MARKER}\r\nviejo\r\n${END_MARKER}\r\nfin\r\n`;
+        const out = spliceGenerated(crlfDoc, 'linea uno\nlinea dos');
+
+        expect(out).toContain('linea uno\r\nlinea dos');
+        expect(out.split('\r\n').length - 1).toBe(out.split('\n').length - 1); // ni un LF suelto
+    });
+
     it('marca como no soportado, no como ausente, el scope que un provider no tiene', () => {
         // La diferencia entre "no soportado" y una celda vacia es exactamente lo que el
         // documento existe para no dejar ambiguo: Copilot no tiene scope global por
