@@ -210,6 +210,6 @@ export function gatherContext(opts: GatherOptions = {}): HarnessContext {
     return {
         machine: gatherMachine(bundles, agent),
         project: root ? gatherProject(root, bundles, agent) : null,
-        providers: gatherProviderChecks(agents, scanSkills),
+        providers: gatherProviderChecks(agents, scanSkills, root ?? undefined),
     };
 }

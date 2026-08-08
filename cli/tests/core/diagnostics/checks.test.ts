@@ -208,6 +208,7 @@ describe('computeProviderOverall (Task 9)', () => {
         return {
             id: 'codex',
             label: 'Codex',
+            tier: 'hooks-native',
             checks: states.map((state, i) => ({ id: CHECK_IDS[i % CHECK_IDS.length], state })),
         };
     }

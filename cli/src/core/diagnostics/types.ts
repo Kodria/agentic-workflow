@@ -68,9 +68,25 @@ export type ProviderCheck = {
     detail?: string;
 };
 
+// --- Task 4.4: capability tier ---------------------------------------------
+//
+// Structural classification of how strongly a provider delivers AWM context,
+// derived from its ProviderConfig shape (see `providerTier` in
+// `provider-checks.ts`) — not from any live check result:
+//   - 'hooks-native': has a `hooks` config (session-start hook re-anchors
+//     state every session — the strongest capability level). Today:
+//     claude-code, codex.
+//   - 'agents-md-managed': no `hooks`, but has SOME `injection` mechanism
+//     (context delivered via a read-on-trigger convention, no active
+//     re-anchor). Today: opencode, cursor, copilot.
+//   - 'context-only': neither `hooks` nor `injection` — no automated context
+//     delivery mechanism at all. Today: antigravity.
+export type ProviderTier = 'hooks-native' | 'agents-md-managed' | 'context-only';
+
 export type ProviderFacts = {
     id: AgentTarget;
     label: string;
+    tier: ProviderTier;
     checks: ProviderCheck[];
 };
 

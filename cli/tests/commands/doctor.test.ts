@@ -1,5 +1,5 @@
-import { renderReport, runDoctor } from '../../src/commands/doctor';
-import type { CheckReport } from '../../src/core/diagnostics/types';
+import { renderProviderReport, renderReport, runDoctor } from '../../src/commands/doctor';
+import type { CheckReport, ProviderDiagnosticReport } from '../../src/core/diagnostics/types';
 import type { AwmPreferences } from '../../src/utils/config';
 import fs from 'fs';
 import os from 'os';
@@ -58,6 +58,23 @@ describe('renderReport', () => {
         }));
         expect(out).toContain('Project: belanz');
         expect(out).toContain('→ skill: project-constitution');
+    });
+});
+
+describe('renderProviderReport — capability tier (Task 4.4)', () => {
+    it('shows the tier next to each provider label', () => {
+        const report: ProviderDiagnosticReport = {
+            overall: 'healthy',
+            providers: [
+                { id: 'claude-code', label: 'Claude Code', tier: 'hooks-native', checks: [] },
+                { id: 'cursor', label: 'Cursor', tier: 'agents-md-managed', checks: [] },
+                { id: 'antigravity', label: 'Antigravity', tier: 'context-only', checks: [] },
+            ],
+        };
+        const out = renderProviderReport(report);
+        expect(out).toContain('Provider: Claude Code (hooks-native)');
+        expect(out).toContain('Provider: Cursor (agents-md-managed)');
+        expect(out).toContain('Provider: Antigravity (context-only)');
     });
 });
 
@@ -125,6 +142,7 @@ describe('runDoctor', () => {
             .toEqual(['claude-code', 'opencode', 'codex']); // verifies R12
         expect(report.providers.find((provider: { id: string }) => provider.id === 'codex'))
             .toMatchObject({
+                tier: 'hooks-native', // Task 4.4
                 checks: expect.arrayContaining([
                     expect.objectContaining({ id: 'binary.version' }),
                     expect.objectContaining({ id: 'skills.global' }),
@@ -132,6 +150,15 @@ describe('runDoctor', () => {
                     expect.objectContaining({ id: 'hook.trust' }),
                 ]),
             }); // verifies R2, R7, R8, R18
+        expect(code).toBe(1);
+    });
+
+    it('includes tier for every provider in JSON output (Task 4.4)', () => {
+        writePrefs(prefsWith(['claude-code', 'opencode', 'codex']));
+        const code = runDoctor({ cwd: tmpWork, json: true });
+        const report = JSON.parse(stdout());
+        expect(report.providers.map((provider: { id: string; tier: string }) => provider.tier))
+            .toEqual(['hooks-native', 'agents-md-managed', 'hooks-native']);
         expect(code).toBe(1);
     });
 

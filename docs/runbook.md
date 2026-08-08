@@ -486,6 +486,23 @@ After step 5, the developer has the same skill set as every other teammate. No m
 
 > `awm sync` confirms what it did — if `.awm/profile.json` declares no extensions it emits `No extensions in .awm/profile.json — nothing to sync.` It becomes necessary once a teammate has run `awm add <bundle>` to add project extensions; the sync materializes those symlinks on a fresh machine.
 
+### 4.8 Provider capability matrix
+
+Not every agent re-anchors AWM context the same way. `awm doctor` labels each provider with a **tier** — `hooks-native`, `agents-md-managed`, or `context-only` — right next to its name, so you know at a glance how strongly a given agent is actually wired in, not just whether its skills are installed.
+
+| Provider | Tier | Session hook | Context delivery | Skill install format |
+|---|---|---|---|---|
+| Claude Code | `hooks-native` | `SessionStart` (settings merge) | rides the hook — re-anchored every session | symlink (`~/.claude/skills`) |
+| Codex | `hooks-native` | `SessionStart` (`hooks.json`) | `~/.codex/AGENTS.md` (managed block, global) | symlink (`~/.agents/skills`, shared with OpenCode) |
+| OpenCode | `agents-md-managed` | none | `opencode.json`'s `instructions` field (global) | symlink (`~/.agents/skills`, shared with Codex) |
+| Cursor | `agents-md-managed` | none | project `AGENTS.md` + a redundant `.cursor/rules/awm.mdc` carrier (local only — no confirmed global file) | rendered `.mdc` (`~/.cursor/rules`) |
+| Copilot | `agents-md-managed` | none | project `AGENTS.md` (local only — Copilot is repo-scoped) | rendered `.instructions.md` (project-only — no global skill dir) |
+| Antigravity | `context-only` | none | none — no automated delivery mechanism | symlink (`~/.gemini/antigravity/skills`) |
+
+`hooks-native` re-anchors state at the start of every session — the strongest guarantee. `agents-md-managed` relies on the agent reading its managed file on its own trigger, with no active re-anchor. `context-only` means AWM has no automated way to hand context to that agent at all — skills still install, but nothing tells the agent to read them.
+
+Cursor and Copilot's `context.global` and `skills.global` doctor rows deliberately mean something narrower than they do for the other four providers: `context.global` reflects LOCAL (project) delivery, not a global file, since neither has a confirmed user-level AGENTS.md-equivalent; `skills.global` reports presence only (`rendered install — content integrity not verified`), because their skill format is real files (`.mdc` / `.instructions.md`), not symlinks, and AWM's symlink-integrity scan structurally cannot verify rendered content.
+
 ---
 
 ## Chapter 5 — Extensibility: authoring content

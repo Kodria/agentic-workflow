@@ -9,8 +9,8 @@
 // (today: OpenCode and Codex both read/write ~/.agents/skills).
 import fs from 'fs';
 import path from 'path';
-import { AgentTarget, providerFor } from '../../providers';
-import { ProviderCheck, ProviderCheckState, ProviderFacts } from './types';
+import { AgentTarget, ProviderConfig, RendererId, Scope, providerFor } from '../../providers';
+import { ProviderCheck, ProviderCheckState, ProviderFacts, ProviderTier } from './types';
 import { SkillIntegrity } from '../skill-integrity';
 import { assertProviderSupported } from '../provider-version';
 import { computeHookStatus } from '../../commands/hooks/status';
@@ -18,6 +18,14 @@ import { InjectionOrchestrator } from '../context/orchestrator';
 import { capabilityRoot } from '../registries';
 
 export type ScanSkills = (dir: string) => SkillIntegrity;
+
+/** Structural classification, computed purely from `provider`'s config shape — see
+ *  `ProviderTier`'s doc comment in `types.ts` for what each tier means. */
+export function providerTier(provider: ProviderConfig): ProviderTier {
+    if (provider.hooks) return 'hooks-native';
+    if (provider.injection) return 'agents-md-managed';
+    return 'context-only';
+}
 
 function binaryVersionCheck(agent: AgentTarget): ProviderCheck {
     const provider = providerFor(agent);
@@ -42,9 +50,39 @@ function binaryVersionCheck(agent: AgentTarget): ProviderCheck {
 
 /** Returns `null` (dropped, same convention as `agentsNativeCheck`/`hookTrustCheck`) when
  *  `dir` is null — i.e. the provider has no global skill discovery mechanism at all
- *  (today: Copilot, see `globalUnsupportedReason` in providers/index.ts). */
-function skillsGlobalCheck(dir: string | null, owners: AgentTarget[], integrity: SkillIntegrity): ProviderCheck | null {
+ *  (today: Copilot, see `globalUnsupportedReason` in providers/index.ts).
+ *
+ *  `renderer` gates which verification is possible: `classifyGlobalSkills` (via `integrity`)
+ *  only ever sees symlinks — `if (!lst.isSymbolicLink()) continue;` — so for a rendered
+ *  format (`cursor-mdc`, `copilot-instructions`) it scans a directory of real files and
+ *  finds nothing, which would make `broken` silently read 0 regardless of whether the
+ *  rendered files are actually well-formed. Reporting `'healthy'` from a scan that
+ *  structurally can't see the files it's supposed to check would be a false green, so for
+ *  any non-`'link'` renderer this reports presence only, honestly, via `detail`. */
+function skillsGlobalCheck(
+    dir: string | null,
+    owners: AgentTarget[],
+    integrity: SkillIntegrity,
+    renderer: RendererId,
+): ProviderCheck | null {
     if (dir === null) return null;
+    if (renderer !== 'link') {
+        let entries: string[];
+        try {
+            entries = fs.readdirSync(dir);
+        } catch {
+            entries = [];
+        }
+        const present = entries.length > 0;
+        return {
+            id: 'skills.global',
+            state: present ? 'supported' : 'absent',
+            target: dir,
+            owners: owners.length > 1 ? owners : undefined,
+            detail: present ? 'rendered install — content integrity not verified' : undefined,
+            remediationCode: present ? undefined : 'awm-init',
+        };
+    }
     const shared = owners.length > 1;
     const broken = integrity.repairable.length + integrity.dead.length;
     // Broken links are checked BEFORE shared: 'shared' is a non-degrading/OK state
@@ -153,21 +191,34 @@ function hookTrustCheck(agent: AgentTarget): ProviderCheck | null {
 /** R7: reflects the provider's global context-delivery mechanism (config-instructions /
  *  managed-agents-md). claude-code's context rides the SessionStart hook — already
  *  covered by hook.trust, so this check is OMITTED (returns null) rather than reported,
- *  to avoid double-reporting the same fact as a separate, redundant row. */
-function contextGlobalCheck(agent: AgentTarget): ProviderCheck | null {
+ *  to avoid double-reporting the same fact as a separate, redundant row.
+ *
+ *  Scope mirrors `init/steps.ts`'s `stepContextInjection` exactly: a `managed-agents-md`
+ *  provider with `globalPath === null` (today: Cursor, Copilot) has no user-level
+ *  AGENTS.md-equivalent file, so its context is legitimately delivered at LOCAL (project)
+ *  scope instead — asking `contextStatus` about 'global' for these providers always
+ *  resolved to 'absent' regardless of whether the local injection actually succeeded. The
+ *  check's `id` stays `'context.global'` either way (stable JSON field); only the
+ *  underlying scope resolution changes. `projectRoot` is only meaningful when the resolved
+ *  scope is 'local' — if it's needed but missing, `contextStatus` throws cleanly
+ *  (`InjectionOrchestrator`'s `contextPathFor`) and the catch below falls back to 'absent',
+ *  same as any other failure to resolve status. */
+function contextGlobalCheck(agent: AgentTarget, projectRoot?: string): ProviderCheck | null {
     const injection = providerFor(agent).injection;
     if (!injection || injection.type === 'cc-settings-merge') {
         return null;
     }
+    const scope: Scope = injection.type === 'managed-agents-md' && injection.globalPath === null ? 'local' : 'global';
     let state: ProviderCheckState = 'absent';
     try {
         const orchestrator = new InjectionOrchestrator();
         const result = orchestrator.contextStatus({
             agent,
-            scope: 'global',
+            scope,
             registryRoot: capabilityRoot('skills') ?? '',
             installMethod: 'symlink',
             profileExtensions: [],
+            projectRoot,
         });
         state = result === 'injected' ? 'delivered' : result === 'stale' ? 'stale' : 'absent';
     } catch {
@@ -191,7 +242,7 @@ function contextGlobalCheck(agent: AgentTarget): ProviderCheck | null {
  * snapshot for rollback comparison — a different shape, a different purpose). No file
  * currently imports both, but the names are close enough to trip up a future reader/editor.
  */
-export function gatherProviderChecks(agents: AgentTarget[], scanSkills: ScanSkills): ProviderFacts[] {
+export function gatherProviderChecks(agents: AgentTarget[], scanSkills: ScanSkills, projectRoot?: string): ProviderFacts[] {
     const ownersByDir = new Map<string, AgentTarget[]>();
     for (const agent of agents) {
         const dir = providerFor(agent).skill.global;
@@ -214,12 +265,12 @@ export function gatherProviderChecks(agents: AgentTarget[], scanSkills: ScanSkil
 
         const checks: ProviderCheck[] = [
             binaryVersionCheck(agent),
-            skillsGlobalCheck(dir, owners, integrity),
+            skillsGlobalCheck(dir, owners, integrity, provider.skill.renderer),
             agentsNativeCheck(agent),
             hookTrustCheck(agent),
-            contextGlobalCheck(agent),
+            contextGlobalCheck(agent, projectRoot),
         ].filter((check): check is ProviderCheck => check !== null);
 
-        return { id: agent, label: provider.label, checks };
+        return { id: agent, label: provider.label, tier: providerTier(provider), checks };
     });
 }
