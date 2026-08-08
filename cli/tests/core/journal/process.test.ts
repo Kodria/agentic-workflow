@@ -242,6 +242,19 @@ describe('process identity (win32, mockeado — sin windows real disponible en e
         expect(killSpy).toHaveBeenCalledWith(999999, 0);
     });
 
+    test('pidExistsNative reintenta un ESRCH transitorio antes de declarar muerte — no confia en un unico intento (regresion: CI real windows-latest, dos corridas del mismo commit dieron resultados distintos para un proceso recien spawneado)', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        let calls = 0;
+        const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => {
+            calls++;
+            if (calls < 3) { const err: any = new Error('transient'); err.code = 'ESRCH'; throw err; }
+            return true;   // el pid "aparece" recien al tercer intento — simula la carrera real observada
+        });
+        const fakeRef = { pid: 424242, startTime: 'x', spawnNonce: 'n', argvDigest: 'd', processGroup: 424242, psArgsDigest: 'x' };
+        expect(refIsAlive(fakeRef)).toBe(true);   // NUNCA declara muerte por el ESRCH transitorio de los primeros 2 intentos
+        expect(killSpy).toHaveBeenCalledTimes(3);
+    });
+
     test('refIsAlive en win32 NUNCA declara muerte por un error que no sea ESRCH (ej. EPERM: el pid existe pero sin permiso de senializarlo) (R2.1)', () => {
         Object.defineProperty(process, 'platform', { value: 'win32' });
         jest.spyOn(process, 'kill').mockImplementation(() => {
