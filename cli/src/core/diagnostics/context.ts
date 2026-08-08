@@ -157,9 +157,19 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
             wanted = cfg.ambient.filter((x: unknown): x is string => typeof x === 'string');
         }
     } catch { /* sin config → ningún ambient deseado */ }
-    const installed = wanted.filter((name) => {
+    // Same guard as devCorePresent above: an agent with no global skill
+    // directory (today: Copilot) has no way to ever receive a globally-
+    // installed ambient bundle either — there is no global-scope "ambient"
+    // concept to satisfy for it at all. Without this, `installed` was forced
+    // to `[]` unconditionally for Copilot regardless of `wanted`, so
+    // stepAmbient (init/steps.ts) would treat every entry of a machine-level
+    // `~/.awm/config.json`'s `ambient` array as permanently missing and call
+    // installBundle at global scope — which throws for Copilot exactly like
+    // the devCore bug this file already fixes. Reported as "N/A == already
+    // satisfied" (installed), not "wanted but always missing".
+    const installed = skillsDir === null ? [...wanted] : wanted.filter((name) => {
         const skillNames = resolveBundleSkills(name, bundles);
-        if (skillNames.length === 0 || skillsDir === null) return false;
+        if (skillNames.length === 0) return false;
         const { linked } = classifyLinks(skillNames, skillsDir);
         return linked.length === skillNames.length;
     });

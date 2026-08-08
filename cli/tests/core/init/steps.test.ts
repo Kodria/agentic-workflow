@@ -10,6 +10,7 @@ import type { InitDeps, InitActions } from '../../../src/core/init/types';
 import type { HarnessContext, ProjectFacts } from '../../../src/core/diagnostics/types';
 import type { BundleDefinition } from '../../../src/core/bundles';
 import { providerFor } from '../../../src/providers';
+import { gatherContext } from '../../../src/core/diagnostics/context';
 
 function bundle(name: string, scope: BundleDefinition['scope'], skills: string[]): BundleDefinition {
     return {
@@ -152,21 +153,45 @@ describe('stepHook / stepDevCore / stepAmbient', () => {
     // — an install that always throws. Fixed in diagnostics/context.ts:
     // devCore.present is now reported `true` (N/A treated as satisfied) when
     // skill.global is null, so this step's existing skip guard applies
-    // naturally. This test uses the machine facts context.ts now produces for
-    // Copilot to prove stepDevCore never calls installBundle for it — before
-    // the fix, `devCore: { present: true, brokenLinks: [] }` was never
-    // reachable for Copilot at all (context.ts forced present: false), so
-    // this exact InitDeps shape would have hit the `installBundle` call below
-    // and thrown "skill global scope is not supported by Copilot".
-    it('devCore skips cleanly (never calls installBundle) for an agent with no global skill directory (copilot)', () => {
-        const a = spies();
+    // naturally.
+    //
+    // Unlike the rest of this describe block (which hand-builds `machine()`
+    // fixtures — a fine choice for exercising stepDevCore's own skip-guard
+    // logic in isolation), this test calls the REAL `gatherContext` (the
+    // function diagnostics/context.ts's fix actually lives in) with an
+    // isolated HOME/AWM_HOME, and feeds ITS real output into stepDevCore.
+    // That's deliberate: an earlier version of this test hand-built
+    // `devCore: { present: true, brokenLinks: [] }` directly and asserted
+    // against it, which only re-verified stepDevCore's pre-existing skip
+    // guard — reverting the context.ts fix left that version GREEN because it
+    // never called the fixed code at all. This version goes RED on revert:
+    // gatherContext would then report `devCore.present: false` for Copilot,
+    // stepDevCore would fall through to `installBundle`, and the assertions
+    // below (`action === 'skipped'`, `installBundle` not called) would fail.
+    it('devCore skips cleanly (never calls installBundle) for an agent with no global skill directory (copilot) — via real gatherContext', () => {
         expect(providerFor('copilot').skill.global).toBeNull();
-        const m = machine(); // devCore: { present: true, brokenLinks: [] } — what context.ts now reports for copilot
-        const r = stepDevCore(deps({ machine: m, project: null }, a, {
-            agent: 'copilot', enabledAgents: ['copilot'],
-        }));
-        expect(r.action).toBe('skipped');
-        expect(a.installBundle).not.toHaveBeenCalled();
+
+        const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-steps-copilot-devcore-'));
+        const originalHome = process.env.HOME;
+        const originalAwmHome = process.env.AWM_HOME;
+        try {
+            process.env.HOME = tmpHome;
+            process.env.AWM_HOME = path.join(tmpHome, '.awm');
+
+            const baselineBundle = bundle('dev-core', 'baseline', ['brainstorming']);
+            const ctx = gatherContext({ cwd: tmpHome, bundles: [baselineBundle], agent: 'copilot' });
+
+            const a = spies();
+            const r = stepDevCore(deps({ machine: ctx.machine, project: null }, a, {
+                agent: 'copilot', enabledAgents: ['copilot'], bundles: [baselineBundle],
+            }));
+            expect(r.action).toBe('skipped');
+            expect(a.installBundle).not.toHaveBeenCalled();
+        } finally {
+            fs.rmSync(tmpHome, { recursive: true, force: true });
+            if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+            if (originalAwmHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = originalAwmHome;
+        }
     });
 
     it('ambient installs only missing wanted', () => {

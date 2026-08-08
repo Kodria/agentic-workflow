@@ -124,6 +124,62 @@ describe('copilot provider — isolated home E2E (devCore global-scope guard reg
         expect(agentsMd).toContain('MUST invoke skills.');
     });
 
+    // Regression for the SAME structural bug as the devCore one above, in the
+    // sibling `ambient` computation (diagnostics/context.ts's `gatherMachine`,
+    // a few lines below devCorePresent): before the fix, `installed` was
+    // forced to `[]` unconditionally whenever `skillsDir === null` (Copilot),
+    // regardless of what `~/.awm/config.json`'s `ambient` array wanted. That
+    // made stepAmbient (init/steps.ts) treat every wanted ambient bundle as
+    // permanently missing and call installBundle at GLOBAL scope for
+    // Copilot — throwing "skill global scope is not supported by Copilot"
+    // and rolling back the whole init transaction, exactly like the devCore
+    // bug. Nothing in the current CLI writes `ambient` into
+    // `~/.awm/config.json` automatically, but it IS read unconditionally by
+    // production code and is a real, documented mechanism a user/script can
+    // populate — so this hand-seeds it, same as a real machine config would.
+    it('with a machine-level ambient bundle configured, completes without crashing/rolling back (ambient sibling of the devCore bug)', async () => {
+        const registryRoot = path.join(tmpHome, '.awm/registries/baseline');
+        seedPublicRegistryFixture(registryRoot);
+
+        // Add an ambient-scope bundle to the registry fixture so `wanted`
+        // resolves to real skills (resolveBundleSkills needs the bundle to
+        // actually exist in `bundles`, discovered via discoverAllBundles()).
+        fs.mkdirSync(path.join(registryRoot, 'skills/ambient-skill'), { recursive: true });
+        fs.writeFileSync(
+            path.join(registryRoot, 'skills/ambient-skill/SKILL.md'),
+            '---\nname: ambient-skill\ndescription: An ambient bundle skill.\n---\nAmbient.',
+        );
+        const catalog = JSON.parse(fs.readFileSync(path.join(registryRoot, 'catalog.json'), 'utf8'));
+        catalog.bundles.push({ name: 'personal-notion', source: 'bundles/personal-notion', version: '1.0.0', scope: 'ambient', visibility: 'public' });
+        fs.writeFileSync(path.join(registryRoot, 'catalog.json'), JSON.stringify(catalog));
+        fs.mkdirSync(path.join(registryRoot, 'bundles/personal-notion'), { recursive: true });
+        fs.writeFileSync(path.join(registryRoot, 'bundles/personal-notion/bundle.json'), JSON.stringify({
+            name: 'personal-notion', description: '', version: '1.0.0', scope: 'ambient', visibility: 'public',
+            dependsOn: [], skills: ['ambient-skill'], workflows: [], agents: [],
+        }));
+
+        // Seed the machine-level ambient config exactly as a user/script would.
+        fs.writeFileSync(path.join(tmpHome, '.awm/config.json'), JSON.stringify({ ambient: ['personal-notion'] }));
+
+        const { runInit } = require('../../src/commands/init');
+
+        // Before the fix, this threw "machine.ambient: skill global scope is
+        // not supported by Copilot..." (same class as the devCore crash) and
+        // rolled back the whole transaction (exit 2, AGENTS.md reverted,
+        // preferences never committed).
+        const code = await runInit({ cwd: tmpWork, yes: true, agent: 'copilot' });
+
+        // 0 (healthy) or 1 (degraded-but-completed) — NOT 2 (failed/rolled back).
+        expect(code).toBeLessThanOrEqual(1);
+
+        // The transaction actually committed.
+        expect(readPrefs().enabledAgents).toEqual(['copilot']);
+
+        // Copilot has no global skill directory at all — confirm the ambient
+        // bundle was NOT (wrongly) installed at global scope either.
+        expect(fs.existsSync(path.join(tmpHome, '.github'))).toBe(false);
+    });
+
     it('a subsequent `awm add <bundle> -a copilot` works once init has actually committed', async () => {
         seedPublicRegistryFixture(path.join(tmpHome, '.awm/registries/baseline'));
 

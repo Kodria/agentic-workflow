@@ -141,6 +141,30 @@ describe('gatherContext', () => {
         expect(ctx.machine.ambient.installed).toEqual(['personal-notion']);
     });
 
+    // Regression for the SAME structural bug as the devCore fix above, just in
+    // the `ambient` computation a few lines below it: Copilot has no global
+    // skill directory (skill.global === null), so before this fix `installed`
+    // was forced to `[]` unconditionally regardless of `wanted`. That made
+    // `stepAmbient` (init/steps.ts) treat every entry in a machine-level
+    // `~/.awm/config.json`'s `ambient` array as permanently missing and call
+    // installBundle at GLOBAL scope for Copilot — which throws with the exact
+    // same "skill global scope is not supported by Copilot" error the devCore
+    // bug had, and rolls back the whole init transaction. Now `installed`
+    // mirrors `wanted` when skillsDir is null (N/A treated as satisfied,
+    // nothing to install), matching devCore's treatment above.
+    it('machine: ambient is trivially satisfied (installed mirrors wanted) for an agent with no global skill directory (copilot)', () => {
+        fs.mkdirSync(path.join(tmpHome, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(tmpHome, '.awm', 'config.json'), JSON.stringify({ ambient: ['personal-notion'] }));
+        const { gatherContext } = require('../../../src/core/diagnostics/context');
+        const bundles = [
+            bundle('dev-core', 'baseline', ['brainstorming']),
+            bundle('personal-notion', 'ambient', ['notion-skill']),
+        ];
+        const ctx = gatherContext({ cwd: tmpHome, bundles, agent: 'copilot' });
+        expect(ctx.machine.ambient.wanted).toEqual(['personal-notion']);
+        expect(ctx.machine.ambient.installed).toEqual(['personal-notion']);
+    });
+
     it('machine: contextInjection empty when opencode config is absent', () => {
         const { gatherContext } = require('../../../src/core/diagnostics/context');
         const ctx = gatherContext({ cwd: tmpHome, bundles: [] });
