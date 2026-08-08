@@ -81,12 +81,20 @@ export function physicalTarget(intent: ArtifactIntent, agent: AgentTarget, scope
     if (dir === null) {
         throw unsupportedScopeError(intent.type, scope, providerFor(agent).label, config.globalUnsupportedReason);
     }
-    // Rendered targets get a provider-specific extension in place of
-    // whatever extension (if any) intent.installName already carries —
-    // path.parse(...).name strips it first, so e.g. `using-awm` (skills
-    // carry no extension) or `using-awm.md` both become
+    // Rendered targets get a provider-specific extension in place of a
+    // trailing `.md` (if any) on intent.installName, so e.g. `using-awm`
+    // (skills carry no extension) or `using-awm.md` both become
     // `using-awm.instructions.md`, never `using-awm.md.instructions.md`.
-    const baseName = path.parse(intent.installName).name;
+    // Deliberately NOT path.parse(...).name: it strips everything after the
+    // LAST dot, not just a real trailing extension — a skill literally named
+    // `v1.2-migration` would silently truncate to `v1.mdc`, dropping
+    // `2-migration` and risking a collision with any other skill named `v1`.
+    // `.md` is the only extension a skill's installName is ever expected to
+    // carry (skills are markdown files), so stripping that literal suffix is
+    // both sufficient and precise.
+    const baseName = intent.installName.endsWith('.md')
+        ? intent.installName.slice(0, -'.md'.length)
+        : intent.installName;
     const filename = config.renderer === 'codex-agent-toml' ? `${baseName}.toml`
         : config.renderer === 'cursor-mdc' ? `${baseName}.mdc`
         : config.renderer === 'copilot-instructions' ? `${baseName}.instructions.md`

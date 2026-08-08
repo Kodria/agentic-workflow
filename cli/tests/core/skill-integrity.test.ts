@@ -112,6 +112,26 @@ describe('reconcileAllSkillLinks (#4 — awm update, all providers)', () => {
             fs.rmSync(home, { recursive: true, force: true });
         }
     });
+
+    it('Gap C — skips an agent whose skill.global is null (copilot) cleanly instead of crashing', () => {
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-home-'));
+        const prevHome = process.env.HOME;
+        process.env.HOME = home;
+        try {
+            jest.resetModules();
+            const { reconcileAllSkillLinks } = require('../../src/core/skill-integrity');
+            const { providerFor } = require('../../src/providers');
+            expect(providerFor('copilot').skill.global).toBeNull();
+
+            const res = reconcileAllSkillLinks([path.join(home, 'no-registry')]);
+
+            expect(() => reconcileAllSkillLinks([path.join(home, 'no-registry')])).not.toThrow();
+            expect(res.find((r: any) => r.agent === 'copilot')).toBeFalsy();
+        } finally {
+            process.env.HOME = prevHome;
+            fs.rmSync(home, { recursive: true, force: true });
+        }
+    });
 });
 
 describe('repairGlobalSkills', () => {

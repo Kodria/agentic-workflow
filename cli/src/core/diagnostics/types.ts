@@ -76,12 +76,19 @@ export type ProviderCheck = {
 //   - 'hooks-native': has a `hooks` config (session-start hook re-anchors
 //     state every session — the strongest capability level). Today:
 //     claude-code, codex.
-//   - 'agents-md-managed': no `hooks`, but has SOME `injection` mechanism
-//     (context delivered via a read-on-trigger convention, no active
-//     re-anchor). Today: opencode, cursor, copilot.
+//   - 'agents-md-managed': no `hooks`, but delivers context via the
+//     `managed-agents-md` convention (a single-block AGENTS.md the agent is
+//     expected to read on its own trigger, no active re-anchor). Today:
+//     cursor, copilot.
+//   - 'config-managed': no `hooks`, delivers context by writing into the
+//     agent's own config file (`injection.type === 'config-instructions'`) —
+//     same "no active re-anchor" reliability as agents-md-managed, but a
+//     materially different delivery mechanism (a JSON config field, not a
+//     markdown file convention), so it gets its own tier rather than being
+//     folded into 'agents-md-managed'. Today: opencode.
 //   - 'context-only': neither `hooks` nor `injection` — no automated context
 //     delivery mechanism at all. Today: antigravity.
-export type ProviderTier = 'hooks-native' | 'agents-md-managed' | 'context-only';
+export type ProviderTier = 'hooks-native' | 'agents-md-managed' | 'config-managed' | 'context-only';
 
 export type ProviderFacts = {
     id: AgentTarget;

@@ -488,18 +488,18 @@ After step 5, the developer has the same skill set as every other teammate. No m
 
 ### 4.8 Provider capability matrix
 
-Not every agent re-anchors AWM context the same way. `awm doctor` labels each provider with a **tier** — `hooks-native`, `agents-md-managed`, or `context-only` — right next to its name, so you know at a glance how strongly a given agent is actually wired in, not just whether its skills are installed.
+Not every agent re-anchors AWM context the same way. `awm doctor` labels each provider with a **tier** — `hooks-native`, `agents-md-managed`, `config-managed`, or `context-only` — right next to its name, so you know at a glance how strongly a given agent is actually wired in, not just whether its skills are installed.
 
 | Provider | Tier | Session hook | Context delivery | Skill install format |
 |---|---|---|---|---|
 | Claude Code | `hooks-native` | `SessionStart` (settings merge) | rides the hook — re-anchored every session | symlink (`~/.claude/skills`) |
 | Codex | `hooks-native` | `SessionStart` (`hooks.json`) | `~/.codex/AGENTS.md` (managed block, global) | symlink (`~/.agents/skills`, shared with OpenCode) |
-| OpenCode | `agents-md-managed` | none | `opencode.json`'s `instructions` field (global) | symlink (`~/.agents/skills`, shared with Codex) |
-| Cursor | `agents-md-managed` | none | project `AGENTS.md` + a redundant `.cursor/rules/awm.mdc` carrier (local only — no confirmed global file) | rendered `.mdc` (`~/.cursor/rules`) |
-| Copilot | `agents-md-managed` | none | project `AGENTS.md` (local only — Copilot is repo-scoped) | rendered `.instructions.md` (project-only — no global skill dir) |
+| OpenCode | `config-managed` | none | `opencode.json`'s `instructions` field (global) | symlink (`~/.agents/skills`, shared with Codex) |
+| Cursor | `agents-md-managed` | none | project `AGENTS.md` (context + project guidance combined in one managed block) + a redundant `.cursor/rules/awm.mdc` carrier (local only — no confirmed global file) | rendered `.mdc` (`~/.cursor/rules`) |
+| Copilot | `agents-md-managed` | none | project `AGENTS.md` (context + project guidance combined in one managed block, local only — Copilot is repo-scoped) | rendered `.instructions.md` (project-only — no global skill dir) |
 | Antigravity | `context-only` | none | none — no automated delivery mechanism | symlink (`~/.gemini/antigravity/skills`) |
 
-`hooks-native` re-anchors state at the start of every session — the strongest guarantee. `agents-md-managed` relies on the agent reading its managed file on its own trigger, with no active re-anchor. `context-only` means AWM has no automated way to hand context to that agent at all — skills still install, but nothing tells the agent to read them.
+`hooks-native` re-anchors state at the start of every session — the strongest guarantee. `agents-md-managed` relies on the agent reading its managed AGENTS.md file on its own trigger, with no active re-anchor. `config-managed` is the same "no active re-anchor" reliability, but delivers via the agent's own config file (a JSON field) rather than the AGENTS.md convention — a materially different mechanism, so OpenCode gets its own tier rather than being folded into `agents-md-managed`. `context-only` means AWM has no automated way to hand context to that agent at all — skills still install, but nothing tells the agent to read them.
 
 Cursor and Copilot's `context.global` and `skills.global` doctor rows deliberately mean something narrower than they do for the other four providers: `context.global` reflects LOCAL (project) delivery, not a global file, since neither has a confirmed user-level AGENTS.md-equivalent; `skills.global` reports presence only (`rendered install — content integrity not verified`), because their skill format is real files (`.mdc` / `.instructions.md`), not symlinks, and AWM's symlink-integrity scan structurally cannot verify rendered content.
 

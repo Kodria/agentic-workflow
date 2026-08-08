@@ -16,6 +16,7 @@ import os from 'os';
 import path from 'path';
 import type { BundleDefinition } from '../../../src/core/bundles';
 import type { AgentTarget } from '../../../src/providers';
+import { projectContextPath } from '../../../src/core/context/materializer';
 
 function bundle(name: string, scope: BundleDefinition['scope'], skills: string[]): BundleDefinition {
     return {
@@ -223,6 +224,68 @@ describe('planInitMutationTargets', () => {
             expect(targets.some((t) => t.endsWith(path.join('.awm', 'sensors.json')))).toBe(false);
         });
 
+        it('includes the materialized .awm/context/awm-context.md path for a local-scope-context provider (cursor)', () => {
+            // Finding: stepContextInjection (steps.ts) materializes its source content
+            // under <projectRoot>/.awm/context/awm-context.md BEFORE injecting it into
+            // the local AGENTS.md/.mdc target, for any provider whose managed-agents-md
+            // injection has no global path (globalPath === null). That materialized
+            // write is a real one this run can make and must be covered by the backup
+            // session, same reasoning as the target file itself just below.
+            const { planInitMutationTargets, providerFor } = load();
+            const projectRoot = makeProjectRoot();
+            const provider = providerFor('cursor');
+            expect(provider.injection?.type).toBe('managed-agents-md');
+            expect((provider.injection as { globalPath: string | null }).globalPath).toBeNull();
+
+            const targets = planInitMutationTargets({ cwd: projectRoot, agent: 'cursor', bundles: [] });
+
+            expect(targets).toContain(projectContextPath(projectRoot));
+        });
+
+        it('includes the materialized .awm/context/awm-context.md path for a local-scope-context provider (copilot)', () => {
+            const { planInitMutationTargets, providerFor } = load();
+            const projectRoot = makeProjectRoot();
+            const provider = providerFor('copilot');
+            expect(provider.injection?.type).toBe('managed-agents-md');
+            expect((provider.injection as { globalPath: string | null }).globalPath).toBeNull();
+
+            const targets = planInitMutationTargets({ cwd: projectRoot, agent: 'copilot', bundles: [] });
+
+            expect(targets).toContain(projectContextPath(projectRoot));
+        });
+
+        it('does NOT include the materialized .awm/context/awm-context.md path for a global-scope-context provider (codex)', () => {
+            // Codex's managed-agents-md injection has a non-null globalPath, so its
+            // context is delivered at GLOBAL scope — the local materialized-source
+            // path is never written for it and must not be enumerated.
+            const { planInitMutationTargets, providerFor } = load();
+            const projectRoot = makeProjectRoot();
+            const provider = providerFor('codex');
+            expect((provider.injection as { globalPath: string | null }).globalPath).not.toBeNull();
+
+            const targets = planInitMutationTargets({ cwd: projectRoot, agent: 'codex', bundles: [] });
+
+            expect(targets).not.toContain(projectContextPath(projectRoot));
+        });
+
+        it('includes .cursor/rules/awm.mdc (the redundant carrier) only for agent === cursor', () => {
+            const { planInitMutationTargets } = load();
+            const projectRoot = makeProjectRoot();
+
+            const cursorTargets = planInitMutationTargets({ cwd: projectRoot, agent: 'cursor', bundles: [] });
+            expect(cursorTargets).toContain(path.join(projectRoot, '.cursor', 'rules', 'awm.mdc'));
+        });
+
+        it('does NOT include .cursor/rules/awm.mdc for copilot or other agents', () => {
+            const { planInitMutationTargets } = load();
+            const projectRoot = makeProjectRoot();
+
+            for (const agent of ['copilot', 'codex', 'claude-code', 'opencode', 'antigravity'] as AgentTarget[]) {
+                const targets = planInitMutationTargets({ cwd: projectRoot, agent, bundles: [] });
+                expect(targets).not.toContain(path.join(projectRoot, '.cursor', 'rules', 'awm.mdc'));
+            }
+        });
+
         it('ignores an extension named in the profile that no longer resolves to a known bundle', () => {
             const { planInitMutationTargets, providerFor } = load();
             const projectRoot = makeProjectRoot();
@@ -248,6 +311,18 @@ describe('planInitMutationTargets', () => {
                 const targets = planInitMutationTargets({ cwd: bareCwd(), agent, bundles: [] });
                 expect(targets).toContain(providerFor(agent).skill.global);
             }
+        });
+
+        it('Gap C — adds no global skills-directory target for an agent whose skill.global is null (copilot), and does not crash', () => {
+            const { planInitMutationTargets, providerFor } = load();
+            expect(providerFor('copilot').skill.global).toBeNull();
+
+            const targets = planInitMutationTargets({ cwd: bareCwd(), agent: 'copilot', bundles: [] });
+
+            // No null ever lands in the returned target list, and nothing crashes
+            // trying to path.join/backup a null skills directory.
+            expect(targets).not.toContain(null);
+            expect(targets.every((t) => typeof t === 'string')).toBe(true);
         });
 
         it('the skills-directory target covers orphaned entries repairGlobalSkills would mutate, not just bundle-derived subpaths', () => {

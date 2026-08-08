@@ -87,6 +87,45 @@ Body content.
     expect(rendered).not.toContain('description: Use this #important skill');
 });
 
+it('quotes a description containing an embedded null byte / control character instead of emitting it raw', () => {
+    // Regression: an embedded control/null byte is invalid in a YAML plain
+    // scalar regardless of position — the original code's YAML_UNSAFE regex
+    // needed the [\x00-\x1f\x7f] class to catch this; without it, a null byte
+    // would have been emitted unquoted straight into the frontmatter.
+    const nul = String.fromCharCode(0);
+    const source = `---
+name: nul-skill
+description: Use this${nul}description
+---
+
+Body content.
+`;
+    const rendered = renderCursorMdc(source);
+    // JSON.stringify \u-escapes control bytes — the rendered frontmatter must
+    // carry the escaped, quoted form, never the literal raw byte.
+    expect(rendered).toContain(`description: ${JSON.stringify(`Use this${nul}description`)}`);
+    expect(rendered).not.toContain(`description: Use this${nul}description\n`);
+});
+
+it('escapes an embedded DEL (0x7F) byte, which JSON.stringify alone does not escape', () => {
+    // Regression: JSON.stringify \u-escapes \x00-\x1F but NOT \x7F (DEL isn't in
+    // JSON's own required-escape set), so quoting via JSON.stringify alone would
+    // leave a raw, non-conformant DEL byte inside the YAML double-quoted scalar.
+    // yamlString must escape it itself after JSON.stringify runs.
+    const del = String.fromCharCode(0x7f);
+    const source = `---
+name: del-skill
+description: Use this${del}description
+---
+
+Body content.
+`;
+    const rendered = renderCursorMdc(source);
+    expect(rendered).toContain('description: "Use this\\u007fdescription"');
+    expect(rendered).not.toContain(`description: Use this${del}description\n`);
+    expect(rendered).not.toMatch(new RegExp(`description: "[^"]*${del}`));
+});
+
 it('leaves a plain description unquoted', () => {
     const source = `---
 name: plain-skill

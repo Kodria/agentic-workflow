@@ -158,7 +158,7 @@ describe('CodexAgentsStrategy', () => {
             .toContain('when that file exists');
     });
 
-    it('injectProject writes a redundant .cursor/rules/awm.mdc carrier (alwaysApply: true) for Cursor', () => {
+    it('injectProject writes a redundant .cursor/rules/awm.mdc carrier (alwaysApply: true) for Cursor, and skips its own AGENTS.md write (owned by inject(), see collision regression below)', () => {
         const project = path.join(tmpWork, 'cursor-repo');
         fs.mkdirSync(project, { recursive: true });
         const strategy = new CodexAgentsStrategy();
@@ -166,21 +166,71 @@ describe('CodexAgentsStrategy', () => {
         const result = strategy.injectProject(project, cursorProvider(), 'cursor');
 
         expect(result).toBe('injected');
-        expect(fs.existsSync(path.join(project, 'AGENTS.md'))).toBe(true);
+        expect(fs.existsSync(path.join(project, 'AGENTS.md'))).toBe(false);
         const mdc = fs.readFileSync(path.join(project, '.cursor/rules/awm.mdc'), 'utf8');
         expect(mdc).toContain('alwaysApply: true');
         expect(mdc).toContain('Read and obey `CONSTITUTION.md` before work');
     });
 
-    it('injectProject writes only AGENTS.md (no .cursor/rules) for a non-Cursor provider', () => {
+    it('injectProject writes only AGENTS.md (no .cursor/rules) for a provider whose context injection is a SEPARATE (global) file', () => {
+        const project = path.join(tmpWork, 'codex-project-repo');
+        fs.mkdirSync(project, { recursive: true });
+        const strategy = new CodexAgentsStrategy();
+
+        strategy.injectProject(project, codexProvider(path.join(tmpHome, '.codex/AGENTS.md')));
+
+        expect(fs.existsSync(path.join(project, 'AGENTS.md'))).toBe(true);
+        expect(fs.existsSync(path.join(project, '.cursor'))).toBe(false);
+    });
+
+    it('injectProject writes NEITHER AGENTS.md NOR a carrier for Copilot (local-context provider, no carrier mechanism)', () => {
         const project = path.join(tmpWork, 'copilot-repo');
         fs.mkdirSync(project, { recursive: true });
         const strategy = new CodexAgentsStrategy();
 
-        strategy.injectProject(project, copilotProvider(), 'copilot');
+        const result = strategy.injectProject(project, copilotProvider(), 'copilot');
 
-        expect(fs.existsSync(path.join(project, 'AGENTS.md'))).toBe(true);
+        expect(result).toBe('unchanged');
+        expect(fs.existsSync(path.join(project, 'AGENTS.md'))).toBe(false);
         expect(fs.existsSync(path.join(project, '.cursor'))).toBe(false);
+    });
+
+    it('regression: local-scope context injection + project constitution injection no longer collide on the same AGENTS.md managed block (R4 QA blocker)', () => {
+        // Before the fix: inject() (context) and injectProject() (constitution) both wrote
+        // the SAME single-slot managed block in <projectRoot>/AGENTS.md for a local-scope
+        // provider (Cursor/Copilot) — whichever ran second silently discarded the other's
+        // content. stepContextInjection runs before stepConstitutionInjection in the real
+        // init orchestrator (init/orchestrator.ts), so constitution always won, and the real
+        // AWM skill/context guidance never survived a real `awm init --agent cursor` run.
+        const project = path.join(tmpWork, 'collision-repo');
+        fs.mkdirSync(project, { recursive: true });
+        const materialized = path.join(project, '.awm/context/awm-context.md');
+        const contextMarkdown = '# AWM\n\nUse `development-process`. MUST invoke skills per policy.';
+        fs.mkdirSync(path.dirname(materialized), { recursive: true });
+        fs.writeFileSync(materialized, contextMarkdown);
+        const provider = cursorProvider();
+        const strategy = new CodexAgentsStrategy();
+        const input: InjectionInput = {
+            ref: { absPath: materialized, scope: 'local', contentHash: sha256(contextMarkdown) },
+            registryRoot: '/registry',
+            installMethod: 'copy',
+            agent: 'cursor',
+            scope: 'local',
+            projectRoot: project,
+        };
+
+        expect(strategy.inject(input, provider)).toBe('injected');
+        expect(strategy.injectProject(project, provider, 'cursor')).toBe('injected'); // carrier only
+
+        const written = fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8');
+        expect(written).toContain('MUST invoke skills per policy');
+        expect(written).toContain('Read and obey `CONSTITUTION.md` before work');
+        expect(strategy.status(input, provider)).toBe('injected');
+
+        // Idempotent: a second full pass (context re-inject, then constitution/carrier) changes nothing.
+        expect(strategy.inject(input, provider)).toBe('unchanged');
+        expect(strategy.injectProject(project, provider, 'cursor')).toBe('unchanged');
+        expect(fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8')).toBe(written);
     });
 
     it('implements global status and remove while preserving user bytes', () => {

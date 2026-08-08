@@ -19,10 +19,21 @@ import { capabilityRoot } from '../registries';
 
 export type ScanSkills = (dir: string) => SkillIntegrity;
 
+/** File extension a healthy AWM install actually produces for each non-`'link'` renderer —
+ *  used by `skillsGlobalCheck` to require AWM-shaped evidence, not just an arbitrary
+ *  non-empty directory (a user's own unrelated file in `~/.cursor/rules` would otherwise
+ *  read as `'supported'`). Renderers absent from this map (i.e. `'link'`) never reach the
+ *  branch that reads it. */
+const RENDERED_SKILL_EXTENSIONS: Partial<Record<RendererId, string>> = {
+    'cursor-mdc': '.mdc',
+    'copilot-instructions': '.instructions.md',
+};
+
 /** Structural classification, computed purely from `provider`'s config shape — see
  *  `ProviderTier`'s doc comment in `types.ts` for what each tier means. */
 export function providerTier(provider: ProviderConfig): ProviderTier {
     if (provider.hooks) return 'hooks-native';
+    if (provider.injection?.type === 'config-instructions') return 'config-managed';
     if (provider.injection) return 'agents-md-managed';
     return 'context-only';
 }
@@ -80,7 +91,14 @@ function skillsGlobalCheck(
             // pattern in this codebase, not introduced here).
             entries = [];
         }
-        const present = entries.length > 0;
+        // Require at least one entry with the extension this renderer actually produces,
+        // not just ANY file — a directory non-empty only because of the user's own
+        // pre-existing, unrelated rule/instructions file must not read as "AWM installed".
+        // Still not full integrity verification (a stray file with the right extension but
+        // wrong content still passes) — that residual gap is the same honest tradeoff this
+        // function's doc comment already accepts for the non-`'link'` branch generally.
+        const ext = RENDERED_SKILL_EXTENSIONS[renderer];
+        const present = ext ? entries.some((e) => e.endsWith(ext)) : entries.length > 0;
         return {
             id: 'skills.global',
             state: present ? 'supported' : 'absent',

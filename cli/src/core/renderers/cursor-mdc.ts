@@ -14,17 +14,22 @@ import { parseSkillSource } from './skill-source';
 // YAML plain scalars break on a bare colon-followed-by-space (parsed as a
 // mapping), a `#` preceded by whitespace ANYWHERE in the string — not just
 // at the start — (starts a comment, silently truncating everything after
-// it), a leading YAML-special indicator character, or an embedded double
-// quote — the same class of problem tomlString/escapeControlChars
-// (codex-agent.ts) guard against for TOML, adapted to YAML's own rules.
-// JSON.stringify produces a YAML-1.1/1.2-compatible double-quoted scalar
-// (YAML's double-quoted flow scalar is a superset of JSON string syntax),
-// so it doubles as the escaping/quoting mechanism once quoting is needed.
-const YAML_UNSAFE = /:(\s|$)|(?:^|\s)#|^[\s\-?:,[\]{}#&*!|>'"%@`]|"/;
+// it), a leading YAML-special indicator character, an embedded double
+// quote, or an embedded control/null/DEL byte (invalid in a YAML plain
+// scalar regardless of position, and would otherwise be emitted unquoted
+// straight into the frontmatter) — the same class of problem tomlString/
+// escapeControlChars (codex-agent.ts) guard against for TOML, adapted to
+// YAML's own rules. JSON.stringify produces a YAML-1.1/1.2-compatible
+// double-quoted scalar (YAML's double-quoted flow scalar is a superset of
+// JSON string syntax), so it doubles as the escaping/quoting mechanism once
+// quoting is needed — it \u-escapes \x00-\x1F, but NOT \x7F (DEL is not in
+// JSON's own list of characters requiring escape), so yamlString below
+// escapes that one byte itself after JSON.stringify runs.
+const YAML_UNSAFE = /:(\s|$)|(?:^|\s)#|^[\s\-?:,[\]{}#&*!|>'"%@`]|"|[\x00-\x1f\x7f]/;
 
 function yamlString(value: string): string {
     if (value !== value.trim() || value === '' || YAML_UNSAFE.test(value)) {
-        return JSON.stringify(value);
+        return JSON.stringify(value).replace(/\x7f/g, '\\u007f');
     }
     return value;
 }

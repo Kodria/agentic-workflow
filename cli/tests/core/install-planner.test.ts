@@ -282,6 +282,50 @@ describe('install-planner', () => {
                 });
                 expect(path.basename(plan.operations[0].targetPath)).toBe('development-process.instructions.md');
             });
+
+            it('does not truncate an installName with an embedded, non-extension dot (e.g. "v1.2-migration")', () => {
+                // Regression: physicalTarget used to derive the base name via
+                // path.parse(...).name, which strips everything after the LAST
+                // dot — not just a genuine trailing .md extension. A skill
+                // literally named `v1.2-migration` would silently truncate to
+                // `v1`, dropping `2-migration` and risking a collision with any
+                // other skill named `v1`.
+                const dottedName: ArtifactIntent = {
+                    name: 'v1.2-migration',
+                    installName: 'v1.2-migration',
+                    type: 'skill',
+                    sourcePath: path.join(tmpWork, 'registry', 'skills', 'v1.2-migration'),
+                };
+                const plan = planInstall({
+                    artifacts: [dottedName],
+                    selectedAgents: ['cursor'],
+                    enabledAgents: ['cursor'],
+                    scope: 'local',
+                    projectRoot: tmpWork,
+                    method: 'symlink',
+                });
+                expect(path.basename(plan.operations[0].targetPath)).toBe('v1.2-migration.mdc');
+                expect(path.basename(plan.operations[0].targetPath)).not.toBe('v1.mdc');
+            });
+
+            it('still strips a real trailing .md extension for Cursor (not v1.2-migration.md.mdc)', () => {
+                const withMdExtension: ArtifactIntent = {
+                    name: 'using-awm',
+                    installName: 'using-awm.md',
+                    type: 'skill',
+                    sourcePath: path.join(tmpWork, 'registry', 'skills', 'using-awm'),
+                };
+                const plan = planInstall({
+                    artifacts: [withMdExtension],
+                    selectedAgents: ['cursor'],
+                    enabledAgents: ['cursor'],
+                    scope: 'local',
+                    projectRoot: tmpWork,
+                    method: 'symlink',
+                });
+                expect(path.basename(plan.operations[0].targetPath)).toBe('using-awm.mdc');
+                expect(path.basename(plan.operations[0].targetPath)).not.toBe('using-awm.md.mdc');
+            });
         });
     });
 

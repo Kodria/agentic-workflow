@@ -158,7 +158,7 @@ describe('runDoctor', () => {
         const code = runDoctor({ cwd: tmpWork, json: true });
         const report = JSON.parse(stdout());
         expect(report.providers.map((provider: { id: string; tier: string }) => provider.tier))
-            .toEqual(['hooks-native', 'agents-md-managed', 'hooks-native']);
+            .toEqual(['hooks-native', 'config-managed', 'hooks-native']);
         expect(code).toBe(1);
     });
 

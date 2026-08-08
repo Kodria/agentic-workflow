@@ -24,7 +24,7 @@ import { ProviderTier } from '../../../src/core/diagnostics/types';
 describe('providerTier — pure structural classification', () => {
     const expected: Record<AgentTarget, ProviderTier> = {
         antigravity: 'context-only',
-        opencode: 'agents-md-managed',
+        opencode: 'config-managed',
         'claude-code': 'hooks-native',
         codex: 'hooks-native',
         cursor: 'agents-md-managed',
@@ -198,6 +198,55 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
         expect(skillsCheck?.detail).toContain('not verified');
     });
 
+    it('Gap B — non-link renderer (cursor-mdc) against REAL renderer/pipeline output, not a hand-written approximation', () => {
+        // The test above hand-writes a `.mdc` file whose frontmatter shape is only an
+        // approximation of what the real cursor-mdc renderer emits. This drives the
+        // REAL default `installBundle`/`applyInstallPlan` pipeline (core/bundle-install.ts,
+        // the same one `awm init`/`awm add` use) end-to-end for a global-scope Cursor
+        // skill, so the file skillsGlobalCheck inspects here is exactly what the
+        // renderer actually produces — not a fixture that merely resembles it.
+        const { discoverBundles } = require('../../../src/core/bundles');
+        const { installBundle } = require('../../../src/core/bundle-install');
+
+        const content = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-provider-tier-registry-'));
+        fs.mkdirSync(path.join(content, 'bundles', 'dev-core'), { recursive: true });
+        fs.mkdirSync(path.join(content, 'skills', 'using-awm'), { recursive: true });
+        fs.writeFileSync(
+            path.join(content, 'skills', 'using-awm', 'SKILL.md'),
+            '---\nname: using-awm\ndescription: Use when starting any development conversation\n---\n\nMUST invoke skills.\n',
+        );
+        fs.writeFileSync(path.join(content, 'catalog.json'), JSON.stringify({
+            version: 1,
+            bundles: [{ name: 'dev-core', source: './bundles/dev-core', version: '1.0.0', scope: 'baseline' }],
+        }));
+        fs.writeFileSync(path.join(content, 'bundles', 'dev-core', 'bundle.json'), JSON.stringify({
+            name: 'dev-core', version: '1.0.0', description: '', scope: 'baseline',
+            dependsOn: [], skills: ['using-awm'], workflows: [], agents: [],
+        }));
+
+        installBundle({
+            bundleName: 'dev-core',
+            bundles: discoverBundles(content),
+            agents: ['cursor'],
+            method: 'symlink',
+            projectRoot: tmpHome, // irrelevant for a global-scope install
+            contentDir: content,
+        });
+
+        const rulesDir = path.join(tmpHome, '.cursor/rules');
+        expect(fs.existsSync(path.join(rulesDir, 'using-awm.mdc'))).toBe(true);
+
+        const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
+        const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
+        const facts = gatherProviderChecks(['cursor'], scanSkills);
+        const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
+
+        expect(skillsCheck).toMatchObject({ id: 'skills.global', state: 'supported', target: rulesDir });
+        expect(skillsCheck?.detail).toContain('not verified');
+
+        fs.rmSync(content, { recursive: true, force: true });
+    });
+
     it('non-link renderer with an empty/missing dir reports absent, not a false healthy', () => {
         const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
         const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
@@ -235,5 +284,49 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
             detail: '1 broken links',
             remediationCode: 'repair-global-skills',
         });
+    });
+
+    describe('false-positive fix — an unrelated file must not read as an AWM install', () => {
+        it('cursor: a dir containing ONLY an unrelated non-.mdc file reports absent, not supported', () => {
+            const rulesDir = path.join(tmpHome, '.cursor/rules');
+            fs.mkdirSync(rulesDir, { recursive: true });
+            // A user's own pre-existing file, or a directory they created themselves —
+            // neither ends in `.mdc`, so neither is AWM-shaped evidence.
+            fs.writeFileSync(path.join(rulesDir, 'notes.txt'), 'my own notes, not an AWM rule');
+            fs.mkdirSync(path.join(rulesDir, 'some-user-dir'));
+
+            const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
+            const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
+            const facts = gatherProviderChecks(['cursor'], scanSkills);
+            const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
+
+            expect(skillsCheck).toMatchObject({ id: 'skills.global', state: 'absent', remediationCode: 'awm-init' });
+        });
+
+        it('cursor: a dir containing a real *.mdc file reports supported', () => {
+            const rulesDir = path.join(tmpHome, '.cursor/rules');
+            fs.mkdirSync(rulesDir, { recursive: true });
+            fs.writeFileSync(path.join(rulesDir, 'notes.txt'), 'my own notes, not an AWM rule');
+            fs.writeFileSync(
+                path.join(rulesDir, 'foo.mdc'),
+                '---\ndescription: foo\nglobs:\nalwaysApply: false\n---\n\nBody.',
+            );
+
+            const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
+            const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
+            const facts = gatherProviderChecks(['cursor'], scanSkills);
+            const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
+
+            expect(skillsCheck).toMatchObject({ id: 'skills.global', state: 'supported' });
+        });
+
+        // NOTE: no copilot companion case here — copilot's `skill.global` is `null`
+        // (no user-level skill discovery mechanism at all, providers/index.ts), so
+        // `skillsGlobalCheck` returns `null` for it and `gatherProviderChecks` drops
+        // the `skills.global` row entirely before the renderer-extension gate this
+        // describe block exercises is ever reached. There is no real directory for
+        // a copilot-shaped false positive to occur against. The null-global-dir
+        // branch itself (the guard that makes this row vanish for copilot) is
+        // covered separately as part of Gap C's null-skip coverage.
     });
 });

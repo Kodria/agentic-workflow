@@ -365,17 +365,23 @@ export function stepContextInjection(d: InitDeps): StepResult {
 
     // Providers with no global AGENTS.md-equivalent (managed-agents-md with a null
     // globalPath — today: Copilot, and Cursor's global scope) deliver context at
-    // project scope instead; d.cwd is already used as the projectRoot for this
-    // agent's other machine-level installs (stepDevCore/stepAmbient use it too).
+    // project scope instead.
     const scope: Scope = inj.type === 'managed-agents-md' && inj.globalPath === null ? 'local' : 'global';
 
+    // d.ctx.project?.root (computed via findProjectRoot, diagnostics/context.ts) rather
+    // than raw d.cwd: mutation-targets.ts's planInitMutationTargets computes the local
+    // AGENTS.md backup target via the same findProjectRoot(cwd) call, so using d.cwd here
+    // whenever it differs from the walked-up project root (e.g. `awm init` run from a
+    // subdirectory) would write to a path the backup session never snapshotted — a failed
+    // init couldn't roll it back. Falls back to d.cwd only when there's no discovered
+    // project yet, matching this op's own pre-existing behavior in that case.
     const op: ContextOp = {
         agent: d.agent,
         scope,
         registryRoot: d.registryRoot,
         installMethod: d.installMethod,
         profileExtensions: [],
-        projectRoot: d.cwd,
+        projectRoot: d.ctx.project?.root ?? d.cwd,
     };
     if (d.actions.contextStatus(op) === 'injected') return ok('machine.contextInjection', 'machine', 'skipped');
 

@@ -32,6 +32,18 @@ function injectFile(file: string, markdown: string): InjectResult {
     return 'injected';
 }
 
+/** For local-scope providers (Cursor/Copilot), context injection (`inject`) and project
+ *  constitution injection (`injectProject`) target the SAME file — `targetFile`'s local
+ *  branch resolves both to `<projectRoot>/<localFile>` (AGENTS.md). Global-scope providers
+ *  (Codex) don't have this collision: context goes to a separate global file, constitution
+ *  stays project-local. `mergeManagedBlock` supports only one managed slot per file, so for
+ *  local scope the two payloads must be combined into a single write — `inject`/`status`
+ *  append `PROJECT_GUIDANCE` here, and `injectProject` skips its own AGENTS.md write for
+ *  these providers (see its `contextCoversThisFile` check) so there is exactly one writer. */
+function withProjectGuidance(markdown: string, scope: Scope): string {
+    return scope === 'local' ? `${markdown}\n\n${PROJECT_GUIDANCE}` : markdown;
+}
+
 export class CodexAgentsStrategy implements InjectionStrategy {
     private globalPath(provider: ProviderConfig): string {
         const injection = provider.injection;
@@ -50,7 +62,7 @@ export class CodexAgentsStrategy implements InjectionStrategy {
             throw new Error(`materialized context not found at ${input.ref.absPath}`);
         }
         const markdown = fs.readFileSync(input.ref.absPath, 'utf8');
-        return injectFile(this.targetFile(provider, scope, input.projectRoot), markdown);
+        return injectFile(this.targetFile(provider, scope, input.projectRoot), withProjectGuidance(markdown, scope));
     }
 
     remove(input: InjectionInput, provider: ProviderConfig): void {
@@ -72,7 +84,7 @@ export class CodexAgentsStrategy implements InjectionStrategy {
 
         const expected = fs.readFileSync(input.ref.absPath, 'utf8');
         if (sha256(expected) !== input.ref.contentHash) return 'stale';
-        return body === normalizeManagedBody(expected) ? 'injected' : 'stale';
+        return body === normalizeManagedBody(withProjectGuidance(expected, scope)) ? 'injected' : 'stale';
     }
 
     injectGlobal(context: { markdown: string }, provider: ProviderConfig): InjectResult {
@@ -89,7 +101,17 @@ export class CodexAgentsStrategy implements InjectionStrategy {
         if (typeof projectRoot !== 'string' || projectRoot.length === 0) {
             throw new Error('projectRoot must be a non-empty string');
         }
-        const result = injectFile(path.join(projectRoot, 'AGENTS.md'), PROJECT_GUIDANCE);
+        // A provider whose context injection is ITSELF local-scope (globalPath === null —
+        // today: Cursor, Copilot) already owns this exact file's managed block via `inject()`
+        // (see withProjectGuidance) — writing PROJECT_GUIDANCE here too would be a second
+        // writer of the same single-slot block, silently overwriting whichever one runs last.
+        // Global-scope providers (Codex) have no such collision: their context targets a
+        // separate global file, so this is the only writer of the project AGENTS.md.
+        const injection = provider.injection;
+        const contextCoversThisFile = injection?.type === 'managed-agents-md' && injection.globalPath === null;
+        const result = contextCoversThisFile
+            ? 'unchanged'
+            : injectFile(path.join(projectRoot, 'AGENTS.md'), PROJECT_GUIDANCE);
         let carrierResult: InjectResult = 'unchanged';
         if (agent === 'cursor') {
             // Cursor's Background/Cloud Agent does not reliably read AGENTS.md (open,

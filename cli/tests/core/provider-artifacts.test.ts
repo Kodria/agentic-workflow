@@ -61,4 +61,16 @@ describe('scanLegacyArtifacts', () => {
         expect(legacyRemove).not.toHaveBeenCalledWith(agentPath);
         expect(fs.existsSync(agentPath)).toBe(true);
     });
+
+    it('Gap C — an agent with a null global skill dir (copilot) at global scope skips cleanly instead of crashing', () => {
+        // Copilot's skill.global is null (no user-level skill discovery mechanism —
+        // providers/index.ts) and its skill renderer is 'copilot-instructions', not
+        // 'link', so scanLegacyArtifacts's `dir === null` guard (config[scope]) is
+        // the same defensive shape this task's null-skip audit covers for the other
+        // 4 files. Proves the call is a clean no-op for copilot at 'global' scope —
+        // no crash, nothing listed — rather than throwing on a null target dir.
+        expect(() => scanLegacyArtifacts(['copilot'], 'global')).not.toThrow();
+        const listed = scanLegacyArtifacts(['copilot'], 'global');
+        expect(listed).toEqual([]);
+    });
 });
