@@ -23,6 +23,9 @@ import { preflightLinkArtifactsForCli } from './ui/provider-preflight';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
 import { discoverAllBundles } from './core/bundles';
 import { syncRegistries } from './core/registries';
+import { planInstall } from './core/install-planner';
+import { applyInstallPlan } from './core/install-transaction';
+import { findProjectRoot } from './core/profile';
 import path from 'path';
 import pc from 'picocolors';
 import fs from 'fs';
@@ -188,35 +191,34 @@ program.command('add [name]')
               return;
           }
 
-          const preflightOk = preflightLinkArtifactsForCli(targetAgents.flatMap((agent) =>
-              artifactsToInstall.map((artifact) => ({ agent, artifact })),
-          ));
-          if (!preflightOk) return;
-
           const installSpinner = spinner();
           installSpinner.start('Installing artifacts...');
 
           try {
-              const installed: string[] = [];
-              const skipped: string[] = [];
-
-              for (const currentAgent of targetAgents) {
-                  for (const artifact of artifactsToInstall) {
-                      const config = assertLinkRenderer(artifact.type, currentAgent);
-                      if (config === null) {
-                          skipped.push(`${artifact.name} (${currentAgent})`);
-                          continue;
-                      }
-                      const targetDir = config[scopeVal];
-                      if (targetDir === null) {
-                          skipped.push(`${artifact.name} (${currentAgent})`);
-                          continue;
-                      }
-                      const finalDest = path.join(targetDir, artifact.name);
-                      installArtifact(artifact.sourcePath, finalDest, methodVal);
-                      installed.push(`${artifact.name} → ${currentAgent} (${scopeVal})`);
-                  }
-              }
+              // Se delega en el MISMO pipeline que `awm add <bundle>`
+              // (planInstall + applyInstallPlan): transaccional, con backups,
+              // rollback y soporte real de renderers.
+              //
+              // Antes esto instalaba a mano y pasaba por `assertLinkRenderer`,
+              // que TIRA para cualquier renderer que no sea `link` — asi que
+              // `awm add --all` moria con "Renderer 'cursor-mdc' … is not
+              // implemented yet" para cursor y copilot, y para CODEX era puro
+              // dano colateral: sus skills son `link` e instalan bien, pero un
+              // solo artefacto `agent` mataba la corrida entera. El pipeline
+              // real ya soporta los tres renderers — `awm add <bundle> -a cursor`
+              // lo demuestra — asi que el unico problema era este camino paralelo.
+              const summary = applyInstallPlan(planInstall({
+                  artifacts: artifactsToInstall.map((a) => ({
+                      name: a.name, type: a.type, installName: a.name, sourcePath: a.sourcePath,
+                  })),
+                  selectedAgents: targetAgents,
+                  enabledAgents: prefs.enabledAgents,
+                  scope: scopeVal,
+                  projectRoot: findProjectRoot(process.cwd()) ?? process.cwd(),
+                  method: methodVal,
+              }));
+              const installed = summary.installed;
+              const skipped = summary.skipped;
 
               const updatedPrefs = targetAgents.reduce(
                   (current, agent) => enableAgent(current, agent),
