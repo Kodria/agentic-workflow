@@ -347,28 +347,47 @@ _Contexto: H4/D4. La mitad del equipo no puede ni instalar AWM._
 - Test: `cli/tests/core/context/`
 
 _Verificado 2026-08-07: NO es solo wiring. Tres acoplamientos reales a Codex:_
-- [ ] `injectGlobal()` hardcodea `~/.codex/AGENTS.md` (`codex-agents.ts:86`) →
+- [x] `injectGlobal()` hardcodea `~/.codex/AGENTS.md` (`codex-agents.ts:86`) →
   parametrizar por `provider.injection.globalPath` (el camino `inject()` ya lo
   hace bien — igualar).
-- [ ] `assertGlobalInput` solo acepta scope global → decidir scope por provider
+- [x] `assertGlobalInput` solo acepta scope global → decidir scope por provider
   (Copilot no tiene AGENTS.md global de repo; su bloque va a nivel proyecto).
-- [ ] `init/steps.ts:82` instancia `CodexAgentsStrategy` para `injectProject` —
+  Generalizado a `requiredScope(provider)`/`targetFile(...)` — primer uso real
+  de scope `'local'` en este módulo (antes solo tipado, nunca ejercido).
+- [x] `init/steps.ts:82` instancia `CodexAgentsStrategy` para `injectProject` —
   revisar la condición de agente que lo rodea para que cubra cursor/copilot.
-- [ ] El bloque gestionado instruye leer `SKILL.md` en los triggers (spine
+  Confirmado ya agnóstica al agente (gatea por `injection.type`, no por nombre)
+  — sin cambios necesarios ahí.
+- [x] El bloque gestionado instruye leer `SKILL.md` en los triggers (spine
   degradado a contexto leído — D4).
-- [ ] Referenciar `SKILL.md` desde el bloque gestionado con link markdown
+- [x] Referenciar `SKILL.md` desde el bloque gestionado con link markdown
   relativo estándar (`[nombre](ruta/relativa/SKILL.md)`) — NUNCA sintaxis
   `@ruta/relativa` (no existe en ninguna fuente primaria de Copilot ni Cursor;
-  corrección de Task 4.0, 2026-08-08).
-- [ ] Copilot: `injectProject` escribe SOLO `AGENTS.md` en la raíz del repo,
+  corrección de Task 4.0, 2026-08-08). Confirmado: la sintaxis `@path` nunca
+  existió en este código — `buildContext()` embebe el `SKILL.md` completo
+  inline, no lo referencia. Nada que corregir.
+- [x] Copilot: `injectProject` escribe SOLO `AGENTS.md` en la raíz del repo,
   nunca anidado (soporte fuera de la raíz apagado por default — corrección de
-  Task 4.0).
-- [ ] Cursor: además del `AGENTS.md` vía `managed-agents-md`, `injectProject`
+  Task 4.0). Confirmado ya cumplido — sin lógica de anidado en el código.
+- [x] Cursor: además del `AGENTS.md` vía `managed-agents-md`, `injectProject`
   también escribe `.cursor/rules/awm.mdc` (`alwaysApply: true`) con el mismo
   bloque gestionado como carrier redundante — el Background/Cloud Agent de
   Cursor no lee `AGENTS.md` de forma confiable (bug abierto sin fix; corrección
   de Task 4.0). Este archivo se genera del mismo contenido fuente que el bloque
-  de `AGENTS.md`, no es una estrategia de inyección nueva.
+  de `AGENTS.md`, no es una estrategia de inyección nueva. commits
+  `33f6b99`+`c7fa13d`. code-quality-review: 2 important (gate por
+  `provider.label` en vez de `AgentTarget` tipado; return value ignoraba el
+  resultado del carrier) + 1 minor, corregidos; re-revisado: approved.
+
+> **Pendiente para Task 4.4 (no scope creep aquí):** `contextGlobalCheck`
+> (`cli/src/core/diagnostics/provider-checks.ts:167`) hardcodea `scope:
+> 'global'`, así que el chequeo de contexto de `awm doctor` para Cursor/Copilot
+> (ambos legítimamente scope local ahora) siempre lee `'absent'` incluso tras
+> una inyección local correcta — no es un crash nuevo (mismo estado visible
+> `'absent'` que antes de este diff, por un camino de excepción distinto), pero
+> vuelve invisible para `doctor` la capacidad de scope local que esta task
+> agregó. Task 4.4 ("tier de capacidades visible") es dueña de `awm doctor`'s
+> reporte por provider — la corrección va ahí.
 
 ### Task 4.3: Renderers de skills por provider
 
