@@ -109,9 +109,25 @@ export class CodexAgentsStrategy implements InjectionStrategy {
         // separate global file, so this is the only writer of the project AGENTS.md.
         const injection = provider.injection;
         const contextCoversThisFile = injection?.type === 'managed-agents-md' && injection.globalPath === null;
-        const result = contextCoversThisFile
+        // La guarda de arriba solo mira a ESTE provider. Pero el bloque es uno
+        // solo por archivo, y OTRO provider ya habilitado (cursor/copilot, cuyo
+        // contexto ES este archivo) pudo haberlo escrito antes — con el contexto
+        // AWM completo, del que PROJECT_GUIDANCE es apenas la cola. Sin este
+        // chequeo, un `awm init -a codex` posterior lo reemplazaba por las 6
+        // lineas de PROJECT_GUIDANCE: 140 -> 6, y para Copilot ese archivo es su
+        // UNICO canal de entrega, asi que se quedaba sin nada. Y al reves otra
+        // vez en el siguiente init. Se compara contra el bloque real en disco en
+        // vez de asumir quien escribio: si ya cubre PROJECT_GUIDANCE, lo que hay
+        // es un superconjunto y pisarlo seria perder informacion.
+        const agentsMdPath = path.join(projectRoot, 'AGENTS.md');
+        const existingBody = fs.existsSync(agentsMdPath)
+            ? managedBlockBody(fs.readFileSync(agentsMdPath, 'utf-8'))
+            : null;
+        const alreadyCovered = existingBody !== null &&
+            normalizeManagedBody(existingBody).includes(normalizeManagedBody(PROJECT_GUIDANCE));
+        const result = contextCoversThisFile || alreadyCovered
             ? 'unchanged'
-            : injectFile(path.join(projectRoot, 'AGENTS.md'), PROJECT_GUIDANCE);
+            : injectFile(agentsMdPath, PROJECT_GUIDANCE);
         let carrierResult: InjectResult = 'unchanged';
         if (agent === 'cursor') {
             // Cursor's Background/Cloud Agent does not reliably read AGENTS.md (open,

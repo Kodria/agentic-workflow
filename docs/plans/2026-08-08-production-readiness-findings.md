@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-08
 **Source:** four independent audits (regression/back-compat · provider×command matrix · security/robustness · maintainability), each verified empirically against the built binary in isolated `HOME`/`AWM_HOME` tmpdirs.
-**Status:** 2 of 4 blockers closed. This document is the durable backlog for the rest.
+**Status:** all 4 blockers closed, plus both security blockers and 8 of the importants. Remaining open items are listed below.
 
 > Every finding below was reproduced **with the test suite green** (158 suites / 1608 tests). That is itself the headline: the fixtures encode the same wrong assumptions as the code. Coverage is 82% and it did not catch any of this.
 
@@ -33,7 +33,18 @@ This is the same shape as the two bugs already fixed this cycle (`awm init -a co
 
 ---
 
-## Open — blockers
+## Closed — blockers
+
+| ID | Finding | How it was verified |
+|---|---|---|
+| **B1** | `awm update`/`awm add` died for every provider when Copilot was enabled — `assertCompleteSharedGroup`'s inner filter had the guard, the line above it did not. | `awm update` now exits 0 with claude-code + copilot both enabled; an explicit `-a copilot -s global` still fails with its explanation. |
+| **B2** | `awm init` exited 1 for four of six providers with zero failed steps. | `--machine-only` now exits 0 for all but codex, which correctly exits 2 without its binary. |
+| **B3** | Cursor/Copilot and Codex overwrote each other's `AGENTS.md` block (140 → 6 → 140 lines). | Rich content now survives in either init order. |
+| **B4** | `awm remove` collapsed same-name artifacts across types, resolved local paths against cwd, offered the user's own files, and was a no-op for rendered artifacts. | Ownership ledger cross-check + type-keyed map + explicit project root. |
+
+Closed importants: **I1, I2** (renderer filenames — one table, idempotency restored), **I3** (`add --all` routed through the real pipeline), **I5** (`update` regenerates managed-agents-md context), **I6** (gitignore only covers link artifacts), **I7** (settings.json no longer clobbered), **I8** (Windows junction + stage-before-remove, resync copy fallback), **I9** (registry JSON validated), **I10** (`awm pin base` reaches the key the resolver reads). `stale` now counts as degrading, so an out-of-date context is visible to a CI exit code.
+
+## Still open — blockers
 
 ### B1 · `awm update` and `awm add` die for every provider when Copilot is enabled
 `core/reconciliation.ts:82`, `core/bundle-install.ts:84` — both hardcode `scope: 'global'`; `physicalTarget` throws for a provider whose `skill.global` is `null`.
