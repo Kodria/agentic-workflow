@@ -126,6 +126,26 @@ describe('runDoctor', () => {
         expect(code).toBe(1);
     });
 
+    // Finding #1 (R7 QA): the real `awm doctor` command (this `runDoctor`,
+    // text mode — not `renderReport`, which only `init.ts` calls) must
+    // actually surface the Windows caveat on native Windows.
+    it('surfaces the Windows caveat in real text output on native Windows only', () => {
+        const realPlatform = process.platform;
+        try {
+            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+            writeSpy.mockClear();
+            runDoctor({ cwd: tmpHome });
+            expect(stdout()).toMatch(/awm watch/i);
+
+            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+            writeSpy.mockClear();
+            runDoctor({ cwd: tmpHome });
+            expect(stdout()).not.toMatch(/awm watch/i);
+        } finally {
+            Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+        }
+    });
+
     it('--json emits a parseable provider report and keeps the same exit code', () => {
         const code = runDoctor({ cwd: tmpHome, json: true });
         const parsed = JSON.parse(stdout());

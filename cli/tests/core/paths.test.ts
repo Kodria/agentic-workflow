@@ -7,8 +7,8 @@ import {
   platform,
   isWindowsNative,
   platformLabel,
-  warnIfUnsupportedPlatform,
-  WINDOWS_NATIVE_WARNING,
+  noteWindowsCaveat,
+  WINDOWS_KNOWN_GAP,
   resolveOnPath,
 } from '../../src/core/paths';
 
@@ -79,20 +79,49 @@ describe('core/paths', () => {
     setPlatform('darwin');
     expect(platformLabel()).toBe('macOS');
     setPlatform('win32');
-    expect(platformLabel()).toContain('WSL');
+    // Windows is a first-class, CI-verified platform since R6 — the label no
+    // longer hedges toward WSL, and must not silently regress back to it.
+    expect(platformLabel()).toBe('Windows (native, CI-verified)');
+    expect(platformLabel()).not.toContain('WSL');
   });
 
-  it('warnIfUnsupportedPlatform calls the logger only on win32', () => {
+  it('noteWindowsCaveat calls the logger only on win32, with the narrow watch-supervisor gap', () => {
     const calls: string[] = [];
     const log = (m: string) => calls.push(m);
 
     setPlatform('linux');
-    warnIfUnsupportedPlatform(log);
+    noteWindowsCaveat(log);
     expect(calls).toHaveLength(0);
 
     setPlatform('win32');
-    warnIfUnsupportedPlatform(log);
-    expect(calls).toEqual([WINDOWS_NATIVE_WARNING]);
+    noteWindowsCaveat(log);
+    expect(calls).toEqual([WINDOWS_KNOWN_GAP]);
+    // The message must assert Windows support, not disclaim it, and must name
+    // the one specific gap rather than a blanket "some things may not work"
+    // hedge — pinning both halves so neither regresses independently.
+    expect(WINDOWS_KNOWN_GAP).toMatch(/supported and continuously verified/i);
+    expect(WINDOWS_KNOWN_GAP).toMatch(/awm watch/i);
+    expect(WINDOWS_KNOWN_GAP).not.toMatch(/WSL/i);
+    expect(WINDOWS_KNOWN_GAP).not.toMatch(/not supported/i);
+  });
+
+  it('noteWindowsCaveat propagates a throwing logger instead of swallowing it', () => {
+    // `noteWindowsCaveat` has no try/catch around the logger call — callers
+    // (init.ts/update.ts/sync.ts/doctor.ts) all pass simple `console.log`
+    // wrappers that are not expected to throw, and every caller controls its
+    // own logger, so there is no shared reason for this helper to be
+    // defensive on their behalf. Pin that behavior explicitly: a throwing
+    // logger's error propagates out of `noteWindowsCaveat`, it is not
+    // swallowed.
+    setPlatform('win32');
+    const boom = new Error('logger exploded');
+    const throwingLog = () => { throw boom; };
+    expect(() => noteWindowsCaveat(throwingLog)).toThrow(boom);
+
+    // And on non-Windows the logger is never even invoked, so a throwing
+    // logger is harmless there.
+    setPlatform('linux');
+    expect(() => noteWindowsCaveat(throwingLog)).not.toThrow();
   });
 
   describe('resolveOnPath', () => {

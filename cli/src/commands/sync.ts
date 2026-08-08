@@ -11,6 +11,7 @@
 // (which already imports clack at the top and is never `require()`d by tests).
 import pc from 'picocolors';
 import { AgentTarget } from '../providers';
+import { noteWindowsCaveat } from '../core/paths';
 import { findProjectRoot, readProfile } from '../core/profile';
 import {
     syncRegistries, readRegistriesConfig, verifyMinCliVersions, assertRegistryGates, RegistrySyncResult,
@@ -52,6 +53,10 @@ export async function runSyncCore(
     options: RunSyncOptions,
     deps: Partial<RunSyncDeps> = {},
 ): Promise<RunSyncResult> {
+    // Fires at most once per `awm sync` run, native Windows only — the single
+    // emission point for this command (mirrors `runInit`/`runUpdateCore`).
+    noteWindowsCaveat((m) => console.log(pc.dim(`ℹ ${m}`)));
+
     const d: RunSyncDeps = { ...defaultDeps, ...deps };
     const cwd = options.cwd ?? process.cwd();
 

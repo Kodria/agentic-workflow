@@ -568,7 +568,7 @@ _Contexto: H6/D6. Cada merge publica sin correr los tests._
 **Files:**
 - Create: `.github/workflows/ci.yml`
 
-- [ ] Matriz `ubuntu-latest` + `windows-latest`, Node 22: `npm ci`, `npm run build`,
+- [x] Matriz `ubuntu-latest` + `windows-latest`, Node 22: `npm ci`, `npm run build`,
   `npx tsc --noEmit`, `npx jest --runInBand`. La pata Windows es la red que faltó
   para H1.
 
@@ -577,7 +577,7 @@ _Contexto: H6/D6. Cada merge publica sin correr los tests._
 **Files:**
 - Modify: `.github/workflows/release.yml`
 
-- [ ] `npx jest --runInBand` antes del paso Release. Rojo → no publica. El publish
+- [x] `npx jest --runInBand` antes del paso Release. Rojo → no publica. El publish
   sigue automático; la condición nueva es estar verde.
 
 ### Task 6.3: Cierre R6 — verificar `ci.yml` corriendo en el PR de esta misma
@@ -591,7 +591,7 @@ _Contexto: H7/D7. Último: documenta lo que ya quedó verdadero._
 
 ### Task 7.1: CONSTITUTION.md de `agentic-workflow`
 
-- [ ] Secciones nuevas: **Matriz de soporte** (stacks R3, agentes R4 con tiers,
+- [x] Secciones nuevas: **Matriz de soporte** (stacks R3, agentes R4 con tiers,
   hosts R2, OS con Windows post-R1) como declaración de contrato; **Frontera
   atendido/desatendido** (regla del registry, citada como política del producto);
   **Decisión pendiente registrada:** piso organizacional de sensores (qué es, por
@@ -599,7 +599,7 @@ _Contexto: H7/D7. Último: documenta lo que ya quedó verdadero._
 
 ### Task 7.2: AGENTS.md de `agentic-workflow`
 
-- [ ] Reencuadrar de notas personales a guía de mantenimiento del producto. Purgar
+- [x] Reencuadrar de notas personales a guía de mantenimiento del producto. Purgar
   entradas obsoletas (aplicar merge-and-prune; `awm context-budget` como evidencia
   del delta).
 

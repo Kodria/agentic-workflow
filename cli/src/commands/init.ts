@@ -22,7 +22,7 @@ import { assertProviderSupported } from '../core/provider-version';
 import type { InitOutcome, InitActions, StepResult } from '../core/init/types';
 import type { AgentTarget } from '../providers';
 import { requireAgentTarget } from '../providers';
-import { warnIfUnsupportedPlatform } from '../core/paths';
+import { noteWindowsCaveat } from '../core/paths';
 import { enableAgent, loadPreferences, savePreferences } from '../utils/config';
 
 // ---------------------------------------------------------------------------
@@ -122,6 +122,12 @@ export interface RunInitOptions {
 }
 
 export async function runInit(opts: RunInitOptions = {}): Promise<number> {
+    // Fires at most once per `awm init` run (native Windows only) — this is
+    // the single emission point; `renderReport`/`renderInitOutcome` below do
+    // NOT also embed it (that used to triple-fire the same text: once here,
+    // once in the "Initial state" render, once in "Final state").
+    noteWindowsCaveat((m) => console.log(pc.dim(`ℹ ${m}`)));
+
     const cwd = opts.cwd ?? process.cwd();
     const agent: AgentTarget = opts.agent === undefined ? 'claude-code' : requireAgentTarget(opts.agent);
 
@@ -325,7 +331,6 @@ export function registerInitCommand(program: Command): void {
         .option('--machine-only', 'Only run machine-level steps (skip project steps)')
         .option('--json', 'Emit the InitOutcome as JSON — on success and on failure (failed steps + rollback)')
         .action(async (options: { yes?: boolean; agent?: string; machineOnly?: boolean; json?: boolean }) => {
-            warnIfUnsupportedPlatform((m) => console.warn(pc.yellow(`⚠ ${m}`)));
             const code = await runInit({
                 yes: options.yes,
                 agent: options.agent,

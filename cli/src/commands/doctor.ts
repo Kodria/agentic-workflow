@@ -4,7 +4,7 @@ import pc from 'picocolors';
 import { gatherContext } from '../core/diagnostics/context';
 import { computeProviderOverall } from '../core/diagnostics/checks';
 import { CheckReport, CheckResult, ProviderCheck, ProviderCheckState, ProviderDiagnosticReport } from '../core/diagnostics/types';
-import { platformLabel } from '../core/paths';
+import { platformLabel, isWindowsNative, WINDOWS_KNOWN_GAP } from '../core/paths';
 import { getPreferences } from '../utils/config';
 import { resolveAgentTargets } from '../core/agent-targets';
 
@@ -92,6 +92,13 @@ function providerCheckLine(check: ProviderCheck): string {
 export function renderProviderReport(report: ProviderDiagnosticReport): string {
     const lines: string[] = [];
     lines.push(pc.bold('AWM · harness status'));
+    lines.push(pc.dim(`  platform: ${platformLabel()}`));
+    // Advisory only, native Windows only. This is the text rendered by the
+    // real `awm doctor` command (`runDoctor` below) — the diagnostics surface
+    // an operator actually goes looking at for platform-specific detail.
+    // `init`/`update`/`sync` also note it once each, at the top of their own
+    // run (`runInit`/`runUpdateCore`/`runSyncCore`), independently of this.
+    if (isWindowsNative()) lines.push(pc.dim(`  ${WINDOWS_KNOWN_GAP.replace(/\n\s*/g, ' ')}`));
     lines.push('');
     for (const provider of report.providers) {
         lines.push(`Provider: ${provider.label} ${pc.dim(`(${provider.tier})`)}`);
