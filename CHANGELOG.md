@@ -1,3 +1,12 @@
+## v3.13.4 - 2026-08-08
+
+### Fixes
+- **tests:** retry the whole spawn, not just the liveness query, on windows-latest
+- **journal:** widen pidExistsNative retry budget — 3x50ms wasn't enough
+- **tests:** sync-gates.test.ts hit the same real-git-clone timeout+EBUSY gap
+- **init:** stop awm init -a copilot from crashing on the ambient step too
+- **init:** stop awm init -a copilot from crashing on the devCore step
+
 ## v3.13.3 - 2026-08-08
 
 ### Fixes
