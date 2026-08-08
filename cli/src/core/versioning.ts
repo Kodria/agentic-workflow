@@ -111,8 +111,22 @@ export function machineVersionOpts(registryName: string): { pin?: string; channe
 }
 
 /** Compara "X.Y.Z" vs "X.Y.Z" (sin prefijo v) numéricamente. <0, 0, >0. */
+/** Compara dos semver X.Y.Z.
+ *
+ *  Antes devolvia `NaN` ante una entrada malformada (`'1.2'`, `'x.y.z'`), y como
+ *  `NaN > 0` y `NaN < 0` son AMBOS false, el gate de version fallaba ABIERTO:
+ *  `verifyMinCliVersions` dejaba pasar en silencio un CLI por debajo del minimo,
+ *  y el aviso de actualizacion no disparaba nunca. Para un gate, la direccion
+ *  correcta de fallo es la contraria. Ahora una entrada que no es semver lanza,
+ *  nombrando el valor: es el llamador quien decide como tratarlo, con
+ *  informacion suficiente para hacerlo. */
 export function compareSemver(a: string, b: string): number {
-    const pa = a.split('.').map(Number);
-    const pb = b.split('.').map(Number);
+    const parse = (v: string): [number, number, number] => {
+        const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(v).trim());
+        if (!m) throw new Error(`not a semver version: ${JSON.stringify(v)}`);
+        return [Number(m[1]), Number(m[2]), Number(m[3])];
+    };
+    const pa = parse(a);
+    const pb = parse(b);
     return (pa[0] - pb[0]) || (pa[1] - pb[1]) || (pa[2] - pb[2]);
 }

@@ -117,7 +117,7 @@ export function discoverWorkflows(roots: string[] = contentRoots()): WorkflowArt
         const overrides = readRegistryManifest(root).overrides;
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
             if (entry.isDirectory() || !entry.name.endsWith('.md')) continue;
-            const name = entry.name.replace('.md', '');
+            const name = entry.name.replace(/\.md$/, '');
             const filePath = path.join(dir, entry.name);
             mergeEntry('workflow', byName, {
                 name,
@@ -142,7 +142,7 @@ export function discoverAgents(roots: string[] = contentRoots()): AgentArtifact[
         const overrides = readRegistryManifest(root).overrides;
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
             if (entry.isDirectory() || !entry.name.endsWith('.md')) continue;
-            const name = entry.name.replace('.md', '');
+            const name = entry.name.replace(/\.md$/, '');
             const filePath = path.join(dir, entry.name);
             mergeEntry('agent', byName, {
                 name,

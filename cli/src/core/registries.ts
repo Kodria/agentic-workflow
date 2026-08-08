@@ -255,7 +255,16 @@ export function verifyMinCliVersions(current: string = cliVersion()): CliVersion
         if (!fs.existsSync(reg.contentRoot)) continue;
         let min: string | undefined;
         try { min = readRegistryManifest(reg.contentRoot).minCliVersion; } catch { continue; }
-        if (min && compareSemver(current, min) < 0) failures.push({ name: reg.name, min });
+        // Falla CERRADO: si alguna de las dos versiones no es legible, se
+        // reporta el fallo en vez de dejar pasar. Antes `compareSemver`
+        // devolvia NaN y `NaN < 0` es false, asi que un `minCliVersion`
+        // malformado hacia que el gate se saltara en silencio.
+        if (!min) continue;
+        try {
+            if (compareSemver(current, min) < 0) failures.push({ name: reg.name, min });
+        } catch {
+            failures.push({ name: reg.name, min });
+        }
     }
     return failures;
 }
