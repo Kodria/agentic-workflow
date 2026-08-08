@@ -1,3 +1,8 @@
+## v3.13.0 - 2026-08-08
+
+### Features
+- **preflight:** legacy-adoption ratchet discoverability (R5) (#31)
+
 ## v3.12.0 - 2026-08-08
 
 ### Features
