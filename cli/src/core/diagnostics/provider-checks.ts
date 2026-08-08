@@ -71,6 +71,13 @@ function skillsGlobalCheck(
         try {
             entries = fs.readdirSync(dir);
         } catch {
+            // best-effort: any readdirSync failure (absent dir, EACCES, …) reads the
+            // same as "nothing installed" here — a permissions error surfacing as
+            // `remediationCode: 'awm-init'` is a worse remedy than none, but this
+            // check has no channel to report "can't tell" separately from "absent"
+            // (same tradeoff already made by this file's agentsNativeCheck and by
+            // skill-integrity.ts's classifyGlobalSkills — a systemic, pre-existing
+            // pattern in this codebase, not introduced here).
             entries = [];
         }
         const present = entries.length > 0;
