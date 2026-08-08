@@ -1,19 +1,37 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execSync } from 'child_process';
 import { computeSensorStatus } from '../../../src/commands/sensors/status';
 
-jest.mock('child_process', () => ({ execSync: jest.fn() }));
-const mockExecSync = execSync as jest.MockedFunction<typeof execSync>;
+// `resolveOnPath` resuelve PATH en proceso (ya no invoca un shell — ver
+// core/paths.ts). Por eso estos tests controlan un PATH aislado en vez de
+// mockear `execSync`: ademas de reflejar el mecanismo real, los vuelve
+// deterministas, que antes no lo eran (el caso "binario ausente" pasaba solo
+// en maquinas donde ese binario realmente no estuviera instalado).
 
 describe('computeSensorStatus', () => {
     let tmpDir: string;
+    let pathDir: string;
+    let originalPath: string | undefined;
     beforeEach(() => {
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-'));
-        mockExecSync.mockReset();
+        pathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-path-'));
+        originalPath = process.env.PATH;
+        process.env.PATH = pathDir;   // PATH vacio salvo lo que cada test instale
     });
-    afterEach(() => { fs.rmSync(tmpDir, { recursive: true }); });
+    afterEach(() => {
+        if (originalPath === undefined) delete process.env.PATH;
+        else process.env.PATH = originalPath;
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        fs.rmSync(pathDir, { recursive: true, force: true });
+    });
+
+    /** Instala un binario ejecutable real en el PATH aislado del test. */
+    function installOnPath(tool: string) {
+        const p = path.join(pathDir, tool);
+        fs.writeFileSync(p, '#!/bin/sh\nexit 0\n');
+        fs.chmodSync(p, 0o755);
+    }
 
     it('returns NOT_CONFIGURED when .awm/sensors.json missing', () => {
         const result = computeSensorStatus(tmpDir);
@@ -84,7 +102,7 @@ describe('computeSensorStatus', () => {
             pack: 'js-ts',
             sensors: { security: { cmd: 'semgrep --json .', fast: false } }
         }));
-        mockExecSync.mockImplementation(() => { throw new Error('not found'); });
+        // PATH aislado y vacio => semgrep no resuelve.
         const result = computeSensorStatus(tmpDir);
         expect(result.overall).toBe('DEGRADED');
         expect(result.checks.security.ok).toBe(false);
@@ -101,17 +119,14 @@ describe('computeSensorStatus', () => {
             Object.defineProperty(process, 'platform', { value: originalPlatform });
         });
 
-        it('resolves an installed binary using `command -v`, not `where`', () => {
+        it('resuelve un binario instalado recorriendo PATH, sin invocar un shell', () => {
             fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
             fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
                 pack: 'js-ts',
                 sensors: { security: { cmd: 'semgrep --json .', fast: false } }
             }));
 
-            mockExecSync.mockImplementation(((cmd: string) => {
-                if (cmd === 'command -v semgrep') return Buffer.from('/usr/bin/semgrep');
-                throw new Error(`not found: ${cmd}`);
-            }) as typeof execSync);
+            installOnPath('semgrep');
 
             const result = computeSensorStatus(tmpDir);
             expect(result.overall).toBe('HEALTHY');

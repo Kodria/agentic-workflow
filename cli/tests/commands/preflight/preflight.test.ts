@@ -201,18 +201,33 @@ describe('preflight', () => {
         // sensor configuration, and an empty sensors object now fails `checkManifest`
         // (see the `total === 0` branch), which would drag `report.status` off 'ready'
         // for reasons unrelated to what these tests exercise.
-        beforeEach(() => { mockExecSync.mockReset(); });
+        // `resolveOnPath` resuelve PATH en proceso (ya no invoca un shell — ver la
+        // nota de seguridad en core/paths.ts), asi que la disponibilidad de `gh`/
+        // `glab` se simula con un PATH aislado, no mockeando `execSync`. Ademas de
+        // reflejar el mecanismo real, esto vuelve deterministas los casos de
+        // "no esta en PATH", que antes dependian de que la maquina no lo tuviera.
+        let pathDir: string;
+        let originalPath: string | undefined;
+        beforeEach(() => {
+            pathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-preflight-path-'));
+            originalPath = process.env.PATH;
+            process.env.PATH = pathDir;
+        });
+        afterEach(() => {
+            if (originalPath === undefined) delete process.env.PATH;
+            else process.env.PATH = originalPath;
+            fs.rmSync(pathDir, { recursive: true, force: true });
+        });
+        function installOnPath(tool: string) {
+            const f = path.join(pathDir, tool);
+            fs.writeFileSync(f, '#!/bin/sh\nexit 0\n');
+            fs.chmodSync(f, 0o755);
+        }
 
         it('reports github + gh available, and does not affect status', () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'git@github.com:kodria/agentic-workflow.git');
-            // `resolveOnPath('gh')` runs `command -v gh` on POSIX but `where gh` on
-            // win32 (see paths.ts) — match both invocation forms so this test's
-            // "gh is available" fixture holds on windows-latest CI too.
-            mockExecSync.mockImplementation(((cmd: string) => {
-                if (cmd === 'command -v gh' || cmd === 'where gh') return Buffer.from('/usr/bin/gh');
-                throw new Error(`not found: ${cmd}`);
-            }) as typeof execSync);
+            installOnPath('gh');
 
             const report = preflight(dir);
 
@@ -226,9 +241,7 @@ describe('preflight', () => {
             // advisory contract: it must not drag an otherwise-clean repo to `degraded`.
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'https://gitlab.com/kodria/agentic-workflow.git');
-            mockExecSync.mockImplementation((() => {
-                throw new Error('not found');
-            }) as typeof execSync);
+            // PATH aislado y vacio => glab no resuelve.
 
             const report = preflight(dir);
 
@@ -313,7 +326,7 @@ describe('preflight', () => {
             // test guards is that it must never again read as gitlab.
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'ssh://gitlab@github.company-internal.com:22/team/repo.git');
-            mockExecSync.mockImplementation((() => { throw new Error('not found'); }) as typeof execSync);
+            // PATH real: estos casos no dependen de gh/glab.
 
             const report = preflight(dir);
 
@@ -357,7 +370,7 @@ describe('preflight', () => {
         it('still detects github.com over HTTPS', () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'https://github.com/org/repo.git');
-            mockExecSync.mockImplementation((() => { throw new Error('not found'); }) as typeof execSync);
+            // PATH real: estos casos no dependen de gh/glab.
 
             const report = preflight(dir);
 
@@ -367,7 +380,7 @@ describe('preflight', () => {
         it('still detects github.com over SSH shorthand', () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'git@github.com:org/repo.git');
-            mockExecSync.mockImplementation((() => { throw new Error('not found'); }) as typeof execSync);
+            // PATH real: estos casos no dependen de gh/glab.
 
             const report = preflight(dir);
 
@@ -377,7 +390,7 @@ describe('preflight', () => {
         it('still detects gitlab over HTTPS', () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'https://gitlab.example.com/org/repo.git');
-            mockExecSync.mockImplementation((() => { throw new Error('not found'); }) as typeof execSync);
+            // PATH real: estos casos no dependen de gh/glab.
 
             const report = preflight(dir);
 
@@ -387,7 +400,7 @@ describe('preflight', () => {
         it('still detects gitlab over SSH shorthand', () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'git@gitlab.example.com:org/repo.git');
-            mockExecSync.mockImplementation((() => { throw new Error('not found'); }) as typeof execSync);
+            // PATH real: estos casos no dependen de gh/glab.
 
             const report = preflight(dir);
 

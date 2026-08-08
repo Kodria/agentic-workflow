@@ -1,6 +1,5 @@
 import os from 'os';
 import path from 'path';
-import { execSync } from 'child_process';
 import {
   homeDir,
   awmHome,
@@ -12,8 +11,6 @@ import {
   resolveOnPath,
 } from '../../src/core/paths';
 
-jest.mock('child_process', () => ({ execSync: jest.fn() }));
-const mockExecSync = execSync as jest.MockedFunction<typeof execSync>;
 
 describe('core/paths', () => {
   let origHome: string | undefined;
@@ -23,7 +20,6 @@ describe('core/paths', () => {
   beforeEach(() => {
     origHome = process.env.HOME;
     origAwmHome = process.env.AWM_HOME;
-    mockExecSync.mockReset();
   });
 
   afterEach(() => {
@@ -124,39 +120,11 @@ describe('core/paths', () => {
     expect(() => noteWindowsCaveat(throwingLog)).not.toThrow();
   });
 
-  describe('resolveOnPath', () => {
-    it('uses `command -v` on POSIX and returns true when the binary resolves', () => {
-      setPlatform('linux');
-      mockExecSync.mockImplementation(((cmd: string) => {
-        if (cmd === 'command -v semgrep') return Buffer.from('/usr/bin/semgrep');
-        throw new Error(`not found: ${cmd}`);
-      }) as typeof execSync);
-
-      expect(resolveOnPath('semgrep')).toBe(true);
-    });
-
-    it('returns false on POSIX when `command -v` fails to resolve the binary', () => {
-      setPlatform('linux');
-      mockExecSync.mockImplementation(() => { throw new Error('not found'); });
-
-      expect(resolveOnPath('semgrep')).toBe(false);
-    });
-
-    it('uses `where` on win32, not `command -v`', () => {
-      setPlatform('win32');
-      mockExecSync.mockImplementation(((cmd: string) => {
-        if (cmd === 'where semgrep') return Buffer.from('C:\\tools\\semgrep.exe');
-        throw new Error(`not found: ${cmd}`);
-      }) as typeof execSync);
-
-      expect(resolveOnPath('semgrep')).toBe(true);
-    });
-
-    it('returns false on win32 when `where` cannot find the binary', () => {
-      setPlatform('win32');
-      mockExecSync.mockImplementation(() => { throw new Error('not found'); });
-
-      expect(resolveOnPath('semgrep')).toBe(false);
-    });
-  });
+  // `resolveOnPath` ya no invoca un shell (ni ningun subproceso): resuelve PATH
+  // en proceso. Los tests que vivian aca mockeaban `execSync` y verificaban las
+  // strings `command -v X` / `where X`, o sea la implementacion removida — y dos
+  // de ellos ademas pasaban por accidente en cualquier maquina que tuviera el
+  // binario del fixture instalado de verdad. Su reemplazo, con PATH controlado y
+  // el exploit de inyeccion como ancla, esta en
+  // tests/core/path-resolution-no-shell.test.ts.
 });

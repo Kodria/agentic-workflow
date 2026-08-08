@@ -39,9 +39,9 @@ AWM has **two layers**, and **one command (`awm init`) bootstraps both**:
 
 ### 1.1 Prerequisites
 
-- `git`, `node`, `npm` on your `$PATH`.
+- `git`, `node` (**22+**), `npm` on your `$PATH`.
 - A working directory that is a git repo. If it isn't one yet: `git init`.
-- **macOS or Linux.** Windows is not supported natively (symlinks + Unix paths); use [WSL](https://learn.microsoft.com/en-us/windows/wsl/) instead.
+- **Linux, macOS, or Windows.** All three are supported; Linux and Windows are verified on every PR by the CI matrix. On native Windows, enable Developer Mode so symlink installs work unprivileged, or use `awm add --method copy`. [WSL](https://learn.microsoft.com/en-us/windows/wsl/) also works and reports as Linux. Full per-OS detail: [installation.md](installation.md).
 
 ### 1.2 Install the CLI
 
