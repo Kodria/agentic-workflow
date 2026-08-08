@@ -14,6 +14,7 @@
 // La causa era una asimetria de guarda clasica: el `.filter()` interno de
 // `assertCompleteSharedGroup` ya toleraba el caso, pero la linea de arriba
 // —que corre primero— no.
+import path from 'path';
 import { planInstall } from '../../src/core/install-planner';
 import type { ArtifactIntent } from '../../src/core/install-planner';
 
@@ -70,7 +71,11 @@ describe('planInstall: un provider incapaz no puede romper el plan de los demas'
             method: 'symlink',
         });
         expect(plan.operations).toHaveLength(1);
-        expect(plan.operations[0].targetPath).toContain('.github/instructions');
+        // `path.join`, no un literal con '/': `physicalTarget` construye la ruta con el
+        // separador de la plataforma, asi que en Windows el destino real es
+        // `.github\instructions` y la asercion POSIX-hardcodeada fallaba sobre un
+        // destino perfectamente correcto.
+        expect(plan.operations[0].targetPath).toContain(path.join('.github', 'instructions'));
         expect(plan.operations[0].targetPath).toContain('using-awm.instructions.md');
     });
 

@@ -87,7 +87,15 @@ describe('resolveOnPath: sin shell, inmune a inyeccion', () => {
         expect(resolveOnPath(payload)).toBe(false);
     });
 
-    it('en POSIX exige el bit de ejecucion — un archivo no ejecutable no es un binario resoluble', () => {
+    // Solo donde el filesystem PUEDE expresar la premisa. `setPlatform('linux')` cambia
+    // lo que hace el codigo, no lo que hace el disco: en un runner Windows `chmod 0o644`
+    // no quita ningun bit de ejecucion (no existe), asi que `accessSync(X_OK)` aprueba el
+    // archivo y el test fallaba sobre un producto que se comporta bien. La rama win32 —
+    // "no exige bit de ejecucion" — la cubre su propio caso mas abajo, que SI es
+    // observable ahi.
+    const itPosix = realPlatform === 'win32' ? it.skip : it;
+
+    itPosix('en POSIX exige el bit de ejecucion — un archivo no ejecutable no es un binario resoluble', () => {
         setPlatform('linux');
         putBinary('noexec', 0o644);
         expect(resolveOnPath('noexec')).toBe(false);
@@ -111,7 +119,12 @@ describe('resolveOnPath: sin shell, inmune a inyeccion', () => {
     });
 
     it('un nombre con separador de ruta se chequea como ruta directa, sin recorrer PATH', () => {
-        setPlatform('linux');
+        // La plataforma REAL, no una simulada: el invariante es "un nombre que trae el
+        // separador de SU plataforma se resuelve como ruta". Fijar 'linux' mientras el
+        // disco entrega `D:\...\directo` mezclaba las dos mitades — el codigo buscaba
+        // '/' y la ruta traia '\\' — y fallaba por la contradiccion del arreglo, no por
+        // el producto. Asi el caso corre de verdad en los dos sistemas operativos.
+        setPlatform(realPlatform);
         const abs = putBinary('directo');
         expect(resolveOnPath(abs)).toBe(true);
         expect(resolveOnPath(path.join(binDir, 'no-esta'))).toBe(false);
