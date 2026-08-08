@@ -495,4 +495,14 @@ describe('stepContextInjection', () => {
         expect(r.action).toBe('applied');
         expect(a.installContext).toHaveBeenCalledWith(expect.objectContaining({ agent: 'codex', scope: 'global' }));
     });
+
+    it('installs Copilot context at local scope with projectRoot (no global AGENTS.md-equivalent)', () => {
+        const a = spies();
+        a.contextStatus.mockReturnValue('absent');
+        const r = stepContextInjection(deps({ machine: machine(), project: null }, a, { agent: 'copilot', cwd: '/repo' }));
+        expect(r.action).toBe('applied');
+        expect(a.installContext).toHaveBeenCalledWith(
+            expect.objectContaining({ agent: 'copilot', scope: 'local', projectRoot: '/repo' }),
+        );
+    });
 });

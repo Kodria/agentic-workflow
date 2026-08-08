@@ -5,7 +5,7 @@ import { HookMergeStrategy } from './strategies/hook-merge';
 import { ConfigInstructionsStrategy } from './strategies/config-instructions';
 import { CodexAgentsStrategy } from './strategies/codex-agents';
 import { buildContext } from './provider';
-import { materialize, globalContextPath } from './materializer';
+import { materialize, globalContextPath, projectContextPath } from './materializer';
 import { InjectionInput, InjectionState, MaterializedRef } from './types';
 
 export type ContextOp = {
@@ -14,6 +14,10 @@ export type ContextOp = {
     registryRoot: string;
     installMethod: 'symlink' | 'copy';
     profileExtensions: string[];
+    /** Required when scope === 'local' (e.g. providers with a null injection.globalPath).
+     *  Existing global-scope-only callers (opencode's config-instructions regen/diagnostics
+     *  paths) never set this. */
+    projectRoot?: string;
 };
 
 type Overrides = { providerOverride?: ProviderConfig; contextPathOverride?: string };
@@ -37,19 +41,35 @@ export class InjectionOrchestrator {
         }
     }
 
+    /** Materialized-source content path for `op.scope` — global under ~/.awm, local under the project. */
+    private contextPathFor(op: ContextOp): string {
+        if (this.overrides.contextPathOverride) return this.overrides.contextPathOverride;
+        if (op.scope === 'local') {
+            if (!op.projectRoot) throw new Error('projectRoot is required for local-scope context operations');
+            return projectContextPath(op.projectRoot);
+        }
+        return globalContextPath();
+    }
+
     /** Full input: builds context from registry and materializes to disk. Used by installContext only. */
     private inputFor(op: ContextOp): InjectionInput {
         const ctx = buildContext({ registryRoot: op.registryRoot, profileExtensions: op.profileExtensions });
-        const absPath = this.overrides.contextPathOverride ?? globalContextPath();
+        const absPath = this.contextPathFor(op);
         const ref = materialize(ctx, absPath, op.scope);
-        return { ref, registryRoot: op.registryRoot, installMethod: op.installMethod, agent: op.agent, scope: op.scope };
+        return {
+            ref, registryRoot: op.registryRoot, installMethod: op.installMethod,
+            agent: op.agent, scope: op.scope, projectRoot: op.projectRoot,
+        };
     }
 
     /** Path-only input: no buildContext, no materialize. Safe for remove() which never reads contentHash. */
     private pathInputFor(op: ContextOp): InjectionInput {
-        const absPath = this.overrides.contextPathOverride ?? globalContextPath();
+        const absPath = this.contextPathFor(op);
         const ref: MaterializedRef = { absPath, scope: op.scope, contentHash: '' };
-        return { ref, registryRoot: op.registryRoot, installMethod: op.installMethod, agent: op.agent, scope: op.scope };
+        return {
+            ref, registryRoot: op.registryRoot, installMethod: op.installMethod,
+            agent: op.agent, scope: op.scope, projectRoot: op.projectRoot,
+        };
     }
 
     /**
@@ -57,7 +77,7 @@ export class InjectionOrchestrator {
      * Avoids silently correcting a stale file before the strategy can observe it.
      */
     private statusInputFor(op: ContextOp): InjectionInput {
-        const absPath = this.overrides.contextPathOverride ?? globalContextPath();
+        const absPath = this.contextPathFor(op);
         let contentHash = '';
         try {
             const ctx = buildContext({ registryRoot: op.registryRoot, profileExtensions: op.profileExtensions });
@@ -68,7 +88,10 @@ export class InjectionOrchestrator {
             if (!msg.includes('using-awm skill not found')) throw err;
         }
         const ref: MaterializedRef = { absPath, scope: op.scope, contentHash };
-        return { ref, registryRoot: op.registryRoot, installMethod: op.installMethod, agent: op.agent, scope: op.scope };
+        return {
+            ref, registryRoot: op.registryRoot, installMethod: op.installMethod,
+            agent: op.agent, scope: op.scope, projectRoot: op.projectRoot,
+        };
     }
 
     installContext(op: ContextOp): void {

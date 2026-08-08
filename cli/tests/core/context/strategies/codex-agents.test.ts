@@ -36,9 +36,10 @@ describe('CodexAgentsStrategy', () => {
         const file = path.join(tmpHome, '.codex/AGENTS.md');
         fs.writeFileSync(file, '# Personal\n\nDo not delete.\n');
 
-        const result = new CodexAgentsStrategy().injectGlobal({
-            markdown: '# AWM\n\nUse `development-process`.',
-        });
+        const result = new CodexAgentsStrategy().injectGlobal(
+            { markdown: '# AWM\n\nUse `development-process`.' },
+            codexProvider(file),
+        );
 
         expect(result).toBe('injected');
         const written = fs.readFileSync(file, 'utf8');
@@ -48,11 +49,13 @@ describe('CodexAgentsStrategy', () => {
 
     it('creates the global file and returns unchanged on an idempotent repeat', () => {
         const strategy = new CodexAgentsStrategy();
+        const file = path.join(tmpHome, '.codex/AGENTS.md');
+        const provider = codexProvider(file);
         const context = { markdown: '# AWM\n\nBootstrap.' };
 
-        expect(strategy.injectGlobal(context)).toBe('injected');
-        expect(strategy.injectGlobal(context)).toBe('unchanged');
-        expect(fs.existsSync(path.join(tmpHome, '.codex/AGENTS.md'))).toBe(true);
+        expect(strategy.injectGlobal(context, provider)).toBe('injected');
+        expect(strategy.injectGlobal(context, provider)).toBe('unchanged');
+        expect(fs.existsSync(file)).toBe(true);
     });
 
     it('uses HOME at call time', () => {
@@ -60,9 +63,9 @@ describe('CodexAgentsStrategy', () => {
         const secondHome = path.join(tmpWork, 'second-home');
         const strategy = new CodexAgentsStrategy();
 
-        strategy.injectGlobal({ markdown: 'first' });
+        strategy.injectGlobal({ markdown: 'first' }, codexProvider(path.join(firstHome, '.codex/AGENTS.md')));
         process.env.HOME = secondHome;
-        strategy.injectGlobal({ markdown: 'second' });
+        strategy.injectGlobal({ markdown: 'second' }, codexProvider(path.join(secondHome, '.codex/AGENTS.md')));
 
         expect(fs.readFileSync(path.join(firstHome, '.codex/AGENTS.md'), 'utf8')).toContain('first');
         expect(fs.readFileSync(path.join(secondHome, '.codex/AGENTS.md'), 'utf8')).toContain('second');
@@ -73,10 +76,11 @@ describe('CodexAgentsStrategy', () => {
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, 'before\n');
         const strategy = new CodexAgentsStrategy();
-        strategy.injectGlobal({ markdown: 'old' });
+        const provider = codexProvider(file);
+        strategy.injectGlobal({ markdown: 'old' }, provider);
         fs.appendFileSync(file, 'after\n');
 
-        strategy.injectGlobal({ markdown: 'new' });
+        strategy.injectGlobal({ markdown: 'new' }, provider);
 
         expect(fs.readFileSync(file, 'utf8')).toBe(
             'before\n\n<!-- AWM:START -->\n<!-- AWM:BOUNDARY prefix=1 suffix=1 -->\nnew\n<!-- AWM:END -->\nafter\n',
@@ -89,7 +93,7 @@ describe('CodexAgentsStrategy', () => {
         const ambiguous = '<!-- AWM:START -->\nuser';
         fs.writeFileSync(file, ambiguous);
 
-        expect(() => new CodexAgentsStrategy().injectGlobal({ markdown: 'new' })).toThrow('unmatched');
+        expect(() => new CodexAgentsStrategy().injectGlobal({ markdown: 'new' }, codexProvider(file))).toThrow('unmatched');
         expect(fs.readFileSync(file, 'utf8')).toBe(ambiguous);
     });
 
@@ -99,7 +103,7 @@ describe('CodexAgentsStrategy', () => {
         const ambiguous = '`<!-- AWM:START -->` example and `<!-- AWM:END -->` example';
         fs.writeFileSync(file, ambiguous);
 
-        expect(() => new CodexAgentsStrategy().injectGlobal({ markdown: 'new' })).toThrow('standalone');
+        expect(() => new CodexAgentsStrategy().injectGlobal({ markdown: 'new' }, codexProvider(file))).toThrow('standalone');
         expect(fs.readFileSync(file, 'utf8')).toBe(ambiguous);
     });
 
@@ -134,7 +138,7 @@ describe('CodexAgentsStrategy', () => {
         fs.writeFileSync(path.join(project, 'CONSTITUTION.md'), '# Rules\n');
         fs.writeFileSync(path.join(project, 'AGENTS.md'), '# Repo-owned rules\n');
 
-        const result = new CodexAgentsStrategy().injectProject(project);
+        const result = new CodexAgentsStrategy().injectProject(project, codexProvider(path.join(tmpHome, '.codex/AGENTS.md')));
 
         expect(result).toBe('injected');
         const written = fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8');
@@ -146,11 +150,37 @@ describe('CodexAgentsStrategy', () => {
         const project = path.join(tmpWork, 'repo');
         fs.mkdirSync(project, { recursive: true });
         const strategy = new CodexAgentsStrategy();
+        const provider = codexProvider(path.join(tmpHome, '.codex/AGENTS.md'));
 
-        expect(strategy.injectProject(project)).toBe('injected');
-        expect(strategy.injectProject(project)).toBe('unchanged');
+        expect(strategy.injectProject(project, provider)).toBe('injected');
+        expect(strategy.injectProject(project, provider)).toBe('unchanged');
         expect(fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8'))
             .toContain('when that file exists');
+    });
+
+    it('injectProject writes a redundant .cursor/rules/awm.mdc carrier (alwaysApply: true) for Cursor', () => {
+        const project = path.join(tmpWork, 'cursor-repo');
+        fs.mkdirSync(project, { recursive: true });
+        const strategy = new CodexAgentsStrategy();
+
+        const result = strategy.injectProject(project, cursorProvider());
+
+        expect(result).toBe('injected');
+        expect(fs.existsSync(path.join(project, 'AGENTS.md'))).toBe(true);
+        const mdc = fs.readFileSync(path.join(project, '.cursor/rules/awm.mdc'), 'utf8');
+        expect(mdc).toContain('alwaysApply: true');
+        expect(mdc).toContain('Read and obey `CONSTITUTION.md` before work');
+    });
+
+    it('injectProject writes only AGENTS.md (no .cursor/rules) for a non-Cursor provider', () => {
+        const project = path.join(tmpWork, 'copilot-repo');
+        fs.mkdirSync(project, { recursive: true });
+        const strategy = new CodexAgentsStrategy();
+
+        strategy.injectProject(project, copilotProvider());
+
+        expect(fs.existsSync(path.join(project, 'AGENTS.md'))).toBe(true);
+        expect(fs.existsSync(path.join(project, '.cursor'))).toBe(false);
     });
 
     it('implements global status and remove while preserving user bytes', () => {
@@ -179,16 +209,80 @@ describe('CodexAgentsStrategy', () => {
 
     it('validates public inputs and never writes outside the configured roots', () => {
         const strategy = new CodexAgentsStrategy();
-        expect(() => strategy.injectGlobal({ markdown: '' })).toThrow('markdown');
-        expect(() => strategy.injectGlobal(null as never)).toThrow('context');
-        expect(() => strategy.injectProject('')).toThrow('projectRoot');
+        const provider = codexProvider(path.join(tmpHome, '.codex/AGENTS.md'));
+        expect(() => strategy.injectGlobal({ markdown: '' }, provider)).toThrow('markdown');
+        expect(() => strategy.injectGlobal(null as never, provider)).toThrow('context');
+        expect(() => strategy.injectProject('', provider)).toThrow('projectRoot');
 
         const open = jest.spyOn(fs, 'openSync');
-        strategy.injectGlobal({ markdown: 'safe' });
-        strategy.injectProject(path.join(tmpWork, 'safe-project'));
+        strategy.injectGlobal({ markdown: 'safe' }, provider);
+        strategy.injectProject(path.join(tmpWork, 'safe-project'), provider);
 
         const opened = open.mock.calls.map((call) => String(call[0]));
         expect(opened.every((file) => file.startsWith(tmpHome) || file.startsWith(tmpWork))).toBe(true);
+    });
+
+    it('regression: Codex (non-null globalPath) still requires global scope — unchanged behavior', () => {
+        const file = path.join(tmpHome, '.codex/AGENTS.md');
+        const materialized = path.join(tmpWork, 'awm-context.md');
+        const markdown = '# AWM\n\nExpected.';
+        fs.writeFileSync(materialized, markdown);
+        const provider = codexProvider(file);
+        const strategy = new CodexAgentsStrategy();
+
+        const localInput: InjectionInput = {
+            ref: { absPath: materialized, scope: 'local', contentHash: sha256(markdown) },
+            registryRoot: '/registry',
+            installMethod: 'copy',
+            agent: 'codex',
+            scope: 'local',
+            projectRoot: tmpWork,
+        };
+
+        expect(() => strategy.inject(localInput, provider)).toThrow('supports only global injection');
+        expect(fs.existsSync(file)).toBe(false);
+    });
+
+    it('Copilot-shaped provider (null globalPath): inject() at scope local writes <projectRoot>/AGENTS.md, not any global path', () => {
+        const project = path.join(tmpWork, 'copilot-local-repo');
+        fs.mkdirSync(project, { recursive: true });
+        const materialized = path.join(tmpWork, 'awm-context.md');
+        const markdown = '# AWM\n\nCopilot body.';
+        fs.writeFileSync(materialized, markdown);
+        const provider = copilotProvider();
+        const strategy = new CodexAgentsStrategy();
+
+        const input: InjectionInput = {
+            ref: { absPath: materialized, scope: 'local', contentHash: sha256(markdown) },
+            registryRoot: '/registry',
+            installMethod: 'copy',
+            agent: 'copilot',
+            scope: 'local',
+            projectRoot: project,
+        };
+
+        expect(strategy.inject(input, provider)).toBe('injected');
+        const written = fs.readFileSync(path.join(project, 'AGENTS.md'), 'utf8');
+        expect(written).toContain('Copilot body.');
+        expect(strategy.status(input, provider)).toBe('injected');
+    });
+
+    it('Copilot-shaped provider (null globalPath): calling at scope global throws (required scope is local)', () => {
+        const materialized = path.join(tmpWork, 'awm-context.md');
+        const markdown = '# AWM\n\nBody.';
+        fs.writeFileSync(materialized, markdown);
+        const provider = copilotProvider();
+        const strategy = new CodexAgentsStrategy();
+
+        const globalInput: InjectionInput = {
+            ref: { absPath: materialized, scope: 'global', contentHash: sha256(markdown) },
+            registryRoot: '/registry',
+            installMethod: 'copy',
+            agent: 'copilot',
+            scope: 'global',
+        };
+
+        expect(() => strategy.inject(globalInput, provider)).toThrow('supports only local injection');
     });
 });
 
@@ -199,6 +293,26 @@ function codexProvider(globalPath: string): ProviderConfig {
         workflow: null,
         agent: null,
         injection: { type: 'managed-agents-md', globalPath, localFile: 'AGENTS.md' },
+    };
+}
+
+function copilotProvider(): ProviderConfig {
+    return {
+        label: 'Copilot',
+        skill: { global: null, local: '.github/instructions', renderer: 'link' },
+        workflow: null,
+        agent: null,
+        injection: { type: 'managed-agents-md', globalPath: null, localFile: 'AGENTS.md' },
+    };
+}
+
+function cursorProvider(): ProviderConfig {
+    return {
+        label: 'Cursor',
+        skill: { global: '', local: '.cursor/rules', renderer: 'link' },
+        workflow: null,
+        agent: null,
+        injection: { type: 'managed-agents-md', globalPath: null, localFile: 'AGENTS.md' },
     };
 }
 

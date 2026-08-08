@@ -3,6 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { InjectionOrchestrator } from '../../../src/core/context/orchestrator';
+import { globalContextPath, projectContextPath } from '../../../src/core/context/materializer';
 
 jest.mock('../../../src/commands/hooks/install', () => ({ installHook: jest.fn() }));
 jest.mock('../../../src/commands/hooks/uninstall', () => ({ uninstallHook: jest.fn() }));
@@ -186,5 +187,57 @@ describe('InjectionOrchestrator (codex, managed AGENTS.md strategy)', () => {
 
         orch.uninstallContext(op);
         expect(fs.readFileSync(agentsPath, 'utf8')).toBe('# User rules\n');
+    });
+});
+
+describe('InjectionOrchestrator (local scope materializes under the project, not ~/.awm)', () => {
+    let tmpHome: string;
+    let projectRoot: string;
+    let registryRoot: string;
+    let originalHome: string | undefined;
+    let originalAwmHome: string | undefined;
+
+    beforeEach(() => {
+        tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-orch-home-'));
+        projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-orch-proj-'));
+        registryRoot = tmpRegistry();
+        originalHome = process.env.HOME;
+        originalAwmHome = process.env.AWM_HOME;
+        process.env.HOME = tmpHome;
+        process.env.AWM_HOME = path.join(tmpHome, '.awm');
+    });
+
+    afterEach(() => {
+        if (originalHome === undefined) delete process.env.HOME;
+        else process.env.HOME = originalHome;
+        if (originalAwmHome === undefined) delete process.env.AWM_HOME;
+        else process.env.AWM_HOME = originalAwmHome;
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+        fs.rmSync(projectRoot, { recursive: true, force: true });
+        fs.rmSync(registryRoot, { recursive: true, force: true });
+    });
+
+    it('materializes to projectContextPath(projectRoot) for scope local, never to globalContextPath()', () => {
+        const orch = new InjectionOrchestrator({
+            providerOverride: {
+                label: 'Copilot', skill: { global: null, local: '.github/instructions', renderer: 'link' }, workflow: null, agent: null,
+                injection: { type: 'managed-agents-md', globalPath: null, localFile: 'AGENTS.md' },
+            },
+        });
+        const op = {
+            agent: 'copilot' as const,
+            scope: 'local' as const,
+            registryRoot,
+            installMethod: 'copy' as const,
+            profileExtensions: [],
+            projectRoot,
+        };
+
+        orch.installContext(op);
+
+        expect(fs.existsSync(projectContextPath(projectRoot))).toBe(true);
+        expect(fs.existsSync(globalContextPath())).toBe(false);
+        expect(fs.existsSync(path.join(projectRoot, 'AGENTS.md'))).toBe(true);
+        expect(orch.contextStatus(op)).toBe('injected');
     });
 });
