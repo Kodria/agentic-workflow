@@ -3,6 +3,20 @@ import path from 'path';
 import os from 'os';
 import { spawn, execFileSync, ChildProcess } from 'child_process';
 import { refIsAlive } from '../../../src/core/journal/process';
+import { isWindowsNative } from '../../../src/core/paths';
+
+/** win32 has no POSIX process groups / negative-pid kill convention -- mirrors
+ *  killTreeWindows's taskkill pattern already established and tested in
+ *  core/journal/process.ts, applied here to this test's own cleanup (not
+ *  production code) since the pgid values collected below are win32 pids too
+ *  (captureRefFor's win32 fallback: processGroup === pid). */
+function killGroup(pgid: number): void {
+    if (isWindowsNative()) {
+        try { execFileSync('taskkill', ['/pid', String(pgid), '/T', '/F'], { stdio: 'ignore' }); } catch { /* ya muerto */ }
+        return;
+    }
+    try { process.kill(-pgid, 'SIGKILL'); } catch { /* ya muerto */ }
+}
 
 jest.setTimeout(180000);
 
@@ -41,10 +55,17 @@ describe('E2E real: crash/restart del supervisor', () => {
         fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'fixture', scripts: { test: 'node -e "process.exit(0)"' } }));
         git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'c');
         stubBin = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-e2e-bin-'));
+        // A bare extensionless #!/bin/sh script only runs via POSIX kernel shebang
+        // interpretation -- Windows CreateProcess has none, so spawnStructured
+        // (shell:false, matching production) would silently fail to launch this stub
+        // there. A .cmd sibling lets the same bare 'codex'/'claude' invocation resolve
+        // on both platforms (Node's spawn on win32 resolves via PATHEXT and transparently
+        // re-invokes a found .cmd through cmd.exe) without touching production code.
         for (const name of ['codex', 'claude']) {
             fs.writeFileSync(path.join(stubBin, name), '#!/bin/sh\nwhile true; do sleep 1; done\n', { mode: 0o755 });
+            fs.writeFileSync(path.join(stubBin, `${name}.cmd`), '@echo off\r\n:loop\r\ntimeout /t 1 /nobreak >nul\r\ngoto loop\r\n');
         }
-        env = { ...process.env, PATH: `${stubBin}:${process.env.PATH}` };
+        env = { ...process.env, PATH: `${stubBin}${path.delimiter}${process.env.PATH}` };
         execFileSync(process.execPath, [CLI, 'watch', '--init'], { cwd: repo, env });
     });
 
@@ -62,7 +83,7 @@ describe('E2E real: crash/restart del supervisor', () => {
                 if (j.processRef !== undefined) groups.add(j.processRef.processGroup);
             }
         }
-        for (const pgid of groups) { try { process.kill(-pgid, 'SIGKILL'); } catch { /* ya muerto */ } }
+        for (const pgid of groups) killGroup(pgid);
         children.length = 0;
         fs.rmSync(repo, { recursive: true, force: true });
         fs.rmSync(stubBin, { recursive: true, force: true });

@@ -57,9 +57,17 @@ describe('supervisor loop', () => {
     beforeEach(() => {
         repo = setupRepo();
         stubBin = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-stub-'));
+        // A bare extensionless file with a #!/bin/sh shebang only runs via the POSIX
+        // kernel's own shebang interpretation -- Windows CreateProcess has no such
+        // mechanism, so this stub would silently fail to spawn there (spawnStructured
+        // uses shell:false, matching production). Node's spawn on win32 resolves a bare
+        // command name through PATHEXT and transparently re-invokes a found .cmd through
+        // cmd.exe, so writing a .cmd sibling makes the SAME 'codex' invocation resolve on
+        // both platforms without touching any production code.
         fs.writeFileSync(path.join(stubBin, 'codex'), '#!/bin/sh\nwhile true; do sleep 1; done\n', { mode: 0o755 });
+        fs.writeFileSync(path.join(stubBin, 'codex.cmd'), '@echo off\r\n:loop\r\ntimeout /t 1 /nobreak >nul\r\ngoto loop\r\n');
         oldPath = process.env.PATH;
-        process.env.PATH = `${stubBin}:${process.env.PATH}`;
+        process.env.PATH = `${stubBin}${path.delimiter}${process.env.PATH}`;
     });
     afterEach(() => {
         process.env.PATH = oldPath;

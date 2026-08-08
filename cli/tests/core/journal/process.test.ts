@@ -450,7 +450,7 @@ describe('process.ts execFileSync: stdio explicito evita inheritStderr hacia un 
         `);
         const child = spawn(process.execPath, [childScript], {
             cwd: workDir,
-            env: { ...process.env, PATH: `${workDir}:${process.env.PATH}` },
+            env: { ...process.env, PATH: `${workDir}${path.delimiter}${process.env.PATH}` },
             stdio: ['ignore', 'pipe', 'pipe'],
             detached: true,
         });
