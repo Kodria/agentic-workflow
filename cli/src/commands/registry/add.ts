@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import simpleGit from 'simple-git';
 import {
-    REGISTRIES_DIR,
+    registriesDir,
     readRegistriesConfig,
     writeRegistriesConfig,
     registryContentRoot,
@@ -47,7 +47,7 @@ export async function addRegistry(remote: string, nameOverride?: string): Promis
         return { ok: false, name, error: `Destination already exists on disk: ${dest}` };
     }
 
-    fs.mkdirSync(REGISTRIES_DIR, { recursive: true });
+    fs.mkdirSync(registriesDir(), { recursive: true });
     try {
         await simpleGit().clone(remote, dest);
     } catch (e) {

@@ -155,7 +155,7 @@ describe('awm sync reaches the project-scope reconciliation', () => {
             syncRegistries: async () => [],
             verifyMinCliVersions: () => [],
             verifyProjectPins: async () => [],
-            syncProfile: () => ({ installed: [], skipped: [], extensions: [] }),
+            syncProfile: () => ({ installed: [], skipped: [], extensions: [], transactionIds: [], modifiedFiles: [] }),
             reconcileProjectSkillLinks: spy,
         });
     }

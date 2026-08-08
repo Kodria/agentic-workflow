@@ -49,7 +49,12 @@ export function syncExecutable(source: string, dest: string, method: 'symlink' |
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     if (method === 'symlink') {
         try {
-            fs.symlinkSync(source, dest);
+            // 'file' explicito: el destino es un archivo. Sin el tipo, Node lo INFIERE
+            // del target y en Windows puede crear un symlink de DIRECTORIO, que
+            // exige SeCreateSymbolicLinkPrivilege. El fallback a copia de abajo lo
+            // cubria, pero el tipo correcto en la llamada no depende de que alguien
+            // conserve el try/catch al editarla.
+            fs.symlinkSync(source, dest, 'file');
         } catch {
             // best-effort: a FILE symlink needs SeCreateSymbolicLinkPrivilege on
             // Windows, denied by default on unprivileged accounts (incl. GitHub

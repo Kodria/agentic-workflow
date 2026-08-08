@@ -42,7 +42,7 @@ export function installClaudeHook(options: InstallOptions): InstallResult {
     const skillDest = path.join(config.scriptsDir, 'using-awm.md');
     try { fs.unlinkSync(skillDest); } catch { /* not exists */ }
     try {
-        fs.symlinkSync(sourceSkill, skillDest);
+        fs.symlinkSync(sourceSkill, skillDest, 'file'); // ver shared.ts: el tipo no se infiere
     } catch {
         // best-effort: copy the single skill file; 'awm update' will not auto-propagate
         fs.copyFileSync(sourceSkill, skillDest);
@@ -195,7 +195,7 @@ export function resyncClaudeHookFiles(config: { scriptsDir: string }, registryRo
     // matriz de soporte declara verificada en CI. Dos escritores del mismo
     // archivo, solo uno endurecido.
     try {
-        fs.symlinkSync(sourceSkill, skillDest);
+        fs.symlinkSync(sourceSkill, skillDest, 'file'); // ver shared.ts: el tipo no se infiere
     } catch {
         // best-effort: `awm update` no auto-propagara cambios de esta skill,
         // pero el hook queda funcional en vez de dejar el comando inservible.

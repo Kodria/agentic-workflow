@@ -62,7 +62,7 @@ describe('Providers Routing', () => {
         expect(providerFor('codex')).toEqual({
             label: 'Codex',
             minimumVersion: '0.145.0',
-            versionCommand: { command: 'codex', args: ['--version'] },
+            versionCommand: { command: 'codex', args: ['--version'], versionPattern: /^codex-cli (\d+\.\d+\.\d+)$/ },
             skill: {
                 global: path.join(tmpHome, '.agents/skills'),
                 local: '.agents/skills',

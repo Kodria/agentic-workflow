@@ -123,11 +123,17 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
     // discovery mechanism (today: Copilot); for those, there is no global-scope devCore
     // concept to satisfy at all, so it's treated as trivially satisfied (see below).
     const skillsDir = providerFor(agent).skill.global;
-    const baseline = bundles.find((b) => b.scope === 'baseline');
+    // TODOS los baseline, igual que `stepDevCore` los instala y que
+    // `reconciliation.ts` los reconcilia. Con `find`, el hecho que decide si el
+    // baseline esta satisfecho miraba solo el primero, asi que un segundo bundle
+    // baseline sin instalar reportaba `healthy` — y el step, que lee este mismo
+    // hecho, nunca lo instalaba.
+    const baselines = bundles.filter((b) => b.scope === 'baseline');
+    const baseline = baselines[0];
     let devCorePresent = false;
     let brokenLinks: string[] = [];
     if (baseline) {
-        const skillNames = resolveBundleSkills(baseline.name, bundles);
+        const skillNames = [...new Set(baselines.flatMap((b) => resolveBundleSkills(b.name, bundles)))];
         if (skillsDir === null) {
             // No global skill directory for this agent (today: Copilot) — there is no
             // global-scope devCore/baseline-bundle concept to satisfy for it at all, so
@@ -176,7 +182,7 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
         // (tests/integration/codex-provider-isolated.test.ts).
         const agentConfig = providerFor(agent).agent;
         if (agentConfig && agentConfig.global !== null) {
-            const agentNames = resolveBundleAgents(baseline.name, bundles);
+            const agentNames = [...new Set(baselines.flatMap((b) => resolveBundleAgents(b.name, bundles)))];
             if (agentNames.length > 0) {
                 // El installName real de un artefacto `agent` es `<n>.md`
                 // (bundle-install.ts), y el renderer decide la extension final:

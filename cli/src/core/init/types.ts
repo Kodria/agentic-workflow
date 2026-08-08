@@ -90,5 +90,13 @@ export interface InitDeps {
     contentDir: string;       // content root del primer registry — para installBundle/syncProfile
     sensorPacksRoot: string;  // content root que provee sensor-packs/ — para initSensors
     confirmExtensions: (proposed: string[], signals: string[]) => Promise<string[]>;
+    /**
+     * `awm init --machine-only`. The flag already nulls `ctx.project` so the project
+     * steps skip, but that made "the user asked us not to touch the project" and
+     * "there is no project here" indistinguishable — and `stepContextInjection`, a
+     * MACHINE-level step, treated the second meaning as license to write AGENTS.md
+     * and .awm/context/ into cwd under a flag whose entire promise is that it won't.
+     */
+    machineOnly?: boolean;
     actions: InitActions;
 }

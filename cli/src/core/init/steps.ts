@@ -216,9 +216,14 @@ export function stepDevCore(d: InitDeps): StepResult {
         return ok('machine.devCore', 'machine', 'skipped');
     }
 
-    // Find the baseline bundle (there may be several; pick first baseline)
-    const baselineBundle = d.bundles.find((b) => b.scope === 'baseline');
-    const bundleName = baselineBundle?.name ?? 'dev';
+    // TODOS los bundles baseline, no el primero. `scope: 'baseline'` es una propiedad
+    // que un bundle TIENE, no un lugar que solo uno puede ocupar — y
+    // `reconciliation.ts` (`awm update`) siempre los filtro todos. Con `find` aca, un
+    // registry con dos baselines instalaba uno en `awm init` y aparecia el segundo, de
+    // la nada, en el siguiente `awm update`; nada antes lo habia reportado como
+    // faltante. El fallback a 'dev' se conserva para un registry sin ningun baseline.
+    const baselineNames = d.bundles.filter((b) => b.scope === 'baseline').map((b) => b.name);
+    const toInstall = baselineNames.length > 0 ? baselineNames : ['dev'];
 
     // Un provider sin directorio global de skills (hoy: Copilot) no tiene donde
     // poner el baseline a nivel maquina — y el hecho `devCore` lo reporta como
@@ -228,15 +233,17 @@ export function stepDevCore(d: InitDeps): StepResult {
     // `awm doctor` decia `healthy`. Su propio `globalUnsupportedReason` ya dice
     // que hay que instalar por proyecto, asi que eso es lo que se hace.
     const localOnly = providerFor(d.agent).skill.global === null;
-    d.actions.installBundle({
-        bundleName,
-        bundles: d.bundles,
-        agents: sharedInstallAgents(d, localOnly ? 'local' : 'global'),
-        method: d.installMethod,
-        projectRoot: d.cwd,
-        contentDir: d.contentDir,
-        ...(localOnly ? { scopeOverride: 'local' as const } : {}),
-    });
+    for (const bundleName of toInstall) {
+        d.actions.installBundle({
+            bundleName,
+            bundles: d.bundles,
+            agents: sharedInstallAgents(d, localOnly ? 'local' : 'global'),
+            method: d.installMethod,
+            projectRoot: d.cwd,
+            contentDir: d.contentDir,
+            ...(localOnly ? { scopeOverride: 'local' as const } : {}),
+        });
+    }
     return ok('machine.devCore', 'machine', 'applied', localOnly ? 'installed at project scope (no global skill dir)' : undefined);
 }
 
@@ -402,8 +409,26 @@ export function stepContextInjection(d: InitDeps): StepResult {
     // AGENTS.md backup target via the same findProjectRoot(cwd) call, so using d.cwd here
     // whenever it differs from the walked-up project root (e.g. `awm init` run from a
     // subdirectory) would write to a path the backup session never snapshotted — a failed
-    // init couldn't roll it back. Falls back to d.cwd only when there's no discovered
-    // project yet, matching this op's own pre-existing behavior in that case.
+    // init couldn't roll it back.
+    //
+    // The `?? d.cwd` fallback below is the legitimate case: a provider whose ONLY
+    // delivery channel is project-scope (Copilot), run in a directory the user means
+    // as their project but which carries no marker yet (no .git, no package.json).
+    // Removing it would leave Copilot with no context at all there. What made it a bug
+    // was that mutation-targets.ts enumerated the AGENTS.md / .awm/context/ backup
+    // targets only inside `if (projectRoot)`, so this write landed outside the backup
+    // session and survived a rollback that reported a clean restore. That is fixed
+    // where it belongs — in the enumeration, which now covers `cwd` unconditionally
+    // for these providers.
+    //
+    // `--machine-only` is the case that genuinely must not write. It nulls
+    // `ctx.project` on purpose, and this MACHINE-level step read that as "no project
+    // found" and wrote into cwd anyway — under the one flag that promises not to.
+    if (scope === 'local' && d.machineOnly) {
+        return ok('machine.contextInjection', 'machine', 'skipped',
+            `${providerFor(d.agent).label} delivers context at project scope — skipped by --machine-only`);
+    }
+
     const op: ContextOp = {
         agent: d.agent,
         scope,

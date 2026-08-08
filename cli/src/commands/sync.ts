@@ -161,6 +161,12 @@ export async function runSyncCore(
     const lines = result.installed.map((n) => pc.green(n)).join('\n  ');
     const installedNote = lines ? `\n  ${lines}` : pc.dim(' (all up to date)');
     console.log(`✅ Synced extensions [${result.extensions.join(', ')}]:${installedNote}`);
+    // The transaction id is the ONLY handle `awm backup restore` accepts. It was
+    // computed, returned in `transactionIds`, and then dropped on the floor by every
+    // caller — so the operator who wanted to undo a sync had no name to give it.
+    for (const id of result.transactionIds) {
+        console.log(pc.dim(`  transaction ${id} — undo with \`awm backup restore ${id}\``));
+    }
 
     return { code: 0, selectedAgents, result };
 }

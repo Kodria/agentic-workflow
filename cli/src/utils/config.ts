@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { AgentTarget, isAgentTarget } from '../providers';
 import { awmHome } from '../core/paths';
+import { writeFileAtomic } from '../core/atomic-file';
 
 export interface AwmPreferences {
     defaultAgent: AgentTarget;
@@ -145,14 +146,12 @@ export function loadPreferences(initialAgent: AgentTarget = 'claude-code'): {
 
 export function savePreferences(prefs: AwmPreferences): void {
     const normalized = normalizePreferences(prefs, false).prefs;
-    const file = prefsFile();
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const temp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(normalized, null, 2) + '\n', {
-        encoding: 'utf8',
-        mode: 0o600,
-    });
-    fs.renameSync(temp, file);
+    // `writeFileAtomic`, not a second hand-rolled write-temp-then-rename. The local copy
+    // predated the primitive and had drifted below it: no fsync, a pid-only temp name,
+    // and none of the guards the shared one grew. Same 0o600 intent and same
+    // mode-preservation semantics as `artifact-state.ts`, the other 0o600 file written
+    // through it — a file of this sensitivity has an established treatment here.
+    writeFileAtomic(prefsFile(), JSON.stringify(normalized, null, 2) + '\n', 0o600);
 }
 
 export function enableAgent(prefs: AwmPreferences, agent: AgentTarget): AwmPreferences {

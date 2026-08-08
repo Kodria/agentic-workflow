@@ -38,8 +38,19 @@ const claudeAdapter: ControllerAdapter = {
     safeToReplace: baseSafeToReplace,
 };
 
+/** Los providers que `awm watch` sabe supervisar. Exportado para que el CLI valide en
+ *  el borde en vez de dejar que un `--provider` invalido llegue hasta el primer tick,
+ *  ya con el journal tocado y el lock tomado. */
+export const WATCH_PROVIDERS = ['codex', 'claude-code'] as const;
+
+export type WatchProvider = typeof WATCH_PROVIDERS[number];
+
+export function isWatchProvider(value: unknown): value is WatchProvider {
+    return typeof value === 'string' && (WATCH_PROVIDERS as readonly string[]).includes(value);
+}
+
 export function adapterFor(provider: string): ControllerAdapter {
     if (provider === 'codex') return codexAdapter;
     if (provider === 'claude-code') return claudeAdapter;
-    throw new Error(`provider desconocido: ${provider} (validos: codex, claude-code)`);
+    throw new Error(`provider desconocido: ${provider} (validos: ${WATCH_PROVIDERS.join(', ')})`);
 }

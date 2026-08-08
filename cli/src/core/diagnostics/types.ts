@@ -71,7 +71,7 @@ export type ProviderCheckState =
     | 'delivered' | 'pending';
 
 export type ProviderCheck = {
-    id: 'binary.version' | 'skills.global' | 'agents.native' |
+    id: 'binary.version' | 'skills.global' | 'agents.native' | 'workflows.global' |
         'context.global' | 'hook.trust' | 'guidance.project' | 'constitution.delivery';
     state: ProviderCheckState;
     target?: string;

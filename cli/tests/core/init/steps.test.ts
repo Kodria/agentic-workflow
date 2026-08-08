@@ -564,7 +564,7 @@ describe('stepContextInjection', () => {
     it('installs Copilot context at local scope with projectRoot (no global AGENTS.md-equivalent)', () => {
         const a = spies();
         a.contextStatus.mockReturnValue('absent');
-        const r = stepContextInjection(deps({ machine: machine(), project: null }, a, { agent: 'copilot', cwd: '/repo' }));
+        const r = stepContextInjection(deps({ machine: machine(), project: project({ root: '/repo' }) }, a, { agent: 'copilot', cwd: '/repo' }));
         expect(r.action).toBe('applied');
         expect(a.installContext).toHaveBeenCalledWith(
             expect.objectContaining({ agent: 'copilot', scope: 'local', projectRoot: '/repo' }),
@@ -591,6 +591,11 @@ describe('stepContextInjection', () => {
     });
 
     it('falls back to raw cwd when no project was discovered', () => {
+        // Legitimate: Copilot has no channel other than a project AGENTS.md, and a
+        // directory without .git/package.json is still where the user is working. What
+        // made this a rollback hole was mutation-targets.ts enumerating that path only
+        // inside `if (projectRoot)` — fixed there; see
+        // tests/core/init/context-injection-no-project.test.ts.
         const a = spies();
         a.contextStatus.mockReturnValue('absent');
         const r = stepContextInjection(deps(

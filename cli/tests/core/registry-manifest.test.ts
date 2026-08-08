@@ -79,7 +79,7 @@ describe('registry manifest (awm-registry.json)', () => {
 
     it('registryNameForPath maps configured registries and returns null for unknown paths', () => {
         const m = load();
-        const regPath = path.join(m.REGISTRIES_DIR, 'team-acme', 'skills', 'x');
+        const regPath = path.join(m.registriesDir(), 'team-acme', 'skills', 'x');
         expect(m.registryNameForPath(regPath)).toBe('team-acme');
         expect(m.registryNameForPath('/somewhere/else')).toBeNull();
     });

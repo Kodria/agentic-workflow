@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-08
 **Source:** four independent audits (regression/back-compat · provider×command matrix · security/robustness · maintainability), each verified empirically against the built binary in isolated `HOME`/`AWM_HOME` tmpdirs.
-**Status:** all 4 blockers closed, plus both security blockers and 8 of the importants. Remaining open items are listed below.
+**Status:** closed. Both security blockers, all 4 functional blockers, all 17 importants, and every minor. Both structural guards are in place. The only items left open are the ones no Linux box can settle — see *What could not be verified here*.
 
 > Every finding below was reproduced **with the test suite green** (158 suites / 1608 tests). That is itself the headline: the fixtures encode the same wrong assumptions as the code. Coverage is 82% and it did not catch any of this.
 
@@ -44,44 +44,46 @@ This is the same shape as the two bugs already fixed this cycle (`awm init -a co
 
 Closed importants: **I1, I2** (renderer filenames — one table, idempotency restored), **I3** (`add --all` routed through the real pipeline), **I5** (`update` regenerates managed-agents-md context), **I6** (gitignore only covers link artifacts), **I7** (settings.json no longer clobbered), **I8** (Windows junction + stage-before-remove, resync copy fallback), **I9** (registry JSON validated), **I10** (`awm pin base` reaches the key the resolver reads). `stale` now counts as degrading, so an out-of-date context is visible to a CI exit code.
 
-## Still open — important
+## Closed — important
 
-(I1, I2, I3, I5, I6, I7, I8, I9 and I10 are closed — see above.)
+(All of I1–I17. The ones closed in the first pass are listed in the paragraph above.)
 
-| ID | Finding |
-|---|---|
-| **I4** | **Copilot silently gets zero skills** and everything reports healthy. `stepDevCore` is skipped (correct: no global scope) but nothing falls back to a local install, and there is **no `skills.local` check for any provider** — so no surface anywhere reveals it. |
-| **I11** | **Rollback leaves files behind** outside a project root: `AGENTS.md` and `.awm/context/` survive a rolled-back init, while the output claims every path was restored. |
-| **I12** | **`awm doctor` exits 1 with `✖ native agents` and no remedy** for any registry shipping no `agents/` — a degrading state with no remediation code. |
-| **I13** | R3's `FALLBACK_DEFAULTS` removal **silently empties the Python sensor manifest** against a registry without a `python` pack (pinned or stale). Quality gate goes from four sensors to zero; preflight flips to exit 1. |
-| **I14** | R3's shell detection makes **`awm sensors run` rewrite a committed `sensors.json`**, add a `shellcheck` dependency, and flip a green harness to `not_certified` — with no `awm sensors init` involved. |
-| **I15** | **Project-scope broken symlinks are never healed, pruned, or reported.** The healing path exists for global scope and simply isn't wired to `update`/`sync`. |
-| **I16** | **Backup transaction IDs collide** (1 ms resolution, no uniqueness) — the second transaction overwrites the first's manifest, making the earlier backup unrestorable and `awm backup restore` restore the wrong target. |
-| **I17** | **Multi-bundle installs are not atomic**: one transaction per extension in a loop; a failure midway leaves earlier ones installed and the transaction ids never reach the caller, so the user cannot name them to `awm backup restore`. |
+| ID | Finding | How it was closed |
+|---|---|---|
+| **I4** | Copilot silently got zero skills and every surface reported healthy. | The devCore fact is computed against the local dir for a provider with no global one, and `stepDevCore` installs there with `scopeOverride: 'local'`. |
+| **I11** | Rollback left `AGENTS.md` and `.awm/context/` behind while claiming a clean restore. | Two situations were being read as one. Writing into an unmarked cwd is legitimate — Copilot has no other channel — so `mutation-targets` now enumerates those paths unconditionally for local-scope providers, which is where the hole actually was. `--machine-only` is the case that must not write at all, and it now skips explicitly instead of inheriting the null-project branch. |
+| **I12** | `awm doctor` exited 1 with `✖ native agents` and no remedy. | Nothing to verify emits no row, rather than a red one with no action. |
+| **I13** | `awm sensors init` silently wrote an empty manifest for a pack the registry does not ship. | Auto-detection now validates against the registry like `--pack` always did, falls back to a pack that exists, and names the missing one at both call sites. `defaultActions.initSensors` was projecting the result down to `detection` alone, so the field would have died in the wrapper. |
+| **I14** | `awm sensors run` rewrote a committed `sensors.json` and copied pack config files into the repo. | The rebuild is gone; the drift is reported (`packDrift`) and `awm sensors init` remains the only thing that adopts a pack. `run.ts` no longer imports anything that can write. |
+| **I15** | Project-scope broken symlinks were never healed, pruned, or reported. | `classifyGlobalSkills`/`repairGlobalSkills` were always scope-agnostic — the name was the bug. Renamed, plus `reconcileProjectSkillLinks`, wired into `awm sync` before the no-extensions early return, and a `project.orphans` row in doctor. |
+| **I16** | Backup transaction IDs collided at 1 ms resolution. | Unique ids; the earlier backup stays restorable. |
+| **I17** | Multi-bundle installs were not atomic and their transaction ids never reached the caller. | `syncProfile` builds ONE plan for the whole sync instead of one transaction per extension, so a failure on the third leaves nothing installed. `awm sync` and `awm add` now print the transaction id with the `awm backup restore` invocation that uses it. |
+
+## Closed — minor
+
+Every item from the paragraph that used to be here:
+
+- `.md` stripping anchored (`a.mdb.md` no longer becomes `ab.md`).
+- `savePreferences` routed through `writeFileAtomic` — the local copy had drifted below the shared primitive.
+- `registries.ts` resolves `awmHome()` at call time; `REGISTRIES_DIR`/`REGISTRIES_CONFIG_PATH` are now `registriesDir()`/`registriesConfigPath()`. It was the only module contradicting the call-time rule in `paths.ts`.
+- `provider-version.ts` no longer hardcodes "Codex" in messages or in the parse regex — the pattern moved into `versionCommand.versionPattern`, so the second provider to declare one will not report Codex's absence when its own binary is missing.
+- `awm init` installs **every** baseline bundle, matching what `awm update` reconciles; the diagnostic that decides whether the baseline is satisfied was changed with it, since it had the same `find`.
+- Antigravity's global workflows have a `workflows.global` check — it was the one provider using them and nothing verified them.
+- `awm watch --provider` is validated at the CLI boundary instead of at the first supervisor tick, with the journal already written.
+- `compareSemver` throws on malformed input; the registry gate fails **closed** and the update notice fails silent. All six callers were audited.
+
+One item surfaced by the structural guards rather than the audits: three `fs.symlinkSync` call sites passed no type argument, leaving Node to infer it. All now say `'file'`.
 
 ---
 
-## Open — minor
-
-`.md` stripping has three implementations, one unanchored (`discovery.ts` turns `a.mdb.md` into `ab.md`) · `savePreferences` reimplements atomic write, losing the symlink guard · `registries.ts` resolves `awmHome()` at require time, contradicting the call-time rule in `paths.ts` · `provider-version.ts` hardcodes "Codex" in the regex and all error strings · `awm init` installs only the *first* baseline bundle while `awm update` reconciles all · Antigravity's workflows are installed and never verified by any diagnostic · `awm watch --provider` accepts any string, failing later · the managed `AGENTS.md` block embeds raw `---` frontmatter fences · `compareSemver` returns `NaN` on malformed input and the version gate **fails open**.
-
 ---
 
-## Recommended order for what remains
+## Two structural guards — added
 
-1. **I4** — Copilot installs nothing and every surface reports healthy. Add a `skills.local` check so at least one thing tells the truth.
-2. **I13 + I14** — the sensor gate silently emptying, and `awm sensors run` rewriting a committed file, both undermine the one mechanism that cannot be talked past.
-3. **I16 + I17** — backup IDs collide and multi-bundle installs are not atomic; both weaken the rollback story the whole design leans on.
-4. **I11, I12, I15** — honesty of rollback, remedies and project-scope healing.
-5. Minors, by the paragraph above.
-6. **Two structural guards** (below) — these are what stop the closed items from coming back.
+Following the pattern already proven by `tests/structural/exec-invocation-explicit-stdio.test.ts` (written after the same bug recurred five times, and the best test in the repo). Both were verified the only way a structural guard can be: by reintroducing the shape they forbid and watching them go red.
 
-## Two structural guards to add
-
-Following the pattern already proven by `tests/structural/exec-invocation-explicit-stdio.test.ts` (written after the same bug recurred five times, and the best test in the repo):
-
-- no `fs.symlinkSync` outside the single `linkOrCopy` primitive;
-- no `RendererId` literal switched on outside the renderer table.
+- `tests/structural/symlink-type-is-explicit.test.ts` — every `fs.symlinkSync` passes an explicit type argument or has a visible copy fallback. It found a live site on its first run.
+- `tests/structural/renderer-table-is-single-source.test.ts` — no source file outside `core/renderers/registry.ts` maps a renderer id to a file extension, and the surviving table covers every declared `RendererId`. It found a **fourth** copy of the mapping, in `provider-checks.ts`, still alive after the first three were collapsed.
 
 ## What could not be verified here
 
