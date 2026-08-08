@@ -25,7 +25,7 @@ awm init [--agent <agent>] [--machine-only] [--yes] [--json]
 | Flag | Description |
 |---|---|
 | `-a, --agent <agent>` | Target agent. Default `claude-code`. |
-| `--machine-only` | Run only machine-level steps; skip all project steps. |
+| `--machine-only` | Run only machine-level steps; skip all project steps. Nothing is written under the working directory — including for providers whose context delivery is itself project-scope (Cursor, Copilot), which are skipped rather than written to the current directory. |
 | `-y, --yes` | Skip confirmation prompts (for scripts). |
 | `--json` | Emit the full `InitOutcome` as JSON instead of the rendered report — on success **and** on failure. |
 
@@ -55,6 +55,15 @@ awm doctor [--json]
 ```
 
 Glyphs: `✔` healthy · `⚠` advisory (does not degrade) · `✖` missing (degrades state). Each non-healthy row carries a remedy — a command (`→ awm …`) or a skill to ask the agent to run (`→ skill: …`). `--json` emits the structured `CheckReport`.
+
+A row that is **absent** means "nothing to verify", not "verified fine": a provider with no
+native-agent directory, or a registry that ships no `agents/`, emits no row rather than a
+red one nobody can act on. Two rows worth knowing:
+
+- **`project.orphans`** — skill links in the project that no longer belong to any declared
+  extension. Advisory; `awm sync` heals or prunes them.
+- **`workflows.global`** — machine-scope workflows, for the providers that use them
+  (today: Antigravity).
 
 ---
 
@@ -105,6 +114,17 @@ awm sync [-a <agent>] [-m <method>]
 |---|---|
 | `-a, --agent <agent>` | Target agent. |
 | `-m, --method <method>` | `symlink` (default) or `copy`. |
+
+`awm sync` also repairs the project's existing skill links before installing: a dangling
+symlink whose target the registry can still serve is re-linked, and one nothing can serve
+any more is pruned. Both are reported per line. Only dangling symlinks are touched — your
+own files and directories, and links that still resolve, are left alone. This runs even
+when the profile declares no extensions, which is precisely when orphans are left behind
+by a removed one.
+
+The whole sync is a **single transaction**: if any part of it fails, nothing is installed.
+On success it prints the transaction id and the `awm backup restore` invocation that
+undoes it.
 
 ### `awm update`
 
@@ -205,6 +225,8 @@ awm sensors run [--fast | --slow | --all] [--json]
 | `--json` | Machine-readable output. |
 
 > The completion gate is the **full** run (no flag). Do not use `--slow` as the gate — it skips lint/typecheck, where most new findings surface.
+
+`awm sensors run` only ever **reads** your project. It runs the manifest exactly as committed: it does not rewrite `.awm/sensors.json`, does not copy pack config files into the tree, and does not install anything. When the manifest's pack no longer matches the tree (a `generic` manifest over a real stack), the output carries a `packDrift` field naming the detected pack and the command that adopts it — `awm sensors init`.
 
 ### `awm sensors status`
 

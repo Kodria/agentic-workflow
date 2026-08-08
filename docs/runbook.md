@@ -145,7 +145,7 @@ For **new repos with no existing stack**. Pick your scenario and follow the orde
 10. ready — give your first development prompt
 ```
 
-On a brand-new repo with no stack files yet (`package.json`/`pyproject.toml`), sensors start as the `generic` pack. **That is fine and self-correcting**: the first time `awm sensors run` executes over a tree that now has a real stack, it auto-upgrades the manifest to the right pack (tsc/lint/test). You never have to re-detect by hand.
+On a brand-new repo with no stack files yet (`package.json`/`pyproject.toml`), sensors start as the `generic` pack. Once your tree has a real stack, run `awm sensors init` once to adopt the matching pack (tsc/lint/test). You do not have to remember to: `awm sensors run` reports the drift on every run (`packDrift`, naming the pack it detected), and `awm preflight` fails on it — but neither rewrites `.awm/sensors.json` for you. That file is committed and shared; changing it is a reviewable diff, not something a read command does behind your back.
 
 ### 2.4 Track B — legacy
 
@@ -266,7 +266,9 @@ This installs the `PostToolUse` hook so fast sensors (tsc/eslint) run automatica
 
 **How the gate stays honest:**
 
-`awm sensors run` **re-detects your stack on every run**. If the manifest is still on the `generic` fallback but your tree now has a real stack, it auto-upgrades to the right pack. And if a run executed nothing real over a tree that clearly has a stack, it refuses to report green (`not_certified`) instead of a false pass. This is why greenfield Track A works without any manual re-detection.
+`awm sensors run` **re-detects your stack on every run and tells you when the manifest no longer matches it** — a `generic` manifest over a real stack comes back with a `packDrift` field naming the pack it detected and the command that adopts it. And if a run executed nothing real over a tree that clearly has a stack, it refuses to report green (`not_certified`) instead of a false pass.
+
+What it will **not** do is rewrite `.awm/sensors.json`. It used to: a run would silently overwrite the committed manifest and copy the new pack's config files into your repo, so a single root `deploy.sh` could pull in the whole shell pack and turn a green harness red — from a command whose job is only to measure. `awm sensors init` is the verb that changes the manifest, and it is the only one.
 
 ### 2.8 Ready checklist
 
@@ -648,7 +650,7 @@ To contribute, open a PR in the relevant registry repo. This CLI repo (`agentic-
 | `awm sensors status` says a tool is "not installed locally" | `npx` tool missing from devDependencies | `npm i -D <tool>` |
 | Sensor always red on a legacy repo | no baseline accepted yet | `awm sensors baseline` |
 | `DEGRADED` sensor that will not clear | config templated for a different tool version | ask the agent to run `setup-sensors` |
-| Gate reports `generic` / nothing ran on a real stack | stack appeared after `awm init` | just run `awm sensors run` once — it self-upgrades; never reports false green |
+| Gate reports `generic` / nothing ran on a real stack | stack appeared after `awm init` | `awm sensors init` to adopt the real pack — `awm sensors run` reports the drift (`packDrift`) but never rewrites the committed manifest, and never reports a false green |
 | A skill is not in the agent's catalog | baseline pack not installed | re-run `awm init` (installs the `dev` baseline) |
 | OpenCode is not receiving `CONSTITUTION.md` | repo-local `opencode.json` missing the entry | re-run `awm init --agent opencode` (it wires it when `CONSTITUTION.md` exists) |
 

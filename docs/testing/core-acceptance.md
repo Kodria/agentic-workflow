@@ -136,6 +136,11 @@ cat .awm/sensors.json
 
 **Expect:** exit `0` and a manifest. On an empty repo the stack is `generic` and the manifest may legitimately be **empty** — AWM does not invent defaults. To exercise a real stack, `npm init -y` first and re-run; expect the `js-ts` pack.
 
+If your registry ships no pack for the detected stack, the command must **say so** — a
+`No '<stack>' sensor-pack in the registry` warning naming the pack it wrote instead. An
+empty or fallback manifest written silently is a FAIL: the whole point is that you learn
+the gate is thin at the moment it is created, not from an unrelated command days later.
+
 ## CORE-12 · Sensors run and report honestly
 
 ```bash
@@ -143,6 +148,39 @@ awm sensors run; echo "exit=$?"
 ```
 
 **Expect:** each configured sensor reported with a real state. A sensor whose tool isn't installed must report `skipped` with a reason — **never silently `pass`**. A non-zero exit with genuine findings is correct behaviour, not a FAIL.
+
+## CORE-12b · `sensors run` changes nothing
+
+`awm sensors run` measures the tree; it must not edit it. This check exists because it
+once did — it rewrote the committed manifest and copied pack config files into the repo,
+so merely running the gate produced a dirty working tree.
+
+```bash
+git status --porcelain > before.txt
+awm sensors run > /dev/null 2>&1
+git status --porcelain > after.txt
+diff before.txt after.txt && echo "OK: working tree unchanged"
+```
+
+**Expect:** no difference. Any new, modified, or untracked file is a FAIL — including a
+rewritten `.awm/sensors.json`.
+
+To see the drift report instead of a silent rewrite, put the manifest on `generic` over a
+real stack (`npm init -y` with `"pack": "generic"` in `.awm/sensors.json`) and run again:
+the output must carry a `packDrift` field naming the detected pack and pointing at
+`awm sensors init`, and the manifest must still be byte-identical.
+
+## CORE-12c · `awm sync` repairs project links and names its transaction
+
+```bash
+ln -s /nonexistent/gone .claude/skills/gone      # an orphan nothing can serve
+awm sync; echo "exit=$?"
+```
+
+**Expect:** exit `0`, a `✂  Pruned dangling gone` line, and a final `transaction <id> —
+undo with awm backup restore <id>` line. A dangling link left in place is a FAIL, and so
+is a sync that installs without telling you how to undo it. Your own real files and
+directories under `.claude/skills/` must be untouched.
 
 ## CORE-13 · Preflight tells you whether the harness can gate
 
