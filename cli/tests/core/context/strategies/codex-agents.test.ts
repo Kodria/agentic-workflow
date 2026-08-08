@@ -163,7 +163,7 @@ describe('CodexAgentsStrategy', () => {
         fs.mkdirSync(project, { recursive: true });
         const strategy = new CodexAgentsStrategy();
 
-        const result = strategy.injectProject(project, cursorProvider());
+        const result = strategy.injectProject(project, cursorProvider(), 'cursor');
 
         expect(result).toBe('injected');
         expect(fs.existsSync(path.join(project, 'AGENTS.md'))).toBe(true);
@@ -177,7 +177,7 @@ describe('CodexAgentsStrategy', () => {
         fs.mkdirSync(project, { recursive: true });
         const strategy = new CodexAgentsStrategy();
 
-        strategy.injectProject(project, copilotProvider());
+        strategy.injectProject(project, copilotProvider(), 'copilot');
 
         expect(fs.existsSync(path.join(project, 'AGENTS.md'))).toBe(true);
         expect(fs.existsSync(path.join(project, '.cursor'))).toBe(false);

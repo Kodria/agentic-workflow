@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import type { ProviderConfig, Scope } from '../../../providers';
+import type { AgentTarget, ProviderConfig, Scope } from '../../../providers';
 import { writeFileAtomic } from '../../atomic-file';
 import {
     managedBlockBody,
@@ -85,28 +85,25 @@ export class CodexAgentsStrategy implements InjectionStrategy {
         return injectFile(this.globalPath(provider), context.markdown);
     }
 
-    injectProject(projectRoot: string, provider: ProviderConfig): InjectResult {
+    injectProject(projectRoot: string, provider: ProviderConfig, agent?: AgentTarget): InjectResult {
         if (typeof projectRoot !== 'string' || projectRoot.length === 0) {
             throw new Error('projectRoot must be a non-empty string');
         }
         const result = injectFile(path.join(projectRoot, 'AGENTS.md'), PROJECT_GUIDANCE);
-        // ProviderConfig carries no AgentTarget field to match on (only `label`); the
-        // codebase's `agent === 'claude-code'` convention (commands/init.ts,
-        // commands/hooks/index.ts) applies where an AgentTarget is already in scope for
-        // other reasons — here it isn't, so provider.label is the identifier available.
-        if (provider.label === 'Cursor') {
+        let carrierResult: InjectResult = 'unchanged';
+        if (agent === 'cursor') {
             // Cursor's Background/Cloud Agent does not reliably read AGENTS.md (open,
             // staff-acknowledged bug on Cursor's own community forum, unresolved as of
             // this research — see docs/plans/2026-08-07-team-rollout-hardening-design.md,
             // D4 correction note). Interactive Agent mode DOES read AGENTS.md, unaffected.
             // Write the same guidance as a redundant .mdc carrier with alwaysApply: true
             // so the managed context survives regardless of which Cursor mode is active.
-            injectFile(
+            carrierResult = injectFile(
                 path.join(projectRoot, '.cursor', 'rules', 'awm.mdc'),
                 `---\ndescription: AWM project guidance (redundant carrier — see AGENTS.md)\nglobs:\nalwaysApply: true\n---\n\n${PROJECT_GUIDANCE}`,
             );
         }
-        return result;
+        return result === 'injected' || carrierResult === 'injected' ? 'injected' : 'unchanged';
     }
 
     /** The scope this provider's managed-agents-md injection operates at: 'local'

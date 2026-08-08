@@ -79,7 +79,7 @@ export const defaultActions: InitActions = {
     repairGlobalSkills: (skillsDir, registryContentDirs) => realRepairGlobalSkills(skillsDir, registryContentDirs),
     injectProjectConstitution: (o) => {
         if (getInjection(o.agent)?.type === 'managed-agents-md') {
-            return new CodexAgentsStrategy().injectProject(o.projectRoot, providerFor(o.agent)) === 'injected' ? 'injected' : 'already';
+            return new CodexAgentsStrategy().injectProject(o.projectRoot, providerFor(o.agent), o.agent) === 'injected' ? 'injected' : 'already';
         }
         return realInjectProjectConstitution(o.projectRoot, o.agent);
     },
