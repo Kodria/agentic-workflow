@@ -1,3 +1,9 @@
+## v3.13.5 - 2026-08-08
+
+### Fixes
+- **frontmatter:** close the reader/writer gap a review exposed
+- **frontmatter:** resolve YAML block-scalar descriptions in all four parsers
+
 ## v3.13.4 - 2026-08-08
 
 ### Fixes
