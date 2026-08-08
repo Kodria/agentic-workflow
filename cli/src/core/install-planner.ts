@@ -99,7 +99,24 @@ export function physicalTarget(intent: ArtifactIntent, agent: AgentTarget, scope
         : config.renderer === 'cursor-mdc' ? `${baseName}.mdc`
         : config.renderer === 'copilot-instructions' ? `${baseName}.instructions.md`
         : intent.installName;
-    return { targetPath: path.join(dir, filename), renderer: config.renderer };
+    const targetPath = path.join(dir, filename);
+    // Asercion de contencion: el destino resuelto DEBE caer dentro del
+    // directorio del provider. `dir` es el ancla de confianza real (sale de la
+    // config del provider, no del contenido), asi que verificarlo aca atrapa
+    // cualquier camino — presente o futuro — que construya un `installName` sin
+    // pasar por `assertSafeArtifactName`. Los nombres llegan desde el
+    // `bundle.json` de un registry, y el instalador borra el destino de forma
+    // recursiva antes de enlazar: un escape aca no es un archivo mal ubicado,
+    // es borrado arbitrario fuera del sandbox.
+    const resolvedDir = path.resolve(dir);
+    const resolved = path.resolve(targetPath);
+    if (resolved !== resolvedDir && !resolved.startsWith(resolvedDir + path.sep)) {
+        throw new Error(
+            `refusing to install outside the target directory: ${JSON.stringify(intent.installName)} ` +
+            `resolves to ${resolved}, which is not inside ${resolvedDir}`
+        );
+    }
+    return { targetPath, renderer: config.renderer };
 }
 
 /**

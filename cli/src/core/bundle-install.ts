@@ -1,6 +1,7 @@
 // src/core/bundle-install.ts
 import fs from 'fs';
 import path from 'path';
+import { assertSafeArtifactName } from './artifact-name';
 import {
     BundleDefinition,
     defaultScopeForBundle,
@@ -36,14 +37,24 @@ export interface InstallBundleOptions {
 }
 
 function bundleArtifacts(b: BundleDefinition, contentDir: string): ArtifactIntent[] {
+    // Estos nombres vienen VERBATIM del `bundle.json` de un registry — contenido
+    // de terceros. Sin validar, `path.join(installDir, name)` con `../../.ssh`
+    // escapaba del directorio destino, y como el instalador hace
+    // `rmSync(target, {recursive:true})` antes de enlazar, eso BORRABA el ~/.ssh
+    // real del usuario. Se valida en el origen, donde el mensaje puede nombrar
+    // el artefacto culpable; `physicalTarget` ademas asegura contencion
+    // estructural sobre la ruta ya resuelta.
     const refs: ArtifactIntent[] = [];
     for (const s of b.skills) {
+        assertSafeArtifactName(s.name, 'skill');
         refs.push({ name: s.name, type: 'skill', installName: s.name, sourcePath: path.join(contentDir, 'skills', s.name) });
     }
     for (const w of b.workflows) {
+        assertSafeArtifactName(w, 'workflow');
         refs.push({ name: w, type: 'workflow', installName: `${w}.md`, sourcePath: path.join(contentDir, 'workflows', `${w}.md`) });
     }
     for (const a of b.agents) {
+        assertSafeArtifactName(a, 'agent');
         refs.push({ name: a, type: 'agent', installName: `${a}.md`, sourcePath: path.join(contentDir, 'agents', `${a}.md`) });
     }
     return refs;
