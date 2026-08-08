@@ -51,6 +51,7 @@ export const defaultActions: InitActions = {
         method: o.method,
         projectRoot: o.projectRoot,
         contentDir: o.contentDir,
+        scopeOverride: o.scopeOverride,
     }),
 
     // Same as installBundle above — defaults to the real applyInstallPlan.
@@ -121,8 +122,12 @@ function failed(id: string, level: StepResult['level'], error: string): StepResu
  * physical operation and simply re-confirms ownership — it does not change
  * the co-owner's installed content.
  */
-function sharedInstallAgents(d: InitDeps): AgentTarget[] {
-    const group = agentsSharingSkillTarget(d.agent, d.enabledAgents, 'global', d.cwd);
+function sharedInstallAgents(d: InitDeps, scope: Scope = 'global'): AgentTarget[] {
+    // El scope tiene que ser el MISMO con el que se va a instalar: para un
+    // provider sin directorio global (Copilot) el baseline va a scope local, y
+    // preguntar por el grupo compartido en 'global' devolvia un grupo calculado
+    // sobre un destino que para el no existe.
+    const group = agentsSharingSkillTarget(d.agent, d.enabledAgents, scope, d.cwd);
     return group.includes(d.agent) ? group : [d.agent, ...group];
 }
 
@@ -208,15 +213,24 @@ export function stepDevCore(d: InitDeps): StepResult {
     const baselineBundle = d.bundles.find((b) => b.scope === 'baseline');
     const bundleName = baselineBundle?.name ?? 'dev';
 
+    // Un provider sin directorio global de skills (hoy: Copilot) no tiene donde
+    // poner el baseline a nivel maquina — y el hecho `devCore` lo reporta como
+    // "trivialmente satisfecho" para no volver a intentar un install global
+    // condenado a tirar. Pero nada instalaba nunca nada en su lugar: Copilot
+    // terminaba con CERO skills mientras `awm init` imprimia `✔ dev-core` y
+    // `awm doctor` decia `healthy`. Su propio `globalUnsupportedReason` ya dice
+    // que hay que instalar por proyecto, asi que eso es lo que se hace.
+    const localOnly = providerFor(d.agent).skill.global === null;
     d.actions.installBundle({
         bundleName,
         bundles: d.bundles,
-        agents: sharedInstallAgents(d),
+        agents: sharedInstallAgents(d, localOnly ? 'local' : 'global'),
         method: d.installMethod,
         projectRoot: d.cwd,
         contentDir: d.contentDir,
+        ...(localOnly ? { scopeOverride: 'local' as const } : {}),
     });
-    return ok('machine.devCore', 'machine', 'applied');
+    return ok('machine.devCore', 'machine', 'applied', localOnly ? 'installed at project scope (no global skill dir)' : undefined);
 }
 
 /** Step 3.5 – Repair broken global skill symlinks (orphans outside the baseline). */

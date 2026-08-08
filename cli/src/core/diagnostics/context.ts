@@ -92,7 +92,7 @@ function gatherContextInjection(): { agent: AgentTarget; state: InjectionState }
     return out;
 }
 
-function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude-code'): MachineFacts {
+function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude-code', projectRoot?: string): MachineFacts {
     // registryCache: estado del primer registry configurado (baseline en una máquina sembrada)
     const regs = listRegistries();
     const first = regs[0];
@@ -139,7 +139,24 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
             // (init/steps.ts) would fall through on every run and call installBundle at
             // global scope, which throws (skill.global === null), rolling back the
             // ENTIRE `awm init -a copilot` transaction, 100% of the time.
-            devCorePresent = true;
+            // Sin directorio global de skills (hoy: Copilot) el baseline se
+            // instala a nivel PROYECTO — `stepDevCore` lo hace con
+            // scopeOverride 'local'. Antes esto se declaraba "trivialmente
+            // satisfecho" incondicionalmente: eso evitaba el crash-loop del
+            // install global, pero significaba que Copilot terminaba con CERO
+            // skills mientras init imprimia `✔ dev-core` y doctor decia
+            // `healthy`. Ahora se mira donde el artefacto REALMENTE va.
+            if (projectRoot) {
+                const localDir = path.join(projectRoot, providerFor(agent).skill.local);
+                const { linked, broken } = classifyLinks(skillNames, localDir, providerFor(agent).skill.renderer);
+                const absent = skillNames.filter((s) => !linked.includes(s) && !broken.includes(s));
+                devCorePresent = skillNames.length > 0 && (linked.length + broken.length) > 0;
+                brokenLinks = [...broken, ...absent];
+            } else {
+                // Fuera de un proyecto no hay destino local: no hay nada que
+                // reclamar como faltante.
+                devCorePresent = true;
+            }
         } else {
             const { linked, broken } = classifyLinks(skillNames, skillsDir, providerFor(agent).skill.renderer);
             const absent = skillNames.filter((s) => !linked.includes(s) && !broken.includes(s));
@@ -263,7 +280,7 @@ export function gatherContext(opts: GatherOptions = {}): HarnessContext {
     const agents = opts.agents ?? [agent];
     const scanSkills = opts.scanSkills ?? ((dir: string) => classifyGlobalSkills(dir, contentRoots()));
     return {
-        machine: gatherMachine(bundles, agent),
+        machine: gatherMachine(bundles, agent, root ?? undefined),
         project: root ? gatherProject(root, bundles, agent) : null,
         providers: gatherProviderChecks(agents, scanSkills, root ?? undefined),
     };

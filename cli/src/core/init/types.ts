@@ -1,7 +1,7 @@
 // src/core/init/types.ts
 import type { HarnessContext, CheckReport, ProjectFacts } from '../diagnostics/types';
 import type { BundleDefinition } from '../bundles';
-import type { AgentTarget } from '../../providers';
+import type { AgentTarget, Scope } from '../../providers';
 import type { InstallMethod, InstallSummary, SyncResult } from '../bundle-install';
 import type { ContextOp } from '../context/orchestrator';
 import type { InjectionState } from '../context/types';
@@ -45,6 +45,10 @@ export interface InitActions {
     installBundle: (o: {
         bundleName: string; bundles: BundleDefinition[]; agents: AgentTarget[];
         method: InstallMethod; projectRoot: string; contentDir: string;
+        /** Fuerza el scope del bundle nombrado. Lo usa `stepDevCore` para un
+         *  provider sin directorio global de skills (Copilot), cuyo baseline va
+         *  a scope de proyecto. */
+        scopeOverride?: Scope;
     }) => InstallSummary;
     syncProfile: (o: {
         projectRoot: string; bundles: BundleDefinition[]; agents: AgentTarget[];
