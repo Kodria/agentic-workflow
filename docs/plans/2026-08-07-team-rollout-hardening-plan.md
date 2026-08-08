@@ -441,7 +441,48 @@ nuevos e implementa su rendering — no toca executor._
 
 ### Task 4.5: Cierre R4
 
-- [ ] Suite completa + e2e de 4.3. Commits + push + PRs.
+- [x] Suite completa + e2e de 4.3. Commits + push + PRs.
+
+  E2E de 4.3 confirmado re-corriendo `tests/commands/add.test.ts` +
+  `tests/core/bundle-install.test.ts` (22/22, filesystem real: `.mdc` para
+  Cursor, `.instructions.md` para Copilot vía `awm add`/`installBundle`
+  reales). `post-implementation-qa` de 4 lentes sobre el diff COMPLETO de
+  R4 (Tasks 4.0-4.5, todos los commits combinados): Track A (fidelidad) 0
+  hallazgos / 6 wins; Track B robustez+lógica+tests: 10 hallazgos (2
+  blocker, 5 important, 3 minor).
+
+  **Blockers:** (1) `stepContextInjection`/`stepConstitutionInjection`
+  colisionaban en el mismo managed-block de `AGENTS.md` para providers de
+  scope local (Cursor/Copilot) — quien corriera segundo pisaba al primero;
+  arreglado combinando ambos payloads en un solo writer
+  (`codex-agents.ts`). (2) `planInitMutationTargets` nunca enumeraba el
+  archivo de contexto materializado local ni el carrier `.cursor/rules/
+  awm.mdc`, y `stepContextInjection` usaba `d.cwd` crudo en vez del
+  project root ya descubierto — un rollback de init fallido podía no
+  limpiar escrituras reales.
+
+  **Important/minor:** truncamiento de nombres de skill con punto
+  embebido en `physicalTarget` (`path.parse` → strip explícito de
+  `.md`); falso positivo de `skillsGlobalCheck` sobre cualquier archivo
+  no relacionado en el directorio; tier de opencode mal etiquetado como
+  `agents-md-managed` (nuevo tier `config-managed`); `YAML_UNSAFE` no
+  cubría bytes de control/DEL. Los 10 hallazgos se corrigieron con tests
+  de regresión; un code-quality-reviewer independiente auditó el batch
+  completo (revirtiendo cada fix uno por uno para confirmar que su test
+  lo cazaba) y encontró 2 gaps propios (test faltante para el fix de
+  `d.cwd`→`project.root`; `JSON.stringify` no escapa `\x7F`) — ambos
+  corregidos y re-verificados. Suite final: 152/152 suites, 1440/1440
+  tests, `tsc --noEmit` limpio.
+
+  `harness-retro` curó 2 lecciones (`docs/harness-retros.md`,
+  2026-08-08): `verify-fix-by-revert-not-just-green` (nueva —
+  ≥4 ocurrencias en R1/R3/R4 nunca antes curadas) y una cuarta instancia
+  de `prefer-stdlib-over-hand-rolled-parsing`. Ledger NO archivado
+  (excepción activa hasta R7, ver notas de cierre de R1-R3).
+
+  R4 es CLI-only — no hubo cambios de registry (`docs/runbook.md` vive en
+  `agentic-workflow`, no en `awm-baseline-registry`; la nota original de
+  este task sobre "registry" era imprecisa).
 
 ---
 
