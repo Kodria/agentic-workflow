@@ -300,10 +300,17 @@ describe('reap — limpieza explicita con identidad validada (R2.2)', () => {
         try {
             const killed = await executeReap(s, ['sinRef', 'muerto', 'no-existe']);
             expect(killed).toEqual([]);
-            // no solo el resultado: nunca se INTENTO ninguna señal (R2.1) —
-            // la ausencia de identidad viva confirmada corta antes de llamar
-            // a terminateGroupConfirmed/process.kill, no despues.
-            expect(killSpy).not.toHaveBeenCalled();
+            // no solo el resultado: nunca se envio una señal REAL de
+            // terminacion (R2.1) — la ausencia de identidad viva confirmada
+            // corta antes de llegar a terminateGroupConfirmed. En win32,
+            // refIsAlive usa pidExistsNative internamente, que SI llama a
+            // process.kill(pid, 0) como sondeo de existencia (signal 0, no
+            // una señal real) — eso aparece legitimamente en este spy y no
+            // es evidencia de una señal enviada; se filtra explicitamente
+            // (mismo patron ya aplicado en adapter.test.ts para execFileSync,
+            // narrowing en vez de "cero llamadas").
+            const realSignals = killSpy.mock.calls.filter((call) => call[1] !== 0);
+            expect(realSignals).toEqual([]);
         } finally {
             killSpy.mockRestore();
         }

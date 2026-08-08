@@ -21,6 +21,28 @@ async function until(fn: () => boolean, ms = 8000): Promise<void> {
     }
 }
 
+/** fakeSpawner dispara runExecWrapper sin esperarlo (fire-and-forget, mismo
+ *  contrato que el spawner real — ver comentario en fakeSpawner). Eso deja
+ *  una escritura async en vuelo hacia archivos bajo `repo` (logs, sidecars)
+ *  que puede seguir viva cuando afterEach borra el tmpdir. En win32 un
+ *  handle abierto en el momento del rmdir produce EBUSY (confirmado en CI
+ *  real: windows-latest, no reproducible en POSIX porque unlink ahi no
+ *  requiere que el handle este cerrado). No es un fallo de produccion —
+ *  ningun test observa contenido tras el cleanup — asi que un
+ *  reintento acotado alcanza sin tener que forzar cada test a esperar el
+ *  wrapper en vuelo. */
+async function rmSyncRetryingEbusy(target: string, attempts = 10, delayMs = 50): Promise<void> {
+    for (let i = 0; i < attempts; i++) {
+        try {
+            fs.rmSync(target, { recursive: true, force: true });
+            return;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'EBUSY' || i === attempts - 1) throw error;
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+    }
+}
+
 function seedJob(repo: string, partial: Partial<Job>): string {
     const s = readJournal(repo, 'rama').state!;
     const j: Job = {
@@ -36,7 +58,7 @@ function seedJob(repo: string, partial: Partial<Job>): string {
 describe('runner concurrente', () => {
     let repo: string;
     beforeEach(() => { repo = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-run-')); initJournal(repo, 'rama'); });
-    afterEach(() => { fs.rmSync(repo, { recursive: true, force: true }); });
+    afterEach(async () => { await rmSyncRetryingEbusy(repo); });
 
     test('spawnPendingWrappers persiste spawn-intent+nonce ANTES del spawn y NO bloquea (R1.8, R4.4)', async () => {  // verifies R4.4
         seedJob(repo, { argv: ['node', '-e', 'setTimeout(()=>process.exit(0), 800)'] });

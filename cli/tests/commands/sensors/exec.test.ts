@@ -58,10 +58,19 @@ describe('runCommand — exit codes and output', () => {
 
 describe('runCommand — output cap', () => {
     it('stops at maxBuffer, flags overflow, and keeps what it read', async () => {
-        // 200 lines of ~50 bytes each, capped at 1KB.
-        const r = await runCommand(`for i in $(seq 1 200); do echo "line-$i-padding-padding-padding-padding"; done`, {
-            timeout: 10_000, cwd: process.cwd(), maxBuffer: 1024,
-        });
+        // 200 lines of ~50 bytes each, capped at 1KB. A `for i in $(seq ...); do
+        // ... done` POSIX shell loop silently no-ops under cmd.exe (win32's
+        // spawn(cmd, {shell:true}) target) instead of erroring — cmd.exe has
+        // no `$(...)`/`do...done` syntax, so the whole string is passed through
+        // largely inert and stdout never reaches the cap (regression: this test
+        // isn't POSIX-scoped, so it ran for-real on windows-latest CI and
+        // r.overflowed came back false). A `node -e` one-liner is invoked
+        // identically by both shells (same portability reasoning as the
+        // exit-code test above).
+        const r = await runCommand(
+            `node -e "for(let i=1;i<=200;i++){console.log('line-'+i+'-padding-padding-padding-padding')}"`,
+            { timeout: 10_000, cwd: process.cwd(), maxBuffer: 1024 },
+        );
         expect(r.overflowed).toBe(true);
         expect(r.stdout.length).toBeLessThanOrEqual(1024);
         // The point of the cap change: what was read is still usable, not discarded.

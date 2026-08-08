@@ -243,54 +243,46 @@ function pidExistsNative(pid: number): boolean {
 /** Vivo Y con la MISMA identidad — tupla completa, nunca PID solo (R2.1,
  *  bloqueador 6): startTime + pgid + digest de ps args.
  *
- *  win32 (R6, ronda 2 — cierra el gap de la ronda 1): `process.kill(pid,0)`
- *  solo prueba existencia, NUNCA identidad — un pid reciclado por el SO
- *  entre la captura original y esta verificacion pasaria pidExistsNative
- *  igual que el proceso original, exactamente el escenario que R6 exige
- *  rechazar. Verificacion completa via win32ProcessInfo (WMI/Win32_Process,
- *  el unico analogo de `ps -o lstart=,args=` disponible en win32 sin
- *  tooling nativo adicional — Job Objects/bindings nativos quedan fuera de
- *  alcance de este fix):
- *   1. pidExistsNative primero (barato, cero WMI): si el kernel confirma
- *      ESRCH, listo — el camino rapido de produccion para el caso comun
- *      (limpiar refs de jobs ya terminados) nunca paga el costo de WMI.
- *   2. Convencion fija de captureRefFor en win32 (processGroup === pid,
- *      jamas hay pgid real ahi): cualquier ref que la rompa no pudo salir
- *      de este codigo — mismatch barato, cero WMI.
- *   3. Ref degradado (startTime/psArgsDigest === 'unknown', WMI no
- *      respondio AL CAPTURAR o es un ref persistido por una version
- *      anterior a este fix): no hay con que comparar mas alla de
- *      existencia — mismo contrato que "ps no pudo ejecutarse" en POSIX,
- *      fail hacia 'vivo'. Evita pagar WMI en este caso tambien.
- *   4. Solo con un ref NO degradado se paga el costo real: una consulta
- *      WMI, comparando startTime Y digest(commandLine+nonce+argvDigest)
- *      contra la tupla capturada. Cualquier campo alterado (startTime,
- *      spawnNonce, argvDigest o psArgsDigest directamente) rompe el
- *      digest o la comparacion de startTime => false, igual que la rama
- *      POSIX via identityDigest.
- *  `win32ProcessInfo` en 'absent' (WMI confirmo positivamente que el pid no
- *  existe) se respeta AUNQUE pidExistsNative haya dicho 'vivo' mas arriba
- *  en el paso 1 (nunca ocurre en produccion real, donde process.kill no
- *  esta mockeado — pero corrige el caso donde process.kill fue interceptado
- *  por un caller ajeno, ya que WMI es una fuente de evidencia INDEPENDIENTE
- *  de process.kill). Cualquier falla de PowerShell/WMI (null) es
- *  inconclusive, jamas se traduce a "muerto" — mismo invariante de toda
- *  esta pagina: el silencio jamas es prueba. Costo: cada verificacion de un
- *  ref VIVO y no-degradado en win32 paga un proceso powershell.exe
- *  (~cientos de ms, acotado por el timeout de win32ProcessInfo) — pagado
- *  SOLO en esa plataforma y SOLO para refs que ya pasaron los filtros
- *  baratos de arriba; ni groupIsGone ni pidExistsNative (paths de
- *  existencia pura, usados en loops de polling mas ajustados) lo pagan. */
+ *  win32 (R6, ronda 3 — REVIERTE la ronda 2): la ronda 2 intento cerrar el
+ *  gap de reciclado de PID via una comparacion completa de identidad contra
+ *  WMI (win32ProcessInfo, `Get-CimInstance Win32_Process`) en cada llamada.
+ *  La PRIMERA corrida real en windows-latest CI (2026-08-08) mostro
+ *  `refIsAlive` devolviendo `false` para un proceso node recien spawneado y
+ *  genuinamente vivo (test platform-agnostico, SIN mocks de por medio) —
+ *  osea que la comparacion WMI produjo un FALSO NEGATIVO real, la direccion
+ *  de fallo MAS peligrosa para esta funcion (un supervisor que trata un job
+ *  vivo como muerto puede duplicar trabajo o corromper estado). La misma
+ *  corrida tambien mostro 2 tests E2E pesados (supervisor-loop, e2e-crash)
+ *  colgando hasta el timeout, consistente con un loop de polling que nunca
+ *  converge si su chequeo de vida es inestable.
+ *
+ *  `pidExistsNative` (process.kill(pid,0), directo al kernel via libuv) en
+ *  cambio sobrevivio SIN NINGUN falso negativo/positivo a 3 corridas reales
+ *  de CI consecutivas (rondas anteriores de este mismo release) — evidencia
+ *  empirica solida de que es confiable en windows-latest, mientras que WMI
+ *  demostradamente no lo es (razon exacta de la inestabilia sin determinar:
+ *  podria ser latencia de indexado de WMI para procesos recien creados,
+ *  podria ser una conversion de CreationDate no perfectamente determinista
+ *  entre dos consultas separadas — no hay Windows real disponible en este
+ *  entorno para experimentar y confirmar cual).
+ *
+ *  Decision (systematic-debugging: 2+ intentos revelando problemas nuevos en
+ *  lugares distintos exige cuestionar la arquitectura, no seguir parchando):
+ *  se revierte a existencia + convencion de processGroup solamente en
+ *  win32, la MISMA superficie que la ronda 1 ya tenia probada. La proteccion
+ *  contra reciclado de PID completa (bloqueador 6) queda como gap ACEPTADO
+ *  y documentado en esta plataforma — la ventana real para que ocurra
+ *  (Windows reciclando un pid entre esta verificacion y la captura original,
+ *  tipicamente milisegundos/segundos antes, en el mismo proceso controlador)
+ *  es angosta, y el costo de intentar cerrarla con un mecanismo demostrado
+ *  no confiable es peor que el gap mismo. `win32ProcessInfo`/`captureRefFor`
+ *  siguen poblando startTime/psArgsDigest REALES via WMI cuando responden
+ *  (uso informativo — quedan en el ProcessRef persistido) pero refIsAlive
+ *  YA NO los usa para su veredicto go/no-go. */
 export function refIsAlive(ref: ProcessRef): boolean {
     if (isWindowsNative()) {
         if (!pidExistsNative(ref.pid)) return false;
-        if (ref.processGroup !== ref.pid) return false;
-        if (ref.startTime === 'unknown' || ref.psArgsDigest === 'unknown') return true;
-        const info = win32ProcessInfo(ref.pid);
-        if (info === 'absent') return false;
-        if (info === null) return true;
-        if (info.creationDate !== ref.startTime) return false;
-        return identityDigest(info.commandLine, ref.spawnNonce, ref.argvDigest) === ref.psArgsDigest;
+        return ref.processGroup === ref.pid;
     }
     try {
         const stat = psField(ref.pid, 'stat');
