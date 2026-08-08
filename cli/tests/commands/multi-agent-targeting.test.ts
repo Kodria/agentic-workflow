@@ -246,6 +246,79 @@ describe('multi-agent targeting (add/remove/sync/update/doctor)', () => {
         expect(outcome.code).toBe(1); // no silent catch{} — verifies Step 6's "no aborta" removal
     });
 
+    // Finding #3 (R7 QA): `noteWindowsCaveat` used to be called only from the
+    // raw Commander `.action()` closures in `index.ts` (update.ts:441,
+    // sync.ts:453 pre-fix) — call sites no test exercised, since `update`/
+    // `sync` are always driven here via `runUpdateCore`/`runSyncCore`
+    // directly. It now lives at the top of those core functions themselves,
+    // firing at most once per run, native Windows only.
+    describe('Windows caveat (noteWindowsCaveat) — update & sync', () => {
+        const realPlatform = process.platform;
+        let logSpy: jest.SpyInstance;
+
+        beforeEach(() => {
+            logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+        });
+        afterEach(() => {
+            logSpy.mockRestore();
+            Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+        });
+
+        function caveatCalls(): unknown[][] {
+            return logSpy.mock.calls.filter((c) => /awm watch/i.test(String(c[0])));
+        }
+
+        it('update logs the caveat exactly once on native Windows, never on Linux', async () => {
+            writePrefs(['claude-code']);
+            const { runUpdateCore } = require('../../src/commands/update');
+            const deps = {
+                syncRegistries: async () => [],
+                verifyMinCliVersions: () => [],
+                regenerateGlobalContext: () => [],
+                planReconciliation: () => ({ operations: [], records: [], reports: [] }),
+                applyInstallPlan: () => ({ installed: [], skipped: [], transactionId: 'tx', modifiedFiles: [] }),
+                resyncInstalledHooks: () => [],
+                offerSelfUpdate: async () => {},
+            };
+
+            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+            await runUpdateCore({}, deps);
+            expect(caveatCalls()).toHaveLength(1);
+
+            logSpy.mockClear();
+            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+            await runUpdateCore({}, deps);
+            expect(caveatCalls()).toHaveLength(0);
+        });
+
+        it('sync logs the caveat exactly once on native Windows, never on Linux', async () => {
+            writePrefs(['claude-code']);
+            const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-sync-project-'));
+            fs.mkdirSync(path.join(projectRoot, '.awm'), { recursive: true });
+            fs.writeFileSync(path.join(projectRoot, '.awm', 'profile.json'), JSON.stringify({ extensions: [] }));
+            const { runSyncCore } = require('../../src/commands/sync');
+            const deps = {
+                syncRegistries: async () => [],
+                verifyMinCliVersions: () => [],
+                verifyProjectPins: async () => [],
+                syncProfile: () => ({ installed: [], skipped: [], extensions: [], transactionIds: [], modifiedFiles: [] }),
+            };
+
+            try {
+                Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+                await runSyncCore({ cwd: projectRoot }, deps);
+                expect(caveatCalls()).toHaveLength(1);
+
+                logSpy.mockClear();
+                Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+                await runSyncCore({ cwd: projectRoot }, deps);
+                expect(caveatCalls()).toHaveLength(0);
+            } finally {
+                fs.rmSync(projectRoot, { recursive: true, force: true });
+            }
+        });
+    });
+
     it('sync reports a syncProfile failure and returns a non-zero exit code instead of crashing uncaught', async () => {
         writePrefs(['claude-code'], 'claude-code');
         const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-sync-project-'));

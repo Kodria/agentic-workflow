@@ -68,6 +68,49 @@ describe('runInit', () => {
         if (originalAwmHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = originalAwmHome;
     });
 
+    // Finding #2/#3 (R7 QA): the Windows caveat used to fire via a direct
+    // call in registerInitCommand's Commander `.action()` closure — a call
+    // site no test exercised, since every other `runInit` test here bypasses
+    // the Commander wrapper entirely. It now lives at the top of `runInit`
+    // itself (the unit these tests already drive directly), firing at most
+    // once per run, native Windows only.
+    describe('Windows caveat (noteWindowsCaveat)', () => {
+        const realPlatform = process.platform;
+        let logSpy: jest.SpyInstance;
+
+        beforeEach(() => {
+            logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+        });
+        afterEach(() => {
+            logSpy.mockRestore();
+            Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+        });
+
+        it('logs the caveat exactly once on native Windows', async () => {
+            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+            const { runInit } = require('../../src/commands/init');
+            await runInit({
+                cwd: tmpHome,
+                yes: true,
+                actions: { syncCache: async () => {}, installHook: () => ({ status: 'installed' }) },
+            });
+            const caveatCalls = logSpy.mock.calls.filter((c) => /awm watch/i.test(String(c[0])));
+            expect(caveatCalls).toHaveLength(1);
+        });
+
+        it('never logs the caveat on non-Windows platforms', async () => {
+            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+            const { runInit } = require('../../src/commands/init');
+            await runInit({
+                cwd: tmpHome,
+                yes: true,
+                actions: { syncCache: async () => {}, installHook: () => ({ status: 'installed' }) },
+            });
+            const caveatCalls = logSpy.mock.calls.filter((c) => /awm watch/i.test(String(c[0])));
+            expect(caveatCalls).toHaveLength(0);
+        });
+    });
+
     it('returns exit 1 on a bare HOME and never prompts with --yes (cache stubbed)', async () => {
         const { runInit } = require('../../src/commands/init');
         const code = await runInit({

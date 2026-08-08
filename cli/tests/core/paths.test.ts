@@ -105,6 +105,25 @@ describe('core/paths', () => {
     expect(WINDOWS_KNOWN_GAP).not.toMatch(/not supported/i);
   });
 
+  it('noteWindowsCaveat propagates a throwing logger instead of swallowing it', () => {
+    // `noteWindowsCaveat` has no try/catch around the logger call — callers
+    // (init.ts/update.ts/sync.ts/doctor.ts) all pass simple `console.log`
+    // wrappers that are not expected to throw, and every caller controls its
+    // own logger, so there is no shared reason for this helper to be
+    // defensive on their behalf. Pin that behavior explicitly: a throwing
+    // logger's error propagates out of `noteWindowsCaveat`, it is not
+    // swallowed.
+    setPlatform('win32');
+    const boom = new Error('logger exploded');
+    const throwingLog = () => { throw boom; };
+    expect(() => noteWindowsCaveat(throwingLog)).toThrow(boom);
+
+    // And on non-Windows the logger is never even invoked, so a throwing
+    // logger is harmless there.
+    setPlatform('linux');
+    expect(() => noteWindowsCaveat(throwingLog)).not.toThrow();
+  });
+
   describe('resolveOnPath', () => {
     it('uses `command -v` on POSIX and returns true when the binary resolves', () => {
       setPlatform('linux');

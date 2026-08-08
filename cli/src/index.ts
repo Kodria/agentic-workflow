@@ -48,7 +48,6 @@ import { runUpdateCore } from './commands/update';
 import { resolveAgentTargetsOrError } from './core/agent-targets';
 import type { AwmPreferences } from './utils/config';
 import { maybeNotifyUpdate } from './core/update-check';
-import { noteWindowsCaveat } from './core/paths';
 import { cliVersion } from './core/cli-version';
 
 const program = new Command();
@@ -438,7 +437,6 @@ program.command('update')
   .option('-a, --agent <agent>', `Target agent(s), comma-separated: ${AGENT_TARGETS.join(', ')} (defaults to every enabled agent)`)
   .action(async (options: { agent?: string }) => {
       intro(pc.bgCyan(pc.black(' AWM - Update Registries ')));
-      noteWindowsCaveat((m) => console.log(pc.dim(`ℹ ${m}`)));
       const result = await runUpdateCore(options);
       outro(result.code === 0 ? '✅ Registries, skills and hooks updated.' : pc.red('Update failed — see errors above.'));
       process.exitCode = result.code;
@@ -450,7 +448,6 @@ program.command('sync')
   .option('-m, --method <method>', 'Install method: symlink or copy', 'symlink')
   .action(async (options: { agent?: string; method?: string }) => {
       intro(pc.bgCyan(pc.black(' AWM - Sync Project Profile ')));
-      noteWindowsCaveat((m) => console.log(pc.dim(`ℹ ${m}`)));
       const { code } = await runSyncCore(options);
       outro(code === 0 ? 'Done.' : pc.red('Sync failed — see errors above.'));
       process.exitCode = code;

@@ -15,6 +15,7 @@
 // by tests).
 import pc from 'picocolors';
 import { AgentTarget } from '../providers';
+import { noteWindowsCaveat } from '../core/paths';
 import { getPreferences } from '../utils/config';
 import { resolveAgentTargetsOrError } from '../core/agent-targets';
 import {
@@ -76,6 +77,10 @@ export async function runUpdateCore(
     options: RunUpdateOptions = {},
     deps: Partial<RunUpdateDeps> = {},
 ): Promise<RunUpdateResult> {
+    // Fires at most once per `awm update` run, native Windows only — the
+    // single emission point for this command (mirrors `runInit`/`runSyncCore`).
+    noteWindowsCaveat((m) => console.log(pc.dim(`ℹ ${m}`)));
+
     const d: RunUpdateDeps = { ...defaultDeps, ...deps };
     const prefs = getPreferences();
 
