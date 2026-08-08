@@ -251,16 +251,50 @@ export function spawnStructured(argv: string[], cwd: string, nonce: string, extr
  *  rompia el invariante "JAMAS safe sin evidencia" (safeToReplace
  *  devolvia 'safe' para un proceso vivo). process.kill(pid,0) evita la
  *  capa de emulacion por completo. */
+/** Sleep sincronico REAL, multiplataforma, sin depender de un binario externo
+ *  (`sleep` no existe nativamente en win32 — ver el comentario de sleepSync
+ *  mas arriba). `Atomics.wait` sobre un buffer compartido bloquea el hilo
+ *  actual durante `ms` sin abrir ningun subproceso; funciona identico en
+ *  cualquier plataforma que soporte Node. Usado SOLO por pidExistsNative
+ *  para el reintento acotado de abajo — nunca en un hot-path de alta
+ *  frecuencia. */
+function sleepMsSync(ms: number): void {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** Reintento acotado (R6, post-mortem de CI real): dos corridas reales de
+ *  windows-latest sobre el MISMO commit (uno vía `release.yml`, uno vía
+ *  `ci.yml`, ambos re-corriendo el suite completo desde cero) dieron
+ *  resultados DISTINTOS para el mismo test — `pidExistsNative` reportando
+ *  ESRCH para un proceso recien spawneado por el propio test, genuinamente
+ *  vivo — evidencia directa de una condicion de carrera transitoria
+ *  especifica de esta plataforma/runner, no un bug determinista (el codigo
+ *  no cambio entre ambas corridas). Un solo intento en el hot-path exacto
+ *  "acabo de spawnear esto, ¿esta vivo?" no le da tiempo al SO a que el pid
+ *  sea consultable via OpenProcess bajo carga pesada del runner. Reintentar
+ *  con una pausa breve ANTES de declarar ESRCH definitivo no debilita el
+ *  invariante "jamas muerte sin evidencia" — un proceso genuinamente muerto
+ *  sigue reportando ESRCH en el reintento; esto solo absorbe el falso
+ *  negativo transitorio. Costo maximo: ~150ms, y SOLO en la rama que ya iba
+ *  a declarar "no existe" — el camino feliz (proceso vivo, exito inmediato)
+ *  no paga nada. */
+const PID_EXISTS_RETRY_ATTEMPTS = 3;
+const PID_EXISTS_RETRY_DELAY_MS = 50;
+
 function pidExistsNative(pid: number): boolean {
-    try {
-        process.kill(pid, 0);
-        return true;
-    } catch (error) {
-        // ESRCH = el SO confirmo que el pid no existe. Cualquier otro
-        // codigo (ej. EPERM: existe pero sin permiso de senializarlo) NO
-        // es evidencia de muerte — falla a favor de "vivo" (R2.1).
-        return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+    for (let attempt = 0; attempt < PID_EXISTS_RETRY_ATTEMPTS; attempt++) {
+        try {
+            process.kill(pid, 0);
+            return true;
+        } catch (error) {
+            // ESRCH = el SO confirmo que el pid no existe. Cualquier otro
+            // codigo (ej. EPERM: existe pero sin permiso de senializarlo) NO
+            // es evidencia de muerte — falla a favor de "vivo" (R2.1).
+            if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return true;
+            if (attempt < PID_EXISTS_RETRY_ATTEMPTS - 1) sleepMsSync(PID_EXISTS_RETRY_DELAY_MS);
+        }
     }
+    return false;
 }
 
 /** Vivo Y con la MISMA identidad — tupla completa, nunca PID solo (R2.1,
