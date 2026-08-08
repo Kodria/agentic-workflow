@@ -2,6 +2,10 @@
 
 AWM installs into whichever agent each developer already uses. Six are supported, and they do **not** get the same product — because they don't have the same capabilities.
 
+> **The authoritative paths live in [support-matrix.md](support-matrix.md)**, generated from
+> `cli/src/providers/index.ts` and locked by a test. If this page ever disagrees with it,
+> the generated one wins — and the disagreement is a bug on this page.
+
 This page is deliberately blunt about that. Promising uniform behaviour and then degrading silently is how a tool loses trust; knowing up front that Cursor won't fire hooks is far better than discovering it when a gate doesn't hold.
 
 ## Choosing: what each tier actually gives you
@@ -121,9 +125,14 @@ awm init -a antigravity
 
 | | Path |
 |---|---|
-| Skills | `~/.agents/skills/` · `.agents/skills/` |
+| Skills | `~/.gemini/antigravity/skills/` · `.agent/skills/` |
 | Workflows | `~/.gemini/antigravity/global_workflows/` |
 | Hooks / injection | none |
+
+> Note the singular `.agent/skills` at project scope, and that Antigravity does **not**
+> share `~/.agents/skills` with Codex/OpenCode — it has its own tree. This table said
+> otherwise for several releases; the authoritative, code-generated version is in
+> [support-matrix.md](support-matrix.md).
 
 Content is delivered and read by the agent. No hooks, no managed injection — `awm doctor` won't report those as missing, because the agent has no such mechanism to begin with.
 
@@ -141,7 +150,7 @@ awm doctor -a cursor,copilot
 
 `awm init` targets one agent per run; run it once per agent you use.
 
-Note that `codex`, `opencode` and `antigravity` share `~/.agents/skills/`. That's intentional — one installed copy serves all three.
+Note that `codex` and `opencode` share `~/.agents/skills/`. That's intentional — one installed copy serves both, and the installer treats them as a group so enabling one without the other is refused rather than silently divergent. **`antigravity` does not share it**: it has its own `~/.gemini/antigravity/skills/`.
 
 ---
 

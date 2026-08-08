@@ -46,7 +46,15 @@ Reglas de proceso del proyecto. Todo agente que trabaje en este repo debe leerla
 
 ## Matriz de soporte
 
-Esta matriz es una **declaración de contrato**: qué combinaciones de stack/agente/host/OS están soportadas HOY, no una lista de aspiraciones. Cada fila está verificada contra el código fuente citado — no contra la prosa de ningún plan (los planes documentan intención; el código es la verdad, ver "Auto-verificación del CLI" en AGENTS.md). Al agregar una fila nueva, verificarla del mismo modo antes de escribirla.
+Esta matriz es una **declaración de contrato**: qué combinaciones de stack/agente/host/OS están soportadas HOY, no una lista de aspiraciones.
+
+> **División de trabajo con [`docs/support-matrix.md`](docs/support-matrix.md):** acá viven las
+> *reglas* — qué tier tiene cada agente y **por qué**, qué decisión hay detrás de cada
+> límite. Allá vive el *estado*: las rutas de instalación (generadas desde
+> `providers/index.ts` y bloqueadas por un test) y el nivel de evidencia de cada
+> combinación (`verificado` / `sin verificar` / `no soportado` / `planeado`). Las rutas no
+> se escriben a mano en ninguno de los dos documentos: esa duplicación ya produjo una
+> tabla que afirmaba durante varias releases que Antigravity instalaba donde no instala. Cada fila está verificada contra el código fuente citado — no contra la prosa de ningún plan (los planes documentan intención; el código es la verdad, ver "Auto-verificación del CLI" en AGENTS.md). Al agregar una fila nueva, verificarla del mismo modo antes de escribirla.
 
 **Stacks** (`cli/src/commands/sensors/init.ts`, `detectStack()` / `STACK_DETECTORS`): `js-ts` (indicador `package.json`), `python` (`pyproject.toml` | `setup.py` | `setup.cfg` | `requirements.txt` | `Pipfile`), `shell` (fallback: glob `*.sh` en la raíz o en `scripts/`, solo si no hay marcador js-ts/python más fuerte), `generic` (fallback puro, cuando nada matchea). Orden de especificidad: `js-ts > python > shell > generic`. `awm sensors init --pack <name>` es el override explícito del operador para cualquier caso que la heurística no cubra — la detección es conveniencia, la declaración es contrato. Sin registry alcanzable, o sin `pack.json` para el stack detectado, el manifest generado es honesto y vacío (`FALLBACK_DEFAULTS` fue eliminado del CLI en R3) — el CLI nunca vuelve a inventar defaults propios.
 

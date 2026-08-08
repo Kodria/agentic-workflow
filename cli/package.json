@@ -23,7 +23,8 @@
     "prerelease": "npm run build",
     "release": "node dist/src/release/index.js",
     "prepack": "npm run build",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "docs:matrix": "ts-node scripts/support-matrix.ts"
   },
   "keywords": [
     "agentic",

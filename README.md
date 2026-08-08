@@ -64,6 +64,12 @@ Not every agent can enforce the same things. AWM reports each one's **tier** hon
 
 **How to configure each one:** **[docs/agents-setup.md](docs/agents-setup.md)**
 
+**Exactly what is supported, with what evidence, and what is not:**
+**[docs/support-matrix.md](docs/support-matrix.md)** — install paths generated from the
+source and locked by a test, plus an explicit `verified / unverified / not supported /
+planned` level for every provider, OS, registry and sensor pack. Nothing there asks you
+to take its word for it.
+
 ### Stacks (for sensors)
 
 `js-ts`, `python`, `shell`, and a `generic` fallback. Detection is a convenience; `awm sensors init --pack <name>` is the explicit override and the real contract.
@@ -128,10 +134,11 @@ The two processes the system runs day to day:
 **Understand it**
 - [Architecture](docs/architecture.md) — components, data flow, on-disk state
 - [Software development lifecycle](docs/sdlc.md) — how the phases, gates and learning loop compose
-- [`CONSTITUTION.md`](CONSTITUTION.md) — the project's non-negotiable rules and the authoritative support matrix
+- [`CONSTITUTION.md`](CONSTITUTION.md) — the project's non-negotiable rules
 - [Harness retros](docs/harness-retros.md) — auditable log of recurring gaps turned into structural rules
 
 **Verify it**
+- [Support matrix](docs/support-matrix.md) — what is supported, at what evidence level, and what is missing
 - [End-to-end acceptance playbooks](docs/testing/README.md) — scripted checks per OS and per agent
 
 **Extend it**

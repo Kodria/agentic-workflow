@@ -6,18 +6,20 @@ Each agent gets a different amount of AWM. That is a property of the target agen
 
 ## Where artifacts land
 
-Verified against `cli/src/providers/index.ts`.
+**This table used to live here and it was wrong** — it claimed Antigravity installed to
+`~/.agents/skills` and `.agents/skills` when the code says `~/.gemini/antigravity/skills`
+and `.agent/skills` (singular), and it never mentioned that Antigravity is the only
+provider with `global_workflows`. A hand-written copy of a fact the code already owns
+drifts, and this one drifted silently for releases.
 
-| Agent | Skills (global) | Skills (project) | Rendered as | Context injection |
-|---|---|---|---|---|
-| `claude-code` | `~/.claude/skills/` | `.claude/skills/` | symlink | `~/.claude/settings.json` (hook) |
-| `codex` | `~/.agents/skills/` | `.agents/skills/` | symlink | managed `AGENTS.md` (+ `~/.codex/AGENTS.md`) |
-| `opencode` | `~/.agents/skills/` | `.agents/skills/` | symlink | `~/.config/opencode/opencode.json` |
-| `cursor` | `~/.cursor/rules/` | `.cursor/rules/` | `.mdc` file | managed `AGENTS.md` (project only) |
-| `copilot` | **not supported** | `.github/instructions/` | `.instructions.md` | managed `AGENTS.md` (project only) |
-| `antigravity` | `~/.agents/skills/` | `.agents/skills/` | symlink | none |
+It now lives **generated from `cli/src/providers/index.ts`**, in
+**[docs/support-matrix.md](../support-matrix.md)**, locked by
+`tests/structural/support-matrix-is-current.test.ts` so it cannot drift again. Read the
+paths there; this document only covers what to *check*.
 
-`copilot` has no global scope on purpose: GitHub Copilot has no user-level skill-discovery mechanism, so skills must be installed per project. `awm add -a copilot --scope global` must fail with **that explanation**, not a generic error.
+`copilot` has no global scope on purpose: GitHub Copilot has no user-level
+skill-discovery mechanism, so skills must be installed per project. `awm add -a copilot
+--scope global` must fail with **that explanation**, not a generic error.
 
 ## What each tier gives you
 
