@@ -168,18 +168,36 @@ _Contexto: H3/D3. Python fuera del registry; shell inexistente; `generic` = gate
 - Create: `sensor-packs/python/pack.json`, `sensor-packs/python/.semgrep.awm.yml`
   (+ configs de mypy/ruff que el pack decida shippear)
 
-- [ ] `pack.json`: typecheck (mypy, fast), lint (ruff `--output-format json`, fast),
+- [x] `pack.json`: typecheck (mypy, fast), lint (ruff `--output-format json`, fast),
   security (semgrep), test (`pytest`, exit-code sensor), mutation disabled.
   `changedCmd`/`changedExtensions` (`.py`) en lint y security — mismo criterio D
-  que js-ts: mypy NO se acota (whole-program).
+  que js-ts: mypy NO se acota (whole-program). PR/merge:
+  `awm-baseline-registry@0a3f20d` (bundle `dev` 2.7.0→2.8.0).
 
 ### Task 3.2: Pack `shell` en el registry
 
 **Files:**
 - Create: `sensor-packs/shell/pack.json` (+ `.semgrep.awm.yml`)
 
-- [ ] lint: `shellcheck --format json` sobre `{files}`/glob; security: semgrep.
-  `changedExtensions`: `.sh`, `.bash`.
+- [x] lint: `shellcheck --format json` sobre `{files}`/glob; security: semgrep.
+  `changedExtensions`: `.sh`, `.bash`. Mismo commit que 3.1.
+
+> **Nota de cierre 3.1+3.2 (2026-08-07):** el implementador original (subagent en
+> background) quedó huérfano por un reinicio de sesión/contenedor a mitad de
+> tarea — sus archivos (packs + `tests/sensor-pack-shape.test.mjs`, nuevo) habían
+> quedado escritos en disco pero sin commit ni review. El controlador retomó
+> directamente: corrió los validadores, encontró y arregló un bug real en el test
+> nuevo (exigía `changedExtensions` siempre que hay `changedCmd`, rompía contra
+> `generic`/`js-ts`.security preexistentes que la omiten a propósito), y descubrió
+> dos gaps de tooling preexistentes no relacionados: `.gitignore`'s `*.awm.*`
+> ocultaba en silencio los archivos `.semgrep.awm.yml` nuevos de `git status`
+> (arreglado, eliminando la línea), y `check-skill-version-bumps.sh` usaba diff de
+> 3 puntos contra un merge-base obsoleto — falsaba en esta misma rama de
+> multi-release (arreglado a 2 puntos). spec-review: compliant. code-quality
+> review: 2 hallazgos importantes (CHANGELOG con el header 2.7.0 pisado en vez de
+> insertar uno nuevo; regla semgrep `awm-sh-no-eval` disparando doble sobre
+> `eval $(...)` junto con `awm-sh-unquoted-command-substitution`) — ambos
+> corregidos y re-revisados, verdict `approved`.
 
 ### Task 3.3: Eliminar `FALLBACK_DEFAULTS` del CLI
 
@@ -187,13 +205,17 @@ _Contexto: H3/D3. Python fuera del registry; shell inexistente; `generic` = gate
 - Modify: `cli/src/commands/sensors/init.ts`
 - Test: `cli/tests/commands/sensors/` (los que cubren init/fallback)
 
-- [ ] Borrar `FALLBACK_DEFAULTS`. Stack detectado sin pack en registry alcanzable →
+- [x] Borrar `FALLBACK_DEFAULTS`. Stack detectado sin pack en registry alcanzable →
   manifest mínimo honesto que preflight reporta como degradado con remedio
   ("registry sin pack `<x>`: corré `awm update` / agregá el registry"), jamás
   defaults inventados por el CLI.
-- [ ] Formatters: verificar que `ruff`/`shellcheck` JSON caen en un formatter
+- [x] Formatters: verificar que `ruff`/`shellcheck` JSON caen en un formatter
   razonable (¿`generic`? ¿nuevo formatter?). Si se necesita formatter nuevo, es
-  parte de esta task (TDD: fixture de salida real → parser).
+  parte de esta task (TDD: fixture de salida real → parser). Nuevos formatters
+  `mypy`/`ruff`/`shellcheck` + campo `SensorConfig.formatter` (dispatch por
+  campo, fallback a nombre de sensor para manifests preexistentes). commits
+  `1ccff19` + `abd1d3d` (gap de cobertura end-to-end encontrado por spec-review
+  y cerrado). spec-review + code-quality review: approved, 0 findings finales.
 
 ### Task 3.4: Detección + override explícito
 
@@ -201,18 +223,59 @@ _Contexto: H3/D3. Python fuera del registry; shell inexistente; `generic` = gate
 - Modify: `cli/src/commands/sensors/init.ts`, `cli/src/commands/sensors/index.ts`
 - Test: init/detección
 
-- [ ] `detectStack`: agregar `shell` (archivos `*.sh` en raíz o `scripts/`, SOLO si
+- [x] `detectStack`: agregar `shell` (archivos `*.sh` en raíz o `scripts/`, SOLO si
   no hay marcador js-ts/python). Orden de especificidad testeado.
-- [ ] `awm sensors init --pack <name>`: override que salta la heurística; pack
-  inexistente en registry → error claro listando los disponibles.
+- [x] `awm sensors init --pack <name>`: override que salta la heurística; pack
+  inexistente en registry → error claro listando los disponibles. commits
+  `723bfc8` + `65220db` (2 fixes menores de code-quality-review: filtro
+  `isFile()` en detección shell, cobertura del throw de registry sin
+  `sensor-packs/`). spec-review + code-quality review: approved.
 
 ### Task 3.5: Cierre R3
 
-- [ ] E2E local: repo fixture python y repo fixture shell → `awm sensors init` copia
-  configs del pack correcto; `awm preflight` verde con tools presentes.
-- [ ] Suite CLI + validadores registry en verde. Commits + push + PRs (registry
+- [x] E2E local: repo fixture python y repo fixture shell → `awm sensors init` copia
+  configs del pack correcto; `awm preflight` verde con tools presentes. Confirmado
+  directo (no subagent): manifest generado correcto para ambos packs (`formatter`
+  incluido), `.semgrep.awm.yml` copiado, `awm preflight` → `ready` en ambos tras
+  agregar `AGENTS.md`. `awm sensors run --fast` confirmó extremo a extremo: mypy y
+  ruff parsean hallazgos reales correctamente vía los nuevos formatters; shell pack
+  corre limpio.
+- [x] Suite CLI + validadores registry en verde. Commits + push + PRs (registry
   primero o simultáneo; el CLI sin fallback depende de que el registry shippee
   `python`).
+
+> **post-implementation-qa (2026-08-07):** Track A (fidelidad vs prosa del plan,
+> sin IDs de requirement en este plan) + panel Track B (robustness/security, logic,
+> tests) sobre el diff completo de R3 en el lado CLI. Encontró 1 blocker + 5
+> important + 2 minor, todos corregidos y re-verificados (commit `7ab9ea3`):
+> - **Blocker:** `buildManifest` perdía el campo `formatter` al re-mergear sobre un
+>   manifest preexistente (el path de upgrade real de usuarios ya publicados en
+>   npm bajo el `FALLBACK_DEFAULTS` viejo) — merge cambiado de reemplazo de objeto
+>   completo por sensor a merge por campo.
+> - **Important (5):** `ruff`/`shellcheck` formatters crasheaban con JSON válido
+>   pero de forma inesperada (mismo patrón sistémico en los 2 archivos — sin
+>   validación de forma en runtime tras `JSON.parse`); `status.ts`/`run.ts` sin el
+>   guard `?? {}` que `checkManifest` ya tenía (mismo patrón sistémico, aplicado
+>   inconsistente); `STACK_DETECTORS` de python no incluía `requirements.txt`/
+>   `Pipfile` pese a que el propio `pack.json` del registry los declara en
+>   `detects`; `getFormatter` cascadeaba a mis-parseo silencioso ante un
+>   `formatter` no reconocido; `checkTools` no reflejaba el estado degradado
+>   honesto de manifest vacío.
+> - **Minor (2):** cobertura de regresión para el fix `isFile()` de Task 3.4;
+>   honestidad del comentario del caso "sin corchete `[code]`" en el test de mypy.
+> Ledger acumulado (no archivado — R4-R7 siguen sobre la misma rama).
+
+> **harness-retro R3 (2026-08-07):** `awm ledger recurring --min 2` sobre el
+> ledger acumulado de R1-R3 (114 entradas) mostró 17 clusters convergentes.
+> Curados 2 en `AGENTS.md`: `defensive-guard-consistency` (nuevo bullet — una
+> guarda agregada a una función debe revisarse contra toda función hermana que
+> lea el mismo campo) y una tercera instancia confirmada de
+> `prefer-stdlib-over-hand-rolled-parsing` (extendido — un tipo TS sobre
+> `JSON.parse()` sin validación runtime es la misma clase de falla que la regex
+> hand-rolled de `shellQuote`/`extractHost`, ahora generalizada). El resto de
+> los clusters son wins/confirmaciones de verificación o hallazgos ya curados
+> como fix directo dentro del mismo ciclo de QA — no ameritan lección nueva.
+> Ledger sigue sin archivar — R4-R7 acumulan sobre la misma rama.
 
 ---
 

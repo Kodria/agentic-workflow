@@ -6,23 +6,53 @@ export type InitOptions = {
     configure?: boolean;
     cwd?: string;
     registryRoot?: string;
+    pack?: string;
 };
 
+// Widened from a hardcoded union to `string` on purpose: `--pack <name>` (below) must
+// accept any pack name present in the registry — including packs this CLI's source
+// has never heard of (a team's custom pack, a future stack). `SensorManifest.pack` in
+// types.ts is already plain `string`; this keeps the two consistent. The STACK_DETECTORS
+// -driven auto-detection below still only ever PRODUCES 'js-ts' | 'python' | 'shell' |
+// 'generic' in practice — only the type widens, not the detection logic's behavior.
 export type StackDetection = {
-    pack: 'js-ts' | 'python' | 'generic';
+    pack: string;
     indicators: string[];
 };
 
-const STACK_DETECTORS: Array<{ pack: StackDetection['pack']; files: string[] }> = [
+const STACK_DETECTORS: Array<{ pack: string; files: string[] }> = [
     { pack: 'js-ts', files: ['package.json'] },
-    { pack: 'python', files: ['pyproject.toml', 'setup.py', 'setup.cfg'] },
+    { pack: 'python', files: ['pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt', 'Pipfile'] },
 ];
+
+// Shell detection is a glob (`*.sh` in the repo root or in `scripts/`), unlike the
+// exact-filename matches above — so it needs its own scan rather than fitting the
+// STACK_DETECTORS table. Tried last, after js-ts and python both fail: a Python
+// project that also ships a root `deploy.sh` must still detect as `python`, never
+// `shell`. Order of specificity: js-ts > python > shell > generic.
+const SHELL_SCAN_DIRS = ['.', 'scripts'];
+
+function findShellIndicators(cwd: string): string[] {
+    const found: string[] = [];
+    for (const dir of SHELL_SCAN_DIRS) {
+        const full = path.join(cwd, dir);
+        if (!fs.existsSync(full) || !fs.statSync(full).isDirectory()) continue;
+        for (const entry of fs.readdirSync(full, { withFileTypes: true })) {
+            if (entry.isFile() && entry.name.endsWith('.sh')) {
+                found.push(dir === '.' ? entry.name : path.join(dir, entry.name));
+            }
+        }
+    }
+    return found;
+}
 
 export function detectStack(cwd: string): StackDetection {
     for (const { pack, files } of STACK_DETECTORS) {
         const found = files.filter(f => fs.existsSync(path.join(cwd, f)));
         if (found.length > 0) return { pack, indicators: found };
     }
+    const shellIndicators = findShellIndicators(cwd);
+    if (shellIndicators.length > 0) return { pack: 'shell', indicators: shellIndicators };
     return { pack: 'generic', indicators: [] };
 }
 
@@ -38,18 +68,6 @@ export function detectSourceDirs(cwd: string): string[] {
     return found.length > 0 ? found : ['src'];
 }
 
-// Fallback defaults for packs that don't yet ship a pack.json in the registry
-// (today: python). js-ts/generic are sourced from
-// registry/sensor-packs/<pack>/pack.json — single source of truth.
-const FALLBACK_DEFAULTS: Record<string, SensorManifest['sensors']> = {
-    python: {
-        typecheck: { cmd: 'mypy .', fast: true },
-        lint:      { cmd: 'ruff check . --output-format json', fast: true },
-        security:  { cmd: 'semgrep --config .semgrep.awm.yml --json .', fast: false },
-        mutation:  { enabled: false },
-    },
-};
-
 type PackJson = {
     sensors?: Record<string, {
         defaultCmd?: string;
@@ -57,6 +75,7 @@ type PackJson = {
         enabled?: boolean;
         changedCmd?: string;
         changedExtensions?: string[];
+        formatter?: string;
     }>;
 };
 
@@ -84,6 +103,10 @@ function readPackDefaults(pack: string, registryRoot: string, cwd: string): Sens
         // substituted here on purpose: a scoped command takes an explicit file list.
         if (def.changedCmd) entry.changedCmd = def.changedCmd;
         if (def.changedExtensions) entry.changedExtensions = def.changedExtensions;
+        // Carries the real tool name (`mypy`, `ruff`, `shellcheck`…) so the runner can
+        // dispatch to the right output parser instead of guessing from the sensor name —
+        // see `SensorConfig.formatter`.
+        if (def.formatter) entry.formatter = def.formatter;
         sensors[name] = entry;
     }
     return sensors;
@@ -96,16 +119,64 @@ export function buildManifest(
     cwd: string = process.cwd(),
 ): SensorManifest {
     const fromPack = registryRoot ? readPackDefaults(pack, registryRoot, cwd) : null;
-    const defaults = fromPack ?? FALLBACK_DEFAULTS[pack] ?? {};
+    // No registry root, or the pack has no pack.json there → `{}` is the honest floor,
+    // not a bug to paper over with CLI-hardcoded defaults. `checkManifest` (preflight)
+    // and `computeSensorStatus` both surface a zero-sensor manifest as degraded, with a
+    // remedy pointing at the registry — never silently inventing sensors here instead.
+    const defaults = fromPack ?? {};
     const existingSensors = existing?.sensors ?? {};
-    return { pack, sensors: { ...defaults, ...existingSensors } };
+    // Per-FIELD merge, not whole-sensor-object replacement: if `existingSensors.foo`
+    // exists at all, a naive `{ ...defaults, ...existingSensors }` would replace
+    // `defaults.foo` wholesale, permanently dropping any field that only lives in the
+    // (newer) pack default — e.g. a pre-`formatter`-era manifest re-merged against a
+    // pack.json that now declares `formatter` would silently lose it forever. Merging
+    // field-by-field within each sensor entry lets a user's hand-edited field (e.g. a
+    // custom `cmd`) win, while still inheriting any field the existing manifest doesn't
+    // specify.
+    const sensorNames = new Set([...Object.keys(defaults), ...Object.keys(existingSensors)]);
+    const sensors: SensorManifest['sensors'] = {};
+    for (const name of sensorNames) {
+        sensors[name] = { ...defaults[name], ...existingSensors[name] };
+    }
+    return { pack, sensors };
+}
+
+/**
+ * Validate that `pack` exists as a directory under `<registryRoot>/sensor-packs/`.
+ * Throws (not a swallow-and-return) so `awm sensors init --pack bogus` actually stops
+ * instead of silently writing a manifest for a pack that doesn't exist. Lists every
+ * pack directory actually present, sorted, so the user immediately sees valid options.
+ */
+function assertPackExists(pack: string, registryRoot: string): void {
+    const packsDir = path.join(registryRoot, 'sensor-packs');
+    if (!fs.existsSync(packsDir) || !fs.statSync(packsDir).isDirectory()) {
+        throw new Error('registry has no sensor-packs directory');
+    }
+    const available = fs.readdirSync(packsDir, { withFileTypes: true })
+        .filter(e => e.isDirectory())
+        .map(e => e.name)
+        .sort();
+    if (!available.includes(pack)) {
+        throw new Error(`pack '${pack}' not found in registry (available: ${available.join(', ')})`);
+    }
 }
 
 export function initSensors(opts: InitOptions = {}): { manifest: SensorManifest; detection: StackDetection; configured: string[] } {
     const cwd = opts.cwd ?? process.cwd();
     const configure = opts.configure ?? true; // configure (copy pack config files) by default
     const manifestPath = path.join(cwd, '.awm', 'sensors.json');
-    const detection = detectStack(cwd);
+
+    // --pack skips the heuristic entirely. Only validate against the registry when a
+    // registryRoot was actually given — same tolerance pattern as readPackDefaults /
+    // buildManifest elsewhere in this file for a missing registry: nothing to validate
+    // against, so nothing is validated.
+    let detection: StackDetection;
+    if (opts.pack) {
+        if (opts.registryRoot) assertPackExists(opts.pack, opts.registryRoot);
+        detection = { pack: opts.pack, indicators: ['--pack override'] };
+    } else {
+        detection = detectStack(cwd);
+    }
 
     let existing: SensorManifest | undefined;
     if (fs.existsSync(manifestPath)) {

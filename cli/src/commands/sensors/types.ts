@@ -23,6 +23,15 @@ export type SensorConfig = {
      * Absent → the sensor accepts whatever changed.
      */
     changedExtensions?: string[];
+    /**
+     * Which output-shape parser to use for this sensor's raw output (e.g. `tsc`,
+     * `eslint-llm`, `mypy`, `ruff`, `shellcheck`, `semgrep`, `test`, `generic`) —
+     * sourced from the pack's `pack.json`, since the tool behind a sensor slot varies
+     * by pack (`lint` is eslint on js-ts, ruff on python, shellcheck on shell). Absent
+     * on manifests written before this field existed, in which case dispatch falls back
+     * to the sensor NAME (`typecheck`/`lint`/`security`/`test`/generic).
+     */
+    formatter?: string;
 };
 
 export type SensorManifest = {

@@ -105,6 +105,19 @@ function checkManifest(cwd: string, manifest: SensorManifest | null): PreflightC
     }
     const total = Object.keys(manifest.sensors ?? {}).length;
     const enabled = Object.values(manifest.sensors ?? {}).filter(s => s.enabled !== false).length;
+    // total === 0 is NOT an opt-out: a deliberate opt-out lists every known sensor NAME
+    // explicitly with `enabled: false` (total > 0, enabled === 0). Zero entries means
+    // nothing was ever configured — most commonly because the registry had no pack.json
+    // for the detected stack, so `awm sensors init` built an honest, empty manifest
+    // rather than inventing defaults. That must not read as "all sensors disabled".
+    if (total === 0) {
+        return {
+            id: 'manifest',
+            ok: false,
+            detail: `pack '${manifest.pack}' has no sensors — the registry has no pack.json for it`,
+            remedy: `registry has no pack for '${manifest.pack}': run \`awm update\` or add a registry that has it`,
+        };
+    }
     return {
         id: 'manifest',
         ok: true,
@@ -118,6 +131,20 @@ function checkTools(cwd: string): PreflightCheck {
     const status = computeSensorStatus(cwd);
     if (status.overall === 'NOT_CONFIGURED') {
         return { id: 'tools', ok: false, detail: 'no manifest to check', remedy: 'run `awm sensors init`' };
+    }
+    // A manifest with zero sensor entries (honest-degraded — no pack.json reachable in
+    // the registry for this stack) makes `Object.entries({}).filter(...)` vacuously
+    // empty, which used to read as "0 broken out of 0" — a clean pass for a manifest
+    // that checks nothing at all. Mirrors the same zero-sensors signal `checkManifest`
+    // already guards against; this defends the invariant independently rather than
+    // relying solely on `checkManifest`'s gate to catch this exact manifest shape.
+    if (Object.keys(status.checks).length === 0) {
+        return {
+            id: 'tools',
+            ok: false,
+            detail: 'no sensors configured to check (0 sensor entries in the manifest)',
+            remedy: `registry has no pack for '${status.pack}': run \`awm update\` or add a registry that has it`,
+        };
     }
     const broken = Object.entries(status.checks).filter(([, c]) => !c.ok);
     if (broken.length > 0) {

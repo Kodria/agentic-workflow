@@ -45,12 +45,18 @@ export function registerSensorsCommand(program: Command): void {
         .description('detect stack and write .awm/sensors.json (+ copy pack config files)')
         .option('--no-configure', 'skip copying sensor pack config files into the project')
         .option('--registry-root <path>', 'path to AWM registry root')
+        .option('--pack <name>', 'skip auto-detection, use this pack explicitly')
         .action((opts) => {
             const registryRoot = opts.registryRoot ?? capabilityRoot('sensor-packs') ?? undefined;
-            const result = initSensors({ configure: opts.configure, registryRoot });
-            log.success(`Detected: ${result.detection.pack} (${result.detection.indicators.join(', ') || 'fallback'})`);
-            log.success('Wrote .awm/sensors.json');
-            result.configured.forEach((f: string) => log.info(`  Installed ${f}`));
+            try {
+                const result = initSensors({ configure: opts.configure, registryRoot, pack: opts.pack });
+                log.success(`Detected: ${result.detection.pack} (${result.detection.indicators.join(', ') || 'fallback'})`);
+                log.success('Wrote .awm/sensors.json');
+                result.configured.forEach((f: string) => log.info(`  Installed ${f}`));
+            } catch (e) {
+                log.error(e instanceof Error ? e.message : String(e));
+                process.exit(1);
+            }
         });
 
     sensors
