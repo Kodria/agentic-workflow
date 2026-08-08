@@ -1,3 +1,8 @@
+## v3.12.0 - 2026-08-08
+
+### Features
+- **providers:** add Cursor and GitHub Copilot support (R4) (#30)
+
 ## v3.11.0 - 2026-08-08
 
 ### Features
