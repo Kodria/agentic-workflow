@@ -221,6 +221,134 @@ describe('applyInstallPlan', () => {
     });
 });
 
+describe('defaultTransactionDeps — cursor-mdc / copilot-instructions renderers (Task 4.3)', () => {
+    // Both renderers are always 'skill'-type: sourcePath is the skill's
+    // DIRECTORY (install-transaction.ts's readSkillMdSource), matching how
+    // discovery.ts/bundle-install.ts set ArtifactIntent.sourcePath for
+    // skills — mirrors the shape makeOp() already assumes for 'link' skills.
+    function makeSkillSource(description: string, body: string): string {
+        const dir = fs.mkdtempSync(path.join(tmpWork, 'skill-source-'));
+        fs.writeFileSync(
+            path.join(dir, 'SKILL.md'),
+            `---\nname: sample-skill\ndescription: ${description}\n---\n\n${body}\n`,
+        );
+        return dir;
+    }
+
+    it('renders a real Cursor .mdc file through the full validate/stage/replace/verify pipeline', () => {
+        const sourceDir = makeSkillSource('A sample skill', 'Body content for the skill.');
+        const targetPath = path.join(tmpWork, 'sample-skill.mdc');
+        const plan: InstallPlan = {
+            operations: [makeOp('sample-skill', {
+                type: 'skill', renderer: 'cursor-mdc', output: 'cursor-mdc',
+                sourcePath: sourceDir, targetPath,
+            })],
+            records: [],
+            reports: [{ owner: 'cursor', targetPath, action: 'install' }],
+        };
+
+        const summary = applyInstallPlan(plan);
+
+        expect(summary.modifiedFiles).toEqual([targetPath]);
+        const content = fs.readFileSync(targetPath, 'utf8');
+        expect(content).toContain('description: A sample skill');
+        expect(content).toContain('alwaysApply: false');
+        expect(content).toContain('Body content for the skill.');
+    });
+
+    it('renders a real Copilot .instructions.md file through the full validate/stage/replace/verify pipeline', () => {
+        const sourceDir = makeSkillSource('A sample skill', 'Body content for the skill.');
+        const targetPath = path.join(tmpWork, 'sample-skill.instructions.md');
+        const plan: InstallPlan = {
+            operations: [makeOp('sample-skill', {
+                type: 'skill', renderer: 'copilot-instructions', output: 'copilot-instructions',
+                sourcePath: sourceDir, targetPath,
+            })],
+            records: [],
+            reports: [{ owner: 'copilot', targetPath, action: 'install' }],
+        };
+
+        const summary = applyInstallPlan(plan);
+
+        expect(summary.modifiedFiles).toEqual([targetPath]);
+        const content = fs.readFileSync(targetPath, 'utf8');
+        expect(content).toContain('applyTo: "**"');
+        expect(content).toContain('Body content for the skill.');
+    });
+
+    it('validate rejects a malformed skill source (missing description) before any backup/replace happens', () => {
+        const dir = fs.mkdtempSync(path.join(tmpWork, 'skill-source-'));
+        fs.writeFileSync(path.join(dir, 'SKILL.md'), '---\nname: broken\n---\nBody with no description field.');
+        const targetPath = path.join(tmpWork, 'broken.mdc');
+        fs.writeFileSync(targetPath, 'pre-existing content');
+
+        const plan: InstallPlan = {
+            operations: [makeOp('broken', {
+                type: 'skill', renderer: 'cursor-mdc', output: 'cursor-mdc',
+                sourcePath: dir, targetPath,
+            })],
+            records: [],
+            reports: [{ owner: 'cursor', targetPath, action: 'install' }],
+        };
+
+        expect(() => applyInstallPlan(plan)).toThrow();
+        // No backup/replace should have touched the pre-existing target.
+        expect(fs.readFileSync(targetPath, 'utf8')).toBe('pre-existing content');
+    });
+
+    it('verify rejects a corrupt/malformed staged .mdc (mirrors the codex-agent-toml malformed-verify case)', () => {
+        const sourceDir = makeSkillSource('A sample skill', 'Body content.');
+        const targetPath = path.join(tmpWork, 'corrupt.mdc');
+        const plan: InstallPlan = {
+            operations: [makeOp('corrupt', {
+                type: 'skill', renderer: 'cursor-mdc', output: 'cursor-mdc',
+                sourcePath: sourceDir, targetPath,
+            })],
+            records: [],
+            reports: [{ owner: 'cursor', targetPath, action: 'install' }],
+        };
+
+        const deps = {
+            ...defaultTransactionDeps(),
+            stage(op: PlannedOperation) {
+                const parent = path.dirname(op.targetPath);
+                fs.mkdirSync(parent, { recursive: true });
+                const staged = path.join(parent, `.${path.basename(op.targetPath)}.corrupt-test.staged`);
+                fs.writeFileSync(staged, 'not a valid rendered .mdc file at all');
+                return staged;
+            },
+        };
+
+        expect(() => applyInstallPlan(plan, deps)).toThrow('does not look like rendered Cursor .mdc');
+    });
+
+    it('verify rejects a corrupt/malformed staged .instructions.md', () => {
+        const sourceDir = makeSkillSource('A sample skill', 'Body content.');
+        const targetPath = path.join(tmpWork, 'corrupt.instructions.md');
+        const plan: InstallPlan = {
+            operations: [makeOp('corrupt', {
+                type: 'skill', renderer: 'copilot-instructions', output: 'copilot-instructions',
+                sourcePath: sourceDir, targetPath,
+            })],
+            records: [],
+            reports: [{ owner: 'copilot', targetPath, action: 'install' }],
+        };
+
+        const deps = {
+            ...defaultTransactionDeps(),
+            stage(op: PlannedOperation) {
+                const parent = path.dirname(op.targetPath);
+                fs.mkdirSync(parent, { recursive: true });
+                const staged = path.join(parent, `.${path.basename(op.targetPath)}.corrupt-test.staged`);
+                fs.writeFileSync(staged, 'not a valid rendered instructions file at all');
+                return staged;
+            },
+        };
+
+        expect(() => applyInstallPlan(plan, deps)).toThrow('does not look like rendered Copilot instructions');
+    });
+});
+
 describe('beginBackupSession / restoreBackup', () => {
     it('backs up existing targets before mutation and restores them on rollback', () => {
         const fileA = path.join(tmpWork, 'a.json');

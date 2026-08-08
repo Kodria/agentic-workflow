@@ -2,7 +2,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { materialize, globalContextPath } from '../../../src/core/context/materializer';
+import { materialize, globalContextPath, projectContextPath } from '../../../src/core/context/materializer';
 import { sha256 } from '../../../src/core/context/provider';
 import { AwmContext } from '../../../src/core/context/types';
 
@@ -13,6 +13,16 @@ function ctxOf(markdown: string): AwmContext {
 describe('globalContextPath', () => {
     it('points under AWM_HOME/context', () => {
         expect(globalContextPath()).toContain(path.join('context', 'awm-context.md'));
+    });
+});
+
+describe('projectContextPath', () => {
+    it('points under <projectRoot>/.awm/context, mirroring globalContextPath\'s shape', () => {
+        expect(projectContextPath('/repo')).toBe(path.join('/repo', '.awm', 'context', 'awm-context.md'));
+    });
+
+    it('differs from globalContextPath (distinct materialized-source paths per scope)', () => {
+        expect(projectContextPath('/repo')).not.toBe(globalContextPath());
     });
 });
 

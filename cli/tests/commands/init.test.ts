@@ -319,6 +319,69 @@ describe('runInit', () => {
     });
 
     // -----------------------------------------------------------------------
+    // Gap A (QA panel) — GLOBAL-scope render pipeline for Cursor/Copilot was
+    // only ever exercised via LOCAL-scope `awm add`/bundle-install tests
+    // (tests/core/bundle-install.test.ts). This drives a real `awm init
+    // --agent cursor` through the REAL installBundle/applyInstallPlan path
+    // (no installBundle override — only syncCache is stubbed, to avoid a
+    // real network clone) and asserts a real rendered .mdc file lands in the
+    // GLOBAL ~/.cursor/rules directory with the expected frontmatter shape.
+    // -----------------------------------------------------------------------
+
+    it('Gap A — real global-scope render: awm init --agent cursor renders a real .mdc into ~/.cursor/rules', async () => {
+        const contentRoot = path.join(process.env.AWM_HOME as string, 'registries', 'baseline');
+        // A 'hooks' dir (even empty) is what makes capabilityRoot('hooks') resolve to
+        // this content root — that's the registryRoot stepContextInjection uses to
+        // find skills/using-awm/SKILL.md for the (unrelated) context-injection step.
+        fs.mkdirSync(path.join(contentRoot, 'hooks'), { recursive: true });
+        fs.mkdirSync(path.join(contentRoot, 'skills', 'using-awm'), { recursive: true });
+        fs.writeFileSync(
+            path.join(contentRoot, 'skills', 'using-awm', 'SKILL.md'),
+            '---\nname: using-awm\ndescription: Use when starting any development conversation\n---\n\nMUST invoke skills per the tiered policy.\n',
+        );
+        fs.mkdirSync(path.join(contentRoot, 'bundles', 'dev-core'), { recursive: true });
+        fs.writeFileSync(path.join(contentRoot, 'catalog.json'), JSON.stringify({
+            version: 1,
+            bundles: [{ name: 'dev-core', source: './bundles/dev-core', version: '1.0.0', scope: 'baseline' }],
+        }));
+        fs.writeFileSync(path.join(contentRoot, 'bundles', 'dev-core', 'bundle.json'), JSON.stringify({
+            name: 'dev-core', version: '1.0.0', description: 'Baseline', scope: 'baseline',
+            dependsOn: [], skills: ['using-awm'], workflows: [], agents: [],
+        }));
+
+        const projectCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-init-cursor-cwd-'));
+        try {
+            const { runInit } = require('../../src/commands/init');
+            const code = await runInit({
+                cwd: projectCwd,
+                agent: 'cursor',
+                yes: true,
+                machineOnly: true,
+                // seedBaselineRegistry() writes registries.json pointing at 'baseline'
+                // (our manually-seeded content root above) since none exists yet — no
+                // real network clone happens because that content root already exists
+                // on disk. Only syncCache is stubbed, so stepCache's own sync (the
+                // content root above has no `.git`, so it reads as "not yet cloned")
+                // doesn't try to shell out to git either.
+                actions: { syncCache: async () => {} },
+            });
+
+            expect(code).toBeLessThanOrEqual(1);
+
+            const mdcPath = path.join(tmpHome, '.cursor', 'rules', 'using-awm.mdc');
+            expect(fs.existsSync(path.join(tmpHome, '.cursor', 'rules', 'using-awm'))).toBe(false);
+            expect(fs.existsSync(mdcPath)).toBe(true);
+            const rendered = fs.readFileSync(mdcPath, 'utf8');
+            expect(rendered).toContain('description: Use when starting any development conversation');
+            expect(rendered).toContain('globs:');
+            expect(rendered).toContain('alwaysApply: false');
+            expect(rendered).toContain('MUST invoke skills per the tiered policy.');
+        } finally {
+            fs.rmSync(projectCwd, { recursive: true, force: true });
+        }
+    });
+
+    // -----------------------------------------------------------------------
     // Failure evidence — `--json` must honour its contract on the ERROR path
     // -----------------------------------------------------------------------
 

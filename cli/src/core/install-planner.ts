@@ -12,7 +12,7 @@
 // actual transactional filesystem writes, backups, and ManagedArtifactRecord
 // persistence (artifact-state.ts). This module only computes the plan.
 import path from 'path';
-import { AgentTarget, ArtifactType, RendererId, Scope, providerFor } from '../providers';
+import { AgentTarget, ArtifactType, RendererId, Scope, providerFor, unsupportedScopeError } from '../providers';
 import { ManagedArtifactRecord } from './artifact-state';
 
 export type ArtifactIntent = {
@@ -24,7 +24,7 @@ export type ArtifactIntent = {
 
 export type PlannedOperation = ManagedArtifactRecord & {
     method: 'symlink' | 'copy';
-    output: 'link' | 'codex-agent-toml';
+    output: RendererId;
 };
 
 export type InstallReport = {
@@ -65,7 +65,8 @@ export type PlanRemovalParams = {
 /** Resolves the single physical filesystem location an intent renders to for one agent. */
 /**
  * Resolves the physical target path + renderer for one artifact intent on one
- * agent (dir + filename, applying the `.toml` rename for `codex-agent-toml`).
+ * agent (dir + filename, applying the renderer-specific extension rename for
+ * `codex-agent-toml`/`cursor-mdc`/`copilot-instructions`).
  * Shared with `core/init/mutation-targets.ts`, which needs the exact same
  * dir/filename computation to enumerate paths before a real `awm init` run —
  * duplicating this logic there would let the two silently diverge.
@@ -77,8 +78,26 @@ export function physicalTarget(intent: ArtifactIntent, agent: AgentTarget, scope
     const config = providerFor(agent)[intent.type];
     if (!config) throw new Error(`${intent.type}s are not supported by ${providerFor(agent).label}`);
     const dir = scope === 'local' ? path.join(projectRoot, config.local) : config.global;
-    const filename = config.renderer === 'codex-agent-toml'
-        ? `${path.parse(intent.installName).name}.toml`
+    if (dir === null) {
+        throw unsupportedScopeError(intent.type, scope, providerFor(agent).label, config.globalUnsupportedReason);
+    }
+    // Rendered targets get a provider-specific extension in place of a
+    // trailing `.md` (if any) on intent.installName, so e.g. `using-awm`
+    // (skills carry no extension) or `using-awm.md` both become
+    // `using-awm.instructions.md`, never `using-awm.md.instructions.md`.
+    // Deliberately NOT path.parse(...).name: it strips everything after the
+    // LAST dot, not just a real trailing extension — a skill literally named
+    // `v1.2-migration` would silently truncate to `v1.mdc`, dropping
+    // `2-migration` and risking a collision with any other skill named `v1`.
+    // `.md` is the only extension a skill's installName is ever expected to
+    // carry (skills are markdown files), so stripping that literal suffix is
+    // both sufficient and precise.
+    const baseName = intent.installName.endsWith('.md')
+        ? intent.installName.slice(0, -'.md'.length)
+        : intent.installName;
+    const filename = config.renderer === 'codex-agent-toml' ? `${baseName}.toml`
+        : config.renderer === 'cursor-mdc' ? `${baseName}.mdc`
+        : config.renderer === 'copilot-instructions' ? `${baseName}.instructions.md`
         : intent.installName;
     return { targetPath: path.join(dir, filename), renderer: config.renderer };
 }
@@ -95,7 +114,11 @@ export function physicalTarget(intent: ArtifactIntent, agent: AgentTarget, scope
  */
 export function skillTargetDir(agent: AgentTarget, scope: Scope, projectRoot: string): string {
     const config = providerFor(agent).skill;
-    return scope === 'local' ? path.join(projectRoot, config.local) : config.global;
+    if (scope === 'local') return path.join(projectRoot, config.local);
+    if (config.global === null) {
+        throw unsupportedScopeError('skill', scope, providerFor(agent).label, config.globalUnsupportedReason);
+    }
+    return config.global;
 }
 
 /**
@@ -117,7 +140,19 @@ export function agentsSharingSkillTarget(
     projectRoot: string,
 ): AgentTarget[] {
     const target = skillTargetDir(agent, scope, projectRoot);
-    return candidates.filter((candidate) => skillTargetDir(candidate, scope, projectRoot) === target);
+    return candidates.filter((candidate) => {
+        // A candidate that doesn't support this scope at all (e.g. Copilot at
+        // `global` — skillTargetDir throws) trivially can't share `agent`'s
+        // target; it just isn't part of the group. Without this guard, a
+        // Copilot in `candidates` (enabled for some OTHER, valid install) would
+        // crash this whole computation for every unrelated agent, since the
+        // exception surfaces from inside `.filter()`'s callback uncaught.
+        try {
+            return skillTargetDir(candidate, scope, projectRoot) === target;
+        } catch {
+            return false;
+        }
+    });
 }
 
 /**
@@ -139,8 +174,19 @@ function assertCompleteSharedGroup(
     if (intent.type !== 'skill') return;
     for (const agent of selected) {
         const target = physicalTarget(intent, agent, scope, projectRoot).targetPath;
-        const group = enabled.filter((candidate) =>
-            physicalTarget(intent, candidate, scope, projectRoot).targetPath === target);
+        // Same reasoning as agentsSharingSkillTarget above: a candidate in
+        // `enabled` that doesn't support this scope (e.g. Copilot at `global`)
+        // can't be part of the shared-target group — it just isn't a
+        // candidate, not a hard failure of this assertion. Without this
+        // guard, having Copilot enabled at all would crash every OTHER
+        // agent's shared-group check.
+        const group = enabled.filter((candidate) => {
+            try {
+                return physicalTarget(intent, candidate, scope, projectRoot).targetPath === target;
+            } catch {
+                return false;
+            }
+        });
         if (group.some((candidate) => !selected.includes(candidate))) {
             throw new Error(`Shared skill target cannot diverge; select the complete shared target group: ${group.join(',')}`);
         }

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { planInstall, planRemoval, ArtifactIntent } from '../../src/core/install-planner';
+import { planInstall, planRemoval, agentsSharingSkillTarget, ArtifactIntent } from '../../src/core/install-planner';
 import { ManagedArtifactRecord } from '../../src/core/artifact-state';
 import { AgentTarget } from '../../src/providers';
 
@@ -72,6 +72,21 @@ describe('install-planner', () => {
         };
     }
 
+    describe('agentsSharingSkillTarget', () => {
+        it('excludes a candidate that does not support this scope at all, instead of throwing', () => {
+            // Regression: used to call skillTargetDir(candidate, ...) unguarded
+            // inside .filter() — Copilot at 'global' throws (no global skill
+            // dir), which crashed the whole call for every OTHER candidate too.
+            const group = agentsSharingSkillTarget('claude-code', ['claude-code', 'copilot'], 'global', tmpWork);
+            expect(group).toEqual(['claude-code']);
+        });
+
+        it('still finds real shared targets when a non-sharing, scope-unsupported candidate is also present', () => {
+            const group = agentsSharingSkillTarget('opencode', ['opencode', 'codex', 'copilot'], 'global', tmpWork);
+            expect(group.sort()).toEqual(['codex', 'opencode']);
+        });
+    });
+
     describe('planInstall', () => {
         it('deduplicates the OpenCode/Codex physical skill write and reports both owners', () => {
             const plan = planInstall({
@@ -107,6 +122,27 @@ describe('install-planner', () => {
                 method: 'symlink',
             });
             expect(plan.operations[0].owners).toEqual(['codex']); // verifies R13
+        });
+
+        it('does not crash when a provider with no global skill support (Copilot) is merely enabled, not selected', () => {
+            // Regression: assertCompleteSharedGroup's inner `enabled.filter(...)`
+            // used to call physicalTarget() unguarded for every enabled agent,
+            // including ones that don't support this scope at all (Copilot has
+            // no global skill directory — skill.global is null). That threw
+            // inside the filter callback, uncaught, crashing this ENTIRE
+            // install for claude-code even though Copilot has nothing to do
+            // with it — just having Copilot in enabledAgents (e.g. from an
+            // earlier local-scope install) broke every subsequent global
+            // install for every other agent.
+            const plan = planInstall({
+                artifacts: [skillArtifact('development-process')],
+                selectedAgents: ['claude-code'],
+                enabledAgents: ['claude-code', 'copilot'],
+                scope: 'global',
+                projectRoot: tmpWork,
+                method: 'symlink',
+            });
+            expect(plan.operations[0].owners).toEqual(['claude-code']);
         });
 
         it('returns no operations for an empty artifacts array', () => {
@@ -196,6 +232,100 @@ describe('install-planner', () => {
                 projectRoot: tmpWork,
                 method: 'symlink',
             })).toThrow(/physical target already claimed by a different source/);
+        });
+
+        describe('renderer-driven filename computation (Task 4.3)', () => {
+            it('renders the Cursor skill target with a .mdc extension, stripping any pre-existing extension', () => {
+                const plan = planInstall({
+                    artifacts: [skillArtifact('development-process')],
+                    selectedAgents: ['cursor'],
+                    enabledAgents: ['cursor'],
+                    scope: 'local',
+                    projectRoot: tmpWork,
+                    method: 'symlink',
+                });
+                expect(plan.operations[0].targetPath).toBe(
+                    path.join(tmpWork, '.cursor', 'rules', 'development-process.mdc'),
+                );
+                expect(plan.operations[0].renderer).toBe('cursor-mdc');
+            });
+
+            it('renders the Copilot skill target with a .instructions.md extension (not .md.instructions.md)', () => {
+                const plan = planInstall({
+                    artifacts: [skillArtifact('development-process')],
+                    selectedAgents: ['copilot'],
+                    enabledAgents: ['copilot'],
+                    scope: 'local',
+                    projectRoot: tmpWork,
+                    method: 'symlink',
+                });
+                expect(plan.operations[0].targetPath).toBe(
+                    path.join(tmpWork, '.github', 'instructions', 'development-process.instructions.md'),
+                );
+                expect(plan.operations[0].renderer).toBe('copilot-instructions');
+            });
+
+            it('strips an installName that already carries an extension before appending .instructions.md', () => {
+                const withExtension: ArtifactIntent = {
+                    name: 'development-process',
+                    installName: 'development-process.md',
+                    type: 'skill',
+                    sourcePath: path.join(tmpWork, 'registry', 'skills', 'development-process'),
+                };
+                const plan = planInstall({
+                    artifacts: [withExtension],
+                    selectedAgents: ['copilot'],
+                    enabledAgents: ['copilot'],
+                    scope: 'local',
+                    projectRoot: tmpWork,
+                    method: 'symlink',
+                });
+                expect(path.basename(plan.operations[0].targetPath)).toBe('development-process.instructions.md');
+            });
+
+            it('does not truncate an installName with an embedded, non-extension dot (e.g. "v1.2-migration")', () => {
+                // Regression: physicalTarget used to derive the base name via
+                // path.parse(...).name, which strips everything after the LAST
+                // dot — not just a genuine trailing .md extension. A skill
+                // literally named `v1.2-migration` would silently truncate to
+                // `v1`, dropping `2-migration` and risking a collision with any
+                // other skill named `v1`.
+                const dottedName: ArtifactIntent = {
+                    name: 'v1.2-migration',
+                    installName: 'v1.2-migration',
+                    type: 'skill',
+                    sourcePath: path.join(tmpWork, 'registry', 'skills', 'v1.2-migration'),
+                };
+                const plan = planInstall({
+                    artifacts: [dottedName],
+                    selectedAgents: ['cursor'],
+                    enabledAgents: ['cursor'],
+                    scope: 'local',
+                    projectRoot: tmpWork,
+                    method: 'symlink',
+                });
+                expect(path.basename(plan.operations[0].targetPath)).toBe('v1.2-migration.mdc');
+                expect(path.basename(plan.operations[0].targetPath)).not.toBe('v1.mdc');
+            });
+
+            it('still strips a real trailing .md extension for Cursor (not v1.2-migration.md.mdc)', () => {
+                const withMdExtension: ArtifactIntent = {
+                    name: 'using-awm',
+                    installName: 'using-awm.md',
+                    type: 'skill',
+                    sourcePath: path.join(tmpWork, 'registry', 'skills', 'using-awm'),
+                };
+                const plan = planInstall({
+                    artifacts: [withMdExtension],
+                    selectedAgents: ['cursor'],
+                    enabledAgents: ['cursor'],
+                    scope: 'local',
+                    projectRoot: tmpWork,
+                    method: 'symlink',
+                });
+                expect(path.basename(plan.operations[0].targetPath)).toBe('using-awm.mdc');
+                expect(path.basename(plan.operations[0].targetPath)).not.toBe('using-awm.md.mdc');
+            });
         });
     });
 

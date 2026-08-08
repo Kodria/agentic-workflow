@@ -109,7 +109,7 @@ Ambos agentes **leen `AGENTS.md` nativamente** → reutilizan la estrategia
 
 | Aspecto | Cursor | Copilot |
 |---|---|---|
-| Contexto feedforward | `managed-agents-md` (bloque AWM en `AGENTS.md`) | `managed-agents-md` |
+| Contexto feedforward | `managed-agents-md` (bloque AWM en `AGENTS.md`) **+ carrier redundante** (ver corrección abajo) | `managed-agents-md`, raíz del repo únicamente (ver corrección abajo) |
 | Skills (proyecto) | `.cursor/rules/` (archivos `.mdc` referenciando `SKILL.md`) | `.github/instructions/*.instructions.md` |
 | Skills (global) | `~/.cursor/rules/` | no soportado → `global` = error claro, no silencio |
 | Workflows/agents | `null` (no existe el concepto) | `null` |
@@ -122,6 +122,43 @@ el bloque en `AGENTS.md` instruye leer `SKILL.md` en los triggers. Es tier-2 por
 naturaleza del agente, no bug de AWM. `awm doctor` reporta el tier de cada provider
 instalado para que nadie espere paridad que el agente no puede dar. El runbook
 (Cap. 4) documenta la matriz de capacidades por agente.
+
+> **Corrección post-re-verificación (2026-08-08, gate de Task 4.0 antes de R4):**
+> la re-confirmación obligatoria contra fuentes primarias del día encontró dos
+> desvíos reales respecto a la verificación del 2026-08-07 — ambos cambian el
+> diseño, no solo la implementación:
+>
+> 1. **Cursor: el Background/Cloud Agent NO lee `AGENTS.md` de forma confiable —
+>    bug abierto, reconocido por staff de Cursor, sin fix** (forum.cursor.com,
+>    hilo "Background agents do not load AGENTS.md", abierto 2025-09-02, sin
+>    resolución al 2025-09-11). El Agent mode interactivo SÍ lee `AGENTS.md`
+>    (confirmado, sin cambios) — la falla es específica del modo autónomo/cloud,
+>    que es exactamente el caso de uso que motivó originalmente confiar solo en
+>    `AGENTS.md` para Cursor. **Decisión de diseño:** el renderer de Cursor emite
+>    `AGENTS.md` (para Agent mode interactivo) Y, redundante, un
+>    `.cursor/rules/awm.mdc` con `alwaysApply: true` que porta el mismo bloque
+>    gestionado — nunca depender de un solo canal cuando uno de los dos modos de
+>    ejecución del agente objetivo tiene ese canal roto. Costo: un archivo más,
+>    generado del mismo contenido fuente — no una estrategia nueva.
+> 2. **Copilot: `AGENTS.md` anidado está apagado por default** ("Support of
+>    AGENTS.md files outside of the workspace root is currently turned off by
+>    default" — docs.github.com) y **el mecanismo `@ruta/relativa` para incluir
+>    otros archivos NO existe** — ninguna fuente primaria (ni agents.md, ni el
+>    blog de GitHub) lo documenta; el mecanismo real de composición es
+>    "AGENTS.md anidado, el más cercano gana", no inclusión por `@`-path.
+>    **Decisión de diseño:** el renderer de Copilot escribe un único `AGENTS.md`
+>    en la raíz del repo (nunca anidado, hasta que una fuente primaria confirme
+>    el toggle específico del coding agent), y referencia `SKILL.md` con un link
+>    markdown relativo estándar (`[nombre](ruta/relativa/SKILL.md)`), no con la
+>    sintaxis `@` — que habría producido un archivo que Copilot simplemente no
+>    resuelve, un fallo silencioso indistinguible de "funciona" hasta que alguien
+>    lo prueba a mano.
+>
+> Hallazgo adicional no bloqueante: `.instructions.md` de Copilot soporta
+> `excludeAgent: "code-review" | "cloud-agent"` en frontmatter (changelog
+> 2025-11-12) — útil si Task 4.3 necesita distinguir el coding agent del code
+> reviewer; no forzado por ningún requirement actual, queda como capacidad
+> disponible del renderer, no como campo obligatorio.
 
 ### D5 — Adopción en repos legacy (H5)
 

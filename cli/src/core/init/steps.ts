@@ -19,7 +19,7 @@ import { detectExtensions } from './detector';
 import type { InitDeps, InitActions, StepResult } from './types';
 import type { ProjectFacts } from '../diagnostics/types';
 import { InjectionOrchestrator, ContextOp } from '../context/orchestrator';
-import { AgentTarget, getInjection, providerFor } from '../../providers';
+import { AgentTarget, Scope, getInjection, providerFor } from '../../providers';
 import { agentsSharingSkillTarget } from '../install-planner';
 import { repairGlobalSkills as realRepairGlobalSkills } from '../skill-integrity';
 import { contentRoots } from '../registries';
@@ -79,7 +79,7 @@ export const defaultActions: InitActions = {
     repairGlobalSkills: (skillsDir, registryContentDirs) => realRepairGlobalSkills(skillsDir, registryContentDirs),
     injectProjectConstitution: (o) => {
         if (getInjection(o.agent)?.type === 'managed-agents-md') {
-            return new CodexAgentsStrategy().injectProject(o.projectRoot) === 'injected' ? 'injected' : 'already';
+            return new CodexAgentsStrategy().injectProject(o.projectRoot, providerFor(o.agent), o.agent) === 'injected' ? 'injected' : 'already';
         }
         return realInjectProjectConstitution(o.projectRoot, o.agent);
     },
@@ -226,6 +226,7 @@ export function stepGlobalSkillsRepair(d: InitDeps): StepResult {
     if (broken === 0) return ok('machine.globalSkills', 'machine', 'skipped');
 
     const skillsDir = providerFor(d.agent).skill.global;
+    if (skillsDir === null) return ok('machine.globalSkills', 'machine', 'skipped');
     const r = d.actions.repairGlobalSkills(skillsDir, contentRoots());
     return ok('machine.globalSkills', 'machine', 'applied', `re-linked ${r.relinked.length}, pruned ${r.pruned.length}`);
 }
@@ -362,12 +363,25 @@ export function stepContextInjection(d: InitDeps): StepResult {
     if (!inj) return ok('machine.contextInjection', 'machine', 'skipped', 'no injection mechanism');
     if (inj.type === 'cc-settings-merge') return ok('machine.contextInjection', 'machine', 'skipped', 'covered by hook');
 
+    // Providers with no global AGENTS.md-equivalent (managed-agents-md with a null
+    // globalPath — today: Copilot, and Cursor's global scope) deliver context at
+    // project scope instead.
+    const scope: Scope = inj.type === 'managed-agents-md' && inj.globalPath === null ? 'local' : 'global';
+
+    // d.ctx.project?.root (computed via findProjectRoot, diagnostics/context.ts) rather
+    // than raw d.cwd: mutation-targets.ts's planInitMutationTargets computes the local
+    // AGENTS.md backup target via the same findProjectRoot(cwd) call, so using d.cwd here
+    // whenever it differs from the walked-up project root (e.g. `awm init` run from a
+    // subdirectory) would write to a path the backup session never snapshotted — a failed
+    // init couldn't roll it back. Falls back to d.cwd only when there's no discovered
+    // project yet, matching this op's own pre-existing behavior in that case.
     const op: ContextOp = {
         agent: d.agent,
-        scope: 'global',
+        scope,
         registryRoot: d.registryRoot,
         installMethod: d.installMethod,
         profileExtensions: [],
+        projectRoot: d.ctx.project?.root ?? d.cwd,
     };
     if (d.actions.contextStatus(op) === 'injected') return ok('machine.contextInjection', 'machine', 'skipped');
 

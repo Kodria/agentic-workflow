@@ -77,6 +77,26 @@ describe('gatherProviderFacts / assertClaudeBaselinePreserved', () => {
         expect(before.hash).not.toBe(after.hash);
     });
 
+    it('Gap C — gatherProviderFacts skips a null skill.global (copilot) cleanly instead of crashing', () => {
+        const { gatherProviderFacts } = require('../../../src/core/init/provider-facts');
+        const { providerFor } = require('../../../src/providers');
+        expect(providerFor('copilot').skill.global).toBeNull();
+
+        const { assertClaudeBaselinePreserved } = require('../../../src/core/init/provider-facts');
+        const facts = gatherProviderFacts('copilot');
+
+        // providerManagedPaths guards `provider.skill.global !== null` (and every
+        // other managed path copilot lacks: no hooks, no global injection, no
+        // workflow/agent config) before adding anything — copilot manages NOTHING
+        // at the machine level, so the inspected path list is empty, and the call
+        // itself must not throw.
+        expect(facts.paths).toEqual([]);
+        expect(typeof facts.hash).toBe('string');
+
+        // Two snapshots of the same (empty) state are still identical/no-throw.
+        expect(() => assertClaudeBaselinePreserved(facts, facts)).not.toThrow();
+    });
+
     it('throws a distinct message when comparing facts for mismatched agents', () => {
         const { gatherProviderFacts, assertClaudeBaselinePreserved } = require('../../../src/core/init/provider-facts');
         const claude = gatherProviderFacts('claude-code');

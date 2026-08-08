@@ -75,7 +75,7 @@ export function reconcileAllSkillLinks(
     const out: { agent: AgentTarget; result: RepairResult }[] = [];
     for (const agent of AGENT_TARGETS) {
         const skillsDir = providerFor(agent).skill.global;
-        if (!fs.existsSync(skillsDir)) continue;
+        if (skillsDir === null || !fs.existsSync(skillsDir)) continue;
         out.push({ agent, result: repairGlobalSkills(skillsDir, registryContentDirs) });
     }
     return out;

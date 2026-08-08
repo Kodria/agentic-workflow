@@ -242,7 +242,12 @@ _Contexto: H3/D3. Python fuera del registry; shell inexistente; `generic` = gate
   corre limpio.
 - [x] Suite CLI + validadores registry en verde. Commits + push + PRs (registry
   primero o simultáneo; el CLI sin fallback depende de que el registry shippee
-  `python`).
+  `python`). **R3 cerrado (2026-08-08):** `awm-baseline-registry` PR #24 mergeado
+  (`40f551a`), `agentic-workflow` PR #29 mergeado (`c6853d2`). Ambas ramas
+  requirieron rebase (`--onto origin/main <last-already-merged-commit> HEAD`)
+  antes del merge — la rama de sesión larga había divergido del squash-merge de
+  R2 en ambos repos (conflicto real en `CHANGELOG.md`/`AGENTS.md`, resuelto sin
+  pérdida de contenido, árbol final verificado idéntico pre/post-rebase).
 
 > **post-implementation-qa (2026-08-07):** Track A (fidelidad vs prosa del plan,
 > sin IDs de requirement en este plan) + panel Track B (robustness/security, logic,
@@ -296,8 +301,23 @@ _Contexto: H4/D4. La mitad del equipo no puede ni instalar AWM._
     archivos con `@ruta/relativa` — mecanismo directo para referenciar SKILL.md.
   - Conclusión: D4 validado. La estrategia `managed-agents-md` es el vehículo
     correcto para ambos.
-- [ ] Al ejecutar R4, re-confirmar contra docs oficiales del día (los formatos de
-  estos agentes cambian rápido) antes de fijar los renderers en tests.
+- [x] Re-confirmado 2026-08-08 contra fuentes primarias frescas (WebSearch/WebFetch,
+  no memoria) antes de fijar renderers. **Dos correcciones reales sobre la
+  verificación del 07-08, ambas de diseño, no solo de implementación — ver nota
+  en D4 de `2026-08-07-team-rollout-hardening-design.md`:**
+  - Cursor: el Background/Cloud Agent NO lee `AGENTS.md` de forma confiable — bug
+    abierto y reconocido por staff de Cursor en su foro, sin fix (Agent mode
+    interactivo sí lo lee, sin cambios). Decisión: emitir `AGENTS.md` +
+    `.cursor/rules/awm.mdc` (`alwaysApply: true`) como carrier redundante — nunca
+    un solo canal cuando uno de los dos modos del agente objetivo lo tiene roto.
+  - Copilot: `AGENTS.md` anidado está apagado por default (docs.github.com), y el
+    mecanismo `@ruta/relativa` para incluir `SKILL.md` NO existe en ninguna
+    fuente primaria — el mecanismo real es "AGENTS.md anidado, el más cercano
+    gana". Decisión: único `AGENTS.md` en la raíz, referencia a `SKILL.md` con
+    link markdown relativo estándar, nunca sintaxis `@`.
+  - Hallazgo no bloqueante: `.instructions.md` soporta `excludeAgent:
+    "code-review"|"cloud-agent"` (changelog 2025-11-12) — capacidad disponible
+    del renderer si Task 4.3 la necesita, no requirement obligatorio.
 
 ### Task 4.1: Provider configs
 
@@ -305,11 +325,20 @@ _Contexto: H4/D4. La mitad del equipo no puede ni instalar AWM._
 - Modify: `cli/src/providers/index.ts`
 - Test: `cli/tests/providers/`
 
-- [ ] `AGENT_TARGETS` += `cursor`, `copilot`. Configs por la tabla D4: skills
+- [x] `AGENT_TARGETS` += `cursor`, `copilot`. Configs por la tabla D4: skills
   local-only en Copilot (global → error claro con mensaje de por qué), `workflow`/
   `agent` = `null`, sin `hooks`, `injection.type = 'managed-agents-md'`.
-- [ ] Tests: rutas de instalación por scope; `global` en Copilot falla con el
-  mensaje esperado; `getInjection` devuelve la estrategia correcta.
+  `ArtifactConfig.global`/`InjectionConfig.globalPath` ampliados a `string |
+  null` (Copilot sin global confirmado; Cursor sin global sin confirmar,
+  dejado `null` explícitamente en vez de adivinado).
+- [x] Tests: rutas de instalación por scope; `global` en Copilot falla con el
+  mensaje esperado; `getInjection` devuelve la estrategia correcta. commits
+  `ad1e819`+`6d109fe`+`e906ca6`. code-quality-review encontró 2 blockers reales
+  (`agentsSharingSkillTarget`/`assertCompleteSharedGroup` crasheaban el install
+  completo de CUALQUIER agente si Copilot estaba meramente habilitado, no
+  seleccionado — mismo patrón que un guard ya correcto en
+  `mutation-targets.ts`, no aplicado en estos 2 call sites) + 1 minor (mensaje
+  de error duplicado 3 veces). Todos corregidos, re-revisado: approved.
 
 ### Task 4.2: Estrategia de contexto generalizada
 
@@ -318,15 +347,47 @@ _Contexto: H4/D4. La mitad del equipo no puede ni instalar AWM._
 - Test: `cli/tests/core/context/`
 
 _Verificado 2026-08-07: NO es solo wiring. Tres acoplamientos reales a Codex:_
-- [ ] `injectGlobal()` hardcodea `~/.codex/AGENTS.md` (`codex-agents.ts:86`) →
+- [x] `injectGlobal()` hardcodea `~/.codex/AGENTS.md` (`codex-agents.ts:86`) →
   parametrizar por `provider.injection.globalPath` (el camino `inject()` ya lo
   hace bien — igualar).
-- [ ] `assertGlobalInput` solo acepta scope global → decidir scope por provider
+- [x] `assertGlobalInput` solo acepta scope global → decidir scope por provider
   (Copilot no tiene AGENTS.md global de repo; su bloque va a nivel proyecto).
-- [ ] `init/steps.ts:82` instancia `CodexAgentsStrategy` para `injectProject` —
+  Generalizado a `requiredScope(provider)`/`targetFile(...)` — primer uso real
+  de scope `'local'` en este módulo (antes solo tipado, nunca ejercido).
+- [x] `init/steps.ts:82` instancia `CodexAgentsStrategy` para `injectProject` —
   revisar la condición de agente que lo rodea para que cubra cursor/copilot.
-- [ ] El bloque gestionado instruye leer `SKILL.md` en los triggers (spine
+  Confirmado ya agnóstica al agente (gatea por `injection.type`, no por nombre)
+  — sin cambios necesarios ahí.
+- [x] El bloque gestionado instruye leer `SKILL.md` en los triggers (spine
   degradado a contexto leído — D4).
+- [x] Referenciar `SKILL.md` desde el bloque gestionado con link markdown
+  relativo estándar (`[nombre](ruta/relativa/SKILL.md)`) — NUNCA sintaxis
+  `@ruta/relativa` (no existe en ninguna fuente primaria de Copilot ni Cursor;
+  corrección de Task 4.0, 2026-08-08). Confirmado: la sintaxis `@path` nunca
+  existió en este código — `buildContext()` embebe el `SKILL.md` completo
+  inline, no lo referencia. Nada que corregir.
+- [x] Copilot: `injectProject` escribe SOLO `AGENTS.md` en la raíz del repo,
+  nunca anidado (soporte fuera de la raíz apagado por default — corrección de
+  Task 4.0). Confirmado ya cumplido — sin lógica de anidado en el código.
+- [x] Cursor: además del `AGENTS.md` vía `managed-agents-md`, `injectProject`
+  también escribe `.cursor/rules/awm.mdc` (`alwaysApply: true`) con el mismo
+  bloque gestionado como carrier redundante — el Background/Cloud Agent de
+  Cursor no lee `AGENTS.md` de forma confiable (bug abierto sin fix; corrección
+  de Task 4.0). Este archivo se genera del mismo contenido fuente que el bloque
+  de `AGENTS.md`, no es una estrategia de inyección nueva. commits
+  `33f6b99`+`c7fa13d`. code-quality-review: 2 important (gate por
+  `provider.label` en vez de `AgentTarget` tipado; return value ignoraba el
+  resultado del carrier) + 1 minor, corregidos; re-revisado: approved.
+
+> **Pendiente para Task 4.4 (no scope creep aquí):** `contextGlobalCheck`
+> (`cli/src/core/diagnostics/provider-checks.ts:167`) hardcodea `scope:
+> 'global'`, así que el chequeo de contexto de `awm doctor` para Cursor/Copilot
+> (ambos legítimamente scope local ahora) siempre lee `'absent'` incluso tras
+> una inyección local correcta — no es un crash nuevo (mismo estado visible
+> `'absent'` que antes de este diff, por un camino de excepción distinto), pero
+> vuelve invisible para `doctor` la capacidad de scope local que esta task
+> agregó. Task 4.4 ("tier de capacidades visible") es dueña de `awm doctor`'s
+> reporte por provider — la corrección va ahí.
 
 ### Task 4.3: Renderers de skills por provider
 
@@ -340,23 +401,88 @@ NO es el punto de extensión. El renderer vive en providers:
 `RendererId = 'link' | 'codex-agent-toml'` y `assertLinkRenderer` TIRA para
 cualquier renderer no-link ("not implemented yet"). Esta task agrega renderer ids
 nuevos e implementa su rendering — no toca executor._
-- [ ] `RendererId` += `cursor-mdc`, `copilot-instructions`; implementar rendering
+- [x] `RendererId` += `cursor-mdc`, `copilot-instructions`; implementar rendering
   (Cursor: `.mdc` con frontmatter refiriendo el `SKILL.md`; Copilot:
   `.instructions.md` con `applyTo`) y levantar la restricción de
-  `assertLinkRenderer` para los nuevos ids.
-- [ ] `awm add` / `awm init` e2e en tmpdir para ambos providers.
+  `assertLinkRenderer` para los nuevos ids. **Corrección post-review:** la
+  restricción de `assertLinkRenderer` NO se levantó — ver nota abajo.
+- [x] `awm add` / `awm init` e2e en tmpdir para ambos providers. commits
+  `a7d00b7`+`c97bde2`. code-quality-review encontró 1 blocker + 2 important,
+  corregidos, re-revisado: approved.
+
+> **Corrección real vs. plan literal:** el plan pedía "levantar la restricción
+> de `assertLinkRenderer` para los nuevos ids" — implementado así en la primera
+> ronda, pero code-quality-review encontró que `assertLinkRenderer` es
+> exclusivo de callers legacy de copia/symlink cruda (`core/provider-artifacts.ts`,
+> `src/index.ts`'s `awm add` interactivo), que NUNCA pueden renderizar —
+> levantar la restricción ahí producía un archivo sin extensión `.mdc`/
+> `.instructions.md` ni frontmatter, que ni Cursor ni Copilot reconocen. El
+> pipeline real (`commands/add.ts` → `install-planner.ts` →
+> `install-transaction.ts`) nunca llama a `assertLinkRenderer` — no necesita el
+> permiso. Revertido: `assertLinkRenderer` sigue rechazando cursor-mdc/
+> copilot-instructions, igual que siempre rechazó `codex-agent-toml`.
 
 ### Task 4.4: Tier de capacidades visible
 
 **Files:**
 - Modify: `cli/src/commands/doctor.ts`; registry: `docs/runbook.md` Cap. 4
 
-- [ ] `awm doctor` reporta tier por provider instalado (hooks nativos / AGENTS.md-
+- [x] `awm doctor` reporta tier por provider instalado (hooks nativos / AGENTS.md-
   managed / sin soporte de workflows). Runbook: matriz de capacidades por agente.
+  commits `e911849`+`2675b71`. **Nota:** `docs/runbook.md` vive en este repo
+  (`agentic-workflow`), no en el registry — el texto original del plan
+  ("registry: docs/runbook.md") era impreciso; confirmado antes de implementar.
+  Además de la tier classification, cerró 2 hallazgos diferidos de reviews
+  anteriores: `contextGlobalCheck` (Task 4.2, scope hardcodeado a global) y
+  `skillsGlobalCheck` (Task 4.3, false-green por scan ciego a renderers no-link).
+  code-quality-review: 1 minor (catch demasiado amplio, patrón sistémico
+  preexistente en 2 archivos más — documentado, no refactor completo),
+  corregido con comentario per `best-effort-catch-comment`.
 
 ### Task 4.5: Cierre R4
 
-- [ ] Suite completa + e2e de 4.3. Commits + push + PRs.
+- [x] Suite completa + e2e de 4.3. Commits + push + PRs.
+
+  E2E de 4.3 confirmado re-corriendo `tests/commands/add.test.ts` +
+  `tests/core/bundle-install.test.ts` (22/22, filesystem real: `.mdc` para
+  Cursor, `.instructions.md` para Copilot vía `awm add`/`installBundle`
+  reales). `post-implementation-qa` de 4 lentes sobre el diff COMPLETO de
+  R4 (Tasks 4.0-4.5, todos los commits combinados): Track A (fidelidad) 0
+  hallazgos / 6 wins; Track B robustez+lógica+tests: 10 hallazgos (2
+  blocker, 5 important, 3 minor).
+
+  **Blockers:** (1) `stepContextInjection`/`stepConstitutionInjection`
+  colisionaban en el mismo managed-block de `AGENTS.md` para providers de
+  scope local (Cursor/Copilot) — quien corriera segundo pisaba al primero;
+  arreglado combinando ambos payloads en un solo writer
+  (`codex-agents.ts`). (2) `planInitMutationTargets` nunca enumeraba el
+  archivo de contexto materializado local ni el carrier `.cursor/rules/
+  awm.mdc`, y `stepContextInjection` usaba `d.cwd` crudo en vez del
+  project root ya descubierto — un rollback de init fallido podía no
+  limpiar escrituras reales.
+
+  **Important/minor:** truncamiento de nombres de skill con punto
+  embebido en `physicalTarget` (`path.parse` → strip explícito de
+  `.md`); falso positivo de `skillsGlobalCheck` sobre cualquier archivo
+  no relacionado en el directorio; tier de opencode mal etiquetado como
+  `agents-md-managed` (nuevo tier `config-managed`); `YAML_UNSAFE` no
+  cubría bytes de control/DEL. Los 10 hallazgos se corrigieron con tests
+  de regresión; un code-quality-reviewer independiente auditó el batch
+  completo (revirtiendo cada fix uno por uno para confirmar que su test
+  lo cazaba) y encontró 2 gaps propios (test faltante para el fix de
+  `d.cwd`→`project.root`; `JSON.stringify` no escapa `\x7F`) — ambos
+  corregidos y re-verificados. Suite final: 152/152 suites, 1440/1440
+  tests, `tsc --noEmit` limpio.
+
+  `harness-retro` curó 2 lecciones (`docs/harness-retros.md`,
+  2026-08-08): `verify-fix-by-revert-not-just-green` (nueva —
+  ≥4 ocurrencias en R1/R3/R4 nunca antes curadas) y una cuarta instancia
+  de `prefer-stdlib-over-hand-rolled-parsing`. Ledger NO archivado
+  (excepción activa hasta R7, ver notas de cierre de R1-R3).
+
+  R4 es CLI-only — no hubo cambios de registry (`docs/runbook.md` vive en
+  `agentic-workflow`, no en `awm-baseline-registry`; la nota original de
+  este task sobre "registry" era imprecisa).
 
 ---
 

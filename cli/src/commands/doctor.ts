@@ -94,7 +94,7 @@ export function renderProviderReport(report: ProviderDiagnosticReport): string {
     lines.push(pc.bold('AWM · harness status'));
     lines.push('');
     for (const provider of report.providers) {
-        lines.push(`Provider: ${provider.label}`);
+        lines.push(`Provider: ${provider.label} ${pc.dim(`(${provider.tier})`)}`);
         for (const check of provider.checks) lines.push(providerCheckLine(check));
         lines.push('');
     }

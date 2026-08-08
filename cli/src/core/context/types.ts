@@ -21,4 +21,7 @@ export type InjectionInput = {
     installMethod: 'symlink' | 'copy';
     agent: AgentTarget;
     scope: Scope;
+    /** Required only when a strategy operates at 'local' scope (e.g. CodexAgentsStrategy for
+     *  providers with a null globalPath). HookMergeStrategy/ConfigInstructionsStrategy never need it. */
+    projectRoot?: string;
 };

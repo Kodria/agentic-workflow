@@ -399,6 +399,18 @@ describe('stepGlobalSkillsRepair', () => {
         expect(r.action).toBe('applied');
         expect(a.repairGlobalSkills).toHaveBeenCalledWith(providerFor('opencode').skill.global, expect.any(Array));
     });
+
+    it('Gap C — skips cleanly for an agent whose skill.global is null (copilot), even with broken links reported', () => {
+        const a = spies();
+        expect(providerFor('copilot').skill.global).toBeNull();
+        const m = machine();
+        // Broken-count is nonzero, so the ONLY thing that can make this skip is the
+        // null-global-dir guard itself, not the "nothing broken" early return above.
+        m.globalSkills = { valid: [], repairable: ['b'], dead: ['c'] };
+        const r = stepGlobalSkillsRepair(deps({ machine: m, project: null }, a, { agent: 'copilot' }));
+        expect(r.action).toBe('skipped');
+        expect(a.repairGlobalSkills).not.toHaveBeenCalled();
+    });
 });
 
 describe('stepConstitutionInjection (#6)', () => {
@@ -494,5 +506,48 @@ describe('stepContextInjection', () => {
         const r = stepContextInjection(deps({ machine: machine(), project: null }, a, { agent: 'codex' }));
         expect(r.action).toBe('applied');
         expect(a.installContext).toHaveBeenCalledWith(expect.objectContaining({ agent: 'codex', scope: 'global' }));
+    });
+
+    it('installs Copilot context at local scope with projectRoot (no global AGENTS.md-equivalent)', () => {
+        const a = spies();
+        a.contextStatus.mockReturnValue('absent');
+        const r = stepContextInjection(deps({ machine: machine(), project: null }, a, { agent: 'copilot', cwd: '/repo' }));
+        expect(r.action).toBe('applied');
+        expect(a.installContext).toHaveBeenCalledWith(
+            expect.objectContaining({ agent: 'copilot', scope: 'local', projectRoot: '/repo' }),
+        );
+    });
+
+    it('regression: uses the discovered project root, not raw cwd, when awm init runs from a subdirectory (R4 QA blocker 2b)', () => {
+        // mutation-targets.ts's planInitMutationTargets computes its local-scope backup
+        // target via findProjectRoot(cwd), which walks UP from cwd to the real project
+        // root. If this step passed raw d.cwd as projectRoot instead, a run from a
+        // subdirectory would write to <cwd>/AGENTS.md while the backup session snapshotted
+        // <root>/AGENTS.md — a failed init's rollback would miss the real write entirely.
+        const a = spies();
+        a.contextStatus.mockReturnValue('absent');
+        const r = stepContextInjection(deps(
+            { machine: machine(), project: project({ root: '/repo' }) },
+            a,
+            { agent: 'copilot', cwd: '/repo/packages/sub' },
+        ));
+        expect(r.action).toBe('applied');
+        expect(a.installContext).toHaveBeenCalledWith(
+            expect.objectContaining({ agent: 'copilot', scope: 'local', projectRoot: '/repo' }),
+        );
+    });
+
+    it('falls back to raw cwd when no project was discovered', () => {
+        const a = spies();
+        a.contextStatus.mockReturnValue('absent');
+        const r = stepContextInjection(deps(
+            { machine: machine(), project: null },
+            a,
+            { agent: 'copilot', cwd: '/nowhere' },
+        ));
+        expect(r.action).toBe('applied');
+        expect(a.installContext).toHaveBeenCalledWith(
+            expect.objectContaining({ agent: 'copilot', scope: 'local', projectRoot: '/nowhere' }),
+        );
     });
 });

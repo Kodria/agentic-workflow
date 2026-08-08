@@ -20,4 +20,22 @@ describe('getInjection', () => {
     it('returns undefined for antigravity (no injection mechanism wired yet)', () => {
         expect(getInjection('antigravity')).toBeUndefined();
     });
+
+    it('returns managed-agents-md for cursor, with no confirmed global path (D4)', () => {
+        const inj = getInjection('cursor');
+        expect(inj).toEqual({
+            type: 'managed-agents-md',
+            globalPath: null,
+            localFile: 'AGENTS.md',
+        });
+    });
+
+    it('returns managed-agents-md for copilot, project-root only (D4: no global equivalent)', () => {
+        const inj = getInjection('copilot');
+        expect(inj).toEqual({
+            type: 'managed-agents-md',
+            globalPath: null,
+            localFile: 'AGENTS.md',
+        });
+    });
 });
