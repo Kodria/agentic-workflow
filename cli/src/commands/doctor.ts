@@ -4,7 +4,7 @@ import pc from 'picocolors';
 import { gatherContext } from '../core/diagnostics/context';
 import { computeProviderOverall } from '../core/diagnostics/checks';
 import { CheckReport, CheckResult, ProviderCheck, ProviderCheckState, ProviderDiagnosticReport } from '../core/diagnostics/types';
-import { platformLabel } from '../core/paths';
+import { platformLabel, isWindowsNative, WINDOWS_KNOWN_GAP } from '../core/paths';
 import { getPreferences } from '../utils/config';
 import { resolveAgentTargets } from '../core/agent-targets';
 
@@ -32,6 +32,11 @@ export function renderReport(report: CheckReport): string {
     lines.push('');
     lines.push('Machine (global)');
     lines.push(pc.dim(`  platform: ${platformLabel()}`));
+    // Advisory only, native Windows only — `doctor` is the diagnostics surface
+    // where a narrow, honest caveat belongs; `init`/`update`/`sync` also note
+    // it once via `noteWindowsCaveat`, but `doctor` is where an operator goes
+    // looking for exactly this kind of platform-specific detail.
+    if (isWindowsNative()) lines.push(pc.dim(`  ${WINDOWS_KNOWN_GAP.replace(/\n\s*/g, ' ')}`));
     for (const r of report.results.filter((x) => x.level === 'machine')) lines.push(line(r));
     lines.push('');
     if (report.hasProject) {

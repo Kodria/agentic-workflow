@@ -17,9 +17,20 @@ describe('doctor renderReport — platform line', () => {
     expect(out).toContain('platform: Linux');
   });
 
-  it('flags native Windows with a WSL hint', () => {
+  it('labels native Windows as supported and CI-verified, not deferred to WSL', () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     const out = renderReport(emptyReport());
-    expect(out).toContain('WSL');
+    expect(out).toContain('platform: Windows (native, CI-verified)');
+    expect(out).not.toContain('WSL');
+  });
+
+  it('surfaces the narrow awm-watch supervisor caveat on native Windows only', () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const winOut = renderReport(emptyReport());
+    expect(winOut).toMatch(/awm watch/i);
+
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    const linuxOut = renderReport(emptyReport());
+    expect(linuxOut).not.toMatch(/awm watch/i);
   });
 });

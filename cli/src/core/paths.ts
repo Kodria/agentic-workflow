@@ -27,11 +27,14 @@ export function isWindowsNative(): boolean {
   return platform() === 'win32';
 }
 
-/** Human-friendly platform label for diagnostics. */
+/** Human-friendly platform label for diagnostics. Windows is a first-class,
+ *  CI-verified platform since R6 (`.github/workflows/ci.yml` runs the full
+ *  suite on `ubuntu-latest` + `windows-latest` on every PR) — this no longer
+ *  hedges toward WSL. */
 export function platformLabel(): string {
   switch (platform()) {
     case 'win32':
-      return 'Windows (native — not supported yet, use WSL)';
+      return 'Windows (native, CI-verified)';
     case 'darwin':
       return 'macOS';
     case 'linux':
@@ -41,14 +44,29 @@ export function platformLabel(): string {
   }
 }
 
-export const WINDOWS_NATIVE_WARNING =
-  'AWM detected native Windows. Native support is deferred; the recommended path today is WSL.\n' +
-  '  Install WSL (https://learn.microsoft.com/windows/wsl/install) and run AWM inside your Linux distro.\n' +
-  '  Continuing in best-effort mode, but some steps (symlinks, hooks) may not work.';
+/**
+ * The one honest, narrow gap left on native Windows: `awm watch`'s supervisor
+ * crash-recovery E2E tests (spawn -> identity capture -> adoption after the
+ * supervisor is killed) never converged on real `windows-latest` CI despite 4
+ * evidence-based fix attempts in R6 (WMI-based `refIsAlive`, `activitySnapshot`
+ * degraded off `ps`/`pgrep`, `spawnStructured`'s `detached` flag tried both
+ * ways) — scoped POSIX-only (`itPosix`) in `cli/tests/commands/watch/
+ * supervisor-loop.test.ts` (2 tests) and `cli/tests/commands/watch/
+ * e2e-crash.test.ts` (2 tests); see the `refIsAlive` comment in
+ * `cli/src/core/journal/process.ts` for the full investigation. This is
+ * deliberately narrow, not a blanket "some things may not work" hedge:
+ * `awm init`/`update`/`sync`/`sensors`/`preflight`/`doctor`/hooks are all
+ * exercised green by the same CI matrix and are unaffected by this gap.
+ */
+export const WINDOWS_KNOWN_GAP =
+  'AWM on native Windows: supported and continuously verified in CI (ubuntu-latest + windows-latest, every PR).\n' +
+  '  One known, narrow gap: `awm watch`\'s supervisor crash-recovery (spawn -> identity capture -> adoption\n' +
+  '  after the supervisor is killed) has not yet converged on real windows-latest CI — see\n' +
+  '  cli/src/core/journal/process.ts (refIsAlive) for detail. Everything else is CI-verified on Windows.';
 
-/** Emit the unsupported-platform warning via the provided logger, only on native Windows. */
-export function warnIfUnsupportedPlatform(log: (msg: string) => void): void {
-  if (isWindowsNative()) log(WINDOWS_NATIVE_WARNING);
+/** Emit `WINDOWS_KNOWN_GAP` via the provided logger, only on native Windows. */
+export function noteWindowsCaveat(log: (msg: string) => void): void {
+  if (isWindowsNative()) log(WINDOWS_KNOWN_GAP);
 }
 
 /** Resolve a binary on PATH portably: `where` on win32, POSIX `command -v` elsewhere. */

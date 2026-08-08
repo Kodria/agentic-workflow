@@ -22,7 +22,7 @@ import { assertProviderSupported } from '../core/provider-version';
 import type { InitOutcome, InitActions, StepResult } from '../core/init/types';
 import type { AgentTarget } from '../providers';
 import { requireAgentTarget } from '../providers';
-import { warnIfUnsupportedPlatform } from '../core/paths';
+import { noteWindowsCaveat } from '../core/paths';
 import { enableAgent, loadPreferences, savePreferences } from '../utils/config';
 
 // ---------------------------------------------------------------------------
@@ -325,7 +325,7 @@ export function registerInitCommand(program: Command): void {
         .option('--machine-only', 'Only run machine-level steps (skip project steps)')
         .option('--json', 'Emit the InitOutcome as JSON — on success and on failure (failed steps + rollback)')
         .action(async (options: { yes?: boolean; agent?: string; machineOnly?: boolean; json?: boolean }) => {
-            warnIfUnsupportedPlatform((m) => console.warn(pc.yellow(`⚠ ${m}`)));
+            noteWindowsCaveat((m) => console.log(pc.dim(`ℹ ${m}`)));
             const code = await runInit({
                 yes: options.yes,
                 agent: options.agent,
