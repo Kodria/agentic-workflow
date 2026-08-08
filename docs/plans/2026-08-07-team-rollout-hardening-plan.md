@@ -301,8 +301,23 @@ _Contexto: H4/D4. La mitad del equipo no puede ni instalar AWM._
     archivos con `@ruta/relativa` — mecanismo directo para referenciar SKILL.md.
   - Conclusión: D4 validado. La estrategia `managed-agents-md` es el vehículo
     correcto para ambos.
-- [ ] Al ejecutar R4, re-confirmar contra docs oficiales del día (los formatos de
-  estos agentes cambian rápido) antes de fijar los renderers en tests.
+- [x] Re-confirmado 2026-08-08 contra fuentes primarias frescas (WebSearch/WebFetch,
+  no memoria) antes de fijar renderers. **Dos correcciones reales sobre la
+  verificación del 07-08, ambas de diseño, no solo de implementación — ver nota
+  en D4 de `2026-08-07-team-rollout-hardening-design.md`:**
+  - Cursor: el Background/Cloud Agent NO lee `AGENTS.md` de forma confiable — bug
+    abierto y reconocido por staff de Cursor en su foro, sin fix (Agent mode
+    interactivo sí lo lee, sin cambios). Decisión: emitir `AGENTS.md` +
+    `.cursor/rules/awm.mdc` (`alwaysApply: true`) como carrier redundante — nunca
+    un solo canal cuando uno de los dos modos del agente objetivo lo tiene roto.
+  - Copilot: `AGENTS.md` anidado está apagado por default (docs.github.com), y el
+    mecanismo `@ruta/relativa` para incluir `SKILL.md` NO existe en ninguna
+    fuente primaria — el mecanismo real es "AGENTS.md anidado, el más cercano
+    gana". Decisión: único `AGENTS.md` en la raíz, referencia a `SKILL.md` con
+    link markdown relativo estándar, nunca sintaxis `@`.
+  - Hallazgo no bloqueante: `.instructions.md` soporta `excludeAgent:
+    "code-review"|"cloud-agent"` (changelog 2025-11-12) — capacidad disponible
+    del renderer si Task 4.3 la necesita, no requirement obligatorio.
 
 ### Task 4.1: Provider configs
 
@@ -332,6 +347,19 @@ _Verificado 2026-08-07: NO es solo wiring. Tres acoplamientos reales a Codex:_
   revisar la condición de agente que lo rodea para que cubra cursor/copilot.
 - [ ] El bloque gestionado instruye leer `SKILL.md` en los triggers (spine
   degradado a contexto leído — D4).
+- [ ] Referenciar `SKILL.md` desde el bloque gestionado con link markdown
+  relativo estándar (`[nombre](ruta/relativa/SKILL.md)`) — NUNCA sintaxis
+  `@ruta/relativa` (no existe en ninguna fuente primaria de Copilot ni Cursor;
+  corrección de Task 4.0, 2026-08-08).
+- [ ] Copilot: `injectProject` escribe SOLO `AGENTS.md` en la raíz del repo,
+  nunca anidado (soporte fuera de la raíz apagado por default — corrección de
+  Task 4.0).
+- [ ] Cursor: además del `AGENTS.md` vía `managed-agents-md`, `injectProject`
+  también escribe `.cursor/rules/awm.mdc` (`alwaysApply: true`) con el mismo
+  bloque gestionado como carrier redundante — el Background/Cloud Agent de
+  Cursor no lee `AGENTS.md` de forma confiable (bug abierto sin fix; corrección
+  de Task 4.0). Este archivo se genera del mismo contenido fuente que el bloque
+  de `AGENTS.md`, no es una estrategia de inyección nueva.
 
 ### Task 4.3: Renderers de skills por provider
 
