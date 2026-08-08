@@ -59,8 +59,56 @@ describe('claudeAiTransform', () => {
     expect(() => claudeAiTransform(FM(['name: x', 'portable: true']), 'x')).toThrow(/description/);
   });
 
-  it('throws on multi-line (block scalar) description', () => {  // verifies R3.4
-    expect(() => claudeAiTransform(FM(['name: x', 'description: >', '  folded text']), 'x')).toThrow(/single-line/);
+  it('resuelve una descripcion en block scalar y le anexa la deference line (antes abortaba el export del bundle entero)', () => {  // verifies R3.4
+    // Regresion real: esto lanzaba, y runExport propaga el throw — asi que UN
+    // skill del registry baseline con esta forma valida (extract-design-md)
+    // hacia fallar `awm export frontend` COMPLETO, no solo ese skill.
+    const out = claudeAiTransform(FM(['name: x', 'description: >', '  folded text', '  segunda linea']), 'x');
+    const descLine = out.split('\n').find((l) => l.startsWith('description:'));
+    expect(descLine).toBe(`description: ${JSON.stringify(`folded text segunda linea ${DEFERENCE_LINE('x')}`)}`);
+    // Las lineas indentadas del bloque se consumieron: no quedan sueltas.
+    expect(out).not.toContain('  folded text');
+    expect(out).not.toContain('description: >');
+  });
+
+  it('no absorbe las claves siguientes del frontmatter al consumir el bloque', () => {
+    const out = claudeAiTransform(FM(['description: >-', '  solo esto', 'name: sigue-viva']), 'x');
+    expect(out).toContain('name: sigue-viva');
+    const descLine = out.split('\n').find((l) => l.startsWith('description:'));
+    expect(descLine).toContain('solo esto');
+    expect(descLine).not.toContain('sigue-viva');
+  });
+
+  it('sigue lanzando si el block scalar no tiene contenido', () => {  // verifies R3.4
+    expect(() => claudeAiTransform(FM(['name: x', 'description: >-']), 'x')).toThrow(/no content/);
+  });
+
+  it('lanza si description esta presente pero vacia (sin valor y sin bloque)', () => {  // verifies R3.4
+    expect(() => claudeAiTransform(FM(['name: x', 'description:']), 'x')).toThrow(/description is empty/);
+  });
+
+  it('resuelve un block scalar CON comentario final sin perder el contenido (regresion: guarda por prefijo vs match completo)', () => {
+    // La guarda de la rama de bloque usaba un prefijo (/^[>|]/) mientras el
+    // resolver exigia match COMPLETO del indicador. Con `>- # nota` entraban en
+    // desacuerdo: se publicaba el indicador como descripcion y las lineas de
+    // contenido REALES se borraban del artefacto exportado, en silencio.
+    const out = claudeAiTransform(FM(['name: x', 'description: >- # nota al margen', '  el texto real']), 'x');
+    const descLine = out.split('\n').find((l) => l.startsWith('description:'))!;
+    expect(descLine).toContain('el texto real');
+    expect(descLine).not.toContain('# nota al margen');
+    expect(out).not.toContain('description: >-');
+  });
+
+  it('lanza ante un indicador de bloque malformado en vez de emitir YAML invalido', () => {
+    // `>-basura` lo rechaza el propio YAML. Tratarlo como escalar plano emitiria
+    // `description: >-basura ...`, invalido porque `>` abre un indicador.
+    expect(() => claudeAiTransform(FM(['name: x', 'description: >-basura', '  texto']), 'x'))
+      .toThrow(/malformed block scalar indicator/);
+  });
+
+  it('conserva la linea en blanco que separa el bloque de la clave siguiente', () => {
+    const out = claudeAiTransform(FM(['description: >-', '  el texto', '', 'name: x']), 'x');
+    expect(out).toMatch(/description: .*\n\nname: x/);
   });
 
   it('escapes an apostrophe in the deference line when appending to a single-quoted description', () => {  // verifies R3.4 (BLOCKER fix)

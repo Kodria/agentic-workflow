@@ -49,6 +49,35 @@ it('ignores provider-only mode while retaining canonical instructions', () => {
     }); // verifies R8, R9
 });
 
+it('acepta una description en block scalar y la resuelve (regresion: rompia awm add -a codex)', () => {
+    // El parser exigia que TODA linea del frontmatter fuera `clave: valor`, asi
+    // que las lineas indentadas de un bloque lanzaban "invalid canonical agent
+    // frontmatter line" y abortaban el install de codex. Peor: discovery lee el
+    // MISMO archivo y (ya arreglado) mostraba la descripcion bien en el picker,
+    // asi que el crash llegaba despues de que la UI dijera que todo estaba OK.
+    const source = [
+        '---',
+        'name: bloque-agente',
+        'description: >-',
+        '  Primera linea de la descripcion',
+        '  y su continuacion.',
+        '---',
+        'Cuerpo de instrucciones.',
+    ].join('\n');
+    expect(parseCanonicalAgent(source)).toEqual({
+        name: 'bloque-agente',
+        description: 'Primera linea de la descripcion y su continuacion.',
+        instructions: 'Cuerpo de instrucciones.',
+    });
+});
+
+it('sigue rechazando una linea invalida que NO pertenece a un block scalar', () => {
+    // El fix no debe aflojar la validacion estricta: sin un indicador de bloque
+    // abierto, una linea indentada suelta sigue siendo frontmatter malformado.
+    const source = '---\nname: ok\ndescription: x\n  suelta e indentada\n---\nbody';
+    expect(() => parseCanonicalAgent(source)).toThrow('invalid canonical agent frontmatter line');
+});
+
 it.each([
     ['---\nname: Bad Name\ndescription: x\n---\nbody', 'invalid agent name'],
     ['---\nname: ok\ndescription:\n---\nbody', 'non-empty description'],

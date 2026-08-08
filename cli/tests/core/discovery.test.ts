@@ -121,8 +121,18 @@ describe('Artifact Discovery', () => {
             expect(readArtifactDescription('/missing/SKILL.md')).toBe('');
         });
 
-        it('returns empty string for a block scalar description indicator', () => {
+        it('resuelve un block scalar leyendo sus lineas indentadas (antes descartaba el texto y devolvia vacio)', () => {
+            // Este test afirmaba `''` sobre un fixture que contiene literalmente
+            // "actual text" — codificaba la degradacion silenciosa, no un
+            // contrato. Un `description: >-` es YAML valido y su texto vive en
+            // las lineas indentadas siguientes; descartarlo dejaba el skill sin
+            // descripcion en todo el discovery del CLI.
             (fs.readFileSync as jest.Mock).mockReturnValue('---\ndescription: >-\n  actual text\n---\n');
+            expect(readArtifactDescription('/any/SKILL.md')).toBe('actual text');
+        });
+
+        it('sigue devolviendo vacio si el indicador de block scalar no tiene lineas indentadas (genuinamente sin descripcion)', () => {
+            (fs.readFileSync as jest.Mock).mockReturnValue('---\ndescription: >-\nname: otra-clave\n---\n');
             expect(readArtifactDescription('/any/SKILL.md')).toBe('');
         });
     });

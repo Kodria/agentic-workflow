@@ -53,11 +53,18 @@ Body content.
     expect(rendered).toContain('description: "*starred description"');
 });
 
-it('throws rather than embedding a literal block-scalar indicator as the description', () => {
-    // Regression: a YAML block scalar (`description: >-` / `|-`) means the
-    // real text lives on the FOLLOWING indented lines, not on this line —
-    // the original code took the bare indicator itself as the description,
-    // which would have rendered the literal string ">-" into the .mdc file.
+it('resuelve un block scalar leyendo sus lineas indentadas, sin emitir el indicador literal', () => {
+    // Regression, en dos etapas:
+    //  1. La version original tomaba el indicador (`>-`) COMO la descripcion,
+    //     lo que habria escrito el literal ">-" dentro del .mdc.
+    //  2. El remedio siguiente lo detectaba pero lo colapsaba a '' (=> throw),
+    //     tratando una forma YAML valida como "descripcion ausente" — este
+    //     test codificaba ESE comportamiento parcial. Rompia `awm add
+    //     <bundle> -a cursor` contra un skill real del registry baseline
+    //     (extract-design-md), que usa exactamente esta forma.
+    // El contrato correcto, y el que se asserta ahora: leer el texto de las
+    // lineas indentadas. La intencion original del test — jamas emitir el
+    // indicador crudo — se conserva explicitamente abajo.
     const source = `---
 name: block-skill
 description: >-
@@ -67,7 +74,9 @@ description: >-
 
 Body content.
 `;
-    expect(() => renderCursorMdc(source)).toThrow('non-empty description');
+    const rendered = renderCursorMdc(source);
+    expect(rendered).toContain('description: This description spans multiple lines.');
+    expect(rendered).not.toContain('>-');
 });
 
 it('quotes a description containing a mid-string " #" (starts a YAML comment, truncating the rest)', () => {
@@ -75,9 +84,18 @@ it('quotes a description containing a mid-string " #" (starts a YAML comment, tr
     // of the string — a `#` preceded by whitespace ANYWHERE in a plain scalar
     // also starts a comment. Unquoted, "Use this #important skill" would
     // render as YAML that silently truncates to "Use this".
+    //
+    // El fuente esta ENTRECOMILLADO a proposito: ahi el `#` es literal y
+    // sobrevive al parseo, que es la unica manera de que un `#` llegue al
+    // renderer y haya algo que escapar. Antes el fixture usaba la forma SIN
+    // comillas, pero YAML dice que ahi ` #` abre un comentario — el lector lo
+    // trataba como texto (divergencia con cualquier parser real) y este test
+    // se apoyaba en esa divergencia. El contrato que el test realmente
+    // protege — nunca emitir un `#` sin comillas en la SALIDA — queda intacto
+    // y ahora se ejercita con una entrada que de verdad lo contiene.
     const source = `---
 name: hash-skill
-description: Use this #important skill
+description: "Use this #important skill"
 ---
 
 Body content.
@@ -85,6 +103,19 @@ Body content.
     const rendered = renderCursorMdc(source);
     expect(rendered).toContain('description: "Use this #important skill"');
     expect(rendered).not.toContain('description: Use this #important skill');
+});
+
+it('trata un " #" en una description SIN comillas como comentario YAML, igual que un parser real', () => {
+    const source = `---
+name: hash-plano
+description: Use this #important skill
+---
+
+Body content.
+`;
+    // js-yaml devuelve "Use this" para esta entrada: el comentario no es parte
+    // del valor. El renderer debe coincidir con esa lectura, no inventar texto.
+    expect(renderCursorMdc(source)).toContain('description: Use this\n');
 });
 
 it('quotes a description containing an embedded null byte / control character instead of emitting it raw', () => {

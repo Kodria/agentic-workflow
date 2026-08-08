@@ -2,7 +2,10 @@
 //
 // Transform mecánico claude.ai (R3.1): función pura string → string.
 // Frontmatter line-based plano (los SKILL.md del baseline usan claves de una
-// línea) — sin parser YAML a propósito (YAGNI, cero deps).
+// línea) — sin parser YAML a propósito (YAGNI, cero deps). La única forma
+// multilínea soportada es el block scalar de `description:`, resuelto vía la
+// función compartida de discovery.ts (ver claudeAiTransform).
+import { readFrontmatterDescription, isBlockScalarHeader } from '../discovery';
 export const DEFERENCE_LINE = (skillName: string): string =>
   `In environments with AWM installed (Claude Code), defer to the registry's ${skillName} skill — this port is for environments without filesystem access.`;
 
@@ -83,8 +86,66 @@ export function claudeAiTransform(skillMd: string, skillName: string): string {
   }
   const descLine = fmLines[descIdx];
   const value = descLine.slice('description:'.length).trim();
-  if (value === '' || value === '>' || value === '|' || value.startsWith('>') || value.startsWith('|')) {
-    throw new Error('description must be single-line (block scalars are not supported by the export transform)');
+
+  // Block scalar (`description: >-` + lineas indentadas): forma YAML valida y
+  // usada por skills REALES del registry baseline (extract-design-md). Antes
+  // esto lanzaba, y como runExport propaga el throw, UN solo skill con esta
+  // forma abortaba el export del bundle ENTERO (`awm export frontend`).
+  // Se resuelve con readFrontmatterDescription — la misma funcion compartida
+  // que usan discovery y los renderers de cursor/copilot — y se normaliza a
+  // un escalar de una linea entrecomillado: el transform ya reescribe el
+  // frontmatter de todas formas, y la salida de una linea es la unica forma
+  // en que el splice de la deference line tiene sentido.
+  // La guarda usa la MISMA funcion que el resolver (isBlockScalarHeader), no
+  // un prefijo laxo tipo /^[>|]/. Con un prefijo, un valor como
+  // `>- # comentario` entraba a esta rama pero el resolver — que exige match
+  // COMPLETO del indicador — caia a su camino de escalar plano y devolvia el
+  // indicador mismo: truthy, asi que la guarda de `!resolved` no disparaba, y
+  // el splice de abajo borraba las lineas de contenido reales. Resultado:
+  // el indicador publicado como descripcion y el texto real perdido en
+  // silencio, justo en el artefacto que una persona sube a claude.ai.
+  // Atrapado en review; las dos condiciones deben venir de la misma fuente.
+  if (isBlockScalarHeader(value)) {
+    const resolved = readFrontmatterDescription(fmLines.slice(descIdx).join('\n'));
+    if (!resolved) {
+      throw new Error('description block scalar has no content');
+    }
+    // Extension del bloque: las lineas siguientes ESTRICTAMENTE mas indentadas
+    // que la clave (que esta en columna 0 aca). Se eliminan junto con la linea
+    // de la clave, que se reemplaza por la forma de una sola linea.
+    // Las lineas en blanco solo cuentan como parte del bloque si DESPUES sigue
+    // habiendo contenido indentado: una linea en blanco que separa el bloque
+    // de la clave siguiente pertenece al frontmatter, no al bloque, y comersela
+    // en el splice la borraria del artefacto exportado.
+    let end = descIdx + 1;
+    let lastContent = descIdx;
+    for (; end < fmLines.length; end++) {
+      if (fmLines[end].trim() === '') continue;
+      if (!/^\s/.test(fmLines[end])) break;
+      lastContent = end;
+    }
+    end = lastContent + 1;
+    // JSON.stringify produce un escalar YAML double-quoted valido (superset de
+    // JSON string), asi que cubre comillas, `:`, `#` y los `\n` que puede
+    // dejar un literal `|` — sin necesidad de decidir el estilo de comilla.
+    const merged = JSON.stringify(`${resolved} ${DEFERENCE_LINE(skillName)}`);
+    fmLines.splice(descIdx, end - descIdx, `description: ${merged}`);
+    return `---\n${fmLines.join('\n')}\n---\n${stripIntraRegistryPaths(body)}`;
+  }
+
+  // Llegar aca con `value` vacio significa `description:` sin NADA a la
+  // derecha y sin bloque indentado debajo (el caso block scalar ya se
+  // resolvio arriba): no hay descripcion que exportar.
+  if (value === '') {
+    throw new Error('description is empty');
+  }
+  // Empieza con `>`/`|` pero NO es un indicador de bloque bien formado (ej.
+  // `>-basura`): YAML mismo lo rechaza. Fallar explicito en vez de tratarlo
+  // como escalar plano, que emitiria un `description: >-basura ...` — invalido
+  // como YAML, porque `>` y `|` son indicadores reservados al inicio de un
+  // escalar plano.
+  if (/^[>|]/.test(value)) {
+    throw new Error(`malformed block scalar indicator in description: ${value}`);
   }
   const deference = DEFERENCE_LINE(skillName);
   // Quote-style detection mirrors readArtifactDescription in discovery.ts: both
