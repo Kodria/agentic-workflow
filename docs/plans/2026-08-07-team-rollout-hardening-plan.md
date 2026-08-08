@@ -427,8 +427,17 @@ nuevos e implementa su rendering — no toca executor._
 **Files:**
 - Modify: `cli/src/commands/doctor.ts`; registry: `docs/runbook.md` Cap. 4
 
-- [ ] `awm doctor` reporta tier por provider instalado (hooks nativos / AGENTS.md-
+- [x] `awm doctor` reporta tier por provider instalado (hooks nativos / AGENTS.md-
   managed / sin soporte de workflows). Runbook: matriz de capacidades por agente.
+  commits `e911849`+`2675b71`. **Nota:** `docs/runbook.md` vive en este repo
+  (`agentic-workflow`), no en el registry — el texto original del plan
+  ("registry: docs/runbook.md") era impreciso; confirmado antes de implementar.
+  Además de la tier classification, cerró 2 hallazgos diferidos de reviews
+  anteriores: `contextGlobalCheck` (Task 4.2, scope hardcodeado a global) y
+  `skillsGlobalCheck` (Task 4.3, false-green por scan ciego a renderers no-link).
+  code-quality-review: 1 minor (catch demasiado amplio, patrón sistémico
+  preexistente en 2 archivos más — documentado, no refactor completo),
+  corregido con comentario per `best-effort-catch-comment`.
 
 ### Task 4.5: Cierre R4
 
