@@ -1,0 +1,52 @@
+# .github/workflows/ci.yml
+#
+# R6 (2026-08-07 team-rollout-hardening plan): every merge to main published
+# without ever running the tests — H1's Windows portability regressions (R1)
+# only surfaced through manual dogfooding, never through CI, because there
+# was no CI. This is the net that was missing: build + typecheck + full test
+# suite on both platforms the CLI actually ships to, on every PR.
+#
+# Each command is its own `run:` step (not chained with `&&` in one
+# multi-line block) deliberately: windows-latest runners default to `pwsh`
+# for `run:` steps, and a bash-style `&&` chain would behave differently (or
+# fail outright) there. Separate single-command steps run identically under
+# `pwsh` and `bash` since none of them use shell-specific syntax.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install
+        working-directory: cli
+        run: npm ci
+
+      - name: Build
+        working-directory: cli
+        run: npm run build
+
+      - name: Typecheck
+        working-directory: cli
+        run: npx tsc --noEmit
+
+      - name: Test
+        working-directory: cli
+        run: npx jest --runInBand
