@@ -557,7 +557,10 @@ program.command('remove')
       handleCancel(scopeChoice);
       const scopeVal = scopeChoice as Scope;
 
-      const installed = scanLegacyArtifacts(targetAgents, scopeVal);
+      // projectRoot explicito: `config.local` es relativo, y resolverlo contra
+      // `process.cwd()` hacia que `awm remove` no encontrara nada desde un
+      // subdirectorio — y que le pasara rutas RELATIVAS a fs.rmSync cuando si.
+      const installed = scanLegacyArtifacts(targetAgents, scopeVal, findProjectRoot(process.cwd()) ?? process.cwd());
 
       if (installed.length === 0) {
           outro(pc.yellow('No installed artifacts found for the selected agents/scope.'));
