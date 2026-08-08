@@ -64,7 +64,14 @@ describe('runner concurrente', () => {
             return readJournal(repo, 'rama').state!.jobs['j1'].executionState === 'running';
         });
         const running = readJournal(repo, 'rama').state!.jobs['j1'];
-        expect(running.processRef!.psArgsDigest).toMatch(/^[0-9a-f]{16}$/);
+        // hex real cuando la plataforma pudo observar el proceso (ps en
+        // POSIX, WMI/powershell en win32 — ver captureRefFor en
+        // src/core/journal/process.ts); sentinel 'unknown' documentado
+        // cuando esa observacion no estuvo disponible. Mismo criterio ya
+        // establecido en tests/core/journal/process.test.ts (y en
+        // exec-wrapper.test.ts) — este test no puede exigir mas certeza de
+        // la que la plataforma real puede dar.
+        expect(running.processRef!.psArgsDigest).toMatch(/^([0-9a-f]{16}|unknown)$/);
         await until(() => {
             collectAndReconcile(repo, 'rama');
             return readJournal(repo, 'rama').state!.jobs['j1'].executionState === 'exited';

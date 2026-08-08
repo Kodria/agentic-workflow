@@ -41,13 +41,19 @@ describe('ControllerAdapter', () => {
 
             // Un ps/pgrep emulado y ciego (exit 1 para un pid nativo real) ya
             // NO puede empujar el veredicto hacia 'safe': refIsAlive en win32
-            // ni siquiera lo consulta.
+            // nunca invoca ps/pgrep — SI invoca powershell.exe (win32ProcessInfo,
+            // R6 ronda 2) para la verificacion de identidad completa cuando el
+            // ref no esta degradado, que es un mecanismo distinto y legitimo
+            // (WMI, no la capa emulada MSYS/Cygwin) — no se afirma "cero
+            // llamadas", se afirma "ps/pgrep especificamente, nunca".
             const cp = require('child_process');
             const execSpy = jest.spyOn(cp, 'execFileSync').mockImplementation(() => {
                 const err: any = new Error('no matches found'); err.status = 1; throw err;
             });
             expect(a.safeToReplace(ref)).toBe('indeterminate');
-            expect(execSpy).not.toHaveBeenCalled();
+            const calledBinaries = execSpy.mock.calls.map((call) => call[0]);
+            expect(calledBinaries).not.toContain('ps');
+            expect(calledBinaries).not.toContain('pgrep');
             execSpy.mockRestore();
 
             child.kill('SIGKILL');

@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawn } from 'child_process';
-import { spawnStructured, refIsAlive, terminateGroupConfirmed, groupIsGone, activitySnapshot, captureSelfRef, processStatesAreGone } from '../../../src/core/journal/process';
+import { spawnStructured, refIsAlive, terminateGroupConfirmed, groupIsGone, activitySnapshot, captureSelfRef, captureRefFor, processStatesAreGone } from '../../../src/core/journal/process';
 
 describe('process identity', () => {
     test('spawnStructured produce ProcessRef con tupla completa (R2.1, R4.7)', async () => {  // verifies R2.1
@@ -183,8 +183,20 @@ describe('process identity (win32, mockeado — sin windows real disponible en e
     });
 
     test('refIsAlive en win32 usa process.kill(pid,0), NUNCA ps/pgrep — reproduce el bug: un ps/pgrep "ciego" que devuelve exit 1 para un pid real y vivo ya no lo declara muerto (R2.1, R4.2b)', () => {
+        // Aca `spawnStructured` corre ANTES de instalar el mock de
+        // execFileSync, y en este entorno (sin powershell.exe real) su
+        // intento win32 de WMI falla por ENOENT genuino => captureRefFor
+        // degrada la ref a startTime/psArgsDigest 'unknown'. Con una ref
+        // degradada, refIsAlive corta ANTES de tocar WMI (ver
+        // src/core/journal/process.ts, paso 3 del comentario de refIsAlive)
+        // — asi que esta asercion ("execFileSync jamas se llama DENTRO de
+        // refIsAlive") sigue siendo exacta pese a que la ronda 2 del fix
+        // agrego un camino WMI: ese camino solo se paga con una identidad
+        // NO degradada (ver el describe 'identidad completa via WMI' mas
+        // abajo para esa cobertura).
         Object.defineProperty(process, 'platform', { value: 'win32' });
         const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 3000)'], process.cwd(), 'n-win32-a');
+        expect(ref.startTime).toBe('unknown');   // precondicion del escenario: identidad degradada
         const cp = require('child_process');
         // Simula EXACTAMENTE el bug real de CI: ps/pgrep "corren" pero
         // devuelven exit 1 (ceguera de MSYS a pids nativos) para un pid que
@@ -196,7 +208,7 @@ describe('process identity (win32, mockeado — sin windows real disponible en e
         });
         try {
             expect(refIsAlive(ref)).toBe(true);          // vivo de verdad: nunca declarado muerto
-            expect(execSpy).not.toHaveBeenCalled();       // refIsAlive en win32 ni siquiera intenta ps/pgrep
+            expect(execSpy).not.toHaveBeenCalled();       // refIsAlive en win32 ni siquiera intenta ps/pgrep/WMI con ref degradada
         } finally {
             child.kill('SIGKILL');
         }
@@ -217,8 +229,27 @@ describe('process identity (win32, mockeado — sin windows real disponible en e
         jest.spyOn(process, 'kill').mockImplementation(() => {
             const err: any = new Error('operation not permitted'); err.code = 'EPERM'; throw err;
         });
-        const fakeRef = { pid: 4242, startTime: 'x', spawnNonce: 'n', argvDigest: 'd', processGroup: 4242, psArgsDigest: 'x' };
-        expect(refIsAlive(fakeRef)).toBe(true);
+        // fakeRef con identidad NO degradada (startTime real, no 'unknown'):
+        // fuerza a refIsAlive a llegar hasta el chequeo WMI (paso 4). Se
+        // mockea powershell.exe explicitamente como "no disponible" (en vez
+        // de dejar que ENOENT ocurra por accidente porque este sandbox no
+        // tiene powershell.exe real) para que el test sea explicito sobre
+        // que camino ejercita y no dependa de una casualidad del entorno.
+        const cp = require('child_process');
+        const execSpy = jest.spyOn(cp, 'execFileSync').mockImplementation((...args: unknown[]) => {
+            const [cmd] = args as [string];
+            if (cmd === 'powershell.exe') { const err: any = new Error('no disponible en este host'); err.code = 'ENOENT'; throw err; }
+            throw new Error('llamada inesperada a execFileSync en este test: ' + cmd);
+        });
+        try {
+            const fakeRef = { pid: 4242, startTime: 'x', spawnNonce: 'n', argvDigest: 'd', processGroup: 4242, psArgsDigest: 'x' };
+            // pidExistsNative dice "vivo" (EPERM no es ESRCH) y WMI no pudo
+            // ejecutar (ENOENT simulado): ninguna de las dos fuentes prueba
+            // muerte => jamas declarar muerte (R2.1).
+            expect(refIsAlive(fakeRef)).toBe(true);
+        } finally {
+            execSpy.mockRestore();
+        }
     });
 
     test('terminateGroupConfirmed en win32 usa `taskkill /pid <pid> /T /F`, NUNCA process.kill(-pgid) (mismo patron probado en sensors/exec.ts::killTree, ver tests/commands/sensors/exec-windows.test.ts)', async () => {
@@ -234,6 +265,13 @@ describe('process identity (win32, mockeado — sin windows real disponible en e
                 child.kill('SIGKILL');   // simula taskkill matando de verdad al pid real
                 return '';
             }
+            // ref.startTime es real aca (capturada en POSIX antes del mock,
+            // ver arriba) => refIsAlive (paso previo a la escalera de kill)
+            // llega hasta WMI. Simula "no disponible" explicitamente en vez
+            // de depender de un ENOENT accidental de este sandbox — el
+            // resultado (fail hacia 'vivo', R2.1) es el mismo que se
+            // necesita para que la escalera de terminacion prosiga.
+            if (cmd === 'powershell.exe') { const err: any = new Error('no disponible en este host'); err.code = 'ENOENT'; throw err; }
             throw new Error('llamada inesperada a execFileSync en este test: ' + cmd);
         });
         const posixKillSpy = jest.spyOn(process, 'kill');
@@ -245,6 +283,125 @@ describe('process identity (win32, mockeado — sin windows real disponible en e
             expect(call[0] as number).toBeGreaterThanOrEqual(0);
         }
     }, 15000);
+});
+
+/** Ronda 2 del fix win32 (R2.1/R6): la ronda 1 solo probaba existencia
+ *  (`pidExistsNative`) — cualquier ref con un pid vivo pasaba, sin importar
+ *  si el resto de la tupla (startTime/spawnNonce/argvDigest/psArgsDigest)
+ *  coincidia. Eso fallaba exactamente el mismo test que en POSIX (misma
+ *  suite, arriba: 'refIsAlive rechaza cualquier campo distinto de la tupla
+ *  completa') cuando corre en windows-latest real, porque ahi
+ *  `isWindowsNative()` es true de verdad — no hay mock de plataforma que
+ *  active/desactive esa cobertura, el mismo test generico ejercita la rama
+ *  de produccion real. Estos tests mockean `powershell.exe` (el unico canal
+ *  disponible para WMI/Win32_Process en win32, ver win32ProcessInfo) con
+ *  una respuesta realista para poder ejercitar y fijar el comportamiento de
+ *  esa rama de forma determinista, sin depender de Windows real. */
+describe('process identity (win32, mockeado) — identidad completa via WMI (R2.1/R6, ronda 2)', () => {
+    const originalPlatform = process.platform;
+
+    afterEach(() => {
+        Object.defineProperty(process, 'platform', { value: originalPlatform });
+        jest.restoreAllMocks();
+    });
+
+    function mockPowershell(response: string | (() => string)): void {
+        const cp = require('child_process');
+        jest.spyOn(cp, 'execFileSync').mockImplementation((...args: unknown[]) => {
+            const [cmd] = args as [string];
+            if (cmd === 'powershell.exe') return typeof response === 'function' ? response() : response;
+            throw new Error('llamada inesperada a execFileSync en este test: ' + cmd);
+        });
+    }
+
+    test('captureRefFor en win32 usa WMI para obtener startTime/psArgsDigest REALES cuando powershell responde (R2.1)', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        const fakeCreationDate = '2026-08-08T00:00:00.0000000-00:00';
+        mockPowershell(JSON.stringify({ CreationDate: fakeCreationDate, CommandLine: 'C:\\node.exe fake-argv' }));
+        const ref = captureRefFor(process.pid, 'nonce-win32-wmi-ok', ['node', 'fake-argv']);
+        expect(ref.startTime).toBe(fakeCreationDate);              // ya NO 'unknown': WMI respondio
+        expect(ref.psArgsDigest).toMatch(/^[0-9a-f]{16}$/);         // digest real, no sentinel
+        expect(ref.processGroup).toBe(process.pid);                 // convencion fija win32: sin pgid real jamas
+    });
+
+    test('captureRefFor en win32 degrada a unknown si WMI/powershell no responde, nunca crashea (R2.1) — mismo contrato que la rama POSIX', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        const cp = require('child_process');
+        const execSpy = jest.spyOn(cp, 'execFileSync').mockImplementation(() => {
+            const err: any = new Error('powershell no encontrado'); err.code = 'ENOENT'; throw err;
+        });
+        try {
+            expect(() => captureRefFor(process.pid, 'nonce-win32-wmi-fail', ['node'])).not.toThrow();
+            const ref = captureRefFor(process.pid, 'nonce-win32-wmi-fail', ['node']);
+            expect(ref.startTime).toBe('unknown');
+            expect(ref.psArgsDigest).toBe('unknown');
+            expect(ref.processGroup).toBe(process.pid);
+        } finally {
+            execSpy.mockRestore();
+        }
+    });
+
+    test('refIsAlive en win32 con identidad NO degradada: la tupla completa coincide via WMI => vivo; CUALQUIER campo alterado => muerto (R2.1, R6 — replica exacta del test generico de POSIX de mas arriba)', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        const fakeCreationDate = '2026-08-08T00:00:00.0000000-00:00';
+        mockPowershell(JSON.stringify({ CreationDate: fakeCreationDate, CommandLine: 'C:\\node.exe fake-argv' }));
+        const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 3000)'], process.cwd(), 'n-win32-full');
+        try {
+            expect(ref.startTime).toBe(fakeCreationDate);   // precondicion: identidad NO degradada
+            expect(refIsAlive(ref)).toBe(true);
+            // Cada campo de la tupla, alterado individualmente, rompe la
+            // identidad — igual que R2.1/R6 exigen en POSIX (bloqueador 6:
+            // nunca PID solo). startTime y processGroup se comparan
+            // directo; spawnNonce/argvDigest/psArgsDigest via el digest
+            // combinado (identityDigest), igual que la rama POSIX.
+            expect(refIsAlive({ ...ref, startTime: 'otro-momento' })).toBe(false);
+            expect(refIsAlive({ ...ref, spawnNonce: 'otro-nonce' })).toBe(false);
+            expect(refIsAlive({ ...ref, argvDigest: 'ffffffffffffffff' })).toBe(false);
+            expect(refIsAlive({ ...ref, psArgsDigest: 'ffffffffffffffff' })).toBe(false);
+            expect(refIsAlive({ ...ref, processGroup: ref.processGroup + 1 })).toBe(false);
+        } finally {
+            child.kill('SIGKILL');
+        }
+    });
+
+    test('refIsAlive en win32: WMI confirma POSITIVAMENTE ausencia ("absent") — evidencia INDEPENDIENTE de process.kill, corrige el caso donde process.kill fue mockeado/interceptado por otro proposito (regresion: CI real, gate-reconcile.test.ts mockeaba process.kill globalmente para verificar "nunca se envia señal" y eso, con el fix de ronda 1, hacia que pidExistsNative reportara "vivo" para un pid que jamas existio, encadenando en cuelgue de la escalera de terminacion)', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        // Simula exactamente el mock incidental de gate-reconcile.test.ts:
+        // process.kill mockeado a "siempre exito" (nunca ESRCH) para un
+        // proposito ajeno (verificar que nunca se envia señal real), sin
+        // intencion de fingir que el pid esta vivo.
+        const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => true);
+        mockPowershell('');   // WMI corrio, cero coincidencias: "absent"
+        const fakeRef = { pid: 999999, startTime: 'gone', spawnNonce: 'n1', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
+        try {
+            expect(refIsAlive(fakeRef)).toBe(false);
+        } finally {
+            killSpy.mockRestore();
+        }
+    });
+
+    test('refIsAlive en win32: powershell corre pero devuelve JSON inesperado/no parseable => inconclusive, NUNCA "absent" ni "muerto" (R2.1)', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        mockPowershell('esto no es JSON valido {{{');
+        const fakeRef = { pid: process.pid, startTime: 'x', spawnNonce: 'n', argvDigest: 'd', processGroup: process.pid, psArgsDigest: 'x' };
+        expect(refIsAlive(fakeRef)).toBe(true);   // el proceso actual esta vivo de verdad; salida rota no es prueba de nada
+    });
+
+    test('refIsAlive en win32: timeout/fallo de powershell.exe (ETIMEDOUT) nunca declara muerte (R2.1) — silencio no es prueba', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        const cp = require('child_process');
+        const execSpy = jest.spyOn(cp, 'execFileSync').mockImplementation((...args: unknown[]) => {
+            const [cmd] = args as [string];
+            if (cmd === 'powershell.exe') { const err: any = new Error('timeout'); err.code = 'ETIMEDOUT'; err.killed = true; throw err; }
+            throw new Error('llamada inesperada a execFileSync en este test: ' + cmd);
+        });
+        try {
+            const fakeRef = { pid: process.pid, startTime: 'x', spawnNonce: 'n', argvDigest: 'd', processGroup: process.pid, psArgsDigest: 'x' };
+            expect(refIsAlive(fakeRef)).toBe(true);
+        } finally {
+            execSpy.mockRestore();
+        }
+    });
 });
 
 /** Defense-in-depth: los execFileSync internos de este archivo (psField,
