@@ -169,12 +169,23 @@ function agentsNativeCheck(agent: AgentTarget): ProviderCheck | null {
 
     const dir = provider.agent.global;
     let entries: string[];
+    // `absent` degrada el estado global, asi que sin `remediationCode` doctor
+    // salia 1 sin decir que hacer — y para un registry que simplemente no trae
+    // `agents/` (lo normal) ese rojo no tiene accion posible. Se reporta como
+    // `unsupported`, que describe la realidad: no hay artefactos nativos que
+    // verificar, y no es culpa de la instalacion.
+    // Un registry que simplemente no trae `agents/` es lo normal, no un defecto
+    // de la instalacion — y no hay accion que el usuario pueda tomar. Antes esto
+    // devolvia `absent`, un estado que DEGRADA, y sin `remediationCode`: doctor
+    // salia 1 mostrando `✖ native agents` sin decir que hacer, justo despues de
+    // un `awm init` exitoso. Cuando no hay nada nativo que verificar, no se
+    // emite fila — el mismo criterio que ya usan los demas casos N/A de aca.
     try {
         entries = fs.readdirSync(dir);
     } catch {
-        return { id: 'agents.native', state: 'absent', target: dir };
+        return null;
     }
-    if (entries.length === 0) return { id: 'agents.native', state: 'absent', target: dir };
+    if (entries.length === 0) return null;
 
     if (provider.agent.renderer === 'codex-agent-toml') {
         const { broken } = tomlAgentsHealthy(dir, entries);

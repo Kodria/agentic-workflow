@@ -33,8 +33,20 @@ import { stageArtifact, replaceArtifact } from './executor';
  * accepts. Strips both `:` and `.` (an ISO timestamp has both) so the result
  * is filesystem- and regex-safe either way.
  */
+/** Id de transaccion: timestamp + sufijo aleatorio.
+ *
+ *  El timestamp solo tiene resolucion de 1 ms y NO era unico. Dos
+ *  transacciones en el mismo milisegundo (p. ej. `syncProfile`, que corre una
+ *  por extension en un loop) producian el mismo id, y como cada una reescribe
+ *  `manifest.json` con SUS entradas y numera los slots de backup desde 0, la
+ *  segunda pisaba el backup de la primera: el respaldo del archivo original del
+ *  usuario quedaba irrecuperable y `awm backup restore <id>` restauraba el
+ *  target equivocado. Es un agujero en el unico mecanismo del que depende toda
+ *  la promesa de "siempre se puede revertir". El regex de `restoreBackup` ya
+ *  acepta este formato. */
 function sanitizeTransactionTimestamp(): string {
-    return new Date().toISOString().replace(/[:.]/g, '-');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    return `${stamp}-${crypto.randomBytes(4).toString('hex')}`;
 }
 
 export type InstallSummary = {

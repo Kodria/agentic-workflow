@@ -155,6 +155,12 @@ describe('runDoctor', () => {
     });
 
     it('reports every enabled provider and stable remediation codes in JSON', () => {
+        // El check `agents.native` solo se emite si hay artefactos nativos que
+        // verificar: un registry sin `agents/` ya no produce una fila roja sin
+        // remedio. Se siembra uno para que el check sea genuino en vez de
+        // asertar sobre una fila que hoy, con razon, no existiria.
+        fs.mkdirSync(path.join(tmpHome, '.codex', 'agents'), { recursive: true });
+        fs.writeFileSync(path.join(tmpHome, '.codex', 'agents', 'demo.toml'), 'name = "demo"\n');
         writePrefs(prefsWith(['claude-code', 'opencode', 'codex']));
         const code = runDoctor({ cwd: tmpWork, json: true });
         const report = JSON.parse(stdout());
