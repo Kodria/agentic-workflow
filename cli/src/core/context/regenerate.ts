@@ -1,5 +1,5 @@
 // W3 — Regeneración del contexto global tras `awm update`.
-// Para cada agente con inyección config-instructions cuya config exista:
+// Para cada agente con un mecanismo de inyección aplicable:
 //   - 'stale'    (sentinel presente, archivo materializado ausente/viejo) → re-materializa.
 //   - 'injected' (ya fresco)                                              → no toca nada.
 //   - 'absent'   (sentinel ausente)                                       → no inyecta (eso es `awm init`).
@@ -22,8 +22,23 @@ export function regenerateGlobalContext(
     const out: RegenResult[] = [];
     for (const agent of targets) {
         const inj = providerFor(agent).injection;
-        if (!inj || inj.type !== 'config-instructions') continue;
-        if (!fs.existsSync(inj.configPath)) continue;
+        if (!inj) continue;
+        // Antes esto exigia `type === 'config-instructions'`, o sea que SOLO se
+        // regeneraba OpenCode: para codex, cursor y copilot (`managed-agents-md`)
+        // `awm update` era un no-op silencioso — ni un aviso — y el unico modo
+        // de refrescar su contexto era volver a correr `awm init`. Peor: doctor
+        // marcaba ⚠ pero seguia reportando `status: healthy` / exit 0, asi que
+        // un AGENTS.md desactualizado era invisible para cualquier gate de CI
+        // que mirara el codigo de salida.
+        //
+        // El destino global de `managed-agents-md` puede ser null (cursor y
+        // copilot no tienen archivo de contexto global); ahi no hay nada global
+        // que regenerar y se saltea limpio.
+        if (inj.type === 'config-instructions') {
+            if (!fs.existsSync(inj.configPath)) continue;
+        } else if (inj.type === 'managed-agents-md') {
+            if (inj.globalPath === null) continue;
+        }
 
         const op: ContextOp = {
             agent,

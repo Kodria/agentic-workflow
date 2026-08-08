@@ -53,14 +53,14 @@ describe('regenerateGlobalContext', () => {
     it('returns empty when no config-instructions agent has a config file', () => {
         seedRegistry();
         const { regenerateGlobalContext } = require('../../../src/core/context/regenerate');
-        expect(regenerateGlobalContext()).toEqual([]);
+        expect(regenerateGlobalContext(['opencode'])).toEqual([]);
     });
 
     it('skips an agent whose config exists but has no AWM sentinel', () => {
         seedRegistry();
         seedOpencode(['docs/rules.md']); // sin el sentinel
         const { regenerateGlobalContext } = require('../../../src/core/context/regenerate');
-        expect(regenerateGlobalContext()).toEqual([{ agent: 'opencode', action: 'skipped' }]);
+        expect(regenerateGlobalContext(['opencode'])).toEqual([{ agent: 'opencode', action: 'skipped' }]);
         expect(fs.existsSync(contextPath())).toBe(false); // no se crea el archivo
     });
 
@@ -69,7 +69,7 @@ describe('regenerateGlobalContext', () => {
         seedOpencode([contextPath()]); // sentinel presente, pero el archivo no existe → stale
         expect(fs.existsSync(contextPath())).toBe(false);
         const { regenerateGlobalContext } = require('../../../src/core/context/regenerate');
-        expect(regenerateGlobalContext()).toEqual([{ agent: 'opencode', action: 'refreshed' }]);
+        expect(regenerateGlobalContext(['opencode'])).toEqual([{ agent: 'opencode', action: 'refreshed' }]);
         expect(fs.existsSync(contextPath())).toBe(true);
         expect(fs.readFileSync(contextPath(), 'utf-8')).toContain('USING-AWM-BODY');
     });
@@ -78,9 +78,9 @@ describe('regenerateGlobalContext', () => {
         seedRegistry();
         seedOpencode([contextPath()]);
         const { regenerateGlobalContext } = require('../../../src/core/context/regenerate');
-        regenerateGlobalContext();                       // 1ª pasada: stale → refreshed, crea el archivo
+        regenerateGlobalContext(['opencode']);                       // 1ª pasada: stale → refreshed, crea el archivo
         const mtime1 = fs.statSync(contextPath()).mtimeMs;
-        const second = regenerateGlobalContext();        // 2ª pasada: ya injected → fresh
+        const second = regenerateGlobalContext(['opencode']);        // 2ª pasada: ya injected → fresh
         expect(second).toEqual([{ agent: 'opencode', action: 'fresh' }]);
         expect(fs.statSync(contextPath()).mtimeMs).toBe(mtime1); // archivo intacto
     });
@@ -97,8 +97,8 @@ describe('regenerateGlobalContext', () => {
         );
         seedOpencode([contextPath()]);
         const { regenerateGlobalContext } = require('../../../src/core/context/regenerate');
-        expect(() => regenerateGlobalContext()).not.toThrow();
-        expect(regenerateGlobalContext()).toEqual([{ agent: 'opencode', action: 'skipped' }]);
+        expect(() => regenerateGlobalContext(['opencode'])).not.toThrow();
+        expect(regenerateGlobalContext(['opencode'])).toEqual([{ agent: 'opencode', action: 'skipped' }]);
     });
 
     it('skips agent when contextStatus throws an unexpected error', () => {
@@ -108,7 +108,40 @@ describe('regenerateGlobalContext', () => {
         const { InjectionOrchestrator } = require('../../../src/core/context/orchestrator');
         const brokenOrch = new InjectionOrchestrator();
         brokenOrch.contextStatus = () => { throw new Error('unexpected orchestrator error'); };
-        expect(regenerateGlobalContext(undefined, brokenOrch)).toEqual([{ agent: 'opencode', action: 'skipped' }]);
+        expect(regenerateGlobalContext(['opencode'], brokenOrch)).toEqual([{ agent: 'opencode', action: 'skipped' }]);
         expect(fs.existsSync(contextPath())).toBe(false); // installContext never called
+    });
+
+    // Regresion: el filtro exigia `type === 'config-instructions'`, o sea que
+    // SOLO se regeneraba OpenCode. Para codex/cursor/copilot
+    // (`managed-agents-md`) `awm update` era un no-op silencioso — ni siquiera
+    // un aviso — y la unica forma de refrescar el contexto era volver a correr
+    // `awm init`. Y como doctor reporta `status: healthy` / exit 0 ante un
+    // contexto 'stale', un AGENTS.md desactualizado era invisible para
+    // cualquier gate de CI que mirara el codigo de salida.
+    it('codex (managed-agents-md con globalPath) ya no se saltea por tipo', () => {
+        seedRegistry();
+        const { regenerateGlobalContext } = require('../../../src/core/context/regenerate');
+        const seen: string[] = [];
+        const orch = {
+            contextStatus: (op: { agent: string }) => { seen.push(op.agent); return 'absent'; },
+            installContext: () => undefined,
+        };
+        regenerateGlobalContext(['codex'], orch as never);
+        expect(seen).toEqual(['codex']);
+    });
+
+    it('cursor y copilot se saltean: no tienen archivo de contexto GLOBAL que regenerar', () => {
+        seedRegistry();
+        const { regenerateGlobalContext } = require('../../../src/core/context/regenerate');
+        const seen: string[] = [];
+        const orch = {
+            contextStatus: (op: { agent: string }) => { seen.push(op.agent); return 'absent'; },
+            installContext: () => undefined,
+        };
+        // Su `injection.globalPath` es null — su contexto es project-local, y
+        // eso no es trabajo de una regeneracion global.
+        expect(regenerateGlobalContext(['cursor', 'copilot'], orch as never)).toEqual([]);
+        expect(seen).toEqual([]);
     });
 });

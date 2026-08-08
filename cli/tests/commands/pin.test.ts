@@ -31,7 +31,7 @@ describe('pin/unpin (editores de preferences)', () => {
     it('setPin escribe pins.base normalizado (acepta prefijo v)', () => {
         const { setPin } = require('../../src/commands/pin');
         setPin('base', 'v1.2.0');
-        expect(readPrefs().pins).toEqual({ base: '1.2.0' });
+        expect(readPrefs().pins).toEqual({ baseline: '1.2.0' });
     });
 
     it('setPin acepta un registry adicional configurado', () => {
@@ -68,7 +68,37 @@ describe('pin/unpin (editores de preferences)', () => {
         writeRegistriesConfig([{ name: 'equipo', remote: '/tmp/x' }]);
         setPin('equipo', '2.0.0');
         const prefs = readPrefs();
-        expect(prefs.pins).toEqual({ base: '1.0.0', equipo: '2.0.0' });
+        expect(prefs.pins).toEqual({ baseline: '1.0.0', equipo: '2.0.0' });
         expect(prefs.defaultAgent).toBeDefined();
+    });
+});
+
+describe('awm pin base: el alias tiene que llegar a la clave que el resolutor lee', () => {
+    // Regresion: el registry base se llama `baseline` en disco, pero la ayuda
+    // del comando siempre documento `awm pin base <v>`. `base` se aceptaba y se
+    // persistia tal cual — en una clave que NADA lee. El comando reportaba
+    // "✓ base pinned to v1.0.0" y no cambiaba nada, incluso siendo la salida
+    // documentada de un bloqueo por `minCliVersion`, donde el usuario queda sin
+    // poder correr `awm update` ni `awm sync`.
+    it('setPin("base") persiste bajo "baseline", que es lo que consulta el resolutor', () => {
+        const { setPin } = require('../../src/commands/pin');
+        setPin('base', '1.5.0');
+        const { getPreferences } = require('../../src/utils/config');
+        expect(getPreferences().pins).toEqual({ baseline: '1.5.0' });
+    });
+
+    it('removePin("base") borra ese mismo pin (no una clave fantasma)', () => {
+        const { setPin, removePin } = require('../../src/commands/pin');
+        setPin('base', '1.5.0');
+        expect(removePin('base')).toBe(true);
+        const { getPreferences } = require('../../src/utils/config');
+        expect(getPreferences().pins).toEqual({});
+    });
+
+    it('"baseline" explicito sigue funcionando igual', () => {
+        const { setPin } = require('../../src/commands/pin');
+        setPin('baseline', '2.0.0');
+        const { getPreferences } = require('../../src/utils/config');
+        expect(getPreferences().pins).toEqual({ baseline: '2.0.0' });
     });
 });

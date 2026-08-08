@@ -213,8 +213,16 @@ describe('computeProviderOverall (Task 9)', () => {
         };
     }
 
-    it('healthy when every check is in an ok/pending/warn state', () => {
-        expect(computeProviderOverall([providerWith(['supported', 'healthy', 'shared', 'pending-trust', 'stale'])])).toBe('healthy');
+    it('healthy when every check is in an ok/pending state', () => {
+        expect(computeProviderOverall([providerWith(['supported', 'healthy', 'shared', 'pending-trust'])])).toBe('healthy');
+    });
+
+    it('degraded cuando algun check esta stale — un contexto viejo tiene que verse en el exit code', () => {
+        // Antes `stale` quedaba fuera de los estados degradantes, asi que doctor
+        // imprimia ⚠ junto a `status: healthy` y exit 0. Un AGENTS.md
+        // desactualizado (o pisado por otro provider) era invisible para
+        // cualquier gate de CI que mirara el codigo de salida.
+        expect(computeProviderOverall([providerWith(['supported', 'healthy', 'stale'])])).toBe('degraded');
     });
 
     it('degrades on a single broken/missing/absent/unsupported/conflict check', () => {

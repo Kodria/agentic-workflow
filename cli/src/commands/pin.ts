@@ -10,8 +10,26 @@ import { normalizePin } from '../core/versioning';
 
 const VERSION_RE = /^v?\d+\.\d+\.\d+$/;
 
+/** El registry base se llama `baseline` en disco (core/registries.ts), pero la
+ *  ayuda del comando siempre documento `awm pin base <v>` — y `base` era
+ *  aceptado y persistido como una clave de pin que NADA lee. El pin reportaba
+ *  exito y no hacia absolutamente nada, incluso cuando es la salida documentada
+ *  de un bloqueo por `minCliVersion`. Se acepta como ALIAS y se normaliza. */
+const BASE_ALIAS = 'base';
+const BASE_REGISTRY = 'baseline';
+
+/** Nombre real en disco para lo que el usuario escribio. */
+export function canonicalRegistryName(name: string): string {
+    return name === BASE_ALIAS ? BASE_REGISTRY : name;
+}
+
 function knownRegistryNames(): string[] {
-    return ['base', ...readRegistriesConfig().map((r) => r.name)];
+    // Ambos nombres son validos: el alias historico que documenta la ayuda del
+    // comando, y el nombre real en disco — que antes se rechazaba si todavia no
+    // habia registries.json, o sea justo cuando un usuario bloqueado intenta
+    // salir del paso.
+    const names = [BASE_ALIAS, BASE_REGISTRY, ...readRegistriesConfig().map((r) => r.name)];
+    return Array.from(new Set(names));
 }
 
 function assertKnownRegistry(name: string): void {
@@ -29,7 +47,9 @@ export function setPin(name: string, version: string): string {
     }
     const normalized = normalizePin(version);
     const prefs = getPreferences();
-    prefs.pins = { ...(prefs.pins ?? {}), [name]: normalized };
+    // Se persiste bajo el nombre REAL del registry; si no, el pin queda en una
+    // clave que el resolutor de versiones nunca consulta.
+    prefs.pins = { ...(prefs.pins ?? {}), [canonicalRegistryName(name)]: normalized };
     savePreferences(prefs);
     return normalized;
 }
@@ -37,9 +57,10 @@ export function setPin(name: string, version: string): string {
 /** Borra pins[name]; devuelve true si existía. */
 export function removePin(name: string): boolean {
     assertKnownRegistry(name);
+    const key = canonicalRegistryName(name);
     const prefs = getPreferences();
-    if (!prefs.pins || !(name in prefs.pins)) return false;
-    delete prefs.pins[name];
+    if (!prefs.pins || !(key in prefs.pins)) return false;
+    delete prefs.pins[key];
     savePreferences(prefs);
     return true;
 }

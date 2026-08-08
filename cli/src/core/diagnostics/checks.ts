@@ -142,7 +142,12 @@ function projectChecks(p: ProjectFacts): CheckResult[] {
 // actionable-but-expected transient states (rendered with ◷/⚠, not ✖) and
 // do not by themselves degrade `overall`, mirroring how a 'warn' CheckResult
 // doesn't degrade the machine+project report either.
-const DEGRADING_PROVIDER_STATES: ProviderCheckState[] = ['missing', 'unsupported', 'broken', 'absent', 'conflict'];
+// `stale` cuenta como degradado: un contexto desactualizado es exactamente la
+// clase de problema que un gate de CI tiene que ver. Antes doctor imprimia ⚠
+// junto a `status: healthy` y exit 0, asi que un AGENTS.md viejo — o sobrescrito
+// por otro provider — era invisible para cualquier script que mirara el codigo
+// de salida. Un aviso que no cambia el veredicto no es un aviso, es ruido.
+const DEGRADING_PROVIDER_STATES: ProviderCheckState[] = ['missing', 'unsupported', 'broken', 'absent', 'conflict', 'stale'];
 
 export function computeProviderOverall(providers: ProviderFacts[]): 'healthy' | 'degraded' {
     const degraded = providers.some((p) => p.checks.some((c) => DEGRADING_PROVIDER_STATES.includes(c.state)));
