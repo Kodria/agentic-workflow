@@ -609,9 +609,17 @@ _Contexto: H7/D7. Último: documenta lo que ya quedó verdadero._
 
 ## Verificación global (al cerrar el plan)
 
-- [ ] `awm preflight` verde en: repo js-ts (notion-tracker), fixture python,
+- [x] `awm preflight` verde en: repo js-ts (notion-tracker), fixture python,
   fixture shell — en Linux; en Windows al menos vía matriz CI de R6.
-- [ ] `finishing-a-development-branch` produce cierre válido en fixture con remote
+- [x] `finishing-a-development-branch` produce cierre válido en fixture con remote
   gitlab sin `glab` (degradación honesta) — simulable con remote falso.
-- [ ] `awm init` + `awm add` funcionan con target `cursor` y `copilot` en tmpdir.
-- [ ] Los 4 PRs+ mergeados, releases npm cortadas, tags del registry al día.
+- [x] `awm init` + `awm add` funcionan con target `cursor` y `copilot` en tmpdir.
+  (Copilot deterministically crasheaba hasta el fix de `gatherMachine`/PR #36 —
+  reverificado end-to-end contra el binario mergeado en tmpdirs aislados para
+  ambos agentes: `init` y `add` completan sin `boom`/rollback en los dos.)
+- [x] Los 4 PRs+ mergeados, releases npm cortadas, tags del registry al día.
+  (R1–R7 + PR #36 de cierre — fix del crash de copilot init/add y 2 rondas de
+  endurecimiento de CI real en windows-latest.)
+
+<!-- awm-qa-complete: 2026-08-08 -->
+<!-- awm-retro-complete: 2026-08-08 -->
