@@ -1,4 +1,4 @@
-// Regresion: `repairGlobalSkills` hacia `rmSync` del link colgante y RECIEN
+// Regresion: `repairSkillLinks` hacia `rmSync` del link colgante y RECIEN
 // DESPUES intentaba recrearlo con `symlinkSync(..., 'dir')`. En Windows un
 // symlink de directorio exige SeCreateSymbolicLinkPrivilege, denegado por
 // defecto en cuentas sin privilegios — asi que el link se borraba y la
@@ -11,9 +11,9 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { repairGlobalSkills } from '../../src/core/skill-integrity';
+import { repairSkillLinks } from '../../src/core/skill-integrity';
 
-describe('repairGlobalSkills: un fallo nunca deja al usuario peor que antes', () => {
+describe('repairSkillLinks: un fallo nunca deja al usuario peor que antes', () => {
     let skillsDir: string;
     let registry: string;
 
@@ -34,7 +34,7 @@ describe('repairGlobalSkills: un fallo nunca deja al usuario peor que antes', ()
 
     it('repara un link colgante apuntandolo al registry', () => {
         danglingLink('alpha');
-        const result = repairGlobalSkills(skillsDir, [registry]);
+        const result = repairSkillLinks(skillsDir, [registry]);
         expect(result.relinked).toContain('alpha');
         expect(fs.existsSync(path.join(skillsDir, 'alpha'))).toBe(true);
         expect(fs.realpathSync(path.join(skillsDir, 'alpha')))
@@ -52,7 +52,7 @@ describe('repairGlobalSkills: un fallo nunca deja al usuario peor que antes', ()
             throw err;
         });
         try {
-            const result = repairGlobalSkills(skillsDir, [registry]);
+            const result = repairSkillLinks(skillsDir, [registry]);
             expect(result.failed).toContain('alpha');
             expect(result.relinked).not.toContain('alpha');
             // Lo que importa: la entrada sigue existiendo, con su target
@@ -67,7 +67,7 @@ describe('repairGlobalSkills: un fallo nunca deja al usuario peor que antes', ()
 
     it('no deja archivos de staging tirados tras una reparacion exitosa', () => {
         danglingLink('alpha');
-        repairGlobalSkills(skillsDir, [registry]);
+        repairSkillLinks(skillsDir, [registry]);
         expect(fs.readdirSync(skillsDir).filter((e) => e.includes('.relink'))).toEqual([]);
     });
 
@@ -75,17 +75,17 @@ describe('repairGlobalSkills: un fallo nunca deja al usuario peor que antes', ()
         danglingLink('alpha');
         const spy = jest.spyOn(fs, 'renameSync').mockImplementation(() => { throw new Error('boom'); });
         try {
-            repairGlobalSkills(skillsDir, [registry]);
+            repairSkillLinks(skillsDir, [registry]);
         } finally { spy.mockRestore(); }
         // El staging puede sobrevivir a un crash duro, pero se limpia en el
         // siguiente intento — se verifica que una segunda pasada converge.
-        repairGlobalSkills(skillsDir, [registry]);
+        repairSkillLinks(skillsDir, [registry]);
         expect(fs.readdirSync(skillsDir).filter((e) => e.includes('.relink'))).toEqual([]);
     });
 
     it('poda un link muerto (sin contraparte en el registry)', () => {
         danglingLink('fantasma');
-        const result = repairGlobalSkills(skillsDir, [registry]);
+        const result = repairSkillLinks(skillsDir, [registry]);
         expect(result.pruned).toContain('fantasma');
         expect(fs.existsSync(path.join(skillsDir, 'fantasma'))).toBe(false);
     });

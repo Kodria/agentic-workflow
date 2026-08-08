@@ -41,6 +41,11 @@ export interface ProjectFacts {
     root: string;
     profile: { present: boolean; extensions: string[] };
     activeBundles: { expected: string[]; linked: string[]; broken: string[] };
+    /** Symlinks colgantes en el dir de skills DEL PROYECTO que ya no corresponden a
+     *  ninguna extension del profile — huerfanos. `activeBundles.broken` solo mira lo
+     *  que el profile espera, asi que un link cuya extension se retiro no aparecia en
+     *  ninguna superficie. `repairable` los puede recuperar el registry; `dead` no. */
+    orphanLinks: { repairable: string[]; dead: string[] };
     sensors: { present: boolean };
     constitution: { present: boolean };
     context: { present: boolean; file?: 'CLAUDE.md' | 'AGENTS.md' };

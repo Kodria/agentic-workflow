@@ -21,6 +21,8 @@ import { syncProfile as realSyncProfile, SyncResult } from '../core/bundle-insta
 import { verifyProjectPins, PinFailure } from '../core/profile-pins';
 import { getPreferences } from '../utils/config';
 import { resolveAgentTargetsOrError } from '../core/agent-targets';
+import { reconcileProjectSkillLinks } from '../core/skill-integrity';
+import { contentRoots } from '../core/registries';
 
 export type RunSyncOptions = {
     cwd?: string;
@@ -33,6 +35,7 @@ export type RunSyncDeps = {
     verifyMinCliVersions: () => ReturnType<typeof verifyMinCliVersions>;
     verifyProjectPins: (pins: Record<string, string>) => Promise<PinFailure[]>;
     syncProfile: typeof realSyncProfile;
+    reconcileProjectSkillLinks: typeof reconcileProjectSkillLinks;
 };
 
 const defaultDeps: RunSyncDeps = {
@@ -40,7 +43,20 @@ const defaultDeps: RunSyncDeps = {
     verifyMinCliVersions,
     verifyProjectPins,
     syncProfile: realSyncProfile,
+    reconcileProjectSkillLinks,
 };
+
+/** Un link curado o podado es un cambio en el arbol del usuario: se dice siempre.
+ *  El silencio es lo que dejo este mantenimiento invisible durante todo su ciclo. */
+function reportProjectLinkRepair(
+    results: ReturnType<typeof reconcileProjectSkillLinks>,
+): void {
+    for (const { agent, result } of results) {
+        for (const n of result.relinked) console.log(pc.green(`  ↻  Re-linked ${n} (${agent}, project scope)`));
+        for (const n of result.pruned) console.log(pc.yellow(`  ✂  Pruned dangling ${n} (${agent}, project scope)`));
+        for (const n of result.failed) console.warn(pc.yellow(`  ⚠  Could not repair ${n} (${agent}, project scope)`));
+    }
+}
 
 export type RunSyncResult = {
     code: number;
@@ -116,6 +132,15 @@ export async function runSyncCore(
             return { code: 1, selectedAgents };
         }
     }
+
+    // Antes de instalar: sanear los links de skills que YA estan en el proyecto. Es lo
+    // simetrico de `stepGlobalSkillsRepair` en `awm init`, que solo cubria el dir
+    // global — un link colgante de proyecto (registry re-clonado, skill renombrada
+    // upstream, bundle sacado del profile) no se curaba ni se podaba nunca. Corre
+    // ANTES del early-return de "sin extensiones": un profile vacio es precisamente el
+    // caso donde quedan huerfanos de una extension retirada, y era el unico camino que
+    // salia sin tocar nada. Solo toca symlinks colgantes (`classifySkillLinks`).
+    reportProjectLinkRepair(d.reconcileProjectSkillLinks(projectRoot, selectedAgents, contentRoots()));
 
     if (profile.extensions.length === 0) {
         console.log(pc.yellow('No extensions in .awm/profile.json — nothing to sync. Use `awm add <bundle>` first.'));

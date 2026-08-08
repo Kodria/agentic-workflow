@@ -10,7 +10,7 @@
 //    `contextStatus` about 'global' for these providers always resolved to
 //    'absent' regardless of whether the local injection actually succeeded.
 // 3. `skillsGlobalCheck`'s renderer-awareness fix (deferred Task 4.3 finding):
-//    `classifyGlobalSkills` only ever sees symlinks, so a rendered format
+//    `classifySkillLinks` only ever sees symlinks, so a rendered format
 //    (cursor-mdc, copilot-instructions) always scanned as "0 broken" and
 //    reported a false-green 'healthy' regardless of what was actually on
 //    disk. Non-'link' renderers now report presence-only, honestly.
@@ -185,9 +185,9 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
             '---\ndescription: dev process\nalwaysApply: true\n---\n\nBody.',
         );
 
-        // classifyGlobalSkills only ever sees symlinks (`if (!lst.isSymbolicLink()) continue;`)
+        // classifySkillLinks only ever sees symlinks (`if (!lst.isSymbolicLink()) continue;`)
         // — a real scan over rulesDir would find nothing here either. Stubbed explicitly so the
-        // test proves the FIX (renderer-gating), not an accident of what classifyGlobalSkills does.
+        // test proves the FIX (renderer-gating), not an accident of what classifySkillLinks does.
         const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
         const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
         const facts = gatherProviderChecks(['cursor'], scanSkills);

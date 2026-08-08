@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { classifyGlobalSkills, repairGlobalSkills } from '../../src/core/skill-integrity';
+import { classifySkillLinks, repairSkillLinks } from '../../src/core/skill-integrity';
 
 describe('skill-integrity multi-root', () => {
     let tmp: string;
@@ -15,7 +15,7 @@ describe('skill-integrity multi-root', () => {
         fs.rmSync(tmp, { recursive: true, force: true });
     });
 
-    it('repairGlobalSkills re-links a dangling symlink to the FIRST root that has the skill', () => {
+    it('repairSkillLinks re-links a dangling symlink to the FIRST root that has the skill', () => {
         const skillsDir = path.join(tmp, 'installed');
         const rootA = path.join(tmp, 'base');
         const rootB = path.join(tmp, 'personal');
@@ -25,19 +25,19 @@ describe('skill-integrity multi-root', () => {
         // dangling symlink: points to a deleted target
         fs.symlinkSync(path.join(tmp, 'gone', 'mine'), path.join(skillsDir, 'mine'), 'dir');
 
-        const { repairGlobalSkills: repair } = require('../../src/core/skill-integrity');
+        const { repairSkillLinks: repair } = require('../../src/core/skill-integrity');
         const r = repair(skillsDir, [rootA, rootB]);
 
         expect(r.relinked).toEqual(['mine']);
         expect(fs.realpathSync(path.join(skillsDir, 'mine'))).toBe(fs.realpathSync(path.join(rootB, 'skills', 'mine')));
     });
 
-    it('classifyGlobalSkills marks dead when NO root has the skill', () => {
+    it('classifySkillLinks marks dead when NO root has the skill', () => {
         const skillsDir = path.join(tmp, 'installed');
         fs.mkdirSync(skillsDir, { recursive: true });
         fs.symlinkSync(path.join(tmp, 'gone', 'nope'), path.join(skillsDir, 'nope'), 'dir');
 
-        const { classifyGlobalSkills: classify } = require('../../src/core/skill-integrity');
+        const { classifySkillLinks: classify } = require('../../src/core/skill-integrity');
         const c = classify(skillsDir, [path.join(tmp, 'base')]);
 
         expect(c.dead).toEqual(['nope']);
@@ -60,7 +60,7 @@ function makeRegistrySkill(registryContentDir: string, name: string): string {
     return dir;
 }
 
-describe('classifyGlobalSkills', () => {
+describe('classifySkillLinks', () => {
     it('classifies valid / repairable / dead', () => {
         const { skillsDir, registryContentDir } = setup();
 
@@ -75,14 +75,14 @@ describe('classifyGlobalSkills', () => {
         // dead: symlink colgante y la skill NO existe en el registry
         fs.symlinkSync(path.join('/nonexistent/old-root/gamma'), path.join(skillsDir, 'gamma'), 'dir');
 
-        const result = classifyGlobalSkills(skillsDir, [registryContentDir]);
+        const result = classifySkillLinks(skillsDir, [registryContentDir]);
         expect(result.valid).toEqual(['alpha']);
         expect(result.repairable).toEqual(['beta']);
         expect(result.dead).toEqual(['gamma']);
     });
 
     it('returns empty arrays when the skills dir does not exist', () => {
-        const result = classifyGlobalSkills('/nonexistent/dir', ['/also/nonexistent']);
+        const result = classifySkillLinks('/nonexistent/dir', ['/also/nonexistent']);
         expect(result).toEqual({ valid: [], repairable: [], dead: [] });
     });
 });
@@ -134,7 +134,7 @@ describe('reconcileAllSkillLinks (#4 — awm update, all providers)', () => {
     });
 });
 
-describe('repairGlobalSkills', () => {
+describe('repairSkillLinks', () => {
     it('re-links repairable to registry content dir and prunes dead; valid untouched; idempotent', () => {
         const { skillsDir, registryContentDir } = setup();
 
@@ -144,7 +144,7 @@ describe('repairGlobalSkills', () => {
         fs.symlinkSync(path.join('/nonexistent/old-root/beta'), path.join(skillsDir, 'beta'), 'dir');
         fs.symlinkSync(path.join('/nonexistent/old-root/gamma'), path.join(skillsDir, 'gamma'), 'dir');
 
-        const r1 = repairGlobalSkills(skillsDir, [registryContentDir]);
+        const r1 = repairSkillLinks(skillsDir, [registryContentDir]);
         expect(r1.relinked).toEqual(['beta']);
         expect(r1.pruned).toEqual(['gamma']);
 
@@ -158,7 +158,7 @@ describe('repairGlobalSkills', () => {
         expect(fs.existsSync(path.join(skillsDir, 'alpha'))).toBe(true);
 
         // idempotente: segunda corrida no cambia nada
-        const r2 = repairGlobalSkills(skillsDir, [registryContentDir]);
+        const r2 = repairSkillLinks(skillsDir, [registryContentDir]);
         expect(r2.relinked).toEqual([]);
         expect(r2.pruned).toEqual([]);
     });

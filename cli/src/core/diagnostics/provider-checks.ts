@@ -63,7 +63,7 @@ function binaryVersionCheck(agent: AgentTarget): ProviderCheck {
  *  `dir` is null — i.e. the provider has no global skill discovery mechanism at all
  *  (today: Copilot, see `globalUnsupportedReason` in providers/index.ts).
  *
- *  `renderer` gates which verification is possible: `classifyGlobalSkills` (via `integrity`)
+ *  `renderer` gates which verification is possible: `classifySkillLinks` (via `integrity`)
  *  only ever sees symlinks — `if (!lst.isSymbolicLink()) continue;` — so for a rendered
  *  format (`cursor-mdc`, `copilot-instructions`) it scans a directory of real files and
  *  finds nothing, which would make `broken` silently read 0 regardless of whether the
@@ -87,7 +87,7 @@ function skillsGlobalCheck(
             // `remediationCode: 'awm-init'` is a worse remedy than none, but this
             // check has no channel to report "can't tell" separately from "absent"
             // (same tradeoff already made by this file's agentsNativeCheck and by
-            // skill-integrity.ts's classifyGlobalSkills — a systemic, pre-existing
+            // skill-integrity.ts's classifySkillLinks — a systemic, pre-existing
             // pattern in this codebase, not introduced here).
             entries = [];
         }

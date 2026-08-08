@@ -174,8 +174,9 @@ function checkTools(cwd: string): PreflightCheck {
 /**
  * A manifest pinned to `generic` on a tree that clearly has a stack means the real
  * sensors for that stack are simply absent — the gate runs, reports green, and has
- * checked almost nothing. `runSensors` self-heals this at run time via `reconcilePack`,
- * but only when a registry is reachable; saying it out loud here costs nothing.
+ * checked almost nothing. Nothing heals this on its own: `awm sensors run` reports the
+ * same drift (`packDrift`) but never rewrites the manifest, so this is the blocking
+ * surface, and `awm sensors init` is the only thing that adopts the real pack.
  */
 function checkPack(cwd: string, manifest: SensorManifest | null): PreflightCheck {
     if (!manifest) return { id: 'pack', ok: true, detail: 'skipped (no manifest)' };

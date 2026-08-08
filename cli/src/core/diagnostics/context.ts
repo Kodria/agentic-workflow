@@ -11,7 +11,7 @@ import { InjectionState } from '../context/types';
 import { computeHookStatus } from '../../commands/hooks/status';
 import { findProjectRoot, readProfile } from '../profile';
 import { discoverAllBundles, resolveBundleSkills, resolveBundleAgents, BundleDefinition } from '../bundles';
-import { classifyGlobalSkills } from '../skill-integrity';
+import { classifySkillLinks } from '../skill-integrity';
 import { awmHome } from '../paths';
 import { gatherProviderChecks, ScanSkills } from './provider-checks';
 
@@ -230,7 +230,7 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
         ambient: { wanted, installed },
         contextInjection: gatherContextInjection(),
         globalSkills: skillsDir !== null
-            ? classifyGlobalSkills(skillsDir, contentRoots())
+            ? classifySkillLinks(skillsDir, contentRoots())
             : { valid: [], repairable: [], dead: [] },
     };
 }
@@ -246,6 +246,15 @@ function gatherProject(root: string, bundles: BundleDefinition[], agent: AgentTa
     }
     const { linked, broken } = classifyLinks(expected, localSkillsDir, providerFor(agent).skill.renderer);
 
+    // Huerfanos: symlinks colgantes que el profile ya no reclama. Se clasifican sobre
+    // el dir REAL, no sobre la lista esperada — que es justamente lo que `linked`/
+    // `broken` de arriba no pueden ver. `awm sync` los cura o los poda.
+    const orphanScan = classifySkillLinks(localSkillsDir, contentRoots());
+    const orphanLinks = {
+        repairable: orphanScan.repairable.filter((n) => !expected.includes(n)),
+        dead: orphanScan.dead.filter((n) => !expected.includes(n)),
+    };
+
     let context: ProjectFacts['context'] = { present: false };
     if (fs.existsSync(path.join(root, 'CLAUDE.md'))) context = { present: true, file: 'CLAUDE.md' };
     else if (fs.existsSync(path.join(root, 'AGENTS.md'))) context = { present: true, file: 'AGENTS.md' };
@@ -254,6 +263,7 @@ function gatherProject(root: string, bundles: BundleDefinition[], agent: AgentTa
         root,
         profile: { present: profilePresent, extensions: profile.extensions },
         activeBundles: { expected, linked, broken },
+        orphanLinks,
         sensors: { present: fs.existsSync(path.join(root, '.awm', 'sensors.json')) },
         constitution: { present: fs.existsSync(path.join(root, 'CONSTITUTION.md')) },
         context,
@@ -267,7 +277,7 @@ export interface GatherOptions {
     /** Task 9: agents to build the `.providers` diagnostic matrix for. Defaults to `[agent]`
      *  (or `['claude-code']`) so existing single-agent callers (init/steps.ts) are unaffected. */
     agents?: AgentTarget[];
-    /** Injectable seam over the physical skills-dir scan (default: classifyGlobalSkills) —
+    /** Injectable seam over the physical skills-dir scan (default: classifySkillLinks) —
      *  tests spy on this to assert a directory shared by two providers is scanned once. */
     scanSkills?: ScanSkills;
 }
@@ -278,7 +288,7 @@ export function gatherContext(opts: GatherOptions = {}): HarnessContext {
     const agent = opts.agent ?? 'claude-code';
     const root = findProjectRoot(cwd);
     const agents = opts.agents ?? [agent];
-    const scanSkills = opts.scanSkills ?? ((dir: string) => classifyGlobalSkills(dir, contentRoots()));
+    const scanSkills = opts.scanSkills ?? ((dir: string) => classifySkillLinks(dir, contentRoots()));
     return {
         machine: gatherMachine(bundles, agent, root ?? undefined),
         project: root ? gatherProject(root, bundles, agent) : null,

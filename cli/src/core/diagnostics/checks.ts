@@ -108,6 +108,18 @@ function projectChecks(p: ProjectFacts): CheckResult[] {
             detail: `${missingLinks.length} missing, ${p.activeBundles.broken.length} broken`, remedy: cmd('awm sync') });
     }
 
+    // project.orphans — links colgantes que ya no pertenecen a ninguna extension.
+    // Fila propia y no parte de `project.activation`: ese check mide "falta lo que el
+    // profile pide", y esto es lo contrario — sobra lo que el profile ya no pide. Sin
+    // separarlos, un proyecto con todo lo esperado instalado reportaba `ok` mientras
+    // arrastraba skills muertas que el agente sigue intentando leer.
+    const orphans = p.orphanLinks.repairable.length + p.orphanLinks.dead.length;
+    if (orphans > 0) {
+        out.push({ id: 'project.orphans', level: 'project', label: 'orphaned skill links', status: 'warn',
+            detail: `${p.orphanLinks.repairable.length} repairable, ${p.orphanLinks.dead.length} dead`,
+            remedy: cmd('awm sync') });
+    }
+
     // project.sensors
     out.push(p.sensors.present
         ? { id: 'project.sensors', level: 'project', label: 'sensors', status: 'ok', remedy: none }

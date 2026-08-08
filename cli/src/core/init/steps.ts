@@ -21,7 +21,7 @@ import type { ProjectFacts } from '../diagnostics/types';
 import { InjectionOrchestrator, ContextOp } from '../context/orchestrator';
 import { AgentTarget, Scope, getInjection, providerFor } from '../../providers';
 import { agentsSharingSkillTarget } from '../install-planner';
-import { repairGlobalSkills as realRepairGlobalSkills } from '../skill-integrity';
+import { repairSkillLinks as realRepairSkillLinks } from '../skill-integrity';
 import { contentRoots } from '../registries';
 import { injectProjectConstitution as realInjectProjectConstitution } from '../context/project-constitution-inject';
 import { CodexAgentsStrategy } from '../context/strategies/codex-agents';
@@ -65,7 +65,14 @@ export const defaultActions: InitActions = {
 
     initSensors: (o) => {
         const result = realInitSensors({ cwd: o.cwd, registryRoot: o.registryRoot, configure: o.configure });
-        return { detection: result.detection };
+        // `unavailablePack`/`manifest` viajan a proposito: `stepSensors` los reporta.
+        // Este wrapper proyectaba solo `detection`, asi que cualquier hallazgo nuevo de
+        // initSensors moria aca en silencio antes de llegar al step que lo muestra.
+        return {
+            detection: result.detection,
+            manifest: { pack: result.manifest.pack },
+            ...(result.unavailablePack ? { unavailablePack: result.unavailablePack } : {}),
+        };
     },
 
     addExtension: (root, name) => { realAddExtension(root, name); },
@@ -77,7 +84,7 @@ export const defaultActions: InitActions = {
     contextStatus: (op) => realInjectionOrchestrator.contextStatus(op),
 
     installContext: (op) => { realInjectionOrchestrator.installContext(op); },
-    repairGlobalSkills: (skillsDir, registryContentDirs) => realRepairGlobalSkills(skillsDir, registryContentDirs),
+    repairGlobalSkills: (skillsDir, registryContentDirs) => realRepairSkillLinks(skillsDir, registryContentDirs),
     injectProjectConstitution: (o) => {
         if (getInjection(o.agent)?.type === 'managed-agents-md') {
             return new CodexAgentsStrategy().injectProject(o.projectRoot, providerFor(o.agent), o.agent) === 'injected' ? 'injected' : 'already';
@@ -331,7 +338,15 @@ export function stepSensors(d: InitDeps): StepResult {
     if (!proj) return ok('project.sensors', 'project', 'skipped', 'no project');
     if (proj.sensors.present) return ok('project.sensors', 'project', 'skipped');
 
-    d.actions.initSensors({ cwd: proj.root, registryRoot: d.sensorPacksRoot, configure: true });
+    const res = d.actions.initSensors({ cwd: proj.root, registryRoot: d.sensorPacksRoot, configure: true });
+    // A registry without the detected pack yields a fallback (or empty) manifest. The
+    // step still succeeded — a manifest was written — but reporting a bare 'applied'
+    // would let `awm init` hand back a quality gate that measures less than the
+    // operator has any reason to expect. Say which pack was missing, here, once.
+    if (res.unavailablePack) {
+        return ok('project.sensors', 'project', 'applied',
+            `registry has no '${res.unavailablePack}' sensor-pack — wrote '${res.manifest?.pack ?? 'fallback'}' instead; run \`awm update\``);
+    }
     return ok('project.sensors', 'project', 'applied');
 }
 

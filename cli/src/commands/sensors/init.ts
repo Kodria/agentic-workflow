@@ -141,6 +141,44 @@ export function buildManifest(
     return { pack, sensors };
 }
 
+/** Pack names present as directories under `<registryRoot>/sensor-packs/`, sorted. */
+function availablePacks(registryRoot: string): string[] {
+    const packsDir = path.join(registryRoot, 'sensor-packs');
+    if (!fs.existsSync(packsDir) || !fs.statSync(packsDir).isDirectory()) return [];
+    return fs.readdirSync(packsDir, { withFileTypes: true })
+        .filter(e => e.isDirectory())
+        .map(e => e.name)
+        .sort();
+}
+
+/** The last-resort pack, used when the detected one is absent from the registry. */
+const FALLBACK_PACK = 'generic';
+
+/**
+ * Resolve the detected pack against what the registry actually ships.
+ *
+ * `--pack <name>` has always thrown here (`assertPackExists`), but auto-detection had
+ * no such check: it wrote `{"pack":"python","sensors":{}}` and said nothing, so the
+ * operator learned the gate was empty from an unrelated command days later. The two
+ * paths now reach the same conclusion; only the remedy differs, because an explicit
+ * `--pack` is a typo to correct while a detection is a fact about the tree that the
+ * registry simply cannot serve yet.
+ *
+ * Falling back to `generic` keeps the gate measuring *something* real rather than
+ * nothing. When the registry has no `generic` either, the detected pack is kept: the
+ * manifest is then honestly empty, and preflight's `manifest`/`tools` checks both fail
+ * on `total === 0` with a remedy pointing at the registry.
+ */
+function resolvePack(detected: string, registryRoot?: string): { pack: string; unavailablePack?: string } {
+    if (!registryRoot) return { pack: detected };  // nothing to validate against
+    const available = availablePacks(registryRoot);
+    if (available.length === 0 || available.includes(detected)) return { pack: detected };
+    return {
+        pack: available.includes(FALLBACK_PACK) ? FALLBACK_PACK : detected,
+        unavailablePack: detected,
+    };
+}
+
 /**
  * Validate that `pack` exists as a directory under `<registryRoot>/sensor-packs/`.
  * Throws (not a swallow-and-return) so `awm sensors init --pack bogus` actually stops
@@ -152,16 +190,21 @@ function assertPackExists(pack: string, registryRoot: string): void {
     if (!fs.existsSync(packsDir) || !fs.statSync(packsDir).isDirectory()) {
         throw new Error('registry has no sensor-packs directory');
     }
-    const available = fs.readdirSync(packsDir, { withFileTypes: true })
-        .filter(e => e.isDirectory())
-        .map(e => e.name)
-        .sort();
+    const available = availablePacks(registryRoot);
     if (!available.includes(pack)) {
         throw new Error(`pack '${pack}' not found in registry (available: ${available.join(', ')})`);
     }
 }
 
-export function initSensors(opts: InitOptions = {}): { manifest: SensorManifest; detection: StackDetection; configured: string[] } {
+export function initSensors(opts: InitOptions = {}): {
+    manifest: SensorManifest;
+    detection: StackDetection;
+    configured: string[];
+    /** The auto-detected pack the registry does not ship, when that happened. The
+     *  manifest was built from the fallback pack (or left empty) instead — callers
+     *  MUST surface this: an unannounced empty gate is the failure being prevented. */
+    unavailablePack?: string;
+} {
     const cwd = opts.cwd ?? process.cwd();
     const configure = opts.configure ?? true; // configure (copy pack config files) by default
     const manifestPath = path.join(cwd, '.awm', 'sensors.json');
@@ -183,7 +226,11 @@ export function initSensors(opts: InitOptions = {}): { manifest: SensorManifest;
         try { existing = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')); } catch { /* ignore corrupt manifest */ }
     }
 
-    const manifest = buildManifest(detection.pack, existing, opts.registryRoot, cwd);
+    // `detection` keeps saying what the tree IS; `pack` is what the registry can serve
+    // for it. They diverge only when the registry lacks the detected pack.
+    const { pack: resolvedPack, unavailablePack } = resolvePack(detection.pack, opts.registryRoot);
+
+    const manifest = buildManifest(resolvedPack, existing, opts.registryRoot, cwd);
     fs.mkdirSync(path.join(cwd, '.awm'), { recursive: true });
     const tmpPath = manifestPath + '.tmp';
     fs.writeFileSync(tmpPath, JSON.stringify(manifest, null, 2), 'utf-8');
@@ -191,7 +238,10 @@ export function initSensors(opts: InitOptions = {}): { manifest: SensorManifest;
 
     const configured: string[] = [];
     if (configure && opts.registryRoot) {
-        const packDir = path.join(opts.registryRoot, 'sensor-packs', detection.pack);
+        // The pack whose defaults the manifest was actually built from — copying the
+        // detected pack's config files here would drop files for sensors that are not
+        // in the manifest, and miss the ones that are.
+        const packDir = path.join(opts.registryRoot, 'sensor-packs', resolvedPack);
         if (fs.existsSync(packDir)) {
             for (const file of fs.readdirSync(packDir).filter(f => f !== 'pack.json')) {
                 const dst = path.join(cwd, file);
@@ -203,5 +253,5 @@ export function initSensors(opts: InitOptions = {}): { manifest: SensorManifest;
         }
     }
 
-    return { manifest, detection, configured };
+    return { manifest, detection, configured, ...(unavailablePack ? { unavailablePack } : {}) };
 }

@@ -96,9 +96,13 @@ export type SensorResult = {
 export type RunOutput = {
     sensors: SensorResult[];
     overall: 'pass' | 'fail' | 'skipped' | 'not_certified';
-    /** Set when reconcilePack upgraded the manifest off the `generic` fallback
-     *  (e.g. "generic→js-ts"). Absent on no-op runs. */
-    packUpgraded?: string;
+    /**
+     * Set when the committed manifest still sits on the `generic` fallback while the
+     * tree has real stack indicators — the gate ran, but against almost nothing.
+     * Advisory and non-mutating by design: `awm sensors run` reports the drift and
+     * runs the manifest as committed; adopting the real pack is `awm sensors init`.
+     */
+    packDrift?: { manifest: string; detected: string; remedy: string };
     /**
      * Present only on a `--changed` run. `files` is how many changed files were in
      * scope; `error` explains why the scope could not be resolved, in which case every
