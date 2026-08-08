@@ -3,6 +3,15 @@
 Auditable log of recurring/structural harness gaps converted into rules. See the
 `harness-retro` skill for the process. Newest first.
 
+## 2026-08-08 — R5: predicado duplicado a la vista, en el mismo archivo — cuarta ocurrencia de `grep-before-you-write-a-helper`
+
+- **Class:** structural
+- **Occurrences (ledger count):** cuarta instancia de un patrón con 3 ocurrencias previas ya curadas (plan Codex: `physicalTarget`, `sanitizeTransactionTimestamp`, `resolveAgentTargets`)
+- **Rule:** `AGENTS.md` → "Patrones de diseño de API", extiende el bullet existente `grep-before-you-write-a-helper` con una cuarta instancia — merge-and-prune, no bullet nuevo.
+- **Sensor:** ninguno mecánico — candidato a regla ESLint genérica (`no-duplicate-predicate`-style, comparando AST de dos funciones en el mismo archivo) pero fuera de alcance de un sensor-pack genérico.
+- **Detalle:** `checkSensorsBaseline` (`cli/src/commands/preflight/checks.ts`, R5 Task 5.1) copió literalmente la fórmula `enabled`/`total` de `checkManifest`, ~100 líneas arriba en el MISMO archivo, en vez de extraerla o reusarla — no hacía falta ni un grep cross-módulo, el sibling estaba a la vista. El lens de robustez de `post-implementation-qa` lo encontró: un manifest con un sensor `null` ya crashea en `checkManifest` hoy (no alcanza a `checkSensorsBaseline`), pero la duplicación deja la misma mina lista para explotar el día que alguien blinde una copia sin acordarse de la otra — exactamente el riesgo que motivó las 3 instancias previas de esta lección. Curado extrayendo `countEnabledSensors()` compartida, reusada por ambas funciones.
+- **Descartes (modo desatendido):** el hallazgo `preflight-formatreport-hardcoded-id-padding`/`r5-preflight-format-padend-misaligned` (columna de `awm preflight` desalineada por un `.padEnd(9)` hardcodeado, encontrado independientemente por 2 lentes de QA en la misma ronda) se corrigió (ancho derivado del id más largo presente) pero NO se curó como lección — es una única ocurrencia de severidad minor/cosmética, sin evidencia de recurrencia entre releases; la detección duplicada por 2 lentes en la misma ronda de QA es señal de cobertura, no de patrón sistémico del agente. Se deja como fix puntual con su propio regression test.
+
 ## 2026-08-08 — R4: fix con regression test que no cubre la línea que arregla el bug (segunda lección nueva, no extensión)
 
 - **Class:** agent (working-style) / proceso

@@ -392,6 +392,99 @@ describe('preflight', () => {
         });
     });
 
+    describe('sensors-baseline check (advisory — never changes the exit code)', () => {
+        it('nudges toward `awm sensors baseline` when sensors are configured but no baseline exists', () => {
+            // The team-rollout gap this addresses: a legacy repo adopts AWM, sensors get
+            // configured, and the ratchet mechanism exists to snapshot pre-existing debt —
+            // but nothing tells the operator it's there until they hit a wall of red
+            // findings and go looking for it.
+            const dir = make({
+                manifest: { pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .' } } },
+                bins: ['eslint'],
+                files: ['package.json'],
+            });
+
+            const report = preflight(dir);
+
+            expect(check(report, 'sensors-baseline').ok).toBe(true);
+            expect(check(report, 'sensors-baseline').detail).toContain('no baseline yet');
+            expect(check(report, 'sensors-baseline').remedy).toContain('awm sensors baseline');
+            expect(report.status).toBe('ready');
+        });
+
+        it('reports the no-advisory-needed state when a baseline already exists, without nudging', () => {
+            const dir = make({
+                manifest: { pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .' } } },
+                bins: ['eslint'],
+                files: ['package.json'],
+            });
+            fs.mkdirSync(path.join(dir, '.awm'), { recursive: true });
+            fs.writeFileSync(path.join(dir, '.awm', 'sensors.baseline.json'), JSON.stringify({ lint: [] }));
+
+            const report = preflight(dir);
+
+            expect(check(report, 'sensors-baseline').ok).toBe(true);
+            expect(check(report, 'sensors-baseline').detail).toBe('baseline present');
+            expect(check(report, 'sensors-baseline').remedy).toBeUndefined();
+            expect(report.status).toBe('ready');
+        });
+
+        it('is omitted entirely when there is no manifest at all — nothing to baseline without sensors', () => {
+            const dir = make();
+
+            const report = preflight(dir);
+
+            expect(report.checks.find(c => c.id === 'sensors-baseline')).toBeUndefined();
+            expect(report.status).toBe('not_configured');
+        });
+
+        it('does not nudge on a deliberate opt-out (every sensor disabled) — nothing to baseline', () => {
+            // Regression: the trigger condition originally checked only manifestExists, so a
+            // repo that deliberately opted out (checkManifest's own documented pattern: every
+            // sensor `enabled: false`) still got told to run `awm sensors baseline` — nothing
+            // to baseline when there's nothing enabled to have findings in the first place.
+            const dir = make({
+                manifest: { pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .', enabled: false } } },
+            });
+
+            const report = preflight(dir);
+
+            expect(check(report, 'sensors-baseline').ok).toBe(true);
+            expect(check(report, 'sensors-baseline').detail).toBe('no enabled sensors — nothing to baseline');
+            expect(check(report, 'sensors-baseline').remedy).toBeUndefined();
+        });
+
+        it('does not nudge on an unparseable manifest — nothing to baseline', () => {
+            const dir = make({ manifest: '{not valid json' });
+
+            const report = preflight(dir);
+
+            expect(check(report, 'sensors-baseline').ok).toBe(true);
+            expect(check(report, 'sensors-baseline').detail).toBe('no enabled sensors — nothing to baseline');
+            expect(check(report, 'sensors-baseline').remedy).toBeUndefined();
+        });
+
+        it('still nudges when the baseline path exists but is not a readable file (e.g. a stray directory)', () => {
+            // Regression: checking presence via `fs.existsSync` alone would have reported
+            // "baseline present" here, reassuring the operator that debt is suppressed —
+            // but the real gate (`readBaseline`, used by `partition()`) treats an unreadable
+            // baseline path as "no baseline, nothing suppressed". The advisory must track
+            // what the runtime actually does, not just whether something exists at the path.
+            const dir = make({
+                manifest: { pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .' } } },
+                bins: ['eslint'],
+                files: ['package.json'],
+            });
+            fs.mkdirSync(path.join(dir, '.awm', 'sensors.baseline.json'), { recursive: true });
+
+            const report = preflight(dir);
+
+            expect(check(report, 'sensors-baseline').ok).toBe(true);
+            expect(check(report, 'sensors-baseline').detail).toContain('no baseline yet');
+            expect(check(report, 'sensors-baseline').remedy).toContain('awm sensors baseline');
+        });
+    });
+
     it('tells the operator not to hand a broken harness to an unattended run', () => {
         const out = formatReport({
             status: 'not_configured',
@@ -400,5 +493,26 @@ describe('preflight', () => {
 
         expect(out).toContain('unattended');
         expect(out).toContain('awm sensors init');
+    });
+
+    it('pads the id column to the widest id actually present, not a hardcoded width', () => {
+        // Regression: a literal `.padEnd(9)` silently misaligned once `sensors-baseline`
+        // (16 chars) was added as a check id — every detail column shifted left of where
+        // shorter ids' details landed. The width must be derived from the report itself.
+        // Marker prefixes (@@) pin exactly where each detail column starts, independent
+        // of the detail text's own content.
+        const out = formatReport({
+            status: 'ready',
+            checks: [
+                { id: 'host', ok: true, detail: '@@marker' },
+                { id: 'sensors-baseline', ok: true, detail: '@@marker' },
+            ],
+        });
+        const lines = out.split('\n').filter(l => l.includes('@@marker'));
+        expect(lines).toHaveLength(2);
+        expect(lines[0].indexOf('@@marker')).toBe(lines[1].indexOf('@@marker'));
+        // And the column is genuinely sized to the longest id (16, 'sensors-baseline'),
+        // not the old hardcoded 9 — the shorter id's row must carry visible padding.
+        expect(lines[0]).toMatch(/host {12,}@@marker/);
     });
 });

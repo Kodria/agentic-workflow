@@ -15,8 +15,13 @@ export function exitCodeFor(report: PreflightReport): number {
 }
 
 export function formatReport(report: PreflightReport): string {
+    // Computed from the actual ids present, not hardcoded to the widest id THIS
+    // report happens to have — a fixed literal here silently misaligns the moment a
+    // longer `PreflightCheck['id']` is added (confirmed: 'sensors-baseline', at 16
+    // chars, broke a hardcoded 9-char pad).
+    const idWidth = Math.max(0, ...report.checks.map(c => c.id.length));
     const lines = report.checks.map(c =>
-        `  ${c.ok ? pc.green('✔') : pc.red('✘')}  ${c.id.padEnd(9)} ${c.detail}`
+        `  ${c.ok ? pc.green('✔') : pc.red('✘')}  ${c.id.padEnd(idWidth)} ${c.detail}`
         + (c.remedy ? `\n       ${pc.dim('→ ' + c.remedy)}` : ''),
     );
 

@@ -168,7 +168,7 @@ For **existing codebases with a real stack and pre-existing debt**. Same spine a
 12. ready — give your first development prompt
 ```
 
-**Why the two extra steps on legacy?** Step 6: an existing project pins specific tool versions, so the templated sensor configs may need adapting before the gate is trustworthy. Step 9: a mature codebase has pre-existing findings — `awm sensors baseline` snapshots them as *accepted*, so the gate fails only on **new** problems you introduce, not on inherited debt. On greenfield there is no debt to baseline, so you skip both.
+**Why the two extra steps on legacy?** Step 6: an existing project pins specific tool versions, so the templated sensor configs may need adapting before the gate is trustworthy. Step 9: your first `awm sensors run` on a legacy repo will typically come back with a wall of red — **expect that, it is not a sign anything is broken.** It is the debt a real codebase accumulates before the gate existed. `awm sensors baseline` snapshots that debt as *accepted* so the gate fails only on **new** problems you introduce, never on what was already there. See [§2.7 — Baseline existing debt](#27-sensors-the-quality-gate) for exactly what gets captured, how the gate reads it afterward, and how the "ratchet" tightens as the team pays debt down. On greenfield there is no debt to baseline, so you skip both.
 
 ### 2.5 Load the agent context
 
@@ -236,13 +236,25 @@ Also: tools that run via `npx` (eslint, depcruise, …) must be **devDependencie
 
 **Baseline existing debt (legacy only):**
 
-A mature codebase has pre-existing findings. Snapshot them as **accepted** so the gate fails only on **new** findings you introduce — then commit the snapshot so the whole team shares the ratchet:
+The first `awm sensors run` on a legacy repo is expected to come back **red — often heavily so**. That is not a misconfiguration signal; it is the accumulated debt of a codebase that predates the gate. Do not chase it file by file. Instead, accept it as one deliberate snapshot, and commit the snapshot so the whole team shares the same accepted debt:
 
 ```bash
 awm sensors baseline      # writes .awm/sensors.baseline.json — commit it
 ```
 
-Skip this on greenfield — there is no debt to accept. The baseline is a *manual* snapshot you re-take deliberately when you want to move the ratchet; it never updates itself.
+*What gets captured.* `awm sensors baseline` re-runs every sensor and records, per sensor, one fingerprint per finding. The fingerprint is built from `sensor|file|rule` — the rule id every real sensor already sets (eslint's `ruleId`, tsc's error code, semgrep's `check_id`) — and **deliberately excludes line/column and the human-readable message**. Findings that share a file and rule stack up as repeated entries, so in effect the baseline is a *count per (file, rule)*, not a list of exact locations.
+
+*How the gate reads it afterward.* Every later `awm sensors run` fingerprints the current findings the same way and matches them against the accepted baseline as a budget: the Nth finding for a given file+rule is suppressed only while baseline "budget" remains for that fingerprint. A file that had 3 accepted `no-explicit-any` findings and now has 5 reports exactly **2 new** — the 3 inherited ones stay suppressed, the 2 you introduced fail the gate. The same file dropping from 3 to 1 reports **0 new** — nothing to complain about, the extra budget just goes unused. The gate only ever fails on findings **above** the accepted count for their class; it never fails on the pre-existing debt itself.
+
+*Ratcheting the bar tighter.* The baseline is a manual snapshot — `awm sensors baseline` never runs on its own and the file never updates itself. As the team pays down debt (fixes findings, deletes dead code, tightens a lint rule), re-run `awm sensors baseline` and commit the new snapshot. Because the fresh run now has fewer findings, the new baseline carries a lower count per fingerprint — the accepted budget shrinks and the gate gets stricter. Nothing in the mechanism lets a re-baseline grow the accepted count beyond what the tree currently has, so re-baselining can only tighten the bar, never loosen it — hence "ratchet."
+
+> **Why count-based, not `file:line`-based?**
+>
+> Baselining exact line numbers would be brittle: reformatting a file, adding an import above a flagged line, or any unrelated edit that shifts line numbers would silently "un-baseline" a finding that was never actually touched — failing the gate for reasons that have nothing to do with the change under review. That's why the fingerprint excludes line/column (and the message text, which drifts with tool-version bumps and rule-config tweaks) and keys on `sensor|file|rule` instead, with occurrence **count** as the only thing that has to match. A finding only re-enters "new" territory when the actual count for its class changes — i.e. when someone genuinely fixed or introduced findings of that kind, not when unrelated code around it moved.
+
+Skip this step entirely on greenfield — there is no debt to accept, and `awm sensors run` fails on any finding from day one.
+
+*Forgot to baseline?* `awm preflight` will flag a repo that has at least one enabled sensor but no `.awm/sensors.baseline.json` yet, so you don't have to remember this step from memory.
 
 **(Claude only) Add the per-edit fast-sensor trigger:**
 
@@ -306,7 +318,7 @@ The project's quality gate is `awm sensors run` (no flag — runs all sensors). 
 - **Per-edit (Claude Code only):** fast sensors (tsc/lint) run automatically after each file edit via the `PostToolUse` hook. This is early feedback, not the gate.
 - **Completion gate (all agents):** before declaring a task done, the `verification-before-completion` skill runs `awm sensors run` (all sensors, no flag) and reads `overall`. Only `overall: "pass"` counts as green.
 - **Do not use `--slow` as the gate.** `awm sensors run --slow` runs only semgrep/mutation and skips lint/typecheck, where most findings surface.
-- **Baseline ratchet:** `awm sensors baseline` snapshots current findings as accepted. Re-take it deliberately when you want to move the ratchet forward (e.g. after a debt-reduction sprint). It never updates itself.
+- **Baseline ratchet:** `awm sensors baseline` snapshots current findings as accepted. Re-take it deliberately when you want to move the ratchet forward (e.g. after a debt-reduction sprint). It never updates itself. See [§2.7 — Baseline existing debt](#27-sensors-the-quality-gate) for what exactly gets captured and why it's count-based, not line-based.
 
 ### 3.4 The learning loop
 

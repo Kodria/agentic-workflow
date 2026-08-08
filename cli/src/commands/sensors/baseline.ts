@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { SensorError } from './types';
 
-const BASELINE_FILE = path.join('.awm', 'sensors.baseline.json');
+export const BASELINE_FILE = path.join('.awm', 'sensors.baseline.json');
 
 /** Per-sensor list of accepted finding fingerprints. */
 export type Baseline = Record<string, string[]>;

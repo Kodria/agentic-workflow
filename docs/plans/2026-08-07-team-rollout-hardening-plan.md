@@ -496,19 +496,66 @@ _Contexto: H5/D5. El trinquete existe; nadie lo descubre._
 - Modify: `cli/src/commands/preflight/checks.ts`
 - Test: `cli/tests/commands/preflight/preflight.test.ts`
 
-- [ ] Sensores habilitados sin `sensors.baseline.json` → advisory con el hint del
+- [x] Sensores habilitados sin `sensors.baseline.json` → advisory con el hint del
   trinquete. No corre sensores (preflight sigue barato), no cambia exit code.
+
+  Nuevo check `sensors-baseline` (`ok` siempre `true`, mismo contrato que
+  `checkHost`), omitido por completo sin manifest (mismo patrón que
+  `checkTools`/`checkPack`). spec+quality review encontró 1 gap important:
+  el trigger original disparaba también en un opt-out deliberado (todos
+  los sensores `enabled: false`) o un manifest no parseable — ambos casos
+  sin nada que baselinear, nudge engañoso. Corregido reusando el cálculo
+  `enabled`/`total` de `checkManifest`; 2 tests de regresión agregados.
+  `BASELINE_FILE` exportado desde `baseline.ts` en vez de duplicar el
+  path literal.
 
 ### Task 5.2: Guía de adopción
 
 **Files:**
-- Modify: registry `docs/runbook.md` (sección nueva en Cap. 2 o 4)
+- Modify: `docs/runbook.md` (nota: vive en `agentic-workflow`, no en el
+  registry — mismo error de etiqueta ya corregido en el cierre de R4)
 
-- [ ] "Adoptar AWM en un repo existente": init → primera corrida (esperá rojo
+- [x] "Adoptar AWM en un repo existente": init → primera corrida (esperá rojo
   masivo) → `awm sensors baseline` → el gate persigue solo hallazgos nuevos →
   re-baseline al reducir deuda. Con el porqué del diseño count-based.
 
+  Expandido §2.4/§2.7 con la mecánica real del fingerprint (`sensor|file|
+  rule`, sin línea/columna ni mensaje — verificado leyendo `baseline.ts`,
+  no asumido) y el matching por budget/conteo (`partition()`). Callout
+  explícito de por qué es count-based y no `file:line`-based (churn de
+  líneas des-baselinearía hallazgos no tocados). spec review (verificación
+  directa contra el código fuente, no solo el diff) encontró 1 gap minor:
+  afirmaba que `awm doctor` también flaggea un baseline faltante — falso,
+  solo `awm preflight` lo hace; corregido.
+
 ### Task 5.3: Cierre R5 — suite + validadores, commits, push, PRs.
+
+- [x] `post-implementation-qa` de 3 lentes (Track A fidelidad + Track B
+  robustez/seguridad + Track B lógica) sobre el diff completo de R5.
+  Track A: 0 forward/backward gaps, 1 hallazgo minor cosmético (columna de
+  `awm preflight` desalineada por `.padEnd(9)` hardcodeado ante el nuevo
+  id de 16 caracteres `sensors-baseline`) — corregido con ancho derivado
+  dinámicamente. Track B robustez: 2 hallazgos minor — el advisory
+  chequeaba presencia del baseline con `fs.existsSync` en vez de
+  `readBaseline` (el mismo mecanismo que usa el gate real), reportando
+  falsamente "baseline present" si el path fuera un directorio en vez de
+  un archivo; y el cálculo `enabled`/`total` estaba duplicado literal
+  entre `checkManifest` y `checkSensorsBaseline` en el mismo archivo —
+  ambos corregidos (`readBaseline` reusado; `countEnabledSensors()`
+  extraída y compartida). Track B lógica: limpio, confirma que el fix del
+  padding es correcto y no hay bugs nuevos. Suite final: 152/152 suites,
+  1447/1447 tests, `tsc --noEmit` limpio.
+
+  `harness-retro` curó 1 lección (`docs/harness-retros.md`, 2026-08-08):
+  cuarta instancia de `grep-before-you-write-a-helper` (predicado
+  duplicado a la vista, mismo archivo, sin necesidad de grep cross-
+  módulo). El hallazgo del padding hardcodeado se corrigió pero se
+  descartó como lección — ocurrencia única de severidad minor, sin
+  evidencia de recurrencia entre releases. Ledger NO archivado (excepción
+  activa hasta R7).
+
+  PR: #31 (https://github.com/Kodria/agentic-workflow/pull/31). R5 es
+  CLI-only — sin cambios de registry.
 
 ---
 
