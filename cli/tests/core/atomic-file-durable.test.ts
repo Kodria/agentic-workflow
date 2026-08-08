@@ -12,7 +12,10 @@ describe('writeFileAtomicDurable', () => {
         const f = path.join(dir, 'state.json');
         writeFileAtomicDurable(f, '{"a":1}', 0o600);
         expect(fs.readFileSync(f, 'utf8')).toBe('{"a":1}');
-        expect(fs.statSync(f).mode & 0o777).toBe(0o600);
+        // Windows fs.chmod can only toggle the read-only attribute, not set
+        // granular POSIX bits — see tests/core/atomic-file.test.ts for the
+        // confirmed 0o600 -> 0o666 shape on win32.
+        expect(fs.statSync(f).mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o600);
     });
 
     test('sobrevive a reemplazos consecutivos sin residuo tmp (R1.2)', () => {  // verifies R1.2

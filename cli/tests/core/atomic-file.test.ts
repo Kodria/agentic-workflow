@@ -66,7 +66,10 @@ describe('writeFileAtomic', () => {
 
         expect(() => writeFileAtomic(file, 'replacement', 0o644)).toThrow('rename failed');
         expect(fs.readFileSync(file, 'utf8')).toBe('original');
-        expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+        // Windows fs.chmod can only toggle the read-only attribute, not set
+        // granular POSIX bits (see the platform-aware assertion above in this
+        // same file for the confirmed 0o600 -> 0o666 shape).
+        expect(fs.statSync(file).mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o600);
     });
 
     it('preserves existing target permissions after replacement', () => {
@@ -76,7 +79,7 @@ describe('writeFileAtomic', () => {
         writeFileAtomic(file, 'replacement');
 
         expect(fs.readFileSync(file, 'utf8')).toBe('replacement');
-        expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+        expect(fs.statSync(file).mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o600);
     });
 
     it('rejects a target symlink without severing it or changing its victim', () => {

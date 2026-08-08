@@ -403,8 +403,16 @@ describe('beginBackupSession / restoreBackup', () => {
         const dirMode = fs.statSync(backupDir).mode & 0o777;
         const manifestPath = path.join(backupDir, 'manifest.json');
         const manifestMode = fs.statSync(manifestPath).mode & 0o777;
-        expect(dirMode).toBe(0o700);
-        expect(manifestMode).toBe(0o600);
+        // Windows fs.chmod can only toggle the read-only attribute, not set granular
+        // POSIX bits (see tests/core/atomic-file.test.ts for the confirmed 0o600 ->
+        // 0o666 file shape on win32, verified against real windows-latest CI). Directory
+        // mode is reasoned by the same mechanism but not yet independently confirmed
+        // against real Windows CI for THIS exact 0o700 -> 0o777 case -- libuv derives
+        // directory mode on win32 by always setting the execute bit for every class
+        // (traversal isn't gated by chmod there), so 0o777 is the expected shape for a
+        // non-read-only directory; flag for correction if a real CI run disagrees.
+        expect(dirMode).toBe(process.platform === 'win32' ? 0o777 : 0o700);
+        expect(manifestMode).toBe(process.platform === 'win32' ? 0o666 : 0o600);
 
         const manifestRaw = fs.readFileSync(manifestPath, 'utf8');
         expect(manifestRaw).not.toContain('secret-content');
