@@ -164,9 +164,8 @@ export function providers(): Record<AgentTarget, ProviderConfig> {
                 type: 'managed-agents-md',
                 // Cursor has no confirmed user-level/global AGENTS.md-equivalent file — its
                 // "User Rules" live inside Cursor's own app settings, not a plain file on disk
-                // (per docs research done for this task). Until a primary source confirms a
-                // real global path, `null` here is the honest answer, not a guess. See this
-                // task's `concerns` report.
+                // (per docs research done for this task, R4 Task 4.1). Until a primary source
+                // confirms a real global path, `null` here is the honest answer, not a guess.
                 globalPath: null,
                 localFile: 'AGENTS.md',
             },
