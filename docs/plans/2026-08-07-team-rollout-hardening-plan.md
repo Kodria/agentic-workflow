@@ -242,7 +242,12 @@ _Contexto: H3/D3. Python fuera del registry; shell inexistente; `generic` = gate
   corre limpio.
 - [x] Suite CLI + validadores registry en verde. Commits + push + PRs (registry
   primero o simultáneo; el CLI sin fallback depende de que el registry shippee
-  `python`).
+  `python`). **R3 cerrado (2026-08-08):** `awm-baseline-registry` PR #24 mergeado
+  (`40f551a`), `agentic-workflow` PR #29 mergeado (`c6853d2`). Ambas ramas
+  requirieron rebase (`--onto origin/main <last-already-merged-commit> HEAD`)
+  antes del merge — la rama de sesión larga había divergido del squash-merge de
+  R2 en ambos repos (conflicto real en `CHANGELOG.md`/`AGENTS.md`, resuelto sin
+  pérdida de contenido, árbol final verificado idéntico pre/post-rebase).
 
 > **post-implementation-qa (2026-08-07):** Track A (fidelidad vs prosa del plan,
 > sin IDs de requirement en este plan) + panel Track B (robustness/security, logic,
