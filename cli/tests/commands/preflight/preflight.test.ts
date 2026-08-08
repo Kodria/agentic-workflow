@@ -463,6 +463,26 @@ describe('preflight', () => {
             expect(check(report, 'sensors-baseline').detail).toBe('no enabled sensors — nothing to baseline');
             expect(check(report, 'sensors-baseline').remedy).toBeUndefined();
         });
+
+        it('still nudges when the baseline path exists but is not a readable file (e.g. a stray directory)', () => {
+            // Regression: checking presence via `fs.existsSync` alone would have reported
+            // "baseline present" here, reassuring the operator that debt is suppressed —
+            // but the real gate (`readBaseline`, used by `partition()`) treats an unreadable
+            // baseline path as "no baseline, nothing suppressed". The advisory must track
+            // what the runtime actually does, not just whether something exists at the path.
+            const dir = make({
+                manifest: { pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .' } } },
+                bins: ['eslint'],
+                files: ['package.json'],
+            });
+            fs.mkdirSync(path.join(dir, '.awm', 'sensors.baseline.json'), { recursive: true });
+
+            const report = preflight(dir);
+
+            expect(check(report, 'sensors-baseline').ok).toBe(true);
+            expect(check(report, 'sensors-baseline').detail).toContain('no baseline yet');
+            expect(check(report, 'sensors-baseline').remedy).toContain('awm sensors baseline');
+        });
     });
 
     it('tells the operator not to hand a broken harness to an unattended run', () => {
