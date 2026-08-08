@@ -151,6 +151,8 @@ There's a boundary here too: AWM's shipped sensor packs carry **generic** rules 
 
 ## Related
 
+- [Support matrix](support-matrix.md) — what is supported, at what evidence level, and what is missing
+
 - [Architecture](architecture.md) — components and data flow
 - [Product process](guides/product-process.md) · [Development process](guides/development-process.md)
 - [`CONSTITUTION.md`](../CONSTITUTION.md) — the authoritative rules and support matrix

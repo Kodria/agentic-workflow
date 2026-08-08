@@ -102,6 +102,19 @@ Ninguna de estas es una tarea pendiente. Son límites del proveedor, no del prod
 
 **Node.js:** 22 o superior (declarado en `engines`). Versiones menores no están soportadas.
 
+### Capacidades por comando, donde el soporte NO es uniforme
+
+Casi todo el CLI se comporta igual en los cuatro sistemas. Estas son las excepciones, enunciadas para que nadie las descubra en una demo:
+
+| Capacidad | Linux / macOS / WSL | Windows nativo |
+|---|---|---|
+| `init` · `update` · `sync` · `add` · `remove` · `sensors` · `preflight` · `doctor` · `export` · `backup` · hooks | ✅ Verificado | ✅ Verificado (matriz de CI) |
+| Instalación por **symlink** (updates se propagan solos) | ✅ Verificado | ✅ Verificado vía *junction* para directorios. Para archivos requiere Modo Desarrollador; si no, cae a **copia** — funciona, pero `awm update` deja de propagar y hay que reinstalar. |
+| `awm watch` — supervisión y gate | ✅ Verificado | ✅ Verificado |
+| `awm watch` — **el wrapper sobrevive a la muerte del supervisor** | ✅ Verificado | ⚠ **Sin verificar.** En POSIX la garantía se sostiene con `detached: true` (sesión nueva, sobrevive un SIGKILL al padre). En win32, dos rondas reales de CI no encontraron una configuración de spawn que sostenga la misma garantía, así que el E2E de crash-recovery tiene alcance POSIX. Ver `cli/src/core/journal/process.ts`. |
+
+Esa última fila es la única capacidad del producto con un nivel distinto según el sistema operativo. No es una regresión pendiente: es un límite conocido, con el intento registrado.
+
 ### Advertencia de Windows que sí es real
 
 Crear un symlink de directorio en Windows requiere `SeCreateSymbolicLinkPrivilege`, denegado por defecto en cuentas sin privilegios. AWM usa **junctions** para directorios (no requieren privilegio) y cae a **copia** para archivos cuando el symlink falla. La consecuencia práctica: en el modo copia, `awm update` **no propaga** cambios del registry automáticamente — hay que volver a instalar. Está soportado y funciona; simplemente no es el mismo mecanismo.

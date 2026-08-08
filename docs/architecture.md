@@ -120,6 +120,8 @@ Every transforming renderer must **escape for its output format** — YAML for `
 
 The JSON output reports `applied` / `pending` / `failed` plus `modifiedFiles`, so a failed run tells you exactly what it touched and restored.
 
+**One transaction per user-facing operation, not per bundle.** `awm sync` over a profile with N extensions builds a single plan and applies it once: a failure on the third extension leaves the first two uninstalled too, rather than a tree matching neither the before nor the after state. The transaction id is printed with the `awm backup restore` invocation that undoes it — an id nobody can name is an id that doesn't exist.
+
 **AWM merges into user-owned files, never clobbers them.** `~/.claude/settings.json`, `AGENTS.md`, `opencode.json` all belong to the user; AWM owns only its managed block within them. `awm backup` keeps the restorable copies.
 
 ---
@@ -129,6 +131,8 @@ The JSON output reports `applied` / `pending` / `failed` plus `modifiedFiles`, s
 Per-project, declared in `.awm/sensors.json`, generated from a **sensor pack** for the detected stack (`js-ts`, `python`, `shell`, `generic`).
 
 Detection is a convenience; `awm sensors init --pack <name>` is the contract. If no pack exists for the detected stack, the manifest is **honestly empty** — AWM does not invent defaults (that behaviour, `FALLBACK_DEFAULTS`, was deliberately removed).
+
+`awm sensors run` is **read-only**: it runs the manifest as committed and never rewrites `.awm/sensors.json` or copies pack config files into the tree. When the manifest's pack no longer matches the tree it reports the drift (`packDrift`) and names `awm sensors init`, the verb that adopts a pack. A measuring command that edits what it measures was a real bug, not a hypothetical.
 
 Execution is `execFileSync` with an **argument array — never a shell string**. Filenames reaching a sensor can come from `git diff` on an untrusted checkout, and on Windows a shell round-trip re-opens the batch-argument-injection class (CVE-2024-27980). No shell, no injection surface.
 
@@ -143,7 +147,7 @@ The rules the design rests on. Violating any one of these produces a bug of a cl
 3. **`~/.awm` belongs to the installer.** Never hand-edited, including by tests (all tests use isolated tmpdirs with `HOME`/`AWM_HOME` overridden).
 4. **Merge into user files, never clobber.** Always with a restorable backup.
 5. **Branch on capability, not on provider id.**
-6. **One implementation per concept.** Duplicated logic drifts, and the drift is the bug — four copies of a frontmatter parser produced four different failures.
+6. **One implementation per concept.** Duplicated logic drifts, and the drift is the bug — four copies of a frontmatter parser produced four different failures, and a fourth copy of the renderer→extension mapping outlived the collapse of the first three. This applies to **documentation too**: the provider paths in [`support-matrix.md`](support-matrix.md) are generated from `providers/index.ts` and locked by a test, because the hand-written copy had been wrong about Antigravity for several releases.
 7. **The deterministic gate outranks every judgement.** No review or lens overrides a red sensor.
 
 ---
@@ -160,4 +164,5 @@ Never run `npm publish` by hand, and never add a parallel publish workflow. CI g
 
 - [SDLC](sdlc.md) · [Installation](installation.md) · [Agent setup](agents-setup.md)
 - [CLI reference](cli-reference.md) · [Runbook](runbook.md)
+- [Support matrix](support-matrix.md) — what is supported, at what evidence level
 - [Acceptance playbooks](testing/README.md)
