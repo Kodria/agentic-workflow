@@ -530,6 +530,33 @@ _Contexto: H5/D5. El trinquete existe; nadie lo descubre._
 
 ### Task 5.3: Cierre R5 — suite + validadores, commits, push, PRs.
 
+- [x] `post-implementation-qa` de 3 lentes (Track A fidelidad + Track B
+  robustez/seguridad + Track B lógica) sobre el diff completo de R5.
+  Track A: 0 forward/backward gaps, 1 hallazgo minor cosmético (columna de
+  `awm preflight` desalineada por `.padEnd(9)` hardcodeado ante el nuevo
+  id de 16 caracteres `sensors-baseline`) — corregido con ancho derivado
+  dinámicamente. Track B robustez: 2 hallazgos minor — el advisory
+  chequeaba presencia del baseline con `fs.existsSync` en vez de
+  `readBaseline` (el mismo mecanismo que usa el gate real), reportando
+  falsamente "baseline present" si el path fuera un directorio en vez de
+  un archivo; y el cálculo `enabled`/`total` estaba duplicado literal
+  entre `checkManifest` y `checkSensorsBaseline` en el mismo archivo —
+  ambos corregidos (`readBaseline` reusado; `countEnabledSensors()`
+  extraída y compartida). Track B lógica: limpio, confirma que el fix del
+  padding es correcto y no hay bugs nuevos. Suite final: 152/152 suites,
+  1447/1447 tests, `tsc --noEmit` limpio.
+
+  `harness-retro` curó 1 lección (`docs/harness-retros.md`, 2026-08-08):
+  cuarta instancia de `grep-before-you-write-a-helper` (predicado
+  duplicado a la vista, mismo archivo, sin necesidad de grep cross-
+  módulo). El hallazgo del padding hardcodeado se corrigió pero se
+  descartó como lección — ocurrencia única de severidad minor, sin
+  evidencia de recurrencia entre releases. Ledger NO archivado (excepción
+  activa hasta R7).
+
+  PR: #31 (https://github.com/Kodria/agentic-workflow/pull/31). R5 es
+  CLI-only — sin cambios de registry.
+
 ---
 
 ## R6 — CI del CLI (CLI) — `chore`/`fix`
