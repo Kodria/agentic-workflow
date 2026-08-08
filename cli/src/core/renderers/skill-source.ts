@@ -35,6 +35,14 @@ export function parseSkillSource(source: string): SkillSource {
     ) {
         description = description.slice(1, -1);
     }
+    // A YAML block scalar indicator (`>-`, `|-`, `>`, `|`, `>+`, `|+`) means the
+    // real description text lives on the FOLLOWING indented lines, not on this
+    // line at all — treating the bare indicator as the description would embed
+    // literal "|-" into every rendered skill. Mirrors discovery.ts's
+    // readArtifactDescription, which detects the same shape and treats it as
+    // absent rather than mis-parsing it.
+    const BLOCK_INDICATORS = new Set(['>-', '>', '|-', '|', '>+', '|+']);
+    if (BLOCK_INDICATORS.has(description)) description = '';
     if (!description) throw new Error('skill source requires a non-empty description');
 
     const bodyMatch = source.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n([\s\S]*)$/);

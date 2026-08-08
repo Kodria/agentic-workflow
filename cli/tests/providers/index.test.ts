@@ -213,11 +213,20 @@ describe('Providers Routing', () => {
             expect(providerFor('copilot').skill.renderer).toBe('copilot-instructions');
         });
 
-        it('assertLinkRenderer no longer throws for the Cursor/Copilot skill renderers (Task 4.3)', () => {
-            expect(() => assertLinkRenderer('skill', 'cursor')).not.toThrow();
-            expect(() => assertLinkRenderer('skill', 'copilot')).not.toThrow();
-            expect(assertLinkRenderer('skill', 'cursor')?.renderer).toBe('cursor-mdc');
-            expect(assertLinkRenderer('skill', 'copilot')?.renderer).toBe('copilot-instructions');
+        it('assertLinkRenderer still refuses the Cursor/Copilot skill renderers (Task 4.3 code-quality-review fix)', () => {
+            // Regression: an earlier version of this task widened assertLinkRenderer to
+            // allow these two through, on the theory that a raw unrendered copy is "at
+            // least a plausible degraded install" — wrong. assertLinkRenderer's only
+            // callers (core/provider-artifacts.ts's legacy preflight, src/index.ts's
+            // legacy interactive `awm add`) can only symlink/copy verbatim; they never
+            // render. A raw SKILL.md copy at `.cursor/rules/<name>` or
+            // `.github/instructions/<name>` has no `.mdc`/`.instructions.md` extension
+            // and no frontmatter (`alwaysApply`/`applyTo`) — neither Cursor nor Copilot
+            // would ever read it. This must keep throwing, same as codex-agent-toml
+            // always has, directing users to commands/add.ts's real render pipeline
+            // instead (which never calls assertLinkRenderer at all).
+            expect(() => assertLinkRenderer('skill', 'cursor')).toThrow(/not implemented yet/);
+            expect(() => assertLinkRenderer('skill', 'copilot')).toThrow(/not implemented yet/);
         });
     });
 });

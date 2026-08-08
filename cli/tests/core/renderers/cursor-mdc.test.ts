@@ -53,6 +53,40 @@ Body content.
     expect(rendered).toContain('description: "*starred description"');
 });
 
+it('throws rather than embedding a literal block-scalar indicator as the description', () => {
+    // Regression: a YAML block scalar (`description: >-` / `|-`) means the
+    // real text lives on the FOLLOWING indented lines, not on this line —
+    // the original code took the bare indicator itself as the description,
+    // which would have rendered the literal string ">-" into the .mdc file.
+    const source = `---
+name: block-skill
+description: >-
+  This description spans
+  multiple lines.
+---
+
+Body content.
+`;
+    expect(() => renderCursorMdc(source)).toThrow('non-empty description');
+});
+
+it('quotes a description containing a mid-string " #" (starts a YAML comment, truncating the rest)', () => {
+    // Regression: the original YAML_UNSAFE regex only caught `#` at the START
+    // of the string — a `#` preceded by whitespace ANYWHERE in a plain scalar
+    // also starts a comment. Unquoted, "Use this #important skill" would
+    // render as YAML that silently truncates to "Use this".
+    const source = `---
+name: hash-skill
+description: Use this #important skill
+---
+
+Body content.
+`;
+    const rendered = renderCursorMdc(source);
+    expect(rendered).toContain('description: "Use this #important skill"');
+    expect(rendered).not.toContain('description: Use this #important skill');
+});
+
 it('leaves a plain description unquoted', () => {
     const source = `---
 name: plain-skill

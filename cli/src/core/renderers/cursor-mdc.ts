@@ -12,13 +12,15 @@
 import { parseSkillSource } from './skill-source';
 
 // YAML plain scalars break on a bare colon-followed-by-space (parsed as a
-// mapping), a leading YAML-special indicator character, or an embedded
-// double quote — the same class of problem tomlString/escapeControlChars
+// mapping), a `#` preceded by whitespace ANYWHERE in the string — not just
+// at the start — (starts a comment, silently truncating everything after
+// it), a leading YAML-special indicator character, or an embedded double
+// quote — the same class of problem tomlString/escapeControlChars
 // (codex-agent.ts) guard against for TOML, adapted to YAML's own rules.
 // JSON.stringify produces a YAML-1.1/1.2-compatible double-quoted scalar
 // (YAML's double-quoted flow scalar is a superset of JSON string syntax),
 // so it doubles as the escaping/quoting mechanism once quoting is needed.
-const YAML_UNSAFE = /:(\s|$)|^[\s\-?:,[\]{}#&*!|>'"%@`]|"/;
+const YAML_UNSAFE = /:(\s|$)|(?:^|\s)#|^[\s\-?:,[\]{}#&*!|>'"%@`]|"/;
 
 function yamlString(value: string): string {
     if (value !== value.trim() || value === '' || YAML_UNSAFE.test(value)) {
