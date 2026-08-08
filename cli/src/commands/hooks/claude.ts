@@ -42,7 +42,7 @@ export function installClaudeHook(options: InstallOptions): InstallResult {
     const skillDest = path.join(config.scriptsDir, 'using-awm.md');
     try { fs.unlinkSync(skillDest); } catch { /* not exists */ }
     try {
-        fs.symlinkSync(sourceSkill, skillDest);
+        fs.symlinkSync(sourceSkill, skillDest, 'file'); // ver shared.ts: el tipo no se infiere
     } catch {
         // best-effort: copy the single skill file; 'awm update' will not auto-propagate
         fs.copyFileSync(sourceSkill, skillDest);
@@ -188,7 +188,19 @@ export function resyncClaudeHookFiles(config: { scriptsDir: string }, registryRo
 
     const skillDest = path.join(config.scriptsDir, 'using-awm.md');
     try { fs.unlinkSync(skillDest); } catch { /* not exists */ }
-    fs.symlinkSync(sourceSkill, skillDest);
+    // Mismo fallback a copia que `installClaudeHook` (arriba). Sin el, en
+    // Windows sin Developer Mode este symlink tira EPERM, `resyncInstalledHooks`
+    // propaga el throw y `awm update` devuelve 1 — PARA SIEMPRE: el install
+    // funcionaba (tenia el fallback) y el update no, en una plataforma que la
+    // matriz de soporte declara verificada en CI. Dos escritores del mismo
+    // archivo, solo uno endurecido.
+    try {
+        fs.symlinkSync(sourceSkill, skillDest, 'file'); // ver shared.ts: el tipo no se infiere
+    } catch {
+        // best-effort: `awm update` no auto-propagara cambios de esta skill,
+        // pero el hook queda funcional en vez de dejar el comando inservible.
+        fs.copyFileSync(sourceSkill, skillDest);
+    }
 }
 
 /** True when the registry has everything needed to resync the Claude hook files. */

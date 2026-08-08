@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process';
 import { initWatch } from './init';
 import { runSupervisorLoop, DEFAULT_SUPERVISOR_CONFIG } from './supervisor';
 import { EXEC_STDIO } from '../../core/journal/process';
+import { WATCH_PROVIDERS, isWatchProvider } from '../../core/journal/adapter';
 
 function currentBranch(cwd: string): string {
     // stdio explicito (ver EXEC_STDIO en journal/process.ts): evita el relay
@@ -24,7 +25,7 @@ export function registerWatchCommand(program: Command): void {
         .command('watch')
         .description('supervisor durable: ejecuta jobs, releva controladores caidos, nunca mata trabajo vivo')
         .option('--init', 'bootstrap: crea el journal de la rama actual, detecta verificadores y sale')
-        .option('--provider <p>', 'codex | claude-code', 'codex')
+        .option('--provider <p>', WATCH_PROVIDERS.join(' | '), 'codex')
         .option('--heartbeat-timeout <min>', 'minutos de silencio de heartbeat', '5')
         .option('--activity-window <min>', 'minutos extra sin actividad de proceso', '10')
         .action(async (opts) => {
@@ -33,6 +34,17 @@ export function registerWatchCommand(program: Command): void {
             if (opts.init) {
                 const out = initWatch(repo, branch);
                 process.stdout.write(`journal inicializado para ${branch}; verificadores requeridos: ${JSON.stringify(out.requiredVerifiers)}\n`);
+                return;
+            }
+            // Validado ACA, antes de tocar nada: `adapterFor` ya rechazaba lo
+            // desconocido, pero recien en el primer tick — con el journal escrito y el
+            // lock tomado, y el error saliendo del supervisor en vez de del flag que lo
+            // causo. Un typo en `--provider` tiene que costar un mensaje, no un ciclo.
+            if (!isWatchProvider(opts.provider)) {
+                process.stderr.write(
+                    `--provider invalido: ${String(opts.provider)} (validos: ${WATCH_PROVIDERS.join(', ')})\n`,
+                );
+                process.exitCode = 1;
                 return;
             }
             const cfg = {

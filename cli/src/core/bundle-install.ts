@@ -1,6 +1,7 @@
 // src/core/bundle-install.ts
 import fs from 'fs';
 import path from 'path';
+import { assertSafeArtifactName } from './artifact-name';
 import {
     BundleDefinition,
     defaultScopeForBundle,
@@ -36,14 +37,24 @@ export interface InstallBundleOptions {
 }
 
 function bundleArtifacts(b: BundleDefinition, contentDir: string): ArtifactIntent[] {
+    // Estos nombres vienen VERBATIM del `bundle.json` de un registry — contenido
+    // de terceros. Sin validar, `path.join(installDir, name)` con `../../.ssh`
+    // escapaba del directorio destino, y como el instalador hace
+    // `rmSync(target, {recursive:true})` antes de enlazar, eso BORRABA el ~/.ssh
+    // real del usuario. Se valida en el origen, donde el mensaje puede nombrar
+    // el artefacto culpable; `physicalTarget` ademas asegura contencion
+    // estructural sobre la ruta ya resuelta.
     const refs: ArtifactIntent[] = [];
     for (const s of b.skills) {
+        assertSafeArtifactName(s.name, 'skill');
         refs.push({ name: s.name, type: 'skill', installName: s.name, sourcePath: path.join(contentDir, 'skills', s.name) });
     }
     for (const w of b.workflows) {
+        assertSafeArtifactName(w, 'workflow');
         refs.push({ name: w, type: 'workflow', installName: `${w}.md`, sourcePath: path.join(contentDir, 'workflows', `${w}.md`) });
     }
     for (const a of b.agents) {
+        assertSafeArtifactName(a, 'agent');
         refs.push({ name: a, type: 'agent', installName: `${a}.md`, sourcePath: path.join(contentDir, 'agents', `${a}.md`) });
     }
     return refs;
@@ -147,7 +158,12 @@ export interface SyncProfileOptions {
 
 export interface SyncResult extends Omit<InstallSummary, 'transactionId'> {
     extensions: string[];
-    /** One transaction ID per bundle actually installed during this sync, in order — a multi-bundle sync runs one applyInstallPlan transaction per bundle. */
+    /**
+     * The sync's transaction ID — a single-element array, or empty when nothing was
+     * applied. Kept as an array because callers already destructure it that way and
+     * because a future multi-scope sync would legitimately produce more than one; it
+     * is no longer one-per-bundle (see `syncProfile`).
+     */
     transactionIds: string[];
 }
 
@@ -157,32 +173,66 @@ export interface SyncResult extends Omit<InstallSummary, 'transactionId'> {
  */
 export function syncProfile(opts: SyncProfileOptions): SyncResult {
     const profile = readProfile(opts.projectRoot);
-    const installed: string[] = [];
     const skipped: string[] = [];
-    const modifiedFiles: string[] = [];
-    const transactionIds: string[] = [];
 
+    // ONE plan for the whole sync, not one per extension.
+    //
+    // This used to loop `installBundle` over `profile.extensions`, so N extensions
+    // meant N independent `applyInstallPlan` transactions. Each is atomic on its own;
+    // none is atomic with the others. A failure on the third extension left the first
+    // two committed and the tree in a state matching neither before nor after — and
+    // `awm sync` is the command a team runs to make a checkout match its profile, so
+    // "partially matches" is the one outcome it must not produce.
+    //
+    // Merging is safe because the two halves were already built for it: expanding a
+    // bundle (`expandBundleArtifacts`) is pure, and `planInstall` dedups by physical
+    // target across ALL the artifacts it is handed — which is also why two extensions
+    // sharing a dependency now collapse into one operation instead of racing to write
+    // the same path twice. `applyInstallPlan` backs up and rolls back per plan, so one
+    // plan is precisely what makes the sync atomic.
+    const intents: ArtifactIntent[] = [];
     for (const ext of profile.extensions) {
-        if (!opts.bundles.some((b) => b.name === ext)) {
+        const bundle = opts.bundles.find((b) => b.name === ext);
+        if (!bundle) {
             skipped.push(`${ext} (bundle not found in registry — remove with \`awm remove ${ext}\`)`);
             continue;
         }
-        const summary = installBundle({
+        intents.push(...expandBundleArtifacts({
             bundleName: ext,
             bundles: opts.bundles,
             agents: opts.agents,
             method: opts.method,
             projectRoot: opts.projectRoot,
             contentDir: opts.contentDir,
-            applyPlan: opts.applyPlan,
-        });
-        installed.push(...summary.installed);
-        skipped.push(...summary.skipped);
-        modifiedFiles.push(...summary.modifiedFiles);
-        transactionIds.push(summary.transactionId);
+        }));
     }
 
     if (profile.extensions.length > 0) ensureSkillsGitignored(opts.projectRoot, opts.agents);
 
-    return { installed, skipped, extensions: profile.extensions, transactionIds, modifiedFiles };
+    // Nothing resolvable: no plan, no transaction, nothing to name to `awm backup
+    // restore`. An empty `transactionIds` is the honest answer, not a phantom id.
+    if (intents.length === 0) {
+        return { installed: [], skipped, extensions: profile.extensions, transactionIds: [], modifiedFiles: [] };
+    }
+
+    const plan = planInstall({
+        artifacts: intents,
+        selectedAgents: opts.agents,
+        enabledAgents: getPreferences().enabledAgents,
+        // Every extension in the profile is a project-scope bundle by construction
+        // (`shouldRecordExtension` only records those), so the whole sync resolves to
+        // one scope — which is what lets it be one plan.
+        scope: 'local',
+        projectRoot: opts.projectRoot,
+        method: opts.method,
+    });
+    const summary = (opts.applyPlan ?? realApplyInstallPlan)(plan);
+
+    return {
+        installed: summary.installed,
+        skipped: [...skipped, ...summary.skipped],
+        extensions: profile.extensions,
+        transactionIds: [summary.transactionId],
+        modifiedFiles: summary.modifiedFiles,
+    };
 }

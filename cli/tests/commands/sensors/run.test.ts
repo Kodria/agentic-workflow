@@ -314,41 +314,12 @@ describe('runSensors — not_certified + auto-discovery', () => {
     });
 });
 
-describe('reconcilePack', () => {
-    // Build a minimal fake registry in a tmpdir (registry/ no longer lives in this repo —
-    // content lives in awm-baseline-registry / awm-documentation-registry).
-    let FAKE_REGISTRY: string;
-
-    beforeAll(() => {
-        FAKE_REGISTRY = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-fake-reg-'));
-        const jstsPackDir = path.join(FAKE_REGISTRY, 'sensor-packs', 'js-ts');
-        const genericPackDir = path.join(FAKE_REGISTRY, 'sensor-packs', 'generic');
-        fs.mkdirSync(jstsPackDir, { recursive: true });
-        fs.mkdirSync(genericPackDir, { recursive: true });
-        // Minimal pack.json matching what the real js-ts pack ships
-        fs.writeFileSync(path.join(jstsPackDir, 'pack.json'), JSON.stringify({
-            name: 'js-ts',
-            description: 'JavaScript/TypeScript sensor pack (test fixture)',
-            sensors: {
-                typecheck: { defaultCmd: 'npx tsc --noEmit', fast: true },
-                lint:      { defaultCmd: 'npx eslint . --format json', fast: true },
-                security:  { defaultCmd: 'semgrep --config .semgrep.awm.yml --json .', fast: false },
-                mutation:  { enabled: false },
-            },
-        }));
-        fs.writeFileSync(path.join(genericPackDir, 'pack.json'), JSON.stringify({
-            name: 'generic',
-            description: 'Generic sensor pack (test fixture)',
-            sensors: {
-                security: { defaultCmd: 'semgrep .', fast: false },
-            },
-        }));
-    });
-
-    afterAll(() => { fs.rmSync(FAKE_REGISTRY, { recursive: true, force: true }); });
-
+describe('detectPackDrift', () => {
+    // Pure detection: it reads the tree and reports. It does NOT rebuild the manifest
+    // and does NOT consult a registry — see run-is-read-only.test.ts for why the
+    // rebuild it used to do (`reconcilePack`) was removed.
     function tmpProject(pack: string, withPackageJson: boolean): string {
-        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-reconcile-'));
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-drift-'));
         fs.mkdirSync(path.join(dir, '.awm'), { recursive: true });
         fs.writeFileSync(
             path.join(dir, '.awm', 'sensors.json'),
@@ -360,42 +331,41 @@ describe('reconcilePack', () => {
         return dir;
     }
 
-    it('upgrades generic→js-ts when package.json is present', async () => {
-        const { reconcilePack } = require('../../../src/commands/sensors/run');
+    it('reports generic→js-ts drift when package.json is present', () => {
+        const { detectPackDrift } = require('../../../src/commands/sensors/run');
         const dir = tmpProject('generic', true);
         try {
             const manifest = JSON.parse(fs.readFileSync(path.join(dir, '.awm', 'sensors.json'), 'utf-8'));
-            const res = reconcilePack(dir, manifest, FAKE_REGISTRY);
-            expect(res.manifest.pack).toBe('js-ts');
-            expect(res.upgradedFrom).toBe('generic');
-            expect(Object.keys(res.manifest.sensors)).toContain('typecheck');
-            // custom sensor cmd preserved through merge
-            expect(res.manifest.sensors.security?.cmd).toBe('semgrep .');
-            // persisted to disk
+            const res = detectPackDrift(dir, manifest);
+            expect(res.detection.pack).toBe('js-ts');
+            expect(res.drift).toEqual({
+                manifest: 'generic',
+                detected: 'js-ts',
+                remedy: expect.stringContaining('awm sensors init'),
+            });
+            // the manifest on disk is untouched — reporting is not healing
             const onDisk = JSON.parse(fs.readFileSync(path.join(dir, '.awm', 'sensors.json'), 'utf-8'));
-            expect(onDisk.pack).toBe('js-ts');
+            expect(onDisk.pack).toBe('generic');
         } finally { fs.rmSync(dir, { recursive: true }); }
     });
 
-    it('is a no-op when pack is already real (idempotent)', async () => {
-        const { reconcilePack } = require('../../../src/commands/sensors/run');
+    it('reports no drift when the pack is already real', () => {
+        const { detectPackDrift } = require('../../../src/commands/sensors/run');
         const dir = tmpProject('js-ts', true);
         try {
             const manifest = JSON.parse(fs.readFileSync(path.join(dir, '.awm', 'sensors.json'), 'utf-8'));
-            const res = reconcilePack(dir, manifest, FAKE_REGISTRY);
-            expect(res.manifest.pack).toBe('js-ts');
-            expect(res.upgradedFrom).toBeUndefined();
+            expect(detectPackDrift(dir, manifest).drift).toBeUndefined();
         } finally { fs.rmSync(dir, { recursive: true }); }
     });
 
-    it('does not upgrade a truly generic project (no indicators)', async () => {
-        const { reconcilePack } = require('../../../src/commands/sensors/run');
+    it('reports no drift on a truly generic project (no indicators)', () => {
+        const { detectPackDrift } = require('../../../src/commands/sensors/run');
         const dir = tmpProject('generic', false);
         try {
             const manifest = JSON.parse(fs.readFileSync(path.join(dir, '.awm', 'sensors.json'), 'utf-8'));
-            const res = reconcilePack(dir, manifest, FAKE_REGISTRY);
-            expect(res.manifest.pack).toBe('generic');
-            expect(res.upgradedFrom).toBeUndefined();
+            const res = detectPackDrift(dir, manifest);
+            expect(res.detection.pack).toBe('generic');
+            expect(res.drift).toBeUndefined();
         } finally { fs.rmSync(dir, { recursive: true }); }
     });
 });

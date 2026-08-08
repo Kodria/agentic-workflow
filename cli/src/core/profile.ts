@@ -129,6 +129,17 @@ export function ensureSkillsGitignored(root: string, agents: AgentTarget[]): voi
         for (const type of ['skill', 'workflow', 'agent'] as ArtifactType[]) {
             const config = provider[type];
             if (!config) continue;
+            // Solo se ignoran los artefactos que son SYMLINKS especificos de la
+            // maquina (renderer `link`), que es lo que `awm sync` reconstruye.
+            // Un renderer que produce CONTENIDO (`.mdc` de cursor,
+            // `.instructions.md` de copilot) genera archivos reales que el
+            // equipo necesita commitear — y para copilot ese es su UNICO canal
+            // de entrega, asi que ignorarlos hacia que los companeros no
+            // recibieran absolutamente nada. Tambien arrastraba a
+            // `.cursor/rules/awm.mdc`, el carrier que existe justamente para
+            // que el contexto sobreviva al Background Agent de Cursor, que lee
+            // del checkout de git.
+            if (config.renderer !== 'link') continue;
             const entry = config.local.endsWith('/') ? config.local : `${config.local}/`;
             if (!toIgnore.includes(entry)) toIgnore.push(entry);
         }

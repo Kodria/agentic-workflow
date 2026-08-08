@@ -4,8 +4,9 @@
 // Functions are evaluated at CALL TIME (not require time) so env overrides are
 // always honored and tests need no jest.resetModules().
 import os from 'os';
+import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
+
 
 /** User home directory with a robust fallback. Never returns a raw, possibly-empty process.env.HOME. */
 export function homeDir(): string {
@@ -69,13 +70,68 @@ export function noteWindowsCaveat(log: (msg: string) => void): void {
   if (isWindowsNative()) log(WINDOWS_KNOWN_GAP);
 }
 
-/** Resolve a binary on PATH portably: `where` on win32, POSIX `command -v` elsewhere. */
+/**
+ * Resolve a binary on PATH, IN PROCESS — no shell, no subprocess.
+ *
+ * SECURITY (this is the whole reason for the implementation below): this used
+ * to build `command -v ${bin}` / `where ${bin}` and hand it to `execSync`,
+ * which runs it through a shell. `bin` is the first token of a sensor's `cmd`,
+ * and that string comes from `.awm/sensors.json` — a file committed in the
+ * repo, and also regenerated from a registry sensor-pack's `defaultCmd`. So a
+ * cloned untrusted repo, or a third-party registry, could put shell syntax
+ * there. The token can't contain whitespace (it's a split token), but `${IFS}`
+ * and `$(...)` make that irrelevant. Confirmed against the real binary: a
+ * crafted `cmd` executed an arbitrary command during `awm sensors status` —
+ * a read-only inspection command — which then reported the sensor HEALTHY,
+ * because the injected command exited 0.
+ *
+ * Resolving PATH ourselves removes the interpreter entirely, so there is
+ * nothing left to inject into on any platform. It's also faster (no process
+ * spawn) and more predictable than depending on `where`/`command -v` being
+ * present and well-behaved.
+ */
 export function resolveOnPath(bin: string): boolean {
-  const cmd = isWindowsNative() ? `where ${bin}` : `command -v ${bin}`;
-  try {
-    execSync(cmd, { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
+  if (typeof bin !== 'string' || bin.trim() === '') return false;
+
+  // win32 resolves `eslint` to `eslint.cmd`/`eslint.exe` via PATHEXT. Missing
+  // this broke every npm-shim-backed sensor on Windows (real bug, published in
+  // v3.9.0). POSIX has no such concept — the name is the name.
+  const extensions = isWindowsNative()
+    ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
+    : [];
+
+  const isExecutable = (candidate: string): boolean => {
+    try {
+      if (!fs.statSync(candidate).isFile()) return false;
+    } catch {
+      return false;
+    }
+    // On win32 the executable bit doesn't exist; being a file with a PATHEXT
+    // extension is the whole contract.
+    if (isWindowsNative()) return true;
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // PATHEXT is conventionally uppercase (`.COM;.EXE;.BAT;.CMD`) while the files
+  // on disk are usually lowercase (`eslint.cmd`). On real Windows that's a
+  // non-issue because the filesystem is case-insensitive — but it IS an issue
+  // on any case-sensitive volume, so try both spellings rather than depend on
+  // filesystem behavior we don't control.
+  const matches = (base: string): boolean =>
+    isExecutable(base) ||
+    extensions.some((ext) => isExecutable(base + ext) || isExecutable(base + ext.toLowerCase()));
+
+  // A name carrying a separator is a path, not a PATH lookup — resolve it
+  // directly instead of joining it onto every PATH entry.
+  if (bin.includes('/') || (isWindowsNative() && bin.includes('\\'))) {
+    return matches(path.resolve(bin));
   }
+
+  const entries = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
+  return entries.some((dir) => matches(path.join(dir, bin)));
 }

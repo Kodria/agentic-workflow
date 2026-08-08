@@ -21,7 +21,7 @@ import type { ProjectFacts } from '../diagnostics/types';
 import { InjectionOrchestrator, ContextOp } from '../context/orchestrator';
 import { AgentTarget, Scope, getInjection, providerFor } from '../../providers';
 import { agentsSharingSkillTarget } from '../install-planner';
-import { repairGlobalSkills as realRepairGlobalSkills } from '../skill-integrity';
+import { repairSkillLinks as realRepairSkillLinks } from '../skill-integrity';
 import { contentRoots } from '../registries';
 import { injectProjectConstitution as realInjectProjectConstitution } from '../context/project-constitution-inject';
 import { CodexAgentsStrategy } from '../context/strategies/codex-agents';
@@ -51,6 +51,7 @@ export const defaultActions: InitActions = {
         method: o.method,
         projectRoot: o.projectRoot,
         contentDir: o.contentDir,
+        scopeOverride: o.scopeOverride,
     }),
 
     // Same as installBundle above — defaults to the real applyInstallPlan.
@@ -64,7 +65,14 @@ export const defaultActions: InitActions = {
 
     initSensors: (o) => {
         const result = realInitSensors({ cwd: o.cwd, registryRoot: o.registryRoot, configure: o.configure });
-        return { detection: result.detection };
+        // `unavailablePack`/`manifest` viajan a proposito: `stepSensors` los reporta.
+        // Este wrapper proyectaba solo `detection`, asi que cualquier hallazgo nuevo de
+        // initSensors moria aca en silencio antes de llegar al step que lo muestra.
+        return {
+            detection: result.detection,
+            manifest: { pack: result.manifest.pack },
+            ...(result.unavailablePack ? { unavailablePack: result.unavailablePack } : {}),
+        };
     },
 
     addExtension: (root, name) => { realAddExtension(root, name); },
@@ -76,7 +84,7 @@ export const defaultActions: InitActions = {
     contextStatus: (op) => realInjectionOrchestrator.contextStatus(op),
 
     installContext: (op) => { realInjectionOrchestrator.installContext(op); },
-    repairGlobalSkills: (skillsDir, registryContentDirs) => realRepairGlobalSkills(skillsDir, registryContentDirs),
+    repairGlobalSkills: (skillsDir, registryContentDirs) => realRepairSkillLinks(skillsDir, registryContentDirs),
     injectProjectConstitution: (o) => {
         if (getInjection(o.agent)?.type === 'managed-agents-md') {
             return new CodexAgentsStrategy().injectProject(o.projectRoot, providerFor(o.agent), o.agent) === 'injected' ? 'injected' : 'already';
@@ -121,8 +129,12 @@ function failed(id: string, level: StepResult['level'], error: string): StepResu
  * physical operation and simply re-confirms ownership — it does not change
  * the co-owner's installed content.
  */
-function sharedInstallAgents(d: InitDeps): AgentTarget[] {
-    const group = agentsSharingSkillTarget(d.agent, d.enabledAgents, 'global', d.cwd);
+function sharedInstallAgents(d: InitDeps, scope: Scope = 'global'): AgentTarget[] {
+    // El scope tiene que ser el MISMO con el que se va a instalar: para un
+    // provider sin directorio global (Copilot) el baseline va a scope local, y
+    // preguntar por el grupo compartido en 'global' devolvia un grupo calculado
+    // sobre un destino que para el no existe.
+    const group = agentsSharingSkillTarget(d.agent, d.enabledAgents, scope, d.cwd);
     return group.includes(d.agent) ? group : [d.agent, ...group];
 }
 
@@ -204,19 +216,35 @@ export function stepDevCore(d: InitDeps): StepResult {
         return ok('machine.devCore', 'machine', 'skipped');
     }
 
-    // Find the baseline bundle (there may be several; pick first baseline)
-    const baselineBundle = d.bundles.find((b) => b.scope === 'baseline');
-    const bundleName = baselineBundle?.name ?? 'dev';
+    // TODOS los bundles baseline, no el primero. `scope: 'baseline'` es una propiedad
+    // que un bundle TIENE, no un lugar que solo uno puede ocupar — y
+    // `reconciliation.ts` (`awm update`) siempre los filtro todos. Con `find` aca, un
+    // registry con dos baselines instalaba uno en `awm init` y aparecia el segundo, de
+    // la nada, en el siguiente `awm update`; nada antes lo habia reportado como
+    // faltante. El fallback a 'dev' se conserva para un registry sin ningun baseline.
+    const baselineNames = d.bundles.filter((b) => b.scope === 'baseline').map((b) => b.name);
+    const toInstall = baselineNames.length > 0 ? baselineNames : ['dev'];
 
-    d.actions.installBundle({
-        bundleName,
-        bundles: d.bundles,
-        agents: sharedInstallAgents(d),
-        method: d.installMethod,
-        projectRoot: d.cwd,
-        contentDir: d.contentDir,
-    });
-    return ok('machine.devCore', 'machine', 'applied');
+    // Un provider sin directorio global de skills (hoy: Copilot) no tiene donde
+    // poner el baseline a nivel maquina — y el hecho `devCore` lo reporta como
+    // "trivialmente satisfecho" para no volver a intentar un install global
+    // condenado a tirar. Pero nada instalaba nunca nada en su lugar: Copilot
+    // terminaba con CERO skills mientras `awm init` imprimia `✔ dev-core` y
+    // `awm doctor` decia `healthy`. Su propio `globalUnsupportedReason` ya dice
+    // que hay que instalar por proyecto, asi que eso es lo que se hace.
+    const localOnly = providerFor(d.agent).skill.global === null;
+    for (const bundleName of toInstall) {
+        d.actions.installBundle({
+            bundleName,
+            bundles: d.bundles,
+            agents: sharedInstallAgents(d, localOnly ? 'local' : 'global'),
+            method: d.installMethod,
+            projectRoot: d.cwd,
+            contentDir: d.contentDir,
+            ...(localOnly ? { scopeOverride: 'local' as const } : {}),
+        });
+    }
+    return ok('machine.devCore', 'machine', 'applied', localOnly ? 'installed at project scope (no global skill dir)' : undefined);
 }
 
 /** Step 3.5 – Repair broken global skill symlinks (orphans outside the baseline). */
@@ -317,7 +345,15 @@ export function stepSensors(d: InitDeps): StepResult {
     if (!proj) return ok('project.sensors', 'project', 'skipped', 'no project');
     if (proj.sensors.present) return ok('project.sensors', 'project', 'skipped');
 
-    d.actions.initSensors({ cwd: proj.root, registryRoot: d.sensorPacksRoot, configure: true });
+    const res = d.actions.initSensors({ cwd: proj.root, registryRoot: d.sensorPacksRoot, configure: true });
+    // A registry without the detected pack yields a fallback (or empty) manifest. The
+    // step still succeeded — a manifest was written — but reporting a bare 'applied'
+    // would let `awm init` hand back a quality gate that measures less than the
+    // operator has any reason to expect. Say which pack was missing, here, once.
+    if (res.unavailablePack) {
+        return ok('project.sensors', 'project', 'applied',
+            `registry has no '${res.unavailablePack}' sensor-pack — wrote '${res.manifest?.pack ?? 'fallback'}' instead; run \`awm update\``);
+    }
     return ok('project.sensors', 'project', 'applied');
 }
 
@@ -373,8 +409,26 @@ export function stepContextInjection(d: InitDeps): StepResult {
     // AGENTS.md backup target via the same findProjectRoot(cwd) call, so using d.cwd here
     // whenever it differs from the walked-up project root (e.g. `awm init` run from a
     // subdirectory) would write to a path the backup session never snapshotted — a failed
-    // init couldn't roll it back. Falls back to d.cwd only when there's no discovered
-    // project yet, matching this op's own pre-existing behavior in that case.
+    // init couldn't roll it back.
+    //
+    // The `?? d.cwd` fallback below is the legitimate case: a provider whose ONLY
+    // delivery channel is project-scope (Copilot), run in a directory the user means
+    // as their project but which carries no marker yet (no .git, no package.json).
+    // Removing it would leave Copilot with no context at all there. What made it a bug
+    // was that mutation-targets.ts enumerated the AGENTS.md / .awm/context/ backup
+    // targets only inside `if (projectRoot)`, so this write landed outside the backup
+    // session and survived a rollback that reported a clean restore. That is fixed
+    // where it belongs — in the enumeration, which now covers `cwd` unconditionally
+    // for these providers.
+    //
+    // `--machine-only` is the case that genuinely must not write. It nulls
+    // `ctx.project` on purpose, and this MACHINE-level step read that as "no project
+    // found" and wrote into cwd anyway — under the one flag that promises not to.
+    if (scope === 'local' && d.machineOnly) {
+        return ok('machine.contextInjection', 'machine', 'skipped',
+            `${providerFor(d.agent).label} delivers context at project scope — skipped by --machine-only`);
+    }
+
     const op: ContextOp = {
         agent: d.agent,
         scope,

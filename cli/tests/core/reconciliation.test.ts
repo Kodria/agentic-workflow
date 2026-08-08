@@ -163,10 +163,18 @@ describe('planReconciliation (real, unmocked)', () => {
         expect(names).toEqual(['ambient-skill', 'brainstorming', 'dangling-skill']);
     });
 
-    it('skips a bundle whose closure genuinely fails to resolve, without aborting reconciliation for the rest', () => {
-        // Malformed dependsOn (not an array) makes resolveBundleClosure throw
-        // when it tries to iterate it — a real "unresolvable closure" error,
-        // unlike a plain dangling name reference (see test above).
+    it('un dependsOn malformado ya no rompe nada: el campo invalido se ignora y el bundle instala', () => {
+        // Este test asertaba que un `dependsOn` no-array hacia TIRAR a
+        // `resolveBundleClosure` y que reconciliation lo salteaba. Desde que
+        // `discoverBundles` valida forma sobre el contenido del registry (que es
+        // input no confiable), ese campo se normaliza a `[]` en vez de
+        // propagarse hasta un `for...of` sobre un numero. O sea: la entrada ya
+        // no falla, y el bundle instala normalmente ignorando el campo roto.
+        //
+        // Es una mejora, no una regresion — antes UN archivo malformado en
+        // cualquier registry tumbaba `awm list`/`awm add` con un stack trace
+        // crudo. El `catch` de reconciliation sigue en su lugar como defensa en
+        // profundidad, pero esta entrada ya no lo ejercita.
         writeBundle(contentRoot, 'broken', 'baseline', ['broken-skill'], 5);
         addToCatalog(contentRoot, 'broken', 'baseline');
 
@@ -177,19 +185,10 @@ describe('planReconciliation (real, unmocked)', () => {
             plan = planReconciliation({ targets: ['claude-code'], roots: [contentRoot] });
         }).not.toThrow();
 
-        // The healthy bundles (baseline 'dev' + ambient 'ambient-x') still
-        // reconcile correctly.
         const names = plan.operations.map((op: any) => op.name).sort();
-        expect(names).toEqual(['ambient-skill', 'brainstorming']);
-
-        // The broken bundle is cleanly absent — no partial/broken entry for
-        // 'broken-skill' or any operation touching it.
-        expect(names).not.toContain('broken-skill');
-        expect(plan.operations.some((op: any) => op.sourcePath?.includes('broken'))).toBe(false);
-
-        // Applying the plan end-to-end still works (no dangling reference to
-        // the broken bundle leaked into the plan).
-        const { applyInstallPlan } = require('../../src/core/install-transaction');
-        expect(() => applyInstallPlan(plan)).not.toThrow();
+        // Los bundles sanos siguen reconciliando, y el que tenia el campo roto
+        // tambien — sin su dependencia invalida.
+        expect(names).toEqual(['ambient-skill', 'brainstorming', 'broken-skill']);
     });
+
 });

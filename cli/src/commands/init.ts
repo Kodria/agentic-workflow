@@ -227,6 +227,7 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
                 contentDir: contentRoots()[0] ?? '',
                 sensorPacksRoot: capabilityRoot('sensor-packs') ?? '',
                 confirmExtensions,
+                machineOnly: !!opts.machineOnly,
                 actions: mergedActions,
             });
             pipelineOutcome = outcome;

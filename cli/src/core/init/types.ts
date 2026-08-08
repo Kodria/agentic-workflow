@@ -1,7 +1,7 @@
 // src/core/init/types.ts
 import type { HarnessContext, CheckReport, ProjectFacts } from '../diagnostics/types';
 import type { BundleDefinition } from '../bundles';
-import type { AgentTarget } from '../../providers';
+import type { AgentTarget, Scope } from '../../providers';
 import type { InstallMethod, InstallSummary, SyncResult } from '../bundle-install';
 import type { ContextOp } from '../context/orchestrator';
 import type { InjectionState } from '../context/types';
@@ -45,12 +45,22 @@ export interface InitActions {
     installBundle: (o: {
         bundleName: string; bundles: BundleDefinition[]; agents: AgentTarget[];
         method: InstallMethod; projectRoot: string; contentDir: string;
+        /** Fuerza el scope del bundle nombrado. Lo usa `stepDevCore` para un
+         *  provider sin directorio global de skills (Copilot), cuyo baseline va
+         *  a scope de proyecto. */
+        scopeOverride?: Scope;
     }) => InstallSummary;
     syncProfile: (o: {
         projectRoot: string; bundles: BundleDefinition[]; agents: AgentTarget[];
         method: InstallMethod; contentDir: string;
     }) => SyncResult;
-    initSensors: (o: { cwd: string; registryRoot: string; configure: boolean }) => { detection: { pack: string } };
+    initSensors: (o: { cwd: string; registryRoot: string; configure: boolean }) => {
+        detection: { pack: string };
+        /** Set when the registry ships no pack for the detected stack — `stepSensors`
+         *  reports it, so `awm init` never hands back a silently empty quality gate. */
+        unavailablePack?: string;
+        manifest?: { pack: string };
+    };
     addExtension: (root: string, name: string) => void;
     ensureProfile: (root: string) => void;
     gatherProject: (cwd: string, bundles: BundleDefinition[], agent?: AgentTarget) => ProjectFacts | null;
@@ -80,5 +90,13 @@ export interface InitDeps {
     contentDir: string;       // content root del primer registry — para installBundle/syncProfile
     sensorPacksRoot: string;  // content root que provee sensor-packs/ — para initSensors
     confirmExtensions: (proposed: string[], signals: string[]) => Promise<string[]>;
+    /**
+     * `awm init --machine-only`. The flag already nulls `ctx.project` so the project
+     * steps skip, but that made "the user asked us not to touch the project" and
+     * "there is no project here" indistinguishable — and `stepContextInjection`, a
+     * MACHINE-level step, treated the second meaning as license to write AGENTS.md
+     * and .awm/context/ into cwd under a flag whose entire promise is that it won't.
+     */
+    machineOnly?: boolean;
     actions: InitActions;
 }

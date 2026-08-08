@@ -22,9 +22,9 @@ describe('registry-view override markers', () => {
     });
 
     it('packageDetailLines marks an overridden skill with its registry name', () => {
-        const { REGISTRIES_DIR } = require('../../src/core/registries');
+        const { registriesDir } = require('../../src/core/registries');
         const { buildPackageView, packageDetailLines } = require('../../src/utils/registry-view');
-        const teamSkillPath = path.join(REGISTRIES_DIR, 'team-acme', 'skills', 'brainstorming');
+        const teamSkillPath = path.join(registriesDir(), 'team-acme', 'skills', 'brainstorming');
         const view = buildPackageView(
             [{ name: 'brainstorming', path: teamSkillPath, description: 'd', overrode: '/old/path' }],
             [], [], []

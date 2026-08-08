@@ -13,8 +13,9 @@ import { parseRuffOutput } from './formatters/ruff';
 import { parseShellcheckOutput } from './formatters/shellcheck';
 import { readBaseline, partition } from './baseline';
 import { changedFiles, applyChangedCmd, filterByExtension, hasUnsafeWin32Chars } from './changed';
-import { detectStack, initSensors } from './init';
-import { capabilityRoot } from '../../core/registries';
+// Solo `detectStack` (puro, lee el arbol) — NO `initSensors`, que escribe. `run` es un
+// verbo de lectura: no debe tener a mano ninguna funcion capaz de mutar el proyecto.
+import { detectStack } from './init';
 import { isWindowsNative } from '../../core/paths';
 
 const MANIFEST_FILE = '.awm/sensors.json';
@@ -70,32 +71,34 @@ function readManifest(cwd: string): SensorManifest | null {
 }
 
 /**
- * Upgrade-only, idempotent pack reconciliation. If the manifest sits on the
- * `generic` fallback but the tree now has real stack indicators (package.json,
- * pyproject.toml…), re-detect and rebuild via initSensors — which merges existing
- * custom sensors and copies the pack's config files. Never downgrades, never
- * touches a real pack. FS/registry failures degrade to a no-op (the honest floor
- * in runSensors covers the gap).
+ * Detect — and only detect — that the manifest's pack no longer describes the tree:
+ * it sits on the `generic` fallback while real stack indicators (package.json,
+ * pyproject.toml, a root `*.sh`…) are present, so the gate is measuring almost
+ * nothing. Pure: reads the tree, writes nothing, consults no registry.
+ *
+ * It used to *heal* this, by calling `initSensors(..., configure: true)` — which
+ * overwrites the committed `.awm/sensors.json` and copies the pack's config files
+ * into the project root. That made `awm sensors run`, a read verb, leave a dirty
+ * working tree, and swapped in sensors whose tools the project never installed
+ * (one root `deploy.sh` pulls in the whole shell pack), turning a green run red.
+ * Rewriting the manifest is `awm sensors init`'s job — the verb whose name says so.
+ * Here the drift is only named: reported as `packDrift` on the run's own output,
+ * and failed on by preflight's `pack` check.
  */
-export function reconcilePack(
+export function detectPackDrift(
     manifestDir: string,
     manifest: SensorManifest,
-    registryRoot?: string,
-): { manifest: SensorManifest; upgradedFrom?: string; detection: ReturnType<typeof detectStack> } {
-    if (manifest.pack !== 'generic') {
-        const detection = detectStack(manifestDir);
-        return { manifest, detection };
-    }
+): { detection: ReturnType<typeof detectStack>; drift?: NonNullable<RunOutput['packDrift']> } {
     const detection = detectStack(manifestDir);
-    if (detection.pack === 'generic') return { manifest, detection }; // truly generic — stay honest
-    const root = registryRoot ?? capabilityRoot('sensor-packs');
-    if (!root || !fs.existsSync(root)) return { manifest, detection }; // can't rebuild without registry
-    try {
-        const { manifest: rebuilt } = initSensors({ cwd: manifestDir, registryRoot: root, configure: true });
-        return { manifest: rebuilt, upgradedFrom: 'generic', detection };
-    } catch {
-        return { manifest, detection }; // never abort the run on a reconcile failure
-    }
+    if (manifest.pack !== 'generic' || detection.pack === 'generic') return { detection };
+    return {
+        detection,
+        drift: {
+            manifest: manifest.pack,
+            detected: detection.pack,
+            remedy: `run \`awm sensors init\` to adopt the '${detection.pack}' pack for this stack`,
+        },
+    };
 }
 
 /**
@@ -283,8 +286,8 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     if (!manifestDir) return { sensors: [], overall: 'not_certified' };
     const manifest = readManifest(manifestDir);
     if (!manifest) return { sensors: [], overall: 'not_certified' };
-    const reconciled = reconcilePack(manifestDir, manifest);
-    const activeManifest = reconciled.manifest;
+    const drift = detectPackDrift(manifestDir, manifest);
+    const activeManifest = manifest; // el manifest COMITEADO es lo que se corre; `run` no lo reescribe
     const cwd = manifestDir; // ejecutar sensores y baseline desde donde vive el manifest
 
     // Baseline suppresses already-accepted findings so sensors fail only on NEW
@@ -398,14 +401,14 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
 
     // Honest floor: a benign-green 'skipped' over a tree that clearly HAS a stack
     // (indicators present) is a false green — the gate ran nothing real. Never green.
-    if (overall === 'skipped' && reconciled.detection.pack !== 'generic') {
+    if (overall === 'skipped' && drift.detection.pack !== 'generic') {
         overall = 'not_certified';
     }
 
     return {
         sensors: results,
         overall,
-        ...(reconciled.upgradedFrom ? { packUpgraded: `${reconciled.upgradedFrom}→${activeManifest.pack}` } : {}),
+        ...(drift.drift ? { packDrift: drift.drift } : {}),
         // Always emitted on a --changed run, including when the scope failed to
         // resolve: a green that came back from an unscoped fallback and a green from a
         // genuinely scoped run are different claims, and the caller cannot tell them

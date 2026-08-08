@@ -102,5 +102,10 @@ export function runAddBundleCore(
         ? `\n\n${pc.dim('Recorded as a project extension in .awm/profile.json (commit it; symlinks are gitignored).')}`
         : '';
     console.log(`✅ Installed bundle ${pc.cyan(matchedBundle.name)}:\n  ${lines}${recordNote}`);
+    // Same reason as in sync.ts: without printing it, `awm backup restore` has no
+    // name to be given and the transaction may as well not have an id.
+    if (result.transactionId) {
+        console.log(pc.dim(`  transaction ${result.transactionId} — undo with \`awm backup restore ${result.transactionId}\``));
+    }
     return { code: 0, selectedAgents, result };
 }

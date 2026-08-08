@@ -1,58 +1,72 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execSync } from 'child_process';
 import { computeSensorStatus } from '../../../src/commands/sensors/status';
 
-jest.mock('child_process', () => ({ execSync: jest.fn() }));
-const mockExecSync = execSync as jest.MockedFunction<typeof execSync>;
-
+// `resolveOnPath` resuelve PATH en proceso (ya no invoca un shell — ver el
+// comentario de seguridad en core/paths.ts). Estos tests controlan un PATH
+// aislado en vez de mockear `execSync`: refleja el mecanismo real y los vuelve
+// deterministas. Lo que se verifica en win32 sigue siendo lo mismo que motivo
+// este archivo: que un shim `.cmd` de npm resuelva (bug real publicado en
+// v3.9.0, donde los sensores quedaban todos "no encontrados" en Windows).
 describe('computeSensorStatus — Windows PATH resolution', () => {
     let tmpDir: string;
+    let pathDir: string;
+    let originalPath: string | undefined;
+    let originalPathExt: string | undefined;
     const originalPlatform = process.platform;
 
     beforeEach(() => {
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-win-'));
-        mockExecSync.mockReset();
+        pathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-win-path-'));
+        originalPath = process.env.PATH;
+        originalPathExt = process.env.PATHEXT;
+        process.env.PATH = pathDir;
+        process.env.PATHEXT = '.COM;.EXE;.BAT;.CMD';
         Object.defineProperty(process, 'platform', { value: 'win32' });
     });
 
     afterEach(() => {
-        fs.rmSync(tmpDir, { recursive: true });
+        if (originalPath === undefined) delete process.env.PATH;
+        else process.env.PATH = originalPath;
+        if (originalPathExt === undefined) delete process.env.PATHEXT;
+        else process.env.PATHEXT = originalPathExt;
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        fs.rmSync(pathDir, { recursive: true, force: true });
         Object.defineProperty(process, 'platform', { value: originalPlatform });
     });
 
-    it('resolves an installed binary on win32 using `where`, not `which`', () => {
+    function writeManifest() {
         fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
             pack: 'js-ts',
             sensors: { security: { cmd: 'semgrep --json .', fast: false } }
         }));
+    }
 
-        mockExecSync.mockImplementation(((cmd: string) => {
-            if (cmd.startsWith('where ')) return Buffer.from('C:\\tools\\semgrep.exe');
-            throw new Error(`not found: ${cmd}`);
-        }) as typeof execSync);
+    it('resuelve un binario instalado en win32 via PATHEXT (incluido un shim .cmd)', () => {
+        writeManifest();
+        // En win32 el usuario escribe `semgrep` y en disco existe `semgrep.cmd`.
+        fs.writeFileSync(path.join(pathDir, 'semgrep.cmd'), '@echo off\r\n');
 
         const result = computeSensorStatus(tmpDir);
         expect(result.overall).toBe('HEALTHY');
         expect(result.checks.security.ok).toBe(true);
     });
 
-    it('reports ok:false on win32 when `where` cannot find the binary', () => {
-        fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
-        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
-            pack: 'js-ts',
-            sensors: { security: { cmd: 'semgrep --json .', fast: false } }
-        }));
-
-        mockExecSync.mockImplementation(((cmd: string) => {
-            if (cmd.startsWith('where ')) throw new Error(`not found: ${cmd}`);
-            throw new Error(`not found: ${cmd}`);
-        }) as typeof execSync);
-
+    it('reporta ok:false en win32 cuando el binario no esta en PATH', () => {
+        writeManifest();
+        // PATH aislado y vacio.
         const result = computeSensorStatus(tmpDir);
         expect(result.overall).toBe('DEGRADED');
         expect(result.checks.security.ok).toBe(false);
+    });
+
+    it('en win32 no exige bit de ejecucion — un .exe sin permisos POSIX igual resuelve', () => {
+        writeManifest();
+        fs.writeFileSync(path.join(pathDir, 'semgrep.exe'), '');
+        fs.chmodSync(path.join(pathDir, 'semgrep.exe'), 0o644);
+
+        expect(computeSensorStatus(tmpDir).checks.security.ok).toBe(true);
     });
 });

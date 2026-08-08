@@ -53,7 +53,7 @@ describe('runInitSteps — orchestrator', () => {
     function buildDeps(cwd: string) {
         const { gatherContext } = require('../../../src/core/diagnostics/context');
         const { discoverAllBundles } = require('../../../src/core/bundles');
-        const { contentRoots, REGISTRIES_DIR } = require('../../../src/core/registries');
+        const { contentRoots, registriesDir } = require('../../../src/core/registries');
         const { defaultActions } = require('../../../src/core/init/steps');
 
         // Seed content at ~/.awm/registries/baseline (content root IS the registry root).

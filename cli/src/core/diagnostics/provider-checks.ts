@@ -11,23 +11,14 @@ import fs from 'fs';
 import path from 'path';
 import { AgentTarget, ProviderConfig, RendererId, Scope, providerFor } from '../../providers';
 import { ProviderCheck, ProviderCheckState, ProviderFacts, ProviderTier } from './types';
-import { SkillIntegrity } from '../skill-integrity';
+import { SkillIntegrity, classifySkillLinks } from '../skill-integrity';
 import { assertProviderSupported } from '../provider-version';
 import { computeHookStatus } from '../../commands/hooks/status';
 import { InjectionOrchestrator } from '../context/orchestrator';
-import { capabilityRoot } from '../registries';
+import { capabilityRoot, contentRoots } from '../registries';
+import { rendererExtension } from '../renderers/registry';
 
 export type ScanSkills = (dir: string) => SkillIntegrity;
-
-/** File extension a healthy AWM install actually produces for each non-`'link'` renderer —
- *  used by `skillsGlobalCheck` to require AWM-shaped evidence, not just an arbitrary
- *  non-empty directory (a user's own unrelated file in `~/.cursor/rules` would otherwise
- *  read as `'supported'`). Renderers absent from this map (i.e. `'link'`) never reach the
- *  branch that reads it. */
-const RENDERED_SKILL_EXTENSIONS: Partial<Record<RendererId, string>> = {
-    'cursor-mdc': '.mdc',
-    'copilot-instructions': '.instructions.md',
-};
 
 /** Structural classification, computed purely from `provider`'s config shape — see
  *  `ProviderTier`'s doc comment in `types.ts` for what each tier means. */
@@ -63,7 +54,7 @@ function binaryVersionCheck(agent: AgentTarget): ProviderCheck {
  *  `dir` is null — i.e. the provider has no global skill discovery mechanism at all
  *  (today: Copilot, see `globalUnsupportedReason` in providers/index.ts).
  *
- *  `renderer` gates which verification is possible: `classifyGlobalSkills` (via `integrity`)
+ *  `renderer` gates which verification is possible: `classifySkillLinks` (via `integrity`)
  *  only ever sees symlinks — `if (!lst.isSymbolicLink()) continue;` — so for a rendered
  *  format (`cursor-mdc`, `copilot-instructions`) it scans a directory of real files and
  *  finds nothing, which would make `broken` silently read 0 regardless of whether the
@@ -87,7 +78,7 @@ function skillsGlobalCheck(
             // `remediationCode: 'awm-init'` is a worse remedy than none, but this
             // check has no channel to report "can't tell" separately from "absent"
             // (same tradeoff already made by this file's agentsNativeCheck and by
-            // skill-integrity.ts's classifyGlobalSkills — a systemic, pre-existing
+            // skill-integrity.ts's classifySkillLinks — a systemic, pre-existing
             // pattern in this codebase, not introduced here).
             entries = [];
         }
@@ -97,7 +88,12 @@ function skillsGlobalCheck(
         // Still not full integrity verification (a stray file with the right extension but
         // wrong content still passes) — that residual gap is the same honest tradeoff this
         // function's doc comment already accepts for the non-`'link'` branch generally.
-        const ext = RENDERED_SKILL_EXTENSIONS[renderer];
+        // `rendererExtension` (core/renderers/registry.ts) is the ONE table mapping a
+        // renderer to the file it produces. This site used to keep its own partial copy —
+        // the fourth such copy in the codebase, and the exact drift that made a rendered
+        // artifact invisible to the "is it installed" check for a whole release. A new
+        // renderer must not be able to be added without this reading it.
+        const ext = rendererExtension(renderer);
         const present = ext ? entries.some((e) => e.endsWith(ext)) : entries.length > 0;
         return {
             id: 'skills.global',
@@ -163,18 +159,67 @@ function tomlAgentsHealthy(dir: string, entries: string[]): { broken: number } {
  * run (e.g. claude-code-only, opencode-only, antigravity-only) would always render
  * inapplicable rows as red ✖ and `overall` could never be 'healthy'.
  */
+/**
+ * Workflows installed at machine scope. Today only Antigravity declares a `workflow`
+ * config at all (`~/.gemini/antigravity/global_workflows`), and nothing verified it:
+ * `awm init` installed the baseline's workflows there and every diagnostic looked only
+ * at skills and native agents, so a broken or emptied workflow directory reported
+ * `healthy` forever on the one provider that uses it.
+ *
+ * Same N/A discipline as `agentsNativeCheck`: a provider with no workflow config, or a
+ * registry that ships no `workflows/`, emits NO row rather than a red one nobody can
+ * act on — an absent row means "nothing to verify", not "verified fine".
+ */
+function workflowsGlobalCheck(agent: AgentTarget): ProviderCheck | null {
+    const provider = providerFor(agent);
+    if (!provider.workflow || provider.workflow.global === null) return null;
+
+    const dir = provider.workflow.global;
+    let entries: string[];
+    try {
+        entries = fs.readdirSync(dir);
+    } catch {
+        return null;
+    }
+    if (entries.length === 0) return null;
+
+    // Los workflows se instalan con el renderer `link`, asi que un symlink colgante es
+    // exactamente la misma clase de rotura que en skills — y se clasifica con la misma
+    // funcion, no con una copia local que pueda divergir.
+    const integrity = classifySkillLinks(dir, contentRoots());
+    const broken = integrity.repairable.length + integrity.dead.length;
+    return {
+        id: 'workflows.global',
+        state: broken > 0 ? 'broken' : 'healthy',
+        target: dir,
+        detail: broken > 0 ? `${broken} broken link(s)` : undefined,
+        remediationCode: broken > 0 ? 'awm-init' : undefined,
+    };
+}
+
 function agentsNativeCheck(agent: AgentTarget): ProviderCheck | null {
     const provider = providerFor(agent);
     if (!provider.agent || provider.agent.global === null) return null;
 
     const dir = provider.agent.global;
     let entries: string[];
+    // `absent` degrada el estado global, asi que sin `remediationCode` doctor
+    // salia 1 sin decir que hacer — y para un registry que simplemente no trae
+    // `agents/` (lo normal) ese rojo no tiene accion posible. Se reporta como
+    // `unsupported`, que describe la realidad: no hay artefactos nativos que
+    // verificar, y no es culpa de la instalacion.
+    // Un registry que simplemente no trae `agents/` es lo normal, no un defecto
+    // de la instalacion — y no hay accion que el usuario pueda tomar. Antes esto
+    // devolvia `absent`, un estado que DEGRADA, y sin `remediationCode`: doctor
+    // salia 1 mostrando `✖ native agents` sin decir que hacer, justo despues de
+    // un `awm init` exitoso. Cuando no hay nada nativo que verificar, no se
+    // emite fila — el mismo criterio que ya usan los demas casos N/A de aca.
     try {
         entries = fs.readdirSync(dir);
     } catch {
-        return { id: 'agents.native', state: 'absent', target: dir };
+        return null;
     }
-    if (entries.length === 0) return { id: 'agents.native', state: 'absent', target: dir };
+    if (entries.length === 0) return null;
 
     if (provider.agent.renderer === 'codex-agent-toml') {
         const { broken } = tomlAgentsHealthy(dir, entries);
@@ -292,6 +337,7 @@ export function gatherProviderChecks(agents: AgentTarget[], scanSkills: ScanSkil
             binaryVersionCheck(agent),
             skillsGlobalCheck(dir, owners, integrity, provider.skill.renderer),
             agentsNativeCheck(agent),
+            workflowsGlobalCheck(agent),
             hookTrustCheck(agent),
             contextGlobalCheck(agent, projectRoot),
         ].filter((check): check is ProviderCheck => check !== null);

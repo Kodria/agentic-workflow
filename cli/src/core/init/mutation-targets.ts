@@ -133,6 +133,18 @@ export function planInitMutationTargets(params: PlanInitMutationTargetsParams): 
         addBundleTargets(targets, b.name, bundles, agent, 'global', cwd, contentDir);
     }
 
+    // Providers whose context injection is itself project-scope (managed-agents-md
+    // with a null globalPath — Cursor, Copilot) write AGENTS.md and the materialized
+    // .awm/context/ file. `stepContextInjection` now refuses to write those without a
+    // discovered project root, but enumerating them against `cwd` unconditionally
+    // costs nothing (a target that goes unwritten is a no-op backup entry, per this
+    // module's opening note) and keeps the guarantee from resting on a single site:
+    // under-enumeration here is the one failure mode that silently defeats rollback.
+    if (injection?.type === 'managed-agents-md' && injection.globalPath === null) {
+        targets.add(path.join(cwd, path.basename(injection.localFile)));
+        targets.add(projectContextPath(cwd));
+    }
+
     // project-level: profile, sensors manifest, project injection, and every
     // extension currently recorded in .awm/profile.json
     const projectRoot = findProjectRoot(cwd);

@@ -1,54 +1,163 @@
-# AWM Architecture
+# Architecture
 
-This document outlines the high-level architecture of the Agentic Workflow Manager (AWM).
+How AWM is put together, what it writes where, and which invariants hold it up.
 
-## 1. CLI + Content separation
+For *why* the lifecycle is shaped this way, see [sdlc.md](sdlc.md). For the authoritative support matrix, see [`CONSTITUTION.md`](../CONSTITUTION.md#matriz-de-soporte).
 
-AWM separates the **CLI tool** from its **content** into distinct repos:
+---
 
-- **CLI** (`cli/` in this repo): the TypeScript source for the global `awm` binary, published to npm as `agentic-workflow-manager`.
-- **Content repos** (separate git repos):
-  - [`awm-baseline-registry`](https://github.com/Kodria/awm-baseline-registry) — Skills, bundles, sensor-packs, hooks seeded by default on `awm init`.
-  - [`awm-documentation-registry`](https://github.com/Kodria/awm-documentation-registry) — Documentation-focused skills (opt-in: `awm registry add <url>`).
+## 1 · CLI and content are separate repos
 
-## 2. The Local Cache (`~/.awm/registries/`)
+```
+  agentic-workflow (this repo)        awm-baseline-registry (+ your team's)
+  ┌──────────────────────────┐        ┌──────────────────────────────────┐
+  │ cli/  → npm              │        │ skills/ bundles/ sensor-packs/   │
+  │        the tool          │        │ agents/ workflows/               │
+  └──────────────────────────┘        └──────────────────────────────────┘
+        released by version                  released by git tag
+```
 
-When you run `awm init`, AWM clones each configured registry into `~/.awm/registries/<name>/`.
+They ship on different clocks, and that's the point: your team's skills change weekly, the CLI doesn't.
 
-- `~/.awm/registries/baseline/` — the baseline registry clone
-- `~/.awm/registries/<name>/` — any additional registered registries
+- **CLI** — `cli/`, published to npm as `agentic-workflow-manager`. Updated with `npm i -g …@latest`.
+- **Content** — separate git repos. Updated with `awm update`.
 
-Every time you run `awm add`, the CLI looks inside these directories to find and parse available skills, workflows, and process bundles. It does *not* hit the GitHub API directly.
+**Consequence worth internalising:** editing a file under `~/.awm/registries/` does nothing durable — the next `awm update` overwrites it. Content is edited **in its registry repo**, tagged, then pulled. The latency between editing a registry and seeing it installed is expected and correct.
 
-When you run `awm update`, the CLI fetches the latest commits for each registry clone and rebuilds the CLI binary (you never run `npm build`).
+---
 
-## 3. Content Discovery
+## 2 · On-disk state
 
-The CLI discovers content via `contentRoots()`, which returns the list of configured registry paths under `~/.awm/registries/`. Each artifact (skill, bundle, sensor-pack) carries a `contentRoot` stamp pointing to the registry it came from, so install/use logic always resolves the correct absolute path.
+### Machine (`~/.awm/`, or `$AWM_HOME`)
 
-## 4. Providers & Multi-Target Support
+| Path | Holds |
+|---|---|
+| `registries/<name>/` | Clone of each configured registry — the content cache |
+| `hooks/` | Session-hook scripts installed into agents |
+| `config.json` | Machine config: registries, pins |
+| `backups/` | Restorable copies of user-owned files AWM rewrote |
 
-AWM is not tied to a single AI IDE or agent interface. Depending on the `Provider` selected during installation, artifacts are routed to different target locations on the user's filesystem.
+**This directory belongs to the installer.** `awm init` and `awm update` own it. Hand-editing it produces states the CLI can't reason about — if something's wrong, fix the source (the registry repo) and re-run, don't patch the cache.
 
-Currently supported Providers:
+### Project (`<repo>/.awm/`)
 
-### 4.1 Claude Code
-- **Global Skills paths**: `~/.claude/skills/` (symlinks into `~/.awm/registries/<name>/skills/`)
+| Path | Holds | Commit it? |
+|---|---|---|
+| `profile.json` | What this project uses — the reproducible declaration | **Yes** |
+| `sensors.json` | The project's sensor manifest | **Yes** |
+| `sensors.baseline.json` | Snapshot of pre-existing findings (legacy ratchet) | **Yes** |
+| `ledger/<branch>.jsonl` | Per-branch findings, for the retro | No (gitignored) |
+| `journal/<branch>/` | Durable job state for `awm watch` | No |
 
-### 4.2 OpenCode
-- **Global Skills paths**: `~/.agents/skills/`
+`profile.json` is the interesting one: it's **agent-agnostic**. It records *what* the project needs, not *where* it goes. Each developer's `awm init -a <their agent>` resolves that to their own paths — which is how one committed file serves a team using six different agents.
 
-### 4.3 Antigravity
-Google Deepmind's internal engineering agent platform.
-- **Global Skills paths**: `~/.agents/skills/`
-- **Global Workflows paths**: `~/.gemini/antigravity/global_workflows/`
+### Agent targets
 
-## 5. Symlinks vs. Copy Implementation
+Written outside the repo, per agent — see [agents-setup.md](agents-setup.md) for the full table.
 
-AWM supports **Symlink Installation (Default)**.
+---
 
-When you install a skill globally via symlink, AWM creates a symbolic link from the target destination back to the registry clone in `~/.awm/registries/<name>/skills/skill-name/`.
+## 3 · Content discovery
 
-Because the target is a window to the registry clone, anytime an upstream maintainer updates a skill and the user runs `awm update` (fetching the registry), the change propagates through the symlink instantly.
+`contentRoots()` returns the configured registry paths. Every discovered artifact is stamped with the `contentRoot` it came from, so downstream install logic always resolves an absolute path back to the right registry.
 
-The **Copy** installation method exists for "ejecting" a skill — if a user wants to fork and modify it locally, `copy` creates a hard clone that disconnects it from future `awm update` syncs.
+**Name collisions across registries are an error, not a silent last-wins.** If two registries ship a skill with the same name, AWM refuses — unless the later registry *declares* the override in its `awm-registry.json`. Silent shadowing is how a team ends up running content nobody chose.
+
+---
+
+## 4 · Providers: capability, not identity
+
+Six targets: `antigravity`, `opencode`, `claude-code`, `codex`, `cursor`, `copilot`.
+
+Each declares a **capability profile** in `cli/src/providers/index.ts` — not a set of special cases:
+
+```ts
+{
+  skill:     { global: string | null, local: string, renderer: RendererId,
+               globalUnsupportedReason?: string },
+  agent:     { … } | null,
+  workflow:  { … } | null,
+  hooks?:    { type, settingsPath, scriptsDir, matcher, eventName },
+  injection?:{ type, … },
+  minimumVersion?: string,
+}
+```
+
+Everything downstream is supposed to branch on **declared capability**, never on a provider id. `global: null` means "this provider has no such scope", and `globalUnsupportedReason` carries the human explanation so an error can say *why* instead of just failing.
+
+> This is the abstraction's real test, and it has failed twice: `awm init -a copilot` crashed because a fact-gathering function treated `skill.global === null` as *missing* rather than *not applicable*, and `awm add -a codex` crashed because one of four frontmatter parsers didn't handle a valid YAML form. Both were "a provider takes a path nobody exercised". **Any new `if (provider === 'x')` is a future bug of the same shape.**
+
+### Renderers
+
+An artifact is either **linked** or **transformed**:
+
+| Renderer | Used by | Produces |
+|---|---|---|
+| `link` | claude-code, codex, opencode, antigravity | Symlink into the registry clone |
+| `cursor-mdc` | cursor | `.mdc` rule with YAML frontmatter |
+| `copilot-instructions` | copilot | `.instructions.md` with `applyTo` |
+| `codex-agent-toml` | codex (agent profiles) | TOML profile |
+
+Every transforming renderer must **escape for its output format** — YAML for `.mdc`, TOML for codex. This is not theoretical: unescaped `:`/`#`/control bytes in a description have produced malformed output before, which is why the escaping is centralised and tested against a real parser.
+
+---
+
+## 5 · Symlink vs. copy
+
+**Symlink (default).** The installed artifact is a window onto `~/.awm/registries/<name>/skills/<name>/`. An `awm update` propagates instantly — nothing to re-install.
+
+**Copy (`--method copy`).** A hard clone, disconnected from updates. Two legitimate uses: forking a skill to modify locally, and Windows without Developer Mode (where unprivileged symlink creation is blocked).
+
+---
+
+## 6 · Transactional installs
+
+`awm init` and installs that touch user-owned files run as a **transaction**:
+
+1. Back up every file about to be modified
+2. Apply the steps
+3. On any failure → restore every backed-up path, commit nothing
+
+The JSON output reports `applied` / `pending` / `failed` plus `modifiedFiles`, so a failed run tells you exactly what it touched and restored.
+
+**AWM merges into user-owned files, never clobbers them.** `~/.claude/settings.json`, `AGENTS.md`, `opencode.json` all belong to the user; AWM owns only its managed block within them. `awm backup` keeps the restorable copies.
+
+---
+
+## 7 · Sensors
+
+Per-project, declared in `.awm/sensors.json`, generated from a **sensor pack** for the detected stack (`js-ts`, `python`, `shell`, `generic`).
+
+Detection is a convenience; `awm sensors init --pack <name>` is the contract. If no pack exists for the detected stack, the manifest is **honestly empty** — AWM does not invent defaults (that behaviour, `FALLBACK_DEFAULTS`, was deliberately removed).
+
+Execution is `execFileSync` with an **argument array — never a shell string**. Filenames reaching a sensor can come from `git diff` on an untrusted checkout, and on Windows a shell round-trip re-opens the batch-argument-injection class (CVE-2024-27980). No shell, no injection surface.
+
+---
+
+## 8 · Invariants
+
+The rules the design rests on. Violating any one of these produces a bug of a class this project has already paid for:
+
+1. **Silence is never evidence.** A tool that failed to run reports "unknown", never "clean". A `ps` that can't see a process does not mean the process is dead.
+2. **Never declare death without positive evidence.** Fail toward "alive" — treating a live job as dead can duplicate work or corrupt state.
+3. **`~/.awm` belongs to the installer.** Never hand-edited, including by tests (all tests use isolated tmpdirs with `HOME`/`AWM_HOME` overridden).
+4. **Merge into user files, never clobber.** Always with a restorable backup.
+5. **Branch on capability, not on provider id.**
+6. **One implementation per concept.** Duplicated logic drifts, and the drift is the bug — four copies of a frontmatter parser produced four different failures.
+7. **The deterministic gate outranks every judgement.** No review or lens overrides a red sensor.
+
+---
+
+## 9 · Release
+
+Pushing to `main` triggers `.github/workflows/release.yml`: build → full test suite → version bump from the conventional-commit prefix (`feat` → minor, `fix` → patch, `!`/`BREAKING` → major) → `npm publish` via OIDC trusted publisher.
+
+Never run `npm publish` by hand, and never add a parallel publish workflow. CI gates the release on the tests passing — that gate is the point.
+
+---
+
+## Related
+
+- [SDLC](sdlc.md) · [Installation](installation.md) · [Agent setup](agents-setup.md)
+- [CLI reference](cli-reference.md) · [Runbook](runbook.md)
+- [Acceptance playbooks](testing/README.md)

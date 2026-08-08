@@ -25,7 +25,14 @@ function machineChecks(m: MachineFacts): CheckResult[] {
     }
 
     // machine.hook
-    if (m.hook.present && !m.hook.degraded) {
+    // Un provider sin mecanismo de hooks no puede "tener el hook instalado":
+    // no se emite fila alguna, igual que ya hacen el paso de init
+    // (init/steps.ts, "no hook mechanism for this agent") y el reporte por
+    // provider (provider-checks.ts, que descarta la fila). Emitir `missing`
+    // aca era lo que ponia `awm init` en exit 1 para 4 de los 6 providers.
+    if (!m.hook.applicable) {
+        // sin fila
+    } else if (m.hook.present && !m.hook.degraded) {
         out.push({ id: 'machine.hook', level: 'machine', label: 'hook SessionStart', status: 'ok', remedy: none });
     } else if (m.hook.present) {
         out.push({ id: 'machine.hook', level: 'machine', label: 'hook SessionStart', status: 'warn',
@@ -101,6 +108,18 @@ function projectChecks(p: ProjectFacts): CheckResult[] {
             detail: `${missingLinks.length} missing, ${p.activeBundles.broken.length} broken`, remedy: cmd('awm sync') });
     }
 
+    // project.orphans — links colgantes que ya no pertenecen a ninguna extension.
+    // Fila propia y no parte de `project.activation`: ese check mide "falta lo que el
+    // profile pide", y esto es lo contrario — sobra lo que el profile ya no pide. Sin
+    // separarlos, un proyecto con todo lo esperado instalado reportaba `ok` mientras
+    // arrastraba skills muertas que el agente sigue intentando leer.
+    const orphans = p.orphanLinks.repairable.length + p.orphanLinks.dead.length;
+    if (orphans > 0) {
+        out.push({ id: 'project.orphans', level: 'project', label: 'orphaned skill links', status: 'warn',
+            detail: `${p.orphanLinks.repairable.length} repairable, ${p.orphanLinks.dead.length} dead`,
+            remedy: cmd('awm sync') });
+    }
+
     // project.sensors
     out.push(p.sensors.present
         ? { id: 'project.sensors', level: 'project', label: 'sensors', status: 'ok', remedy: none }
@@ -135,7 +154,12 @@ function projectChecks(p: ProjectFacts): CheckResult[] {
 // actionable-but-expected transient states (rendered with ◷/⚠, not ✖) and
 // do not by themselves degrade `overall`, mirroring how a 'warn' CheckResult
 // doesn't degrade the machine+project report either.
-const DEGRADING_PROVIDER_STATES: ProviderCheckState[] = ['missing', 'unsupported', 'broken', 'absent', 'conflict'];
+// `stale` cuenta como degradado: un contexto desactualizado es exactamente la
+// clase de problema que un gate de CI tiene que ver. Antes doctor imprimia ⚠
+// junto a `status: healthy` y exit 0, asi que un AGENTS.md viejo — o sobrescrito
+// por otro provider — era invisible para cualquier script que mirara el codigo
+// de salida. Un aviso que no cambia el veredicto no es un aviso, es ruido.
+const DEGRADING_PROVIDER_STATES: ProviderCheckState[] = ['missing', 'unsupported', 'broken', 'absent', 'conflict', 'stale'];
 
 export function computeProviderOverall(providers: ProviderFacts[]): 'healthy' | 'degraded' {
     const degraded = providers.some((p) => p.checks.some((c) => DEGRADING_PROVIDER_STATES.includes(c.state)));

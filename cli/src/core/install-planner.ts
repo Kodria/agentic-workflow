@@ -13,6 +13,7 @@
 // persistence (artifact-state.ts). This module only computes the plan.
 import path from 'path';
 import { AgentTarget, ArtifactType, RendererId, Scope, providerFor, unsupportedScopeError } from '../providers';
+import { renderedFilename } from './renderers/registry';
 import { ManagedArtifactRecord } from './artifact-state';
 
 export type ArtifactIntent = {
@@ -85,21 +86,29 @@ export function physicalTarget(intent: ArtifactIntent, agent: AgentTarget, scope
     // trailing `.md` (if any) on intent.installName, so e.g. `using-awm`
     // (skills carry no extension) or `using-awm.md` both become
     // `using-awm.instructions.md`, never `using-awm.md.instructions.md`.
-    // Deliberately NOT path.parse(...).name: it strips everything after the
-    // LAST dot, not just a real trailing extension — a skill literally named
-    // `v1.2-migration` would silently truncate to `v1.mdc`, dropping
-    // `2-migration` and risking a collision with any other skill named `v1`.
-    // `.md` is the only extension a skill's installName is ever expected to
-    // carry (skills are markdown files), so stripping that literal suffix is
-    // both sufficient and precise.
-    const baseName = intent.installName.endsWith('.md')
-        ? intent.installName.slice(0, -'.md'.length)
-        : intent.installName;
-    const filename = config.renderer === 'codex-agent-toml' ? `${baseName}.toml`
-        : config.renderer === 'cursor-mdc' ? `${baseName}.mdc`
-        : config.renderer === 'copilot-instructions' ? `${baseName}.instructions.md`
-        : intent.installName;
-    return { targetPath: path.join(dir, filename), renderer: config.renderer };
+    // `renderedFilename` (core/renderers/registry.ts) es la unica fuente de
+    // verdad de este mapeo. Antes vivia inline aca y re-derivado a mano en tres
+    // lectores mas, uno de los cuales lo omitia por completo — y ese era
+    // justamente el que decidia si un artefacto estaba instalado.
+    const filename = renderedFilename(intent.installName, config.renderer);
+    const targetPath = path.join(dir, filename);
+    // Asercion de contencion: el destino resuelto DEBE caer dentro del
+    // directorio del provider. `dir` es el ancla de confianza real (sale de la
+    // config del provider, no del contenido), asi que verificarlo aca atrapa
+    // cualquier camino — presente o futuro — que construya un `installName` sin
+    // pasar por `assertSafeArtifactName`. Los nombres llegan desde el
+    // `bundle.json` de un registry, y el instalador borra el destino de forma
+    // recursiva antes de enlazar: un escape aca no es un archivo mal ubicado,
+    // es borrado arbitrario fuera del sandbox.
+    const resolvedDir = path.resolve(dir);
+    const resolved = path.resolve(targetPath);
+    if (resolved !== resolvedDir && !resolved.startsWith(resolvedDir + path.sep)) {
+        throw new Error(
+            `refusing to install outside the target directory: ${JSON.stringify(intent.installName)} ` +
+            `resolves to ${resolved}, which is not inside ${resolvedDir}`
+        );
+    }
+    return { targetPath, renderer: config.renderer };
 }
 
 /**
@@ -173,7 +182,15 @@ function assertCompleteSharedGroup(
 ): void {
     if (intent.type !== 'skill') return;
     for (const agent of selected) {
-        const target = physicalTarget(intent, agent, scope, projectRoot).targetPath;
+        // El `.filter()` de abajo ya tenia esta guarda; esta linea no — y es la
+        // que corre PRIMERO. Con copilot en `selected` (que es lo que hace
+        // `awm update`, que apunta a todos los agentes habilitados) tiraba aca,
+        // antes de llegar al loop de planificacion, rompiendo el comando para
+        // TODOS los demas agentes de la maquina. Un agente que no soporta este
+        // scope no tiene grupo compartido que verificar: no es parte del grupo.
+        let target: string;
+        try { target = physicalTarget(intent, agent, scope, projectRoot).targetPath; }
+        catch { continue; }
         // Same reasoning as agentsSharingSkillTarget above: a candidate in
         // `enabled` that doesn't support this scope (e.g. Copilot at `global`)
         // can't be part of the shared-target group — it just isn't a
@@ -235,7 +252,28 @@ export function planInstall(params: PlanInstallParams): InstallPlan {
     const groups = new Map<string, Group>();
 
     for (const intent of artifacts) {
-        for (const agent of selectedAgents) {
+        // Agentes que estructuralmente NO pueden recibir este artefacto en este
+        // scope — hoy: copilot en scope global, que no tiene mecanismo de
+        // descubrimiento de skills a nivel usuario.
+        //
+        // Se saltean, pero SOLO si algun otro agente seleccionado si puede. La
+        // distincion es deliberada:
+        //  - `awm update` / `awm add <bundle>` corren sobre TODOS los agentes
+        //    habilitados. Que uno no pueda no es un error del usuario, y hacer
+        //    tirar todo el plan rompia el comando para TODOS los demas agentes
+        //    de la maquina — incluido el re-sync de hooks, que ni se alcanzaba.
+        //  - `awm add x -a copilot -s global` es una peticion EXPLICITA. Ahi no
+        //    hay a quien saltear, asi que sigue tirando con la explicacion
+        //    (`globalUnsupportedReason`), que es justo lo que el usuario
+        //    necesita leer.
+        const capable = selectedAgents.filter((agent) => {
+            if (!providerFor(agent)[intent.type]) return false;
+            try { physicalTarget(intent, agent, scope, projectRoot); return true; }
+            catch { return false; }
+        });
+        const effectiveAgents = capable.length > 0 ? capable : selectedAgents;
+
+        for (const agent of effectiveAgents) {
             const config = providerFor(agent)[intent.type];
             if (!config) continue;
             const { targetPath, renderer } = physicalTarget(intent, agent, scope, projectRoot);

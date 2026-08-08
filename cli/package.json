@@ -34,6 +34,9 @@
   ],
   "author": "Kodria",
   "license": "ISC",
+  "engines": {
+    "node": ">=22"
+  },
   "description": "CLI to manage Agentic Workflows - install skills, workflows, and processes for AI agents",
   "dependencies": {
     "@clack/prompts": "^1.0.1",

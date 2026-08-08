@@ -57,6 +57,7 @@ const CHECK_LABELS: Record<ProviderCheck['id'], string> = {
     'binary.version': 'binary/version',
     'skills.global': 'global skills',
     'agents.native': 'native agents',
+    'workflows.global': 'global workflows',
     'context.global': 'global context',
     'hook.trust': 'hook SessionStart',
     'guidance.project': 'project guidance',

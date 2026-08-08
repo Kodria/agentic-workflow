@@ -8,10 +8,19 @@ import { cliVersion } from './cli-version';
 import { awmHome } from './paths';
 
 // Computed at require-time by calling the shared resolver (single source of truth: core/paths.ts).
-const AWM_HOME = awmHome();
 
-export const REGISTRIES_DIR = path.join(AWM_HOME, 'registries');
-export const REGISTRIES_CONFIG_PATH = path.join(AWM_HOME, 'registries.json');
+// Funciones, no constantes de nivel de modulo. `awmHome()` lee AWM_HOME/HOME EN CADA
+// LLAMADA a proposito (paths.ts) — resolverlo una sola vez al hacer `require` congelaba
+// la respuesta en el instante del import, asi que cualquier cosa que fijara AWM_HOME
+// despues (un test, un comando que cambia de home) seguia apuntando al viejo. Este
+// modulo era el unico lugar que contradecia esa regla.
+export function registriesDir(): string {
+    return path.join(awmHome(), 'registries');
+}
+
+export function registriesConfigPath(): string {
+    return path.join(awmHome(), 'registries.json');
+}
 
 export const CONTENT_DIR_NAMES = ['skills', 'bundles', 'workflows', 'agents'] as const;
 
@@ -25,35 +34,35 @@ export interface RegistrySource extends RegistryEntry {
 }
 
 export function registryContentRoot(name: string): string {
-    const root = path.join(REGISTRIES_DIR, name);
-    if (!path.resolve(root).startsWith(path.resolve(REGISTRIES_DIR) + path.sep)) {
+    const root = path.join(registriesDir(), name);
+    if (!path.resolve(root).startsWith(path.resolve(registriesDir()) + path.sep)) {
         throw new Error(`Invalid registry name "${name}" — must not contain path separators`);
     }
     return root;
 }
 
 export function readRegistriesConfig(): RegistryEntry[] {
-    if (!fs.existsSync(REGISTRIES_CONFIG_PATH)) return [];
+    if (!fs.existsSync(registriesConfigPath())) return [];
     let raw: unknown;
     try {
-        raw = JSON.parse(fs.readFileSync(REGISTRIES_CONFIG_PATH, 'utf-8'));
+        raw = JSON.parse(fs.readFileSync(registriesConfigPath(), 'utf-8'));
     } catch (e) {
         throw new Error(
-            `Invalid registries config at ${REGISTRIES_CONFIG_PATH}: ${e instanceof Error ? e.message : String(e)}`
+            `Invalid registries config at ${registriesConfigPath()}: ${e instanceof Error ? e.message : String(e)}`
         );
     }
     if (!Array.isArray(raw)) {
-        throw new Error(`Invalid registries config at ${REGISTRIES_CONFIG_PATH}: expected a JSON array`);
+        throw new Error(`Invalid registries config at ${registriesConfigPath()}: expected a JSON array`);
     }
     for (const entry of raw) {
         if (typeof (entry as Record<string, unknown>)?.name !== 'string' || typeof (entry as Record<string, unknown>)?.remote !== 'string') {
             throw new Error(
-                `Invalid registries config at ${REGISTRIES_CONFIG_PATH}: malformed entry ${JSON.stringify(entry)}`
+                `Invalid registries config at ${registriesConfigPath()}: malformed entry ${JSON.stringify(entry)}`
             );
         }
         if (entry.name === '.' || entry.name.includes('/') || entry.name.includes('\\') || entry.name.includes('..')) {
             throw new Error(
-                `Invalid registries config at ${REGISTRIES_CONFIG_PATH}: malformed entry name "${entry.name}" (path traversal)`
+                `Invalid registries config at ${registriesConfigPath()}: malformed entry name "${entry.name}" (path traversal)`
             );
         }
     }
@@ -61,15 +70,15 @@ export function readRegistriesConfig(): RegistryEntry[] {
 }
 
 export function writeRegistriesConfig(entries: RegistryEntry[]): void {
-    fs.mkdirSync(AWM_HOME, { recursive: true });
-    fs.writeFileSync(REGISTRIES_CONFIG_PATH, JSON.stringify(entries, null, 2) + '\n', 'utf-8');
+    fs.mkdirSync(awmHome(), { recursive: true });
+    fs.writeFileSync(registriesConfigPath(), JSON.stringify(entries, null, 2) + '\n', 'utf-8');
 }
 
 /** Bootstrap de máquina (awm init): si no hay registries.json, lo crea con la
  *  entrada baseline (remote por cadena WS-2: env > prefs > default).
  *  Devuelve true si sembró. Nunca toca un registries.json existente. */
 export function seedBaselineRegistry(): boolean {
-    if (fs.existsSync(REGISTRIES_CONFIG_PATH)) return false;
+    if (fs.existsSync(registriesConfigPath())) return false;
     writeRegistriesConfig([{ name: 'baseline', remote: resolveBaseRemote() }]);
     return true;
 }
@@ -114,7 +123,7 @@ export async function syncRegistries(): Promise<RegistrySyncResult[]> {
         try {
             const freshClone = !fs.existsSync(reg.contentRoot);
             if (freshClone) {
-                fs.mkdirSync(REGISTRIES_DIR, { recursive: true });
+                fs.mkdirSync(registriesDir(), { recursive: true });
                 try {
                     await simpleGit().clone(reg.remote, reg.contentRoot);
                 } catch (e) {
@@ -234,11 +243,11 @@ export function readRegistryManifest(root: string): RegistryManifest {
     return { overrides: new Set(overrides as string[]), minCliVersion };
 }
 
-/** Nombre del registry dueño de un path: el nombre del clone bajo REGISTRIES_DIR,
+/** Nombre del registry dueño de un path: el nombre del clone bajo registriesDir(),
  *  o null si no pertenece a ninguno. */
 export function registryNameForPath(p: string): string | null {
     const resolved = path.resolve(p);
-    const regsRoot = path.resolve(REGISTRIES_DIR) + path.sep;
+    const regsRoot = path.resolve(registriesDir()) + path.sep;
     if (resolved.startsWith(regsRoot)) {
         const first = resolved.slice(regsRoot.length).split(path.sep)[0];
         return first || null;
@@ -255,7 +264,16 @@ export function verifyMinCliVersions(current: string = cliVersion()): CliVersion
         if (!fs.existsSync(reg.contentRoot)) continue;
         let min: string | undefined;
         try { min = readRegistryManifest(reg.contentRoot).minCliVersion; } catch { continue; }
-        if (min && compareSemver(current, min) < 0) failures.push({ name: reg.name, min });
+        // Falla CERRADO: si alguna de las dos versiones no es legible, se
+        // reporta el fallo en vez de dejar pasar. Antes `compareSemver`
+        // devolvia NaN y `NaN < 0` es false, asi que un `minCliVersion`
+        // malformado hacia que el gate se saltara en silencio.
+        if (!min) continue;
+        try {
+            if (compareSemver(current, min) < 0) failures.push({ name: reg.name, min });
+        } catch {
+            failures.push({ name: reg.name, min });
+        }
     }
     return failures;
 }

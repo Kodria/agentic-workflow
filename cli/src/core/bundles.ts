@@ -39,17 +39,57 @@ function catalogPath(contentDir: string): string {
     return path.join(contentDir, 'catalog.json');
 }
 
+/** Lee `catalog.json` de un registry.
+ *
+ *  El contenido de un registry es INPUT NO CONFIABLE (un registry de equipo,
+ *  interno, o agregado con `awm registry add`), asi que se valida forma antes de
+ *  desreferenciar. Sin esto, un solo archivo malformado en CUALQUIER registry
+ *  — incluido uno que llega por un `awm update` rutinario — hacia que `awm list`
+ *  y `awm add` murieran con un stack trace crudo de Node y ningun mensaje
+ *  accionable. Los demas lectores de contenido de registry de este repo
+ *  (readRegistriesConfig, readRegistryManifest, readProfile) ya validaban; estos
+ *  dos eran los que faltaban. */
 export function readCatalog(contentDir: string): CatalogEntry[] {
     const file = catalogPath(contentDir);
     if (!fs.existsSync(file)) return [];
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf-8')) as { version: number; bundles: CatalogEntry[] };
-    return parsed.bundles ?? [];
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    } catch {
+        throw new Error(`${file} is not valid JSON. Fix the file in its registry, then re-run \`awm update\`.`);
+    }
+    if (parsed === null || typeof parsed !== 'object') {
+        throw new Error(`${file} must contain a JSON object.`);
+    }
+    const bundles = (parsed as { bundles?: unknown }).bundles;
+    if (bundles === undefined) return [];
+    if (!Array.isArray(bundles)) {
+        throw new Error(`${file}: "bundles" must be an array.`);
+    }
+    // Una entrada sin `source` usable haria que `path.join` tirara un
+    // TypeError opaco mas adelante; se descarta aca, nombrando el archivo.
+    return bundles.filter((entry): entry is CatalogEntry =>
+        entry !== null && typeof entry === 'object' && typeof (entry as CatalogEntry).source === 'string');
 }
 
-function normalizeSkillRefs(raw: Array<string | { name: string; onSignal?: boolean }>): BundleSkillRef[] {
-    return (raw ?? []).map((s) =>
-        typeof s === 'string' ? { name: s, onSignal: false } : { name: s.name, onSignal: s.onSignal === true }
-    );
+/** Tolera `skills` ausente o mal formado: lo que no sea un array se trata como
+ *  vacio en vez de tirar `(raw ?? []).map is not a function`, y cada entrada se
+ *  valida individualmente. */
+function normalizeSkillRefs(raw: unknown): BundleSkillRef[] {
+    if (!Array.isArray(raw)) return [];
+    return raw.flatMap((s) => {
+        if (typeof s === 'string') return [{ name: s, onSignal: false }];
+        if (s !== null && typeof s === 'object' && typeof (s as { name?: unknown }).name === 'string') {
+            return [{ name: (s as { name: string }).name, onSignal: (s as { onSignal?: unknown }).onSignal === true }];
+        }
+        return [];
+    });
+}
+
+/** Array de strings, o vacio. Cualquier otra forma en el contenido del registry
+ *  se ignora en vez de propagarse hasta un crash aguas abajo. */
+function stringArray(raw: unknown): string[] {
+    return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === 'string') : [];
 }
 
 export function discoverBundles(contentDir: string): BundleDefinition[] {
@@ -58,17 +98,31 @@ export function discoverBundles(contentDir: string): BundleDefinition[] {
     for (const entry of entries) {
         const manifestPath = path.join(contentDir, entry.source, 'bundle.json');
         if (!fs.existsSync(manifestPath)) continue;
-        const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+        let raw: unknown;
+        try {
+            raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+        } catch {
+            throw new Error(`${manifestPath} is not valid JSON. Fix the file in its registry, then re-run \`awm update\`.`);
+        }
+        if (raw === null || typeof raw !== 'object') {
+            throw new Error(`${manifestPath} must contain a JSON object.`);
+        }
+        const m = raw as Record<string, unknown>;
+        // Un bundle sin nombre usable no es instalable y solo produciria errores
+        // opacos mas adelante — se nombra el archivo y se falla aca.
+        if (typeof m.name !== 'string' || m.name === '') {
+            throw new Error(`${manifestPath}: "name" must be a non-empty string.`);
+        }
         bundles.push({
-            name: raw.name,
-            description: raw.description ?? '',
-            version: raw.version ?? '0.0.0',
-            scope: raw.scope ?? 'project',
-            visibility: raw.visibility ?? 'public',
-            dependsOn: raw.dependsOn ?? [],
-            skills: normalizeSkillRefs(raw.skills),
-            workflows: raw.workflows ?? [],
-            agents: raw.agents ?? [],
+            name: m.name,
+            description: typeof m.description === 'string' ? m.description : '',
+            version: typeof m.version === 'string' ? m.version : '0.0.0',
+            scope: (m.scope as BundleDefinition['scope']) ?? 'project',
+            visibility: (m.visibility as BundleDefinition['visibility']) ?? 'public',
+            dependsOn: stringArray(m.dependsOn),
+            skills: normalizeSkillRefs(m.skills),
+            workflows: stringArray(m.workflows),
+            agents: stringArray(m.agents),
             contentRoot: contentDir,
         });
     }

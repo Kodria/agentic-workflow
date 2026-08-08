@@ -6,7 +6,7 @@ import { InjectionState } from '../../../src/core/context/types';
 function healthyMachine(): HarnessContext['machine'] {
     return {
         registryCache: { present: true, gitState: 'clean' },
-        hook: { present: true, degraded: false },
+        hook: { present: true, degraded: false, applicable: true },
         devCore: { present: true, brokenLinks: [] },
         ambient: { wanted: [], installed: [] },
         contextInjection: [],
@@ -19,6 +19,7 @@ function healthyProject(): ProjectFacts {
         root: '/repo/belanz',
         profile: { present: true, extensions: ['frontend'] },
         activeBundles: { expected: ['frontend-craft'], linked: ['frontend-craft'], broken: [] },
+        orphanLinks: { repairable: [], dead: [] },
         sensors: { present: true },
         constitution: { present: true },
         context: { present: true, file: 'CLAUDE.md' },
@@ -89,12 +90,12 @@ describe('runChecks — machine.cli', () => {
 
 describe('runChecks — machine.hook / devCore', () => {
     it('hook degraded → warn', () => {
-        const m = healthyMachine(); m.hook = { present: true, degraded: true };
+        const m = healthyMachine(); m.hook = { present: true, degraded: true, applicable: true };
         expect(byId({ machine: m, project: null }, 'machine.hook').status).toBe('warn');
     });
 
     it('hook absent → missing + awm init', () => {
-        const m = healthyMachine(); m.hook = { present: false };
+        const m = healthyMachine(); m.hook = { present: false, applicable: true };
         const c = byId({ machine: m, project: null }, 'machine.hook');
         expect(c.status).toBe('missing');
         expect(c.remedy).toEqual({ kind: 'command', value: 'awm init' });
@@ -176,7 +177,7 @@ describe('machineChecks — global skill integrity', () => {
         return {
             machine: {
                 registryCache: { present: true, gitState: 'clean' },
-                hook: { present: true, degraded: false },
+                hook: { present: true, degraded: false, applicable: true },
                 devCore: { present: true, brokenLinks: [] },
                 ambient: { wanted: [], installed: [] },
                 contextInjection: [],
@@ -213,8 +214,16 @@ describe('computeProviderOverall (Task 9)', () => {
         };
     }
 
-    it('healthy when every check is in an ok/pending/warn state', () => {
-        expect(computeProviderOverall([providerWith(['supported', 'healthy', 'shared', 'pending-trust', 'stale'])])).toBe('healthy');
+    it('healthy when every check is in an ok/pending state', () => {
+        expect(computeProviderOverall([providerWith(['supported', 'healthy', 'shared', 'pending-trust'])])).toBe('healthy');
+    });
+
+    it('degraded cuando algun check esta stale — un contexto viejo tiene que verse en el exit code', () => {
+        // Antes `stale` quedaba fuera de los estados degradantes, asi que doctor
+        // imprimia ⚠ junto a `status: healthy` y exit 0. Un AGENTS.md
+        // desactualizado (o pisado por otro provider) era invisible para
+        // cualquier gate de CI que mirara el codigo de salida.
+        expect(computeProviderOverall([providerWith(['supported', 'healthy', 'stale'])])).toBe('degraded');
     });
 
     it('degrades on a single broken/missing/absent/unsupported/conflict check', () => {

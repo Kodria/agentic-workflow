@@ -10,6 +10,14 @@ import pc from 'picocolors';
 import { confirm, isCancel } from '@clack/prompts';
 import { cliVersion, CLI_PACKAGE_NAME } from './cli-version';
 import { compareSemver } from './versioning';
+
+/** El aviso de actualizacion es cosmetico: una version ilegible (de la cache o
+ *  del registro de npm) no debe romper el comando que el usuario pidio — solo
+ *  se omite el aviso. El gate de `minCliVersion`, en cambio, falla CERRADO
+ *  (ver verifyMinCliVersions). */
+function isNewer(a: string, b: string): boolean {
+    try { return compareSemver(a, b) > 0; } catch { return false; }
+}
 import { awmHome } from './paths';
 
 const TTL_MS = 24 * 60 * 60 * 1000;
@@ -62,7 +70,7 @@ export function maybeNotifyUpdate(opts?: { now?: number; spawnWorker?: () => voi
     const now = opts?.now ?? Date.now();
     const spawnWorker = opts?.spawnWorker ?? spawnRefreshWorker;
     const cache = readUpdateCache();
-    if (cache?.latest && compareSemver(cache.latest, cliVersion()) > 0) {
+    if (cache?.latest && isNewer(cache.latest, cliVersion())) {
         console.log(pc.dim(`\n⬆ awm v${cache.latest} available → npm i -g ${CLI_PACKAGE_NAME}`));
     }
     if (!cache || now - cache.lastCheck > TTL_MS) spawnWorker();
@@ -82,7 +90,7 @@ export async function offerSelfUpdate(deps: SelfUpdateDeps = {}): Promise<void> 
     const current = deps.current ?? cliVersion();
     const latest = deps.latest !== undefined ? deps.latest : await fetchLatestVersion(deps.fetchImpl ?? fetch);
     writeUpdateCache({ lastCheck: Date.now(), latest: latest ?? null });
-    if (!latest || compareSemver(latest, current) <= 0) return;
+    if (!latest || !isNewer(latest, current)) return;
 
     const confirmImpl = deps.confirmImpl ?? (async (message: string) => {
         const r = await confirm({ message });

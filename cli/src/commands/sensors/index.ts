@@ -51,6 +51,15 @@ export function registerSensorsCommand(program: Command): void {
             try {
                 const result = initSensors({ configure: opts.configure, registryRoot, pack: opts.pack });
                 log.success(`Detected: ${result.detection.pack} (${result.detection.indicators.join(', ') || 'fallback'})`);
+                // Said BEFORE "Wrote .awm/sensors.json": the manifest about to be
+                // reported as written is not the one the detection implied.
+                if (result.unavailablePack) {
+                    log.warn(
+                        `No '${result.unavailablePack}' sensor-pack in the registry — wrote the `
+                        + `'${result.manifest.pack}' pack instead (${Object.keys(result.manifest.sensors).length} sensors). `
+                        + 'Run `awm update`, or add a registry that ships it, then re-run `awm sensors init`.',
+                    );
+                }
                 log.success('Wrote .awm/sensors.json');
                 result.configured.forEach((f: string) => log.info(`  Installed ${f}`));
             } catch (e) {

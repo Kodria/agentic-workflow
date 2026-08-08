@@ -42,8 +42,8 @@ describe('installBundlesFromRegistry', () => {
     });
 
     it('installs all ambient bundles of the given registry root for the agent', () => {
-        const { REGISTRIES_DIR } = require('../../../src/core/registries');
-        const regRoot = path.join(REGISTRIES_DIR, 'team');
+        const { registriesDir } = require('../../../src/core/registries');
+        const regRoot = path.join(registriesDir(), 'team');
         writeBundleRoot(regRoot, 'team-pack', 'team-skill');
         fs.mkdirSync(path.join(tmpHome, '.awm'), { recursive: true });
         fs.writeFileSync(
@@ -62,8 +62,8 @@ describe('installBundlesFromRegistry', () => {
     });
 
     it('returns empty when the registry has no bundles', () => {
-        const { REGISTRIES_DIR } = require('../../../src/core/registries');
-        const regRoot = path.join(REGISTRIES_DIR, 'empty');
+        const { registriesDir } = require('../../../src/core/registries');
+        const regRoot = path.join(registriesDir(), 'empty');
         fs.mkdirSync(path.join(regRoot, 'skills', 's'), { recursive: true });
         fs.writeFileSync(path.join(regRoot, 'skills', 's', 'SKILL.md'), `---\nname: s\ndescription: d\n---\n`);
         fs.mkdirSync(path.join(tmpHome, '.awm'), { recursive: true });
@@ -77,8 +77,8 @@ describe('installBundlesFromRegistry', () => {
     });
 
     it('installs only the named bundles when a list is given', () => {
-        const { REGISTRIES_DIR } = require('../../../src/core/registries');
-        const regRoot = path.join(REGISTRIES_DIR, 'team');
+        const { registriesDir } = require('../../../src/core/registries');
+        const regRoot = path.join(registriesDir(), 'team');
         writeBundleRoot(regRoot, 'wanted', 'skill-w');
         // second bundle in same catalog
         fs.mkdirSync(path.join(regRoot, 'bundles', 'unwanted'), { recursive: true });

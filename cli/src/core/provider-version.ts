@@ -29,21 +29,27 @@ export function assertProviderSupported(
         }).toString();
     } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
+        // `provider.label` y `versionCommand`, no "Codex" literal. Esta funcion es
+        // generica sobre AgentTarget desde siempre, pero cada mensaje y el patron de
+        // parseo nombraban al unico provider que hoy declara `versionCommand` — el
+        // segundo en declararlo habria reportado "Codex no esta instalado" al no
+        // encontrar SU binario, y habria fallado a parsear una salida perfectamente
+        // valida contra el formato de otro programa.
         if (code === 'ENOENT') {
             throw new Error(
-                'Codex is not installed or not available on PATH. ' +
-                'Install the current stable @openai/codex release, then re-run.',
+                `${provider.label} is not installed or not available on PATH ` +
+                `(tried \`${provider.versionCommand.command}\`). Install it, then re-run.`,
             );
         }
-        throw new Error(`Codex version probe failed: ${(error as Error).message}`);
+        throw new Error(`${provider.label} version probe failed: ${(error as Error).message}`);
     }
 
-    const match = output.trim().match(/^codex-cli (\d+\.\d+\.\d+)$/);
+    const match = output.trim().match(provider.versionCommand.versionPattern);
     if (!match) {
-        throw new Error(`could not parse Codex version from: ${output.trim()}`);
+        throw new Error(`could not parse ${provider.label} version from: ${output.trim()}`);
     }
     if (compareSemver(match[1], provider.minimumVersion) < 0) {
-        throw new Error(`requires Codex >= ${provider.minimumVersion}; found ${match[1]}`);
+        throw new Error(`requires ${provider.label} >= ${provider.minimumVersion}; found ${match[1]}`);
     }
 
     return { provider: agent, version: match[1] };

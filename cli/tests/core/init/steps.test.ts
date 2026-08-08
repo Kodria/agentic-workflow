@@ -23,7 +23,7 @@ function bundle(name: string, scope: BundleDefinition['scope'], skills: string[]
 function machine(): HarnessContext['machine'] {
     return {
         registryCache: { present: true, gitState: 'clean' },
-        hook: { present: true, degraded: false },
+        hook: { present: true, degraded: false, applicable: true },
         devCore: { present: true, brokenLinks: [] },
         ambient: { wanted: [], installed: [] },
         contextInjection: [],
@@ -36,6 +36,7 @@ function project(over: Partial<ProjectFacts> = {}): ProjectFacts {
         root: '/repo',
         profile: { present: true, extensions: [] },
         activeBundles: { expected: [], linked: [], broken: [] },
+        orphanLinks: { repairable: [], dead: [] },
         sensors: { present: true },
         constitution: { present: true },
         context: { present: true, file: 'CLAUDE.md' },
@@ -106,13 +107,13 @@ describe('stepHook / stepDevCore / stepAmbient', () => {
     });
     it('hook installs when absent', () => {
         const a = spies();
-        const m = machine(); m.hook = { present: false };
+        const m = machine(); m.hook = { present: false, applicable: true };
         expect(stepHook(deps({ machine: m, project: null }, a)).action).toBe('applied');
         expect(a.installHook).toHaveBeenCalled();
     });
     it('hook reinstalls when present but degraded', () => {
         const a = spies();
-        const m = machine(); m.hook = { present: true, degraded: true };
+        const m = machine(); m.hook = { present: true, degraded: true, applicable: true };
         expect(stepHook(deps({ machine: m, project: null }, a)).action).toBe('applied');
         expect(a.installHook).toHaveBeenCalled();
     });
@@ -126,7 +127,7 @@ describe('stepHook / stepDevCore / stepAmbient', () => {
     // applicable" rather than a failure.
     it('hook skips (not calls installHook) for an agent with no hook mechanism', () => {
         const a = spies();
-        const m = machine(); m.hook = { present: false };
+        const m = machine(); m.hook = { present: false, applicable: true };
         const r = stepHook(deps({ machine: m, project: null }, a, { agent: 'opencode', enabledAgents: ['opencode'] }));
         expect(r.action).toBe('skipped');
         expect(a.installHook).not.toHaveBeenCalled();
@@ -563,7 +564,7 @@ describe('stepContextInjection', () => {
     it('installs Copilot context at local scope with projectRoot (no global AGENTS.md-equivalent)', () => {
         const a = spies();
         a.contextStatus.mockReturnValue('absent');
-        const r = stepContextInjection(deps({ machine: machine(), project: null }, a, { agent: 'copilot', cwd: '/repo' }));
+        const r = stepContextInjection(deps({ machine: machine(), project: project({ root: '/repo' }) }, a, { agent: 'copilot', cwd: '/repo' }));
         expect(r.action).toBe('applied');
         expect(a.installContext).toHaveBeenCalledWith(
             expect.objectContaining({ agent: 'copilot', scope: 'local', projectRoot: '/repo' }),
@@ -590,6 +591,11 @@ describe('stepContextInjection', () => {
     });
 
     it('falls back to raw cwd when no project was discovered', () => {
+        // Legitimate: Copilot has no channel other than a project AGENTS.md, and a
+        // directory without .git/package.json is still where the user is working. What
+        // made this a rollback hole was mutation-targets.ts enumerating that path only
+        // inside `if (projectRoot)` — fixed there; see
+        // tests/core/init/context-injection-no-project.test.ts.
         const a = spies();
         a.contextStatus.mockReturnValue('absent');
         const r = stepContextInjection(deps(

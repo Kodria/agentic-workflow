@@ -69,9 +69,9 @@ describe('copilot provider — isolated home E2E (devCore global-scope guard reg
         fs.writeFileSync(path.join(root, 'hooks/run-hook.cmd'), '#!/bin/sh\nexec sh "$1"\n', { mode: 0o755 });
 
         fs.mkdirSync(path.join(root, 'skills/using-awm'), { recursive: true });
-        fs.writeFileSync(path.join(root, 'skills/using-awm/SKILL.md'), '---\nname: using-awm\n---\nMUST invoke skills.');
+        fs.writeFileSync(path.join(root, 'skills/using-awm/SKILL.md'), '---\nname: using-awm\ndescription: Entry point for AWM skills.\n---\nMUST invoke skills.');
         fs.mkdirSync(path.join(root, 'skills/development-process'), { recursive: true });
-        fs.writeFileSync(path.join(root, 'skills/development-process/SKILL.md'), '---\nname: development-process\n---\nOrchestrates the dev lifecycle.');
+        fs.writeFileSync(path.join(root, 'skills/development-process/SKILL.md'), '---\nname: development-process\ndescription: Orchestrates the development lifecycle.\n---\nOrchestrates the dev lifecycle.');
 
         fs.writeFileSync(path.join(root, 'catalog.json'), JSON.stringify({
             version: 1,

@@ -7,7 +7,13 @@ export const AGENT_TARGETS = ['antigravity', 'opencode', 'claude-code', 'codex',
 export type AgentTarget = typeof AGENT_TARGETS[number];
 export type Scope = 'global' | 'local';
 export type ArtifactType = 'skill' | 'workflow' | 'agent';
-export type RendererId = 'link' | 'codex-agent-toml' | 'cursor-mdc' | 'copilot-instructions';
+/** Runtime-enumerable, so the renderer table in `core/renderers/registry.ts` can be
+ *  checked for completeness against it (tests/structural/renderer-table-is-single-source).
+ *  A type-only union cannot be iterated, which is part of why four partial copies of the
+ *  renderer→extension mapping could drift apart unnoticed. */
+export const RENDERER_IDS = ['link', 'codex-agent-toml', 'cursor-mdc', 'copilot-instructions'] as const;
+
+export type RendererId = typeof RENDERER_IDS[number];
 
 
 export function isAgentTarget(value: unknown): value is AgentTarget {
@@ -59,6 +65,12 @@ export type ProviderConfig = {
     versionCommand?: {
         command: string;
         args: string[];
+        /** Patron con UN grupo de captura que extrae la version del stdout del binario.
+         *  Sin esto, `provider-version.ts` traia el formato de Codex horneado
+         *  (`/^codex-cli (\d+\.\d+\.\d+)$/`), asi que el segundo provider que
+         *  declarara un `versionCommand` habria fallado a parsear la salida de un
+         *  binario que respondio perfectamente. */
+        versionPattern: RegExp;
     };
 };
 
@@ -143,7 +155,7 @@ export function providers(): Record<AgentTarget, ProviderConfig> {
         codex: {
             label: 'Codex',
             minimumVersion: '0.145.0',
-            versionCommand: { command: 'codex', args: ['--version'] },
+            versionCommand: { command: 'codex', args: ['--version'], versionPattern: /^codex-cli (\d+\.\d+\.\d+)$/ },
             skill: {
                 global: path.join(home, '.agents/skills'),
                 local: '.agents/skills',
