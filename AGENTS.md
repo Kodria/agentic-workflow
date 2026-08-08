@@ -36,7 +36,7 @@ Esta es la guía de mantenimiento de este repo (el CLI de AWM) — no la funció
 
 - **contentRoot stamp en discovery:** estampar `contentRoot` sobre cada artefacto en el momento del discovery, no en el momento del install/uso. Los consumidores downstream no necesitan saber de qué registry proviene el artefacto — el path absoluto ya los guía al lugar correcto.
 
-- **injected-logger:** cuando una función necesita emitir warnings o mensajes al usuario, recibir el logger como argumento (`fn(log: (msg: string) => void)`) en vez de llamar `console.warn()` directamente. Ventaja: la función es pura (sin side effects de I/O), testeable sin capturar stdout, y reutilizable con cualquier output channel. Patrón: `warnIfUnsupportedPlatform((m) => console.warn(pc.yellow(m)))` en el call-site.
+- **injected-logger:** cuando una función necesita emitir warnings o mensajes al usuario, recibir el logger como argumento (`fn(log: (msg: string) => void)`) en vez de llamar `console.warn()` directamente. Ventaja: la función es pura (sin side effects de I/O), testeable sin capturar stdout, y reutilizable con cualquier output channel. Patrón: `noteWindowsCaveat((m) => console.log(pc.dim(m)))` en el call-site.
 
 - **pure-render-io-split:** al construir un selector/picker interactivo, separar completamente el render puro (`(state, width) → string[]`) del shell I/O (`onData → dispatch → redraw`). El render puro es 100% testeable sin terminal; el shell I/O queda delgado y se aísla con injectable IO. Patrón: `defaultIO = () => ({ input: process.stdin, output: process.stdout })` como función lazy (no en import-time) + seam de default argument en la función pública. Confirmado en `src/ui/picker-view.ts` + `picker.ts`.
 
