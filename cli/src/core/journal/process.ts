@@ -208,18 +208,24 @@ export function spawnStructured(argv: string[], cwd: string, nonce: string, extr
     const [exe, ...args] = argv;
     const child = spawn(exe, args, {
         cwd, shell: false,
-        // `detached: true` en TODAS las plataformas, incluido win32 (revertido
-        // el especial-caso anterior que ponia `false` ahi). La doc oficial de
-        // Node es explicita: en Windows, `detached: true` es precisamente lo
-        // que permite al hijo seguir vivo tras la muerte del padre — no es
-        // "solo" el grupo de consola de CTRL+BREAK como asumia el comentario
-        // anterior. Confirmado por regresion en CI real windows-latest: el
-        // wrapper externo (spawneado via esta funcion desde
-        // defaultWrapperSpawner) dejaba de escribir su resultado cuando el
-        // supervisor que lo lanzo era SIGKILLeado — exactamente el sintoma de
-        // NO sobrevivir a la muerte del padre (R1.8 exige lo contrario: "el
-        // wrapper sobrevive incluso si el supervisor muere", runner.ts:26).
-        detached: true,
+        // R6 ronda 4 probo `detached: true` incondicional en win32 (razonando
+        // desde la doc de Node sobre supervivencia post-muerte del padre) y
+        // la ronda 5 lo REVIERTE: la primera corrida real en windows-latest
+        // mostro `refIsAlive(ref)` devolviendo `false` INMEDIATAMENTE despues
+        // de un spawn normal, sin matar nada — el test mas basico del
+        // archivo ('spawnStructured produce ProcessRef con tupla completa').
+        // `captureRefFor` fija `processGroup: pid` por convencion en win32
+        // (siempre), asi que ese `false` solo puede venir de
+        // `pidExistsNative` viendo ESRCH real — el proceso hijo aparentaba
+        // no existir casi de inmediato. Evidencia real > lectura de
+        // documentacion: se revierte a `!isWindowsNative()` (el diseño ya
+        // probado, correcto, en 4 rondas previas de CI real). La garantia de
+        // R1.8 ("el wrapper sobrevive al supervisor") queda como gap
+        // ABIERTO en win32 — ver el test skippeado en
+        // tests/commands/watch/e2e-crash.test.ts para el detalle y el
+        // proximo intento debe verificarse contra CI real antes de asumir
+        // que un cambio de `detached` lo resuelve.
+        detached: !isWindowsNative(),
         env: { ...process.env, [NONCE_ENV]: nonce, ...extraEnv },
         // stdio:'ignore' completo (nada de pipes): un pipe destruido/abandonado
         // por el padre puede EPIPE-crashear al hijo si este escribe a su propio

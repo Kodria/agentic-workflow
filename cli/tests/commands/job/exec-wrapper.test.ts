@@ -4,6 +4,12 @@ import os from 'os';
 import { runExecWrapper, claimPath, identityPath, resultPath, replayVerdict, logPath } from '../../../src/commands/job/exec-wrapper';
 import { groupIsGone } from '../../../src/core/journal/process';
 
+// Real subprocess spawn + termination + fsync per test; the jest default of
+// 5000ms proved too tight on a loaded windows-latest CI runner (regression:
+// real CI, "Exceeded timeout of 5000 ms"). Same class of issue already fixed
+// in registries-sync.test.ts this round.
+jest.setTimeout(20000);
+
 describe('exec-wrapper', () => {
     let dir: string;
     beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-wrap-')); });
