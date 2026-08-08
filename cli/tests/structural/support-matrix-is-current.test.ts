@@ -12,7 +12,7 @@
 // "linda": verifica que sea LA MISMA que produce el codigo hoy.
 import fs from 'fs';
 import {
-    BEGIN_MARKER, END_MARKER, DOC_PATH, renderProviderTables, spliceGenerated,
+    BEGIN_MARKER, END_MARKER, DOC_PATH, homeRelative, renderProviderTables, spliceGenerated,
 } from '../../scripts/support-matrix';
 
 
@@ -59,6 +59,26 @@ describe('docs/support-matrix.md refleja el codigo', () => {
             if (saved === undefined) delete process.env.HOME; else process.env.HOME = saved;
             jest.resetModules();
         }
+    });
+
+    // La abreviacion a `~` se probaba solo end-to-end, y en Linux eso no distingue entre
+    // "normaliza bien" y "los separadores ya coincidian". La CI de Windows encontro que no
+    // normalizaba: comparaba el prefijo ANTES de convertir separadores, asi que alla no
+    // abreviaba nada y la tabla regenerada no era la comiteada. Probar la unidad con las
+    // dos formas de ruta lo detecta en cualquier sistema, sin fingir la plataforma.
+    describe('homeRelative normaliza antes de comparar', () => {
+        it.each([
+            ['posix',      '/home/x',        '/home/x/.claude/skills',            '~/.claude/skills'],
+            ['win32',      'C:\\Users\\x',    'C:\\Users\\x\\.claude\\skills',     '~/.claude/skills'],
+            ['mixto',      '/home/x',        '\\home\\x\\.claude\\skills',         '~/.claude/skills'],
+            ['sin prefijo', '/home/x',       '/opt/otro/skills',                  '/opt/otro/skills'],
+        ])('%s', (_n, home, input, expected) => {
+            expect(homeRelative(input, home)).toBe(expected);
+        });
+
+        it('nunca deja un separador de Windows en la salida', () => {
+            expect(homeRelative('C:\\Users\\x\\.codex\\agents', 'C:\\Users\\x')).not.toContain('\\');
+        });
     });
 
     it('marca como no soportado, no como ausente, el scope que un provider no tiene', () => {

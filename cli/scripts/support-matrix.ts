@@ -17,11 +17,24 @@ import { homeDir } from '../src/core/paths';
 export const BEGIN_MARKER = '<!-- BEGIN GENERATED: provider-capabilities -->';
 export const END_MARKER = '<!-- END GENERATED: provider-capabilities -->';
 
+/** Cualquier separador → `/`. Las rutas que produce `providers()` traen el separador
+ *  nativo, y el `home` puede traer otro (en win32, un `HOME` de entorno con `/` frente a
+ *  un `path.join` que devuelve `\`). Normalizar los dos lados ANTES de compararlos es lo
+ *  unico que hace la comparacion valida. */
+const toPosix = (p: string): string => p.split(path.sep).join('/').split('\\').join('/');
+
 /** Rutas absolutas → `~/…`, con separadores POSIX, para que la tabla sea la misma en
- *  cualquier maquina y en cualquier sistema operativo que la regenere. */
-function homeRelative(p: string, home: string): string {
-    const rel = p.startsWith(home) ? `~${p.slice(home.length)}` : p;
-    return rel.split(path.sep).join('/');
+ *  cualquier maquina y en cualquier sistema operativo que la regenere.
+ *
+ *  La version anterior comparaba con `startsWith` ANTES de normalizar, asi que en Windows
+ *  —donde `path.join` devuelve `\` y el home podia venir con `/`— el prefijo no
+ *  coincidia nunca, no abreviaba nada, y la tabla regenerada ahi no era la misma que la
+ *  comiteada. Es decir: el documento prometia ser independiente de la maquina y no lo era.
+ *  Lo encontro la CI de Windows, no el desarrollo en Linux. */
+export function homeRelative(p: string, home: string): string {
+    const target = toPosix(p);
+    const prefix = toPosix(home);
+    return target.startsWith(prefix) ? `~${target.slice(prefix.length)}` : target;
 }
 
 function cell(value: string | null, absent: string, home: string): string {
