@@ -42,6 +42,15 @@ describe('truncate', () => {
   it('returns empty for non-positive width', () => {
     expect(truncate('abc', 0)).toBe('');
   });
+  it('colapsa saltos de linea a un espacio — la celda es de UNA linea', () => {
+    // Regresion: `displayWidth` cuenta `\n` como ancho 1, asi que una string
+    // multilinea corta pasaba el chequeo y se emitia cruda, partiendo la fila
+    // de `awm list` y desalineando todo lo siguiente. Alcanzable desde que el
+    // lector de frontmatter resuelve block scalars literales (`|`).
+    expect(truncate('linea uno\nlinea dos', 80)).toBe('linea uno linea dos');
+    expect(truncate('a\r\n  b', 80)).toBe('a b');
+    expect(truncate('linea uno\nlinea dos', 12)).toBe('linea uno l…');
+  });
 });
 
 describe('wrap', () => {

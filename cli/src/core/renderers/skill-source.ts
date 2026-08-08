@@ -7,7 +7,7 @@
 // link. Reuses discovery.ts's `matchFrontmatterBlock` (already the single
 // source of truth for locating the frontmatter block elsewhere in this
 // codebase) rather than writing a second frontmatter parser.
-import { matchFrontmatterBlock, readFrontmatterDescription } from '../discovery';
+import { matchFrontmatterBlock, readFrontmatterDescription } from '../frontmatter';
 
 export type SkillSource = {
     description: string;

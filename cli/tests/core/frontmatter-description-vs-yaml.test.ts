@@ -57,6 +57,27 @@ const CASES: Array<[name: string, frontmatter: string]> = [
     ['plain con hash pegado (NO es comentario)', 'description: usar C# y F#'],
     ['plain multilinea (se pliega como folded)', 'description: primera\n  segunda\n  tercera'],
     ['quoted con hash adentro (literal)', 'description: "tiene # adentro"'],
+    // Segunda tanda de revision adversarial: espacios, blancos consecutivos y
+    // escalares entrecomillados que cierran en una linea posterior.
+    ['blancos consecutivos en folded', 'description: >-\n  a\n\n\n  b'],
+    ['espacios finales dentro de un folded', 'description: >-\n  a   \n  b'],
+    ['linea solo-espacios dentro de un folded', 'description: >-\n  a\n   \n  b'],
+    ['double-quoted multilinea', 'description: "hola\n  mundo"'],
+    ['single-quoted multilinea', "description: 'hola\n  mundo'"],
+    ['double-quoted con comentario final', 'description: "x" # comentario'],
+    ['single-quoted con comentario final', "description: 'y' # comentario"],
+    ['single-quoted con apostrofe y comentario', "description: 'it''s aqui' # nota"],
+];
+
+/** Formas que YAML RECHAZA: no hay valor correcto que devolver, y devolver el
+ *  indicador crudo como si fuera la descripcion seria peor que no devolver
+ *  nada (se publicaria en el artefacto). El contrato aca es '' — que hace
+ *  fallar fuerte a parseSkillSource y claudeAiTransform. */
+const INVALID_CASES: Array<[name: string, frontmatter: string]> = [
+    ['indicador con indent 0', 'description: >0\n  a'],
+    ['indicador con indent de 2 digitos', 'description: >12\n  a'],
+    ['indicador con basura pegada', 'description: >-basura\n  a'],
+    ['indicador con comentario sin espacio', 'description: >-#c\n  a'],
 ];
 
 describe('readFrontmatterDescription coincide con un parser YAML real (js-yaml)', () => {
@@ -67,6 +88,13 @@ describe('readFrontmatterDescription coincide con un parser YAML real (js-yaml)'
         expect(typeof parsed.description).toBe('string');
         const expected = (parsed.description as string).trim();
         expect(readFrontmatterDescription(frontmatter)).toBe(expected);
+    });
+
+    it.each(INVALID_CASES)('%s: YAML lo rechaza, nosotros devolvemos vacio (nunca el indicador crudo)', (_name, frontmatter) => {
+        // Guard del fixture: si js-yaml LO ACEPTARA, el caso esta mal clasificado
+        // y este test seria vacuo — que falle fuerte.
+        expect(() => yaml.load(frontmatter)).toThrow();
+        expect(readFrontmatterDescription(frontmatter)).toBe('');
     });
 
     it('resuelve el SKILL.md real del registry igual que js-yaml (extract-design-md, el caso que origino el bug)', () => {

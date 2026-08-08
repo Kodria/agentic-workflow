@@ -1,4 +1,4 @@
-import { readFrontmatterDescription, isBlockScalarHeader } from '../discovery';
+import { readFrontmatterDescription, isBlockScalarHeader } from '../frontmatter';
 
 export type CanonicalAgent = {
     name: string;
@@ -19,14 +19,24 @@ export function parseCanonicalAgent(source: string): CanonicalAgent {
     // resuelta y recien despues explotaba el install — dos caminos leyendo el
     // MISMO archivo con reglas distintas.
     const lines = match[1].split(/\r?\n/);
-    let inBlock = false;
+    let sawKey = false;
     for (const line of lines) {
-        if (inBlock && (line.trim() === '' || /^\s/.test(line))) continue;   // contenido del bloque
-        inBlock = false;
+        // Toda linea INDENTADA (o en blanco) es continuacion del valor de la
+        // clave anterior, no una clave nueva: asi se ven tanto el contenido de
+        // un block scalar como el de un escalar plano multilinea, y ambos son
+        // YAML valido. El primer fix de esto solo contemplo el block scalar,
+        // asi que `description: primera\n  continuacion` seguia lanzando
+        // "invalid canonical agent frontmatter line" y rompiendo
+        // `awm add -a codex` — mientras discovery, leyendo el MISMO archivo con
+        // la funcion compartida, mostraba la descripcion correcta en el picker.
+        // Dos caminos sobre el mismo archivo o se arreglan juntos o divergen de
+        // una forma mas confusa que el bug original.
+        if (sawKey && (line.trim() === '' || /^[ \t]/.test(line))) continue;
         const field = line.match(/^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/);
         if (!field) throw new Error(`invalid canonical agent frontmatter line: ${line}`);
         if (fields.has(field[1])) throw new Error(`duplicate canonical agent frontmatter key: ${field[1]}`);
-        if (isBlockScalarHeader(field[2])) { inBlock = true; fields.set(field[1], ''); continue; }
+        sawKey = true;
+        if (isBlockScalarHeader(field[2])) { fields.set(field[1], ''); continue; }
         fields.set(field[1], field[2].replace(/^(['"])(.*)\1$/, '$2').trim());
     }
     const name = fields.get('name') ?? '';

@@ -71,10 +71,20 @@ it('acepta una description en block scalar y la resuelve (regresion: rompia awm 
     });
 });
 
-it('sigue rechazando una linea invalida que NO pertenece a un block scalar', () => {
-    // El fix no debe aflojar la validacion estricta: sin un indicador de bloque
-    // abierto, una linea indentada suelta sigue siendo frontmatter malformado.
+it('acepta un escalar plano multilinea y lo pliega (js-yaml lee exactamente esto)', () => {
+    // Ojo: una version previa de este test exigia un throw aca. Estaba mal —
+    // `description: x` seguido de una linea indentada es un escalar plano
+    // multilinea, YAML perfectamente valido, y js-yaml lo lee como
+    // "x suelta e indentada". Asertar el throw codificaba una divergencia con
+    // YAML, no un contrato.
     const source = '---\nname: ok\ndescription: x\n  suelta e indentada\n---\nbody';
+    expect(parseCanonicalAgent(source).description).toBe('x suelta e indentada');
+});
+
+it('sigue rechazando una linea que no es ni clave ni continuacion indentada', () => {
+    // El fix no afloja la validacion estricta: una linea en columna 0 que no es
+    // `clave: valor` sigue siendo frontmatter malformado.
+    const source = '---\nname: ok\ndescription: x\nno soy un campo\n---\nbody';
     expect(() => parseCanonicalAgent(source)).toThrow('invalid canonical agent frontmatter line');
 });
 
