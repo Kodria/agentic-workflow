@@ -23,7 +23,7 @@ function bundle(name: string, scope: BundleDefinition['scope'], skills: string[]
 function machine(): HarnessContext['machine'] {
     return {
         registryCache: { present: true, gitState: 'clean' },
-        hook: { present: true, degraded: false },
+        hook: { present: true, degraded: false, applicable: true },
         devCore: { present: true, brokenLinks: [] },
         ambient: { wanted: [], installed: [] },
         contextInjection: [],
@@ -106,13 +106,13 @@ describe('stepHook / stepDevCore / stepAmbient', () => {
     });
     it('hook installs when absent', () => {
         const a = spies();
-        const m = machine(); m.hook = { present: false };
+        const m = machine(); m.hook = { present: false, applicable: true };
         expect(stepHook(deps({ machine: m, project: null }, a)).action).toBe('applied');
         expect(a.installHook).toHaveBeenCalled();
     });
     it('hook reinstalls when present but degraded', () => {
         const a = spies();
-        const m = machine(); m.hook = { present: true, degraded: true };
+        const m = machine(); m.hook = { present: true, degraded: true, applicable: true };
         expect(stepHook(deps({ machine: m, project: null }, a)).action).toBe('applied');
         expect(a.installHook).toHaveBeenCalled();
     });
@@ -126,7 +126,7 @@ describe('stepHook / stepDevCore / stepAmbient', () => {
     // applicable" rather than a failure.
     it('hook skips (not calls installHook) for an agent with no hook mechanism', () => {
         const a = spies();
-        const m = machine(); m.hook = { present: false };
+        const m = machine(); m.hook = { present: false, applicable: true };
         const r = stepHook(deps({ machine: m, project: null }, a, { agent: 'opencode', enabledAgents: ['opencode'] }));
         expect(r.action).toBe('skipped');
         expect(a.installHook).not.toHaveBeenCalled();

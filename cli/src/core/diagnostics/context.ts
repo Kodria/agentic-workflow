@@ -3,7 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { HarnessContext, MachineFacts, ProjectFacts, GitState } from './types';
-import { AGENT_TARGETS, AgentTarget, providerFor } from '../../providers';
+import { AGENT_TARGETS, AgentTarget, RendererId, providerFor } from '../../providers';
+import { renderedFilename } from '../renderers/registry';
 import { capabilityRoot, listRegistries, contentRoots } from '../registries';
 import { InjectionOrchestrator } from '../context/orchestrator';
 import { InjectionState } from '../context/types';
@@ -23,13 +24,27 @@ function linkState(dir: string, skill: string): 'present' | 'broken' | 'absent' 
     return 'present'; // un dir/archivo real también cuenta como presente
 }
 
-function classifyLinks(skillNames: string[], dir: string): { linked: string[]; broken: string[] } {
+/** Clasifica artefactos por su presencia en disco.
+ *
+ *  `renderer` NO es opcional a proposito. El escritor (`physicalTarget`) estampa
+ *  la extension del renderer sobre el nombre — `using-awm.mdc`,
+ *  `using-awm.instructions.md` — y este lector buscaba el nombre pelado
+ *  (`using-awm`), asi que para Cursor y Copilot NADA figuraba nunca como
+ *  instalado: `awm init` reinstalaba el baseline completo en cada corrida (2
+ *  directorios de backup sin podar por corrida) y `awm doctor` mostraba un rojo
+ *  permanente cuyo remedio no podia satisfacerlo. Exigir el renderer obliga a
+ *  cada caller a declarar de que artefacto habla, y `renderedFilename` es la
+ *  misma funcion que usa el escritor — no pueden volver a discrepar.
+ *
+ *  Los nombres devueltos son los LOGICOS (los de entrada), no los fisicos: los
+ *  consumidores comparan contra listas de nombres de bundle. */
+function classifyLinks(names: string[], dir: string, renderer: RendererId): { linked: string[]; broken: string[] } {
     const linked: string[] = [];
     const broken: string[] = [];
-    for (const s of skillNames) {
-        const st = linkState(dir, s);
-        if (st === 'present') linked.push(s);
-        else if (st === 'broken') broken.push(s);
+    for (const name of names) {
+        const st = linkState(dir, renderedFilename(name, renderer));
+        if (st === 'present') linked.push(name);
+        else if (st === 'broken') broken.push(name);
     }
     return { linked, broken };
 }
@@ -92,11 +107,17 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
     // caught while building this task's real end-to-end init test).
     let hookPresent = false;
     let hookDegraded = false;
-    try {
-        const hs = computeHookStatus(agent);
-        hookPresent = hs.checks.settingsEntry.ok;
-        hookDegraded = hs.overall === 'DEGRADED';
-    } catch { /* sin soporte de hooks → ausente */ }
+    // La aplicabilidad se computa DONDE el provider esta en alcance, no se
+    // infiere de que `computeHookStatus` haya tirado (un throw puede ser "no
+    // soporta hooks" o un error real, y confundirlos fue el bug).
+    const hookApplicable = providerFor(agent).hooks !== undefined;
+    if (hookApplicable) {
+        try {
+            const hs = computeHookStatus(agent);
+            hookPresent = hs.checks.settingsEntry.ok;
+            hookDegraded = hs.overall === 'DEGRADED';
+        } catch { /* soporta hooks pero no se pudo leer el estado → ausente */ }
+    }
 
     // devCore (bundle baseline) — skillsDir is null only for providers with no global skill
     // discovery mechanism (today: Copilot); for those, there is no global-scope devCore
@@ -120,7 +141,7 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
             // ENTIRE `awm init -a copilot` transaction, 100% of the time.
             devCorePresent = true;
         } else {
-            const { linked, broken } = classifyLinks(skillNames, skillsDir);
+            const { linked, broken } = classifyLinks(skillNames, skillsDir, providerFor(agent).skill.renderer);
             const absent = skillNames.filter((s) => !linked.includes(s) && !broken.includes(s));
             devCorePresent = skillNames.length > 0 && (linked.length + broken.length) > 0;
             brokenLinks = [...broken, ...absent];
@@ -140,11 +161,22 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
         if (agentConfig && agentConfig.global !== null) {
             const agentNames = resolveBundleAgents(baseline.name, bundles);
             if (agentNames.length > 0) {
-                const filenames = agentNames.map((n) =>
-                    agentConfig.renderer === 'codex-agent-toml' ? `${n}.toml` : n);
-                const { linked: agentLinked, broken: agentBroken } = classifyLinks(filenames, agentConfig.global);
+                // El installName real de un artefacto `agent` es `<n>.md`
+                // (bundle-install.ts), y el renderer decide la extension final:
+                // `.toml` para codex, `.md` tal cual para los renderers `link`.
+                // El ternario anterior devolvia `n` pelado para `link`, asi que
+                // `machine.devCore` quedaba permanentemente roto para
+                // claude-code — el provider por DEFECTO — contra el registry real.
+                const filenames = agentNames.map((n) => `${n}.md`);
+                const { linked: agentLinked, broken: agentBroken } = classifyLinks(filenames, agentConfig.global, agentConfig.renderer);
                 const agentAbsent = filenames.filter((f) => !agentLinked.includes(f) && !agentBroken.includes(f));
-                brokenLinks = [...brokenLinks, ...agentBroken, ...agentAbsent];
+                // `brokenLinks` es de diagnostico: se le muestra al usuario para
+                // que vaya a buscar ese archivo. Por eso se reportan los nombres
+                // FISICOS (`development-process.toml`), aunque la clasificacion
+                // trabaje con los logicos — que es lo que necesitan las
+                // comparaciones por cantidad de arriba.
+                const physical = (n: string) => renderedFilename(n, agentConfig.renderer);
+                brokenLinks = [...brokenLinks, ...agentBroken.map(physical), ...agentAbsent.map(physical)];
             }
         }
     }
@@ -170,13 +202,13 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
     const installed = skillsDir === null ? [...wanted] : wanted.filter((name) => {
         const skillNames = resolveBundleSkills(name, bundles);
         if (skillNames.length === 0) return false;
-        const { linked } = classifyLinks(skillNames, skillsDir);
+        const { linked } = classifyLinks(skillNames, skillsDir, providerFor(agent).skill.renderer);
         return linked.length === skillNames.length;
     });
 
     return {
         registryCache: { present: cachePresent, gitState },
-        hook: { present: hookPresent, degraded: hookDegraded },
+        hook: { present: hookPresent, degraded: hookDegraded, applicable: hookApplicable },
         devCore: { present: devCorePresent, brokenLinks },
         ambient: { wanted, installed },
         contextInjection: gatherContextInjection(),
@@ -195,7 +227,7 @@ function gatherProject(root: string, bundles: BundleDefinition[], agent: AgentTa
     for (const ext of profile.extensions) {
         for (const s of resolveBundleSkills(ext, bundles)) if (!expected.includes(s)) expected.push(s);
     }
-    const { linked, broken } = classifyLinks(expected, localSkillsDir);
+    const { linked, broken } = classifyLinks(expected, localSkillsDir, providerFor(agent).skill.renderer);
 
     let context: ProjectFacts['context'] = { present: false };
     if (fs.existsSync(path.join(root, 'CLAUDE.md'))) context = { present: true, file: 'CLAUDE.md' };

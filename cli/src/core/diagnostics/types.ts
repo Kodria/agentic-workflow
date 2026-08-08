@@ -23,7 +23,14 @@ export interface CheckResult {
 
 export interface MachineFacts {
     registryCache: { present: boolean; gitState?: GitState };
-    hook: { present: boolean; degraded?: boolean };
+    /** `applicable: false` = este provider NO tiene mecanismo de hooks
+     *  (opencode, antigravity, cursor, copilot). Distinto de "lo tiene y falta":
+     *  sin esta distincion, el check emitia `missing` para los 4, con un remedio
+     *  (`awm init`) que jamas podia satisfacerlo — y `awm init` salia con exit 1
+     *  en una corrida donde no fallo nada, abortando cualquier script bajo
+     *  `set -e`. El paso de init y el reporte de doctor ya distinguian bien; el
+     *  check era el tercer lector, y el unico equivocado. */
+    hook: { present: boolean; degraded?: boolean; applicable: boolean };
     devCore: { present: boolean; brokenLinks: string[] };
     ambient: { wanted: string[]; installed: string[] };
     contextInjection: { agent: AgentTarget; state: InjectionState }[];

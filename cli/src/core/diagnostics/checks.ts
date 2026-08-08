@@ -25,7 +25,14 @@ function machineChecks(m: MachineFacts): CheckResult[] {
     }
 
     // machine.hook
-    if (m.hook.present && !m.hook.degraded) {
+    // Un provider sin mecanismo de hooks no puede "tener el hook instalado":
+    // no se emite fila alguna, igual que ya hacen el paso de init
+    // (init/steps.ts, "no hook mechanism for this agent") y el reporte por
+    // provider (provider-checks.ts, que descarta la fila). Emitir `missing`
+    // aca era lo que ponia `awm init` en exit 1 para 4 de los 6 providers.
+    if (!m.hook.applicable) {
+        // sin fila
+    } else if (m.hook.present && !m.hook.degraded) {
         out.push({ id: 'machine.hook', level: 'machine', label: 'hook SessionStart', status: 'ok', remedy: none });
     } else if (m.hook.present) {
         out.push({ id: 'machine.hook', level: 'machine', label: 'hook SessionStart', status: 'warn',

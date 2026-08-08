@@ -6,7 +6,7 @@ import { InjectionState } from '../../../src/core/context/types';
 function healthyMachine(): HarnessContext['machine'] {
     return {
         registryCache: { present: true, gitState: 'clean' },
-        hook: { present: true, degraded: false },
+        hook: { present: true, degraded: false, applicable: true },
         devCore: { present: true, brokenLinks: [] },
         ambient: { wanted: [], installed: [] },
         contextInjection: [],
@@ -89,12 +89,12 @@ describe('runChecks — machine.cli', () => {
 
 describe('runChecks — machine.hook / devCore', () => {
     it('hook degraded → warn', () => {
-        const m = healthyMachine(); m.hook = { present: true, degraded: true };
+        const m = healthyMachine(); m.hook = { present: true, degraded: true, applicable: true };
         expect(byId({ machine: m, project: null }, 'machine.hook').status).toBe('warn');
     });
 
     it('hook absent → missing + awm init', () => {
-        const m = healthyMachine(); m.hook = { present: false };
+        const m = healthyMachine(); m.hook = { present: false, applicable: true };
         const c = byId({ machine: m, project: null }, 'machine.hook');
         expect(c.status).toBe('missing');
         expect(c.remedy).toEqual({ kind: 'command', value: 'awm init' });
@@ -176,7 +176,7 @@ describe('machineChecks — global skill integrity', () => {
         return {
             machine: {
                 registryCache: { present: true, gitState: 'clean' },
-                hook: { present: true, degraded: false },
+                hook: { present: true, degraded: false, applicable: true },
                 devCore: { present: true, brokenLinks: [] },
                 ambient: { wanted: [], installed: [] },
                 contextInjection: [],

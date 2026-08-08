@@ -58,7 +58,7 @@ describe('stepCache — registry sync error results', () => {
         const ctx: HarnessContext = {
             machine: {
                 registryCache: { present: false },
-                hook: { present: true, degraded: false },
+                hook: { present: true, degraded: false, applicable: true },
                 devCore: { present: true, brokenLinks: [] },
                 ambient: { wanted: [], installed: [] },
                 contextInjection: [],
