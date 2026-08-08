@@ -474,4 +474,25 @@ describe('preflight', () => {
         expect(out).toContain('unattended');
         expect(out).toContain('awm sensors init');
     });
+
+    it('pads the id column to the widest id actually present, not a hardcoded width', () => {
+        // Regression: a literal `.padEnd(9)` silently misaligned once `sensors-baseline`
+        // (16 chars) was added as a check id — every detail column shifted left of where
+        // shorter ids' details landed. The width must be derived from the report itself.
+        // Marker prefixes (@@) pin exactly where each detail column starts, independent
+        // of the detail text's own content.
+        const out = formatReport({
+            status: 'ready',
+            checks: [
+                { id: 'host', ok: true, detail: '@@marker' },
+                { id: 'sensors-baseline', ok: true, detail: '@@marker' },
+            ],
+        });
+        const lines = out.split('\n').filter(l => l.includes('@@marker'));
+        expect(lines).toHaveLength(2);
+        expect(lines[0].indexOf('@@marker')).toBe(lines[1].indexOf('@@marker'));
+        // And the column is genuinely sized to the longest id (16, 'sensors-baseline'),
+        // not the old hardcoded 9 — the shorter id's row must carry visible padding.
+        expect(lines[0]).toMatch(/host {12,}@@marker/);
+    });
 });
