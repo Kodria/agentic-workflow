@@ -1,3 +1,16 @@
+## v3.13.1 - 2026-08-08
+
+### Fixes
+- **windows:** revert spawnStructured detached hypothesis, scope SIGKILL-survival test to POSIX (R6 round 5)
+- **windows:** spawnStructured survives parent death on win32, degrade activitySnapshot, harden remaining gaps (R6 round 4)
+- **windows:** revert refIsAlive win32 to proven pid+group check, fix 3 remaining CI gaps (R6 round 3)
+- **tests:** make stub-controller scripts and PATH construction cross-platform (R6)
+- **tests:** correct win32 psArgsDigest expectations + adapter test mock scope
+- **windows:** close remaining R6 CI round-2 gaps (identity check, symlink fallback, misc)
+- **tests:** sweep remaining POSIX mode-bit assertions for Windows (R6)
+- **windows:** resolve remaining real portability bugs found by R6 CI (windows-latest)
+- **ci:** resolve the two dominant Windows/CI test-failure root causes (R6)
+
 ## v3.13.0 - 2026-08-08
 
 ### Features
