@@ -142,15 +142,23 @@ describe('E2E real: crash/restart del supervisor', () => {
         const sup = startSupervisor('claude-code');
         const lockPath = path.join(fs.realpathSync(repo), '.awm', 'journal', 'supervisor.lock');
         await until(() => fs.existsSync(lockPath), 30000, 'lock');
+        // Antes usaba `ps -o args= -p <pid>` para confirmar que el proceso
+        // lanzado era el stub `claude` — pero `ps`, cuando resuelve en el
+        // PATH en win32, es el binario EMULADO de MSYS/Cygwin (Git for
+        // Windows): ciego a procesos nativos spawneados via CreateProcess
+        // (mismo hecho ya establecido y probado repetidas veces en
+        // src/core/journal/process.ts para produccion). Reproducido en CI
+        // real: este `until` colgaba hasta su propio timeout porque `ps`
+        // jamas encontraba el pid nativo. `adapterFor('claude-code')` fija
+        // el binario a lanzar de forma estatica (ver adapter.ts) — no hay
+        // riesgo real de que arranque el binario equivocado — asi que
+        // `refIsAlive` (multiplataforma, ya importada) es suficiente señal
+        // de "el controlador esta arriba".
         await until(() => {
             const s = readState(repo);
             if (s === null) return false;
-            const gen = (s.generations as Array<{ state: string; processRef?: { pid: number } }>).find((g) => g.state === 'active');
-            if (gen?.processRef === undefined) return false;
-            try {
-                const args = execFileSync('ps', ['-o', 'args=', '-p', String(gen.processRef.pid)], { encoding: 'utf8' });
-                return args.includes('claude');
-            } catch { return false; }
+            const gen = (s.generations as Array<{ state: string; processRef?: Parameters<typeof refIsAlive>[0] }>).find((g) => g.state === 'active');
+            return gen?.processRef !== undefined && refIsAlive(gen.processRef);
         }, 30000, 'stub claude lanzado por el adapter');
         const active = (readState(repo)!.generations as Array<{ state: string; processRef?: Parameters<typeof refIsAlive>[0] }>).find((g) => g.state === 'active')!;
         const controllerRef = active.processRef!;

@@ -7,6 +7,35 @@ import { execSync } from 'child_process';
 const GIT = (cwd: string, cmd: string) =>
     execSync(`git -c user.email=t@t.t -c user.name=t -c tag.gpgSign=false ${cmd}`, { cwd, stdio: 'pipe' });
 
+// Real `git clone`/`pull` against local file:// fixtures, several times per
+// test — on windows-latest CI this is measurably slower than on POSIX (NTFS
+// overhead, antivirus scanning of freshly-written objects) and the jest
+// default of 5000ms proved too tight in real CI (regression: real windows-latest
+// run, "Exceeded timeout of 5000 ms"). Matches the pattern already used by
+// other real-subprocess suites in this repo (supervisor-loop.test.ts: 60000,
+// e2e-crash.test.ts: 180000).
+jest.setTimeout(30000);
+
+/** git en win32 puede mantener un handle abierto sobre `.git/objects` por un
+ *  instante despues de que el proceso `git` retorna (buffering/flush del
+ *  filesystem, o un git-index-lock que el SO tarda en soltar) — rmSync
+ *  inmediato entonces produce EBUSY/ENOTEMPTY (regresion: real windows-latest
+ *  CI). Mismo patron ya aplicado en tests/commands/watch/runner.test.ts para
+ *  un problema de fondo identico (escritura async en vuelo vs cleanup
+ *  inmediato). */
+async function rmSyncRetryingBusy(target: string, attempts = 10, delayMs = 100): Promise<void> {
+    for (let i = 0; i < attempts; i++) {
+        try {
+            fs.rmSync(target, { recursive: true, force: true });
+            return;
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if ((code !== 'EBUSY' && code !== 'ENOTEMPTY') || i === attempts - 1) throw error;
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+    }
+}
+
 /** Creates a git source repo with a skill, returns its path (serves as local remote). */
 function makeSourceRepo(base: string, skillName: string): string {
     const dir = path.join(base, `src-${skillName}`);
@@ -37,9 +66,9 @@ describe('syncRegistries (git fixtures locales)', () => {
         jest.resetModules();
     });
 
-    afterEach(() => {
-        fs.rmSync(tmpHome, { recursive: true, force: true });
-        fs.rmSync(tmpWork, { recursive: true, force: true });
+    afterEach(async () => {
+        await rmSyncRetryingBusy(tmpHome);
+        await rmSyncRetryingBusy(tmpWork);
         if (originalHome === undefined) delete process.env.HOME;
         else process.env.HOME = originalHome;
         if (originalAwmHome === undefined) delete process.env.AWM_HOME;

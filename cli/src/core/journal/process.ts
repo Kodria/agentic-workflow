@@ -30,19 +30,28 @@ export const NONCE_ENV = 'AWM_SPAWN_NONCE';
  *  internamente y listo, sin tocar el fd real del proceso actual. */
 export const EXEC_STDIO: ['ignore', 'pipe', 'pipe'] = ['ignore', 'pipe', 'pipe'];
 
+/** timeout explicito (defense-in-depth, mismo patron que win32ProcessInfo):
+ *  sin esto, un `ps`/`pgrep` que cuelga (recurso bloqueado, binario
+ *  emulado con comportamiento anomalo) cuelga TODO el proceso llamante
+ *  indefinidamente — sin excepcion que atrapar, sin manera de fallar a
+ *  favor de "vivo" porque el codigo nunca vuelve a ejecutar. Un timeout
+ *  convierte ese cuelgue en un error normal, que el contrato existente de
+ *  cada caller ya sabe manejar (nunca declarar muerte por un error). */
+const PS_TIMEOUT_MS = 3000;
+
 function psField(pid: number, field: string): string | null {
     try {
-        const out = execFileSync('ps', ['-o', `${field}=`, '-p', String(pid)], { encoding: 'utf8', stdio: EXEC_STDIO }).trim();
+        const out = execFileSync('ps', ['-o', `${field}=`, '-p', String(pid)], { encoding: 'utf8', stdio: EXEC_STDIO, timeout: PS_TIMEOUT_MS }).trim();
         return out.length > 0 ? out : null;
     } catch (error) {
         const status = (error as { status?: number | null }).status;
         if (status === 1) return null;   // ps corrio y confirmo: el pid no existe
-        throw error;   // ps no pudo ejecutarse (ENOENT/permisos/etc): NO es prueba de nada
+        throw error;   // ps no pudo ejecutarse (ENOENT/permisos/timeout/etc): NO es prueba de nada
     }
 }
 
 function sleepSync(seconds: string): void {
-    try { execFileSync('sleep', [seconds], { stdio: EXEC_STDIO }); } catch { /* sin sleep: seguimos */ }
+    try { execFileSync('sleep', [seconds], { stdio: EXEC_STDIO, timeout: PS_TIMEOUT_MS }); } catch { /* sin sleep: seguimos */ }
     // Nota win32: `sleep` no existe nativamente ahi (ver callers via
     // win32ProcessInfo/captureRefFor) — el catch de arriba lo absorbe
     // silenciosamente, asi que en esa plataforma los reintentos que llaman
@@ -199,10 +208,18 @@ export function spawnStructured(argv: string[], cwd: string, nonce: string, extr
     const [exe, ...args] = argv;
     const child = spawn(exe, args, {
         cwd, shell: false,
-        // win32 no tiene grupos de proceso POSIX (setsid) — `detached: true`
-        // ahi solo crea un grupo de consola para CTRL+BREAK, no lo que este
-        // modulo necesita. Mismo patron que sensors/exec.ts::runCommand.
-        detached: !isWindowsNative(),
+        // `detached: true` en TODAS las plataformas, incluido win32 (revertido
+        // el especial-caso anterior que ponia `false` ahi). La doc oficial de
+        // Node es explicita: en Windows, `detached: true` es precisamente lo
+        // que permite al hijo seguir vivo tras la muerte del padre — no es
+        // "solo" el grupo de consola de CTRL+BREAK como asumia el comentario
+        // anterior. Confirmado por regresion en CI real windows-latest: el
+        // wrapper externo (spawneado via esta funcion desde
+        // defaultWrapperSpawner) dejaba de escribir su resultado cuando el
+        // supervisor que lo lanzo era SIGKILLeado — exactamente el sintoma de
+        // NO sobrevivir a la muerte del padre (R1.8 exige lo contrario: "el
+        // wrapper sobrevive incluso si el supervisor muere", runner.ts:26).
+        detached: true,
         env: { ...process.env, [NONCE_ENV]: nonce, ...extraEnv },
         // stdio:'ignore' completo (nada de pipes): un pipe destruido/abandonado
         // por el padre puede EPIPE-crashear al hijo si este escribe a su propio
@@ -322,7 +339,7 @@ export function groupIsGone(pgid: number): boolean {
     }
     let pids: number[];
     try {
-        const out = execFileSync('pgrep', ['-g', String(pgid)], { encoding: 'utf8', stdio: EXEC_STDIO });
+        const out = execFileSync('pgrep', ['-g', String(pgid)], { encoding: 'utf8', stdio: EXEC_STDIO, timeout: PS_TIMEOUT_MS });
         pids = out.split('\n').filter(Boolean).map(Number).filter(Number.isInteger);
     } catch (error) {
         const status = (error as { status?: number | null }).status;
@@ -341,13 +358,29 @@ export function groupIsGone(pgid: number): boolean {
 }
 
 export interface ActivitySnapshot { cpuTime: string; groupSize: number; }
+/** Llamada UNA VEZ POR TICK por el supervisor (ver superviseController en
+ *  commands/watch/supervisor.ts) mientras un controlador este activo — el
+ *  path mas caliente de todo el modulo. En win32, `ps`/`pgrep`, cuando
+ *  resuelven en el PATH, son el binario EMULADO de MSYS/Cygwin (Git for
+ *  Windows) — ciego a procesos nativos (el mismo hecho ya documentado y
+ *  probado para pidExistsNative/refIsAlive/groupIsGone en este archivo).
+ *  A diferencia de esas funciones, ESTA no fue tocada por ninguna ronda
+ *  previa del fix de R6 — seguia intentando `ps`/`pgrep` reales en CADA
+ *  tick, sin timeout, sobre un binario ya sabido no confiable ahi.
+ *  Degradar directo (sin tocar el proceso real) evita acumular latencia de
+ *  subprocess real en un loop de polling de alta frecuencia, con o sin el
+ *  timeout de PS_TIMEOUT_MS de defensa — ese timeout cubre el caso en que
+ *  el binario SI exista mal comportado; esta rama cubre el caso, ya
+ *  confirmado real en este archivo, de que la herramienta simplemente no
+ *  es fuente de verdad en esta plataforma. */
 export function activitySnapshot(ref: ProcessRef): ActivitySnapshot | null {
     if (!refIsAlive(ref)) return null;
+    if (isWindowsNative()) return { cpuTime: 'unknown', groupSize: 1 };
     let cpu = '0';
     try { cpu = psField(ref.pid, 'time') ?? '0'; } catch { cpu = '0'; }
     let groupSize = 1;
     try {
-        groupSize = execFileSync('pgrep', ['-g', String(ref.processGroup)], { encoding: 'utf8', stdio: EXEC_STDIO })
+        groupSize = execFileSync('pgrep', ['-g', String(ref.processGroup)], { encoding: 'utf8', stdio: EXEC_STDIO, timeout: PS_TIMEOUT_MS })
             .split('\n').filter(Boolean).length;
     } catch { groupSize = 1; }
     return { cpuTime: cpu, groupSize };

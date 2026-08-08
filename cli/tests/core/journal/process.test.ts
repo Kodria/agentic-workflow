@@ -203,20 +203,18 @@ describe('process identity (win32, mockeado — sin windows real disponible en e
     });
 
     test('refIsAlive en win32 usa process.kill(pid,0), NUNCA ps/pgrep — reproduce el bug: un ps/pgrep "ciego" que devuelve exit 1 para un pid real y vivo ya no lo declara muerto (R2.1, R4.2b)', () => {
-        // Aca `spawnStructured` corre ANTES de instalar el mock de
-        // execFileSync, y en este entorno (sin powershell.exe real) su
-        // intento win32 de WMI falla por ENOENT genuino => captureRefFor
-        // degrada la ref a startTime/psArgsDigest 'unknown'. Con una ref
-        // degradada, refIsAlive corta ANTES de tocar WMI (ver
-        // src/core/journal/process.ts, paso 3 del comentario de refIsAlive)
-        // — asi que esta asercion ("execFileSync jamas se llama DENTRO de
-        // refIsAlive") sigue siendo exacta pese a que la ronda 2 del fix
-        // agrego un camino WMI: ese camino solo se paga con una identidad
-        // NO degradada (ver el describe 'identidad completa via WMI' mas
-        // abajo para esa cobertura).
+        // Ronda 3 (ver refIsAlive en process.ts): el veredicto win32 ya NO
+        // depende de si la identidad esta degradada o no ('unknown' vs
+        // datos reales de WMI) — refIsAlive ahi SOLO llama a
+        // pidExistsNative (process.kill) + convencion de processGroup,
+        // incondicionalmente. La precondicion original de este test
+        // ("identidad degradada porque no hay powershell.exe real en este
+        // entorno") ya no es ni necesaria ni confiable: en windows-latest
+        // CI real, powershell.exe SI esta disponible y captureRefFor
+        // devuelve un startTime real via WMI — lo cual esta bien, porque
+        // esta rama de refIsAlive nunca lo consulta de todos modos.
         Object.defineProperty(process, 'platform', { value: 'win32' });
         const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 3000)'], process.cwd(), 'n-win32-a');
-        expect(ref.startTime).toBe('unknown');   // precondicion del escenario: identidad degradada
         const cp = require('child_process');
         // Simula EXACTAMENTE el bug real de CI: ps/pgrep "corren" pero
         // devuelven exit 1 (ceguera de MSYS a pids nativos) para un pid que
@@ -228,7 +226,7 @@ describe('process identity (win32, mockeado — sin windows real disponible en e
         });
         try {
             expect(refIsAlive(ref)).toBe(true);          // vivo de verdad: nunca declarado muerto
-            expect(execSpy).not.toHaveBeenCalled();       // refIsAlive en win32 ni siquiera intenta ps/pgrep/WMI con ref degradada
+            expect(execSpy).not.toHaveBeenCalled();       // refIsAlive en win32 ni siquiera intenta ps/pgrep/WMI
         } finally {
             child.kill('SIGKILL');
         }
