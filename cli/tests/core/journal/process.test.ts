@@ -7,7 +7,28 @@ import { isWindowsNative } from '../../../src/core/paths';
 
 describe('process identity', () => {
     test('spawnStructured produce ProcessRef con tupla completa (R2.1, R4.7)', async () => {  // verifies R2.1
-        const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 5000)'], process.cwd(), 'nonce-abc');
+        // Reintento de INSTANCIA completa (no solo de la consulta), a proposito:
+        // esta misma linea fallo 2 veces reales consecutivas en windows-latest
+        // CI, la segunda vez YA con el presupuesto interno de pidExistsNative
+        // ampliado a 10 intentos/100ms (~900ms de espera real dentro de
+        // refIsAlive) — evidencia de que NO es (solo) latencia de visibilidad
+        // de OpenProcess bajo carga: un proceso genuinamente vivo no deberia
+        // seguir siendo invisible tras casi un segundo de reintentos. Apunta
+        // en cambio a que el hijo mismo puede terminar genuinamente muy
+        // temprano en este runner (imagen windows-2025-vs2026, sospecha no
+        // confirmable sin Windows real: AV/Defender interviniendo un `node -e`
+        // recien lanzado bajo carga pesada de CI). pidExistsNative reintenta
+        // la MISMA consulta sobre el MISMO pid — si ese pid ya esta
+        // genuinamente muerto, reintentar la consulta jamas ayuda. Este loop
+        // reintenta el SPAWN entero: un intento NUEVO puede sobrevivir donde
+        // el anterior no lo hizo. Si los 3 intentos mueren temprano, el
+        // ultimo `expect` de abajo sigue fallando fuerte — no enmascara una
+        // regresion real de refIsAlive.
+        let { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 5000)'], process.cwd(), 'nonce-abc');
+        for (let attempt = 1; attempt < 3 && !refIsAlive(ref); attempt++) {
+            try { child.kill('SIGKILL'); } catch { /* ya ausente */ }
+            ({ child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 5000)'], process.cwd(), 'nonce-abc'));
+        }
         expect(ref.pid).toBe(child.pid);
         expect(ref.spawnNonce).toBe('nonce-abc');
         expect(typeof ref.startTime).toBe('string');
@@ -253,6 +274,31 @@ describe('process identity (win32, mockeado — sin windows real disponible en e
         const fakeRef = { pid: 424242, startTime: 'x', spawnNonce: 'n', argvDigest: 'd', processGroup: 424242, psArgsDigest: 'x' };
         expect(refIsAlive(fakeRef)).toBe(true);   // NUNCA declara muerte por el ESRCH transitorio de los primeros 2 intentos
         expect(killSpy).toHaveBeenCalledTimes(3);
+    });
+
+    test('pidExistsNative absorbe una carrera transitoria mas larga que el presupuesto original — arranque en frio del primer spawn del job (regresion #2: misma falla real, mismo test, tras el fix de 3x50ms ya mergeado)', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        let calls = 0;
+        const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => {
+            calls++;
+            // El pid tarda 9 intentos en "aparecer" — mas alla del presupuesto
+            // anterior (3 intentos) pero dentro del ampliado (10 intentos).
+            if (calls < 9) { const err: any = new Error('transient'); err.code = 'ESRCH'; throw err; }
+            return true;
+        });
+        const fakeRef = { pid: 424243, startTime: 'x', spawnNonce: 'n', argvDigest: 'd', processGroup: 424243, psArgsDigest: 'x' };
+        expect(refIsAlive(fakeRef)).toBe(true);
+        expect(killSpy).toHaveBeenCalledTimes(9);
+    });
+
+    test('pidExistsNative declara muerte solo tras agotar el presupuesto ampliado (10 intentos) — un ESRCH sostenido nunca se lee como vivo', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => {
+            const err: any = new Error('gone'); err.code = 'ESRCH'; throw err;
+        });
+        const fakeRef = { pid: 424244, startTime: 'x', spawnNonce: 'n', argvDigest: 'd', processGroup: 424244, psArgsDigest: 'x' };
+        expect(refIsAlive(fakeRef)).toBe(false);
+        expect(killSpy).toHaveBeenCalledTimes(10);
     });
 
     test('refIsAlive en win32 NUNCA declara muerte por un error que no sea ESRCH (ej. EPERM: el pid existe pero sin permiso de senializarlo) (R2.1)', () => {

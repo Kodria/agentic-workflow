@@ -13,6 +13,31 @@ import { execSync } from 'child_process';
 const GIT = (cwd: string, cmd: string) =>
     execSync(`git -c user.email=t@t.t -c user.name=t -c tag.gpgSign=false ${cmd}`, { cwd, stdio: 'pipe' });
 
+// Real `git init`/clone-adjacent work per test, several times over — on
+// windows-latest CI this is measurably slower than on POSIX and the jest
+// default of 5000ms proved too tight in real CI (regression: real
+// windows-latest run, "Exceeded timeout of 5000 ms"). Same class of issue
+// already fixed in registries-sync.test.ts earlier this session — this
+// sibling file has the identical real-git-fixture pattern and was missed.
+jest.setTimeout(30000);
+
+/** git en win32 puede mantener un handle abierto sobre `.git/hooks`/`.git/objects`
+ *  por un instante despues de que el proceso `git` retorna — rmSync inmediato
+ *  entonces produce EBUSY/ENOTEMPTY (regresion: real windows-latest CI). Mismo
+ *  patron ya aplicado en registries-sync.test.ts y runner.test.ts. */
+async function rmSyncRetryingBusy(target: string, attempts = 10, delayMs = 100): Promise<void> {
+    for (let i = 0; i < attempts; i++) {
+        try {
+            fs.rmSync(target, { recursive: true, force: true });
+            return;
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if ((code !== 'EBUSY' && code !== 'ENOTEMPTY') || i === attempts - 1) throw error;
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+    }
+}
+
 function makeRegistryWithManifest(base: string, name: string, manifest: Record<string, unknown>): string {
     const dir = path.join(base, name);
     fs.mkdirSync(dir, { recursive: true });
@@ -39,9 +64,9 @@ describe('verifyMinCliVersions (gate de awm sync / awm update)', () => {
         jest.resetModules();
     });
 
-    afterEach(() => {
-        fs.rmSync(tmpHome, { recursive: true, force: true });
-        fs.rmSync(tmpWork, { recursive: true, force: true });
+    afterEach(async () => {
+        await rmSyncRetryingBusy(tmpHome);
+        await rmSyncRetryingBusy(tmpWork);
         if (originalHome === undefined) delete process.env.HOME;
         else process.env.HOME = originalHome;
         if (originalAwmHome === undefined) delete process.env.AWM_HOME;

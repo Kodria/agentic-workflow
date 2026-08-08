@@ -275,11 +275,28 @@ function sleepMsSync(ms: number): void {
  *  con una pausa breve ANTES de declarar ESRCH definitivo no debilita el
  *  invariante "jamas muerte sin evidencia" — un proceso genuinamente muerto
  *  sigue reportando ESRCH en el reintento; esto solo absorbe el falso
- *  negativo transitorio. Costo maximo: ~150ms, y SOLO en la rama que ya iba
- *  a declarar "no existe" — el camino feliz (proceso vivo, exito inmediato)
- *  no paga nada. */
-const PID_EXISTS_RETRY_ATTEMPTS = 3;
-const PID_EXISTS_RETRY_DELAY_MS = 50;
+ *  negativo transitorio. Costo maximo, y SOLO en la rama que ya iba a
+ *  declarar "no existe" — el camino feliz (proceso vivo, exito inmediato)
+ *  no paga nada.
+ *
+ *  R6 post-mortem #2: el presupuesto original (3 intentos, 50ms => 100ms de
+ *  espera real) sobrevivio 2 corridas reales de windows-latest tras mergear
+ *  este mismo mecanismo, pero una tercera corrida real (commit identico,
+ *  ningun cambio en este archivo) volvio a fallar EL MISMO assert en EL
+ *  MISMO test — siempre el PRIMER spawn del archivo, nunca los siguientes
+ *  (que reusan un binario node.exe ya "calentado" por el SO/AV en ese
+ *  proceso de test). Eso apunta a latencia de arranque en frio (primer
+ *  spawn del job) empujando el tiempo de visibilidad de OpenProcess mas
+ *  alla del presupuesto anterior — no una condicion de carrera nueva, la
+ *  MISMA, con cola mas larga de lo que 100ms cubria. Presupuesto ampliado a
+ *  10 intentos / 100ms (hasta ~900ms de espera real) para darle margen real
+ *  a ese arranque en frio, siguiendo cuestionando el mismo mecanismo en vez
+ *  de reemplazarlo (systematic-debugging: 2+ fallas del mismo sintoma exacto
+ *  primero exige ampliar el mismo remedio antes de descartar la arquitectura
+ *  — a diferencia del patron de "cada intento revela un problema nuevo en
+ *  otro lugar", que si justificaria cuestionar el diseño). */
+const PID_EXISTS_RETRY_ATTEMPTS = 10;
+const PID_EXISTS_RETRY_DELAY_MS = 100;
 
 function pidExistsNative(pid: number): boolean {
     for (let attempt = 0; attempt < PID_EXISTS_RETRY_ATTEMPTS; attempt++) {
