@@ -1,3 +1,8 @@
+## v3.11.0 - 2026-08-08
+
+### Features
+- **sensors:** remove FALLBACK_DEFAULTS, shell detection, --pack override (R3) (#29)
+
 ## v3.10.0 - 2026-08-07
 
 ### Features
