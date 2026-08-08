@@ -4,6 +4,7 @@ import path from 'path';
 import { computeSensorStatus } from '../sensors/status';
 import { detectStack } from '../sensors/init';
 import { SensorManifest } from '../sensors/types';
+import { BASELINE_FILE } from '../sensors/baseline';
 import { resolveOnPath } from '../../core/paths';
 
 /**
@@ -27,7 +28,7 @@ import { resolveOnPath } from '../../core/paths';
  */
 
 export type PreflightCheck = {
-    id: 'context' | 'manifest' | 'tools' | 'pack' | 'host';
+    id: 'context' | 'manifest' | 'tools' | 'pack' | 'host' | 'sensors-baseline';
     ok: boolean;
     detail: string;
     /** What the operator should do. Absent when `ok`. */
@@ -179,6 +180,45 @@ function checkPack(cwd: string, manifest: SensorManifest | null): PreflightCheck
 }
 
 /**
+ * Advisory only — `ok` is ALWAYS `true`, same contract as `checkHost` below. A team
+ * adopting AWM on a legacy repo starts with pre-existing sensor findings; the ratchet
+ * (`awm sensors baseline`, `.awm/sensors.baseline.json`) exists precisely to snapshot
+ * those as accepted debt so the gate only fails on genuinely NEW findings. But nothing
+ * today surfaces that the mechanism exists — the team discovers it only after hitting a
+ * wall of red findings and going looking. This nudges them toward it before that
+ * happens. It never blocks preflight: a repo can legitimately have zero debt to
+ * snapshot (sensors enabled from day one), and "no baseline yet" is not itself a
+ * failure — only the operator's lack of awareness that baselining is an option is the
+ * problem this addresses.
+ *
+ * Only called when a manifest exists (see the conditional spread in `preflight()`) —
+ * there is nothing to baseline without sensors configured in the first place, so this
+ * mirrors how `checkTools`/`checkPack` are skipped entirely rather than reported on a
+ * repo that was never set up.
+ *
+ * Also requires at least one ENABLED sensor, via the same `enabled`/`total` computation
+ * `checkManifest` already does — a deliberate opt-out (every sensor `enabled: false`) or
+ * an unparseable/empty manifest has nothing to baseline either, and nudging "run `awm
+ * sensors baseline`" there would be actively misleading rather than merely unnecessary.
+ */
+function checkSensorsBaseline(cwd: string, manifest: SensorManifest | null): PreflightCheck {
+    const enabled = manifest ? Object.values(manifest.sensors ?? {}).filter(s => s.enabled !== false).length : 0;
+    if (enabled === 0) {
+        return { id: 'sensors-baseline', ok: true, detail: 'no enabled sensors — nothing to baseline' };
+    }
+    if (fs.existsSync(path.join(cwd, BASELINE_FILE))) {
+        return { id: 'sensors-baseline', ok: true, detail: 'baseline present' };
+    }
+    return {
+        id: 'sensors-baseline',
+        ok: true,
+        detail: 'sensors configured, no baseline yet — awm sensors baseline',
+        remedy: 'run `awm sensors baseline` to snapshot pre-existing findings as accepted debt, '
+            + 'so the gate only chases new problems',
+    };
+}
+
+/**
  * Extract just the hostname portion of a git remote URL — never match against the
  * full URL string. A bare substring check against the whole remote (`remote.includes
  * ('gitlab')`) false-positives on an org/repo name that happens to contain the word,
@@ -272,9 +312,10 @@ export function preflight(cwd: string = process.cwd()): PreflightReport {
     const checks: PreflightCheck[] = [
         checkContext(cwd),
         checkManifest(cwd, manifest),
-        // Skipped when there is no manifest: reporting "tools broken" on a repo that was
-        // never set up buries the one thing the operator needs to read.
-        ...(manifestExists ? [checkTools(cwd), checkPack(cwd, manifest)] : []),
+        // Skipped when there is no manifest: reporting "tools broken" (or nudging toward
+        // a baseline that has nothing to snapshot) on a repo that was never set up
+        // buries the one thing the operator needs to read.
+        ...(manifestExists ? [checkTools(cwd), checkPack(cwd, manifest), checkSensorsBaseline(cwd, manifest)] : []),
         // Runs unconditionally — orthogonal to sensor configuration entirely, this is
         // about PR/MR tooling, not sensors.
         checkHost(cwd),
