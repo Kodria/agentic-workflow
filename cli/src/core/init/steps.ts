@@ -226,6 +226,7 @@ export function stepGlobalSkillsRepair(d: InitDeps): StepResult {
     if (broken === 0) return ok('machine.globalSkills', 'machine', 'skipped');
 
     const skillsDir = providerFor(d.agent).skill.global;
+    if (skillsDir === null) return ok('machine.globalSkills', 'machine', 'skipped');
     const r = d.actions.repairGlobalSkills(skillsDir, contentRoots());
     return ok('machine.globalSkills', 'machine', 'applied', `re-linked ${r.relinked.length}, pruned ${r.pruned.length}`);
 }

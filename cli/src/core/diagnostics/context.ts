@@ -98,14 +98,17 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
         hookDegraded = hs.overall === 'DEGRADED';
     } catch { /* sin soporte de hooks → ausente */ }
 
-    // devCore (bundle baseline)
+    // devCore (bundle baseline) — skillsDir is null only for providers with no global skill
+    // discovery mechanism (today: Copilot); treated the same as "nothing linked here yet".
     const skillsDir = providerFor(agent).skill.global;
     const baseline = bundles.find((b) => b.scope === 'baseline');
     let devCorePresent = false;
     let brokenLinks: string[] = [];
     if (baseline) {
         const skillNames = resolveBundleSkills(baseline.name, bundles);
-        const { linked, broken } = classifyLinks(skillNames, skillsDir);
+        const { linked, broken } = skillsDir !== null
+            ? classifyLinks(skillNames, skillsDir)
+            : { linked: [], broken: [] };
         const absent = skillNames.filter((s) => !linked.includes(s) && !broken.includes(s));
         devCorePresent = skillNames.length > 0 && (linked.length + broken.length) > 0;
         brokenLinks = [...broken, ...absent];
@@ -121,7 +124,7 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
         // the real Codex+OpenCode coexistence E2E test
         // (tests/integration/codex-provider-isolated.test.ts).
         const agentConfig = providerFor(agent).agent;
-        if (agentConfig) {
+        if (agentConfig && agentConfig.global !== null) {
             const agentNames = resolveBundleAgents(baseline.name, bundles);
             if (agentNames.length > 0) {
                 const filenames = agentNames.map((n) =>
@@ -143,7 +146,7 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
     } catch { /* sin config → ningún ambient deseado */ }
     const installed = wanted.filter((name) => {
         const skillNames = resolveBundleSkills(name, bundles);
-        if (skillNames.length === 0) return false;
+        if (skillNames.length === 0 || skillsDir === null) return false;
         const { linked } = classifyLinks(skillNames, skillsDir);
         return linked.length === skillNames.length;
     });
@@ -154,7 +157,9 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
         devCore: { present: devCorePresent, brokenLinks },
         ambient: { wanted, installed },
         contextInjection: gatherContextInjection(),
-        globalSkills: classifyGlobalSkills(skillsDir, contentRoots()),
+        globalSkills: skillsDir !== null
+            ? classifyGlobalSkills(skillsDir, contentRoots())
+            : { valid: [], repairable: [], dead: [] },
     };
 }
 

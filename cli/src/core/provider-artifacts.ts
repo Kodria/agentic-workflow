@@ -51,7 +51,7 @@ export function scanLegacyArtifacts(
             }
             if (!config) continue;
             const dir = config[scope];
-            if (!fs.existsSync(dir)) continue;
+            if (dir === null || !fs.existsSync(dir)) continue;
 
             for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
                 const fullPath = path.join(dir, entry.name);

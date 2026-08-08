@@ -4,6 +4,7 @@ import path from 'path';
 import {
     AGENT_TARGETS,
     getTargetPath,
+    isAgentTarget,
     providerFor,
     providers,
 } from '../../src/providers';
@@ -154,7 +155,7 @@ describe('Providers Routing', () => {
     });
 
     it('uses AGENT_TARGETS as the single iterable target catalog', () => {
-        expect(AGENT_TARGETS).toEqual(['antigravity', 'opencode', 'claude-code', 'codex']);
+        expect(AGENT_TARGETS).toEqual(['antigravity', 'opencode', 'claude-code', 'codex', 'cursor', 'copilot']);
         expect(Object.keys(providers())).toEqual([...AGENT_TARGETS]);
     });
 
@@ -168,5 +169,42 @@ describe('Providers Routing', () => {
         expect(() => providerFor('unknown-agent' as any)).toThrow('Unknown agent target');
         expect(() => getTargetPath('skill', 'unknown-agent' as any, 'global'))
             .toThrow('Unknown agent target');
+    });
+
+    describe('Cursor and Copilot (D4)', () => {
+        it('recognizes cursor and copilot as valid agent targets', () => {
+            expect(isAgentTarget('cursor')).toBe(true);
+            expect(isAgentTarget('copilot')).toBe(true);
+        });
+
+        it('resolves Cursor skill paths for both scopes', () => {
+            expect(getTargetPath('skill', 'cursor', 'local')).toBe('.cursor/rules');
+            expect(getTargetPath('skill', 'cursor', 'global'))
+                .toBe(path.join(process.env.HOME!, '.cursor/rules'));
+        });
+
+        it('resolves the Copilot local skill path', () => {
+            expect(getTargetPath('skill', 'copilot', 'local')).toBe('.github/instructions');
+        });
+
+        it('throws a specific, non-generic reason when Copilot global skills are requested', () => {
+            expect(() => getTargetPath('skill', 'copilot', 'global')).toThrow(
+                'skill global scope is not supported by Copilot: GitHub Copilot has no user-level skill discovery mechanism — skills must be installed per-project.',
+            );
+        });
+
+        it('keeps workflow/agent unsupported (null) for both, via the existing generic message', () => {
+            expect(() => getTargetPath('workflow', 'cursor', 'local')).toThrow(
+                'workflows are not supported by Cursor.',
+            );
+            expect(() => getTargetPath('agent', 'copilot', 'local')).toThrow(
+                'agents are not supported by Copilot.',
+            );
+        });
+
+        it('declares no hooks config for cursor or copilot', () => {
+            expect(providerFor('cursor').hooks).toBeUndefined();
+            expect(providerFor('copilot').hooks).toBeUndefined();
+        });
     });
 });

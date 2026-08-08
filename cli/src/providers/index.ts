@@ -2,7 +2,7 @@
 import path from 'path';
 import { awmHome, homeDir } from '../core/paths';
 
-export const AGENT_TARGETS = ['antigravity', 'opencode', 'claude-code', 'codex'] as const;
+export const AGENT_TARGETS = ['antigravity', 'opencode', 'claude-code', 'codex', 'cursor', 'copilot'] as const;
 
 export type AgentTarget = typeof AGENT_TARGETS[number];
 export type Scope = 'global' | 'local';
@@ -23,9 +23,11 @@ export function requireAgentTarget(value: unknown): AgentTarget {
 }
 
 export type ArtifactConfig = {
-    global: string;
+    global: string | null;
     local: string;
     renderer: RendererId;
+    /** Explains WHY `global` is null, when it is. Surfaced by getTargetPath's error. */
+    globalUnsupportedReason?: string;
 };
 
 export type HookConfig = {
@@ -43,7 +45,7 @@ export type SettingsMergeHookConfig = HookConfig & {
 export type InjectionConfig =
     | { type: 'cc-settings-merge' }
     | { type: 'config-instructions'; configPath: string; field: 'instructions' }
-    | { type: 'managed-agents-md'; globalPath: string; localFile: string };
+    | { type: 'managed-agents-md'; globalPath: string | null; localFile: string };
 
 export type ProviderConfig = {
     label: string;
@@ -149,6 +151,45 @@ export function providers(): Record<AgentTarget, ProviderConfig> {
                 localFile: 'AGENTS.md',
             },
         },
+        cursor: {
+            label: 'Cursor',
+            skill: {
+                global: path.join(home, '.cursor/rules'),
+                local: '.cursor/rules',
+                renderer: 'link', // Task 4.3 will change this to a Cursor-specific .mdc renderer.
+            },
+            workflow: null,
+            agent: null,
+            injection: {
+                type: 'managed-agents-md',
+                // Cursor has no confirmed user-level/global AGENTS.md-equivalent file — its
+                // "User Rules" live inside Cursor's own app settings, not a plain file on disk
+                // (per docs research done for this task). Until a primary source confirms a
+                // real global path, `null` here is the honest answer, not a guess. See this
+                // task's `concerns` report.
+                globalPath: null,
+                localFile: 'AGENTS.md',
+            },
+        },
+        copilot: {
+            label: 'Copilot',
+            skill: {
+                global: null,
+                globalUnsupportedReason: 'GitHub Copilot has no user-level skill discovery mechanism — skills must be installed per-project.',
+                local: '.github/instructions',
+                renderer: 'link', // Task 4.3 will change this to a Copilot instructions renderer.
+            },
+            workflow: null,
+            agent: null,
+            injection: {
+                type: 'managed-agents-md',
+                // Copilot is inherently repository-scoped — confirmed no ~/.copilot or
+                // equivalent user-level AGENTS.md file exists. Task 4.2 owns the actual
+                // runtime handling of a null globalPath (project-only injection).
+                globalPath: null,
+                localFile: 'AGENTS.md',
+            },
+        },
     };
 }
 
@@ -171,7 +212,14 @@ export function getTargetPath(type: ArtifactType, agent: AgentTarget, scope: Sco
     const config = provider[type];
     if (!config) throw new Error(`${type}s are not supported by ${provider.label}.`);
 
-    return config[scope];
+    const targetPath = scope === 'global' ? config.global : config.local;
+    if (targetPath === null) {
+        throw new Error(
+            `${type} ${scope} scope is not supported by ${provider.label}` +
+            (config.globalUnsupportedReason ? `: ${config.globalUnsupportedReason}` : '.'),
+        );
+    }
+    return targetPath;
 }
 
 export function getHookConfig(agent: AgentTarget): HookConfig | undefined {

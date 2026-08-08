@@ -40,7 +40,11 @@ function binaryVersionCheck(agent: AgentTarget): ProviderCheck {
     }
 }
 
-function skillsGlobalCheck(dir: string, owners: AgentTarget[], integrity: SkillIntegrity): ProviderCheck {
+/** Returns `null` (dropped, same convention as `agentsNativeCheck`/`hookTrustCheck`) when
+ *  `dir` is null — i.e. the provider has no global skill discovery mechanism at all
+ *  (today: Copilot, see `globalUnsupportedReason` in providers/index.ts). */
+function skillsGlobalCheck(dir: string | null, owners: AgentTarget[], integrity: SkillIntegrity): ProviderCheck | null {
+    if (dir === null) return null;
     const shared = owners.length > 1;
     const broken = integrity.repairable.length + integrity.dead.length;
     // Broken links are checked BEFORE shared: 'shared' is a non-degrading/OK state
@@ -98,7 +102,7 @@ function tomlAgentsHealthy(dir: string, entries: string[]): { broken: number } {
  */
 function agentsNativeCheck(agent: AgentTarget): ProviderCheck | null {
     const provider = providerFor(agent);
-    if (!provider.agent) return null;
+    if (!provider.agent || provider.agent.global === null) return null;
 
     const dir = provider.agent.global;
     let entries: string[];
@@ -191,6 +195,7 @@ export function gatherProviderChecks(agents: AgentTarget[], scanSkills: ScanSkil
     const ownersByDir = new Map<string, AgentTarget[]>();
     for (const agent of agents) {
         const dir = providerFor(agent).skill.global;
+        if (dir === null) continue;
         const owners = ownersByDir.get(dir) ?? [];
         owners.push(agent);
         ownersByDir.set(dir, owners);
@@ -204,8 +209,8 @@ export function gatherProviderChecks(agents: AgentTarget[], scanSkills: ScanSkil
     return agents.map((agent) => {
         const provider = providerFor(agent);
         const dir = provider.skill.global;
-        const owners = ownersByDir.get(dir) ?? [agent];
-        const integrity = scansByDir.get(dir) ?? { valid: [], repairable: [], dead: [] };
+        const owners = (dir !== null ? ownersByDir.get(dir) : undefined) ?? [agent];
+        const integrity = (dir !== null ? scansByDir.get(dir) : undefined) ?? { valid: [], repairable: [], dead: [] };
 
         const checks: ProviderCheck[] = [
             binaryVersionCheck(agent),

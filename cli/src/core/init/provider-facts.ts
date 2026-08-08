@@ -127,11 +127,13 @@ function providerManagedPaths(agent: AgentTarget): string[] {
     }
     if (provider.injection) {
         if (provider.injection.type === 'config-instructions') paths.add(provider.injection.configPath);
-        if (provider.injection.type === 'managed-agents-md') paths.add(provider.injection.globalPath);
+        if (provider.injection.type === 'managed-agents-md' && provider.injection.globalPath !== null) {
+            paths.add(provider.injection.globalPath);
+        }
     }
-    if (provider.skill) paths.add(provider.skill.global);
-    if (provider.workflow) paths.add(provider.workflow.global);
-    if (provider.agent) paths.add(provider.agent.global);
+    if (provider.skill && provider.skill.global !== null) paths.add(provider.skill.global);
+    if (provider.workflow && provider.workflow.global !== null) paths.add(provider.workflow.global);
+    if (provider.agent && provider.agent.global !== null) paths.add(provider.agent.global);
     return Array.from(paths).sort();
 }
 

@@ -115,13 +115,13 @@ export function planInitMutationTargets(params: PlanInitMutationTargetsParams): 
     // whole tree (backupEntryFor does a recursive fs.cpSync for directory
     // targets — verified in install-transaction.ts), covering any entry that
     // repair might mutate. Broad-but-safe, per this module's own philosophy.
-    targets.add(provider.skill.global);
+    if (provider.skill.global !== null) targets.add(provider.skill.global);
 
     // global context / AGENTS.md injection (covered by the hook for claude-code)
     const injection = provider.injection;
     if (injection) {
         if (injection.type === 'config-instructions') targets.add(injection.configPath);
-        if (injection.type === 'managed-agents-md') targets.add(injection.globalPath);
+        if (injection.type === 'managed-agents-md' && injection.globalPath !== null) targets.add(injection.globalPath);
     }
 
     // machine-level bundle targets: baseline (dev-core) + ambient, global scope

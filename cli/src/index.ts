@@ -209,6 +209,10 @@ program.command('add [name]')
                           continue;
                       }
                       const targetDir = config[scopeVal];
+                      if (targetDir === null) {
+                          skipped.push(`${artifact.name} (${currentAgent})`);
+                          continue;
+                      }
                       const finalDest = path.join(targetDir, artifact.name);
                       installArtifact(artifact.sourcePath, finalDest, methodVal);
                       installed.push(`${artifact.name} → ${currentAgent} (${scopeVal})`);
@@ -391,6 +395,10 @@ program.command('add [name]')
                       continue;
                   }
                   const targetDir = config[scopeVal];
+                  if (targetDir === null) {
+                      skipped.push(`${artifact.name} (${currentAgent})`);
+                      continue;
+                  }
                   const finalDest = path.join(targetDir, artifact.name);
                   installArtifact(artifact.sourcePath, finalDest, methodVal);
                   installed.push(`${artifact.name} → ${currentAgent} (${scopeVal})`);

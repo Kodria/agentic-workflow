@@ -161,6 +161,7 @@ describe('planInitMutationTargets', () => {
             ];
             const targets = planInitMutationTargets({ cwd: bareCwd(), agent: 'claude-code', bundles });
             const skillsDir = providerFor('claude-code').skill.global;
+            if (skillsDir === null) throw new Error('claude-code skill.global must not be null');
 
             expect(targets).toContain(path.join(skillsDir, 'using-awm'));
             expect(targets).toContain(path.join(skillsDir, 'ambient-skill'));
@@ -262,6 +263,7 @@ describe('planInitMutationTargets', () => {
             const bundles = [bundle('dev-core', 'baseline', ['using-awm'])];
             const targets = planInitMutationTargets({ cwd: bareCwd(), agent: 'claude-code', bundles });
             const skillsDir = providerFor('claude-code').skill.global;
+            if (skillsDir === null) throw new Error('claude-code skill.global must not be null');
 
             expect(targets).toContain(skillsDir);
             // Sanity: the orphan path itself is a child of the now-covered dir,

@@ -77,6 +77,12 @@ export function physicalTarget(intent: ArtifactIntent, agent: AgentTarget, scope
     const config = providerFor(agent)[intent.type];
     if (!config) throw new Error(`${intent.type}s are not supported by ${providerFor(agent).label}`);
     const dir = scope === 'local' ? path.join(projectRoot, config.local) : config.global;
+    if (dir === null) {
+        throw new Error(
+            `${intent.type} ${scope} scope is not supported by ${providerFor(agent).label}` +
+            (config.globalUnsupportedReason ? `: ${config.globalUnsupportedReason}` : '.'),
+        );
+    }
     const filename = config.renderer === 'codex-agent-toml'
         ? `${path.parse(intent.installName).name}.toml`
         : intent.installName;
@@ -95,7 +101,14 @@ export function physicalTarget(intent: ArtifactIntent, agent: AgentTarget, scope
  */
 export function skillTargetDir(agent: AgentTarget, scope: Scope, projectRoot: string): string {
     const config = providerFor(agent).skill;
-    return scope === 'local' ? path.join(projectRoot, config.local) : config.global;
+    if (scope === 'local') return path.join(projectRoot, config.local);
+    if (config.global === null) {
+        throw new Error(
+            `skill ${scope} scope is not supported by ${providerFor(agent).label}` +
+            (config.globalUnsupportedReason ? `: ${config.globalUnsupportedReason}` : '.'),
+        );
+    }
+    return config.global;
 }
 
 /**
