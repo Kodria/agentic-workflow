@@ -255,6 +255,31 @@ describe('process identity (win32, mockeado — sin windows real disponible en e
         expect(killSpy).toHaveBeenCalledTimes(3);
     });
 
+    test('pidExistsNative absorbe una carrera transitoria mas larga que el presupuesto original — arranque en frio del primer spawn del job (regresion #2: misma falla real, mismo test, tras el fix de 3x50ms ya mergeado)', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        let calls = 0;
+        const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => {
+            calls++;
+            // El pid tarda 9 intentos en "aparecer" — mas alla del presupuesto
+            // anterior (3 intentos) pero dentro del ampliado (10 intentos).
+            if (calls < 9) { const err: any = new Error('transient'); err.code = 'ESRCH'; throw err; }
+            return true;
+        });
+        const fakeRef = { pid: 424243, startTime: 'x', spawnNonce: 'n', argvDigest: 'd', processGroup: 424243, psArgsDigest: 'x' };
+        expect(refIsAlive(fakeRef)).toBe(true);
+        expect(killSpy).toHaveBeenCalledTimes(9);
+    });
+
+    test('pidExistsNative declara muerte solo tras agotar el presupuesto ampliado (10 intentos) — un ESRCH sostenido nunca se lee como vivo', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => {
+            const err: any = new Error('gone'); err.code = 'ESRCH'; throw err;
+        });
+        const fakeRef = { pid: 424244, startTime: 'x', spawnNonce: 'n', argvDigest: 'd', processGroup: 424244, psArgsDigest: 'x' };
+        expect(refIsAlive(fakeRef)).toBe(false);
+        expect(killSpy).toHaveBeenCalledTimes(10);
+    });
+
     test('refIsAlive en win32 NUNCA declara muerte por un error que no sea ESRCH (ej. EPERM: el pid existe pero sin permiso de senializarlo) (R2.1)', () => {
         Object.defineProperty(process, 'platform', { value: 'win32' });
         jest.spyOn(process, 'kill').mockImplementation(() => {
