@@ -67,12 +67,32 @@ export function writeFileAtomic(file: string, content: string, mode = 0o644): vo
 /** fsync del directorio contenedor: garantiza que una ENTRADA creada/renombrada
  *  sobrevive un crash del OS. Falla LANZANDO — la durabilidad de la transición
  *  es parte del contrato, nunca un best-effort silencioso (design R1.2,
- *  bloqueador 4 de la review del plan). */
+ *  bloqueador 4 de la review del plan) — EXCEPTO en Windows, donde fsync-ear un
+ *  file descriptor de directorio no es una operacion que el SO soporte en
+ *  absoluto (no es una falla de durabilidad real: no existe el mecanismo
+ *  POSIX que esta funcion intenta invocar). Confirmado via R6 CI (2026-08-08,
+ *  primera corrida real en windows-latest): `fs.openSync(dir, 'r')` tiene
+ *  exito, pero el `fsyncSync` subsiguiente sobre ese fd siempre falla con
+ *  EPERM — libuv mapea asi el resultado de `FlushFileBuffers` sobre un handle
+ *  de directorio en Win32, que Windows rechaza categoricamente (no es un
+ *  fallo intermitente de hardware/permisos, es ausencia de la capacidad).
+ *  NTFS ya registra los renames/creates en su propio journal transaccional,
+ *  asi que la garantia de durabilidad de la ENTRADA sigue sostenida por el
+ *  filesystem — solo el mecanismo explicito para pedirla no existe ahi.
+ *  Por eso, y solo para esta combinacion exacta (win32 + EPERM en el fsync,
+ *  nunca en el open), esta funcion degrada a no-op en vez de lanzar; culquier
+ *  otra plataforma, o cualquier otro código de error incluso en Windows
+ *  (el open fallando, ENOENT, EACCES por permisos reales), sigue lanzando. */
 export function fsyncDirSync(dir: string): void {
     let dirFd: number | undefined;
     try {
         dirFd = fs.openSync(dir, 'r');
-        fs.fsyncSync(dirFd);
+        try {
+            fs.fsyncSync(dirFd);
+        } catch (error) {
+            if (process.platform === 'win32' && (error as NodeJS.ErrnoException).code === 'EPERM') return;
+            throw error;
+        }
     } catch (error) {
         throw new Error(`fsync de directorio fallo para ${dir}: ${(error as Error).message}`);
     } finally {
