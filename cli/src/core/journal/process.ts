@@ -43,6 +43,59 @@ function psField(pid: number, field: string): string | null {
 
 function sleepSync(seconds: string): void {
     try { execFileSync('sleep', [seconds], { stdio: EXEC_STDIO }); } catch { /* sin sleep: seguimos */ }
+    // Nota win32: `sleep` no existe nativamente ahi (ver callers via
+    // win32ProcessInfo/captureRefFor) — el catch de arriba lo absorbe
+    // silenciosamente, asi que en esa plataforma los reintentos que llaman
+    // a esta funcion ocurren espalda-con-espalda sin pausa real. No es un
+    // fallo: solo pierde el espaciado, nunca crashea ni miente sobre
+    // resultado alguno.
+}
+
+/** Analogo win32 de `psField`/`stablePsArgs` (R2.1, R6): identidad real de un
+ *  pid via WMI (clase Win32_Process), consultada a traves de PowerShell's
+ *  Get-CimInstance — el reemplazo moderno soportado de `wmic` (que Microsoft
+ *  viene retirando de instalaciones nuevas), y presente en cualquier Windows
+ *  no deliberadamente reducido (a diferencia de `ps`/`pgrep`, que en Windows
+ *  SOLO existen si algo como Git for Windows los puso en el PATH, y ahi son
+ *  la capa emulada de MSYS/Cygwin ciega a procesos nativos — ver
+ *  pidExistsNative). Contrato de TRES vias, deliberado, paralelo al de
+ *  `psField`:
+ *   - `'absent'`: PowerShell corrio bien y WMI no encontro NINGUN proceso
+ *     con ese pid — evidencia POSITIVA de ausencia (el analogo exacto del
+ *     exit-1 de `ps`/`pgrep` sobre un pid real), independiente de
+ *     `process.kill` (que pidExistsNative usa) — asi que sigue siendo
+ *     evidencia valida incluso si `process.kill` fuera mockeado/erroneo en
+ *     algun caller (visto en CI real: un test que mockea process.kill para
+ *     verificar que executeReap NUNCA senializa, sin intencion de simular
+ *     un pid vivo — WMI no comparte ese mock y corrige la vista).
+ *   - `null`: PowerShell no pudo ejecutarse, timeout, politica de ejecucion
+ *     restrictiva, WMI/CIM deshabilitado, salida no parseable, etc. — CERO
+ *     evidencia, ni de vida ni de muerte. Igual que el ENOENT de `ps` en
+ *     POSIX: nunca se traduce a "muerto".
+ *   - objeto con `creationDate`/`commandLine` reales: exito, comparables
+ *     con `ref.startTime`/`ref.psArgsDigest` (via identityDigest) igual que
+ *     `lstart`/`args` en la rama POSIX.
+ *  Acotado con `timeout` (nunca cuelga al caller indefinidamente si el
+ *  proveedor WMI no responde) y con `-NoProfile -NonInteractive -NoLogo`
+ *  (arranque mas rapido y determinista, sin depender de perfiles del
+ *  usuario). Solo se invoca desde refIsAlive/captureRefFor en win32, jamas
+ *  desde un path "barato" (groupIsGone, pidExistsNative) — ver refIsAlive
+ *  para el razonamiento de costo/beneficio. */
+function win32ProcessInfo(pid: number): { creationDate: string; commandLine: string } | 'absent' | null {
+    if (!Number.isInteger(pid) || pid <= 0) return null;
+    let out: string;
+    try {
+        const script = `try { $p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}" -ErrorAction Stop; if ($p) { [PSCustomObject]@{ CreationDate = $p.CreationDate.ToString('o'); CommandLine = [string]$p.CommandLine } | ConvertTo-Json -Compress } } catch { exit 1 }`;
+        out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-NoLogo', '-Command', script], { encoding: 'utf8', stdio: EXEC_STDIO, timeout: 2000 }).trim();
+    } catch {
+        return null;   // powershell/WMI no disponible, timeout, o error interno: sin evidencia (nunca "ausente")
+    }
+    if (out.length === 0) return 'absent';   // corrio bien, cero coincidencias: evidencia positiva
+    try {
+        const parsed = JSON.parse(out) as { CreationDate?: unknown; CommandLine?: unknown };
+        if (typeof parsed.CreationDate !== 'string' || typeof parsed.CommandLine !== 'string') return null;
+        return { creationDate: parsed.CreationDate, commandLine: parsed.CommandLine };
+    } catch { return null; }   // salida inesperada: inconclusive, jamas "ausente" por un parseo roto
 }
 
 /** Variante de psField para contextos de CAPTURA de identidad (spawn time):
@@ -89,8 +142,33 @@ export function psArgsDigestOf(pid: number, spawnNonce = '', requestedArgvDigest
 }
 
 /** Captura la identidad COMPLETA de un pid recien spawneado (R2.1):
- *  startTime + pgid reales de ps + digest de `ps -o args=` estable. */
+ *  startTime + pgid reales de ps + digest de `ps -o args=` estable.
+ *
+ *  win32: sin pgid POSIX real jamas (convencion fija: processGroup === pid,
+ *  la misma que asume killTreeWindows/groupIsGone); startTime/psArgsDigest
+ *  se intentan via WMI (win32ProcessInfo) con el mismo reintento acotado que
+ *  la rama POSIX. Si WMI no responde (politica restrictiva, servicio
+ *  deshabilitado, sin powershell.exe) degrada al mismo sentinel 'unknown'
+ *  ya documentado y testeado (ver 'captureRefFor degrada a unknown...') —
+ *  jamas crashea, jamas fabrica una identidad falsa. */
 export function captureRefFor(pid: number, nonce: string, argv: string[]): ProcessRef {
+    const requestedArgvDigest = argvDigest(argv);
+    if (isWindowsNative()) {
+        let info: ReturnType<typeof win32ProcessInfo> = null;
+        for (let i = 0; i < 5 && (info === null || info === 'absent'); i++) {
+            info = win32ProcessInfo(pid);
+            if (info === null || info === 'absent') sleepSync('0.05');
+        }
+        const resolved = info !== null && info !== 'absent' ? info : null;
+        return {
+            pid,
+            startTime: resolved?.creationDate ?? 'unknown',
+            spawnNonce: nonce,
+            argvDigest: requestedArgvDigest,
+            processGroup: pid,
+            psArgsDigest: resolved !== null ? identityDigest(resolved.commandLine, nonce, requestedArgvDigest) : 'unknown',
+        };
+    }
     let start: string | null = null;
     for (let i = 0; i < 5 && start === null; i++) {
         start = psFieldSafe(pid, 'lstart');
@@ -98,7 +176,6 @@ export function captureRefFor(pid: number, nonce: string, argv: string[]): Proce
     }
     const pgid = psFieldSafe(pid, 'pgid');
     const args = stablePsArgs(pid);
-    const requestedArgvDigest = argvDigest(argv);
     return {
         pid,
         startTime: start ?? 'unknown',
@@ -166,17 +243,55 @@ function pidExistsNative(pid: number): boolean {
 /** Vivo Y con la MISMA identidad — tupla completa, nunca PID solo (R2.1,
  *  bloqueador 6): startTime + pgid + digest de ps args.
  *
- *  win32: sin `ps` confiable (ver pidExistsNative) no hay observacion
- *  fresca de lstart/pgid/args con la que reconstruir y comparar la tupla
- *  completa — la unica senial que el SO respalda directamente en esta
- *  plataforma es "¿existe el pid?". Verificacion de identidad completa
- *  (proteccion R6 contra reciclado de pid) queda fuera de alcance en
- *  win32 sin una fuente de observacion nativa (tasklist/WMI); el fallo
- *  conservador es hacia 'vivo' (nunca declarar muerte sin ESRCH real), lo
- *  que en el peor caso deja al supervisor en custodia de mas, JAMAS
- *  autoriza un reemplazo/kill indebido. */
+ *  win32 (R6, ronda 2 — cierra el gap de la ronda 1): `process.kill(pid,0)`
+ *  solo prueba existencia, NUNCA identidad — un pid reciclado por el SO
+ *  entre la captura original y esta verificacion pasaria pidExistsNative
+ *  igual que el proceso original, exactamente el escenario que R6 exige
+ *  rechazar. Verificacion completa via win32ProcessInfo (WMI/Win32_Process,
+ *  el unico analogo de `ps -o lstart=,args=` disponible en win32 sin
+ *  tooling nativo adicional — Job Objects/bindings nativos quedan fuera de
+ *  alcance de este fix):
+ *   1. pidExistsNative primero (barato, cero WMI): si el kernel confirma
+ *      ESRCH, listo — el camino rapido de produccion para el caso comun
+ *      (limpiar refs de jobs ya terminados) nunca paga el costo de WMI.
+ *   2. Convencion fija de captureRefFor en win32 (processGroup === pid,
+ *      jamas hay pgid real ahi): cualquier ref que la rompa no pudo salir
+ *      de este codigo — mismatch barato, cero WMI.
+ *   3. Ref degradado (startTime/psArgsDigest === 'unknown', WMI no
+ *      respondio AL CAPTURAR o es un ref persistido por una version
+ *      anterior a este fix): no hay con que comparar mas alla de
+ *      existencia — mismo contrato que "ps no pudo ejecutarse" en POSIX,
+ *      fail hacia 'vivo'. Evita pagar WMI en este caso tambien.
+ *   4. Solo con un ref NO degradado se paga el costo real: una consulta
+ *      WMI, comparando startTime Y digest(commandLine+nonce+argvDigest)
+ *      contra la tupla capturada. Cualquier campo alterado (startTime,
+ *      spawnNonce, argvDigest o psArgsDigest directamente) rompe el
+ *      digest o la comparacion de startTime => false, igual que la rama
+ *      POSIX via identityDigest.
+ *  `win32ProcessInfo` en 'absent' (WMI confirmo positivamente que el pid no
+ *  existe) se respeta AUNQUE pidExistsNative haya dicho 'vivo' mas arriba
+ *  en el paso 1 (nunca ocurre en produccion real, donde process.kill no
+ *  esta mockeado — pero corrige el caso donde process.kill fue interceptado
+ *  por un caller ajeno, ya que WMI es una fuente de evidencia INDEPENDIENTE
+ *  de process.kill). Cualquier falla de PowerShell/WMI (null) es
+ *  inconclusive, jamas se traduce a "muerto" — mismo invariante de toda
+ *  esta pagina: el silencio jamas es prueba. Costo: cada verificacion de un
+ *  ref VIVO y no-degradado en win32 paga un proceso powershell.exe
+ *  (~cientos de ms, acotado por el timeout de win32ProcessInfo) — pagado
+ *  SOLO en esa plataforma y SOLO para refs que ya pasaron los filtros
+ *  baratos de arriba; ni groupIsGone ni pidExistsNative (paths de
+ *  existencia pura, usados en loops de polling mas ajustados) lo pagan. */
 export function refIsAlive(ref: ProcessRef): boolean {
-    if (isWindowsNative()) return pidExistsNative(ref.pid);
+    if (isWindowsNative()) {
+        if (!pidExistsNative(ref.pid)) return false;
+        if (ref.processGroup !== ref.pid) return false;
+        if (ref.startTime === 'unknown' || ref.psArgsDigest === 'unknown') return true;
+        const info = win32ProcessInfo(ref.pid);
+        if (info === 'absent') return false;
+        if (info === null) return true;
+        if (info.creationDate !== ref.startTime) return false;
+        return identityDigest(info.commandLine, ref.spawnNonce, ref.argvDigest) === ref.psArgsDigest;
+    }
     try {
         const stat = psField(ref.pid, 'stat');
         if (stat === null || stat.startsWith('Z')) return false; // zombie = proceso terminado, solo espera reap

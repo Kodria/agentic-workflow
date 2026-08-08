@@ -16,7 +16,9 @@ describe('journal store', () => {
         // POSIX bits -- see tests/core/atomic-file.test.ts (files, confirmed against
         // real windows-latest CI) and tests/core/install-transaction.test.ts
         // (directories, same reasoning) for the 0o666/0o777 shapes.
-        expect(fs.statSync(dir).mode & 0o777).toBe(process.platform === 'win32' ? 0o777 : 0o700);
+        // Confirmed against real windows-latest CI (2026-08-08): directories get the same
+        // 0o666 shape as files there, not 0o777 as first reasoned.
+        expect(fs.statSync(dir).mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o700);
         expect(fs.statSync(statePath(repo, 'rama')).mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o600);
         const r = readJournal(repo, 'rama');
         expect(r.corrupt).toBe(false);

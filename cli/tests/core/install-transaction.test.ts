@@ -349,6 +349,58 @@ describe('defaultTransactionDeps — cursor-mdc / copilot-instructions renderers
     });
 });
 
+// Regression (Failure 4/5, R6 round 3): a 'link'-renderer op whose sourcePath
+// is a FILE (an agent/workflow .md, not a skill directory) used to be staged
+// with the same directory-oriented junction/dir symlink type as a directory
+// source — a junction has no equivalent for a single file, so it silently
+// failed to resolve back to the target on native Windows. executor.ts's
+// stageArtifact now dispatches on source kind and falls back to a plain copy
+// for files when the real file-symlink throws (no privilege-free Windows
+// equivalent to a directory junction exists for files); verify() here must
+// accept that fallback rather than failing "not a symlink" for an install
+// that landed correctly, just not as a symlink — see
+// tests/core/executor.test.ts for the stageArtifact-level unit coverage and
+// tests/integration/codex-provider-isolated.test.ts for the real end-to-end
+// flow this was breaking (`InitStepsFailedError` -> exit code 2).
+describe('defaultTransactionDeps — win32 FILE-symlink fallback (Failure 4/5 regression)', () => {
+    const realPlatform = process.platform;
+    let symlinkSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+        Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+        symlinkSpy = jest.spyOn(fs, 'symlinkSync').mockImplementation(() => {
+            const err: any = new Error('EPERM: operation not permitted, symlink');
+            err.code = 'EPERM';
+            throw err;
+        });
+    });
+
+    afterEach(() => {
+        Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+        symlinkSpy.mockRestore();
+    });
+
+    it('completes the full validate/stage/replace/verify pipeline for a FILE `link` op via the copy fallback, instead of failing verification', () => {
+        const sourcePath = path.join(tmpWork, 'agent-source.md');
+        fs.writeFileSync(sourcePath, '---\nname: sample-agent\n---\nDo the thing.\n');
+        const targetPath = path.join(tmpWork, 'sample-agent.md');
+        const plan: InstallPlan = {
+            operations: [makeOp('sample-agent', {
+                type: 'agent', renderer: 'link', output: 'link', method: 'symlink',
+                sourcePath, targetPath,
+            })],
+            records: [],
+            reports: [{ owner: 'claude-code', targetPath, action: 'install' }],
+        };
+
+        const summary = applyInstallPlan(plan);
+
+        expect(summary.modifiedFiles).toEqual([targetPath]);
+        expect(fs.lstatSync(targetPath).isSymbolicLink()).toBe(false); // copy fallback, not a symlink
+        expect(fs.readFileSync(targetPath, 'utf8')).toContain('Do the thing.');
+    });
+});
+
 describe('beginBackupSession / restoreBackup', () => {
     it('backs up existing targets before mutation and restores them on rollback', () => {
         const fileA = path.join(tmpWork, 'a.json');
@@ -411,7 +463,10 @@ describe('beginBackupSession / restoreBackup', () => {
         // directory mode on win32 by always setting the execute bit for every class
         // (traversal isn't gated by chmod there), so 0o777 is the expected shape for a
         // non-read-only directory; flag for correction if a real CI run disagrees.
-        expect(dirMode).toBe(process.platform === 'win32' ? 0o777 : 0o700);
+        // Confirmed against real windows-latest CI (2026-08-08): directories get the same
+        // 0o666 shape as files there, not 0o777 as first reasoned — libuv does not
+        // synthesize a distinct execute bit for directories on win32 either.
+        expect(dirMode).toBe(process.platform === 'win32' ? 0o666 : 0o700);
         expect(manifestMode).toBe(process.platform === 'win32' ? 0o666 : 0o600);
 
         const manifestRaw = fs.readFileSync(manifestPath, 'utf8');

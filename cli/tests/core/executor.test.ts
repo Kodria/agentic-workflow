@@ -103,5 +103,38 @@ describe('Executor Engine', () => {
             expect(calledSource).toBe(sourceDir);
             expect(calledType).toBe('junction');
         });
+
+        // Regression (Failure 4/5, R6 round 3): a junction is a NTFS
+        // *directory* reparse point — it has no equivalent for a single FILE
+        // artifact (an agent/workflow .md). Before this branch existed, a file
+        // source got the exact same 'junction' treatment as a directory, which
+        // does not correctly resolve back to the file — see
+        // tests/core/bundle-install.test.ts's "claude-code agents" case, which
+        // reproduced this on windows-latest as a silently-missing target file.
+        it('stages a FILE source with a file-typed symlink, not a junction', () => {
+            const fileSource = path.join(sourceDir, 'test.txt');
+            const target = path.join(targetDir, 'win-agent.md');
+            stageArtifact(fileSource, target, 'symlink');
+
+            expect(symlinkSpy).toHaveBeenCalledTimes(1);
+            const [calledSource, , calledType] = symlinkSpy.mock.calls[0];
+            expect(calledSource).toBe(fileSource);
+            expect(calledType).toBe('file');
+        });
+
+        it('falls back to a plain copy for a FILE source when the file symlink throws (EPERM — no SeCreateSymbolicLinkPrivilege)', () => {
+            symlinkSpy.mockImplementation(() => {
+                const err: any = new Error('EPERM: operation not permitted, symlink');
+                err.code = 'EPERM';
+                throw err;
+            });
+
+            const fileSource = path.join(sourceDir, 'test.txt');
+            const target = path.join(targetDir, 'win-agent-fallback.md');
+            const staged = stageArtifact(fileSource, target, 'symlink');
+
+            expect(fs.lstatSync(staged).isSymbolicLink()).toBe(false);
+            expect(fs.readFileSync(staged, 'utf8')).toBe('hello');
+        });
     });
 });

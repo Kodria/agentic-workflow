@@ -4,6 +4,7 @@ import path from 'path';
 import { runCommand } from '../../../src/commands/sensors/exec';
 
 const onPosix = process.platform !== 'win32' ? describe : describe.skip;
+const itPosix = process.platform !== 'win32' ? it : it.skip;
 
 /** Poll until `fn()` is true or the budget runs out. Avoids fixed sleeps. */
 async function until(fn: () => boolean, budgetMs = 4000): Promise<boolean> {
@@ -44,7 +45,12 @@ describe('runCommand — exit codes and output', () => {
         expect(r.timedOut).toBe(false);
     });
 
-    it('reports 127 for a command that does not exist', async () => {
+    itPosix('reports 127 for a command that does not exist', async () => {
+        // 127 is the POSIX shell's own "command not found" convention (`/bin/sh
+        // -c`), not something this codebase computes — runCommand just relays
+        // whatever the shell's `close` event reports. cmd.exe has no such
+        // convention (it reports 1 for "not recognized..."), so this is
+        // POSIX-only; see exec-windows.test.ts for the win32 equivalent.
         const r = await runCommand('awm-definitely-not-a-real-binary-xyz', { timeout: 5000, cwd: process.cwd() });
         expect(r.code).toBe(127);
     });

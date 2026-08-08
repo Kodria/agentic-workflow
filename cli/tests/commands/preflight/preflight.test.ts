@@ -206,8 +206,11 @@ describe('preflight', () => {
         it('reports github + gh available, and does not affect status', () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'git@github.com:kodria/agentic-workflow.git');
+            // `resolveOnPath('gh')` runs `command -v gh` on POSIX but `where gh` on
+            // win32 (see paths.ts) — match both invocation forms so this test's
+            // "gh is available" fixture holds on windows-latest CI too.
             mockExecSync.mockImplementation(((cmd: string) => {
-                if (cmd === 'command -v gh') return Buffer.from('/usr/bin/gh');
+                if (cmd === 'command -v gh' || cmd === 'where gh') return Buffer.from('/usr/bin/gh');
                 throw new Error(`not found: ${cmd}`);
             }) as typeof execSync);
 

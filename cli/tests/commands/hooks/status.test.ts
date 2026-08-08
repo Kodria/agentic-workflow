@@ -107,7 +107,12 @@ describe('computeHookStatus', () => {
         // never touching Claude's settings.json path.
         const { computeHookStatus } = require('../../../src/commands/hooks/status');
         const result = computeHookStatus('codex');
-        expect(result.checks.settingsEntry.detail).toContain('.codex/hooks.json');
+        // Separator-agnostic: the detail embeds a real OS path (`path.join`
+        // under the hood), so it's `\` on windows-latest and `/` elsewhere —
+        // assert the two path segments independently rather than one
+        // POSIX-shaped fragment.
+        expect(result.checks.settingsEntry.detail).toContain('.codex');
+        expect(result.checks.settingsEntry.detail).toContain('hooks.json');
         expect(result.checks.bootstrapSkill).toBeUndefined();
         expect(result.checks.runHookWrapper).toBeUndefined();
     });
