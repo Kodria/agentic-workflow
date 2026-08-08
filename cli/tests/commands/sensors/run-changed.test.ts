@@ -31,6 +31,14 @@ describe('runSensors --changed', () => {
     let prevAwmHome: string | undefined;
     let fakeAwmHome: string;
 
+    // shellQuote (changed.ts) branches on isWindowsNative(), which reads real
+    // process.platform. The commands asserted below hardcode the POSIX single-quote
+    // form — pin the platform so they're deterministic on windows-latest CI too,
+    // instead of asserting whatever the CI runner's real OS happens to produce. The
+    // nested "on native Windows" describe below overrides this per-test as needed.
+    // Pattern: AGENTS.md "stub-process-platform".
+    const originalPlatform = process.platform;
+
     beforeEach(() => {
         jest.resetModules();
         mockRunCommand.mockReset();
@@ -40,12 +48,14 @@ describe('runSensors --changed', () => {
         fakeAwmHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-home-'));
         prevAwmHome = process.env.AWM_HOME;
         process.env.AWM_HOME = fakeAwmHome;
+        Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
     });
 
     afterEach(() => {
         process.env.AWM_HOME = prevAwmHome;
         if (dir) fs.rmSync(dir, { recursive: true, force: true });
         fs.rmSync(fakeAwmHome, { recursive: true, force: true });
+        Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
     });
 
     const load = () => require('../../../src/commands/sensors/run');
@@ -207,6 +217,36 @@ describe('runSensors --changed', () => {
             const out = await load().runSensors({ cwd: dir, changed: true });
 
             expect(out.changedScope?.error).toBeDefined();
+        });
+    });
+
+    describe('on native Windows, quoting the scoped file list', () => {
+        // Regression coverage for the windows-latest CI failure: the general "scopes a
+        // sensor" test above only ever asserted the POSIX single-quote form of
+        // shellQuote's output, so it silently passed on Linux/macOS CI while actually
+        // asserting nothing about win32 behavior. changed-windows.test.ts covers
+        // applyChangedCmd's win32 branch directly, but not the runSensors --changed
+        // path that builds the dispatched command from it — cover that here so a
+        // regression in how run.ts wires scoping into the command is caught too.
+        const originalPlatform = process.platform;
+
+        beforeEach(() => {
+            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+        });
+
+        afterEach(() => {
+            Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+        });
+
+        it('double-quotes the scoped file instead of single-quoting it', async () => {
+            dir = project({ lint: LINT, typecheck: TYPECHECK });
+            mockChangedFiles.mockReturnValue({ files: ['src/a.ts'] });
+
+            await load().runSensors({ cwd: dir, changed: true });
+
+            expect(cmds()).toContain(`eslint --format json "src/a.ts"`);
+            expect(cmds()).not.toContain(`eslint --format json 'src/a.ts'`);
+            expect(cmds()).toContain('tsc --noEmit');
         });
     });
 });

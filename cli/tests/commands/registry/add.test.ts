@@ -22,6 +22,37 @@ function makeSourceRepo(base: string, opts: { skill?: string; empty?: boolean })
     return dir;
 }
 
+describe('deriveRegistryName', () => {
+    // Regression: on native Windows, a local clone source is a backslash-separated
+    // path (e.g. `C:\Users\runner\AppData\Local\Temp\awm-regadd-work-xyz\src-alpha`).
+    // The old `split(/[/:]/)` only split on '/' and ':', so the whole backslash-joined
+    // tail after the drive letter's ':' survived as one segment — `deriveRegistryName`
+    // returned a name containing backslashes, which addRegistry's own
+    // `/[/\\]/.test(name)` guard then rejected as invalid, making every
+    // `addRegistry(localWindowsPath)` call fail with "Invalid registry name" on
+    // windows-latest CI (got `result.ok === false` instead of `true`).
+    it('derives the basename from a Windows-style backslash path', () => {
+        const { deriveRegistryName } = require('../../../src/commands/registry/add');
+        const winPath = 'C:\\Users\\runner\\AppData\\Local\\Temp\\awm-regadd-work-xyz\\src-alpha';
+        expect(deriveRegistryName(winPath)).toBe('src-alpha');
+    });
+
+    it('derives the basename from a POSIX path (unchanged behavior)', () => {
+        const { deriveRegistryName } = require('../../../src/commands/registry/add');
+        expect(deriveRegistryName('/tmp/awm-regadd-work-xyz/src-alpha')).toBe('src-alpha');
+    });
+
+    it('still strips a trailing .git and derives from an https remote URL', () => {
+        const { deriveRegistryName } = require('../../../src/commands/registry/add');
+        expect(deriveRegistryName('https://github.com/Kodria/awm-baseline-registry.git')).toBe('awm-baseline-registry');
+    });
+
+    it('still derives from an SSH-style remote (host:org/repo.git)', () => {
+        const { deriveRegistryName } = require('../../../src/commands/registry/add');
+        expect(deriveRegistryName('git@github.com:Kodria/awm-baseline-registry.git')).toBe('awm-baseline-registry');
+    });
+});
+
 describe('addRegistry', () => {
     let tmpHome: string;
     let tmpWork: string;

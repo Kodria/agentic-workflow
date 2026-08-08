@@ -69,4 +69,39 @@ describe('Executor Engine', () => {
         expect(fs.existsSync(path.join(target, 'test.txt'))).toBe(true);
         expect(fs.existsSync(staged)).toBe(false);
     });
+
+    // Regression: a directory *symlink* ('dir') needs SeCreateSymbolicLinkPrivilege
+    // on native Windows, which unprivileged accounts (incl. GitHub Actions'
+    // windows-latest runner) don't have — every `awm init` install of a skill/
+    // agent directory threw EPERM there, failing the step and exiting the whole
+    // run with code 2 (see tests/integration/codex-provider-isolated.test.ts).
+    // A 'junction' is a different NTFS reparse-point kind that any account can
+    // create, and Node reports it the same way a symlink is reported
+    // (isSymbolicLink() true, readlinkSync() resolves it), so this only needs
+    // to change the `type` argument passed to fs.symlinkSync on win32 — nothing
+    // downstream (verify(), R19 hashing, doctor checks) needs to change.
+    describe('on native Windows', () => {
+        const realPlatform = process.platform;
+        let symlinkSpy: jest.SpyInstance;
+
+        beforeEach(() => {
+            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+            symlinkSpy = jest.spyOn(fs, 'symlinkSync').mockImplementation(() => undefined as unknown as void);
+        });
+
+        afterEach(() => {
+            Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+            symlinkSpy.mockRestore();
+        });
+
+        it('stages a directory symlink as a junction instead of a dir-symlink', () => {
+            const target = path.join(targetDir, 'win-skill');
+            stageArtifact(sourceDir, target, 'symlink');
+
+            expect(symlinkSpy).toHaveBeenCalledTimes(1);
+            const [calledSource, , calledType] = symlinkSpy.mock.calls[0];
+            expect(calledSource).toBe(sourceDir);
+            expect(calledType).toBe('junction');
+        });
+    });
 });

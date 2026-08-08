@@ -1,6 +1,7 @@
 // src/core/executor.ts
 import fs from 'fs';
 import path from 'path';
+import { isWindowsNative } from './paths';
 
 export function removeArtifact(targetPath: string): void {
     let exists = false;
@@ -39,7 +40,19 @@ export function stageArtifact(
     fs.rmSync(staged, { recursive: true, force: true });
 
     if (method === 'symlink') {
-        fs.symlinkSync(sourcePath, staged, 'dir');
+        // A directory *symlink* ('dir') needs SeCreateSymbolicLinkPrivilege on
+        // Windows — denied by default on unprivileged accounts, including
+        // GitHub Actions' windows-latest runner, so every install here would
+        // throw EPERM. A *junction* is a different NTFS reparse-point kind
+        // that Windows lets any account create, and Node/libuv report it the
+        // same way a symlink is reported (`lstat().isSymbolicLink()` is true,
+        // `readlinkSync()` resolves it) — so every downstream consumer
+        // (verify(), R19's provider-facts hashing, doctor's symlink checks)
+        // keeps working unmodified. Junctions require an absolute target,
+        // which `sourcePath` always is here (registry content roots are
+        // resolved under `awmHome()`). POSIX platforms are unaffected: 'dir'
+        // is a plain no-op hint there.
+        fs.symlinkSync(sourcePath, staged, isWindowsNative() ? 'junction' : 'dir');
     } else {
         fs.cpSync(sourcePath, staged, { recursive: true });
     }

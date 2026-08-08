@@ -25,7 +25,20 @@ describe('runCommand — exit codes and output', () => {
     });
 
     it('captures stderr and a non-zero exit code without throwing', async () => {
-        const r = await runCommand('echo oops 1>&2; exit 3', { timeout: 5000, cwd: process.cwd() });
+        // Portable by construction: `node -e "..."` is invoked identically by
+        // `spawn(cmd, {shell:true})` on both `/bin/sh -c` (POSIX) and
+        // `cmd.exe /d /s /c` (win32) — the shell only tokenizes the outer
+        // double-quoted argument, and node's own -e parsing is platform-
+        // independent from there. A previous version of this test used
+        // POSIX-only shell syntax (`;` as a separator, `1>&2` redirect
+        // ordering) that cmd.exe does not support: `;` isn't a command
+        // separator there, so the whole string became literal arguments to
+        // `echo` and `exit 3` never ran as its own command — the run
+        // "succeeded" with code 0 instead of 3 on windows-latest CI.
+        const r = await runCommand(
+            `node -e "process.stderr.write('oops'); process.exit(3)"`,
+            { timeout: 5000, cwd: process.cwd() },
+        );
         expect(r.code).toBe(3);
         expect(r.stderr).toMatch(/oops/);
         expect(r.timedOut).toBe(false);

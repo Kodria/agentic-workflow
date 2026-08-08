@@ -11,7 +11,15 @@ describe('process identity', () => {
         expect(ref.spawnNonce).toBe('nonce-abc');
         expect(typeof ref.startTime).toBe('string');
         expect(ref.processGroup).toBeGreaterThan(0);
-        expect(ref.psArgsDigest).toMatch(/^[0-9a-f]{16}$/);
+        // hex real cuando `ps` pudo observar el proceso (caso normal en
+        // POSIX); sentinel 'unknown' documentado (ver captureRefFor) cuando
+        // no pudo — en win32 esto es la ruta NORMAL, no un error: `ps`/`pgrep`
+        // ahi (si resuelven en el PATH) son el ps/pgrep emulado de
+        // MSYS/Cygwin, ciego a procesos nativos (ver pidExistsNative en
+        // src/core/journal/process.ts). El formato exacto de este campo
+        // nunca es la fuente de verdad de vida/muerte — solo lo es refIsAlive
+        // (ver los tests de la seccion 'process identity (win32, mockeado)').
+        expect(ref.psArgsDigest).toMatch(/^([0-9a-f]{16}|unknown)$/);
         expect(refIsAlive(ref)).toBe(true);
         const dead = await terminateGroupConfirmed(ref, { termGraceMs: 300, killGraceMs: 300 });
         expect(dead).toBe(true);
@@ -151,6 +159,92 @@ describe('process identity', () => {
             spy.mockRestore();
         }
     });
+});
+
+/** Regresion (CI windows-latest, primera corrida real de la matriz): ps/pgrep,
+ *  cuando resuelven en el PATH en Windows, son el ps/pgrep EMULADO de
+ *  MSYS/Cygwin (Git for Windows) — una capa con su propia tabla de pids,
+ *  ciega a procesos nativos spawneados via CreateProcess (exactamente lo que
+ *  produce spawnStructured). El codigo viejo interpretaba el exit 1 de ese
+ *  ps/pgrep "ciego" como "el SO confirmo que el pid no existe" — falso, y
+ *  rompia el invariante "JAMAS safe sin evidencia": `safeToReplace` devolvia
+ *  'safe' para un proceso genuinamente vivo (ver adapter.test.ts). No hay
+ *  windows-latest real disponible en este entorno; estos tests mockean
+ *  `process.platform` (mismo patron que
+ *  tests/commands/sensors/exec-windows.test.ts, que ya cubre exactamente
+ *  este problema para sensors/exec.ts::killTree) para ejercitar la rama
+ *  win32 REAL del codigo de produccion contra un pid real y vivo. */
+describe('process identity (win32, mockeado — sin windows real disponible en este entorno)', () => {
+    const originalPlatform = process.platform;
+
+    afterEach(() => {
+        Object.defineProperty(process, 'platform', { value: originalPlatform });
+        jest.restoreAllMocks();
+    });
+
+    test('refIsAlive en win32 usa process.kill(pid,0), NUNCA ps/pgrep — reproduce el bug: un ps/pgrep "ciego" que devuelve exit 1 para un pid real y vivo ya no lo declara muerto (R2.1, R4.2b)', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 3000)'], process.cwd(), 'n-win32-a');
+        const cp = require('child_process');
+        // Simula EXACTAMENTE el bug real de CI: ps/pgrep "corren" pero
+        // devuelven exit 1 (ceguera de MSYS a pids nativos) para un pid que
+        // esta genuinamente vivo — el codigo viejo confiaba en esto.
+        const execSpy = jest.spyOn(cp, 'execFileSync').mockImplementation(() => {
+            const err: any = new Error('no matches found');
+            err.status = 1;
+            throw err;
+        });
+        try {
+            expect(refIsAlive(ref)).toBe(true);          // vivo de verdad: nunca declarado muerto
+            expect(execSpy).not.toHaveBeenCalled();       // refIsAlive en win32 ni siquiera intenta ps/pgrep
+        } finally {
+            child.kill('SIGKILL');
+        }
+    });
+
+    test('refIsAlive en win32 declara muerte SOLO con ESRCH real de process.kill(pid,0) (R2.1)', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => {
+            const err: any = new Error('no such process'); err.code = 'ESRCH'; throw err;
+        });
+        const fakeRef = { pid: 999999, startTime: 'x', spawnNonce: 'n', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
+        expect(refIsAlive(fakeRef)).toBe(false);
+        expect(killSpy).toHaveBeenCalledWith(999999, 0);
+    });
+
+    test('refIsAlive en win32 NUNCA declara muerte por un error que no sea ESRCH (ej. EPERM: el pid existe pero sin permiso de senializarlo) (R2.1)', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        jest.spyOn(process, 'kill').mockImplementation(() => {
+            const err: any = new Error('operation not permitted'); err.code = 'EPERM'; throw err;
+        });
+        const fakeRef = { pid: 4242, startTime: 'x', spawnNonce: 'n', argvDigest: 'd', processGroup: 4242, psArgsDigest: 'x' };
+        expect(refIsAlive(fakeRef)).toBe(true);
+    });
+
+    test('terminateGroupConfirmed en win32 usa `taskkill /pid <pid> /T /F`, NUNCA process.kill(-pgid) (mismo patron probado en sensors/exec.ts::killTree, ver tests/commands/sensors/exec-windows.test.ts)', async () => {
+        // Spawnea en modo POSIX real (platform sin mockear todavia) para que
+        // ref.processGroup sea un pgid real de ps (detached:true en esta
+        // plataforma) — evita que el pgid observado sea el del test runner.
+        const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 5000)'], process.cwd(), 'n-win32-taskkill');
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        const cp = require('child_process');
+        const execSpy = jest.spyOn(cp, 'execFileSync').mockImplementation((...args: unknown[]) => {
+            const [cmd] = args as [string, string[]];
+            if (cmd === 'taskkill') {
+                child.kill('SIGKILL');   // simula taskkill matando de verdad al pid real
+                return '';
+            }
+            throw new Error('llamada inesperada a execFileSync en este test: ' + cmd);
+        });
+        const posixKillSpy = jest.spyOn(process, 'kill');
+        const dead = await terminateGroupConfirmed(ref, { termGraceMs: 2000, killGraceMs: 500 });
+        expect(execSpy).toHaveBeenCalledWith('taskkill', ['/pid', String(ref.pid), '/T', '/F'], expect.anything());
+        expect(dead).toBe(true);
+        // Nunca la convencion POSIX de pid negativo (grupo) en esta plataforma.
+        for (const call of posixKillSpy.mock.calls) {
+            expect(call[0] as number).toBeGreaterThanOrEqual(0);
+        }
+    }, 15000);
 });
 
 /** Defense-in-depth: los execFileSync internos de este archivo (psField,

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { spawn, execFileSync, ChildProcess } from 'child_process';
 import type { ProcessRef } from './types';
+import { isWindowsNative } from '../paths';
 
 export const NONCE_ENV = 'AWM_SPAWN_NONCE';
 
@@ -120,7 +121,11 @@ export function captureSelfRef(nonce: string): ProcessRef {
 export function spawnStructured(argv: string[], cwd: string, nonce: string, extraEnv: Record<string, string> = {}): { child: ChildProcess; ref: ProcessRef } {
     const [exe, ...args] = argv;
     const child = spawn(exe, args, {
-        cwd, shell: false, detached: true,
+        cwd, shell: false,
+        // win32 no tiene grupos de proceso POSIX (setsid) — `detached: true`
+        // ahi solo crea un grupo de consola para CTRL+BREAK, no lo que este
+        // modulo necesita. Mismo patron que sensors/exec.ts::runCommand.
+        detached: !isWindowsNative(),
         env: { ...process.env, [NONCE_ENV]: nonce, ...extraEnv },
         // stdio:'ignore' completo (nada de pipes): un pipe destruido/abandonado
         // por el padre puede EPIPE-crashear al hijo si este escribe a su propio
@@ -132,9 +137,46 @@ export function spawnStructured(argv: string[], cwd: string, nonce: string, extr
     return { child, ref: captureRefFor(child.pid, nonce, argv) };
 }
 
+/** Existencia de pid respaldada DIRECTAMENTE por el kernel via libuv
+ *  (process.kill(pid,0) — funciona en cualquier plataforma que Node
+ *  soporte, incluido win32), a diferencia de `ps`/`pgrep`: en Windows esos
+ *  binarios, cuando resuelven en el PATH, son el `ps`/`pgrep` de
+ *  MSYS/Cygwin (Git for Windows) — una capa de EMULACION con su propia
+ *  tabla de pids, ciega a procesos nativos spawneados via CreateProcess
+ *  (exactamente lo que produce spawnStructured). Confirmado en CI
+ *  windows-latest: `ps -o stat= -p <pid>` para un hijo real y vivo salia
+ *  con exit 1 ("no such process" segun la vista emulada), y `psField`
+ *  interpretaba ese exit 1 como "el SO confirmo que el pid no existe" —
+ *  falso: era ceguera de la herramienta, no evidencia de muerte. Eso
+ *  rompia el invariante "JAMAS safe sin evidencia" (safeToReplace
+ *  devolvia 'safe' para un proceso vivo). process.kill(pid,0) evita la
+ *  capa de emulacion por completo. */
+function pidExistsNative(pid: number): boolean {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (error) {
+        // ESRCH = el SO confirmo que el pid no existe. Cualquier otro
+        // codigo (ej. EPERM: existe pero sin permiso de senializarlo) NO
+        // es evidencia de muerte — falla a favor de "vivo" (R2.1).
+        return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+    }
+}
+
 /** Vivo Y con la MISMA identidad — tupla completa, nunca PID solo (R2.1,
- *  bloqueador 6): startTime + pgid + digest de ps args. */
+ *  bloqueador 6): startTime + pgid + digest de ps args.
+ *
+ *  win32: sin `ps` confiable (ver pidExistsNative) no hay observacion
+ *  fresca de lstart/pgid/args con la que reconstruir y comparar la tupla
+ *  completa — la unica senial que el SO respalda directamente en esta
+ *  plataforma es "¿existe el pid?". Verificacion de identidad completa
+ *  (proteccion R6 contra reciclado de pid) queda fuera de alcance en
+ *  win32 sin una fuente de observacion nativa (tasklist/WMI); el fallo
+ *  conservador es hacia 'vivo' (nunca declarar muerte sin ESRCH real), lo
+ *  que en el peor caso deja al supervisor en custodia de mas, JAMAS
+ *  autoriza un reemplazo/kill indebido. */
 export function refIsAlive(ref: ProcessRef): boolean {
+    if (isWindowsNative()) return pidExistsNative(ref.pid);
     try {
         const stat = psField(ref.pid, 'stat');
         if (stat === null || stat.startsWith('Z')) return false; // zombie = proceso terminado, solo espera reap
@@ -160,6 +202,17 @@ export function processStatesAreGone(states: Array<string | null>): boolean {
 }
 
 export function groupIsGone(pgid: number): boolean {
+    if (isWindowsNative()) {
+        // Sin pgrep confiable en esta plataforma (ver pidExistsNative):
+        // mejor esfuerzo, solo confirma al LIDER (pgid === pid, por la
+        // convencion de fallback de captureRefFor en win32 — nunca hay un
+        // pgid real de ps ahi). No enumeramos descendientes sin Job
+        // Objects (fuera de alcance) — killTreeWindows ya los alcanza al
+        // matar via `taskkill /T`, aunque este check no los confirme
+        // individualmente. Nunca declarar "grupo ausente" por ceguera de
+        // una herramienta POSIX inexistente/emulada.
+        return !pidExistsNative(pgid);
+    }
     let pids: number[];
     try {
         const out = execFileSync('pgrep', ['-g', String(pgid)], { encoding: 'utf8', stdio: EXEC_STDIO });
@@ -193,6 +246,16 @@ export function activitySnapshot(ref: ProcessRef): ActivitySnapshot | null {
     return { cpuTime: cpu, groupSize };
 }
 
+/** win32: sin process groups POSIX ni convencion de pid negativo, y sin
+ *  distincion real SIGTERM/SIGKILL (Node mapea ambas a TerminateProcess
+ *  alla) — un `taskkill /T /F` (recursivo, forzado) sustituye a la
+ *  escalera completa. Mismo patron ya usado y testeado en
+ *  sensors/exec.ts::killTree (ver tests/commands/sensors/exec-windows.test.ts). */
+function killTreeWindows(pid: number): void {
+    try { execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: EXEC_STDIO }); }
+    catch { /* ya ausente, o taskkill no disponible: best-effort — la confirmacion la hace el poll de groupIsGone */ }
+}
+
 /** Escalera de gracia (design R4.2b): SIGTERM -> confirmar -> SIGKILL -> confirmar.
  *  true <=> lider muerto por identidad Y grupo entero desaparecido (pgrep -g
  *  vacio) — jamas confirmar solo el lider (bloqueador 6). */
@@ -209,6 +272,12 @@ export async function terminateGroupConfirmed(ref: ProcessRef, opts: { termGrace
     // Un PGID ocupado con lider de identidad distinta NO es nuestro. Nunca
     // usar la falta de match como autorizacion para senializar ese grupo.
     if (!refIsAlive(ref)) return false;
+    if (isWindowsNative()) {
+        killTreeWindows(ref.pid);
+        if (await waitUntilGone(opts.termGraceMs)) return true;
+        killTreeWindows(ref.pid);
+        return waitUntilGone(opts.killGraceMs);
+    }
     try { process.kill(-ref.processGroup, 'SIGTERM'); } catch { /* grupo ya ausente */ }
     if (await waitUntilGone(opts.termGraceMs)) return true;
     try { process.kill(-ref.processGroup, 'SIGKILL'); } catch { /* idem */ }
@@ -229,6 +298,12 @@ export async function terminatePreviouslyOwnedGroup(ref: ProcessRef, opts: { ter
         return groupIsGone(ref.processGroup);
     };
     if (groupIsGone(ref.processGroup)) return true;
+    if (isWindowsNative()) {
+        killTreeWindows(ref.pid);
+        if (await waitUntilGone(opts.termGraceMs)) return true;
+        killTreeWindows(ref.pid);
+        return waitUntilGone(opts.killGraceMs);
+    }
     try { process.kill(-ref.processGroup, 'SIGTERM'); } catch { /* ya ausente */ }
     if (await waitUntilGone(opts.termGraceMs)) return true;
     try { process.kill(-ref.processGroup, 'SIGKILL'); } catch { /* ya ausente */ }

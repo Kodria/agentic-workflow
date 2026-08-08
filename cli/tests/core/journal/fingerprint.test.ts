@@ -114,7 +114,15 @@ describe('computeFingerprint', () => {
  *  de un git real) — sin el fix, esto tumba al hijo; con el fix, sobrevive. */
 describe('fingerprint.ts git(): stdio explicito evita inheritStderr hacia un pipe roto', () => {
     const DIST_ENTRY = path.resolve(__dirname, '..', '..', '..', 'dist', 'src', 'core', 'journal', 'fingerprint.js');
-    const REAL_GIT = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+    // `which` is POSIX-only and not reliably on PATH in a pwsh-shell windows-latest
+    // runner even though Git for Windows is installed (Windows uses `where`). `where`
+    // can print one match per line when git is reachable via more than one PATH
+    // entry, so only the FIRST line is a valid single path to spawn directly — the
+    // rest would make execFileSync try to exec a multi-line string as one path.
+    const REAL_GIT = execFileSync(process.platform === 'win32' ? 'where' : 'which', ['git'], { encoding: 'utf8' })
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line.length > 0)!;
 
     beforeAll(() => {
         if (!fs.existsSync(DIST_ENTRY)) {
