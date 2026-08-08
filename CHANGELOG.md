@@ -1,3 +1,8 @@
+## v3.13.6 - 2026-08-08
+
+### Fixes
+- close every remaining production-readiness finding (#39)
+
 ## v3.13.5 - 2026-08-08
 
 ### Fixes
