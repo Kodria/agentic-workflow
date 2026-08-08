@@ -1,6 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import { homeDir, awmHome } from '../../core/paths';
+import { readStrictJson } from '../hooks/shared';
+import { writeFileAtomic } from '../../core/atomic-file';
+import { getSettingsMergeHookConfig } from '../../providers';
 
 const POST_TOOL_USE_EVENT = 'PostToolUse';
 const POST_TOOL_USE_MATCHER = 'Write|Edit|MultiEdit';
@@ -10,12 +13,24 @@ type HookEntry = { type: 'command'; command: string; };
 type HookMatcher = { matcher: string; hooks: HookEntry[]; };
 
 function defaultSettingsPath(): string {
-    return path.join(homeDir(), '.claude', 'settings.json');
+    // Se toma de la config del provider, no de una ruta hardcodeada: era la
+    // cuarta copia de este path en el codigo.
+    return getSettingsMergeHookConfig('claude-code').settingsPath;
 }
 
+/** Lectura ESTRICTA, compartida con los demas escritores de este archivo.
+ *
+ *  Antes esto era `try { JSON.parse(...) } catch { return {} }` y el `{}` se
+ *  escribia de vuelta — asi que un JSON malformado (una coma de mas, el error
+ *  de edicion a mano mas comun) BORRABA el settings.json entero del usuario y
+ *  la operacion reportaba exito. Verificado destruyendo `model`, `permissions`
+ *  y el propio hook SessionStart de AWM. El escritor hermano
+ *  (`installClaudeHook`) ya se negaba correctamente ante el mismo archivo.
+ *
+ *  AWM hace MERGE sobre archivos que son del usuario; nunca los clobberea. Ante
+ *  un archivo que no se puede parsear, la unica accion segura es negarse. */
 function readSettings(p: string): any {
-    if (!fs.existsSync(p)) return {};
-    try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { return {}; }
+    return readStrictJson(p);
 }
 
 function isAwmEntry(e: HookMatcher): boolean {
@@ -53,7 +68,7 @@ export function installSensorHook(settingsPath: string = defaultSettingsPath()):
     };
 
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-    fs.writeFileSync(settingsPath, JSON.stringify(updated, null, 2), 'utf-8');
+    writeFileAtomic(settingsPath, `${JSON.stringify(updated, null, 2)}\n`);
     return { status: 'installed', backupPath };
 }
 
@@ -68,6 +83,6 @@ export function uninstallSensorHook(settingsPath: string = defaultSettingsPath()
     if (updated.hooks[POST_TOOL_USE_EVENT].length === 0) delete updated.hooks[POST_TOOL_USE_EVENT];
     if (Object.keys(updated.hooks).length === 0) delete updated.hooks;
 
-    fs.writeFileSync(settingsPath, JSON.stringify(updated, null, 2), 'utf-8');
+    writeFileAtomic(settingsPath, `${JSON.stringify(updated, null, 2)}\n`);
     return { status: 'removed' };
 }

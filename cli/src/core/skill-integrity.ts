@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { AGENT_TARGETS, AgentTarget, providerFor } from '../providers';
+import { isWindowsNative } from './paths';
 
 export type SkillIntegrity = {
     valid: string[];
@@ -53,8 +54,34 @@ export function repairGlobalSkills(skillsDir: string, registryContentDirs: strin
         try {
             const target = findRegistrySkillPath(registryContentDirs, name);
             if (!target) { result.failed.push(name); continue; }
-            fs.rmSync(p, { force: true });
-            fs.symlinkSync(target, p, 'dir');
+            // Dos correcciones, ambas criticas en Windows:
+            //
+            // 1. `'junction'` en win32, no `'dir'`. Un symlink de directorio
+            //    exige SeCreateSymbolicLinkPrivilege, denegado por defecto en
+            //    cuentas sin privilegios (incluido el runner windows-latest);
+            //    una junction la puede crear cualquiera y libuv la reporta
+            //    igual. `executor.ts` ya documenta esto en extenso — este sitio
+            //    nunca recibio el fix.
+            //
+            // 2. Se crea el link NUEVO antes de retirar el viejo. Antes el
+            //    `rmSync` iba primero, asi que en Windows el link se borraba y
+            //    la recreacion fallaba: el usuario quedaba PEOR que antes, y
+            //    con la entrada ya ausente el proximo `awm init` ni siquiera
+            //    podia verla como reparable. Un fallo ahora deja el estado
+            //    original intacto.
+            const staged = path.join(skillsDir, `.${name}.${process.pid}.relink`);
+            try {
+                fs.rmSync(staged, { recursive: true, force: true });
+                fs.symlinkSync(target, staged, isWindowsNative() ? 'junction' : 'dir');
+                fs.rmSync(p, { recursive: true, force: true });
+                fs.renameSync(staged, p);
+            } finally {
+                // El staging jamas debe sobrevivir a esta iteracion: si quedara,
+                // `classifyGlobalSkills` lo veria como un symlink valido (apunta
+                // al registry, que existe) y nunca lo clasificaria como muerto,
+                // asi que se quedaria en el directorio para siempre.
+                fs.rmSync(staged, { recursive: true, force: true });
+            }
             result.relinked.push(name);
         } catch { result.failed.push(name); }
     }
