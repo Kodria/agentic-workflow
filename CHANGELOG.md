@@ -1,3 +1,8 @@
+## v3.13.2 - 2026-08-08
+
+### Fixes
+- **cli:** make awm doctor actually show the Windows caveat, stop init tripling it
+
 ## v3.13.1 - 2026-08-08
 
 ### Fixes
