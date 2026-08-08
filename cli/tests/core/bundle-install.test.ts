@@ -233,6 +233,87 @@ describe('installBundle', () => {
         expect(fs.existsSync(path.join(projectRoot, '.gitignore'))).toBe(true);
     });
 
+    it('materializes a skill as a rendered Cursor .mdc via the real default applyInstallPlan (Task 4.3 e2e)', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+        // s-base's fixture SKILL.md (makeFixture, above) has no `description`
+        // field — real for a bare skill fixture, but cursor-mdc.ts's renderer
+        // requires one (parseSkillSource). Seed a real description here so
+        // this is a genuine end-to-end render, not just a source-existence check.
+        fs.writeFileSync(
+            path.join(content, 'skills', 's-base', 'SKILL.md'),
+            '---\nname: s-base\ndescription: Base skill for bundle-install fixtures\n---\n\nDo the base thing.\n',
+        );
+        const base = bundles.find((bundle) => bundle.name === 'base')!;
+
+        const result = installBundle({
+            bundleName: 'base',
+            bundles: [base],
+            agents: ['cursor'],
+            method: 'symlink',
+            projectRoot,
+            contentDir: content,
+        });
+
+        const mdcPath = path.join(projectRoot, '.cursor/rules/s-base.mdc');
+        expect(fs.existsSync(path.join(projectRoot, '.cursor/rules/s-base'))).toBe(false);
+        expect(fs.existsSync(mdcPath)).toBe(true);
+        const rendered = fs.readFileSync(mdcPath, 'utf8');
+        expect(rendered).toContain('description: Base skill for bundle-install fixtures');
+        expect(rendered).toContain('alwaysApply: false');
+        expect(rendered).toContain('Do the base thing.');
+        expect(result.transactionId).toBeTruthy();
+        expect(result.modifiedFiles).toContain(mdcPath);
+    });
+
+    it('materializes a skill as rendered Copilot .instructions.md via the real default applyInstallPlan (Task 4.3 e2e)', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+        fs.writeFileSync(
+            path.join(content, 'skills', 's-base', 'SKILL.md'),
+            '---\nname: s-base\ndescription: Base skill for bundle-install fixtures\n---\n\nDo the base thing.\n',
+        );
+        const base = bundles.find((bundle) => bundle.name === 'base')!;
+
+        const result = installBundle({
+            bundleName: 'base',
+            bundles: [base],
+            agents: ['copilot'],
+            method: 'symlink',
+            projectRoot,
+            contentDir: content,
+        });
+
+        const instructionsPath = path.join(projectRoot, '.github/instructions/s-base.instructions.md');
+        expect(fs.existsSync(path.join(projectRoot, '.github/instructions/s-base'))).toBe(false);
+        expect(fs.existsSync(instructionsPath)).toBe(true);
+        const rendered = fs.readFileSync(instructionsPath, 'utf8');
+        expect(rendered).toContain('applyTo: "**"');
+        expect(rendered).toContain('Do the base thing.');
+        expect(result.transactionId).toBeTruthy();
+        expect(result.modifiedFiles).toContain(instructionsPath);
+    });
+
+    it('applies real filesystem changes for Cursor + Copilot via addBundle (awm add e2e, no applyPlan override)', () => {
+        const { content, projectRoot, bundles } = makeFixture();
+        fs.writeFileSync(
+            path.join(content, 'skills', 's-base', 'SKILL.md'),
+            '---\nname: s-base\ndescription: Base skill for bundle-install fixtures\n---\n\nDo the base thing.\n',
+        );
+
+        const cursorResult = addBundle({
+            bundleName: 'base', bundles, agents: ['cursor'],
+            method: 'symlink', projectRoot, contentDir: content,
+        });
+        expect(fs.existsSync(path.join(projectRoot, '.cursor/rules/s-base.mdc'))).toBe(true);
+        expect(cursorResult.recordedExtension).toBe('base');
+
+        const copilotResult = addBundle({
+            bundleName: 'base', bundles, agents: ['copilot'],
+            method: 'symlink', projectRoot, contentDir: content,
+        });
+        expect(fs.existsSync(path.join(projectRoot, '.github/instructions/s-base.instructions.md'))).toBe(true);
+        expect(copilotResult.recordedExtension).toBe('base');
+    });
+
     it('installs a skill shared by two agents (OpenCode + Codex) with exactly one replaceArtifact call, but the summary contains both providers', () => {
         const { content, projectRoot, bundles } = makeFixture();
         const base = bundles.find((bundle) => bundle.name === 'base')!;

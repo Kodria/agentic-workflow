@@ -233,6 +233,56 @@ describe('install-planner', () => {
                 method: 'symlink',
             })).toThrow(/physical target already claimed by a different source/);
         });
+
+        describe('renderer-driven filename computation (Task 4.3)', () => {
+            it('renders the Cursor skill target with a .mdc extension, stripping any pre-existing extension', () => {
+                const plan = planInstall({
+                    artifacts: [skillArtifact('development-process')],
+                    selectedAgents: ['cursor'],
+                    enabledAgents: ['cursor'],
+                    scope: 'local',
+                    projectRoot: tmpWork,
+                    method: 'symlink',
+                });
+                expect(plan.operations[0].targetPath).toBe(
+                    path.join(tmpWork, '.cursor', 'rules', 'development-process.mdc'),
+                );
+                expect(plan.operations[0].renderer).toBe('cursor-mdc');
+            });
+
+            it('renders the Copilot skill target with a .instructions.md extension (not .md.instructions.md)', () => {
+                const plan = planInstall({
+                    artifacts: [skillArtifact('development-process')],
+                    selectedAgents: ['copilot'],
+                    enabledAgents: ['copilot'],
+                    scope: 'local',
+                    projectRoot: tmpWork,
+                    method: 'symlink',
+                });
+                expect(plan.operations[0].targetPath).toBe(
+                    path.join(tmpWork, '.github', 'instructions', 'development-process.instructions.md'),
+                );
+                expect(plan.operations[0].renderer).toBe('copilot-instructions');
+            });
+
+            it('strips an installName that already carries an extension before appending .instructions.md', () => {
+                const withExtension: ArtifactIntent = {
+                    name: 'development-process',
+                    installName: 'development-process.md',
+                    type: 'skill',
+                    sourcePath: path.join(tmpWork, 'registry', 'skills', 'development-process'),
+                };
+                const plan = planInstall({
+                    artifacts: [withExtension],
+                    selectedAgents: ['copilot'],
+                    enabledAgents: ['copilot'],
+                    scope: 'local',
+                    projectRoot: tmpWork,
+                    method: 'symlink',
+                });
+                expect(path.basename(plan.operations[0].targetPath)).toBe('development-process.instructions.md');
+            });
+        });
     });
 
     describe('planRemoval', () => {

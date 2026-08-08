@@ -24,7 +24,7 @@ export type ArtifactIntent = {
 
 export type PlannedOperation = ManagedArtifactRecord & {
     method: 'symlink' | 'copy';
-    output: 'link' | 'codex-agent-toml';
+    output: RendererId;
 };
 
 export type InstallReport = {
@@ -65,7 +65,8 @@ export type PlanRemovalParams = {
 /** Resolves the single physical filesystem location an intent renders to for one agent. */
 /**
  * Resolves the physical target path + renderer for one artifact intent on one
- * agent (dir + filename, applying the `.toml` rename for `codex-agent-toml`).
+ * agent (dir + filename, applying the renderer-specific extension rename for
+ * `codex-agent-toml`/`cursor-mdc`/`copilot-instructions`).
  * Shared with `core/init/mutation-targets.ts`, which needs the exact same
  * dir/filename computation to enumerate paths before a real `awm init` run —
  * duplicating this logic there would let the two silently diverge.
@@ -80,8 +81,15 @@ export function physicalTarget(intent: ArtifactIntent, agent: AgentTarget, scope
     if (dir === null) {
         throw unsupportedScopeError(intent.type, scope, providerFor(agent).label, config.globalUnsupportedReason);
     }
-    const filename = config.renderer === 'codex-agent-toml'
-        ? `${path.parse(intent.installName).name}.toml`
+    // Rendered targets get a provider-specific extension in place of
+    // whatever extension (if any) intent.installName already carries —
+    // path.parse(...).name strips it first, so e.g. `using-awm` (skills
+    // carry no extension) or `using-awm.md` both become
+    // `using-awm.instructions.md`, never `using-awm.md.instructions.md`.
+    const baseName = path.parse(intent.installName).name;
+    const filename = config.renderer === 'codex-agent-toml' ? `${baseName}.toml`
+        : config.renderer === 'cursor-mdc' ? `${baseName}.mdc`
+        : config.renderer === 'copilot-instructions' ? `${baseName}.instructions.md`
         : intent.installName;
     return { targetPath: path.join(dir, filename), renderer: config.renderer };
 }

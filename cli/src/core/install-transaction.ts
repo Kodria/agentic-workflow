@@ -22,6 +22,8 @@ import { mergeArtifactRecords, readArtifactState, writeArtifactState } from './a
 import { awmHome } from './paths';
 import { writeFileAtomic } from './atomic-file';
 import { renderCodexAgent } from './renderers/codex-agent';
+import { renderCursorMdc } from './renderers/cursor-mdc';
+import { renderCopilotInstructions } from './renderers/copilot-instructions';
 import { stageArtifact, replaceArtifact } from './executor';
 
 /**
@@ -272,11 +274,25 @@ function stageRenderedFile(content: string, targetPath: string): string {
 }
 
 /**
+ * `cursor-mdc`/`copilot-instructions` targets are always 'skill'-type
+ * operations (providers/index.ts only assigns these renderers to a
+ * provider's `skill` ArtifactConfig), whose `sourcePath` is the skill's
+ * DIRECTORY (discovery.ts's `discoverSkills`/bundle-install.ts's
+ * `expandBundleArtifacts` both set it that way — the whole directory is what
+ * a `link` renderer symlinks), not the SKILL.md file itself. Both renderers
+ * are sourced from that directory's SKILL.md, so every call site needs this
+ * same one-line join instead of reading `op.sourcePath` directly.
+ */
+function readSkillMdSource(op: PlannedOperation): string {
+    return fs.readFileSync(path.join(op.sourcePath, 'SKILL.md'), 'utf8');
+}
+
+/**
  * The real, filesystem-touching TransactionDeps used by applyInstallPlan by
- * default. Renders `codex-agent-toml` targets from the canonical agent
- * Markdown source at stage time; every other renderer uses the plain
- * symlink/copy staging from executor.ts. Never logs target contents or
- * environment variables.
+ * default. Renders `codex-agent-toml`/`cursor-mdc`/`copilot-instructions`
+ * targets from their respective canonical sources at stage time; every other
+ * renderer ('link') uses the plain symlink/copy staging from executor.ts.
+ * Never logs target contents or environment variables.
  */
 export function defaultTransactionDeps(): TransactionDeps {
     let index = 0;
@@ -288,10 +304,14 @@ export function defaultTransactionDeps(): TransactionDeps {
             if (!fs.existsSync(op.sourcePath)) {
                 throw new Error(`Source path does not exist: ${op.sourcePath}`);
             }
+            // Renders without writing anything, purely to surface parse errors
+            // before any backup/replace happens.
             if (op.renderer === 'codex-agent-toml') {
-                // Renders without writing anything, purely to surface parse errors
-                // before any backup/replace happens.
                 renderCodexAgent(fs.readFileSync(op.sourcePath, 'utf8'));
+            } else if (op.renderer === 'cursor-mdc') {
+                renderCursorMdc(readSkillMdSource(op));
+            } else if (op.renderer === 'copilot-instructions') {
+                renderCopilotInstructions(readSkillMdSource(op));
             }
         },
 
@@ -312,6 +332,14 @@ export function defaultTransactionDeps(): TransactionDeps {
         stage(op) {
             if (op.renderer === 'codex-agent-toml') {
                 const rendered = renderCodexAgent(fs.readFileSync(op.sourcePath, 'utf8'));
+                return stageRenderedFile(rendered, op.targetPath);
+            }
+            if (op.renderer === 'cursor-mdc') {
+                const rendered = renderCursorMdc(readSkillMdSource(op));
+                return stageRenderedFile(rendered, op.targetPath);
+            }
+            if (op.renderer === 'copilot-instructions') {
+                const rendered = renderCopilotInstructions(readSkillMdSource(op));
                 return stageRenderedFile(rendered, op.targetPath);
             }
             return stageArtifact(op.sourcePath, op.targetPath, op.method);
@@ -335,6 +363,26 @@ export function defaultTransactionDeps(): TransactionDeps {
                 const content = fs.readFileSync(op.targetPath, 'utf8');
                 if (!content.startsWith('name = ')) {
                     throw new Error(`verification failed: ${op.targetPath} does not look like rendered TOML`);
+                }
+                return;
+            }
+            if (op.renderer === 'cursor-mdc') {
+                if (!stat.isFile()) {
+                    throw new Error(`verification failed: ${op.targetPath} is not a regular file`);
+                }
+                const content = fs.readFileSync(op.targetPath, 'utf8');
+                if (!content.startsWith('---\n') || !content.includes('alwaysApply:')) {
+                    throw new Error(`verification failed: ${op.targetPath} does not look like rendered Cursor .mdc`);
+                }
+                return;
+            }
+            if (op.renderer === 'copilot-instructions') {
+                if (!stat.isFile()) {
+                    throw new Error(`verification failed: ${op.targetPath} is not a regular file`);
+                }
+                const content = fs.readFileSync(op.targetPath, 'utf8');
+                if (!content.startsWith('---\n') || !content.includes('applyTo:')) {
+                    throw new Error(`verification failed: ${op.targetPath} does not look like rendered Copilot instructions`);
                 }
                 return;
             }

@@ -7,7 +7,26 @@ export const AGENT_TARGETS = ['antigravity', 'opencode', 'claude-code', 'codex',
 export type AgentTarget = typeof AGENT_TARGETS[number];
 export type Scope = 'global' | 'local';
 export type ArtifactType = 'skill' | 'workflow' | 'agent';
-export type RendererId = 'link' | 'codex-agent-toml';
+export type RendererId = 'link' | 'codex-agent-toml' | 'cursor-mdc' | 'copilot-instructions';
+
+/**
+ * Renderer ids `assertLinkRenderer` allows through even though they aren't
+ * `'link'`. Deliberately NOT the same as "every renderer id implemented
+ * anywhere" — `'codex-agent-toml'` IS fully implemented (install-transaction.ts's
+ * `defaultTransactionDeps`), but stays out of this set on purpose: it is
+ * pre-existing, intentional behavior (see tests/core/provider-artifacts.test.ts,
+ * tests/ui/provider-preflight.test.ts) that `assertLinkRenderer`'s own raw-
+ * symlink-only callers (below) keep refusing it, because those callers
+ * physically cannot render TOML — they only ever symlink/copy `op.sourcePath`
+ * verbatim. `cursor-mdc`/`copilot-instructions` (Task 4.3) are different: unlike
+ * codex-agent-toml (an `agent`-type artifact with no non-rendered install path
+ * at all), a raw, unrendered copy of a skill's SKILL.md into `.cursor/rules/`
+ * or `.github/instructions/` is at least a plausible degraded skill install
+ * (same shape a `link` renderer would produce), not a structurally broken one
+ * — so lifting the gate for these two only relaxes an artificial restriction,
+ * it doesn't newly enable an operation this raw path can't perform at all.
+ */
+const RAW_PATH_ALLOWED_NONLINK_RENDERER_IDS: ReadonlySet<RendererId> = new Set(['cursor-mdc', 'copilot-instructions']);
 
 export function isAgentTarget(value: unknown): value is AgentTarget {
     return typeof value === 'string' &&
@@ -172,7 +191,7 @@ export function providers(): Record<AgentTarget, ProviderConfig> {
             skill: {
                 global: path.join(home, '.cursor/rules'),
                 local: '.cursor/rules',
-                renderer: 'link', // Task 4.3 will change this to a Cursor-specific .mdc renderer.
+                renderer: 'cursor-mdc',
             },
             workflow: null,
             agent: null,
@@ -192,7 +211,7 @@ export function providers(): Record<AgentTarget, ProviderConfig> {
                 global: null,
                 globalUnsupportedReason: 'GitHub Copilot has no user-level skill discovery mechanism — skills must be installed per-project.',
                 local: '.github/instructions',
-                renderer: 'link', // Task 4.3 will change this to a Copilot instructions renderer.
+                renderer: 'copilot-instructions',
             },
             workflow: null,
             agent: null,
@@ -249,6 +268,17 @@ export function getSettingsMergeHookConfig(agent: AgentTarget): SettingsMergeHoo
     return config as SettingsMergeHookConfig;
 }
 
+/**
+ * Guards callers that only know how to stage a target via a plain
+ * symlink/copy (`core/executor.ts`'s stageArtifact) — today, that means
+ * `core/provider-artifacts.ts`'s legacy single-artifact scan/preflight and
+ * `src/index.ts`'s legacy interactive `awm add` flow, neither of which goes
+ * through install-planner.ts/install-transaction.ts's render-at-stage-time
+ * pipeline. Throws for any non-'link' renderer except the ones explicitly
+ * allowlisted in RAW_PATH_ALLOWED_NONLINK_RENDERER_IDS — see that constant's
+ * comment for why codex-agent-toml stays refused here while cursor-mdc/
+ * copilot-instructions don't.
+ */
 export function assertLinkRenderer(
     type: ArtifactType,
     agent: AgentTarget,
@@ -257,7 +287,7 @@ export function assertLinkRenderer(
         throw new Error(`Unknown artifact type: ${String(type)}`);
     }
     const config = providerFor(agent)[type];
-    if (config && config.renderer !== 'link') {
+    if (config && config.renderer !== 'link' && !RAW_PATH_ALLOWED_NONLINK_RENDERER_IDS.has(config.renderer)) {
         throw new UnsupportedRendererError(
             `Renderer '${config.renderer}' for ${agent} ${type} artifacts is not implemented yet`,
         );

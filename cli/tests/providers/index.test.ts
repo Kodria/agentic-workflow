@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import {
     AGENT_TARGETS,
+    assertLinkRenderer,
     getTargetPath,
     isAgentTarget,
     providerFor,
@@ -205,6 +206,18 @@ describe('Providers Routing', () => {
         it('declares no hooks config for cursor or copilot', () => {
             expect(providerFor('cursor').hooks).toBeUndefined();
             expect(providerFor('copilot').hooks).toBeUndefined();
+        });
+
+        it('assigns the Cursor .mdc and Copilot instructions renderers to their skill artifact config (Task 4.3)', () => {
+            expect(providerFor('cursor').skill.renderer).toBe('cursor-mdc');
+            expect(providerFor('copilot').skill.renderer).toBe('copilot-instructions');
+        });
+
+        it('assertLinkRenderer no longer throws for the Cursor/Copilot skill renderers (Task 4.3)', () => {
+            expect(() => assertLinkRenderer('skill', 'cursor')).not.toThrow();
+            expect(() => assertLinkRenderer('skill', 'copilot')).not.toThrow();
+            expect(assertLinkRenderer('skill', 'cursor')?.renderer).toBe('cursor-mdc');
+            expect(assertLinkRenderer('skill', 'copilot')?.renderer).toBe('copilot-instructions');
         });
     });
 });
