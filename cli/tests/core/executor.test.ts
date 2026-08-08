@@ -69,4 +69,72 @@ describe('Executor Engine', () => {
         expect(fs.existsSync(path.join(target, 'test.txt'))).toBe(true);
         expect(fs.existsSync(staged)).toBe(false);
     });
+
+    // Regression: a directory *symlink* ('dir') needs SeCreateSymbolicLinkPrivilege
+    // on native Windows, which unprivileged accounts (incl. GitHub Actions'
+    // windows-latest runner) don't have — every `awm init` install of a skill/
+    // agent directory threw EPERM there, failing the step and exiting the whole
+    // run with code 2 (see tests/integration/codex-provider-isolated.test.ts).
+    // A 'junction' is a different NTFS reparse-point kind that any account can
+    // create, and Node reports it the same way a symlink is reported
+    // (isSymbolicLink() true, readlinkSync() resolves it), so this only needs
+    // to change the `type` argument passed to fs.symlinkSync on win32 — nothing
+    // downstream (verify(), R19 hashing, doctor checks) needs to change.
+    describe('on native Windows', () => {
+        const realPlatform = process.platform;
+        let symlinkSpy: jest.SpyInstance;
+
+        beforeEach(() => {
+            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+            symlinkSpy = jest.spyOn(fs, 'symlinkSync').mockImplementation(() => undefined as unknown as void);
+        });
+
+        afterEach(() => {
+            Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+            symlinkSpy.mockRestore();
+        });
+
+        it('stages a directory symlink as a junction instead of a dir-symlink', () => {
+            const target = path.join(targetDir, 'win-skill');
+            stageArtifact(sourceDir, target, 'symlink');
+
+            expect(symlinkSpy).toHaveBeenCalledTimes(1);
+            const [calledSource, , calledType] = symlinkSpy.mock.calls[0];
+            expect(calledSource).toBe(sourceDir);
+            expect(calledType).toBe('junction');
+        });
+
+        // Regression (Failure 4/5, R6 round 3): a junction is a NTFS
+        // *directory* reparse point — it has no equivalent for a single FILE
+        // artifact (an agent/workflow .md). Before this branch existed, a file
+        // source got the exact same 'junction' treatment as a directory, which
+        // does not correctly resolve back to the file — see
+        // tests/core/bundle-install.test.ts's "claude-code agents" case, which
+        // reproduced this on windows-latest as a silently-missing target file.
+        it('stages a FILE source with a file-typed symlink, not a junction', () => {
+            const fileSource = path.join(sourceDir, 'test.txt');
+            const target = path.join(targetDir, 'win-agent.md');
+            stageArtifact(fileSource, target, 'symlink');
+
+            expect(symlinkSpy).toHaveBeenCalledTimes(1);
+            const [calledSource, , calledType] = symlinkSpy.mock.calls[0];
+            expect(calledSource).toBe(fileSource);
+            expect(calledType).toBe('file');
+        });
+
+        it('falls back to a plain copy for a FILE source when the file symlink throws (EPERM — no SeCreateSymbolicLinkPrivilege)', () => {
+            symlinkSpy.mockImplementation(() => {
+                const err: any = new Error('EPERM: operation not permitted, symlink');
+                err.code = 'EPERM';
+                throw err;
+            });
+
+            const fileSource = path.join(sourceDir, 'test.txt');
+            const target = path.join(targetDir, 'win-agent-fallback.md');
+            const staged = stageArtifact(fileSource, target, 'symlink');
+
+            expect(fs.lstatSync(staged).isSymbolicLink()).toBe(false);
+            expect(fs.readFileSync(staged, 'utf8')).toBe('hello');
+        });
+    });
 });

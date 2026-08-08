@@ -102,7 +102,17 @@ describe('artifact-state', () => {
             expect(fs.existsSync(path.dirname(stateFile))).toBe(false);
             writeArtifactState([record('s', path.join(tmpHome, '.agents/skills/s'), ['codex'])], stateFile);
             expect(fs.existsSync(stateFile)).toBe(true);
-            expect(fs.statSync(stateFile).mode & 0o777).toBe(0o600);
+            // Windows/NTFS has no POSIX permission bits: fs.chmod/fchmod there can only
+            // toggle the read-only attribute, so a *writable* file always reports back
+            // mode 0o666 regardless of the finer-grained mode requested (0o600 here) —
+            // confirmed directly from windows-latest CI output (R6, 2026-08-08: expected
+            // 384/0o600, got 438/0o666). This is a genuine, unfixable platform capability
+            // gap, not a production bug to patch: artifacts.json holds only install
+            // bookkeeping (artifact name/type/scope/paths/owning agent targets) — no
+            // secrets or credentials — so accepting Windows's real (broader) capability
+            // here instead of faking POSIX semantics it doesn't have is the correct call.
+            const expectedMode = process.platform === 'win32' ? 0o666 : 0o600;
+            expect(fs.statSync(stateFile).mode & 0o777).toBe(expectedMode);
         });
     });
 

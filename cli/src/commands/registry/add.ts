@@ -20,7 +20,16 @@ export type AddRegistryResult =
     | { ok: false; name?: string; error: string };
 
 export function deriveRegistryName(remote: string): string {
-    const base = remote.replace(/\/+$/, '').split(/[/:]/).pop() ?? '';
+    // Split on '/', '\' and ':' — not just '/' and ':'. A git remote URL
+    // (https://…/repo.git, git@host:org/repo.git) only ever uses the first
+    // two, but `remote` here can also be a plain local filesystem path (e.g.
+    // a `awm registry add <local-repo>` clone source, or this repo's own
+    // tests), and on native Windows that path is backslash-separated
+    // (`C:\Users\...\src-alpha`). Splitting on `[/:]` alone leaves the whole
+    // backslash-joined tail as one segment (`\Users\...\src-alpha`), which
+    // then fails the caller's `/[/\\]/.test(name)` invalid-name check and
+    // makes every local-path `addRegistry` call fail on Windows.
+    const base = remote.replace(/[/\\]+$/, '').split(/[/\\:]/).pop() ?? '';
     return base.replace(/\.git$/, '');
 }
 

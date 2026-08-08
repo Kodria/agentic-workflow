@@ -90,6 +90,22 @@ describe('changedFiles', () => {
 });
 
 describe('applyChangedCmd', () => {
+    // shellQuote (changed.ts) branches on isWindowsNative(), which reads real
+    // process.platform. These assertions exercise the POSIX single-quote branch —
+    // pin the platform so the expectations are deterministic on windows-latest CI too,
+    // instead of silently asserting whatever the CI runner's real OS happens to be.
+    // The win32 double-quote branch is covered separately in changed-windows.test.ts.
+    // Pattern: AGENTS.md "stub-process-platform".
+    const originalPlatform = process.platform;
+
+    beforeEach(() => {
+        Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    });
+
+    afterEach(() => {
+        Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+    });
+
     it('substitutes the file list into the template', () => {
         expect(applyChangedCmd('eslint --format json {files}', ['a.ts', 'b.ts']))
             .toBe(`eslint --format json 'a.ts' 'b.ts'`);

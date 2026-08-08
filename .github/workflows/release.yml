@@ -44,6 +44,10 @@ jobs:
           npm ci
           npm run build
 
+      - name: Tests (gate — rojo no publica)
+        working-directory: cli
+        run: npx jest --runInBand
+
       - name: Release
         working-directory: cli
         run: |

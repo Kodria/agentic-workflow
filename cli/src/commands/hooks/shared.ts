@@ -48,7 +48,19 @@ export function syncExecutable(source: string, dest: string, method: 'symlink' |
     try { fs.unlinkSync(dest); } catch { /* not exists, fine */ }
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     if (method === 'symlink') {
-        fs.symlinkSync(source, dest);
+        try {
+            fs.symlinkSync(source, dest);
+        } catch {
+            // best-effort: a FILE symlink needs SeCreateSymbolicLinkPrivilege on
+            // Windows, denied by default on unprivileged accounts (incl. GitHub
+            // Actions' windows-latest runner) — fall back to a plain copy, same
+            // as the bootstrap skill file's own fallback (hooks/claude.ts) and
+            // executor.ts's stageArtifact for file artifacts. 'awm update' will
+            // not auto-propagate for this file until re-synced, same tradeoff.
+            fs.copyFileSync(source, dest);
+            const srcMode = fs.statSync(source).mode;
+            fs.chmodSync(dest, srcMode);
+        }
     } else {
         fs.copyFileSync(source, dest);
         const srcMode = fs.statSync(source).mode;

@@ -29,7 +29,15 @@ describe('writeFileAtomic', () => {
         expect(open.mock.calls[0][1]).toBe('wx');
         expect(rename).toHaveBeenCalledWith(temporary, file);
         expect(fs.readFileSync(file, 'utf8')).toBe('content');
-        expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+        // Windows/NTFS has no POSIX permission bits: fs.fchmodSync there can only
+        // toggle the read-only attribute, so a *writable* file always reports back
+        // mode 0o666 regardless of the finer-grained mode requested (0o600 here) —
+        // confirmed directly from windows-latest CI output (R6, 2026-08-08: expected
+        // 384/0o600, got 438/0o666). This is a genuine platform capability gap, not a
+        // production bug: see the matching note in tests/core/artifact-state.test.ts
+        // for why the data this guards doesn't need Windows-specific hardening.
+        const expectedMode = process.platform === 'win32' ? 0o666 : 0o600;
+        expect(fs.statSync(file).mode & 0o777).toBe(expectedMode);
         expect(fs.existsSync(temporary)).toBe(false);
     });
 
@@ -58,7 +66,10 @@ describe('writeFileAtomic', () => {
 
         expect(() => writeFileAtomic(file, 'replacement', 0o644)).toThrow('rename failed');
         expect(fs.readFileSync(file, 'utf8')).toBe('original');
-        expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+        // Windows fs.chmod can only toggle the read-only attribute, not set
+        // granular POSIX bits (see the platform-aware assertion above in this
+        // same file for the confirmed 0o600 -> 0o666 shape).
+        expect(fs.statSync(file).mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o600);
     });
 
     it('preserves existing target permissions after replacement', () => {
@@ -68,7 +79,7 @@ describe('writeFileAtomic', () => {
         writeFileAtomic(file, 'replacement');
 
         expect(fs.readFileSync(file, 'utf8')).toBe('replacement');
-        expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+        expect(fs.statSync(file).mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o600);
     });
 
     it('rejects a target symlink without severing it or changing its victim', () => {

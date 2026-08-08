@@ -47,6 +47,22 @@ describe('runCommand — win32', () => {
         expect(r.code).toBe(0);
     });
 
+    it('propagates cmd.exe\'s own exit code for a command that does not exist (1, not the POSIX 127)', async () => {
+        // Mirrors exec.test.ts's POSIX "reports 127" case. cmd.exe has no
+        // equivalent 127 convention — it reports 1 (sometimes 9009) for
+        // "not recognized as an internal or external command" — and
+        // runCommand does not remap it: whatever the shell's `close` event
+        // carries is exactly what comes out on `r.code`.
+        const child = fakeChild();
+        mockSpawn.mockReturnValue(child);
+
+        const pending = runCommand('awm-definitely-not-a-real-binary-xyz', { timeout: 5000, cwd: process.cwd() });
+
+        child.emit('close', 1, null);
+        const r = await pending;
+        expect(r.code).toBe(1);
+    });
+
     it('kills via `taskkill /pid <pid> /T /F` on timeout, never the POSIX process.kill(-pid) path', async () => {
         jest.useFakeTimers();
         const child = fakeChild(4242);

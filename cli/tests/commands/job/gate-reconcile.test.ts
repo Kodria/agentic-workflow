@@ -296,14 +296,36 @@ describe('reap — limpieza explicita con identidad validada (R2.2)', () => {
         const deadRef = { pid: 999999, startTime: 'gone', spawnNonce: 'n1', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
         s.jobs['sinRef'] = job({ id: 'sinRef', executionState: 'running' });
         s.jobs['muerto'] = job({ id: 'muerto', executionState: 'running', processRef: deadRef });
-        const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => true);
+        // deadRef.pid (999999) debe comportarse como un pid REALMENTE
+        // ausente ante un sondeo de existencia (signal 0) — igual que en
+        // windows-latest real, donde `isWindowsNative()` es cierto de
+        // verdad y refIsAlive/groupIsGone dependen de pidExistsNative
+        // (process.kill(pid, 0)) como UNICA fuente de veredicto (ronda 3,
+        // ver process.ts). Mockear esto como "siempre exito" incondicional
+        // rompia esa unica fuente de verdad en CI real: pidExistsNative
+        // reportaba "vivo" para un pid que nunca existio, y la escalera de
+        // terminacion quedaba reintentando hasta el timeout del test — no
+        // por una señal real enviada, sino porque nunca podia CONFIRMAR
+        // ausencia. En POSIX este spy ni siquiera se ejercita (refIsAlive
+        // ahi usa ps/pgrep, no process.kill), asi que el fix solo cambia
+        // comportamiento win32.
+        const killSpy = jest.spyOn(process, 'kill').mockImplementation((pid: number) => {
+            if (pid === deadRef.pid) { const err: any = new Error('no such process'); err.code = 'ESRCH'; throw err; }
+            return true;
+        });
         try {
             const killed = await executeReap(s, ['sinRef', 'muerto', 'no-existe']);
             expect(killed).toEqual([]);
-            // no solo el resultado: nunca se INTENTO ninguna señal (R2.1) —
-            // la ausencia de identidad viva confirmada corta antes de llamar
-            // a terminateGroupConfirmed/process.kill, no despues.
-            expect(killSpy).not.toHaveBeenCalled();
+            // no solo el resultado: nunca se envio una señal REAL de
+            // terminacion (R2.1) — la ausencia de identidad viva confirmada
+            // corta antes de llegar a terminateGroupConfirmed. pidExistsNative
+            // SI llama a process.kill(pid, 0) como sondeo de existencia
+            // (signal 0, no una señal real) — eso aparece legitimamente en
+            // este spy y no es evidencia de una señal enviada; se filtra
+            // explicitamente (mismo patron ya aplicado en adapter.test.ts
+            // para execFileSync, narrowing en vez de "cero llamadas").
+            const realSignals = killSpy.mock.calls.filter((call) => call[1] !== 0);
+            expect(realSignals).toEqual([]);
         } finally {
             killSpy.mockRestore();
         }

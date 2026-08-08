@@ -387,7 +387,19 @@ export function defaultTransactionDeps(): TransactionDeps {
                 return;
             }
             if (op.method === 'symlink' && !stat.isSymbolicLink()) {
-                throw new Error(`verification failed: ${op.targetPath} is not a symlink`);
+                // executor.ts's stageArtifact falls back to a plain copy for a
+                // FILE source when the real 'file'-type symlink throws (no
+                // privilege-free equivalent to a directory junction exists for
+                // individual files on Windows) — accept that fallback here
+                // rather than failing verification for an install that landed
+                // correctly, just not as a symlink. A directory source always
+                // gets a privilege-free junction and should never legitimately
+                // reach this branch, so this stays scoped to files only.
+                const sourceIsDirectory = fs.existsSync(op.sourcePath) && fs.statSync(op.sourcePath).isDirectory();
+                const acceptableFileFallback = !sourceIsDirectory && stat.isFile();
+                if (!acceptableFileFallback) {
+                    throw new Error(`verification failed: ${op.targetPath} is not a symlink`);
+                }
             }
             if (op.method === 'copy' && stat.isSymbolicLink()) {
                 throw new Error(`verification failed: ${op.targetPath} is unexpectedly a symlink`);

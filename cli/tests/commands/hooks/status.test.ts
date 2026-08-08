@@ -78,8 +78,22 @@ describe('computeHookStatus', () => {
         fs.chmodSync(path.join(tmpHome, '.awm/hooks/session-start'), 0o644);
         const { computeHookStatus } = require('../../../src/commands/hooks/status');
         const result = computeHookStatus('claude-code');
-        expect(result.overall).toBe('DEGRADED');
-        expect(result.checks.sessionStartScript.ok).toBe(false);
+        if (process.platform === 'win32') {
+            // Windows has no POSIX executable-bit concept at all, and this isn't a
+            // gap in computeHookStatus's checkExecutable() — it's Node's own
+            // documented behavior: fs.accessSync(file, X_OK) "has no effect on
+            // Windows (will behave like fs.constants.F_OK)" (Node fs docs). So
+            // chmod(0o644) here only clears write bits, which Windows collapses
+            // into "still not read-only" either way — there was never a distinct
+            // exec permission to remove, and the script remains just as runnable
+            // (via its interpreter/file association) as before the chmod. HEALTHY
+            // is the factually correct report here, not a gap to paper over.
+            expect(result.overall).toBe('HEALTHY');
+            expect(result.checks.sessionStartScript.ok).toBe(true);
+        } else {
+            expect(result.overall).toBe('DEGRADED');
+            expect(result.checks.sessionStartScript.ok).toBe(false);
+        }
     });
 
     it('throws when agent target has no hooks config', () => {
@@ -93,7 +107,12 @@ describe('computeHookStatus', () => {
         // never touching Claude's settings.json path.
         const { computeHookStatus } = require('../../../src/commands/hooks/status');
         const result = computeHookStatus('codex');
-        expect(result.checks.settingsEntry.detail).toContain('.codex/hooks.json');
+        // Separator-agnostic: the detail embeds a real OS path (`path.join`
+        // under the hood), so it's `\` on windows-latest and `/` elsewhere —
+        // assert the two path segments independently rather than one
+        // POSIX-shaped fragment.
+        expect(result.checks.settingsEntry.detail).toContain('.codex');
+        expect(result.checks.settingsEntry.detail).toContain('hooks.json');
         expect(result.checks.bootstrapSkill).toBeUndefined();
         expect(result.checks.runHookWrapper).toBeUndefined();
     });

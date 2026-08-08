@@ -12,8 +12,14 @@ describe('journal store', () => {
     test('initJournal crea 0700/0600 y estado inicial valido (R1.2)', () => {  // verifies R1.2
         initJournal(repo, 'rama');
         const dir = journalDir(repo, 'rama');
-        expect(fs.statSync(dir).mode & 0o777).toBe(0o700);
-        expect(fs.statSync(statePath(repo, 'rama')).mode & 0o777).toBe(0o600);
+        // Windows fs.chmod can only toggle the read-only attribute, not set granular
+        // POSIX bits -- see tests/core/atomic-file.test.ts (files, confirmed against
+        // real windows-latest CI) and tests/core/install-transaction.test.ts
+        // (directories, same reasoning) for the 0o666/0o777 shapes.
+        // Confirmed against real windows-latest CI (2026-08-08): directories get the same
+        // 0o666 shape as files there, not 0o777 as first reasoned.
+        expect(fs.statSync(dir).mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o700);
+        expect(fs.statSync(statePath(repo, 'rama')).mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o600);
         const r = readJournal(repo, 'rama');
         expect(r.corrupt).toBe(false);
         expect(r.state!.revision).toBe(0);

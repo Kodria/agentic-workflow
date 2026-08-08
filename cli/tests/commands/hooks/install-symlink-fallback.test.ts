@@ -55,4 +55,33 @@ describe('hooks/install — skill symlink fallback to copy', () => {
     expect(fs.lstatSync(skillDest).isSymbolicLink()).toBe(false); // it was copied, not linked
     expect(fs.readFileSync(skillDest, 'utf-8')).toContain('using-awm');
   });
+
+  // Regression: syncExecutable (shared.ts) — used for the hook SCRIPT files
+  // (session-start, run-hook.cmd), not just the bootstrap skill above — called
+  // fs.symlinkSync unconditionally when installMethod is 'symlink', with no
+  // EPERM fallback at all. On native Windows without SeCreateSymbolicLinkPrivilege
+  // (the default for GitHub Actions' windows-latest runner), that would throw
+  // out of installHook uninstall, failing the whole `awm init` step. Proves the
+  // same fallback-to-copy this file already established for the skill file also
+  // now covers the script files when the caller actually requests 'symlink'.
+  it('copies the hook scripts when symlink throws (EPERM), instead of throwing out of installHook', () => {
+    const registryRoot = path.join(tmpHome, 'registry');
+    seedRegistry(registryRoot);
+
+    symlinkSpy = jest.spyOn(fs, 'symlinkSync').mockImplementation(() => {
+      const err: any = new Error('EPERM: operation not permitted, symlink');
+      err.code = 'EPERM';
+      throw err;
+    });
+
+    const { installHook } = require('../../../src/commands/hooks/install');
+    const result = installHook({ agent: 'claude-code', registryRoot, installMethod: 'symlink' });
+
+    const scriptDest = path.join(result.scriptsDir, 'session-start');
+    const wrapperDest = path.join(result.scriptsDir, 'run-hook.cmd');
+    expect(fs.existsSync(scriptDest)).toBe(true);
+    expect(fs.lstatSync(scriptDest).isSymbolicLink()).toBe(false); // copied, not linked
+    expect(fs.existsSync(wrapperDest)).toBe(true);
+    expect(fs.lstatSync(wrapperDest).isSymbolicLink()).toBe(false);
+  });
 });

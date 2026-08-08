@@ -4,6 +4,12 @@ import os from 'os';
 import { runExecWrapper, claimPath, identityPath, resultPath, replayVerdict, logPath } from '../../../src/commands/job/exec-wrapper';
 import { groupIsGone } from '../../../src/core/journal/process';
 
+// Real subprocess spawn + termination + fsync per test; the jest default of
+// 5000ms proved too tight on a loaded windows-latest CI runner (regression:
+// real CI, "Exceeded timeout of 5000 ms"). Same class of issue already fixed
+// in registries-sync.test.ts this round.
+jest.setTimeout(20000);
+
 describe('exec-wrapper', () => {
     let dir: string;
     beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-wrap-')); });
@@ -16,7 +22,16 @@ describe('exec-wrapper', () => {
         const identity = JSON.parse(fs.readFileSync(identityPath(dir, 'job1', 'nonceA'), 'utf8'));
         expect(identity.wrapper.pid).toBe(process.pid);            // ProcessRef REAL del wrapper
         expect(identity.command.pid).toBeGreaterThan(0);           // ProcessRef REAL del comando
-        expect(identity.command.psArgsDigest).toMatch(/^[0-9a-f]{16}$/);
+        // hex real cuando la plataforma pudo observar el proceso (ps en
+        // POSIX, WMI/powershell en win32 — ver captureRefFor en
+        // src/core/journal/process.ts); sentinel 'unknown' documentado
+        // cuando esa observacion no estuvo disponible (ps ausente, o en
+        // win32 powershell/WMI restringido/deshabilitado). Mismo criterio
+        // ya establecido en tests/core/journal/process.test.ts — el formato
+        // exacto de este campo nunca es la fuente de verdad de vida/muerte
+        // (esa es refIsAlive), asi que este test no puede exigir mas
+        // certeza de la que la plataforma real puede dar.
+        expect(identity.command.psArgsDigest).toMatch(/^([0-9a-f]{16}|unknown)$/);
         expect(identity.command.processGroup).not.toBe(identity.wrapper.processGroup);  // el wrapper puede limpiar el grupo sin matarse
         const result = JSON.parse(fs.readFileSync(resultPath(dir, 'job1', 'nonceA'), 'utf8'));
         expect(result.exitCode).toBe(0);
