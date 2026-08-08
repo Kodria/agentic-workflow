@@ -1,0 +1,5 @@
+# El .md de este repo se compara byte a byte por tests estructurales
+# (docs/support-matrix.md contra su generador). Un checkout de Windows con
+# core.autocrlf=true los entregaba con CRLF y rompia esa comparacion por
+# bytes que no tienen que ver con el contenido. Se fija LF para todos.
+*.md text eol=lf

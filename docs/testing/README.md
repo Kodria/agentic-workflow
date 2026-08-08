@@ -12,7 +12,8 @@ There are 4 OS targets and 6 agents. A document per combination would be 24 file
 |---|---|
 | **[core-acceptance.md](core-acceptance.md)** | The suite that must pass identically everywhere — install, init, add, sync, update, sensors, preflight, doctor, export, backup, remove. ~80% of the value. |
 | **[os-matrix.md](os-matrix.md)** | Only what differs per OS: symlink permissions on Windows, path separators, WSL, macOS specifics. |
-| **[agent-matrix.md](agent-matrix.md)** | Only what differs per agent: where artifacts land, and — critically — **what is supposed to degrade**, so a tester doesn't file a bug against a documented tier limitation. |
+| **[agent-matrix.md](agent-matrix.md)** | Only what differs per agent: what to check, and — critically — **what is supposed to degrade**, so a tester doesn't file a bug against a documented tier limitation. |
+| **[../support-matrix.md](../support-matrix.md)** | Not a playbook — the reference these results feed. Says what is supported at what evidence level, and where the install paths actually are (generated from source, locked by a test). Read it before recording a result, and update it after. |
 
 Run **core-acceptance** first. Then the OS section for your machine, then the agent section for each agent you use.
 
