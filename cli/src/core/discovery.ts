@@ -27,31 +27,19 @@ export interface AgentArtifact {
     overrode?: string;
 }
 
-/** Extracts the raw frontmatter text (between the --- delimiters), or null if the block is missing/malformed. CRLF-tolerant. */
-export function matchFrontmatterBlock(raw: string): string | null {
-    const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    return fmMatch ? fmMatch[1] : null;
-}
+// El parseo de frontmatter vive en el modulo HOJA `core/frontmatter.ts`
+// (sin imports, para que consumidores puros como export/transform.ts no
+// arrastren fs/git por transitividad). Se re-exporta aca porque este modulo
+// ya era el punto de entrada historico para esos helpers.
+export { matchFrontmatterBlock, readFrontmatterDescription, isBlockScalarHeader, findFrontmatterDescription } from './frontmatter';
+import { matchFrontmatterBlock, readFrontmatterDescription } from './frontmatter';
 
 export function readArtifactDescription(filePath: string): string {
     try {
         const raw = fs.readFileSync(filePath, 'utf-8');
         const frontmatter = matchFrontmatterBlock(raw);
         if (frontmatter === null) return '';
-        const line = frontmatter
-            .split(/\r?\n/)
-            .find((l) => /^description\s*:/.test(l));
-        if (!line) return '';
-        let val = line.replace(/^description\s*:/, '').trim();
-        if (
-            (val.startsWith('"') && val.endsWith('"')) ||
-            (val.startsWith("'") && val.endsWith("'"))
-        ) {
-            val = val.slice(1, -1);
-        }
-        const BLOCK_INDICATORS = new Set(['>-', '>', '|-', '|', '>+', '|+']);
-        if (BLOCK_INDICATORS.has(val.trim())) return '';
-        return val.trim();
+        return readFrontmatterDescription(frontmatter);
     } catch {
         return '';
     }

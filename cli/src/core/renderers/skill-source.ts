@@ -7,7 +7,7 @@
 // link. Reuses discovery.ts's `matchFrontmatterBlock` (already the single
 // source of truth for locating the frontmatter block elsewhere in this
 // codebase) rather than writing a second frontmatter parser.
-import { matchFrontmatterBlock } from '../discovery';
+import { matchFrontmatterBlock, readFrontmatterDescription } from '../frontmatter';
 
 export type SkillSource = {
     description: string;
@@ -26,23 +26,15 @@ export function parseSkillSource(source: string): SkillSource {
     const frontmatter = matchFrontmatterBlock(source);
     if (frontmatter === null) throw new Error('skill source requires YAML frontmatter');
 
-    const line = frontmatter.split(/\r?\n/).find((l) => /^description\s*:/.test(l));
-    if (!line) throw new Error('skill source requires a non-empty description');
-    let description = line.replace(/^description\s*:/, '').trim();
-    if (
-        (description.startsWith('"') && description.endsWith('"')) ||
-        (description.startsWith("'") && description.endsWith("'"))
-    ) {
-        description = description.slice(1, -1);
-    }
-    // A YAML block scalar indicator (`>-`, `|-`, `>`, `|`, `>+`, `|+`) means the
-    // real description text lives on the FOLLOWING indented lines, not on this
-    // line at all — treating the bare indicator as the description would embed
-    // literal "|-" into every rendered skill. Mirrors discovery.ts's
-    // readArtifactDescription, which detects the same shape and treats it as
-    // absent rather than mis-parsing it.
-    const BLOCK_INDICATORS = new Set(['>-', '>', '|-', '|', '>+', '|+']);
-    if (BLOCK_INDICATORS.has(description)) description = '';
+    // Delega en readFrontmatterDescription (discovery.ts) — la MISMA funcion
+    // que usa el discovery del CLI, incluyendo la resolucion de block scalars
+    // (`description: >-` + lineas indentadas). Antes esta funcion tenia su
+    // propia copia de la logica, y ambas colapsaban el indicador de block
+    // scalar a '' en vez de leer el texto de las lineas siguientes: eso
+    // crasheaba `awm add <bundle> -a copilot|cursor` contra un skill real del
+    // registry baseline. Una sola implementacion = no pueden volver a
+    // divergir.
+    const description = readFrontmatterDescription(frontmatter);
     if (!description) throw new Error('skill source requires a non-empty description');
 
     const bodyMatch = source.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n([\s\S]*)$/);

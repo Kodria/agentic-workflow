@@ -1,6 +1,19 @@
+import yaml from 'js-yaml';
 import { claudeAiTransform, DEFERENCE_LINE, stripIntraRegistryPaths } from '../../../src/core/export/transform';
 
 const FM = (lines: string[]) => `---\n${lines.join('\n')}\n---\nBody line.\n`;
+
+/** Reparsea el frontmatter EXPORTADO con un YAML real y devuelve su
+ *  `description`. Lanza si la salida no es YAML valido — que es justamente lo
+ *  que queremos que falle fuerte, en vez de asertar sobre el texto crudo y no
+ *  enterarnos de que emitimos algo que ningun parser puede leer. */
+function descriptionOf(exported: string): string {
+    const fm = exported.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    if (!fm) throw new Error('la salida no tiene bloque de frontmatter');
+    const parsed = yaml.load(fm[1]) as { description?: unknown };
+    if (typeof parsed.description !== 'string') throw new Error('description ausente o no-string en la salida');
+    return parsed.description;
+}
 
 describe('claudeAiTransform', () => {
   it('strips version and portable, keeps other keys and body intact', () => {  // verifies R3.1
@@ -18,19 +31,26 @@ describe('claudeAiTransform', () => {
     expect(out).toContain(`description: "Does things. ${DEFERENCE_LINE('x')}"`);
   });
 
+  // NOTA sobre el estilo de la salida: el transform ya no conserva el estilo de
+  // comillas del fuente — emite SIEMPRE un escalar double-quoted via
+  // JSON.stringify, sea cual sea la forma de entrada (plano, entrecomillado,
+  // block scalar, multilinea). Antes habia una rama por forma, y cada vez que
+  // el lector aprendia una forma nueva el escritor quedaba atras: asi se
+  // colaron una deference line enterrada en medio de una descripcion
+  // multilinea y otra tragada entera por un `#` de comentario. Un solo camino
+  // hace imposible esa clase de divergencia. El contrato que estos tests
+  // protegen — YAML valido que conserva descripcion + deference line — se
+  // cumple igual, y se verifica reparseando la salida con js-yaml mas abajo.
   it('appends the deference line to an unquoted description', () => {  // verifies R3.1
     const input = FM(['name: x', 'portable: true', 'description: Does things.']);
     const out = claudeAiTransform(input, 'x');
-    expect(out).toContain(`description: Does things. ${DEFERENCE_LINE('x')}`);
+    expect(out).toContain(`description: ${JSON.stringify(`Does things. ${DEFERENCE_LINE('x')}`)}`);
   });
 
   it('appends the deference line inside a single-quoted description', () => {  // verifies R3.1
     const input = FM(['name: x', 'portable: true', "description: 'Does things.'"]);
     const out = claudeAiTransform(input, 'x');
-    // DEFERENCE_LINE itself always contains an apostrophe ("registry's"), so
-    // even a fixture with no apostrophe of its own must see it doubled ('')
-    // per YAML single-quote escaping once spliced into a single-quoted scalar.
-    expect(out).toContain(`description: 'Does things. ${DEFERENCE_LINE('x').replace(/'/g, "''")}'`);
+    expect(out).toContain(`description: ${JSON.stringify(`Does things. ${DEFERENCE_LINE('x')}`)}`);
   });
 
   it('appends the deference line inside a double-quoted description with trailing whitespace', () => {  // verifies R3.1
@@ -59,30 +79,100 @@ describe('claudeAiTransform', () => {
     expect(() => claudeAiTransform(FM(['name: x', 'portable: true']), 'x')).toThrow(/description/);
   });
 
-  it('throws on multi-line (block scalar) description', () => {  // verifies R3.4
-    expect(() => claudeAiTransform(FM(['name: x', 'description: >', '  folded text']), 'x')).toThrow(/single-line/);
+  it('resuelve una descripcion en block scalar y le anexa la deference line (antes abortaba el export del bundle entero)', () => {  // verifies R3.4
+    // Regresion real: esto lanzaba, y runExport propaga el throw — asi que UN
+    // skill del registry baseline con esta forma valida (extract-design-md)
+    // hacia fallar `awm export frontend` COMPLETO, no solo ese skill.
+    const out = claudeAiTransform(FM(['name: x', 'description: >', '  folded text', '  segunda linea']), 'x');
+    const descLine = out.split('\n').find((l) => l.startsWith('description:'));
+    expect(descLine).toBe(`description: ${JSON.stringify(`folded text segunda linea ${DEFERENCE_LINE('x')}`)}`);
+    // Las lineas indentadas del bloque se consumieron: no quedan sueltas.
+    expect(out).not.toContain('  folded text');
+    expect(out).not.toContain('description: >');
   });
 
-  it('escapes an apostrophe in the deference line when appending to a single-quoted description', () => {  // verifies R3.4 (BLOCKER fix)
+  it('no absorbe las claves siguientes del frontmatter al consumir el bloque', () => {
+    const out = claudeAiTransform(FM(['description: >-', '  solo esto', 'name: sigue-viva']), 'x');
+    expect(out).toContain('name: sigue-viva');
+    const descLine = out.split('\n').find((l) => l.startsWith('description:'));
+    expect(descLine).toContain('solo esto');
+    expect(descLine).not.toContain('sigue-viva');
+  });
+
+  it('sigue lanzando si el block scalar no tiene contenido', () => {  // verifies R3.4
+    expect(() => claudeAiTransform(FM(['name: x', 'description: >-']), 'x')).toThrow(/no content/);
+  });
+
+  it('lanza si description esta presente pero vacia (sin valor y sin bloque)', () => {  // verifies R3.4
+    expect(() => claudeAiTransform(FM(['name: x', 'description:']), 'x')).toThrow(/description is empty/);
+  });
+
+  it('resuelve un block scalar CON comentario final sin perder el contenido (regresion: guarda por prefijo vs match completo)', () => {
+    // La guarda de la rama de bloque usaba un prefijo (/^[>|]/) mientras el
+    // resolver exigia match COMPLETO del indicador. Con `>- # nota` entraban en
+    // desacuerdo: se publicaba el indicador como descripcion y las lineas de
+    // contenido REALES se borraban del artefacto exportado, en silencio.
+    const out = claudeAiTransform(FM(['name: x', 'description: >- # nota al margen', '  el texto real']), 'x');
+    const descLine = out.split('\n').find((l) => l.startsWith('description:'))!;
+    expect(descLine).toContain('el texto real');
+    expect(descLine).not.toContain('# nota al margen');
+    expect(out).not.toContain('description: >-');
+  });
+
+  it('lanza ante un indicador de bloque malformado en vez de emitir YAML invalido', () => {
+    // `>-basura` lo rechaza el propio YAML. Tratarlo como escalar plano emitiria
+    // `description: >-basura ...`, invalido porque `>` abre un indicador.
+    expect(() => claudeAiTransform(FM(['name: x', 'description: >-basura', '  texto']), 'x'))
+      .toThrow(/malformed block scalar indicator/);
+  });
+
+  it('conserva la linea en blanco que separa el bloque de la clave siguiente', () => {
+    const out = claudeAiTransform(FM(['description: >-', '  el texto', '', 'name: x']), 'x');
+    expect(out).toMatch(/description: .*\n\nname: x/);
+  });
+
+  it('no deja que el apostrofe de la deference line rompa el escalar emitido', () => {  // verifies R3.4 (BLOCKER fix)
+    // DEFERENCE_LINE siempre contiene un apostrofe ("registry's"). El fix
+    // original lo doblaba ('') porque la salida era single-quoted; hoy la
+    // salida es double-quoted, donde el apostrofe es un caracter comun. Lo
+    // que el test protege no es la convencion de comillas sino que el
+    // resultado sea YAML bien formado con el texto intacto — se verifica
+    // reparseando con js-yaml en vez de inspeccionar comillas a ojo.
     const input = FM(['name: mermaid', 'portable: true', "description: 'Diagrams and flowcharts.'"]);
     const out = claudeAiTransform(input, 'mermaid');
-    // The apostrophe in "registry's" must be doubled ('') per YAML single-quote escaping.
-    expect(out).toContain("registry''s mermaid skill");
-    expect(out).not.toContain("registry's mermaid skill");
-    const descLine = out.split('\n').find((l) => l.startsWith('description:'));
-    expect(descLine).toBe(
-      `description: 'Diagrams and flowcharts. ${DEFERENCE_LINE('mermaid').replace(/'/g, "''")}'`
-    );
-    // Sanity check the result is well-formed: single-quoted scalar body has no
-    // lone (unescaped) apostrophes — every ' is either the opening/closing
-    // quote or part of a doubled '' pair.
-    const body = descLine!.slice('description: \''.length, -1);
-    expect(body.replace(/''/g, '')).not.toMatch(/'/);
+    expect(descriptionOf(out)).toBe(`Diagrams and flowcharts. ${DEFERENCE_LINE('mermaid')}`);
+    expect(descriptionOf(out)).toContain("registry's mermaid skill");
   });
 
-  it('throws when a quoted description has trailing content after its closing quote (e.g. inline comment)', () => {  // verifies R3.4 (MINOR fix)
+  it('resuelve un escalar entrecomillado con comentario final en vez de lanzar', () => {  // verifies R3.4
+    // Antes lanzaba. Pero `description: "x" # nota` es YAML valido y js-yaml lo
+    // lee como "x": el comentario no forma parte del valor. Lanzar obligaba al
+    // autor a tocar un SKILL.md que no tenia nada malo.
     const input = FM(['name: x', 'portable: true', 'description: "Does things." # a comment']);
-    expect(() => claudeAiTransform(input, 'x')).toThrow(/trailing content|comment/i);
+    expect(descriptionOf(claudeAiTransform(input, 'x'))).toBe(`Does things. ${DEFERENCE_LINE('x')}`);
+  });
+
+  describe('round-trip: la salida se reparsea con un YAML real (par lector+escritor)', () => {
+    // Los tests del lector, por si solos, no habrian detectado que el ESCRITOR
+    // quedaba atras cuando el lector aprendia una forma nueva. Estos casos
+    // pasan cada forma por el transform y REPARSEAN el resultado, que es donde
+    // se ve si la deference line sobrevivio y si el YAML sigue siendo valido.
+    it.each([
+      ['plano', ['description: Does things.']],
+      ['plano multilinea', ['description: primera parte', '  y su continuacion']],
+      ['plano con comentario final', ['description: hola mundo # nota del autor']],
+      ['single-quoted', ["description: 'con apostrofe: it''s'"]],
+      ['double-quoted', ['description: "con dos puntos: si"']],
+      ['folded', ['description: >-', '  primera', '  segunda']],
+      ['literal', ['description: |-', '  primera', '  segunda']],
+      ['folded con comentario en el indicador', ['description: >- # nota', '  el texto']],
+    ])('%s', (_name, descLines) => {
+      const out = claudeAiTransform(FM(['name: x', 'portable: true', ...descLines]), 'x');
+      const desc = descriptionOf(out);   // lanza si la salida no es YAML valido
+      // La deference line es la razon de existir de este transform: nunca puede
+      // perderse en un comentario ni quedar sepultada en el medio del texto.
+      expect(desc.endsWith(DEFERENCE_LINE('x'))).toBe(true);
+    });
   });
 
   it('cleans intra-registry paths in the body', () => {  // verifies R2.1, R2.4

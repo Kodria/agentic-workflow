@@ -28,10 +28,18 @@ export function displayWidth(s: string): number {
   return w;
 }
 
-/** Truncate plain text to `width` cells, appending '…'. Strips ANSI — color AFTER truncating. */
+/** Truncate plain text to `width` cells, appending '…'. Strips ANSI — color AFTER truncating.
+ *
+ *  Los saltos de linea se colapsan a un espacio: esto se usa para celdas de UNA
+ *  linea (filas de `awm list`), y `displayWidth` cuenta un `\n` como ancho 1 en
+ *  vez de reconocerlo como salto — o sea que una string multilinea podia pasar
+ *  el chequeo de ancho y emitirse cruda, partiendo la fila y desalineando todo
+ *  lo que viniera despues. Antes era inalcanzable; dejo de serlo cuando el
+ *  lector de frontmatter aprendio a resolver block scalars literales (`|`), que
+ *  producen saltos de linea REALES en la descripcion. */
 export function truncate(s: string, width: number): string {
   if (width <= 0) return '';
-  const plain = stripAnsi(s);
+  const plain = stripAnsi(s).replace(/\s*\r?\n\s*/g, ' ');
   if (displayWidth(plain) <= width) return plain;
   if (width === 1) return '…';
   let out = '';
