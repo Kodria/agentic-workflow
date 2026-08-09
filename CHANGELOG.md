@@ -1,3 +1,8 @@
+## v5.0.2 - 2026-08-09
+
+### Fixes
+- **hooks:** stop reporting HEALTHY for a hook that was never seen running
+
 ## v5.0.1 - 2026-08-09
 
 ### Fixes
