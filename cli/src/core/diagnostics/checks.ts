@@ -120,6 +120,15 @@ function projectChecks(p: ProjectFacts): CheckResult[] {
             remedy: cmd('awm sync') });
     }
 
+    // Fila aparte de `project.orphans`, y con OTRO remedio: `awm sync` solo toca
+    // symlinks, asi que sobre un directorio real que piso nuestro link corre limpio sin
+    // cambiar nada. Mandar ahi al usuario seria peor que no ofrecer remedio (D-007).
+    if (p.orphanLinks.usurped.length > 0) {
+        out.push({ id: 'project.usurped', level: 'project', label: 'skill links replaced by non-AWM content',
+            status: 'warn', detail: p.orphanLinks.usurped.join(', '),
+            remedy: cmd(`awm remove <bundle> --yes && awm add <bundle> --yes`) });
+    }
+
     // project.sensors
     out.push(p.sensors.present
         ? { id: 'project.sensors', level: 'project', label: 'sensors', status: 'ok', remedy: none }

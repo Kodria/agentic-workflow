@@ -136,3 +136,75 @@ describe('awm doctor degrades on a usurped global skill', () => {
         expect(checkFor([]).state).not.toBe('broken');
     });
 });
+
+// ---------------------------------------------------------------------------
+// Los hermanos: `agents.native` y `workflows.global` escanean dirs igual de
+// gestionados, y no recibieron el tratamiento cuando se agrego la deteccion.
+// ---------------------------------------------------------------------------
+//
+// Encontrado validando la v5.0.0: una sonda apunto sin querer a
+// `~/.claude/agents/development-process.md`, lo reemplazo por un directorio ajeno, y
+// `doctor` siguio diciendo `healthy`. `agents.native` con renderer `link` devolvia
+// `healthy` fijo con solo mirar que el dir no estuviera vacio — ni siquiera detectaba
+// un symlink colgante. Tres hermanos, uno tratado.
+
+describe('agents.native gets the same treatment as skills.global', () => {
+    let tmpHome: string;
+    let originalHome: string | undefined;
+    let originalAwmHome: string | undefined;
+
+    beforeEach(() => {
+        tmpHome = mkCanonicalTmpDir('awm-usurp-agents-');
+        originalHome = process.env.HOME;
+        originalAwmHome = process.env.AWM_HOME;
+        process.env.HOME = tmpHome;
+        process.env.AWM_HOME = path.join(tmpHome, '.awm');
+        // registries.ts cachea AWM_HOME al require: hay que re-requerir por test.
+        jest.resetModules();
+    });
+
+    afterEach(() => {
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+        if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+        if (originalAwmHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = originalAwmHome;
+    });
+
+    /** Deja en `~/.claude/agents` una entrada real (no symlink) y la declara nuestra. */
+    function seedUsurpedAgent(name: string): void {
+        const dir = path.join(tmpHome, '.claude', 'agents');
+        fs.mkdirSync(dir, { recursive: true });
+        fs.mkdirSync(path.join(dir, name), { recursive: true });
+        const stateDir = path.join(tmpHome, '.awm', 'state');
+        fs.mkdirSync(stateDir, { recursive: true });
+        fs.writeFileSync(path.join(stateDir, 'artifacts.json'), JSON.stringify([{
+            name, type: 'agent', scope: 'global',
+            targetPath: path.join(dir, name),
+            sourcePath: '/registry/agents/' + name,
+            renderer: 'link', owners: ['claude-code'],
+        }], null, 2));
+    }
+
+    function agentsCheck() {
+        const { gatherProviderChecks } = require('../../src/core/diagnostics/provider-checks');
+        const scan = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
+        const facts = gatherProviderChecks(['claude-code'], scan);
+        return facts[0].checks.find((c: { id: string }) => c.id === 'agents.native');
+    }
+
+    it('reports broken and names the replaced agent', () => {
+        seedUsurpedAgent('development-process');
+        const check = agentsCheck();
+        expect(check.state).toBe('broken');
+        expect(check.detail).toContain('development-process');
+        expect(check.remediationCode).toBe('reinstall-usurped-skills');
+    });
+
+    it('stays healthy when the directory holds only entries AWM never claimed', () => {
+        // Lo que el usuario puso a mano sigue sin ser problema nuestro — el mismo
+        // limite que en skills.global. Sin ledger no hay usurpacion posible.
+        const dir = path.join(tmpHome, '.claude', 'agents');
+        fs.mkdirSync(dir, { recursive: true });
+        fs.mkdirSync(path.join(dir, 'my-own-agent'), { recursive: true });
+        expect(agentsCheck().state).toBe('healthy');
+    });
+});

@@ -20,7 +20,7 @@ function healthyProject(): ProjectFacts {
         root: '/repo/belanz',
         profile: { present: true, extensions: ['frontend'] },
         activeBundles: { expected: ['frontend-craft'], linked: ['frontend-craft'], broken: [] },
-        orphanLinks: { repairable: [], dead: [] },
+        orphanLinks: { repairable: [], dead: [], usurped: [] },
         sensors: { present: true },
         constitution: { present: true },
         context: { present: true, file: 'CLAUDE.md' },
