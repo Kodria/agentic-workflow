@@ -55,7 +55,7 @@ awm init -a <agent> --yes --json > init-<agent>.json
 
 **AG-03 · Install a skill for this agent**
 ```bash
-awm add development-process --type skill --scope local --method symlink --agent <agent> --yes
+awm add dev --scope local --method symlink --agent <agent> --yes
 ```
 **Expect:** exit `0`, and the artifact present at the project path from the table.
 
@@ -109,7 +109,7 @@ codex --version && awm init -a codex --yes --json
 
 **CX-02 · Agent profile renders as TOML**
 ```bash
-awm add development-process --type agent --scope local --agent codex --yes
+awm add dev --scope local --agent codex --yes
 ```
 **Expect:** `.codex/agents/development-process.toml`, parseable as TOML, with the description intact.
 
@@ -125,7 +125,7 @@ awm doctor --json -a cursor
 
 **CP-01 · Global scope is refused with a reason**
 ```bash
-awm add development-process --type skill --scope global --agent copilot --yes
+awm add dev --scope global --agent copilot --yes
 ```
 **Expect:** a clear failure naming *why* (no user-level skill discovery in Copilot). A generic stack trace is a **FAIL**.
 
