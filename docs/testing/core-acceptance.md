@@ -23,11 +23,22 @@ Teardown when you're done: delete `$AWM_HOME` and `$WORK`.
 
 ---
 
-## ⚠️ Read this before judging any exit code
+## Los exit codes de `awm init`
 
-**`awm init` exits `1` on a perfectly successful run.** Exit `1` means *"the harness is degraded"* — normally just "two steps need an agent to finish them" — **not** "something failed".
+| Código | Significa | Qué hacer |
+|---|---|---|
+| `0` | **Init hizo su trabajo.** Puede quedar `degraded` — normalmente dos pasos `pending` que escribe una sesión de agente (`CONSTITUTION.md`, `AGENTS.md`) — y eso sigue siendo un éxito. | Seguir. `awm init --yes && <siguiente>` es seguro. |
+| `2` | **No se completó.** O un gate rechazó (binario del agente ausente o por debajo del mínimo), o algún paso falló y el run se revirtió entero. | Leer el mensaje. Un `2` con causa clara es un rechazo *correcto*, no un bug. |
 
-The reliable signal is the JSON, not the exit code:
+`awm init` **no usa exit `1`.**
+
+> **Esto cambió en la v5.0.0.** Antes, un run donde no fallaba nada salía `1` solo porque
+> el harness quedaba `degraded` — y este documento tenía un recuadro pidiendo *ignorá el
+> exit code*. Tres lectores independientes lo reportaron como fallo antes de que lo fuera,
+> y `awm init --yes && …` moría bajo `set -e`, en el único comando cuyo trabajo entero es
+> arrancar un script. Ver [`decisions.md`](../decisions.md) D-008.
+
+La salud del harness la responde `awm doctor`, y el JSON de `init` la sigue trayendo:
 
 ```bash
 awm init --yes --json > init.json; echo "exit=$?"
@@ -37,10 +48,10 @@ awm init --yes --json > init.json; echo "exit=$?"
 { "result": "degraded", "applied": 4, "pending": 2, "failed": 0 }
 ```
 
-- `failed: 0` → **nothing broke.** `pending` counts steps that require an agent session (writing `CONSTITUTION.md`, `AGENTS.md`).
-- `failed: > 0` → a real failure. `awm init` is transactional: on failure it rolls back every file it touched, and `modifiedFiles` lists them.
+- `failed: 0` → **no se rompió nada.** `pending` cuenta pasos que necesitan una sesión de agente.
+- `failed: > 0` → falla real. `awm init` es transaccional: revierte todo lo que tocó, y `modifiedFiles` lo lista.
 
-Judge on **`failed`**, and on `result` (`ok` | `degraded` | `failed`). Exit codes: `0` = clean, `1` = degraded, `2` = a gate refused (e.g. the agent's binary isn't installed or is below its minimum version) — a `2` with a clear message is a *correct* refusal, not a bug.
+Para un script, `$?` alcanza. Para saber si además quedó algo pendiente, mirar `result`.
 
 ---
 

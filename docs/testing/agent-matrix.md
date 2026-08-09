@@ -57,6 +57,18 @@ awm doctor --json -a <agent>
 awm init -a <agent> --yes --json > init-<agent>.json
 ```
 **Expect:** `failed: 0`.
+
+> **Judge `failed`, not the exit code.** A run can finish `degraded` — two steps `pending`
+> because an agent session writes `CONSTITUTION.md` and `AGENTS.md` — and that is a normal
+> first run, not a failure.
+>
+> `failed: 0` → PASS. `failed: > 0` → FAIL, and `modifiedFiles` lists what was rolled back.
+>
+> Desde la **v5.0.0** el exit code acompaña: `0` = init hizo su trabajo, `2` = no se
+> completó, y `1` no se usa. Contra una v4.x, un run sano sale `1` — **dos corridas
+> distintas marcaron AG-02 FAIL por eso**, con `failed: 0` en su propio JSON. Ver
+> [core-acceptance](core-acceptance.md) y [`decisions.md`](../decisions.md) D-008.
+
 **Legitimate exception:** exit `2` with a message that the agent's binary is missing or below its minimum version — that is a **correct refusal**, record it as PASS with a note. `codex` requires ≥ `0.145.0`.
 
 **AG-03 · Install a skill for this agent**
@@ -162,7 +174,7 @@ awm doctor --json -a antigravity
 | Agent | AG-01 | AG-02 | AG-03 | AG-04 | AG-05 | AG-06 | Extras | Notes |
 |---|---|---|---|---|---|---|---|---|
 | claude-code | PASS | PASS | PASS | PASS | PASS | PASS | CC-01 PASS · CC-02 PASS | 2026-08-09, awm 4.0.0, Linux. AG-02 exit `1` / `failed: 0`. AG-05: 31 artefactos. AG-06 con control negativo (ver abajo). **Un hallazgo de producto**, arreglado: ver "Lo que encontró la corrida". |
-| codex |  |  |  |  |  |  | CX-01 CX-02 |  |
+| codex | PASS¹ | PASS¹ | PASS | PASS | PASS | PASS | CX-01 PASS¹ · CX-02 PASS | 2026-08-09, awm 4.0.0, codex-cli 0.146.0, Node 24.19.0, Ubuntu (VPC). AG-05: 30 symlinks. **Hooks siguen ⚠**: `hook.trust: pending-trust` — ver abajo. |
 | opencode |  |  |  |  |  |  | OC-01 |  |
 | cursor |  |  |  |  |  |  | CU-01 |  |
 | copilot |  |  |  |  |  |  | CP-01 CP-02 |  |
@@ -206,3 +218,48 @@ borrar un directorio real de un tercero es destructivo — ver [`decisions.md`](
 **Si repetís la corrida, esperá esto:** después de abrir una sesión real de Claude Code
 contra el `HOME` aislado, `awm doctor` reporta `mermaid-diagrams` como reemplazado. Eso es
 el producto funcionando, no una regresión.
+
+---
+
+## Lo que encontró la corrida de `codex` (2026-08-09)
+
+Ubuntu, VPC del equipo, `codex-cli 0.146.0`, contra `awm 4.0.0` publicado. La corrida
+reportó **tres FAIL**. Ninguno era del producto — los tres los produjo este documento,
+y por eso está reescrito arriba. Se dejan acá con la observación cruda: un playbook que
+se corrige sin decir qué le pasaba se vuelve a torcer.
+
+**¹ Los tres FAIL, re-clasificados con su razón**
+
+| ID | Lo observado | Por qué no es un defecto del producto |
+|---|---|---|
+| AG-01 | `awm doctor --json -a codex` **antes de `init`** → `codex is not enabled; run awm init --agent codex`, exit `2`. | El check estaba **mal ordenado**: pedía exit `0` sobre una máquina donde el agente todavía no estaba habilitado. El mensaje nombra la causa y el comando exacto — es un rechazo correcto. Corregido: AG-01 va después de AG-02. Post-`init`, `doctor` devolvió `overall: healthy`, exit `0`. |
+| AG-02 | `failed: 0` en el JSON, pero exit `1`. | Exit `1` de `awm init` significa *degradado*, no *falló* — dos pasos quedan `pending` porque los escribe una sesión de agente. El criterio es `failed`, y el prompt de la corrida no llevaba `core-acceptance.md`, donde estaba la advertencia. Ahora está repetida en AG-02. |
+| CX-01 | Igual que AG-02. | Mismo síntoma, misma causa. |
+
+**El exit code de `awm init` es un problema aparte, y este es su tercer observador.** Que la
+documentación necesite un recuadro pidiendo *ignorá el exit code* es la señal, no la
+solución: `awm init --yes && <siguiente paso>` se corta bajo `set -e` en cualquier script de
+bootstrap, que es exactamente el uso del comando. Registrado como decisión pendiente.
+
+**Lo que la corrida SÍ cerró, y lo que no**
+
+- ✅ **Instalación y entrega de contexto en Codex, contra el binario real.** AG-03 a AG-05
+  limpios; `.codex/agents/development-process.toml` parseado con `tomllib` y la
+  `description` intacta (CX-02); AG-06 nombró skills instaladas de verdad y describió la
+  orquestación, incluido el preflight del Step 0.
+- ⚠ **Los hooks de Codex siguen sin verificar.** `awm doctor` reportó
+  `hook.trust: pending-trust`: el hook está instalado, pero **la transición de confianza
+  nunca ocurrió**, así que nunca se observó dispararse. AG-06 pasó igual — y eso no lo
+  contradice, porque Codex también recibe el contexto por `context.global: delivered` (el
+  bloque gestionado en `AGENTS.md`), que es un camino distinto del hook. Atribuir el
+  resultado de AG-06 al hook sería justo el error que la matriz de cuatro niveles existe
+  para evitar.
+
+  `pending-trust` no degrada `overall` a propósito: otorgar la confianza es una acción del
+  usuario en la UI de Codex que AWM no puede hacer por él, y marcarlo rojo dejaría a todo
+  usuario de Codex en `degraded` para siempre. Cerrar este ⚠ pide **una corrida donde
+  alguien acepte la confianza y después observe el hook disparar**.
+
+**Nota menor, sin registrar como hallazgo:** Codex reportó ver algunas skills "duplicadas en
+dos registros". `.agents/skills` lo comparten Codex y OpenCode, y una instalación global más
+una de proyecto pueden mostrar el mismo nombre dos veces. No se investigó; queda anotado.

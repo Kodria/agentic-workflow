@@ -111,14 +111,17 @@ describe('runInit', () => {
         });
     });
 
-    it('returns exit 1 on a bare HOME and never prompts with --yes (cache stubbed)', async () => {
+    it('returns exit 0 on a bare HOME and never prompts with --yes (cache stubbed)', async () => {
         const { runInit } = require('../../src/commands/init');
         const code = await runInit({
             cwd: tmpHome,
             yes: true,
             actions: { syncCache: async () => {}, installHook: () => ({ status: 'installed' }) },
         });
-        expect(code).toBe(1); // cache/hook/devCore siguen ausentes (syncCache no-op) → degradado
+        // Degradado (cache/hook/devCore siguen ausentes con syncCache no-op) pero NADA
+        // fallo, y el exit code de `init` responde por init, no por la salud del
+        // harness — ver D-008. Esto salia 1 y rompia `awm init --yes && …` bajo `set -e`.
+        expect(code).toBe(0);
     });
 
     it('--json emits a parseable InitOutcome', async () => {
@@ -134,7 +137,10 @@ describe('runInit', () => {
         expect(Array.isArray(parsed.steps)).toBe(true);
         expect(parsed.after.overall).toBe('degraded');
         expect(parsed.result).toBe('degraded'); // success envelope is self-describing too
-        expect(code).toBe(1);
+        // El exit code deja de duplicar `result`: la distincion ok/degradado sigue
+        // disponible para quien la quiera, en el campo, no en `$?` (D-008).
+        expect(parsed.failed).toBe(0);
+        expect(code).toBe(0);
     });
 
     const prefsFile = () => path.join(process.env.AWM_HOME as string, 'preferences.json');
@@ -249,6 +255,44 @@ describe('runInit', () => {
         expect(code).toBeLessThanOrEqual(1);
         expect(readPreferences().enabledAgents)
             .toEqual(['claude-code', 'codex', 'opencode']);
+    });
+
+    // -----------------------------------------------------------------------
+    // D-008 — el exit code de `init` responde por init, no por la salud del harness
+    // -----------------------------------------------------------------------
+    //
+    // El contrato entero en un solo lugar, porque el sitio que lo rompia era el
+    // ausente: ningun test preguntaba "¿un script puede encadenar `awm init &&`?".
+    // Habia dos assertions de `toBe(1)`, y las dos *documentaban* el bug en vez de
+    // detenerlo. Tres lectores independientes lo reportaron como fallo antes de que
+    // lo fuera, y la doc habia crecido un recuadro pidiendo ignorar el exit code.
+
+    it('a degraded-but-successful run exits 0, so `awm init && next` survives set -e', async () => {
+        const { runInit } = require('../../src/commands/init');
+        const code = await runInit({
+            cwd: tmpHome,
+            yes: true,
+            json: true,
+            actions: { syncCache: async () => {}, installHook: () => ({ status: 'installed' }) },
+        });
+        const parsed = JSON.parse(writeSpy.mock.calls.map((c) => c[0]).join(''));
+
+        // Las tres afirmaciones juntas son el punto: degradado, sin nada fallado, exit 0.
+        // Cualquiera de las tres sola se puede satisfacer sin el fix.
+        expect(parsed.result).toBe('degraded');
+        expect(parsed.failed).toBe(0);
+        expect(code).toBe(0);
+    });
+
+    it('still refuses with exit 2 when a gate rejects — 0 does not mean "always succeed"', async () => {
+        const { runInit } = require('../../src/commands/init');
+        const code = await runInit({
+            cwd: tmpHome,
+            agent: 'codex',
+            yes: true,
+            assertProviderSupported: () => { throw new Error('requires Codex >= 0.145.0'); },
+        });
+        expect(code).toBe(2);
     });
 
     // -----------------------------------------------------------------------

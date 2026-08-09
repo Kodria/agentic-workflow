@@ -74,7 +74,7 @@ La parte determinística —`awm sensors run`, su código de salida y el gate de
 | Proveedor | Instalación de artefactos | Entrega de contexto | Hooks | Evidencia |
 |---|---|---|---|---|
 | **Claude Code** | ✅ Verificado | ✅ Verificado | ✅ Verificado | Suite + E2E aislado en CI (ubuntu, windows, macos) + playbook [`agent-matrix`](testing/agent-matrix.md) corrido contra el binario real (AG-01…AG-06, CC-01, CC-02), incluido **AG-06 con control negativo**: un `HOME` sin AWM responde que no tiene ninguna skill de AWM, así que lo que la sesión nombró vino de la instalación observada y no de su ambiente. |
-| **Codex** | ✅ Verificado | ✅ Verificado | ⚠ Sin verificar | Suite + `tests/integration/codex-provider-isolated`. La **transición de confianza del hook** requiere el binario real. |
+| **Codex** | ✅ Verificado | ✅ Verificado | ⚠ Sin verificar | Suite + `tests/integration/codex-provider-isolated` + playbook [`agent-matrix`](testing/agent-matrix.md) contra `codex-cli 0.146.0` real (Ubuntu, 2026-08-09): instalación y `.toml` parseado con `tomllib`, AG-06 nombró skills instaladas. **Los hooks siguen ⚠**: `doctor` reportó `hook.trust: pending-trust` — el hook está instalado y **la transición de confianza nunca ocurrió**, así que nunca se lo observó disparar. AG-06 no lo cierra: Codex también recibe contexto por el bloque gestionado en `AGENTS.md` (`context.global: delivered`), que es otro camino. |
 | **OpenCode** | ✅ Verificado | ⚠ Sin verificar | ⛔ No tiene | El escritor de `opencode.json` está cubierto por tests; que OpenCode *lea* ese campo no fue observado. |
 | **Cursor** | ✅ Verificado | ⚠ Sin verificar | ⛔ No tiene | El `.mdc` se genera y se valida su forma. Que Cursor **cargue** un `.mdc` con `alwaysApply: false` no fue observado. |
 | **Copilot** | ✅ Verificado (solo proyecto) | ⚠ Sin verificar | ⛔ No tiene | El `.instructions.md` se genera. Que Copilot **honre** `applyTo: "**"` no fue observado. |
@@ -162,6 +162,7 @@ Enunciado como trabajo, no como defecto. Esto es lo que hay que construir para s
 | 3 | **Reconciliación de scope de proyecto en `awm update`** | `update` reconcilia artefactos de máquina; los de proyecto son trabajo de `awm sync`. Un proyecto sin `sync` queda desactualizado en silencio. | Elimina un paso manual |
 | 4 | **Pruebas de los packs `python` y `shell` contra proyectos reales** | Existen y están completos; nadie los corrió contra un repo Python o de shell de verdad. | Sube 2 packs a ✅ |
 | 5 | **Un séptimo proveedor** | El modelo de capacidades ya lo soporta como una edición localizada (tabla de renderers + entrada de provider). No hay ninguno pedido todavía. | Amplía la cobertura |
+| 6 | **Observar el hook de Codex disparando, con la confianza otorgada** | Es lo único que separa a Codex de ✅ en hooks. La corrida real del playbook dejó `hook.trust: pending-trust`: instalado, nunca disparado. Pide una corrida donde una persona acepte la confianza en la UI de Codex y **después** observe el re-anclaje de sesión. | Sube Codex a ✅ en hooks |
 
 ---
 

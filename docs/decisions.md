@@ -13,6 +13,7 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-005](#d-005) | 2026-08-09 | El gate de release corre en las tres plataformas | Vigente |
 | [D-006](#d-006) | 2026-08-09 | `awm remove` tiene modo no interactivo, simétrico con `add` | Vigente |
 | [D-007](#d-007) | 2026-08-09 | Un artefacto usurpado se **reporta**, no se auto-repara | Vigente |
+| [D-008](#d-008) | 2026-08-09 | El exit code de `awm init` responde por init, no por la salud del harness | Vigente |
 
 ---
 
@@ -128,3 +129,48 @@ estructural escrita a mano de `SkillIntegrity` (`{ valid; repairable; dead }`). 
 subconjunto exacto, TypeScript nunca se quejó, y al crecer el tipo real esta copia quedó
 atrás en silencio. Ahora referencia el tipo. Es la misma clase que la tabla de renderers
 duplicada de D-002: **una copia de algo que el código ya define en otro lado.**
+
+---
+
+## D-008
+
+**`awm init` sale `0` cuando init hizo su trabajo, aunque el harness quede `degraded`.** (Opción 1 de las tres evaluadas.)
+
+Salía `1` cuando el `doctor` posterior reportaba `degraded` — que en un primer run es lo
+**normal**: dos pasos quedan `pending` porque `CONSTITUTION.md` y `AGENTS.md` los escribe
+una sesión de agente, no el CLI. Un run donde no fallaba nada reportaba fallo.
+
+**La evidencia de que era un bug y no una convención:**
+- `awm init --yes && <siguiente>` se cortaba bajo `set -e` — en el único comando cuyo
+  trabajo entero es arrancar un script de bootstrap.
+- `core-acceptance.md` había crecido un recuadro **⚠️ Read this before judging any exit
+  code** pidiendo ignorarlo. Cuando la doc tiene que pedir que ignores el comportamiento,
+  el comportamiento es el problema.
+- **Tres lectores independientes** lo reportaron como fallo: dos corridas del playbook
+  `agent-matrix` marcaron AG-02 y CX-01 FAIL con `failed: 0` en su propio JSON.
+
+**El contrato nuevo:**
+
+| Código | Significa |
+|---|---|
+| `0` | Init hizo su trabajo. Puede quedar `degraded`; eso sigue siendo éxito. |
+| `2` | No se completó: un gate rechazó, o un paso falló y se revirtió todo. |
+
+`1` deja de usarse. La distinción `ok`/`degraded` no se pierde: sigue en el campo `result`
+del `--json`, que es donde un consumidor que la quiera debe leerla. "¿El harness está
+sano?" es la pregunta de `awm doctor`, no de `init`.
+
+**Descartadas:**
+- *Un flag `--strict`* — mantiene compatibilidad con scripts que hoy chequean el `1`, pero
+  deja dos semánticas conviviendo y un flag más que explicar, para preservar un
+  comportamiento que nadie quería.
+- *Solo arreglar la doc* — riesgo cero, pero el próximo que escriba un script de bootstrap
+  o corra un playbook vuelve a chocar. Ya se repitió tres veces.
+
+**Costo:** es un cambio de contrato observable, así que sale como **major (v5.0.0)**. Un
+script que hoy hace `awm init || echo degradado` deja de imprimir esa rama; el reemplazo es
+leer `result` del `--json`.
+
+**Cómo se detuvo:** el sitio que faltaba era el test ausente — ningún test preguntaba si un
+script podía encadenar `awm init &&`. Había dos assertions de `toBe(1)`, y las dos
+*documentaban* el bug en vez de detenerlo.
