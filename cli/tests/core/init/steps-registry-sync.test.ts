@@ -62,7 +62,7 @@ describe('stepCache — registry sync error results', () => {
                 devCore: { present: true, brokenLinks: [] },
                 ambient: { wanted: [], installed: [] },
                 contextInjection: [],
-                globalSkills: { valid: [], repairable: [], dead: [] },
+                globalSkills: { valid: [], repairable: [], dead: [], usurped: [] },
             },
             project: null,
         };

@@ -106,13 +106,20 @@ function skillsGlobalCheck(
     }
     const shared = owners.length > 1;
     const broken = integrity.repairable.length + integrity.dead.length;
+    // Usurpado ≠ roto: el link no cuelga, DESAPARECIO — otro instalador dejo un
+    // directorio real con el mismo nombre encima. El agente carga esa skill, no la
+    // nuestra, y hasta que esto se reporto el scan solo miraba symlinks, asi que el
+    // caso era literalmente invisible y `overall` decia `healthy`. No se auto-repara:
+    // borrar un directorio real con contenido de un tercero es destructivo y necesita
+    // que lo pida una persona.
+    const usurped = integrity.usurped.length;
     // Broken links are checked BEFORE shared: 'shared' is a non-degrading/OK state
     // (see checks.ts's DEGRADING_PROVIDER_STATES), so if it were set unconditionally
     // for a shared dir it would silently mask real broken/dead symlinks — a green
     // checkmark next to "N broken links → repair-global-skills" would contradict its
     // own trailing text, and `overall` would never degrade despite real breakage.
     let state: ProviderCheckState;
-    if (broken > 0) {
+    if (broken > 0 || usurped > 0) {
         state = 'broken';
     } else if (shared) {
         state = 'shared';
@@ -126,8 +133,18 @@ function skillsGlobalCheck(
         state,
         target: dir,
         owners: shared ? owners : undefined,
-        detail: broken > 0 ? `${broken} broken links` : undefined,
-        remediationCode: broken > 0 ? 'repair-global-skills' : undefined,
+        detail: [
+            broken > 0 ? `${broken} broken links` : null,
+            usurped > 0
+                ? `${usurped} replaced by non-AWM content (${integrity.usurped.join(', ')})`
+                : null,
+        ].filter(Boolean).join('; ') || undefined,
+        // Una usurpacion NO la arregla `repair-global-skills` (solo toca symlinks
+        // colgantes), asi que ofrecer ese remedio seria mandar al usuario a un comando
+        // que no cambia nada. Reinstalar el bundle es lo que la resuelve.
+        remediationCode: usurped > 0
+            ? 'reinstall-usurped-skills'
+            : broken > 0 ? 'repair-global-skills' : undefined,
     };
 }
 
@@ -331,7 +348,8 @@ export function gatherProviderChecks(agents: AgentTarget[], scanSkills: ScanSkil
         const provider = providerFor(agent);
         const dir = provider.skill.global;
         const owners = (dir !== null ? ownersByDir.get(dir) : undefined) ?? [agent];
-        const integrity = (dir !== null ? scansByDir.get(dir) : undefined) ?? { valid: [], repairable: [], dead: [] };
+        const integrity = (dir !== null ? scansByDir.get(dir) : undefined)
+            ?? { valid: [], repairable: [], dead: [], usurped: [] };
 
         const checks: ProviderCheck[] = [
             binaryVersionCheck(agent),

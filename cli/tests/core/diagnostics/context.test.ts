@@ -250,7 +250,7 @@ describe('gatherContext — providers matrix (Task 9)', () => {
     });
 
     function healthySharedSkills() {
-        return { valid: ['development-process'], repairable: [], dead: [] };
+        return { valid: ['development-process'], repairable: [], dead: [], usurped: [] };
     }
 
     it('reports shared skills for both owners without scanning twice', () => {
@@ -265,7 +265,7 @@ describe('gatherContext — providers matrix (Task 9)', () => {
     });
 
     it('marks skills.global healthy (not shared) for a single unshared provider', () => {
-        const scan = jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
+        const scan = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
         const { gatherContext } = require('../../../src/core/diagnostics/context');
         const report = gatherContext({ cwd: tmpHome, bundles: [], agents: ['claude-code'], scanSkills: scan });
         expect(scan).toHaveBeenCalledTimes(1);
