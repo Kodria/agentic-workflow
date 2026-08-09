@@ -97,7 +97,7 @@ Ninguna de estas es una tarea pendiente. Son límites del proveedor, no del prod
 |---|---|---|
 | **Linux** | ✅ Verificado | Matriz de CI en cada PR (`ubuntu-latest`), suite completa |
 | **Windows** | ✅ Verificado | Matriz de CI en cada PR (`windows-latest`), suite completa. Cubre junctions, PATHEXT y separadores. |
-| **macOS** | ⚠ Sin verificar | Ninguna máquina macOS ejecutó nada. Nada es específico de macOS en el código, pero eso es un argumento, no evidencia. |
+| **macOS** | ✅ Verificado | Matriz de CI en cada PR (`macos-latest`), suite completa. Su primera corrida encontró un defecto real de producto (ver abajo), que es la diferencia entre "debería funcionar" y evidencia. |
 | **WSL** | ⚠ Sin verificar | Se comporta como Linux por diseño; sin ejecución registrada. Ver la advertencia de rutas cruzadas en [os-matrix](testing/os-matrix.md). |
 
 **Node.js:** 22 o superior (declarado en `engines`). Versiones menores no están soportadas.
@@ -114,6 +114,14 @@ Casi todo el CLI se comporta igual en los cuatro sistemas. Estas son las excepci
 | `awm watch` — **el wrapper sobrevive a la muerte del supervisor** | ✅ Verificado | ⚠ **Sin verificar.** En POSIX la garantía se sostiene con `detached: true` (sesión nueva, sobrevive un SIGKILL al padre). En win32, dos rondas reales de CI no encontraron una configuración de spawn que sostenga la misma garantía, así que el E2E de crash-recovery tiene alcance POSIX. Ver `cli/src/core/journal/process.ts`. |
 
 Esa última fila es la única capacidad del producto con un nivel distinto según el sistema operativo. No es una regresión pendiente: es un límite conocido, con el intento registrado.
+
+### Lo que encontró agregar macOS
+
+Vale registrarlo porque justifica la distinción entre los dos primeros niveles. macOS estaba en `⚠` únicamente porque nadie lo había agregado a la matriz — "nada es específico de macOS en el código" era el argumento. Su primera corrida encontró un defecto de producto:
+
+En macOS `/var/folders/…` es un symlink a `/private/var/folders/…`. `planInitMutationTargets` derivaba unos destinos de `cwd` tal cual y otros de `findProjectRoot(cwd)`, que canonicaliza — así que enumeraba **el mismo archivo dos veces**, una por forma. Esa lista es la que el backup respalda y la que el rollback restaura: un archivo con dos entradas se respalda dos veces y se restaura dos veces, en el mecanismo cuyo único trabajo es dejar el disco como estaba. En Linux y Windows las dos formas coinciden y el `Set` lo tapaba.
+
+El bug no era de macOS: cualquier `cwd` alcanzado a través de un symlink lo reproduce. macOS solo fue el primero en pisarlo. Está cubierto por un test que arma esa situación a mano y falla en cualquier sistema.
 
 ### Advertencia de Windows que sí es real
 
@@ -150,11 +158,10 @@ Enunciado como trabajo, no como defecto. Esto es lo que hay que construir para s
 | # | Falta | Por qué importa | Qué destraba |
 |---|---|---|---|
 | 1 | **CI con binarios de agente reales** | Es la única razón por la que Cursor, Copilot, OpenCode y Antigravity siguen en ⚠. Ninguna cantidad de tests unitarios la sustituye. | Sube 4 proveedores de ⚠ a ✅ |
-| 2 | **macOS en la matriz de CI** | Un tercio de los desarrolladores; hoy no hay una sola ejecución registrada. | Sube macOS a ✅ |
-| 3 | **Verificación de integridad de contenido en artefactos renderizados** | Para `.mdc` / `.instructions.md` el diagnóstico comprueba que el archivo *existe y tiene la extensión correcta*, no que su contenido esté intacto. Un archivo correcto por fuera y corrupto por dentro pasa. | Cierra un hueco conocido en `skills.global` |
-| 4 | **Reconciliación de scope de proyecto en `awm update`** | `update` reconcilia artefactos de máquina; los de proyecto son trabajo de `awm sync`. Un proyecto sin `sync` queda desactualizado en silencio. | Elimina un paso manual |
-| 5 | **Pruebas de los packs `python` y `shell` contra proyectos reales** | Existen y están completos; nadie los corrió contra un repo Python o de shell de verdad. | Sube 2 packs a ✅ |
-| 6 | **Un séptimo proveedor** | El modelo de capacidades ya lo soporta como una edición localizada (tabla de renderers + entrada de provider). No hay ninguno pedido todavía. | Amplía la cobertura |
+| 2 | **Verificación de integridad de contenido en artefactos renderizados** | Para `.mdc` / `.instructions.md` el diagnóstico comprueba que el archivo *existe y tiene la extensión correcta*, no que su contenido esté intacto. Un archivo correcto por fuera y corrupto por dentro pasa. | Cierra un hueco conocido en `skills.global` |
+| 3 | **Reconciliación de scope de proyecto en `awm update`** | `update` reconcilia artefactos de máquina; los de proyecto son trabajo de `awm sync`. Un proyecto sin `sync` queda desactualizado en silencio. | Elimina un paso manual |
+| 4 | **Pruebas de los packs `python` y `shell` contra proyectos reales** | Existen y están completos; nadie los corrió contra un repo Python o de shell de verdad. | Sube 2 packs a ✅ |
+| 5 | **Un séptimo proveedor** | El modelo de capacidades ya lo soporta como una edición localizada (tabla de renderers + entrada de provider). No hay ninguno pedido todavía. | Amplía la cobertura |
 
 ---
 

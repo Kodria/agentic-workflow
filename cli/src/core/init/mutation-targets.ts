@@ -11,6 +11,7 @@
 // entry when nothing exists there yet). The one failure mode that matters is
 // under-enumeration: a real write to a path NOT in this list would land
 // outside the backup session and survive a rollback.
+import fs from 'fs';
 import path from 'path';
 import { AgentTarget, ArtifactType, providerFor } from '../../providers';
 import { defaultScopeForBundle, type BundleDefinition } from '../bundles';
@@ -49,6 +50,17 @@ function physicalTarget(
         ).targetPath;
     } catch {
         return null;
+    }
+}
+
+/** La forma canonica de un directorio: resuelve symlinks si existe, y si no existe
+ *  todavia devuelve la entrada tal cual — enumerar un destino aun inexistente es
+ *  deliberado en este modulo (un backup vacio no es un problema; no enumerarlo si). */
+function canonicalDir(dir: string): string {
+    try {
+        return fs.realpathSync(dir);
+    } catch {
+        return dir;
     }
 }
 
@@ -91,7 +103,17 @@ function addBundleTargets(
  * read the project profile, but never writes).
  */
 export function planInitMutationTargets(params: PlanInitMutationTargetsParams): string[] {
-    const { cwd, agent, bundles } = params;
+    const { agent, bundles } = params;
+    // `cwd` canonico ANTES de derivar nada de el. Algunos destinos salen de `cwd` tal
+    // cual y otros de `findProjectRoot(cwd)`, que hace `realpathSync`: mientras las dos
+    // formas coincidan el `Set` deduplica y no se nota, pero en macOS `/var/folders/…`
+    // es un symlink a `/private/var/folders/…` y entonces NO coinciden — la CI de macOS
+    // mostro `AGENTS.md` y `.awm/context/awm-context.md` dos veces, una por forma.
+    //
+    // Esta lista es la que `beginBackupSession` respalda y la que el rollback restaura.
+    // Un archivo con dos entradas es un archivo respaldado dos veces y restaurado dos
+    // veces, en el mecanismo cuyo unico trabajo es dejar el disco como estaba.
+    const cwd = canonicalDir(params.cwd);
     const targets = new Set<string>();
 
     // preferences.json + the artifact ownership ledger (state/artifacts.json)

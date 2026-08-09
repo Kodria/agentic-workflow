@@ -26,7 +26,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Los tres sistemas de la matriz de soporte. macOS entro despues que los
+        # otros dos: estaba en `⚠ sin verificar` unicamente porque nadie lo habia
+        # agregado, no porque hubiera algo que resolver — y `fail-fast: false`
+        # arriba asegura que un fallo en uno no oculte el resultado de los demas,
+        # que es como se descubre que un bug es de UNA plataforma y no del cambio.
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

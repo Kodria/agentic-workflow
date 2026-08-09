@@ -8,6 +8,18 @@ import { logsDir } from '../../../src/core/journal/paths';
 import { Job } from '../../../src/core/journal/types';
 import { argvDigest } from '../../../src/core/journal/process';
 
+// Presupuesto explicito, como sus tres hermanos de `tests/commands/watch/`
+// (integration 30s, supervisor-loop 60s, e2e-crash 180s). Este archivo era el unico de
+// la familia sin uno, y hace el mismo trabajo que ellos: cada `collectAndReconcile`
+// consulta si el proceso sigue vivo, y en Windows eso spawnea `tasklist` — cientos de ms
+// por llamada bajo carga. El test de stall hace 3 iteraciones sobre dos refs (proceso +
+// wrapper), o sea 6 consultas, y el default de 5s de jest quedaba justo en el borde:
+// verde en dos corridas de Windows y timeout en la tercera, sin que cambiara el codigo.
+// El sujeto del test es la semantica de deteccion de stall, no cuanto tarda; el reloj
+// generoso no afloja ninguna asercion.
+jest.setTimeout(60000);
+
+
 const fakeSpawner: WrapperSpawner = (job, nonce, logsRoot, repoRoot) => {
     // Mismo contrato que el spawner real: dispara el wrapper y NO espera.
     void runExecWrapper({ logsRoot, jobId: job.id, nonce, argv: job.argv, cwd: job.cwd, repoRoot }).catch(() => { /* el resultado 127 ya quedo en sidecar */ });
