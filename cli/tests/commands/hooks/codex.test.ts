@@ -286,6 +286,64 @@ describe('installHook / computeHookStatus / uninstallHook — Codex adapter', ()
         expect(result.status).toBe('not-installed');
         expect(result.backupPath).toBeNull();
     });
+
+    // Restos de otro AWM_HOME: se podan, pero solo si estan MUERTOS.
+    //
+    // `awm init` reconoce como propia solo la entrada del AWM_HOME actual, asi que instalar
+    // con otro AGREGA una segunda. Una corrida de playbook aislada deja en el archivo real
+    // una entrada permanente hacia un directorio temporal ya borrado, y el agente la intenta
+    // ejecutar cada sesion. Observado: `~/.codex/hooks.json` con dos entradas de AWM. Ver
+    // backlog §C2.
+    describe('stale AWM entries from another AWM_HOME are pruned, live ones are not', () => {
+        /** Una entrada con nuestra forma apuntando a `scriptPath`. */
+        function entryFor(scriptPath: string) {
+            return {
+                matcher: 'startup|resume|clear|compact',
+                hooks: [{ type: 'command', command: scriptPath, statusMessage: 'Loading AWM session state' }],
+            };
+        }
+
+        it('drops an entry whose script no longer exists', () => {
+            const { isDeadAwmHookEntry } = require('../../../src/commands/hooks/shared');
+            const dead = entryFor('/tmp/awm-home-that-was-deleted/hooks/codex/session-start');
+            expect(isDeadAwmHookEntry(dead, 'startup|resume|clear|compact', 'session-start', codexScriptsDir)).toBe(true);
+        });
+
+        it('keeps a parallel install whose script DOES exist', () => {
+            // Es la diferencia entre limpiar basura propia y romperle la instalacion a alguien.
+            const { isDeadAwmHookEntry } = require('../../../src/commands/hooks/shared');
+            const alive = entryFor(path.join(codexScriptsDir, 'session-start'));
+            fs.mkdirSync(codexScriptsDir, { recursive: true });
+            fs.writeFileSync(path.join(codexScriptsDir, 'session-start'), '#!/bin/sh\n', { mode: 0o755 });
+            expect(isDeadAwmHookEntry(alive, 'startup|resume|clear|compact', 'session-start', codexScriptsDir)).toBe(false);
+        });
+
+        it('leaves a foreign hook alone even when its path is dead', () => {
+            // Mismo matcher, ruta muerta, pero NO es nuestro script: no se toca.
+            const { isDeadAwmHookEntry } = require('../../../src/commands/hooks/shared');
+            const foreign = entryFor('/tmp/someone-elses/my-own-hook');
+            expect(isDeadAwmHookEntry(foreign, 'startup|resume|clear|compact', 'session-start', codexScriptsDir)).toBe(false);
+        });
+
+        it('install removes the stale entry instead of accumulating a second one', () => {
+            installCodexFixture({ heartbeat: false });
+            const hooksJson = path.join(tmpHome, '.codex', 'hooks.json');
+            const current = JSON.parse(fs.readFileSync(hooksJson, 'utf-8'));
+            // Simular la corrida anterior con otro AWM_HOME, ya borrado.
+            current.hooks.SessionStart.unshift(entryFor('/tmp/awm-e2e-gone/hooks/codex/session-start'));
+            fs.writeFileSync(hooksJson, JSON.stringify(current, null, 2));
+            expect(JSON.parse(fs.readFileSync(hooksJson, 'utf-8')).hooks.SessionStart).toHaveLength(2);
+
+            writeRegistry();
+            const { installHook } = require('../../../src/commands/hooks/install');
+            installHook({ agent: 'codex', registryRoot: tmpRegistry, installMethod: 'copy' });
+
+            const after = JSON.parse(fs.readFileSync(hooksJson, 'utf-8')).hooks.SessionStart;
+            expect(after).toHaveLength(1);
+            expect(JSON.stringify(after)).toContain(tmpHome);
+            expect(JSON.stringify(after)).not.toContain('awm-e2e-gone');
+        });
+    });
 });
 
 // El remedio tiene que ser ejecutable, no un codigo.

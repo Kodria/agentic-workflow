@@ -4,6 +4,7 @@ import path from 'path';
 
 import { checkBudget, readConfig, CONFIG_FILE } from '../../../src/commands/context-budget/budget';
 import { exitCodeFor, formatReport } from '../../../src/commands/context-budget';
+import { mkCanonicalTmpDir } from '../../support/tmp';
 
 function project(files: Record<string, number>): string {
     // CLAUDE.md: no test may reach the real ~/.awm. Everything here is a tmpdir.
@@ -116,5 +117,46 @@ describe('reporting', () => {
         expect(out).toContain('Raise');
         expect(out).toContain('Accept');
         expect(out).toMatch(/~5[0-9]k tokens/);
+    });
+});
+
+// Fijar sobre cero archivos garantiza una falsa alarma en la corrida siguiente.
+//
+// `context-budget` mide AGENTS.md / CONSTITUTION.md / CLAUDE.md. En un proyecto recien
+// inicializado NINGUNO existe: los escribe una sesion de agente, y `awm init` los reporta
+// como pasos `pending`. El 0KB no es un error de medicion — no hay nada que medir. El
+// problema es FIJAR sobre eso: apenas el agente escribe AGENTS.md, que es el flujo
+// documentado, el comando reporta "excedido". Una alarma que siempre suena se aprende a
+// ignorar. Ver issue #56.
+describe('pinning refuses to happen when there is nothing to measure', () => {
+    let cwd: string;
+
+    beforeEach(() => { cwd = mkCanonicalTmpDir('awm-budget-zero-'); });
+    afterEach(() => { fs.rmSync(cwd, { recursive: true, force: true }); });
+
+    it('does not pin a budget on a project whose context files do not exist yet', () => {
+        const report = checkBudget(cwd);
+        expect(report.status).toBe('unmeasurable');
+        expect(report.totalBytes).toBe(0);
+        // Lo que importa: NO deja config. Un `maxBytes: 0` en disco es la trampa.
+        expect(fs.existsSync(path.join(cwd, CONFIG_FILE))).toBe(false);
+    });
+
+    it('the very next run, after the agent writes AGENTS.md, is not "over budget"', () => {
+        checkBudget(cwd);                                    // primer intento: nada que medir
+        fs.writeFileSync(path.join(cwd, 'AGENTS.md'), 'x'.repeat(3000));
+
+        const report = checkBudget(cwd);
+        // Este es el bug entero: antes daba 'over' — 3KB contra un maximo de 0.
+        expect(report.status).toBe('pinned');
+        expect(report.maxBytes).toBe(3000);
+    });
+
+    it('still pins normally when at least one context file exists', () => {
+        fs.writeFileSync(path.join(cwd, 'CLAUDE.md'), 'y'.repeat(500));
+        const report = checkBudget(cwd);
+        expect(report.status).toBe('pinned');
+        expect(report.maxBytes).toBe(500);
+        expect(fs.existsSync(path.join(cwd, CONFIG_FILE))).toBe(true);
     });
 });

@@ -33,8 +33,9 @@ export const CONFIG_FILE = path.join('.awm', 'context-budget.json');
 export type BudgetConfig = { files: string[]; maxBytes: number };
 
 export type BudgetReport = {
-    /** 'pinned' on the first check; 'within' under budget; 'over' past it. */
-    status: 'pinned' | 'within' | 'over';
+    /** 'pinned' on the first check; 'within' under budget; 'over' past it;
+     *  'unmeasurable' cuando NINGUNO de los archivos existe todavia. */
+    status: 'pinned' | 'within' | 'over' | 'unmeasurable';
     totalBytes: number;
     maxBytes: number;
     /** Per-file sizes, in the order declared. Absent files are omitted. */
@@ -103,6 +104,19 @@ export function checkBudget(cwd: string): BudgetReport {
     const config = readConfig(cwd);
     if (!config) {
         const { total, breakdown } = measure(cwd, DEFAULT_FILES);
+        // Fijar sobre CERO archivos es una trampa, no una linea base.
+        //
+        // En un proyecto recien inicializado ninguno de los tres existe todavia: los
+        // escribe una sesion de agente, y `awm init` los reporta como pasos `pending`.
+        // El 0KB no es un error de medicion — no hay nada que medir. Pero dejar
+        // `maxBytes: 0` en disco hace que la corrida SIGUIENTE, apenas el agente escribe
+        // AGENTS.md (el flujo documentado), reporte "excedido". Una alarma que siempre
+        // suena se aprende a ignorar, y ahi se pierde el gate entero.
+        //
+        // Se reporta y NO se escribe config: el proximo run, ya con contexto, fija bien.
+        if (breakdown.length === 0) {
+            return { status: 'unmeasurable', totalBytes: 0, maxBytes: 0, breakdown };
+        }
         writeConfig(cwd, { files: DEFAULT_FILES, maxBytes: total });
         return { status: 'pinned', totalBytes: total, maxBytes: total, breakdown };
     }
