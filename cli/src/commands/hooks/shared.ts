@@ -133,7 +133,10 @@ export function checkFile(file: string): CheckResult {
 }
 
 export type HookStatus = {
-    overall: 'HEALTHY' | 'DEGRADED' | 'NOT_INSTALLED';
+    /** `PENDING_TRUST`: instalado y bien formado, pero NUNCA se lo vio correr. No es
+     *  `HEALTHY` — un hook que nunca corrio no se puede afirmar que entregue contexto —
+     *  y tampoco `DEGRADED`, porque no hay nada roto que arreglar. Ver D-010. */
+    overall: 'HEALTHY' | 'DEGRADED' | 'NOT_INSTALLED' | 'PENDING_TRUST';
     // Codex-only: whether a runtime heartbeat confirms the installed script
     // matches what actually ran last session. Absent for agents (Claude)
     // that don't have a heartbeat mechanism.

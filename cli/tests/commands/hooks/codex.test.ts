@@ -189,6 +189,30 @@ describe('installHook / computeHookStatus / uninstallHook — Codex adapter', ()
         expect(computeHookStatus('codex').trust).toBe(expected); // verifies R18
     });
 
+    // `overall` NUNCA se assertaba — solo `.trust` — y por eso el bug vivio: se calculaba
+    // ignorando trust por completo, asi que `awm hooks status` imprimia `Status: HEALTHY`
+    // dos lineas debajo de `Trust: … pending-trust`. Una corrida real del playbook leyo esa
+    // salida y concluyo que el hook andaba. Ver D-010.
+    it.each([
+        [false, 'PENDING_TRUST'],
+        [true, 'HEALTHY'],
+    ])('overall refleja el trust, no solo la presencia de archivos (heartbeat=%s)', (heartbeat, expected) => {
+        installCodexFixture({ heartbeat: heartbeat as boolean });
+        const { computeHookStatus } = require('../../../src/commands/hooks/status');
+        expect(computeHookStatus('codex').overall).toBe(expected);
+    });
+
+    it('un heartbeat obsoleto degrada: el script cambio desde la ultima corrida confirmada', () => {
+        installCodexFixture({ heartbeat: true });
+        fs.writeFileSync(path.join(codexScriptsDir, 'session-start'), '#!/usr/bin/env bash\necho "changed"', { mode: 0o755 });
+
+        const { computeHookStatus } = require('../../../src/commands/hooks/status');
+        const status = computeHookStatus('codex');
+        expect(status.trust).toBe('stale');
+        // Esto era `HEALTHY`: la rotura mas clara de las tres, reportada en verde.
+        expect(status.overall).toBe('DEGRADED');
+    });
+
     it('reports stale trust when the heartbeat hash no longer matches the installed script', () => {
         installCodexFixture({ heartbeat: true });
         fs.writeFileSync(path.join(codexScriptsDir, 'session-start'), '#!/usr/bin/env bash\necho "changed"', { mode: 0o755 });

@@ -10,6 +10,17 @@ import { capabilityRoot } from '../../core/registries';
 
 const HOOK_TARGETS = AGENT_TARGETS.filter((a) => getHookConfig(a));
 
+/**
+ * `hooks` nacio con `-t, --target` y el resto del CLI (`add`, `remove`, `sync`,
+ * `update`, `doctor`) usa `-a, --agent`. La asimetria se cobro una corrida real del
+ * playbook: `awm hooks status --agent codex` fallaba con `unknown option`. Se acepta
+ * `--agent` como alias en vez de renombrar, para no romper a quien ya scriptea
+ * `--target`. Ver D-010.
+ */
+function resolveHookTarget(options: { target?: string; agent?: string }): AgentTarget {
+    return (options.agent ?? options.target ?? 'claude-code') as AgentTarget;
+}
+
 function targetOptionDescription(): string {
     return `Target harness (${HOOK_TARGETS.join('|')})`;
 }
@@ -20,9 +31,10 @@ export function registerHooksCommand(program: Command): void {
     hooks.command('install')
         .description('Install the AWM bootstrap hook into the target harness')
         .option('-t, --target <target>', targetOptionDescription(), 'claude-code')
+        .option('-a, --agent <agent>', 'Alias de --target, por simetria con el resto del CLI')
         .option('-y, --yes', 'Skip interactive confirmations', false)
-        .action(async (options: { target?: string; yes?: boolean }) => {
-            const agent = (options.target ?? 'claude-code') as AgentTarget;
+        .action(async (options: { target?: string; agent?: string; yes?: boolean }) => {
+            const agent = resolveHookTarget(options);
             const prefs = getPreferences();
 
             const hooksRoot = capabilityRoot('hooks');
@@ -72,9 +84,10 @@ export function registerHooksCommand(program: Command): void {
     hooks.command('uninstall')
         .description('Remove the AWM bootstrap hook')
         .option('-t, --target <target>', targetOptionDescription(), 'claude-code')
+        .option('-a, --agent <agent>', 'Alias de --target, por simetria con el resto del CLI')
         .option('-y, --yes', 'Skip interactive confirmations', false)
-        .action(async (options: { target?: string; yes?: boolean }) => {
-            const agent = (options.target ?? 'claude-code') as AgentTarget;
+        .action(async (options: { target?: string; agent?: string; yes?: boolean }) => {
+            const agent = resolveHookTarget(options);
 
             if (!options.yes && process.stdin.isTTY) {
                 const ok = await confirm({ message: 'Remove AWM bootstrap hook from settings.json?' });
@@ -103,8 +116,9 @@ export function registerHooksCommand(program: Command): void {
     hooks.command('status')
         .description('Check the bootstrap hook installation status')
         .option('-t, --target <target>', targetOptionDescription(), 'claude-code')
-        .action((options: { target?: string }) => {
-            const agent = (options.target ?? 'claude-code') as AgentTarget;
+        .option('-a, --agent <agent>', 'Alias de --target, por simetria con el resto del CLI')
+        .action((options: { target?: string; agent?: string }) => {
+            const agent = resolveHookTarget(options);
             try {
                 const result = computeHookStatus(agent);
                 const symbol = (ok: boolean) => ok ? pc.green('✓') : pc.red('✗');
@@ -123,10 +137,17 @@ export function registerHooksCommand(program: Command): void {
                 }
                 console.log('');
                 const overall = result.overall === 'HEALTHY' ? pc.green(result.overall) :
-                                result.overall === 'NOT_INSTALLED' ? pc.yellow(result.overall) :
-                                pc.red(result.overall);
+                                result.overall === 'NOT_INSTALLED' || result.overall === 'PENDING_TRUST'
+                                    ? pc.yellow(result.overall)
+                                    : pc.red(result.overall);
                 console.log(`  Status: ${overall}`);
-                if (result.overall !== 'HEALTHY') {
+                if (result.overall === 'PENDING_TRUST') {
+                    console.log(pc.dim('  El hook esta instalado y bien formado, pero nunca se lo vio correr.'));
+                    console.log(pc.dim('  Abri una sesion del agente; si sigue igual, no se esta disparando.'));
+                }
+                // PENDING_TRUST no sale 1: no hay nada roto que arreglar, y salir 1 en
+                // toda instalacion recien hecha convertiria el comando en ruido.
+                if (result.overall !== 'HEALTHY' && result.overall !== 'PENDING_TRUST') {
                     process.exit(1);
                 }
             } catch (e: any) {
