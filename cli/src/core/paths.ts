@@ -18,6 +18,26 @@ export function awmHome(): string {
   return process.env.AWM_HOME || path.join(homeDir(), '.awm');
 }
 
+/**
+ * Raiz de configuracion de un agente, honrando SU propia variable de entorno.
+ *
+ * AWM honra `AWM_HOME` para si mismo (ver `awmHome` arriba) y durante mucho tiempo le
+ * nego esa misma cortesia a todos los agentes que administra: cada ruta de proveedor se
+ * armaba desde `homeDir()` y punto. En una maquina con `CODEX_HOME` apuntando a otro
+ * lado, AWM escribia el hook en `~/.codex/hooks.json` y Codex lo leia desde
+ * `$CODEX_HOME/hooks.json` — instalacion correcta, en el archivo que nadie mira. El hook
+ * quedaba instalado y mudo, y `doctor` lo reportaba presente porque miraba el mismo
+ * lugar equivocado donde lo habia escrito.
+ *
+ * `envVar` en `null` significa "este proveedor no declara override conocido": se usa el
+ * default y listo. No se inventan variables — una que no exista de verdad seria peor que
+ * ninguna, porque prometeria una configurabilidad que no funciona.
+ */
+export function providerConfigHome(envVar: string | null, defaultDir: string): string {
+  const override = envVar ? process.env[envVar]?.trim() : undefined;
+  return override || path.join(homeDir(), defaultDir);
+}
+
 /** Raw platform string (wrapper over process.platform for testability). */
 export function platform(): NodeJS.Platform {
   return process.platform;

@@ -226,3 +226,10 @@ si no aparece, es otra cosa.
 'open-hooks-trust'` y ese código **no está explicado en ningún lado** — ni en la referencia
 del CLI, ni en la salida, ni en esta documentación. El usuario ve `→ open-hooks-trust` y no
 tiene ninguna acción que tomar.
+
+
+**Actualización (misma fecha):** la causa de que el hook no se descubriera está
+identificada y corregida — AWM ignoraba `CODEX_HOME` y escribía en `~/.codex/hooks.json`
+mientras Codex leía `$CODEX_HOME/hooks.json` (ver [`decisions.md`](decisions.md) D-011).
+**Esto no sube a Codex de ❌ todavía:** saber por qué no se descubría no es lo mismo que
+haberlo visto correr. Falta una corrida donde el hook, ya descubierto, deje su heartbeat.

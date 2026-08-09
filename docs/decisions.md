@@ -16,6 +16,7 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-008](#d-008) | 2026-08-09 | El exit code de `awm init` responde por init, no por la salud del harness | Vigente |
 | [D-009](#d-009) | 2026-08-09 | Los releases se serializan, y el tag se empuja antes que la rama | Vigente |
 | [D-010](#d-010) | 2026-08-09 | Un hook que nunca corrió no se reporta `HEALTHY` | Vigente |
+| [D-011](#d-011) | 2026-08-09 | Cada agente resuelve su raíz de configuración por su propia variable de entorno | Vigente |
 
 ---
 
@@ -262,3 +263,49 @@ temporal. La corrida del VPC termino con DOS entradas de AWM bajo `SessionStart`
 el mismo matcher. `awm init` no la reconoce como propia porque compara contra el
 `scriptsDir` actual, y agrega otra. Falta decidir si eso se deduplica, se limpia en el
 teardown del playbook, o ambas.
+
+---
+
+## D-011
+
+**Cada proveedor declara su variable de entorno de configuración, y TODAS sus rutas la respetan.**
+
+`awm hooks status` decía que el hook de Codex estaba instalado. Codex nunca lo ejecutaba. Los
+dos tenían razón: en esa máquina `CODEX_HOME` apuntaba fuera del home, Codex leía
+`$CODEX_HOME/hooks.json`, y AWM había escrito en `~/.codex/hooks.json`. **Instalación
+correcta, en el archivo que nadie mira.**
+
+Lo peor no fue el bug: fue que `doctor` lo reportara sano. Escribía y verificaba en el
+mismo lugar equivocado, así que el diagnóstico confirmaba su propia suposición. Un chequeo
+que solo puede ver lo que él mismo hizo no es un chequeo.
+
+**La asimetría de fondo:** AWM honra `AWM_HOME` para sí mismo desde siempre, y le negaba
+esa misma cortesía a todos los agentes que administra. Cada ruta de proveedor salía de
+`homeDir()` y punto.
+
+**Implica:**
+- `ProviderConfig` gana `configHome: { envVar, dir, resolved }`. Una sola tabla, `CONFIG_HOME`.
+- `codex: { envVar: 'CODEX_HOME' }` — **confirmado contra el binario real** (0.146.0).
+- Los demás quedan en `envVar: null`. Eso es *"no le conocemos override"*, no *"no tiene"*.
+  **No se inventan variables:** una que no exista prometería una configurabilidad que no
+  funciona, que es peor que no ofrecerla. Confirmar una es cambiar una línea.
+- Una variable vacía o en blanco (`export CODEX_HOME=`) cae al default. Tomarla al pie de
+  la letra dejaría las rutas colgando de la raíz.
+- **Las convenciones compartidas no se mueven.** `~/.agents/skills` lo usan Codex y
+  OpenCode: es del ecosistema, no de un agente. Moverlo con `CODEX_HOME` desconectaría a
+  OpenCode de sus propias skills.
+
+**El guard es una propiedad, no una lista.** `provider-paths-honor-config-home` recorre la
+tabla entera: para cada proveedor que declare override, setearlo tiene que mover **todas**
+sus rutas propias. Eran tres las afectadas (`hooks.json`, `agents/`, `AGENTS.md`) y
+arreglar dos habría dejado el bug vivo en la tercera — el patrón que más se repitió en este
+repo. Verificado por revert: devolver **una sola** ruta al hardcode pone el guard en rojo.
+Un proveedor nuevo lo hereda sin que nadie se acuerde.
+
+**Efecto lateral que vale:** el aislamiento de los playbooks ahora funciona de verdad. Antes
+`AWM_HOME` no alcanzaba, porque los archivos del agente viven fuera de él y una corrida de
+prueba contaminaba el `hooks.json` real — que fue justo lo que hizo dudar del resultado.
+
+**Lo que esto NO cierra:** que el hook de Codex se dispare. Sabemos por qué no se
+descubría; falta ver si, ya descubierto, la compuerta de confianza lo deja correr. Codex
+sigue en ❌ hasta que alguien lo observe.

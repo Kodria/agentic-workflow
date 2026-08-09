@@ -61,6 +61,8 @@ describe('Providers Routing', () => {
     it('declares the complete Codex capability metadata', () => {
         expect(providerFor('codex')).toEqual({
             label: 'Codex',
+            // El unico proveedor con override confirmado contra su binario real (D-011).
+            configHome: { envVar: 'CODEX_HOME', dir: '.codex', resolved: path.join(tmpHome, '.codex') },
             minimumVersion: '0.145.0',
             versionCommand: { command: 'codex', args: ['--version'], versionPattern: /^codex-cli (\d+\.\d+\.\d+)$/ },
             skill: {
@@ -93,6 +95,7 @@ describe('Providers Routing', () => {
         const graph = providers();
         expect(graph.antigravity).toEqual({
             label: 'Antigravity',
+            configHome: { envVar: null, dir: '.gemini/antigravity', resolved: path.join(tmpHome, '.gemini/antigravity') },
             skill: {
                 global: path.join(tmpHome, '.gemini/antigravity/skills'),
                 local: '.agent/skills',
@@ -107,6 +110,7 @@ describe('Providers Routing', () => {
         });
         expect(graph.opencode).toEqual({
             label: 'OpenCode',
+            configHome: { envVar: null, dir: '.config/opencode', resolved: path.join(tmpHome, '.config/opencode') },
             skill: {
                 global: path.join(tmpHome, '.agents/skills'),
                 local: '.agents/skills',
@@ -126,6 +130,7 @@ describe('Providers Routing', () => {
         });
         expect(graph['claude-code']).toEqual({
             label: 'Claude Code',
+            configHome: { envVar: null, dir: '.claude', resolved: path.join(tmpHome, '.claude') },
             skill: {
                 global: path.join(tmpHome, '.claude/skills'),
                 local: '.claude/skills',

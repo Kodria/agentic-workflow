@@ -1,6 +1,6 @@
 // src/providers/index.ts
 import path from 'path';
-import { awmHome, homeDir } from '../core/paths';
+import { awmHome, homeDir, providerConfigHome } from '../core/paths';
 
 export const AGENT_TARGETS = ['antigravity', 'opencode', 'claude-code', 'codex', 'cursor', 'copilot'] as const;
 
@@ -56,6 +56,10 @@ export type InjectionConfig =
 
 export type ProviderConfig = {
     label: string;
+    /** De donde sale la raiz de configuracion de ESTE agente. `envVar: null` significa
+     *  que no se le conoce override; nunca se inventa una variable, porque prometer una
+     *  configurabilidad que no existe es peor que no ofrecerla. Ver D-011. */
+    configHome: { envVar: string | null; dir: string; resolved: string };
     skill: ArtifactConfig;
     workflow: ArtifactConfig | null;
     agent: ArtifactConfig | null;
@@ -92,20 +96,45 @@ export function unsupportedScopeError(
     );
 }
 
+/** El override declarado por cada agente. Una sola tabla: agregar un proveedor o
+ *  descubrir la variable de otro es una edicion de UNA linea, y el guard estructural
+ *  `provider-paths-honor-config-home` verifica que TODAS sus rutas la respeten. */
+const CONFIG_HOME: Record<AgentTarget, { envVar: string | null; dir: string }> = {
+    // Confirmada contra el binario real: Codex 0.146.0 lee `$CODEX_HOME/hooks.json`.
+    // Una corrida del playbook en una maquina con CODEX_HOME seteado encontro el hook
+    // instalado donde Codex no mira. Ver docs/decisions.md D-011.
+    codex: { envVar: 'CODEX_HOME', dir: '.codex' },
+    // Los demas usan su directorio por defecto. `null` es una afirmacion honesta —
+    // "no le conocemos override"— y no un "no tiene". Cuando se confirme uno contra su
+    // binario, se cambia aca y el guard obliga a que todas sus rutas lo sigan.
+    'claude-code': { envVar: null, dir: '.claude' },
+    opencode: { envVar: null, dir: '.config/opencode' },
+    cursor: { envVar: null, dir: '.cursor' },
+    copilot: { envVar: null, dir: '.github' },
+    antigravity: { envVar: null, dir: '.gemini/antigravity' },
+};
+
+function configHomeFor(agent: AgentTarget): ProviderConfig['configHome'] {
+    const declared = CONFIG_HOME[agent];
+    return { ...declared, resolved: providerConfigHome(declared.envVar, declared.dir) };
+}
+
 export function providers(): Record<AgentTarget, ProviderConfig> {
     const home = homeDir();
     const awm = awmHome();
+    const root = (agent: AgentTarget) => configHomeFor(agent).resolved;
 
     return {
         antigravity: {
             label: 'Antigravity',
+            configHome: configHomeFor('antigravity'),
             skill: {
-                global: path.join(home, '.gemini/antigravity/skills'),
+                global: path.join(root('antigravity'), 'skills'),
                 local: '.agent/skills',
                 renderer: 'link',
             },
             workflow: {
-                global: path.join(home, '.gemini/antigravity/global_workflows'),
+                global: path.join(root('antigravity'), 'global_workflows'),
                 local: '.agent/workflows',
                 renderer: 'link',
             },
@@ -113,6 +142,7 @@ export function providers(): Record<AgentTarget, ProviderConfig> {
         },
         opencode: {
             label: 'OpenCode',
+            configHome: configHomeFor('opencode'),
             skill: {
                 global: path.join(home, '.agents/skills'),
                 local: '.agents/skills',
@@ -120,32 +150,33 @@ export function providers(): Record<AgentTarget, ProviderConfig> {
             },
             workflow: null,
             agent: {
-                global: path.join(home, '.config/opencode/agents'),
+                global: path.join(root('opencode'), 'agents'),
                 local: '.agents/profiles',
                 renderer: 'link',
             },
             injection: {
                 type: 'config-instructions',
-                configPath: path.join(home, '.config/opencode/opencode.json'),
+                configPath: path.join(root('opencode'), 'opencode.json'),
                 field: 'instructions',
             },
         },
         'claude-code': {
             label: 'Claude Code',
+            configHome: configHomeFor('claude-code'),
             skill: {
-                global: path.join(home, '.claude/skills'),
+                global: path.join(root('claude-code'), 'skills'),
                 local: '.claude/skills',
                 renderer: 'link',
             },
             workflow: null,
             agent: {
-                global: path.join(home, '.claude/agents'),
+                global: path.join(root('claude-code'), 'agents'),
                 local: '.claude/agents',
                 renderer: 'link',
             },
             hooks: {
                 type: 'cc-settings-merge',
-                settingsPath: path.join(home, '.claude/settings.json'),
+                settingsPath: path.join(root('claude-code'), 'settings.json'),
                 scriptsDir: path.join(awm, 'hooks'),
                 matcher: 'startup|clear|compact',
                 eventName: 'SessionStart',
@@ -154,6 +185,7 @@ export function providers(): Record<AgentTarget, ProviderConfig> {
         },
         codex: {
             label: 'Codex',
+            configHome: configHomeFor('codex'),
             minimumVersion: '0.145.0',
             versionCommand: { command: 'codex', args: ['--version'], versionPattern: /^codex-cli (\d+\.\d+\.\d+)$/ },
             skill: {
@@ -163,27 +195,28 @@ export function providers(): Record<AgentTarget, ProviderConfig> {
             },
             workflow: null,
             agent: {
-                global: path.join(home, '.codex/agents'),
+                global: path.join(root('codex'), 'agents'),
                 local: '.codex/agents',
                 renderer: 'codex-agent-toml',
             },
             hooks: {
                 type: 'codex-hooks-json',
-                settingsPath: path.join(home, '.codex/hooks.json'),
+                settingsPath: path.join(root('codex'), 'hooks.json'),
                 scriptsDir: path.join(awm, 'hooks/codex'),
                 matcher: 'startup|resume|clear|compact',
                 eventName: 'SessionStart',
             },
             injection: {
                 type: 'managed-agents-md',
-                globalPath: path.join(home, '.codex/AGENTS.md'),
+                globalPath: path.join(root('codex'), 'AGENTS.md'),
                 localFile: 'AGENTS.md',
             },
         },
         cursor: {
             label: 'Cursor',
+            configHome: configHomeFor('cursor'),
             skill: {
-                global: path.join(home, '.cursor/rules'),
+                global: path.join(root('cursor'), 'rules'),
                 local: '.cursor/rules',
                 renderer: 'cursor-mdc',
             },
@@ -201,6 +234,7 @@ export function providers(): Record<AgentTarget, ProviderConfig> {
         },
         copilot: {
             label: 'Copilot',
+            configHome: configHomeFor('copilot'),
             skill: {
                 global: null,
                 globalUnsupportedReason: 'GitHub Copilot has no user-level skill discovery mechanism — skills must be installed per-project.',
