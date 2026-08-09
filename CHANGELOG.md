@@ -1,3 +1,8 @@
+## v6.0.0 - 2026-08-09
+
+### Breaking Changes
+- **providers:** resolve each agent's config root from its own env var
+
 ## v5.0.2 - 2026-08-09
 
 ### Fixes
