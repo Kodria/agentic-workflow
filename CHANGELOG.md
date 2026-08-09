@@ -1,3 +1,8 @@
+## v3.13.7 - 2026-08-09
+
+### Fixes
+- **init:** canonicalise cwd so the backup list never names one file twice
+
 ## v3.13.6 - 2026-08-08
 
 ### Fixes
