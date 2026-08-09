@@ -10,7 +10,7 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-002](#d-002) | 2026-08-09 | La matriz de soporte se genera del código | Vigente |
 | [D-003](#d-003) | 2026-08-09 | Cuatro niveles de evidencia, y `BLOCKED` nunca es `PASS` | Vigente |
 | [D-004](#d-004) | 2026-08-09 | macOS entra a la matriz de CI | Vigente |
-| [D-005](#d-005) | 2026-08-09 | El gate de release cubre una sola plataforma | **Abierta — requiere decisión** |
+| [D-005](#d-005) | 2026-08-09 | El gate de release corre en las tres plataformas | Vigente |
 
 ---
 
@@ -65,14 +65,14 @@ El repo es público: los runners no cuestan minutos.
 
 ## D-005
 
-**Abierta.** `release.yml` corre sus tests solo en `ubuntu-latest` y no depende de la matriz `ci`. Un fallo exclusivo de Windows o macOS igual publica a npm — **pasó con la v3.13.7**.
+**El gate del release corre en las tres plataformas.** (Opción 2 de las tres evaluadas.)
 
-`CLAUDE.md` afirma "CI gates the release on the tests passing". Es cierto para una plataforma.
+`release.yml` corría sus tests solo en `ubuntu-latest` y no dependía de la matriz `ci` — un workflow aparte, disparado por PR. Un fallo exclusivo de Windows o macOS publicaba a npm igual. **Pasó con la v3.13.7**, que salió con la matriz en rojo. `CLAUDE.md` afirmaba *"CI gates the release on the tests passing"*; era cierto para una plataforma.
 
-**Opciones:**
+`release.yml` ahora tiene su propio job `test` con la matriz de tres sistemas, y el job `release` declara `needs: test`. Rojo en cualquiera de las tres no publica.
 
-1. Dejarlo y corregir `CLAUDE.md` a "sobre Linux". Cero riesgo; acepta que un bug solo-Windows pueda publicarse.
-2. **Meter la matriz dentro de `release.yml`** — el release espera a los tres sistemas. Es lo que la doc ya promete. *(recomendada)*
-3. `workflow_run`: release se dispara al completar `ci` con éxito. Más limpio, mayor riesgo de dejar de publicar si queda mal configurado.
+**Descartadas:**
+- *Corregir la doc a "sobre Linux"* — honesto y sin riesgo, pero aceptaba que un bug solo-Windows pudiera publicarse. Este ciclo produjo cinco bugs específicos de plataforma; no es hipotético.
+- *`workflow_run`* — más limpio conceptualmente, pero es el que más riesgo tiene de dejar de publicar en silencio si queda mal configurado. La duplicación de la matriz entre `ci.yml` y `release.yml` es el precio, y es visible.
 
-Sin implementar: romper el pipeline de release falla en silencio, y la decisión es de su dueño.
+**Costo:** el release espera a las tres plataformas (~5 min, lo que tarda Windows) en vez de ~2. Se paga una vez por merge a `main`.
