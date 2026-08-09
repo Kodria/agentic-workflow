@@ -1,3 +1,8 @@
+## v6.1.0 - 2026-08-09
+
+### Features
+- **hooks:** make the pending-trust remedy executable, and close Codex at verified
+
 ## v6.0.0 - 2026-08-09
 
 ### Breaking Changes
