@@ -1,3 +1,8 @@
+## v4.0.0 - 2026-08-09
+
+### Breaking Changes
+- awm add installs bundles only, and record decisions where they last
+
 ## v3.13.7 - 2026-08-09
 
 ### Fixes
