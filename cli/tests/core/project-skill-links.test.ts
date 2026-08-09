@@ -21,6 +21,7 @@ import os from 'os';
 import path from 'path';
 import { classifySkillLinks, reconcileProjectSkillLinks } from '../../src/core/skill-integrity';
 import { providerFor } from '../../src/providers';
+import { mkCanonicalTmpDir } from '../support/tmp';
 
 describe('project-scope skill links get the same integrity path as global ones', () => {
     let registry: string;
@@ -28,8 +29,8 @@ describe('project-scope skill links get the same integrity path as global ones',
     const made: string[] = [];
 
     beforeEach(() => {
-        registry = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-projlink-reg-')));
-        projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-projlink-proj-')));
+        registry = mkCanonicalTmpDir('awm-projlink-reg-');
+        projectRoot = mkCanonicalTmpDir('awm-projlink-proj-');
         made.push(registry, projectRoot);
         fs.mkdirSync(path.join(registry, 'skills', 'alive'), { recursive: true });
         fs.writeFileSync(path.join(registry, 'skills', 'alive', 'SKILL.md'), '# alive\n');
@@ -123,7 +124,7 @@ describe('awm sync reaches the project-scope reconciliation', () => {
 
     beforeEach(() => {
         jest.resetModules();
-        home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-syncwire-home-')));
+        home = mkCanonicalTmpDir('awm-syncwire-home-');
         saved = { HOME: process.env.HOME, AWM_HOME: process.env.AWM_HOME };
         process.env.HOME = home;
         process.env.AWM_HOME = path.join(home, '.awm');
@@ -135,7 +136,7 @@ describe('awm sync reaches the project-scope reconciliation', () => {
                 installMethod: 'symlink', defaultScope: 'global',
             }),
         );
-        projectRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-syncwire-proj-')));
+        projectRoot = mkCanonicalTmpDir('awm-syncwire-proj-');
         fs.mkdirSync(path.join(projectRoot, '.awm'), { recursive: true });
     });
 

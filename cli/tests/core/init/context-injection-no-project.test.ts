@@ -33,6 +33,7 @@ import { planInitMutationTargets } from '../../../src/core/init/mutation-targets
 import { projectContextPath } from '../../../src/core/context/materializer';
 import type { InitDeps } from '../../../src/core/init/types';
 import type { AgentTarget } from '../../../src/providers';
+import { mkCanonicalTmpDir } from '../../support/tmp';
 
 function deps(
     agent: AgentTarget,
@@ -66,7 +67,7 @@ function deps(
 describe('project-scope context injection without a project', () => {
     let cwd: string;
 
-    beforeEach(() => { cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-noproj-')); });
+    beforeEach(() => { cwd = mkCanonicalTmpDir('awm-noproj-'); });
     afterEach(() => { fs.rmSync(cwd, { recursive: true, force: true }); });
 
     it.each(['copilot', 'cursor'] as const)(
@@ -130,7 +131,7 @@ describe('project-scope context injection without a project', () => {
 describe('mutation-targets covers the local-scope context paths independently', () => {
     let cwd: string;
 
-    beforeEach(() => { cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-noproj-mt-')); });
+    beforeEach(() => { cwd = mkCanonicalTmpDir('awm-noproj-mt-'); });
     afterEach(() => { fs.rmSync(cwd, { recursive: true, force: true }); });
 
     it.each(['copilot', 'cursor'] as const)(
