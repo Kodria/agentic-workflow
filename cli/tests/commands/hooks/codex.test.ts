@@ -340,8 +340,11 @@ describe('installHook / computeHookStatus / uninstallHook — Codex adapter', ()
 
             const after = JSON.parse(fs.readFileSync(hooksJson, 'utf-8')).hooks.SessionStart;
             expect(after).toHaveLength(1);
-            expect(JSON.stringify(after)).toContain(tmpHome);
-            expect(JSON.stringify(after)).not.toContain('awm-e2e-gone');
+            // Sobre la ESTRUCTURA, no sobre el JSON serializado: en Windows las barras
+            // invertidas van escapadas dentro del string, asi que un `toContain(tmpHome)`
+            // compara `C:\Users\...` contra `C:\\Users\\...` y falla sobre un producto
+            // que se comporta bien. Paso en CI — `platform-property-assumed-universal`.
+            expect(after[0].hooks[0].command).toBe(path.join(codexScriptsDir, 'session-start'));
         });
     });
 });
