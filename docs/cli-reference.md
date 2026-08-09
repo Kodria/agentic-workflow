@@ -106,7 +106,23 @@ awm list [package] [-a, --all]
 
 ### `awm remove`
 
-Interactively uninstall a skill or workflow — prompts for agent, scope, then removes the symlink/folder. (No non-interactive flags.)
+Remove an installed **bundle**. Interactive by default; the flags below make it scriptable.
+
+```
+awm remove [name] [-a <agent>] [-s <scope>] [-y]
+```
+
+| Flag | Description |
+|---|---|
+| `-a, --agent <agent>` | Target agent(s), comma-separated. Defaults to every enabled agent. |
+| `-s, --scope <scope>` | `local` or `global`. Skips the scope prompt. |
+| `-y, --yes` | Skip the confirmation. **Requires a name** — and implies fully non-interactive: no agent or scope prompt either. |
+
+`--yes` without a name is refused. Removal without a name stays interactive so you see
+what you are deleting; `--yes` skips the *confirmation*, never the *selection*.
+
+Removing what is not installed is not an error — it reports that nothing matched and
+exits `0`, so a cleanup script is safe to re-run.
 
 ### `awm sync`
 

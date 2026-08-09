@@ -529,19 +529,44 @@ program.command('list [package]')
       outro(`Run ${pc.green('awm add')} to install artifacts.`);
   });
 
-program.command('remove')
-  .description('Remove an installed skill or workflow')
+// Simetrico con `add`: si se puede instalar scripteado, se tiene que poder desinstalar
+// scripteado. `remove` era interactivo puro — sin nombre posicional, sin `--scope`, sin
+// `--yes` — asi que cualquier limpieza automatizada quedaba bloqueada, y el playbook de
+// aceptacion (CORE-17) scripteaba `awm remove dev --yes`, una invocacion que nunca
+// existio. Tercera vez en esta sesion que un playbook se escribio contra lo que la doc
+// prometia y no contra el comportamiento. Ver docs/decisions.md, D-006.
+//
+// El nombre es de BUNDLE, igual que en `add` (D-001).
+program.command('remove [name]')
+  .description('Remove an installed bundle interactively, or non-interactively with flags')
   .option('-a, --agent <agent>', `Target agent(s), comma-separated: ${AGENT_TARGETS.join(', ')} (defaults to every enabled agent)`)
-  .action(async (options: { agent?: string }) => {
+  .option('-s, --scope <scope>', 'Scope: local or global (skips the prompt)')
+  .option('-y, --yes', 'Skip the confirmation prompt (requires a name)')
+  .action(async (name: string | undefined, options: { agent?: string; scope?: string; yes?: boolean }) => {
       intro(pc.bgCyan(pc.black(' AWM - Remove Artifact ')));
 
       const prefs = getPreferences();
+
+      // `--yes` sin nombre borraria lo que el usuario nunca eligio: un `rm -rf` silencioso
+      // sobre todo lo instalado. Se rechaza antes de tocar nada.
+      if (options.yes && !name) {
+          console.error(pc.red('--yes requires a bundle name: `awm remove <bundle> --yes`.'));
+          console.error(pc.dim('Without a name, removal stays interactive so you see what you are deleting.'));
+          process.exit(1);
+      }
 
       // Multi-agent selection (matching the add command flow). --agent skips
       // the interactive prompt and resolves the same way as add/sync/update/doctor (R12/R13).
       let targetAgents: AgentTarget[];
       if (options.agent) {
           targetAgents = resolveTargetsOrExit(prefs, options.agent);
+      } else if (options.yes) {
+          // `--yes` significa CERO prompts, no "cero confirmaciones". Sin esto, un
+          // `awm remove dev --yes` sin `--agent` seguia abriendo el multiselect de
+          // agentes y colgaba cualquier script — el flag prometia no-interactivo y no lo
+          // era. Sin `--agent`, el default son los agentes habilitados, igual que en
+          // `add`, `sync`, `update` y `doctor`.
+          targetAgents = [...prefs.enabledAgents];
       } else {
           const agentChoice = await multiselect({
               message: 'From which agent(s)?',
@@ -556,16 +581,25 @@ program.command('remove')
           targetAgents = agentChoice as AgentTarget[];
       }
 
-      const scopeChoice = await select({
-          message: 'Scope?',
-          options: [
-              { value: 'local', label: 'Project (Local)' },
-              { value: 'global', label: 'Global' }
-          ],
-          initialValue: prefs.defaultScope
-      });
-      handleCancel(scopeChoice);
-      const scopeVal = scopeChoice as Scope;
+      let scopeVal: Scope;
+      if (options.scope) {
+          if (options.scope !== 'local' && options.scope !== 'global') {
+              console.error(pc.red(`Invalid scope "${options.scope}". Use: local or global.`));
+              process.exit(1);
+          }
+          scopeVal = options.scope;
+      } else {
+          const scopeChoice = await select({
+              message: 'Scope?',
+              options: [
+                  { value: 'local', label: 'Project (Local)' },
+                  { value: 'global', label: 'Global' }
+              ],
+              initialValue: prefs.defaultScope
+          });
+          handleCancel(scopeChoice);
+          scopeVal = scopeChoice as Scope;
+      }
 
       // projectRoot explicito: `config.local` es relativo, y resolverlo contra
       // `process.cwd()` hacia que `awm remove` no encontrara nada desde un
@@ -591,18 +625,42 @@ program.command('remove')
           }
       );
 
-      const toRemove = await multiselect({
-          message: 'Select artifact(s) to remove',
-          options: groupedOpts,
-          required: true
-      });
-      handleCancel(toRemove);
-
-      const resolved = resolveSelectedArtifacts(toRemove as any[]) as typeof installed;
+      let resolved: typeof installed;
+      if (name) {
+          // Los artefactos del bundle pedido que estan REALMENTE instalados en este
+          // scope. Se cruza contra `installed`: lo que no esta instalado no se puede
+          // remover, y decirlo es mejor que borrar un subconjunto en silencio.
+          const bundle = discoverAllBundles().find((b) => b.name === name);
+          if (!bundle) {
+              console.error(pc.red(`Bundle "${name}" not found in registry.`));
+              console.error(pc.dim('Run `awm list` to see available packages.'));
+              process.exit(1);
+          }
+          const owned = new Set<string>([
+              ...bundle.skills.map((sk) => sk.name),
+              ...bundle.workflows,
+              ...bundle.agents,
+          ]);
+          resolved = installed.filter((a) => owned.has(a.name));
+          if (resolved.length === 0) {
+              outro(pc.yellow(`Nothing from "${name}" is installed at ${scopeVal} scope for the selected agent(s).`));
+              process.exit(0);
+          }
+      } else {
+          const toRemove = await multiselect({
+              message: 'Select artifact(s) to remove',
+              options: groupedOpts,
+              required: true
+          });
+          handleCancel(toRemove);
+          resolved = resolveSelectedArtifacts(toRemove as any[]) as typeof installed;
+      }
       const names = resolved.map(a => pc.red(a.name)).join(', ');
 
-      const confirmRemove = await confirm({ message: `Remove ${names}?` });
-      handleCancel(confirmRemove);
+      // `--yes` salta la confirmacion, nunca la seleccion: lo que se borra siempre sale
+      // de un nombre que el usuario escribio.
+      const confirmRemove = options.yes ? true : await confirm({ message: `Remove ${names}?` });
+      if (!options.yes) handleCancel(confirmRemove);
 
       if (confirmRemove) {
           try {

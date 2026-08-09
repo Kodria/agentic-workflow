@@ -11,6 +11,7 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-003](#d-003) | 2026-08-09 | Cuatro niveles de evidencia, y `BLOCKED` nunca es `PASS` | Vigente |
 | [D-004](#d-004) | 2026-08-09 | macOS entra a la matriz de CI | Vigente |
 | [D-005](#d-005) | 2026-08-09 | El gate de release corre en las tres plataformas | Vigente |
+| [D-006](#d-006) | 2026-08-09 | `awm remove` tiene modo no interactivo, simétrico con `add` | Vigente |
 
 ---
 
@@ -76,3 +77,17 @@ El repo es público: los runners no cuestan minutos.
 - *`workflow_run`* — más limpio conceptualmente, pero es el que más riesgo tiene de dejar de publicar en silencio si queda mal configurado. La duplicación de la matriz entre `ci.yml` y `release.yml` es el precio, y es visible.
 
 **Costo:** el release espera a las tres plataformas (~5 min, lo que tarda Windows) en vez de ~2. Se paga una vez por merge a `main`.
+
+---
+
+## D-006
+
+**`awm remove` acepta `[name]`, `--scope` y `--yes`.** Simétrico con `add`: si se puede instalar scripteado, se tiene que poder desinstalar scripteado.
+
+Era interactivo puro. Una limpieza automatizada quedaba bloqueada, y el playbook (`CORE-17`) scripteaba `awm remove dev --yes` — una invocación que nunca existió. **Tercera vez en esta sesión** que un playbook se escribió contra lo que la doc prometía y no contra el comportamiento (las otras dos: `--type` en `add`, y `AG-03`).
+
+**Dos límites deliberados:**
+- **`--yes` sin nombre se rechaza.** Borraría lo que el usuario nunca eligió — un `rm -rf` silencioso sobre todo lo instalado. Sin nombre, la remoción sigue siendo interactiva: `--yes` salta la *confirmación*, nunca la *selección*.
+- **`--yes` implica cero prompts.** La primera versión seguía abriendo el multiselect de agentes sin `--agent`, así que el flag prometía no-interactivo y colgaba cualquier script. Sin `--agent`, el default son los agentes habilitados — igual que `add`, `sync`, `update` y `doctor`.
+
+El nombre es de **bundle**, por D-001. Remover lo que no está instalado no es error: reporta que nada coincidió y sale `0`, así que un script de limpieza es seguro de re-correr.
