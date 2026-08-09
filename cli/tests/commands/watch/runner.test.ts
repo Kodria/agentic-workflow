@@ -8,7 +8,8 @@ import { logsDir } from '../../../src/core/journal/paths';
 import { Job } from '../../../src/core/journal/types';
 import { argvDigest } from '../../../src/core/journal/process';
 
-// Presupuesto explicito, como sus tres hermanos de `tests/commands/watch/`
+// Presupuesto explicito POR ENCIMA del global (30s en jest.config.js), como sus tres
+// hermanos de `tests/commands/watch/`
 // (integration 30s, supervisor-loop 60s, e2e-crash 180s). Este archivo era el unico de
 // la familia sin uno, y hace el mismo trabajo que ellos: cada `collectAndReconcile`
 // consulta si el proceso sigue vivo, y en Windows eso spawnea `tasklist` — cientos de ms
