@@ -1,3 +1,11 @@
+## v4.1.0 - 2026-08-09
+
+### Features
+- **remove:** non-interactive mode, symmetric with add (D-006) (#45)
+
+### Fixes
+- **doctor:** stop writing, and document the JSON shape it actually emits (#44)
+
 ## v4.0.0 - 2026-08-09
 
 ### Breaking Changes
