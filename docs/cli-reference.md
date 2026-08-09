@@ -54,7 +54,9 @@ Read-only dashboard of machine + project harness state. Changes nothing.
 awm doctor [--json]
 ```
 
-Glyphs: `✔` healthy · `⚠` advisory (does not degrade) · `✖` missing (degrades state). Each non-healthy row carries a remedy — a command (`→ awm …`) or a skill to ask the agent to run (`→ skill: …`). `--json` emits the structured `CheckReport`.
+Glyphs: `✔` healthy · `⚠` advisory (does not degrade) · `✖` missing (degrades state). Each non-healthy row carries a remedy — a command (`→ awm …`) or a skill to ask the agent to run (`→ skill: …`). `--json` emits a `ProviderDiagnosticReport`: `{ providers: [...], overall }`, one entry
+per resolved agent with its `tier` and `checks`. If you are asserting on parsed fields,
+that is the shape — there is no top-level `results` array.
 
 A row that is **absent** means "nothing to verify", not "verified fine": a provider with no
 native-agent directory, or a registry that ships no `agents/`, emits no row rather than a

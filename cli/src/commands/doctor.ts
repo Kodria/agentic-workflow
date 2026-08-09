@@ -5,7 +5,9 @@ import { gatherContext } from '../core/diagnostics/context';
 import { computeProviderOverall } from '../core/diagnostics/checks';
 import { CheckReport, CheckResult, ProviderCheck, ProviderCheckState, ProviderDiagnosticReport } from '../core/diagnostics/types';
 import { platformLabel, isWindowsNative, WINDOWS_KNOWN_GAP } from '../core/paths';
-import { getPreferences } from '../utils/config';
+// `readPreferences`, no `getPreferences`: este comando esta documentado como
+// read-only y el segundo auto-vivifica el archivo. Ver la nota en config.ts.
+import { readPreferences } from '../utils/config';
 import { resolveAgentTargets } from '../core/agent-targets';
 
 function glyph(status: CheckResult['status']): string {
@@ -132,7 +134,7 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
     // internal-error catch further down.
     let targets: ReturnType<typeof resolveAgentTargets>;
     try {
-        const prefs = getPreferences();
+        const prefs = readPreferences();
         targets = resolveTargets({ prefs, explicit: opts.agent });
     } catch (err) {
         process.stderr.write(`awm doctor: ${(err as Error).message}\n`);
