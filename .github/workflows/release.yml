@@ -16,7 +16,44 @@ permissions:
   id-token: write   # OIDC para npm Trusted Publisher
 
 jobs:
+  # El gate del release, en las TRES plataformas.
+  #
+  # Antes el release corria sus tests solo en ubuntu-latest y no dependia de la matriz
+  # `ci` (que es un workflow aparte, disparado por PR). Consecuencia: un fallo exclusivo
+  # de Windows o macOS publicaba a npm igual. Paso con la v3.13.7 — salio con la matriz
+  # en rojo. CLAUDE.md afirmaba "CI gates the release on the tests passing", y era cierto
+  # para una sola plataforma. Ver docs/decisions.md, D-005.
+  #
+  # `fail-fast: false` a proposito: si Windows falla se quiere igual el resultado de
+  # macOS y Linux, porque es la diferencia entre "bug de una plataforma" y "el cambio
+  # esta roto".
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read      # este job no publica: no necesita write ni OIDC
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instalar y build
+        working-directory: cli
+        run: |
+          npm ci
+          npm run build
+
+      - name: Tests
+        working-directory: cli
+        run: npx jest --runInBand
+
   release:
+    needs: test          # rojo en CUALQUIER plataforma no publica
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,9 +81,9 @@ jobs:
           npm ci
           npm run build
 
-      - name: Tests (gate — rojo no publica)
-        working-directory: cli
-        run: npx jest --runInBand
+      # Sin paso de tests aca: `needs: test` ya los corrio en las tres plataformas.
+      # Repetirlos en ubuntu seria correr por cuarta vez lo que ya paso, y daria la
+      # impresion de que el gate vive en este job cuando vive en la matriz.
 
       - name: Release
         working-directory: cli

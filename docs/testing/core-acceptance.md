@@ -100,7 +100,7 @@ awm list
 ## CORE-07 · Install one artifact non-interactively
 
 ```bash
-awm add development-process --type skill --scope global --method symlink --agent claude-code --yes
+awm add dev --scope global --method symlink --agent claude-code --yes
 ```
 
 **Expect:** exit `0` and a line naming the installed artifact. Where it lands depends on the agent — see [agent-matrix.md](agent-matrix.md). For `claude-code`/global that is `~/.claude/skills/development-process`.

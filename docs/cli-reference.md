@@ -71,15 +71,19 @@ red one nobody can act on. Two rows worth knowing:
 
 ### `awm add [name]`
 
-Install a skill, workflow, or process. With no `name`, launches an interactive search over the cached registry. With a `name`, the flags below let you skip the prompts (recommended for scripts).
+Install a **bundle** — a package of skills. With no `name`, launches an interactive search over the cached registry. With a `name`, the flags below let you skip the prompts (recommended for scripts).
+
+**Bundles, not individual artifacts.** AWM's skills lean on each other — the
+`development-process` spine invokes `brainstorming`, `writing-plans`, the QA gates — so a
+skill installed alone rarely does what you expect. Passing a skill name fails with
+`Bundle "<name>" not found in registry`. See [decisions D-001](decisions.md#d-001).
 
 ```
-awm add [name] [-t <type>] [-a <agent>] [-s <scope>] [-m <method>] [-y]
+awm add [name] [-a <agent>] [-s <scope>] [-m <method>] [-y]
 ```
 
 | Flag | Description |
 |---|---|
-| `-t, --type <type>` | `skill`, `workflow`, or `process`. Auto-detected if omitted. |
 | `-a, --agent <agent>` | Target agent. |
 | `-s, --scope <scope>` | `global` or `local`. |
 | `-m, --method <method>` | `symlink` or `copy`. |
@@ -87,7 +91,7 @@ awm add [name] [-t <type>] [-a <agent>] [-s <scope>] [-m <method>] [-y]
 
 ```bash
 # Fully scripted: install a skill globally via symlink on claude-code, no prompts
-awm add cscti-docs-assistant --type skill --agent claude-code --scope global --method symlink --yes
+awm add dev --agent claude-code --scope global --method symlink --yes
 ```
 
 ### `awm list [package]`

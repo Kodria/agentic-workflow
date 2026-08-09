@@ -17,7 +17,7 @@ macOS having no CI is the honest gap in this matrix: it is the one OS where thes
 
 **LNX-01 · Symlinks work unprivileged**
 ```bash
-awm add development-process --type skill --scope global --method symlink --agent claude-code --yes
+awm add dev --scope global --method symlink --agent claude-code --yes
 ls -la ~/.claude/skills/development-process
 ```
 **Expect:** a symlink into `$AWM_HOME/registries/baseline/skills/`.
@@ -51,7 +51,7 @@ awm sensors run
 
 **MAC-04 · Case-insensitive filesystem**
 ```bash
-awm add development-process --type skill --scope local --agent claude-code --yes
+awm add dev --scope local --agent claude-code --yes
 ls .claude/skills/
 ```
 **Expect:** exactly one entry. Two entries differing only in case would mean AWM is relying on case-sensitivity — a **FAIL** on the default macOS filesystem.
@@ -68,7 +68,7 @@ $env:AWM_HOME = "$HOME\.awm-e2e"
 
 **WIN-01 · Symlink creation, or an honest fallback**
 ```powershell
-awm add development-process --type skill --scope global --method symlink --agent claude-code --yes
+awm add dev --scope global --method symlink --agent claude-code --yes
 Get-Item ~\.claude\skills\development-process | Select-Object LinkType, Target
 ```
 Windows only allows unprivileged symlink creation with **Developer Mode** on (Settings → System → For developers), otherwise it needs an elevated shell.
@@ -81,7 +81,7 @@ Windows only allows unprivileged symlink creation with **Developer Mode** on (Se
 
 **WIN-02 · Copy method always works**
 ```powershell
-awm add development-process --type skill --scope local --method copy --agent claude-code --yes
+awm add dev --scope local --method copy --agent claude-code --yes
 ```
 **Expect:** exit `0` and a real directory with content. This is the guaranteed path on Windows.
 

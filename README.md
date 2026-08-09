@@ -139,6 +139,7 @@ The two processes the system runs day to day:
 
 **Verify it**
 - [Support matrix](docs/support-matrix.md) — what is supported, at what evidence level, and what is missing
+- [Decisions](docs/decisions.md) — product and process decisions, with their reason and consequence
 - [End-to-end acceptance playbooks](docs/testing/README.md) — scripted checks per OS and per agent
 
 **Extend it**

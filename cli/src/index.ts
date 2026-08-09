@@ -96,15 +96,25 @@ function resolveSelectedArtifacts(selections: any[]): any[] {
     return Array.from(result.values());
 }
 
+// AWM instala BUNDLES, no artefactos sueltos. Es una decision de producto, no una
+// limitacion pendiente: las skills de AWM se apoyan unas en otras (el spine de
+// development-process invoca brainstorming, writing-plans, los gates de QA...), asi que
+// una skill instalada sola casi nunca hace lo que el usuario espera. Ver
+// docs/decisions.md, D-001.
+//
+// El flag `-t, --type` existia y `add.ts` NUNCA lo leia: se aceptaba y se descartaba en
+// silencio. Peor, la doc y los playbooks de aceptacion documentaban `awm add <skill>
+// --type skill` como el camino scripteado — una invocacion que siempre fallo con
+// «Bundle "<skill>" not found». Los playbooks se escribieron contra la documentacion, no
+// contra el comportamiento. Un flag que no se lee es peor que uno ausente: promete.
 program.command('add [name]')
-  .description('Add a skill, workflow, or process interactively (or non-interactively with flags)')
-  .option('-t, --type <type>', 'Artifact type: skill, workflow, or process')
+  .description('Add a bundle (package of skills) interactively, or non-interactively with flags')
   .option('-a, --agent <agent>', `Target agent: ${AGENT_TARGETS.join(', ')}`)
   .option('-s, --scope <scope>', 'Scope: local or global')
   .option('-m, --method <method>', 'Install method: symlink or copy')
   .option('-y, --yes', 'Skip confirmation prompts')
   .option('--all', 'install all artifacts from all packages without prompting')
-  .action(async (name: string | undefined, options: { type?: string; agent?: string; scope?: string; method?: string; yes?: boolean; all?: boolean }) => {
+  .action(async (name: string | undefined, options: { agent?: string; scope?: string; method?: string; yes?: boolean; all?: boolean }) => {
       intro(pc.bgCyan(pc.black(' AWM - Agentic Workflow Manager ')));
 
       // 1. Sync the registry
