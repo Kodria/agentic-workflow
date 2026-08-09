@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { pendingTrustGuidance } from './trust-guidance';
 import pc from 'picocolors';
 import { confirm, isCancel } from '@clack/prompts';
 import { getPreferences } from '../../utils/config';
@@ -142,8 +143,7 @@ export function registerHooksCommand(program: Command): void {
                                     : pc.red(result.overall);
                 console.log(`  Status: ${overall}`);
                 if (result.overall === 'PENDING_TRUST') {
-                    console.log(pc.dim('  El hook esta instalado y bien formado, pero nunca se lo vio correr.'));
-                    console.log(pc.dim('  Abri una sesion del agente; si sigue igual, no se esta disparando.'));
+                    for (const line of pendingTrustGuidance(agent)) console.log(pc.dim(`  ${line}`));
                 }
                 // PENDING_TRUST no sale 1: no hay nada roto que arreglar, y salir 1 en
                 // toda instalacion recien hecha convertiria el comando en ruido.

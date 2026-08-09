@@ -287,3 +287,27 @@ describe('installHook / computeHookStatus / uninstallHook — Codex adapter', ()
         expect(result.backupPath).toBeNull();
     });
 });
+
+// El remedio tiene que ser ejecutable, no un codigo.
+//
+// `doctor` emitia `open-hooks-trust` y nada mas — ni en la referencia del CLI, ni en la
+// salida, ni en la doc. Una corrida real leyo `→ open-hooks-trust` y no tenia que hacer.
+// El texto que se muestra ahora es el que Codex 0.146.0 emite de verdad, observado en una
+// corrida, no una parafrasis. Ver D-010.
+describe('pending-trust tells the user what to actually do', () => {
+    it('names the exact prompt Codex shows and the option that grants trust', () => {
+        const { pendingTrustGuidance } = require('../../../src/commands/hooks/trust-guidance');
+        const text = pendingTrustGuidance('codex').join('\n');
+        expect(text).toContain('Hooks need review');
+        expect(text).toContain('Trust all and continue');
+    });
+
+    it('falls back to a generic message for an agent whose prompt we have not observed', () => {
+        // No se inventa el texto de un prompt que nadie vio: seria peor que uno generico,
+        // porque mandaria a buscar algo que quiza no existe.
+        const { pendingTrustGuidance } = require('../../../src/commands/hooks/trust-guidance');
+        const text = pendingTrustGuidance('claude-code').join('\n');
+        expect(text).not.toContain('Hooks need review');
+        expect(text).toContain('nunca se lo vio correr');
+    });
+});
