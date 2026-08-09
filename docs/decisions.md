@@ -12,6 +12,7 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-004](#d-004) | 2026-08-09 | macOS entra a la matriz de CI | Vigente |
 | [D-005](#d-005) | 2026-08-09 | El gate de release corre en las tres plataformas | Vigente |
 | [D-006](#d-006) | 2026-08-09 | `awm remove` tiene modo no interactivo, simétrico con `add` | Vigente |
+| [D-007](#d-007) | 2026-08-09 | Un artefacto usurpado se **reporta**, no se auto-repara | Vigente |
 
 ---
 
@@ -91,3 +92,39 @@ Era interactivo puro. Una limpieza automatizada quedaba bloqueada, y el playbook
 - **`--yes` implica cero prompts.** La primera versión seguía abriendo el multiselect de agentes sin `--agent`, así que el flag prometía no-interactivo y colgaba cualquier script. Sin `--agent`, el default son los agentes habilitados — igual que `add`, `sync`, `update` y `doctor`.
 
 El nombre es de **bundle**, por D-001. Remover lo que no está instalado no es error: reporta que nada coincidió y sale `0`, así que un script de limpieza es seguro de re-correr.
+
+---
+
+## D-007
+
+**Cuando un tercero reemplaza un artefacto que AWM instaló, `doctor` lo reporta. No lo arregla solo.**
+
+El caso apareció corriendo el playbook `agent-matrix` contra el binario real: Claude Code
+trae su propia skill `mermaid-diagrams` y la materializó encima del symlink que `awm init`
+había puesto en `~/.claude/skills/`. El agente cargaba la del tercero. `awm doctor` decía
+`healthy`, `overall: healthy`, exit `0`; `awm sync` no lo tocaba.
+
+**Por qué era invisible:** `classifySkillLinks` empieza con `if (!lst.isSymbolicLink()) continue`.
+Eso es correcto para una skill que puso el usuario a mano — AWM no debe tocarla — y falso
+cuando `state/artifacts.json` dice que esa ruta exacta es nuestra. El clasificador nunca
+leía el ledger, así que no tenía cómo distinguir los dos casos. **El ledger de propiedad
+existía desde siempre; ningún diagnóstico lo consultaba.**
+
+**Implica:**
+- `SkillIntegrity` gana una cuarta categoría, `usurped`, separada de `valid`/`repairable`/`dead`.
+- `skills.global` pasa a `broken`, nombra qué fue reemplazado, y `overall` degrada.
+- El remedio es `reinstall-usurped-skills`, **no** `repair-global-skills`: ese último solo
+  re-linkea symlinks colgantes, así que correría limpio sin cambiar nada — mandar ahí al
+  usuario sería peor que no ofrecer remedio.
+- Solo aplica al renderer `link`. Para `cursor-mdc` / `copilot-instructions`, "no es un
+  symlink" es el estado sano; contarlo pintaría de rojo toda instalación correcta.
+
+**Por qué no se auto-repara:** restaurar el symlink exige borrar un directorio real con
+contenido de un tercero. Eso es destructivo y no es reversible desde el backup de AWM, que
+solo conoce lo que AWM escribió. Se reporta con nombre y remedio; la orden la da una persona.
+
+**Efecto lateral, del mismo tipo de bug:** `MachineFacts.globalSkills` era una copia
+estructural escrita a mano de `SkillIntegrity` (`{ valid; repairable; dead }`). Como era un
+subconjunto exacto, TypeScript nunca se quejó, y al crecer el tipo real esta copia quedó
+atrás en silencio. Ahora referencia el tipo. Es la misma clase que la tabla de renderers
+duplicada de D-002: **una copia de algo que el código ya define en otro lado.**

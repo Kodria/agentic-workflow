@@ -11,7 +11,8 @@ import { InjectionState } from '../context/types';
 import { computeHookStatus } from '../../commands/hooks/status';
 import { findProjectRoot, readProfile } from '../profile';
 import { discoverAllBundles, resolveBundleSkills, resolveBundleAgents, BundleDefinition } from '../bundles';
-import { classifySkillLinks } from '../skill-integrity';
+import { classifySkillLinks, managedLinkTargets } from '../skill-integrity';
+import { ManagedArtifactRecord, readArtifactState } from '../artifact-state';
 import { awmHome } from '../paths';
 import { gatherProviderChecks, ScanSkills } from './provider-checks';
 
@@ -236,9 +237,16 @@ function gatherMachine(bundles: BundleDefinition[], agent: AgentTarget = 'claude
         ambient: { wanted, installed },
         contextInjection: gatherContextInjection(),
         globalSkills: skillsDir !== null
-            ? classifySkillLinks(skillsDir, contentRoots())
-            : { valid: [], repairable: [], dead: [] },
+            ? classifySkillLinks(skillsDir, contentRoots(), managedLinkTargets(safeReadArtifactState()))
+            : { valid: [], repairable: [], dead: [], usurped: [] },
     };
+}
+
+/** `readArtifactState` tira si el JSON esta roto — correcto para un comando que va a
+ *  ESCRIBIR sobre ese estado, inaceptable para uno que solo diagnostica. Aca degrada a
+ *  "sin ledger": se pierde la deteccion de usurpaciones, no el resto del reporte. */
+function safeReadArtifactState(): ManagedArtifactRecord[] {
+    try { return readArtifactState(); } catch { return []; }
 }
 
 function gatherProject(root: string, bundles: BundleDefinition[], agent: AgentTarget = 'claude-code'): ProjectFacts {
@@ -294,7 +302,12 @@ export function gatherContext(opts: GatherOptions = {}): HarnessContext {
     const agent = opts.agent ?? 'claude-code';
     const root = findProjectRoot(cwd);
     const agents = opts.agents ?? [agent];
-    const scanSkills = opts.scanSkills ?? ((dir: string) => classifySkillLinks(dir, contentRoots()));
+    // El ledger se lee UNA vez por corrida y se comparte con todos los dirs escaneados:
+    // es lo unico que distingue "el usuario puso este directorio" de "algo reemplazo
+    // nuestro symlink". Best-effort — un ledger ausente o corrupto degrada a "no puedo
+    // detectar usurpaciones", nunca revienta un comando de diagnostico.
+    const managed = managedLinkTargets(safeReadArtifactState());
+    const scanSkills = opts.scanSkills ?? ((dir: string) => classifySkillLinks(dir, contentRoots(), managed));
     return {
         machine: gatherMachine(bundles, agent, root ?? undefined),
         project: root ? gatherProject(root, bundles, agent) : null,

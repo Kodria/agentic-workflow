@@ -27,7 +27,7 @@ function machine(): HarnessContext['machine'] {
         devCore: { present: true, brokenLinks: [] },
         ambient: { wanted: [], installed: [] },
         contextInjection: [],
-        globalSkills: { valid: [], repairable: [], dead: [] },
+        globalSkills: { valid: [], repairable: [], dead: [], usurped: [] },
     };
 }
 
@@ -435,7 +435,7 @@ describe('stepGlobalSkillsRepair', () => {
         const a = spies();
         (a as any).repairGlobalSkills = jest.fn(() => ({ relinked: ['b'], pruned: ['c'], failed: [] }));
         const m = machine();
-        m.globalSkills = { valid: ['a'], repairable: ['b'], dead: ['c'] };
+        m.globalSkills = { valid: ['a'], repairable: ['b'], dead: ['c'], usurped: [] };
         const r = stepGlobalSkillsRepair(deps({ machine: m, project: null }, a));
         expect(r.action).toBe('applied');
         expect(a.repairGlobalSkills).toHaveBeenCalledTimes(1);
@@ -447,7 +447,7 @@ describe('stepGlobalSkillsRepair', () => {
         const a = spies();
         (a as any).repairGlobalSkills = jest.fn(() => ({ relinked: ['b'], pruned: [], failed: [] }));
         const m = machine();
-        m.globalSkills = { valid: [], repairable: ['b'], dead: [] };
+        m.globalSkills = { valid: [], repairable: ['b'], dead: [], usurped: [] };
         const r = stepGlobalSkillsRepair(deps({ machine: m, project: null }, a, { agent: 'opencode' }));
         expect(r.action).toBe('applied');
         expect(a.repairGlobalSkills).toHaveBeenCalledWith(providerFor('opencode').skill.global, expect.any(Array));
@@ -459,7 +459,7 @@ describe('stepGlobalSkillsRepair', () => {
         const m = machine();
         // Broken-count is nonzero, so the ONLY thing that can make this skip is the
         // null-global-dir guard itself, not the "nothing broken" early return above.
-        m.globalSkills = { valid: [], repairable: ['b'], dead: ['c'] };
+        m.globalSkills = { valid: [], repairable: ['b'], dead: ['c'], usurped: [] };
         const r = stepGlobalSkillsRepair(deps({ machine: m, project: null }, a, { agent: 'copilot' }));
         expect(r.action).toBe('skipped');
         expect(a.repairGlobalSkills).not.toHaveBeenCalled();

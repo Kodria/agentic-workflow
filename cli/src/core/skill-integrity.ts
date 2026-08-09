@@ -1,12 +1,17 @@
 import fs from 'fs';
 import path from 'path';
 import { AGENT_TARGETS, AgentTarget, providerFor } from '../providers';
+import { ManagedArtifactRecord } from './artifact-state';
 import { isWindowsNative } from './paths';
 
 export type SkillIntegrity = {
     valid: string[];
     repairable: string[];
     dead: string[];
+    /** Entradas que NO son symlinks pero que el ledger de artefactos declara como
+     *  targets gestionados por AWM: un tercero (otro instalador, el propio agente)
+     *  reemplazo nuestro link por contenido real suyo. Ver `managedLinkTargets`. */
+    usurped: string[];
 };
 
 export type RepairResult = {
@@ -23,12 +28,42 @@ function findRegistrySkillPath(registryContentDirs: string[], name: string): str
     return null;
 }
 
+/** Normaliza una ruta para comparar contra el ledger: absoluta siempre, y en
+ *  Windows tambien case-insensitive, porque NTFS lo es y el ledger guarda la
+ *  ruta con el casing que tuvo al instalarse, no el que tiene al leerse. */
+function pathKey(p: string): string {
+    const resolved = path.resolve(p);
+    return isWindowsNative() ? resolved.toLowerCase() : resolved;
+}
+
+/** Targets que el ledger de artefactos declara instalados con el renderer `link`,
+ *  normalizados con `pathKey` para comparar contra rutas del filesystem.
+ *
+ *  Solo `link`: para un renderer que produce archivos reales (`cursor-mdc`,
+ *  `copilot-instructions`) "no es un symlink" es lo esperado, no una usurpacion. */
+export function managedLinkTargets(records: ManagedArtifactRecord[]): Set<string> {
+    return new Set(
+        records.filter((r) => r.renderer === 'link').map((r) => pathKey(r.targetPath)),
+    );
+}
+
 /** Clasifica cada entrada de `skillsDir` (read-only, no muta nada).
  *  Agnostico al alcance: `skillsDir` es global (`provider.skill.global`) o de
  *  proyecto (`<projectRoot>/<provider.skill.local>`) — el nombre decia "Global" y
- *  eso basto para que nadie lo apuntara nunca a un dir de proyecto. */
-export function classifySkillLinks(skillsDir: string, registryContentDirs: string[]): SkillIntegrity {
-    const out: SkillIntegrity = { valid: [], repairable: [], dead: [] };
+ *  eso basto para que nadie lo apuntara nunca a un dir de proyecto.
+ *
+ *  `managedTargets` (opcional, ver `managedLinkTargets`) es lo que distingue
+ *  "un directorio que el usuario puso ahi" de "un directorio que reemplazo un
+ *  link nuestro". Sin el, el scan solo mira symlinks y una usurpacion es
+ *  literalmente invisible: `awm doctor` reporta `healthy` mientras el agente
+ *  carga la skill de otro. Por defecto vacio, para que los llamadores que no
+ *  tienen ledger a mano conserven el comportamiento anterior. */
+export function classifySkillLinks(
+    skillsDir: string,
+    registryContentDirs: string[],
+    managedTargets: ReadonlySet<string> = new Set(),
+): SkillIntegrity {
+    const out: SkillIntegrity = { valid: [], repairable: [], dead: [], usurped: [] };
     let entries: string[];
     try { entries = fs.readdirSync(skillsDir); }
     catch { return out; } // dir ausente → nada que clasificar
@@ -37,7 +72,12 @@ export function classifySkillLinks(skillsDir: string, registryContentDirs: strin
         const p = path.join(skillsDir, name);
         let lst: fs.Stats;
         try { lst = fs.lstatSync(p); } catch { continue; }
-        if (!lst.isSymbolicLink()) continue; // dirs/archivos reales no son nuestro problema
+        if (!lst.isSymbolicLink()) {
+            // Un dir/archivo real que puso el usuario no es nuestro problema. Uno
+            // que el ledger declara nuestro SI lo es — ahi hubo un reemplazo.
+            if (managedTargets.has(pathKey(p))) out.usurped.push(name);
+            continue;
+        }
         if (fs.existsSync(p)) { out.valid.push(name); continue; } // target vivo
         // symlink colgante → ¿reparable o muerto?
         if (findRegistrySkillPath(registryContentDirs, name)) out.repairable.push(name);

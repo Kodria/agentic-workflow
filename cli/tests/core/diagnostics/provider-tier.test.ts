@@ -55,7 +55,7 @@ describe('contextGlobalCheck — scope-aware (Task 4.4 / deferred Task 4.2 findi
     }
 
     function scanSkillsStub() {
-        return jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
+        return jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
     }
 
     beforeEach(() => {
@@ -188,7 +188,7 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
         // classifySkillLinks only ever sees symlinks (`if (!lst.isSymbolicLink()) continue;`)
         // — a real scan over rulesDir would find nothing here either. Stubbed explicitly so the
         // test proves the FIX (renderer-gating), not an accident of what classifySkillLinks does.
-        const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
+        const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
         const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
         const facts = gatherProviderChecks(['cursor'], scanSkills);
         const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
@@ -236,7 +236,7 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
         const rulesDir = path.join(tmpHome, '.cursor/rules');
         expect(fs.existsSync(path.join(rulesDir, 'using-awm.mdc'))).toBe(true);
 
-        const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
+        const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
         const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
         const facts = gatherProviderChecks(['cursor'], scanSkills);
         const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
@@ -248,7 +248,7 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
     });
 
     it('non-link renderer with an empty/missing dir reports absent, not a false healthy', () => {
-        const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
+        const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
         const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
         const facts = gatherProviderChecks(['cursor'], scanSkills);
         const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
@@ -260,7 +260,7 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
         const skillsDir = path.join(tmpHome, '.claude/skills');
         fs.mkdirSync(skillsDir, { recursive: true });
 
-        const scanSkills = jest.fn(() => ({ valid: ['using-awm'], repairable: [], dead: [] }));
+        const scanSkills = jest.fn(() => ({ valid: ['using-awm'], repairable: [], dead: [], usurped: [] }));
         const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
         const facts = gatherProviderChecks(['claude-code'], scanSkills);
         const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
@@ -273,7 +273,7 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
         const skillsDir = path.join(tmpHome, '.claude/skills');
         fs.mkdirSync(skillsDir, { recursive: true });
 
-        const scanSkills = jest.fn(() => ({ valid: [], repairable: ['stale-skill'], dead: [] }));
+        const scanSkills = jest.fn(() => ({ valid: [], repairable: ['stale-skill'], dead: [], usurped: [] }));
         const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
         const facts = gatherProviderChecks(['claude-code'], scanSkills);
         const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
@@ -295,7 +295,7 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
             fs.writeFileSync(path.join(rulesDir, 'notes.txt'), 'my own notes, not an AWM rule');
             fs.mkdirSync(path.join(rulesDir, 'some-user-dir'));
 
-            const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
+            const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
             const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
             const facts = gatherProviderChecks(['cursor'], scanSkills);
             const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
@@ -312,7 +312,7 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
                 '---\ndescription: foo\nglobs:\nalwaysApply: false\n---\n\nBody.',
             );
 
-            const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
+            const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
             const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
             const facts = gatherProviderChecks(['cursor'], scanSkills);
             const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');

@@ -1,6 +1,7 @@
 // src/core/diagnostics/types.ts
 import { AgentTarget } from '../../providers';
 import { InjectionState } from '../context/types';
+import { SkillIntegrity } from '../skill-integrity';
 
 export type CheckLevel = 'machine' | 'project';
 export type CheckStatus = 'ok' | 'warn' | 'missing'; // ✔ / ⚠ / ✖
@@ -34,7 +35,13 @@ export interface MachineFacts {
     devCore: { present: boolean; brokenLinks: string[] };
     ambient: { wanted: string[]; installed: string[] };
     contextInjection: { agent: AgentTarget; state: InjectionState }[];
-    globalSkills: { valid: string[]; repairable: string[]; dead: string[] };
+    /** `SkillIntegrity` por referencia, no una copia estructural. Estaba escrito a mano
+     *  aca — `{ valid; repairable; dead }` — y como era un subconjunto exacto TypeScript
+     *  no se quejaba nunca, asi que al agregarle `usurped` al tipo real este campo quedo
+     *  atras en silencio y los llamadores no podian ni pasar el valor completo. Misma
+     *  clase de bug que la tabla de renderers duplicada: una copia de algo que el codigo
+     *  ya define en otro lado. */
+    globalSkills: SkillIntegrity;
 }
 
 export interface ProjectFacts {

@@ -2,6 +2,7 @@ import { runChecks, computeProviderOverall } from '../../../src/core/diagnostics
 import { HarnessContext, ProjectFacts, ProviderFacts } from '../../../src/core/diagnostics/types';
 import { AgentTarget } from '../../../src/providers';
 import { InjectionState } from '../../../src/core/context/types';
+import { SkillIntegrity } from '../../../src/core/skill-integrity';
 
 function healthyMachine(): HarnessContext['machine'] {
     return {
@@ -10,7 +11,7 @@ function healthyMachine(): HarnessContext['machine'] {
         devCore: { present: true, brokenLinks: [] },
         ambient: { wanted: [], installed: [] },
         contextInjection: [],
-        globalSkills: { valid: [], repairable: [], dead: [] },
+        globalSkills: { valid: [], repairable: [], dead: [], usurped: [] },
     };
 }
 
@@ -173,7 +174,7 @@ describe('runChecks — project', () => {
 });
 
 describe('machineChecks — global skill integrity', () => {
-    function machineCtx(globalSkills: { valid: string[]; repairable: string[]; dead: string[] }): HarnessContext {
+    function machineCtx(globalSkills: SkillIntegrity): HarnessContext {
         return {
             machine: {
                 registryCache: { present: true, gitState: 'clean' },
@@ -188,13 +189,13 @@ describe('machineChecks — global skill integrity', () => {
     }
 
     it('ok when no broken global skill links', () => {
-        const report = runChecks(machineCtx({ valid: ['a'], repairable: [], dead: [] }));
+        const report = runChecks(machineCtx({ valid: ['a'], repairable: [], dead: [], usurped: [] }));
         const row = report.results.find((r) => r.id === 'machine.globalSkills');
         expect(row?.status).toBe('ok');
     });
 
     it('warns with awm init remedy when there are broken links', () => {
-        const report = runChecks(machineCtx({ valid: ['a'], repairable: ['b'], dead: ['c'] }));
+        const report = runChecks(machineCtx({ valid: ['a'], repairable: ['b'], dead: ['c'], usurped: [] }));
         const row = report.results.find((r) => r.id === 'machine.globalSkills');
         expect(row?.status).toBe('warn');
         expect(row?.detail).toContain('2'); // 1 repairable + 1 dead

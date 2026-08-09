@@ -40,11 +40,17 @@ Substitute `<agent>` and run in a scratch project (setup as in core-acceptance).
 
 ### Common to every agent
 
-**AG-01 · The agent is recognised**
+**AG-01 · The agent is recognised** *(run this AFTER AG-02)*
 ```bash
 awm doctor --json -a <agent>
 ```
 **Expect:** exit `0`; a `providers` entry for `<agent>` with the `tier` from the table above.
+
+> **Order matters, and this check used to have it wrong.** It sat first and asked for exit
+> `0` on a scratch project where nothing had been installed yet — which `awm doctor`
+> cannot give you: with no hook and no skills it reports `degraded` and exits `1`, exactly
+> as documented. Bootstrap first (AG-02), then ask whether the agent is healthy. A `1`
+> *before* AG-02 is the correct answer, not a finding.
 
 **AG-02 · Bootstrap for this agent**
 ```bash
@@ -155,7 +161,7 @@ awm doctor --json -a antigravity
 
 | Agent | AG-01 | AG-02 | AG-03 | AG-04 | AG-05 | AG-06 | Extras | Notes |
 |---|---|---|---|---|---|---|---|---|
-| claude-code |  |  |  |  |  |  | CC-01 CC-02 |  |
+| claude-code | PASS | PASS | PASS | PASS | PASS | PASS | CC-01 PASS · CC-02 PASS | 2026-08-09, awm 4.0.0, Linux. AG-02 exit `1` / `failed: 0`. AG-05: 31 artefactos. AG-06 con control negativo (ver abajo). **Un hallazgo de producto**, arreglado: ver "Lo que encontró la corrida". |
 | codex |  |  |  |  |  |  | CX-01 CX-02 |  |
 | opencode |  |  |  |  |  |  | OC-01 |  |
 | cursor |  |  |  |  |  |  | CU-01 |  |
@@ -163,3 +169,40 @@ awm doctor --json -a antigravity
 | antigravity |  |  |  |  |  |  | AN-01 |  |
 
 Record **BLOCKED** for any agent whose binary you don't have. Do not infer a result from another agent's outcome — the bugs this suite exists to catch are precisely the ones that only appear on one provider's path.
+
+---
+
+## Lo que encontró la corrida de `claude-code` (2026-08-09)
+
+Vale escribirlo porque es el argumento entero a favor de correr esto contra un binario
+real: **1726 tests unitarios en verde no lo habían visto**, y la corrida lo encontró en
+menos de veinte minutos.
+
+**AG-06 se corrió con un control negativo.** Un `claude -p` anidado podría estar leyendo el
+ambiente del proceso padre en lugar del `HOME` aislado, y entonces "nombró las skills" no
+probaría nada. El control: la misma pregunta con un `HOME` limpio sin AWM. Respondió que no
+tiene ninguna skill de AWM. Recién con eso la respuesta afirmativa vale como evidencia.
+
+**El hallazgo:** al terminar AG-06, `~/.claude/skills/mermaid-diagrams` había dejado de ser
+el symlink que `awm init` instaló. Claude Code trae su propia skill `mermaid-diagrams` y la
+materializó encima — un directorio real, otra `description`, sin `version`, con un
+`README.md` que la nuestra no tiene. El agente cargaba esa, no la instalada.
+
+Lo grave no fue la colisión de nombres: fue que **nada lo reportaba**.
+
+```
+skills.global: healthy   ·   overall: healthy   ·   exit 0
+```
+
+`awm sync` tampoco lo tocaba. La causa es una línea de `classifySkillLinks`:
+`if (!lst.isSymbolicLink()) continue`. Correcta para una skill que puso el usuario a mano
+— AWM no debe tocarla — y equivocada cuando el ledger de artefactos dice que esa ruta
+exacta es nuestra. El clasificador nunca consultaba el ledger, así que no podía distinguir
+los dos casos, y la usurpación era literalmente invisible.
+
+Hoy `doctor` reporta `broken`, nombra qué fue reemplazado y sale `1`. No se auto-repara:
+borrar un directorio real de un tercero es destructivo — ver [`decisions.md`](../decisions.md) D-007.
+
+**Si repetís la corrida, esperá esto:** después de abrir una sesión real de Claude Code
+contra el `HOME` aislado, `awm doctor` reporta `mermaid-diagrams` como reemplazado. Eso es
+el producto funcionando, no una regresión.

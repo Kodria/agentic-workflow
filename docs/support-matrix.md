@@ -73,7 +73,7 @@ La parte determinística —`awm sensors run`, su código de salida y el gate de
 
 | Proveedor | Instalación de artefactos | Entrega de contexto | Hooks | Evidencia |
 |---|---|---|---|---|
-| **Claude Code** | ✅ Verificado | ✅ Verificado | ✅ Verificado | Suite + E2E aislado en CI (ubuntu, windows) |
+| **Claude Code** | ✅ Verificado | ✅ Verificado | ✅ Verificado | Suite + E2E aislado en CI (ubuntu, windows, macos) + playbook [`agent-matrix`](testing/agent-matrix.md) corrido contra el binario real (AG-01…AG-06, CC-01, CC-02), incluido **AG-06 con control negativo**: un `HOME` sin AWM responde que no tiene ninguna skill de AWM, así que lo que la sesión nombró vino de la instalación observada y no de su ambiente. |
 | **Codex** | ✅ Verificado | ✅ Verificado | ⚠ Sin verificar | Suite + `tests/integration/codex-provider-isolated`. La **transición de confianza del hook** requiere el binario real. |
 | **OpenCode** | ✅ Verificado | ⚠ Sin verificar | ⛔ No tiene | El escritor de `opencode.json` está cubierto por tests; que OpenCode *lea* ese campo no fue observado. |
 | **Cursor** | ✅ Verificado | ⚠ Sin verificar | ⛔ No tiene | El `.mdc` se genera y se valida su forma. Que Cursor **cargue** un `.mdc` con `alwaysApply: false` no fue observado. |

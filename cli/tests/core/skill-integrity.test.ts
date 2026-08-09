@@ -83,7 +83,7 @@ describe('classifySkillLinks', () => {
 
     it('returns empty arrays when the skills dir does not exist', () => {
         const result = classifySkillLinks('/nonexistent/dir', ['/also/nonexistent']);
-        expect(result).toEqual({ valid: [], repairable: [], dead: [] });
+        expect(result).toEqual({ valid: [], repairable: [], dead: [], usurped: [] });
     });
 });
 

@@ -193,7 +193,7 @@ describe('gatherProviderChecks — shared skills.global does not mask broken lin
 
         // OpenCode and Codex share ~/.agents/skills (providers/index.ts). Stub the
         // scan to report 2 broken/dead links on that shared directory.
-        const scanSkills = jest.fn(() => ({ valid: ['ok-skill'], repairable: ['stale-skill'], dead: ['ghost-skill'] }));
+        const scanSkills = jest.fn(() => ({ valid: ['ok-skill'], repairable: ['stale-skill'], dead: ['ghost-skill'], usurped: [] }));
         const ctx = gatherContext({ cwd: tmpHome, bundles: [], agents: ['opencode', 'codex'], scanSkills });
 
         expect(scanSkills).toHaveBeenCalledTimes(1);
@@ -211,7 +211,7 @@ describe('gatherProviderChecks — shared skills.global does not mask broken lin
         const { gatherContext } = require('../../../src/core/diagnostics/context');
         const { computeProviderOverall } = require('../../../src/core/diagnostics/checks');
 
-        const scanSkills = jest.fn(() => ({ valid: ['ok-skill'], repairable: [], dead: [] }));
+        const scanSkills = jest.fn(() => ({ valid: ['ok-skill'], repairable: [], dead: [], usurped: [] }));
         const ctx = gatherContext({ cwd: tmpHome, bundles: [], agents: ['opencode', 'codex'], scanSkills });
 
         for (const provider of ctx.providers) {
@@ -260,7 +260,7 @@ describe('gatherProviderChecks — agents.native reports broken on a malformed C
         );
 
         const { gatherContext } = require('../../../src/core/diagnostics/context');
-        const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [] }));
+        const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
         const ctx = gatherContext({ cwd: tmpHome, bundles: [], agents: ['codex'], scanSkills });
 
         const codex = ctx.providers.find((p: { id: string }) => p.id === 'codex');
