@@ -339,7 +339,7 @@ describe('CodexAgentsStrategy', () => {
 function codexProvider(globalPath: string): ProviderConfig {
     return {
         label: 'Codex',
-        skill: { global: '', local: '', renderer: 'link' },
+        configHome: { envVar: null, dir: '.test', resolved: '/tmp/test-config-home' }, skill: { global: '', local: '', renderer: 'link' },
         workflow: null,
         agent: null,
         injection: { type: 'managed-agents-md', globalPath, localFile: 'AGENTS.md' },
@@ -349,7 +349,7 @@ function codexProvider(globalPath: string): ProviderConfig {
 function copilotProvider(): ProviderConfig {
     return {
         label: 'Copilot',
-        skill: { global: null, local: '.github/instructions', renderer: 'link' },
+        configHome: { envVar: null, dir: '.test', resolved: '/tmp/test-config-home' }, skill: { global: null, local: '.github/instructions', renderer: 'link' },
         workflow: null,
         agent: null,
         injection: { type: 'managed-agents-md', globalPath: null, localFile: 'AGENTS.md' },
@@ -359,7 +359,7 @@ function copilotProvider(): ProviderConfig {
 function cursorProvider(): ProviderConfig {
     return {
         label: 'Cursor',
-        skill: { global: '', local: '.cursor/rules', renderer: 'link' },
+        configHome: { envVar: null, dir: '.test', resolved: '/tmp/test-config-home' }, skill: { global: '', local: '.cursor/rules', renderer: 'link' },
         workflow: null,
         agent: null,
         injection: { type: 'managed-agents-md', globalPath: null, localFile: 'AGENTS.md' },

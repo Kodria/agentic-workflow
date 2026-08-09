@@ -25,7 +25,7 @@ function tmpRegistry(): string {
 
 describe('InjectionOrchestrator (claude-code dispatch via HookMergeStrategy)', () => {
     const ccOverride = {
-        label: 'Claude Code', skill: { global: '', local: '', renderer: 'link' as const }, workflow: null, agent: null,
+        label: 'Claude Code', configHome: { envVar: null, dir: '.test', resolved: '/tmp/test-config-home' }, skill: { global: '', local: '', renderer: 'link' as const }, workflow: null, agent: null,
         injection: { type: 'cc-settings-merge' as const },
         hooks: { type: 'cc-settings-merge' as const, settingsPath: '', scriptsDir: '', matcher: '', eventName: '' },
     };
@@ -69,7 +69,7 @@ describe('InjectionOrchestrator (claude-code dispatch via HookMergeStrategy)', (
     it('throws when providerOverride has no injection (does not fall through to real agent config)', () => {
         const noInjection = {
             label: 'Test',
-            skill: { global: '', local: '', renderer: 'link' as const },
+            configHome: { envVar: null, dir: '.test', resolved: '/tmp/test-config-home' }, skill: { global: '', local: '', renderer: 'link' as const },
             workflow: null,
             agent: null,
         };
@@ -92,7 +92,7 @@ describe('InjectionOrchestrator (opencode, real strategy)', () => {
         registryRoot = tmpRegistry();
         orch = new InjectionOrchestrator({
             providerOverride: {
-                label: 'OpenCode', skill: { global: '', local: '', renderer: 'link' }, workflow: null, agent: null,
+                label: 'OpenCode', configHome: { envVar: null, dir: '.test', resolved: '/tmp/test-config-home' }, skill: { global: '', local: '', renderer: 'link' }, workflow: null, agent: null,
                 injection: { type: 'config-instructions', configPath, field: 'instructions' },
             },
             contextPathOverride: absPath,
@@ -165,7 +165,7 @@ describe('InjectionOrchestrator (codex, managed AGENTS.md strategy)', () => {
         fs.writeFileSync(agentsPath, '# User rules\n');
         const orch = new InjectionOrchestrator({
             providerOverride: {
-                label: 'Codex', skill: { global: '', local: '', renderer: 'link' }, workflow: null, agent: null,
+                label: 'Codex', configHome: { envVar: null, dir: '.test', resolved: '/tmp/test-config-home' }, skill: { global: '', local: '', renderer: 'link' }, workflow: null, agent: null,
                 injection: { type: 'managed-agents-md', globalPath: agentsPath, localFile: 'AGENTS.md' },
             },
             contextPathOverride: contextPath,
@@ -220,7 +220,7 @@ describe('InjectionOrchestrator (local scope materializes under the project, not
     it('materializes to projectContextPath(projectRoot) for scope local, never to globalContextPath()', () => {
         const orch = new InjectionOrchestrator({
             providerOverride: {
-                label: 'Copilot', skill: { global: null, local: '.github/instructions', renderer: 'link' }, workflow: null, agent: null,
+                label: 'Copilot', configHome: { envVar: null, dir: '.test', resolved: '/tmp/test-config-home' }, skill: { global: null, local: '.github/instructions', renderer: 'link' }, workflow: null, agent: null,
                 injection: { type: 'managed-agents-md', globalPath: null, localFile: 'AGENTS.md' },
             },
         });
