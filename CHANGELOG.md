@@ -1,3 +1,8 @@
+## v5.0.0 - 2026-08-09
+
+### Breaking Changes
+- **init:** exit 0 when init did its job, even if the harness stays degraded
+
 ## v4.1.1 - 2026-08-09
 
 ### Fixes
