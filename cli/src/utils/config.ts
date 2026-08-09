@@ -104,6 +104,29 @@ function normalizePreferences(
     };
 }
 
+/**
+ * Las preferencias TAL COMO ESTAN, sin escribir nada. Devuelve los defaults en memoria
+ * cuando el archivo no existe todavia.
+ *
+ * `getPreferences` auto-vivifica: si no hay archivo, lo crea con los defaults. Eso esta
+ * bien para un comando que va a configurar la maquina, y esta mal para uno que solo
+ * mira. `awm doctor` —documentado como «Read-only dashboard. Changes nothing.»— lo
+ * llamaba, asi que en una maquina limpia el comando de inspeccion dejaba un
+ * `preferences.json` con `claude-code` como agente por defecto, que despues se lee como
+ * «el usuario configuro esto» cuando no lo hizo. Lo encontro el playbook de aceptacion,
+ * no la suite: ningun test preguntaba si un comando de lectura escribia.
+ *
+ * Se midieron los otros siete comandos de inspeccion (`list`, `preflight`, `sensors
+ * status`, `context-budget`, `backup list`, `ledger list`, `registry status`): todos
+ * limpios. `doctor` era el unico.
+ */
+export function readPreferences(): AwmPreferences {
+    const loaded = loadPreferences();
+    return loaded.exists
+        ? loaded.prefs
+        : { ...DEFAULT_PREFS, enabledAgents: [...DEFAULT_PREFS.enabledAgents] };
+}
+
 export function getPreferences(): AwmPreferences {
     const loaded = loadPreferences();
     if (!loaded.exists) {
