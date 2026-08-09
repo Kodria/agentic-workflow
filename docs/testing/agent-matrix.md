@@ -174,7 +174,7 @@ awm doctor --json -a antigravity
 | Agent | AG-01 | AG-02 | AG-03 | AG-04 | AG-05 | AG-06 | Extras | Notes |
 |---|---|---|---|---|---|---|---|---|
 | claude-code | PASS | PASS | PASS | PASS | PASS | PASS | CC-01 PASS · CC-02 PASS | 2026-08-09, awm 4.0.0, Linux. AG-02 exit `1` / `failed: 0`. AG-05: 31 artefactos. AG-06 con control negativo (ver abajo). **Un hallazgo de producto**, arreglado: ver "Lo que encontró la corrida". |
-| codex | PASS¹ | PASS¹ | PASS | PASS | PASS | PASS | CX-01 PASS¹ · CX-02 PASS · **hook FAIL** | 2026-08-09, codex-cli 0.146.0, Node 24.19.0, Ubuntu (VPC). AG-05: 30 symlinks. **El hook NO se dispara** — verificado en las dos rutas registradas, ninguna dejó heartbeat. Evidencia en [support-matrix](../support-matrix.md). |
+| codex | PASS | PASS | PASS | PASS | PASS | PASS | CX-01 PASS · CX-02 PASS · **hook PASS** | 2026-08-09, awm 6.0.0, codex-cli 0.146.0, Ubuntu (VPC) con `CODEX_HOME`. **Hook observado ejecutándose** tras otorgar la confianza, sin bypass. Las tres corridas que costó están contadas en [support-matrix](../support-matrix.md). |
 | opencode |  |  |  |  |  |  | OC-01 |  |
 | cursor |  |  |  |  |  |  | CU-01 |  |
 | copilot |  |  |  |  |  |  | CP-01 CP-02 |  |

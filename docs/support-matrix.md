@@ -75,7 +75,7 @@ La parte determinística —`awm sensors run`, su código de salida y el gate de
 | Proveedor | Instalación de artefactos | Entrega de contexto | Hooks | Evidencia |
 |---|---|---|---|---|
 | **Claude Code** | ✅ Verificado | ✅ Verificado | ✅ Verificado | Suite + E2E aislado en CI (ubuntu, windows, macos) + playbook [`agent-matrix`](testing/agent-matrix.md) corrido contra el binario real (AG-01…AG-06, CC-01, CC-02), incluido **AG-06 con control negativo**: un `HOME` sin AWM responde que no tiene ninguna skill de AWM, así que lo que la sesión nombró vino de la instalación observada y no de su ambiente. |
-| **Codex** | ✅ Verificado | ✅ Verificado | ❌ **Verificado que NO funciona** | Instalación y contexto: playbook contra `codex-cli 0.146.0` real. **Los hooks no se disparan.** Evidencia abajo — no es "falta verificar", se verificó y no corre. |
+| **Codex** | ✅ Verificado | ✅ Verificado | ✅ Verificado | Playbook completo contra `codex-cli 0.146.0` real, en una máquina con `CODEX_HOME`. **El hook se observó ejecutándose**: Codex mostró su prompt `Hooks need review`, se otorgó la confianza, la sesión imprimió `Running SessionStart hook` y el hook dejó su `heartbeat.json`. `hook.trust: healthy`, `overall: healthy`. Evidencia abajo. |
 | **OpenCode** | ✅ Verificado | ⚠ Sin verificar | ⛔ No tiene | El escritor de `opencode.json` está cubierto por tests; que OpenCode *lea* ese campo no fue observado. |
 | **Cursor** | ✅ Verificado | ⚠ Sin verificar | ⛔ No tiene | El `.mdc` se genera y se valida su forma. Que Cursor **cargue** un `.mdc` con `alwaysApply: false` no fue observado. |
 | **Copilot** | ✅ Verificado (solo proyecto) | ⚠ Sin verificar | ⛔ No tiene | El `.instructions.md` se genera. Que Copilot **honre** `applyTo: "**"` no fue observado. |
@@ -163,7 +163,6 @@ Enunciado como trabajo, no como defecto. Esto es lo que hay que construir para s
 | 3 | **Reconciliación de scope de proyecto en `awm update`** | `update` reconcilia artefactos de máquina; los de proyecto son trabajo de `awm sync`. Un proyecto sin `sync` queda desactualizado en silencio. | Elimina un paso manual |
 | 4 | **Pruebas de los packs `python` y `shell` contra proyectos reales** | Existen y están completos; nadie los corrió contra un repo Python o de shell de verdad. | Sube 2 packs a ✅ |
 | 5 | **Un séptimo proveedor** | El modelo de capacidades ya lo soporta como una edición localizada (tabla de renderers + entrada de provider). No hay ninguno pedido todavía. | Amplía la cobertura |
-| 6 | **Hacer que el hook de Codex se dispare** | No es "falta verificarlo": se verificó y **no corre**. AWM declara a Codex `hooks-native` — un tier que promete que los gates de fase se *aplican* —, y hoy Codex solo recibe el contexto por `AGENTS.md`, que es el camino `agents-md-managed`. La causa más probable es la compuerta de confianza de Codex, que AWM nunca le explica al usuario. | Sube Codex a ✅ y vuelve cierto su tier |
 
 ---
 
@@ -183,51 +182,43 @@ Los playbooks están escritos para que los corras vos **o para que se los pases 
 
 ---
 
-## Evidencia — los hooks de Codex no se disparan (2026-08-09)
+## Evidencia — los hooks de Codex, de ❌ a ✅ en el mismo día (2026-08-09)
 
-Corrida del playbook contra `codex-cli 0.146.0` en Ubuntu, con `awm 5.0.1`.
+Vale contarlo entero porque es el caso que justifica los cinco niveles.
 
-**Lo que SÍ funciona:** el script está bien. Ejecutado a mano emite el JSON correcto,
-sale `0`, y escribe su `heartbeat.json`:
+**Primera corrida — ❌.** El script era sano (a mano emitía su JSON y escribía el heartbeat),
+pero tras una sesión real de Codex no aparecía heartbeat en **ninguna** de las dos rutas
+registradas. La matriz pasó de ⚠ a ❌: no era "falta verificar", se verificó y no corría.
+
+**La causa no era la que suponíamos.** La hipótesis era la compuerta de confianza. El
+diagnóstico encontró otra cosa: esa máquina define `CODEX_HOME`, Codex lee
+`$CODEX_HOME/hooks.json`, y AWM escribía en `~/.codex/hooks.json`. Instalación correcta, en
+el archivo que nadie mira — y `doctor` lo reportaba presente porque verificaba en el mismo
+lugar equivocado donde había escrito. Corregido en la v6.0.0 (ver
+[`decisions.md`](decisions.md) D-011).
+
+**Segunda corrida — ✅.** Con el hook registrado donde Codex mira, Codex mostró:
 
 ```
-{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"AWM is active. …"}}
-exit=0
--rw------- 1 … 155 Aug  9 04:33 …/hooks/codex/heartbeat.json
+Hooks need review
+1 hook is new or changed.
+Hooks can run outside the sandbox after you trust them.
 ```
 
-**Lo que no:** tras abrir y cerrar una sesión interactiva normal de Codex, **no apareció
-ningún heartbeat** — ni el del entorno de prueba ni el de la instalación real. Las dos
-rutas se comprobaron por separado, porque `~/.codex/hooks.json` tenía **dos** entradas de
-AWM y cada hook escribe al lado de su propio script:
+Otorgada la confianza (`Trust all and continue`), la sesión imprimió `Running SessionStart
+hook: Loading AWM session state` → `SessionStart hook (completed)` y entregó el contexto de
+AWM. El hook dejó su `heartbeat.json`, y `awm hooks status` pasó a `Trust: ✓ healthy`,
+`Status: HEALTHY`. **Sin bypass** — sesión normal.
 
-```
-ls: cannot access '…/.awm-e2e/hooks/codex/heartbeat.json': No such file or directory
-ls: cannot access '…/.awm/hooks/codex/heartbeat.json': No such file or directory
-```
+**Lo que deja el episodio:**
 
-El esquema registrado (`hooks` → `SessionStart` → entradas con `matcher` y `hooks` de tipo
-`command`) coincide con el que documenta Codex. No hubo prompt de confianza de hooks en la
-sesión.
-
-**Por qué esto no lo cierra AG-06.** La sesión de Codex sí reconoció las skills de AWM —
-pero eso se explica entero por el bloque gestionado en `AGENTS.md` (`context.global:
-delivered`), que es un camino independiente del hook. Atribuirle ese resultado al hook
-sería justo el error que la matriz de cuatro niveles existe para evitar.
-
-**Sospecha principal, sin confirmar:** Codex 0.146.0 expone
-`--dangerously-bypass-hook-trust`, así que la compuerta de confianza es un concepto vigente
-en esa versión. Si los hooks no se ejecutan hasta ser aprobados, y AWM nunca le dice al
-usuario cómo aprobarlos, el hook queda instalado y mudo para siempre. **La prueba que lo
-confirmaría** es una sesión con ese flag: si el heartbeat aparece, la causa es la confianza;
-si no aparece, es otra cosa.
-
-**Agujero relacionado en el producto:** `doctor` emite `remediationCode:
-'open-hooks-trust'` y ese código **no está explicado en ningún lado** — ni en la referencia
-del CLI, ni en la salida, ni en esta documentación. El usuario ve `→ open-hooks-trust` y no
-tiene ninguna acción que tomar.
-
-
+- La compuerta de confianza era real, pero **no** era la causa: nunca se llegó a ella
+  porque el hook no estaba donde Codex lo busca. Una hipótesis plausible que resultó falsa,
+  y solo el diagnóstico de la ruta lo separó.
+- `hooks-native` para Codex ahora es una promesa con evidencia detrás.
+- El código `open-hooks-trust` era un remedio inejecutable: `doctor` lo emitía y no estaba
+  explicado en ningún lado. Ahora `awm hooks status` reproduce el prompt exacto que Codex
+  muestra y nombra la opción que otorga la confianza — texto observado, no parafraseado.
 **Actualización (misma fecha):** la causa de que el hook no se descubriera está
 identificada y corregida — AWM ignoraba `CODEX_HOME` y escribía en `~/.codex/hooks.json`
 mientras Codex leía `$CODEX_HOME/hooks.json` (ver [`decisions.md`](decisions.md) D-011).

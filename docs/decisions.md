@@ -257,6 +257,12 @@ La asimetria se cobro la misma corrida: `awm hooks status --agent codex` fallaba
 `unknown option`. Se agrega alias en vez de renombrar, para no romper a quien ya scriptea
 `--target`.
 
+**Cerrado después:** el código `open-hooks-trust` era un remedio inejecutable — `doctor` lo
+emitía y no estaba explicado en ningún lado. `awm hooks status` ahora reproduce el prompt
+exacto que Codex muestra (`Hooks need review` / `Trust all and continue`), **texto observado
+en una corrida real, no parafraseado**. Para un agente cuyo prompt nadie vio, el mensaje
+queda genérico: inventarlo sería peor, porque mandaría a buscar algo que quizá no existe.
+
 **Abierto, del mismo reporte:** `~/.codex/hooks.json` **no** vive bajo `AWM_HOME`, asi que
 una corrida "aislada" del playbook deja ahi una entrada permanente apuntando a un directorio
 temporal. La corrida del VPC termino con DOS entradas de AWM bajo `SessionStart`, ambas con
@@ -306,6 +312,8 @@ Un proveedor nuevo lo hereda sin que nadie se acuerde.
 `AWM_HOME` no alcanzaba, porque los archivos del agente viven fuera de él y una corrida de
 prueba contaminaba el `hooks.json` real — que fue justo lo que hizo dudar del resultado.
 
-**Lo que esto NO cierra:** que el hook de Codex se dispare. Sabemos por qué no se
-descubría; falta ver si, ya descubierto, la compuerta de confianza lo deja correr. Codex
-sigue en ❌ hasta que alguien lo observe.
+**Cerrado el mismo día.** Con el hook registrado donde Codex mira, Codex mostró su prompt
+`Hooks need review`, se otorgó la confianza y el hook corrió — sin bypass. Codex pasa a ✅
+en las tres columnas. La compuerta de confianza era real pero **no** era la causa: nunca se
+llegaba a ella. Una hipótesis plausible que resultó falsa, y solo el diagnóstico de la ruta
+la separó del síntoma.
