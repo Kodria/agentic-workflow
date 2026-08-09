@@ -32,7 +32,7 @@ let originalAwmHome: string | undefined;
 let extraDirs: string[];
 
 beforeEach(() => {
-    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-mutation-targets-'));
+    tmpHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-mutation-targets-')));
     originalHome = process.env.HOME;
     originalAwmHome = process.env.AWM_HOME;
     process.env.HOME = tmpHome;
@@ -67,7 +67,7 @@ function load() {
 
 /** A cwd guaranteed to have no project-root marker (.git/package.json/.awm) in its ancestry. */
 function bareCwd(): string {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-mutation-targets-cwd-'));
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-mutation-targets-cwd-')));
     extraDirs.push(dir);
     return dir;
 }
@@ -174,7 +174,7 @@ describe('planInitMutationTargets', () => {
 
     describe('project-level targets', () => {
         function makeProjectRoot(): string {
-            const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-mutation-targets-project-'));
+            const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-mutation-targets-project-')));
             fs.mkdirSync(path.join(root, '.git')); // project-root marker for findProjectRoot
             extraDirs.push(root);
             return root;
