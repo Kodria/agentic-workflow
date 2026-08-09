@@ -14,6 +14,7 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-006](#d-006) | 2026-08-09 | `awm remove` tiene modo no interactivo, simétrico con `add` | Vigente |
 | [D-007](#d-007) | 2026-08-09 | Un artefacto usurpado se **reporta**, no se auto-repara | Vigente |
 | [D-008](#d-008) | 2026-08-09 | El exit code de `awm init` responde por init, no por la salud del harness | Vigente |
+| [D-009](#d-009) | 2026-08-09 | Los releases se serializan, y el tag se empuja antes que la rama | Vigente |
 
 ---
 
@@ -174,3 +175,43 @@ leer `result` del `--json`.
 **Cómo se detuvo:** el sitio que faltaba era el test ausente — ningún test preguntaba si un
 script podía encadenar `awm init &&`. Había dos assertions de `toBe(1)`, y las dos
 *documentaban* el bug en vez de detenerlo.
+
+---
+
+## D-009
+
+**Los releases corren de a uno, y despues del publish el tag se empuja antes que la rama.**
+
+Salio de validar la v5.0.0: **`4.0.1` existe en npm y no existe en git** — sin tag `v4.0.1`,
+sin entrada de CHANGELOG, sin commit de bump. Es instalable y no hay forma de decir desde
+el repo que la produjo.
+
+**Como paso:** mergeé el PR #45 mientras el release de #44 estaba en vuelo. La corrida de
+#44 hizo commit, tag, **publish**, y recien despues `git push origin main` — que ya estaba
+atras, y fue rechazado por non-fast-forward. El job murio ahi. npm quedo con la version;
+git no se entero.
+
+**El orden importaba y estaba al reves.** El publish es irreversible; el push no. Todo lo
+que se haga despues de publicar puede fallar y dejar a npm adelantado, asi que lo unico que
+se decide es cuanto alcanza a quedar registrado.
+
+**Implica:**
+- `release.yml` declara `concurrency: { group: release-<ref>, cancel-in-progress: false }`.
+  Serializa. `cancel-in-progress: false` es la mitad importante: cancelar un release a
+  mitad de camino es justo el modo de falla que se quiere evitar — la segunda corrida
+  **espera**.
+- Despues del publish se empuja **primero el tag**, que no puede entrar en conflicto (es
+  una ref nueva). En el peor caso queda la identidad exacta de lo publicado, y lo unico
+  que falta es el commit de bump, que una persona repone.
+- El push de la rama reintenta con `pull --rebase` (3 intentos). Si igual no entra, el
+  error **nombra el estado real**: `vX.Y.Z YA SE PUBLICO en npm … NO re-publicar`, con la
+  instruccion de reconciliar a mano. Un `failed to push some refs` pelado no le dice a
+  nadie que npm quedo adelantado.
+
+**El sitio que faltaba era el test ausente:** el happy path afirmaba que las dos lineas de
+push existen — no en que orden, y nada cubria que pasa si una falla.
+
+**Pendiente, y no lo decide el codigo:** que hacer con la `4.0.1` publicada. Las opciones
+son dejarla (es funcionalmente la 4.0.0 mas el fix de `doctor`), taggearla
+retroactivamente sobre el merge de #44, o deprecarla en npm. Deprecar es visible para
+cualquiera que la instale, asi que lo decide una persona.

@@ -263,10 +263,15 @@ function gatherProject(root: string, bundles: BundleDefinition[], agent: AgentTa
     // Huerfanos: symlinks colgantes que el profile ya no reclama. Se clasifican sobre
     // el dir REAL, no sobre la lista esperada — que es justamente lo que `linked`/
     // `broken` de arriba no pueden ver. `awm sync` los cura o los poda.
-    const orphanScan = classifySkillLinks(localSkillsDir, contentRoots());
+    const orphanScan = classifySkillLinks(localSkillsDir, contentRoots(), managedLinkTargets(safeReadArtifactState()));
     const orphanLinks = {
         repairable: orphanScan.repairable.filter((n) => !expected.includes(n)),
         dead: orphanScan.dead.filter((n) => !expected.includes(n)),
+        // Usurpados NO se filtran contra `expected`: lo huerfano es lo que sobra, y esto
+        // es lo contrario — una skill que el profile SI reclama, cuyo link reemplazo un
+        // tercero por contenido suyo. Se reporta aparte porque el remedio difiere: `awm
+        // sync` cura symlinks colgantes y sobre un directorio real no hace nada.
+        usurped: orphanScan.usurped,
     };
 
     let context: ProjectFacts['context'] = { present: false };

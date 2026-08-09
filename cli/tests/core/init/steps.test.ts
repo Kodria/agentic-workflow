@@ -36,7 +36,7 @@ function project(over: Partial<ProjectFacts> = {}): ProjectFacts {
         root: '/repo',
         profile: { present: true, extensions: [] },
         activeBundles: { expected: [], linked: [], broken: [] },
-        orphanLinks: { repairable: [], dead: [] },
+        orphanLinks: { repairable: [], dead: [], usurped: [] },
         sensors: { present: true },
         constitution: { present: true },
         context: { present: true, file: 'CLAUDE.md' },

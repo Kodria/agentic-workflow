@@ -130,8 +130,55 @@ export function release(opts: ReleaseOpts, io: ReleaseIO): ReleaseResult {
   }
 
   if (opts.push) {
-    io.run('git', ['push', 'origin', opts.branch]);
+    // El TAG primero, y a proposito.
+    //
+    // Despues de un publish exitoso ya no hay vuelta atras: npm tiene la version. A
+    // partir de aca todo fallo de git deja a npm adelantado respecto del repo, y lo
+    // unico que decide cuan grave es eso es CUANTO alcanzo a quedar registrado.
+    //
+    // Un tag no puede entrar en conflicto — es una ref nueva —, asi que se empuja
+    // antes: en el peor caso queda el tag que identifica exactamente que se publico,
+    // y lo unico que falta es el commit de bump, que una persona puede reponer. Al
+    // reves (main primero) un push rechazado se lleva puesta tambien la identidad de
+    // la version, que es lo que paso con la 4.0.1: publicada, sin tag, sin CHANGELOG.
     io.run('git', ['push', 'origin', `v${version}`]);
+
+    // El push de `main` SI puede perder una carrera. Se reintenta rebaseando: el commit
+    // de bump toca solo `cli/package.json` y `CHANGELOG.md`, y lleva `[skip ci]`.
+    pushBranchWithRebase(io, opts.branch, version);
   }
   return { released: true, version };
+}
+
+const PUSH_ATTEMPTS = 3;
+
+/**
+ * Empuja `branch` reintentando con `pull --rebase` ante un rechazo. Si agota los
+ * intentos tira un error que NOMBRA el estado real del mundo — npm publicado, git a
+ * medias — en vez de un "failed to push some refs" que no dice que hacer.
+ *
+ * El `concurrency` de release.yml deberia hacer que esto no llegue a usarse nunca.
+ * Esta igual porque serializar evita la carrera CONOCIDA, y este es el unico punto del
+ * pipeline donde un fallo es irreversible a medias.
+ */
+function pushBranchWithRebase(io: ReleaseIO, branch: string, version: string): void {
+    for (let attempt = 1; attempt <= PUSH_ATTEMPTS; attempt++) {
+        try {
+            io.run('git', ['push', 'origin', branch]);
+            return;
+        } catch (err) {
+            if (attempt === PUSH_ATTEMPTS) {
+                throw new Error(
+                    `v${version} YA SE PUBLICO en npm, pero el commit de bump no se pudo ` +
+                    `empujar a '${branch}' despues de ${PUSH_ATTEMPTS} intentos. El tag ` +
+                    `v${version} si esta en el remoto. Para reconciliar: rebasar el commit ` +
+                    `'chore(release): v${version}' sobre origin/${branch} y empujarlo a mano. ` +
+                    `NO re-publicar. Causa: ${(err as Error).message}`,
+                );
+            }
+            // Un fallo de red no lo arregla el rebase, pero tampoco lo empeora: el
+            // siguiente intento reintenta el push igual.
+            try { io.run('git', ['pull', '--rebase', 'origin', branch]); } catch { /* el retry decide */ }
+        }
+    }
 }

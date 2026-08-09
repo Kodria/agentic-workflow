@@ -52,7 +52,14 @@ export interface ProjectFacts {
      *  ninguna extension del profile — huerfanos. `activeBundles.broken` solo mira lo
      *  que el profile espera, asi que un link cuya extension se retiro no aparecia en
      *  ninguna superficie. `repairable` los puede recuperar el registry; `dead` no. */
-    orphanLinks: { repairable: string[]; dead: string[] };
+    orphanLinks: {
+        repairable: string[];
+        dead: string[];
+        /** Skills que el profile SI reclama, cuyo link fue reemplazado por contenido de
+         *  un tercero. Categoria aparte de los huerfanos porque el remedio difiere: ver
+         *  `docs/decisions.md` D-007. */
+        usurped: string[];
+    };
     sensors: { present: boolean };
     constitution: { present: boolean };
     context: { present: boolean; file?: 'CLAUDE.md' | 'AGENTS.md' };

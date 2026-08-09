@@ -202,3 +202,60 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['--branch'])).toThrow(/--branch requiere/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// D-009 — despues del publish, un fallo de git no puede quedar en silencio
+// ---------------------------------------------------------------------------
+//
+// La 4.0.1 existe en npm y no existe en git: sin tag, sin CHANGELOG. Dos corridas
+// de release concurrentes (mergear un PR mientras el release del anterior estaba en
+// vuelo) dejaron a la segunda adelantando `main`, y la primera murio en
+// `git push origin main` con non-fast-forward DESPUES de publicar.
+//
+// El publish es irreversible; el push no. Ningun test cubria el orden entre ambos ni
+// que pasa si el push falla — el happy path afirmaba que las dos lineas existen, no
+// en que orden ni con que recuperacion.
+
+describe('release — el push despues de un publish exitoso', () => {
+  it('empuja el TAG antes que la rama: en el peor caso queda la identidad de lo publicado', () => {
+    const { io, calls } = makeIO({ commits: `feat: x${US}${RS}` });
+    release(opts(), io);
+    const tagPush = calls.findIndex((c) => c === 'git push origin v2.2.0');
+    const branchPush = calls.findIndex((c) => c === 'git push origin main');
+    expect(tagPush).toBeGreaterThanOrEqual(0);
+    expect(branchPush).toBeGreaterThanOrEqual(0);
+    expect(tagPush).toBeLessThan(branchPush);
+  });
+
+  it('reintenta con rebase cuando la rama se movio bajo los pies', () => {
+    let branchPushes = 0;
+    const { io, calls } = makeIO({ commits: `feat: x${US}${RS}` });
+    const inner = io.run;
+    io.run = (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'push' && args[2] === 'main') {
+        branchPushes++;
+        // Exactamente el fallo real: la primera vez rechazado, despues del rebase pasa.
+        if (branchPushes === 1) throw new Error('! [rejected] main -> main (non-fast-forward)');
+      }
+      return inner(cmd, args);
+    };
+    expect(() => release(opts(), io)).not.toThrow();
+    expect(branchPushes).toBe(2);
+    expect(calls.join('\n')).toMatch(/git pull --rebase origin main/);
+  });
+
+  it('si el push no se recupera, el error NOMBRA que npm ya tiene la version', () => {
+    const { io } = makeIO({ commits: `feat: x${US}${RS}` });
+    const inner = io.run;
+    io.run = (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'push' && args[2] === 'main') {
+        throw new Error('! [rejected] main -> main (non-fast-forward)');
+      }
+      return inner(cmd, args);
+    };
+    // Un "failed to push some refs" pelado no le dice a nadie que npm quedo adelantado
+    // ni que NO hay que re-publicar. Eso es lo que se asserta, no que tire.
+    expect(() => release(opts(), io)).toThrow(/YA SE PUBLICO en npm/);
+    expect(() => release(opts(), io)).toThrow(/NO re-publicar/);
+  });
+});

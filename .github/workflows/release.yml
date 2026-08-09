@@ -15,6 +15,18 @@ permissions:
   contents: write
   id-token: write   # OIDC para npm Trusted Publisher
 
+# Los releases se SERIALIZAN. Dos corridas concurrentes ya rompieron una vez:
+# mergear un PR mientras el release del anterior estaba en vuelo dejo a la segunda
+# corrida adelantando `main`, y la primera murio en `git push` con non-fast-forward
+# DESPUES de haber publicado a npm. Resultado: la 4.0.1 existe en npm y no existe en
+# git — sin tag y sin entrada de CHANGELOG. Ver docs/decisions.md D-009.
+#
+# `cancel-in-progress: false` es lo importante: cancelar un release a mitad de camino
+# es justo el modo de falla que se quiere evitar. La segunda corrida ESPERA.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   # El gate del release, en las TRES plataformas.
   #

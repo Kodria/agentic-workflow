@@ -11,7 +11,8 @@ import fs from 'fs';
 import path from 'path';
 import { AgentTarget, ProviderConfig, RendererId, Scope, providerFor } from '../../providers';
 import { ProviderCheck, ProviderCheckState, ProviderFacts, ProviderTier } from './types';
-import { SkillIntegrity, classifySkillLinks } from '../skill-integrity';
+import { SkillIntegrity, classifySkillLinks, managedLinkTargets } from '../skill-integrity';
+import { ManagedArtifactRecord, readArtifactState } from '../artifact-state';
 import { assertProviderSupported } from '../provider-version';
 import { computeHookStatus } from '../../commands/hooks/status';
 import { InjectionOrchestrator } from '../context/orchestrator';
@@ -203,14 +204,24 @@ function workflowsGlobalCheck(agent: AgentTarget): ProviderCheck | null {
     // Los workflows se instalan con el renderer `link`, asi que un symlink colgante es
     // exactamente la misma clase de rotura que en skills — y se clasifica con la misma
     // funcion, no con una copia local que pueda divergir.
-    const integrity = classifySkillLinks(dir, contentRoots());
+    //
+    // El ledger va SIEMPRE que se escanee un dir gestionado. Cuando se agrego la
+    // deteccion de usurpaciones (D-007) se cableo en el seam `scanSkills`, que alimenta
+    // `skills.global` — y este sitio, que llama al clasificador directo, quedo afuera:
+    // detectaba links colgantes y no un workflow reemplazado por contenido ajeno. Es el
+    // mismo hermano-sin-tratar que ya aparecio varias veces en este archivo.
+    const integrity = classifySkillLinks(dir, contentRoots(), managedLinkTargets(safeArtifactState()));
     const broken = integrity.repairable.length + integrity.dead.length;
+    const usurped = integrity.usurped.length;
     return {
         id: 'workflows.global',
-        state: broken > 0 ? 'broken' : 'healthy',
+        state: broken > 0 || usurped > 0 ? 'broken' : 'healthy',
         target: dir,
-        detail: broken > 0 ? `${broken} broken link(s)` : undefined,
-        remediationCode: broken > 0 ? 'awm-init' : undefined,
+        detail: [
+            broken > 0 ? `${broken} broken link(s)` : null,
+            usurped > 0 ? `${usurped} replaced by non-AWM content (${integrity.usurped.join(', ')})` : null,
+        ].filter(Boolean).join('; ') || undefined,
+        remediationCode: usurped > 0 ? 'reinstall-usurped-skills' : broken > 0 ? 'awm-init' : undefined,
     };
 }
 
@@ -248,7 +259,31 @@ function agentsNativeCheck(agent: AgentTarget): ProviderCheck | null {
             remediationCode: broken > 0 ? 'reinstall-native-agents' : undefined,
         };
     }
-    return { id: 'agents.native', state: 'healthy', target: dir };
+    // Renderer `link` (claude-code, `~/.claude/agents`): esto devolvia `healthy` fijo
+    // con solo mirar que el dir no estuviera vacio. Un symlink colgante ahi adentro
+    // pasaba, y un artefacto reemplazado por contenido de un tercero tambien — el
+    // agente cargaba el ajeno mientras doctor daba verde. El dir es gestionado igual
+    // que el de skills, asi que se verifica igual.
+    const integrity = classifySkillLinks(dir, contentRoots(), managedLinkTargets(safeArtifactState()));
+    const broken = integrity.repairable.length + integrity.dead.length;
+    const usurped = integrity.usurped.length;
+    return {
+        id: 'agents.native',
+        state: broken > 0 || usurped > 0 ? 'broken' : 'healthy',
+        target: dir,
+        detail: [
+            broken > 0 ? `${broken} broken link(s)` : null,
+            usurped > 0 ? `${usurped} replaced by non-AWM content (${integrity.usurped.join(', ')})` : null,
+        ].filter(Boolean).join('; ') || undefined,
+        remediationCode: usurped > 0 ? 'reinstall-usurped-skills' : broken > 0 ? 'reinstall-native-agents' : undefined,
+    };
+}
+
+/** El ledger de propiedad, best-effort: un archivo ausente o corrupto degrada a "no
+ *  puedo detectar usurpaciones", nunca revienta un comando de diagnostico. Mismo
+ *  criterio que `safeReadArtifactState` en context.ts. */
+function safeArtifactState(): ManagedArtifactRecord[] {
+    try { return readArtifactState(); } catch { return []; }
 }
 
 function hookTrustCheck(agent: AgentTarget): ProviderCheck | null {
