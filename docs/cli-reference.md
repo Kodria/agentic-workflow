@@ -29,13 +29,17 @@ awm init [--agent <agent>] [--machine-only] [--yes] [--json]
 | `-y, --yes` | Skip confirmation prompts (for scripts). |
 | `--json` | Emit the full `InitOutcome` as JSON instead of the rendered report — on success **and** on failure. |
 
-**Exit codes:** `0` healthy · `1` degraded (ran to completion, some checks still missing) · `2` failed (one or more steps failed; every write was rolled back).
+**Exit codes:** `0` init did its job — including a run that ends `degraded`, i.e. ran to completion with checks still pending · `2` did not complete: a gate refused, or a step failed and every write was rolled back. **`1` is not used.**
 
-**`--json` contract.** Both documents carry a `result` field mirroring the exit code, so a bootstrap script can branch on one value:
+> **Cambió en la v5.0.0.** `degraded` salía `1`, así que un run donde no fallaba nada
+> reportaba fallo y `awm init --yes && …` moría bajo `set -e`. El exit code responde por
+> init; la salud del harness la responde `awm doctor`. Ver [`decisions.md`](decisions.md) D-008.
+
+**`--json` contract.** Both documents carry a `result` field, so a script that wants the `ok` / `degraded` distinction can branch on it — the exit code no longer encodes it:
 
 | `result` | Exit | Document |
 |---|---|---|
-| `ok` / `degraded` | 0 / 1 | The `InitOutcome`: `steps`, `applied`/`pending`/`failed`, `before`, `after`, `transactionId`, `modifiedFiles`. |
+| `ok` / `degraded` | 0 | The `InitOutcome`: `steps`, `applied`/`pending`/`failed`, `before`, `after`, `transactionId`, `modifiedFiles`. |
 | `failed` | 2 | A failure envelope: `error` (names the failed steps), `steps`, `failedSteps` (the `action: "failed"` subset, each with `id` and `error`), `before`, `after`, and `transaction`. |
 
 On `result: "failed"`, `transaction` records what happened to the machine: `committed` is always `false`, `rolledBack` says whether every path in `restoredFiles` was restored to its pre-init state, and `rollbackError` appears only if the restore itself failed (recover with `awm backup restore <transactionId>`). `after` is the state observed at the end of the step pipeline — *before* the rollback ran — so it describes what the failing run produced, not what is on disk now.

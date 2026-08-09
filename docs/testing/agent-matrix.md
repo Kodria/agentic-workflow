@@ -58,14 +58,16 @@ awm init -a <agent> --yes --json > init-<agent>.json
 ```
 **Expect:** `failed: 0`.
 
-> **Judge `failed`, not the exit code.** `awm init` exits `1` on a run where nothing broke:
-> exit `1` means *the harness is degraded*, which normally just means two steps are `pending`
-> because they need an agent session to write `CONSTITUTION.md` and `AGENTS.md`. This is
-> spelled out in [core-acceptance](core-acceptance.md), and this playbook used to assume you
-> had read it first — **two separate runs marked AG-02 FAIL on the exit code while their own
-> JSON said `failed: 0`**, so it is repeated here.
+> **Judge `failed`, not the exit code.** A run can finish `degraded` — two steps `pending`
+> because an agent session writes `CONSTITUTION.md` and `AGENTS.md` — and that is a normal
+> first run, not a failure.
 >
 > `failed: 0` → PASS. `failed: > 0` → FAIL, and `modifiedFiles` lists what was rolled back.
+>
+> Desde la **v5.0.0** el exit code acompaña: `0` = init hizo su trabajo, `2` = no se
+> completó, y `1` no se usa. Contra una v4.x, un run sano sale `1` — **dos corridas
+> distintas marcaron AG-02 FAIL por eso**, con `failed: 0` en su propio JSON. Ver
+> [core-acceptance](core-acceptance.md) y [`decisions.md`](../decisions.md) D-008.
 
 **Legitimate exception:** exit `2` with a message that the agent's binary is missing or below its minimum version — that is a **correct refusal**, record it as PASS with a note. `codex` requires ≥ `0.145.0`.
 

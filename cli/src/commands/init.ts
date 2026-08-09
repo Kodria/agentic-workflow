@@ -279,8 +279,20 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
         });
     }
 
-    // `result` mirrors the exit code, so a consumer can branch on one field
-    // instead of correlating stdout with $?: ok → 0, degraded → 1, failed → 2.
+    // `result` distinguishes `ok` from `degraded` in the JSON; the EXIT CODE does
+    // not, on purpose (D-008).
+    //
+    // `degraded` used to exit `1`. It does not mean init failed — it means the
+    // harness still has `pending` steps, which is the NORMAL outcome of a first run:
+    // `CONSTITUTION.md` and `AGENTS.md` are written by an agent session, not by the
+    // CLI. So a run where nothing broke reported failure, and `awm init --yes && …`
+    // died under `set -e` — in the one command whose entire job is bootstrapping a
+    // script. Three independent readers called it a bug before it was one; the docs
+    // had grown a warning box asking people to ignore the exit code.
+    //
+    // The exit code now answers "did init do its job?". "Is the harness fully
+    // healthy?" is `awm doctor`'s question, and `result` still carries it here for
+    // any consumer that wants to branch on it.
     const result = outcome.after.overall === 'healthy' ? 'ok' : 'degraded';
 
     if (opts.json) {
@@ -289,7 +301,7 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
         process.stdout.write(renderInitOutcome(outcome) + '\n');
     }
 
-    return result === 'ok' ? 0 : 1;
+    return 0;
 }
 
 // ---------------------------------------------------------------------------
