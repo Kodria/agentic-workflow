@@ -69,6 +69,36 @@ awm init -a codex
 
 If Codex is below `0.145.0`, `awm init -a codex` refuses with exit `2` and names the minimum. That's a correct refusal, not a bug — upgrade Codex and re-run.
 
+**Si tenés `CODEX_HOME` seteado, esas rutas cambian.** Codex lee su configuración desde
+`$CODEX_HOME` cuando esa variable existe, y AWM la respeta desde la **v6.0.0**: `hooks.json`,
+`agents/` y el `AGENTS.md` global pasan a colgar de ahí. Las skills **no** se mueven —
+`~/.agents/skills` es una convención compartida con OpenCode, no un directorio de Codex.
+
+Comprobalo antes de dar nada por instalado:
+
+```bash
+echo "$CODEX_HOME"
+awm doctor --json -a codex     # los `target` deben empezar con tu $CODEX_HOME
+```
+
+> Antes de la v6.0.0 AWM ignoraba esa variable y escribía en `~/.codex`: instalación
+> correcta, en el archivo que Codex no lee. El hook quedaba instalado y mudo, y `doctor`
+> lo reportaba presente porque verificaba en el mismo lugar equivocado donde había
+> escrito. Si venís de una versión anterior, corré `awm init -a codex` de nuevo y borrá a
+> mano lo que haya quedado en `~/.codex`.
+
+**La primera sesión te va a pedir confianza.** Codex no ejecuta hooks hasta aprobarlos:
+
+```
+Hooks need review
+1 hook is new or changed.
+Hooks can run outside the sandbox after you trust them.
+```
+
+Elegí **"Trust all and continue"**. Hasta entonces `awm hooks status --agent codex` reporta
+`PENDING_TRUST` — instalado, nunca ejecutado. Si elegís "Continue without trusting", el hook
+no corre y AWM no tiene forma de forzarlo.
+
 ## `opencode` — config-managed
 
 ```bash
