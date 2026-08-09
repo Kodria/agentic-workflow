@@ -15,6 +15,7 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-007](#d-007) | 2026-08-09 | Un artefacto usurpado se **reporta**, no se auto-repara | Vigente |
 | [D-008](#d-008) | 2026-08-09 | El exit code de `awm init` responde por init, no por la salud del harness | Vigente |
 | [D-009](#d-009) | 2026-08-09 | Los releases se serializan, y el tag se empuja antes que la rama | Vigente |
+| [D-010](#d-010) | 2026-08-09 | Un hook que nunca corrió no se reporta `HEALTHY` | Vigente |
 
 ---
 
@@ -215,3 +216,49 @@ push existen — no en que orden, y nada cubria que pasa si una falla.
 son dejarla (es funcionalmente la 4.0.0 mas el fix de `doctor`), taggearla
 retroactivamente sobre el merge de #44, o deprecarla en npm. Deprecar es visible para
 cualquiera que la instale, asi que lo decide una persona.
+
+---
+
+## D-010
+
+**`awm hooks status` deja de decir `HEALTHY` sobre un hook que nunca se vio correr.**
+
+Salio de la corrida del playbook de Codex en el VPC. La salida real que leyo quien lo corrio:
+
+```
+  Trust:              … pending-trust
+
+  Status: HEALTHY
+```
+
+Dos lineas, contradictorias. `overall` se calculaba con `sessionStartScript.ok &&
+settingsEntry.ok` — **ignorando `trust` por completo**. Los archivos estan, entonces
+verde. Que el hook jamas se haya ejecutado no entraba en la cuenta.
+
+`doctor --json` decia la verdad (`hook.trust: pending-trust`). La vista humana no, y es la
+que mira una persona.
+
+**Implica:**
+- `overall` gana `PENDING_TRUST`: instalado y bien formado, pero nunca confirmado
+  corriendo. No es `HEALTHY` — de un hook que nunca corrio no se puede afirmar que
+  entregue contexto — y no es `DEGRADED`, porque no hay nada roto que arreglar.
+- `trust: 'stale'` (el script cambio desde la ultima corrida confirmada) ahora si degrada.
+  Era la rotura mas clara de las tres y se reportaba en verde.
+- `PENDING_TRUST` sale `0`. Salir `1` en toda instalacion recien hecha convertiria el
+  comando en ruido; el texto ya no miente, que era el problema.
+
+**El sitio que faltaba era el test ausente:** los tests de Codex afirmaban `.trust` y
+**nunca** `.overall`. El campo equivocado no lo miraba nadie.
+
+**Ademas, `hooks` acepta `-a, --agent` como alias de `-t, --target`.** `hooks` nacio con
+`--target` y el resto del CLI (`add`, `remove`, `sync`, `update`, `doctor`) usa `--agent`.
+La asimetria se cobro la misma corrida: `awm hooks status --agent codex` fallaba con
+`unknown option`. Se agrega alias en vez de renombrar, para no romper a quien ya scriptea
+`--target`.
+
+**Abierto, del mismo reporte:** `~/.codex/hooks.json` **no** vive bajo `AWM_HOME`, asi que
+una corrida "aislada" del playbook deja ahi una entrada permanente apuntando a un directorio
+temporal. La corrida del VPC termino con DOS entradas de AWM bajo `SessionStart`, ambas con
+el mismo matcher. `awm init` no la reconoce como propia porque compara contra el
+`scriptsDir` actual, y agrega otra. Falta decidir si eso se deduplica, se limpia en el
+teardown del playbook, o ambas.

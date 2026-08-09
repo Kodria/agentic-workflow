@@ -263,3 +263,29 @@ bootstrap, que es exactamente el uso del comando. Registrado como decisión pend
 **Nota menor, sin registrar como hallazgo:** Codex reportó ver algunas skills "duplicadas en
 dos registros". `.agents/skills` lo comparten Codex y OpenCode, y una instalación global más
 una de proyecto pueden mostrar el mismo nombre dos veces. No se investigó; queda anotado.
+
+
+---
+
+## Aviso de aislamiento — `hooks.json` NO vive bajo `AWM_HOME`
+
+Los playbooks piden `export AWM_HOME="$HOME/.awm-e2e"` para no tocar tu estado real. Ese
+aislamiento **no cubre el archivo de hooks del agente**: Codex los registra en
+`~/.codex/hooks.json` y Claude Code en `~/.claude/settings.json`, los dos en tu HOME real.
+
+Consecuencia observada en la corrida del VPC: `~/.codex/hooks.json` termino con **dos**
+entradas de AWM bajo `SessionStart`, con el mismo matcher — la de la instalacion real y la
+del entorno de prueba. `awm init` no reconoce la ajena como propia (compara contra el
+`scriptsDir` actual) y agrega la suya.
+
+Eso importa por dos razones:
+
+1. **Contamina el resultado.** Cada entrada escribe su heartbeat al lado de SU script. Si
+   mirás solo el del entorno aislado, podés concluir que el hook no disparo cuando en
+   realidad disparo el otro.
+2. **Queda para siempre.** Una entrada apuntando a un `AWM_HOME` temporal ya borrado se
+   queda ahi, y el agente intenta ejecutarla en cada sesion.
+
+**Antes de correr un playbook de hooks:** mirá `~/.codex/hooks.json` (o
+`~/.claude/settings.json`) y anotá que habia. **Al terminar:** sacá a mano la entrada del
+entorno de prueba. Es la unica parte del teardown que no resuelve borrar `$AWM_HOME`.

@@ -139,16 +139,21 @@ export function computeCodexHookStatus(agent: 'codex'): HookStatus {
     const allOk = sessionStartScript.ok && settingsEntry.ok;
     const settingsOnlyMissing = !settingsEntry.ok && sessionStartScript.ok;
 
-    let overall: HookStatus['overall'];
-    if (allOk) overall = 'HEALTHY';
-    else if (settingsOnlyMissing) overall = 'NOT_INSTALLED';
-    else overall = 'DEGRADED';
-
     // Trust only makes sense once the AWM entry is actually present in
     // hooks.json — otherwise there's nothing installed to trust.
     const trust = settingsEntry.ok
         ? computeCodexTrust(sessionStartScript, scriptPath, heartbeatPath)
         : undefined;
+
+    // `overall` IGNORABA `trust` por completo, asi que `awm hooks status` imprimia
+    // `Status: HEALTHY` dos lineas debajo de `Trust: … pending-trust`. Una corrida real
+    // del playbook leyo esa salida y concluyo que el hook andaba. `doctor --json` decia
+    // la verdad; la vista humana, no — y es la que mira una persona. Ver D-010.
+    let overall: HookStatus['overall'];
+    if (!allOk) overall = settingsOnlyMissing ? 'NOT_INSTALLED' : 'DEGRADED';
+    else if (trust === 'stale') overall = 'DEGRADED';
+    else if (trust === 'pending-trust') overall = 'PENDING_TRUST';
+    else overall = 'HEALTHY';
 
     return {
         overall,
