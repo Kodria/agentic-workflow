@@ -1,3 +1,8 @@
+## v5.0.1 - 2026-08-09
+
+### Fixes
+- **release,doctor:** serialize releases, and give the sibling checks the ledger
+
 ## v5.0.0 - 2026-08-09
 
 ### Breaking Changes
