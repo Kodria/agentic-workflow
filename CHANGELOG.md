@@ -1,3 +1,8 @@
+## v4.1.1 - 2026-08-09
+
+### Fixes
+- **doctor:** detect an AWM skill link replaced by third-party content
+
 ## v4.1.0 - 2026-08-09
 
 ### Features
