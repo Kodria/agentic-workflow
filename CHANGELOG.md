@@ -1,3 +1,13 @@
+## v6.4.1 - 2026-08-10
+
+### Fixes
+- **gate:** un track no podía congelarse NUNCA — R3.6 se evaluaba fuera de su scope
+- **tracks:** el supervisor de un track no arrancaba si el plan cruzaba ACTIVE entre dos polls
+- **tracks:** la descripción de `awm track remove` prometía un teardown que no ocurre
+- **tracks:** un join pedido antes de la activación esperaba que lo descartaran
+- **tracks:** awm track join no hacía nada, y el supervisor lo contaba como aplicado
+- **update:** stop reporting success for work awm update did not do, and stop hanging on a prompt nobody can answer
+
 ## v6.4.0 - 2026-08-10
 
 ### Features
