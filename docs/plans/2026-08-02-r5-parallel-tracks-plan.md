@@ -2887,7 +2887,7 @@ _Requirements: R1.2, R4.5, R8.2, R10.1, RNF-T.2_
 - Modify: `docs/plans/2026-08-02-r5-parallel-tracks-plan.md` (solo checkboxes durante ejecución; marcadores QA/retro los agregan sus skills)
 - Modify after CLI release decision: `../awm-baseline-registry/awm-registry.json`
 
-- [ ] **Step 1: Documentar el flujo diario y fallback**
+- [x] **Step 1: Documentar el flujo diario y fallback**
 
 Agregar a `cli/README.md`:
 
@@ -2909,7 +2909,7 @@ worktree, branch, lock, or process merely to make it proceed.
 
 En `README.md` enlazar esa sección sin duplicar el protocolo.
 
-- [ ] **Step 2: Correr suites focalizadas**
+- [x] **Step 2: Correr suites focalizadas**
 
 Run:
 
@@ -2920,13 +2920,13 @@ npx jest tests/core/tracks tests/commands/track tests/commands/watch/track-boots
 
 Expected: PASS, cero procesos/worktrees de fixtures remanentes.
 
-- [ ] **Step 3: Correr regresión completa y build**
+- [x] **Step 3: Correr regresión completa y build**
 
 Run: `cd cli && npm test && npm run build`
 
 Expected: PASS. No actualizar snapshots para ocultar diferencias; cada cambio inesperado se investiga.
 
-- [ ] **Step 4: Auto-verificar el CLI compilado**
+- [x] **Step 4: Auto-verificar el CLI compilado**
 
 Run:
 
