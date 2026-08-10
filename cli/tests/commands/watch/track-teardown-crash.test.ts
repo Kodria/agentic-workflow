@@ -348,7 +348,13 @@ describe('reconcileTracks — crash/restart de teardown con git real (Task 13, R
         s = readJournal(planRoot, BRANCH).state!;
         const ref = trackA(s);
 
-        const bystander = spawn(process.execPath, ['-e', 'setTimeout(()=>{}, 5000)'], { detached: true, stdio: 'ignore' });
+        // Vive hasta que el `finally` lo mate, NO 5 segundos. Estos dos tests son los
+        // únicos de la suite que asertan que el proceso ajeno SIGUE VIVO al final, y un
+        // tiempo fijo convierte esa aserción en una carrera contra la plataforma más lenta:
+        // en Windows este archivo tarda ~22s, así que el bystander moría de viejo y el test
+        // reportaba "lo matamos" cuando `signalledForeignProcess` probaba lo contrario.
+        // Se elimina la carrera en vez de agrandarle el margen.
+        const bystander = spawn(process.execPath, ['-e', 'setInterval(()=>{}, 1000)'], { detached: true, stdio: 'ignore' });
         if (bystander.pid === undefined) throw new Error('spawn de bystander falló');
         const bystanderPid = bystander.pid;
         await new Promise((resolve) => setTimeout(resolve, 150));   // dejar asentar identidad real vía ps
@@ -399,7 +405,13 @@ describe('reconcileTracks — crash/restart de teardown con git real (Task 13, R
         s = readJournal(planRoot, BRANCH).state!;
         const ref = trackA(s);
 
-        const bystander = spawn(process.execPath, ['-e', 'setTimeout(()=>{}, 5000)'], { detached: true, stdio: 'ignore' });
+        // Vive hasta que el `finally` lo mate, NO 5 segundos. Estos dos tests son los
+        // únicos de la suite que asertan que el proceso ajeno SIGUE VIVO al final, y un
+        // tiempo fijo convierte esa aserción en una carrera contra la plataforma más lenta:
+        // en Windows este archivo tarda ~22s, así que el bystander moría de viejo y el test
+        // reportaba "lo matamos" cuando `signalledForeignProcess` probaba lo contrario.
+        // Se elimina la carrera en vez de agrandarle el margen.
+        const bystander = spawn(process.execPath, ['-e', 'setInterval(()=>{}, 1000)'], { detached: true, stdio: 'ignore' });
         if (bystander.pid === undefined) throw new Error('spawn de bystander falló');
         const bystanderPid = bystander.pid;
         await new Promise((resolve) => setTimeout(resolve, 150));
