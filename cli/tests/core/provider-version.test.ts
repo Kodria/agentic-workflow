@@ -10,6 +10,34 @@ describe('assertProviderSupported', () => {
         expect(exec).toHaveBeenCalledWith('codex', ['--version'], expect.any(Object));
     });
 
+    // Regression: npm installs `codex` as `codex.cmd` on Windows, and
+    // execFileSync can't CreateProcess a `.cmd` shim without a shell — it threw
+    // ENOENT here even on a machine where `codex --version` worked fine typed
+    // directly. `provider.versionCommand` is hardcoded first-party config
+    // (providers/index.ts), never attacker-controlled, so `shell: true` here
+    // carries none of the injection risk core/paths.ts's resolveOnPath was
+    // built to avoid for sensors.json's user/registry-supplied `cmd`.
+    describe('on native Windows', () => {
+        const realPlatform = process.platform;
+        afterEach(() => {
+            Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+        });
+
+        it('runs the version probe through a shell so the .cmd shim resolves', () => {
+            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+            const exec = jest.fn(() => Buffer.from('codex-cli 0.145.0\n'));
+            assertProviderSupported('codex', exec);
+            expect(exec).toHaveBeenCalledWith('codex', ['--version'], expect.objectContaining({ shell: true }));
+        });
+
+        it('does not use a shell on non-Windows platforms', () => {
+            Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+            const exec = jest.fn(() => Buffer.from('codex-cli 0.145.0\n'));
+            assertProviderSupported('codex', exec);
+            expect(exec).toHaveBeenCalledWith('codex', ['--version'], expect.objectContaining({ shell: false }));
+        });
+    });
+
     it.each(['0.145.1', '0.146.0', '1.0.0'])(
         'accepts stable Codex version %s above the minimum',
         (version) => {

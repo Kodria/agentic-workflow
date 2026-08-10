@@ -4,6 +4,7 @@ import {
 } from 'child_process';
 import { AgentTarget, providerFor } from '../providers';
 import { compareSemver } from './versioning';
+import { isWindowsNative } from './paths';
 
 type Exec = (
     command: string,
@@ -26,6 +27,17 @@ export function assertProviderSupported(
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'pipe'],
             timeout: 5000,
+            // Windows can't CreateProcess a `.cmd` shim directly (npm installs
+            // `codex` as `codex.cmd`, not `codex.exe`) — execFileSync needs a
+            // shell to resolve and run it, or it throws ENOENT even though
+            // typing `codex --version` in the same shell works fine. Safe here
+            // (unlike sensors.json's `cmd`, core/paths.ts's resolveOnPath):
+            // `provider.versionCommand.command`/`args` are hardcoded first-party
+            // config (providers/index.ts), never attacker-controlled input.
+            // Found running the issue #55 Windows playbook: `awm init -a codex`
+            // reported "Codex is not installed" on a machine where it plainly
+            // was — `codex --version` worked fine typed directly.
+            shell: isWindowsNative(),
         }).toString();
     } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
