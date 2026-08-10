@@ -607,7 +607,10 @@ describe('finalizer end-to-end (R7.1-R7.7, C3/C4, Task 12)', () => {
         });
         // El interlock certifica UNA VEZ que la evidencia (qa, interlock,
         // track-integration:* de ambos tracks) está completa y vigente.
-        expect(h.interlock().pass).toBe(true);
+        // Instrumentado a propósito: un `toBe(true)` pelado en Windows dice "false" y nada
+        // más, y la causa (`stale-fingerprint`, `missing-verifier`, …) vive en `reasons`.
+        // Afirmar sobre las razones hace que el rojo TRAIGA su propio diagnóstico.
+        expect(h.interlock().reasons).toEqual([]);
 
         await h.tickUntil(() => readJournal(h.repo, 'main').state!.cohortPhase === 'COMPLETE');
         const final = readJournal(h.repo, 'main').state!;
@@ -675,7 +678,10 @@ describe('finalizer end-to-end (R7.1-R7.7, C3/C4, Task 12)', () => {
                 .filter((j) => j.satisfies?.some((id) => id.startsWith('track-integration:')));
             return jobs.length === 1 && jobs[0].executionState === 'exited';
         });
-        expect(h.interlock().pass).toBe(true);
+        // Instrumentado a propósito: un `toBe(true)` pelado en Windows dice "false" y nada
+        // más, y la causa (`stale-fingerprint`, `missing-verifier`, …) vive en `reasons`.
+        // Afirmar sobre las razones hace que el rojo TRAIGA su propio diagnóstico.
+        expect(h.interlock().reasons).toEqual([]);
 
         h.moveHeadUnrelated();   // el árbol mutó DESPUÉS de que la evidencia se fijó
         const stale = h.interlock();
