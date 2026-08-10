@@ -175,9 +175,9 @@ awm doctor --json -a antigravity
 |---|---|---|---|---|---|---|---|---|
 | claude-code | PASS | PASS | PASS | PASS | PASS | PASS | CC-01 PASS · CC-02 PASS | 2026-08-09, awm 4.0.0, Linux. AG-02 exit `1` / `failed: 0`. AG-05: 31 artefactos. AG-06 con control negativo (ver abajo). **Un hallazgo de producto**, arreglado: ver "Lo que encontró la corrida". |
 | codex | PASS | PASS | PASS | PASS | PASS | PASS | CX-01 PASS · CX-02 PASS · **hook PASS** | 2026-08-09, awm 6.0.0, codex-cli 0.146.0, Ubuntu (VPC) con `CODEX_HOME`. **Hook observado ejecutándose** tras otorgar la confianza, sin bypass. Las tres corridas que costó están contadas en [support-matrix](../support-matrix.md). |
-| opencode |  |  |  |  |  |  | OC-01 |  |
+| opencode | PASS | PASS | PASS | PASS | PASS | PASS | OC-01 PASS | 2026-08-10, macOS 15.6 arm64, Node 24.18.0, AWM 6.4.1, OpenCode 1.16.2. Isolated `HOME` + `AWM_HOME`; `instructions` pointed to AWM context and 30 frontend artifacts installed. Causal AG-06: with all skill symlinks hidden, OpenCode recited the exact three-level priority from the materialized context; with `instructions` removed under the same conditions, it reported no AWM instructions. |
 | cursor |  |  |  |  |  |  | CU-01 |  |
-| copilot |  |  |  |  |  |  | CP-01 CP-02 |  |
+| copilot | PASS | PASS | PASS | PASS | PASS | PASS | CP-01 PASS · CP-02 PASS | 2026-08-10, macOS 15.6 arm64, Node 24.18.0, AWM 6.4.1, Copilot Pro in VS Code. `init` had `failed: 0`; `doctor` reported `overall: healthy`, `agents-md-managed`, and delivered context. CP-01 refused global scope with its user-level-discovery reason; CP-02 rendered 36 project instructions. Copilot Chat cited `using-awm`, `development-process`, and `writing-plans` instructions in References, and named `awm preflight` correctly. |
 | antigravity |  |  |  |  |  |  | AN-01 |  |
 
 Record **BLOCKED** for any agent whose binary you don't have. Do not infer a result from another agent's outcome — the bugs this suite exists to catch are precisely the ones that only appear on one provider's path.

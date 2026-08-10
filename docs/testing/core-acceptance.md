@@ -122,18 +122,19 @@ Run CORE-07 again verbatim.
 
 **Expect:** exit `0`, no duplicate entry, no crash. Re-installing an already-installed artifact must be a no-op or a clean replace.
 
-## CORE-09 · The project profile records the install
+## CORE-09 · The project profile records local installs
 
 ```bash
+awm add dev --scope local --method symlink --agent claude-code --yes
 cat .awm/profile.json
 ```
 
-**Expect:** valid JSON recording the project's extensions. This file is meant to be **committed** — it is how a teammate reproduces your setup with `awm sync`.
+**Expect:** valid JSON whose `extensions` includes `dev`. This file is meant to be **committed** — it is how a teammate reproduces your setup with `awm sync`. The global install in CORE-07 is deliberately absent: machine-scope artifacts are not project extensions.
 
 ## CORE-10 · Rebuild from the profile
 
 ```bash
-awm sync --yes; echo "exit=$?"
+awm sync; echo "exit=$?"
 ```
 
 **Expect:** exit `0`. This is the "fresh clone on a new machine" path: it rebuilds links from `profile.json` alone.
@@ -141,7 +142,7 @@ awm sync --yes; echo "exit=$?"
 ## CORE-11 · Sensors initialise for the detected stack
 
 ```bash
-awm sensors init --yes
+awm sensors init
 cat .awm/sensors.json
 ```
 
@@ -158,7 +159,7 @@ the gate is thin at the moment it is created, not from an unrelated command days
 awm sensors run; echo "exit=$?"
 ```
 
-**Expect:** each configured sensor reported with a real state. A sensor whose tool isn't installed must report `skipped` with a reason — **never silently `pass`**. A non-zero exit with genuine findings is correct behaviour, not a FAIL.
+**Expect:** each configured sensor reported with a real state. A sensor whose tool isn't installed must report a clear `fail` explaining that the gate could not run it — **never silently `pass`**. A non-zero exit from `awm sensors run` is correct when the output reports findings or a missing tool.
 
 ## CORE-12b · `sensors run` changes nothing
 
@@ -207,12 +208,12 @@ awm preflight --json > pre.json; echo "exit=$?"
 awm context-budget
 ```
 
-**Expect:** exit `0` and a size report for the files injected into every agent session. This is the guard against context bloat as a team's registry grows.
+**Expect:** exit `0` and either a size report for the files injected into every agent session, or `unmeasurable` when none of those files exists yet. In the latter case the command must not pin a 0KB budget. This is the guard against context bloat as a team's registry grows.
 
 ## CORE-15 · Export produces an uploadable artifact
 
 ```bash
-awm export development-process
+awm export mermaid-diagrams
 ```
 
 **Expect:** exit `0` and a folder (plus a zip, if zip is available) under `awm-export/`. Open the exported `SKILL.md`: its frontmatter must be valid YAML and its description must end with the "defer to the registry" deference sentence.
@@ -239,7 +240,7 @@ awm remove
 ## CORE-18 · Backups exist and are inspectable
 
 ```bash
-awm backup
+awm backup list
 ```
 
 **Expect:** exit `0`; AWM's filesystem backups under `$AWM_HOME/backups` are listed. Any command that rewrote a user-owned file (`AGENTS.md`, agent settings) should have left a restorable copy.
@@ -269,25 +270,27 @@ ls ~/.awm 2>/dev/null && echo "⚠ real ~/.awm exists — confirm this run did n
 
 | ID | Result | Notes |
 |----|--------|-------|
-| CORE-01 |  |  |
-| CORE-02 |  |  |
-| CORE-03 |  |  |
-| CORE-04 |  |  |
-| CORE-05 |  |  |
-| CORE-06 |  |  |
-| CORE-07 |  |  |
-| CORE-08 |  |  |
-| CORE-09 |  |  |
-| CORE-10 |  |  |
-| CORE-11 |  |  |
-| CORE-12 |  |  |
-| CORE-13 |  |  |
-| CORE-14 |  |  |
-| CORE-15 |  |  |
-| CORE-16 |  |  |
-| CORE-17 |  |  |
-| CORE-18 |  |  |
-| CORE-19 |  |  |
-| CORE-20 |  |  |
+| CORE-01 | PASS | 2026-08-10, macOS 15.6 arm64, Node 24.18.0, AWM 6.4.1 matched the npm latest version. |
+| CORE-02 | PASS | All documented commands present. |
+| CORE-03 | PASS | Isolated bootstrap: `failed: 0`, `applied: 2`, `pending: 2`. |
+| CORE-04 | PASS | Second bootstrap: `failed: 0`, `applied: 0`. |
+| CORE-05 | PASS | `doctor` exit 0, `overall: healthy`. |
+| CORE-06 | PASS | Non-empty package summary. |
+| CORE-07 | PASS | Global symlink install completed. |
+| CORE-08 | PASS | Reinstall completed without duplicate or error. |
+| CORE-09 | PASS | Local `dev` install recorded in `profile.json`; global install stayed absent by design. |
+| CORE-10 | PASS | `sync` rebuilt profile artifacts and named its transaction. |
+| CORE-11 | PASS | Detected `js-ts` and wrote a manifest. |
+| CORE-12 | PASS | Each sensor reported a concrete state; missing local tools were explicit failures, never passes. |
+| CORE-12b | PASS | Re-run left the working tree byte-for-byte unchanged. |
+| CORE-12c | PASS | Removed the dangling link and named the backup transaction. |
+| CORE-13 | PASS | Returned the complete JSON preflight report; missing context and tools were explicit. |
+| CORE-14 | PASS | Reported `unmeasurable` rather than pinning an empty context budget. |
+| CORE-15 | PASS | Exported portable `mermaid-diagrams` as a zip. |
+| CORE-16 | PASS | Two consecutive updates completed successfully. |
+| CORE-17 | PASS | Interactive picker opened; the non-interactive removal path removed the local artifact and `doctor` remained healthy. |
+| CORE-18 | PASS | `backup list` showed restorable transactions. |
+| CORE-19 | PASS | Added and read back a ledger finding. |
+| CORE-20 | PASS | Isolated registry and artifacts stayed under the sandbox; source checkout unchanged. |
 
 Next: **[os-matrix.md](os-matrix.md)** for your OS, then **[agent-matrix.md](agent-matrix.md)** for each agent you use.

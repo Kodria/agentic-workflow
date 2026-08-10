@@ -76,9 +76,9 @@ La parte determinística —`awm sensors run`, su código de salida y el gate de
 |---|---|---|---|---|
 | **Claude Code** | ✅ Verificado | ✅ Verificado | ✅ Verificado | Suite + E2E aislado en CI (ubuntu, windows, macos) + playbook [`agent-matrix`](testing/agent-matrix.md) corrido contra el binario real (AG-01…AG-06, CC-01, CC-02), incluido **AG-06 con control negativo**: un `HOME` sin AWM responde que no tiene ninguna skill de AWM, así que lo que la sesión nombró vino de la instalación observada y no de su ambiente. |
 | **Codex** | ✅ Verificado | ✅ Verificado | ✅ Verificado | Playbook completo contra `codex-cli 0.146.0` real, en una máquina con `CODEX_HOME`. **El hook se observó ejecutándose**: Codex mostró su prompt `Hooks need review`, se otorgó la confianza, la sesión imprimió `Running SessionStart hook` y el hook dejó su `heartbeat.json`. `hook.trust: healthy`, `overall: healthy`. Evidencia abajo. |
-| **OpenCode** | ✅ Verificado | ⚠ Sin verificar | ⛔ No tiene | El escritor de `opencode.json` está cubierto por tests; que OpenCode *lea* ese campo no fue observado. |
+| **OpenCode** | ✅ Verificado | ✅ Verificado | ⛔ No tiene | Playbook aislado ejecutado el 2026-08-10 en macOS 15.6 arm64 con OpenCode 1.16.2 y AWM 6.4.1. Prueba causal de AG-06: sin symlinks de skills visibles, una sesión con `opencode.json.instructions` recitó el orden exacto de prioridad del contexto materializado; al retirar únicamente `instructions`, una nueva invocación con el mismo prompt dijo no tener instrucciones AWM. |
 | **Cursor** | ✅ Verificado | ⚠ Sin verificar | ⛔ No tiene | El `.mdc` se genera, se valida su forma **y se verifica que su contenido siga intacto** (marcador `alwaysApply:`). Que Cursor **cargue** un `.mdc` con `alwaysApply: false` no fue observado. |
-| **Copilot** | ✅ Verificado (solo proyecto) | ⚠ Sin verificar | ⛔ No tiene | El `.instructions.md` se genera **y se verifica su contenido** (marcador `applyTo:`). Que Copilot **honre** `applyTo: "**"` no fue observado. |
+| **Copilot** | ✅ Verificado (solo proyecto) | ✅ Verificado | ⛔ No tiene | Playbook aislado ejecutado el 2026-08-10 en macOS 15.6 arm64 con Copilot Pro en VS Code y AWM 6.4.1. CP-01 rechazó scope global explicando que no hay descubrimiento a nivel usuario; CP-02 generó 36 `.instructions.md`. Una conversación nueva citó `using-awm`, `development-process` y `writing-plans` en References y respondió correctamente `awm preflight`. |
 | **Antigravity** | ✅ Verificado | ⛔ No tiene mecanismo | ⛔ No tiene | Que Antigravity **lea** `global_workflows/` no fue observado. |
 
 ### Las decisiones ⛔, con su razón
@@ -98,7 +98,7 @@ Ninguna de estas es una tarea pendiente. Son límites del proveedor, no del prod
 |---|---|---|
 | **Linux** | ✅ Verificado | Matriz de CI en cada PR (`ubuntu-latest`), suite completa |
 | **Windows** | ✅ Verificado | Matriz de CI en cada PR (`windows-latest`), suite completa. Cubre junctions, PATHEXT y separadores. |
-| **macOS** | ✅ Verificado | Matriz de CI en cada PR (`macos-latest`), suite completa. Su primera corrida encontró un defecto real de producto (ver abajo), que es la diferencia entre "debería funcionar" y evidencia. |
+| **macOS** | ✅ Verificado | Matriz de CI en cada PR (`macos-latest`) más playbook manual registrado el 2026-08-10 en macOS 15.6 arm64, Node 24.18.0 y AWM 6.4.1: CORE-01…20 y MAC-01…04. |
 | **WSL** | ⚠ Sin verificar | Se comporta como Linux por diseño; sin ejecución registrada. Ver la advertencia de rutas cruzadas en [os-matrix](testing/os-matrix.md). |
 
 **Node.js:** 22 o superior (declarado en `engines`). Versiones menores no están soportadas.
