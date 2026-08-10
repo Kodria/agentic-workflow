@@ -1,3 +1,12 @@
+## v6.4.2 - 2026-08-10
+
+### Fixes
+- **provider-version:** distinguish shell "not found" from other failures on Windows
+- **provider-version:** resolve codex's .cmd shim on Windows via shell:true
+- **add:** honor --method on the bundle-activation path (was hardcoded to symlink)
+- **remove:** --yes must also skip the scope prompt, not just the agent one
+- **init:** keep --json stdout pure JSON on native Windows
+
 ## v6.4.1 - 2026-08-10
 
 ### Fixes
