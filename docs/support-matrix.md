@@ -97,7 +97,7 @@ Ninguna de estas es una tarea pendiente. Son límites del proveedor, no del prod
 | Sistema | Nivel | Evidencia |
 |---|---|---|
 | **Linux** | ✅ Verificado | Matriz de CI en cada PR (`ubuntu-latest`), suite completa |
-| **Windows** | ✅ Verificado | Matriz de CI en cada PR (`windows-latest`), suite completa. Cubre junctions, PATHEXT y separadores. |
+| **Windows** | ✅ Verificado | Matriz de CI en cada PR (`windows-latest`), suite completa. Cubre junctions, PATHEXT y separadores. Playbook manual registrado el 2026-08-10 en Windows Server 2022 Datacenter, Node 24.19.0: CORE-01…20 y WIN-01…06 (ver [os-matrix](testing/os-matrix.md)), corrido primero contra AWM 6.4.1 — encontró 4 bugs reales (banner de `--json`, `remove --yes` sin saltar el prompt de scope, `add --method copy` ignorado, `.cmd` de Codex no resuelto), cerrados en [#68](https://github.com/Kodria/agentic-workflow/pull/68) (AWM 6.4.2). WIN-05 quedó `BLOCKED` por una precondición del propio check ajena a Windows. |
 | **macOS** | ✅ Verificado | Matriz de CI en cada PR (`macos-latest`) más playbook manual registrado el 2026-08-10 en macOS 15.6 arm64, Node 24.18.0 y AWM 6.4.1: CORE-01…20 y MAC-01…04. |
 | **WSL** | ⚠ Sin verificar | Se comporta como Linux por diseño; sin ejecución registrada. Ver la advertencia de rutas cruzadas en [os-matrix](testing/os-matrix.md). |
 
