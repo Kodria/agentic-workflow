@@ -60,8 +60,23 @@ function idleUnlessPlanController() {
     try { cwdReal = fs.realpathSync(process.cwd()); repoReal = fs.realpathSync(repo); }
     catch { return; }   // indemostrable: seguir es preferible a abortar la corrida entera
     if (cwdReal === repoReal) return;
-    log(`lanzado fuera de la raiz del plan (cwd=${cwdReal}): no soy el controller del plan, no emito nada`);
-    for (;;) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60000);
+    log(`lanzado fuera de la raiz del plan (cwd=${cwdReal}): no soy el controller del plan`);
+    // Callar del todo NO es opción: el supervisor de ESTE journal cuenta el silencio y a los
+    // `--heartbeat-timeout` declara `controller-suspected-stall`; sin señal positiva de
+    // `safeToReplace` no mata a nadie — entra en custodia BLOCKED, y el track deja de
+    // congelarse. Se observó en la certificación: `alpha` con el freeze pedido y su
+    // supervisor en custodia porque su controller no latía.
+    //
+    // Así que este proceso hace lo mínimo que un controller legítimo de este journal debe
+    // hacer: latir contra SU PROPIO journal (cwd), con el token que recibió. No emite nada
+    // más — no tiene protocolo de track que ejecutar.
+    for (;;) {
+        try {
+            execFileSync(process.execPath, [cli, 'job', 'controller-heartbeat', '--generation', token],
+                { cwd: cwdReal, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        } catch { /* generación superseded: el supervisor ya decidió, no hay nada que hacer */ }
+        sleep(5000);
+    }
 }
 const awm = (args, opts = {}) =>
     execFileSync(process.execPath, [cli, ...args], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
