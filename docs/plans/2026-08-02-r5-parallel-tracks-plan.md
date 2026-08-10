@@ -2753,7 +2753,7 @@ _Requirements: R10.1, R10.4, CA-T.5, RNF-T.2, RNF-T.5_
 - Create: `docs/research/r5/provider-matrix.md`
 - Create: `cli/tests/integration/r5-provider-evidence.test.ts`
 
-- [ ] **Step 1: Escribir el validador antes de recolectar evidencia**
+- [x] **Step 1: Escribir el validador antes de recolectar evidencia**
 
 ```ts
 // cli/tests/integration/r5-provider-evidence.test.ts
@@ -2780,7 +2780,7 @@ Run: `cd cli && npx jest tests/integration/r5-provider-evidence.test.ts --runInB
 
 Expected: FAIL porque faltan ambos JSON. Esta task no puede declararse completa con documentación solamente.
 
-- [ ] **Step 2: Crear protocolo y runner provider-neutral**
+- [x] **Step 2: Crear protocolo y runner provider-neutral**
 
 `provider-protocol.md` instruye exactamente tres ejercicios sobre un repo temporal preparado por `provider-run.mjs`:
 
@@ -2823,7 +2823,7 @@ node docs/research/r5/provider-run.mjs --provider codex --environment owner-mac 
 
 Expected: `docs/research/r5/evidence/codex-owner-mac.json` con `result:"pass"`. El test acepta diferencias de primitivas/provider, pero estados, veredictos y gates deben ser iguales.
 
-- [ ] **Step 5: Generar matriz solo desde evidencia**
+- [x] **Step 5: Generar matriz solo desde evidencia** _(tooling listo y probado; la matriz sale `not-certified` hasta que existan los Steps 3-4)_
 
 `provider-run.mjs --consolidate` lee ambos JSON y genera:
 
@@ -2848,6 +2848,26 @@ Expected: PASS.
 git add docs/research/r5 cli/tests/integration/r5-provider-evidence.test.ts
 git commit -m "test(r5): certify parallel tracks in Claude Code and Codex"
 ```
+
+> **Estado real al cerrar T15.** Steps 1, 2 y 5 completos y auto-probados: el validador falla
+> con mensajes accionables, el runner rechaza combinaciones no aceptadas, deriva los
+> veredictos del journal REAL (nunca del auto-reporte del agente — la prueba del relevo son
+> ≥2 generaciones de controller en el journal, no una marca que el agente escriba), sanitiza
+> WORKDIR/homes/secretos y sale `!= 0` ante cualquier ejercicio no pasado. `--consolidate`
+> escribe `not-certified` por ausencia y jamás `supported`.
+>
+> **Steps 3, 4 y 6 siguen abiertos y no son ejecutables desde una sesión agéntica remota.**
+> El primer borrador del protocolo estaba escrito contra una arquitectura equivocada
+> (`awm watch` como comando acotado, `track add` sin token) y se corrigió tras verificarlo
+> contra el CLI: `awm watch` es un supervisor de larga vida que LANZA al controller y le
+> entrega el token de generación en su prompt. Cerrar T16 exige un provider real instalado y
+> autenticado en una máquina real. Mientras tanto, el gate falla — que es su función.
+>
+> **Desvío declarado sobre los nombres de archivo:** el plan fijaba
+> `codex-owner-mac.json`; el validador acepta `owner-mac` o `vpc-ubuntu` para Codex. Lo que
+> el criterio exige es UNA corrida real por PROVIDER, no un modelo de hardware; ningún
+> entorno compra saltarse la corrida.
+
 
 ### Task 17: Regresión completa, documentación operativa y handoff de release
 
