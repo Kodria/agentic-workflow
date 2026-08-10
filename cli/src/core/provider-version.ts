@@ -40,14 +40,26 @@ export function assertProviderSupported(
             shell: isWindowsNative(),
         }).toString();
     } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
+        const err = error as NodeJS.ErrnoException & { stderr?: Buffer | string };
         // `provider.label` y `versionCommand`, no "Codex" literal. Esta funcion es
         // generica sobre AgentTarget desde siempre, pero cada mensaje y el patron de
         // parseo nombraban al unico provider que hoy declara `versionCommand` — el
         // segundo en declararlo habria reportado "Codex no esta instalado" al no
         // encontrar SU binario, y habria fallado a parsear una salida perfectamente
         // valida contra el formato de otro programa.
-        if (code === 'ENOENT') {
+        //
+        // Two distinct "not found" shapes to catch now that Windows goes through
+        // a shell (see `shell: isWindowsNative()` above): without a shell, a
+        // missing binary is a spawn-level ENOENT; through cmd.exe, the shell
+        // itself spawns fine and the missing command instead surfaces as a
+        // non-zero exit with "'codex' is not recognized..." on stderr — no
+        // ENOENT anywhere. Missing this second shape was a real regression:
+        // windows-latest CI (no codex installed at all) started reporting
+        // "version probe failed" instead of "not installed", because the exit
+        // code alone doesn't say WHY the shell failed.
+        const shellCommandNotFound = isWindowsNative()
+            && /is not recognized as an internal or external command/i.test(String(err.stderr ?? ''));
+        if (err.code === 'ENOENT' || shellCommandNotFound) {
             throw new Error(
                 `${provider.label} is not installed or not available on PATH ` +
                 `(tried \`${provider.versionCommand.command}\`). Install it, then re-run.`,

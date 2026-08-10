@@ -36,6 +36,23 @@ describe('assertProviderSupported', () => {
             assertProviderSupported('codex', exec);
             expect(exec).toHaveBeenCalledWith('codex', ['--version'], expect.objectContaining({ shell: false }));
         });
+
+        // Regression from the fix above: shipping shell:true changed how a
+        // GENUINELY missing binary fails. Without a shell it's a spawn-level
+        // ENOENT; through cmd.exe the shell itself starts fine and the missing
+        // command surfaces as a non-zero exit with this exact stderr text — no
+        // ENOENT anywhere. windows-latest CI (no codex installed) caught this:
+        // it started reporting "version probe failed" instead of "not
+        // installed" the first time shell:true shipped without this branch.
+        it('still reports "not installed" when the shell itself says the command is unknown', () => {
+            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+            const shellNotFound = Object.assign(new Error('Command failed: codex --version'), {
+                status: 1,
+                stderr: Buffer.from("'codex' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n"),
+            });
+            expect(() => assertProviderSupported('codex', () => { throw shellNotFound; }))
+                .toThrow('Codex is not installed or not available on PATH');
+        });
     });
 
     it.each(['0.145.1', '0.146.0', '1.0.0'])(
