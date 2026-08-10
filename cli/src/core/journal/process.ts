@@ -500,6 +500,24 @@ export async function terminateGroupConfirmed(ref: ProcessRef, opts: { termGrace
  *  zombie). Fail-closed ante cualquier duda (R2.1/R4.8): un `ps` que no pudo
  *  correr, o cualquier campo indeterminado, se trata como reuso — nunca
  *  como autorizacion para senializar. */
+/** Hermano win32 de `groupLeaderReused` (R4.8). Mismo contrato, distinta fuente de verdad:
+ *  POSIX pregunta a `ps` por lstart/pgid/args; win32 pregunta a WMI por creationDate y
+ *  commandLine, exactamente los dos campos con los que `captureRefFor` construyo el `ref`
+ *  en esta plataforma. `true` <=> el PID esta ocupado por algo que NO es nuestro proceso.
+ *
+ *  Fail-closed identico al POSIX: WMI indisponible o ilegible (`null`) NO prueba que el
+ *  proceso sea nuestro, asi que se trata como ajeno y la senial jamas sale. Un `ref`
+ *  degradado a `'unknown'` (WMI no respondio al capturarlo) tampoco autoriza nada — es la
+ *  consecuencia correcta de no haber podido probar identidad al momento del spawn.
+ *  `'absent'` es el unico caso que devuelve `false`: no hay nadie ahi a quien confundir. */
+function win32LeaderReused(ref: ProcessRef): boolean {
+    const info = win32ProcessInfo(ref.processGroup);
+    if (info === 'absent') return false;
+    if (info === null) return true;
+    if (info.creationDate !== ref.startTime) return true;
+    return identityDigest(info.commandLine, ref.spawnNonce, ref.argvDigest) !== ref.psArgsDigest;
+}
+
 function groupLeaderReused(ref: ProcessRef): boolean {
     try {
         const stat = psField(ref.processGroup, 'stat');
@@ -546,8 +564,16 @@ export async function terminatePreviouslyOwnedGroup(ref: ProcessRef, opts: { ter
     };
     if (groupIsGone(ref.processGroup)) return true;
     // Windows PRIMERO: sale sin tocar la logica de grupos, que es semantica POSIX.
-    // El guard de identidad de abajo razona sobre PGIDs y no aplica aca.
+    // El guard `groupLeaderReused` de abajo razona sobre PGIDs y no aplica aca — pero el
+    // PELIGRO que evita si aplica, y durante un tiempo win32 no tuvo ninguna proteccion
+    // equivalente: `groupIsGone` en esta plataforma solo pregunta si el PID existe
+    // (`pidExistsNative`), sin verificar identidad, asi que un PID reciclado por un proceso
+    // AJENO vivo se leia como "nuestro supervisor sigue vivo" y `killTreeWindows` lo mataba.
+    // Eso es exactamente el `kill(pid)` crudo que R4.8 prohibe. `win32LeaderReused` es el
+    // hermano que faltaba, con el mismo criterio fail-closed: sin prueba positiva de que el
+    // proceso es NUESTRO, jamas se le manda una senial.
     if (isWindowsNative()) {
+        if (win32LeaderReused(ref)) return false;
         killTreeWindows(ref.pid);
         if (await waitUntilGone(opts.termGraceMs)) return true;
         killTreeWindows(ref.pid);

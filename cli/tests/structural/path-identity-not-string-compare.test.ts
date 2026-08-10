@@ -30,7 +30,12 @@ describe('identidad de rutas: filesystem, no strings', () => {
     it('ningún módulo compara dos realpath con === / !==', () => {
         const offenders: string[] = [];
         for (const file of tsFiles(SRC)) {
-            const lines = fs.readFileSync(file, 'utf8').split('\n');
+            // `\r\n` normalizado ANTES de partir: en JS `\r` es un terminador de línea, así
+            // que `.` NO lo matchea y `.*$` se corta antes del `\r` — el strip de comentarios
+            // de abajo no limpiaba nada en un checkout Windows y el guard se denunciaba a sí
+            // mismo por su propia documentación. Un guard contra un bug de plataforma roto
+            // por una suposición de plataforma: la misma clase que existe para atrapar.
+            const lines = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n').split('\n');
             lines.forEach((line, i) => {
                 const code = line.replace(/\/\/.*$/, '').replace(/^\s*\*.*$/, '');
                 if (STRING_COMPARE.test(code)) offenders.push(`${path.relative(SRC, file)}:${i + 1}: ${line.trim()}`);
