@@ -109,8 +109,14 @@ export function registerTrackCommand(program: Command): void {
             process.stdout.write(JSON.stringify({ requestId: r.requestId, idempotencyKey: r.idempotencyKey, qaHeadSha: r.qaHeadSha }, null, 2) + '\n');
         });
 
+    // NO IMPLEMENTADO del lado del supervisor: no hay handler para `track-teardown-request`,
+    // así que la request se emite y el supervisor la RECHAZA (`request-rejected-invalid`).
+    // La descripción lo dice en vez de prometer un desmantelamiento que no ocurre — hasta
+    // este release afirmaba que el supervisor desmantelaba worktree/rama, y no lo hacía.
+    // El teardown que sí funciona es el automático de la degradación a serial
+    // (`begin-teardown` desde `FALLBACK_PENDING`), que no pasa por este verbo.
     track.command('remove')
-        .description('emite track-teardown-request — el supervisor del plan desmantela worktree/rama (R6.1)')
+        .description('NO IMPLEMENTADO: emite track-teardown-request, que el supervisor todavía no sabe aplicar y rechaza')
         .requiredOption('--generation <token>', 'token de la generacion vigente')
         .argument('<trackId>')
         .action((trackId: string, opts) => {

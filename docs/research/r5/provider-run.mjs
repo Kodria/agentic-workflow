@@ -186,11 +186,16 @@ async function certifyScripted(timeoutMs) {
 
     execFileSync(process.execPath, [run.cli, 'watch', '--init'], { cwd: run.repo, stdio: 'ignore' });
 
-    // Timeouts chicos a propósito: los defaults (5 min de silencio de heartbeat + 10 de
-    // ventana de actividad) son correctos en producción y convertirían esta certificación en
-    // un cuarto de hora de espera. Se acortan los PLAZOS, nunca el criterio.
+    // Timeouts más chicos que los defaults de producción (5 min de silencio de heartbeat +
+    // 10 de ventana de actividad), que convertirían esta certificación en un cuarto de hora
+    // de espera. Se acortan los PLAZOS, nunca el criterio — pero un plazo MENOR QUE LA
+    // LATENCIA REAL DE LANZAMIENTO sí cambia el criterio: con 0.2 (12 s) y ~60 s reales
+    // entre `generation-launch-requested` y `generation-launched`, el supervisor declaraba
+    // en stall a un controller que todavía no había llegado a existir, y la corrida
+    // encadenaba generaciones sin que nadie trabajara nunca. 2 min deja margen sobre esa
+    // latencia observada sin volver a los plazos de producción.
     const spawnWatch = () => spawn(process.execPath, [run.cli, 'watch', '--provider', 'claude-code',
-        '--heartbeat-timeout', '0.2', '--activity-window', '0.2'], {
+        '--heartbeat-timeout', '2', '--activity-window', '2'], {
         cwd: run.repo, env, detached: true, stdio: 'ignore',
     });
     const phaseOf = () => { try { return readJournal(run.repo).state?.cohortPhase; } catch { return undefined; } };
