@@ -77,8 +77,8 @@ La parte determinística —`awm sensors run`, su código de salida y el gate de
 | **Claude Code** | ✅ Verificado | ✅ Verificado | ✅ Verificado | Suite + E2E aislado en CI (ubuntu, windows, macos) + playbook [`agent-matrix`](testing/agent-matrix.md) corrido contra el binario real (AG-01…AG-06, CC-01, CC-02), incluido **AG-06 con control negativo**: un `HOME` sin AWM responde que no tiene ninguna skill de AWM, así que lo que la sesión nombró vino de la instalación observada y no de su ambiente. |
 | **Codex** | ✅ Verificado | ✅ Verificado | ✅ Verificado | Playbook completo contra `codex-cli 0.146.0` real, en una máquina con `CODEX_HOME`. **El hook se observó ejecutándose**: Codex mostró su prompt `Hooks need review`, se otorgó la confianza, la sesión imprimió `Running SessionStart hook` y el hook dejó su `heartbeat.json`. `hook.trust: healthy`, `overall: healthy`. Evidencia abajo. |
 | **OpenCode** | ✅ Verificado | ⚠ Sin verificar | ⛔ No tiene | El escritor de `opencode.json` está cubierto por tests; que OpenCode *lea* ese campo no fue observado. |
-| **Cursor** | ✅ Verificado | ⚠ Sin verificar | ⛔ No tiene | El `.mdc` se genera y se valida su forma. Que Cursor **cargue** un `.mdc` con `alwaysApply: false` no fue observado. |
-| **Copilot** | ✅ Verificado (solo proyecto) | ⚠ Sin verificar | ⛔ No tiene | El `.instructions.md` se genera. Que Copilot **honre** `applyTo: "**"` no fue observado. |
+| **Cursor** | ✅ Verificado | ⚠ Sin verificar | ⛔ No tiene | El `.mdc` se genera, se valida su forma **y se verifica que su contenido siga intacto** (marcador `alwaysApply:`). Que Cursor **cargue** un `.mdc` con `alwaysApply: false` no fue observado. |
+| **Copilot** | ✅ Verificado (solo proyecto) | ⚠ Sin verificar | ⛔ No tiene | El `.instructions.md` se genera **y se verifica su contenido** (marcador `applyTo:`). Que Copilot **honre** `applyTo: "**"` no fue observado. |
 | **Antigravity** | ✅ Verificado | ⛔ No tiene mecanismo | ⛔ No tiene | Que Antigravity **lea** `global_workflows/` no fue observado. |
 
 ### Las decisiones ⛔, con su razón
@@ -159,7 +159,6 @@ Enunciado como trabajo, no como defecto. Esto es lo que hay que construir para s
 | # | Falta | Por qué importa | Qué destraba |
 |---|---|---|---|
 | 1 | **CI con binarios de agente reales** | Es la única razón por la que Cursor, Copilot, OpenCode y Antigravity siguen en ⚠. Ninguna cantidad de tests unitarios la sustituye. | Sube 4 proveedores de ⚠ a ✅ |
-| 2 | **Verificación de integridad de contenido en artefactos renderizados** | Para `.mdc` / `.instructions.md` el diagnóstico comprueba que el archivo *existe y tiene la extensión correcta*, no que su contenido esté intacto. Un archivo correcto por fuera y corrupto por dentro pasa. | Cierra un hueco conocido en `skills.global` |
 | 3 | **Reconciliación de scope de proyecto en `awm update`** | `update` reconcilia artefactos de máquina; los de proyecto son trabajo de `awm sync`. Un proyecto sin `sync` queda desactualizado en silencio. | Elimina un paso manual |
 | 4 | **Pruebas de los packs `python` y `shell` contra proyectos reales** | Existen y están completos; nadie los corrió contra un repo Python o de shell de verdad. | Sube 2 packs a ✅ |
 | 5 | **Un séptimo proveedor** | El modelo de capacidades ya lo soporta como una edición localizada (tabla de renderers + entrada de provider). No hay ninguno pedido todavía. | Amplía la cobertura |

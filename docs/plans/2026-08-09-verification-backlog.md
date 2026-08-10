@@ -108,9 +108,13 @@ D-011 redujo el daño (las rutas del agente ahora se resuelven bien), pero la ac
 
 **Resuelto:** `awm init` poda las entradas con **nuestra forma** cuyo script ya no existe, en Claude Code y en Codex. Tres condiciones, porque es el archivo de configuración del usuario y no se le borran líneas por parecido vago: el `matcher` es exactamente el nuestro, el ejecutable se llama como el script que AWM instala, y esa ruta **no existe**. Una instalación paralela viva no cumple la tercera, así que sobrevive intacta — y la entrada del `AWM_HOME` actual nunca se poda, aunque su script todavía no esté en disco.
 
-### C3 · Integridad de contenido en artefactos renderizados
+### ~~C3 · Integridad de contenido en artefactos renderizados~~ — ✅ cerrado 2026-08-09
 
-Para `.mdc` y `.instructions.md`, el diagnóstico comprueba que el archivo **existe y tiene la extensión correcta** — no que su contenido esté intacto. Un archivo correcto por fuera y corrupto por dentro pasa como sano. Hueco conocido y declarado en `support-matrix.md`.
+Para `.mdc` y `.instructions.md`, el diagnóstico comprobaba que el archivo **existía y tenía la extensión correcta** — no que su contenido estuviera intacto. Un archivo correcto por fuera y vacío o truncado por dentro pasaba como sano: el agente cargaba nada y `doctor` decía que sí.
+
+**Resuelto:** cada renderer declara su **marcador de integridad** en la misma tabla que ya declaraba su extensión (`core/renderers/registry.ts`), y el check lo consume. Un `.mdc` sin `alwaysApply:` o un `.instructions.md` sin `applyTo:` se reporta `broken`, con el nombre del archivo y remedio propio (`reinstall-rendered-artifacts` — no es una usurpación ni un symlink colgante: es nuestro archivo incompleto).
+
+**De paso, un cuarto duplicado menos:** `codex-agent-toml` era el único renderer con verificación de contenido, y su marcador estaba horneado dentro de `tomlAgentsHealthy`. Ahora los tres salen de la tabla, así que un renderer nuevo no puede agregarse sin declarar el suyo. El guard estructural del registry detectó —durante este mismo cambio— que yo había escrito `'.toml'` a mano en el sitio nuevo.
 
 ### C4 · `awm update` no reconcilia el scope de proyecto
 

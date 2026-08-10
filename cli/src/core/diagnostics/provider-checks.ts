@@ -17,7 +17,7 @@ import { assertProviderSupported } from '../provider-version';
 import { computeHookStatus } from '../../commands/hooks/status';
 import { InjectionOrchestrator } from '../context/orchestrator';
 import { capabilityRoot, contentRoots } from '../registries';
-import { rendererExtension } from '../renderers/registry';
+import { rendererExtension, rendererIntegrityMarker } from '../renderers/registry';
 
 export type ScanSkills = (dir: string) => SkillIntegrity;
 
@@ -55,13 +55,13 @@ function binaryVersionCheck(agent: AgentTarget): ProviderCheck {
  *  `dir` is null — i.e. the provider has no global skill discovery mechanism at all
  *  (today: Copilot, see `globalUnsupportedReason` in providers/index.ts).
  *
- *  `renderer` gates which verification is possible: `classifySkillLinks` (via `integrity`)
- *  only ever sees symlinks — `if (!lst.isSymbolicLink()) continue;` — so for a rendered
- *  format (`cursor-mdc`, `copilot-instructions`) it scans a directory of real files and
- *  finds nothing, which would make `broken` silently read 0 regardless of whether the
- *  rendered files are actually well-formed. Reporting `'healthy'` from a scan that
- *  structurally can't see the files it's supposed to check would be a false green, so for
- *  any non-`'link'` renderer this reports presence only, honestly, via `detail`. */
+ *  `renderer` parte la verificacion en dos caminos distintos porque los artefactos son
+ *  distintos: `classifySkillLinks` solo ve symlinks — `if (!lst.isSymbolicLink()) continue;`
+ *  — asi que sobre un directorio de archivos renderizados no encuentra nada. Durante un
+ *  tiempo esa rama reporto SOLO presencia, y lo decia en el `detail` para no fingir una
+ *  verificacion que no ocurria. Ahora tambien comprueba contenido, con el marcador que
+ *  declara el renderer (`rendererIntegrityMarker`): un archivo con la extension correcta
+ *  y el cuerpo vacio o truncado ya no pasa como sano. */
 function skillsGlobalCheck(
     dir: string | null,
     owners: AgentTarget[],
@@ -86,23 +86,37 @@ function skillsGlobalCheck(
         // Require at least one entry with the extension this renderer actually produces,
         // not just ANY file — a directory non-empty only because of the user's own
         // pre-existing, unrelated rule/instructions file must not read as "AWM installed".
-        // Still not full integrity verification (a stray file with the right extension but
-        // wrong content still passes) — that residual gap is the same honest tradeoff this
-        // function's doc comment already accepts for the non-`'link'` branch generally.
         // `rendererExtension` (core/renderers/registry.ts) is the ONE table mapping a
         // renderer to the file it produces. This site used to keep its own partial copy —
         // the fourth such copy in the codebase, and the exact drift that made a rendered
         // artifact invisible to the "is it installed" check for a whole release. A new
         // renderer must not be able to be added without this reading it.
         const ext = rendererExtension(renderer);
-        const present = ext ? entries.some((e) => e.endsWith(ext)) : entries.length > 0;
+        const rendered = ext ? entries.filter((e) => e.endsWith(ext)) : entries;
+        const present = rendered.length > 0;
+        if (!present) {
+            return {
+                id: 'skills.global', state: 'absent', target: dir,
+                owners: owners.length > 1 ? owners : undefined,
+                remediationCode: 'awm-init',
+            };
+        }
+        // Ya no se reporta "content integrity not verified": AHORA se verifica.
+        // Comprobar presencia y extension dejaba pasar un archivo correcto por fuera y
+        // vacio o truncado por dentro — el agente cargaba nada y doctor decia que si.
+        const corrupt = corruptRendered(dir, rendered, renderer);
         return {
             id: 'skills.global',
-            state: present ? 'supported' : 'absent',
+            state: corrupt.length > 0 ? 'broken' : 'supported',
             target: dir,
             owners: owners.length > 1 ? owners : undefined,
-            detail: present ? 'rendered install — content integrity not verified' : undefined,
-            remediationCode: present ? undefined : 'awm-init',
+            detail: corrupt.length > 0
+                ? `${corrupt.length} rendered file(s) missing their expected content (${corrupt.slice(0, 3).join(', ')})`
+                : undefined,
+            // Codigo propio: no es una usurpacion (nadie lo reemplazo por otra cosa) ni un
+            // symlink colgante. Es nuestro archivo, con el contenido incompleto — lo
+            // arregla re-instalar el bundle, que lo reescribe.
+            remediationCode: corrupt.length > 0 ? 'reinstall-rendered-artifacts' : undefined,
         };
     }
     const shared = owners.length > 1;
@@ -149,21 +163,29 @@ function skillsGlobalCheck(
     };
 }
 
-/** R8: verify the Codex `.toml` agents this run's renderer would have produced still parse. */
-function tomlAgentsHealthy(dir: string, entries: string[]): { broken: number } {
-    const tomls = entries.filter((e) => e.endsWith('.toml'));
-    const broken = tomls.filter((file) => {
+/**
+ * Archivos renderizados cuyo contenido ya no es lo que el renderer escribe.
+ *
+ * El marcador sale de `rendererIntegrityMarker` — la MISMA tabla que da la extension —
+ * y no de una copia local. Antes solo `codex-agent-toml` tenia esta verificacion, con su
+ * marcador horneado en esta funcion: el tercer renderer en agregarse habria pasado sin
+ * verificar y nadie se habria enterado.
+ *
+ * Un archivo ilegible cuenta como corrupto: no poder leerlo no es evidencia de que este
+ * bien. Es la misma disciplina que el resto de los checks — nunca verde por no mirar.
+ */
+function corruptRendered(dir: string, files: string[], renderer: RendererId): string[] {
+    const marker = rendererIntegrityMarker(renderer);
+    if (marker === null) return [];
+    return files.filter((file) => {
         try {
-            const content = fs.readFileSync(path.join(dir, file), 'utf8');
-            // renderCodexAgent (Task 4) always emits this key — its absence means the
-            // file was hand-edited or truncated, not a shape `awm` would have written.
-            return !content.includes('developer_instructions = ');
+            return !fs.readFileSync(path.join(dir, file), 'utf8').includes(marker);
         } catch {
             return true;
         }
-    }).length;
-    return { broken };
+    });
 }
+
 
 /**
  * Returns `null` when a check doesn't structurally apply to `agent` (e.g. Antigravity
@@ -250,7 +272,10 @@ function agentsNativeCheck(agent: AgentTarget): ProviderCheck | null {
     if (entries.length === 0) return null;
 
     if (provider.agent.renderer === 'codex-agent-toml') {
-        const { broken } = tomlAgentsHealthy(dir, entries);
+        // La extension sale de la tabla, no de un literal: escribir '.toml' aca fue
+        // exactamente lo que el guard estructural existe para detener, y lo detuvo.
+        const tomlExt = rendererExtension('codex-agent-toml') as string;
+        const broken = corruptRendered(dir, entries.filter((e) => e.endsWith(tomlExt)), 'codex-agent-toml').length;
         return {
             id: 'agents.native',
             state: broken > 0 ? 'broken' : 'healthy',

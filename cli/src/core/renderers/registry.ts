@@ -32,6 +32,27 @@ const RENDERER_EXTENSION: Record<RendererId, string | null> = {
     'copilot-instructions': '.instructions.md',
 };
 
+/**
+ * Cadena que el renderer SIEMPRE estampa en lo que produce, y que por lo tanto
+ * distingue "el archivo existe" de "el archivo sigue siendo lo que escribimos".
+ *
+ * Vive en esta tabla, al lado de la extension, por la misma razon que la extension:
+ * son los dos hechos que un renderer nuevo tiene que declarar, y tenerlos juntos hace
+ * imposible agregar uno y olvidarse del segundo. `codex-agent-toml` ya tenia su marcador
+ * — horneado dentro de `tomlAgentsHealthy` en provider-checks.ts — y era el UNICO de los
+ * tres renderers con verificacion de contenido. Los otros dos comprobaban presencia y
+ * extension: un archivo correcto por fuera y vacio o truncado por dentro pasaba como sano.
+ *
+ * `null` en `link`: ahi la integridad la responde el clasificador de symlinks, que
+ * ademas distingue colgante de usurpado (D-007). Un marcador de texto no aplica.
+ */
+const RENDERER_INTEGRITY_MARKER: Record<RendererId, string | null> = {
+    link: null,
+    'codex-agent-toml': 'developer_instructions = ',
+    'cursor-mdc': 'alwaysApply:',
+    'copilot-instructions': 'applyTo:',
+};
+
 /** `.md` es la unica extension que un `installName` de artefacto puede traer.
  *  Deliberadamente NO se usa `path.parse().name`: eso corta desde el ULTIMO
  *  punto, asi que un skill llamado `v1.2-migration` se truncaria a `v1`,
@@ -58,4 +79,10 @@ export function renderedFilename(installName: string, renderer: RendererId): str
  *  renderizado en este directorio?") en vez de un nombre concreto. */
 export function rendererExtension(renderer: RendererId): string | null {
     return RENDERER_EXTENSION[renderer];
+}
+
+/** Marcador de integridad del renderer, o `null` cuando no aplica (`link`).
+ *  Ver `RENDERER_INTEGRITY_MARKER`. */
+export function rendererIntegrityMarker(renderer: RendererId): string | null {
+    return RENDERER_INTEGRITY_MARKER[renderer];
 }
