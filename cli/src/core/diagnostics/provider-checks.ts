@@ -123,20 +123,24 @@ function skillsGlobalCheck(
         // generados NO: quedan con el contenido de la version anterior hasta que alguien
         // corra `awm sync`, y hasta ahora nada lo decia.
         const stale = staleRendered(dir, artifacts);
+        const names = stale.map((r) => path.basename(r.targetPath));
         return {
             id: 'skills.global',
             state: stale.length > 0 ? 'stale' : 'supported',
             target: dir,
             owners: owners.length > 1 ? owners : undefined,
             detail: stale.length > 0
-                ? `${stale.length} rendered file(s) no longer match the installed registry (${stale.slice(0, 3).join(', ')})`
+                ? `${stale.length} rendered file(s) no longer match the installed registry (${names.slice(0, 3).join(', ')})`
                 : undefined,
-            // `reinstall-bundle`, y NO `awm-sync` ni `awm-init`: se midio cual de los
-            // cuatro comandos refresca de verdad un renderizado viejo, y solo `awm add`
-            // lo hace. `init` y `sync` son idempotentes por presencia —ven el archivo y
-            // no lo tocan— y `update` refresca el registry, no lo derivado de el. Ofrecer
-            // un remedio que corre limpio sin cambiar nada es peor que no ofrecer ninguno.
-            remediationCode: stale.length > 0 ? 'reinstall-bundle' : undefined,
+            // El remedio depende del ALCANCE, y se midio cual funciona en cada uno:
+            // `awm update` reconcilia los artefactos de maquina, `awm sync` los que el
+            // profile del proyecto declara. Ofrecer el equivocado seria mandar al usuario
+            // a un comando que corre limpio sin cambiar nada — el defecto que ya tuvo
+            // `open-hooks-trust` (D-010), y que la primera version de ESTE chequeo
+            // repitio: ofrecia `reinstall-bundle` porque dos mediciones mias estaban mal.
+            remediationCode: stale.length > 0
+                ? (stale.some((r) => r.scope === 'local') ? 'awm-sync' : 'awm-update')
+                : undefined,
         };
     }
     const shared = owners.length > 1;
@@ -194,7 +198,7 @@ function skillsGlobalCheck(
  * Un archivo ilegible cuenta como corrupto: no poder leerlo no es evidencia de que este
  * bien. Es la misma disciplina que el resto de los checks — nunca verde por no mirar.
  */
-function staleRendered(dir: string, records: ManagedArtifactRecord[]): string[] {
+function staleRendered(dir: string, records: ManagedArtifactRecord[]): ManagedArtifactRecord[] {
     return records
         .filter((r) => r.renderer !== 'link' && path.dirname(r.targetPath) === dir)
         .filter((r) => {
@@ -208,8 +212,7 @@ function staleRendered(dir: string, records: ManagedArtifactRecord[]): string[] 
                 // corresponden. Aca "no puedo comparar" no se convierte en "esta viejo".
                 return false;
             }
-        })
-        .map((r) => path.basename(r.targetPath));
+        });
 }
 
 function corruptRendered(dir: string, files: string[], renderer: RendererId): string[] {

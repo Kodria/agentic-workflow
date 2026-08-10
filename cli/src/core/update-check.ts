@@ -71,7 +71,11 @@ export function maybeNotifyUpdate(opts?: { now?: number; spawnWorker?: () => voi
     const spawnWorker = opts?.spawnWorker ?? spawnRefreshWorker;
     const cache = readUpdateCache();
     if (cache?.latest && isNewer(cache.latest, cliVersion())) {
-        console.log(pc.dim(`\n⬆ awm v${cache.latest} available → npm i -g ${CLI_PACKAGE_NAME}`));
+        // stderr, NO stdout. Este aviso se imprime al final de CUALQUIER comando, asi
+        // que en stdout se mezclaba con la salida de `--json` y rompia a cualquiera que
+        // parsee: `awm doctor --json | jq` fallaba con un SyntaxError que no menciona la
+        // causa. stdout es la interfaz de maquina; los avisos al humano van por stderr.
+        process.stderr.write(pc.dim(`\n⬆ awm v${cache.latest} available → npm i -g ${CLI_PACKAGE_NAME}\n`));
     }
     if (!cache || now - cache.lastCheck > TTL_MS) spawnWorker();
 }

@@ -116,7 +116,7 @@ Para `.mdc` y `.instructions.md`, el diagnóstico comprobaba que el archivo **ex
 
 **De paso, un cuarto duplicado menos:** `codex-agent-toml` era el único renderer con verificación de contenido, y su marcador estaba horneado dentro de `tomlAgentsHealthy`. Ahora los tres salen de la tabla, así que un renderer nuevo no puede agregarse sin declarar el suyo. El guard estructural del registry detectó —durante este mismo cambio— que yo había escrito `'.toml'` a mano en el sitio nuevo.
 
-### C4 · Los artefactos **renderizados** quedan viejos y nada los refresca — parcialmente cerrado 2026-08-09
+### ~~C4 · Los artefactos **renderizados** quedan viejos~~ — ✅ cerrado 2026-08-09
 
 **El enunciado original estaba mal, y medirlo lo corrigió.** No es "scope de proyecto": es **formato de instalación**.
 
@@ -129,18 +129,44 @@ Así que solo Cursor, Copilot y los perfiles de agente de Codex quedan viejos �
 
 **Cerrado: la detección.** `awm doctor` re-renderiza cada artefacto desde la fuente que el ledger declara y compara. Si difiere, reporta `stale`, nombra el archivo y degrada `overall`. Es una comparación **exacta**, no una heurística de timestamps: un registry re-clonado no produce falsos positivos.
 
-**Medido, no supuesto — cuál comando refresca:**
+**Medido — y la primera medición estuvo mal, así que vale decir cómo.** La tabla inicial
+afirmaba que ningún comando refrescaba salvo `awm add`. Dos errores míos: `awm update --yes`
+no existe (el comando erroró y nunca corrió), y editar el `SKILL.md` del registry a mano no
+sirve como fuente de verdad porque `awm update` hace `git pull` y descarta esa edición. Al
+medirlo bien, corrompiendo el **destino** en vez de la fuente:
 
-| Comando | ¿Refresca un renderizado viejo? |
+| Artefacto | Comando que lo refresca |
 |---|---|
-| `awm init` | **No** — idempotente por presencia: ve el archivo y no lo toca |
-| `awm update` | **No** — refresca el registry, no lo derivado de él |
-| `awm sync` | **No** (verificado en scope global) |
-| `awm add <bundle>` | **Sí** |
+| Global (baseline, máquina) | **`awm update`** ✅ |
+| Proyecto, declarado en `profile.json` | **`awm sync`** ✅ |
+| Proyecto, bundle **baseline** con `--scope local` | **ninguno** ❌ |
 
-Por eso el remedio es `reinstall-bundle`. Ofrecer `awm sync` habría sido un remedio que corre limpio sin cambiar nada — el mismo defecto que `open-hooks-trust` tenía y que D-010 cerró.
+**Ese tercer caso era el hueco real**, y no era raro: `awm add dev --scope local` es
+exactamente lo que el playbook AG-03 pide correr para verificar cualquier proveedor.
+`shouldRecordExtension` exigía que el bundle fuese de scope `project`, así que un baseline
+instalado localmente no entraba al profile — y `awm sync` reconcilia lo que el profile
+declara. Esos artefactos no los tocaba nadie.
 
-**Abierto: la reconciliación automática.** Lo correcto a futuro es que `awm update` **re-renderice los artefactos derivados**, porque son exactamente eso — derivados del registry que acaba de actualizar. Hoy el usuario tiene que verlo en `doctor` y correr `awm add` a mano. La detección lo hace visible; la automatización queda pendiente, ahora con la evidencia de qué comando toca cambiar.
+**Resuelto:** el criterio pasa a ser el **alcance efectivo**, no el del bundle. Si alguien
+pidió artefactos de proyecto, el profile lo dice — que es además lo que hace que un
+compañero que clona el repo y corre `awm sync` obtenga lo mismo.
+
+El remedio que `doctor` ofrece depende del alcance: `awm update` para lo global, `awm sync`
+para lo de proyecto. La primera versión de este chequeo ofrecía `reinstall-bundle`, basada
+en la medición equivocada — el mismo defecto de "remedio que corre limpio sin cambiar nada"
+que D-010 cerró, repetido y corregido.
+
+**Verificado contra el binario:** artefacto de proyecto viejo → `awm sync` lo arregla;
+artefacto global viejo → `awm update` lo arregla; `profile.json` registra el install local.
+
+### ~~C7 · El aviso de versión nueva contamina `--json`~~ — ✅ cerrado 2026-08-09
+
+`⬆ awm vX available` se imprimía por **stdout** al final de cualquier comando, así que se
+mezclaba con la salida de `--json` y rompía a cualquiera que parsee: `awm doctor --json | jq`
+fallaba con un `SyntaxError` que no menciona la causa. Encontrado tropezando con él mientras
+se verificaba C4.
+
+**Resuelto:** va por `stderr`. stdout es la interfaz de máquina; los avisos al humano no van ahí.
 
 ### C5 · Packs `python` y `shell` contra proyectos reales
 
