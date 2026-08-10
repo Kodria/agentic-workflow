@@ -1,3 +1,40 @@
+## v6.3.0 - 2026-08-10
+
+### Features
+- **watch:** make provider agnosticism falsifiable via AWM_CONTROLLER_ARGV
+- **tracks:** reconcile ownership-proven teardown after crashes
+- **tracks:** validate final head once before global interlock
+- **tracks:** reconcile durable joins across merge crashes
+- **tracks:** freeze track and plan mutations before join
+- **tracks:** bootstrap supervisors behind an armed cohort barrier
+- **cli:** add request-only track commands and aggregate status
+- **tracks:** authenticate track context and isolate local gates
+- **tracks:** verify declared and actual independence fail-closed
+- **tracks:** parse strict ownership and integration contract
+- **journal:** add stable identities and track protocol entities
+- **tracks:** prove durable cohort protocol with state exploration
+
+### Fixes
+- **tracks:** scope teardown convergence to POSIX and document the win32 gap
+- **tests:** stop racing the bystander's lifetime against the slowest platform
+- **tests:** make the canonical integration fixture runnable on Windows
+- **process:** give win32 the identity guard POSIX already had before killing
+- **tracks:** compare paths by filesystem identity, not by string
+- **tracks:** close PGID-reuse identity gap in terminatePreviouslyOwnedGroup
+- **tracks:** exclude JOINED from canCompleteCohort pendingTracks; isolate pause/request boundary split with fake-runtime test
+- **tracks:** re-derive LIVE_COHORT_PHASES from traced causal chain; strengthen crash-point tests
+- **tracks:** guard cycle-complete by live cohort phase, not tracks.length
+- **tracks:** split integration-lock acquisition from merge attempt; trace merge/abort errors
+- **watch:** keep retry-same-intent alive during track freeze
+- **tracks:** correct duplicate-supervisor claim in comment, add crash-window test
+- **tracks:** wire decidePrepare into the exploration harness, fix vacuous assertion
+- **tracks:** check gitignore against created worktree, not stale HEAD
+- **tracks:** thread supervisor nonce and enforce single-effect boundary
+- **tracks:** derive concurrency cap from fingerprint benchmark
+- **cli:** verify-independence catches ownership-assessment throws too
+- **cli:** verify-independence structured errors on parser failures
+- **tracks:** case-fold resource values and close coverage gaps
+
 ## v6.2.1 - 2026-08-10
 
 ### Fixes
