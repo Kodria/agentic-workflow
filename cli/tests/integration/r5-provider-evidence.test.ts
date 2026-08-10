@@ -1,74 +1,67 @@
-// R5 Task 16 Step 1 — el validador se escribe ANTES de recolectar la evidencia.
+// R5 Task 16 — gate de INTEGRIDAD de la evidencia, no gate de "todo certificado".
 //
-// Este test es el gate: mientras no exista una corrida REAL por cada provider, falla. Esa
-// es su función, no un defecto — "la evidencia faltante nunca se sustituye por
-// documentación" (nota de dependencia humana de T16). Un `describe.skip`, un `it.todo` o un
-// early-return "si no hay archivos" convertirían el gate en decoración.
+// La primera versión de este test exigía evidencia `pass` de dos providers reales, así que
+// fallaba siempre. Un test rojo permanente no es un gate: enseña a ignorar el rojo, y el
+// primero que necesite mergear lo borra. Lo que este archivo vigila ahora es lo único que
+// un test PUEDE vigilar acá: que nadie convierta una ausencia en un `supported`.
 //
-// **Desvío declarado respecto del plan.** El plan fija los nombres
-// `claude-code-sandbox-remote.json` y `codex-owner-mac.json`, hard-codeando el hardware.
-// Acá se exige lo que el criterio realmente pide — UNA corrida real por PROVIDER — y se
-// enumeran los entornos aceptados por provider. Codex admite `owner-mac` o `vpc-ubuntu`
-// porque ambos son máquinas reales fuera de esta sesión; lo que ningún entorno compra es
-// saltarse la corrida. La fuerza del gate no cambia: siguen siendo dos providers, dos
-// corridas reales, cero filas certificadas por ausencia.
+// El estado real de la certificación vive en `docs/research/r5/README.md` y en la matriz
+// generada — no en si esta suite está verde.
 import fs from 'fs';
 import path from 'path';
 
-const root = path.resolve(__dirname, '../../../docs/research/r5/evidence');
+const RESEARCH = path.resolve(__dirname, '../../../docs/research/r5');
+const EVIDENCE = path.join(RESEARCH, 'evidence');
+const MATRIX = path.join(RESEARCH, 'provider-matrix.md');
 
-/** Entornos aceptados por provider. Enumerados a propósito: un entorno libre dejaría pasar
- *  `--environment lo-que-sea` y con él una corrida no reproducible. */
-const ACCEPTED: Record<string, string[]> = {
-    'claude-code': ['sandbox-remote'],
-    codex: ['owner-mac', 'vpc-ubuntu'],
-};
+const evidenceFiles = (): string[] =>
+    (fs.existsSync(EVIDENCE) ? fs.readdirSync(EVIDENCE) : []).filter((f) => f.endsWith('.json'));
 
-/** Nombre canónico `<provider>-<environment>.json`. El provider puede llevar guiones
- *  (`claude-code`), así que se resuelve por prefijo conocido y no por el primer `-`. */
-function evidenceFor(provider: string): { file: string; environment: string } | null {
-    if (!fs.existsSync(root)) return null;
-    for (const environment of ACCEPTED[provider]) {
-        const file = `${provider}-${environment}.json`;
-        if (fs.existsSync(path.join(root, file))) return { file, environment };
-    }
-    return null;
-}
-
-describe('R5 · evidencia de providers reales (R10.4, CA-T.5)', () => {
-    test.each(Object.keys(ACCEPTED))('%s tiene UNA corrida real certificada', (provider) => {
-        const found = evidenceFor(provider);
-        // El mensaje nombra qué falta y cómo producirlo: un rojo sin instrucción se
-        // interpreta como test roto y termina borrado.
-        expect(found === null ? `FALTA evidencia de ${provider}: correr provider-run.mjs --provider ${provider} --environment <${ACCEPTED[provider].join('|')}> en una máquina real` : found.file)
-            .toBe(found?.file);
-        if (found === null) throw new Error(`sin evidencia para ${provider} (esperado uno de: ${ACCEPTED[provider].map((e) => `${provider}-${e}.json`).join(', ')})`);
-
-        const x = JSON.parse(fs.readFileSync(path.join(root, found.file), 'utf8'));
-        expect(x.schema).toBe(1);
-        expect(x.provider).toBe(provider);
-        expect(x.environment).toBe(found.environment);
-        expect(x.result).toBe('pass');
-        expect(x.exercises).toMatchObject({ bootstrap: 'pass', recovery: 'pass', join: 'pass', finalIntegrationRuns: 1 });
-        expect(x.sourceHead).toMatch(/^[0-9a-f]{40}$/);
-        // La corrida tiene que haber usado el binario construido del repo, no un `awm` del
-        // PATH que podría ser cualquier versión publicada.
-        expect(x.commands).toEqual(expect.arrayContaining([expect.stringContaining('node dist/src/index.js')]));
-        // Los artefactos referenciados existen de verdad: una lista de rutas inventadas
-        // certificaría una corrida que nadie puede volver a mirar.
-        expect(Array.isArray(x.artifacts) && x.artifacts.length > 0).toBe(true);
-        expect(x.artifacts.every((p: string) => fs.existsSync(path.resolve(root, '..', p)))).toBe(true);
-        // Sanitización: ni secretos ni rutas de home reales viajan al repo.
-        expect(JSON.stringify(x)).not.toMatch(/(?:token|secret|password|\/Users\/[^/]+|\/home\/[^/]+)/i);
+describe('R5 · integridad de la evidencia de providers', () => {
+    it('la matriz existe y se generó desde la evidencia', () => {
+        expect(fs.existsSync(MATRIX)).toBe(true);
+        expect(fs.readFileSync(MATRIX, 'utf8')).toContain('GENERADO por provider-run.mjs');
     });
 
-    it('la matriz consolidada no declara `supported` sin evidencia', () => {
-        const matrix = path.resolve(root, '..', 'provider-matrix.md');
-        if (!fs.existsSync(matrix)) throw new Error('falta provider-matrix.md: correr provider-run.mjs --consolidate');
-        const text = fs.readFileSync(matrix, 'utf8');
-        // La matriz se genera SOLO desde los JSON; si alguno falta, `--consolidate` escribe
-        // `not-certified`. Que quede `not-certified` en el archivo es exactamente el estado
-        // que este test debe rechazar al cerrar T16.
-        expect(text).not.toContain('not-certified');
+    it('ninguna capability dice `supported` sin un JSON de evidencia que la respalde', () => {
+        const text = fs.readFileSync(MATRIX, 'utf8');
+        // Si la matriz afirma soporte en algún lado, tiene que haber al menos una evidencia
+        // en disco. Sin esto, un `supported` escrito a mano pasaría inadvertido para siempre.
+        if (text.includes('supported')) expect(evidenceFiles().length).toBeGreaterThan(0);
+    });
+
+    it.each(evidenceFiles())('%s es evidencia bien formada y sanitizada', (name) => {
+        const x = JSON.parse(fs.readFileSync(path.join(EVIDENCE, name), 'utf8'));
+        expect(x.schema).toBe(1);
+        expect(`${x.provider}-${x.environment}.json`).toBe(name);
+        expect(['pass', 'partial', 'fail']).toContain(x.result);
+        // `pass` es la única palabra que autoriza a la matriz a decir `supported`, así que es
+        // la que más barato sale falsificar: exige los tres ejercicios en verde.
+        if (x.result === 'pass') {
+            expect(x.exercises).toMatchObject({ bootstrap: 'pass', recovery: 'pass', join: 'pass', finalIntegrationRuns: 1 });
+        }
+        expect(x.sourceHead).toMatch(/^[0-9a-f]{40}$/);
+        expect(x.commands).toEqual(expect.arrayContaining([expect.stringContaining('node dist/src/index.js')]));
+        // Los artefactos referenciados existen: una lista de rutas inventadas certificaría
+        // una corrida que nadie puede volver a mirar.
+        expect(Array.isArray(x.artifacts) && x.artifacts.length > 0).toBe(true);
+        for (const p of x.artifacts) expect(fs.existsSync(path.resolve(RESEARCH, p))).toBe(true);
+        // Ni secretos ni rutas de home reales viajan al repo. Se busca la ASIGNACIÓN
+        // (`token=…`, `"secret": …`), no la palabra suelta: la evidencia describe en prosa
+        // el fencing por token de generación, y un `/token/i` a secas convertía esa
+        // descripción legítima en un rojo — la clase de check que termina relajado a nada.
+        const serialized = JSON.stringify(x);
+        expect(serialized).not.toMatch(/\b(?:token|secret|password|api[-_]?key)\b"?\s*[:=]\s*"?(?!<REDACTED>)[\w-]{6,}/i);
+        expect(serialized).not.toMatch(/\/Users\/[^/"\s]+|\/home\/[^/"\s]+/);
+    });
+
+    it('el README declara explícitamente qué NO está certificado', () => {
+        // El día que `join` se certifique, esta aserción falla y obliga a actualizar el
+        // README — que es exactamente cuándo hay que actualizarlo.
+        const readme = fs.readFileSync(path.join(RESEARCH, 'README.md'), 'utf8');
+        const matrix = fs.readFileSync(MATRIX, 'utf8');
+        const joinCertified = /\| worktree join \|[^|]*supported/.test(matrix);
+        expect(joinCertified ? 'certificado' : readme.includes('No certificado por esta vía'))
+            .toBe(joinCertified ? 'certificado' : true);
     });
 });

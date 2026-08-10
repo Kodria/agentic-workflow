@@ -2856,6 +2856,14 @@ git commit -m "test(r5): certify parallel tracks in Claude Code and Codex"
 > WORKDIR/homes/secretos y sale `!= 0` ante cualquier ejercicio no pasado. `--consolidate`
 > escribe `not-certified` por ausencia y jamás `supported`.
 >
+>
+> **ACTUALIZACIÓN — cierre por controller scripteado (D-016).** Los Steps 3/4 con LLM real
+> quedan OPCIONALES y sin correr. En su lugar se certificó el contrato supervisor↔controller
+> con un controller determinista (`scripted-controller.mjs` + `AWM_CONTROLLER_ARGV`):
+> **bootstrap ✅ y recovery ✅** con procesos reales, git real y `SIGKILL` de grupo, a costo
+> cero de tokens y repetible. **join queda `pending`** con causa raíz no identificada, sin
+> maquillar. Detalle completo en `docs/research/r5/README.md`.
+>
 > **Steps 3, 4 y 6 siguen abiertos y no son ejecutables desde una sesión agéntica remota.**
 > El primer borrador del protocolo estaba escrito contra una arquitectura equivocada
 > (`awm watch` como comando acotado, `track add` sin token) y se corrigió tras verificarlo

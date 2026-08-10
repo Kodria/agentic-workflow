@@ -317,3 +317,49 @@ prueba contaminaba el `hooks.json` real — que fue justo lo que hizo dudar del 
 en las tres columnas. La compuerta de confianza era real pero **no** era la causa: nunca se
 llegaba a ella. Una hipótesis plausible que resultó falsa, y solo el diagnóstico de la ruta
 la separó del síntoma.
+
+---
+
+## D-016 · La agnosticidad de providers deja de ser un acto de fe
+
+**Decisión:** `AWM_CONTROLLER_ARGV` — un array JSON que redirige el lanzamiento del
+controller a un comando propio, conservando el resto del adapter (actividad,
+`safeToReplace`, fencing, custodia).
+
+**El problema no era técnico, era epistemológico.** `adapter.ts` abre diciendo "la logica
+del supervisor no conoce providers: conoce este contrato". Pero los únicos adapters
+construibles eran `codex` y `claude-code`, así que esa afirmación **no se podía romper**.
+Una propiedad que ningún experimento puede refutar no está verificada: está creída.
+
+**Lo que habilita, además de testear:** certificar el contrato supervisor↔controller con un
+controller determinista — procesos reales, git real, journal real, **cero tokens** — en vez
+de pagar un ciclo agéntico completo por cada corrida. El plan original de R5-T16 pedía dos
+corridas con LLM real; medido contra la suite ya existente (que cubre bootstrap, join y
+teardown con git real, más crash/restart con procesos reales y `SIGKILL` de grupo), esas
+corridas volvían a probar lo ya probado a costo abierto. Se separaron las dos afirmaciones:
+el **contrato** lo certifica el controller scripteado; que **un LLM sepa ocupar el rol** es
+una propiedad del agente, opcional y explícitamente marcada como no verificada.
+
+**Array JSON, jamás una línea de shell** — misma doctrina que el argv de integración de los
+tracks (C4). Validado en el borde y **fail-closed**: cualquier cosa que no sea un array no
+vacío de strings no vacíos es un error explícito, nunca un fallback silencioso al provider
+nativo. Un override mal escrito que "funciona igual" lanzaría el agente real, con su costo
+en tokens, sin que nadie note que el override no aplicó.
+
+**Lo que el seam encontró apenas se usó** (todos defectos del controller de prueba, no del
+producto — y cada uno confirma que el mecanismo correspondiente funciona):
+
+- Un controller que no emite heartbeat es declarado en stall y superseded en loop.
+- Las requests de una generación superseded se rechazan (`request-rejected-stale`): el
+  fencing es real y observable.
+- Sin `register --entity track-integration`, el supervisor **fail-closea** en vez de
+  inventar el comando de integración.
+
+**Lo que quedó abierto, sin maquillar:** la cohorte no alcanza `COMPLETE` bajo supervisor
+vivo con relevo. Tres fixes al controller de prueba corrigieron tres defectos reales y el
+síntoma persistió — a los ~3,5 min del `SIGKILL` el token del controller vivo pasa a stale
+sin causa raíz identificada. **No se intentó un cuarto fix a propósito:** tres intentos
+fallidos sobre el mismo síntoma indican que el problema vive en otro nivel, y seguir
+parchando produce un verde que no significa nada. Queda como `pending` nombrado en la matriz
+y como hallazgo con evidencia en `docs/research/r5/README.md` — nunca como `pass`, y nunca
+como test tolerado en rojo.
