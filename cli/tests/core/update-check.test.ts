@@ -55,12 +55,14 @@ describe('update-check', () => {
     it('maybeNotifyUpdate avisa si el cache trae versión más nueva y NO refresca cache fresco', () => {
         const m = require('../../src/core/update-check');
         m.writeUpdateCache({ lastCheck: 1_000_000, latest: '99.0.0' });
-        const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+        // stderr, no stdout: el aviso sale al final de cualquier comando y en stdout
+        // rompia la salida de `--json`.
+        const err = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
         const spawnWorker = jest.fn();
         m.maybeNotifyUpdate({ now: 1_000_000 + 1000, spawnWorker });
-        expect(log.mock.calls.flat().join('\n')).toContain('99.0.0');
+        expect(err.mock.calls.flat().join('\n')).toContain('99.0.0');
         expect(spawnWorker).not.toHaveBeenCalled();
-        log.mockRestore();
+        err.mockRestore();
     });
 
     it('cache viejo (>24h) dispara refresh en background', () => {
@@ -102,5 +104,31 @@ describe('update-check', () => {
         expect(cache).not.toBeNull();
         expect(cache.latest).toBe('2.0.0');
         expect(cache.lastCheck).toBeGreaterThan(0);
+    });
+});
+
+// El aviso de version nueva va por stderr, no por stdout.
+//
+// Se imprime al final de CUALQUIER comando, asi que en stdout se mezclaba con la salida
+// de `--json` y rompia a cualquiera que parsee. Encontrado tropezando con el:
+// `awm doctor --json | node -e 'JSON.parse(...)'` fallaba con un SyntaxError que no
+// menciona la causa. stdout es la interfaz de maquina.
+describe('the update banner never contaminates stdout', () => {
+    it('writes to stderr so `--json` output stays parseable', () => {
+        const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+        try {
+            const { maybeNotifyUpdate } = require('../../src/core/update-check');
+            maybeNotifyUpdate({ spawnWorker: () => {} });
+            const onStdout = stdout.mock.calls.map((c) => String(c[0])).join('')
+                + log.mock.calls.map((c) => String(c[0])).join('');
+            expect(onStdout).not.toContain('available');
+            // Y si habia aviso, salio por stderr — no se perdio, se movio.
+            const emitted = stderr.mock.calls.map((c) => String(c[0])).join('');
+            if (emitted.length > 0) expect(emitted).toContain('available');
+        } finally {
+            stdout.mockRestore(); stderr.mockRestore(); log.mockRestore();
+        }
     });
 });

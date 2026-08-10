@@ -309,9 +309,9 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
             .checks.find((c: { id: string }) => c.id === 'skills.global');
         expect(stale?.state).toBe('stale');
         expect(stale?.detail).toContain('using-awm.mdc');
-        // Medido, no supuesto: de `init`/`update`/`sync`/`add`, solo `add` refresca un
-        // renderizado viejo. Los otros tres corren limpios y no cambian nada.
-        expect(stale?.remediationCode).toBe('reinstall-bundle');
+        // El remedio depende del alcance, y se midio: `awm update` reconcilia los
+        // artefactos de maquina; `awm sync`, los que declara el profile del proyecto.
+        expect(stale?.remediationCode).toBe('awm-update');
 
         fs.rmSync(source, { recursive: true, force: true });
     });

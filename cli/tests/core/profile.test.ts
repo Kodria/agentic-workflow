@@ -118,11 +118,19 @@ describe('ensureSkillsGitignored', () => {
 });
 
 describe('shouldRecordExtension', () => {
-    it('records only project-scope bundles installed locally', () => {
+    it('no registra nada instalado a nivel maquina, sea cual sea el bundle', () => {
         expect(shouldRecordExtension('project', 'local')).toBe(true);
         expect(shouldRecordExtension('project', 'global')).toBe(false);
         expect(shouldRecordExtension('baseline', 'global')).toBe(false);
-        expect(shouldRecordExtension('baseline', 'local')).toBe(false);
         expect(shouldRecordExtension('ambient', 'global')).toBe(false);
+    });
+
+    it('records a BASELINE bundle too when it was installed with --scope local', () => {
+        // Antes devolvia false, y esos artefactos quedaban fuera del profile: `awm sync`
+        // reconcilia lo que el profile declara, asi que nadie los refrescaba nunca —
+        // `update` cubre lo global y esto caia en el medio. No es un caso raro:
+        // `awm add dev --scope local` es lo que el playbook AG-03 pide correr.
+        expect(shouldRecordExtension('baseline', 'local')).toBe(true);
+        expect(shouldRecordExtension('ambient', 'local')).toBe(true);
     });
 });

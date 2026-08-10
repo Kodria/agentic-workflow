@@ -160,5 +160,19 @@ export function ensureSkillsGitignored(root: string, agents: AgentTarget[]): voi
  * project extensions and stay out of `.awm/profile.json`.
  */
 export function shouldRecordExtension(bundleScope: BundleScope, effective: Scope): boolean {
-    return bundleScope === 'project' && effective === 'local';
+    // El criterio es el ALCANCE EFECTIVO, no el del bundle.
+    //
+    // Antes exigia ademas `bundleScope === 'project'`, asi que un bundle baseline
+    // instalado explicitamente con `--scope local` no quedaba registrado en ningun lado:
+    // `awm sync` reconcilia lo que declara el profile, y esos artefactos no estaban ahi.
+    // Resultado: nadie los refrescaba nunca. `update` cubre lo global y `sync` lo del
+    // profile; eso caia en el medio.
+    //
+    // Y no es un caso raro: `awm add dev --scope local` es exactamente lo que el playbook
+    // de aceptacion (AG-03) le pide correr a cualquiera que verifique un proveedor.
+    //
+    // Si alguien pidio artefactos de proyecto, el profile lo dice — que es lo que hace
+    // que un companero que clona el repo y corre `awm sync` obtenga lo mismo.
+    void bundleScope;
+    return effective === 'local';
 }
