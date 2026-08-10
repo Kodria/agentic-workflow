@@ -14,7 +14,7 @@ import { emitRequest, listPendingRequests } from '../../core/journal/requests';
 import { supervisorLockPath } from '../../core/journal/paths';
 import { refIsAlive } from '../../core/journal/process';
 import { computeFingerprint } from '../../core/journal/fingerprint';
-import { decidePrepare, decideJoinReconciliation, nextProtocolEffect, observeProtocolEffect } from '../../core/tracks/protocol';
+import { decidePrepare, decideJoinReconciliation, nextProtocolEffect, observeProtocolEffect, reconcileProtocol } from '../../core/tracks/protocol';
 import {
     addOwnedWorktree, isAwmGitignored, foreignPathExists, ownedWorktreeExists,
     mergeBase, changedPaths, headSha, readMergeHead, isAncestor, dirtyPaths,
@@ -939,6 +939,29 @@ export async function reconcileTracks(
         if (s.tracks === undefined || s.tracks.length < 2 || s.cohortPhase === undefined) {
             return { state: s, effectExecuted: null };
         }
+        // El pedido de join del controller (`joinRequested`, marcado declarativamente al
+        // consumir `track-join-request`) se convierte ACÁ en la observación que el reducer
+        // entiende. La regla de si eso mueve la fase vive en `reconcileProtocol` (solo
+        // `ACTIVE` pasa a `JOIN_REQUESTED`), no acá: este bloque solo produce la observación
+        // que hasta ahora nadie producía. Se consume una por vuelta y se persiste, para no
+        // colapsar dos fronteras en un mismo call (mismo invariante que el resto del loop).
+        const pendingJoin = (s.tracks ?? []).find((t) => t.joinRequested === true);
+        if (pendingJoin !== undefined) {
+            const protocolBefore = toProtocol(s, maxParallel);
+            const observed = reconcileProtocol(protocolBefore, { kind: 'join-requested', trackId: pendingJoin.trackId });
+            // La marca se limpia SIEMPRE que se la observó, haya movido la fase o no: un
+            // track que ya no está `ACTIVE` (porque el join llegó tarde, o duplicado) no debe
+            // dejar el flag prendido girando en cada tick.
+            const next = applyProtocolToState(s, observed);
+            for (const t of next.tracks ?? []) if (t.trackId === pendingJoin.trackId) t.joinRequested = undefined;
+            s = persist(planRoot, branch, next);
+            appendEvent(planRoot, branch, {
+                kind: 'track-join-observed', trackId: pendingJoin.trackId,
+                phase: s.tracks?.find((t) => t.trackId === pendingJoin.trackId)?.phase,
+            });
+            continue;
+        }
+
         const protocol = toProtocol(s, maxParallel);
         const effect = nextProtocolEffect(protocol);
         if (effect === null) return { state: s, effectExecuted: null };

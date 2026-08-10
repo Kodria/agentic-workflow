@@ -94,6 +94,12 @@ export interface TrackRef {
     };
     joinedCommitSha?: string;
     blockedReason?: string;
+    /** El controller pidió integrar este track (`awm track join`). Puramente declarativo,
+     *  igual que `freezeRequested` en el journal de un track: quien decide si eso mueve la
+     *  fase es el reducer puro (`reconcileProtocol`, observación `join-requested`), nunca el
+     *  consumo transaccional de la request. Persistido para que el pedido sobreviva a un
+     *  crash entre "request consumida" y "fase avanzada". */
+    joinRequested?: boolean;
 }
 
 export interface NextAction {

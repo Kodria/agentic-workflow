@@ -39,6 +39,30 @@ if (token === undefined) {
 }
 
 const log = (msg) => process.stdout.write(`[scripted-controller] ${msg}\n`);
+
+/**
+ * `AWM_CONTROLLER_ARGV` es un override GLOBAL (D-016): lo honra `adapterFor()` en TODA
+ * llamada, así que no lo usa solo el supervisor del plan — también cada supervisor de track,
+ * que lanza su propio controller dentro del worktree del track. Este script está escrito
+ * para el rol de PLAN y apunta a `--repo <raíz del plan>`, de modo que las copias lanzadas
+ * por un track terminaban emitiendo requests contra el journal del plan con el token de
+ * generación del TRACK: el supervisor las rechazaba una por una (`request-rejected-stale`,
+ * 45 en un minuto de corrida) y el ruido tapaba por completo el fallo real.
+ *
+ * El cwd es lo que distingue el rol: el exec-wrapper corre al controller con el cwd fijado
+ * en el repo del journal que lo lanzó. Si no es la raíz del plan, este proceso no es el
+ * controller del plan — y se queda quieto en vez de salir, porque salir haría que su
+ * supervisor lo relanzara en loop. Callar es la conducta correcta de un controller que no
+ * tiene protocolo que ejecutar.
+ */
+function idleUnlessPlanController() {
+    let cwdReal, repoReal;
+    try { cwdReal = fs.realpathSync(process.cwd()); repoReal = fs.realpathSync(repo); }
+    catch { return; }   // indemostrable: seguir es preferible a abortar la corrida entera
+    if (cwdReal === repoReal) return;
+    log(`lanzado fuera de la raiz del plan (cwd=${cwdReal}): no soy el controller del plan, no emito nada`);
+    for (;;) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60000);
+}
 const awm = (args, opts = {}) =>
     execFileSync(process.execPath, [cli, ...args], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
 const git = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -90,6 +114,7 @@ const ARMED_OR_LATER = ['ARMED', 'ACTIVE', 'JOIN_REQUESTED', 'FROZEN', 'JOIN_INT
 // --- Ejercicio 1: bootstrap ------------------------------------------------
 // Idempotente a propósito: si el supervisor relevó a un controller anterior (ejercicio 2),
 // este arranca de nuevo y los tracks YA declarados no deben re-declararse.
+idleUnlessPlanController();   // antes del primer latido: un track jamás late contra el plan
 heartbeat();   // primer latido antes de cualquier trabajo: el supervisor ya está contando
 
 // El contrato canónico de integración se registra ANTES de cualquier join. Sin él, el
@@ -149,6 +174,64 @@ for (const t of tracks) {
     heartbeat();
     log(`track join ${t}`);
 }
+
+// --- Cierre: QA global sobre el HEAD ya mergeado, y autoreporte ------------
+// Los joins NO cierran la cohorte. Con todos los tracks en `MERGED_UNVERIFIED` el supervisor
+// emite `request-global-qa` y espera el autoreporte del controller del plan: "corrí la QA
+// sobre el HEAD mergeado, corregí lo que apareció, este es mi HEAD limpio". Sin este tramo
+// la cohorte se queda esperando para siempre, y la corrida anterior de esta certificación
+// lo interpretaba como "el join no completa" — cuando lo que faltaba era el paso siguiente.
+waitFor('todos los tracks mergeados', (s) =>
+    (s.tracks ?? []).every((t) => ['MERGED_UNVERIFIED', 'JOINED'].includes(t.phase)));
+log('todos los tracks mergeados: arranca la QA global');
+
+// El plan de ciclo debe CONTENER un item por cada verificador que el repo exige
+// (`requiredVerifiers`, detectados por `watch --init`): el gate rechaza por ausencia (R3.6),
+// nunca por omisión silenciosa. Se registran por unión — re-registrar tras un relevo no pisa
+// lo ya satisfecho.
+const requiredVerifiers = journal()?.requiredVerifiers ?? [];
+const cycleItems = requiredVerifiers.map((kind) => ({ id: `cycle-${kind}`, kind }));
+if (cycleItems.length > 0) {
+    try {
+        awm(['job', 'register', '--generation', token, '--entity', 'cycle-plan', '--json', JSON.stringify({ items: cycleItems })]);
+        log(`plan de ciclo registrado: ${cycleItems.map((i) => i.id).join(', ')}`);
+    } catch (e) {
+        log(`registro de plan de ciclo no aplicado: ${String(e).split('\n')[0]}`);
+    }
+}
+heartbeat();
+
+// Las verificaciones NO se corren inline: se PIDEN. El supervisor las ejecuta vía
+// exec-wrapper y persiste la evidencia con su fingerprint — que es lo que el interlock
+// recomputa después. Un controller que corriera `npm test` por su cuenta y dijera "pasó" no
+// dejaría evidencia de nada.
+const VERIFIER_ARGV = {
+    test: ['npm', 'test', '--silent'],
+    sensors: ['node', '-e', 'process.exit(0)'],
+};
+for (const item of cycleItems) {
+    const already = Object.values(journal()?.jobs ?? {}).some((j) => (j.satisfies ?? []).includes(item.id));
+    if (already) { log(`${item.id} ya tiene job pedido`); continue; }
+    try {
+        awm(['job', 'request', '--generation', token, '--satisfies', item.id, '--', ...(VERIFIER_ARGV[item.kind] ?? ['node', '-e', 'process.exit(0)'])]);
+        log(`verificacion pedida para ${item.id}`);
+    } catch (e) {
+        log(`pedido de ${item.id} no aplicado: ${String(e).split('\n')[0]}`);
+    }
+    heartbeat();
+}
+
+waitFor('evidencia de ciclo completa', (s) => cycleItems.every((item) => {
+    const jobId = [...s.cycleVerificationPlan ?? []].find((x) => x.id === item.id)?.satisfiedBy;
+    return jobId !== undefined && s.jobs?.[jobId]?.verdict === 'pass';
+}));
+log('evidencia de ciclo completa');
+
+// El autoreporte. El árbol tiene que estar limpio: el supervisor RE-VERIFICA HEAD real y
+// limpieza antes de aceptarlo — este comando solo declara.
+awm(['track', 'finalize', '--generation', token]);
+log('QA global autoreportada (track finalize)');
+heartbeat();
 
 waitFor('cohorte COMPLETE', (s) => s.cohortPhase === 'COMPLETE');
 log('join: cohorte COMPLETE');

@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { execFileSync } from 'child_process';
 import fs from 'fs';
-import { emitTrackRequest } from './emit';
+import { emitTrackRequest, emitFinalizeRequest } from './emit';
 import { aggregateTrackStatus } from './status';
 import { readJournal } from '../../core/journal/store';
 import { EXEC_STDIO } from '../../core/journal/process';
@@ -88,6 +88,25 @@ export function registerTrackCommand(program: Command): void {
             assertAuthenticatedCwd(repo, branch);
             const r = emitTrackRequest(repo, branch, opts.generation, 'track-join-request', trackId);
             process.stdout.write(JSON.stringify({ requestId: r.requestId, idempotencyKey: r.idempotencyKey }, null, 2) + '\n');
+        });
+
+    track.command('finalize')
+        .description('emite track-finalize-request — autoreporte de QA global del controller del plan sobre el HEAD ya mergeado (R7.2)')
+        .requiredOption('--generation <token>', 'token de la generacion vigente')
+        .action((opts) => {
+            const repo = process.cwd();
+            const branch = branchOf(repo);
+            // Plan-scoped, igual que `list`/`status`: la QA global corre sobre el HEAD del
+            // PLAN con todos los tracks ya mergeados. Emitirla desde el worktree de un track
+            // escribiría el autoreporte en el journal equivocado, donde nadie lo espera.
+            assertPlanCwd(repo, branch);
+            let r;
+            try {
+                r = emitFinalizeRequest(repo, branch, opts.generation);
+            } catch (e) {
+                failGuard(`track finalize: ${(e as Error).message}`);
+            }
+            process.stdout.write(JSON.stringify({ requestId: r.requestId, idempotencyKey: r.idempotencyKey, qaHeadSha: r.qaHeadSha }, null, 2) + '\n');
         });
 
     track.command('remove')

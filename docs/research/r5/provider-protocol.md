@@ -108,6 +108,32 @@ del plan. Ningún merge arranca hasta que **toda** la cohorte esté congelada (C
 comando canónico corre **una vez sobre el HEAD final**, no una vez por track (C4). Si ves más
 de un job de integración final, es un hallazgo — reportalo, no lo "arregles" reintentando.
 
+### Los joins NO cierran la cohorte
+
+Con los dos tracks en `MERGED_UNVERIFIED` el supervisor emite `request-global-qa` y **espera
+tu autoreporte**. Este tramo es parte del ejercicio, no un detalle administrativo: sin él la
+cohorte se queda en `MERGED_UNVERIFIED` para siempre, que es exactamente cómo se veía este
+protocolo antes de que existiera `awm track finalize`.
+
+```bash
+# 1. El plan de ciclo debe contener un item por cada verificador que el repo exige.
+#    `awm job reconcile` imprime `requiredVerifiers`; el gate rechaza por ausencia (R3.6).
+node "$CLI" job register --generation "$GENERATION" --entity cycle-plan \
+  --json '{"items":[{"id":"cycle-test","kind":"test"},{"id":"cycle-sensors","kind":"sensors"}]}'
+
+# 2. Las verificaciones se PIDEN, no se corren inline: el supervisor las ejecuta y persiste
+#    la evidencia con su fingerprint, que es lo que el interlock final recomputa.
+node "$CLI" job request --generation "$GENERATION" --satisfies cycle-test -- npm test
+
+# 3. Corré la QA global sobre el HEAD ya mergeado, COMITEÁ las correcciones, y autoreportá.
+node "$CLI" track finalize --generation "$GENERATION"
+node "$CLI" track status
+```
+
+`track finalize` lee el HEAD del repo — no lo recibe por flag — y falla si el árbol está
+sucio. El supervisor **re-verifica por su cuenta** HEAD real y limpieza antes de aceptar el
+autoreporte: lo que emitís declara, nunca prueba.
+
 **Se certifica leyendo:** `cohortPhase: COMPLETE`, los dos tracks en `JOINED`, y exactamente
 un job de integración final.
 

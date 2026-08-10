@@ -17,8 +17,9 @@ Sin ambigüedad sobre qué está probado y qué no:
 | Degradación a serial ante cualquier condición no probada | ✅ Verificado | Suite con git real, incluida paridad de árbol serial-vs-paralelo |
 | Recuperación tras crash sin duplicar recursos | ✅ Verificado | `SIGKILL` real al grupo del supervisor + relevo |
 | Aislamiento por worktree y ownership declarado/real | ✅ Verificado | Suite con git real, incluidos renames por sus dos puntas |
-| `join → COMPLETE` bajo supervisor vivo con relevo de controller | 🔜 No verificado | Ver [`docs/research/r5/README.md`](../research/r5/README.md) |
+| `join → COMPLETE` bajo supervisor vivo con relevo de controller | 🔜 No verificado | El camino estaba **roto**: `awm track join` emitía una request que el supervisor no sabía aplicar y contaba como aplicada (ver más abajo). Arreglado y cubierto por suite; la certificación end-to-end con supervisor vivo todavía no dio verde — hasta que lo haga, esta fila NO dice verificado |
 | Un agente LLM real como controller | ⚠ Sin verificar | Opcional; certificado solo con controller determinista |
+| `awm track remove` (teardown pedido por el controller) | ❌ **No implementado** | El supervisor no tiene handler para `track-teardown-request`: el comando emite la request y el supervisor la **rechaza** de forma visible. El teardown que sí funciona es el automático de la degradación a serial. |
 
 ## El modelo mental
 
@@ -73,11 +74,30 @@ El controller, con su token:
 ```bash
 awm track add <id>  --generation "$GEN"    # emite la request de preparación
 awm track join <id> --generation "$GEN"    # pide la integración de su track
+awm track finalize  --generation "$GEN"    # autoreporta la QA global sobre el HEAD mergeado
 ```
 
 Cada track trabaja en un worktree hermano del repo (`<repo>.track-<id>`) y commitea **solo
 sus archivos asignados**. Ningún merge arranca hasta que **toda** la cohorte esté congelada, y
 el comando canónico corre **una vez sobre el HEAD final** — no una vez por track.
+
+### Los joins no cierran la cohorte
+
+Con todos los tracks mergeados la cohorte **no** está completa: queda el tramo que verifica el
+resultado combinado, y ese tramo lo maneja el controller del plan.
+
+1. El supervisor pide la **QA global** sobre el HEAD que ya tiene todos los tracks adentro.
+2. El controller corre esa QA, **comitea las correcciones** que salgan, y lo autoreporta con
+   `awm track finalize`. El HEAD sale del repo, no de un flag: es *tu* HEAD el que reportás.
+   Con el árbol sucio el comando falla nombrando lo que falta, en vez de emitir un
+   autoreporte que el supervisor va a descartar en silencio.
+3. El supervisor **re-verifica por su cuenta** (HEAD real + árbol limpio) antes de aceptarlo:
+   el autoreporte declara, nunca prueba.
+4. Recién ahí corre la integración canónica y el interlock final, y la cohorte pasa a
+   `COMPLETE`.
+
+Si la cohorte se queda quieta con todos los tracks en `MERGED_UNVERIFIED`, está esperando el
+paso 2: `awm track status` lo muestra, y el `next_action` del journal dice `run-global-qa`.
 
 ## Cuándo degrada a serial (y por qué está bien)
 

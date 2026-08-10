@@ -487,6 +487,60 @@ describe('aplicacion transaccional de requests', () => {
         expect(readJournal(repo, 'rama').state!.trackIntegration).toBeUndefined();
     });
 
+    // El modo de falla que estos dos tests cierran: `applyRequestToState` era una cadena de
+    // `if (env.kind === …) { …; return; }` que se caía POR EL FINAL ante un kind sin handler.
+    // El caller no veía excepción, hacía `applied++` y BORRABA el archivo. `awm track join`
+    // vivió así: salía 0 con su requestId, el journal contaba la request como aplicada, y el
+    // track se quedaba en `ACTIVE` para siempre — la cohorte no podía congelarse (C3) y por
+    // lo tanto nunca llegaba a `COMPLETE`.
+    test('track-join-request marca la intención de join sobre un track existente (declarativo, R6.1)', () => {
+        const s0 = readJournal(repo, 'rama').state!;
+        const alpha: TrackRef = {
+            trackId: 'alpha', worktreePath: path.join(repo, '.track-alpha'), branch: 'awm-track/alpha',
+            ownership: [], sharedResources: [], dependsOn: [],
+            fencingToken: 'f'.repeat(32), phase: 'ACTIVE', readinessNonce: 'n'.repeat(32),
+        };
+        s0.tracks = [alpha];
+        writeJournal(repo, 'rama', s0);
+
+        emitRequest(repo, 'rama', {
+            kind: 'track-join-request', generationToken: 'g1', idempotencyKey: 'join-alpha',
+            payload: { trackId: 'alpha' },
+        });
+        expect(consumePendingRequests(repo, 'rama', 'g1').applied).toBe(1);
+        const s = readJournal(repo, 'rama').state!;
+        expect(s.tracks!.find((t) => t.trackId === 'alpha')!.joinRequested).toBe(true);
+        // La FASE no la mueve este consumo: eso es del reducer puro vía `reconcileTracks`.
+        expect(s.tracks!.find((t) => t.trackId === 'alpha')!.phase).toBe('ACTIVE');
+    });
+
+    test('un join sobre un track inexistente se RECHAZA en vez de absorberse en silencio', () => {
+        const r = emitRequest(repo, 'rama', {
+            kind: 'track-join-request', generationToken: 'g1', idempotencyKey: 'join-fantasma',
+            payload: { trackId: 'no-existe' },
+        });
+        const out = consumePendingRequests(repo, 'rama', 'g1');
+        expect(out.applied).toBe(0);
+        expect(out.rejectedInvalid).toBe(1);
+        expect(fs.existsSync(`${r.file}.rejected`)).toBe(true);
+    });
+
+    test('un kind SIN handler falla cerrado: rechazo visible, no un `applied` que borra el archivo', () => {
+        // `track-teardown-request` es un kind real, emitido por `awm track remove`, que hoy
+        // no tiene handler en el supervisor. Antes de este cambio se contaba como aplicado y
+        // desaparecía sin dejar rastro; ahora queda registrado como problema y el archivo se
+        // conserva con sufijo `.rejected`, que es lo que permite darse cuenta.
+        const r = emitRequest(repo, 'rama', {
+            kind: 'track-teardown-request', generationToken: 'g1', idempotencyKey: 'teardown-1',
+            payload: { trackId: 'alpha' },
+        });
+        const out = consumePendingRequests(repo, 'rama', 'g1');
+        expect(out.applied).toBe(0);
+        expect(out.rejectedInvalid).toBe(1);
+        expect(fs.existsSync(`${r.file}.rejected`)).toBe(true);
+        expect(readJournal(repo, 'rama').state!.requestProblems.some((p) => p.kind === 'rejected')).toBe(true);
+    });
+
     test('track-finalize-request persiste el autoreporte del controller (qaFinalizeRequested) — puramente declarativo (R7.2)', () => {
         emitRequest(repo, 'rama', {
             kind: 'track-finalize-request', generationToken: 'g1', idempotencyKey: 'finalize-1',
