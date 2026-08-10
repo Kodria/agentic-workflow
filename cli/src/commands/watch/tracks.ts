@@ -29,7 +29,7 @@ import { requestJob } from '../job/request';
 import { computeGate, FingerprintNow } from '../job/gate';
 import { spawnStructured, groupIsGone, terminatePreviouslyOwnedGroup } from '../../core/journal/process';
 import { JOIN_STRATEGY_NO_FF } from '../../core/tracks/types';
-import type { CohortProtocol, JoinIntent, PrepareObservation, ProtocolEffect, TrackProtocolState } from '../../core/tracks/types';
+import type { CohortProtocol, JoinIntent, PrepareObservation, ProtocolEffect, TrackPhase, TrackProtocolState } from '../../core/tracks/types';
 import type { IntegrationLockHandle } from '../../core/tracks/join';
 import type { ParsedTrack } from '../../core/tracks/plan-parser';
 import type { JournalState, TrackContext, TrackRef, ProcessRef } from '../../core/journal/types';
@@ -160,6 +160,13 @@ const RUNTIME_EFFECTS = new Set([
     // `runRunFinalInterlock` más abajo).
     'request-global-qa', 'request-final-integration', 'run-final-interlock',
 ]);
+
+/** Fases en las que un `joinRequested` todavía tiene futuro: el track aún no llegó a
+ *  `ACTIVE`, así que el pedido espera a que llegue en vez de perderse. `ACTIVE` está incluida
+ *  porque es justamente donde se aplica; cualquier otra fase lo vuelve moot. */
+const JOIN_PENDING_PHASES: TrackPhase[] = [
+    'DECLARED', 'PREPARE_INTENT', 'WORKTREE_CREATED', 'JOURNAL_CREATED', 'SUPERVISOR_STARTING', 'ARMED', 'ACTIVE',
+];
 
 function toProtocol(state: JournalState, maxParallel: number): CohortProtocol {
     const tracks: Record<string, TrackProtocolState> = {};
@@ -945,13 +952,19 @@ export async function reconcileTracks(
         // `ACTIVE` pasa a `JOIN_REQUESTED`), no acá: este bloque solo produce la observación
         // que hasta ahora nadie producía. Se consume una por vuelta y se persiste, para no
         // colapsar dos fronteras en un mismo call (mismo invariante que el resto del loop).
-        const pendingJoin = (s.tracks ?? []).find((t) => t.joinRequested === true);
+        //
+        // El pedido es DURABLE mientras el track todavía no llegó a `ACTIVE`. Un join que
+        // llega antes de la activación no es un error del controller: es la carrera normal
+        // — con `maxParallel` chico la cohorte activa de a un track por vez, así que el
+        // controller termina su trabajo y pide el join mientras su track sigue en `ARMED`.
+        // Se observó en la certificación: dos joins emitidos con ambos tracks en `ARMED`.
+        // Descartarlos ahí (que es lo que hacía la primera versión de este bloque) devuelve
+        // el mismo modo de falla que este cambio vino a cerrar — un pedido que reporta éxito
+        // y no pasa nada — y solo sobrevivía porque el controller scripteado los re-emite.
+        const pendingJoin = (s.tracks ?? []).find((t) => t.joinRequested === true && t.phase === 'ACTIVE');
         if (pendingJoin !== undefined) {
             const protocolBefore = toProtocol(s, maxParallel);
             const observed = reconcileProtocol(protocolBefore, { kind: 'join-requested', trackId: pendingJoin.trackId });
-            // La marca se limpia SIEMPRE que se la observó, haya movido la fase o no: un
-            // track que ya no está `ACTIVE` (porque el join llegó tarde, o duplicado) no debe
-            // dejar el flag prendido girando en cada tick.
             const next = applyProtocolToState(s, observed);
             for (const t of next.tracks ?? []) if (t.trackId === pendingJoin.trackId) t.joinRequested = undefined;
             s = persist(planRoot, branch, next);
@@ -959,6 +972,19 @@ export async function reconcileTracks(
                 kind: 'track-join-observed', trackId: pendingJoin.trackId,
                 phase: s.tracks?.find((t) => t.trackId === pendingJoin.trackId)?.phase,
             });
+            continue;
+        }
+        // Pedido que ya no puede aplicarse nunca: el track pasó de `ACTIVE` (join duplicado,
+        // o el relevo de un controller que re-emite) o quedó `BLOCKED`. Se limpia la marca
+        // — dejarla prendida la haría reevaluar en cada tick sin progreso posible. Lo que NO
+        // se limpia es el pedido de un track anterior a `ACTIVE`: ese sigue esperando.
+        const mootJoin = (s.tracks ?? []).find((t) => t.joinRequested === true
+            && !JOIN_PENDING_PHASES.includes(t.phase));
+        if (mootJoin !== undefined) {
+            const next = structuredClone(s);
+            for (const t of next.tracks ?? []) if (t.trackId === mootJoin.trackId) t.joinRequested = undefined;
+            s = persist(planRoot, branch, next);
+            appendEvent(planRoot, branch, { kind: 'track-join-moot', trackId: mootJoin.trackId, phase: mootJoin.phase });
             continue;
         }
 
