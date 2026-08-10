@@ -48,7 +48,7 @@ import { registerWatchCommand } from './commands/watch';
 import { registerTrackCommand } from './commands/track';
 import { runAddBundleCore } from './commands/add';
 import { runSyncCore } from './commands/sync';
-import { runUpdateCore } from './commands/update';
+import { runUpdateCore, updateOutro } from './commands/update';
 import { resolveAgentTargetsOrError } from './core/agent-targets';
 import type { AwmPreferences } from './utils/config';
 import { maybeNotifyUpdate } from './core/update-check';
@@ -448,10 +448,15 @@ program.command('add [name]')
 program.command('update')
   .description('Sync all configured registries, reconcile artifacts and re-sync hooks')
   .option('-a, --agent <agent>', `Target agent(s), comma-separated: ${AGENT_TARGETS.join(', ')} (defaults to every enabled agent)`)
-  .action(async (options: { agent?: string }) => {
+  .option('-y, --yes', 'Non-interactive: never prompt, and self-update the CLI without asking')
+  .action(async (options: { agent?: string; yes?: boolean }) => {
       intro(pc.bgCyan(pc.black(' AWM - Update Registries ')));
       const result = await runUpdateCore(options);
-      outro(result.code === 0 ? '✅ Registries, skills and hooks updated.' : pc.red('Update failed — see errors above.'));
+      // El cierre lo DERIVA `updateOutro` del resultado. No se recorta a `code === 0` con
+      // un literal fijo: eso es lo que hacía que una máquina sin registries recibiera la
+      // confirmación de que se le habían actualizado.
+      const message = updateOutro(result);
+      outro(result.code === 0 ? message : pc.red(message));
       process.exitCode = result.code;
   });
 

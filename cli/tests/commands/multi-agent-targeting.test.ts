@@ -17,6 +17,12 @@ import type { AgentTarget } from '../../src/providers';
 import type { AwmPreferences } from '../../src/utils/config';
 import type { BundleDefinition } from '../../src/core/bundles';
 
+/** Un registry sincronizado con éxito. `awm update` con CERO registries es una máquina sin
+ *  `awm init`: falla en vez de anunciar que actualizó (ver `tests/commands/update.test.ts`),
+ *  así que los tests de acá — que miden targeting de agentes y el caveat de Windows, no
+ *  registries — necesitan al menos uno para llegar a las etapas que sí les importan. */
+const SYNCED_REGISTRY = { name: 'baseline', action: 'pulled' as const, version: 'v1.0.0' };
+
 describe('multi-agent targeting (add/remove/sync/update/doctor)', () => {
     let tmpHome: string;
     let originalHome: string | undefined;
@@ -107,7 +113,7 @@ describe('multi-agent targeting (add/remove/sync/update/doctor)', () => {
                 const outcome = await runUpdateCore(
                     { agent: explicit },
                     {
-                        syncRegistries: async () => [],
+                        syncRegistries: async () => [SYNCED_REGISTRY],
                         verifyMinCliVersions: () => [],
                         regenerateGlobalContext: () => [],
                         planReconciliation: (o: any) => { captured = o.targets; return { operations: [], records: [], reports: [] }; },
@@ -208,7 +214,7 @@ describe('multi-agent targeting (add/remove/sync/update/doctor)', () => {
         );
         const { runUpdateCore } = require('../../src/commands/update');
 
-        const syncRegistries = jest.fn(async () => []);
+        const syncRegistries = jest.fn(async () => [SYNCED_REGISTRY]);
         const planReconciliation = jest.fn((o: any) => ({ operations: [], records: [], reports: [] }));
         const applyInstallPlan = jest.fn(() => ({ installed: [], skipped: [], transactionId: 'tx', modifiedFiles: [] }));
         const resyncInstalledHooks = jest.fn(() => []);
@@ -235,7 +241,7 @@ describe('multi-agent targeting (add/remove/sync/update/doctor)', () => {
         writePrefs(['claude-code'], 'claude-code');
         const { runUpdateCore } = require('../../src/commands/update');
         const outcome = await runUpdateCore({}, {
-            syncRegistries: async () => [],
+            syncRegistries: async () => [SYNCED_REGISTRY],
             verifyMinCliVersions: () => [],
             regenerateGlobalContext: () => [],
             planReconciliation: () => { throw new Error('reconciliation exploded'); },
@@ -272,7 +278,7 @@ describe('multi-agent targeting (add/remove/sync/update/doctor)', () => {
             writePrefs(['claude-code']);
             const { runUpdateCore } = require('../../src/commands/update');
             const deps = {
-                syncRegistries: async () => [],
+                syncRegistries: async () => [SYNCED_REGISTRY],
                 verifyMinCliVersions: () => [],
                 regenerateGlobalContext: () => [],
                 planReconciliation: () => ({ operations: [], records: [], reports: [] }),
