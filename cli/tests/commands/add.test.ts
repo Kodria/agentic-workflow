@@ -109,3 +109,70 @@ it('awm add demo materializes a real Copilot .instructions.md file end-to-end', 
     fs.rmSync(content, { recursive: true, force: true });
     fs.rmSync(projectRoot, { recursive: true, force: true });
 });
+
+// Regression for WIN-02 (issue #55 Windows playbook): `--method copy` was
+// silently discarded by this exact function — `runAddBundleCore` hardcoded
+// 'symlink' regardless of what the CLI parsed, so a real Windows machine got
+// a Junction back no matter what `--method` asked for.
+describe('runAddBundleCore --method', () => {
+    const claudeCodePrefs: AwmPreferences = {
+        defaultAgent: 'claude-code', enabledAgents: ['claude-code'], installMethod: 'symlink', defaultScope: 'local',
+    };
+
+    it('honours an explicit --method copy: a real directory, not a symlink', () => {
+        const content = makeContentFixture();
+        const projectRoot = makeProjectRoot();
+        const bundles = discoverBundles(content);
+
+        const outcome = runAddBundleCore(
+            { name: 'demo', agent: 'claude-code', method: 'copy', cwd: projectRoot },
+            claudeCodePrefs,
+            bundles,
+        );
+
+        expect(outcome.code).toBe(0);
+        const skillPath = path.join(projectRoot, '.claude/skills/demo-skill');
+        expect(fs.lstatSync(skillPath).isSymbolicLink()).toBe(false);
+        expect(fs.readFileSync(path.join(skillPath, 'SKILL.md'), 'utf8')).toContain('Follow the demo skill body.');
+
+        fs.rmSync(content, { recursive: true, force: true });
+        fs.rmSync(projectRoot, { recursive: true, force: true });
+    });
+
+    it('still defaults to symlink when --method is omitted (unchanged behavior)', () => {
+        const content = makeContentFixture();
+        const projectRoot = makeProjectRoot();
+        const bundles = discoverBundles(content);
+
+        const outcome = runAddBundleCore(
+            { name: 'demo', agent: 'claude-code', cwd: projectRoot },
+            claudeCodePrefs,
+            bundles,
+        );
+
+        expect(outcome.code).toBe(0);
+        const skillPath = path.join(projectRoot, '.claude/skills/demo-skill');
+        expect(fs.lstatSync(skillPath).isSymbolicLink()).toBe(true);
+
+        fs.rmSync(content, { recursive: true, force: true });
+        fs.rmSync(projectRoot, { recursive: true, force: true });
+    });
+
+    it('rejects an invalid --method value without touching the filesystem', () => {
+        const content = makeContentFixture();
+        const projectRoot = makeProjectRoot();
+        const bundles = discoverBundles(content);
+
+        const outcome = runAddBundleCore(
+            { name: 'demo', agent: 'claude-code', method: 'bogus', cwd: projectRoot },
+            claudeCodePrefs,
+            bundles,
+        );
+
+        expect(outcome.code).toBe(1);
+        expect(fs.existsSync(path.join(projectRoot, '.claude/skills/demo-skill'))).toBe(false);
+
+        fs.rmSync(content, { recursive: true, force: true });
+        fs.rmSync(projectRoot, { recursive: true, force: true });
+    });
+});

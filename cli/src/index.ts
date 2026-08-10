@@ -131,7 +131,7 @@ program.command('add [name]')
       if (name) {
           const allBundles = discoverAllBundles();
           const prefs = getPreferences();
-          const outcome = runAddBundleCore({ name, agent: options.agent, scope: options.scope }, prefs, allBundles);
+          const outcome = runAddBundleCore({ name, agent: options.agent, scope: options.scope, method: options.method }, prefs, allBundles);
           if (outcome.code !== 0) process.exit(outcome.code);
           outro('Done.');
           return;
