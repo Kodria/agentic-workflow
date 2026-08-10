@@ -42,7 +42,7 @@ describe('runSupervisorWrapper — claim exact-once + espera read-only del ACTIV
         fs.rmSync(worktreePath, { recursive: true, force: true });
     });
 
-    function seedTrackRef(phase: 'ARMED' | 'ACTIVE' | 'BLOCKED'): void {
+    function seedTrackRef(phase: 'ARMED' | 'ACTIVE' | 'BLOCKED' | 'JOIN_REQUESTED' | 'FROZEN'): void {
         const s = readJournal(planRoot, 'main').state!;
         s.tracks = [
             trackRefFixture({ trackId: 'cli', phase, readinessNonce: 'nonce-cli'.padEnd(32, '0') }, worktreePath),
@@ -100,6 +100,31 @@ describe('runSupervisorWrapper — claim exact-once + espera read-only del ACTIV
         expect(second).toBe('already-claimed');
         expect(secondLaunched).toBe(false);
     });
+
+    // El wrapper esperaba la IGUALDAD EXACTA con `ACTIVE`, con un poll de 2 s en producción.
+    // Eso es una carrera: el plan puede cruzar `ACTIVE` entre dos lecturas y dejar al wrapper
+    // esperando para siempre una fase que ya pasó — sin `awm watch`, nadie consume las
+    // requests cross-journal del track (empezando por `track-freeze-request`) y la cohorte se
+    // traba en el freeze. Se observó al reparar el join: un track podía ir
+    // `ARMED -> ACTIVE -> JOIN_REQUESTED` dentro de un mismo `reconcileTracks`.
+    test.each(['ACTIVE', 'JOIN_REQUESTED', 'FROZEN'] as const)(
+        'lanza watch con el track ya en %s: la condición es monótona, no la igualdad con ACTIVE',
+        async (phase) => {
+            seedTrackRef(phase);
+            let launched: string | null = null;
+            const outcome = await runSupervisorWrapper({
+                worktreePath, trackId: 'cli', nonce: NONCE, readinessNonce: 'nonce-cli'.padEnd(32, '0'), fencingToken: 'fence',
+                planRoot, planBranch: 'main', pollMs: 5,
+                launchWatch: (wt) => {
+                    launched = wt;
+                    fs.mkdirSync(path.dirname(supervisorLockPath(wt)), { recursive: true });
+                    fs.writeFileSync(supervisorLockPath(wt), '{}');
+                },
+            });
+            expect(outcome).toBe('active');
+            expect(launched).toBe(worktreePath);
+        },
+    );
 
     test('si el plan bloquea el track, el wrapper jamás lanza `awm watch` (C1, R4.9)', async () => {
         seedTrackRef('BLOCKED');
