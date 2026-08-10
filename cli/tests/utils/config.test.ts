@@ -1,6 +1,30 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { resolveScopeOption } from '../../src/utils/config';
+
+// Regression for the `awm remove <bundle> --yes` gap found running the issue #55
+// Windows playbook (CORE-17): `--yes` skipped the agent prompt but not the scope
+// one, so a supposedly non-interactive removal still hung waiting on a picker.
+// D-006's own stated rule is "`--yes` implica cero prompts" — this closes the one
+// call site that had drifted from it.
+describe('resolveScopeOption', () => {
+    it('falls back to the default when nothing explicit was passed (the --yes path)', () => {
+        expect(resolveScopeOption(undefined, 'local')).toEqual({ ok: true, scope: 'local' });
+        expect(resolveScopeOption(undefined, 'global')).toEqual({ ok: true, scope: 'global' });
+    });
+
+    it('an explicit valid value wins over the default', () => {
+        expect(resolveScopeOption('global', 'local')).toEqual({ ok: true, scope: 'global' });
+    });
+
+    it('rejects a value that is neither local nor global', () => {
+        expect(resolveScopeOption('bogus', 'local')).toEqual({
+            ok: false,
+            error: 'Invalid scope "bogus". Use: local or global.',
+        });
+    });
+});
 
 describe('Preferences Manager', () => {
     let tmpHome: string;
