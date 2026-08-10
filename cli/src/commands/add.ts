@@ -17,6 +17,7 @@ export type RunAddBundleOptions = {
     name: string;
     agent?: string;
     scope?: string;
+    method?: string;
     cwd?: string;
 };
 
@@ -75,13 +76,31 @@ export function runAddBundleCore(
         return { code: 1, selectedAgents };
     }
 
+    // `--method` used to be accepted here and silently discarded — this branch
+    // hardcoded 'symlink' regardless of what was passed. Since D-001 made bundle
+    // names the ONLY thing `add [name]` resolves against, this is the sole live
+    // path for any real invocation; the interactive/`--all` path below still has
+    // its own (correct) method resolution, but a valid bundle name never reaches
+    // it. Found running the issue #55 Windows playbook's WIN-02: `--method copy`
+    // on native Windows still produced a Junction, because 'symlink' was the
+    // only value that ever actually reached the installer. The no-flag default
+    // stays 'symlink' (unchanged) — only the explicit-override case was broken.
+    let methodVal: 'symlink' | 'copy' = 'symlink';
+    if (options.method) {
+        if (options.method !== 'symlink' && options.method !== 'copy') {
+            console.error(pc.red(`Invalid method "${options.method}". Use: symlink or copy.`));
+            return { code: 1, selectedAgents };
+        }
+        methodVal = options.method;
+    }
+
     let result: AddBundleResult;
     try {
         result = d.addBundle({
             bundleName: matchedBundle.name,
             bundles,
             agents: selectedAgents,
-            method: 'symlink',
+            method: methodVal,
             projectRoot: projectRoot ?? cwd,
             scopeOverride,
         });

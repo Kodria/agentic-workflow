@@ -10,6 +10,51 @@ describe('assertProviderSupported', () => {
         expect(exec).toHaveBeenCalledWith('codex', ['--version'], expect.any(Object));
     });
 
+    // Regression: npm installs `codex` as `codex.cmd` on Windows, and
+    // execFileSync can't CreateProcess a `.cmd` shim without a shell — it threw
+    // ENOENT here even on a machine where `codex --version` worked fine typed
+    // directly. `provider.versionCommand` is hardcoded first-party config
+    // (providers/index.ts), never attacker-controlled, so `shell: true` here
+    // carries none of the injection risk core/paths.ts's resolveOnPath was
+    // built to avoid for sensors.json's user/registry-supplied `cmd`.
+    describe('on native Windows', () => {
+        const realPlatform = process.platform;
+        afterEach(() => {
+            Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+        });
+
+        it('runs the version probe through a shell so the .cmd shim resolves', () => {
+            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+            const exec = jest.fn(() => Buffer.from('codex-cli 0.145.0\n'));
+            assertProviderSupported('codex', exec);
+            expect(exec).toHaveBeenCalledWith('codex', ['--version'], expect.objectContaining({ shell: true }));
+        });
+
+        it('does not use a shell on non-Windows platforms', () => {
+            Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+            const exec = jest.fn(() => Buffer.from('codex-cli 0.145.0\n'));
+            assertProviderSupported('codex', exec);
+            expect(exec).toHaveBeenCalledWith('codex', ['--version'], expect.objectContaining({ shell: false }));
+        });
+
+        // Regression from the fix above: shipping shell:true changed how a
+        // GENUINELY missing binary fails. Without a shell it's a spawn-level
+        // ENOENT; through cmd.exe the shell itself starts fine and the missing
+        // command surfaces as a non-zero exit with this exact stderr text — no
+        // ENOENT anywhere. windows-latest CI (no codex installed) caught this:
+        // it started reporting "version probe failed" instead of "not
+        // installed" the first time shell:true shipped without this branch.
+        it('still reports "not installed" when the shell itself says the command is unknown', () => {
+            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+            const shellNotFound = Object.assign(new Error('Command failed: codex --version'), {
+                status: 1,
+                stderr: Buffer.from("'codex' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n"),
+            });
+            expect(() => assertProviderSupported('codex', () => { throw shellNotFound; }))
+                .toThrow('Codex is not installed or not available on PATH');
+        });
+    });
+
     it.each(['0.145.1', '0.146.0', '1.0.0'])(
         'accepts stable Codex version %s above the minimum',
         (version) => {

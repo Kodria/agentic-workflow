@@ -2,7 +2,7 @@
 
 import { intro, outro, spinner, select, multiselect, confirm, isCancel } from '@clack/prompts';
 import { Command } from 'commander';
-import { enableAgent, getPreferences, savePreferences } from './utils/config';
+import { enableAgent, getPreferences, savePreferences, resolveScopeOption } from './utils/config';
 import { buildGroupedOptions } from './utils/grouping';
 import { buildPackageView, packageSummaryLines, packageDetailLines, findPackage, packagePickerItems, artifactPickerItems, resolveLevel2Selection, ALL_SENTINEL, ArtifactView, artifactValue } from './utils/registry-view';
 import { isInteractive } from './ui/tty';
@@ -131,7 +131,7 @@ program.command('add [name]')
       if (name) {
           const allBundles = discoverAllBundles();
           const prefs = getPreferences();
-          const outcome = runAddBundleCore({ name, agent: options.agent, scope: options.scope }, prefs, allBundles);
+          const outcome = runAddBundleCore({ name, agent: options.agent, scope: options.scope, method: options.method }, prefs, allBundles);
           if (outcome.code !== 0) process.exit(outcome.code);
           outro('Done.');
           return;
@@ -588,12 +588,17 @@ program.command('remove [name]')
       }
 
       let scopeVal: Scope;
-      if (options.scope) {
-          if (options.scope !== 'local' && options.scope !== 'global') {
-              console.error(pc.red(`Invalid scope "${options.scope}". Use: local or global.`));
+      if (options.scope || options.yes) {
+          // Same reasoning as the --agent default just above: `--yes` means ZERO
+          // prompts. Without the `options.yes` half of this condition, `awm remove
+          // <bundle> --yes` still opened the scope picker and hung any
+          // non-interactive caller — the flag promised no-interactive and wasn't.
+          const resolved = resolveScopeOption(options.scope, prefs.defaultScope);
+          if (!resolved.ok) {
+              console.error(pc.red(resolved.error));
               process.exit(1);
           }
-          scopeVal = options.scope;
+          scopeVal = resolved.scope;
       } else {
           const scopeChoice = await select({
               message: 'Scope?',

@@ -1,7 +1,7 @@
 // src/utils/config.ts
 import fs from 'fs';
 import path from 'path';
-import { AgentTarget, isAgentTarget } from '../providers';
+import { AgentTarget, isAgentTarget, Scope } from '../providers';
 import { awmHome } from '../core/paths';
 import { writeFileAtomic } from '../core/atomic-file';
 
@@ -185,4 +185,22 @@ export function enableAgent(prefs: AwmPreferences, agent: AgentTarget): AwmPrefe
     return prefs.enabledAgents.includes(agent)
         ? prefs
         : { ...prefs, enabledAgents: [...prefs.enabledAgents, agent] };
+}
+
+export type ScopeResolution = { ok: true; scope: Scope } | { ok: false; error: string };
+
+/**
+ * Resolve `--scope` the same way across every non-interactive command path: an
+ * explicit value wins (validated), otherwise fall back to the caller's default
+ * instead of prompting. Pulled out of `remove`'s Commander closure (D-006) after
+ * `--yes` was found to still open the scope picker with no `--scope` given —
+ * `--yes` means zero prompts, and this is the one call site that had drifted
+ * from that rule (the sibling --agent default sits right next to it in index.ts).
+ */
+export function resolveScopeOption(explicit: string | undefined, fallback: Scope): ScopeResolution {
+    if (explicit === undefined) return { ok: true, scope: fallback };
+    if (explicit !== 'local' && explicit !== 'global') {
+        return { ok: false, error: `Invalid scope "${explicit}". Use: local or global.` };
+    }
+    return { ok: true, scope: explicit };
 }
