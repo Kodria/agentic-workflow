@@ -2653,12 +2653,23 @@ No crear tag ni ejecutar `awm update` en esta task; promoción del registry ocur
 
 _Requirements: R4.5, R5.7, R5.8, R6.1, R7.6, R8.2, CA-4.1, CA-4.2, CA-4.3_
 
+> **Los snippets de los Steps 2–4 están escritos contra una API que nunca existió.** Fueron
+> redactados antes de la implementación y esperan `runWorkload()` devolviendo
+> `{ cycleStatus, treeHash, events: [{ kind: 'parallel-degraded' }] }` más un seam
+> `worktreeAdder`. Lo que se shippeó es `reconcileTracks(planRoot, branch, state, runtime,
+> maxParallel) -> { state, effectExecuted }`, el seam es `TrackRuntime.addWorktree`, y la
+> degradación se observa como `cohortPhase: 'SERIAL'` + `cohortFallbackReason`. Los tests se
+> escribieron contra el contrato REAL: doblar código que funciona para que se parezca a un
+> plan anterior a él sería invertir la relación. **Los criterios (CA-4.1/4.2/4.3) no cambian
+> — solo su expresión.** Cuarta ocurrencia de este patrón en el repo (las otras: `--type` en
+> `add`, `AG-03`, `CORE-17`).
+
 **Files:**
 - Create: `cli/tests/integration/parallel-tracks.e2e.test.ts`
 - Create: `cli/tests/fixtures/tracks/workload/plan.md`
 - Create: `cli/tests/fixtures/tracks/workload/apply-task.mjs`
 
-- [ ] **Step 1: Crear workload determinista con modo serial y paralelo**
+- [x] **Step 1: Crear workload determinista con modo serial y paralelo**
 
 El fixture inicializa un repo con `src/a.txt` y `src/b.txt`. `apply-task.mjs <file> <value>` reemplaza el contenido usando argv, nunca shell. El plan declara dos tracks, integration argv:
 
@@ -2668,7 +2679,7 @@ El fixture inicializa un repo con `src/a.txt` y `src/b.txt`. `apply-task.mjs <fi
 
 y paths `['src/**']`. `verify.mjs` sale 0 solo si ambos archivos tienen sus valores finales.
 
-- [ ] **Step 2: Escribir CA-4.1 sobre tree hash, no historial**
+- [x] **Step 2: Escribir CA-4.1 sobre tree hash, no historial**
 
 ```ts
 test('serial y paralelo producen el mismo árbol (CA-4.1)', async () => {
@@ -2681,7 +2692,7 @@ test('serial y paralelo producen el mismo árbol (CA-4.1)', async () => {
 });
 ```
 
-- [ ] **Step 3: Escribir CA-4.2 con seam de `worktreeAdder`**
+- [x] **Step 3: Escribir CA-4.2 con seam de `worktreeAdder`**
 
 ```ts
 test('fallo de worktree completa serial y deja degradación (CA-4.2)', async () => {
@@ -2693,7 +2704,7 @@ test('fallo de worktree completa serial y deja degradación (CA-4.2)', async () 
 });
 ```
 
-- [ ] **Step 4: Escribir CA-4.3 con un solo lockfile**
+- [x] **Step 4: Escribir CA-4.3 con un solo lockfile**
 
 ```ts
 test('un track que toca package-lock invalida la cohorte (CA-4.3, C5)', async () => {
@@ -2704,23 +2715,23 @@ test('un track que toca package-lock invalida la cohorte (CA-4.3, C5)', async ()
 });
 ```
 
-- [ ] **Step 5: Agregar caso de ownership real violado después de ejecución**
+- [x] **Step 5: Agregar caso de ownership real violado después de ejecución**
 
 El track A declara `src/a.txt` pero su commit también toca `outside.txt`. Ambos tracks terminan en sus worktrees; la ejecución paralela no se mata, pero los joins ocurren uno por vez y el evento `joins-serialized` nombra `outside.txt`.
 
-- [ ] **Step 6: Build local y corrida aislada**
+- [x] **Step 6: Build local y corrida aislada**
 
 Run: `cd cli && npm run build && npx jest tests/integration/parallel-tracks.e2e.test.ts --runInBand`
 
 Expected: 4 tests PASS. El test invoca `node dist/src/index.js`, nunca `awm` del PATH.
 
-- [ ] **Step 7: Repetir para detectar leaks**
+- [x] **Step 7: Repetir para detectar leaks**
 
 Run: `cd cli && npx jest tests/integration/parallel-tracks.e2e.test.ts --runInBand && npx jest tests/integration/parallel-tracks.e2e.test.ts --runInBand`
 
 Expected: ambas PASS; `afterEach` confirma cero procesos propios vivos y remueve solo los tmpdirs creados por el test.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add cli/tests/integration/parallel-tracks.e2e.test.ts cli/tests/fixtures/tracks/workload
@@ -3017,7 +3028,7 @@ Con todas las tasks marcadas, ejecutar `post-implementation-qa`; debe auditar ca
 | C10 | T4, T15 | recursos declarados participan; test no afirma observar uso runtime oculto |
 | C11 | T1, T8, T9 | intent + claim `wx`; spawn count 1 tras cada crash |
 | CA-4.1 | T15 | tree hash serial === paralelo |
-| CA-4.2 | T15 | worktreeAdder falla, serial completa y registra degradación |
+| CA-4.2 | T15 | `TrackRuntime.addWorktree` falla, serial completa, `cohortFallbackReason` nombra efecto+track y el árbol coincide con el paralelo |
 | CA-4.3 | T4, T15 | package-lock en un track invalida cohorte |
 | CA-T.5 | T16 | dos JSON reales con artefactos y sourceHead |
 

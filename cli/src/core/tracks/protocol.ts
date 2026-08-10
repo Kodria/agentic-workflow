@@ -252,7 +252,14 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
     } else if (observation.kind === 'effect-failed') {
         if (out.cohortPhase === 'PREPARING') {
             out.cohortPhase = 'FALLBACK_PENDING';
-            out.fallbackReason = `effect-failed:${observation.effect}`;
+            // Nombra el TRACK además del efecto: "cuál falló" es la primera pregunta
+            // frente a una cohorte degradada, y sin el trackId el motivo obliga a
+            // correlacionar hacia atrás con el evento `track-effect-failed`. El sufijo se
+            // omite (no se rellena con un placeholder) cuando la observación genuinamente
+            // no tiene track — un `undefined` impreso sería peor que no decir nada.
+            out.fallbackReason = observation.trackId === undefined
+                ? `effect-failed:${observation.effect}`
+                : `effect-failed:${observation.effect}:${observation.trackId}`;
             markTeardownRequested(out.tracks);
         } else if (observation.effect === 'begin-teardown' && observation.trackId !== undefined) {
             // T13 (C9): un paso de teardown que no pudo probarse seguro

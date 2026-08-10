@@ -197,6 +197,11 @@ function toProtocol(state: JournalState, maxParallel: number): CohortProtocol {
         // `nextProtocolEffect` repetiría el efecto desde cero.
         globalQaHeadSha: state.globalQaHeadSha,
         finalIntegrationJobId: state.finalIntegrationJobId,
+        // Mismo criterio que los tres campos de arriba: `reconcileProtocol` fija
+        // `fallbackReason` sobre el protocolo, pero este loop lo reconstruye desde el
+        // journal en cada vuelta — sin releerlo acá, la causa específica de la
+        // degradación se pierde antes de que `enter-serial` llegue a usarla.
+        fallbackReason: state.cohortFallbackReason,
     };
 }
 
@@ -220,6 +225,7 @@ export function applyProtocolToState(state: JournalState, protocol: CohortProtoc
     // `reconcileProtocol`).
     if (protocol.globalQaHeadSha !== undefined) next.globalQaHeadSha = protocol.globalQaHeadSha;
     if (protocol.finalIntegrationJobId !== undefined) next.finalIntegrationJobId = protocol.finalIntegrationJobId;
+    if (protocol.fallbackReason !== undefined) next.cohortFallbackReason = protocol.fallbackReason;
     next.tracks = (next.tracks ?? []).map((ref) => {
         const t = protocol.tracks[ref.trackId];
         if (t === undefined) return ref;
@@ -950,7 +956,11 @@ export async function reconcileTracks(
             s = persist(planRoot, branch, candidate);
             const trackId = 'trackId' in effect ? effect.trackId : undefined;
             const label = trackId !== undefined ? (s.tracks?.find((t) => t.trackId === trackId)?.phase ?? effect.kind) : s.cohortPhase;
-            appendEvent(planRoot, branch, { kind: 'track-protocol-persist', effect: effect.kind, trackId, phase: label });
+            // `enter-serial` es el ÚNICO efecto de este branch que lleva una causa: la
+            // degradación se lee entera en su propio evento, sin obligar a correlacionar
+            // hacia atrás con el `track-effect-failed` que la originó.
+            const reason = effect.kind === 'enter-serial' ? effect.reason : undefined;
+            appendEvent(planRoot, branch, { kind: 'track-protocol-persist', effect: effect.kind, trackId, phase: label, reason });
             continue;
         }
 

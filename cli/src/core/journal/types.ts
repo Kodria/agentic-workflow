@@ -227,6 +227,15 @@ export interface JournalState {
     // merge recién creado — el siguiente `persist-join-intent` de la cohorte
     // usa ESTE valor como su `expectedPlanHeadSha`, nunca el base original.
     cohortPlanHeadSha?: string;
+    // Espejo persistente de `CohortProtocol.fallbackReason` — mismo criterio que
+    // `cohortPlanHeadSha`/`globalQaHeadSha`/`finalIntegrationJobId`: `reconcileProtocol` lo
+    // fija en el protocolo, pero `reconcileTracks` reconstruye el protocolo con `toProtocol`
+    // en CADA vuelta de su loop, así que un campo sin espejo acá se pierde antes de la
+    // siguiente iteración. Sin esto, el `prepare-failed:<trackId>` que `reconcileProtocol`
+    // calcula era inalcanzable por construcción y `enter-serial` siempre caía al genérico
+    // `'prepare-failed'` — la causa quedaba solo en el evento `track-effect-failed`,
+    // obligando a correlacionar hacia atrás en vez de leerla en la degradación misma.
+    cohortFallbackReason?: string;
     trackIntegration?: { argv: string[]; paths: string[]; planDigest: string };
     // R7/C3/C4 (Task 12): espejo persistente de `CohortProtocol.globalQaHeadSha`/
     // `finalIntegrationJobId` (`core/tracks/types.ts`, ya definidos desde Task 1) —
@@ -306,6 +315,7 @@ export function isWellFormedState(x: unknown): x is JournalState {
     if (x.cohortPhase !== undefined && !(COHORT_PHASES as readonly string[]).includes(String(x.cohortPhase))) return false;
     if (x.cohortBaseSha !== undefined && typeof x.cohortBaseSha !== 'string') return false;
     if (x.cohortPlanHeadSha !== undefined && typeof x.cohortPlanHeadSha !== 'string') return false;
+    if (x.cohortFallbackReason !== undefined && typeof x.cohortFallbackReason !== 'string') return false;
     if (x.trackIntegration !== undefined && !isWellFormedTrackIntegration(x.trackIntegration)) return false;
     if (x.freezeRequested !== undefined && typeof x.freezeRequested !== 'boolean') return false;
     if (x.frozen !== undefined && !(isObj(x.frozen) && typeof x.frozen.headSha === 'string' && typeof x.frozen.at === 'string')) return false;
