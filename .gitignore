@@ -7,7 +7,12 @@ coverage
 .agents
 skills-lock.json
 tmp/*
-*.awm.*
+# NO se ignoran los configs de sensores (`.semgrep.awm.yml`, `eslint.config.awm.mjs`,
+# `.dep-cruiser.awm.js`): son el lugar donde `harness-retro` crece las reglas ESPECÍFICAS
+# del proyecto, así que el equipo tiene que recibirlas por el repo. Un `*.awm.*` global los
+# excluía a todos — y solo `eslint.config.awm.mjs` sobrevivía, por haberse commiteado antes
+# de que la regla existiera. Resultado: el sensor `security` declarado en sensors.json
+# apuntaba a un archivo que git nunca dejaba entrar, y quedaba `inconclusive` para siempre.
 .claude/skills/
 .claude/agents/
 *.eslintcache

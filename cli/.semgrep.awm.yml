@@ -1,0 +1,38 @@
+# AWM Semgrep rules — security patterns for JavaScript/TypeScript
+# Usage: semgrep --config .semgrep.awm.yml --json .
+
+rules:
+  - id: awm-no-eval
+    patterns:
+      - pattern: eval(...)
+    message: >
+      SENSOR[security] Avoid eval() — it executes arbitrary code and is a security risk.
+      Fix: use JSON.parse() for JSON, or refactor to avoid dynamic code execution.
+    languages: [javascript, typescript]
+    severity: ERROR
+
+  - id: awm-no-hardcoded-secrets
+    patterns:
+      - pattern: |
+          const $VAR = "..."
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: (password|secret|api_key|apikey|token|passwd)
+    message: >
+      SENSOR[security] Potential hardcoded secret in variable '$VAR'.
+      Fix: use environment variables or a secrets manager instead.
+    languages: [javascript, typescript]
+    severity: WARNING
+
+  - id: awm-no-sql-concat
+    patterns:
+      - pattern: |
+          $QUERY + $VAR
+      - metavariable-regex:
+          metavariable: $QUERY
+          regex: (SELECT|INSERT|UPDATE|DELETE|DROP)
+    message: >
+      SENSOR[security] Possible SQL injection via string concatenation.
+      Fix: use parameterized queries or a query builder.
+    languages: [javascript, typescript]
+    severity: ERROR
