@@ -7,7 +7,7 @@ verificó por esta vía — no se infiere de las que sí.
 
 | Vía | Qué certifica | Costo | Estado |
 |---|---|---|---|
-| `scripted` (`scripted-controller.mjs`) | El contrato **supervisor↔controller**: spawn, token de generación, requests consumidas, worktrees, fencing | **Cero tokens**, repetible | bootstrap ✅ · recovery ✅ · join ⏳ |
+| `scripted` (`scripted-controller.mjs`) | El contrato **supervisor↔controller**: spawn, token de generación, requests consumidas, worktrees, fencing | **Cero tokens**, repetible | bootstrap ✅ · recovery ✅ · join ✅ |
 | `claude-code` / `codex` | Que un **agente real** sabe ocupar el rol de controller | Tokens, sin techo garantizado | Sin correr (opcional) |
 
 La segunda **no** se deduce de la primera, y la primera **no** se deduce de la segunda. Son
@@ -36,34 +36,44 @@ y deriva los veredictos **del journal**, nunca de lo que el controller diga habe
 - **fencing observado en vivo** — las requests de una generación superseded se rechazan
   (`request-rejected-stale`). El mecanismo funciona.
 
-**No certificado por esta vía — `join` (`pending`):**
+**Certificado — `join` (`pass`):** la cohorte alcanza `COMPLETE` bajo supervisor vivo con
+relevo, con los 2 tracks en `JOINED` y **exactamente 1** job de integración final.
 
-La cohorte no alcanza `COMPLETE` bajo supervisor vivo con relevo. Tres hipótesis se probaron
-y se descartaron como causa completa, cada una arreglando un defecto real del propio
-controller scripteado:
+Llegar ahí exigió reparar **siete defectos**, la mayoría de producto. El síntoma que este
+README describía antes — "el token del controller vivo pasa a ser stale y todas sus requests
+se rechazan" — resultó ser un efecto secundario, no la causa: era el controller lanzado por
+un supervisor de TRACK emitiendo contra el journal del PLAN con el token del track. Las
+requests rechazadas por generación stale en la corrida certificada son **0**.
 
-1. **Sin heartbeat** el supervisor lo declaraba en stall y lo superseeded en loop. Corregido
-   (el heartbeat es parte del contrato del controller, no un adorno).
-2. **`git commit` sobre árbol limpio** cuando un controller relevado reencuentra el trabajo
-   ya commiteado por su antecesor. Corregido: idempotencia sobre el estado real del worktree,
-   no sobre la fase del track.
-3. **Contrato canónico de integración sin registrar** — sin `register --entity
-   track-integration` el supervisor fail-closea en `request-final-integration` en vez de
-   inventar un comando (comportamiento correcto). Corregido.
+La decisión de entonces de **no intentar un cuarto parche** fue correcta: el problema estaba
+en un nivel distinto del que se estaba parcheando. Los defectos reales, en el orden en que se
+destaparon uno a otro:
 
-Después de los tres, el síntoma persiste: **~3,5 minutos después del `SIGKILL`, el token del
-controller vivo pasa a ser stale y todas sus requests se rechazan**, antes de que se abra la
-generación siguiente. No se identificó la causa raíz.
+1. **`awm track join` no hacía nada** (producto). `applyRequestToState` no tenía rama para
+   `track-join-request`: se caía por el final sin lanzar, el caller contaba `applied++` y
+   borraba el archivo. `join-requested` era la única observación del protocolo con cero
+   productores en todo `src/`.
+2. **El fallthrough silencioso** (producto) que permitió (1). Un `RequestKind` sin handler
+   ahora falla cerrado: `request-rejected-invalid`, evento durable, archivo `.rejected`.
+3. **`awm track finalize` no existía** (producto). Los joins no cierran la cohorte: el
+   supervisor pide QA global y espera un `track-finalize-request` que ningún comando emitía —
+   el único productor era el harness de tests. `COMPLETE` solo era alcanzable desde adentro
+   de los tests.
+4. **Un join pedido antes de la activación se perdía** (producto, introducido al reparar (1)
+   y detectado por esta misma certificación).
+5. **El supervisor de un track no arrancaba** si el plan cruzaba `ACTIVE` entre dos polls
+   (producto). Solo funcionaba *porque* el join estaba roto y los tracks se quedaban parados
+   en `ACTIVE`: un bug sostenía al otro.
+6. **Un track no podía congelarse nunca** (producto): R3.6 se evaluaba fuera del guard
+   `requireGlobalKinds`, así que el gate local exigía verificadores que un journal de track
+   jamás detecta.
+7. **El plan de ciclo del controller scripteado** no incluía `qa` ni `interlock` (harness),
+   que el gate global exige siempre.
 
-**No se intentó un cuarto fix a propósito.** Tres intentos fallidos sobre el mismo síntoma es
-la señal de que el problema está en un nivel distinto del que se está parcheando, y seguir
-parchando produce un verde que no significa nada. Queda como hallazgo abierto con su
-evidencia (`evidence/artifacts/scripted-local/events.jsonl`), no como test tolerado en rojo.
-
-**Dónde SÍ está cubierto el join:** `cli/tests/commands/watch/track-join-crash.test.ts`,
-`track-finalize.test.ts` y `cli/tests/integration/parallel-tracks.e2e.test.ts` — todos con
-git real, incluyendo crash/restart en cada frontera del join. Lo que falta es ejercitarlo
-bajo un supervisor vivo con relevo de controller, que es una composición, no el join en sí.
+**Dónde más está cubierto el join:** `cli/tests/commands/watch/track-join-crash.test.ts`,
+`track-finalize.test.ts`, `track-join-request.test.ts` y
+`cli/tests/integration/parallel-tracks.e2e.test.ts` — todos con git real, incluyendo
+crash/restart en cada frontera.
 
 ## `AWM_CONTROLLER_ARGV`
 

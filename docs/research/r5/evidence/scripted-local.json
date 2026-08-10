@@ -2,19 +2,19 @@
   "schema": 1,
   "provider": "scripted",
   "environment": "local",
-  "result": "partial",
+  "result": "pass",
   "exercises": {
     "bootstrap": "pass",
     "recovery": "pass",
-    "join": "pending",
+    "join": "pass",
     "finalIntegrationRuns": 1
   },
   "details": {
     "bootstrap": "ARMED: alpha,beta; cohorte activada",
-    "recovery": "tras SIGKILL al grupo (pgid 10792 @ 2026-08-10T12:20:12.468Z), un solo supervisorIntent y un solo TrackRef por track: {\"alpha\":1,\"beta\":1}",
-    "join": "no alcanzado por esta vía: cohortPhase=FINAL_INTERLOCK; JOINED=0/2; jobs de integración final=1; requests rechazadas por generación stale=0 (transición de token sin causa raíz identificada — ver docs/research/r5/README.md)"
+    "recovery": "tras SIGKILL al grupo (pgid 18751 @ 2026-08-10T12:31:23.844Z), un solo supervisorIntent y un solo TrackRef por track: {\"alpha\":1,\"beta\":1}",
+    "join": "COMPLETE con 2 tracks JOINED y 1 job de integración final"
   },
-  "sourceHead": "220bdef9cf03adc85a69375a24342f0ccedb86ec",
+  "sourceHead": "016dae56a4853a5bb1a1b3e5b70f8a47ea434eec",
   "commands": [
     "node dist/src/index.js watch --init",
     "node dist/src/index.js track add alpha",
@@ -28,5 +28,5 @@
     "evidence/artifacts/scripted-local/state.json",
     "evidence/artifacts/scripted-local/events.jsonl"
   ],
-  "finalizedAt": "2026-08-10T12:29:48.714Z"
+  "finalizedAt": "2026-08-10T12:33:15.483Z"
 }

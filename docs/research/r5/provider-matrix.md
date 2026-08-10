@@ -6,10 +6,10 @@
 |---|---|---|---|
 | bootstrap | supported | sin-evidencia | sin-evidencia |
 | crash recovery | supported | sin-evidencia | sin-evidencia |
-| worktree join | not-certified | sin-evidencia | sin-evidencia |
+| worktree join | supported | sin-evidencia | sin-evidencia |
 | final gate semantics | identical | sin-evidencia | sin-evidencia |
 
-Fuente: scripted@3f8783b4f254 · claude-code: SIN EVIDENCIA · codex: SIN EVIDENCIA
+Fuente: scripted@016dae56a485 · claude-code: SIN EVIDENCIA · codex: SIN EVIDENCIA
 
 ## Qué certifica esta matriz — y qué no
 

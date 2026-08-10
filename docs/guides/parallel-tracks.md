@@ -17,7 +17,7 @@ Sin ambigüedad sobre qué está probado y qué no:
 | Degradación a serial ante cualquier condición no probada | ✅ Verificado | Suite con git real, incluida paridad de árbol serial-vs-paralelo |
 | Recuperación tras crash sin duplicar recursos | ✅ Verificado | `SIGKILL` real al grupo del supervisor + relevo |
 | Aislamiento por worktree y ownership declarado/real | ✅ Verificado | Suite con git real, incluidos renames por sus dos puntas |
-| `join → COMPLETE` bajo supervisor vivo con relevo de controller | 🔜 No verificado | El camino estaba **roto**: `awm track join` emitía una request que el supervisor no sabía aplicar y contaba como aplicada (ver más abajo). Arreglado y cubierto por suite; la certificación end-to-end con supervisor vivo todavía no dio verde — hasta que lo haga, esta fila NO dice verificado |
+| `join → COMPLETE` bajo supervisor vivo con relevo de controller | ✅ Verificado | Certificación con supervisor y procesos reales (`provider-run.mjs --certify-scripted`): `COMPLETE`, 2 tracks `JOINED` y **1** job de integración final. Evidencia en [`docs/research/r5/evidence/scripted-local.json`](../research/r5/evidence/scripted-local.json) |
 | Un agente LLM real como controller | ⚠ Sin verificar | Opcional; certificado solo con controller determinista |
 | `awm track remove` (teardown pedido por el controller) | ❌ **No implementado** | El supervisor no tiene handler para `track-teardown-request`: el comando emite la request y el supervisor la **rechaza** de forma visible. El teardown que sí funciona es el automático de la degradación a serial. |
 
