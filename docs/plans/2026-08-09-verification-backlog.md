@@ -116,9 +116,31 @@ Para `.mdc` y `.instructions.md`, el diagnóstico comprobaba que el archivo **ex
 
 **De paso, un cuarto duplicado menos:** `codex-agent-toml` era el único renderer con verificación de contenido, y su marcador estaba horneado dentro de `tomlAgentsHealthy`. Ahora los tres salen de la tabla, así que un renderer nuevo no puede agregarse sin declarar el suyo. El guard estructural del registry detectó —durante este mismo cambio— que yo había escrito `'.toml'` a mano en el sitio nuevo.
 
-### C4 · `awm update` no reconcilia el scope de proyecto
+### C4 · Los artefactos **renderizados** quedan viejos y nada los refresca — parcialmente cerrado 2026-08-09
 
-`update` reconcilia artefactos de máquina; los de proyecto son trabajo de `awm sync`. Un proyecto en el que nadie corre `sync` queda desactualizado en silencio.
+**El enunciado original estaba mal, y medirlo lo corrigió.** No es "scope de proyecto": es **formato de instalación**.
+
+| Instalación | ¿Se actualiza sola con `awm update`? |
+|---|---|
+| **Symlink** (`claude-code`, `codex`, `opencode`, `antigravity`) | **Sí.** Apunta al registry: el cambio se ve al instante, en todos los proyectos a la vez. |
+| **Renderizada** (`.mdc`, `.instructions.md`, `.toml`) | **No.** Son archivos generados: se quedan con el contenido de la versión anterior. |
+
+Así que solo Cursor, Copilot y los perfiles de agente de Codex quedan viejos — y nada lo decía.
+
+**Cerrado: la detección.** `awm doctor` re-renderiza cada artefacto desde la fuente que el ledger declara y compara. Si difiere, reporta `stale`, nombra el archivo y degrada `overall`. Es una comparación **exacta**, no una heurística de timestamps: un registry re-clonado no produce falsos positivos.
+
+**Medido, no supuesto — cuál comando refresca:**
+
+| Comando | ¿Refresca un renderizado viejo? |
+|---|---|
+| `awm init` | **No** — idempotente por presencia: ve el archivo y no lo toca |
+| `awm update` | **No** — refresca el registry, no lo derivado de él |
+| `awm sync` | **No** (verificado en scope global) |
+| `awm add <bundle>` | **Sí** |
+
+Por eso el remedio es `reinstall-bundle`. Ofrecer `awm sync` habría sido un remedio que corre limpio sin cambiar nada — el mismo defecto que `open-hooks-trust` tenía y que D-010 cerró.
+
+**Abierto: la reconciliación automática.** Lo correcto a futuro es que `awm update` **re-renderice los artefactos derivados**, porque son exactamente eso — derivados del registry que acaba de actualizar. Hoy el usuario tiene que verlo en `doctor` y correr `awm add` a mano. La detección lo hace visible; la automatización queda pendiente, ahora con la evidencia de qué comando toca cambiar.
 
 ### C5 · Packs `python` y `shell` contra proyectos reales
 

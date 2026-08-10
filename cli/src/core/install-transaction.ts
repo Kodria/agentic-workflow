@@ -21,9 +21,7 @@ import { InstallPlan, PlannedOperation } from './install-planner';
 import { mergeArtifactRecords, readArtifactState, writeArtifactState } from './artifact-state';
 import { awmHome } from './paths';
 import { writeFileAtomic } from './atomic-file';
-import { renderCodexAgent } from './renderers/codex-agent';
-import { renderCursorMdc } from './renderers/cursor-mdc';
-import { renderCopilotInstructions } from './renderers/copilot-instructions';
+import { renderArtifact } from './renderers/registry';
 import { stageArtifact, replaceArtifact } from './executor';
 
 /**
@@ -295,10 +293,6 @@ function stageRenderedFile(content: string, targetPath: string): string {
  * are sourced from that directory's SKILL.md, so every call site needs this
  * same one-line join instead of reading `op.sourcePath` directly.
  */
-function readSkillMdSource(op: PlannedOperation): string {
-    return fs.readFileSync(path.join(op.sourcePath, 'SKILL.md'), 'utf8');
-}
-
 /**
  * The real, filesystem-touching TransactionDeps used by applyInstallPlan by
  * default. Renders `codex-agent-toml`/`cursor-mdc`/`copilot-instructions`
@@ -318,13 +312,10 @@ export function defaultTransactionDeps(): TransactionDeps {
             }
             // Renders without writing anything, purely to surface parse errors
             // before any backup/replace happens.
-            if (op.renderer === 'codex-agent-toml') {
-                renderCodexAgent(fs.readFileSync(op.sourcePath, 'utf8'));
-            } else if (op.renderer === 'cursor-mdc') {
-                renderCursorMdc(readSkillMdSource(op));
-            } else if (op.renderer === 'copilot-instructions') {
-                renderCopilotInstructions(readSkillMdSource(op));
-            }
+            // Renderiza y descarta: el objetivo es que un error de parseo salte ANTES
+            // de tocar nada. El dispatch sale de la tabla (`renderArtifact`), no de una
+            // copia local — esta era una de las dos que habia en este archivo.
+            renderArtifact(op.renderer, op.sourcePath);
         },
 
         backup(op, backupDir) {
@@ -342,19 +333,11 @@ export function defaultTransactionDeps(): TransactionDeps {
         },
 
         stage(op) {
-            if (op.renderer === 'codex-agent-toml') {
-                const rendered = renderCodexAgent(fs.readFileSync(op.sourcePath, 'utf8'));
-                return stageRenderedFile(rendered, op.targetPath);
-            }
-            if (op.renderer === 'cursor-mdc') {
-                const rendered = renderCursorMdc(readSkillMdSource(op));
-                return stageRenderedFile(rendered, op.targetPath);
-            }
-            if (op.renderer === 'copilot-instructions') {
-                const rendered = renderCopilotInstructions(readSkillMdSource(op));
-                return stageRenderedFile(rendered, op.targetPath);
-            }
-            return stageArtifact(op.sourcePath, op.targetPath, op.method);
+            const rendered = renderArtifact(op.renderer, op.sourcePath);
+            // `null` = renderer `link`: no genera contenido, se instala el artefacto tal cual.
+            return rendered === null
+                ? stageArtifact(op.sourcePath, op.targetPath, op.method)
+                : stageRenderedFile(rendered, op.targetPath);
         },
 
         replace(op, staged) {
