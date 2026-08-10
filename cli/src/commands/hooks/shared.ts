@@ -150,3 +150,46 @@ export type HookStatus = {
         settingsEntry: CheckResult;
     };
 };
+
+/**
+ * Entradas de hook con NUESTRA forma cuyo script ya no existe en disco.
+ *
+ * `awm init` reconoce como propia solo la entrada que apunta al `AWM_HOME` actual, asi
+ * que instalar con otro `AWM_HOME` AGREGA una segunda en vez de reemplazar. Una corrida
+ * de playbook aislada deja en el archivo real una entrada permanente hacia un directorio
+ * temporal ya borrado, y el agente intenta ejecutarla en cada sesion, para siempre.
+ * Observado en una corrida real: `~/.codex/hooks.json` con dos entradas de AWM.
+ *
+ * Tres condiciones, a proposito — es el archivo de configuracion DEL USUARIO y no se le
+ * borran lineas por parecido vago:
+ *   1. el `matcher` es exactamente el nuestro,
+ *   2. el ejecutable se llama como el script que AWM instala, y
+ *   3. esa ruta NO existe.
+ *
+ * Una instalacion paralela viva no cumple (3), asi que sobrevive intacta. Lo unico que
+ * se poda es basura que AWM misma dejo y que ya no puede funcionar.
+ */
+export function isDeadAwmHookEntry(
+    entry: unknown,
+    matcher: string,
+    scriptBasename: string,
+    currentScriptsDir: string,
+): boolean {
+    const e = entry as { matcher?: unknown; hooks?: unknown };
+    if (e?.matcher !== matcher || !Array.isArray(e.hooks)) return false;
+    return e.hooks.some((h: unknown) => {
+        const command = (h as { command?: unknown })?.command;
+        if (typeof command !== 'string' || command.length === 0) return false;
+        // Claude invoca `<ruta>/run-hook.cmd session-start`: el ejecutable es el primer
+        // token. Codex invoca la ruta pelada. Partir por espacio cubre las dos formas.
+        const executable = command.split(' ')[0];
+        if (path.basename(executable) !== scriptBasename) return false;
+        // La entrada del AWM_HOME ACTUAL nunca es basura, aunque el script todavia no
+        // este en disco: en una instalacion nueva el archivo aparece unos pasos despues.
+        // Sin esta guarda, un `hooks.json` con dos entradas duplicadas del home actual se
+        // podaba entero y el guard de duplicados (R17) dejaba de dispararse — lo detecto
+        // su propio test al agregar la poda.
+        if (path.dirname(executable) === currentScriptsDir) return false;
+        return !fs.existsSync(executable);
+    });
+}

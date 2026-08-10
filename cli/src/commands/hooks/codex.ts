@@ -9,7 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { getHookConfig } from '../../providers';
-import { backupManagedFile, syncExecutable, readStrictJson, checkExecutable } from './shared';
+import { isDeadAwmHookEntry, backupManagedFile, syncExecutable, readStrictJson, checkExecutable } from './shared';
 import { writeFileAtomic } from '../../core/atomic-file';
 import type { InstallOptions, InstallResult, UninstallResult, HookStatus, CheckResult } from './shared';
 
@@ -55,7 +55,11 @@ export function installCodexHook(options: InstallOptions): InstallResult {
     const hooks = current.hooks && typeof current.hooks === 'object'
         ? current.hooks as Record<string, unknown>
         : {};
-    const entries: any[] = Array.isArray(hooks.SessionStart) ? hooks.SessionStart : [];
+    const raw: any[] = Array.isArray(hooks.SessionStart) ? hooks.SessionStart : [];
+    // Se podan primero las entradas nuestras que apuntan a un script inexistente: son
+    // restos de otro AWM_HOME ya borrado, y el agente las intenta ejecutar cada sesion.
+    // Una instalacion paralela VIVA no se toca — su script existe. Ver isDeadAwmHookEntry.
+    const entries = raw.filter((entry) => !isDeadAwmHookEntry(entry, codexMatcher(), 'session-start', config.scriptsDir));
     const matches = entries.filter((entry) => isAwmCodexEntry(entry, config.scriptsDir));
     if (matches.length > 1) {
         throw new Error('multiple AWM SessionStart entries in Codex hooks.json');
@@ -63,7 +67,11 @@ export function installCodexHook(options: InstallOptions): InstallResult {
 
     const newEntry = awmCodexEntry(config.scriptsDir);
 
-    if (matches.length === 1 && JSON.stringify(matches[0]) === JSON.stringify(newEntry)) {
+    // `pruned` gana sobre el early-return: si se saco basura hay que ESCRIBIRLA, aunque
+    // nuestra entrada ya este identica. Sin esto la poda se calculaba y se tiraba, y el
+    // archivo quedaba igual — lo detecto su propio test.
+    const pruned = raw.length !== entries.length;
+    if (!pruned && matches.length === 1 && JSON.stringify(matches[0]) === JSON.stringify(newEntry)) {
         return { status: 'already-up-to-date', scriptsDir: config.scriptsDir, settingsPath: config.settingsPath, backupPath: null };
     }
 

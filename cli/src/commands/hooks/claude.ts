@@ -9,7 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getSettingsMergeHookConfig } from '../../providers';
-import { backupManagedFile, syncExecutable, checkExecutable, checkFile } from './shared';
+import { isDeadAwmHookEntry, backupManagedFile, syncExecutable, checkExecutable, checkFile } from './shared';
 import type { InstallOptions, InstallResult, UninstallResult, HookStatus, CheckResult } from './shared';
 
 function isAwmEntry(entry: any, scriptsDir: string, matcher: string): boolean {
@@ -68,7 +68,12 @@ export function installClaudeHook(options: InstallOptions): InstallResult {
     if (!settings.hooks) settings.hooks = {};
     if (!settings.hooks[config.eventName]) settings.hooks[config.eventName] = [];
 
-    const entries: any[] = settings.hooks[config.eventName];
+    // Misma poda que en codex.ts: restos nuestros apuntando a un AWM_HOME ya borrado.
+    // `settings.hooks[eventName]` se reasigna porque el objeto se serializa entero abajo.
+    const entries: any[] = settings.hooks[config.eventName]
+        .filter((e: unknown) => !isDeadAwmHookEntry(e, config.matcher, 'run-hook.cmd', config.scriptsDir));
+    const pruned = settings.hooks[config.eventName].length !== entries.length;
+    settings.hooks[config.eventName] = entries;
     const awmEntryIdx = entries.findIndex((e) => isAwmEntry(e, config.scriptsDir, config.matcher));
     const newEntry = {
         matcher: config.matcher,
@@ -81,7 +86,9 @@ export function installClaudeHook(options: InstallOptions): InstallResult {
 
     let status: InstallResult['status'];
     if (awmEntryIdx >= 0) {
-        if (JSON.stringify(entries[awmEntryIdx]) === JSON.stringify(newEntry)) {
+        // Igual que en codex.ts: si la poda saco algo, hay que escribir aunque nuestra
+        // entrada ya este identica — si no, la limpieza se calcula y se tira.
+        if (!pruned && JSON.stringify(entries[awmEntryIdx]) === JSON.stringify(newEntry)) {
             return { status: 'already-up-to-date', scriptsDir: config.scriptsDir, settingsPath: config.settingsPath, backupPath: null };
         }
         entries[awmEntryIdx] = newEntry;

@@ -83,7 +83,7 @@ CI corre la suite de unidad/integración en las tres plataformas. **Eso no es lo
 
 No bloquea nada hoy, y está enunciada como trabajo, no como defecto oculto.
 
-### C1 · `awm context-budget` fija la línea base en cero — falsa alarma garantizada
+### ~~C1 · `awm context-budget` fija la línea base en cero~~ — ✅ cerrado 2026-08-09 (#56)
 
 **Reproducido el 2026-08-09 con la v6.0.0.** El comando mide `AGENTS.md`, `CONSTITUTION.md` y `CLAUDE.md`. En un proyecto recién inicializado esos archivos **todavía no existen** — son pasos `pending` que escribe una sesión de agente. Entonces:
 
@@ -98,13 +98,15 @@ $ awm context-budget
 
 El 0KB no es un error de medición: no hay nada que medir todavía. El problema es **fijar** sobre eso. El camino feliz garantiza una falsa alarma en la corrida siguiente, y una alarma que siempre suena se aprende a ignorar.
 
-**Dirección:** negarse a fijar cuando no hay ningún archivo presente, diciendo que se corra después de que exista el contexto. No inventar un default.
+**Resuelto:** con cero archivos presentes el comando reporta `unmeasurable`, **no escribe config**, y explica que esos archivos los escribe una sesión de agente. La corrida siguiente fija bien. Sale `0` — no es un error, es "todavía no hay nada que medir".
 
-### C2 · `hooks.json` acumula una entrada por cada `AWM_HOME` usado
+### ~~C2 · `hooks.json` acumula una entrada por cada `AWM_HOME` usado~~ — ✅ cerrado 2026-08-09
 
 Abierto desde D-010. `awm init` reconoce como propia solo la entrada que apunta al `AWM_HOME` actual; con otro, **agrega una segunda**. Una corrida de playbook aislada deja en el `hooks.json` real una entrada permanente hacia un directorio temporal ya borrado, y el agente intenta ejecutarla en cada sesión.
 
-D-011 redujo el daño (las rutas del agente ahora se resuelven bien), pero la acumulación sigue. **Falta decidir** si se deduplica en el producto, si alcanza con el paso de teardown que ya documenta `agent-matrix.md`, o ambas.
+D-011 redujo el daño (las rutas del agente ahora se resuelven bien), pero la acumulación seguía.
+
+**Resuelto:** `awm init` poda las entradas con **nuestra forma** cuyo script ya no existe, en Claude Code y en Codex. Tres condiciones, porque es el archivo de configuración del usuario y no se le borran líneas por parecido vago: el `matcher` es exactamente el nuestro, el ejecutable se llama como el script que AWM instala, y esa ruta **no existe**. Una instalación paralela viva no cumple la tercera, así que sobrevive intacta — y la entrada del `AWM_HOME` actual nunca se poda, aunque su script todavía no esté en disco.
 
 ### C3 · Integridad de contenido en artefactos renderizados
 
