@@ -1,3 +1,8 @@
+## v6.1.1 - 2026-08-10
+
+### Fixes
+- **context-budget,hooks:** stop pinning at zero, and prune dead hook entries
+
 ## v6.1.0 - 2026-08-09
 
 ### Features
