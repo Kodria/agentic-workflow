@@ -1,3 +1,8 @@
+## v6.2.1 - 2026-08-10
+
+### Fixes
+- **sync,doctor,update-check:** close the last two open items
+
 ## v6.2.0 - 2026-08-10
 
 ### Features

@@ -17,6 +17,10 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-009](#d-009) | 2026-08-09 | Los releases se serializan, y el tag se empuja antes que la rama | Vigente |
 | [D-010](#d-010) | 2026-08-09 | Un hook que nunca corrió no se reporta `HEALTHY` | Vigente |
 | [D-011](#d-011) | 2026-08-09 | Cada agente resuelve su raíz de configuración por su propia variable de entorno | Vigente |
+| [D-012](#d-012) | 2026-08-09 | Worktree con fallback serial, no requisito duro (cierra DA-3) | Vigente |
+| [D-013](#d-013) | 2026-08-09 | El set de referencia de sensores vive en el `pack.json` del registry (cierra DA-4) | Vigente |
+| [D-014](#d-014) | 2026-08-09 | La detección de cobertura **reporta**, nunca instala ni configura (cierra DA-6) | Vigente |
+| [D-015](#d-015) | 2026-08-09 | Umbral empírico ≥2, y es señal, no compuerta (cierra DA-5) | Vigente |
 
 ---
 
@@ -319,6 +323,78 @@ llegaba a ella. Una hipótesis plausible que resultó falsa, y solo el diagnóst
 la separó del síntoma.
 
 ---
+
+## D-012
+
+**El worktree es el camino preferido, con fallback serial. No es requisito duro.** (Cierra DA-3.)
+
+La duda era si R5 debía exigir worktrees o degradar a ejecución serial cuando no estén
+disponibles. **La respuesta ya estaba en el código:** el reducer de R5 implementa
+`FALLBACK_PENDING` → `SERIAL` con `begin-fallback`, y la restricción C2 define exactamente
+cuándo se permite — solo cuando todos los tracks están `REMOVED` o nunca pasaron de
+`DECLARED`.
+
+Lo importante es lo que ese diseño **no** hace: `BLOCKED` significa *"no pude probar de
+quién es este recurso"* y **jamás** habilita serial. Mientras haya un track bloqueado, la
+cohorte espera evidencia de una persona. Degradar a serial con worktrees ajenos vivos sería
+correr encima de algo que no probamos que sea nuestro.
+
+**Implica:** exigir worktrees habría hecho a R5 inutilizable donde no se pueden crear, y no
+hay ninguna garantía que se gane con esa exigencia — el fallback ya es seguro por
+construcción. Se cierra a favor de lo ya construido.
+
+---
+
+## D-013
+
+**El set de referencia de cada sensor-pack vive en su `pack.json`, en `awm-baseline-registry`.** (Cierra DA-4.)
+
+R2 necesita saber qué sensores *debería* tener un stack para reportar cuáles faltan. La
+pregunta era dónde vive esa lista y quién la mantiene.
+
+`sensor-packs/<pack>/pack.json` ya existe para `generic`, `js-ts`, `python` y `shell`. El
+set de referencia es una propiedad **del pack**, no del CLI: se versiona con él, se
+distribuye con él y se actualiza por el mismo flujo — editar el registry → tag → `awm update`.
+
+**Por qué no en el CLI:** metería conocimiento de stacks concretos dentro del binario, que
+es exactamente lo que se sacó al eliminar `FALLBACK_DEFAULTS`. El CLI compara; el registry
+declara.
+
+**Quién lo mantiene:** quien mantiene el pack. Un pack sin set de referencia no es un error
+— es un pack que todavía no declara cobertura esperada, y R2 lo reporta como tal en vez de
+inventar un default.
+
+---
+
+## D-014
+
+**La detección de cobertura reporta lo que falta. No lo instala ni lo configura.** (Cierra DA-6.)
+
+Es la misma frontera que el brief ya declara fuera de alcance (*"auto-instalar/configurar
+sensores"*) y la misma disciplina de D-007: cuando la acción correctiva toca el estado del
+usuario, AWM la **nombra** y la ejecuta una persona.
+
+**Implica:** R2 emite qué sensor falta para qué clase de defecto, y **con qué comando
+agregarlo**. No lo corre. Un remedio nombrado y ejecutable es el estándar que fijó D-010; un
+remedio auto-aplicado sobre la configuración de calidad de un proyecto ajeno no lo es.
+
+---
+
+## D-015
+
+**Umbral empírico ≥2 por defecto, y es una señal, no una compuerta.** (Cierra DA-5.)
+
+R3 detecta clusters de defectos convergentes en el ledger que ningún sensor cubre. El
+umbral por defecto es **2**, por consistencia con lo que ya existe: `awm ledger recurring
+--min 2` es lo que `harness-retro` usa hoy para decidir si vale estructuralizar.
+
+**Lo que NO significa:** que 1 ocurrencia se ignore. `harness-retro` ya documenta que la
+recurrencia es *"una señal a sopesar, no un umbral que pasar"* — un hallazgo único de alta
+severidad puede estructuralizarse igual. R3 hereda ese criterio: ordena y destaca, no filtra
+en silencio.
+
+Un umbral que descarta sin decirlo convierte a la herramienta en un lugar donde la evidencia
+se pierde, que es lo contrario de para lo que existe el ledger.
 
 ## D-016 · La agnosticidad de providers deja de ser un acto de fe
 
