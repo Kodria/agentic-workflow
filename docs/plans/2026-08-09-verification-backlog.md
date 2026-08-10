@@ -189,3 +189,64 @@ Las reglas están en [`docs/testing/README.md`](../testing/README.md) y no son f
 Y las dos que invalidan una corrida entera: no arreglar el entorno para que un check pase y después declararlo PASS, y no editar a mano nada bajo `$AWM_HOME`.
 
 Un nivel de la matriz sube **citando la evidencia**, no la intención. Si algo se verifica y no funciona, va a ❌ — perder evidencia negativa es peor que no haberla tenido.
+
+---
+
+## D · Iniciativa de optimización del ciclo SDD (issue #20) — plan de cierre
+
+Los dos dolores medidos en el diagnóstico original pesan hoy, y atacan cosas distintas:
+
+| Dolor | Qué lo ataca | Estado |
+|---|---|---|
+| **Tiempo de ciclo** (~115 min post-plan, tracks independientes en serie) | **R5** — paralelismo por worktree | construido 95/117, sin verificar |
+| **Costo en tokens** (1.57M, revisión:implementación 4.2:1) | **R2/R3** — detectar clases de defecto sin sensor, para que las agarre un linter y no un revisor | sin empezar |
+
+**El orden es R5 → R2 → R3, y no por antigüedad.**
+
+R5 primero porque está a tres tareas del final y **cada día que espera cuesta más**: seis
+días parado produjeron 136 commits de divergencia. No es apego a lo hecho — es que 4223
+líneas ya revisadas son el valor más barato disponible, y su costo de integración crece solo.
+
+R2 antes que R3 porque R3 lee del mismo vocabulario de cobertura que R2 define; construir R3
+primero significaría inventarlo dos veces.
+
+### D1 · Cerrar R5 — Tasks 15, 16, 17
+
+- [ ] **Task 15 — E2E local de aceptación (CA-4.1–4.3).** Workload determinista con modo
+      serial y paralelo; CA-4.1 sobre *tree hash*, no historial (dos órdenes de merge
+      distintos producen el mismo árbol: comparar historial daría un falso rojo); CA-4.2 con
+      seam de `worktreeAdder`; CA-4.3 con un solo lockfile, que es el caso que C5 declara
+      invalidante. Se corre acá.
+- [ ] **Task 16 — E2E contra binarios reales.** El validador **se escribe antes** de
+      recolectar evidencia, para que la matriz salga solo de lo observado. Claude Code se
+      corre acá; Codex va al VPC. Precondición ya cumplida: los dos proveedores quedaron
+      verificados el 2026-08-09.
+- [ ] **Task 17 — Regresión, documentación operativa y handoff.** Incluye el flujo diario y
+      el fallback (hoy `awm track` no tiene una línea de doc), auto-verificación del CLI
+      compilado, y `post-implementation-qa` + `harness-retro`.
+
+**Hasta que 15–17 estén, el PR #63 no se mergea.** Publicar `awm track` sin documentación
+operativa ni criterios de aceptación ejecutados sería aplicarle a 4223 líneas un estándar
+más bajo que el que este repo le aplica a un cambio de tres.
+
+**Riesgo activo mientras espera:** la divergencia. #63 se rebasa cada vez que `main` se
+mueve, en vez de dejarlo envejecer otros seis días.
+
+### D2 · R2 — cobertura de sensores declarada vs configurada
+
+Desbloqueado por [D-013](../decisions.md#d-013) (el set de referencia vive en el `pack.json`
+del registry) y [D-014](../decisions.md#d-014) (reporta, nunca instala).
+
+Compara lo que el pack declara esperado contra lo que el proyecto tiene configurado, y
+nombra lo que falta **con el comando para agregarlo**. Un pack sin set de referencia se
+reporta como tal; no se inventa un default — misma razón por la que se eliminaron los
+`FALLBACK_DEFAULTS`.
+
+### D3 · R3 — detección empírica desde el ledger
+
+Desbloqueado por [D-015](../decisions.md#d-015) (umbral ≥2, señal y no compuerta).
+Depende de R2: usa su vocabulario de cobertura para responder "este cluster converge y
+**ningún sensor lo cubre**".
+
+Ordena y destaca; no filtra en silencio. Un umbral que descarta sin decirlo convierte al
+ledger en el lugar donde la evidencia se pierde.
