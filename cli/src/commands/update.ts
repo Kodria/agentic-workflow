@@ -20,8 +20,9 @@ import { getPreferences } from '../utils/config';
 import { resolveAgentTargetsOrError } from '../core/agent-targets';
 import {
     syncRegistries, verifyMinCliVersions, assertRegistryGates, contentRoots, capabilityRoot,
-    RegistrySyncResult,
+    assertSyncedRegistriesUsable, RegistrySyncResult,
 } from '../core/registries';
+import { awmHome } from '../core/paths';
 import { regenerateGlobalContext, RegenResult } from '../core/context/regenerate';
 import { planReconciliation } from '../core/reconciliation';
 import { applyInstallPlan as realApplyInstallPlan, InstallSummary } from '../core/install-transaction';
@@ -30,10 +31,14 @@ import { resyncInstalledHooks, ResyncResult } from '../commands/hooks/resync';
 // `core/update-check.ts` imports `@clack/prompts` (ESM-only) at its top level
 // for its interactive confirm() prompt — required lazily below, inside the
 // default dep, so `require()`-ing this module for `runUpdateCore` alone never
-// pulls it in.
+// pulls it in. `import type` es la única forma de nombrar su tipo acá: TS lo
+// borra al compilar, así que no genera el `require` que rompería a los tests.
+import type { SelfUpdateMode } from '../core/update-check';
 
 export type RunUpdateOptions = {
     agent?: string;
+    /** No interactivo con consentimiento explícito: no pregunta y SÍ hace el self-update. */
+    yes?: boolean;
 };
 
 export type RunUpdateDeps = {
@@ -43,7 +48,7 @@ export type RunUpdateDeps = {
     planReconciliation: (params: { targets: AgentTarget[]; roots: string[] }) => InstallPlan;
     applyInstallPlan: (plan: InstallPlan) => InstallSummary;
     resyncInstalledHooks: (registryRoot: string, targets: AgentTarget[]) => ResyncResult[];
-    offerSelfUpdate: () => Promise<void>;
+    offerSelfUpdate: (mode?: SelfUpdateMode) => Promise<void>;
 };
 
 const defaultDeps: RunUpdateDeps = {
@@ -53,17 +58,52 @@ const defaultDeps: RunUpdateDeps = {
     planReconciliation,
     applyInstallPlan: realApplyInstallPlan,
     resyncInstalledHooks,
-    offerSelfUpdate: async () => {
+    offerSelfUpdate: async (mode?: SelfUpdateMode) => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { offerSelfUpdate: real } = require('../core/update-check');
-        await real();
+        await real({ mode });
     },
+};
+
+/** Qué le pasó realmente a los registries en esta corrida. El mensaje de cierre se
+ *  DERIVA de esto (ver `updateOutro`) en vez de ser un literal fijo: un literal solo
+ *  puede decir "actualizado", incluso cuando no se actualizó nada. */
+export type RegistryOutcome = {
+    /** Registries configurados en esta máquina. 0 = máquina sin `awm init`. */
+    configured: number;
+    /** Los que se sincronizaron sin error. */
+    synced: number;
+    /** Nombres de los que fallaron (usables o no). */
+    failed: string[];
 };
 
 export type RunUpdateResult = {
     code: number;
     selectedAgents: AgentTarget[];
+    registries: RegistryOutcome;
 };
+
+const NO_REGISTRIES: RegistryOutcome = { configured: 0, synced: 0, failed: [] };
+
+/**
+ * El texto de cierre, derivado del resultado. Vive acá y no en la registración de
+ * Commander porque el literal de `index.ts` era el defecto: decía
+ * "✅ Registries, skills and hooks updated." con `code === 0`, y `code` valía 0 pase lo
+ * que pase — así que una máquina SIN NINGÚN registry configurado recibía la confirmación
+ * de que se le habían actualizado los registries, los skills y los hooks. Un comando que
+ * miente es peor que uno que falla: el que falla te manda a mirar, el que miente te manda
+ * a otro lado a buscar el problema.
+ */
+export function updateOutro(result: RunUpdateResult): string {
+    const { registries: reg } = result;
+    if (reg.configured === 0) return 'Nothing updated — no registries configured on this machine.';
+    if (result.code !== 0) return 'Update failed — see errors above.';
+    if (reg.failed.length > 0) {
+        return `⚠ Updated with stale content — ${reg.synced}/${reg.configured} registries synced, `
+            + `kept on-disk content for: ${reg.failed.join(', ')}.`;
+    }
+    return `✅ ${reg.synced} ${reg.synced === 1 ? 'registry' : 'registries'}, skills and hooks updated.`;
+}
 
 /**
  * Core, UI-free `awm update` logic: resolves agent targets, runs every stage
@@ -87,7 +127,7 @@ export async function runUpdateCore(
     const resolved = resolveAgentTargetsOrError({ prefs, explicit: options.agent });
     if (!resolved.ok) {
         console.error(pc.red(resolved.error));
-        return { code: 1, selectedAgents: [] };
+        return { code: 1, selectedAgents: [], registries: NO_REGISTRIES };
     }
     const selectedAgents = resolved.targets;
 
@@ -96,12 +136,40 @@ export async function runUpdateCore(
         if (r.action === 'error') console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
         else console.log(pc.green(`  ✓ Registry ${r.name} ${r.action === 'pulled' ? 'updated' : 're-cloned'} @ ${r.version}`));
     }
+    const registries: RegistryOutcome = {
+        configured: registryResults.length,
+        synced: registryResults.filter((r) => r.action !== 'error').length,
+        failed: registryResults.filter((r) => r.action === 'error').map((r) => r.name),
+    };
+
+    // Cero registries no es "todo al día": es una máquina que nunca corrió `awm init`
+    // (o cuyo registries.json se perdió). Seguir adelante regenera contexto vacío,
+    // reconcilia contra cero content roots y no re-sincroniza ningún hook — cada etapa
+    // "pasa" porque no tiene nada que hacer, y el comando terminaba anunciando éxito.
+    // Se corta acá, nombrando el archivo que falta y el comando que lo crea.
+    if (registries.configured === 0) {
+        console.error(pc.red(`No registries configured in ${awmHome()} — nothing to update.`));
+        console.error(pc.dim("  This machine was never initialized: run 'awm init' first."));
+        return { code: 1, selectedAgents, registries };
+    }
+
+    // Falla CERRADO solo cuando el registry quedó sin contenido en disco: ahí lo que sigue
+    // leería un árbol inexistente y el fallo reaparecería más tarde, disfrazado de otra
+    // etapa. Un registry que falló pero conserva su contenido queda stale, no roto — se
+    // sigue (doctrina de `unusableSyncedRegistries`: un registry secundario flaky nunca
+    // aborta la corrida) y el cierre lo nombra en vez de declarar éxito parejo.
+    try {
+        assertSyncedRegistriesUsable(registryResults);
+    } catch (e) {
+        console.error(pc.red((e as Error).message));
+        return { code: 1, selectedAgents, registries };
+    }
 
     try {
         assertRegistryGates(d.verifyMinCliVersions());
     } catch (e) {
         console.error(pc.red((e as Error).message));
-        return { code: 1, selectedAgents };
+        return { code: 1, selectedAgents, registries };
     }
 
     const regen = d.regenerateGlobalContext(selectedAgents);
@@ -114,7 +182,7 @@ export async function runUpdateCore(
         artifactResult = d.applyInstallPlan(artifactPlan);
     } catch (e) {
         console.error(pc.red(`Artifact reconciliation failed: ${(e as Error).message}`));
-        return { code: 1, selectedAgents };
+        return { code: 1, selectedAgents, registries };
     }
     if (artifactResult.installed.length > 0) {
         console.log(pc.green(`  ✓ Reconciled artifacts: ${artifactResult.installed.join(', ')}`));
@@ -129,11 +197,14 @@ export async function runUpdateCore(
             }
         } catch (e) {
             console.error(pc.red(`Hook resync failed: ${(e as Error).message}`));
-            return { code: 1, selectedAgents };
+            return { code: 1, selectedAgents, registries };
         }
     }
 
-    await d.offerSelfUpdate();
+    // `--yes` es consentimiento explícito para reemplazar el binario global. Sin él se
+    // pasa `undefined` a propósito, para que la decisión la tome `defaultSelfUpdateMode()`
+    // según haya o no un humano en stdin — no este llamador.
+    await d.offerSelfUpdate(options.yes === true ? 'assume-yes' : undefined);
 
-    return { code: 0, selectedAgents };
+    return { code: 0, selectedAgents, registries };
 }

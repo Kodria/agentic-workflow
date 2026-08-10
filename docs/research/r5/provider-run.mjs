@@ -121,8 +121,27 @@ function prepare(provider, environment, opts = {}) {
     fs.writeFileSync(path.join(repo, '.gitignore'), '.awm/\n');
     fs.mkdirSync(path.join(repo, 'src'), { recursive: true });
     for (const t of TRACKS) fs.writeFileSync(path.join(repo, 'src', `${t}.txt`), `${t}-inicial\n`);
+    // El repo tiene que ser CERTIFICABLE, no solo válido. `computeGate` aplica R3.6 — "el
+    // repo no tiene 'test'/'sensors' configurado; no se certifica por ausencia" — así que un
+    // fixture sin script de test ni `.awm/sensors.json` produce `requiredVerifiers: []` y el
+    // interlock final queda rojo PARA SIEMPRE, con un motivo que no tiene nada que ver con
+    // el supervisor. Certificar al supervisor sobre un repo que el gate rechaza por diseño
+    // no mide al supervisor: mide la regla que lo rechaza.
+    fs.writeFileSync(path.join(repo, 'package.json'), `${JSON.stringify({
+        name: 'awm-r5-fixture', private: true, version: '0.0.0',
+        // Determinista y sin dependencias: lo que se certifica es que el supervisor CORRE el
+        // verificador y persiste su evidencia, no que el verificador sea inteligente.
+        scripts: { test: 'node -e "process.exit(0)"' },
+    }, null, 2)}\n`);
     git(repo, ['add', '-A']);
     git(repo, ['commit', '-qm', 'seed']);
+    // Fuera del commit a propósito: `.awm/` está gitignoreado, así que este archivo hace que
+    // `detectRequiredVerifiers` exija 'sensors' sin ensuciar el árbol (que el autoreporte de
+    // QA global necesita limpio).
+    fs.mkdirSync(path.join(repo, '.awm'), { recursive: true });
+    fs.writeFileSync(path.join(repo, '.awm', 'sensors.json'), `${JSON.stringify({
+        sensors: [{ name: 'noop', kind: 'custom', cmd: 'node -e "process.exit(0)"' }],
+    }, null, 2)}\n`);
 
     const run = {
         schema: 1, provider, environment, sourceHead,
@@ -167,11 +186,16 @@ async function certifyScripted(timeoutMs) {
 
     execFileSync(process.execPath, [run.cli, 'watch', '--init'], { cwd: run.repo, stdio: 'ignore' });
 
-    // Timeouts chicos a propósito: los defaults (5 min de silencio de heartbeat + 10 de
-    // ventana de actividad) son correctos en producción y convertirían esta certificación en
-    // un cuarto de hora de espera. Se acortan los PLAZOS, nunca el criterio.
+    // Timeouts más chicos que los defaults de producción (5 min de silencio de heartbeat +
+    // 10 de ventana de actividad), que convertirían esta certificación en un cuarto de hora
+    // de espera. Se acortan los PLAZOS, nunca el criterio — pero un plazo MENOR QUE LA
+    // LATENCIA REAL DE LANZAMIENTO sí cambia el criterio: con 0.2 (12 s) y ~60 s reales
+    // entre `generation-launch-requested` y `generation-launched`, el supervisor declaraba
+    // en stall a un controller que todavía no había llegado a existir, y la corrida
+    // encadenaba generaciones sin que nadie trabajara nunca. 2 min deja margen sobre esa
+    // latencia observada sin volver a los plazos de producción.
     const spawnWatch = () => spawn(process.execPath, [run.cli, 'watch', '--provider', 'claude-code',
-        '--heartbeat-timeout', '0.2', '--activity-window', '0.2'], {
+        '--heartbeat-timeout', '2', '--activity-window', '2'], {
         cwd: run.repo, env, detached: true, stdio: 'ignore',
     });
     const phaseOf = () => { try { return readJournal(run.repo).state?.cohortPhase; } catch { return undefined; } };

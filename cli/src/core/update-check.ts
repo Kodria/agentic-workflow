@@ -80,27 +80,57 @@ export function maybeNotifyUpdate(opts?: { now?: number; spawnWorker?: () => voi
     if (!cache || now - cache.lastCheck > TTL_MS) spawnWorker();
 }
 
+/**
+ * Cómo resolver la oferta de self-update:
+ *  - `prompt`     — preguntar al humano (comportamiento histórico).
+ *  - `skip`       — no preguntar y NO actualizar: solo avisar cómo hacerlo a mano.
+ *  - `assume-yes` — no preguntar y SÍ actualizar (consentimiento explícito, `--yes`).
+ */
+export type SelfUpdateMode = 'prompt' | 'skip' | 'assume-yes';
+
+/**
+ * Sin nadie del otro lado, un prompt no es una pregunta: es un cuelgue. `awm update`
+ * corre en CI, en cron y dentro de sesiones agénticas, y ahí el confirm de self-update
+ * bloqueaba el proceso indefinidamente — el comando quedaba a mitad de camino y ningún
+ * humano podía destrabarlo. La ausencia de TTY en stdin es la evidencia POSITIVA de que
+ * no hay quien conteste, así que se degrada al aviso.
+ *
+ * Degrada a `skip`, jamás a `assume-yes`: nadie pidió reemplazar el binario global de la
+ * máquina, y hacerlo por iniciativa propia porque "no había a quién preguntarle" es
+ * exactamente la clase de acción que el silencio no autoriza.
+ */
+export function defaultSelfUpdateMode(): SelfUpdateMode {
+    return process.stdin.isTTY === true ? 'prompt' : 'skip';
+}
+
 export interface SelfUpdateDeps {
     current?: string;
     latest?: string | null;
+    mode?: SelfUpdateMode;
     confirmImpl?: (msg: string) => Promise<boolean>;
     runner?: (cmd: string, args: string[]) => { status: number | null };
     fetchImpl?: typeof fetch;
 }
 
-/** Capa 2 — en `awm update`: detecta, pregunta, ejecuta npm i -g; degrada a aviso. */
+/** Capa 2 — en `awm update`: detecta, pregunta (si hay a quién), ejecuta npm i -g; degrada a aviso. */
 export async function offerSelfUpdate(deps: SelfUpdateDeps = {}): Promise<void> {
     if (process.env.AWM_NO_UPDATE_CHECK) return;
     const current = deps.current ?? cliVersion();
+    const mode = deps.mode ?? defaultSelfUpdateMode();
     const latest = deps.latest !== undefined ? deps.latest : await fetchLatestVersion(deps.fetchImpl ?? fetch);
     writeUpdateCache({ lastCheck: Date.now(), latest: latest ?? null });
     if (!latest || !isNewer(latest, current)) return;
+
+    if (mode === 'skip') {
+        console.log(pc.dim(`  ⬆ awm v${latest} available — to update: npm i -g ${CLI_PACKAGE_NAME}`));
+        return;
+    }
 
     const confirmImpl = deps.confirmImpl ?? (async (message: string) => {
         const r = await confirm({ message });
         return !isCancel(r) && r === true;
     });
-    const yes = await confirmImpl(`Update awm v${current} → v${latest} now?`);
+    const yes = mode === 'assume-yes' ? true : await confirmImpl(`Update awm v${current} → v${latest} now?`);
     if (!yes) {
         console.log(pc.dim(`  To update later: npm i -g ${CLI_PACKAGE_NAME}`));
         return;

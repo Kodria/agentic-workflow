@@ -154,9 +154,30 @@ undoes it.
 
 ### `awm update`
 
-Pull the latest content from every configured registry (checking out the latest semver tag, or the pinned version if the project pins one). Because skills are symlinked into the registry clones by default, this instantly patches every global and local install on the machine. (No flags.)
+Pull the latest content from every configured registry (checking out the latest semver tag, or the pinned version if the project pins one). Because skills are symlinked into the registry clones by default, this instantly patches every global and local install on the machine.
 
-> `awm update` updates **content** (registries). The CLI itself is updated via npm: `npm i -g agentic-workflow-manager@latest`.
+| Flag | Effect |
+|---|---|
+| `-a, --agent <agent>` | Restrict the run to the given agent target(s), comma-separated. Defaults to every enabled agent. |
+| `-y, --yes` | Non-interactive: never prompt, and take the CLI self-update below without asking. |
+
+**Exit code and closing message are derived from what actually happened** — they never
+claim work the run did not do:
+
+| Situation | Exit | Closing line |
+|---|---|---|
+| Every configured registry synced | `0` | `✅ N registries, skills and hooks updated.` |
+| A registry failed but its content is still on disk | `0` | `⚠ Updated with stale content — …` naming the stale registry |
+| A registry failed and left no content on disk | `1` | the failing registry and its error |
+| **No registries configured** on this machine | `1` | `Nothing updated — no registries configured on this machine.` (run `awm init`) |
+| Any later stage failed (context, artifacts, hooks) | `1` | the failing stage |
+
+> `awm update` updates **content** (registries). The CLI binary is a separate thing: at
+> the end of the run, if a newer version is published, `awm update` offers to install it
+> for you. That offer is only made when there is a human to answer — with no TTY on stdin
+> (CI, cron, an agent session) it prints `npm i -g agentic-workflow-manager` and moves on
+> rather than blocking on a prompt nobody can see. Pass `--yes` to take the update without
+> being asked, or update by hand any time with `npm i -g agentic-workflow-manager@latest`.
 
 ### `awm export <name>`
 

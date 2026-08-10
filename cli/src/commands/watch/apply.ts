@@ -216,6 +216,31 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
         applyOutcome(s, { ...base, outcome: 'applied', resultRef: trackId });
         return;
     }
+    if (env.kind === 'track-join-request') {
+        // R6.1: el ÚNICO efecto es marcar la intención. Quien decide si eso mueve la fase es
+        // el reducer puro (`reconcileProtocol`, rama `join-requested`: solo un track en
+        // `ACTIVE` pasa a `JOIN_REQUESTED`), y quien congela/mergea es `reconcileTracks` —
+        // jamás este consumo transaccional. Mismo criterio declarativo que
+        // `track-freeze-request` arriba.
+        //
+        // Este handler NO EXISTÍA: `awm track join` emitía la request, `applyRequestToState`
+        // se caía por el final sin reconocer el kind, y `consumePendingRequests` la contaba
+        // como `applied` y borraba el archivo. El comando salía 0 imprimiendo un requestId,
+        // el supervisor sumaba una request "aplicada", y el track se quedaba en `ACTIVE`
+        // para siempre: la cohorte no podía congelarse (C3), así que jamás llegaba a
+        // `MERGED_UNVERIFIED` ni a `COMPLETE`. `join-requested` era la única observación del
+        // protocolo con CERO productores en todo `src/`.
+        const p = env.payload;
+        if (typeof p.trackId !== 'string' || p.trackId.length === 0) throw new Error('track-join-request requiere trackId');
+        const trackId = p.trackId;
+        const ref = s.tracks?.find((t) => t.trackId === trackId);
+        // Fail-closed: un join sobre un track que no existe es un error del emisor, no algo
+        // que se absorba en silencio (que es exactamente lo que hacía la ausencia de handler).
+        if (ref === undefined) throw new Error(`track-join-request: track desconocido: ${trackId}`);
+        ref.joinRequested = true;
+        applyOutcome(s, { ...base, outcome: 'applied', resultRef: trackId });
+        return;
+    }
     if (env.kind === 'track-freeze-request') {
         // R5.2/R6.3 (Task 10): request administrativa CROSS-JOURNAL — el
         // supervisor del PLAN la emite directamente al `requestsDir` de ESTE
@@ -414,6 +439,18 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
         applyOutcome(s, { ...base, outcome: 'applied', resultRef: verdictId });
         return;
     }
+    // FALLA CERRADO ante un kind sin handler. Antes esta función simplemente se caía por el
+    // final: `consumePendingRequests` no veía excepción, hacía `applied++` y BORRABA el
+    // archivo. Una request emitida por un comando real quedaba contada como aplicada, sin
+    // evento, sin cambio de estado y sin error — el modo de falla más caro que existe, porque
+    // todo el sistema reporta éxito. Así vivió `track-join-request` (ver su handler arriba):
+    // el comando salía 0, el journal sumaba una request "aplicada", y la cohorte no avanzaba.
+    //
+    // Con este throw, un kind sin handler se convierte en `request-rejected-invalid`: queda en
+    // `requestProblems`, deja evento durable, y el archivo se renombra a `.rejected` en vez de
+    // desaparecer. Agregar un `RequestKind` sin su handler pasa a ser ruidoso — que es la
+    // única forma de que no se repita.
+    throw new Error(`request kind sin handler en el supervisor: ${env.kind} — emitida pero nunca aplicada`);
 }
 
 /** Consume TODAS las requests pendientes en orden. ORDEN CRITICO (R1.3,

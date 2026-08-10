@@ -90,7 +90,11 @@ describe('update-check', () => {
         const m = require('../../src/core/update-check');
         const runner = jest.fn().mockReturnValue({ status: 1 });
         const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-        await m.offerSelfUpdate({ current: '2.0.0', latest: '2.1.0', confirmImpl: async () => true, runner });
+        // `mode: 'prompt'` explícito: la premisa de este test es que HAY un humano
+        // confirmando. Bajo jest stdin no es un TTY, y el modo por defecto pasó a ser
+        // `skip` justamente para que `awm update` no se cuelgue donde no hay a quién
+        // preguntarle — sin declarar el modo, este test mediría el camino desatendido.
+        await m.offerSelfUpdate({ current: '2.0.0', latest: '2.1.0', mode: 'prompt', confirmImpl: async () => true, runner });
         expect(runner).toHaveBeenCalled();
         expect(warn.mock.calls.flat().join('\n')).toContain('npm i -g agentic-workflow-manager');
         warn.mockRestore();

@@ -51,6 +51,8 @@ function evaluateEvidence(state: JournalState, fingerprintNow: FingerprintNow, s
             reasons.push({ category: 'pending-task', detail: `task ${t.id} en ${t.status}` });
         }
     }
+    const allPlans: VerificationItem[] = [...tasksInScope.flatMap((t) => t.verificationPlan), ...state.cycleVerificationPlan];
+    const presentKinds = new Set<VerificationKind>(allPlans.map((i) => i.kind));
     if (scope.requireGlobalKinds) {
         if (state.cycleVerificationPlan.length === 0) {
             reasons.push({ category: 'empty-cycle-plan', detail: 'CycleVerificationPlan vacio: un ciclo sin plan de cierre jamas certifica (R1.4b)' });
@@ -60,16 +62,28 @@ function evaluateEvidence(state: JournalState, fingerprintNow: FingerprintNow, s
                 reasons.push({ category: 'missing-verifier', detail: `CycleVerificationPlan requiere '${required}'` });
             }
         }
-    }
-    // Verificadores requeridos por la config REAL del repo (watch --init):
-    // cada kind requerido debe existir en algun plan (R1.4b, R3.6).
-    const allPlans: VerificationItem[] = [...tasksInScope.flatMap((t) => t.verificationPlan), ...state.cycleVerificationPlan];
-    const presentKinds = new Set<VerificationKind>(allPlans.map((i) => i.kind));
-    for (const mechanical of ['test', 'sensors'] as const) {
-        if (!state.requiredVerifiers.includes(mechanical)) {
-            reasons.push({ category: 'missing-verifier', detail: `el repo no tiene '${mechanical}' configurado; no se certifica por ausencia (R3.6)` });
+        // R3.6 es una afirmación sobre la CONFIG DEL REPO ("este repo no tiene test/sensors,
+        // así que no se certifica por ausencia"), y por eso vive del lado global del scope.
+        //
+        // Estaba afuera del guard, y eso hacía imposible que un track se congelara NUNCA:
+        // `computeTrackGate` pasa `requireGlobalKinds: false` precisamente porque el journal
+        // de un track no evalúa los kinds globales, pero heredaba igual esta exigencia — y
+        // `requiredVerifiers` de un journal de track es SIEMPRE `[]`, porque
+        // `initTrackJournal` llama a `initJournal` y no a `initWatch`, así que la detección
+        // mecánica nunca corre ahí. Gate local rojo para siempre => `attemptFreeze` devolvía
+        // `continue` en cada tick => la cohorte no podía congelarse => sin C3 no hay merge, y
+        // por lo tanto no hay `COMPLETE`. Se observó en la certificación con supervisor vivo:
+        // `alpha` con el freeze pedido, su worktree limpio, cero jobs vivos, y estas dos
+        // razones como único motivo.
+        for (const mechanical of ['test', 'sensors'] as const) {
+            if (!state.requiredVerifiers.includes(mechanical)) {
+                reasons.push({ category: 'missing-verifier', detail: `el repo no tiene '${mechanical}' configurado; no se certifica por ausencia (R3.6)` });
+            }
         }
     }
+    // Este otro sí es por scope: "lo que el repo exige tiene que estar en ALGÚN plan del
+    // scope". En un journal de track es un no-op (`requiredVerifiers` vacío), y si algún día
+    // se poblara, exigirlo sobre los planes del track es lo correcto.
     for (const required of state.requiredVerifiers) {
         if (!presentKinds.has(required)) {
             reasons.push({ category: 'missing-verifier', detail: `el repo exige verificador '${required}' y ningun plan lo contiene` });

@@ -11,6 +11,7 @@ import { captureSelfRef, EXEC_STDIO } from '../../core/journal/process';
 import { writeFileAtomicDurable, fsyncDirSync } from '../../core/atomic-file';
 import { initJournal, readJournal } from '../../core/journal/store';
 import { supervisorLockPath } from '../../core/journal/paths';
+import type { TrackPhase } from '../../core/tracks/types';
 
 export interface SupervisorWrapperOptions {
     worktreePath: string;
@@ -34,6 +35,12 @@ export interface SupervisorWrapperOptions {
 export type WrapperOutcome = 'already-claimed' | 'blocked' | 'active';
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Fases desde las cuales el track YA tiene trabajo propio que atender, así que su
+ *  supervisor debe estar corriendo. Es el conjunto monótono "ACTIVE o posterior": el plan
+ *  puede haber avanzado varias fases entre dos polls de este wrapper, y perderse el arranque
+ *  por no haber visto la fase exacta deja al track sin nadie que consuma sus requests. */
+const LAUNCH_PHASES: TrackPhase[] = ['ACTIVE', 'JOIN_REQUESTED', 'FROZEN', 'JOIN_INTENT', 'MERGED_UNVERIFIED', 'JOINED'];
 
 function localBranch(worktreePath: string): string {
     return execFileSync('git', ['branch', '--show-current'], { cwd: worktreePath, encoding: 'utf8', stdio: EXEC_STDIO }).trim();
@@ -96,7 +103,18 @@ export async function runSupervisorWrapper(opts: SupervisorWrapperOptions): Prom
         const r = readJournal(opts.planRoot, opts.planBranch);
         if (!r.corrupt && r.state !== null) {
             const ref = r.state.tracks?.find((t) => t.trackId === opts.trackId);
-            if (ref?.phase === 'ACTIVE') break;
+            // MONOTONO, nunca la igualdad exacta con `ACTIVE`. Esperar a ver una fase
+            // puntual con un poll de 2 s es una carrera: el plan puede cruzar `ACTIVE` entre
+            // dos lecturas y este wrapper quedarse esperando para siempre una fase que ya
+            // pasó — sin lanzar `awm watch`, así que las requests cross-journal del plan
+            // (empezando por `track-freeze-request`) no las consume nadie y la cohorte se
+            // traba en el freeze.
+            //
+            // Pasó de verdad: al reparar el join, un track podía ir `ARMED -> ACTIVE ->
+            // JOIN_REQUESTED` dentro de un mismo `reconcileTracks`, y la ventana `ACTIVE`
+            // dejó de ser observable. La igualdad exacta solo funcionaba mientras el join
+            // estaba roto y los tracks se quedaban parados en `ACTIVE`.
+            if (ref !== undefined && LAUNCH_PHASES.includes(ref.phase)) break;
             // BLOCKED/REMOVED: el plan ya decidió que este track no avanza —
             // el wrapper nunca lanza `awm watch` para un track que el plan
             // bloqueó, ni insiste indefinidamente (C1: la barrera es del plan).

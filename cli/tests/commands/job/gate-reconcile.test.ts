@@ -309,6 +309,24 @@ describe('computeTrackGate — gate local de un track (C6, R3.5)', () => {
         expect(computeGate(s, false, () => 'same').pass).toBe(false);
     });
 
+    // El journal de un track REAL tiene `requiredVerifiers: []`: `initTrackJournal` llama a
+    // `initJournal`, no a `initWatch`, así que la detección mecánica de verificadores nunca
+    // corre sobre el worktree del track. La fixture de arriba los pobla a mano y por eso
+    // tapaba el defecto — R3.6 ("el repo no tiene test/sensors configurado") vivía FUERA del
+    // guard `requireGlobalKinds`, así que el gate local de todo track quedaba rojo para
+    // siempre, `attemptFreeze` devolvía `continue` en cada tick, y sin freeze no hay merge
+    // (C3) ni `COMPLETE`. Observado en la certificación con supervisor vivo.
+    test('un journal de track SIN requiredVerifiers (el caso real) certifica igual: R3.6 es del gate global', () => {
+        const s = stateWithCompletedTrackTask();
+        s.requiredVerifiers = [];
+        const g = computeTrackGate(s, false, () => 'same');
+        expect(g.reasons.filter((r) => /no se certifica por ausencia/.test(r.detail))).toEqual([]);
+        expect(g).toEqual({ pass: true, reasons: [] });
+        // El gate GLOBAL sí sigue exigiéndolo: la regla no se debilitó, se puso en su scope.
+        const global = computeGate({ ...s, requiredVerifiers: [] }, false, () => 'same');
+        expect(global.reasons.some((r) => /no se certifica por ausencia/.test(r.detail))).toBe(true);
+    });
+
     test('corrupcion o journal ausente bloquea con categoria propia (corrupt-state)', () => {
         const g = computeTrackGate(null, true, () => 'same');
         expect(g.pass).toBe(false);

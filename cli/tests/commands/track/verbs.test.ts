@@ -24,6 +24,11 @@ function git(repo: string, args: string[]): string {
 function gitInit(repo: string, branch: string): void {
     execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'init', '-q', '-b', branch], { cwd: repo });
     fs.writeFileSync(path.join(repo, 'f.txt'), 'x');
+    // `.awm/` gitignoreado, igual que lo deja `awm watch --init` (watch/init.ts) y que
+    // `runPrepareTrack` EXIGE en cada worktree nuevo: sin esto el journal propio hace que
+    // `git status` reporte el árbol sucio para siempre, y cualquier test que dependa de un
+    // árbol limpio mediría un repo que en producción no existe.
+    fs.writeFileSync(path.join(repo, '.gitignore'), '.awm/\n');
     execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'add', '.'], { cwd: repo });
     execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'c'], { cwd: repo });
 }
@@ -91,6 +96,53 @@ describe('awm track — verbos mutantes son request-only (R6.1)', () => {
         expect(readPendingKinds(repo, branch)).toContain(kind);
         expect(git(repo, ['rev-parse', 'HEAD'])).toBe(beforeHead);
         expect(fs.readFileSync(statePath(repo, branch), 'utf8')).toBe(beforeState);
+    });
+
+    // `finalize` es PLAN-scoped y sin <trackId>, así que no entra en las matrices de
+    // add/join/remove — pero comparte con ellas la propiedad que define a la superficie:
+    // emite una request y no toca Git ni state.json.
+    test('finalize emite track-finalize-request con el HEAD del plan, y no muta Git/state (R7.2)', async () => {
+        const beforeHead = git(repo, ['rev-parse', 'HEAD']);
+        const beforeState = fs.readFileSync(statePath(repo, branch), 'utf8');
+        const out = await runCli(repo, ['track', 'finalize', '--generation', 'g1']);
+        expect(out.exitCode).toBe(0);
+        expect(readPendingKinds(repo, branch)).toContain('track-finalize-request');
+        const pending = listPendingRequests(repo, branch).find((p) => !p.corrupt && p.envelope.kind === 'track-finalize-request');
+        // El HEAD se LEE del repo: es el autoreporte del controller sobre SU propio HEAD,
+        // no un valor que el llamador pueda elegir.
+        expect((pending?.envelope.payload as { qaHeadSha?: string }).qaHeadSha).toBe(beforeHead);
+        expect(git(repo, ['rev-parse', 'HEAD'])).toBe(beforeHead);
+        expect(fs.readFileSync(statePath(repo, branch), 'utf8')).toBe(beforeState);
+    });
+
+    test('finalize exige --generation', async () => {
+        const out = await runCli(repo, ['track', 'finalize']);
+        expect(out.exitCode).not.toBe(0);
+        expect(readPendingKinds(repo, branch)).toEqual([]);
+    });
+
+    test('finalize con el árbol sucio falla nombrando lo que falta, en vez de emitir un autoreporte que el supervisor va a rechazar en silencio', async () => {
+        fs.writeFileSync(path.join(repo, 'pendiente.txt'), 'sin comitear');
+        const out = await runCli(repo, ['track', 'finalize', '--generation', 'g1']);
+        expect(out.exitCode).not.toBe(0);
+        expect(out.err).toMatch(/sin comitear/);
+        expect(readPendingKinds(repo, branch)).toEqual([]);
+    });
+
+    test('re-reportar el MISMO HEAD colapsa por idempotencyKey; un HEAD nuevo es una request nueva', async () => {
+        await runCli(repo, ['track', 'finalize', '--generation', 'g1']);
+        const first = listPendingRequests(repo, branch).filter((p) => !p.corrupt).map((p) => p.envelope.idempotencyKey);
+        await runCli(repo, ['track', 'finalize', '--generation', 'g1']);
+        const second = listPendingRequests(repo, branch).filter((p) => !p.corrupt).map((p) => p.envelope.idempotencyKey);
+        expect(new Set(second)).toEqual(new Set(first));   // mismo HEAD => misma key
+
+        // La QA encontró algo más, se corrigió y se comiteó: HEAD nuevo, request nueva.
+        fs.writeFileSync(path.join(repo, 'fix.txt'), 'correccion de QA');
+        execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'add', '.'], { cwd: repo });
+        execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fix'], { cwd: repo });
+        await runCli(repo, ['track', 'finalize', '--generation', 'g1']);
+        const third = new Set(listPendingRequests(repo, branch).filter((p) => !p.corrupt).map((p) => p.envelope.idempotencyKey));
+        expect(third.size).toBe(new Set(first).size + 1);
     });
 
     test.each(['add', 'join', 'remove'])('%s exige --generation (Commander valida antes de emitir)', async (verb) => {
@@ -340,10 +392,10 @@ describe('awm track status — sale 1 con gate rojo a nivel CLI (Gap: solo se pr
     });
 });
 
-describe('awm track --help lista exactamente los 6 verbos', () => {
-    test('help incluye add, list, status, verify-independence, join, remove', async () => {
+describe('awm track --help lista exactamente los 7 verbos', () => {
+    test('help incluye add, list, status, verify-independence, join, remove, finalize', async () => {
         const out = await runCli(process.cwd(), ['track', '--help']);
-        for (const verb of ['add', 'list', 'status', 'verify-independence', 'join', 'remove']) {
+        for (const verb of ['add', 'list', 'status', 'verify-independence', 'join', 'remove', 'finalize']) {
             expect(out.out).toContain(verb);
         }
     });
