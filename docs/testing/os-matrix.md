@@ -71,11 +71,19 @@ $env:AWM_HOME = "$HOME\.awm-e2e"
 awm add dev --scope global --method symlink --agent claude-code --yes
 Get-Item ~\.claude\skills\development-process | Select-Object LinkType, Target
 ```
-Windows only allows unprivileged symlink creation with **Developer Mode** on (Settings → System → For developers), otherwise it needs an elevated shell.
+For a **directory** artifact (a skill), `--method symlink` deliberately installs an NTFS
+**Junction**, not a `SymbolicLink` — a privilege-free directory reparse point that needs no
+Developer Mode and that Node/libuv report through the same `isSymbolicLink()`/`readlinkSync()`
+surface every downstream consumer already relies on (see `executor.ts`'s `stageArtifact`).
+Developer Mode only matters for **file**-type artifacts (agent `.md`, workflow `.md`), where no
+privilege-free equivalent exists.
 
 **Expect one of two acceptable outcomes:**
-- Developer Mode on → a real symlink (`LinkType: SymbolicLink`).
-- Developer Mode off → a clear error explaining the requirement, **or** an automatic fallback to `--method copy`.
+- A directory artifact → `LinkType: Junction`, regardless of Developer Mode. Treat a real
+  `SymbolicLink` here as equally acceptable if Developer Mode happens to be on, but do not
+  require it — junction is the intended, primary outcome.
+- A file artifact with Developer Mode off → a `SymbolicLink` attempt that falls back to a
+  plain copy (no privilege-free equivalent), **or** a clear error naming the requirement.
 
 **FAIL** if it half-succeeds: a zero-byte file, a broken link, or a silent no-op that `awm doctor` then reports as healthy.
 
@@ -107,6 +115,14 @@ awm init --yes; Get-Content AGENTS.md -Raw | Format-Hex | Select-Object -First 4
 ```
 **Expect:** AWM's managed block is intact and the file isn't mangled into mixed `\r\n`/`\n` inside a single block.
 
+> **Precondition gap (not Windows-specific — reproduces identically on macOS/Linux):**
+> a bare `awm init --yes` defaults to the `claude-code` target, whose `project.context` step
+> stays `pending` (gated on a `project-context-init` skill session) — it never writes
+> `AGENTS.md` on its own. As written, this check has no file to inspect. Either target an
+> agent whose context step materializes directly (`awm init -a codex --yes` did, in one live
+> run — see result sheet), or run a skill session first to produce `AGENTS.md`, then re-run
+> this check against it.
+
 **WIN-06 · `awm watch` — the known gap**
 ```powershell
 awm watch --init
@@ -135,7 +151,14 @@ Run the suite from `~` inside the distro, **not** from `/mnt/c/...`.
 |----|--------|-------|
 | LNX-01 · 02 · 03 |  |  |
 | MAC-01 · 02 · 03 · 04 | PASS | 2026-08-10 — macOS 15.6, arm64, Node 24.18.0, AWM 6.4.1. Bootstrap matched in zsh and bash; no Gatekeeper warning; one case-insensitive `development-process` entry. |
-| WIN-01 · 02 · 03 · 04 · 05 · 06 |  |  |
+| WIN-01 | PASS | 2026-08-10 — Windows Server 2022 Datacenter, Node 24.19.0, Developer Mode on, AWM 6.4.1. `LinkType: Junction` for the `development-process` directory artifact, as intended (this row's own criterion above was corrected the same day — it previously required `SymbolicLink`). |
+| WIN-02 | PASS | **Real bug found and closed.** 2026-08-10 against AWM 6.4.1: `awm add dev --scope local --method copy --agent claude-code --yes` reported exit `0` but installed a Junction, not a real directory — `--method copy` was silently discarded (`runAddBundleCore` hardcoded `method: 'symlink'`). Reproduced in two independently fresh `AWM_HOME`/project setups to rule out state bleed from earlier steps. Fixed in [#68](https://github.com/Kodria/agentic-workflow/pull/68) (AWM 6.4.2) and verified via a real, unmocked `addBundle → installBundle → executor.stageArtifact` pipeline test (`tests/commands/add.test.ts`) green on `windows-latest` CI. |
+| WIN-03 | PASS | 2026-08-10, AWM 6.4.1. `awm init --yes --json` from `%TEMP%\awm e2e con espacios` returned `failed: 0`. |
+| WIN-04 | PASS | 2026-08-10, AWM 6.4.1. `npm i -D typescript` + `awm sensors init` + `awm sensors run`: the typecheck sensor resolved its `.cmd` shim and ran (not `skipped: not found`). |
+| WIN-05 | BLOCKED | 2026-08-10. Not a Windows bug — see the precondition-gap note under WIN-05 above: `awm init --yes` (bare, `claude-code` default) never produces an `AGENTS.md` to inspect on any OS. In a separate live run, `awm init -a codex --yes` (AWM 6.4.2, patched build) *did* write `AGENTS.md` directly — worth re-running this exact check against that target before it can PASS or FAIL for real. |
+| WIN-06 | PASS | 2026-08-10, AWM 6.4.1. `awm watch --init` exited `0`; the documented crash-recovery known-gap was not exercised. |
 | WSL-01 · 02 |  |  |
+
+**Related finding, adjacent to this playbook but not a WIN-XX check itself:** `awm remove <bundle> --yes` (no `--scope`) still opened an interactive scope picker on Windows — found live during this same session, against AWM 6.4.1. Fixed in [#68](https://github.com/Kodria/agentic-workflow/pull/68) (AWM 6.4.2), unit-tested (`resolveScopeOption`); not yet re-verified against a real non-interactive invocation post-fix.
 
 Record the machine alongside the result: OS version, `node --version`, `awm --version`, and for macOS `uname -m`. A result without its environment isn't reproducible.

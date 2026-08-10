@@ -272,7 +272,7 @@ ls ~/.awm 2>/dev/null && echo "⚠ real ~/.awm exists — confirm this run did n
 |----|--------|-------|
 | CORE-01 | PASS | 2026-08-10, macOS 15.6 arm64, Node 24.18.0, AWM 6.4.1 matched the npm latest version. |
 | CORE-02 | PASS | All documented commands present. |
-| CORE-03 | PASS | Isolated bootstrap: `failed: 0`, `applied: 2`, `pending: 2`. |
+| CORE-03 | PASS | Isolated bootstrap: `failed: 0`, `applied: 2`, `pending: 2`. **Windows-specific regression found and closed:** 2026-08-10, `awm init --yes --json` on native Windows (Server 2022, Node 24.19.0, AWM 6.4.1) wrote the `WINDOWS_KNOWN_GAP` banner to stdout ahead of the JSON — `... --json > init.json` produced a file that wasn't valid JSON. Fixed in [#68](https://github.com/Kodria/agentic-workflow/pull/68) (AWM 6.4.2): the banner now goes to stderr in `--json` mode. See [os-matrix.md](os-matrix.md)'s Windows section for the full native-Windows run. |
 | CORE-04 | PASS | Second bootstrap: `failed: 0`, `applied: 0`. |
 | CORE-05 | PASS | `doctor` exit 0, `overall: healthy`. |
 | CORE-06 | PASS | Non-empty package summary. |
