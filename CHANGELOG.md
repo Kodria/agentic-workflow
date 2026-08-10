@@ -1,3 +1,8 @@
+## v6.2.0 - 2026-08-10
+
+### Features
+- **doctor:** detect rendered artifacts that no longer match the registry
+
 ## v6.1.2 - 2026-08-10
 
 ### Fixes
