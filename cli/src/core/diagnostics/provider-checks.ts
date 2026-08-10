@@ -17,7 +17,7 @@ import { assertProviderSupported } from '../provider-version';
 import { computeHookStatus } from '../../commands/hooks/status';
 import { InjectionOrchestrator } from '../context/orchestrator';
 import { capabilityRoot, contentRoots } from '../registries';
-import { rendererExtension, rendererIntegrityMarker } from '../renderers/registry';
+import { rendererExtension, rendererIntegrityMarker, renderArtifact } from '../renderers/registry';
 
 export type ScanSkills = (dir: string) => SkillIntegrity;
 
@@ -67,6 +67,7 @@ function skillsGlobalCheck(
     owners: AgentTarget[],
     integrity: SkillIntegrity,
     renderer: RendererId,
+    artifacts: ManagedArtifactRecord[],
 ): ProviderCheck | null {
     if (dir === null) return null;
     if (renderer !== 'link') {
@@ -105,18 +106,37 @@ function skillsGlobalCheck(
         // Comprobar presencia y extension dejaba pasar un archivo correcto por fuera y
         // vacio o truncado por dentro — el agente cargaba nada y doctor decia que si.
         const corrupt = corruptRendered(dir, rendered, renderer);
+        if (corrupt.length > 0) {
+            return {
+                id: 'skills.global', state: 'broken', target: dir,
+                owners: owners.length > 1 ? owners : undefined,
+                detail: `${corrupt.length} rendered file(s) missing their expected content (${corrupt.slice(0, 3).join(', ')})`,
+                // Codigo propio: no es una usurpacion (nadie lo reemplazo por otra cosa) ni
+                // un symlink colgante. Es nuestro archivo, con el contenido incompleto — lo
+                // arregla re-instalar el bundle, que lo reescribe.
+                remediationCode: 'reinstall-rendered-artifacts',
+            };
+        }
+        // Frescura, DESPUES de integridad: un archivo truncado tambien difiere de su
+        // fuente, y "incompleto" es mas util que "viejo". Solo aplica a renderizados — un
+        // symlink apunta al registry, asi que `awm update` lo actualiza solo. Los
+        // generados NO: quedan con el contenido de la version anterior hasta que alguien
+        // corra `awm sync`, y hasta ahora nada lo decia.
+        const stale = staleRendered(dir, artifacts);
         return {
             id: 'skills.global',
-            state: corrupt.length > 0 ? 'broken' : 'supported',
+            state: stale.length > 0 ? 'stale' : 'supported',
             target: dir,
             owners: owners.length > 1 ? owners : undefined,
-            detail: corrupt.length > 0
-                ? `${corrupt.length} rendered file(s) missing their expected content (${corrupt.slice(0, 3).join(', ')})`
+            detail: stale.length > 0
+                ? `${stale.length} rendered file(s) no longer match the installed registry (${stale.slice(0, 3).join(', ')})`
                 : undefined,
-            // Codigo propio: no es una usurpacion (nadie lo reemplazo por otra cosa) ni un
-            // symlink colgante. Es nuestro archivo, con el contenido incompleto — lo
-            // arregla re-instalar el bundle, que lo reescribe.
-            remediationCode: corrupt.length > 0 ? 'reinstall-rendered-artifacts' : undefined,
+            // `reinstall-bundle`, y NO `awm-sync` ni `awm-init`: se midio cual de los
+            // cuatro comandos refresca de verdad un renderizado viejo, y solo `awm add`
+            // lo hace. `init` y `sync` son idempotentes por presencia —ven el archivo y
+            // no lo tocan— y `update` refresca el registry, no lo derivado de el. Ofrecer
+            // un remedio que corre limpio sin cambiar nada es peor que no ofrecer ninguno.
+            remediationCode: stale.length > 0 ? 'reinstall-bundle' : undefined,
         };
     }
     const shared = owners.length > 1;
@@ -174,6 +194,24 @@ function skillsGlobalCheck(
  * Un archivo ilegible cuenta como corrupto: no poder leerlo no es evidencia de que este
  * bien. Es la misma disciplina que el resto de los checks — nunca verde por no mirar.
  */
+function staleRendered(dir: string, records: ManagedArtifactRecord[]): string[] {
+    return records
+        .filter((r) => r.renderer !== 'link' && path.dirname(r.targetPath) === dir)
+        .filter((r) => {
+            try {
+                const expected = renderArtifact(r.renderer, r.sourcePath);
+                if (expected === null) return false;
+                return fs.readFileSync(r.targetPath, 'utf8') !== expected;
+            } catch {
+                // Fuente ausente (el registry ya no la trae) o target ilegible: no es
+                // desactualizacion, es otra cosa, y la reportan los checks que
+                // corresponden. Aca "no puedo comparar" no se convierte en "esta viejo".
+                return false;
+            }
+        })
+        .map((r) => path.basename(r.targetPath));
+}
+
 function corruptRendered(dir: string, files: string[], renderer: RendererId): string[] {
     const marker = rendererIntegrityMarker(renderer);
     if (marker === null) return [];
@@ -404,6 +442,11 @@ export function gatherProviderChecks(agents: AgentTarget[], scanSkills: ScanSkil
         scansByDir.set(dir, scanSkills(dir));
     }
 
+    // El ledger se lee UNA vez por corrida y se comparte: es la unica forma de saber
+    // que fuente produjo cada artefacto renderizado, y por lo tanto de preguntar si
+    // sigue coincidiendo con ella.
+    const artifacts = safeArtifactState();
+
     return agents.map((agent) => {
         const provider = providerFor(agent);
         const dir = provider.skill.global;
@@ -413,7 +456,7 @@ export function gatherProviderChecks(agents: AgentTarget[], scanSkills: ScanSkil
 
         const checks: ProviderCheck[] = [
             binaryVersionCheck(agent),
-            skillsGlobalCheck(dir, owners, integrity, provider.skill.renderer),
+            skillsGlobalCheck(dir, owners, integrity, provider.skill.renderer, artifacts),
             agentsNativeCheck(agent),
             workflowsGlobalCheck(agent),
             hookTrustCheck(agent),

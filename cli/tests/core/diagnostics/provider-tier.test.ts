@@ -270,6 +270,52 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
         fs.rmSync(content, { recursive: true, force: true });
     });
 
+    it('a rendered file that no longer matches its registry source is reported stale', () => {
+        // El caso que C4 realmente pedia. Un symlink apunta al registry, asi que
+        // `awm update` lo actualiza solo — por eso claude-code/codex/opencode nunca
+        // quedan viejos. Un `.mdc` es un archivo GENERADO: se queda con el contenido de
+        // la version anterior hasta que alguien corra `awm sync`, y nada lo decia.
+        const source = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-stale-src-'));
+        fs.mkdirSync(path.join(source, 'using-awm'), { recursive: true });
+        const skillMd = path.join(source, 'using-awm', 'SKILL.md');
+        fs.writeFileSync(skillMd, '---\nname: using-awm\ndescription: original\n---\n\nCuerpo v1.\n');
+
+        const rulesDir = path.join(tmpHome, '.cursor/rules');
+        fs.mkdirSync(rulesDir, { recursive: true });
+        const target = path.join(rulesDir, 'using-awm.mdc');
+        const { renderArtifact } = require('../../../src/core/renderers/registry');
+        fs.writeFileSync(target, renderArtifact('cursor-mdc', path.join(source, 'using-awm')));
+
+        const stateDir = path.join(tmpHome, '.awm', 'state');
+        fs.mkdirSync(stateDir, { recursive: true });
+        fs.writeFileSync(path.join(stateDir, 'artifacts.json'), JSON.stringify([{
+            name: 'using-awm', type: 'skill', scope: 'global',
+            targetPath: target, sourcePath: path.join(source, 'using-awm'),
+            renderer: 'cursor-mdc', owners: ['cursor'],
+        }]));
+
+        const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
+        const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
+
+        // Recien instalado: coincide con su fuente.
+        const fresh = gatherProviderChecks(['cursor'], scanSkills)[0]
+            .checks.find((c: { id: string }) => c.id === 'skills.global');
+        expect(fresh?.state).toBe('supported');
+
+        // `awm update` trae una version nueva de la skill upstream.
+        fs.writeFileSync(skillMd, '---\nname: using-awm\ndescription: original\n---\n\nCuerpo v2, cambiado upstream.\n');
+
+        const stale = gatherProviderChecks(['cursor'], scanSkills)[0]
+            .checks.find((c: { id: string }) => c.id === 'skills.global');
+        expect(stale?.state).toBe('stale');
+        expect(stale?.detail).toContain('using-awm.mdc');
+        // Medido, no supuesto: de `init`/`update`/`sync`/`add`, solo `add` refresca un
+        // renderizado viejo. Los otros tres corren limpios y no cambian nada.
+        expect(stale?.remediationCode).toBe('reinstall-bundle');
+
+        fs.rmSync(source, { recursive: true, force: true });
+    });
+
     it('non-link renderer with an empty/missing dir reports absent, not a false healthy', () => {
         const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
         const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');

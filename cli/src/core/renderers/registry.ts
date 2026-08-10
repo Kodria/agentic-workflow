@@ -21,7 +21,12 @@
 // renderer nuevo, se agrega aca y todos los consumidores quedan correctos por
 // construccion — que es lo que convierte "agregar un provider" en un cambio
 // localizado en vez de una caceria por seis archivos.
+import fs from 'fs';
+import path from 'path';
 import type { RendererId } from '../../providers';
+import { renderCodexAgent } from './codex-agent';
+import { renderCursorMdc } from './cursor-mdc';
+import { renderCopilotInstructions } from './copilot-instructions';
 
 /** Extension que el renderer estampa sobre el nombre base, o `null` cuando el
  *  artefacto se instala con el nombre tal cual (renderer `link`). */
@@ -85,4 +90,38 @@ export function rendererExtension(renderer: RendererId): string | null {
  *  Ver `RENDERER_INTEGRITY_MARKER`. */
 export function rendererIntegrityMarker(renderer: RendererId): string | null {
     return RENDERER_INTEGRITY_MARKER[renderer];
+}
+
+/**
+ * Contenido que `renderer` produce AHORA a partir de `sourcePath`, o `null` para `link`
+ * (no genera nada: instala el artefacto tal cual).
+ *
+ * Es la tercera cosa que un renderer tiene que declarar, junto con su extension y su
+ * marcador — y por eso vive en esta tabla. El dispatch `renderer id → funcion` estaba
+ * escrito DOS veces dentro de `install-transaction.ts` (una en `validate`, otra en
+ * `stage`), y agregar un consumidor mas —el chequeo de frescura del diagnostico— habria
+ * hecho tres. Es exactamente la duplicacion que el comentario de arriba de este modulo
+ * describe como el bug que costo una release.
+ *
+ * Puro: lee la fuente y devuelve texto. No escribe nada, asi que sirve igual para
+ * instalar, para validar antes de instalar, y para preguntar "¿lo instalado sigue
+ * coincidiendo con la fuente?".
+ */
+export function renderArtifact(renderer: RendererId, sourcePath: string): string | null {
+    switch (renderer) {
+        case 'link':
+            return null;
+        case 'codex-agent-toml':
+            return renderCodexAgent(fs.readFileSync(sourcePath, 'utf8'));
+        case 'cursor-mdc':
+            return renderCursorMdc(readSkillMd(sourcePath));
+        case 'copilot-instructions':
+            return renderCopilotInstructions(readSkillMd(sourcePath));
+    }
+}
+
+/** Las skills se rinden desde el `SKILL.md` de su directorio; los agentes de Codex,
+ *  desde el archivo directo. La diferencia la sabe cada rama de `renderArtifact`. */
+function readSkillMd(sourceDir: string): string {
+    return fs.readFileSync(path.join(sourceDir, 'SKILL.md'), 'utf8');
 }
