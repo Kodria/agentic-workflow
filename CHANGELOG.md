@@ -1,3 +1,8 @@
+## v6.4.0 - 2026-08-10
+
+### Features
+- **sensors:** give this repo a working security gate, and stop hiding sensor configs
+
 ## v6.3.0 - 2026-08-10
 
 ### Features
