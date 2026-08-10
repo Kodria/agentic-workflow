@@ -155,3 +155,51 @@ export function resolveOnPath(bin: string): boolean {
   const entries = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
   return entries.some((dir) => matches(path.join(dir, bin)));
 }
+
+/**
+ * ¿Dos rutas nombran el MISMO directorio/archivo existente?
+ *
+ * Comparar `fs.realpathSync(a) !== fs.realpathSync(b)` como strings parece obvio y es
+ * incorrecto en Windows: el mismo directorio tiene más de una grafía legítima —
+ * `C:\Users\RUNNER~1\AppData\...` (nombre corto 8.3, lo que devuelve `os.tmpdir()`) y
+ * `C:/Users/runneradmin/AppData/...` (lo que devuelve `git worktree list`, con separadores
+ * POSIX) — y `realpathSync` NO reconcilia las dos. En CI eso hacía que
+ * `ownedWorktreeExists` respondiera "este worktree no es mío" sobre un worktree propio.
+ *
+ * Falla cerrado, así que no corrompía nada — pero dejaba la adopción tras crash inservible
+ * en Windows: el teardown no podía probar propiedad, los tracks quedaban `BLOCKED`, y la
+ * cohorte no llegaba nunca ni a `SERIAL` ni a `ACTIVE`. Un solo bug de comparación, quince
+ * tests en cascada.
+ *
+ * La identidad se toma del filesystem — `(dev, ino)` — que es agnóstica a separadores, a
+ * mayúsculas y a nombres cortos. Cuando el volumen no expone inode (`ino === 0`, posible en
+ * algunos filesystems de Windows) se cae a `realpathSync.native` — que sí resuelve 8.3 vía
+ * la API del SO — normalizando separadores y capitalización.
+ *
+ * Cualquier fallo de `stat` significa que al menos una no existe: `false`. La identidad
+ * nunca se afirma sin prueba.
+ */
+export function sameExistingPath(a: string, b: string): boolean {
+  let sa: fs.Stats;
+  let sb: fs.Stats;
+  try {
+    sa = fs.statSync(a);
+    sb = fs.statSync(b);
+  } catch {
+    return false;
+  }
+  // `ino === 0` en AMBOS lados no prueba identidad: probaría que el filesystem no la
+  // reporta. Tratarlo como match haría coincidir dos rutas cualesquiera del mismo volumen.
+  if (sa.ino !== 0 && sb.ino !== 0) return sa.dev === sb.dev && sa.ino === sb.ino;
+  const canonical = (p: string): string | null => {
+    try {
+      const real = fs.realpathSync.native(p).replaceAll('\\', '/');
+      return isWindowsNative() ? real.toLowerCase() : real;
+    } catch {
+      return null;
+    }
+  };
+  const ca = canonical(a);
+  const cb = canonical(b);
+  return ca !== null && ca === cb;
+}

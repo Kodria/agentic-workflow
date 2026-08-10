@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { EXEC_STDIO } from '../journal/process';
+import { sameExistingPath } from '../paths';
 import type { TrackRef } from '../journal/types';
 import type { JoinIntent } from './types';
 
@@ -87,12 +88,7 @@ export function foreignPathExists(target: string): boolean {
  *  `false` — el caller sigue tratando el destino como potencialmente ajeno
  *  vía `foreignPathExists`, nunca lo adopta a ciegas. */
 export function ownedWorktreeExists(repo: string, worktreePath: string, branch: string): boolean {
-    let target: string;
-    try {
-        target = fs.realpathSync(worktreePath);
-    } catch {
-        return false; // no existe nada ahí todavía: no puede ser "nuestro" de un intento previo
-    }
+    if (!fs.existsSync(worktreePath)) return false; // nada ahí todavía: no puede ser "nuestro" de un intento previo
     let out: string;
     try {
         out = git(repo, ['worktree', 'list', '--porcelain']);
@@ -105,13 +101,11 @@ export function ownedWorktreeExists(repo: string, worktreePath: string, branch: 
         const wtLine = lines.find((l) => l.startsWith('worktree '));
         const branchLine = lines.find((l) => l.startsWith('branch '));
         if (wtLine === undefined || branchLine === undefined) continue;
-        let candidate: string;
-        try {
-            candidate = fs.realpathSync(wtLine.slice('worktree '.length));
-        } catch {
-            continue;
-        }
-        if (candidate === target && branchLine.slice('branch '.length) === wantedRef) return true;
+        // Identidad de filesystem, NUNCA comparación de strings: git imprime los paths con
+        // separadores POSIX y el nombre largo, mientras el `worktreePath` del journal puede
+        // venir en 8.3 con backslashes. Son la misma carpeta escrita de dos formas.
+        if (sameExistingPath(wtLine.slice('worktree '.length), worktreePath)
+            && branchLine.slice('branch '.length) === wantedRef) return true;
     }
     return false;
 }

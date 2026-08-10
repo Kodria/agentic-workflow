@@ -5,6 +5,7 @@
 // estado ajeno.
 import fs from 'fs';
 import crypto from 'crypto';
+import { sameExistingPath } from '../paths';
 import type { JournalState, TrackContext } from '../journal/types';
 import { readDescriptor } from './descriptor';
 import { readJournal } from '../journal/store';
@@ -42,7 +43,9 @@ export function resolveAuthenticatedContext(cwd: string, localState: JournalStat
     }
     if (ref === undefined) throw new Error('TrackRef ausente en journal del plan');
     if (ref.fencingToken !== descriptor.fencingToken) throw new Error('fencingToken no coincide');
-    if (fs.realpathSync(ref.worktreePath) !== root || planRoot === root) throw new Error('realpath de track no coincide');
+    // Identidad de filesystem, no de string: en Windows `process.cwd()` y el path guardado
+    // en el journal pueden ser dos grafías de la misma carpeta (8.3 vs nombre largo).
+    if (!sameExistingPath(ref.worktreePath, root) || sameExistingPath(planRoot, root)) throw new Error('realpath de track no coincide');
     if (localState.trackContext.trackId !== descriptor.trackId) throw new Error('trackId no coincide');
     return { mode: 'track', repoRoot: root, descriptor, trackContext: localState.trackContext };
 }

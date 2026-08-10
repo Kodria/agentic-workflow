@@ -25,6 +25,7 @@
 // adopta ni borra lo que no pudo probar.
 import fs from 'fs';
 import { readDescriptor } from './descriptor';
+import { sameExistingPath } from '../paths';
 import { ownedWorktreeExists } from './git';
 import type { TrackRef } from '../journal/types';
 
@@ -34,15 +35,10 @@ export type { TeardownDecision, TeardownObservation } from './types';
 export function worktreeOwnershipProven(repo: string, ref: TrackRef, planJournalId: string): boolean {
     const intent = ref.teardownIntent;
     if (intent === undefined) return false; // sin snapshot durable: nada que comparar, no probado
-    let intentTarget: string;
-    let liveTarget: string;
-    try {
-        intentTarget = fs.realpathSync(intent.worktreePath);
-        liveTarget = fs.realpathSync(ref.worktreePath);
-    } catch {
-        return false;
-    }
-    if (intentTarget !== liveTarget) return false;
+    // Identidad de filesystem, no de string (mismo motivo que en `ownedWorktreeExists`):
+    // el snapshot durable del intent y el `TrackRef` vivo pueden traer dos grafías del
+    // mismo path. `sameExistingPath` ya devuelve `false` si alguno no existe.
+    if (!sameExistingPath(intent.worktreePath, ref.worktreePath)) return false;
     if (intent.branch !== ref.branch) return false;
     let descriptor;
     try {

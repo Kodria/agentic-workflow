@@ -10,7 +10,7 @@ import os from 'os';
 import { execFileSync } from 'child_process';
 import { initRepo, commitFile } from '../../helpers/git-fixture';
 import { defaultTrackRuntime } from '../../../src/commands/watch/tracks';
-import { isAwmGitignored } from '../../../src/core/tracks/git';
+import { isAwmGitignored, ownedWorktreeExists } from '../../../src/core/tracks/git';
 import type { TrackRef, TrackContext } from '../../../src/core/journal/types';
 
 function trackRef(worktreePath: string, overrides: Partial<TrackRef> = {}): TrackRef {
@@ -51,8 +51,11 @@ describe('defaultTrackRuntime — integración con git real (R4.1, R4.6, C2, pos
 
         expect(fs.existsSync(path.join(worktreePath, 'a.txt'))).toBe(true);
         expect(fs.existsSync(path.join(worktreePath, '.gitignore'))).toBe(true);
-        const list = execFileSync('git', ['worktree', 'list'], { cwd: planRoot, encoding: 'utf8' });
-        expect(list).toContain(worktreePath);
+        // `toContain` sobre la salida cruda compara STRINGS: git imprime separadores POSIX y
+        // el nombre largo, mientras `worktreePath` viene del tmpdir en 8.3 con backslashes.
+        // Se afirma la propiedad real — git registra ESTE worktree en ESTA branch — con la
+        // misma función que usa el producto.
+        expect(ownedWorktreeExists(planRoot, worktreePath, 'awm-track/x')).toBe(true);
     });
 
     test('CRITICAL fix: baseSha SIN .gitignore de .awm pero el HEAD vivo del plan SÍ lo tiene — la comprobación vieja (contra planRoot) mentía "ignorado"; la nueva (contra el worktree) detecta que NO lo está y limpia el worktree que acaba de crear (C2)', () => {

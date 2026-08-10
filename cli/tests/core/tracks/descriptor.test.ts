@@ -40,7 +40,10 @@ describe('descriptor de track (R2.5)', () => {
     test('el archivo se escribe con permisos 0600 (R1.2)', () => {
         writeDescriptor(trackRoot, descriptor({}, planRoot));
         const mode = fs.statSync(descriptorPath(trackRoot)).mode & 0o777;
-        expect(mode).toBe(0o600);
+        // win32 no sintetiza el bit de grupo/otros: mismo tratamiento que el resto de la
+        // suite tras el barrido de R6 (`atomic-file-durable`, `journal/store`,
+        // `install-transaction`). Este archivo nació en la rama R5, anterior al barrido.
+        expect(mode).toBe(process.platform === 'win32' ? 0o666 : 0o600);
     });
 
     test('rechaza schema distinto de 1', () => {
