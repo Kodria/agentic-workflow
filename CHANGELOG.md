@@ -1,3 +1,8 @@
+## v6.1.2 - 2026-08-10
+
+### Fixes
+- **doctor:** verify the CONTENT of rendered artifacts, not just their extension
+
 ## v6.1.1 - 2026-08-10
 
 ### Fixes
