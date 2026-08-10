@@ -2,19 +2,21 @@
 // writeJournal -> RECIEN AHI borrar archivos. El replay es seguro por
 // requestId + idempotencyKey + digest.
 import fs from 'fs';
+import path from 'path';
 import crypto from 'crypto';
 import { readJournal, writeJournal, appendEvent } from '../../core/journal/store';
 import { listPendingRequests, applyOutcome, digestOf, RequestEnvelope } from '../../core/journal/requests';
 import { requestsDir } from '../../core/journal/paths';
 import { fsyncDirSync } from '../../core/atomic-file';
 import { redactText } from '../../core/journal/redact';
-import type { Job, JournalState, ReviewObligation, VerificationItem } from '../../core/journal/types';
+import { gitCheckTrackId, headSha } from '../../core/tracks/git';
+import type { Job, JournalState, ReviewObligation, TrackRef, VerificationItem } from '../../core/journal/types';
 
 export interface ApplySummary { applied: number; rejectedStale: number; rejectedDigest: number; rejectedInvalid: number; corrupt: number; }
 
 function now(): string { return new Date().toISOString(); }
 
-const VERIFICATION_KINDS = ['test', 'lint', 'sensors', 'review', 'qa', 'interlock'] as const;
+const VERIFICATION_KINDS = ['test', 'lint', 'sensors', 'review', 'qa', 'interlock', 'track-integration'] as const;
 
 function verificationItems(value: unknown, field: string): VerificationItem[] {
     if (!Array.isArray(value) || !value.every((item) => typeof item === 'object' && item !== null
@@ -40,6 +42,20 @@ function stringArray(value: unknown, field: string): string[] {
     return value;
 }
 
+/** R7 Task 12: `job-request.satisfies` migró de string a array (un mismo job
+ *  puede satisfacer VARIOS items del ciclo a la vez — ej. el job canónico de
+ *  integración final satisface todos los `track-integration:*` juntos).
+ *  Acepta AMBAS formas en el payload (string legacy o array) — el emisor
+ *  actual (`requestJob`) siempre manda array, pero una request en vuelo
+ *  emitida por un binario anterior al deploy de este cambio no debe
+ *  rechazarse por forma. */
+function satisfiesArray(value: unknown, field: string): string[] {
+    if (value === undefined) return [];
+    if (typeof value === 'string') return [value];
+    if (Array.isArray(value) && value.every((item) => typeof item === 'string')) return value;
+    throw new Error(`${field} requiere string o array de strings`);
+}
+
 function linkSatisfies(s: JournalState, itemId: string, jobId: string): void {
     const items: VerificationItem[] = [...s.tasks.flatMap((t) => t.verificationPlan), ...s.cycleVerificationPlan];
     const item = items.find((i) => i.id === itemId);
@@ -47,7 +63,46 @@ function linkSatisfies(s: JournalState, itemId: string, jobId: string): void {
     item.satisfiedBy = jobId;
 }
 
-function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId: string }, digest: string): void {
+/** R7.2 (Task 12): append transaccional — agrega items NUEVOS por id sin
+ *  jamás pisar un item ya existente (preserva `satisfiedBy` ya enlazado). Una
+ *  colisión de `kind` para el mismo id rechaza el request COMPLETO (se llama
+ *  siempre sobre el clone transaccional de `consumePendingRequests`, así que
+ *  un throw acá descarta la mutación entera vía el catch de ese loop). */
+export function applyCyclePlanAppend(state: JournalState, incoming: VerificationItem[]): void {
+    const byId = new Map(state.cycleVerificationPlan.map((item) => [item.id, item]));
+    for (const item of incoming) {
+        const prior = byId.get(item.id);
+        if (prior !== undefined && prior.kind !== item.kind) throw new Error(`verification item ${item.id} cambia kind`);
+        if (prior === undefined) byId.set(item.id, { ...item });
+    }
+    state.cycleVerificationPlan = [...byId.values()];
+}
+
+/** R7.3 (Task 12): declarar un track dentro de la cohorte agrega DE INMEDIATO
+ *  su `track-integration:<trackId>` al CycleVerificationPlan, sin
+ *  `satisfiedBy` — el gate global queda rojo desde el momento en que la
+ *  cohorte se conoce, nunca solo al final. Idempotente por construcción
+ *  (`applyCyclePlanAppend`): llamarla de nuevo con el mismo conjunto de
+ *  tracks es un no-op para los ids ya presentes. */
+export function registerTrackIntegrationItems(state: JournalState): void {
+    const items: VerificationItem[] = [...new Set((state.tracks ?? []).map((t) => t.trackId))].sort()
+        .map((trackId) => ({ id: `track-integration:${trackId}`, kind: 'track-integration' as const }));
+    applyCyclePlanAppend(state, items);
+}
+
+/** Convención determinista, sibling del repo del plan — nunca DENTRO de su
+ *  working tree (git worktree add lo exige, y evita que el track pise el
+ *  árbol que el propio plan está observando). El trackId ya pasó
+ *  `gitCheckTrackId` antes de llegar acá, así que es seguro como segmento
+ *  de path. NOTA (ver `concerns` del reporte de Task 8): esta función NO
+ *  deriva ownership/dependsOn/sharedResources del plan — `reconcileTracks`
+ *  (P1) no los necesita; quedan en `[]` hasta que un mecanismo futuro (fuera
+ *  de alcance de R5-T8) los declare explícitamente. */
+function trackWorktreePath(repoRoot: string, trackId: string): string {
+    return path.join(path.dirname(repoRoot), `${path.basename(repoRoot)}.track-${trackId}`);
+}
+
+function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId: string }, digest: string, repoRoot: string): void {
     const base = { requestId: env.requestId, idempotencyKey: env.idempotencyKey, payloadDigest: digest };
     if (env.kind === 'controller-heartbeat') {
         s.controllerHeartbeatAt = now();
@@ -71,11 +126,12 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
             && (['received', 'spawn-intent', 'claimed', 'running'].includes(j.executionState)
                 || (j.executionState === 'exited' && j.verdict === 'pass')));
         if (equivalent !== undefined) {
-            if (typeof p.satisfies === 'string') linkSatisfies(s, p.satisfies, equivalent.id);
+            for (const itemId of satisfiesArray(p.satisfies, 'job-request satisfies')) linkSatisfies(s, itemId, equivalent.id);
             applyOutcome(s, { ...base, outcome: 'applied', resultRef: equivalent.id });
             return;
         }
         const jobId = `job-${Object.keys(s.jobs).length + 1}-${crypto.randomBytes(3).toString('hex')}`;
+        const satisfiesIds = satisfiesArray(p.satisfies, 'job-request satisfies');
         const job: Job = {
             id: jobId,
             fingerprint: String(p.fingerprint), commandDigest: String(p.commandDigest),
@@ -85,11 +141,115 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
             expandedPaths: p.expandedPaths === undefined ? [] : stringArray(p.expandedPaths, 'job-request expandedPaths'),
             executionState: 'received', observationState: 'progressing',
             phaseTimestamps: { received: now() },
-            ...(typeof p.satisfies === 'string' ? { satisfies: p.satisfies } : {}),
+            ...(satisfiesIds.length > 0 ? { satisfies: satisfiesIds } : {}),
         };
         s.jobs[jobId] = job;
-        if (typeof p.satisfies === 'string') linkSatisfies(s, p.satisfies, jobId);
+        for (const itemId of satisfiesIds) linkSatisfies(s, itemId, jobId);
         applyOutcome(s, { ...base, outcome: 'applied', resultRef: jobId });
+        return;
+    }
+    if (env.kind === 'track-prepare-request') {
+        // R4.1/R6.1: el ÚNICO efecto de esta request es declarar el TrackRef
+        // (fase DECLARED) — todo lo que sigue (worktree, journal, supervisor,
+        // ARMED, ACTIVE) es propiedad exclusiva de `reconcileTracks`
+        // (watch/tracks.ts), nunca de este consumo transaccional.
+        //
+        // ============================================================
+        // GAP CONOCIDO Y DELIBERADAMENTE DIFERIDO (post-review Task 8,
+        // item 3 — decisión: opción (b), NO implementar acá):
+        //
+        // `TrackContext.taskIds`/`planDigest` (asignados en
+        // `tracks.ts::runCreateTrackJournal`) y `TrackRef.ownership`/
+        // `dependsOn`/`sharedResources` (asignados acá abajo) quedan
+        // `[]`/`''` — NINGÚN task de 1 a 8 provee un mecanismo para que el
+        // supervisor localice y parsee "el" archivo de plan .md de la rama
+        // en ejecución. `parseTrackPlan` HOY solo se invoca desde
+        // `track verify-independence --plan <file>`, con el path pasado a
+        // mano; no existe convención de descubrimiento automático
+        // (ni glob de `docs/plans/*.md`, ni mapeo rama->archivo).
+        //
+        // Esto NO bloquea a Task 8 (el protocolo P1 de `nextProtocolEffect`
+        // jamás lee estos campos), pero SÍ va a romper en silencio:
+        //   - Task 5's `assertTrackTask`/`computeTrackGate` (gating por
+        //     `taskIds`/`planDigest` reales) una vez que algo intente usarlos
+        //     de verdad contra un track creado por esta vía.
+        //   - El supuesto de Task 14 (`docs/plans/2026-08-02-r5-parallel-
+        //     tracks-plan.md:2587-2591`) de que `trackContext.taskIds` ya es
+        //     confiable para ese momento.
+        //
+        // Requiere una decisión humana sobre qué task es dueño de: (a)
+        // definir la convención de descubrimiento del archivo de plan, y
+        // (b) extender `track add`/`emitTrackRequest` para llevarlo — o una
+        // enmienda al plan de 17 tasks. No se improvisa acá.
+        // ============================================================
+        const p = env.payload;
+        if (typeof p.trackId !== 'string' || p.trackId.length === 0) throw new Error('track-prepare-request requiere trackId');
+        const trackId = p.trackId;
+        if (!gitCheckTrackId(trackId)) throw new Error(`track-prepare-request: trackId inválido: ${trackId}`);
+        if (!s.tracks?.some((t) => t.trackId === trackId)) {
+            const ref: TrackRef = {
+                trackId,
+                worktreePath: trackWorktreePath(repoRoot, trackId),
+                branch: `awm-track/${trackId}`,
+                ownership: [], sharedResources: [], dependsOn: [],   // ver GAP arriba
+                // R4.10: tokens criptográficamente aleatorios — los hashes
+                // deterministas de protocol.ts son solo valores opacos del
+                // modelo puro, jamás la fuente real de un token de producción.
+                fencingToken: crypto.randomBytes(32).toString('hex'),
+                phase: 'DECLARED',
+                readinessNonce: crypto.randomBytes(32).toString('hex'),
+            };
+            s.tracks = [...(s.tracks ?? []), ref];
+            // R7.3 (Task 12): el gate global queda rojo desde el momento en
+            // que un track se conoce — no espera a que la cohorte termine de
+            // declararse ni a JOINING/FINAL_QA.
+            registerTrackIntegrationItems(s);
+            // C1: la barrera ARMED solo tiene sentido con el conjunto COMPLETO
+            // de la cohorte conocido — recién con >= 2 tracks declarados
+            // existe algo que `reconcileTracks` pueda reconciliar (Task 1
+            // exige al menos dos tracks en cualquier CohortProtocol válido).
+            if (s.tracks.length >= 2 && s.cohortPhase === undefined) {
+                s.cohortPhase = 'PREPARING';
+                s.cohortBaseSha = headSha(repoRoot);
+            }
+        }
+        applyOutcome(s, { ...base, outcome: 'applied', resultRef: trackId });
+        return;
+    }
+    if (env.kind === 'track-freeze-request') {
+        // R5.2/R6.3 (Task 10): request administrativa CROSS-JOURNAL — el
+        // supervisor del PLAN la emite directamente al `requestsDir` de ESTE
+        // journal (el journal de UN track), vía el mismo primitivo durable
+        // (`emitRequest`) que cualquier otra request. El propio supervisor
+        // del track (SU `Supervisor.tick()`, corriendo en este mismo
+        // worktree) la consume acá como cualquier otra — el efecto es
+        // puramente declarativo (marcar la intención); las 6 observaciones
+        // reales (drenar jobs, recomputar gate, exigir árbol limpio,
+        // terminar la generación propia) las hace `Supervisor.tick()` en su
+        // propio loop, nunca este consumo transaccional (que no puede
+        // esperar terminaciones de proceso reales). Idempotente sin
+        // importar cuántas veces se re-emita, y jamás pisa un `frozen` ya
+        // persistido (R6.4: un track congelado no vuelve a mutar).
+        if (s.frozen === undefined) s.freezeRequested = true;
+        applyOutcome(s, { ...base, outcome: 'applied' });
+        return;
+    }
+    if (env.kind === 'track-finalize-request') {
+        // R7.2 (Task 12): a diferencia de `track-freeze-request` (cross-
+        // journal, un track por cada uno), esta request es PLAN-scoped — el
+        // propio controller del PLAN (corriendo `post-implementation-qa`
+        // sobre el HEAD ya mergeado de todos los tracks) la emite a SU PROPIO
+        // journal para reportar "ya corregí hallazgos y comiteé, este es mi
+        // HEAD limpio". El efecto acá es puramente declarativo (autoreporte);
+        // `reconcileTracks`/`runRequestGlobalQa` (watch/tracks.ts) es quien
+        // hace las dos observaciones reales independientes (HEAD real
+        // coincide, árbol/índice limpios) antes de aceptarlo como evidencia
+        // de `global-qa-pass` — jamás se confía ciegamente en el autoreporte
+        // (mismo criterio fail-closed que el freeze de un track, Task 10).
+        const p = env.payload;
+        if (typeof p.qaHeadSha !== 'string' || p.qaHeadSha.length === 0) throw new Error('track-finalize-request requiere qaHeadSha');
+        s.qaFinalizeRequested = { headSha: p.qaHeadSha, at: now() };
+        applyOutcome(s, { ...base, outcome: 'applied' });
         return;
     }
     if (env.kind === 'register-entity') {
@@ -116,11 +276,30 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
         }
         if (p.entity === 'cycle-plan') {
             const items = verificationItems(p.items, 'register --entity cycle-plan items');
-            // Idempotente por creacion-unica (Task 4): un re-registro defensivo
-            // (ej. tras crash sin memoria de si ya se registro) NUNCA debe pisar
-            // un plan ya existente y perder los `satisfiedBy` ya enlazados.
-            if (s.cycleVerificationPlan.length === 0) {
-                s.cycleVerificationPlan = items;
+            // R7.2 (Task 12): append transaccional por id — reemplaza el guard
+            // "solo si vacío" (Fix4/R1.4b original). Un re-registro defensivo
+            // (ej. tras crash sin memoria de si ya se registro) NUNCA pisa un
+            // item ya existente ni pierde su `satisfiedBy`, pero SÍ agrega los
+            // ids nuevos (ej. `track-integration:*` que `registerTrackIntegrationItems`
+            // fue agregando en paralelo) — el plan de ciclo crece por unión,
+            // nunca se reemplaza entero.
+            applyCyclePlanAppend(s, items);
+            applyOutcome(s, { ...base, outcome: 'applied' });
+            return;
+        }
+        if (p.entity === 'track-integration') {
+            // R7/C3/C4 (Task 12): el contrato canónico ÚNICO del job de
+            // integración final de la cohorte — creación-única (como
+            // cycle-plan antes de R7.2): jamás se pisa un contrato ya
+            // registrado, porque dos contratos distintos en el tiempo
+            // producirían dos idempotencyKeys distintas para "la" integración
+            // final (violaría C4 — un solo job canónico).
+            const argv = stringArray(p.argv, 'register --entity track-integration argv');
+            if (argv.length === 0) throw new Error('register --entity track-integration requiere argv no vacio');
+            const paths = p.paths === undefined ? [] : stringArray(p.paths, 'register --entity track-integration paths');
+            if (typeof p.planDigest !== 'string') throw new Error('register --entity track-integration requiere planDigest (string)');
+            if (s.trackIntegration === undefined) {
+                s.trackIntegration = { argv, paths, planDigest: p.planDigest };
             }
             applyOutcome(s, { ...base, outcome: 'applied' });
             return;
@@ -295,7 +474,7 @@ export function consumePendingRequests(repoRoot: string, branch: string, activeT
                 // nunca deja un estado parcialmente contaminado que luego no se
                 // pueda serializar o reintentar.
                 const candidate = structuredClone(s);
-                applyRequestToState(candidate, env, digest);
+                applyRequestToState(candidate, env, digest, repoRoot);
                 s = candidate;
                 applied++;
                 stateTouched = true;

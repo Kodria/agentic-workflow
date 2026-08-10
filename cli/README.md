@@ -60,3 +60,20 @@ npm run build
 npm link
 ```
 Now simply type `awm` from any path on your machine.
+
+### Parallel tracks
+
+Plans without `## Tracks` run serially exactly as before — parallelism is opt-in and there is
+nothing to migrate. A parallel plan must declare task membership, dependency/resource rows,
+and one JSON argv integration command. Start or resume with `awm watch`; inspect with
+`awm track status`. Track workers commit only their assigned files and request
+`awm track join`. The plan supervisor freezes and merges tracks, runs global QA once on the
+final HEAD, executes the canonical integration job once, then applies the interlock.
+
+Any missing declaration, overlap, global file class, unavailable worktree, or failed
+preparation degrades to serial with an event naming the cause. `BLOCKED` means ownership or
+identity was **not provable** and needs operator evidence; never delete a worktree, branch,
+lock, or process merely to make it proceed — that destroys the evidence of why it blocked.
+
+Full operating guide, including the fallback table and the `BLOCKED` diagnostic path:
+[`docs/guides/parallel-tracks.md`](../docs/guides/parallel-tracks.md).

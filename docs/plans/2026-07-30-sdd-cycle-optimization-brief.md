@@ -5,8 +5,8 @@ title: Optimización del ciclo SDD sin pérdida de calidad
 mode: brief
 readiness: ready
 created: 2026-07-30
-updated: 2026-07-31
-open_decisions: [DA-3, DA-4, DA-5, DA-6]
+updated: 2026-08-02
+open_decisions: [DA-4, DA-5, DA-6]
 project: awm-sdd-optimization
 ---
 
@@ -167,7 +167,7 @@ flowchart TD
   - Donde no hay soporte, degradación a no-op **reportado**: el ciclo completa normal y la evidencia registra que el campo se ignoró. Si R0 confirma soporte en los tres providers, la degradación será excepcional; si no, DA-2 decide si el no-op satisface el criterio del dueño ("funcional en todo o no sirve").
   - Campo ausente → comportamiento idéntico al actual.
 
-- **PR-4 — Paralelismo entre tracks independientes con aislamiento** *(condicionado a R0 + DA-3)*:
+- **PR-4 — Paralelismo entre tracks independientes con aislamiento** *(desbloqueado: R0 completo + DA-3 resuelta 2026-08-02 a favor de fallback a serial)*:
   - La independencia se verifica mecánicamente sobre `Files:` declarados, dependencias/recursos compartidos conocidos y archivos realmente modificados; una intersección vacía declarada es necesaria, no suficiente.
   - Cada track paralelo corre en su propio worktree/branch con ownership explícito; el merge de vuelta y el gate de integración son del controlador. Si el runtime no ofrece aislamiento, fallback a serial — jamás paralelo sobre árbol compartido (incidente real documentado en `AGENTS.md` del repo del CLI: corrupción silenciosa de 7 archivos por `git checkout` concurrente).
 
@@ -240,7 +240,7 @@ flowchart TD
 |----|----------|--------|------------------|
 | DA-1 | **RESUELTA 2026-07-31 (dueño):** sin infraestructura de métrica permanente — no tendría acción real. La calidad se preserva por diseño: (1) etapas de revisión intocables (ya en Fuera de alcance firme); (2) la deduplicación de verificación de Release 1 solo puede saltar comandos con fingerprint idéntico, probado con test mecánico (CA de R1). La batería de defectos controlados queda especificada en el report de R0 como recurso reutilizable si alguna optimización futura tocara el aparato de detección. | ~~Release 1~~ ninguna | — |
 | DA-2 | **RESUELTA 2026-07-31 (dueño):** el tiering de modelo se **desestima** — la matriz de R0 muestra soporte certificable solo en Claude Code, y el criterio del dueño es "funcional en todo o no sirve". Release 4 queda desestimado. | ~~Release 4~~ ninguna | — |
-| DA-3 | Aislamiento por worktree para paralelismo: ¿requisito duro (sin worktree no hay feature) o fallback a serial aceptable como degradación? | Release 5 | (a) fallback a serial (propuesto: el plan sigue siendo válido en los tres providers); (b) requisito duro |
+| DA-3 | **RESUELTA 2026-08-02 (dueño):** posición (a) — **fallback a serial**. Sin aislamiento por worktree el plan igual se ejecuta, en serie, y el ciclo **declara explícitamente la degradación** (nunca silenciosa: lo exige RNF-T.2). Razón: el valor del paralelismo es velocidad, no correctitud — perder velocidad es degradación, perder la ejecución sería una falla; y el fallback es probadamente seguro porque es el comportamiento serial vigente hoy. No debilita RF-4.2: paralelo sobre árbol o recurso compartido sigue prohibido sin tercera opción. | ~~Release 5~~ ninguna | — |
 | DA-4 | ¿Dónde viven los sets de referencia de sensores y quién los mantiene? | Release 2 | (a) dentro de cada sensor-pack del registry baseline, mantenidos con el pack (propuesto); (b) archivo separado por stack en el registry; (c) en el CLI |
 | DA-5 | Umbral de la detección empírica: ¿cuántos hallazgos convergentes manuales de una clase disparan el reporte de "sensor faltante"? | Release 3 | Configurable con default (propuesto: cluster convergente de ≥2, alineado con `--min 2` de `awm ledger recurring`) |
 | DA-6 | ¿La detección solo reporta el gap, o además sugiere la remediación (comando/config propuesto, sin ejecutarlo)? | Release 2 | (a) reporte + sugerencia no ejecutada (propuesto); (b) solo reporte |
@@ -310,11 +310,11 @@ El orden es por valor de negocio: primero lo que reduce el dolor de N1 en *todos
 - **Blocked by:** n/a — release desestimado (DA-2 resuelta 2026-07-31).
 - **Acceptance:** CA-3.1, CA-3.2, CA-3.3 — CA-3.1/3.2 ejecutados en los providers que la matriz de R0 marque como soportado/no-soportado respectivamente.
 
-### Release 5 — Paralelismo entre tracks independientes (condicionado)
+### Release 5 — Paralelismo entre tracks independientes
 
 - **Value:** planes con tracks genuinamente independientes (caso real medido) dejan de pagar la suma de sus duraciones y pagan aproximadamente el camino crítico, con independencia previa/posterior verificada, ownership explícito, aislamiento y gate de integración como condiciones.
 - **Scope:** RF-4.1, RF-4.2, RF-4.3 · RNF-T.2. (Registry: `writing-plans` + skill SDD.)
-- **Blocked by:** DA-3 + matriz de capacidades de R0.
+- **Blocked by:** ~~DA-3 + matriz de capacidades de R0~~ — nada. R0 completo (worktree isolation certificada `soportado` en ambos providers) y DA-3 resuelta 2026-08-02: fallback a serial con degradación declarada.
 - **Acceptance:** CA-4.1, CA-4.2, CA-4.3.
 
 ## Risks

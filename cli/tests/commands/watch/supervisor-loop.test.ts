@@ -13,6 +13,8 @@ import { initJournal, readJournal, writeJournal } from '../../../src/core/journa
 import { supervisorLockPath } from '../../../src/core/journal/paths';
 import { spawnStructured } from '../../../src/core/journal/process';
 import { computeFingerprint } from '../../../src/core/journal/fingerprint';
+import { reconcileTracks, defaultTrackRuntime, TrackRuntime, SupervisorObservation } from '../../../src/commands/watch/tracks';
+import type { TrackRef, ProcessRef } from '../../../src/core/journal/types';
 
 jest.setTimeout(60000);
 
@@ -62,6 +64,86 @@ async function until(fn: () => boolean, ms = 30000): Promise<void> {
         if (Date.now() - t0 > ms) throw new Error('timeout');
         await new Promise((r) => setTimeout(r, 50));
     }
+}
+
+/** Mismo patron que `track-bootstrap-crash.test.ts::fakeProcessRef` — un
+ *  `ProcessRef` sintetico (nunca un proceso real) para trackear cuantas veces
+ *  se "spawneo" cada supervisor de track sin depender de wrappers reales. */
+function fakeProcessRef(trackId: string, n: number): ProcessRef {
+    return { pid: 1, startTime: `x-${n}`, spawnNonce: trackId, argvDigest: 'x', processGroup: 1, psArgsDigest: `x-${n}` };
+}
+
+/** Runtime para forzar un fallback-a-SERIAL REAL (Finding 2, ronda 2 de
+ *  re-review de Task 12): `addWorktree`/`teardownOwned` delegan al
+ *  `defaultTrackRuntime` de verdad (git real, mismo criterio que
+ *  `track-bootstrap-crash.test.ts::buildRuntime`) — solo `spawnSupervisor`/
+ *  `observeSupervisor` quedan fake, porque a esta prueba no le importa la
+ *  mecanica de un wrapper detached, sino que la cohorte atraviese el reducer
+ *  real (`nextProtocolEffect`/`reconcileTracks`) hasta `enter-serial`. El
+ *  worktree de `failWorktreeFor` falla SIEMPRE — el mismo disparador que usa
+ *  Task 9 para su `'fallo del segundo track limpia el primero antes de
+ *  serializar'`. */
+function buildFallbackRuntime(
+    planRoot: string, wrapperState: Map<string, 'absent' | 'claimed' | 'ready'>, spawnCalls: Map<string, number>,
+    failWorktreeFor: string,
+): TrackRuntime {
+    const real = defaultTrackRuntime(planRoot, 'main');
+    return {
+        addWorktree(root, ref, baseSha) {
+            if (ref.trackId === failWorktreeFor) throw new Error(`fallo inyectado: create-worktree de ${ref.trackId}`);
+            real.addWorktree(root, ref, baseSha);
+        },
+        initTrackJournal(ref, context) { real.initTrackJournal(ref, context); },
+        spawnSupervisor(ref) {
+            const n = (spawnCalls.get(ref.trackId) ?? 0) + 1;
+            spawnCalls.set(ref.trackId, n);
+            wrapperState.set(ref.trackId, 'claimed');
+            return fakeProcessRef(ref.trackId, n);
+        },
+        observeSupervisor(ref): SupervisorObservation {
+            const st = wrapperState.get(ref.trackId) ?? 'absent';
+            if (st === 'absent') return { kind: 'absent' };
+            if (st === 'ready') return { kind: 'ready', readinessNonce: ref.readinessNonce };
+            wrapperState.set(ref.trackId, 'ready');
+            return { kind: 'claimed' };
+        },
+        async stopOwnSupervisor() { return true; },
+        removeOwnedWorktree(repo, ref) { real.removeOwnedWorktree(repo, ref); },
+        removeOwnedBranch(repo, branch) { real.removeOwnedBranch(repo, branch); },
+        emitFreezeRequest() { throw new Error('no deberia llamarse (fallback a SERIAL nunca llega a freeze)'); },
+        mergeFrozenTrack() { throw new Error('no deberia llamarse (fallback a SERIAL nunca llega a merge)'); },
+        abortOwnedMerge() { throw new Error('no deberia llamarse (fallback a SERIAL nunca llega a merge)'); },
+        async ensureIntegrationLock() { throw new Error('no deberia llamarse (fallback a SERIAL nunca llega a integracion)'); },
+        async pauseControllerGeneration() { throw new Error('no deberia llamarse (fallback a SERIAL nunca llega a integracion)'); },
+        releaseIntegrationLockIfHeld() { throw new Error('no deberia llamarse (fallback a SERIAL nunca llega a integracion)'); },
+    };
+}
+
+/** Declara una cohorte de 2 tracks DIRECTAMENTE sobre el journal (mismo
+ *  criterio que `track-bootstrap-crash.test.ts::declareCohort`: esta es la
+ *  UNICA parte que no pasa por una request real — deliberado, porque
+ *  `track-prepare-request` (`apply.ts`) tambien registra cada
+ *  `track-integration:<trackId>` en el `cycleVerificationPlan` SIN
+ *  `satisfiedBy`, y nada limpia esos items cuando la cohorte cae a SERIAL
+ *  (el fallback nunca vuelve a satisfacerlos ni los remueve) — dejarian el
+ *  gate generico permanentemente rojo y esta prueba dejaria de probar lo que
+ *  el Finding 2 pide. Todo lo que pasa DESPUES de esta declaracion (worktree,
+ *  journal, teardown, `enter-serial`) SI atraviesa el reducer real via
+ *  `reconcileTracks`, exactamente como pide la ronda 2 de re-review. */
+function declareFallbackCohort(repo: string, tracksRoot: string, baseSha: string): void {
+    const s0 = readJournal(repo, 'main').state!;
+    s0.cohortPhase = 'PREPARING';
+    s0.cohortBaseSha = baseSha;
+    s0.tracks = ['a', 'b'].map((id) => ({
+        trackId: id,
+        worktreePath: path.join(tracksRoot, `track-${id}`),
+        branch: `awm-track/${id}`,
+        ownership: [], sharedResources: [], dependsOn: [],
+        fencingToken: `fence-${id}`.padEnd(32, '0'),
+        phase: 'DECLARED' as const,
+        readinessNonce: `ready-${id}`.padEnd(32, '0'),
+    } satisfies TrackRef));
+    writeJournal(repo, 'main', s0);
 }
 
 describe('supervisor loop', () => {
@@ -121,6 +203,79 @@ describe('supervisor loop', () => {
         expect(final.cycle.status).toBe('COMPLETE');
         expect(typeof final.cycle.completedAt).toBe('string');
         expect(Object.values(final.jobs).every((j) => j.executionState === 'exited' && j.verdict === 'pass')).toBe(true);
+    });
+
+    // Regresion (post-review #2, Task 12/R7 — Finding 2 de la segunda ronda
+    // de re-review): la version anterior de esta prueba armaba el escenario
+    // hand-mutando el journal directo a `cohortPhase = 'SERIAL'` con tracks
+    // REMOVED/DECLARED "a mano" — probaba la logica del GUARD en aislamiento,
+    // pero nunca demostraba que el guard se comporta bien contra un journal
+    // con la FORMA que un fallback real deja (teardown real, git real,
+    // secuencia exacta begin-teardown -> enter-serial que decide
+    // `protocol.ts`). Esta version dispara el MISMO fallback de Task 9
+    // (`track-bootstrap-crash.test.ts::'fallo del segundo track limpia el
+    // primero antes de serializar'`: track 'a' llega a ARMED con git real,
+    // 'b' falla su `create-worktree` real, `nextProtocolEffect` decide
+    // FALLBACK_PENDING -> begin-teardown de 'a' -> enter-serial) sobre el
+    // MISMO journal que despues se usa para el camino generico de
+    // finalizacion de ciclo (task done + qa/interlock satisfechos, cero jobs
+    // vivos) y confirma que `cycle.status` llega a COMPLETE por ese camino
+    // generico, exactamente como lo haria un plan sin tracks en absoluto.
+    test('una cohorte que cayo a fallback SERIAL via el reducer real no cuelga el ciclo: COMPLETE llega igual por el camino generico (regresion post-review R7, ronda 2)', async () => {  // verifies R7
+        initWatch(repo, 'main');
+        const tracksRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-loop-tracks-'));
+        try {
+            const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+            declareFallbackCohort(repo, tracksRoot, baseSha);
+
+            // --- Fase 1: conducir la cohorte REAL (protocolo + git real)
+            // hasta SERIAL, sin pasar por Supervisor.tick() todavia (misma
+            // tecnica que track-bootstrap-crash.test.ts).
+            const wrapperState = new Map<string, 'absent' | 'claimed' | 'ready'>();
+            const spawnCalls = new Map<string, number>();
+            const fallbackRuntime = buildFallbackRuntime(repo, wrapperState, spawnCalls, 'b');
+            let s = readJournal(repo, 'main').state!;
+            for (let i = 0; i < 200 && s.cohortPhase !== 'SERIAL'; i++) {
+                s = (await reconcileTracks(repo, 'main', s, fallbackRuntime, 2)).state;
+            }
+            expect(s.cohortPhase).toBe('SERIAL');
+            // Mismo shape que exige `assertProtocolInvariants` para SERIAL, y
+            // el mismo que deja el fallback real de Task 9: REMOVED/DECLARED,
+            // nunca inventado por el test.
+            for (const t of s.tracks!) expect(['REMOVED', 'DECLARED']).toContain(t.phase);
+            expect(s.tracks).toHaveLength(2);   // el array nunca se vacia (la regresion original)
+
+            // --- Fase 2: sobre ESE MISMO journal, completar el ciclo por el
+            // camino generico (task done + qa/interlock satisfechos + cero
+            // jobs vivos) — la misma receta que la prueba R4.5 de arriba.
+            emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e1',
+                payload: { entity: 'task', taskId: 'T1', title: 't', verificationPlan: [{ id: 'v1', kind: 'test' }, { id: 'v-sensors', kind: 'sensors' }], reviewObligations: [{ id: 'o-spec', kind: 'spec' }, { id: 'o-quality', kind: 'quality' }] } });
+            emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e2',
+                payload: { entity: 'cycle-plan', items: [{ id: 'cv1', kind: 'qa' }, { id: 'cv-interlock', kind: 'interlock' }] } });
+            requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v1' });
+            requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v-sensors' });
+            requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv1' });
+            requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv-interlock' });
+            emitVerdict(repo, 'g0', 'o-spec', 'verd-spec');
+            emitVerdict(repo, 'g0', 'o-quality', 'verd-quality');
+            emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e3',
+                payload: { entity: 'task-status', taskId: 'T1', status: 'done' } });
+
+            const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', tickMs: 50, reconcileGraceMs: 10000 };
+            const sup = new Supervisor(repo, 'main', cfg, fakeSpawner);
+            let outcome = 'continue';
+            for (let i = 0; i < 400 && outcome !== 'complete'; i++) {
+                outcome = await sup.tick();
+                await new Promise((r) => setTimeout(r, 50));
+            }
+            expect(outcome).toBe('complete');
+            const final = readJournal(repo, 'main').state!;
+            expect(final.cycle.status).toBe('COMPLETE');
+            expect(final.cohortPhase).toBe('SERIAL');   // nunca inventa una transicion SERIAL -> COMPLETE
+            for (const t of final.tracks!) expect(['REMOVED', 'DECLARED']).toContain(t.phase);
+        } finally {
+            fs.rmSync(tracksRoot, { recursive: true, force: true });
+        }
     });
 
     test('tick verifica branch antes del launch y un ciclo COMPLETE no lanza otro controller', async () => {

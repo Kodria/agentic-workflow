@@ -17,7 +17,7 @@ export function queryPs(repoRoot: string, branch: string): PsOutput {
     return { corruptState: false, jobs };
 }
 
-export interface ListRow { id: string; executionState: string; verdict?: string; argv: string[]; satisfies?: string; }
+export interface ListRow { id: string; executionState: string; verdict?: string; argv: string[]; satisfies?: string[]; }
 export interface ListOutput { corruptState: boolean; cycleStatus: string | null; jobs: ListRow[]; }
 
 export function queryList(repoRoot: string, branch: string): ListOutput {

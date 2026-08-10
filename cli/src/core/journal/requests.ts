@@ -6,8 +6,13 @@ import { findLiteralSecretFlag, redactArgv } from './redact';
 import { fsyncDirSync } from '../atomic-file';
 import type { AppliedRequest, JournalState } from './types';
 
+export type RequestKind =
+    | 'job-request' | 'register-entity' | 'controller-heartbeat' | 'verdict'
+    | 'track-prepare-request' | 'track-freeze-request' | 'track-join-request'
+    | 'track-teardown-request' | 'track-finalize-request';
+
 export interface RequestEnvelope {
-    kind: 'job-request' | 'register-entity' | 'controller-heartbeat' | 'verdict';
+    kind: RequestKind;
     generationToken: string;
     idempotencyKey: string;
     payload: Record<string, unknown>;
@@ -61,7 +66,11 @@ export function emitRequest(repoRoot: string, branch: string, env: RequestEnvelo
 
 export interface PendingRequest { requestId: string; envelope: RequestEnvelope & { requestId: string }; file: string; corrupt: boolean; }
 
-const KNOWN_KINDS: ReadonlyArray<RequestEnvelope['kind']> = ['job-request', 'register-entity', 'controller-heartbeat', 'verdict'];
+const KNOWN_KINDS: readonly RequestKind[] = [
+    'job-request', 'register-entity', 'controller-heartbeat', 'verdict',
+    'track-prepare-request', 'track-freeze-request', 'track-join-request',
+    'track-teardown-request', 'track-finalize-request',
+];
 
 function isRecord(x: unknown): x is Record<string, unknown> {
     return typeof x === 'object' && x !== null && !Array.isArray(x);

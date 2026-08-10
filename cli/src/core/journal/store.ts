@@ -1,23 +1,53 @@
 import fs from 'fs';
+import crypto from 'crypto';
 import { writeFileAtomicDurable } from '../atomic-file';
 import { emptyState, isWellFormedState, JournalState } from './types';
 import { journalDir, statePath, requestsDir, acksDir, logsDir, exportDir, eventsPath } from './paths';
 
 export interface ReadResult { state: JournalState | null; corrupt: boolean; raw?: string; }
 
-/** Schema 1 evoluciono de forma aditiva durante R1. Normalizamos solamente
+/** Schema 1 evoluciono de forma aditiva durante R1/R5. Normalizamos solamente
  * campos que antes no existian; evidencia legacy queda deliberadamente con
- * fingerprint vacio para que el gate la considere stale, nunca certificada. */
+ * fingerprint vacio para que el gate la considere stale, nunca certificada.
+ * `tracks`/`trackContext` NO se normalizan por ausencia: son opcionales
+ * (solo el journal de un plan-con-tracks o de un track individual los
+ * lleva), asi que faltar es una forma legitima, no legacy — no se les
+ * inventa un default para un journal que jamas los tuvo (R9.2). */
 function normalizeSchemaOne(value: unknown): unknown {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
     const parsed = structuredClone(value) as Record<string, unknown>;
     if (parsed.schema !== 1) return parsed;
     if (parsed.requestProblems === undefined) parsed.requestProblems = [];
     if (parsed.custodyDecisions === undefined) parsed.custodyDecisions = [];
+    // R9.3: journals legacy pre-R5 no tenian journalId. Se materializa
+    // DETERMINISTICAMENTE desde (branch, cycle.startedAt) para que dos
+    // lecturas del MISMO snapshot legacy nunca produzcan identidades
+    // distintas (a diferencia de emptyState, que usa randomUUID solo para
+    // journals genuinamente nuevos). Se persiste en la siguiente escritura
+    // CAS normal — la lectura por si sola sigue siendo read-only.
+    if (parsed.journalId === undefined) {
+        const branch = typeof parsed.branch === 'string' ? parsed.branch : '';
+        const cycle = typeof parsed.cycle === 'object' && parsed.cycle !== null
+            ? parsed.cycle as Record<string, unknown> : {};
+        const startedAt = typeof cycle.startedAt === 'string' ? cycle.startedAt : '';
+        parsed.journalId = `legacy-${crypto.createHash('sha256')
+            .update(`${branch}\0${startedAt}`).digest('hex').slice(0, 32)}`;
+    }
     if (typeof parsed.cycle === 'object' && parsed.cycle !== null && !Array.isArray(parsed.cycle)) {
         const cycle = parsed.cycle as Record<string, unknown>;
         if (cycle.status === 'IN_PROGRESS' && cycle.nextAction === undefined) {
             cycle.nextAction = { actionId: 'bootstrap-cycle', type: 'plan-cycle', target: 'cycle', preconditions: [], attempt: 0, state: 'pending' };
+        }
+    }
+    // R7 Task 12: `Job.satisfies` migró de `string` a `string[]` (varios items
+    // satisfechos por un mismo job, ej. el job canónico de integración final).
+    // Un journal legacy con `satisfies` string se normaliza a un array de un
+    // elemento — jamás se pierde el enlace ya persistido.
+    if (typeof parsed.jobs === 'object' && parsed.jobs !== null && !Array.isArray(parsed.jobs)) {
+        for (const job of Object.values(parsed.jobs as Record<string, unknown>)) {
+            if (typeof job !== 'object' || job === null || Array.isArray(job)) continue;
+            const j = job as Record<string, unknown>;
+            if (typeof j.satisfies === 'string') j.satisfies = [j.satisfies];
         }
     }
     if (Array.isArray(parsed.verdicts)) {

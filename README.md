@@ -111,6 +111,7 @@ awm sensors run          # run the project's quality gates
 awm preflight            # verify the harness can actually gate before you start
 awm update               # pull the latest content from every registry
 awm doctor               # what state is everything in?
+awm track status         # parallel tracks: phase of each track and of the cohort
 ```
 
 The two processes the system runs day to day:
@@ -130,6 +131,7 @@ The two processes the system runs day to day:
 **Use it**
 - [Product process guide](docs/guides/product-process.md) · [Development process guide](docs/guides/development-process.md)
 - [CLI reference](docs/cli-reference.md) — every command and non-interactive flag
+- [Parallel tracks](docs/guides/parallel-tracks.md) — running a plan's tasks in parallel worktrees, when it degrades to serial, and what `BLOCKED` means
 
 **Understand it**
 - [Architecture](docs/architecture.md) — components, data flow, on-disk state

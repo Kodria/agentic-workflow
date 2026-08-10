@@ -356,6 +356,17 @@ function pidExistsNative(pid: number): boolean {
 export function refIsAlive(ref: ProcessRef): boolean {
     if (isWindowsNative()) {
         if (!pidExistsNative(ref.pid)) return false;
+        // DELIBERADO (Ronda 3, ver el test 'refIsAlive en win32 usa process.kill(pid,0),
+        // NUNCA ps/pgrep'): esta rama NO consulta identidad — ni ps/pgrep ni WMI. La razon
+        // es un bug real de CI: `ps`/`pgrep` emulados por MSYS son ciegos a procesos nativos
+        // y devuelven exit 1 para pids genuinamente vivos, y confiar en ellos declaraba
+        // muertes falsas. `process.kill(pid, 0)` es la unica observacion no ciega.
+        //
+        // CONSECUENCIA CONOCIDA Y ACEPTADA: un pid RECICLADO por un proceso ajeno se reporta
+        // como "nuestro proceso sigue vivo". Eso sobre-reporta vida, que es la direccion
+        // SEGURA — jamas autoriza matar nada ajeno (de eso se encarga `win32LeaderReused`
+        // antes de cualquier senial) — a costa de que un teardown pueda quedarse esperando a
+        // un proceso que nunca fue nuestro. Se prefiere la espera sobre el riesgo.
         return ref.processGroup === ref.pid;
     }
     try {
@@ -481,10 +492,78 @@ export async function terminateGroupConfirmed(ref: ProcessRef, opts: { termGrace
     return waitUntilGone(opts.killGraceMs);
 }
 
+/** true <=> el slot de PID que identifica al grupo (`ref.processGroup` — para
+ *  todo caller real de esta funcion coincide con `ref.pid`, el lider que el
+ *  propio caller spawneo: `captureRefFor`/`spawnStructured` siempre fijan
+ *  `processGroup` al pgid real de ese pid recien creado, que en un detached
+ *  spawn -setsid- es su PROPIO pid) esta hoy ocupado por un proceso VIVO cuya
+ *  identidad (startTime + digest de `ps args`) NO coincide con la que
+ *  capturamos para `ref`. Cubre reuso de PGID (post-review, hallazgo de
+ *  revision de Task 13): el SO reciclo ese numero de pid hacia un proceso
+ *  nuevo y no relacionado que se convirtio en lider de su propio grupo
+ *  (`setpgid`/`setsid`) con el MISMO numero — sin este chequeo, la senial de
+ *  `terminatePreviouslyOwnedGroup` de mas abajo alcanzaria a ese proceso
+ *  ajeno. Una ausencia total o un zombie en ese slot NUNCA cuentan como
+ *  reuso: o es nuestro propio lider aun sin reap (zombie), o el slot esta
+ *  libre y cualquier miembro remanente del pgid es necesariamente
+ *  descendiente nuestro (el SO no puede reutilizar el NUMERO de pid del
+ *  lider para un proceso nuevo mientras ese pid siga ocupado, vivo o
+ *  zombie). Fail-closed ante cualquier duda (R2.1/R4.8): un `ps` que no pudo
+ *  correr, o cualquier campo indeterminado, se trata como reuso — nunca
+ *  como autorizacion para senializar. */
+/** Hermano win32 de `groupLeaderReused` (R4.8). Mismo contrato, distinta fuente de verdad:
+ *  POSIX pregunta a `ps` por lstart/pgid/args; win32 pregunta a WMI por creationDate y
+ *  commandLine, exactamente los dos campos con los que `captureRefFor` construyo el `ref`
+ *  en esta plataforma. `true` <=> el PID esta ocupado por algo que NO es nuestro proceso.
+ *
+ *  Fail-closed identico al POSIX: WMI indisponible o ilegible (`null`) NO prueba que el
+ *  proceso sea nuestro, asi que se trata como ajeno y la senial jamas sale. Un `ref`
+ *  degradado a `'unknown'` (WMI no respondio al capturarlo) tampoco autoriza nada — es la
+ *  consecuencia correcta de no haber podido probar identidad al momento del spawn.
+ *  `'absent'` es el unico caso que devuelve `false`: no hay nadie ahi a quien confundir. */
+function win32LeaderReused(ref: ProcessRef): boolean {
+    const info = win32ProcessInfo(ref.processGroup);
+    if (info === 'absent') return false;
+    if (info === null) return true;
+    if (info.creationDate !== ref.startTime) return true;
+    return identityDigest(info.commandLine, ref.spawnNonce, ref.argvDigest) !== ref.psArgsDigest;
+}
+
+function groupLeaderReused(ref: ProcessRef): boolean {
+    try {
+        const stat = psField(ref.processGroup, 'stat');
+        if (stat === null || stat.startsWith('Z')) return false;   // ausente o zombie: nunca un impostor vivo
+        const start = psField(ref.processGroup, 'lstart');
+        if (start === null || start !== ref.startTime) return true;
+        const argsDig = psArgsDigestOf(ref.processGroup, ref.spawnNonce, ref.argvDigest);
+        if (argsDig === null || argsDig !== ref.psArgsDigest) return true;
+        return false;
+    } catch {
+        return true;   // sin evidencia, jamas autorizar la senial (R2.1)
+    }
+}
+
 /** Drena un grupo cuya propiedad fue capturada por el caller mientras el
  * lider aun estaba vivo. Se usa inmediatamente tras el exit del lider para
  * eliminar descendientes remanentes; el PGID no puede reutilizarse mientras
- * esos miembros sigan presentes. */
+ * esos miembros sigan presentes.
+ *
+ * Post-review (hallazgo de revision de Task 13): a diferencia de
+ * `terminateGroupConfirmed`, esta funcion se usa PRECISAMENTE cuando el lider
+ * ya se espera muerto — por eso no puede reusar `refIsAlive` (exige lider
+ * vivo) como gate de identidad. `groupLeaderReused` cubre el mismo riesgo
+ * (R4.8: jamas senializar sin identidad verificada) sin asumir que el lider
+ * sigue vivo. Antes de este fix, esta funcion confiaba en que el CALLER
+ * hubiera verificado identidad momentos antes: `exec-wrapper.ts` lo hace por
+ * construccion (llama esto en una ventana de milisegundos justo tras
+ * observar el exit del propio hijo), y el caller de Task 13
+ * (`stopOwnSupervisor` en `tracks.ts`) tambien, indirectamente — la capa de
+ * arriba (`gatherTeardownObservation`) ya recalcula `refIsAlive` en la MISMA
+ * tick antes de siquiera elegir la decision `stop-own-supervisor`. Pero esa
+ * garantia era implicita y externa al primitivo: un caller futuro (o un
+ * cambio en esa capa de arriba) podia perderla sin que este archivo lo
+ * notara. Con el chequeo ACA DENTRO, el primitivo deja de depender de la
+ * disciplina del caller — se auto-defiende, igual que `terminateGroupConfirmed`. */
 export async function terminatePreviouslyOwnedGroup(ref: ProcessRef, opts: { termGraceMs: number; killGraceMs: number }): Promise<boolean> {
     const waitUntilGone = async (maxMs: number): Promise<boolean> => {
         const deadline = Date.now() + maxMs;
@@ -495,12 +574,26 @@ export async function terminatePreviouslyOwnedGroup(ref: ProcessRef, opts: { ter
         return groupIsGone(ref.processGroup);
     };
     if (groupIsGone(ref.processGroup)) return true;
+    // Windows PRIMERO: sale sin tocar la logica de grupos, que es semantica POSIX.
+    // El guard `groupLeaderReused` de abajo razona sobre PGIDs y no aplica aca — pero el
+    // PELIGRO que evita si aplica, y durante un tiempo win32 no tuvo ninguna proteccion
+    // equivalente: `groupIsGone` en esta plataforma solo pregunta si el PID existe
+    // (`pidExistsNative`), sin verificar identidad, asi que un PID reciclado por un proceso
+    // AJENO vivo se leia como "nuestro supervisor sigue vivo" y `killTreeWindows` lo mataba.
+    // Eso es exactamente el `kill(pid)` crudo que R4.8 prohibe. `win32LeaderReused` es el
+    // hermano que faltaba, con el mismo criterio fail-closed: sin prueba positiva de que el
+    // proceso es NUESTRO, jamas se le manda una senial.
     if (isWindowsNative()) {
+        if (win32LeaderReused(ref)) return false;
         killTreeWindows(ref.pid);
         if (await waitUntilGone(opts.termGraceMs)) return true;
         killTreeWindows(ref.pid);
         return waitUntilGone(opts.killGraceMs);
     }
+    // Un PGID cuyo slot de lider fue reciclado hacia un proceso vivo ajeno
+    // NUNCA se confunde con el nuestro (mismo criterio que `refIsAlive`
+    // aplica en `terminateGroupConfirmed`, adaptado a un lider ya-muerto).
+    if (groupLeaderReused(ref)) return false;
     try { process.kill(-ref.processGroup, 'SIGTERM'); } catch { /* ya ausente */ }
     if (await waitUntilGone(opts.termGraceMs)) return true;
     try { process.kill(-ref.processGroup, 'SIGKILL'); } catch { /* ya ausente */ }
