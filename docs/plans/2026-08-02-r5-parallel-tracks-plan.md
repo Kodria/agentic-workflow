@@ -1,4 +1,6 @@
 # R5 Parallel Tracks Implementation Plan
+<!-- awm-qa-complete: 2026-08-10 -->
+<!-- awm-retro-complete: 2026-08-10 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
@@ -2939,7 +2941,7 @@ node dist/src/index.js sensors run
 
 Expected: los dos help salen 0; sensores reporta `overall: pass` o `overall: inconclusive` con razones ambientales explícitas. Un `overall: fail` bloquea el cierre.
 
-- [ ] **Step 5: Verificar registry completo**
+- [x] **Step 5: Verificar registry completo**
 
 Run:
 
@@ -2956,7 +2958,7 @@ Expected: PASS.
 
 Después de que el PR del CLI esté mergeado y la versión publicada sea conocida, actualizar `../awm-baseline-registry/awm-registry.json` para que `minCliVersion` sea esa versión exacta o superior. Probar con el CLI publicado en un HOME/AWM_HOME temporal mediante `awm update && awm init`; no promover el registry antes del CLI porque las skills nuevas invocan `awm track`.
 
-- [ ] **Step 7: Commit de documentación en cada repo**
+- [x] **Step 7: Commit de documentación en cada repo**
 
 ```bash
 git add README.md cli/README.md
@@ -2966,7 +2968,7 @@ git -C ../awm-baseline-registry add awm-registry.json
 git -C ../awm-baseline-registry commit -m "chore(registry): require CLI with parallel track support"
 ```
 
-- [ ] **Step 8: Invocar QA y cierre del lifecycle**
+- [x] **Step 8: Invocar QA y cierre del lifecycle**
 
 Con todas las tasks marcadas, ejecutar `post-implementation-qa`; debe auditar cada requisito de la matriz siguiente y corregir todos los hallazgos. Luego ejecutar `harness-retro` y `finishing-a-development-branch` por separado en ambos repos. Los marcadores `awm-qa-complete` y `awm-retro-complete` se agregan solamente cuando esos skills terminan, no durante implementación.
 
