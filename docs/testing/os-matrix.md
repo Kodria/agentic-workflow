@@ -6,10 +6,10 @@ Only the **deltas per operating system**. Run [core-acceptance.md](core-acceptan
 |---|---|
 | Linux | Full suite on `ubuntu-latest`, every PR and every push to `main` |
 | Windows (native) | Full suite on `windows-latest`, every PR and every push to `main` |
-| macOS | **No CI.** This playbook is the only verification. |
+| macOS | Full suite on `macos-latest`, every PR and every push to `main`; the manual playbook additionally exercises real agent binaries. |
 | WSL | Reports as Linux; covered by the Linux path |
 
-macOS having no CI is the honest gap in this matrix: it is the one OS where these manual checks are the *only* evidence.
+The macOS CI suite proves the CLI on the platform; the manual playbook remains necessary because CI does not exercise a user's real agent binary or configuration.
 
 ---
 
@@ -97,7 +97,7 @@ awm init --yes --json > init.json
 **WIN-04 · Sensors resolve their binaries on PATH**
 ```powershell
 npm init -y; npm i -D typescript
-awm sensors init --yes; awm sensors run
+awm sensors init; awm sensors run
 ```
 **Expect:** the typecheck sensor **runs** (pass or fail), not `skipped: not found`. Resolving `.cmd`/`.ps1` shims on Windows was a real published bug (v3.9.0); this is its regression check.
 
@@ -134,7 +134,7 @@ Run the suite from `~` inside the distro, **not** from `/mnt/c/...`.
 | ID | Result | Notes |
 |----|--------|-------|
 | LNX-01 · 02 · 03 |  |  |
-| MAC-01 · 02 · 03 · 04 |  |  |
+| MAC-01 · 02 · 03 · 04 | PASS | 2026-08-10 — macOS 15.6, arm64, Node 24.18.0, AWM 6.4.1. Bootstrap matched in zsh and bash; no Gatekeeper warning; one case-insensitive `development-process` entry. |
 | WIN-01 · 02 · 03 · 04 · 05 · 06 |  |  |
 | WSL-01 · 02 |  |  |
 

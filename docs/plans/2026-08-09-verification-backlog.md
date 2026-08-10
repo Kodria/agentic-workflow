@@ -10,16 +10,16 @@ Este documento es la fuente. Los issues de GitHub apuntan acá en vez de repetir
 |---|---|---|---|
 | Claude Code | ✅ | ✅ | ✅ |
 | Codex | ✅ | ✅ | ✅ |
-| OpenCode | ✅ | ⚠ | ⛔ no tiene |
+| OpenCode | ✅ | ✅ | ⛔ no tiene |
 | Cursor | ✅ | ⚠ | ⛔ no tiene |
-| Copilot | ✅ (solo proyecto) | ⚠ | ⛔ no tiene |
+| Copilot | ✅ (solo proyecto) | ✅ | ⛔ no tiene |
 | Antigravity | ✅ | ⛔ no tiene | ⛔ no tiene |
 
 | Sistema | Suite en CI | Playbook a mano |
 |---|---|---|
 | Linux | ✅ | ✅ |
 | Windows | ✅ | ⚠ |
-| macOS | ✅ | ⚠ |
+| macOS | ✅ | ✅ |
 | WSL | — | ⚠ |
 
 **Los ⚠ no son trabajo de código.** Son "nadie corrió esto contra el binario real". La lección de Codex —que pasó ⚠ → ❌ → ✅ en un día— es que la corrida encuentra cosas que ninguna cantidad de tests unitarios encuentra.
@@ -32,11 +32,11 @@ Cada uno pide: tener el binario, correr [`core-acceptance.md`](../testing/core-a
 
 **Antes de empezar, siempre:** `AWM_HOME` aislado + proyecto scratch. Y leer el aviso de aislamiento al final de `agent-matrix.md`: los archivos de config del agente (`~/.codex/hooks.json`, `~/.claude/settings.json`) **no** viven bajo `AWM_HOME`, así que una corrida de prueba los toca de verdad.
 
-### A1 · OpenCode — cerrar "entrega de contexto"
+### A1 · OpenCode — entrega de contexto cerrada ✅ (2026-08-10)
 
-- **Checks:** AG-01…AG-06 + OC-01.
-- **La pregunta que decide:** `~/.config/opencode/opencode.json` recibe el campo `instructions` apuntando al contenido gestionado por AWM — pero **nadie observó que OpenCode lo lea**. AG-06 contra el binario real es lo único que lo cierra.
-- **Cierra cuando:** una sesión de OpenCode nombra skills instaladas o cita el contexto del proyecto, y queda la respuesta textual.
+- **Checks:** AG-01…AG-06 + OC-01 — PASS.
+- **Evidencia:** macOS 15.6 arm64, Node 24.18.0, AWM 6.4.1 y OpenCode 1.16.2, con `HOME` y `AWM_HOME` aislados. `instructions` apuntó al contexto gestionado; AG-03 creó el symlink local; AG-05 instaló 30 artefactos.
+- **Prueba causal de AG-06:** con todos los symlinks de skills retirados del sandbox y `instructions` como única ruta de AWM, OpenCode recitó el orden exacto de prioridades: instrucciones explícitas del usuario, skills AWM y prompt del sistema. Al retirar solo `instructions` y repetir el prompt sin inspeccionar archivos, respondió que no tenía instrucciones AWM. Así la respuesta afirmativa se atribuye a la entrada de configuración, no al symlink de AG-03.
 
 ### A2 · Cursor — cerrar "entrega de contexto"
 
@@ -44,11 +44,11 @@ Cada uno pide: tener el binario, correr [`core-acceptance.md`](../testing/core-a
 - **Medido el 2026-08-09:** `awm add dev --agent cursor` instala **24** reglas en `.cursor/rules/*.mdc`, con frontmatter válido y el cuerpo completo (236 líneas). Lo que falta es lo otro: **que Cursor cargue un `.mdc` con `alwaysApply: false`** cuando corresponde.
 - **Cierra cuando:** una sesión de Cursor demuestra tener el contenido de una skill que solo pudo venir del `.mdc`.
 
-### A3 · Copilot — cerrar "entrega de contexto"
+### A3 · Copilot — entrega de contexto cerrada ✅ (2026-08-10)
 
-- **Checks:** AG-01…AG-06 + CP-01, CP-02.
-- **Medido el 2026-08-09:** instala **29** archivos en `.github/instructions/*.instructions.md` con `applyTo: "**"` y cuerpo completo. Falta que **Copilot honre ese `applyTo`**.
-- **Ojo:** Copilot no tiene scope global por diseño. `awm add -a copilot --scope global` **debe** fallar nombrando esa razón; un stack trace genérico ahí es un bug (CP-01).
+- **Checks:** AG-01…AG-06 + CP-01, CP-02 — PASS.
+- **Evidencia:** macOS 15.6 arm64, Node 24.18.0, AWM 6.4.1 y Copilot Pro en VS Code. `init` terminó con `failed: 0`; `doctor` reportó `overall: healthy`, tier `agents-md-managed` y contexto entregado. CP-01 rechazó scope global con la explicación de que Copilot no tiene descubrimiento de skills a nivel usuario; CP-02 instaló 36 archivos bajo `.github/instructions` con `applyTo: "**"`.
+- **AG-06:** una conversación nueva de Copilot Chat respondió que la entrada es `development-process` y que el preflight es `awm preflight`; sus References citaron `using-awm.instructions.md`, `development-process.instructions.md` y `writing-plans.instructions.md`.
 
 ### A4 · Antigravity — cerrar "lectura de workflows"
 
@@ -62,10 +62,10 @@ Cada uno pide: tener el binario, correr [`core-acceptance.md`](../testing/core-a
 
 CI corre la suite de unidad/integración en las tres plataformas. **Eso no es lo mismo que correr el playbook**: CI no instala ningún binario de agente ni ejercita el flujo de un usuario.
 
-### B1 · macOS — playbook a mano
+### B1 · macOS — playbook manual completado ✅ (2026-08-10)
 
-- **Correr:** `core-acceptance.md` completo + la sección macOS de [`os-matrix.md`](../testing/os-matrix.md) + `agent-matrix` para los agentes que tengas ahí.
-- **Por qué vale igual con CI en verde:** la primera corrida de macOS *en CI* encontró un defecto de producto real (rutas de backup duplicadas por `/var` → `/private/var`). El playbook ejercita rutas que la suite no toca.
+- **Resultado:** CORE-01…20 y MAC-01…04 ejecutados en macOS 15.6 arm64, Node 24.18.0 y AWM 6.4.1, con proyecto y `AWM_HOME` aislados. `zsh` y `bash` coincidieron, no apareció aviso de Gatekeeper y no hubo duplicado por case-insensitivity.
+- **Corrección del playbook durante la corrida:** `sync`, `sensors init` y `backup` habían cambiado sus contratos de CLI; se actualizaron sus comandos y expectativas contra el binario real. La falta de una herramienta de sensor ahora es un `fail` explícito, no un `skipped`.
 
 ### B2 · Windows nativo — playbook a mano
 
