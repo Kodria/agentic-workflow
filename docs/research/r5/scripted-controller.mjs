@@ -204,8 +204,13 @@ log('todos los tracks mergeados: arranca la QA global');
 // (`requiredVerifiers`, detectados por `watch --init`): el gate rechaza por ausencia (R3.6),
 // nunca por omisión silenciosa. Se registran por unión — re-registrar tras un relevo no pisa
 // lo ya satisfecho.
+// `qa` e `interlock` son EXIGIDOS SIEMPRE por el gate global (R1/R3.2), con independencia de
+// lo que el repo tenga configurado: `run-final-interlock` no reimplementa nada, llama al
+// mismo `computeGate`. Sin ellos la cohorte llega hasta `FINAL_INTERLOCK` — tracks mergeados,
+// QA global aceptada, job canónico corrido una sola vez — y se queda ahí para siempre con
+// "CycleVerificationPlan requiere 'qa'/'interlock'" como único motivo. Se observó así.
 const requiredVerifiers = journal()?.requiredVerifiers ?? [];
-const cycleItems = requiredVerifiers.map((kind) => ({ id: `cycle-${kind}`, kind }));
+const cycleItems = [...requiredVerifiers, 'qa', 'interlock'].map((kind) => ({ id: `cycle-${kind}`, kind }));
 if (cycleItems.length > 0) {
     try {
         awm(['job', 'register', '--generation', token, '--entity', 'cycle-plan', '--json', JSON.stringify({ items: cycleItems })]);
