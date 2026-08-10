@@ -195,7 +195,27 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
 
         expect(skillsCheck?.state).not.toBe('healthy');
         expect(skillsCheck?.state).toBe('supported');
-        expect(skillsCheck?.detail).toContain('not verified');
+        // Antes decia 'content integrity not verified' — honesto entonces, porque no se
+        // verificaba. Ahora SI se verifica, y este archivo tiene su marcador, asi que no
+        // hay nada que reportar.
+        expect(skillsCheck?.detail).toBeUndefined();
+    });
+
+    it('a rendered file with the right extension but a truncated body is reported broken', () => {
+        // El hueco que cerraba C3: presencia + extension dejaba pasar un archivo correcto
+        // por fuera y vacio por dentro. El agente cargaba nada y doctor decia que si.
+        const rulesDir = path.join(tmpHome, '.cursor/rules');
+        fs.mkdirSync(rulesDir, { recursive: true });
+        fs.writeFileSync(path.join(rulesDir, 'development-process.mdc'), '---\ndescription: x\n');
+
+        const scanSkills = jest.fn(() => ({ valid: [], repairable: [], dead: [], usurped: [] }));
+        const { gatherProviderChecks } = require('../../../src/core/diagnostics/provider-checks');
+        const facts = gatherProviderChecks(['cursor'], scanSkills);
+        const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
+
+        expect(skillsCheck?.state).toBe('broken');
+        expect(skillsCheck?.detail).toContain('development-process.mdc');
+        expect(skillsCheck?.remediationCode).toBe('reinstall-rendered-artifacts');
     });
 
     it('Gap B — non-link renderer (cursor-mdc) against REAL renderer/pipeline output, not a hand-written approximation', () => {
@@ -242,7 +262,10 @@ describe('skillsGlobalCheck — renderer-aware (Task 4.4 / deferred Task 4.3 fin
         const skillsCheck = facts[0].checks.find((c: { id: string }) => c.id === 'skills.global');
 
         expect(skillsCheck).toMatchObject({ id: 'skills.global', state: 'supported', target: rulesDir });
-        expect(skillsCheck?.detail).toContain('not verified');
+        // La verificacion de contenido corre sobre la salida REAL del renderer, no sobre
+        // una aproximacion escrita a mano: si el marcador declarado en la tabla no
+        // coincidiera con lo que el renderer emite de verdad, este test lo detectaria.
+        expect(skillsCheck?.detail).toBeUndefined();
 
         fs.rmSync(content, { recursive: true, force: true });
     });
