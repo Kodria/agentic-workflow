@@ -381,9 +381,17 @@ describe('reconcileTracks — crash/restart de teardown con git real (Task 13, R
                 s = (await reconcileTracks(planRoot, BRANCH, s, runtime, 2)).state;
             }
 
-            expect(trackA(s).phase).toBe('REMOVED');
+            // La propiedad que vale en TODAS las plataformas y es la razón de ser del test:
+            // el proceso ajeno JAMÁS recibe una señal. Se afirma primero, sin condicionar.
             const signalledForeignProcess = killSpy.mock.calls.some(([target]) => Number(target) === -bystanderPid);
             expect(signalledForeignProcess).toBe(false);
+            // La convergencia a REMOVED, en cambio, es POSIX-only y por diseño: en win32
+            // `refIsAlive` no consulta identidad (decisión deliberada de Ronda 3 — ps/pgrep
+            // de MSYS son ciegos a procesos nativos y declaraban muertes falsas), así que un
+            // pid reciclado se lee como "nuestro supervisor sigue vivo" y el teardown espera.
+            // Sobre-reportar vida es la dirección segura: nunca mata nada ajeno, solo espera.
+            // Afirmar REMOVED en win32 exigiría revertir esa decisión para que un test pase.
+            if (process.platform !== 'win32') expect(trackA(s).phase).toBe('REMOVED');
             // El bystander sigue vivo: nunca fue tocado.
             expect(() => process.kill(bystanderPid, 0)).not.toThrow();
         } finally {

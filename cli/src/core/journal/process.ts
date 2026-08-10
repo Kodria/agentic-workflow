@@ -356,6 +356,17 @@ function pidExistsNative(pid: number): boolean {
 export function refIsAlive(ref: ProcessRef): boolean {
     if (isWindowsNative()) {
         if (!pidExistsNative(ref.pid)) return false;
+        // DELIBERADO (Ronda 3, ver el test 'refIsAlive en win32 usa process.kill(pid,0),
+        // NUNCA ps/pgrep'): esta rama NO consulta identidad — ni ps/pgrep ni WMI. La razon
+        // es un bug real de CI: `ps`/`pgrep` emulados por MSYS son ciegos a procesos nativos
+        // y devuelven exit 1 para pids genuinamente vivos, y confiar en ellos declaraba
+        // muertes falsas. `process.kill(pid, 0)` es la unica observacion no ciega.
+        //
+        // CONSECUENCIA CONOCIDA Y ACEPTADA: un pid RECICLADO por un proceso ajeno se reporta
+        // como "nuestro proceso sigue vivo". Eso sobre-reporta vida, que es la direccion
+        // SEGURA — jamas autoriza matar nada ajeno (de eso se encarga `win32LeaderReused`
+        // antes de cualquier senial) — a costa de que un teardown pueda quedarse esperando a
+        // un proceso que nunca fue nuestro. Se prefiere la espera sobre el riesgo.
         return ref.processGroup === ref.pid;
     }
     try {
