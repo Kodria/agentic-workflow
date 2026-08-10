@@ -122,7 +122,11 @@ describe('runRequestFinalIntegration — pausa del controller y pedido del job c
         s0.cohortBaseSha = headSha;
         s0.cohortPlanHeadSha = headSha;
         s0.globalQaHeadSha = headSha;
-        s0.trackIntegration = { argv: ['true'], paths: [], planDigest: 'plan-1' };
+        // `true` es un builtin POSIX, NO un ejecutable en Windows: cmd.exe responde
+        // "is not recognized" y el job sale != 0, así que el gate reporta verdict adverso y
+        // el test mide el error del fixture en vez del comportamiento del interlock. Mismo
+        // idioma multiplataforma que ya usa este archivo más abajo para un no-op.
+        s0.trackIntegration = { argv: ['node', '-e', 'process.exit(0)'], paths: [], planDigest: 'plan-1' };
         writeJournal(planRoot, BRANCH, s0);
         return readJournal(planRoot, BRANCH).state!;
     }
@@ -229,7 +233,14 @@ describe('runRequestFinalIntegration — pausa del controller y pedido del job c
 
 // --- Parte B: el finalizer end-to-end -------------------------------------
 
-const INTEGRATION_ARGV = ['npm', 'test', '--', '--runInBand'];
+// El comando canónico del fixture NO pasa por npm, y eso es portabilidad, no comodidad:
+// (1) `execFile('npm', …)` falla en Windows —el ejecutable real es `npm.cmd`— y este argv se
+// ejecuta sin shell, a propósito (C4); (2) `npm test -- --runInBand` pega el flag DIRECTO al
+// script sin preservar el `--`, así que el script recibe un argumento que no espera. El
+// fixture anterior sobrevivía a (2) solo porque `true` ignora sus argumentos — y `true` no
+// existe como ejecutable en Windows, que era (1) otra vez. Un `node -e` autónomo no depende
+// de ninguna de las dos cosas.
+const INTEGRATION_ARGV = ['node', '-e', 'process.exit(0)'];
 const INTEGRATION_PATHS = ['cli/src/**', 'cli/tests/**'];
 
 interface Harness {
@@ -263,7 +274,8 @@ function finalizerHarness(trackIds: string[]): Harness {
     // `true` ignora cualquier argumento extra (`npm test -- --runInBand` pasa
     // `--runInBand` al script) y siempre sale 0 — a diferencia de `node -e`,
     // que interpreta `--runInBand` como flag de node y falla con exit 9.
-    fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ scripts: { test: 'true' } }));
+    // Queda por si algún test futuro invoca `npm test`; el comando canónico ya no lo hace.
+    fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ scripts: { test: 'node --version' } }));
     git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'seed');
     fs.mkdirSync(path.join(repo, '.awm'), { recursive: true });
     fs.writeFileSync(path.join(repo, '.awm', 'sensors.json'), '{}');
