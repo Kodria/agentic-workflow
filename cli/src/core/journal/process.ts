@@ -481,10 +481,60 @@ export async function terminateGroupConfirmed(ref: ProcessRef, opts: { termGrace
     return waitUntilGone(opts.killGraceMs);
 }
 
+/** true <=> el slot de PID que identifica al grupo (`ref.processGroup` — para
+ *  todo caller real de esta funcion coincide con `ref.pid`, el lider que el
+ *  propio caller spawneo: `captureRefFor`/`spawnStructured` siempre fijan
+ *  `processGroup` al pgid real de ese pid recien creado, que en un detached
+ *  spawn -setsid- es su PROPIO pid) esta hoy ocupado por un proceso VIVO cuya
+ *  identidad (startTime + digest de `ps args`) NO coincide con la que
+ *  capturamos para `ref`. Cubre reuso de PGID (post-review, hallazgo de
+ *  revision de Task 13): el SO reciclo ese numero de pid hacia un proceso
+ *  nuevo y no relacionado que se convirtio en lider de su propio grupo
+ *  (`setpgid`/`setsid`) con el MISMO numero — sin este chequeo, la senial de
+ *  `terminatePreviouslyOwnedGroup` de mas abajo alcanzaria a ese proceso
+ *  ajeno. Una ausencia total o un zombie en ese slot NUNCA cuentan como
+ *  reuso: o es nuestro propio lider aun sin reap (zombie), o el slot esta
+ *  libre y cualquier miembro remanente del pgid es necesariamente
+ *  descendiente nuestro (el SO no puede reutilizar el NUMERO de pid del
+ *  lider para un proceso nuevo mientras ese pid siga ocupado, vivo o
+ *  zombie). Fail-closed ante cualquier duda (R2.1/R4.8): un `ps` que no pudo
+ *  correr, o cualquier campo indeterminado, se trata como reuso — nunca
+ *  como autorizacion para senializar. */
+function groupLeaderReused(ref: ProcessRef): boolean {
+    try {
+        const stat = psField(ref.processGroup, 'stat');
+        if (stat === null || stat.startsWith('Z')) return false;   // ausente o zombie: nunca un impostor vivo
+        const start = psField(ref.processGroup, 'lstart');
+        if (start === null || start !== ref.startTime) return true;
+        const argsDig = psArgsDigestOf(ref.processGroup, ref.spawnNonce, ref.argvDigest);
+        if (argsDig === null || argsDig !== ref.psArgsDigest) return true;
+        return false;
+    } catch {
+        return true;   // sin evidencia, jamas autorizar la senial (R2.1)
+    }
+}
+
 /** Drena un grupo cuya propiedad fue capturada por el caller mientras el
  * lider aun estaba vivo. Se usa inmediatamente tras el exit del lider para
  * eliminar descendientes remanentes; el PGID no puede reutilizarse mientras
- * esos miembros sigan presentes. */
+ * esos miembros sigan presentes.
+ *
+ * Post-review (hallazgo de revision de Task 13): a diferencia de
+ * `terminateGroupConfirmed`, esta funcion se usa PRECISAMENTE cuando el lider
+ * ya se espera muerto — por eso no puede reusar `refIsAlive` (exige lider
+ * vivo) como gate de identidad. `groupLeaderReused` cubre el mismo riesgo
+ * (R4.8: jamas senializar sin identidad verificada) sin asumir que el lider
+ * sigue vivo. Antes de este fix, esta funcion confiaba en que el CALLER
+ * hubiera verificado identidad momentos antes: `exec-wrapper.ts` lo hace por
+ * construccion (llama esto en una ventana de milisegundos justo tras
+ * observar el exit del propio hijo), y el caller de Task 13
+ * (`stopOwnSupervisor` en `tracks.ts`) tambien, indirectamente — la capa de
+ * arriba (`gatherTeardownObservation`) ya recalcula `refIsAlive` en la MISMA
+ * tick antes de siquiera elegir la decision `stop-own-supervisor`. Pero esa
+ * garantia era implicita y externa al primitivo: un caller futuro (o un
+ * cambio en esa capa de arriba) podia perderla sin que este archivo lo
+ * notara. Con el chequeo ACA DENTRO, el primitivo deja de depender de la
+ * disciplina del caller — se auto-defiende, igual que `terminateGroupConfirmed`. */
 export async function terminatePreviouslyOwnedGroup(ref: ProcessRef, opts: { termGraceMs: number; killGraceMs: number }): Promise<boolean> {
     const waitUntilGone = async (maxMs: number): Promise<boolean> => {
         const deadline = Date.now() + maxMs;
@@ -495,12 +545,18 @@ export async function terminatePreviouslyOwnedGroup(ref: ProcessRef, opts: { ter
         return groupIsGone(ref.processGroup);
     };
     if (groupIsGone(ref.processGroup)) return true;
+    // Windows PRIMERO: sale sin tocar la logica de grupos, que es semantica POSIX.
+    // El guard de identidad de abajo razona sobre PGIDs y no aplica aca.
     if (isWindowsNative()) {
         killTreeWindows(ref.pid);
         if (await waitUntilGone(opts.termGraceMs)) return true;
         killTreeWindows(ref.pid);
         return waitUntilGone(opts.killGraceMs);
     }
+    // Un PGID cuyo slot de lider fue reciclado hacia un proceso vivo ajeno
+    // NUNCA se confunde con el nuestro (mismo criterio que `refIsAlive`
+    // aplica en `terminateGroupConfirmed`, adaptado a un lider ya-muerto).
+    if (groupLeaderReused(ref)) return false;
     try { process.kill(-ref.processGroup, 'SIGTERM'); } catch { /* ya ausente */ }
     if (await waitUntilGone(opts.termGraceMs)) return true;
     try { process.kill(-ref.processGroup, 'SIGKILL'); } catch { /* ya ausente */ }

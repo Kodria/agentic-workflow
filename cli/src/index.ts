@@ -45,6 +45,7 @@ import { registerExportCommand } from './commands/export';
 import { registerAgentCommand } from './commands/agent';
 import { registerJobCommand } from './commands/job';
 import { registerWatchCommand } from './commands/watch';
+import { registerTrackCommand } from './commands/track';
 import { runAddBundleCore } from './commands/add';
 import { runSyncCore } from './commands/sync';
 import { runUpdateCore } from './commands/update';
@@ -772,5 +773,6 @@ registerExportCommand(program);
 registerAgentCommand(program);
 registerJobCommand(program);
 registerWatchCommand(program);
+registerTrackCommand(program);
 
 program.parse();

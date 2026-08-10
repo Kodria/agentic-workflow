@@ -26,6 +26,15 @@ export function supervisorLockPath(repoRoot: string): string {
     return path.join(fs.realpathSync(repoRoot), '.awm', 'journal', 'supervisor.lock');
 }
 
+/** Lock de integración (R5.8/R5.9/C7, Task 10): único por PLAN físico, fuera
+ *  de cualquier dir de rama — mismo criterio de `supervisorLockPath` (clavado
+ *  por realpath). Se adquiere ANTES del primer join de una cohorte y retiene
+ *  ownership mientras la generación del plan está pausada y ningún controller
+ *  administrado corre. */
+export function integrationLockPath(repoRoot: string): string {
+    return path.join(fs.realpathSync(repoRoot), '.awm', 'journal', 'integration.lock');
+}
+
 export function statePath(repoRoot: string, branch: string): string {
     return path.join(journalDir(repoRoot, branch), 'state.json');
 }
