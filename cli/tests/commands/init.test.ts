@@ -109,6 +109,30 @@ describe('runInit', () => {
             const caveatCalls = logSpy.mock.calls.filter((c) => /awm watch/i.test(String(c[0])));
             expect(caveatCalls).toHaveLength(0);
         });
+
+        // Regression: `awm init --yes --json > init.json` on native Windows used to
+        // write the caveat to stdout via console.log AHEAD of the JSON payload,
+        // so the documented core-acceptance.md CORE-03 flow produced a file that
+        // wasn't valid JSON (banner text, then `{...}`). The caveat must still
+        // reach the operator — it now goes to stderr instead of vanishing.
+        it('does not pollute --json stdout with the caveat on native Windows', async () => {
+            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+            const errSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+            const { runInit } = require('../../src/commands/init');
+            await runInit({
+                cwd: tmpHome,
+                yes: true,
+                json: true,
+                actions: { syncCache: async () => {}, installHook: () => ({ status: 'installed' }) },
+            });
+            const written = writeSpy.mock.calls.map((c) => c[0]).join('');
+            expect(() => JSON.parse(written)).not.toThrow();
+            const caveatOnStdout = logSpy.mock.calls.filter((c) => /awm watch/i.test(String(c[0])));
+            expect(caveatOnStdout).toHaveLength(0);
+            const caveatOnStderr = errSpy.mock.calls.filter((c) => /awm watch/i.test(String(c[0])));
+            expect(caveatOnStderr).toHaveLength(1);
+            errSpy.mockRestore();
+        });
     });
 
     it('returns exit 0 on a bare HOME and never prompts with --yes (cache stubbed)', async () => {

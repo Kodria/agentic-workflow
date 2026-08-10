@@ -125,8 +125,16 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
     // Fires at most once per `awm init` run (native Windows only) — this is
     // the single emission point; `renderReport`/`renderInitOutcome` below do
     // NOT also embed it (that used to triple-fire the same text: once here,
-    // once in the "Initial state" render, once in "Final state").
-    noteWindowsCaveat((m) => console.log(pc.dim(`ℹ ${m}`)));
+    // once in the "Initial state" render, once in "Final state"). In `--json`
+    // mode it goes to stderr instead of stdout: stdout must stay pure JSON for
+    // `awm init --yes --json > init.json` (documented in core-acceptance.md
+    // CORE-03) — a stray banner ahead of the `{` broke that contract on every
+    // native-Windows `--json` run.
+    if (opts.json) {
+        noteWindowsCaveat((m) => process.stderr.write(pc.dim(`ℹ ${m}`) + '\n'));
+    } else {
+        noteWindowsCaveat((m) => console.log(pc.dim(`ℹ ${m}`)));
+    }
 
     const cwd = opts.cwd ?? process.cwd();
     const agent: AgentTarget = opts.agent === undefined ? 'claude-code' : requireAgentTarget(opts.agent);
