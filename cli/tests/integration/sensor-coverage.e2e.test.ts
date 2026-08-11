@@ -28,6 +28,17 @@ beforeAll(() => {
     execFileSync('npm', ['run', 'build'], { cwd: cliDir, stdio: 'pipe' });
 });
 
+test('js-ts gap fixture tracks the manifest copied into the coverage project', () => {
+    const manifest = path.join(fixture, '.awm', 'sensors.json');
+    expect(fs.existsSync(manifest)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(manifest, 'utf8'))).toMatchObject({
+        sensors: expect.any(Object),
+    });
+    expect(execFileSync('git', ['ls-files', '--error-unmatch', 'tests/fixtures/sensor-coverage/js-ts-gap/.awm/sensors.json'], {
+        cwd: cliDir, encoding: 'utf8',
+    }).trim()).toBe('tests/fixtures/sensor-coverage/js-ts-gap/.awm/sensors.json');
+});
+
 function runWithFixture(mutatePack?: (pack: Record<string, unknown>) => void) {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-coverage-e2e-'));
     const project = path.join(tmp, 'project');

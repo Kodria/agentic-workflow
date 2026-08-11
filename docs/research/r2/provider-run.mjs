@@ -8,6 +8,21 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const [provider, projectArg = path.join(repoRoot, 'cli')] = process.argv.slice(2);
 if (!['claude-code', 'codex'].includes(provider)) throw new Error('provider must be claude-code or codex');
 
+const executable = provider === 'claude-code' ? 'claude' : 'codex';
+const sanitizeVersion = (value) => {
+    const sanitized = value.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!/^[A-Za-z0-9 ._+:/()@=-]{1,200}$/.test(sanitized)) {
+        throw new Error(`${executable} --version returned unusable output`);
+    }
+    return sanitized;
+};
+
+// Attest the requested provider before exercising AWM or creating an artifact.
+// A Codex session therefore cannot manufacture a Claude Code pass without claude itself.
+const providerVersion = sanitizeVersion(execFileSync(executable, ['--version'], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+}));
+
 const project = path.resolve(projectArg);
 const cli = path.join(repoRoot, 'cli/dist/src/index.js');
 if (!fs.existsSync(cli)) throw new Error('missing compiled CLI: run npm run build from cli first');
@@ -20,6 +35,7 @@ const stdout = execFileSync(process.execPath, [cli, 'sensors', 'coverage', '--js
     env: { ...process.env, AWM_NO_UPDATE_CHECK: '1' },
 });
 const report = JSON.parse(stdout);
+const canonicalReport = `${JSON.stringify(report)}\n`;
 const evidence = {
     schema: 1,
     provider,
@@ -28,7 +44,14 @@ const evidence = {
     // committed later, so sourceHead identifies the tested binary source, not its commit.
     sourceHead,
     command: 'node cli/dist/src/index.js sensors coverage --json',
-    reportSha256: crypto.createHash('sha256').update(stdout).digest('hex'),
+    providerVersion,
+    providerIdentity: {
+        requestedProvider: provider,
+        executable,
+        attestedBy: 'executable--version',
+    },
+    report: JSON.parse(canonicalReport),
+    reportSha256: crypto.createHash('sha256').update(canonicalReport).digest('hex'),
     semanticContract: {
         schemaVersion: report.schemaVersion,
         overall: report.overall,

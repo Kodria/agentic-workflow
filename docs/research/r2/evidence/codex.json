@@ -2,9 +2,26 @@
   "schema": 1,
   "provider": "codex",
   "result": "pass",
-  "sourceHead": "93a502154cde3778dd16c83c3f81d0eda2a4dff6",
+  "sourceHead": "2611ed4afb5c5d02dd9e3ea8fefe3861ca29a332",
   "command": "node cli/dist/src/index.js sensors coverage --json",
-  "reportSha256": "5b5770a18bfa19e3c1a957215b04a8dccd2e9961b90fd3cf6a18e415833c8fba",
+  "providerVersion": "codex-cli 0.146.0",
+  "providerIdentity": {
+    "requestedProvider": "codex",
+    "executable": "codex",
+    "attestedBy": "executable--version"
+  },
+  "report": {
+    "schemaVersion": 1,
+    "pack": "js-ts",
+    "registry": "baseline",
+    "overall": "inconclusive",
+    "static": {
+      "status": "inconclusive",
+      "reason": "no_reference",
+      "classes": []
+    }
+  },
+  "reportSha256": "0ea3ae8e6849ae0eb03b9489943d826af3a165823f47fd9e809a81166e70c81d",
   "semanticContract": {
     "schemaVersion": 1,
     "overall": "inconclusive",

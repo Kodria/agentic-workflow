@@ -1,0 +1,9 @@
+{
+  "pack": "js-ts",
+  "sensors": {
+    "typecheck": { "cmd": "npx tsc --noEmit", "enabled": true },
+    "lint": { "cmd": "npx eslint . --config eslint.config.awm.mjs --format json", "enabled": true },
+    "test": { "cmd": "npm test --silent", "enabled": true },
+    "security": { "cmd": "semgrep --config .semgrep.awm.yml --json .", "enabled": true }
+  }
+}

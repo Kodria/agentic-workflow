@@ -1,5 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
+import { execFileSync, spawnSync } from 'child_process';
 
 const evidenceDir = path.resolve(__dirname, '../../../docs/research/r2/evidence');
 const runner = path.resolve(__dirname, '../../../docs/research/r2/provider-run.mjs');
@@ -12,6 +14,13 @@ type Evidence = {
     result: 'pass' | 'partial' | 'fail';
     sourceHead: string;
     command: string;
+    providerVersion?: string;
+    providerIdentity?: {
+        requestedProvider: Provider;
+        executable: string;
+        attestedBy: 'executable--version';
+    };
+    report?: unknown;
     reportSha256?: string;
     semanticContract?: unknown;
 };
@@ -26,26 +35,63 @@ describe('R2 provider evidence integrity', () => {
         expect(fs.readFileSync(runner, 'utf8')).toContain("fileURLToPath(import.meta.url)), '../../..')");
     });
 
-    it.each(providers)('%s evidence, when recorded, is sanitized and well formed (RNF-T.2)', (provider) => {
+    it.each(providers)('%s evidence, when recorded, is a sanitized attested partial (RNF-T.2)', (provider) => {
         const value = read(provider);
-        if (value === null) return;
+        if (value === null) {
+            expect({ certification: 'partial', missingProviders: [provider] }).toEqual({
+                certification: 'partial',
+                missingProviders: ['claude-code'],
+            });
+            return;
+        }
         expect(value).toMatchObject({ schema: 1, provider });
         expect(['pass', 'partial', 'fail']).toContain(value.result);
         expect(value.sourceHead).toMatch(/^[0-9a-f]{40}$/);
+        expect(execFileSync('git', ['cat-file', '-t', value.sourceHead], {
+            cwd: path.resolve(__dirname, '../../..'), encoding: 'utf8',
+        }).trim()).toBe('commit');
         expect(value.command).toBe('node cli/dist/src/index.js sensors coverage --json');
+        expect(value.providerVersion).toMatch(/^\S[^\r\n]*$/);
+        expect(value.providerIdentity).toEqual({
+            requestedProvider: provider,
+            executable: provider === 'claude-code' ? 'claude' : 'codex',
+            attestedBy: 'executable--version',
+        });
         const serialized = JSON.stringify(value);
         expect(serialized).not.toMatch(/\/home\/[^/"\s]+|\/Users\/[^/"\s]+|\b(?:token|secret|password|api[-_]?key)\b"?\s*[:=]/i);
         if (value.result === 'pass') {
             expect(value.reportSha256).toMatch(/^[0-9a-f]{64}$/);
             expect(value.semanticContract).toBeDefined();
+            expect(value.report).toBeDefined();
+            expect(crypto.createHash('sha256').update(`${JSON.stringify(value.report)}\n`).digest('hex'))
+                .toBe(value.reportSha256);
         }
     });
 
-    it('compares exactly the two real pass envelopes when both providers have certified (RNF-T.2)', () => {
+    it('reports RNF-T.2 as partial until two real pass envelopes can be compared', () => {
         const claude = read('claude-code');
         const codex = read('codex');
-        if (claude?.result !== 'pass' || codex?.result !== 'pass') return;
+        const missingPassEvidence = providers.filter((provider) => read(provider)?.result !== 'pass');
+        if (missingPassEvidence.length > 0) {
+            expect({ certification: 'partial', missingPassEvidence }).toEqual({
+                certification: 'partial',
+                missingPassEvidence: ['claude-code'],
+            });
+            return;
+        }
+        if (claude === null || codex === null) throw new Error('pass evidence must be present before certification');
         expect(claude.sourceHead).toBe(codex.sourceHead);
         expect(claude.semanticContract).toEqual(codex.semanticContract);
+    });
+
+    it('does not write Claude evidence when its required executable is unavailable', () => {
+        const output = path.join(evidenceDir, 'claude-code.json');
+        expect(fs.existsSync(output)).toBe(false);
+        const result = spawnSync(process.execPath, [runner, 'claude-code', path.resolve(__dirname, '../..')], {
+            cwd: path.resolve(__dirname, '../../..'), encoding: 'utf8',
+        });
+        expect(result.status).not.toBe(0);
+        expect(`${result.stdout}${result.stderr}`).toContain('claude');
+        expect(fs.existsSync(output)).toBe(false);
     });
 });
