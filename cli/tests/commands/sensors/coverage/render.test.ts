@@ -99,6 +99,28 @@ test.each([
         ...report.static.classes[0].detectors[0], evidence: [{ kind: 'marker', path: '.prettierrc', ordinal: 0, status: 'matched' }],
     }] }] } }],
     ['mismatched static and overall status', { ...report, static: { ...report.static, status: 'covered' } }],
+    ['covered class whose detectors are all missing', {
+        ...report,
+        static: { ...report.static, classes: [{ ...report.static.classes[0], status: 'covered' }] },
+    }],
+    ['missing class with an unverifiable detector and no covered detector', {
+        ...report,
+        static: { ...report.static, classes: [{
+            ...report.static.classes[0],
+            detectors: [{ ...report.static.classes[0].detectors[0], status: 'unverifiable' }],
+        }] },
+    }],
+    ['gaps overall when every class is covered', {
+        ...report,
+        static: {
+            ...report.static,
+            classes: report.static.classes.map((coverageClass) => ({
+                ...coverageClass,
+                status: 'covered' as const,
+                detectors: coverageClass.detectors.map((detector) => ({ ...detector, status: 'covered' as const })),
+            })),
+        },
+    }],
     ['not_configured with resolved pack and registry', {
         schemaVersion: 1, pack: 'js-ts', registry: 'baseline', overall: 'inconclusive',
         static: { status: 'inconclusive', reason: 'not_configured', classes: [] },

@@ -86,6 +86,8 @@ function assertCoverageEnvelope(report: unknown, renderer: string): asserts repo
     }
 
     let previousId: string | undefined;
+    let hasMissingClass = false;
+    let hasUnverifiableClass = false;
     for (const coverageClass of staticReport.classes) {
         if (!isRecord(coverageClass) || !hasExactFields(coverageClass, ['id', 'description', 'status', 'detectors', 'remedy'])
             || !isNonBlankString(coverageClass.id) || !isNonBlankString(coverageClass.description)
@@ -97,14 +99,24 @@ function assertCoverageEnvelope(report: unknown, renderer: string): asserts repo
         previousId = coverageClass.id;
         if (!hasExactFields(coverageClass.remedy, ['summary', 'command'])) invalidReport(renderer);
         if (!isNonBlankString(coverageClass.remedy.summary) || !isNonBlankString(coverageClass.remedy.command)) invalidReport(renderer);
+        let hasCoveredDetector = false;
+        let hasUnverifiableDetector = false;
         for (const detector of coverageClass.detectors) {
             if (!isRecord(detector) || !hasExactFields(detector, ['sensor', 'status', 'evidence'])
                 || !isNonBlankString(detector.sensor) || !isOneOf(detector.status, DETECTOR_STATUS)) {
                 invalidReport(renderer);
             }
             assertEvidence(detector.evidence, renderer);
+            hasCoveredDetector ||= detector.status === 'covered';
+            hasUnverifiableDetector ||= detector.status === 'unverifiable';
         }
+        const expectedClassStatus = hasCoveredDetector ? 'covered' : hasUnverifiableDetector ? 'unverifiable' : 'missing';
+        if (coverageClass.status !== expectedClassStatus) invalidReport(renderer);
+        hasMissingClass ||= expectedClassStatus === 'missing';
+        hasUnverifiableClass ||= expectedClassStatus === 'unverifiable';
     }
+    const expectedOverall = hasMissingClass ? 'gaps' : hasUnverifiableClass ? 'inconclusive' : 'covered';
+    if (report.overall !== expectedOverall) invalidReport(renderer);
 }
 
 function safeHumanText(value: string): string {
