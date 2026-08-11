@@ -44,6 +44,22 @@ test.each([
     expect(observeDetector(root, 'style', 0, detector, sensor)).toMatchObject({ status: expected });
 });
 
+test('records absent and custom required commands without exposing their text (R2.5)', () => {
+    const absent = observeDetector(root, 'style', 0, detector, { enabled: true });
+    const custom = observeDetector(root, 'style', 0, detector, { cmd: 'private-linter --private-flag' });
+
+    expect(absent).toMatchObject({
+        status: 'unverifiable',
+        evidence: [{ kind: 'command', status: 'missing' }],
+    });
+    expect(custom).toMatchObject({
+        status: 'unverifiable',
+        evidence: [{ kind: 'command', status: 'custom' }],
+    });
+    expect(JSON.stringify({ absent, custom })).not.toContain('private-linter');
+    expect(JSON.stringify({ absent, custom })).not.toContain('private-flag');
+});
+
 test('recognized command plus missing file is ineffective (R2.4)', () => {
     const out = observeDetector(root, 'style', 0, detector, { cmd: 'eslint --config eslint.config.js' });
 
@@ -59,6 +75,29 @@ test('recognized command plus missing literal marker is ineffective (R2.4)', () 
     expect(out.evidence).toContainEqual({ kind: 'marker', path: 'eslint.config.js', ordinal: 1, status: 'missing' });
 });
 
+test('unverifiable file evidence dominates missing evidence in the detector result (R2.5a)', () => {
+    const mixed: CoverageDetectorContract = {
+        sensor: 'lint',
+        evidence: {
+            files: [
+                { path: 'missing.js', containsAll: [] },
+                { path: 'linked.js', containsAll: ['no-unreachable'] },
+            ],
+        },
+    };
+    const target = path.join(root, 'target.js');
+    fs.writeFileSync(target, 'no-unreachable');
+    fs.symlinkSync(target, path.join(root, 'linked.js'));
+
+    const out = observeDetector(root, 'style', 0, mixed, { cmd: 'eslint' });
+
+    expect(out.status).toBe('unverifiable');
+    expect(out.evidence).toEqual(expect.arrayContaining([
+        { kind: 'file', path: 'missing.js', status: 'missing' },
+        { kind: 'file', path: 'linked.js', status: 'unverifiable' },
+    ]));
+});
+
 test.each(['symlink', 'oversize'] as const)('%s evidence is unverifiable, never green or missing (R2.5a, R2.11)', (kind) => {
     const target = path.join(root, 'target.js');
     fs.writeFileSync(target, 'no-unreachable');
@@ -70,6 +109,26 @@ test.each(['symlink', 'oversize'] as const)('%s evidence is unverifiable, never 
         status: 'unverifiable',
         evidence: expect.arrayContaining([{ kind: 'file', path: 'eslint.config.js', status: 'unverifiable' }]),
     });
+});
+
+test('uses injected lstat semantics so symlink evidence cannot be mistaken for a regular file (R2.11)', () => {
+    const target = path.join(root, 'target.js');
+    const file = path.join(root, 'eslint.config.js');
+    fs.writeFileSync(target, 'no-unreachable');
+    fs.symlinkSync(target, file);
+    const command = { cmd: 'eslint --config eslint.config.js' };
+
+    const observedWithLstat = observeDetector(root, 'style', 0, detector, command, {
+        lstatSync: fs.lstatSync,
+        readFileUtf8: (input) => fs.readFileSync(input, 'utf8'),
+    });
+    const simulatedStatRegression = observeDetector(root, 'style', 0, detector, command, {
+        lstatSync: fs.statSync,
+        readFileUtf8: (input) => fs.readFileSync(input, 'utf8'),
+    });
+
+    expect(observedWithLstat.status).toBe('unverifiable');
+    expect(simulatedStatRegression.status).toBe('covered');
 });
 
 test('read errors are unverifiable independently of host permissions (R2.5a)', () => {
@@ -91,6 +150,18 @@ test('rejects an evidence path that escapes the project root (R2.11)', () => {
 
     expect(() => observeDetector(root, 'style', 0, escaped, { cmd: 'eslint' }))
         .toThrow('evidence path escaped project root: ../outside.txt');
+});
+
+test.each([
+    [{}, 'style', 0, 'root must be a non-empty string'],
+    ['   ', 'style', 0, 'root must be a non-empty string'],
+    ['/valid-root', '', 0, 'classId must be a non-empty string'],
+    ['/valid-root', '   ', 0, 'classId must be a non-empty string'],
+    ['/valid-root', 'style', -1, 'detectorIndex must be a non-negative integer'],
+    ['/valid-root', 'style', 0.5, 'detectorIndex must be a non-negative integer'],
+] as const)('rejects malformed public arguments %#', (inputRoot, classId, detectorIndex, message) => {
+    expect(() => observeDetector(inputRoot, classId, detectorIndex, detector, { cmd: 'eslint --config eslint.config.js' }))
+        .toThrow(`observeDetector: ${message}`);
 });
 
 test('reports only ordinal/path/status and never leaks command or marker text (RF-1.4)', () => {

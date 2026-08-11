@@ -75,8 +75,8 @@ export function observeDetector(
     sensor: SensorConfig | undefined,
     io: EvidenceIo = realIo,
 ): IndexedDetectorObservation {
-    if (typeof root !== 'string' || root.length === 0) throw new Error('observeDetector: root must be a non-empty string');
-    if (typeof classId !== 'string' || classId.length === 0) throw new Error('observeDetector: classId must be a non-empty string');
+    if (typeof root !== 'string' || root.trim().length === 0) throw new Error('observeDetector: root must be a non-empty string');
+    if (typeof classId !== 'string' || classId.trim().length === 0) throw new Error('observeDetector: classId must be a non-empty string');
     if (typeof detectorIndex !== 'number' || !Number.isSafeInteger(detectorIndex) || detectorIndex < 0) {
         throw new Error('observeDetector: detectorIndex must be a non-negative integer');
     }
