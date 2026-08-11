@@ -1,3 +1,8 @@
+## v6.5.1 - 2026-08-11
+
+### Fixes
+- **sensors:** restrict dotfile coverage evidence
+
 ## v6.5.0 - 2026-08-11
 
 ### Features
