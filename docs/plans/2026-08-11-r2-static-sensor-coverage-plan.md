@@ -1,5 +1,8 @@
 # R2 Static Sensor Coverage Implementation Plan
 
+<!-- awm-qa-complete: 2026-08-11 -->
+<!-- awm-retro-complete: 2026-08-11 -->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
 > use checkbox (`- [ ]`) syntax for tracking.
@@ -1737,9 +1740,11 @@ Run: los ocho comandos enumerados en Task 9 Step 6.
 
 Expected: todos exit `0` sobre el commit que se enviará al PR.
 
-- [ ] **Step 6: Solicitar review y ejecutar QA terminal**
+- [x] **Step 6: Solicitar review y ejecutar QA terminal**
 
 Invocar `requesting-code-review`; corregir cada hallazgo con test discriminante rojo/verde. Luego invocar `post-implementation-qa`, cerrar todos los hallazgos, ejecutar `harness-retro` y no avanzar a `finishing-a-development-branch` hasta que el plan contenga `<!-- awm-qa-complete -->` y `<!-- awm-retro-complete -->`.
+
+Completado: review de fidelidad, seguridad, lógica y pruebas; QA detectó el oracle de archivos regulares y una mutación de symlink externa ausente. Se corrigieron e integraron en PR #74 (CLI) y PR #28 (registry), ambos con CI verde. La retrospectiva los archivó por decisión explícita: ya tienen defensas y regresiones discriminantes, sin recurrencia que justifique una regla adicional.
 
 - [ ] **Step 7: Publicar evidencia en issue #20 y dejar explícito el baton R3**
 
