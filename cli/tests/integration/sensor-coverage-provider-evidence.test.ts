@@ -96,13 +96,17 @@ describe('R2 provider evidence integrity', () => {
     });
 
     it('does not write Claude evidence when its required executable is unavailable', () => {
+        // Certified evidence is now committed at this path (RNF-T.2), so this test cannot
+        // assume the file is absent. Instead, force the attestation to fail by hiding
+        // `claude` from PATH and assert the file is left byte-for-byte untouched.
         const output = path.join(evidenceDir, 'claude-code.json');
-        expect(fs.existsSync(output)).toBe(false);
+        const before = fs.existsSync(output) ? fs.readFileSync(output, 'utf8') : null;
         const result = spawnSync(process.execPath, [runner, 'claude-code', path.resolve(__dirname, '../..')], {
-            cwd: path.resolve(__dirname, '../../..'), encoding: 'utf8',
+            cwd: path.resolve(__dirname, '../../..'), encoding: 'utf8', env: { ...process.env, PATH: '' },
         });
         expect(result.status).not.toBe(0);
         expect(`${result.stdout}${result.stderr}`).toContain('claude');
-        expect(fs.existsSync(output)).toBe(false);
+        const after = fs.existsSync(output) ? fs.readFileSync(output, 'utf8') : null;
+        expect(after).toBe(before);
     });
 });
