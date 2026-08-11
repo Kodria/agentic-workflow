@@ -520,7 +520,7 @@ _Requirements: RF-1.4, R2.2, R2.3, R2.4, R2.5, R2.5a, R2.9, R2.11_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tests rojos para comando, archivos, markers y límites**
+- [x] **Step 1: Escribir tests rojos para comando, archivos, markers y límites**
 
 ```ts
 // cli/tests/commands/sensors/coverage/evidence.test.ts
@@ -592,13 +592,13 @@ test('reports only ordinal/path/status and never leaks command or marker text (R
 });
 ```
 
-- [ ] **Step 2: Ejecutar el test rojo**
+- [x] **Step 2: Ejecutar el test rojo**
 
 Run: `cd cli && npx jest tests/commands/sensors/coverage/evidence.test.ts --runInBand`
 
 Expected: FAIL por módulo inexistente.
 
-- [ ] **Step 3: Implementar `observeDetector` sin subprocess ni dereferencia**
+- [x] **Step 3: Implementar `observeDetector` sin subprocess ni dereferencia**
 
 ```ts
 // cli/src/commands/sensors/coverage/evidence.ts
@@ -657,7 +657,7 @@ export function observeDetector(root: unknown, classId: unknown, detectorIndex: 
 }
 ```
 
-- [ ] **Step 4: Ajustar el caso de permisos para plataformas donde root puede leer `000`**
+- [x] **Step 4: Ajustar el caso de permisos para plataformas donde root puede leer `000`**
 
 El test no debe fingir que `chmod 000` siempre produce `EACCES`. El tipo `EvidenceIo` del Step 3 permite hacer que el test `unreadable` lance `EACCES`; mantener tests reales separados para symlink y tamaño.
 
@@ -670,17 +670,17 @@ expect(observeDetector(root, 'style', 0, detector,
     { cmd: 'eslint --config eslint.config.js' }, io).status).toBe('unverifiable');
 ```
 
-- [ ] **Step 5: Ejecutar evidencia + evaluador + build**
+- [x] **Step 5: Ejecutar evidencia + evaluador + build**
 
 Run: `cd cli && npx jest tests/commands/sensors/coverage/evidence.test.ts tests/commands/sensors/coverage/evaluate.test.ts --runInBand && npm run build`
 
 Expected: PASS.
 
-- [ ] **Step 6: Probar la mutación de symlink**
+- [x] **Step 6: Probar la mutación de symlink**
 
 Cambiar temporalmente `lstatSync` por `statSync`; el caso symlink debe fallar. Restaurar `lstatSync` y confirmar PASS.
 
-- [ ] **Step 7: Commit de evidencia segura**
+- [x] **Step 7: Commit de evidencia segura**
 
 ```bash
 git add cli/src/commands/sensors/coverage/evidence.ts cli/tests/commands/sensors/coverage/evidence.test.ts
