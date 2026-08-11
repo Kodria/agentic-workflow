@@ -2,6 +2,7 @@ import type { SensorConfig } from '../types';
 
 export const COVERAGE_SCHEMA_VERSION = 1;
 export const MAX_COVERAGE_FILE_BYTES = 1024 * 1024;
+const SAFE_EVIDENCE_DOTFILES: readonly string[] = Object.freeze(['.semgrep.awm.yml', '.dep-cruiser.awm.js']);
 
 export type CoverageFileRequirement = {
     path: string;
@@ -67,8 +68,16 @@ function nonEmptyString(value: unknown, source: unknown, location: string): stri
 
 function safeName(value: unknown, source: unknown, location: string): string {
     const name = nonEmptyString(value, source, location);
-    if (name === '.' || name === '..' || name.includes('..') || /[/\\]/.test(name) || !/^[A-Za-z0-9._-]+$/.test(name)) {
+    if (name === '.' || name === '..' || name.includes('..') || /[/\\]/.test(name) || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
         invalid(source, `${location} must be a safe filename component`);
+    }
+    return name;
+}
+
+function safeEvidenceFilename(value: unknown, source: unknown, location: string): string {
+    const name = nonEmptyString(value, source, location);
+    if (name === '.' || name === '..' || name.includes('..') || /[/\\]/.test(name) || !/^[A-Za-z0-9._-]+$/.test(name) || (name.startsWith('.') && !SAFE_EVIDENCE_DOTFILES.includes(name))) {
+        invalid(source, `${location} must be a safe evidence filename component`);
     }
     return name;
 }
@@ -83,7 +92,7 @@ function stringArray(value: unknown, source: unknown, location: string, allowEmp
 function parseFileRequirement(input: unknown, source: unknown, location: string): CoverageFileRequirement {
     const value = record(input, source, location);
     fields(value, ['path', 'containsAll'], source, location);
-    const path = safeName(value.path, source, `${location}.path`);
+    const path = safeEvidenceFilename(value.path, source, `${location}.path`);
     const containsAll = stringArray(value.containsAll, source, `${location}.containsAll`, true);
     return { path, containsAll };
 }
