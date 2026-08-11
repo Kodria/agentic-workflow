@@ -1,23 +1,72 @@
 import type { CoverageEnvelope } from '.';
 
 const ANSI = /\x1B\[[0-?]*[ -/]*[@-~]/g;
+const OSC = /\x1B\][\s\S]*?(?:\x07|\x1B\\)/g;
+const CONTROLS = /[\u0000-\u001F\u007F-\u009F]/g;
+const OVERALL = ['covered', 'gaps', 'inconclusive'];
+const CLASS_STATUS = ['covered', 'missing', 'unverifiable'];
+const DETECTOR_STATUS = ['covered', 'missing', 'disabled', 'ineffective', 'unverifiable'];
+const REASON = ['not_configured', 'no_reference'];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isOneOf(value: unknown, options: readonly string[]): boolean {
+    return typeof value === 'string' && options.includes(value);
+}
+
+function invalidReport(renderer: string): never {
+    throw new Error(`${renderer}: invalid report`);
+}
+
+function assertString(value: unknown, renderer: string): asserts value is string {
+    if (typeof value !== 'string') invalidReport(renderer);
+}
 
 function assertCoverageEnvelope(report: unknown, renderer: string): asserts report is CoverageEnvelope {
-    if (typeof report !== 'object' || report === null || (report as { schemaVersion?: unknown }).schemaVersion !== 1) {
-        throw new Error(`${renderer}: invalid report`);
+    if (!isRecord(report) || report.schemaVersion !== 1
+        || !(report.pack === null || typeof report.pack === 'string')
+        || !(report.registry === null || typeof report.registry === 'string')
+        || !isOneOf(report.overall, OVERALL) || !isRecord(report.static)) {
+        invalidReport(renderer);
+    }
+
+    const staticReport = report.static;
+    if (!isOneOf(staticReport.status, OVERALL)
+        || !(staticReport.reason === null || isOneOf(staticReport.reason, REASON))
+        || !Array.isArray(staticReport.classes)) {
+        invalidReport(renderer);
+    }
+
+    for (const coverageClass of staticReport.classes) {
+        if (!isRecord(coverageClass) || !isOneOf(coverageClass.status, CLASS_STATUS) || !Array.isArray(coverageClass.detectors)
+            || !isRecord(coverageClass.remedy)) {
+            invalidReport(renderer);
+        }
+        assertString(coverageClass.id, renderer);
+        assertString(coverageClass.description, renderer);
+        assertString(coverageClass.remedy.summary, renderer);
+        assertString(coverageClass.remedy.command, renderer);
+        for (const detector of coverageClass.detectors) {
+            if (!isRecord(detector) || !isOneOf(detector.status, DETECTOR_STATUS) || !Array.isArray(detector.evidence)) {
+                invalidReport(renderer);
+            }
+            assertString(detector.sensor, renderer);
+        }
     }
 }
 
 function safeHumanText(value: string): string {
-    return value.replace(ANSI, '').replace(/[\r\n\t]/g, ' ');
+    return value.replace(OSC, '').replace(ANSI, '').replace(CONTROLS, ' ');
 }
 
-export function renderCoverageJson(report: CoverageEnvelope): string {
+export function renderCoverageJson(report: unknown): string {
     assertCoverageEnvelope(report, 'renderCoverageJson');
     return `${JSON.stringify(report, null, 2)}\n`;
 }
 
-export function renderCoverageHuman(report: CoverageEnvelope): string {
+export function renderCoverageHuman(report: unknown): string {
     assertCoverageEnvelope(report, 'renderCoverageHuman');
     if (report.static.reason === 'not_configured') {
         return ['Sensor coverage', 'Overall: inconclusive', 'Reason: sensors are not configured', 'Run: awm sensors init', ''].join('\n');

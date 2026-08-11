@@ -264,7 +264,7 @@ Compare configured sensors with the static coverage reference owned by the selec
 awm sensors coverage [--json]
 ```
 
-Human output is the default. `--json` emits the versioned `schemaVersion: 1` envelope, whose stable `static` section contains the current analysis; a future release may add optional `empirical` data without changing existing field meanings. Human output identifies only class IDs, declared paths, statuses, and the pack-provided remedy; it never prints configured sensor commands, marker values, or inspected file content.
+Human output is the default. `--json` emits the versioned `schemaVersion: 1` envelope, whose stable `static` section contains the current analysis; a future release may add optional `empirical` data without changing existing field meanings. Human output shows class descriptions, detector sensor statuses, and pack-provided remedies. It excludes configured sensor commands, evidence paths, marker values, and inspected file content.
 
 Coverage gaps, unverifiable custom configuration, a missing `.awm/sensors.json`, and packs without a coverage reference are informative and exit `0`. A missing manifest returns `inconclusive/not_configured` and recommends `awm sensors init`; a legacy pack returns the distinct `inconclusive/no_reference` state and is never reported as covered. Malformed or unreadable manifests, packs, and coverage contracts exit non-zero with an actionable error.
 

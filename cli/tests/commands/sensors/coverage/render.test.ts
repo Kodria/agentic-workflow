@@ -61,3 +61,34 @@ test('human output never renders raw detector commands, markers, or file content
     expect(human).not.toContain('prettier --token');
     expect(human).not.toContain('marker:');
 });
+
+test('human output removes OSC controls from pack-provided text while retaining printable text', () => {
+    const osc8Open = '\x1B]8;;https://attacker.invalid\x07';
+    const osc8Close = '\x1B]8;;\x07';
+    const hostile = {
+        ...report,
+        static: {
+            ...report.static,
+            classes: [{
+                ...report.static.classes[0],
+                description: `${osc8Open}Formatting${osc8Close}`,
+                remedy: { summary: `Add ${osc8Open}formatter${osc8Close}`, command: 'npm i -D prettier' },
+            }],
+        },
+    };
+
+    const human = renderCoverageHuman(hostile);
+    expect(human).toContain('missing formatting — Formatting');
+    expect(human).toContain('  remedy: Add formatter');
+    expect(human.replace(/\n/g, '')).not.toMatch(/[\u0000-\u001F\u007F-\u009F]/);
+});
+
+test.each([
+    ['non-string pack', { ...report, pack: 42 }],
+    ['malformed class detectors', { ...report, static: { ...report.static, classes: [{ ...report.static.classes[0], detectors: null }] } }],
+    ['unknown static reason', { ...report, static: { ...report.static, reason: 'other' } }],
+])('renderers reject a malformed envelope with %s before emitting or dereferencing fields', (_case, malformed) => {
+    for (const render of [renderCoverageJson, renderCoverageHuman]) {
+        expect(() => render(malformed as never)).toThrow(/^renderCoverage(?:Json|Human): invalid report/);
+    }
+});
