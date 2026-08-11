@@ -1,3 +1,24 @@
+## v6.5.0 - 2026-08-11
+
+### Features
+- **sensors:** expose static coverage report
+- **sensors:** resolve static coverage inputs
+- **sensors:** inspect coverage evidence safely
+- **sensors:** evaluate static coverage states
+- **sensors:** validate coverage contract v1
+
+### Fixes
+- **sensors:** attest provider coverage evidence
+- **sensors:** validate derived coverage status
+- **sensors:** enforce coverage envelope invariants
+- **sensors:** validate coverage report envelope
+- **sensors:** harden coverage report rendering
+- **sensors:** reject dangling coverage manifest links
+- **sensors:** bound coverage evidence reads
+- **sensors:** close coverage evidence symlink race
+- **sensors:** harden coverage contract strings
+- **test:** isolate harness verification environment
+
 ## v6.4.2 - 2026-08-10
 
 ### Fixes
