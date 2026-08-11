@@ -8,6 +8,8 @@ const cliDir = path.resolve(__dirname, '../..');
 const bin = path.join(cliDir, 'dist/src/index.js');
 const fixture = path.join(cliDir, 'tests/fixtures/sensor-coverage/js-ts-gap');
 const registryFixture = path.join(cliDir, 'tests/fixtures/sensor-coverage/registry');
+const noFollowUnavailableOnNativeWindows = process.platform === 'win32'
+    && typeof fs.constants.O_NOFOLLOW !== 'number';
 
 const hashTree = (root: string): string => {
     const hash = crypto.createHash('sha256');
@@ -25,7 +27,9 @@ const hashTree = (root: string): string => {
 };
 
 beforeAll(() => {
-    execFileSync('npm', ['run', 'build'], { cwd: cliDir, stdio: 'pipe' });
+    if (!fs.existsSync(bin)) {
+        throw new Error(`Coverage E2E requires the compiled CLI at ${bin}; run npm run build before this test.`);
+    }
 });
 
 test('js-ts gap fixture tracks the manifest copied into the coverage project', () => {
@@ -57,25 +61,33 @@ function runWithFixture(mutatePack?: (pack: Record<string, unknown>) => void) {
     return { tmp, project, awmHome };
 }
 
-test('compiled CLI reports formatter/style gaps and changes no bytes (RF-1.1, RF-1.4)', () => {
+test('compiled CLI reports gaps or fails closed when no-follow safety is unavailable (RF-1.1, RF-1.4)', () => {
     const { tmp, project, awmHome } = runWithFixture();
     try {
         const before = [hashTree(project), hashTree(awmHome)];
-        const stdout = execFileSync(process.execPath, [bin, 'sensors', 'coverage', '--json'], {
+        const result = spawnSync(process.execPath, [bin, 'sensors', 'coverage', '--json'], {
             cwd: project, encoding: 'utf8', env: { ...process.env, AWM_HOME: awmHome, AWM_NO_UPDATE_CHECK: '1' },
         });
-        const report = JSON.parse(stdout);
-        expect(report.static.classes).toEqual(expect.arrayContaining([
-            expect.objectContaining({ id: 'formatting', status: 'missing' }),
-            expect.objectContaining({ id: 'project-style-conventions', status: 'missing' }),
-        ]));
+        if (noFollowUnavailableOnNativeWindows) {
+            expect(result.status).toBe(1);
+            expect(`${result.stdout ?? ''}${result.stderr ?? ''}`).toContain('platform cannot guarantee no symlink dereference');
+        } else {
+            expect(result.status).toBe(0);
+            const report = JSON.parse(result.stdout ?? '');
+            expect(report.static.classes).toEqual(expect.arrayContaining([
+                expect.objectContaining({ id: 'formatting', status: 'missing' }),
+                expect.objectContaining({ id: 'project-style-conventions', status: 'missing' }),
+            ]));
+        }
         expect([hashTree(project), hashTree(awmHome)]).toEqual(before);
     } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
     }
 });
 
-test('informative states exit zero; malformed contract exits non-zero (R2.7, R2.9)', () => {
+const testWithNoFollow = noFollowUnavailableOnNativeWindows ? test.skip : test;
+
+testWithNoFollow('informative states exit zero; malformed contract exits non-zero (R2.7, R2.9)', () => {
     const run = (mutatePack: (pack: Record<string, unknown>) => void) => {
         const { tmp, project, awmHome } = runWithFixture(mutatePack);
         try {

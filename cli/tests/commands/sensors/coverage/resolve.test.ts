@@ -28,6 +28,9 @@ const writeManifest = (body: unknown) => fs.writeFileSync(path.join(project, '.a
 const coverage = { schemaVersion: 1, classes: {
     formatting: { description: 'Formatting', detectors: [{ sensor: 'format' }], remedy: { summary: 'Add formatter', command: 'npm i -D prettier' } },
 } };
+const noFollowUnavailableOnNativeWindows = process.platform === 'win32'
+    && typeof fs.constants.O_NOFOLLOW !== 'number';
+const safetyError = /platform cannot guarantee no symlink dereference/;
 const writePack = (registry: string, pack: string, body: object | string | Buffer) => {
     const dir = path.join(awmHome, 'registries', registry, 'sensor-packs', pack);
     fs.mkdirSync(dir, { recursive: true });
@@ -46,7 +49,11 @@ test('selects the first configured registry containing the exact pack', () => {
     configure(['first', 'second']);
     writePack('first', 'generic', { name: 'generic', sensors: {} });
     writePack('second', 'js-ts', { name: 'js-ts', sensors: {}, coverage });
-    expect(resolveCoverageInputs(project)).toMatchObject({ kind: 'ready', pack: 'js-ts', registry: 'second' });
+    if (noFollowUnavailableOnNativeWindows) {
+        expect(() => resolveCoverageInputs(project)).toThrow(safetyError);
+    } else {
+        expect(resolveCoverageInputs(project)).toMatchObject({ kind: 'ready', pack: 'js-ts', registry: 'second' });
+    }
 });
 
 test('registry ordering chooses the earlier exact pack when both registries contain it', () => {
@@ -54,14 +61,34 @@ test('registry ordering chooses the earlier exact pack when both registries cont
     configure(['first', 'second']);
     writePack('first', 'js-ts', { name: 'js-ts', sensors: {}, coverage });
     writePack('second', 'js-ts', { name: 'js-ts', sensors: {}, coverage });
-    expect(resolveCoverageInputs(project)).toMatchObject({ kind: 'ready', registry: 'first' });
+    if (noFollowUnavailableOnNativeWindows) {
+        expect(() => resolveCoverageInputs(project)).toThrow(safetyError);
+    } else {
+        expect(resolveCoverageInputs(project)).toMatchObject({ kind: 'ready', registry: 'first' });
+    }
 });
 
 test('old pack without coverage is no_reference, not covered', () => {
     writeManifest({ pack: 'js-ts', sensors: {} });
     configure(['baseline']);
     writePack('baseline', 'js-ts', { name: 'js-ts', sensors: {} });
-    expect(resolveCoverageInputs(project)).toMatchObject({ kind: 'no_reference', pack: 'js-ts', registry: 'baseline' });
+    if (noFollowUnavailableOnNativeWindows) {
+        expect(() => resolveCoverageInputs(project)).toThrow(safetyError);
+    } else {
+        expect(resolveCoverageInputs(project)).toMatchObject({ kind: 'no_reference', pack: 'js-ts', registry: 'baseline' });
+    }
+});
+
+test('native Windows without no-follow support fails closed before resolving normal coverage inputs', () => {
+    writeManifest({ pack: 'js-ts', sensors: {} });
+    configure(['baseline']);
+    writePack('baseline', 'js-ts', { name: 'js-ts', sensors: {}, coverage });
+
+    if (noFollowUnavailableOnNativeWindows) {
+        expect(() => resolveCoverageInputs(project)).toThrow(safetyError);
+    } else {
+        expect(resolveCoverageInputs(project)).toMatchObject({ kind: 'ready' });
+    }
 });
 
 test.each([
@@ -69,7 +96,9 @@ test.each([
     ['manifest-oversize', Buffer.alloc(1024 * 1024 + 1), /sensors\.json.*exceeds 1 MiB/],
 ] as const)('rejects %s', (_name, body, expected) => {
     writeManifest(body);
-    expect(() => resolveCoverageInputs(project)).toThrow(expected);
+    expect(() => resolveCoverageInputs(project)).toThrow(
+        noFollowUnavailableOnNativeWindows && _name !== 'manifest-oversize' ? safetyError : expected,
+    );
 });
 
 test.each([
@@ -79,7 +108,7 @@ test.each([
     writeManifest({ pack: 'js-ts', sensors: {} });
     configure(['baseline']);
     writePack('baseline', 'js-ts', body);
-    expect(() => resolveCoverageInputs(project)).toThrow(expected);
+    expect(() => resolveCoverageInputs(project)).toThrow(noFollowUnavailableOnNativeWindows ? safetyError : expected);
 });
 
 test('rejects a symlinked manifest without dereferencing it', () => {
@@ -100,11 +129,11 @@ test('rejects a JSON object that is not a valid pack', () => {
     writeManifest({ pack: 'js-ts', sensors: {} });
     configure(['baseline']);
     writePack('baseline', 'js-ts', { coverage });
-    expect(() => resolveCoverageInputs(project)).toThrow(/Invalid pack.*name/);
+    expect(() => resolveCoverageInputs(project)).toThrow(noFollowUnavailableOnNativeWindows ? safetyError : /Invalid pack.*name/);
 });
 
 test('rejects registry names that are not safe path components', () => {
     writeManifest({ pack: 'js-ts', sensors: {} });
     configure(['']);
-    expect(() => resolveCoverageInputs(project)).toThrow(/Invalid registry name/);
+    expect(() => resolveCoverageInputs(project)).toThrow(noFollowUnavailableOnNativeWindows ? safetyError : /Invalid registry name/);
 });

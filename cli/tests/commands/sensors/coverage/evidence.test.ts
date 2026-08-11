@@ -25,12 +25,27 @@ const detector: CoverageDetectorContract = {
     },
 };
 
+const noFollowUnavailableOnNativeWindows = process.platform === 'win32'
+    && typeof fs.constants.O_NOFOLLOW !== 'number';
+
+const regularFileStatus = (posixStatus: 'covered' | 'ineffective') =>
+    noFollowUnavailableOnNativeWindows ? 'unverifiable' : posixStatus;
+
 test('active matching sensor with all AND evidence is covered (R2.2)', () => {
     fs.writeFileSync(path.join(root, 'eslint.config.js'), "rules: { 'no-unreachable': 'error' }");
 
-    expect(observeDetector(root, 'style', 0, detector, {
+    const observed = observeDetector(root, 'style', 0, detector, {
         cmd: 'npx eslint . --config eslint.config.js', enabled: true,
-    })).toEqual({
+    });
+
+    if (noFollowUnavailableOnNativeWindows) {
+        expect(observed).toMatchObject({
+            status: 'unverifiable',
+            evidence: expect.arrayContaining([{ kind: 'file', path: 'eslint.config.js', status: 'unverifiable' }]),
+        });
+        return;
+    }
+    expect(observed).toEqual({
         classId: 'style',
         detectorIndex: 0,
         sensor: 'lint',
@@ -79,8 +94,26 @@ test('recognized command plus missing literal marker is ineffective (R2.4)', () 
     fs.writeFileSync(path.join(root, 'eslint.config.js'), 'export default []');
     const out = observeDetector(root, 'style', 0, detector, { cmd: 'eslint --config eslint.config.js' });
 
-    expect(out.status).toBe('ineffective');
-    expect(out.evidence).toContainEqual({ kind: 'marker', path: 'eslint.config.js', ordinal: 1, status: 'missing' });
+    expect(out.status).toBe(regularFileStatus('ineffective'));
+    if (noFollowUnavailableOnNativeWindows) {
+        expect(out.evidence).toContainEqual({ kind: 'file', path: 'eslint.config.js', status: 'unverifiable' });
+    } else {
+        expect(out.evidence).toContainEqual({ kind: 'marker', path: 'eslint.config.js', ordinal: 1, status: 'missing' });
+    }
+});
+
+test('native Windows without no-follow support never certifies regular evidence from its contents', () => {
+    fs.writeFileSync(path.join(root, 'eslint.config.js'), 'no-unreachable');
+
+    const observed = observeDetector(root, 'style', 0, detector, { cmd: 'eslint --config eslint.config.js' });
+
+    if (noFollowUnavailableOnNativeWindows) {
+        expect(observed.status).toBe('unverifiable');
+        expect(observed.status).not.toBe('covered');
+        expect(observed.status).not.toBe('ineffective');
+    } else {
+        expect(observed.status).toBe('covered');
+    }
 });
 
 test('unverifiable file evidence dominates missing evidence in the detector result (R2.5a)', () => {
