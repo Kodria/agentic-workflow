@@ -6,7 +6,7 @@ mode: brief
 readiness: ready
 created: 2026-07-30
 updated: 2026-08-11
-open_decisions: [DA-4, DA-5, DA-6]
+open_decisions: [DA-5]
 project: awm-sdd-optimization
 ---
 
