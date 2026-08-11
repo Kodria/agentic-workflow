@@ -1746,7 +1746,7 @@ Invocar `requesting-code-review`; corregir cada hallazgo con test discriminante 
 
 Completado: review de fidelidad, seguridad, lógica y pruebas; QA detectó el oracle de archivos regulares y una mutación de symlink externa ausente. Se corrigieron e integraron en PR #74 (CLI) y PR #28 (registry), ambos con CI verde. La retrospectiva los archivó por decisión explícita: ya tienen defensas y regresiones discriminantes, sin recurrencia que justifique una regla adicional.
 
-- [ ] **Step 7: Publicar evidencia en issue #20 y dejar explícito el baton R3**
+- [x] **Step 7: Publicar evidencia en issue #20 y dejar explícito el baton R3**
 
 Obtener primero las URLs reales y abortar si alguna está vacía:
 
@@ -1768,6 +1768,8 @@ gh issue comment 20 --repo Kodria/agentic-workflow --body "R2 complete:
 
 Issue remains open for R3: add optional top-level empirical using the stable class IDs introduced by R2; do not change existing R2 field semantics."
 ```
+
+Completado: comentario de cierre publicado en https://github.com/Kodria/agentic-workflow/issues/20#issuecomment-5258703648, con los PRs integrados #71–#74, #27–#28, el tag `v1.16.0`, evidencia de aceptación y el baton explícito para R3.
 
 ## Matriz de trazabilidad
 
