@@ -44,22 +44,25 @@ test('not_configured names the remedy and no_reference stays distinct (R2.6)', (
         .toContain('No coverage reference');
 });
 
-test('human output never renders raw detector commands, markers, or file contents', () => {
-    const unsafeReport = {
+test('human output never renders structured detector evidence', () => {
+    const evidenceReport = {
         ...report,
         static: {
             ...report.static,
             classes: [{ ...report.static.classes[0], detectors: [{
                 sensor: 'format', status: 'missing' as const,
-                evidence: [{ kind: 'marker' as const, path: '.prettierrc', ordinal: 1, status: 'missing' as const,
-                    command: 'prettier --token TOP_SECRET_TOKEN', marker: 'TOP_SECRET_TOKEN', content: 'TOP_SECRET_TOKEN' }],
+                evidence: [
+                    { kind: 'command' as const, status: 'matched' as const },
+                    { kind: 'file' as const, path: '.prettierrc', status: 'matched' as const },
+                    { kind: 'marker' as const, path: '.prettierrc', ordinal: 1, status: 'missing' as const },
+                ],
             }] }],
         },
     };
-    const human = renderCoverageHuman(unsafeReport);
-    expect(human).not.toContain('TOP_SECRET_TOKEN');
-    expect(human).not.toContain('prettier --token');
-    expect(human).not.toContain('marker:');
+    const human = renderCoverageHuman(evidenceReport);
+    expect(human).not.toContain('.prettierrc');
+    expect(human).not.toContain('marker');
+    expect(human).not.toContain('matched');
 });
 
 test('human output removes OSC controls from pack-provided text while retaining printable text', () => {
@@ -87,6 +90,14 @@ test.each([
     ['non-string pack', { ...report, pack: 42 }],
     ['malformed class detectors', { ...report, static: { ...report.static, classes: [{ ...report.static.classes[0], detectors: null }] } }],
     ['unknown static reason', { ...report, static: { ...report.static, reason: 'other' } }],
+    ['unknown top-level field', { ...report, extra: true }],
+    ['unknown class field', { ...report, static: { ...report.static, classes: [{ ...report.static.classes[0], extra: true }] } }],
+    ['unknown evidence field', { ...report, static: { ...report.static, classes: [{ ...report.static.classes[0], detectors: [{
+        ...report.static.classes[0].detectors[0], evidence: [{ kind: 'command', status: 'matched', command: 'secret' }],
+    }] }] } }],
+    ['malformed marker evidence', { ...report, static: { ...report.static, classes: [{ ...report.static.classes[0], detectors: [{
+        ...report.static.classes[0].detectors[0], evidence: [{ kind: 'marker', path: '.prettierrc', ordinal: 0, status: 'matched' }],
+    }] }] } }],
 ])('renderers reject a malformed envelope with %s before emitting or dereferencing fields', (_case, malformed) => {
     for (const render of [renderCoverageJson, renderCoverageHuman]) {
         expect(() => render(malformed as never)).toThrow(/^renderCoverage(?:Json|Human): invalid report/);

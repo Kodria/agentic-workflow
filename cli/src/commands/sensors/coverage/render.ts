@@ -7,6 +7,8 @@ const OVERALL = ['covered', 'gaps', 'inconclusive'];
 const CLASS_STATUS = ['covered', 'missing', 'unverifiable'];
 const DETECTOR_STATUS = ['covered', 'missing', 'disabled', 'ineffective', 'unverifiable'];
 const REASON = ['not_configured', 'no_reference'];
+const COMMAND_EVIDENCE_STATUS = ['matched', 'custom', 'missing'];
+const FILE_EVIDENCE_STATUS = ['matched', 'missing', 'unverifiable'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -14,6 +16,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isOneOf(value: unknown, options: readonly string[]): boolean {
     return typeof value === 'string' && options.includes(value);
+}
+
+function hasExactFields(value: Record<string, unknown>, fields: readonly string[]): boolean {
+    const keys = Object.keys(value);
+    return keys.length === fields.length && keys.every((key) => fields.includes(key));
+}
+
+function isNonBlankString(value: unknown): value is string {
+    return typeof value === 'string' && value.trim().length > 0;
 }
 
 function invalidReport(renderer: string): never {
@@ -24,8 +35,29 @@ function assertString(value: unknown, renderer: string): asserts value is string
     if (typeof value !== 'string') invalidReport(renderer);
 }
 
+function assertEvidence(evidence: unknown, renderer: string): void {
+    if (!Array.isArray(evidence)) invalidReport(renderer);
+    for (const item of evidence) {
+        if (!isRecord(item)) invalidReport(renderer);
+        if (item.kind === 'command') {
+            if (!hasExactFields(item, ['kind', 'status']) || !isOneOf(item.status, COMMAND_EVIDENCE_STATUS)) invalidReport(renderer);
+        } else if (item.kind === 'file') {
+            if (!hasExactFields(item, ['kind', 'path', 'status']) || !isNonBlankString(item.path)
+                || !isOneOf(item.status, FILE_EVIDENCE_STATUS)) invalidReport(renderer);
+        } else if (item.kind === 'marker') {
+            if (!hasExactFields(item, ['kind', 'path', 'ordinal', 'status']) || !isNonBlankString(item.path)
+                || typeof item.ordinal !== 'number' || !Number.isSafeInteger(item.ordinal) || item.ordinal <= 0
+                || !isOneOf(item.status, FILE_EVIDENCE_STATUS)) invalidReport(renderer);
+        } else {
+            invalidReport(renderer);
+        }
+    }
+}
+
 function assertCoverageEnvelope(report: unknown, renderer: string): asserts report is CoverageEnvelope {
-    if (!isRecord(report) || report.schemaVersion !== 1
+    if (!isRecord(report) || !hasExactFields(report, 'empirical' in report
+        ? ['schemaVersion', 'pack', 'registry', 'overall', 'static', 'empirical']
+        : ['schemaVersion', 'pack', 'registry', 'overall', 'static']) || report.schemaVersion !== 1
         || !(report.pack === null || typeof report.pack === 'string')
         || !(report.registry === null || typeof report.registry === 'string')
         || !isOneOf(report.overall, OVERALL) || !isRecord(report.static)) {
@@ -33,26 +65,30 @@ function assertCoverageEnvelope(report: unknown, renderer: string): asserts repo
     }
 
     const staticReport = report.static;
-    if (!isOneOf(staticReport.status, OVERALL)
+    if (!hasExactFields(staticReport, ['status', 'reason', 'classes']) || !isOneOf(staticReport.status, OVERALL)
         || !(staticReport.reason === null || isOneOf(staticReport.reason, REASON))
         || !Array.isArray(staticReport.classes)) {
         invalidReport(renderer);
     }
 
     for (const coverageClass of staticReport.classes) {
-        if (!isRecord(coverageClass) || !isOneOf(coverageClass.status, CLASS_STATUS) || !Array.isArray(coverageClass.detectors)
+        if (!isRecord(coverageClass) || !hasExactFields(coverageClass, ['id', 'description', 'status', 'detectors', 'remedy'])
+            || !isOneOf(coverageClass.status, CLASS_STATUS) || !Array.isArray(coverageClass.detectors)
             || !isRecord(coverageClass.remedy)) {
             invalidReport(renderer);
         }
         assertString(coverageClass.id, renderer);
         assertString(coverageClass.description, renderer);
+        if (!hasExactFields(coverageClass.remedy, ['summary', 'command'])) invalidReport(renderer);
         assertString(coverageClass.remedy.summary, renderer);
         assertString(coverageClass.remedy.command, renderer);
         for (const detector of coverageClass.detectors) {
-            if (!isRecord(detector) || !isOneOf(detector.status, DETECTOR_STATUS) || !Array.isArray(detector.evidence)) {
+            if (!isRecord(detector) || !hasExactFields(detector, ['sensor', 'status', 'evidence'])
+                || !isOneOf(detector.status, DETECTOR_STATUS)) {
                 invalidReport(renderer);
             }
             assertString(detector.sensor, renderer);
+            assertEvidence(detector.evidence, renderer);
         }
     }
 }
