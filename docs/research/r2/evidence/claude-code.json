@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "provider": "codex",
+  "provider": "claude-code",
   "result": "pass",
   "sourceHead": "618f321588dd95a1cf3005afb01bb054506b0f30",
   "command": "node cli/dist/src/index.js sensors coverage --json",
-  "providerVersion": "codex-cli 0.145.0",
+  "providerVersion": "2.1.227 (Claude Code)",
   "providerIdentity": {
-    "requestedProvider": "codex",
-    "executable": "codex",
+    "requestedProvider": "claude-code",
+    "executable": "claude",
     "attestedBy": "executable--version"
   },
   "report": {
