@@ -11,4 +11,4 @@
 
 ## Certification status
 
-Codex was genuinely attested and run with `codex --version` in this session; its `result: "pass"` envelope is recorded in `evidence/codex.json` (tested source `2611ed4afb5c5d02dd9e3ea8fefe3861ca29a332`). Claude Code is unavailable in this task, so there is deliberately no `claude-code.json`; RNF-T.2 is **partial and not certified**. The provider test reports that partial state explicitly. It compares semantic contracts only after both independently attested `pass` envelopes exist; a missing envelope is never a certification.
+Codex was genuinely attested and run with `codex --version` in this session; its `result: "pass"` envelope is recorded in `evidence/codex.json` (tested source `3816ff3ad421d08e6cc685ea05928e7c1be7d242`). Claude Code is unavailable in this task, so there is deliberately no `claude-code.json`; RNF-T.2 is **partial and not certified**. The provider test reports that partial state explicitly. It compares semantic contracts only after both independently attested `pass` envelopes exist; a missing envelope is never a certification.

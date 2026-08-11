@@ -2,7 +2,7 @@
   "schema": 1,
   "provider": "codex",
   "result": "pass",
-  "sourceHead": "2611ed4afb5c5d02dd9e3ea8fefe3861ca29a332",
+  "sourceHead": "3816ff3ad421d08e6cc685ea05928e7c1be7d242",
   "command": "node cli/dist/src/index.js sensors coverage --json",
   "providerVersion": "codex-cli 0.146.0",
   "providerIdentity": {
