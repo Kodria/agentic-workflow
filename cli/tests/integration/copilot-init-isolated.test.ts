@@ -46,6 +46,7 @@ describe('copilot provider — isolated home E2E (devCore global-scope guard reg
         originalAwmHome = process.env.AWM_HOME;
         process.env.HOME = tmpHome;
         process.env.AWM_HOME = path.join(tmpHome, '.awm');
+        fs.writeFileSync(path.join(tmpWork, 'package.json'), JSON.stringify({ name: 'copilot-e2e-fixture' }));
         jest.resetModules();
         writeSpy = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
     });

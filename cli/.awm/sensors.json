@@ -16,7 +16,7 @@
     "test": {
       "cmd": "npm test --silent",
       "fast": false,
-      "timeout": 180000
+      "timeout": 300000
     },
     "mutation": {
       "cmd": "npx stryker run",

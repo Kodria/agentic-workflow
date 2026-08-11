@@ -252,11 +252,24 @@ describe('codex provider — isolated home E2E (Task 9)', () => {
         seedPublicRegistryFixture(path.join(tmpHome, '.awm/registries/baseline'));
         writePrefs(prefsWith(['claude-code', 'codex']));
 
+        const childProcess = require('child_process') as typeof import('child_process');
+        const realExecFileSync = childProcess.execFileSync;
+        const execSpy = jest.spyOn(childProcess, 'execFileSync').mockImplementation(((command: string, ...args: unknown[]) => {
+            if (command === 'codex') {
+                throw Object.assign(new Error('spawnSync codex ENOENT'), { code: 'ENOENT' });
+            }
+            return realExecFileSync(command, ...(args as Parameters<typeof realExecFileSync> extends [unknown, ...infer R] ? R : never));
+        }) as typeof childProcess.execFileSync);
+        jest.resetModules();
         const { runDoctor } = require('../../src/commands/doctor');
 
         // R20: doctor resolves a single explicit provider without needing every
         // enabled agent to be independently initialized first.
-        runDoctor({ cwd: tmpWork, json: true, agent: 'codex' });
+        try {
+            runDoctor({ cwd: tmpWork, json: true, agent: 'codex' });
+        } finally {
+            execSpy.mockRestore();
+        }
         const report = JSON.parse(stdout());
         expect(report.providers.map((p: { id: string }) => p.id)).toEqual(['codex']);
         const codexReport = report.providers[0];

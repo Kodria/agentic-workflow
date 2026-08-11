@@ -45,4 +45,9 @@ describe('configs de sensores: declarados <=> presentes', () => {
         // termina resuelto borrando el sensor, que es la salida equivocada.
         expect(missing.join('\n') || 'todos presentes').toBe('todos presentes');
     });
+
+    it('el sensor de tests cubre la duración observada de la suite con margen de CI', () => {
+        const testSensor = manifest?.sensors?.test as { timeout?: number } | undefined;
+        expect(testSensor?.timeout).toBeGreaterThanOrEqual(300_000);
+    });
 });
