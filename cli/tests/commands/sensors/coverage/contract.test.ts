@@ -11,7 +11,7 @@ describe('coverage contract v1', () => {
                         sensor: 'contract-test',
                         evidence: {
                             commandIncludes: ['coverage'],
-                            files: [{ path: 'contract.ts', containsAll: ['parseCoverageContract'] }],
+                            files: [{ path: 'eslint.config.awm.mjs', containsAll: ['parseCoverageContract'] }],
                         },
                     }],
                     remedy: { summary: 'Add a parser.', command: 'npm test -- contract.test.ts' },
@@ -34,7 +34,7 @@ describe('coverage contract v1', () => {
         expect(() => parseCoverageContract(input, 'coverage.json')).toThrow(message);
     });
 
-    test.each(['', '.', '..', 'a..b', '../secret', 'a/../../secret', '/etc/passwd', 'C:\\secret', 'a\\..\\secret', ' report.txt', 'report!.txt', 'ñ.txt', '.env', '.gitignore'])('rejects hostile evidence path %p', (path) => {
+    test.each(['', '.', '..', 'a..b', '../secret', 'a/../../secret', '/etc/passwd', 'C:\\secret', 'a\\..\\secret', ' report.txt', 'report!.txt', 'ñ.txt', '.env', '.gitignore', 'secrets.txt', 'id_rsa'])('rejects hostile evidence path %p', (path) => {
         const input = {
             schemaVersion: 1,
             classes: {
@@ -48,7 +48,17 @@ describe('coverage contract v1', () => {
         expect(() => parseCoverageContract(input, 'coverage.json')).toThrow('path');
     });
 
-    test.each(['.semgrep.awm.yml', '.dep-cruiser.awm.js'])('accepts safe dotfile evidence path %p', (path) => {
+    test.each([
+        'eslint.config.awm.mjs',
+        'eslint.config.js',
+        'eslint.config.mjs',
+        'eslint.config.cjs',
+        'eslint.config.ts',
+        'eslint.config.mts',
+        'eslint.config.cts',
+        '.semgrep.awm.yml',
+        '.dep-cruiser.awm.js',
+    ])('accepts contractual evidence path %p', (path) => {
         const input = {
             schemaVersion: 1,
             classes: {
@@ -68,7 +78,7 @@ describe('coverage contract v1', () => {
             classes: {
                 valid: {
                     description: 'x',
-                    detectors: [{ sensor: 'test', evidence: { files: [{ path: 'report.txt', containsAll: [' \n'] }] } }],
+                    detectors: [{ sensor: 'test', evidence: { files: [{ path: 'eslint.config.awm.mjs', containsAll: [' \n'] }] } }],
                     remedy: { summary: 'x', command: 'x' },
                 },
             },
