@@ -1,0 +1,9 @@
+{
+  "_comment": "Context budget for files injected into every agent session. Raising maxBytes is allowed but must be a deliberate, reviewed change — see writing-plans, Context Budget Gate.",
+  "files": [
+    "AGENTS.md",
+    "CONSTITUTION.md",
+    "CLAUDE.md"
+  ],
+  "maxBytes": 7902
+}
