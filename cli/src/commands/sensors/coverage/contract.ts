@@ -61,13 +61,13 @@ function fields(value: UnknownRecord, allowed: readonly string[], source: unknow
 }
 
 function nonEmptyString(value: unknown, source: unknown, location: string): string {
-    if (typeof value !== 'string' || value.length === 0) invalid(source, `${location} must be a nonempty string`);
+    if (typeof value !== 'string' || value.trim().length === 0) invalid(source, `${location} must be a nonempty string`);
     return value;
 }
 
 function safeName(value: unknown, source: unknown, location: string): string {
     const name = nonEmptyString(value, source, location);
-    if (name === '.' || name === '..' || name.includes('..') || /[/\\]/.test(name)) {
+    if (name === '.' || name === '..' || name.includes('..') || /[/\\]/.test(name) || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
         invalid(source, `${location} must be a safe filename component`);
     }
     return name;

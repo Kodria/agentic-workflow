@@ -28,12 +28,13 @@ describe('coverage contract v1', () => {
         [{ schemaVersion: 1, classes: {} }, 'classes'],
         [{ schemaVersion: 1, classes: { Bad: { description: 'x', detectors: [{ sensor: 'test' }], remedy: { summary: 'x', command: 'x' } } } }, 'class'],
         [{ schemaVersion: 1, classes: { valid: { description: '', detectors: [{ sensor: 'test' }], remedy: { summary: 'x', command: 'x' } } } }, 'description'],
+        [{ schemaVersion: 1, classes: { valid: { description: '  \t', detectors: [{ sensor: 'test' }], remedy: { summary: 'x', command: 'x' } } } }, 'description'],
         [{ schemaVersion: 1, classes: { valid: { description: 'x', detectors: [], remedy: { summary: 'x', command: 'x' } } } }, 'detectors'],
     ])('rejects malformed contract %j', (input, message) => {
         expect(() => parseCoverageContract(input, 'coverage.json')).toThrow(message);
     });
 
-    test.each(['', '.', '..', '../secret', 'a/../../secret', '/etc/passwd', 'C:\\secret', 'a\\..\\secret'])('rejects hostile evidence path %p', (path) => {
+    test.each(['', '.', '..', '../secret', 'a/../../secret', '/etc/passwd', 'C:\\secret', 'a\\..\\secret', ' report.txt', 'report!.txt'])('rejects hostile evidence path %p', (path) => {
         const input = {
             schemaVersion: 1,
             classes: {
@@ -45,6 +46,20 @@ describe('coverage contract v1', () => {
             },
         };
         expect(() => parseCoverageContract(input, 'coverage.json')).toThrow('path');
+    });
+
+    it('rejects whitespace-only evidence text', () => {
+        const input = {
+            schemaVersion: 1,
+            classes: {
+                valid: {
+                    description: 'x',
+                    detectors: [{ sensor: 'test', evidence: { files: [{ path: 'report.txt', containsAll: [' \n'] }] } }],
+                    remedy: { summary: 'x', command: 'x' },
+                },
+            },
+        };
+        expect(() => parseCoverageContract(input, 'coverage.json')).toThrow('containsAll');
     });
 
     it('rejects unknown nested evidence fields', () => {
@@ -80,8 +95,12 @@ describe('coverage manifest boundary', () => {
         [null, 'object'],
         [{}, 'pack'],
         [{ pack: '', sensors: {} }, 'pack'],
+        [{ pack: ' js-ts', sensors: {} }, 'pack'],
+        [{ pack: 'js ts', sensors: {} }, 'pack'],
+        [{ pack: 'js@ts', sensors: {} }, 'pack'],
         [{ pack: 'js-ts', sensors: null }, 'sensors'],
         [{ pack: 'js-ts', sensors: { lint: { cmd: 3 } } }, 'cmd'],
+        [{ pack: 'js-ts', sensors: { 'lint!': {} } }, 'sensor name'],
     ])('rejects malformed manifest %j', (input, message) => {
         expect(() => parseCoverageManifest(input, 'sensors.json')).toThrow(message);
     });
