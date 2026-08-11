@@ -6,7 +6,7 @@ mode: brief
 readiness: ready
 created: 2026-07-30
 updated: 2026-08-11
-open_decisions: [DA-4, DA-5, DA-6]
+open_decisions: [DA-5]
 project: awm-sdd-optimization
 ---
 
@@ -241,9 +241,9 @@ flowchart TD
 | DA-1 | **RESUELTA 2026-07-31 (dueño):** sin infraestructura de métrica permanente — no tendría acción real. La calidad se preserva por diseño: (1) etapas de revisión intocables (ya en Fuera de alcance firme); (2) la deduplicación de verificación de Release 1 solo puede saltar comandos con fingerprint idéntico, probado con test mecánico (CA de R1). La batería de defectos controlados queda especificada en el report de R0 como recurso reutilizable si alguna optimización futura tocara el aparato de detección. | ~~Release 1~~ ninguna | — |
 | DA-2 | **RESUELTA 2026-07-31 (dueño):** el tiering de modelo se **desestima** — la matriz de R0 muestra soporte certificable solo en Claude Code, y el criterio del dueño es "funcional en todo o no sirve". Release 4 queda desestimado. | ~~Release 4~~ ninguna | — |
 | DA-3 | **RESUELTA 2026-08-02 (dueño):** posición (a) — **fallback a serial**. Sin aislamiento por worktree el plan igual se ejecuta, en serie, y el ciclo **declara explícitamente la degradación** (nunca silenciosa: lo exige RNF-T.2). Razón: el valor del paralelismo es velocidad, no correctitud — perder velocidad es degradación, perder la ejecución sería una falla; y el fallback es probadamente seguro porque es el comportamiento serial vigente hoy. No debilita RF-4.2: paralelo sobre árbol o recurso compartido sigue prohibido sin tercera opción. | ~~Release 5~~ ninguna | — |
-| DA-4 | ¿Dónde viven los sets de referencia de sensores y quién los mantiene? | Release 2 | (a) dentro de cada sensor-pack del registry baseline, mantenidos con el pack (propuesto); (b) archivo separado por stack en el registry; (c) en el CLI |
+| DA-4 | **RESUELTA 2026-08-11:** los sets de referencia viven dentro de cada sensor-pack del registry baseline y se mantienen con ese pack. | ~~Release 2~~ ninguna | — |
 | DA-5 | Umbral de la detección empírica: ¿cuántos hallazgos convergentes manuales de una clase disparan el reporte de "sensor faltante"? | Release 3 | Configurable con default (propuesto: cluster convergente de ≥2, alineado con `--min 2` de `awm ledger recurring`) |
-| DA-6 | ¿La detección solo reporta el gap, o además sugiere la remediación (comando/config propuesto, sin ejecutarlo)? | Release 2 | (a) reporte + sugerencia no ejecutada (propuesto); (b) solo reporte |
+| DA-6 | **RESUELTA 2026-08-11:** el reporte incluye una sugerencia de remedio no ejecutada y estrictamente read-only. | ~~Release 2~~ ninguna | — |
 
 ## Out of Scope
 
@@ -286,10 +286,10 @@ El orden es por valor de negocio: primero lo que reduce el dolor de N1 en *todos
 
 ### Release 2 — Detección estática de cobertura de sensores (core, mitad 1)
 
-- **Value:** el dueño puede preguntarle al framework "¿qué clases de defecto no tienen detector acá?" y recibir una respuesta accionable — elimina en origen la clase de desperdicio "estilo escalando a revisores" en cualquier proyecto, no solo el diagnosticado.
-- **Scope:** RF-1.1, RF-1.4, RF-1.5 · RNF-T.2, RNF-T.3. (CLI: comando de reporte · Registry: sets de referencia por pack.)
-- **Blocked by:** DA-4, DA-6.
-- **Acceptance:** CA-1.1, CA-1.4, CA-1.5, CA-T.2, CA-T.3.
+- **Value:** **entregado e integrado** — el dueño puede preguntarle al framework "¿qué clases de defecto no tienen detector acá?" y recibir una respuesta accionable, eliminando en origen la clase de desperdicio "estilo escalando a revisores" en cualquier proyecto, no solo el diagnosticado.
+- **Scope:** RF-1.1, RF-1.4, RF-1.5 · RNF-T.2, RNF-T.3. (CLI: comando de reporte · Registry: sets de referencia por pack.) DA-4 quedó resuelta con el contrato `coverage` dentro de cada sensor-pack del registry baseline; DA-6 quedó resuelta con remedios sugeridos y estrictamente read-only.
+- **Blocked by:** cierre terminal pendiente de Task 10 Step 6 (review, QA y retro) y Step 7 (evidencia en issue #20). Baton: Release 3 continúa pendiente de DA-5.
+- **Acceptance:** CA-1.1, CA-1.4, CA-1.5, CA-T.2, CA-T.3 certificadas por el trabajo integrado: consumidor #71, evidencia provider #72, fix de seguridad/compatibilidad #73 y registry #27 (`v1.16.0`).
 
 ### Release 3 — Detección empírica de cobertura (core, mitad 2)
 

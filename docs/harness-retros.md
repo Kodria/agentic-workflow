@@ -3,6 +3,14 @@
 Auditable log of recurring/structural harness gaps converted into rules. See the
 `harness-retro` skill for the process. Newest first.
 
+## 2026-08-11 — R2 static sensor coverage: dos hallazgos QA cubiertos, sin regla nueva
+
+- **Class:** seguridad (`r2-coverage-evidence-arbitrary-regular-file-oracle`) y proceso de pruebas (`r2-registry-coverage-symlink-containment-untested`).
+- **Occurrences (ledger count):** 1 cada uno; `awm ledger recurring --min 2` no devolvió clusters.
+- **Rule:** ninguna, por decisión explícita del usuario. La allowlist v1 de los nueve paths de evidencia ya elimina el oracle y la mutación de symlink externo protege la contención por `realpath`; agregar una regla adicional sería redundante.
+- **Sensor:** tests de contrato de coverage del CLI y `sensor-pack-coverage-mutations.test.mjs` del registry; ambos gates y las matrices CI correspondientes quedaron verdes.
+- **Descartes:** ambos signatures — corregidos, cubiertos por regresión discriminante y no recurrentes.
+
 ## 2026-08-08 — Post-plan closure: `awm init -a copilot` crash — tercera instancia de `defensive-guard-consistency`
 
 - **Class:** structural (bug real, encontrado en verificación final, no parte de una tarea del plan)
