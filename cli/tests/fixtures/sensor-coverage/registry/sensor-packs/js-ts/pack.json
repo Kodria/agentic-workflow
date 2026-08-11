@@ -1,0 +1,23 @@
+{
+  "name": "js-ts",
+  "sensors": {},
+  "coverage": {
+    "schemaVersion": 1,
+    "classes": {
+      "formatting": {
+        "description": "Mechanical formatting consistency",
+        "detectors": [{ "sensor": "format", "evidence": { "commandIncludes": ["prettier"] } }],
+        "remedy": { "summary": "Add a formatter", "command": "npm install --save-dev prettier" }
+      },
+      "project-style-conventions": {
+        "description": "Project-specific lint conventions",
+        "detectors": [
+          { "sensor": "lint", "evidence": { "commandIncludes": ["eslint", "--config"], "files": [{ "path": "eslint.config.js", "containsAll": [] }] } },
+          { "sensor": "lint", "evidence": { "commandIncludes": ["eslint", "--config"], "files": [{ "path": "eslint.config.mjs", "containsAll": [] }] } },
+          { "sensor": "lint", "evidence": { "commandIncludes": ["eslint", "--config"], "files": [{ "path": "eslint.config.cjs", "containsAll": [] }] } }
+        ],
+        "remedy": { "summary": "Add an ESLint project config", "command": "touch eslint.config.js" }
+      }
+    }
+  }
+}
