@@ -699,7 +699,7 @@ _Requirements: RF-1.4, RF-1.5, R2.6, R2.7, R2.9, R2.11, R2.12, R2.13, R2.14_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tests rojos de lectura acotada y precedencia de registries**
+- [x] **Step 1: Escribir tests rojos de lectura acotada y precedencia de registries**
 
 ```ts
 // cli/tests/commands/sensors/coverage/resolve.test.ts
@@ -786,13 +786,13 @@ test('rejects a JSON object that is not a valid pack (R2.7)', () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar resolución en rojo**
+- [x] **Step 2: Ejecutar resolución en rojo**
 
 Run: `cd cli && npx jest tests/commands/sensors/coverage/resolve.test.ts --runInBand`
 
 Expected: FAIL por módulo inexistente.
 
-- [ ] **Step 3: Implementar lectura bounded y resolución exacta**
+- [x] **Step 3: Implementar lectura bounded y resolución exacta**
 
 ```ts
 // cli/src/commands/sensors/coverage/resolve.ts
@@ -851,7 +851,7 @@ export function resolveCoverageInputs(cwd: unknown): CoverageInputs {
 }
 ```
 
-- [ ] **Step 4: Escribir tests rojos del orquestador para los tres caminos**
+- [x] **Step 4: Escribir tests rojos del orquestador para los tres caminos**
 
 ```ts
 // cli/tests/commands/sensors/coverage/index.test.ts
@@ -887,7 +887,7 @@ test('ready input observes every declared detector and evaluates once (RF-1.1)',
 });
 ```
 
-- [ ] **Step 5: Implementar `runCoverage` con dependencias inyectables solo para tests**
+- [x] **Step 5: Implementar `runCoverage` con dependencias inyectables solo para tests**
 
 ```ts
 // cli/src/commands/sensors/coverage/index.ts
@@ -927,17 +927,17 @@ export function runCoverage(cwd: unknown, dependencies: Partial<Dependencies> = 
 }
 ```
 
-- [ ] **Step 6: Ejecutar resolución, orquestación y build**
+- [x] **Step 6: Ejecutar resolución, orquestación y build**
 
 Run: `cd cli && npx jest tests/commands/sensors/coverage/resolve.test.ts tests/commands/sensors/coverage/index.test.ts --runInBand && npm run build`
 
 Expected: PASS.
 
-- [ ] **Step 7: Mutar el orden de registries y confirmar discriminación**
+- [x] **Step 7: Mutar el orden de registries y confirmar discriminación**
 
 Cambiar temporalmente el loop a `listRegistries().reverse()`; el test multi-registry debe fallar nombrando `first`/`second`. Restaurar y confirmar PASS.
 
-- [ ] **Step 8: Commit de resolución y orquestación**
+- [x] **Step 8: Commit de resolución y orquestación**
 
 ```bash
 git add cli/src/commands/sensors/coverage/resolve.ts cli/src/commands/sensors/coverage/index.ts cli/tests/commands/sensors/coverage/resolve.test.ts cli/tests/commands/sensors/coverage/index.test.ts
