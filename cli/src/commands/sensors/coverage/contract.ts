@@ -67,7 +67,7 @@ function nonEmptyString(value: unknown, source: unknown, location: string): stri
 
 function safeName(value: unknown, source: unknown, location: string): string {
     const name = nonEmptyString(value, source, location);
-    if (name === '.' || name === '..' || name.includes('..') || /[/\\]/.test(name) || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+    if (name === '.' || name === '..' || name.includes('..') || /[/\\]/.test(name) || !/^[A-Za-z0-9._-]+$/.test(name)) {
         invalid(source, `${location} must be a safe filename component`);
     }
     return name;

@@ -48,6 +48,20 @@ describe('coverage contract v1', () => {
         expect(() => parseCoverageContract(input, 'coverage.json')).toThrow('path');
     });
 
+    test.each(['.semgrep.awm.yml', '.dep-cruiser.awm.js'])('accepts safe dotfile evidence path %p', (path) => {
+        const input = {
+            schemaVersion: 1,
+            classes: {
+                valid: {
+                    description: 'x',
+                    detectors: [{ sensor: 'test', evidence: { files: [{ path, containsAll: [] }] } }],
+                    remedy: { summary: 'x', command: 'x' },
+                },
+            },
+        };
+        expect(parseCoverageContract(input, 'coverage.json')).toEqual(input);
+    });
+
     it('rejects whitespace-only evidence text', () => {
         const input = {
             schemaVersion: 1,
