@@ -1,3 +1,8 @@
+## v6.5.2 - 2026-08-11
+
+### Fixes
+- **sensors:** allowlist coverage evidence paths (#74)
+
 ## v6.5.1 - 2026-08-11
 
 ### Fixes
