@@ -957,7 +957,7 @@ _Requirements: RF-1.1, R2.6, R2.7, R2.8, R2.9, R2.10, R2.14, RNF-T.2_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tests rojos de render sin color/secretos**
+- [x] **Step 1: Escribir tests rojos de render sin color/secretos**
 
 ```ts
 // cli/tests/commands/sensors/coverage/render.test.ts
@@ -1004,13 +1004,13 @@ test('not_configured names the remedy and no_reference stays distinct (R2.6)', (
 });
 ```
 
-- [ ] **Step 2: Ejecutar render en rojo**
+- [x] **Step 2: Ejecutar render en rojo**
 
 Run: `cd cli && npx jest tests/commands/sensors/coverage/render.test.ts --runInBand`
 
 Expected: FAIL por módulo inexistente.
 
-- [ ] **Step 3: Implementar renderizadores puros**
+- [x] **Step 3: Implementar renderizadores puros**
 
 ```ts
 // cli/src/commands/sensors/coverage/render.ts
@@ -1037,7 +1037,7 @@ export function renderCoverageHuman(report: CoverageEnvelope): string {
 }
 ```
 
-- [ ] **Step 4: Añadir los tests rojos de Commander y exit codes**
+- [x] **Step 4: Añadir los tests rojos de Commander y exit codes**
 
 En `cli/tests/commands/sensors/index.test.ts`, mockear `./coverage` y `./coverage/render`, y añadir:
 
@@ -1066,7 +1066,7 @@ it('prints an actionable contract error and exits 1 (R2.7)', async () => {
 });
 ```
 
-- [ ] **Step 5: Conectar el subcomando sin cambiar los comandos existentes**
+- [x] **Step 5: Conectar el subcomando sin cambiar los comandos existentes**
 
 Añadir imports y este bloque a `registerSensorsCommand` en `cli/src/commands/sensors/index.ts`:
 
@@ -1089,7 +1089,7 @@ sensors
     });
 ```
 
-- [ ] **Step 6: Documentar el contrato CLI**
+- [x] **Step 6: Documentar el contrato CLI**
 
 Insertar antes de `awm sensors run` en `docs/cli-reference.md`:
 
@@ -1107,13 +1107,13 @@ Human output is the default. `--json` emits envelope `schemaVersion: 1` with sta
 Coverage gaps, unverifiable custom configuration, missing `.awm/sensors.json`, and packs without a reference are informative and exit `0`. Malformed/unreadable manifests, packs, or coverage contracts exit non-zero. `not_configured` recommends `awm sensors init`; `no_reference` is never reported as covered.
 ```
 
-- [ ] **Step 7: Ejecutar wiring, render, regresión de comandos y build**
+- [x] **Step 7: Ejecutar wiring, render, regresión de comandos y build**
 
 Run: `cd cli && npx jest tests/commands/sensors/coverage/render.test.ts tests/commands/sensors/index.test.ts --runInBand && npm run build`
 
 Expected: PASS y `node dist/src/index.js sensors --help` lista `coverage`.
 
-- [ ] **Step 8: Commit de superficie CLI**
+- [x] **Step 8: Commit de superficie CLI**
 
 ```bash
 git add cli/src/commands/sensors/coverage/render.ts cli/src/commands/sensors/index.ts cli/tests/commands/sensors/coverage/render.test.ts cli/tests/commands/sensors/index.test.ts docs/cli-reference.md
