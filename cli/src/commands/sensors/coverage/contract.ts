@@ -2,7 +2,17 @@ import type { SensorConfig } from '../types';
 
 export const COVERAGE_SCHEMA_VERSION = 1;
 export const MAX_COVERAGE_FILE_BYTES = 1024 * 1024;
-const SAFE_EVIDENCE_DOTFILES: readonly string[] = Object.freeze(['.semgrep.awm.yml', '.dep-cruiser.awm.js']);
+const COVERAGE_EVIDENCE_PATHS: ReadonlySet<string> = new Set([
+    'eslint.config.awm.mjs',
+    'eslint.config.js',
+    'eslint.config.mjs',
+    'eslint.config.cjs',
+    'eslint.config.ts',
+    'eslint.config.mts',
+    'eslint.config.cts',
+    '.semgrep.awm.yml',
+    '.dep-cruiser.awm.js',
+]);
 
 export type CoverageFileRequirement = {
     path: string;
@@ -76,8 +86,8 @@ function safeName(value: unknown, source: unknown, location: string): string {
 
 function safeEvidenceFilename(value: unknown, source: unknown, location: string): string {
     const name = nonEmptyString(value, source, location);
-    if (name === '.' || name === '..' || name.includes('..') || /[/\\]/.test(name) || !/^[A-Za-z0-9._-]+$/.test(name) || (name.startsWith('.') && !SAFE_EVIDENCE_DOTFILES.includes(name))) {
-        invalid(source, `${location} must be a safe evidence filename component`);
+    if (!COVERAGE_EVIDENCE_PATHS.has(name)) {
+        invalid(source, `${location} must be a supported coverage evidence path`);
     }
     return name;
 }
