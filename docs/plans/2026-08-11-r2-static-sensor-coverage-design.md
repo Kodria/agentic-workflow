@@ -17,15 +17,17 @@
 - **RNF-T.3** — THE referencia de cada pack SHALL declarar exclusivamente clases genéricas de defecto reutilizables entre proyectos.
 - **R2.1** — THE referencia de cobertura SHALL vivir bajo `coverage` en `sensor-packs/<pack>/pack.json`, SHALL declarar `schemaVersion: 1` y SHALL mapear IDs estables de clase a descripción, detectores y remedio.
 - **R2.2** — WHEN una clase declara varios detectores, THE evaluador SHALL considerar la clase cubierta si al menos un detector queda demostrado; dentro de cada detector, THE evaluador SHALL exigir toda la evidencia declarada.
-- **R2.3** — WHEN un sensor esperado no existe o está deshabilitado, THE evaluador SHALL clasificar su clase como `missing` y SHALL identificar el detector como `missing` o `disabled`.
-- **R2.4** — WHEN un sensor está activo pero su comando, archivo o marcador requerido no coincide, THE evaluador SHALL clasificar el detector como `ineffective` y la clase como `missing` si ninguna alternativa queda demostrada.
-- **R2.5** — IF existe un candidato pero su evidencia no puede inspeccionarse de forma segura, THEN THE evaluador SHALL clasificarlo como `unverifiable` y SHALL NOT convertirlo en verde ni en ausencia confirmada.
+- **R2.3** — WHEN un sensor esperado no existe o está deshabilitado, THE evaluador SHALL identificar el detector como `missing` o `disabled` respectivamente.
+- **R2.4** — WHEN un sensor activo coincide con el comando de un detector declarado pero falta un archivo o marcador requerido, THE evaluador SHALL clasificar ese detector como `ineffective`.
+- **R2.5** — WHEN existe un sensor activo con el nombre esperado pero su comando no coincide con ningún detector declarado, THE evaluador SHALL clasificarlo como `unverifiable` porque puede ser una implementación personalizada equivalente.
+- **R2.5a** — IF la evidencia de un detector no puede inspeccionarse de forma segura, THEN THE evaluador SHALL clasificarlo como `unverifiable` y SHALL NOT convertirlo en verde ni en ausencia confirmada.
+- **R2.5b** — WHEN ningún detector alternativo está cubierto, THE evaluador SHALL clasificar la clase como `unverifiable` si al menos un detector lo está; solamente SHALL clasificarla como `missing` cuando todos sus detectores sean ausencia, deshabilitación o inefectividad confirmadas.
 - **R2.6** — IF `.awm/sensors.json` no existe, THEN THE comando SHALL devolver `inconclusive/not_configured`, SHALL sugerir `awm sensors init` y SHALL terminar con exit `0`.
 - **R2.7** — IF `.awm/sensors.json`, `pack.json` o el contrato `coverage` existe pero es malformado o usa una versión desconocida, THEN THE comando SHALL fallar con un error accionable y exit distinto de cero.
 - **R2.8** — WHEN el comando produce un reporte, THE CLI SHALL mostrar una vista humana por defecto y SHALL emitir un envelope JSON versionado al recibir `--json`.
 - **R2.9** — WHEN el reporte contiene gaps, evidencia no verificable o falta de referencia/configuración, THE comando SHALL terminar con exit `0`; solamente los errores de lectura o contrato SHALL terminar con exit distinto de cero.
 - **R2.10** — THE resultado SHALL ordenar las clases por ID y SHALL ser determinista para entradas idénticas.
-- **R2.11** — THE evaluador SHALL inspeccionar únicamente paths relativos al proyecto, SHALL rechazar traversal y symlinks, SHALL limitar a 1 MiB cada JSON o archivo de evidencia leído y SHALL usar coincidencias literales en vez de regex provistas por el registry.
+- **R2.11** — THE evaluador SHALL inspeccionar únicamente paths relativos al proyecto, SHALL rechazar traversal, SHALL negarse a dereferenciar symlinks marcando su evidencia `unverifiable`, SHALL limitar a 1 MiB cada JSON o archivo de evidencia leído y SHALL usar coincidencias literales en vez de regex provistas por el registry.
 - **R2.12** — THE CLI SHALL resolver el primer registry configurado que contenga el pack exacto solicitado y SHALL identificar ese registry en el reporte.
 - **R2.13** — THE CLI SHALL tolerar packs antiguos sin `coverage` como `inconclusive/no_reference` y SHALL NOT exigir migración para ejecutar los demás comandos de sensores.
 - **R2.14** — THE envelope JSON SHALL reservar una sección `static` estable y SHALL permitir que R3 agregue una sección opcional `empirical` sin alterar la semántica de R2.
@@ -69,7 +71,7 @@ Una clase puede tener uno o más detectores alternativos. Un detector se demuest
 3. existen todos los archivos de evidencia declarados; y
 4. cada archivo contiene todos sus marcadores literales requeridos.
 
-La ausencia o discordancia observable es un gap confirmado. La imposibilidad de leer evidencia de forma segura es `unverifiable`. Esta separación evita tanto falsos verdes como afirmar ausencia cuando el CLI carece de prueba.
+La ausencia o deshabilitación del sensor es un gap confirmado. Cuando el comando demuestra que se trata del detector conocido, la ausencia de sus archivos o marcadores requeridos también confirma inefectividad. Un comando personalizado que no coincide con ningún detector declarado, o la imposibilidad de leer evidencia de forma segura, queda `unverifiable`. Esta separación evita tanto falsos verdes como afirmar ausencia cuando el CLI carece de prueba.
 
 ## Arquitectura
 
@@ -156,14 +158,14 @@ No existe ningún paso de escritura ni lanzamiento de subprocesos.
 - `covered`: sensor activo y toda evidencia satisfecha.
 - `missing`: sensor no configurado.
 - `disabled`: sensor configurado con `enabled: false`.
-- `ineffective`: sensor activo, pero falta o no coincide evidencia requerida.
-- `unverifiable`: existe candidato, pero una lectura segura no puede decidir.
+- `ineffective`: el comando coincide con un detector conocido, pero falta un archivo o marcador requerido.
+- `unverifiable`: existe un sensor candidato con comando personalizado no reconocido, o una lectura segura no puede decidir.
 
 ### Estados por clase
 
 - `covered`: al menos un detector alternativo está `covered`.
-- `missing`: ningún detector está cubierto y existe ausencia, deshabilitación o inefectividad demostrada.
-- `unverifiable`: ningún detector está cubierto y no puede probarse ausencia efectiva porque al menos uno quedó `unverifiable` sin ningún gap confirmado.
+- `unverifiable`: ningún detector está cubierto y al menos uno quedó `unverifiable`, aunque otros estén ausentes, deshabilitados o sean inefectivos.
+- `missing`: ningún detector está cubierto, ninguno quedó `unverifiable` y todos son ausencia, deshabilitación o inefectividad demostradas.
 
 ### Precedencia global
 
@@ -190,7 +192,13 @@ Si coexisten gaps y clases no verificables, `overall` es `gaps`, pero el reporte
         "id": "formatting",
         "description": "Consistencia mecánica de formato",
         "status": "missing",
-        "detectors": [],
+        "detectors": [
+          {
+            "sensor": "format",
+            "status": "missing",
+            "evidence": []
+          }
+        ],
         "remedy": {
           "summary": "Agregar un formatter mecánico al proyecto",
           "command": "npm install --save-dev prettier"
@@ -202,6 +210,16 @@ Si coexisten gaps y clases no verificables, `overall` es `gaps`, pero el reporte
 ```
 
 R3 puede añadir `empirical` como campo top-level opcional. No cambiará `schemaVersion: 1` mientras el significado y shape de los campos existentes permanezca compatible; una ruptura real exige una versión nueva.
+
+`pack` y `registry` son strings cuando la resolución alcanza esos datos y `null` cuando termina antes, por ejemplo en `not_configured`. `static.reason` es exactamente `null`, `not_configured` o `no_reference`.
+
+Cada resultado de detector contiene `sensor`, `status` y `evidence`. La evidencia expone únicamente metadatos seguros:
+
+- comando: `{ "kind": "command", "status": "matched|custom|missing" }`;
+- archivo: `{ "kind": "file", "path": "<relativo>", "status": "matched|missing|unverifiable" }`;
+- marcador: `{ "kind": "marker", "path": "<relativo>", "ordinal": 1, "status": "matched|missing|unverifiable" }`.
+
+Nunca se incluye el comando completo, el valor del marcador ni contenido del archivo.
 
 ### Salida humana
 
@@ -222,25 +240,26 @@ No imprime contenido de archivos inspeccionados ni oculta estados no verdes.
 | Sin `.awm/sensors.json` | `inconclusive/not_configured` + `awm sensors init` | 0 |
 | Pack sin `coverage` | `inconclusive/no_reference` | 0 |
 | Gaps o evidencia no verificable | reporte completo | 0 |
-| Manifiesto malformado | error accionable con path | ≠0 |
+| Manifiesto malformado o mayor de 1 MiB | error accionable con path | ≠0 |
 | `pack.json` malformado o mayor de 1 MiB | error accionable con path | ≠0 |
 | `coverage` malformado o versión desconocida | error accionable con campo/path | ≠0 |
 | Path contractual absoluto, vacío, `.`, `..` o traversal | error de contrato | ≠0 |
-| Archivo de evidencia ausente o marcador no encontrado | detector `ineffective` | 0 |
+| Comando de sensor personalizado que no coincide con detectores declarados | detector `unverifiable` | 0 |
+| Archivo de evidencia ausente o marcador no encontrado, después de reconocer el comando | detector `ineffective` | 0 |
 | Archivo de evidencia symlink, ilegible o mayor de 1 MiB | detector `unverifiable` | 0 |
 
 Los archivos se inspeccionan con `lstat`; un symlink nunca se dereferencia. Los marcadores son coincidencias literales, no regex. El renderer solo expone IDs, paths declarados y estados, nunca el contenido leído.
 
 ## Catálogo inicial de referencia
 
-El catálogo exacto se derivará de los sensores y reglas que cada pack distribuye en el momento de implementación. Su alcance aprobado es:
+El catálogo inicial usa estos IDs estables; cada detector y marcador concreto se deriva de los sensores y reglas que el pack distribuye en el commit de implementación:
 
 | Pack | Clases baseline |
 |---|---|
-| `generic` | secretos hardcodeados |
-| `js-ts` | tipos estáticos; errores básicos de lint; convenciones propias del proyecto; formato mecánico; dependencias; regresión; ejecución dinámica; secretos hardcodeados; construcción insegura de SQL |
-| `python` | tipos estáticos; lint; regresión; ejecución dinámica; shell inseguro en subprocess; construcción insegura de SQL; deserialización insegura; secretos hardcodeados |
-| `shell` | corrección ShellCheck; `eval`; pipe remoto a shell; sustitución de comando sin quoting; secretos hardcodeados |
+| `generic` | `hardcoded-secrets` |
+| `js-ts` | `static-type-errors`; `lint-errors`; `project-style-conventions`; `formatting`; `dependency-boundaries`; `regression-tests`; `dynamic-code-execution`; `hardcoded-secrets`; `sql-string-construction` |
+| `python` | `static-type-errors`; `lint-errors`; `regression-tests`; `dynamic-code-execution`; `subprocess-shell-injection`; `sql-string-construction`; `unsafe-deserialization`; `hardcoded-secrets` |
+| `shell` | `shell-lint-errors`; `dynamic-code-execution`; `remote-code-pipe-to-shell`; `unquoted-command-substitution`; `hardcoded-secrets` |
 
 Cada entrada debe ser genérica y trazable a evidencia real del pack. Mutation testing queda excluido del set requerido mientras siga deshabilitado por defecto.
 
