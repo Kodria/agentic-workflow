@@ -23,7 +23,7 @@
 - Base CLI: `origin/main` en `d8381e83093ed146de7c6e2a1a4b351b6c4fdf8c`.
 - Base registry: `origin/main` en `ad61e5051cbb3f0b1a60e6ce10ca9f8f1fde75a9` (`v1.15.1`). La rama local del registry está atrasada; al comenzar su trabajo se crea una rama desde `origin/main`, sin reescribir `main` local.
 - R2 termina en cobertura estática. No ejecuta sensores, no configura remedios, no lee el ledger y no implementa `empirical`; R3 añadirá esa sección opcional sobre el envelope estable de R2.
-- Los archivos locales no rastreados `cli/.dep-cruiser.awm.js`, `cli/eslint.config.awm.cjs` y `cli/tsconfig.awm.json` pertenecen al usuario: ninguna tarea los añade, borra, mueve ni incluye en commits.
+- Los templates copiados por AWM se evaluaron contra el stack real antes del handoff: `cli/.dep-cruiser.awm.js` se conserva y versiona porque respalda el sensor `depcheck`; `cli/eslint.config.awm.cjs` se excluye por ser incompatible con ESLint 10 y `cli/tsconfig.awm.json` se excluye porque no está activo y produciría deuda masiva sin una migración dedicada.
 
 ## Contratos que no se pueden reinterpretar durante la ejecución
 
@@ -1362,7 +1362,7 @@ git commit -m "test(sensors): prove static coverage acceptance"
 
 - [ ] **Step 9: Abrir y mergear el PR del consumidor antes del registry**
 
-Verificar `git status --short`, excluir explícitamente los tres archivos locales no rastreados, push de `feat/issue-20-r2-sensor-coverage` y PR con `Closes` solamente si issue #20 se cierra con R2; de lo contrario usar `Refs #20` y mantener R3 abierto. Esperar CI verde y publicación del CLI compatible antes de comenzar el merge del registry.
+Verificar `git status --short`, confirmar que solo los templates AWM aplicables al stack quedaron versionados, push de `feat/issue-20-r2-sensor-coverage` y PR con `Closes` solamente si issue #20 se cierra con R2; de lo contrario usar `Refs #20` y mantener R3 abierto. Esperar CI verde y publicación del CLI compatible antes de comenzar el merge del registry.
 
 ### Task 7: Gate estructural de coverage en `awm-baseline-registry`
 
@@ -1700,7 +1700,7 @@ git -C ../awm-baseline-registry status --short --branch
 git -C ../awm-baseline-registry diff origin/main...HEAD --check
 ```
 
-Expected: solamente archivos R2 en commits/diff; los tres archivos locales no rastreados de `cli/` siguen fuera del diff.
+Expected: solamente archivos R2 y del harness validado en commits/diff; `eslint.config.awm.cjs` y `tsconfig.awm.json` permanecen ausentes, mientras `.dep-cruiser.awm.js` y su baseline quedan versionados.
 
 - [ ] **Step 2: Ejecutar la suite completa y build de la CLI**
 
@@ -1800,7 +1800,7 @@ La opción recomendada es `subagent-driven-development`: una tarea por implement
 
 ### Estado del gate al redactar el plan (2026-08-11)
 
-- `awm preflight` desde `cli/`: `ready` (manifest `js-ts`, 4/5 sensores activos, tools y baseline presentes).
+- `awm preflight` desde `cli/`: `ready` (manifest `js-ts`, 5/6 sensores activos, tools y baseline presentes).
 - `awm context-budget`: límites iniciales fijados en 69 KB para la raíz y 8 KB para `cli/`; los JSON viven bajo `.awm/` y deben añadirse deliberadamente con `git add -f` porque el repo ignora ese directorio.
 - `npm run build`: PASS después de sincronizar `node_modules` con el lockfile; faltaba localmente `@types/js-yaml@4.0.9`, aunque ya estaba declarado.
 - `npm test --silent`: PASS, 208/208 suites y 2141/2141 tests en 181.621 s. Jest usa ahora un tmpdir propio, no hereda `CODEX_HOME`, las fixtures que requieren proyecto declaran su marker y los probes de binarios externos se controlan explícitamente.
