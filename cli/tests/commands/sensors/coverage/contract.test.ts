@@ -34,7 +34,7 @@ describe('coverage contract v1', () => {
         expect(() => parseCoverageContract(input, 'coverage.json')).toThrow(message);
     });
 
-    test.each(['', '.', '..', '../secret', 'a/../../secret', '/etc/passwd', 'C:\\secret', 'a\\..\\secret', ' report.txt', 'report!.txt'])('rejects hostile evidence path %p', (path) => {
+    test.each(['', '.', '..', 'a..b', '../secret', 'a/../../secret', '/etc/passwd', 'C:\\secret', 'a\\..\\secret', ' report.txt', 'report!.txt', 'ñ.txt'])('rejects hostile evidence path %p', (path) => {
         const input = {
             schemaVersion: 1,
             classes: {
