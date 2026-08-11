@@ -90,6 +90,12 @@ test('rejects a symlinked manifest without dereferencing it', () => {
     expect(() => resolveCoverageInputs(project)).toThrow(/sensors\.json.*regular file/);
 });
 
+test('rejects a dangling symlinked manifest without reporting not_configured', () => {
+    const manifest = path.join(project, '.awm', 'sensors.json');
+    fs.symlinkSync(path.join(root, 'missing-manifest.json'), manifest);
+    expect(() => resolveCoverageInputs(project)).toThrow(/sensors\.json.*regular file/);
+});
+
 test('rejects a JSON object that is not a valid pack', () => {
     writeManifest({ pack: 'js-ts', sensors: {} });
     configure(['baseline']);

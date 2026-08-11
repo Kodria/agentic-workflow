@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { listRegistries } from '../../../core/registries';
-import { findManifestDir } from '../run';
 import {
     MAX_COVERAGE_FILE_BYTES,
     parseCoverageContract,
@@ -80,9 +79,26 @@ function safeRegistryName(name: string): void {
     }
 }
 
+/** Finds the nearest manifest without following a symlink during discovery. */
+function findManifestDirNoFollow(startCwd: string): string | null {
+    let dir = path.resolve(startCwd);
+    while (true) {
+        const manifestPath = path.join(dir, '.awm', 'sensors.json');
+        try {
+            fs.lstatSync(manifestPath);
+            return dir;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw readFailure(manifestPath, error);
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) return null;
+        dir = parent;
+    }
+}
+
 export function resolveCoverageInputs(cwd: unknown): CoverageInputs {
     if (typeof cwd !== 'string' || cwd.trim().length === 0) throw new Error('resolveCoverageInputs: cwd must be a non-empty string');
-    const projectRoot = findManifestDir(cwd);
+    const projectRoot = findManifestDirNoFollow(cwd);
     if (!projectRoot) return { kind: 'not_configured' };
 
     const manifestPath = path.join(projectRoot, '.awm', 'sensors.json');
