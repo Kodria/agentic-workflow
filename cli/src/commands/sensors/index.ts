@@ -6,6 +6,8 @@ import { initSensors } from './init';
 import { computeSensorStatus } from './status';
 import { installSensorHook } from './install';
 import { buildBaseline, writeBaseline } from './baseline';
+import { runCoverage } from './coverage';
+import { renderCoverageHuman, renderCoverageJson } from './coverage/render';
 import { capabilityRoot } from '../../core/registries';
 
 export type RunOutputLike = { sensors: unknown[]; overall: 'pass' | 'fail' | 'skipped' | 'not_certified' };
@@ -19,6 +21,20 @@ export function exitCodeFor(output: RunOutputLike): number {
 
 export function registerSensorsCommand(program: Command): void {
     const sensors = program.command('sensors').description('manage computational sensors for the current project');
+
+    sensors
+        .command('coverage')
+        .description('report static gaps between configured sensors and the pack reference')
+        .option('--json', 'emit the versioned machine-readable envelope')
+        .action((opts: { json?: boolean }) => {
+            try {
+                const report = runCoverage(process.cwd());
+                process.stdout.write(opts.json ? renderCoverageJson(report) : renderCoverageHuman(report));
+            } catch (error) {
+                log.error(error instanceof Error ? error.message : String(error));
+                process.exit(1);
+            }
+        });
 
     sensors
         .command('run')
