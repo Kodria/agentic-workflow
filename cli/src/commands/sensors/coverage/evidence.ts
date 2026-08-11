@@ -6,12 +6,18 @@ import type { CoverageEvidenceResult, IndexedDetectorObservation } from './evalu
 
 export type EvidenceIo = {
     lstatSync: (file: string) => fs.Stats;
-    readFileUtf8: (file: string) => string;
+    openSync?: (file: string, flags: number) => number;
+    fstatSync?: (fd: number) => fs.Stats;
+    readFileUtf8: (file: string | number) => string;
+    closeSync?: (fd: number) => void;
 };
 
 const realIo: EvidenceIo = {
     lstatSync: fs.lstatSync,
+    openSync: fs.openSync,
+    fstatSync: fs.fstatSync,
     readFileUtf8: (file) => fs.readFileSync(file, 'utf8'),
+    closeSync: fs.closeSync,
 };
 
 type FileInspection = {
@@ -45,11 +51,30 @@ function inspectFile(root: string, relative: string, markers: string[], io: Evid
         return { status: 'unverifiable', evidence: [{ kind: 'file', path: relative, status: 'unverifiable' }] };
     }
 
+    const noFollow = fs.constants.O_NOFOLLOW;
+    if (typeof noFollow !== 'number') {
+        return { status: 'unverifiable', evidence: [{ kind: 'file', path: relative, status: 'unverifiable' }] };
+    }
+
+    let fd: number | undefined;
     let content: string;
     try {
-        content = io.readFileUtf8(absolute);
+        fd = (io.openSync ?? realIo.openSync!)(absolute, fs.constants.O_RDONLY | noFollow);
+        const opened = (io.fstatSync ?? realIo.fstatSync!)(fd);
+        if (!opened.isFile() || opened.size > MAX_COVERAGE_FILE_BYTES) {
+            return { status: 'unverifiable', evidence: [{ kind: 'file', path: relative, status: 'unverifiable' }] };
+        }
+        content = io.readFileUtf8(fd);
     } catch {
         return { status: 'unverifiable', evidence: [{ kind: 'file', path: relative, status: 'unverifiable' }] };
+    } finally {
+        if (fd !== undefined) {
+            try {
+                (io.closeSync ?? realIo.closeSync!)(fd);
+            } catch {
+                // best-effort: a close failure does not make already-read evidence unsafe.
+            }
+        }
     }
 
     const evidence: CoverageEvidenceResult[] = [{ kind: 'file', path: relative, status: 'matched' }];
