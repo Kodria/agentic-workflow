@@ -31,10 +31,6 @@ function invalidReport(renderer: string): never {
     throw new Error(`${renderer}: invalid report`);
 }
 
-function assertString(value: unknown, renderer: string): asserts value is string {
-    if (typeof value !== 'string') invalidReport(renderer);
-}
-
 function assertEvidence(evidence: unknown, renderer: string): void {
     if (!Array.isArray(evidence)) invalidReport(renderer);
     for (const item of evidence) {
@@ -58,36 +54,54 @@ function assertCoverageEnvelope(report: unknown, renderer: string): asserts repo
     if (!isRecord(report) || !hasExactFields(report, 'empirical' in report
         ? ['schemaVersion', 'pack', 'registry', 'overall', 'static', 'empirical']
         : ['schemaVersion', 'pack', 'registry', 'overall', 'static']) || report.schemaVersion !== 1
-        || !(report.pack === null || typeof report.pack === 'string')
-        || !(report.registry === null || typeof report.registry === 'string')
+        || !(report.pack === null || isNonBlankString(report.pack))
+        || !(report.registry === null || isNonBlankString(report.registry))
         || !isOneOf(report.overall, OVERALL) || !isRecord(report.static)) {
         invalidReport(renderer);
     }
 
     const staticReport = report.static;
-    if (!hasExactFields(staticReport, ['status', 'reason', 'classes']) || !isOneOf(staticReport.status, OVERALL)
+    if (!hasExactFields(staticReport, ['status', 'reason', 'classes']) || staticReport.status !== report.overall
+        || !isOneOf(staticReport.status, OVERALL)
         || !(staticReport.reason === null || isOneOf(staticReport.reason, REASON))
         || !Array.isArray(staticReport.classes)) {
         invalidReport(renderer);
     }
 
+    if (staticReport.reason === 'not_configured') {
+        if (report.overall !== 'inconclusive' || report.pack !== null || report.registry !== null || staticReport.classes.length !== 0) {
+            invalidReport(renderer);
+        }
+        return;
+    }
+    if (staticReport.reason === 'no_reference') {
+        if (report.overall !== 'inconclusive' || !isNonBlankString(report.pack) || !isNonBlankString(report.registry)
+            || staticReport.classes.length !== 0) {
+            invalidReport(renderer);
+        }
+        return;
+    }
+    if (!isNonBlankString(report.pack) || !isNonBlankString(report.registry) || staticReport.classes.length === 0) {
+        invalidReport(renderer);
+    }
+
+    let previousId: string | undefined;
     for (const coverageClass of staticReport.classes) {
         if (!isRecord(coverageClass) || !hasExactFields(coverageClass, ['id', 'description', 'status', 'detectors', 'remedy'])
-            || !isOneOf(coverageClass.status, CLASS_STATUS) || !Array.isArray(coverageClass.detectors)
+            || !isNonBlankString(coverageClass.id) || !isNonBlankString(coverageClass.description)
+            || !isOneOf(coverageClass.status, CLASS_STATUS) || !Array.isArray(coverageClass.detectors) || coverageClass.detectors.length === 0
             || !isRecord(coverageClass.remedy)) {
             invalidReport(renderer);
         }
-        assertString(coverageClass.id, renderer);
-        assertString(coverageClass.description, renderer);
+        if (previousId !== undefined && previousId >= coverageClass.id) invalidReport(renderer);
+        previousId = coverageClass.id;
         if (!hasExactFields(coverageClass.remedy, ['summary', 'command'])) invalidReport(renderer);
-        assertString(coverageClass.remedy.summary, renderer);
-        assertString(coverageClass.remedy.command, renderer);
+        if (!isNonBlankString(coverageClass.remedy.summary) || !isNonBlankString(coverageClass.remedy.command)) invalidReport(renderer);
         for (const detector of coverageClass.detectors) {
             if (!isRecord(detector) || !hasExactFields(detector, ['sensor', 'status', 'evidence'])
-                || !isOneOf(detector.status, DETECTOR_STATUS)) {
+                || !isNonBlankString(detector.sensor) || !isOneOf(detector.status, DETECTOR_STATUS)) {
                 invalidReport(renderer);
             }
-            assertString(detector.sensor, renderer);
             assertEvidence(detector.evidence, renderer);
         }
     }

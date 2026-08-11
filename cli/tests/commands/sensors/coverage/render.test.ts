@@ -98,6 +98,35 @@ test.each([
     ['malformed marker evidence', { ...report, static: { ...report.static, classes: [{ ...report.static.classes[0], detectors: [{
         ...report.static.classes[0].detectors[0], evidence: [{ kind: 'marker', path: '.prettierrc', ordinal: 0, status: 'matched' }],
     }] }] } }],
+    ['mismatched static and overall status', { ...report, static: { ...report.static, status: 'covered' } }],
+    ['not_configured with resolved pack and registry', {
+        schemaVersion: 1, pack: 'js-ts', registry: 'baseline', overall: 'inconclusive',
+        static: { status: 'inconclusive', reason: 'not_configured', classes: [] },
+    }],
+    ['not_configured with classes', {
+        schemaVersion: 1, pack: null, registry: null, overall: 'inconclusive',
+        static: { status: 'inconclusive', reason: 'not_configured', classes: [report.static.classes[0]] },
+    }],
+    ['no_reference without resolved registry', {
+        schemaVersion: 1, pack: 'js-ts', registry: null, overall: 'inconclusive',
+        static: { status: 'inconclusive', reason: 'no_reference', classes: [] },
+    }],
+    ['no_reference with classes', {
+        schemaVersion: 1, pack: 'js-ts', registry: 'baseline', overall: 'inconclusive',
+        static: { status: 'inconclusive', reason: 'no_reference', classes: [report.static.classes[0]] },
+    }],
+    ['normal coverage without a pack', { ...report, pack: null }],
+    ['normal coverage without classes', { ...report, static: { ...report.static, classes: [] } }],
+    ['blank pack', { ...report, pack: '  ' }],
+    ['blank registry', { ...report, registry: '' }],
+    ['blank class id', { ...report, static: { ...report.static, classes: [{ ...report.static.classes[0], id: ' ' }] } }],
+    ['blank class description', { ...report, static: { ...report.static, classes: [{ ...report.static.classes[0], description: '' }] } }],
+    ['blank remedy summary', { ...report, static: { ...report.static, classes: [{ ...report.static.classes[0], remedy: { ...report.static.classes[0].remedy, summary: ' ' } }] } }],
+    ['blank remedy command', { ...report, static: { ...report.static, classes: [{ ...report.static.classes[0], remedy: { ...report.static.classes[0].remedy, command: '' } }] } }],
+    ['empty class detectors', { ...report, static: { ...report.static, classes: [{ ...report.static.classes[0], detectors: [] }] } }],
+    ['blank detector sensor', { ...report, static: { ...report.static, classes: [{ ...report.static.classes[0], detectors: [{ ...report.static.classes[0].detectors[0], sensor: ' ' }] }] } }],
+    ['duplicate class ids', { ...report, static: { ...report.static, classes: [report.static.classes[0], { ...report.static.classes[1], id: report.static.classes[0].id }] } }],
+    ['unsorted class ids', { ...report, static: { ...report.static, classes: [...report.static.classes].reverse() } }],
 ])('renderers reject a malformed envelope with %s before emitting or dereferencing fields', (_case, malformed) => {
     for (const render of [renderCoverageJson, renderCoverageHuman]) {
         expect(() => render(malformed as never)).toThrow(/^renderCoverage(?:Json|Human): invalid report/);
