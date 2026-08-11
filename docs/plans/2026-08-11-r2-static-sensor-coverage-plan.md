@@ -1137,7 +1137,7 @@ _Requirements: RF-1.1, RF-1.4, RF-1.5, RNF-T.2, R2.6, R2.8, R2.9, R2.10, R2.12, 
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Crear el fixture mínimo versionado del gap JS/TS**
+- [x] **Step 1: Crear el fixture mínimo versionado del gap JS/TS**
 
 ```json
 // cli/tests/fixtures/sensor-coverage/js-ts-gap/.awm/sensors.json
@@ -1189,7 +1189,7 @@ _Requirements: RF-1.1, RF-1.4, RF-1.5, RNF-T.2, R2.6, R2.8, R2.9, R2.10, R2.12, 
 }
 ```
 
-- [ ] **Step 2: Escribir el E2E rojo con binario compilado y homes aislados**
+- [x] **Step 2: Escribir el E2E rojo con binario compilado y homes aislados**
 
 ```ts
 // cli/tests/integration/sensor-coverage.e2e.test.ts
@@ -1266,13 +1266,13 @@ test('informative states exit zero; malformed contract exits non-zero (R2.7, R2.
 });
 ```
 
-- [ ] **Step 3: Ejecutar E2E rojo antes de que exista la referencia del registry**
+- [x] **Step 3: Ejecutar E2E rojo antes de que exista la referencia del registry**
 
 Run: `cd cli && npx jest tests/integration/sensor-coverage.e2e.test.ts --runInBand`
 
 Expected: FAIL por ausencia del comando/implementación R2 o por una aserción funcional; nunca por depender del checkout hermano.
 
-- [ ] **Step 4: Añadir runner e integridad de evidencia provider**
+- [x] **Step 4: Añadir runner e integridad de evidencia provider**
 
 ```js
 // docs/research/r2/provider-run.mjs
@@ -1323,7 +1323,7 @@ test('Claude Code and Codex expose the same result contract (RNF-T.2)', () => {
 });
 ```
 
-- [ ] **Step 5: Documentar procedencia y reproducción**
+- [x] **Step 5: Documentar procedencia y reproducción**
 
 `docs/research/r2/README.md` debe registrar:
 
@@ -1347,13 +1347,13 @@ Run en la sesión Codex: `cd cli && npm run build && node ../docs/research/r2/pr
 
 Expected: ambos JSON tienen el mismo `semanticContract`. Si una plataforma real no está disponible, no fabricar `result: pass`: registrar `partial` en README y dejar que el test de certificación permanezca dirigido solamente a evidencias `pass`; RNF-T.2 no se marca completo hasta obtener ambas.
 
-- [ ] **Step 7: Ejecutar suite dirigida de R2 y confirmar read-only**
+- [x] **Step 7: Ejecutar suite dirigida de R2 y confirmar read-only**
 
 Run: `cd cli && npx jest tests/commands/sensors/coverage tests/integration/sensor-coverage.e2e.test.ts tests/integration/sensor-coverage-provider-evidence.test.ts --runInBand && npm run build`
 
 Expected: PASS, hashes idénticos antes/después y cero rutas reales de home en evidencia.
 
-- [ ] **Step 8: Commit de aceptación CLI**
+- [x] **Step 8: Commit de aceptación CLI**
 
 ```bash
 git add cli/tests/fixtures/sensor-coverage cli/tests/integration/sensor-coverage.e2e.test.ts cli/tests/integration/sensor-coverage-provider-evidence.test.ts docs/research/r2
