@@ -365,7 +365,7 @@ _Requirements: RF-1.1, R2.2, R2.3, R2.4, R2.5, R2.5a, R2.5b, R2.10, R2.14_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir la tabla roja de estados y precedencia**
+- [x] **Step 1: Escribir la tabla roja de estados y precedencia**
 
 ```ts
 // cli/tests/commands/sensors/coverage/evaluate.test.ts
@@ -413,13 +413,13 @@ describe('coverage evaluation', () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar el test rojo**
+- [x] **Step 2: Ejecutar el test rojo**
 
 Run: `cd cli && npx jest tests/commands/sensors/coverage/evaluate.test.ts --runInBand`
 
 Expected: FAIL por módulo inexistente.
 
-- [ ] **Step 3: Implementar el reducer puro y sus tipos de salida**
+- [x] **Step 3: Implementar el reducer puro y sus tipos de salida**
 
 ```ts
 // cli/src/commands/sensors/coverage/evaluate.ts
@@ -475,7 +475,7 @@ export function evaluateCoverage(contract: CoverageContract, observations: Index
 }
 ```
 
-- [ ] **Step 4: Agregar el test de detectores alternativos con el mismo sensor**
+- [x] **Step 4: Agregar el test de detectores alternativos con el mismo sensor**
 
 ```ts
 test('keeps two alternatives for the same sensor independent (R2.2)', () => {
@@ -493,17 +493,17 @@ test('keeps two alternatives for the same sensor independent (R2.2)', () => {
 });
 ```
 
-- [ ] **Step 5: Ejecutar evaluador + contrato + build**
+- [x] **Step 5: Ejecutar evaluador + contrato + build**
 
 Run: `cd cli && npx jest tests/commands/sensors/coverage/contract.test.ts tests/commands/sensors/coverage/evaluate.test.ts --runInBand && npm run build`
 
 Expected: PASS. La implementación final usa identidad `classId + detectorIndex`, no solamente `sensor`.
 
-- [ ] **Step 6: Revertir temporalmente la precedencia `unverifiable` y probar rojo/verde**
+- [x] **Step 6: Revertir temporalmente la precedencia `unverifiable` y probar rojo/verde**
 
 Cambiar temporalmente la reducción de clase para devolver `missing` ante `[unverifiable, missing]`; el caso correspondiente debe fallar. Restaurar y confirmar PASS antes del commit.
 
-- [ ] **Step 7: Commit del evaluador**
+- [x] **Step 7: Commit del evaluador**
 
 ```bash
 git add cli/src/commands/sensors/coverage/evaluate.ts cli/tests/commands/sensors/coverage/evaluate.test.ts
