@@ -119,7 +119,7 @@ _Requirements: R2.1, R2.7, R2.11, R2.13_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Crear el corpus rojo de contratos válidos e inválidos**
+- [x] **Step 1: Crear el corpus rojo de contratos válidos e inválidos**
 
 ```ts
 // cli/tests/commands/sensors/coverage/contract.test.ts
@@ -189,13 +189,13 @@ describe('coverage manifest boundary', () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar el test y confirmar que falla por módulo inexistente**
+- [x] **Step 2: Ejecutar el test y confirmar que falla por módulo inexistente**
 
 Run: `cd cli && npx jest tests/commands/sensors/coverage/contract.test.ts --runInBand`
 
 Expected: FAIL con `Cannot find module .../coverage/contract`.
 
-- [ ] **Step 3: Implementar los tipos y guards recursivos**
+- [x] **Step 3: Implementar los tipos y guards recursivos**
 
 ```ts
 // cli/src/commands/sensors/coverage/contract.ts
@@ -338,17 +338,17 @@ export function parseCoverageManifest(input: unknown, source: unknown): Coverage
 }
 ```
 
-- [ ] **Step 4: Ejecutar contrato + build**
+- [x] **Step 4: Ejecutar contrato + build**
 
 Run: `cd cli && npx jest tests/commands/sensors/coverage/contract.test.ts --runInBand && npm run build`
 
 Expected: PASS y build sin errores TypeScript.
 
-- [ ] **Step 5: Confirmar la mutación discriminante**
+- [x] **Step 5: Confirmar la mutación discriminante**
 
 Cambiar temporalmente `fields(detector, ['sensor', 'evidence'], detectorWhere)` para incluir `commandInclude`, correr el caso `rejects unknown nested fields`, observar FAIL, restaurar la línea y observar PASS. No commitear la mutación.
 
-- [ ] **Step 6: Commit del contrato**
+- [x] **Step 6: Commit del contrato**
 
 ```bash
 git add cli/src/commands/sensors/coverage/contract.ts cli/tests/commands/sensors/coverage/contract.test.ts
