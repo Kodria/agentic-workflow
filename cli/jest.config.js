@@ -2,6 +2,8 @@ module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   testMatch: ['**/tests/**/*.test.ts'],
+  globalSetup: '<rootDir>/jest.global-setup.js',
+  globalTeardown: '<rootDir>/jest.global-teardown.js',
   setupFiles: ['<rootDir>/jest.setup.js'],
   // El default de jest son 5s, pensado para tests puros. Esta suite no lo es: 24
   // archivos clonan repos git de verdad, spawnean procesos y consultan si un pid sigue

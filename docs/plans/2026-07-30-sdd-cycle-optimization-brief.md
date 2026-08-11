@@ -5,7 +5,7 @@ title: Optimización del ciclo SDD sin pérdida de calidad
 mode: brief
 readiness: ready
 created: 2026-07-30
-updated: 2026-08-02
+updated: 2026-08-11
 open_decisions: [DA-4, DA-5, DA-6]
 project: awm-sdd-optimization
 ---

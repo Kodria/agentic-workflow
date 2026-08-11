@@ -14,6 +14,7 @@ import path from 'path';
 
 const CLI_ROOT = path.resolve(__dirname, '..', '..');
 const SENSORS = path.join(CLI_ROOT, '.awm', 'sensors.json');
+const BASELINE = path.join(CLI_ROOT, '.awm', 'sensors.baseline.json');
 
 /** Extrae los archivos de config que un comando de sensor referencia. Se buscan por la
  *  convención `*.awm.*` que usan todos los packs, no por una lista de nombres — un pack
@@ -44,5 +45,16 @@ describe('configs de sensores: declarados <=> presentes', () => {
         // El mensaje nombra sensor y archivo: un rojo que no dice cuál de los dos falta
         // termina resuelto borrando el sensor, que es la salida equivocada.
         expect(missing.join('\n') || 'todos presentes').toBe('todos presentes');
+    });
+
+    it('cada sensor conservado en el baseline sigue declarado en el manifiesto', () => {
+        const baseline = JSON.parse(fs.readFileSync(BASELINE, 'utf8')) as Record<string, string[]>;
+        const missing = Object.keys(baseline).filter((name) => manifest?.sensors?.[name] === undefined);
+        expect(missing).toEqual([]);
+    });
+
+    it('el sensor de tests cubre la duración observada de la suite con margen de CI', () => {
+        const testSensor = manifest?.sensors?.test as { timeout?: number } | undefined;
+        expect(testSensor?.timeout).toBeGreaterThanOrEqual(300_000);
     });
 });

@@ -256,6 +256,20 @@ awm sensors init [--no-configure] [--registry-root <path>]
 | `--no-configure` | Write the manifest only; do not copy pack config files. |
 | `--registry-root <path>` | Override the AWM registry root (defaults to the cache). |
 
+### `awm sensors coverage`
+
+Compare configured sensors with the static coverage reference owned by the selected sensor-pack. This diagnostic is read-only: it does not run sensors, install tools, edit `.awm/sensors.json`, or apply a remedy.
+
+```
+awm sensors coverage [--json]
+```
+
+Human output is the default. `--json` emits the versioned `schemaVersion: 1` envelope, whose stable `static` section contains the current analysis; a future release may add optional `empirical` data without changing existing field meanings. Human output shows class descriptions, detector sensor statuses, and pack-provided remedies. It excludes configured sensor commands, evidence paths, marker values, and inspected file content.
+
+Coverage gaps, unverifiable custom configuration, a missing `.awm/sensors.json`, and packs without a coverage reference are informative and exit `0`. A missing manifest returns `inconclusive/not_configured` and recommends `awm sensors init`; a legacy pack returns the distinct `inconclusive/no_reference` state and is never reported as covered. Malformed or unreadable manifests, packs, and coverage contracts exit non-zero with an actionable error.
+
+On native Windows, when Node does not expose a safe no-follow file-open primitive, coverage inspection fails closed with an explicit non-zero safety error instead of inspecting the manifest, pack, or evidence files. Coverage results resume once that primitive is available.
+
 ### `awm sensors run`
 
 Run the sensors in the manifest. With no flag, runs **all** sensors (the completion gate). The speed flags scope the run:

@@ -9,7 +9,7 @@ import { Command } from 'commander';
 import { registerSensorsCommand } from '../../../src/commands/sensors/index';
 
 describe('registerSensorsCommand', () => {
-    it('registers sensors command with 4 subcommands', () => {
+    it('keeps existing sensor subcommands and adds coverage', () => {
         const program = new Command();
         registerSensorsCommand(program);
         const cmd = program.commands.find(c => c.name() === 'sensors');
@@ -19,5 +19,6 @@ describe('registerSensorsCommand', () => {
         expect(subNames).toContain('init');
         expect(subNames).toContain('status');
         expect(subNames).toContain('install');
+        expect(subNames).toContain('coverage');
     });
 });
