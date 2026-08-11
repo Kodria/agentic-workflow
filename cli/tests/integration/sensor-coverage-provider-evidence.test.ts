@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { execFileSync, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
 
 const evidenceDir = path.resolve(__dirname, '../../../docs/research/r2/evidence');
 const runner = path.resolve(__dirname, '../../../docs/research/r2/provider-run.mjs');
@@ -30,6 +30,29 @@ function read(provider: Provider): Evidence | null {
     return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) as Evidence : null;
 }
 
+function expectEvidenceIntegrity(provider: Provider, value: Evidence): void {
+    expect(value).toMatchObject({ schema: 1, provider });
+    expect(['pass', 'partial', 'fail']).toContain(value.result);
+    // This identifies the evidence's source without assuming CI has fetched that object.
+    expect(value.sourceHead).toMatch(/^[0-9a-f]{40}$/);
+    expect(value.command).toBe('node cli/dist/src/index.js sensors coverage --json');
+    expect(value.providerVersion).toMatch(/^\S[^\r\n]*$/);
+    expect(value.providerIdentity).toEqual({
+        requestedProvider: provider,
+        executable: provider === 'claude-code' ? 'claude' : 'codex',
+        attestedBy: 'executable--version',
+    });
+    const serialized = JSON.stringify(value);
+    expect(serialized).not.toMatch(/\/home\/[^/"\s]+|\/Users\/[^/"\s]+|\b(?:token|secret|password|api[-_]?key)\b"?\s*[:=]/i);
+    if (value.result === 'pass') {
+        expect(value.reportSha256).toMatch(/^[0-9a-f]{64}$/);
+        expect(value.semanticContract).toBeDefined();
+        expect(value.report).toBeDefined();
+        expect(crypto.createHash('sha256').update(`${JSON.stringify(value.report)}\n`).digest('hex'))
+            .toBe(value.reportSha256);
+    }
+}
+
 describe('R2 provider evidence integrity', () => {
     it('locates the repository root from docs/research/r2 before invoking the compiled CLI', () => {
         expect(fs.readFileSync(runner, 'utf8')).toContain("fileURLToPath(import.meta.url)), '../../..')");
@@ -44,28 +67,16 @@ describe('R2 provider evidence integrity', () => {
             });
             return;
         }
-        expect(value).toMatchObject({ schema: 1, provider });
-        expect(['pass', 'partial', 'fail']).toContain(value.result);
-        expect(value.sourceHead).toMatch(/^[0-9a-f]{40}$/);
-        expect(execFileSync('git', ['cat-file', '-t', value.sourceHead], {
-            cwd: path.resolve(__dirname, '../../..'), encoding: 'utf8',
-        }).trim()).toBe('commit');
-        expect(value.command).toBe('node cli/dist/src/index.js sensors coverage --json');
-        expect(value.providerVersion).toMatch(/^\S[^\r\n]*$/);
-        expect(value.providerIdentity).toEqual({
-            requestedProvider: provider,
-            executable: provider === 'claude-code' ? 'claude' : 'codex',
-            attestedBy: 'executable--version',
-        });
-        const serialized = JSON.stringify(value);
-        expect(serialized).not.toMatch(/\/home\/[^/"\s]+|\/Users\/[^/"\s]+|\b(?:token|secret|password|api[-_]?key)\b"?\s*[:=]/i);
-        if (value.result === 'pass') {
-            expect(value.reportSha256).toMatch(/^[0-9a-f]{64}$/);
-            expect(value.semanticContract).toBeDefined();
-            expect(value.report).toBeDefined();
-            expect(crypto.createHash('sha256').update(`${JSON.stringify(value.report)}\n`).digest('hex'))
-                .toBe(value.reportSha256);
-        }
+        expectEvidenceIntegrity(provider, value);
+    });
+
+    it('accepts a valid but locally unavailable source SHA and rejects malformed source SHAs', () => {
+        const value = read('codex');
+        if (value === null) throw new Error('Codex evidence fixture is required for integrity validation');
+
+        expectEvidenceIntegrity('codex', { ...value, sourceHead: 'f'.repeat(40) });
+        expect(() => expectEvidenceIntegrity('codex', { ...value, sourceHead: 'not-a-commit' }))
+            .toThrow();
     });
 
     it('reports RNF-T.2 as partial until two real pass envelopes can be compared', () => {
