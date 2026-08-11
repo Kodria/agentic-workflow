@@ -128,11 +128,9 @@ test('does not trust injected lstat semantics to make symlink evidence regular (
 
     const observedWithLstat = observeDetector(root, 'style', 0, detector, command, {
         lstatSync: fs.lstatSync,
-        readFileUtf8: (input) => fs.readFileSync(input, 'utf8'),
     });
     const simulatedStatRegression = observeDetector(root, 'style', 0, detector, command, {
         lstatSync: fs.statSync,
-        readFileUtf8: (input) => fs.readFileSync(input, 'utf8'),
     });
 
     expect(observedWithLstat.status).toBe('unverifiable');
@@ -154,9 +152,9 @@ test('rejects a file swapped to a symlink after lstat without reading its target
             fs.symlinkSync(outsideTarget, input);
             return stat;
         },
-        readFileUtf8: (input: string | number) => {
-            reads.push(input);
-            return fs.readFileSync(input, 'utf8');
+        readSync: (fd, buffer, offset, length, position) => {
+            reads.push(fd);
+            return fs.readSync(fd, buffer, offset, length, position);
         },
     });
 
@@ -176,9 +174,9 @@ test('rejects a non-regular descriptor before reading it (R2.11)', () => {
         lstatSync: fs.lstatSync,
         openSync: fs.openSync,
         fstatSync: () => fs.statSync(root),
-        readFileUtf8: (fd) => {
+        readSync: (fd, buffer, offset, length, position) => {
             reads.push(fd as number);
-            return fs.readFileSync(fd, 'utf8');
+            return fs.readSync(fd, buffer, offset, length, position);
         },
         closeSync: fs.closeSync,
     });
@@ -190,11 +188,32 @@ test('rejects a non-regular descriptor before reading it (R2.11)', () => {
     expect(reads).toEqual([]);
 });
 
+test('rejects evidence that grows beyond the byte cap after descriptor validation (R2.11)', () => {
+    const file = path.join(root, 'eslint.config.js');
+    fs.writeFileSync(file, 'no-unreachable');
+
+    const out = observeDetector(root, 'style', 0, detector, { cmd: 'eslint --config eslint.config.js' }, {
+        lstatSync: fs.lstatSync,
+        openSync: fs.openSync,
+        fstatSync: (fd) => {
+            const stat = fs.fstatSync(fd);
+            fs.appendFileSync(file, Buffer.alloc(MAX_COVERAGE_FILE_BYTES + 1));
+            return stat;
+        },
+        closeSync: fs.closeSync,
+    });
+
+    expect(out).toMatchObject({
+        status: 'unverifiable',
+        evidence: expect.arrayContaining([{ kind: 'file', path: 'eslint.config.js', status: 'unverifiable' }]),
+    });
+});
+
 test('read errors are unverifiable independently of host permissions (R2.5a)', () => {
     fs.writeFileSync(path.join(root, 'eslint.config.js'), 'no-unreachable');
     const io = {
         lstatSync: fs.lstatSync,
-        readFileUtf8: () => { throw Object.assign(new Error('permission denied'), { code: 'EACCES' }); },
+        readSync: () => { throw Object.assign(new Error('permission denied'), { code: 'EACCES' }); },
     };
 
     expect(observeDetector(root, 'style', 0, detector,

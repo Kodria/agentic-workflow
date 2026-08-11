@@ -8,7 +8,7 @@ export type EvidenceIo = {
     lstatSync: (file: string) => fs.Stats;
     openSync?: (file: string, flags: number) => number;
     fstatSync?: (fd: number) => fs.Stats;
-    readFileUtf8: (file: string | number) => string;
+    readSync?: (fd: number, buffer: Uint8Array, offset: number, length: number, position: number | null) => number;
     closeSync?: (fd: number) => void;
 };
 
@@ -16,7 +16,7 @@ const realIo: EvidenceIo = {
     lstatSync: fs.lstatSync,
     openSync: fs.openSync,
     fstatSync: fs.fstatSync,
-    readFileUtf8: (file) => fs.readFileSync(file, 'utf8'),
+    readSync: fs.readSync,
     closeSync: fs.closeSync,
 };
 
@@ -64,7 +64,12 @@ function inspectFile(root: string, relative: string, markers: string[], io: Evid
         if (!opened.isFile() || opened.size > MAX_COVERAGE_FILE_BYTES) {
             return { status: 'unverifiable', evidence: [{ kind: 'file', path: relative, status: 'unverifiable' }] };
         }
-        content = io.readFileUtf8(fd);
+        const buffer = Buffer.allocUnsafe(MAX_COVERAGE_FILE_BYTES + 1);
+        const bytesRead = (io.readSync ?? realIo.readSync!)(fd, buffer, 0, buffer.length, null);
+        if (!Number.isSafeInteger(bytesRead) || bytesRead < 0 || bytesRead > MAX_COVERAGE_FILE_BYTES) {
+            return { status: 'unverifiable', evidence: [{ kind: 'file', path: relative, status: 'unverifiable' }] };
+        }
+        content = buffer.subarray(0, bytesRead).toString('utf8');
     } catch {
         return { status: 'unverifiable', evidence: [{ kind: 'file', path: relative, status: 'unverifiable' }] };
     } finally {
