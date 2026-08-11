@@ -286,10 +286,10 @@ El orden es por valor de negocio: primero lo que reduce el dolor de N1 en *todos
 
 ### Release 2 — Detección estática de cobertura de sensores (core, mitad 1)
 
-- **Value:** el dueño puede preguntarle al framework "¿qué clases de defecto no tienen detector acá?" y recibir una respuesta accionable — elimina en origen la clase de desperdicio "estilo escalando a revisores" en cualquier proyecto, no solo el diagnosticado.
-- **Scope:** RF-1.1, RF-1.4, RF-1.5 · RNF-T.2, RNF-T.3. (CLI: comando de reporte · Registry: sets de referencia por pack.)
-- **Blocked by:** DA-4, DA-6.
-- **Acceptance:** CA-1.1, CA-1.4, CA-1.5, CA-T.2, CA-T.3.
+- **Value:** **completo** — el dueño puede preguntarle al framework "¿qué clases de defecto no tienen detector acá?" y recibir una respuesta accionable, eliminando en origen la clase de desperdicio "estilo escalando a revisores" en cualquier proyecto, no solo el diagnosticado.
+- **Scope:** RF-1.1, RF-1.4, RF-1.5 · RNF-T.2, RNF-T.3. (CLI: comando de reporte · Registry: sets de referencia por pack.) DA-4 quedó resuelta con el contrato `coverage` dentro de cada sensor-pack del registry baseline; DA-6 quedó resuelta con remedios sugeridos y estrictamente read-only.
+- **Blocked by:** ninguno. Baton: Release 3 continúa pendiente de DA-5.
+- **Acceptance:** CA-1.1, CA-1.4, CA-1.5, CA-T.2, CA-T.3 certificadas: consumidor #71, evidencia provider #72, fix de seguridad/compatibilidad #73 y registry #27 (`v1.16.0`).
 
 ### Release 3 — Detección empírica de cobertura (core, mitad 2)
 

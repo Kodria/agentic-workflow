@@ -1339,13 +1339,15 @@ test('Claude Code and Codex expose the same result contract (RNF-T.2)', () => {
 - Premisa CA-1.1: el checkout real carece de sensor `format`; si el estado del repo cambia, la corrida real documenta el estado nuevo y el fixture hermético permanece como reproducción histórica.
 ```
 
-- [ ] **Step 6: Completar fixture/runner, ejecutar aceptación y registrar evidencia real**
+- [x] **Step 6: Completar fixture/runner, ejecutar aceptación y registrar evidencia real**
 
 Run en la sesión Claude Code: `cd cli && npm run build && node ../docs/research/r2/provider-run.mjs claude-code .`
 
 Run en la sesión Codex: `cd cli && npm run build && node ../docs/research/r2/provider-run.mjs codex .`
 
 Expected: ambos JSON tienen el mismo `semanticContract`. Si una plataforma real no está disponible, no fabricar `result: pass`: registrar `partial` en README y dejar que el test de certificación permanezca dirigido solamente a evidencias `pass`; RNF-T.2 no se marca completo hasta obtener ambas.
+
+Completado: Claude Code y Codex certificaron evidencia `pass` con el mismo `sourceHead`; el rerun quedó integrado en el merge de evidencia provider `de5c3b4b1ba0998214d560203dc051e962940d95`.
 
 - [x] **Step 7: Ejecutar suite dirigida de R2 y confirmar read-only**
 
@@ -1360,9 +1362,11 @@ git add cli/tests/fixtures/sensor-coverage cli/tests/integration/sensor-coverage
 git commit -m "test(sensors): prove static coverage acceptance"
 ```
 
-- [ ] **Step 9: Abrir y mergear el PR del consumidor antes del registry**
+- [x] **Step 9: Abrir y mergear el PR del consumidor antes del registry**
 
 Verificar `git status --short`, confirmar que solo los templates AWM aplicables al stack quedaron versionados, push de `feat/issue-20-r2-sensor-coverage` y PR con `Closes` solamente si issue #20 se cierra con R2; de lo contrario usar `Refs #20` y mantener R3 abierto. Esperar CI verde y publicación del CLI compatible antes de comenzar el merge del registry.
+
+Completado: el consumidor se publicó antes del registry mediante PR #71 (merge `6ac18564535c7962637b68afa48c4310fe3a9b9f`); la compatibilidad y seguridad quedaron revalidadas tras PR #73 (merge `be206456cfc110341db067f7d0ac10e8c8bbf8f6`) con CI verde en Ubuntu, macOS y Windows.
 
 ### Task 7: Gate estructural de coverage en `awm-baseline-registry`
 
@@ -1373,7 +1377,7 @@ _Requirements: R2.1, R2.7, R2.11, R2.15, RNF-T.3_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Crear una rama limpia del registry desde su remoto actualizado**
+- [x] **Step 1: Crear una rama limpia del registry desde su remoto actualizado**
 
 ```bash
 cd ../awm-baseline-registry
@@ -1384,7 +1388,7 @@ git status --short --branch
 
 Expected: rama basada en `ad61e5051cbb3f0b1a60e6ce10ca9f8f1fde75a9` o un `origin/main` posterior que ya contenga ese commit; árbol limpio.
 
-- [ ] **Step 2: Escribir el validador rojo del contrato y catálogo exacto**
+- [x] **Step 2: Escribir el validador rojo del contrato y catálogo exacto**
 
 ```js
 // tests/sensor-pack-coverage.test.mjs
@@ -1445,13 +1449,13 @@ for (const packName of Object.keys(expected)) {
 console.log('sensor-pack-coverage: 4 packs / contrato v1 OK');
 ```
 
-- [ ] **Step 3: Ejecutar el gate rojo**
+- [x] **Step 3: Ejecutar el gate rojo**
 
 Run: `node tests/sensor-pack-coverage.test.mjs`
 
 Expected: FAIL con `generic: falta coverage`.
 
-- [ ] **Step 4: Commit del gate rojo solo después de añadir un fixture interno mínimo**
+- [x] **Step 4: Commit del gate rojo solo después de añadir un fixture interno mínimo**
 
 No dejar `main` permanentemente rojo. Mantener el archivo sin commit hasta Task 8, donde los cuatro contratos lo vuelven verde; el commit de Task 8 incluye test + packs como una unidad atómica.
 
@@ -1468,7 +1472,7 @@ _Requirements: RF-1.1, R2.1, R2.2, R2.3, R2.4, R2.5, R2.5a, R2.5b, R2.10, R2.15,
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Añadir `generic.coverage` con evidencia real del pack**
+- [x] **Step 1: Añadir `generic.coverage` con evidencia real del pack**
 
 ```json
 "coverage": {
@@ -1489,7 +1493,7 @@ _Requirements: RF-1.1, R2.1, R2.2, R2.3, R2.4, R2.5, R2.5a, R2.5b, R2.10, R2.15,
 }
 ```
 
-- [ ] **Step 2: Añadir `js-ts.coverage` según el mapa completo**
+- [x] **Step 2: Añadir `js-ts.coverage` según el mapa completo**
 
 Cada fila se serializa como una entrada de `coverage.classes`; todos los fragments/markers son literales y todas las evidencias dentro de la fila son AND. Las seis filas de `project-style-conventions` son detectores OR independientes.
 
@@ -1515,7 +1519,7 @@ Usar como forma exacta por clase:
 }
 ```
 
-- [ ] **Step 3: Añadir `python.coverage` según el mapa completo**
+- [x] **Step 3: Añadir `python.coverage` según el mapa completo**
 
 | Clase | Sensor | `commandIncludes` | Archivo → marker | Remedio |
 |---|---|---|---|---|
@@ -1528,7 +1532,7 @@ Usar como forma exacta por clase:
 | `unsafe-deserialization` | `security` | `semgrep`, `.semgrep.awm.yml` | `.semgrep.awm.yml` → `awm-py-unsafe-deserialization` | `awm sensors init --pack python` |
 | `hardcoded-secrets` | `security` | `semgrep`, `.semgrep.awm.yml` | `.semgrep.awm.yml` → `awm-py-no-hardcoded-secrets` | `awm sensors init --pack python` |
 
-- [ ] **Step 4: Añadir `shell.coverage` según el mapa completo**
+- [x] **Step 4: Añadir `shell.coverage` según el mapa completo**
 
 | Clase | Sensor | `commandIncludes` | Archivo → marker | Remedio |
 |---|---|---|---|---|
@@ -1538,17 +1542,17 @@ Usar como forma exacta por clase:
 | `unquoted-command-substitution` | `security` | `semgrep`, `.semgrep.awm.yml` | `.semgrep.awm.yml` → `awm-sh-unquoted-command-substitution` | `awm sensors init --pack shell` |
 | `hardcoded-secrets` | `security` | `semgrep`, `.semgrep.awm.yml` | `.semgrep.awm.yml` → `awm-sh-no-hardcoded-secrets` | `awm sensors init --pack shell` |
 
-- [ ] **Step 5: Ejecutar el gate estructural y el shape gate existente**
+- [x] **Step 5: Ejecutar el gate estructural y el shape gate existente**
 
 Run: `node tests/sensor-pack-coverage.test.mjs && node tests/sensor-pack-shape.test.mjs`
 
 Expected: `sensor-pack-coverage: 4 packs / contrato v1 OK` y `sensor-pack-shape: 4 packs ... OK`.
 
-- [ ] **Step 6: Probar una mutación semántica antes del commit**
+- [x] **Step 6: Probar una mutación semántica antes del commit**
 
 Cambiar temporalmente la descripción de `hardcoded-secrets` a `Secrets in agentic-workflow`; el gate debe fallar por acoplamiento a proyecto. Restaurar y confirmar PASS.
 
-- [ ] **Step 7: Commit atómico de gate + cuatro contratos**
+- [x] **Step 7: Commit atómico de gate + cuatro contratos**
 
 ```bash
 git add tests/sensor-pack-coverage.test.mjs sensor-packs/generic/pack.json sensor-packs/js-ts/pack.json sensor-packs/python/pack.json sensor-packs/shell/pack.json
@@ -1569,7 +1573,7 @@ _Requirements: R2.1, R2.7, R2.11, R2.15, RNF-T.3_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Extraer el validador a modo importable/CLI**
+- [x] **Step 1: Extraer el validador a modo importable/CLI**
 
 Mover `validateCoverage` y `validateRegistryCoverage(root)` a `tests/support/sensor-pack-coverage-validator.mjs`; `tests/sensor-pack-coverage.test.mjs` lo importa y ejecuta contra el checkout real. El módulo exporta funciones y solo imprime cuando `import.meta.url === pathToFileURL(process.argv[1]).href`.
 
@@ -1583,7 +1587,7 @@ export function validateRegistryCoverage(root) {
 }
 ```
 
-- [ ] **Step 2: Escribir el self-test de mutaciones**
+- [x] **Step 2: Escribir el self-test de mutaciones**
 
 ```js
 // tests/sensor-pack-coverage-mutations.test.mjs
@@ -1618,13 +1622,13 @@ console.log(`sensor-pack-coverage-mutations: ${mutations.length} mutations rejec
 
 El validador productivo debe verificar además que todo marker declarado existe literalmente en el archivo del propio pack. Para `project-style-conventions`, donde el archivo esperado pertenece al proyecto consumidor y no al pack, declarar `containsAll: []` y no exigir existencia en registry; para archivos que sí existen junto al pack (`.semgrep.awm.yml`, `.dep-cruiser.awm.js`, `eslint.config.awm.mjs`), el test comprueba marker y existencia.
 
-- [ ] **Step 3: Ejecutar el self-test rojo y corregir el validador hasta que cada mutación dispare**
+- [x] **Step 3: Ejecutar el self-test rojo y corregir el validador hasta que cada mutación dispare**
 
 Run: `node tests/sensor-pack-coverage-mutations.test.mjs`
 
 Expected antes de endurecer: al menos `missing marker` no lanza. Expected final: `6 mutations rejected`.
 
-- [ ] **Step 4: Añadir ambos comandos a los dos workflows**
+- [x] **Step 4: Añadir ambos comandos a los dos workflows**
 
 En `.github/workflows/validate.yml` y dentro de `Verify registry before tagging` en `.github/workflows/auto-tag.yml`, después de `sensor-pack-shape`:
 
@@ -1635,7 +1639,7 @@ En `.github/workflows/validate.yml` y dentro de `Verify registry before tagging`
 
 Conservar la indentación propia de cada bloque: `auto-tag.yml` usa un `run: |`, por lo que allí se añaden como líneas `node ...`, no como nuevos items YAML.
 
-- [ ] **Step 5: Bump coordinado del bundle dev y changelog**
+- [x] **Step 5: Bump coordinado del bundle dev y changelog**
 
 Cambiar exactamente `2.9.0` → `2.10.0` en `catalog.json` y `bundles/dev/bundle.json`. Añadir al inicio de `CHANGELOG.md`:
 
@@ -1650,7 +1654,7 @@ Cambiar exactamente `2.9.0` → `2.10.0` en `catalog.json` y `bundles/dev/bundle
 Bundle `dev` 2.9.0 → 2.10.0 (minor): capacidad aditiva. Los sensor-packs siguen siendo contenido top-level entregado por el tag del registry; no se modificó ninguna skill, por lo que no corresponde bump de frontmatter de skills.
 ```
 
-- [ ] **Step 6: Ejecutar el gate completo del registry**
+- [x] **Step 6: Ejecutar el gate completo del registry**
 
 Run:
 
@@ -1667,16 +1671,18 @@ node tests/sensor-pack-coverage-mutations.test.mjs
 
 Expected: todos exit `0`; los dos nuevos imprimen `4 packs / contrato v1 OK` y `6 mutations rejected`.
 
-- [ ] **Step 7: Commit de gate, CI y versión**
+- [x] **Step 7: Commit de gate, CI y versión**
 
 ```bash
 git add tests/support/sensor-pack-coverage-validator.mjs tests/sensor-pack-coverage.test.mjs tests/sensor-pack-coverage-mutations.test.mjs .github/workflows/validate.yml .github/workflows/auto-tag.yml catalog.json bundles/dev/bundle.json CHANGELOG.md
 git commit -m "test(sensors): gate baseline coverage metadata"
 ```
 
-- [ ] **Step 8: Abrir PR del registry después de confirmar el consumidor publicado**
+- [x] **Step 8: Abrir PR del registry después de confirmar el consumidor publicado**
 
 Push de `feat/issue-20-r2-coverage-contracts`, PR con `Refs Kodria/agentic-workflow#20`, CI verde y merge con conventional commit `feat(sensors): ...` para que `auto-tag.yml` derive bump minor. No crear tag manual.
+
+Completado: PR #27 del registry integró el contrato en `374f5a78f76031c8221dda0a442cf7d7a9e7d23f`; `validate` y `auto-tag` terminaron en SUCCESS y publicaron `v1.16.0`.
 
 ### Task 10: Reconciliación cruzada, regresión completa y baton hacia R3
 
@@ -1689,7 +1695,7 @@ _Requirements: RF-1.1, RF-1.4, RF-1.5, RNF-T.2, RNF-T.3, R2.1, R2.2, R2.3, R2.4,
 
 **Skills:** `verification-before-completion`, `requesting-code-review`, `post-implementation-qa`, `harness-retro`, `finishing-a-development-branch`
 
-- [ ] **Step 1: Verificar primero el estado y scope de ambos repos**
+- [x] **Step 1: Verificar primero el estado y scope de ambos repos**
 
 Run:
 
@@ -1702,19 +1708,19 @@ git -C ../awm-baseline-registry diff origin/main...HEAD --check
 
 Expected: solamente archivos R2 y del harness validado en commits/diff; `eslint.config.awm.cjs` y `tsconfig.awm.json` permanecen ausentes, mientras `.dep-cruiser.awm.js` y su baseline quedan versionados.
 
-- [ ] **Step 2: Ejecutar la suite completa y build de la CLI**
+- [x] **Step 2: Ejecutar la suite completa y build de la CLI**
 
 Run: `cd cli && npm test && npm run build`
 
 Expected: PASS y `dist/src/index.js` actualizado por build, sin añadir `dist/` al commit si el repo no lo trackea.
 
-- [ ] **Step 3: Ejecutar el gate real de sensores con el CLI compilado local**
+- [x] **Step 3: Ejecutar el gate real de sensores con el CLI compilado local**
 
 Run desde `cli/`: `node dist/src/index.js sensors run`
 
 Expected: `overall: "pass"`. Nunca sustituir este comando por `awm sensors run` global.
 
-- [ ] **Step 4: Ejecutar la aceptación coverage contra CLI + registry finales**
+- [x] **Step 4: Ejecutar la aceptación coverage contra CLI + registry finales**
 
 Con `AWM_HOME` temporal que contenga el registry final:
 
@@ -1725,7 +1731,7 @@ node dist/src/index.js sensors coverage
 
 Expected: ambos exit `0`, JSON parseable, vista humana coherente, `pack: js-ts`, registry fuente correcto, clases ordenadas, y los gaps reales conservados sin escribir archivos.
 
-- [ ] **Step 5: Ejecutar otra vez el gate completo del registry desde su rama final**
+- [x] **Step 5: Ejecutar otra vez el gate completo del registry desde su rama final**
 
 Run: los ocho comandos enumerados en Task 9 Step 6.
 
