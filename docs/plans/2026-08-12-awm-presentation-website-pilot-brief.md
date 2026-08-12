@@ -6,7 +6,7 @@ mode: brief
 readiness: ready
 created: 2026-08-12
 updated: 2026-08-12
-open_decisions: [DA-1, DA-2, DA-3, DA-4, DA-5, DA-6, DA-7, DA-8, DA-9]
+open_decisions: [DA-1, DA-2, DA-3, DA-4, DA-5, DA-6, DA-7, DA-8, DA-9, DA-10]
 project: agentic-workflow
 ---
 
@@ -21,6 +21,7 @@ Audience: implementing agent (provider-neutral) · Methodology: brief-spec (AWM 
 - **N3** — Delivery leads and developers often begin from Jira items with partial specifications or limited bug evidence. Unresolved assumptions surface during implementation and may survive until after integration, creating misalignment and rework.
 - **N4** — Project decisions, evidence and lessons are not routinely recorded as durable development documentation. The cost is that each project repeats discovery and quality work instead of accumulating reusable organizational knowledge.
 - **N5** — AWM is an open-source personal contribution by Sendara that needs a clear public presence and an accurate internal introduction. Without both, the methodology cannot be understood independently of its creator or evaluated responsibly for a controlled corporate pilot.
+- **N6** — AWM's differentiating value comes from an engineered lifecycle, not from a catalog of prompts or AI tools. If its architecture, control boundaries and evidence flow are not explained explicitly, audiences may mistake it for generic code generation and cannot evaluate why its quality claims are credible.
 
 ## Business Cases
 
@@ -37,6 +38,7 @@ Audience: implementing agent (provider-neutral) · Methodology: brief-spec (AWM 
 - **Provider/account variation:** require a controlled pilot to record and authorize each repository/provider combination while keeping the methodology independent of any single subscription.
 - **Jira without automated connector:** accept a manual, traceable transfer of the ticket context until API/MCP feasibility is evaluated; automation is an enhancement, not an entry dependency.
 - **Public visitor:** understand the methodology, then reach documentation/examples, the repository and installation guidance, with GitHub as the initial contact path.
+- **Engineering-depth explanation:** allow leadership to understand the lifecycle and control model in the 15-minute core while allowing technical evaluators to inspect how current AWM mechanisms implement that model in the optional presentation depth and public website.
 - **Presentation-time exception:** deliver a coherent 15-minute core narrative that can expand to 30 minutes without depending on a full live demonstration.
 
 ## Users & Context
@@ -66,12 +68,15 @@ Audience: implementing agent (provider-neutral) · Methodology: brief-spec (AWM 
 - **Website ownership:** the website is public, belongs to the Sendara open-source presence and uses a `*.sendaraconsulting.com` domain; the exact subdomain remains open.
 - **Contact:** GitHub is the only confirmed initial contact channel; no separate Sendara contact channel is currently available.
 - **Demonstration:** the presentation must not depend on completing an end-to-end live development flow during the session.
+- **Methodological depth:** the 15-minute core must reserve enough time to explain AWM's canonical operating layers, engineering responsibilities and evidence flow; a project list, tool demo or list of skill names cannot substitute for this explanation.
 
 ## Non-Assumption Mandate
 
 This brief was constructed from the owner's sanitized discovery input and with access to the public AWM repository, but without access to the private target systems, repositories, running applications or measurement data that a pilot would use. The following have **not** been verified and must be confirmed in R0 (read-only discovery) before any technical or evidentiary commitment is made:
 
 The owner maintains a separate confidential context companion outside every public repository. The implementing agent must request and read that companion together with this brief for private presentation work and pilot R0. The companion is an input source, never a versioned deliverable: none of its organization, person, project or process identifiers may be copied into this repository, the public website, public issues, commits, pull requests, logs or screenshots. If the companion is not supplied, private evidence selection remains blocked while public-site discovery may continue.
+
+A read-only scan performed while refining this brief found pre-existing organization-like identifiers and developer-local path fragments in tracked historical tests, plans, runbooks and evidence outside this document. This brief does not classify those references, authorize their reuse or prescribe destructive history rewriting. R0 must inventory the current exposure privately, identify which files can feed public-site content or builds, and obtain the owner's disposition under DA-10 before affected content is reused or published.
 
 - The exact AWM configuration, version, generated artifacts and usable evidence in the primary private new-project case.
 - The exact private content that is approved for the internal presentation.
@@ -86,6 +91,7 @@ The owner maintains a separate confidential context companion outside every publ
 - The available Sendara brand assets, typography, visual conventions and accessibility baseline.
 - The exact presentation environment, network availability, audience count and permission to show selected private evidence.
 - The final command names, screenshots and examples that remain accurate against the latest AWM release at presentation time.
+- The exact current mapping between the stable methodology concepts and version-specific AWM skills, CLI commands, registry artifacts and repository paths; R0 must re-verify this mapping against public sources before publication or presentation.
 
 Any contradiction found between this brief and the real repositories, systems or policies during R0 is reported to the owner and never resolved by assuming. The owner decides, and the resolution is recorded as an update to this brief or a new `DA-#`. All schemas, routes, connector mechanisms, site architecture, deployment choices and tool signatures are delegated to the implementer after R0 discovery.
 
@@ -99,6 +105,9 @@ Any contradiction found between this brief and the real repositories, systems or
 | Verifiable PR | A pull/merge request whose scope, requirements, tests, reviews, security checks and known limitations are traceable. |
 | Harness | The installed AWM context, skills, sensors, rules and process gates that adapt the methodology to a repository. |
 | Sensor | A project-adapted automated check that produces evidence about quality, tests, security or structural integrity. |
+| Canonical operating layer | One of AWM's three public architectural layers: Product decides whether and why to build, Development decides how and builds, and the Harness makes both verifiable. |
+| Engineering responsibility | One of the five explanatory responsibilities used to show how work and evidence move through the three canonical layers; it is a conceptual view, not a replacement architecture. |
+| Evidence artifact | A durable output—such as a certified brief, traceable plan, test result, sensor verdict, review finding or learned rule—that allows a later person or session to verify what occurred. |
 | Characterization test | A test that records existing legacy behavior so a proposed change can be bounded and compared safely. |
 | Fail-closed | A rule that stops and reports uncertainty when required evidence cannot be obtained, instead of treating uncertainty as success. |
 | Controlled pilot | A time-bounded evaluation on selected repositories and participants, authorized by the responsible technical lead and measured against an agreed baseline. |
@@ -114,6 +123,21 @@ Any contradiction found between this brief and the real repositories, systems or
 - **PR-6 — Legacy compatibility case:** perform read-only discovery, identify stack and constraints, establish characterization evidence, propose the smallest justified change and stop for human escalation if verification cannot be made credible.
 - **PR-7 — Hotfix/sensitive-work variants:** shorten optional steps for urgency or strengthen evidence for regulated work, while retaining minimum scope, security, verification and human-approval gates.
 - **PR-8 — Jira intake without automation:** transfer ticket context manually with its identifier and source preserved; if later discovery confirms an approved API/MCP route, automate intake without making it a prerequisite for methodology use.
+- **PR-9 — Engineering-architecture explanation:** present AWM first through its canonical Product, Development and Harness layers, then use the five responsibilities below to explain the lifecycle, control boundaries, produced evidence and retained human decisions. Skill and command names may appear as verified implementation detail, but may not replace the conceptual explanation.
+
+### AWM engineering architecture to communicate
+
+AWM's source-of-truth documentation defines three canonical operating layers: **Product**, **Development** and **Harness**. The five responsibilities below are the mandatory explanatory view across those layers. They refine the story for presentation and website audiences; they do not redefine the framework's internal architecture.
+
+| Engineering responsibility | Canonical layer | Purpose and mechanisms | Evidence or gate produced | Human responsibility retained |
+|---|---|---|---|---|
+| **1. Product intent** | Product | Move from an idea or incomplete need through discovery, business cases, a portable brief and a readiness decision before solution work begins. | Certified brief, explicit acceptance intent, managed open decisions and a G1–G9 readiness verdict. | Own the problem, priority, business decisions, constraints and authorization to cross into development. |
+| **2. Engineering design** | Development | Explore the solution space, make architecture or UI decisions when relevant, derive traceable requirements and decompose the work into a bounded plan before implementation. | Design/architecture artifacts, requirement IDs, implementation plan, scope boundaries and unresolved technical risks. | Approve consequential design choices, trade-offs, scope and the execution handoff. |
+| **3. Controlled execution** | Development | Execute isolated, bounded tasks; establish discriminating tests before implementation; use agents or subagents with per-task specification and quality review. | Failing-then-passing test evidence, reviewable commits/diffs, task-level review verdicts and traceability back to the plan. | Supply judgment, resolve authorized decisions, inspect material changes and remain accountable for the delivered behavior. |
+| **4. Verification fabric** | Harness across phase boundaries | Run preflight and stack-adapted deterministic sensors, reconcile plan versus code, apply independent fidelity/quality/security lenses, perform terminal QA and fail closed when evidence is missing. | Real command output, sensor verdicts, review findings, QA markers, known-limitations record and a PR/MR whose claims can be checked. | Decide whether residual risk is acceptable; no human or agent narrative may override a failed deterministic gate. |
+| **5. Learning and governance** | Harness and lifecycle closure | Record branch findings, detect recurrence, convert lessons into sensors or durable project rules, preserve context across sessions and distribute reusable methodology through controlled registries/profiles. | Ledger entries, retro record, updated sensor/rule/context artifacts, versioned project configuration and an auditable learning trail. | Curate organizational rules, approve governance boundaries and decide which learning is project-specific versus reusable. |
+
+The core explanation must communicate each responsibility's purpose, mechanism, evidence and human ownership. Exact skill names, CLI commands and repository paths belong in a verified technical mapping or optional depth section because they may evolve independently of the stable methodology.
 
 ```mermaid
 flowchart LR
@@ -133,6 +157,10 @@ flowchart LR
   - **CA-0.1** — The owner approves a read-only discovery report that records inspected sources, public/private classification, contradictions and missing inputs, while repository diff checks show no imported private artifact.
 - **RF-0.2** — IF R0 finds a contradiction between this brief and a real source, THEN THE discovery SHALL report the contradiction and request an owner decision instead of silently choosing an interpretation.
   - **CA-0.2** — A reconciliation table records every contradiction, its source and owner disposition; unresolved contradictions remain explicit and block the affected release.
+- **RF-0.3** — WHEN R0 prepares methodology claims, THE discovery SHALL map the three canonical layers and five engineering responsibilities to current, public AWM sources and SHALL distinguish stable concepts, current implementation and roadmap.
+  - **CA-0.3** — The owner approves a source matrix that cites the public documentation or repository evidence for every material architecture claim, records the inspected AWM version/commit and contains no unsupported or private claim.
+- **RF-0.4** — WHEN R0 evaluates repository content for presentation or website reuse, THE discovery SHALL inventory pre-existing organization-like identifiers and local path fragments, classify their publication risk privately and prevent affected sources from entering public builds until DA-10 is resolved.
+  - **CA-0.4** — The owner approves a private inventory by file/category and a sanitized public disposition; a build-input trace plus prohibited-content scan demonstrates that no unresolved source contributes restricted content to the website or presentation's public package.
 - **RF-1.1** — WHEN the internal presentation begins, THE presentation SHALL frame AWM as a methodology for controlled, verifiable agentic development rather than as a code-generation tool.
   - **CA-1.1** — In a timed rehearsal, an independent listener can state the methodology's purpose and distinguish it from generic AI coding after the opening section.
 - **RF-1.2** — WHEN the methodology is explained, THE presentation SHALL show the complete lifecycle from problem/need definition through planning, agent execution, tests, reviews, security, pull request and reusable learning.
@@ -147,6 +175,10 @@ flowchart LR
   - **CA-1.6** — The owner approves the private evidence inventory, and an automated plus manual content comparison confirms none of its corporate identifiers appear in the public build.
 - **RF-1.7** — WHEN the presentation concludes, THE call to action SHALL first request organizational feedback and interested teams, then offer a controlled pilot rather than broad adoption.
   - **CA-1.7** — The final slide identifies the approved primary private case and asks for selectively evaluated volunteers without requesting mass rollout or immediate budget.
+- **RF-1.8** — WHEN AWM's architecture is presented, THE 15-minute core SHALL use two distinct readable visuals: one for the end-to-end lifecycle and one for the Product/Development/Harness control architecture expressed through the five engineering responsibilities.
+  - **CA-1.10** — In a timed rehearsal, both visuals appear in the core narrative and an independent listener can explain why AWM is an engineered methodology rather than a prompt library, including at least one evidence artifact and retained human decision from every responsibility.
+- **RF-1.9** — WHEN the presentation expands beyond the 15-minute core, THE optional technical depth SHALL map the methodology to verified current implementation mechanisms, including context delivery, provider-capability adaptation, registries/profiles, stack sensor packs and baselines, independent review/QA, ledger/retro and PR completion.
+  - **CA-1.11** — The optional section can be delivered without exceeding 30 minutes, cites the R0 source matrix, labels version-specific mechanisms and roadmap separately, and does not require the audience to know AWM skill names to understand the core method.
 - **RF-2.1** — WHEN a visitor opens the public website, THE site SHALL identify the project as `Agentic Workflow Methodology (AWM)` and display `an open-source project by Sendara` as the secondary signature.
   - **CA-2.1** — The public production URL renders both identities in the primary page experience and does not display corporate branding.
 - **RF-2.2** — WHEN a visitor explores the public website, THE site SHALL explain the problem, human/agent responsibility split, lifecycle, quality controls, fail-closed behavior and suitable adoption cases before requiring navigation to external documentation.
@@ -157,6 +189,10 @@ flowchart LR
   - **CA-2.4** — The public build passes an explicit prohibited-content scan and manual privacy review before deployment.
 - **RF-2.5** — WHEN the initial public website is released, THE website SHALL present its complete core content in Spanish and SHALL NOT require the English release to be useful.
   - **CA-2.5** — A Spanish production build independently satisfies CA-2.1 through CA-2.4; English absence does not produce incomplete labels or dead navigation.
+- **RF-2.6** — WHEN a visitor reaches the public site's `Cómo funciona AWM` experience, THE site SHALL explain the three canonical layers and all five engineering responsibilities, showing each responsibility's purpose, mechanism, evidence and retained human ownership.
+  - **CA-2.6** — A first-time evaluator using only that experience can place every responsibility in Product, Development or Harness and identify the artifact or gate that prevents the lifecycle from being a sequence of unsupported AI assertions.
+- **RF-2.7** — WHEN a technical visitor requests more depth, THE site SHALL provide a secondary path from the conceptual architecture to verified current implementation details and canonical public sources without turning the primary experience into an exhaustive skill catalog.
+  - **CA-2.7** — Every technical-detail claim links to or cites an R0-verified public source, labels current implementation versus roadmap, and remains reachable from—but visually subordinate to—the core methodology experience.
 - **RF-3.1** — WHEN a pilot is proposed, THE pilot SHALL use the approved primary private new-project case and SHALL admit additional teams or repositories only through controlled technical-lead evaluation.
   - **CA-3.1** — The pilot register identifies the principal case, each added repository, its authorizing technical lead, participants, provider and approved scope.
 - **RF-3.2** — BEFORE pilot work begins, THE pilot SHALL record a real baseline for need-to-PR time, rework/defects and AI adoption among participating developers.
@@ -183,6 +219,8 @@ flowchart LR
   - **CA-T.2** — Public messaging and pilot design describe provider variation explicitly and contain no mandatory provider-specific claim outside verified compatibility notes.
 - **RNF-T.3** — THE delivered artifacts SHALL preserve traceability from each requirement to its acceptance evidence.
   - **CA-T.3** — The final package includes a requirement/evidence matrix with no orphan RF/RNF or acceptance criterion.
+- **RNF-T.4** — THE presentation and website SHALL preserve a single architecture content model in which every engineering responsibility is described by purpose, mechanism, produced evidence and retained human ownership.
+  - **CA-T.4** — A cross-artifact content matrix reports all five responsibilities and all four explanatory dimensions in both deliverables, with any intentional wording difference justified and no conceptual contradiction.
 
 ## Open Decisions
 
@@ -197,6 +235,7 @@ flowchart LR
 | DA-7 | Which repositories and volunteers may join beyond the primary private case? | Release 4 | Interested teams proposed after the presentation / technical-lead selection based on sensitivity, stack and scope |
 | DA-8 | Who owns English translation and review? | Release 5 | Sendara owner / qualified external reviewer after the Spanish release is stable |
 | DA-9 | Which authorized Jira environment and credentials may be used for read-only feasibility discovery? | Release 6 | A selected pilot environment / defer automation assessment until authorization exists |
+| DA-10 | How should pre-existing organization-like identifiers and developer-local paths already tracked in the public AWM repository be classified and remediated before reuse? | Release 2 source reuse and publication | Sanitize affected current-tree content and build inputs / additionally evaluate history remediation only if the owner determines exposure and disruption justify it |
 
 ## Out of Scope
 
@@ -206,6 +245,7 @@ flowchart LR
 - Promising defect-free software, automatic compliance or absolute quality guarantees.
 - Replacing Jira, GitLab, existing CI/CD, delivery ownership, technical review or human accountability.
 - Executing an end-to-end live development demo during the 15-minute core presentation.
+- Turning the 15-minute core or primary website experience into an exhaustive inventory of every skill, command, provider adapter or internal module; those details belong in verified optional depth.
 - Organization-wide rollout, mandatory developer adoption or a complete corporate AI policy in the initial proposal.
 - Waiting for centrally provisioned licenses before a selected-repository pilot can begin.
 - Implementing Jira API/MCP automation in the initial presentation/site releases.
@@ -220,28 +260,28 @@ Release order follows the immediate business deadline first, then public reuse a
 ### Release 0 — Read-only evidence and delivery discovery
 
 - **Value:** prevents unsupported claims and privacy mistakes by producing an owner-validated inventory before any presentation or web implementation.
-- **Scope:** RF-0.1, RF-0.2; supports RF-1.6, RF-2.4, RF-2.3, RNF-T.1 and every unverified item in the Non-Assumption Mandate.
+- **Scope:** RF-0.1 through RF-0.4; supports RF-1.6, RF-1.9, RF-2.3, RF-2.4, RF-2.7, RNF-T.1 and every unverified item in the Non-Assumption Mandate.
 - **Blocked by:** none.
-- **Acceptance:** CA-0.1 and CA-0.2 pass before Release 1.
+- **Acceptance:** CA-0.1 through CA-0.4 pass before Release 1.
 
 ### Release 1 — Private management presentation and speaker narrative
 
 - **Value:** enables the near-term management conversation, organizational feedback and identification of interested pilot teams without requiring the website or pilot to prove value first.
-- **Scope:** RF-1.1 through RF-1.7, RNF-1.2, RNF-T.1 through RNF-T.3.
+- **Scope:** RF-1.1 through RF-1.9, RNF-1.2, RNF-T.1 through RNF-T.4.
 - **Blocked by:** DA-3.
-- **Acceptance:** CA-1.1 through CA-1.7, CA-1.9, CA-T.1 through CA-T.3 pass in a timed private rehearsal.
+- **Acceptance:** CA-1.1 through CA-1.7, CA-1.9 through CA-1.11, CA-T.1 through CA-T.4 pass in a timed private rehearsal.
 
 ### Release 2 — Public Spanish AWM website
 
 - **Value:** gives AWM a durable, shareable and corporate-neutral public explanation under Sendara, independently useful after the meeting.
-- **Scope:** RF-2.1 through RF-2.5, RNF-1.1, RNF-T.1 through RNF-T.3.
-- **Blocked by:** DA-1, DA-2, DA-4, DA-5.
-- **Acceptance:** CA-2.1 through CA-2.5, CA-1.8, CA-T.1 through CA-T.3 pass against the public production URL.
+- **Scope:** RF-2.1 through RF-2.7, RNF-1.1, RNF-T.1 through RNF-T.4.
+- **Blocked by:** DA-1, DA-2, DA-4, DA-5, DA-10.
+- **Acceptance:** CA-2.1 through CA-2.7, CA-1.8, CA-T.1 through CA-T.4 pass against the public production URL.
 
 ### Release 3 — Presentation-day resilient package
 
 - **Value:** reduces delivery risk by combining the approved deck, notes, public site references, offline fallback and optional 30-minute expansion into one rehearsed package.
-- **Scope:** RF-1.5, RF-1.6, RNF-1.2, RNF-T.1, RNF-T.3.
+- **Scope:** RF-1.5, RF-1.6, RF-1.8, RF-1.9, RNF-1.2, RNF-T.1, RNF-T.3, RNF-T.4.
 - **Blocked by:** none beyond completed Releases 1 and 2.
 - **Acceptance:** a network-disabled 15-minute rehearsal succeeds; the optional material expands to no more than 30 minutes; every private/public boundary and external link is rechecked on presentation day.
 
@@ -277,6 +317,7 @@ Release order follows the immediate business deadline first, then public reuse a
 | AWM is perceived as an official corporate product | Ownership, support and governance confusion | Use AWM/Sendara branding and state that it is an open-source personal contribution proposed for controlled evaluation. |
 | AWM is perceived as replacing developers or delivery leads | Adoption resistance and reduced accountability | Center the human responsibility statement: agents execute; humans own problem definition, decisions, validation and outcome. |
 | AWM is perceived as excessive process | Teams reject adoption before testing value | Demonstrate stack adaptation, low-friction setup, hotfix variants and measurable pilot criteria; distinguish mandatory evidence from optional ceremony. |
+| AWM is presented as a generic AI workflow or skill catalog | Its engineering differentiation and quality rationale are lost | Make the three-layer architecture, five responsibilities, evidence flow and human decision boundaries mandatory in both core deliverables; place version-specific skills in secondary technical depth. |
 | Absolute-quality wording is interpreted as a guarantee | Credibility and legal/operational risk | Describe enforced controls, evidence and fail-closed behavior; prohibit unqualified guarantee/zero-defect claims. |
 | Live demo consumes or destabilizes the session | Core message is lost due to timing, network or tooling failure | Use a rehearsed visual walkthrough and verified evidence snapshots; keep any live interaction optional and outside the 15-minute core. |
 | Pilot baseline is unavailable or incomparable | Benefits cannot be measured credibly | Resolve DA-6 before the pilot using real historical Jira/GitLab data or a prospective measurement window; publish limitations with results. |
