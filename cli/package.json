@@ -18,6 +18,9 @@
   },
   "scripts": {
     "build": "tsc && chmod +x dist/src/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --config eslint.config.awm.mjs --cache --format json",
+    "depcheck": "depcruise --config .dep-cruiser.awm.js src",
     "test": "jest --runInBand",
     "start": "ts-node src/index.ts",
     "prerelease": "npm run build",

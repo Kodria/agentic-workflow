@@ -3,6 +3,9 @@ dist
 coverage
 .env
 .awm
+!.awm/
+!.awm/sensors.json
+!.awm/sensors.baseline.json
 .agent
 .agents
 skills-lock.json

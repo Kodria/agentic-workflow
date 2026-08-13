@@ -1,0 +1,9 @@
+{
+  "typecheck": [],
+  "lint": [],
+  "security": [],
+  "depcheck": [
+    "90e6c5e1dba4b7cf5514c5c66b85076a049e5703"
+  ],
+  "test": []
+}
