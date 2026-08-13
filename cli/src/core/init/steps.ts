@@ -233,6 +233,14 @@ export function stepDevCore(d: InitDeps): StepResult {
     // `awm doctor` decia `healthy`. Su propio `globalUnsupportedReason` ya dice
     // que hay que instalar por proyecto, asi que eso es lo que se hace.
     const localOnly = providerFor(d.agent).skill.global === null;
+    if (localOnly && d.machineOnly) {
+        return ok(
+            'machine.devCore',
+            'machine',
+            'skipped',
+            `${providerFor(d.agent).label} provides skills at project scope — deferred until project initialization`,
+        );
+    }
     for (const bundleName of toInstall) {
         d.actions.installBundle({
             bundleName,

@@ -144,6 +144,23 @@ describe('stepHook / stepDevCore / stepAmbient', () => {
         expect(stepDevCore(deps({ machine: m, project: null }, a)).action).toBe('applied');
         expect(a.installBundle).toHaveBeenCalled();
     });
+    it('defers local-only baseline bundles during --machine-only (R7)', () => {
+        const a = spies();
+        const m = machine(); m.devCore = { present: false, brokenLinks: [] };
+
+        const r = stepDevCore(deps({ machine: m, project: null }, a, {
+            agent: 'copilot',
+            enabledAgents: ['copilot'],
+            machineOnly: true,
+        }));
+
+        expect(r).toMatchObject({
+            action: 'skipped',
+            level: 'machine',
+        });
+        expect(r.detail).toMatch(/project scope.*deferred/i);
+        expect(a.installBundle).not.toHaveBeenCalled();
+    });
     // Regression for the confirmed production bug: `awm init -a copilot` crashed
     // 100% of the time with "machine.devCore: skill global scope is not
     // supported by Copilot...", rolling back the ENTIRE init transaction (even
