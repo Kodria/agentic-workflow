@@ -15,9 +15,13 @@
 - **R11.** THE functional framework guide SHALL explain AWM's lifecycle, layers, mandatory and optional phases, components, produced artifacts, quality model, human control, and supported entry cases independently of CLI internals.
 - **R12.** THE active documentation SHALL assign one canonical owner to each subject and SHALL link to generated or authoritative references instead of repeating paths, capabilities, flags, or support claims.
 - **R13.** THE documentation reorganization SHALL NOT move or repurpose `docs/plans/`, `docs/research/`, harness retrospectives, or other artifacts whose paths are part of AWM's own process contract.
-- **R14.** WHEN active documentation changes, THE repository SHALL validate internal links, command names and flags, generated support content, and navigation reachability against the current CLI and source-of-truth files.
+- **R14.1.** WHEN active documentation changes, THE repository SHALL validate its relative links and anchors.
+- **R14.2.** WHEN a documented command or flag changes, THE repository SHALL validate it against the compiled CLI help or Commander registration.
+- **R14.3.** WHEN provider capabilities or paths change, THE repository SHALL regenerate and validate the support matrix from its source-of-truth files.
+- **R14.4.** WHEN active documentation changes, THE repository SHALL verify that every active editorial guide remains reachable from `README.md` or `docs/README.md`.
 - **R15.** IF a setup path is unsupported, degraded, pending agent work, or blocked by an external prerequisite, THEN THE documentation SHALL state the condition and provide an actionable next step without implying silent parity.
-- **R16.** THE implementation SHALL preserve Git history for renamed editorial documents and update every affected internal link.
+- **R16.1.** WHEN an editorial document is renamed, THE implementation SHALL use a history-preserving Git move.
+- **R16.2.** WHEN an editorial document is renamed, THE implementation SHALL update every affected internal link.
 
 ## Context
 
