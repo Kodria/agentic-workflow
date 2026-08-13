@@ -139,6 +139,6 @@ Three failed fixes is not "try a fourth" — it's a signal to question the archi
 ## Related
 
 - [Product process](product-process.md) — the layer before this one
-- [SDLC](../sdlc.md) — how the phases, gates and learning loop compose
+- [How AWM works](../framework.md) — how the phases, gates and learning loop compose
 - [CLI reference](../cli-reference.md) — every command
 - [Runbook ch. 3](../runbook.md#chapter-3--day-to-day-in-a-project) — day-to-day mechanics

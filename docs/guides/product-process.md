@@ -120,5 +120,5 @@ In agents that don't enforce (OpenCode, Cursor, Copilot, Antigravity):
 ## Related
 
 - [Development process](development-process.md) — what happens after the handoff
-- [SDLC](../sdlc.md) — the whole lifecycle end to end
+- [How AWM works](../framework.md) — the whole lifecycle end to end
 - [Runbook](../runbook.md) — install, project setup, team rollout

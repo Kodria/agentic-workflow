@@ -1,159 +1,224 @@
-# Software development lifecycle
+# How AWM works
 
-How the pieces compose into a lifecycle — and, more importantly, **why** it's built this way. Every mechanism here exists because something failed without it.
+AWM is an engineering framework, not an autonomous code generator. Humans own
+intent and consequential decisions; agents perform bounded work; the harness
+enforces deterministic controls and records reviewable evidence.
 
-## The problem this solves
+## The problem AWM solves
 
-An AI coding agent is fast and confident. Confidence is the problem: it will report work as done that isn't, write a test that cannot fail, fix a symptom and call it a root cause, and — under a long conversation — quietly forget the constraints it was given an hour ago.
+An AI coding agent can produce code quickly and describe it confidently. That
+does not make a change correct, complete, secure, or reviewable. AWM supplies
+the structure that turns an agent interaction into an engineering process:
 
-None of that is fixed by better prompting. It's fixed by **structure**:
-
-| Failure mode | Structural answer |
+| Risk | AWM response |
 |---|---|
-| "Done" that isn't | Deterministic gates — real commands, real exit codes |
-| Context lost to a long session or compaction | State on disk, re-anchored by a session hook |
-| Business answers invented mid-build | A product/development boundary crossed only by a certified brief |
-| The same mistake, every week | A ledger and a retro that convert recurrences into rules |
-| A reviewer that agrees with itself | Independent lenses with different criteria, plus a gate no lens can override |
+| An incomplete need becomes invented requirements | Product discovery and a readiness gate make decisions explicit. |
+| A long session loses a constraint | Context, constitution, and durable state re-anchor the work. |
+| An agent declares success without proof | Sensors and verification commands produce independent evidence. |
+| A team repeats the same failure | Ledger findings and retrospectives turn recurrence into a rule or check. |
+| One reviewer confirms its own assumptions | Focused reviews and deterministic gates use independent criteria. |
 
-## The three layers
+## The control model: human, agents, harness
 
-```
-┌─ PRODUCT ─────────────────────────────────────────────┐
-│  idea → discovery → brief → readiness gate (G1–G9)    │
-└───────────────────────────┬───────────────────────────┘
-                            │ certified brief (the baton)
-┌─ DEVELOPMENT ─────────────▼───────────────────────────┐
-│  design → plan → execute → QA → retro → finish        │
-└───────────────────────────┬───────────────────────────┘
-                            │ every phase boundary
-┌─ HARNESS ─────────────────▼───────────────────────────┐
-│  sensors · preflight · ledger · hooks · constitution  │
-└───────────────────────────────────────────────────────┘
+```text
+Human: intent, priority, trade-offs, approval
+                 │
+                 ▼
+Agents: discovery, design, planning, bounded execution, review
+                 │
+                 ▼
+Harness: context, sensors, preflight, evidence, transactions, learning
 ```
 
-- **Product** decides *whether and why* to build. [Guide](guides/product-process.md)
-- **Development** decides *how*, and builds it. [Guide](guides/development-process.md)
-- **Harness** is what makes both verifiable rather than merely asserted.
+The human is not removed from the process. AWM moves human effort toward
+describing the need, deciding trade-offs, and evaluating evidence rather than
+typing every implementation detail. Agents may accelerate execution, but cannot
+override a gate or silently make a consequential product decision.
 
-The layers are separated so that a business question raised during development can't be silently answered by whoever happens to be typing. It goes back through the door as an open decision (`DA-#`).
+## Valid entry points
 
----
+AWM does not force every piece of work through the same starting point.
 
-## The harness
+### Raw idea or business need
 
-### Sensors — the deterministic floor
+Use the [product process](guides/product-process.md) when the team needs to
+discover the problem, decisions, constraints, and outcome before development.
 
-Sensors are real commands (typecheck, lint, tests, security scan, mutation) with real exit codes.
+### Certified product brief
 
-```bash
-awm sensors init     # generate the manifest for the detected stack
-awm sensors run      # the gate
-awm sensors baseline # snapshot current findings — the ratchet for legacy repos
-```
+A ready brief is the hand-off into the development process. It avoids answering
+business questions ad hoc while someone is already changing code.
 
-Their entire value is that **they cannot be talked past**. A model can produce a persuasive argument that the code is fine; it cannot produce a zero exit code from `tsc` that didn't happen.
+### Concrete feature, bug, or refactor
 
-Two rules that come from real incidents:
+Start with the [development process](guides/development-process.md) when the
+requirement is sufficiently concrete. For an incomplete support issue, gather
+evidence first and return to discovery where decisions remain open.
 
-- **A missing tool reports `skipped` with a reason — never `pass`.** Silence is not evidence.
-- **No review, lens, or claim overrides a red sensor.** Fresh context reduces a model's self-preference bias; it doesn't remove it. The deterministic gate is the only thing that neutralises it.
+### Existing implementation plan
 
-**Legacy repos** don't have to be green on day one: `awm sensors baseline` snapshots existing findings, and the gate then blocks only *new* ones. The ratchet turns "we can't adopt this, we have 4000 lint errors" into "we can adopt this today".
+An approved plan can be executed directly, with its verification steps and
+quality gates still in force.
 
-### Preflight — is the gate real?
+## The complete lifecycle
 
-```bash
-awm preflight
-```
+### 1. Need and product discovery
 
-A green sensor run on a project with no configured sensors is a lie in the most dangerous direction. Preflight verifies the harness can *actually* gate before development starts. Advisory checks (like git-host detection for PR automation) never flip the overall status on their own — a warning is a warning, not a failure.
+Product discovery turns a raw request into a shared understanding of the
+problem. It is conditional: a concrete, accepted requirement does not need to
+repeat it.
 
-### Context injection — surviving the long conversation
+### 2. Brief and readiness
 
-The constitution and agent context are delivered into **every** session, and in hooks-native agents re-anchored on `SessionStart` (including after a compaction). This is the answer to "the agent knew the rules an hour ago".
+A product brief captures intent, scope, decisions, risks, and acceptance
+criteria. Readiness verifies that development has a coherent baton to receive.
 
-```bash
-awm context-budget   # what does that delivery cost?
-```
+### 3. Solution design
 
-Context is finite, so the delivered documents are treated as a **curated index, not an append-only log**. That's why `AGENTS.md` and `CONSTITUTION.md` are edited by merge-and-prune: a doc that grows forever eventually crowds out the work.
+Architecture, non-functional requirements, and UI design are selected when the
+change needs them. UI design is optional and applies to a real screen or user
+experience—not to every code change.
 
-### The ledger — the learning loop
+### 4. Traceable planning
 
-```bash
-awm ledger add ...        # reviewers, QA and debugging emit findings here
-awm ledger list
-awm ledger recurring --min 2
-```
+The implementation plan maps the requirement to files, tests, commands,
+sequencing, and acceptance evidence. It is the contract for bounded execution.
 
-Per-branch, on disk. It exists so the retro doesn't depend on anyone *remembering* that this bug happened before — recurrence is a query, not a recollection.
+### 5. Bounded execution
 
-> An empty ledger after a cycle that produced findings is **not** a clean bill. It means the emission pipeline broke, and that is itself the finding.
+A controller coordinates focused agents or a serial workflow. Each task has a
+defined ownership boundary, follows the plan, and reports evidence rather than
+an unqualified claim of completion.
 
----
+### 6. Sensors and quality gates
 
-## The quality model
+Sensors run real commands—such as type checking, linting, tests, security
+scanning, and dependency analysis—against the project. `awm preflight` confirms
+that the configured gate is actually runnable before it is trusted.
 
-Four independent checks, deliberately not one big "review":
+### 7. Review, verification, and PR
 
-| Check | Asks | Catches |
+Review checks implementation fidelity and independent quality concerns.
+Verification repeats the relevant commands. The branch is completed only when
+the required evidence is available and the pull request represents a coherent,
+reviewable change.
+
+### 8. Ledger and harness learning
+
+Findings are recorded on disk. A retrospective identifies recurring failures
+and promotes them into a sensor, a process rule, or focused guidance where
+appropriate.
+
+## Flexible phases and mandatory gates
+
+Discovery, detailed design, and visual design are intentionally flexible. A
+well-defined bug can begin in development; a new product idea should not skip
+the decisions that make it buildable.
+
+Security, robustness, verification, and evidence gates are not optional. A
+feature may be out of scope; input validation, safe failure behavior, and a
+truthful verification result are not. A missing tool or incomplete check is not
+reported as a clean pass.
+
+## Components
+
+### CLI
+
+The AWM CLI installs and reconciles registries, bundles, profiles, provider
+artifacts, sensors, and diagnostics. It keeps machine preparation distinct from
+project setup. See [Architecture](architecture.md) for implementation details.
+
+### Skills and orchestrators
+
+Skills encode process, craft, and gate discipline. Product and development
+orchestrators route work by the maturity of the starting need; specialist skills
+apply only when their domain is relevant.
+
+### Controllers and subagents
+
+A controller maintains the plan and decision context. Focused subagents own
+small, independent work boundaries, which makes parallel work reviewable rather
+than a collection of overlapping edits.
+
+### Registries and bundles
+
+Registries distribute versioned skills, workflows, agent profiles, and sensor
+packs. The official baseline includes `dev` and `product`; `frontend` and
+`authoring` are project extensions. Teams can extend these through their own
+registries without modifying the CLI.
+
+### Provider adapters
+
+Provider adapters render the same framework content into each agent's supported
+format. Capability tiers describe the actual level of hooks, managed context, or
+project-only delivery. They do not promise false parity.
+
+### Project context and constitution
+
+`AGENTS.md`, `CLAUDE.md`, `CONSTITUTION.md`, and `.awm/profile.json` define the
+shared operating contract and its provider-specific delivery. They make the
+constraints durable across sessions and team members.
+
+### Sensors, preflight, and evidence
+
+Sensors are executable checks; preflight verifies their configuration; test and
+review outputs are evidence. A legacy baseline can accept existing debt while
+blocking new findings, so adoption does not require pretending the repository
+was already clean.
+
+### Transactions, backups, and recovery
+
+AWM plans filesystem changes and protects user-owned content with backups. A
+failed initialization should fail loudly and leave an actionable recovery path,
+not a partially explained state.
+
+## Artifacts produced across the lifecycle
+
+| Stage | Typical artifact | Why it matters |
 |---|---|---|
-| Sensors | Does it compile, lint, pass, scan clean? | Everything mechanical |
-| Track A — fidelity | Was what the plan promised actually built and tested? | Missing requirements; scope creep |
-| Track B — quality | Regardless of the plan, is this code sound? | Crashes on edge input, wrong logic, tests that can't fail |
-| Retro | Have we seen this before? | The recurring class behind this instance |
+| Product | Discovery record and brief | Makes intent and decisions reviewable. |
+| Readiness and design | Acceptance criteria, architecture, NFRs, UI design where needed | Gives development a bounded target. |
+| Planning | File-level implementation plan | Connects the change to proof. |
+| Execution | Source, tests, and focused findings | Records the work actually performed. |
+| Quality | Sensor output, reviews, verification | Separates evidence from assertion. |
+| Learning | Ledger entries and retrospective | Improves the next cycle. |
 
-Track B runs as a **panel of lenses** — robustness/security, logic, tests — each in isolated context with its own criterion. One critic has one blind spot; three copies of it share that blind spot. Different criteria are what catch different failures.
+## Adoption cases
 
-The **robustness floor is never out of scope.** A design can declare a *feature* out of scope. It cannot declare input validation out of scope. A public function that returns `Infinity`/`NaN`/`undefined` or crashes on edge input is a defect even if nobody asked about it.
+### New project
 
----
+Prepare the machine, initialize the repository, and establish sensors and the
+shared contract from the first change.
 
-## Verification discipline
+### New business capability
 
-Three rules, each earned:
+Use discovery and a brief to turn business language into scope, acceptance
+criteria, and a development-ready hand-off.
 
-**1 · Evidence before assertion.** No claim of done/fixed/passing without the command output that proves it.
+### Incomplete support bug
 
-**2 · Verify a fix by reverting it.** Apply the fix, add the test, then **revert only the fix** and confirm the new test goes red. A green suite proves the suite is green — not that your test discriminates anything. This repo has multiple retros from tests that passed with the fix reverted.
+Begin with evidence: reproduce, inspect the affected path, state uncertainty,
+and make only the decisions the evidence supports.
 
-**3 · Root cause before fix.** Symptom fixes are failure. Three failed attempts is not a cue to try a fourth — it's a cue to question the architecture.
+### Legacy system change
 
----
+Use the existing architecture and safety constraints as inputs. Baseline known
+sensor debt when necessary, then make future work ratchet quality upward.
 
-## Where knowledge lives
+## What AWM guarantees — and what it does not
 
-| Document | Holds | Edited by |
-|---|---|---|
-| `CONSTITUTION.md` | Non-negotiable project rules; the support matrix | `harness-retro` (process class) |
-| `AGENTS.md` | Agent working-style lessons and wins; agent-agnostic | `harness-retro` (agent class) |
-| `CLAUDE.md` | Claude-specific instructions | Humans |
-| `.semgrep.awm.yml`, `eslint.config.awm.mjs`, `tests/structural/` | Mechanical rules | `harness-retro` (sensor-catchable) |
-| `docs/harness-retros.md` | The auditable log of what was learned and when | `harness-retro` |
+AWM guarantees a disciplined process: explicit boundaries, reproducible
+configuration, deterministic checks where the stack supports them, and durable
+evidence of what was run and decided.
 
-The routing rule: **a finding a machine can catch becomes a sensor rule, not a paragraph.** Prose that depends on someone remembering it is the weakest possible enforcement — it's the fallback, not the goal.
+It cannot guarantee that an LLM reasons correctly, that a requirement is
+complete, or that a human accepts the right trade-off. Those remain decisions
+for the people responsible for the product and its operation.
 
-There's a boundary here too: AWM's shipped sensor packs carry **generic** rules (never `eval`, no unsanitised SQL). A rule born from one project's specific bug belongs in *that project's* config, versioned with its code. The framework carries conventions, not somebody's bug list.
+## Where to go next
 
----
-
-## Adopting this on a real team
-
-1. **One project first.** `awm init`, `awm sensors init`, `awm sensors baseline` if it's legacy.
-2. **Commit `.awm/profile.json`.** That's how a teammate reproduces the setup with `awm sync`.
-3. **Stand up a team registry** once you have a second project — that's the point at which shared skills start paying off. [Runbook ch. 4](runbook.md#chapter-4--team-setup--customization)
-4. **Pin it.** `awm pin <registry> <version>` so a registry change can't surprise everyone mid-sprint.
-5. **Let the retro run.** The system gets better only if recurring findings actually become rules.
-6. **Verify per environment.** Each developer's OS × agent combination is its own risk surface — that's what the [acceptance playbooks](testing/README.md) are for.
-
----
-
-## Related
-
-- [Support matrix](support-matrix.md) — what is supported, at what evidence level, and what is missing
-
-- [Architecture](architecture.md) — components and data flow
-- [Product process](guides/product-process.md) · [Development process](guides/development-process.md)
-- [`CONSTITUTION.md`](../CONSTITUTION.md) — the authoritative rules and support matrix
-- [Harness retros](harness-retros.md) — what has been learned, with dates
+- [Install AWM and prepare a machine](installation.md)
+- [Configure providers and registries](configuration.md)
+- [Initialize a project](project-setup.md)
+- [Operate the framework](runbook.md)
+- [Read the generated support matrix](support-matrix.md)
