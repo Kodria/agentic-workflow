@@ -14,6 +14,7 @@ const FILE_EVIDENCE_STATUS = ['matched', 'missing', 'unverifiable'];
 const EMPIRICAL_STATUS = ['no-evidence', 'evidence', 'partial', 'inconclusive'];
 const EMPIRICAL_OUTCOME = ['covered-by-sensor', 'gap', 'coverage-unverifiable', 'applicability-contradiction', 'unmapped-class'];
 const SEVERITY = ['blocker', 'important', 'minor', 'info'];
+const CLUSTER_KIND = ['exact', 'convergent'];
 const SAFE_REF = /^(?:PR #[1-9][0-9]*|[a-f0-9]{7,64}|(?!\/)(?!.*(?:^|\/)\.\.?\/)[A-Za-z0-9._@+~=-]+(?:\/[A-Za-z0-9._@+~=-]+)*:[1-9][0-9]*)$/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -80,21 +81,49 @@ function assertRefs(value: unknown, renderer: string): void {
     for (let index = 1; index < value.length; index += 1) if (value[index - 1] >= value[index]) invalidReport(renderer);
 }
 
+function assertClusters(value: unknown, threshold: number, renderer: string): { occurrences: number; recurrent: boolean; severity: string } {
+    if (!Array.isArray(value) || value.length === 0) invalidReport(renderer);
+    let occurrences = 0;
+    let recurrent = false;
+    let highestSeverity = 'info';
+    const severityRank = { blocker: 4, important: 3, minor: 2, info: 1 } as const;
+    for (const cluster of value) {
+        if (!isRecord(cluster) || !hasExactFields(cluster, ['occurrences', 'recurrent', 'severity', 'kind', 'signatures', 'omittedSignatures', 'evidenceRefs', 'omittedEvidenceRefs'])
+            || !isOneOf(cluster.kind, CLUSTER_KIND) || !isOneOf(cluster.severity, SEVERITY) || typeof cluster.recurrent !== 'boolean') invalidReport(renderer);
+        assertCount(cluster.occurrences, renderer);
+        assertRefs(cluster.signatures, renderer);
+        assertCount(cluster.omittedSignatures, renderer);
+        assertRefs(cluster.evidenceRefs, renderer);
+        assertCount(cluster.omittedEvidenceRefs, renderer);
+        if (cluster.occurrences < 1 || cluster.recurrent !== (cluster.occurrences >= threshold)) invalidReport(renderer);
+        occurrences += cluster.occurrences;
+        recurrent ||= cluster.recurrent;
+        if (severityRank[cluster.severity as keyof typeof severityRank] > severityRank[highestSeverity as keyof typeof severityRank]) highestSeverity = cluster.severity as string;
+    }
+    return { occurrences, recurrent, severity: highestSeverity };
+}
+
 function assertEmpirical(value: unknown, renderer: string): void {
     if (!isRecord(value) || !hasExactFields(value, ['recurrenceThreshold', 'status', 'classes', 'unclassified', 'sources', 'omittedEvidenceRefs'])
         || !isOneOf(value.status, EMPIRICAL_STATUS) || !Array.isArray(value.classes) || !isRecord(value.unclassified)
         || !isRecord(value.sources)) invalidReport(renderer);
     assertCount(value.omittedEvidenceRefs, renderer);
     if (typeof value.recurrenceThreshold !== 'number' || !Number.isSafeInteger(value.recurrenceThreshold) || value.recurrenceThreshold < 1) invalidReport(renderer);
-    let previous = '';
+    let previous: { recurrent: boolean; occurrences: number; defectClass: string } | undefined;
     let occurrenceCount = 0;
     for (const item of value.classes) {
-        if (!isRecord(item) || !hasExactFields(item, ['defectClass', 'occurrences', 'recurrent', 'severity', 'outcome', 'evidenceRefs', 'omittedEvidenceRefs'])
+        if (!isRecord(item) || !hasExactFields(item, ['defectClass', 'occurrences', 'recurrent', 'severity', 'outcome', 'evidenceRefs', 'omittedEvidenceRefs', 'clusters'])
             || !isNonBlankString(item.defectClass) || !isOneOf(item.severity, SEVERITY) || !isOneOf(item.outcome, EMPIRICAL_OUTCOME)
             || typeof item.recurrent !== 'boolean') invalidReport(renderer);
         assertCount(item.occurrences, renderer); assertCount(item.omittedEvidenceRefs, renderer); assertRefs(item.evidenceRefs, renderer);
-        if (item.occurrences < 1 || item.recurrent !== (item.occurrences >= value.recurrenceThreshold) || previous > item.defectClass) invalidReport(renderer);
-        previous = item.defectClass; occurrenceCount += item.occurrences;
+        const clusterSummary = assertClusters(item.clusters, value.recurrenceThreshold as number, renderer);
+        if (item.occurrences < 1 || item.occurrences !== clusterSummary.occurrences || item.recurrent !== clusterSummary.recurrent
+            || item.severity !== clusterSummary.severity) invalidReport(renderer);
+        if (previous && (Number(previous.recurrent) < Number(item.recurrent)
+            || (previous.recurrent === item.recurrent && previous.occurrences < item.occurrences)
+            || (previous.recurrent === item.recurrent && previous.occurrences === item.occurrences && previous.defectClass >= item.defectClass))) invalidReport(renderer);
+        previous = { recurrent: item.recurrent, occurrences: item.occurrences, defectClass: item.defectClass };
+        occurrenceCount += item.occurrences;
     }
     if (!hasExactFields(value.unclassified, ['occurrences', 'evidenceRefs', 'omittedEvidenceRefs'])) invalidReport(renderer);
     assertCount(value.unclassified.occurrences, renderer); assertCount(value.unclassified.omittedEvidenceRefs, renderer); assertRefs(value.unclassified.evidenceRefs, renderer);
@@ -248,6 +277,11 @@ function empiricalHuman(report: CoverageEnvelope): string {
             : `below recurrence threshold (${empirical.recurrenceThreshold})`;
         lines.push(`${item.outcome} ${safeHumanText(item.defectClass)} — ${item.occurrences} occurrence${item.occurrences === 1 ? '' : 's'} (${item.severity}; ${recurrence})`);
         if (item.evidenceRefs.length > 0) lines.push(`  evidence: ${item.evidenceRefs.map(safeHumanText).join(', ')}`);
+        for (const cluster of item.clusters) {
+            const detail = cluster.signatures.length > 0 ? ` — ${cluster.signatures.map(safeHumanText).join(', ')}` : '';
+            lines.push(`  cluster: ${cluster.kind} (${cluster.occurrences} occurrence${cluster.occurrences === 1 ? '' : 's'}; ${cluster.severity})${detail}`);
+            if (cluster.omittedSignatures > 0) lines.push(`  omitted cluster signatures: ${cluster.omittedSignatures}`);
+        }
     }
     if (empirical.unclassified.occurrences > 0) lines.push(`unclassified findings: ${empirical.unclassified.occurrences}`);
     if (empirical.omittedEvidenceRefs > 0) lines.push(`omitted evidence refs: ${empirical.omittedEvidenceRefs}`);

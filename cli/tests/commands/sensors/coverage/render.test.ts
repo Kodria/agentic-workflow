@@ -13,9 +13,20 @@ const report = {
     ] },
 };
 
+const redactedCluster = {
+    occurrences: 1,
+    recurrent: false,
+    severity: 'important' as const,
+    kind: 'exact' as const,
+    signatures: [],
+    omittedSignatures: 1,
+    evidenceRefs: ['src/a.ts:1'],
+    omittedEvidenceRefs: 0,
+};
+
 const empiricalEvidence = {
     recurrenceThreshold: 2, status: 'evidence' as const,
-    classes: [{ defectClass: 'lint-errors', occurrences: 1, recurrent: false, severity: 'important' as const, outcome: 'gap' as const, evidenceRefs: ['src/a.ts:1'], omittedEvidenceRefs: 0 }],
+    classes: [{ defectClass: 'lint-errors', occurrences: 1, recurrent: false, severity: 'important' as const, outcome: 'gap' as const, evidenceRefs: ['src/a.ts:1'], omittedEvidenceRefs: 0, clusters: [redactedCluster] }],
     unclassified: { occurrences: 0, evidenceRefs: [], omittedEvidenceRefs: 0 },
     sources: { activeFiles: 1, archivedFiles: 0, validEntries: 1, validFindings: 1, skippedFindings: 0, skippedByReason: {} },
     omittedEvidenceRefs: 0,
@@ -70,7 +81,7 @@ test('json is the exact versioned envelope and ends in newline (R2.8, R2.14)', (
 
 test('keeps the R2 static shape when an optional empirical section is added (R2.14)', () => {
     const extended = { ...report, empirical: {
-        recurrenceThreshold: 2, status: 'partial', classes: [{ defectClass: 'lint-errors', occurrences: 1, recurrent: false, severity: 'important', outcome: 'gap', evidenceRefs: ['src/a.ts:1'], omittedEvidenceRefs: 0 }],
+        recurrenceThreshold: 2, status: 'partial', classes: [{ defectClass: 'lint-errors', occurrences: 1, recurrent: false, severity: 'important', outcome: 'gap', evidenceRefs: ['src/a.ts:1'], omittedEvidenceRefs: 0, clusters: [redactedCluster] }],
         unclassified: { occurrences: 1, evidenceRefs: [], omittedEvidenceRefs: 1 },
         sources: { activeFiles: 1, archivedFiles: 0, validEntries: 2, validFindings: 2, skippedFindings: 1, skippedByReason: { 'invalid-json': 1 } }, omittedEvidenceRefs: 1,
     } };
@@ -80,9 +91,9 @@ test('keeps the R2 static shape when an optional empirical section is added (R2.
     expect(parsed.schemaVersion).toBe(2);
 });
 
-test('renders sanitized empirical outcomes without ledger descriptions or signatures', () => {
+test('renders sanitized empirical outcomes without ledger descriptions or unsafe signatures', () => {
     const empirical = {
-        recurrenceThreshold: 2, status: 'partial', classes: [{ defectClass: 'lint-errors', occurrences: 1, recurrent: false, severity: 'important', outcome: 'gap', evidenceRefs: ['PR #2'], omittedEvidenceRefs: 0 }],
+        recurrenceThreshold: 2, status: 'partial', classes: [{ defectClass: 'lint-errors', occurrences: 1, recurrent: false, severity: 'important', outcome: 'gap', evidenceRefs: ['PR #2'], omittedEvidenceRefs: 0, clusters: [redactedCluster] }],
         unclassified: { occurrences: 1, evidenceRefs: [], omittedEvidenceRefs: 1 },
         sources: { activeFiles: 1, archivedFiles: 0, validEntries: 2, validFindings: 2, skippedFindings: 1, skippedByReason: { 'invalid-json': 1 } }, omittedEvidenceRefs: 1,
     };
@@ -91,7 +102,7 @@ test('renders sanitized empirical outcomes without ledger descriptions or signat
     expect(human).toContain('gap lint-errors — 1 occurrence');
     expect(human).toContain('below recurrence threshold (2)');
     expect(human).toContain('PR #2');
-    expect(human).not.toContain('signature');
+    expect(human).toContain('omitted cluster signatures: 1');
     expect(human).not.toContain('desc');
 });
 
@@ -107,7 +118,7 @@ test('renders a report generated with both invalid and scanner-omitted evidence 
 
 test('renders recurrence emphasis and rejects the retired complete empirical state', () => {
     const empirical = {
-        recurrenceThreshold: 2, status: 'evidence', classes: [{ defectClass: 'lint-errors', occurrences: 2, recurrent: true, severity: 'important', outcome: 'gap', evidenceRefs: [], omittedEvidenceRefs: 0 }],
+        recurrenceThreshold: 2, status: 'evidence', classes: [{ defectClass: 'lint-errors', occurrences: 2, recurrent: true, severity: 'important', outcome: 'gap', evidenceRefs: [], omittedEvidenceRefs: 0, clusters: [{ ...redactedCluster, occurrences: 2, recurrent: true, evidenceRefs: [] }] }],
         unclassified: { occurrences: 0, evidenceRefs: [], omittedEvidenceRefs: 0 },
         sources: { activeFiles: 1, archivedFiles: 0, validEntries: 2, validFindings: 2, skippedFindings: 0, skippedByReason: {} }, omittedEvidenceRefs: 0,
     };

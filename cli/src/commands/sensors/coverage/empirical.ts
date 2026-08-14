@@ -1,4 +1,5 @@
 import { clusterEntries } from '../../../core/ledger/cluster';
+import type { ClusterKind } from '../../../core/ledger/cluster';
 import type { LedgerEntry, Severity } from '../../../core/ledger/types';
 import type { LedgerScanResult, ScannedLedgerEntry } from '../../../core/ledger/scan';
 import type { CoverageClassStatus } from './evaluate';
@@ -6,6 +7,19 @@ import type { CoverageClassStatus } from './evaluate';
 export type EmpiricalOutcome = 'covered-by-sensor' | 'gap' | 'coverage-unverifiable' | 'applicability-contradiction' | 'unmapped-class';
 export type EmpiricalStaticState = CoverageClassStatus | 'incompatible' | 'missing-tool' | 'compatible-unverified';
 export type EmpiricalStaticAvailability = 'available' | 'unavailable';
+
+export type EmpiricalCluster = {
+    occurrences: number;
+    recurrent: boolean;
+    severity: Severity;
+    kind: ClusterKind;
+    /** Only signatures that satisfy the same public-reference allowlist. */
+    signatures: string[];
+    /** Distinct cluster signatures withheld because they are not public-safe. */
+    omittedSignatures: number;
+    evidenceRefs: string[];
+    omittedEvidenceRefs: number;
+};
 
 export type EmpiricalClass = {
     defectClass: string;
@@ -15,6 +29,8 @@ export type EmpiricalClass = {
     outcome: EmpiricalOutcome;
     evidenceRefs: string[];
     omittedEvidenceRefs: number;
+    /** Deterministic exact/convergent grouping retained without private ledger text. */
+    clusters: EmpiricalCluster[];
 };
 
 export type EmpiricalCoverage = {
@@ -52,6 +68,17 @@ function refsFor(entries: LedgerEntry[], scanned: Map<LedgerEntry, ScannedLedger
         else refs.add(ref);
     }
     return { refs: [...refs].sort((a, b) => a.localeCompare(b)), omitted };
+}
+
+function signaturesFor(signatures: readonly string[]): { signatures: string[]; omitted: number } {
+    const safe = new Set<string>();
+    let omitted = 0;
+    for (const signature of signatures) {
+        const publicSignature = safeRef(signature);
+        if (publicSignature === null) omitted += 1;
+        else safe.add(publicSignature);
+    }
+    return { signatures: [...safe].sort((a, b) => a.localeCompare(b)), omitted };
 }
 
 function maxSeverity(entries: LedgerEntry[]): Severity {
@@ -100,18 +127,29 @@ export function evaluateEmpiricalCoverage(
     }
     const classes: EmpiricalClass[] = [];
     for (const [defectClass, entries] of [...typed.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-        for (const cluster of clusterEntries(entries, 1)) {
-            const evidence = refsFor(cluster.entries, scanned);
-            classes.push({ defectClass, occurrences: cluster.count, recurrent: cluster.count >= min,
-                severity: maxSeverity(cluster.entries), outcome: outcomeFor(staticStates[defectClass], cluster.count > 0, staticAvailability),
-                evidenceRefs: evidence.refs, omittedEvidenceRefs: evidence.omitted });
-        }
+        const evidence = refsFor(entries, scanned);
+        const clusters = clusterEntries(entries, 1).map((cluster) => {
+            const signatures = signaturesFor(cluster.signatures);
+            const clusterEvidence = refsFor(cluster.entries, scanned);
+            return {
+                occurrences: cluster.count,
+                recurrent: cluster.count >= min,
+                severity: maxSeverity(cluster.entries),
+                kind: cluster.kind,
+                signatures: signatures.signatures,
+                omittedSignatures: signatures.omitted,
+                evidenceRefs: clusterEvidence.refs,
+                omittedEvidenceRefs: clusterEvidence.omitted,
+            };
+        });
+        classes.push({ defectClass, occurrences: entries.length, recurrent: clusters.some((cluster) => cluster.recurrent),
+            severity: maxSeverity(entries), outcome: outcomeFor(staticStates[defectClass], entries.length > 0, staticAvailability),
+            evidenceRefs: evidence.refs, omittedEvidenceRefs: evidence.omitted, clusters });
     }
-    // Stable public order: class first, then items meeting the supplied recurrence
-    // threshold, then count and evidence. This makes --min observable without
-    // changing the static verdict or leaking private cluster signatures.
-    classes.sort((a, b) => a.defectClass.localeCompare(b.defectClass) || Number(b.recurrent) - Number(a.recurrent) || b.occurrences - a.occurrences
-        || a.evidenceRefs.join('\u0000').localeCompare(b.evidenceRefs.join('\u0000')));
+    // Stable public order: recurrence emphasis, count, then class ID. The
+    // cluster helper already supplies its own deterministic inner ordering.
+    classes.sort((a, b) => Number(b.recurrent) - Number(a.recurrent) || b.occurrences - a.occurrences
+        || a.defectClass.localeCompare(b.defectClass));
     const unclassifiedEvidence = refsFor(unclassified, scanned);
     const retained = classes.reduce((total, item) => total + item.occurrences, 0) + unclassified.length;
     const omittedEvidenceRefs = scan.omittedEvidenceRefs

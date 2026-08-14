@@ -31,6 +31,22 @@ test('clusters only inside defectClass and keeps singles below min (R5.4, R5.6)'
     expect(report.classes.every((item) => item.occurrences === 1 && item.recurrent === false)).toBe(true);
 });
 
+test('preserves cluster kind and only sorted safe signatures in public empirical clusters (R5.5)', () => {
+    const report = evaluateEmpiricalCoverage(scanOf([
+        finding('lint-errors', 'src/z.ts:9', 'src/z.ts:9'),
+        finding('lint-errors', 'PR #12', 'src/z.ts:10'),
+        finding('lint-errors', 'secret-token=do-not-expose', 'src/z.ts:11'),
+    ]), { 'lint-errors': 'covered' }, 1);
+
+    expect(report.classes).toHaveLength(1);
+    expect(report.classes[0].clusters).toEqual([expect.objectContaining({
+        kind: 'convergent',
+        signatures: ['PR #12', 'src/z.ts:9'],
+        omittedSignatures: 1,
+    })]);
+    expect(JSON.stringify(report)).not.toContain('secret-token=do-not-expose');
+});
+
 test.each([
     ['covered', 'covered-by-sensor'], ['missing', 'gap'], ['incompatible', 'gap'],
     ['missing-tool', 'gap'], ['unverifiable', 'coverage-unverifiable'],
@@ -61,9 +77,10 @@ test('changes recurrence emphasis and stable ordering when --min changes (R5.13)
     const minTwo = evaluateEmpiricalCoverage(entries, { 'lint-errors': 'covered' }, 2);
     const minThree = evaluateEmpiricalCoverage(entries, { 'lint-errors': 'covered' }, 3);
     expect(minTwo.recurrenceThreshold).toBe(2);
-    expect(minTwo.classes.map((item) => [item.occurrences, item.recurrent])).toEqual([[2, true], [1, false]]);
+    expect(minTwo.classes.map((item) => [item.occurrences, item.recurrent])).toEqual([[3, true]]);
+    expect(minTwo.classes[0].clusters).toHaveLength(2);
     expect(minThree.recurrenceThreshold).toBe(3);
-    expect(minThree.classes.map((item) => [item.occurrences, item.recurrent])).toEqual([[2, false], [1, false]]);
+    expect(minThree.classes.map((item) => [item.occurrences, item.recurrent])).toEqual([[3, false]]);
     expect(JSON.stringify(minTwo)).not.toEqual(JSON.stringify(minThree));
 });
 
