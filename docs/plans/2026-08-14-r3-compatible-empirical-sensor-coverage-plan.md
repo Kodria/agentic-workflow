@@ -146,7 +146,7 @@ _Requirements: R1.1, R1.6, R1.7, R7.1, R7.2, R7.4, R7.5, R8.5_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir fixtures y tests rojos del pack v2**
+- [x] **Step 1: Escribir fixtures y tests rojos del pack v2**
 
 ```ts
 // cli/tests/commands/sensors/compatibility/contract.test.ts
@@ -191,19 +191,19 @@ test.each([
 });
 ```
 
-- [ ] **Step 2: Ejecutar el corpus rojo**
+- [x] **Step 2: Ejecutar el corpus rojo**
 
 Run: `cd cli && npx jest tests/commands/sensors/compatibility/contract.test.ts --runInBand`
 
 Expected: FAIL por módulo inexistente.
 
-- [ ] **Step 3: Agregar `semver` como dependencia directa y definir tipos cerrados**
+- [x] **Step 3: Agregar `semver` como dependencia directa y definir tipos cerrados**
 
 Run: `cd cli && npm install semver@^7.7.4 && npm install --save-dev @types/semver@^7.7.1`
 
 Implementar en `types.ts` los tipos del bloque contractual, `PackV2`, `LegacyPack`, `SensorVariant`, `ProbeKind`, `ManifestV2`, `LegacyManifest` y `ParsedSensorManifest`. Todos los arrays devueltos son copias, todos los enums se validan desde `unknown` y ningún command acepta NUL, saltos de línea, shell (`sh`, `bash`, `cmd`, `powershell`) ni placeholders embebidos dentro de otro argumento.
 
-- [ ] **Step 4: Implementar `parseSensorPack` con rangos y solapamientos fail-closed**
+- [x] **Step 4: Implementar `parseSensorPack` con rangos y solapamientos fail-closed**
 
 ```ts
 export function parseSensorPack(input: unknown, source: unknown): ParsedPack {
@@ -221,7 +221,7 @@ export function parseSensorPack(input: unknown, source: unknown): ParsedPack {
 
 `assertNoEqualPriorityOverlap` usa `semver.intersects`; rangos o versiones inválidas lanzan con source+field. `coverage` se delega al parser v1 existente y no cambia de versión.
 
-- [ ] **Step 5: Escribir tests rojos de manifiesto legacy/v2 y migración**
+- [x] **Step 5: Escribir tests rojos de manifiesto legacy/v2 y migración**
 
 ```ts
 // cli/tests/commands/sensors/compatibility/manifest.test.ts
@@ -246,11 +246,11 @@ test.each([null, {}, { schemaVersion: 3, pack: 'x', sensors: {} },
     });
 ```
 
-- [ ] **Step 6: Implementar el parser único y retirar la duplicación de coverage**
+- [x] **Step 6: Implementar el parser único y retirar la duplicación de coverage**
 
 `compatibility/manifest.ts` exporta `parseSensorManifest`, `serializeManifestV2` y `legacyCompatibility`. `coverage/contract.ts` conserva solo `parseCoverageContract` y tipos del catálogo; todos los consumidores importarán el parser de manifiesto nuevo en tareas posteriores.
 
-- [ ] **Step 7: Ejecutar tests, probar mutación y commit**
+- [x] **Step 7: Ejecutar tests, probar mutación y commit**
 
 Run:
 
