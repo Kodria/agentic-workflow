@@ -38,6 +38,17 @@ describe('runCompatibilityProbe', () => {
         );
     });
 
+    it('keeps Windows Semgrep validation on the discovered .venv executable', async () => {
+        await runCompatibilityProbe({ kind: 'semgrep-validate' }, {
+            cwd: process.cwd(), toolExecutable: 'semgrep', toolResolution: 'python-environment', pythonEnvironmentRoot: '.venv',
+        }, fakeExecutor);
+
+        expect(fakeExecutor).toHaveBeenCalledWith(
+            { executable: 'semgrep', resolution: 'python-environment', pythonEnvironmentRoot: '.venv', args: ['--validate'] },
+            expect.objectContaining({ cwd: process.cwd() }),
+        );
+    });
+
     it.each(['mypy', 'ruff', 'pytest'])('probes a %s variant through the contained Python environment', async (toolExecutable) => {
         await runCompatibilityProbe({ kind: 'version' }, { ...evidence, toolExecutable, toolResolution: 'python-environment' }, fakeExecutor);
 
