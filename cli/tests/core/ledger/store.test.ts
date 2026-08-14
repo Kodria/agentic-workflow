@@ -233,6 +233,41 @@ describe('ledger store — archive', () => {
         expect(listEntries(cwd, 'feat-x')).toEqual([expect.objectContaining({ signature: 'active-evidence' })]);
     });
 
+    test('rejects a symlinked archive directory without moving the active ledger outside the project', () => {
+        addEntry(cwd, entry({ signature: 'active-evidence' }));
+        const archive = path.join(cwd, '.awm', 'ledger', 'archive');
+        const outside = path.join(cwd, 'outside');
+        fs.mkdirSync(outside, { recursive: true });
+        try {
+            fs.symlinkSync(outside, archive, 'dir');
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'EPERM') return;
+            throw error;
+        }
+
+        expect(() => archiveLedger(cwd, 'feat-x', '20260606T000000')).toThrow(/unsafe|escape|symlink/i);
+        expect(listEntries(cwd, 'feat-x')).toEqual([expect.objectContaining({ signature: 'active-evidence' })]);
+        expect(fs.readdirSync(outside)).toEqual([]);
+    });
+
+    test('rejects a symlinked source ledger and preserves the link target', () => {
+        const outside = path.join(cwd, 'outside.jsonl');
+        fs.writeFileSync(outside, JSON.stringify(entry({ signature: 'outside-evidence' })) + '\n');
+        const source = ledgerPath(cwd, 'feat-x');
+        fs.mkdirSync(path.dirname(source), { recursive: true });
+        try {
+            fs.symlinkSync(outside, source);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'EPERM') return;
+            throw error;
+        }
+
+        expect(() => archiveLedger(cwd, 'feat-x', '20260606T000000')).toThrow(/unsafe|escape|symlink/i);
+        expect(fs.lstatSync(source).isSymbolicLink()).toBe(true);
+        expect(fs.readFileSync(outside, 'utf-8')).toContain('outside-evidence');
+        expect(fs.existsSync(path.join(cwd, '.awm', 'ledger', 'archive', 'feat-x-20260606T000000.jsonl'))).toBe(false);
+    });
+
     test.each(['', '.', '..', '../outside', '/tmp/outside', 'C:\\temp\\outside'])
     ('rejects an unsafe archive label %p before touching a ledger', (label) => {
         expect(() => archiveLedger(cwd, 'feat-x', label)).toThrow(/invalid ledger label/i);

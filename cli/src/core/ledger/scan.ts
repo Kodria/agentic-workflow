@@ -110,10 +110,11 @@ function compareCandidates(a: LedgerCandidate, b: LedgerCandidate): number {
 }
 
 /**
- * Reads a bounded window from each direct ledger directory, then sorts only
- * that window. This deliberately does not claim to find a globally lexical
- * prefix in an unbounded directory: the extra candidate is a truncation
- * witness, and no later directory entry is opened or read.
+ * Reads one global bounded window across the direct ledger directories, then
+ * sorts only the retained candidates. This deliberately does not claim to
+ * find a globally lexical prefix in an unbounded directory: the extra
+ * candidate is a truncation witness, and no later candidate is opened or
+ * retained from either active or archive storage.
  */
 function collectBoundedCandidates(
     root: string,
@@ -124,15 +125,15 @@ function collectBoundedCandidates(
     const capacity = maxFiles + 1;
     let truncated = false;
     for (const { directory, archive } of directories) {
+        if (candidates.length >= capacity) break;
         const handle = fs.opendirSync(directory);
-        const directoryCandidates: LedgerCandidate[] = [];
         try {
             let item: fs.Dirent | null;
             while ((item = handle.readSync()) !== null) {
                 if (!item.name.endsWith('.jsonl')) continue;
                 const target = path.join(directory, item.name);
-                directoryCandidates.push({ isArchive: archive, target, sourcePath: relativePath(root, target) });
-                if (directoryCandidates.length === capacity) {
+                candidates.push({ isArchive: archive, target, sourcePath: relativePath(root, target) });
+                if (candidates.length === capacity) {
                     truncated = true;
                     break;
                 }
@@ -140,8 +141,6 @@ function collectBoundedCandidates(
         } finally {
             handle.closeSync();
         }
-        directoryCandidates.sort(compareCandidates);
-        candidates.push(...directoryCandidates);
     }
     candidates.sort(compareCandidates);
     return { candidates, truncated: truncated || candidates.length > maxFiles };

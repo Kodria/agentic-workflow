@@ -8,6 +8,36 @@ import type { RecurringCluster } from './cluster';
 
 const LEDGER_DIR = path.join('.awm', 'ledger');
 
+function isWithin(root: string, candidate: string): boolean {
+    const relative = path.relative(root, candidate);
+    return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+function assertSafeDirectory(directory: string, root: string, name: string): string {
+    const stat = fs.lstatSync(directory);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`unsafe ledger ${name} directory`);
+    const real = fs.realpathSync(directory);
+    if (!isWithin(root, real)) throw new Error(`ledger ${name} directory escapes its root`);
+    return real;
+}
+
+function sourceExists(source: string): boolean {
+    try {
+        fs.lstatSync(source);
+        return true;
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+        throw error;
+    }
+}
+
+function assertSafeLedgerSource(source: string, ledgerRoot: string): void {
+    const stat = fs.lstatSync(source);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error('unsafe ledger source');
+    const real = fs.realpathSync(source);
+    if (!isWithin(ledgerRoot, real)) throw new Error('ledger source escapes ledger directory');
+}
+
 function ledgerFilename(branch: string): string {
     if (typeof branch !== 'string'
         || branch.length === 0
@@ -90,10 +120,16 @@ export function recurring(cwd: string, branch: string, min: number): RecurringCl
 export function archiveLedger(cwd: string, branch: string, label: string): boolean {
     const safeLabel = archiveLabel(label);
     const src = ledgerPath(cwd, branch);
-    if (!fs.existsSync(src)) return false;
+    if (!sourceExists(src)) return false;
     const safe = ledgerFilename(branch);
-    const dst = path.join(cwd, LEDGER_DIR, 'archive', `${safe}-${safeLabel}.jsonl`);
-    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    const projectRoot = fs.realpathSync(cwd);
+    const ledgerRoot = path.join(projectRoot, LEDGER_DIR);
+    const safeLedgerRoot = assertSafeDirectory(ledgerRoot, projectRoot, 'root');
+    assertSafeLedgerSource(src, safeLedgerRoot);
+    const archiveRoot = path.join(ledgerRoot, 'archive');
+    if (!sourceExists(archiveRoot)) fs.mkdirSync(archiveRoot);
+    const safeArchiveRoot = assertSafeDirectory(archiveRoot, safeLedgerRoot, 'archive');
+    const dst = path.join(safeArchiveRoot, `${safe}-${safeLabel}.jsonl`);
     if (destinationExists(dst)) throw new Error(`ledger archive already exists: ${dst}`);
     fs.renameSync(src, dst);
     return true;
