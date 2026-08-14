@@ -73,6 +73,11 @@ function stringArray(value: unknown, source: unknown, location: string): string[
     return value.map((item, index) => text(item, source, `${location}[${index}]`));
 }
 
+function assetArray(value: unknown, source: unknown, location: string, allowEmpty = false): string[] {
+    if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) invalid(source, `${location} must be a ${allowEmpty ? '' : 'nonempty '}array`);
+    return value.map((item, index) => asset(item, source, `${location}[${index}]`));
+}
+
 export function parseStructuredCommand(input: unknown, source: unknown): StructuredCommand {
     const value = record(input, source, 'command');
     fields(value, ['executable', 'resolution', 'args', 'fileInput'], source, 'command');
@@ -123,11 +128,24 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
         priority: value.priority,
         certifiedRange,
         requirements: { tool: text(requirements.tool, source, `${location}.requirements.tool`), toolRange, runtime: text(requirements.runtime, source, `${location}.requirements.runtime`), runtimeRange, ...('configFiles' in requirements ? { configFiles: stringArray(requirements.configFiles, source, `${location}.requirements.configFiles`).map((file, index) => asset(file, source, `${location}.requirements.configFiles[${index}]`)) } : {}) },
-        assets: stringArray(value.assets, source, `${location}.assets`).map((entry, index) => asset(entry, source, `${location}.assets[${index}]`)),
+        assets: assetArray(value.assets, source, `${location}.assets`, true),
         formatter: text(value.formatter, source, `${location}.formatter`),
         probe: { kind: probe.kind as CompatibilityProbe },
         command: parseStructuredCommand(value.command, source),
     };
+}
+
+function parseHardening(input: unknown, source: unknown): SensorPackV2['hardening'] {
+    const value = record(input, source, 'hardening');
+    const names = Object.keys(value);
+    if (names.length === 0) invalid(source, 'hardening must be nonempty when declared');
+    const hardening: NonNullable<SensorPackV2['hardening']> = {};
+    for (const name of names) {
+        const entry = record(value[name], source, `hardening.${name}`);
+        fields(entry, ['assets'], source, `hardening.${name}`);
+        hardening[id(name, source, 'hardening id')] = { assets: assetArray(entry.assets, source, `hardening.${name}.assets`) };
+    }
+    return hardening;
 }
 
 export function assertNoEqualPriorityOverlap(variants: unknown): void {
@@ -215,7 +233,7 @@ function parseLegacyPack(value: UnknownRecord, source: unknown): LegacySensorPac
 export function parseSensorPack(input: unknown, source: unknown): ParsedSensorPack {
     const value = record(input, source, 'root');
     if (!('schemaVersion' in value)) return { kind: 'legacy', pack: parseLegacyPack(value, source) };
-    fields(value, ['schemaVersion', 'name', 'description', 'detects', 'sensors', 'coverage'], source, 'root');
+    fields(value, ['schemaVersion', 'name', 'description', 'detects', 'sensors', 'coverage', 'hardening'], source, 'root');
     if (value.schemaVersion !== PACK_SCHEMA_VERSION) invalid(source, `unsupported pack schemaVersion ${String(value.schemaVersion)}; supported: legacy, 2; upgrade or migrate the pack`);
     const sensorsInput = record(value.sensors, source, 'sensors');
     const sensorNames = Object.keys(sensorsInput);
@@ -229,10 +247,11 @@ export function parseSensorPack(input: unknown, source: unknown): ParsedSensorPa
     } catch (error) {
         invalid(source, `coverage.${error instanceof Error ? error.message.replace(/^.*?: /, '') : 'is invalid'}`);
     }
+    const hardening = 'hardening' in value ? parseHardening(value.hardening, source) : undefined;
     return { kind: 'v2', pack: {
         schemaVersion: PACK_SCHEMA_VERSION,
         name: id(value.name, source, 'name'), description: text(value.description, source, 'description'), detects: stringArray(value.detects, source, 'detects'),
-        sensors,
+        sensors, ...(hardening ? { hardening } : {}),
         coverage,
     } };
 }

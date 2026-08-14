@@ -42,6 +42,23 @@ describe('sensor pack v2 contract', () => {
         expect(parseSensorPack(validPack(), 'pack.json')).toMatchObject({ kind: 'v2', pack: validPack() });
     });
 
+    it('accepts an opt-in hardening asset while variants may require no assets', () => {
+        const pack = {
+            ...validPack(),
+            hardening: { 'typescript-strict': { assets: ['tsconfig.awm.json'] } },
+            sensors: {
+                lint: {
+                    ...validPack().sensors.lint,
+                    variants: [{ ...validPack().sensors.lint.variants[0], assets: [] }],
+                },
+            },
+        };
+        expect(parseSensorPack(pack, 'pack.json')).toMatchObject({
+            kind: 'v2',
+            pack: { hardening: { 'typescript-strict': { assets: ['tsconfig.awm.json'] } }, sensors: { lint: { variants: [{ assets: [] }] } } },
+        });
+    });
+
     it('keeps an unversioned pack on the legacy compatibility path', () => {
         const legacy = { name: 'legacy', sensors: {} };
         expect(parseSensorPack(legacy, 'pack.json')).toMatchObject({ kind: 'legacy', pack: { ...legacy, compatibility: { state: 'compatible-unverified' } } });
@@ -101,6 +118,9 @@ describe('sensor pack v2 contract', () => {
         [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command: { executable: 'cmd.exe', resolution: 'path', args: ['x'] } }] } } }, 'executable'],
         [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command: { ...validPack().sensors.lint.variants[0].command, args: ['prefix{files}'] } }] } } }, 'embed'],
         [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], formatter: 'bad\nformat' }] } } }, 'formatter'],
+        [{ ...validPack(), hardening: { 'typescript-strict': { assets: ['../tsconfig.awm.json'] } } }, 'asset'],
+        [{ ...validPack(), hardening: { 'typescript-strict': { assets: [] } } }, 'hardening'],
+        [{ ...validPack(), hardening: { 'typescript-strict': { assets: ['tsconfig.awm.json'], command: {} } } }, 'unknown field'],
     ])('rejects malformed pack %j', (input, message) => {
         expect(() => parseSensorPack(input, 'pack.json')).toThrow(message);
     });

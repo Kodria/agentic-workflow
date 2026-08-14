@@ -43,9 +43,11 @@ function makeV2Registry(): string {
     const packDir = path.join(registryRoot, 'sensor-packs', 'js-ts');
     fs.mkdirSync(packDir, { recursive: true });
     fs.writeFileSync(path.join(packDir, 'eslint.config.awm.mjs'), 'export default []\n');
+    fs.writeFileSync(path.join(packDir, 'tsconfig.awm.json'), '{ "compilerOptions": { "strict": true } }\n');
     fs.writeFileSync(path.join(packDir, 'pack.json'), JSON.stringify({
         schemaVersion: 2, name: 'js-ts', description: 'fixture', detects: ['package.json'],
         coverage: { schemaVersion: 1, classes: { lint: { description: 'lint', detectors: [{ sensor: 'lint' }], remedy: { summary: 'fix lint', command: 'awm sensors init --pack js-ts' } } } },
+        hardening: { 'typescript-strict': { assets: ['tsconfig.awm.json'] } },
         sensors: { lint: { applicability: { allFiles: ['package.json'] }, variants: [{
             id: 'eslint-10', priority: 10, certifiedRange: '>=10.0.0 <11.0.0',
             requirements: { tool: 'eslint', toolRange: '>=10.0.0 <11.0.0', runtime: 'node', runtimeRange: '>=0.0.0' },
@@ -298,6 +300,20 @@ describe('initSensors', () => {
             expect(written.sensors.lint.initializedCompatibility).toMatchObject({ variantId: 'eslint-10', state: 'certified', reason: 'range-and-probe' });
             expect(written.registryRoot).toBe(v2Registry);
             expect(fs.existsSync(path.join(tmpDir, 'eslint.config.awm.mjs'))).toBe(true);
+        } finally {
+            fs.rmSync(v2Registry, { recursive: true, force: true });
+        }
+    });
+
+    it('never materializes an opt-in hardening asset during ordinary v2 init', async () => {
+        const v2Registry = makeV2Registry();
+        try {
+            fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ devDependencies: { eslint: '^10.0.0' } }));
+            fs.mkdirSync(path.join(tmpDir, 'node_modules', 'eslint'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version: '10.0.0' }));
+            await initSensors({ cwd: tmpDir, registryRoot: v2Registry });
+            expect(fs.existsSync(path.join(tmpDir, 'eslint.config.awm.mjs'))).toBe(true);
+            expect(fs.existsSync(path.join(tmpDir, 'tsconfig.awm.json'))).toBe(false);
         } finally {
             fs.rmSync(v2Registry, { recursive: true, force: true });
         }

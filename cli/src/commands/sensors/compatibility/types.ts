@@ -42,6 +42,13 @@ export type SensorVariant = {
     command: StructuredCommand;
 };
 
+/**
+ * Stricter pack configuration that is deliberately inert until an explicit opt-in
+ * surface selects it. That future surface must require a named hardening choice and
+ * package-manager/environment resolution before it can materialize any asset.
+ */
+export type SensorPackHardening = Record<string, { assets: string[] }>;
+
 export type SensorPackSensor = {
     applicability: { allFiles?: string[]; anyFiles?: string[]; kind?: string };
     variants: SensorVariant[];
@@ -55,6 +62,7 @@ export type SensorPackV2 = {
     detects: string[];
     sensors: Record<string, SensorPackSensor>;
     coverage: unknown;
+    hardening?: SensorPackHardening;
 };
 
 export type LegacySensorPack = {
