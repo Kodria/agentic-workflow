@@ -34,6 +34,17 @@ describe('ledger store — add/list', () => {
         expect(ledgerPath(cwd, 'feature/foo')).toBe(path.join(cwd, '.awm', 'ledger', 'feature__foo.jsonl'));
     });
 
+    test.each(['..\\outside', 'feature\\..\\outside'])
+    ('rejects a Windows path-traversal branch %p before it can escape the ledger directory', (branch) => {
+        // On Windows, a backslash is a separator even when this test suite runs on POSIX.
+        // Keep the regression explicit so future path changes cannot reintroduce the escape.
+        expect(branch.split(path.win32.sep)).toContain('..');
+
+        expect(() => ledgerPath(cwd, branch)).toThrow(/invalid ledger branch/i);
+        expect(() => addEntry(cwd, entry({ branch }))).toThrow(/invalid ledger branch/i);
+        expect(fs.existsSync(path.join(cwd, '.awm', 'ledger'))).toBe(false);
+    });
+
     test('addEntry creates .awm/ledger/ and appends one jsonl line', () => {
         addEntry(cwd, entry());
         const raw = fs.readFileSync(ledgerPath(cwd, 'feat-x'), 'utf-8');

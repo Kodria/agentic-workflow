@@ -8,6 +8,18 @@ import type { RecurringCluster } from './cluster';
 
 const LEDGER_DIR = path.join('.awm', 'ledger');
 
+function ledgerFilename(branch: string): string {
+    if (typeof branch !== 'string'
+        || branch.length === 0
+        || branch.includes('\\')
+        || path.posix.isAbsolute(branch)
+        || path.win32.isAbsolute(branch)
+        || branch.split('/').some(segment => segment === '.' || segment === '..')) {
+        throw new Error('invalid ledger branch');
+    }
+    return branch.replace(/\//g, '__');
+}
+
 export function detectBranch(cwd: string): string {
     try {
         const b = execSync('git rev-parse --abbrev-ref HEAD', {
@@ -20,8 +32,7 @@ export function detectBranch(cwd: string): string {
 }
 
 export function ledgerPath(cwd: string, branch: string): string {
-    const safe = branch.replace(/\//g, '__');
-    return path.join(cwd, LEDGER_DIR, `${safe}.jsonl`);
+    return path.join(cwd, LEDGER_DIR, `${ledgerFilename(branch)}.jsonl`);
 }
 
 export function addEntry(cwd: string, entry: LedgerEntry): void {
@@ -56,7 +67,7 @@ export function recurring(cwd: string, branch: string, min: number): RecurringCl
 export function archiveLedger(cwd: string, branch: string, label: string): boolean {
     const src = ledgerPath(cwd, branch);
     if (!fs.existsSync(src)) return false;
-    const safe = branch.replace(/\//g, '__');
+    const safe = ledgerFilename(branch);
     const dst = path.join(cwd, LEDGER_DIR, 'archive', `${safe}-${label}.jsonl`);
     fs.mkdirSync(path.dirname(dst), { recursive: true });
     fs.renameSync(src, dst);
