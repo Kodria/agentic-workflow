@@ -11,11 +11,11 @@ describe('sensor manifest contract', () => {
     });
 
     it('normalizes a legacy string command with compatible-unverified evidence', () => {
-        expect(parseSensorManifest({ pack: 'js-ts', sensors: { lint: 'npm run lint' } }, 'sensors.json')).toMatchObject({
+        expect(parseSensorManifest({ pack: 'js-ts', sensors: { lint: 'npm run lint' } }, 'sensors.json')).toMatchObject({ kind: 'legacy', pack: {
             pack: 'js-ts',
             sensors: { lint: { cmd: 'npm run lint' } },
             compatibility: legacyCompatibility(),
-        });
+        } });
     });
 
     it('accepts a v2 selected variant and structured command', () => {
@@ -24,12 +24,13 @@ describe('sensor manifest contract', () => {
             pack: 'js-ts',
             sensors: {
                 lint: {
-                    selectedVariantId: 'eslint-9',
+                    enabled: true, variantId: 'eslint-9', assets: ['eslint.config.awm.mjs'],
                     command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.', '--format', 'json'] },
+                    initializedCompatibility: { state: 'certified', reason: 'range-and-probe', variantId: 'eslint-9', toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [] },
                 },
             },
         };
-        expect(parseSensorManifest(manifest, 'sensors.json')).toEqual(manifest);
+        expect(parseSensorManifest(manifest, 'sensors.json')).toMatchObject({ kind: 'v2', pack: manifest });
         expect(JSON.parse(serializeManifestV2(manifest))).toEqual(manifest);
     });
 
@@ -37,7 +38,7 @@ describe('sensor manifest contract', () => {
         [null, 'object'],
         [{}, 'pack'],
         [{ schemaVersion: 3, pack: 'js-ts', sensors: {} }, 'schemaVersion'],
-        [{ schemaVersion: 2, pack: 'js-ts', sensors: { lint: { selectedVariantId: 'eslint-9', command: { executable: 'eslint', resolution: 'path', args: [] } } } }, 'args'],
+        [{ schemaVersion: 2, pack: 'js-ts', sensors: { lint: { variantId: 'eslint-9', command: { executable: 'eslint', resolution: 'path', args: [] } } } }, 'enabled'],
     ])('rejects malformed manifest %j', (input, message) => {
         expect(() => parseSensorManifest(input, 'sensors.json')).toThrow(message);
     });

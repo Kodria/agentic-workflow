@@ -102,8 +102,9 @@ export function resolveCoverageInputs(cwd: unknown): CoverageInputs {
     if (!projectRoot) return { kind: 'not_configured' };
 
     const manifestPath = path.join(projectRoot, '.awm', 'sensors.json');
-    const manifest = parseSensorManifest(readBoundedJson(manifestPath), manifestPath);
-    if ('schemaVersion' in manifest) throw new Error(`Invalid coverage manifest at ${manifestPath}: v2 requires the compatibility resolver`);
+    const parsedManifest = parseSensorManifest(readBoundedJson(manifestPath), manifestPath);
+    if (parsedManifest.kind === 'v2') throw new Error(`Invalid coverage manifest at ${manifestPath}: v2 requires the compatibility resolver`);
+    const manifest = parsedManifest.pack;
     for (const registry of listRegistries()) {
         safeRegistryName(registry.name);
         const packPath = path.join(registry.contentRoot, 'sensor-packs', manifest.pack, 'pack.json');

@@ -35,18 +35,23 @@ export type SensorVariant = {
     id: string;
     priority: number;
     certifiedRange: string;
-    probes: CompatibilityProbe[];
+    requirements: { tool: string; toolRange: string; runtime: string; runtimeRange: string; configFiles?: string[] };
+    assets: string[];
+    formatter: string;
+    probe: { kind: CompatibilityProbe };
     command: StructuredCommand;
 };
 
 export type SensorPackSensor = {
+    applicability: { allFiles?: string[]; anyFiles?: string[]; kind?: string };
     variants: SensorVariant[];
 };
 
 export type SensorPackV2 = {
     schemaVersion: 2;
-    id: string;
-    assets: string[];
+    name: string;
+    description: string;
+    detects: string[];
     sensors: Record<string, SensorPackSensor>;
     coverage: unknown;
 };
@@ -61,3 +66,4 @@ export type LegacySensorPack = {
 };
 
 export type SensorPack = SensorPackV2 | LegacySensorPack;
+export type ParsedSensorPack = { kind: 'v2'; pack: SensorPackV2 } | { kind: 'legacy'; pack: LegacySensorPack };

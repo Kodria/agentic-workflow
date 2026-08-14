@@ -7,12 +7,12 @@ type UnknownRecord = Record<string, unknown>;
 export type SensorManifestV2 = {
     schemaVersion: 2;
     pack: string;
-    sensors: Record<string, { selectedVariantId: string; command: StructuredCommand }>;
+    sensors: Record<string, { enabled: boolean; variantId: string; command: StructuredCommand; assets: string[]; initializedCompatibility: CompatibilityEvidence }>;
     concurrency?: number;
 };
 
 export type LegacySensorManifest = SensorManifest & { compatibility: CompatibilityEvidence };
-export type ParsedSensorManifest = LegacySensorManifest | SensorManifestV2;
+export type ParsedSensorManifest = { kind: 'legacy'; pack: LegacySensorManifest } | { kind: 'v2'; pack: SensorManifestV2 };
 
 function isRecord(value: unknown): value is UnknownRecord {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -110,18 +110,23 @@ function parseLegacyManifest(value: UnknownRecord, source: unknown): LegacySenso
     return manifest;
 }
 
-function parseV2Sensor(input: unknown, source: unknown, location: string): { selectedVariantId: string; command: StructuredCommand } {
+function parseV2Sensor(input: unknown, source: unknown, location: string): { enabled: boolean; variantId: string; command: StructuredCommand; assets: string[]; initializedCompatibility: CompatibilityEvidence } {
     const value = record(input, source, location);
-    fields(value, ['selectedVariantId', 'command'], source, location);
+    fields(value, ['enabled', 'variantId', 'command', 'assets', 'initializedCompatibility'], source, location);
+    if (typeof value.enabled !== 'boolean') invalid(source, `${location}.enabled must be a boolean`);
+    const evidence = record(value.initializedCompatibility, source, `${location}.initializedCompatibility`);
+    fields(evidence, ['state', 'reason', 'variantId', 'toolVersion', 'runtimeVersion', 'certifiedRange', 'evidence'], source, `${location}.initializedCompatibility`);
     return {
-        selectedVariantId: id(value.selectedVariantId, source, `${location}.selectedVariantId`),
+        enabled: value.enabled, variantId: id(value.variantId, source, `${location}.variantId`),
         command: parseStructuredCommand(value.command, source),
+        assets: stringArray(value.assets, source, `${location}.assets`, false),
+        initializedCompatibility: evidence as CompatibilityEvidence,
     };
 }
 
 function parseV2Manifest(value: UnknownRecord, source: unknown): SensorManifestV2 {
     fields(value, ['schemaVersion', 'pack', 'sensors', 'concurrency'], source, 'root');
-    if (value.schemaVersion !== 2) invalid(source, 'schemaVersion must be 2');
+    if (value.schemaVersion !== 2) invalid(source, `unsupported manifest schemaVersion ${String(value.schemaVersion)}; supported: legacy, 2; upgrade or migrate the manifest`);
     const pack = id(value.pack, source, 'pack');
     const sensorsInput = record(value.sensors, source, 'sensors');
     const sensors: SensorManifestV2['sensors'] = {};
@@ -136,11 +141,11 @@ function parseV2Manifest(value: UnknownRecord, source: unknown): SensorManifestV
 
 export function parseSensorManifest(input: unknown, source: unknown): ParsedSensorManifest {
     const value = record(input, source, 'root');
-    return 'schemaVersion' in value ? parseV2Manifest(value, source) : parseLegacyManifest(value, source);
+    return 'schemaVersion' in value ? { kind: 'v2', pack: parseV2Manifest(value, source) } : { kind: 'legacy', pack: parseLegacyManifest(value, source) };
 }
 
 export function serializeManifestV2(input: unknown): string {
     const parsed = parseSensorManifest(input, 'manifest serialization');
-    if (!('schemaVersion' in parsed) || parsed.schemaVersion !== 2) throw new Error('Cannot serialize a legacy sensor manifest as v2');
-    return JSON.stringify(parsed, null, 2);
+    if (parsed.kind !== 'v2') throw new Error('Cannot serialize a legacy sensor manifest as v2');
+    return JSON.stringify(parsed.pack, null, 2);
 }
