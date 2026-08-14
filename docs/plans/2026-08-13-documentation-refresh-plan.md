@@ -72,7 +72,7 @@ _Requirements: R7, R15_
 
 **Skills:** test-driven-development, systematic-debugging
 
-- [ ] **Step 1: Add the failing unit regression**
+- [x] **Step 1: Add the failing unit regression**
 
 Add this case beside the existing Copilot `stepDevCore` tests:
 
@@ -97,7 +97,7 @@ it('defers local-only baseline bundles during --machine-only (R7)', () => {
 });
 ```
 
-- [ ] **Step 2: Run the unit test and verify RED**
+- [x] **Step 2: Run the unit test and verify RED**
 
 Run:
 
@@ -108,7 +108,7 @@ npx jest tests/core/init/steps.test.ts --runInBand
 
 Expected: FAIL because `stepDevCore` calls `installBundle` with `scopeOverride: 'local'` even when `machineOnly` is true.
 
-- [ ] **Step 3: Add the failing isolated integration regression**
+- [x] **Step 3: Add the failing isolated integration regression**
 
 Add a test in `copilot-init-isolated.test.ts` that starts with a bare working directory and snapshots every entry before and after:
 
@@ -134,7 +134,13 @@ it('machine-only enables Copilot without writing project artifacts (R7, R15)', a
 });
 ```
 
-- [ ] **Step 4: Run the integration test and verify RED**
+- [x] **Step 4: Run the integration test and verify RED**
+
+> Completion note: the isolated bare-directory scenario was already protected by
+> the existing project-root detection path, so it did not reproduce the proposed
+> failure before the guard was added. The direct `stepDevCore` unit regression
+> did reproduce it in RED; the isolated test remains the end-to-end no-write
+> contract.
 
 Run:
 
@@ -145,7 +151,7 @@ npx jest tests/integration/copilot-init-isolated.test.ts --runInBand
 
 Expected: FAIL because baseline instructions are materialized under `tmpWork`.
 
-- [ ] **Step 5: Implement the minimal machine-only guard**
+- [x] **Step 5: Implement the minimal machine-only guard**
 
 In `stepDevCore`, guard the local-only branch before installing bundles:
 
@@ -174,7 +180,7 @@ for (const bundleName of toInstall) {
 
 Do not change normal project initialization: the existing real E2E must continue to create `AGENTS.md` and `.github/instructions/` when `machineOnly` is false.
 
-- [ ] **Step 6: Run focused tests and verify GREEN**
+- [x] **Step 6: Run focused tests and verify GREEN**
 
 Run:
 
@@ -185,7 +191,7 @@ npx jest tests/core/init/steps.test.ts tests/core/init/context-injection-no-proj
 
 Expected: PASS; the new machine-only tests pass and the existing normal Copilot initialization test still delivers project content.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add cli/src/core/init/steps.ts cli/tests/core/init/steps.test.ts cli/tests/integration/copilot-init-isolated.test.ts
@@ -199,7 +205,7 @@ _Requirements: R1, R2, R3, R5, R8, R11, R12, R14.1, R14.2, R14.4_
 **Files:**
 - Create: `cli/tests/structural/active-documentation.test.ts`
 
-- [ ] **Step 1: Write the failing structural test with the final active-doc set**
+- [x] **Step 1: Write the failing structural test with the final active-doc set**
 
 Create the test with a fixed editorial allowlist; do not scan `docs/plans` or `docs/research`:
 
@@ -306,7 +312,7 @@ describe('active documentation contract', () => {
 });
 ```
 
-- [ ] **Step 2: Run the new test and verify RED**
+- [x] **Step 2: Run the new test and verify RED**
 
 Run:
 
@@ -317,7 +323,7 @@ npx jest tests/structural/active-documentation.test.ts --runInBand
 
 Expected: FAIL because `docs/README.md`, `framework.md`, `configuration.md`, and `project-setup.md` do not exist yet.
 
-- [ ] **Step 3: Commit the RED contract**
+- [x] **Step 3: Commit the RED contract**
 
 ```bash
 git add cli/tests/structural/active-documentation.test.ts
@@ -332,7 +338,7 @@ _Requirements: R1, R2, R11, R14.4_
 - Modify: `README.md`
 - Create: `docs/README.md`
 
-- [ ] **Step 1: Rewrite the README opening around product identity and two intents**
+- [x] **Step 1: Rewrite the README opening around product identity and two intents**
 
 Keep the existing package name, badges, install snippet, and license. Replace the duplicated matrices and long documentation list with this hierarchy and equivalent final prose:
 
@@ -372,7 +378,7 @@ the repository you want AWM to manage.
 
 Retain concise sections for support summary, framework-at-a-glance, daily commands, contributing, and license. Link the generated support matrix rather than recreating its tables.
 
-- [ ] **Step 2: Create the intent-based documentation hub**
+- [x] **Step 2: Create the intent-based documentation hub**
 
 Use this exact top-level structure in `docs/README.md`:
 
@@ -411,7 +417,7 @@ AWM itself. They retain their contractual locations and are not part of the
 getting-started sequence.
 ```
 
-- [ ] **Step 3: Run the reachability test**
+- [x] **Step 3: Run the reachability test**
 
 Run:
 
@@ -422,7 +428,7 @@ npx jest tests/structural/active-documentation.test.ts --runInBand
 
 Expected: still FAIL only for the active documents not yet created or renamed; no README navigation failure.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md docs/README.md
@@ -438,13 +444,13 @@ _Requirements: R11, R12, R16.1, R16.2_
 - Modify: `docs/framework.md`
 - Modify links in: `README.md`, `docs/README.md`, `docs/architecture.md`, `docs/runbook.md`, `docs/cli-reference.md`, `docs/guides/*.md`
 
-- [ ] **Step 1: Preserve history with Git move**
+- [x] **Step 1: Preserve history with Git move**
 
 ```bash
 git mv docs/sdlc.md docs/framework.md
 ```
 
-- [ ] **Step 2: Rewrite the guide with the approved functional structure**
+- [x] **Step 2: Rewrite the guide with the approved functional structure**
 
 Use these sections and claims:
 
@@ -499,7 +505,7 @@ Explicitly state:
 - AWM guarantees process discipline and evidence, not correct LLM reasoning.
 - The official baseline includes Product and Development; Frontend is a project extension.
 
-- [ ] **Step 3: Update every active inbound link**
+- [x] **Step 3: Update every active inbound link**
 
 Run:
 
@@ -509,7 +515,12 @@ rg -n 'sdlc\.md|\[SDLC\]' README.md docs --glob '*.md' --glob '!plans/**' --glob
 
 Replace active editorial links with `framework.md` or `docs/framework.md`. Do not rewrite historical plans merely because they mention the old file.
 
-- [ ] **Step 4: Verify the move and links**
+- [x] **Step 4: Verify the move and links**
+
+> Completion note: the history-preserving move was committed separately in
+> `c08b115` before the substantive rewrite. The aggregate branch diff classifies
+> the heavily rewritten file as add/delete, while `git log --follow` retains the
+> pre-branch history through that explicit rename commit.
 
 Run:
 
@@ -521,7 +532,7 @@ npx jest tests/structural/active-documentation.test.ts --runInBand
 
 Expected: Git reports `rename docs/{sdlc.md => framework.md}` and the link checker has no `sdlc.md` failure.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add README.md docs
@@ -537,7 +548,7 @@ _Requirements: R3, R4, R5, R6, R7, R8, R9, R15_
 - Create: `docs/configuration.md`
 - Modify: `docs/agents-setup.md`
 
-- [ ] **Step 1: Make installation end at a prepared machine**
+- [x] **Step 1: Make installation end at a prepared machine**
 
 Restructure `installation.md` to this order:
 
@@ -568,7 +579,7 @@ State explicitly that this phase may write AWM machine preferences, registry cac
 
 Correct the stale macOS claim: macOS is part of `.github/workflows/ci.yml` together with Linux and Windows.
 
-- [ ] **Step 2: Create the canonical configuration guide**
+- [x] **Step 2: Create the canonical configuration guide**
 
 Use this structure:
 
@@ -628,11 +639,11 @@ awm init --agent <provider> --machine-only
 
 Explain that baseline/ambient bundles reconcile at machine scope and project bundles activate later. Link complete paths and tiers to `[Support matrix](support-matrix.md)` instead of copying them.
 
-- [ ] **Step 3: Narrow `agents-setup.md` to provider-specific mechanics**
+- [x] **Step 3: Narrow `agents-setup.md` to provider-specific mechanics**
 
 Retain one section per provider with prerequisites, format, trust prompts, provider-specific environment variables, and limitations. Replace the duplicated “several agents” and team onboarding prose with links to `configuration.md` and `project-setup.md`. Keep the generated matrix authoritative for paths.
 
-- [ ] **Step 4: Verify configuration contract**
+- [x] **Step 4: Verify configuration contract**
 
 Run:
 
@@ -646,7 +657,7 @@ node dist/src/index.js registry --help
 
 Expected: documentation tests pass for existing files; help output exposes every documented command and option.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/installation.md docs/configuration.md docs/agents-setup.md
@@ -662,7 +673,7 @@ _Requirements: R3, R8, R9, R10, R15_
 - Modify: `README.md`
 - Modify: `docs/README.md`
 
-- [ ] **Step 1: Create `project-setup.md` with explicit entry cases**
+- [x] **Step 1: Create `project-setup.md` with explicit entry cases**
 
 Use this structure and command contracts:
 
@@ -714,7 +725,7 @@ awm add frontend --agent <provider> --scope local
 
 State what should be committed: `.awm/profile.json`, sensor manifest/configuration, `CONSTITUTION.md`, and provider-specific project context/instructions where applicable. Generated symlinks remain ignored according to the existing installer contract.
 
-- [ ] **Step 2: Add troubleshooting branches**
+- [x] **Step 2: Add troubleshooting branches**
 
 Cover these exact cases with a cause and command:
 
@@ -726,7 +737,7 @@ Cover these exact cases with a cause and command:
 | native Windows symlink denial | Enable Developer Mode or install affected artifacts with copy mode. |
 | Copilot machine setup has no skills | Expected; run normal project initialization inside the repository. |
 
-- [ ] **Step 3: Verify the complete navigation/link contract**
+- [x] **Step 3: Verify the complete navigation/link contract**
 
 Run:
 
@@ -737,7 +748,7 @@ npx jest tests/structural/active-documentation.test.ts --runInBand
 
 Expected: PASS for reachability, two-stage boundary, local links, anchors, provider commands, and canonical-topic ownership.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md docs/README.md docs/project-setup.md
@@ -753,7 +764,7 @@ _Requirements: R6, R9, R12, R14.2, R15_
 - Modify: `docs/cli-reference.md`
 - Modify: `docs/architecture.md`
 
-- [ ] **Step 1: Refocus the runbook on operations**
+- [x] **Step 1: Refocus the runbook on operations**
 
 Replace the full installation and project-bootstrap chapters with short prerequisites linking to `installation.md`, `configuration.md`, and `project-setup.md`. Retain and consolidate:
 
@@ -775,7 +786,7 @@ Replace the full installation and project-bootstrap chapters with short prerequi
 
 Keep registry creation, SSH, pinning, authoring, and team rollout detail here. Remove repeated provider path tables and repeated `init` flag definitions.
 
-- [ ] **Step 2: Correct `cli-reference.md` contracts**
+- [x] **Step 2: Correct `cli-reference.md` contracts**
 
 The `awm init` entry must say:
 
@@ -787,7 +798,7 @@ without global delivery defer their content until a normal project init.
 
 Document `awm agent list` and `awm agent disable`, including replacement-default behavior. Keep examples concise and link conceptual explanations to `configuration.md`.
 
-- [ ] **Step 3: Separate internal architecture from functional explanation**
+- [x] **Step 3: Separate internal architecture from functional explanation**
 
 At the top of `architecture.md`, add:
 
@@ -798,7 +809,7 @@ workflow and its lifecycle, start with [How AWM works](framework.md).
 
 Update related links without duplicating framework prose.
 
-- [ ] **Step 4: Verify command reference and links**
+- [x] **Step 4: Verify command reference and links**
 
 Run:
 
@@ -813,7 +824,7 @@ node dist/src/index.js registry add --help
 
 Expected: all help invocations exit 0 and every documented flag appears exactly as implemented.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/runbook.md docs/cli-reference.md docs/architecture.md
@@ -830,7 +841,7 @@ _Requirements: R4, R5, R12, R14.3, R15_
 - Modify: `docs/agents-setup.md`
 - Regenerate: generated block inside `docs/support-matrix.md` only through `npm run docs:matrix`
 
-- [ ] **Step 1: Regenerate the provider tables from code**
+- [x] **Step 1: Regenerate the provider tables from code**
 
 Run:
 
@@ -842,7 +853,7 @@ git diff -- ../docs/support-matrix.md
 
 Expected: either no generated diff, or a diff fully explained by current `providers/index.ts`. Never hand-edit between the generated markers.
 
-- [ ] **Step 2: Audit hand-written support prose against current contracts**
+- [x] **Step 2: Audit hand-written support prose against current contracts**
 
 Confirm and state accurately:
 
@@ -855,7 +866,7 @@ Confirm and state accurately:
 
 Remove dated narrative that is useful only as historical evidence from the active support path; link to research evidence where it adds value rather than moving the evidence.
 
-- [ ] **Step 3: Run generated-content verification**
+- [x] **Step 3: Run generated-content verification**
 
 Run:
 
@@ -866,7 +877,7 @@ npx jest tests/structural/support-matrix-is-current.test.ts tests/structural/pro
 
 Expected: PASS on all three OS-neutral provider truth guards.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/support-matrix.md docs/installation.md docs/agents-setup.md
@@ -881,7 +892,7 @@ _Requirements: R2, R12, R13, R14.1, R14.4, R15, R16.1, R16.2_
 - Modify only active editorial files named in this plan when findings require correction.
 - Do not modify harness-owned evidence except the two new approved plan artifacts.
 
-- [ ] **Step 1: Scan for stale navigation and duplicate ownership**
+- [x] **Step 1: Scan for stale navigation and duplicate ownership**
 
 Run:
 
@@ -892,11 +903,11 @@ rg -n '^## (Install|First run|Provider capability matrix|Several agents)' docs/{
 
 Expected: no stale `sdlc.md` link or obsolete macOS claim; each topic appears in its canonical owner and only concise links appear elsewhere.
 
-- [ ] **Step 2: Perform the canonical-English review**
+- [x] **Step 2: Perform the canonical-English review**
 
 Read every file in the `ACTIVE` allowlist from `active-documentation.test.ts`. Verify headings, explanatory prose, examples, and captions are English. Provider output quoted verbatim may retain its source language only when necessary; new editorial prose must be English. This manual reading specifically verifies R2 rather than relying on an unreliable language heuristic.
 
-- [ ] **Step 3: Verify harness paths were preserved**
+- [x] **Step 3: Verify harness paths were preserved**
 
 Run:
 
@@ -913,7 +924,7 @@ A docs/plans/2026-08-13-documentation-refresh-plan.md
 
 There must be no move, deletion, or modification under `docs/research/` or `docs/harness-retros.md`.
 
-- [ ] **Step 4: Verify history-preserving rename**
+- [x] **Step 4: Verify history-preserving rename**
 
 Run:
 
@@ -924,7 +935,7 @@ git log --follow --oneline -- docs/framework.md | head
 
 Expected: Git detects the rename and `git log --follow` includes history predating this branch.
 
-- [ ] **Step 5: Fix only concrete audit findings and commit**
+- [x] **Step 5: Fix only concrete audit findings and commit**
 
 ```bash
 git add README.md docs
@@ -942,7 +953,7 @@ _Requirements: R1, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13, R14.1, R14.2,
 
 **Skills:** verification-before-completion
 
-- [ ] **Step 1: Build the real CLI**
+- [x] **Step 1: Build the real CLI**
 
 ```bash
 cd cli
@@ -951,7 +962,7 @@ npm run build
 
 Expected: TypeScript exits 0 and `dist/src/index.js` exists.
 
-- [ ] **Step 2: Run focused documentation and Copilot gates**
+- [x] **Step 2: Run focused documentation and Copilot gates**
 
 ```bash
 cd cli
@@ -960,7 +971,7 @@ npx jest tests/structural/active-documentation.test.ts tests/structural/support-
 
 Expected: all focused suites PASS.
 
-- [ ] **Step 3: Run the complete suite**
+- [x] **Step 3: Run the complete suite**
 
 ```bash
 cd cli
@@ -969,7 +980,7 @@ npm test -- --runInBand
 
 Expected: all suites pass; the starting baseline was 216 suites and 2,281 tests before adding this plan's new cases.
 
-- [ ] **Step 4: Run AWM gates from the configured CLI project root**
+- [x] **Step 4: Run AWM gates from the configured CLI project root**
 
 ```bash
 cd cli
@@ -980,7 +991,7 @@ node dist/src/index.js context-budget --cwd ..
 
 Expected: preflight is ready; enabled sensors pass or report an explicitly accepted baseline; context budget is within the committed limit or has a reviewed decision.
 
-- [ ] **Step 5: Review the final diff and requirement preservation**
+- [x] **Step 5: Review the final diff and requirement preservation**
 
 ```bash
 git diff --check origin/main...HEAD
@@ -991,7 +1002,7 @@ git diff --name-status origin/main...HEAD -- docs/plans docs/research docs/harne
 
 Expected: no whitespace errors, no uncommitted files, no harness-evidence moves, and only intended code/documentation changes.
 
-- [ ] **Step 6: Commit any verification-only corrections**
+- [x] **Step 6: Commit any verification-only corrections**
 
 ```bash
 git add README.md docs cli/src cli/tests
