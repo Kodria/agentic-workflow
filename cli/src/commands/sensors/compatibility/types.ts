@@ -60,7 +60,7 @@ export type LegacySensorPack = {
     name: string;
     description?: string;
     detects?: string[];
-    sensors: Record<string, { defaultCmd?: string; fast?: boolean; enabled?: boolean; changedCmd?: string; changedExtensions?: string[]; formatter?: string }>;
+    sensors: Record<string, { defaultCmd?: string; fast?: boolean; enabled?: boolean; changedCmd?: string; changedExtensions?: string[]; formatter?: string; configFile?: string; configFileFallback?: string }>;
     coverage?: unknown;
     compatibility: CompatibilityEvidence;
 };

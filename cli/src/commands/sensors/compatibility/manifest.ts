@@ -7,7 +7,7 @@ type UnknownRecord = Record<string, unknown>;
 export type SensorManifestV2 = {
     schemaVersion: 2;
     pack: string;
-    sensors: Record<string, { enabled: boolean; variantId: string; command: StructuredCommand; assets: string[]; initializedCompatibility: CompatibilityEvidence }>;
+    sensors: Record<string, { enabled: boolean; variantId: string; command: StructuredCommand; assets?: string[]; initializedCompatibility: CompatibilityEvidence }>;
     concurrency?: number;
 };
 
@@ -55,6 +55,26 @@ function stringArray(value: unknown, source: unknown, location: string, allowEmp
         invalid(source, `${location} must be ${allowEmpty ? 'an array' : 'a nonempty array'}`);
     }
     return value.map((item, index) => text(item, source, `${location}[${index}]`));
+}
+
+function asset(value: unknown, source: unknown, location: string): string {
+    const parsed = text(value, source, location);
+    if (parsed.startsWith('/') || /^[A-Za-z]:[\\/]/.test(parsed) || parsed.startsWith('\\\\') || parsed.includes('\\') || parsed.split('/').some(part => part === '' || part === '.' || part === '..')) invalid(source, `${location} must be a contained relative asset path`);
+    return parsed;
+}
+
+const STATES = new Set<CompatibilityEvidence['state']>(['certified', 'compatible-unverified', 'incompatible', 'missing-tool', 'unverifiable', 'not-applicable']);
+
+function nullableText(value: unknown, source: unknown, location: string): string | null {
+    return value === null ? null : text(value, source, location);
+}
+
+function parseCompatibilityEvidence(input: unknown, source: unknown, location: string): CompatibilityEvidence {
+    const value = record(input, source, location);
+    fields(value, ['state', 'reason', 'variantId', 'toolVersion', 'runtimeVersion', 'certifiedRange', 'evidence'], source, location);
+    if (typeof value.state !== 'string' || !STATES.has(value.state as CompatibilityEvidence['state'])) invalid(source, `${location}.state must be a supported state`);
+    if (!Array.isArray(value.evidence)) invalid(source, `${location}.evidence must be an array`);
+    return { state: value.state as CompatibilityEvidence['state'], reason: text(value.reason, source, `${location}.reason`), variantId: nullableText(value.variantId, source, `${location}.variantId`), toolVersion: nullableText(value.toolVersion, source, `${location}.toolVersion`), runtimeVersion: nullableText(value.runtimeVersion, source, `${location}.runtimeVersion`), certifiedRange: nullableText(value.certifiedRange, source, `${location}.certifiedRange`), evidence: value.evidence.map((entry, index) => { const item = record(entry, source, `${location}.evidence[${index}]`); fields(item, ['kind', 'status', 'path'], source, `${location}.evidence[${index}]`); return { kind: text(item.kind, source, `${location}.evidence[${index}].kind`), status: text(item.status, source, `${location}.evidence[${index}].status`), ...('path' in item ? { path: asset(item.path, source, `${location}.evidence[${index}].path`) } : {}) }; }) };
 }
 
 export function legacyCompatibility(reason = 'legacy manifest without schemaVersion'): CompatibilityEvidence {
@@ -110,18 +130,17 @@ function parseLegacyManifest(value: UnknownRecord, source: unknown): LegacySenso
     return manifest;
 }
 
-function parseV2Sensor(input: unknown, source: unknown, location: string): { enabled: boolean; variantId: string; command: StructuredCommand; assets: string[]; initializedCompatibility: CompatibilityEvidence } {
+function parseV2Sensor(input: unknown, source: unknown, location: string): SensorManifestV2['sensors'][string] {
     const value = record(input, source, location);
     fields(value, ['enabled', 'variantId', 'command', 'assets', 'initializedCompatibility'], source, location);
     if (typeof value.enabled !== 'boolean') invalid(source, `${location}.enabled must be a boolean`);
-    const evidence = record(value.initializedCompatibility, source, `${location}.initializedCompatibility`);
-    fields(evidence, ['state', 'reason', 'variantId', 'toolVersion', 'runtimeVersion', 'certifiedRange', 'evidence'], source, `${location}.initializedCompatibility`);
-    return {
+    const sensor: SensorManifestV2['sensors'][string] = {
         enabled: value.enabled, variantId: id(value.variantId, source, `${location}.variantId`),
         command: parseStructuredCommand(value.command, source),
-        assets: stringArray(value.assets, source, `${location}.assets`, false),
-        initializedCompatibility: evidence as CompatibilityEvidence,
+        initializedCompatibility: parseCompatibilityEvidence(value.initializedCompatibility, source, `${location}.initializedCompatibility`),
     };
+    if ('assets' in value) sensor.assets = stringArray(value.assets, source, `${location}.assets`, false).map((entry, index) => asset(entry, source, `${location}.assets[${index}]`));
+    return sensor;
 }
 
 function parseV2Manifest(value: UnknownRecord, source: unknown): SensorManifestV2 {

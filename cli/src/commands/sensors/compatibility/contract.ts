@@ -29,7 +29,7 @@ function isRecord(value: unknown): value is UnknownRecord {
 }
 
 function sourceSuffix(source: unknown): string {
-    return typeof source === 'string' && source.length > 0 ? ` in ${source}` : '';
+    return typeof source === 'string' && source.length > 0 && !/[\0\r\n]/.test(source) ? ` in ${source}` : ' in <unknown source>';
 }
 
 function invalid(source: unknown, message: string): never {
@@ -116,12 +116,13 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
     const runtimeRange = text(requirements.runtimeRange, source, `${location}.requirements.runtimeRange`);
     if (semver.validRange(toolRange) === null || semver.validRange(runtimeRange) === null) invalid(source, `${location}.requirements ranges must be valid semver ranges`);
     const probe = record(value.probe, source, `${location}.probe`);
+    fields(probe, ['kind'], source, `${location}.probe`);
     if (typeof probe.kind !== 'string' || !ALLOWED_PROBES.has(probe.kind as CompatibilityProbe)) invalid(source, `${location}.probe.kind must be an allowed probe`);
     return {
         id: id(value.id, source, `${location}.id`),
         priority: value.priority,
         certifiedRange,
-        requirements: { tool: text(requirements.tool, source, `${location}.requirements.tool`), toolRange, runtime: text(requirements.runtime, source, `${location}.requirements.runtime`), runtimeRange },
+        requirements: { tool: text(requirements.tool, source, `${location}.requirements.tool`), toolRange, runtime: text(requirements.runtime, source, `${location}.requirements.runtime`), runtimeRange, ...('configFiles' in requirements ? { configFiles: stringArray(requirements.configFiles, source, `${location}.requirements.configFiles`).map((file, index) => asset(file, source, `${location}.requirements.configFiles[${index}]`)) } : {}) },
         assets: stringArray(value.assets, source, `${location}.assets`).map((entry, index) => asset(entry, source, `${location}.assets[${index}]`)),
         formatter: text(value.formatter, source, `${location}.formatter`),
         probe: { kind: probe.kind as CompatibilityProbe },
@@ -160,7 +161,13 @@ function parseSensor(input: unknown, source: unknown, location: string, variantI
     } catch (error) {
         invalid(source, `${location}.variants ${error instanceof Error ? error.message : 'overlap validation failed'}`);
     }
-    const applicability = record(value.applicability, source, `${location}.applicability`);
+    const applicabilityInput = record(value.applicability, source, `${location}.applicability`);
+    fields(applicabilityInput, ['allFiles', 'anyFiles', 'kind'], source, `${location}.applicability`);
+    const applicability: SensorPackSensor['applicability'] = {};
+    if ('allFiles' in applicabilityInput) applicability.allFiles = stringArray(applicabilityInput.allFiles, source, `${location}.applicability.allFiles`).map((file, index) => asset(file, source, `${location}.applicability.allFiles[${index}]`));
+    if ('anyFiles' in applicabilityInput) applicability.anyFiles = stringArray(applicabilityInput.anyFiles, source, `${location}.applicability.anyFiles`).map((file, index) => asset(file, source, `${location}.applicability.anyFiles[${index}]`));
+    if ('kind' in applicabilityInput) applicability.kind = text(applicabilityInput.kind, source, `${location}.applicability.kind`);
+    if (Object.keys(applicability).length === 0) invalid(source, `${location}.applicability must declare a condition`);
     return { applicability, variants };
 }
 
@@ -183,7 +190,7 @@ function parseLegacyPack(value: UnknownRecord, source: unknown): LegacySensorPac
     const sensors: LegacySensorPack['sensors'] = {};
     for (const sensorName of Object.keys(sensorsInput)) {
         const sensor = record(sensorsInput[sensorName], source, `sensors.${sensorName}`);
-        fields(sensor, ['defaultCmd', 'fast', 'enabled', 'changedCmd', 'changedExtensions', 'formatter'], source, `sensors.${sensorName}`);
+        fields(sensor, ['defaultCmd', 'fast', 'enabled', 'changedCmd', 'changedExtensions', 'formatter', 'configFile', 'configFileFallback'], source, `sensors.${sensorName}`);
         const parsed: LegacySensorPack['sensors'][string] = {};
         if ('defaultCmd' in sensor) parsed.defaultCmd = text(sensor.defaultCmd, source, `sensors.${sensorName}.defaultCmd`);
         if ('fast' in sensor) { if (typeof sensor.fast !== 'boolean') invalid(source, `sensors.${sensorName}.fast must be a boolean`); parsed.fast = sensor.fast; }
@@ -191,6 +198,8 @@ function parseLegacyPack(value: UnknownRecord, source: unknown): LegacySensorPac
         if ('changedCmd' in sensor) parsed.changedCmd = text(sensor.changedCmd, source, `sensors.${sensorName}.changedCmd`);
         if ('changedExtensions' in sensor) parsed.changedExtensions = stringArray(sensor.changedExtensions, source, `sensors.${sensorName}.changedExtensions`);
         if ('formatter' in sensor) parsed.formatter = text(sensor.formatter, source, `sensors.${sensorName}.formatter`);
+        if ('configFile' in sensor) parsed.configFile = asset(sensor.configFile, source, `sensors.${sensorName}.configFile`);
+        if ('configFileFallback' in sensor) parsed.configFileFallback = asset(sensor.configFileFallback, source, `sensors.${sensorName}.configFileFallback`);
         sensors[id(sensorName, source, 'sensor id')] = parsed;
     }
     const legacy: LegacySensorPack = { name, sensors, compatibility: legacyCompatibility() };
