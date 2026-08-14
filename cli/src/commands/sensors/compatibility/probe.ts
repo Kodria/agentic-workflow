@@ -12,7 +12,11 @@ function commandFor(kind: CompatibilityProbe, evidence: ProbeEvidence): Structur
     // A tool version certified from local package metadata must be probed through
     // the same project installation. Only the Node runtime is intentionally PATH
     // resolved: it is runtime evidence, not a package-local tool assertion.
-    const resolution = executable === 'node' ? 'path' : 'node-modules-bin' as const;
+    const resolution = executable === 'node'
+        ? 'path'
+        : kind === 'semgrep-validate'
+            ? 'python-environment'
+            : 'node-modules-bin' as const;
     if (kind === 'package-script-present') return null;
     if (kind === 'config-present') return null;
     if (kind === 'version') return { executable, resolution, args: ['--version'] };

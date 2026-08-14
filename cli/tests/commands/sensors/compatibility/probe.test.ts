@@ -28,4 +28,13 @@ describe('runCompatibilityProbe', () => {
             expect.any(Object),
         );
     });
+
+    it('binds Semgrep validation to the contained Python environment', async () => {
+        await runCompatibilityProbe({ kind: 'semgrep-validate' }, evidence, fakeExecutor);
+
+        expect(fakeExecutor).toHaveBeenCalledWith(
+            expect.objectContaining({ executable: 'semgrep', resolution: 'python-environment' }),
+            expect.any(Object),
+        );
+    });
 });

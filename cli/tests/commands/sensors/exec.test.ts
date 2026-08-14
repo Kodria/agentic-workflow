@@ -161,3 +161,22 @@ onPosix('runStructuredCommand — local node_modules binaries', () => {
         }
     });
 });
+
+onPosix('runStructuredCommand — Python environments', () => {
+    it('rejects a missing project Python executable instead of falling back to PATH', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-python-env-missing-'));
+        const global = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-python-env-global-'));
+        const savedPath = process.env.PATH;
+        try {
+            fs.writeFileSync(path.join(global, 'semgrep'), '#!/bin/sh\necho global\n', { mode: 0o755 });
+            process.env.PATH = global;
+
+            expect(() => runStructuredCommand({ executable: 'semgrep', resolution: 'python-environment', args: ['--validate'] }, { timeout: 5000, cwd: dir }))
+                .toThrow(/python.*environment.*local|contained/i);
+        } finally {
+            process.env.PATH = savedPath;
+            fs.rmSync(dir, { recursive: true, force: true });
+            fs.rmSync(global, { recursive: true, force: true });
+        }
+    });
+});

@@ -116,6 +116,24 @@ describe('runCommand — win32', () => {
         }
     });
 
+    it('rejects a missing Python environment executable instead of falling back to a same-named global command', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-python-env-missing-win-'));
+        const global = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-python-env-global-win-'));
+        const savedPath = process.env.PATH;
+        try {
+            fs.writeFileSync(path.join(global, 'semgrep.exe'), 'global');
+            process.env.PATH = global;
+            mockSpawn.mockReturnValue(fakeChild());
+            expect(() => runStructuredCommand({ executable: 'semgrep', resolution: 'python-environment', args: ['--validate'] }, { timeout: 5000, cwd: dir }))
+                .toThrow(/python.*environment.*local|contained/i);
+            expect(mockSpawn).not.toHaveBeenCalled();
+        } finally {
+            process.env.PATH = savedPath;
+            fs.rmSync(dir, { recursive: true, force: true });
+            fs.rmSync(global, { recursive: true, force: true });
+        }
+    });
+
     it('propagates cmd.exe\'s own exit code for a command that does not exist (1, not the POSIX 127)', async () => {
         // Mirrors exec.test.ts's POSIX "reports 127" case. cmd.exe has no
         // equivalent 127 convention — it reports 1 (sometimes 9009) for

@@ -222,16 +222,18 @@ function resolveStructuredExecutable(command: StructuredCommand, cwd: string): s
         throw new Error('node_modules executable is not a contained local file');
     }
     const candidates: string[] = [];
-    if (path.isAbsolute(command.executable)) candidates.push(command.executable);
-    else if (command.resolution === 'python-environment') {
+    if (command.resolution === 'python-environment') {
+        if (path.isAbsolute(command.executable)) throw new Error('python environment executable must be a contained local name');
         candidates.push(path.join(cwd, '.venv', isWindowsNative() ? 'Scripts' : 'bin', command.executable));
         candidates.push(path.join(cwd, 'venv', isWindowsNative() ? 'Scripts' : 'bin', command.executable));
-    } else {
+    } else if (path.isAbsolute(command.executable)) candidates.push(command.executable);
+    else {
         for (const entry of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) candidates.push(path.join(entry, command.executable));
     }
     if (!isWindowsNative()) {
         const found = candidates.find(regularFile);
         if (found) return found;
+        if (command.resolution === 'python-environment') throw new Error('python environment executable is not a contained local regular file');
         return command.executable;
     }
     const extensions = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map(ext => ext.toLowerCase()).filter(ext => ext === '.exe' || ext === '.com');
@@ -241,6 +243,7 @@ function resolveStructuredExecutable(command: StructuredCommand, cwd: string): s
         if (regularFile(candidate) && extensions.some(ext => lower.endsWith(ext))) return candidate;
         for (const extension of extensions) if (regularFile(candidate + extension)) return candidate + extension;
     }
+    if (command.resolution === 'python-environment') throw new Error('python environment executable is not a contained local regular file');
     return command.executable;
 }
 
