@@ -1027,6 +1027,25 @@ git commit -m "test: verify AWM documentation onboarding contract"
 
 Skip the commit if verification required no correction.
 
+## QA remediation closure (2026-08-14)
+
+The final verification exposed a harness-environment assumption, not a documentation
+requirement gap: Jest created its suite fixture below `~/.cache` even when that location
+was mounted read-only. This surfaced first as an `EROFS` error and then as a false-negative
+test sensor in the sandbox. The CI matrix had already demonstrated the production suite on
+all supported operating systems; the correction below makes the local gate portable too.
+
+- [x] Added a focused structural regression that simulates an existing but read-only
+  home cache and asserts that the suite fixture falls back to a unique directory under the
+  system temporary directory.
+- [x] Updated `cli/jest.global-setup.js` to catch either cache-directory creation or
+  unique-directory creation failure, then use `os.tmpdir()/awm-cache` without weakening
+  fixture isolation.
+- [x] Verified the red/green cycle with
+  `npx jest tests/structural/jest-environment-is-isolated.test.ts --runInBand`.
+- [x] Re-ran the complete suite outside the sandbox, where its real Git, npm-pack, and
+  child-process integration cases are permitted: 217 suites / 2,332 tests passed.
+
 ## Traceability matrix
 
 | Requirement | Task(s) | Verification |
