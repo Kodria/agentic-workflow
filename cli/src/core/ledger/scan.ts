@@ -22,7 +22,8 @@ export const DEFAULT_LEDGER_SCAN_LIMITS: LedgerScanLimits = {
 };
 
 export type LedgerScanReason = LedgerParseReason | 'invalid-json' | 'line-too-large' | 'json-too-deep'
-    | 'symlink-entry' | 'nonregular-entry' | 'path-escape' | 'file-too-large' | 'file-limit' | 'entry-limit';
+    | 'symlink-entry' | 'nonregular-entry' | 'path-escape' | 'file-too-large' | 'file-limit' | 'entry-limit'
+    | 'evidence-ref-limit';
 
 export interface ScannedLedgerEntry {
     entry: LedgerEntry;
@@ -169,7 +170,15 @@ export function scanProjectLedgers(projectRoot: string, overrides: Partial<Ledge
                     const defectClass = parsed.entry.defectClass ?? 'unclassified';
                     const count = evidenceRefsByClass.get(defectClass) ?? 0;
                     const evidenceRef = count < limits.maxRefsPerClass ? source : null;
-                    if (evidenceRef === null) omittedEvidenceRefs += 1;
+                    if (evidenceRef === null) {
+                        omittedEvidenceRefs += 1;
+                        // The finding remains available for recurrence analysis, but
+                        // its public evidence is deliberately omitted. Record the
+                        // truncation through the same typed source contract as every
+                        // other scan bound so downstream renderers cannot call it a
+                        // complete report.
+                        skip('evidence-ref-limit');
+                    }
                     else evidenceRefsByClass.set(defectClass, count + 1);
                     entries.push({ entry: parsed.entry, source, evidenceRef });
                 }
