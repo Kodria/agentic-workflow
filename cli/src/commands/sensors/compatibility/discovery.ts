@@ -62,7 +62,13 @@ export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependen
     const declaredManager = typeof pkg?.packageManager === 'string' ? pkg.packageManager.split('@')[0] : null;
     if (declaredManager) lockManagers.add(declaredManager);
     const configCandidates = new Set(COMMON_CONFIGS);
-    if ('schemaVersion' in pack) for (const sensor of Object.values(pack.sensors)) for (const variant of sensor.variants) for (const config of variant.requirements.configFiles ?? []) configCandidates.add(config);
+    if ('schemaVersion' in pack) {
+        for (const marker of pack.detects) configCandidates.add(marker);
+        for (const sensor of Object.values(pack.sensors)) {
+            for (const marker of [...(sensor.applicability.allFiles ?? []), ...(sensor.applicability.anyFiles ?? [])]) configCandidates.add(marker);
+            for (const variant of sensor.variants) for (const config of variant.requirements.configFiles ?? []) configCandidates.add(config);
+        }
+    }
     const configFiles = [...configCandidates].filter(file => safeFile(root, file)).sort();
     const scripts = Object.keys(stringMap(pkg?.scripts)).sort();
     const declaredToolRanges = { ...stringMap(pkg?.dependencies), ...stringMap(pkg?.devDependencies), ...stringMap(pkg?.peerDependencies) };

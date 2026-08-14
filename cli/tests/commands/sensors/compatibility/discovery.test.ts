@@ -23,4 +23,25 @@ describe('discoverProjectEvidence', () => {
             expect(evidence.paths.every((item: string) => !path.isAbsolute(item) && !item.includes('..'))).toBe(true);
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
+
+    it('includes pack and applicability markers when deciding whether a sensor applies', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-discovery-markers-'));
+        try {
+            fs.writeFileSync(path.join(root, 'pack-marker'), 'present');
+            fs.writeFileSync(path.join(root, 'sensor-marker'), 'present');
+            fs.writeFileSync(path.join(root, 'one-of-these'), 'present');
+            const evidence = discoverProjectEvidence(root, {
+                schemaVersion: 2,
+                name: 'custom',
+                detects: ['pack-marker'],
+                sensors: {
+                    lint: {
+                        applicability: { allFiles: ['sensor-marker'], anyFiles: ['one-of-these', 'missing-marker'] },
+                        variants: [{ requirements: { tool: 'eslint', configFiles: [] } }],
+                    },
+                },
+            } as any);
+            expect(evidence.paths).toEqual(expect.arrayContaining(['pack-marker', 'sensor-marker', 'one-of-these']));
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
 });

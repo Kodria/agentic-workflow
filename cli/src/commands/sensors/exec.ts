@@ -182,15 +182,20 @@ function regularFile(candidate: string): boolean {
  * excluded: CreateProcess cannot execute them safely without cmd.exe. */
 function resolveStructuredExecutable(command: StructuredCommand, cwd: string): string {
     const candidates: string[] = [];
-    if (path.isAbsolute(command.executable)) candidates.push(command.executable);
-    else if (command.resolution === 'node-modules-bin') candidates.push(path.join(cwd, 'node_modules', '.bin', command.executable));
+    if (command.resolution === 'node-modules-bin') candidates.push(path.join(cwd, 'node_modules', '.bin', command.executable));
+    else if (path.isAbsolute(command.executable)) candidates.push(command.executable);
     else if (command.resolution === 'python-environment') {
         candidates.push(path.join(cwd, '.venv', isWindowsNative() ? 'Scripts' : 'bin', command.executable));
         candidates.push(path.join(cwd, 'venv', isWindowsNative() ? 'Scripts' : 'bin', command.executable));
     } else {
         for (const entry of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) candidates.push(path.join(entry, command.executable));
     }
-    if (!isWindowsNative()) return candidates.find(regularFile) ?? command.executable;
+    if (!isWindowsNative()) {
+        const found = candidates.find(regularFile);
+        if (found) return found;
+        if (command.resolution === 'node-modules-bin') throw new Error('node_modules executable not found locally');
+        return command.executable;
+    }
     const extensions = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map(ext => ext.toLowerCase()).filter(ext => ext === '.exe' || ext === '.com');
     for (const candidate of candidates) {
         const lower = candidate.toLowerCase();
@@ -198,6 +203,7 @@ function resolveStructuredExecutable(command: StructuredCommand, cwd: string): s
         if (regularFile(candidate) && extensions.some(ext => lower.endsWith(ext))) return candidate;
         for (const extension of extensions) if (regularFile(candidate + extension)) return candidate + extension;
     }
+    if (command.resolution === 'node-modules-bin') throw new Error('node_modules executable not found locally');
     return command.executable;
 }
 

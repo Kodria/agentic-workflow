@@ -39,6 +39,23 @@ describe('resolveSensorCompatibility', () => {
         expect(resolveSensorCompatibility(sensor as any, evidence({ packageManagerConflict: true }), context)).toMatchObject({ state: 'unverifiable', reason: 'package-manager-conflict' });
     });
 
+    it('selects an operational variant when another tool variant is absent locally', () => {
+        const variants = [
+            { ...variant('eslint'), requirements: { ...variant('eslint').requirements, tool: 'eslint' } },
+            { ...variant('biome'), requirements: { ...variant('biome').requirements, tool: 'biome' } },
+        ];
+        const resolved = resolveSensorCompatibility({ applicability: { allFiles: ['package.json'] }, variants } as any,
+            evidence({ toolVersions: { eslint: '10.4.1', biome: null }, runtimeVersions: { node: '22.0.0' }, toolVersion: '8.0.0', runtimeVersion: '8.0.0' }), context);
+        expect(resolved).toMatchObject({ state: 'certified', variantId: 'eslint', toolVersion: '10.4.1', runtimeVersion: '22.0.0' });
+    });
+
+    it('does not reuse scalar evidence for a missing key in a version map', () => {
+        const biome = { ...variant('biome'), requirements: { ...variant('biome').requirements, tool: 'biome', runtime: 'bun' } };
+        expect(resolveSensorCompatibility({ applicability: { allFiles: ['package.json'] }, variants: [biome] } as any,
+            evidence({ toolVersions: { biome: null }, runtimeVersions: { bun: null }, toolVersion: '10.4.1', runtimeVersion: '22.0.0' }), context))
+            .toMatchObject({ state: 'missing-tool' });
+    });
+
     it('carries bounded, sanitized evidence without raw probe output', () => {
         const resolved = resolveSensorCompatibility(sensor as any, evidence({ paths: ['package.json', '../SECRET_VALUE'], probe: { status: 'matched', output: 'SECRET_VALUE' } }), context);
         expect(resolved.evidence).toEqual(expect.arrayContaining([{ kind: 'project-path', status: 'present', path: 'package.json' }, { kind: 'probe', status: 'matched' }]));
@@ -55,5 +72,15 @@ describe('resolveSensorCompatibility', () => {
             resolveSensorCompatibility(sensor as any, evidence({ os, applicable: false, paths: [] }), context),
         ].map(result => result.state);
         expect(states).toEqual(['certified', 'compatible-unverified', 'incompatible', 'missing-tool', 'unverifiable', 'not-applicable']);
+    });
+
+    test.each(['linux', 'darwin', 'win32'] as const)('keeps applicability and deterministic precedence above version resolution on %s', (os) => {
+        const broad = variant('broad', 10, '>=9 <12');
+        const narrow = variant('narrow', 10, '>=10 <11');
+        const precedenceSensor = { applicability: { allFiles: ['package.json'] }, variants: [broad, narrow] };
+        expect(resolveSensorCompatibility(precedenceSensor as any, evidence({ os, packageManagerConflict: true, applicable: false, paths: [] }), context))
+            .toMatchObject({ state: 'not-applicable', reason: 'applicability-not-met' });
+        expect(resolveSensorCompatibility(precedenceSensor as any, evidence({ os }), context)).toMatchObject({ variantId: 'narrow' });
+        expect(() => resolveSensorCompatibility({ ...precedenceSensor, variants: [variant('a'), variant('b')] } as any, evidence({ os }), context)).toThrow(/ambiguous/i);
     });
 });

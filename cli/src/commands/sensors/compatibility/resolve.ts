@@ -29,8 +29,12 @@ function specificity(variant: SensorVariant): number {
     return variant.requirements.toolRange.length + variant.requirements.runtimeRange.length + (variant.requirements.configFiles?.length ?? 0);
 }
 function validVersion(value: string | null | undefined): value is string { return typeof value === 'string' && semver.valid(value) !== null; }
-function toolFor(variant: SensorVariant, evidence: ResolveEvidence): string | null | undefined { return evidence.toolVersions?.[variant.requirements.tool] ?? evidence.toolVersion; }
-function runtimeFor(variant: SensorVariant, evidence: ResolveEvidence): string | null | undefined { return evidence.runtimeVersions?.[variant.requirements.runtime] ?? evidence.runtimeVersion; }
+function toolFor(variant: SensorVariant, evidence: ResolveEvidence): string | null | undefined {
+    return evidence.toolVersions === undefined ? evidence.toolVersion : evidence.toolVersions[variant.requirements.tool];
+}
+function runtimeFor(variant: SensorVariant, evidence: ResolveEvidence): string | null | undefined {
+    return evidence.runtimeVersions === undefined ? evidence.runtimeVersion : evidence.runtimeVersions[variant.requirements.runtime];
+}
 
 /** Pure precedence resolver. It consumes discovered evidence and neither probes nor executes commands. */
 export function resolveSensorCompatibility(sensor: SensorPackSensor | Record<string, unknown>, evidence: ResolveEvidence, context: ResolveContext): CompatibilityEvidence {
@@ -43,8 +47,9 @@ export function resolveSensorCompatibility(sensor: SensorPackSensor | Record<str
     if (evidence.packageManagerConflict) return result('unverifiable', 'package-manager-conflict', null, evidence);
     const availableTools = v2.variants.map(variant => toolFor(variant, evidence));
     if (availableTools.every(version => version === null || version === undefined)) return result('missing-tool', 'tool-not-found', null, evidence);
-    if (v2.variants.some(variant => !validVersion(toolFor(variant, evidence)) || !validVersion(runtimeFor(variant, evidence)))) return result('unverifiable', 'invalid-or-missing-version-evidence', null, evidence);
-    const matches = v2.variants.filter(variant => semver.satisfies(toolFor(variant, evidence)!, variant.requirements.toolRange) && semver.satisfies(runtimeFor(variant, evidence)!, variant.requirements.runtimeRange));
+    const operational = v2.variants.filter(variant => validVersion(toolFor(variant, evidence)) && validVersion(runtimeFor(variant, evidence)));
+    if (operational.length === 0) return result('unverifiable', 'invalid-or-missing-version-evidence', null, evidence);
+    const matches = operational.filter(variant => semver.satisfies(toolFor(variant, evidence)!, variant.requirements.toolRange) && semver.satisfies(runtimeFor(variant, evidence)!, variant.requirements.runtimeRange));
     if (matches.length === 0) return result('incompatible', 'no-operational-variant', null, evidence);
     matches.sort((a, b) => b.priority - a.priority || specificity(b) - specificity(a) || a.id.localeCompare(b.id));
     const best = matches[0];
