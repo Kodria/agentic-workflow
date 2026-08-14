@@ -16,12 +16,43 @@ test('human output shows every non-green class, remedy and totals without raw ev
     const human = renderCoverageHuman(report);
     expect(human).toBe([
         'Sensor coverage', 'Pack: js-ts', 'Registry: baseline', 'Overall: gaps', '',
-        'missing formatting — Formatting', '  detector: format (missing)', '  remedy: Add formatter', '  command: npm i -D prettier',
-        'unverifiable style — Style', '  detector: lint (unverifiable)', '  remedy: Declare evidence', '  command: awm sensors init', '',
+        'missing formatting — Formatting', '  detector: format (missing)', '  compatibility: missing-tool — fixture', '  remedy: Add formatter', '  command: npm i -D prettier',
+        'unverifiable style — Style', '  detector: lint (unverifiable)', '  compatibility: unverifiable — fixture', '  remedy: Declare evidence', '  command: awm sensors init', '',
         'Summary: 0 covered, 1 missing, 1 unverifiable, 0 not applicable', '',
     ].join('\n'));
     expect(human).not.toContain('commandIncludes');
     expect(human).not.toContain('custom');
+});
+
+test('human output explains an incompatible detector even when its structural evidence is covered (R3.3)', () => {
+    const compatibility = {
+        state: 'incompatible' as const,
+        reason: 'installed eslint version is outside the certified range',
+        variantId: 'eslint-v9',
+        toolVersion: '10.0.0',
+        runtimeVersion: null,
+        certifiedRange: '^9.0.0',
+        evidence: [],
+    };
+    const incompatible = {
+        ...report,
+        static: {
+            ...report.static,
+            classes: [{
+                ...report.static.classes[0],
+                detectors: [{
+                    ...report.static.classes[0].detectors[0],
+                    status: 'covered' as const,
+                    compatibility,
+                }],
+            }],
+        },
+    };
+
+    const human = renderCoverageHuman(incompatible);
+
+    expect(human).toContain('  detector: format (covered)');
+    expect(human).toContain('  compatibility: incompatible — installed eslint version is outside the certified range');
 });
 
 test('json is the exact versioned envelope and ends in newline (R2.8, R2.14)', () => {
@@ -77,6 +108,13 @@ test('human output removes OSC controls from pack-provided text while retaining 
                 ...report.static.classes[0],
                 description: `${osc8Open}Formatting${osc8Close}`,
                 remedy: { summary: `Add ${osc8Open}formatter${osc8Close}`, command: 'npm i -D prettier' },
+                detectors: [{
+                    ...report.static.classes[0].detectors[0],
+                    compatibility: {
+                        ...report.static.classes[0].detectors[0].compatibility,
+                        reason: `tool ${osc8Open}version${osc8Close} is unsupported`,
+                    },
+                }],
             }],
         },
     };
@@ -84,6 +122,7 @@ test('human output removes OSC controls from pack-provided text while retaining 
     const human = renderCoverageHuman(hostile);
     expect(human).toContain('missing formatting — Formatting');
     expect(human).toContain('  remedy: Add formatter');
+    expect(human).toContain('  compatibility: missing-tool — tool version is unsupported');
     expect(human.replace(/\n/g, '')).not.toMatch(/[\u0000-\u001F\u007F-\u009F]/);
 });
 

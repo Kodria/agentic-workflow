@@ -166,7 +166,14 @@ export function renderCoverageHuman(report: unknown): string {
         `Overall: ${report.overall}`, ''];
     for (const item of report.static.classes.filter((entry) => entry.status !== 'covered' && entry.status !== 'not-applicable')) {
         lines.push(`${item.status} ${safeHumanText(item.id)} — ${safeHumanText(item.description)}`);
-        item.detectors.forEach((detector) => lines.push(`  detector: ${safeHumanText(detector.sensor)} (${detector.status})`));
+        item.detectors.forEach((detector) => {
+            const compatibility = detector.compatibility;
+            if (!compatibility) invalidReport('renderCoverageHuman');
+            lines.push(
+                `  detector: ${safeHumanText(detector.sensor)} (${detector.status})`,
+                `  compatibility: ${safeHumanText(compatibility.state)} — ${safeHumanText(compatibility.reason)}`,
+            );
+        });
         lines.push(`  remedy: ${safeHumanText(item.remedy.summary)}`, `  command: ${safeHumanText(item.remedy.command)}`);
     }
     const count = (status: 'covered' | 'missing' | 'unverifiable' | 'not-applicable') => report.static.classes.filter((item) => item.status === status).length;
