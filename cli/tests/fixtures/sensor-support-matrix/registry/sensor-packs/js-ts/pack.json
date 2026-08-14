@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "name": "js-ts",
+  "description": "JavaScript and TypeScript baseline",
+  "detects": ["package.json"],
+  "sensors": {
+    "lint": {
+      "applicability": { "allFiles": ["package.json"] },
+      "variants": [{
+        "id": "eslint-10", "priority": 1, "certifiedRange": ">=10 <11",
+        "requirements": { "tool": "eslint", "toolRange": ">=10 <11", "runtime": "node", "runtimeRange": ">=22 <23" },
+        "command": { "executable": "eslint", "resolution": "node-modules-bin", "args": ["."] },
+        "assets": ["eslint.config.awm.mjs"], "formatter": "eslint-json", "probe": { "kind": "eslint-print-config" }
+      }]
+    }
+  },
+  "coverage": { "schemaVersion": 1, "classes": { "lint-errors": { "description": "Lint errors", "detectors": [{ "sensor": "lint" }], "remedy": { "summary": "Configure ESLint", "command": "awm sensors init --pack js-ts" } } } }
+}

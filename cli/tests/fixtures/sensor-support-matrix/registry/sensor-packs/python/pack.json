@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "name": "python",
+  "description": "Python baseline",
+  "detects": ["pyproject.toml"],
+  "sensors": {
+    "lint": {
+      "applicability": { "allFiles": ["pyproject.toml"] },
+      "variants": [{
+        "id": "ruff-0", "priority": 1, "certifiedRange": ">=0.8 <1",
+        "requirements": { "tool": "ruff", "toolRange": ">=0.8 <1", "runtime": "python", "runtimeRange": ">=3.10 <4" },
+        "command": { "executable": "ruff", "resolution": "python-environment", "args": ["check", "."] },
+        "assets": ["pyproject.toml"], "formatter": "ruff", "probe": { "kind": "version" }
+      }]
+    }
+  },
+  "coverage": { "schemaVersion": 1, "classes": { "lint-errors": { "description": "Python lint errors", "detectors": [{ "sensor": "lint" }], "remedy": { "summary": "Configure Ruff", "command": "awm sensors init --pack python" } } } }
+}

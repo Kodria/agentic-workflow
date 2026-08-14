@@ -96,6 +96,22 @@ Sensors run real commands—such as type checking, linting, tests, security
 scanning, and dependency analysis—against the project. `awm preflight` confirms
 that the configured gate is actually runnable before it is trusted.
 
+### Static coverage, empirical coverage, and learning
+
+**Static coverage** compares the sensors declared by a project with the defect
+classes its selected pack says should be detected. It answers “is the intended
+control present?” without running commands or changing the repository.
+**Empirical coverage** then reads bounded, sanitized ledger evidence to answer
+whether recurring classified findings are actually being caught. Neither result
+pretends that an unknown tool version is a clean pass: compatibility must be
+certified, compatible-unverified, or explicitly inconclusive.
+
+The retrospective feedback loop consumes those two views before archival. A
+repeated class that lacks a credible detector becomes a candidate for a pack,
+process rule, or focused guidance; a single finding remains evidence, not an
+automatic new policy. This is how AWM improves controls without turning every
+project-specific incident into a universal rule.
+
 ### 7. Review, verification, and PR
 
 Review checks implementation fidelity and independent quality concerns.

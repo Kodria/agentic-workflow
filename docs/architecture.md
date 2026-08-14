@@ -133,6 +133,15 @@ The JSON output reports `applied` / `pending` / `failed` plus `modifiedFiles`, s
 
 Per-project, declared in `.awm/sensors.json`, generated from a **sensor pack** for the detected stack (`js-ts`, `python`, `shell`, `generic`).
 
+The **compatibility resolver** is the boundary between a pack's declared v2
+variants and a project's local facts. The CLI owns parsing, local discovery,
+bounded command execution, and the read-only manifest result; the registry owns
+variant ranges, structured commands, contained assets, and certification
+evidence. A **bounded probe** is allowed to inspect only the local executable,
+runtime, and declared config needed for a selected variant. It cannot fall back
+to a global tool, shell-evaluate a command, or treat timeout as certification.
+Uncertain evidence stays `unverifiable` or `compatible-unverified`.
+
 Detection is a convenience; `awm sensors init --pack <name>` is the contract. If no pack exists for the detected stack, the manifest is **honestly empty** — AWM does not invent defaults (that behaviour, `FALLBACK_DEFAULTS`, was deliberately removed).
 
 `awm sensors run` is **read-only**: it runs the manifest as committed and never rewrites `.awm/sensors.json` or copies pack config files into the tree. When the manifest's pack no longer matches the tree it reports the drift (`packDrift`) and names `awm sensors init`, the verb that adopts a pack. A measuring command that edits what it measures was a real bug, not a hypothetical.

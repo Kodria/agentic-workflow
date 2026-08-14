@@ -11,6 +11,19 @@ Only the **deltas per operating system**. Run [core-acceptance.md](core-acceptan
 
 The macOS CI suite proves the CLI on the platform; the manual playbook remains necessary because CI does not exercise a user's real agent binary or configuration.
 
+## Sensor-pack certification evidence
+
+For every first-party pack, record one real-tool boundary run on Linux, macOS,
+and native Windows: minimum supported version, current version, and a
+representative future version. Include native config and package-manager
+fixtures where the pack supports both. The expected future-version result is an
+explicit compatibility state, never a fallback to PATH or an assumed pass.
+
+Windows-specific certification must run the local `.cmd` or environment shim;
+macOS and Linux must demonstrate the same structured command without a shell.
+This supplements the CI suite—it is not permission to describe an unrecorded
+combination as verified.
+
 ---
 
 ## Linux

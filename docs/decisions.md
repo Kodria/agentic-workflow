@@ -21,6 +21,10 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-013](#d-013) | 2026-08-09 | El set de referencia de sensores vive en el `pack.json` del registry (cierra DA-4) | Vigente |
 | [D-014](#d-014) | 2026-08-09 | La detección de cobertura **reporta**, nunca instala ni configura (cierra DA-6) | Vigente |
 | [D-015](#d-015) | 2026-08-09 | Umbral empírico ≥2, y es señal, no compuerta (cierra DA-5) | Vigente |
+| [D-017](#d-017) | 2026-08-14 | Compatibility is evidence, not a fallback assumption | Active |
+| [D-018](#d-018) | 2026-08-14 | Coverage reports never create a false green | Active |
+| [D-019](#d-019) | 2026-08-14 | Schema v2 is a deliberate, reviewable migration | Active |
+| [D-020](#d-020) | 2026-08-14 | Retrospective coverage runs before ledger archive | Active |
 
 ---
 
@@ -439,3 +443,41 @@ fallidos sobre el mismo síntoma indican que el problema vive en otro nivel, y s
 parchando produce un verde que no significa nada. Queda como `pending` nombrado en la matriz
 y como hallazgo con evidencia en `docs/research/r5/README.md` — nunca como `pass`, y nunca
 como test tolerado en rojo.
+
+---
+
+## D-017
+
+**Compatibility is evidence, not a fallback assumption.**
+
+The CLI resolves a version-aware pack against local project evidence only. The
+registry owns variants and their certified ranges; the CLI owns parsing,
+bounded probes, and the explicit result. A future or unavailable tool is not
+silently run through PATH and is never treated as a compatible default.
+
+## D-018
+
+**Coverage reports never create a false green.**
+
+Static coverage, empirical ledger analysis, missing evidence, legacy packs, and
+unverifiable probes are distinct states. Reporting is read-only: the command
+does not install a sensor, write a baseline, or alter a ledger to improve its
+own result.
+
+## D-019
+
+**Schema v2 is a deliberate, reviewable migration.**
+
+V2 stores selected variants, structured commands, assets, provenance, and
+compatibility evidence. Legacy manifests and packs remain readable as
+`compatible-unverified`; migration happens through explicit initialization and
+review, never as a hidden rewrite during a diagnostic command.
+
+## D-020
+
+**Retrospective coverage runs before ledger archive.**
+
+The retrospective consumes static and empirical coverage while active and
+archived ledger evidence is still bounded and attributable. It may recommend a
+new reusable control from repeated classified findings, but archival must not
+erase the feedback signal first.

@@ -1,0 +1,56 @@
+import fs from 'fs';
+import path from 'path';
+import { Command } from 'commander';
+
+jest.mock('@clack/prompts', () => ({
+    log: { error: jest.fn(), success: jest.fn(), warn: jest.fn(), info: jest.fn() },
+}));
+
+import { parseSensorManifest } from '../../src/commands/sensors/compatibility/manifest';
+import { registerLedgerCommand } from '../../src/commands/ledger';
+import { registerSensorsCommand } from '../../src/commands/sensors';
+
+const ROOT = path.resolve(__dirname, '../../..');
+const read = (file: string): string => fs.readFileSync(path.join(ROOT, file), 'utf8');
+
+function documentedJson(files: readonly string[]): unknown[] {
+    return files.flatMap((file) => Array.from(read(file).matchAll(/```json\s*\n([\s\S]*?)```/g), (match) => JSON.parse(match[1])));
+}
+
+function helpFor(command: 'sensors coverage' | 'ledger add'): string {
+    const program = new Command().name('awm');
+    registerSensorsCommand(program);
+    registerLedgerCommand(program);
+    const [parent, child] = command.split(' ');
+    return program.commands.find((entry) => entry.name() === parent)!
+        .commands.find((entry) => entry.name() === child)!.helpInformation();
+}
+
+describe('R3 canonical sensor documentation', () => {
+    test.each([
+        ['docs/framework.md', ['Static coverage', 'Empirical coverage', 'retrospective feedback loop']],
+        ['docs/configuration.md', ['pack schema v2', 'legacy pack', 'compatible-unverified']],
+        ['docs/project-setup.md', ['version-aware', 'hardening opt-in']],
+        ['docs/runbook.md', ['awm sensors coverage --min', 'compatibility drift', 'orphaned asset']],
+        ['docs/cli-reference.md', ['schemaVersion: 2', '--defect-class', '--min']],
+        ['docs/architecture.md', ['compatibility resolver', 'bounded probe']],
+    ] as const)('%s owns its R3 subject', (file, phrases) => {
+        const text = read(file);
+        phrases.forEach((phrase) => expect(text).toContain(phrase));
+    });
+
+    test('parses every documented v2 sensor manifest example with the production parser', () => {
+        const examples = documentedJson(['docs/configuration.md', 'docs/cli-reference.md'])
+            .filter((value): value is Record<string, unknown> => typeof value === 'object' && value !== null && (value as Record<string, unknown>).schemaVersion === 2);
+        expect(examples.length).toBeGreaterThan(0);
+        examples.forEach((example) => expect(() => parseSensorManifest(example, 'documented example')).not.toThrow());
+    });
+
+    test('documents exact Commander flags', () => {
+        expect(helpFor('sensors coverage')).toContain('--min <count>');
+        expect(helpFor('ledger add')).toContain('--defect-class <id>');
+        const reference = read('docs/cli-reference.md');
+        expect(reference).toContain('awm sensors coverage [--json] [--min <count>]');
+        expect(reference).toContain('--defect-class <id>');
+    });
+});

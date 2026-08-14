@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "name": "generic",
+  "description": "Generic security baseline",
+  "detects": ["README.md"],
+  "sensors": {
+    "security": {
+      "applicability": { "kind": "repository" },
+      "variants": [{
+        "id": "semgrep-1", "priority": 1, "certifiedRange": ">=1 <2",
+        "requirements": { "tool": "semgrep", "toolRange": ">=1 <2", "runtime": "node", "runtimeRange": ">=22 <23" },
+        "command": { "executable": "semgrep", "resolution": "path", "args": ["--config", ".semgrep.awm.yml", "."] },
+        "assets": [".semgrep.awm.yml"], "formatter": "semgrep-json", "probe": { "kind": "semgrep-validate" }
+      }]
+    }
+  },
+  "coverage": { "schemaVersion": 1, "classes": { "security": { "description": "Security scanning", "detectors": [{ "sensor": "security" }], "remedy": { "summary": "Configure Semgrep", "command": "awm sensors init --pack generic" } } } }
+}

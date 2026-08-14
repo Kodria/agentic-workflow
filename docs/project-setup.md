@@ -26,6 +26,12 @@ awm preflight
 reconciles the project profile, detects applicable extensions, initializes
 sensors, and reports any agent-owned steps that require a session.
 
+Sensor selection is **version-aware**. The selected stack pack uses local
+project metadata and local tool resolution to choose a certified variant when
+one matches. Review the resulting `.awm/sensors.json`; a version outside a
+certified range is a compatibility result to investigate, not a reason to
+silently use a global binary.
+
 ## Existing repository adopting AWM
 
 Use the same commands, then inspect the detected sensor pack and current
@@ -41,6 +47,12 @@ awm preflight
 For a legacy codebase with known findings, use `awm sensors baseline` only after
 reviewing the full run. That records accepted debt and makes future gates fail
 on new findings rather than hiding the original state.
+
+Legacy adoption starts from the same baseline manifest, but hardening remains an
+explicit **hardening opt-in**: first establish runnable controls and review
+existing debt; then add stricter security, mutation, or project-specific
+controls deliberately. A baseline records reviewed history; it does not certify
+an incompatible or missing tool.
 
 ## Clone a repository that already uses AWM
 

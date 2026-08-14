@@ -163,6 +163,56 @@ override as an engineering dependency: document its owner, pin it when needed,
 and verify it in the target project rather than relying on an implicit local
 change.
 
+## Sensor-pack compatibility contract
+
+The baseline registry is the canonical pack-author reference. Read its
+[`sensor-packs/README.md`](https://github.com/Kodria/awm-baseline-registry/blob/main/sensor-packs/README.md)
+when authoring or extending a pack; this guide deliberately does not duplicate
+that schema.
+
+A **pack schema v2** declares sensor variants, each with a stable ID, tool and
+runtime ranges, a certified range, structured command, contained assets, and a
+bounded probe. The resolver selects the highest-priority matching variant from
+local project evidence. A probe that cannot establish the facts returns an
+honest `compatible-unverified` or `unverifiable` result; it never turns a
+timeout, missing local tool, or future version into a false green.
+
+A **legacy pack** has no `schemaVersion`. It remains readable for migration but
+has no version-aware variant evidence, so its compatibility is
+`compatible-unverified`. Migrate custom packs by preserving their existing
+intent, adding v2 variants and contained assets, then testing the command with
+the real local tool before claiming certification. Custom registries may extend
+the baseline with additional packs; pin and review them as dependencies.
+
+This is a representative project manifest. `registryRoot` is local provenance,
+not a path to copy into another repository:
+
+```json
+{
+  "schemaVersion": 2,
+  "pack": "js-ts",
+  "registryRoot": "/opt/awm/registries/baseline",
+  "sensors": {
+    "lint": {
+      "enabled": true,
+      "fast": true,
+      "variantId": "eslint-10",
+      "command": { "executable": "eslint", "resolution": "node-modules-bin", "args": ["."] },
+      "assets": ["eslint.config.awm.mjs"],
+      "initializedCompatibility": {
+        "state": "certified",
+        "reason": "local eslint and Node satisfy the selected variant",
+        "variantId": "eslint-10",
+        "toolVersion": "10.0.0",
+        "runtimeVersion": "22.0.0",
+        "certifiedRange": ">=10 <11",
+        "evidence": []
+      }
+    }
+  }
+}
+```
+
 ## What machine initialization installs
 
 Machine initialization seeds and synchronizes registries, records enabled

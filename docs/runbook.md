@@ -40,6 +40,20 @@ loop is:
 `awm sensors run` is the full completion gate. `--fast` and `--slow` are useful
 iteration slices, not substitutes for the full run.
 
+Before the retrospective archives a branch ledger, it automatically evaluates
+coverage feedback. Use the same evidence manually when investigating a control
+gap:
+
+```bash
+awm sensors coverage --min 2
+```
+
+`--min` changes recurrence emphasis only; coverage remains read-only. Treat a
+reported **compatibility drift** as a configuration review: inspect the selected
+variant and local tool evidence, upgrade the registry or project dependency as
+needed, then re-run `awm sensors init` explicitly. Do not hand-edit a command
+to bypass the resolver.
+
 ## Diagnose machine and project state
 
 Use the least invasive command that answers the question:
@@ -131,6 +145,11 @@ findings fail the gate. It is not a way to turn an unknown or broken check into
 a pass. If the stack changes or the manifest reports pack drift, run
 `awm sensors init`, review the generated change, and commit it before relying
 on the new configuration.
+
+If the command reports an **orphaned asset**, remove or restore only the
+contained asset named by the selected variant, then re-initialize and review
+the diff. An orphan is not evidence that any arbitrary local file should be
+copied from a registry.
 
 ## Backups and recovery
 

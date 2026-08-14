@@ -135,12 +135,24 @@ Windows directory symlinks need `SeCreateSymbolicLinkPrivilege`, which ordinary 
 
 ## Sensor packs
 
-| Pack | Level | Tools |
-|---|---|---|
-| `js-ts` | ✅ Verified | tsc, eslint, semgrep, tests |
-| `python` | ⚠ Unverified | mypy, ruff |
-| `shell` | ⚠ Unverified | shellcheck |
-| `generic` | ✅ Verified | semgrep |
+This generated section reports what the pack contract declares. It does not turn
+a manifest range into a claim that a real binary has been certified: the
+registry release evidence is the source for that separate claim.
+
+<!-- BEGIN GENERATED: sensor-pack-support -->
+
+### Sensor-pack compatibility evidence
+
+| Pack | Contract | Version-aware variants and certified ranges | Evidence status |
+|---|---|---|---|
+| `generic` | pack schema v2 | `security/semgrep-1`: semgrep >=1 <2; node >=22 <23; certified >=1 <2 | Manifest-declared ranges; real-tool and OS certification is recorded by the registry release evidence |
+| `js-ts` | pack schema v2 | `lint/eslint-10`: eslint >=10 <11; node >=22 <23; certified >=10 <11 | Manifest-declared ranges; real-tool and OS certification is recorded by the registry release evidence |
+| `python` | pack schema v2 | `lint/ruff-0`: ruff >=0.8 <1; python >=3.10 <4; certified >=0.8 <1 | Manifest-declared ranges; real-tool and OS certification is recorded by the registry release evidence |
+| `shell` | pack schema v2 | `lint/shellcheck-0`: shellcheck >=0.9 <1; node >=22 <23; certified >=0.9 <1 | Manifest-declared ranges; real-tool and OS certification is recorded by the registry release evidence |
+
+> Generated from four first-party `sensor-packs/*/pack.json` manifests. **Do not edit by hand** — `npm run docs:matrix` regenerates this block.
+
+<!-- END GENERATED: sensor-pack-support -->
 
 An absent pack is **not invented**: `awm sensors init` selects an available pack and reports the missing one; `awm preflight` fails while the gate is empty.
 

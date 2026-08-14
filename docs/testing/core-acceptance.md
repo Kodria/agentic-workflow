@@ -194,6 +194,26 @@ undo with awm backup restore <id>` line. A dangling link left in place is a FAIL
 is a sync that installs without telling you how to undo it. Your own real files and
 directories under `.claude/skills/` must be untouched.
 
+## CORE-12d · Coverage is version-aware and read-only
+
+Run this against a project whose local dependency is inside a certified pack
+range, then repeat with a representative out-of-range version:
+
+```bash
+git status --porcelain > before.txt
+awm sensors coverage --json --min 2 > coverage.json; echo "exit=$?"
+git status --porcelain > after.txt
+diff before.txt after.txt
+```
+
+**Expect:** exit `0` for informative coverage states; `coverage.json` has
+`schemaVersion: 2`, `static`, and `empirical` sections. A selected local version
+is reported as certified only when its variant evidence is certified. A missing,
+future, or unprobeable local tool is `compatible-unverified`, `unverifiable`, or
+another explicit non-green state—not covered by implication. `before.txt` and
+`after.txt` must match. Repeat after placing a malformed line in a test ledger:
+the report must disclose a bounded skipped reason without printing ledger text.
+
 ## CORE-13 · Preflight tells you whether the harness can gate
 
 ```bash
