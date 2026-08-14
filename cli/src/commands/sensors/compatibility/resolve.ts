@@ -20,6 +20,7 @@ function result(state: CompatibilityEvidence['state'], reason: string, variant: 
     return { state, reason, variantId: variant?.id ?? null, toolVersion, runtimeVersion, certifiedRange: variant?.certifiedRange ?? null, evidence: refs.slice(0, 32) };
 }
 function applies(sensor: SensorPackSensor, evidence: ResolveEvidence): boolean {
+    if (sensor.applicability.kind === 'explicit-or-supported-language') return evidence.applicable === true;
     if (evidence.applicable === false) return false;
     const paths = new Set(evidence.paths ?? []);
     const rule = sensor.applicability;

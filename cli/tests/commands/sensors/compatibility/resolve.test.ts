@@ -12,6 +12,11 @@ const evidence = (input: any = {}) => ({ paths: ['package.json'], applicable: tr
 const context = { pack: 'js-ts', sensor: 'lint' };
 
 describe('resolveSensorCompatibility', () => {
+    it('keeps explicit-or-supported-language sensors not-applicable without positive capability evidence', () => {
+        const resolved = resolveSensorCompatibility({ applicability: { kind: 'explicit-or-supported-language' }, variants: [variant('semgrep')] } as any,
+            evidence({ applicable: undefined, paths: [], toolVersion: '1.0.0', runtimeVersion: '3.12.0', probe: { status: 'matched' } }), { pack: 'generic', sensor: 'security' });
+        expect(resolved).toMatchObject({ state: 'not-applicable', reason: 'applicability-not-met' });
+    });
     test.each([
         ['certified', evidence(), 'eslint-main'],
         ['compatible-unverified', evidence({ toolVersion: '11.0.0' }), 'eslint-main'],
