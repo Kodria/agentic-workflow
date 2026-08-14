@@ -137,15 +137,27 @@ describe('runCommand — spawn failure', () => {
 
 describe('runStructuredCommand — public boundary validation', () => {
     it.each(['sh', 'cmd.exe', '/usr/bin/node', 'nested/tool', 'nested\\tool'])('rejects unsafe executable %j before resolution', executable => {
-        expect(() => runStructuredCommand({ executable, resolution: 'path', args: [] }, { timeout: 5000, cwd: process.cwd() }))
+        expect(() => runStructuredCommand({ executable, resolution: 'path', args: ['--version'] }, { timeout: 5000, cwd: process.cwd() }))
             .toThrow(/safe executable name|shell/i);
     });
 
     it('normalizes package-manager spellings while requiring an equivalent explicit selection', () => {
-        expect(() => runStructuredCommand({ executable: 'NPM.exe', resolution: 'path', args: [] }, { timeout: 5000, cwd: process.cwd() }))
+        expect(() => runStructuredCommand({ executable: 'NPM.exe', resolution: 'path', args: ['--version'] }, { timeout: 5000, cwd: process.cwd() }))
             .toThrow(/packageManager/);
-        expect(() => runStructuredCommand({ executable: 'NPM.exe', resolution: 'path', args: [], packageManager: 'pnpm' }, { timeout: 5000, cwd: process.cwd() }))
+        expect(() => runStructuredCommand({ executable: 'NPM.exe', resolution: 'path', args: ['--version'], packageManager: 'pnpm' }, { timeout: 5000, cwd: process.cwd() }))
             .toThrow(/packageManager/);
+    });
+
+    it.each([
+        [{ executable: 'node', resolution: 'path', args: [] }, /nonempty array/],
+        [{ executable: 'node', resolution: 'path', args: [''] }, /nonempty single-line/],
+        [{ executable: 'node', resolution: 'path', args: ['one\ntwo'] }, /single-line/],
+        [{ executable: 'node', resolution: 'path', args: ['{files}'] }, /requires fileInput/],
+        [{ executable: 'node', resolution: 'path', args: ['prefix{files}'], fileInput: { placeholder: '{files}', extensions: ['.ts'] } }, /must not embed/],
+        [{ executable: 'node', resolution: 'path', args: ['{files}', '{files}'], fileInput: { placeholder: '{files}', extensions: ['.ts'] } }, /exactly one/],
+        [{ executable: 'node', resolution: 'path', args: ['--check'], fileInput: { placeholder: '{files}', extensions: ['.ts'] } }, /exactly one/],
+    ])('rejects malformed args or file input at the public boundary', (command, message) => {
+        expect(() => runStructuredCommand(command as any, { timeout: 5000, cwd: process.cwd() })).toThrow(message);
     });
 });
 
@@ -163,12 +175,12 @@ onPosix('runStructuredCommand — local node_modules binaries', () => {
             fs.mkdirSync(bin, { recursive: true });
             fs.symlinkSync('../tool/bin/tool', path.join(bin, 'tool'));
 
-            await expect(runStructuredCommand({ executable: 'tool', resolution: 'node-modules-bin', args: [] }, { timeout: 5000, cwd: dir }))
+            await expect(runStructuredCommand({ executable: 'tool', resolution: 'node-modules-bin', args: ['--version'] }, { timeout: 5000, cwd: dir }))
                 .resolves.toMatchObject({ code: 0, stdout: 'contained\n' });
 
             fs.unlinkSync(path.join(bin, 'tool'));
             fs.symlinkSync(outside, path.join(bin, 'tool'));
-            expect(() => runStructuredCommand({ executable: 'tool', resolution: 'node-modules-bin', args: [] }, { timeout: 5000, cwd: dir }))
+            expect(() => runStructuredCommand({ executable: 'tool', resolution: 'node-modules-bin', args: ['--version'] }, { timeout: 5000, cwd: dir }))
                 .toThrow(/node_modules.*contain|local/i);
         } finally {
             fs.rmSync(dir, { recursive: true, force: true });

@@ -23,6 +23,11 @@ function fakeChild(pid = 4242) {
     return child;
 }
 
+function restoreEnvironment(name: 'PATH' | 'PATHEXT', value: string | undefined): void {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+}
+
 describe('runCommand — win32', () => {
     const originalPlatform = process.platform;
 
@@ -64,10 +69,10 @@ describe('runCommand — win32', () => {
             expect(mockSpawn).toHaveBeenCalledWith(path.join(dir, 'tool.exe'), ['literal;&'], expect.objectContaining({ shell: false, detached: false }));
             child.emit('close', 0, null);
             await expect(pending).resolves.toMatchObject({ code: 0 });
-            expect(() => runStructuredCommand({ executable: 'tool.cmd', resolution: 'path', args: [] }, { timeout: 5000, cwd: dir })).toThrow(/wrappers/);
+            expect(() => runStructuredCommand({ executable: 'tool.cmd', resolution: 'path', args: ['--version'] }, { timeout: 5000, cwd: dir })).toThrow(/wrappers/);
         } finally {
-            process.env.PATH = savedPath;
-            process.env.PATHEXT = savedPathExt;
+            restoreEnvironment('PATH', savedPath);
+            restoreEnvironment('PATHEXT', savedPathExt);
             fs.rmSync(dir, { recursive: true, force: true });
         }
     });
@@ -86,13 +91,13 @@ describe('runCommand — win32', () => {
             process.env.PATHEXT = '.EXE';
             const child = fakeChild();
             mockSpawn.mockReturnValue(child);
-            const pending = runStructuredCommand({ executable: 'tool', resolution: 'node-modules-bin', args: [] }, { timeout: 5000, cwd: dir });
-            expect(mockSpawn).toHaveBeenCalledWith(path.join(localBin, 'tool.exe'), [], expect.objectContaining({ shell: false }));
+            const pending = runStructuredCommand({ executable: 'tool', resolution: 'node-modules-bin', args: ['--version'] }, { timeout: 5000, cwd: dir });
+            expect(mockSpawn).toHaveBeenCalledWith(path.join(localBin, 'tool.exe'), ['--version'], expect.objectContaining({ shell: false }));
             child.emit('close', 0, null);
             await expect(pending).resolves.toMatchObject({ code: 0 });
         } finally {
-            process.env.PATH = savedPath;
-            process.env.PATHEXT = savedPathExt;
+            restoreEnvironment('PATH', savedPath);
+            restoreEnvironment('PATHEXT', savedPathExt);
             fs.rmSync(dir, { recursive: true, force: true });
             fs.rmSync(global, { recursive: true, force: true });
         }
@@ -106,13 +111,32 @@ describe('runCommand — win32', () => {
             fs.writeFileSync(path.join(global, 'tool.exe'), 'global');
             process.env.PATH = global;
             mockSpawn.mockReturnValue(fakeChild());
-            expect(() => runStructuredCommand({ executable: 'tool', resolution: 'node-modules-bin', args: [] }, { timeout: 5000, cwd: dir }))
+            expect(() => runStructuredCommand({ executable: 'tool', resolution: 'node-modules-bin', args: ['--version'] }, { timeout: 5000, cwd: dir }))
                 .toThrow(/node_modules.*not found locally/i);
             expect(mockSpawn).not.toHaveBeenCalled();
         } finally {
-            process.env.PATH = savedPath;
+            restoreEnvironment('PATH', savedPath);
             fs.rmSync(dir, { recursive: true, force: true });
             fs.rmSync(global, { recursive: true, force: true });
+        }
+    });
+
+    it('fails closed when PATHEXT contains no safe executable extension', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-structured-win-pathext-'));
+        const savedPath = process.env.PATH;
+        const savedPathExt = process.env.PATHEXT;
+        try {
+            fs.writeFileSync(path.join(dir, 'tool.cmd'), 'wrapper');
+            process.env.PATH = dir;
+            process.env.PATHEXT = '.CMD';
+
+            expect(() => runStructuredCommand({ executable: 'tool', resolution: 'path', args: ['--version'] }, { timeout: 5000, cwd: dir }))
+                .toThrow(/safe Windows executable|PATHEXT/i);
+            expect(mockSpawn).not.toHaveBeenCalled();
+        } finally {
+            restoreEnvironment('PATH', savedPath);
+            restoreEnvironment('PATHEXT', savedPathExt);
+            fs.rmSync(dir, { recursive: true, force: true });
         }
     });
 
@@ -128,7 +152,7 @@ describe('runCommand — win32', () => {
                 .toThrow(/python.*environment.*local|contained/i);
             expect(mockSpawn).not.toHaveBeenCalled();
         } finally {
-            process.env.PATH = savedPath;
+            restoreEnvironment('PATH', savedPath);
             fs.rmSync(dir, { recursive: true, force: true });
             fs.rmSync(global, { recursive: true, force: true });
         }

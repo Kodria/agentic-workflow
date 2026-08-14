@@ -170,8 +170,16 @@ function validateStructuredCommand(command: StructuredCommand): void {
     if (new Set(['sh', 'bash', 'cmd', 'powershell']).has(normalizedExecutable)) {
         throw new Error('structured command executable must not be a shell');
     }
-    if (!Array.isArray(command.args) || command.args.some(arg => typeof arg !== 'string' || /[\0\r\n]/.test(arg))) {
-        throw new Error('structured command args must be an array of single-line strings without NUL');
+    if (!Array.isArray(command.args) || command.args.length === 0) {
+        throw new Error('structured command args must be a nonempty array');
+    }
+    for (const [index, arg] of command.args.entries()) {
+        if (typeof arg !== 'string' || arg.trim() === '' || /[\0\r\n]/.test(arg)) {
+            throw new Error(`structured command args[${index}] must be a nonempty single-line string without NUL`);
+        }
+        if (arg.includes('{files}') && arg !== '{files}') {
+            throw new Error(`structured command args[${index}] must not embed {files}`);
+        }
     }
     if (!['node-modules-bin', 'python-environment', 'path'].includes(command.resolution)) throw new Error('structured command resolution is unsupported');
     const packageManagers = new Set(['npm', 'pnpm', 'yarn', 'bun']);
@@ -180,6 +188,28 @@ function validateStructuredCommand(command: StructuredCommand): void {
     if (normalizedPackageManager !== undefined && !packageManagers.has(normalizedPackageManager)) throw new Error('structured command packageManager is unsupported');
     if (normalizedPackageManager !== undefined && normalizedPackageManager !== normalizedExecutable) throw new Error('structured command packageManager must explicitly match its executable');
     if (command.environment !== undefined && (Object.keys(command.environment).length !== 1 || command.environment.ESLINT_USE_FLAT_CONFIG !== 'false')) throw new Error('structured command environment is not allowlisted');
+    const fileArguments = command.args.filter(arg => arg === '{files}').length;
+    if (command.fileInput === undefined) {
+        if (fileArguments !== 0) throw new Error('structured command {files} argument requires fileInput');
+        return;
+    }
+    const fileInput = command.fileInput as unknown;
+    if (!fileInput || typeof fileInput !== 'object' || Array.isArray(fileInput) || Object.keys(fileInput).length !== 2 || !Object.prototype.hasOwnProperty.call(fileInput, 'placeholder') || !Object.prototype.hasOwnProperty.call(fileInput, 'extensions')) {
+        throw new Error('structured command fileInput must contain only placeholder and extensions');
+    }
+    const { placeholder, extensions } = fileInput as { placeholder?: unknown; extensions?: unknown };
+    if (placeholder !== '{files}') throw new Error('structured command fileInput.placeholder must be {files}');
+    if (!Array.isArray(extensions) || extensions.length === 0 || extensions.some(extension => typeof extension !== 'string' || extension.trim() === '' || /[\0\r\n]/.test(extension) || !/^\.[A-Za-z0-9]+$/.test(extension))) {
+        throw new Error('structured command fileInput.extensions must be a nonempty array of extensions');
+    }
+    if (fileArguments !== 1) throw new Error('structured command fileInput requires exactly one {files} argument');
+}
+
+function safeWindowsExecutableExtensions(): string[] {
+    return (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+        .split(';')
+        .map(ext => ext.toLowerCase())
+        .filter(ext => ext === '.exe' || ext === '.com');
 }
 
 function regularFile(candidate: string): boolean {
@@ -222,7 +252,8 @@ function resolveStructuredExecutable(command: StructuredCommand, cwd: string): s
             if (local) return local;
             throw new Error('node_modules executable is not a contained local file');
         }
-        const extensions = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map(ext => ext.toLowerCase()).filter(ext => ext === '.exe' || ext === '.com');
+        const extensions = safeWindowsExecutableExtensions();
+        if (extensions.length === 0) throw new Error('PATHEXT contains no safe Windows executable extension for structured commands');
         const candidates = [path.join(bin, command.executable), ...extensions.map(extension => path.join(bin, command.executable + extension))];
         for (const candidate of candidates) {
             const lower = candidate.toLowerCase();
@@ -247,7 +278,8 @@ function resolveStructuredExecutable(command: StructuredCommand, cwd: string): s
         if (command.resolution === 'python-environment') throw new Error('python environment executable is not a contained local regular file');
         return command.executable;
     }
-    const extensions = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map(ext => ext.toLowerCase()).filter(ext => ext === '.exe' || ext === '.com');
+    const extensions = safeWindowsExecutableExtensions();
+    if (extensions.length === 0) throw new Error('PATHEXT contains no safe Windows executable extension for structured commands');
     for (const candidate of candidates) {
         const lower = candidate.toLowerCase();
         if (lower.endsWith('.cmd') || lower.endsWith('.bat')) throw new Error('structured commands cannot execute Windows command wrappers');
