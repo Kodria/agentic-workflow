@@ -111,7 +111,7 @@ export function validateRegistryLayout(root: string): boolean {
     return CONTENT_DIR_NAMES.some((d) => {
         const candidate = path.join(root, d);
         try {
-            return fs.statSync(candidate).isDirectory();
+            return fs.lstatSync(candidate).isDirectory();
         } catch {
             return false;
         }

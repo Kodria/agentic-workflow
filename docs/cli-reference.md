@@ -50,7 +50,7 @@ On `result: "failed"`, `transaction` records what happened to the machine: `comm
 
 Human mode renders the same evidence: on failure the three-panel report is printed as usual, with the failing step marked `✖` and its error inline, followed by the summary on stderr.
 
-**What it does:** syncs the registry cache · installs the agent's context mechanism (Claude: `SessionStart` hook; OpenCode: global `opencode.json` `instructions[]`) · installs the `dev` **baseline** skill pack · bootstraps `.awm/profile.json` · detects the stack and writes `.awm/sensors.json` · wires `CONSTITUTION.md` into the repo-local `opencode.json` (OpenCode). It **flags** (but does not perform) the steps that need an agent or a deliberate choice: generating `CONSTITUTION.md` / agent context, and installing the Claude per-edit sensor hook.
+**What it does:** syncs the registry cache · installs the agent's context mechanism (Claude: `SessionStart` hook; OpenCode: global `opencode.json` `instructions[]`) · installs the `dev` and `product` baseline bundles · bootstraps `.awm/profile.json` · detects the stack and writes `.awm/sensors.json` · wires `CONSTITUTION.md` into the repo-local `opencode.json` (OpenCode). It **flags** (but does not perform) the steps that need an agent or a deliberate choice: generating `CONSTITUTION.md` / agent context, and installing the Claude per-edit sensor hook.
 
 The output has three panels: **Initial state**, **Actions**, and **Final state**.
 A red initial row that turns green in the final panel means the step repaired it;

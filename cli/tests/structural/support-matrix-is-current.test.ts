@@ -75,6 +75,35 @@ describe('docs/support-matrix.md refleja el codigo', () => {
         }
     });
 
+    it('does not leak a normalized CODEX_HOME override into generated documentation', () => {
+        const saved = process.env.CODEX_HOME;
+        process.env.CODEX_HOME = '/private/codex/../secret-codex/';
+        try {
+            jest.resetModules();
+            const { renderProviderTables: fresh } = require('../../scripts/support-matrix');
+            const generated: string = fresh();
+            expect(generated).toContain('`~/.codex/agents`');
+            expect(generated).not.toContain('/private/');
+            expect(generated).not.toContain('secret-codex');
+        } finally {
+            if (saved === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = saved;
+            jest.resetModules();
+        }
+    });
+
+    it('keeps a separator when CODEX_HOME has a trailing slash', () => {
+        const saved = process.env.CODEX_HOME;
+        process.env.CODEX_HOME = '/private/codex-home/';
+        try {
+            jest.resetModules();
+            const { renderProviderTables: fresh } = require('../../scripts/support-matrix');
+            expect(fresh()).toContain('`~/.codex/agents`');
+        } finally {
+            if (saved === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = saved;
+            jest.resetModules();
+        }
+    });
+
     // La abreviacion a `~` se probaba solo end-to-end, y en Linux eso no distingue entre
     // "normaliza bien" y "los separadores ya coincidian". La CI de Windows encontro que no
     // normalizaba: comparaba el prefijo ANTES de convertir separadores, asi que alla no

@@ -7,10 +7,12 @@ import { execSync } from 'child_process';
 const GIT = (cwd: string, cmd: string) =>
     execSync(`git -c user.email=t@t.t -c user.name=t ${cmd}`, { cwd, stdio: 'pipe' });
 
-function makeSourceRepo(base: string, opts: { skill?: string; empty?: boolean; contentFile?: string }): string {
+function makeSourceRepo(base: string, opts: { skill?: string; empty?: boolean; contentFile?: string; contentSymlink?: string }): string {
     const dir = path.join(base, `src-${opts.skill ?? 'empty'}`);
     fs.mkdirSync(dir, { recursive: true });
-    if (opts.contentFile) {
+    if (opts.contentSymlink) {
+        fs.symlinkSync(opts.contentSymlink, path.join(dir, 'skills'));
+    } else if (opts.contentFile) {
         fs.writeFileSync(path.join(dir, opts.contentFile), 'not a content directory');
     } else if (!opts.empty && opts.skill) {
         fs.mkdirSync(path.join(dir, 'skills', opts.skill), { recursive: true });
@@ -114,6 +116,18 @@ describe('addRegistry', () => {
         const { readRegistriesConfig } = require('../../../src/core/registries');
         expect(readRegistriesConfig()).toEqual([]);
         expect(fs.existsSync(path.join(tmpHome, '.awm/registries/not-a-registry'))).toBe(false);
+    });
+
+    it('rejects a symlink that masquerades as a content directory', async () => {
+        const source = makeSourceRepo(tmpWork, { contentSymlink: '.' });
+        const { addRegistry } = require('../../../src/commands/registry/add');
+        const result = await addRegistry(source, 'linked-content');
+
+        expect(result.ok).toBe(false);
+        expect(result.error).toMatch(/skills\/, bundles\/, workflows\/, agents\//);
+        const { readRegistriesConfig } = require('../../../src/core/registries');
+        expect(readRegistriesConfig()).toEqual([]);
+        expect(fs.existsSync(path.join(tmpHome, '.awm/registries/linked-content'))).toBe(false);
     });
 
     it('is atomic: artifact collision with existing configured registry → no config, cleanup, error names both', async () => {

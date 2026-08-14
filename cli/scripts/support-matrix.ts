@@ -51,10 +51,15 @@ function defaultProviderPath(value: string | null, c: ProviderConfig, home: stri
     if (value === null) return null;
     if (c.configHome.envVar === null) return value;
 
-    const resolved = toPosix(c.configHome.resolved);
-    const standard = toPosix(path.join(home, c.configHome.dir));
-    const target = toPosix(value);
-    return target.startsWith(resolved) ? `${standard}${target.slice(resolved.length)}` : value;
+    // `path.join` normalizes a provider override while configHome.resolved keeps
+    // the literal environment value. Compare their canonical filesystem forms:
+    // otherwise a trailing slash or `..` segment makes the prefix check fail and
+    // leaks the operator-specific path into this public, committed document.
+    const relative = path.relative(path.resolve(c.configHome.resolved), path.resolve(value));
+    if (relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))) {
+        return path.join(home, c.configHome.dir, relative);
+    }
+    return value;
 }
 
 function providerCell(value: string | null, absent: string, c: ProviderConfig, home: string): string {

@@ -117,5 +117,7 @@ describe('active documentation contract', () => {
         expect(runbook).toMatch(/`catalog\.json` is required only when the registry\s+publishes bundles/);
         expect(cliReference).toContain('`claude-code` and `codex`');
         expect(cliReference).toContain('`--agent` is an alias for `--target`');
+        expect(cliReference).toContain('`dev` and `product` baseline bundles');
+        expect(runbook).toContain('bundles/<bundle-name>/bundle.json');
     });
 });

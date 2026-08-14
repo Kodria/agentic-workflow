@@ -160,7 +160,7 @@ publishes bundles:
 ```text
 <registry>/
 ├── skills/<skill-name>/SKILL.md
-├── bundles/<bundle-name>.json
+├── bundles/<bundle-name>/bundle.json
 └── catalog.json
 ```
 
@@ -250,8 +250,9 @@ description: Use when the agent needs to perform the named task.
 # Your skill title
 ```
 
-Group compatible skills into a bundle in `bundles/<bundle-name>.json`, declare
-that bundle in `catalog.json`, and test it in a target project before release.
+Group compatible skills into a bundle in `bundles/<bundle-name>/bundle.json`,
+declare that bundle in `catalog.json`, and test it in a target project before
+release.
 Use the `authoring` extension when available: it provides the content-authoring
 workflow rather than requiring authors to infer registry conventions.
 
