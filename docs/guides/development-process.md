@@ -54,7 +54,10 @@ The plan also declares its **execution mode**:
 **Modo de ejecución:** desatendido
 ```
 
-`interactivo` (default) pauses for confirmation between phases. `desatendido` runs the whole thing without check-ins — the gates still run identically, it only removes the pauses. Use unattended for long autonomous runs; use interactive when you want to steer.
+The literal plan values `interactivo` (the default) and `desatendido` respectively pause for
+confirmation between phases or run the whole process without check-ins. The gates still run
+identically; unattended mode only removes the pauses. Use it for long autonomous runs and use
+interactive mode when you want to steer.
 
 ### 3 · Execution
 
