@@ -1041,6 +1041,9 @@ all supported operating systems; the correction below makes the local gate porta
 - [x] Updated `cli/jest.global-setup.js` to catch either cache-directory creation or
   unique-directory creation failure, then use `os.tmpdir()/awm-cache` without weakening
   fixture isolation.
+- [x] Made the regression fixture separator-neutral: its read-only-home simulation now
+  recognizes both Windows and POSIX path forms instead of accidentally bypassing the
+  simulated failure on Windows.
 - [x] Verified the red/green cycle with
   `npx jest tests/structural/jest-environment-is-isolated.test.ts --runInBand`.
 - [x] Re-ran the complete suite outside the sandbox, where its real Git, npm-pack, and

@@ -27,13 +27,13 @@ describe('Jest environment isolation', () => {
             jest.doMock('fs', () => ({
                 ...actualFs,
                 mkdirSync: jest.fn((target: fs.PathLike, ...args: unknown[]) => {
-                    if (target === '/readonly-home/.cache') {
+                    if (String(target).includes('readonly-home')) {
                         return undefined;
                     }
                     return (actualFs.mkdirSync as (...inner: unknown[]) => string | undefined)(target, ...args);
                 }),
                 mkdtempSync: jest.fn((prefix: string, ...args: unknown[]) => {
-                    if (prefix === '/readonly-home/.cache/awm-jest-') {
+                    if (prefix.includes('readonly-home')) {
                         const error = new Error('read-only') as NodeJS.ErrnoException;
                         error.code = 'EROFS';
                         throw error;
