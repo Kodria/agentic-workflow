@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "sourceHead": "5a73920967b6dde41f250a8f1e44d769daaa0868",
+  "cli": {
+    "package": "agentic-workflow-manager",
+    "targetVersion": "7.0.0",
+    "releaseStatus": "pending-main-merge"
+  },
+  "contracts": {
+    "sensorPackSchemaVersion": 2,
+    "sensorManifestSchemaVersion": 2,
+    "coverageSchemaVersion": 2,
+    "coverageCatalogSchemaVersion": 1,
+    "compatibilityStates": [
+      "certified",
+      "compatible-unverified",
+      "incompatible",
+      "missing-tool",
+      "unverifiable",
+      "not-applicable"
+    ]
+  },
+  "fixtures": {
+    "project/.awm/sensors.json": "cd514b9a87707207cb9c459e87becfa0e0e0a91a122012c70e9a84225a4e4fa8",
+    "project/eslint.config.mjs": "d7076912d1c9786ca76231a2a77cef475b7fafbe4950a8ecc430af171422993c",
+    "project/eslint-tool-package.json": "4454635892942caf729ff8f85891c6226e27cbddb292166637073d06a2f5c999",
+    "project/package.json": "ae556b3b01ef6125d8563e3525c12f03b66ee19f137701617fef1dc2bcb09605",
+    "registry/sensor-packs/js-ts/eslint.fixture.mjs": "d7076912d1c9786ca76231a2a77cef475b7fafbe4950a8ecc430af171422993c",
+    "registry/sensor-packs/js-ts/pack.json": "8b19e15fd1b186aa2d6a49dd08299d23d94eb6d99246c0de20bdfb314dc6d7e0"
+  },
+  "commands": [
+    "cd cli && npm ci",
+    "cd cli && npm run typecheck",
+    "cd cli && npm test -- --runInBand",
+    "cd cli && npm run build",
+    "node cli/dist/src/index.js sensors run",
+    "node cli/dist/src/index.js sensors coverage --json --min 2",
+    "cd cli && npx jest tests/integration/sensor-compatibility.e2e.test.ts --runInBand"
+  ],
+  "certification": {
+    "status": "partial",
+    "reason": "The CLI evidence is hermetic and reproducible; official pack certification requires the coordinated awm-baseline-registry v2.0.0 tag after the CLI 7.0.0 release."
+  }
+}

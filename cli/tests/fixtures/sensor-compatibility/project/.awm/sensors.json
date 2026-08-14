@@ -1,0 +1,9 @@
+{
+  "pack": "js-ts",
+  "sensors": {
+    "lint": {
+      "cmd": "eslint .",
+      "enabled": true
+    }
+  }
+}
