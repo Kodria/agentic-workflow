@@ -3,7 +3,7 @@ import { parseSensorPack } from './contract';
 import { discoverProjectEvidence } from './discovery';
 import { resolveProjectCompatibility } from './resolve';
 import { runCompatibilityProbe } from './probe';
-import type { CompatibilityEvidence, SensorPackV2 } from './types';
+import type { CompatibilityEvidence, SensorPackV2, SensorVariant } from './types';
 import path from 'path';
 
 export type LiveCompatibility = {
@@ -11,6 +11,29 @@ export type LiveCompatibility = {
     sensors: Record<string, CompatibilityEvidence>;
 };
 export type LiveCompatibilityOptions = { packSelection?: 'explicit' };
+
+/**
+ * Python package metadata is evidence only for a contained virtual environment.
+ * A v2 command that names a Python-runtime tool must therefore resolve through
+ * that same environment — never a same-named executable inherited from PATH.
+ *
+ * Keep this at the live pack boundary so the command used by probing, init's
+ * materialized manifest, and `sensors run` is one identical structured command.
+ */
+function containedRuntimeCommand(variant: SensorVariant): SensorVariant {
+    if (variant.requirements.runtime !== 'python') return variant;
+    return { ...variant, command: { ...variant.command, resolution: 'python-environment' } };
+}
+
+function bindContainedRuntimeCommands(pack: SensorPackV2): SensorPackV2 {
+    return {
+        ...pack,
+        sensors: Object.fromEntries(Object.entries(pack.sensors).map(([name, sensor]) => [
+            name,
+            { ...sensor, variants: sensor.variants.map(containedRuntimeCommand) },
+        ])),
+    };
+}
 
 /**
  * Re-resolve a v2 pack from the configured registry and current project evidence.
@@ -36,11 +59,12 @@ export async function resolveLiveCompatibility(cwd: string, packName: string, re
 export async function resolveParsedPackCompatibility(cwd: string, pack: SensorPackV2, options: LiveCompatibilityOptions = {}): Promise<LiveCompatibility> {
     if (typeof cwd !== 'string' || cwd.trim() === '') throw new Error('cwd must be a non-empty path');
     if (!pack || typeof pack !== 'object' || pack.schemaVersion !== 2) throw new Error('pack must be a parsed v2 sensor pack');
-    const evidence = discoverProjectEvidence(cwd, pack);
+    const executionPack = bindContainedRuntimeCommands(pack);
+    const evidence = discoverProjectEvidence(cwd, executionPack);
     const resolutionEvidence = { ...evidence, ...(options.packSelection === 'explicit' ? { packSelection: 'explicit' as const } : {}) };
-    const initial = resolveProjectCompatibility(pack, resolutionEvidence).sensors;
+    const initial = resolveProjectCompatibility(executionPack, resolutionEvidence).sensors;
     const sensors: Record<string, CompatibilityEvidence> = {};
-    for (const [name, sensor] of Object.entries(pack.sensors)) {
+    for (const [name, sensor] of Object.entries(executionPack.sensors)) {
         const base = initial[name];
         const variant = base.variantId === null ? null : sensor.variants.find(candidate => candidate.id === base.variantId) ?? null;
         const probe = variant
@@ -53,9 +77,9 @@ export async function resolveParsedPackCompatibility(cwd: string, pack: SensorPa
             })
             : null;
         sensors[name] = resolveProjectCompatibility(
-            { ...pack, sensors: { [name]: sensor } },
+            { ...executionPack, sensors: { [name]: sensor } },
             { ...resolutionEvidence, probe: probe ?? undefined },
         ).sensors[name];
     }
-    return { pack, sensors };
+    return { pack: executionPack, sensors };
 }
