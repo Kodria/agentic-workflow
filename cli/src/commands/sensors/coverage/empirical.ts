@@ -5,6 +5,7 @@ import type { CoverageClassStatus } from './evaluate';
 
 export type EmpiricalOutcome = 'covered-by-sensor' | 'gap' | 'coverage-unverifiable' | 'applicability-contradiction' | 'unmapped-class';
 export type EmpiricalStaticState = CoverageClassStatus | 'incompatible' | 'missing-tool' | 'compatible-unverified';
+export type EmpiricalStaticAvailability = 'available' | 'unavailable';
 
 export type EmpiricalClass = {
     defectClass: string;
@@ -45,7 +46,7 @@ function refsFor(entries: LedgerEntry[], scanned: Map<LedgerEntry, ScannedLedger
     let omitted = 0;
     for (const entry of entries) {
         const scannedEntry = scanned.get(entry);
-        if (!scannedEntry || scannedEntry.evidenceRef === null) { omitted += 1; continue; }
+        if (!scannedEntry || scannedEntry.evidenceRef === null) continue;
         const ref = safeRef(scannedEntry.evidenceRef);
         if (ref === null) omitted += 1;
         else refs.add(ref);
@@ -57,8 +58,14 @@ function maxSeverity(entries: LedgerEntry[]): Severity {
     return entries.reduce<Severity>((best, entry) => severityRank[entry.severity] > severityRank[best] ? entry.severity : best, 'info');
 }
 
-export function outcomeFor(staticState: EmpiricalStaticState | undefined, hasEvidence: boolean): EmpiricalOutcome {
+export function outcomeFor(
+    staticState: EmpiricalStaticState | undefined,
+    hasEvidence: boolean,
+    staticAvailability: EmpiricalStaticAvailability = 'available',
+): EmpiricalOutcome {
     if (typeof hasEvidence !== 'boolean') throw new Error('outcomeFor: hasEvidence must be boolean');
+    if (staticAvailability !== 'available' && staticAvailability !== 'unavailable') throw new Error('outcomeFor: invalid static availability');
+    if (staticAvailability === 'unavailable') return 'coverage-unverifiable';
     if (!hasEvidence || staticState === 'unverifiable' || staticState === 'compatible-unverified') return 'coverage-unverifiable';
     if (staticState === undefined) return 'unmapped-class';
     if (staticState === 'covered') return 'covered-by-sensor';
@@ -72,11 +79,17 @@ export function outcomeFor(staticState: EmpiricalStaticState | undefined, hasEvi
  * the sole grouping boundary: no description or signature is used to classify
  * an entry, and those private fields never cross this module's output.
  */
-export function evaluateEmpiricalCoverage(scan: LedgerScanResult, staticStates: Readonly<Record<string, EmpiricalStaticState>>, min: number): EmpiricalCoverage {
+export function evaluateEmpiricalCoverage(
+    scan: LedgerScanResult,
+    staticStates: Readonly<Record<string, EmpiricalStaticState>>,
+    min: number,
+    staticAvailability: EmpiricalStaticAvailability = 'available',
+): EmpiricalCoverage {
     if (!scan || typeof scan !== 'object' || !Array.isArray(scan.entries) || !scan.sources || typeof scan.omittedEvidenceRefs !== 'number') {
         throw new Error('evaluateEmpiricalCoverage: invalid ledger scan');
     }
     if (!Number.isSafeInteger(min) || min < 1) throw new Error('evaluateEmpiricalCoverage: min must be a positive safe integer');
+    if (staticAvailability !== 'available' && staticAvailability !== 'unavailable') throw new Error('evaluateEmpiricalCoverage: invalid static availability');
     const scanned = new Map<LedgerEntry, ScannedLedgerEntry>(scan.entries.map(item => [item.entry, item]));
     const typed = new Map<string, LedgerEntry[]>();
     const unclassified: LedgerEntry[] = [];
@@ -90,7 +103,7 @@ export function evaluateEmpiricalCoverage(scan: LedgerScanResult, staticStates: 
         for (const cluster of clusterEntries(entries, 1)) {
             const evidence = refsFor(cluster.entries, scanned);
             classes.push({ defectClass, occurrences: cluster.count, recurrent: cluster.count >= min,
-                severity: maxSeverity(cluster.entries), outcome: outcomeFor(staticStates[defectClass], cluster.count > 0),
+                severity: maxSeverity(cluster.entries), outcome: outcomeFor(staticStates[defectClass], cluster.count > 0, staticAvailability),
                 evidenceRefs: evidence.refs, omittedEvidenceRefs: evidence.omitted });
         }
     }
@@ -101,13 +114,16 @@ export function evaluateEmpiricalCoverage(scan: LedgerScanResult, staticStates: 
         || a.evidenceRefs.join('\u0000').localeCompare(b.evidenceRefs.join('\u0000')));
     const unclassifiedEvidence = refsFor(unclassified, scanned);
     const retained = classes.reduce((total, item) => total + item.occurrences, 0) + unclassified.length;
-    const skipped = scan.sources.skippedFindings > 0 || scan.omittedEvidenceRefs > 0 || unclassified.length > 0;
+    const omittedEvidenceRefs = scan.omittedEvidenceRefs
+        + classes.reduce((total, item) => total + item.omittedEvidenceRefs, 0)
+        + unclassifiedEvidence.omitted;
+    const skipped = scan.sources.skippedFindings > 0 || omittedEvidenceRefs > 0 || unclassified.length > 0;
     return {
         recurrenceThreshold: min,
         status: retained === 0 ? (skipped ? 'inconclusive' : 'no-evidence') : (skipped ? 'partial' : 'evidence'),
         classes,
         unclassified: { occurrences: unclassified.length, evidenceRefs: unclassifiedEvidence.refs, omittedEvidenceRefs: unclassifiedEvidence.omitted },
         sources: { ...scan.sources, skippedByReason: { ...scan.sources.skippedByReason } },
-        omittedEvidenceRefs: classes.reduce((total, item) => total + item.omittedEvidenceRefs, 0) + unclassifiedEvidence.omitted,
+        omittedEvidenceRefs,
     };
 }

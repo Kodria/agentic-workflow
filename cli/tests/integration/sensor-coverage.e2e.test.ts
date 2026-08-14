@@ -129,7 +129,10 @@ testWithNoFollow('informative states exit zero; malformed contract exits non-zer
     expect(gaps.status).toBe(0);
     expect(JSON.parse(gaps.stdout ?? '')).toMatchObject({ overall: 'inconclusive' });
     expect(noReference.status).toBe(0);
-    expect(JSON.parse(noReference.stdout ?? '')).toMatchObject({ static: { reason: 'no_reference' } });
+    expect(JSON.parse(noReference.stdout ?? '')).toMatchObject({
+        static: { reason: 'no_reference' },
+        empirical: { classes: [expect.objectContaining({ outcome: 'coverage-unverifiable' })] },
+    });
     expect(malformed.status).toBe(1);
     expect(`${malformed.stdout ?? ''}${malformed.stderr ?? ''}`).toContain('schemaVersion must be 1');
 });

@@ -45,6 +45,13 @@ test('maps a valid defect class absent from the static contract to unmapped-clas
         .toBe('unmapped-class');
 });
 
+test('treats a class as coverage-unverifiable when the static catalog is unavailable', () => {
+    const scan = scanOf([finding('legacy-lint', 'legacy', 'src/a.ts:1')]);
+
+    expect(evaluateEmpiricalCoverage(scan, {}, 2, 'unavailable').classes[0].outcome)
+        .toBe('coverage-unverifiable');
+});
+
 test('changes recurrence emphasis and stable ordering when --min changes (R5.13)', () => {
     const entries = scanOf([
         { ...finding('lint-errors', 'solo-orange', 'src/a.ts:1'), entry: { ...finding('lint-errors', 'solo-orange', 'src/a.ts:1').entry, desc: 'orchard fruit gamma' } },
@@ -77,6 +84,22 @@ test('sanitizes, deduplicates and bounds allowed evidence refs (R5.7, R5.8)', ()
     ]), { 'lint-errors': 'missing' }, 1);
     expect(report.classes[0]).toMatchObject({ outcome: 'gap', severity: 'blocker', evidenceRefs: ['PR #12', 'src/z.ts:8'], omittedEvidenceRefs: 1 });
     expect(JSON.stringify(report)).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+});
+
+test('includes invalid and scanner-omitted evidence refs in the partial public status', () => {
+    const scan = {
+        ...scanOf([finding('lint-errors', 'invalid-ref', 'not an allowed ref')]),
+        sources: {
+            activeFiles: 1, archivedFiles: 0, validEntries: 1, validFindings: 1,
+            skippedFindings: 3, skippedByReason: { 'evidence-ref-limit': 3 },
+        },
+        omittedEvidenceRefs: 3,
+    } as LedgerScanResult;
+
+    const report = evaluateEmpiricalCoverage(scan, { 'lint-errors': 'covered' }, 2);
+
+    expect(report).toMatchObject({ status: 'partial', omittedEvidenceRefs: 4 });
+    expect(report.classes[0]).toMatchObject({ omittedEvidenceRefs: 1, evidenceRefs: [] });
 });
 
 test('does not double-count scanner-truncated evidence refs', () => {

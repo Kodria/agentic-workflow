@@ -10,6 +10,23 @@ test('not configured is explicit, actionable and exit-0 data', async () => {
     });
 });
 
+test('unavailable static contracts make empirical findings coverage-unverifiable', async () => {
+    const scan = {
+        entries: [{ entry: { ts: 'x', branch: 'main', phase: 'qa', source_skill: 'test', polarity: 'finding' as const,
+            class: 'structural' as const, signature: 'private', severity: 'minor' as const, desc: 'secret', defectClass: 'lint-errors' }, source: '.awm/ledger/main.jsonl:1', evidenceRef: '.awm/ledger/main.jsonl:1' }],
+        sources: { activeFiles: 1, archivedFiles: 0, validEntries: 1, validFindings: 1, skippedFindings: 0, skippedByReason: {} }, omittedEvidenceRefs: 0,
+    };
+
+    const notConfigured = await runCoverage('/fixture', { resolve: () => ({ kind: 'not_configured' }), scan: () => scan });
+    expect(notConfigured.empirical?.classes[0].outcome).toBe('coverage-unverifiable');
+
+    const manifest = { kind: 'legacy' as const, pack: { pack: 'legacy', sensors: {}, compatibility: {
+        state: 'compatible-unverified' as const, reason: 'legacy', variantId: null, toolVersion: null, runtimeVersion: null, certifiedRange: null, evidence: [],
+    } } };
+    const noReference = await runCoverage('/fixture', { resolve: () => ({ kind: 'no_reference' as const, projectRoot: '/fixture', pack: 'legacy', registry: 'baseline', manifest }), scan: () => scan });
+    expect(noReference.empirical?.classes[0].outcome).toBe('coverage-unverifiable');
+});
+
 test('old pack is no_reference and preserves pack and registry', async () => {
     const manifest = { kind: 'legacy' as const, pack: { pack: 'legacy', sensors: {}, compatibility: {
         state: 'compatible-unverified' as const, reason: 'legacy', variantId: null, toolVersion: null, runtimeVersion: null, certifiedRange: null, evidence: [],
@@ -20,7 +37,7 @@ test('old pack is no_reference and preserves pack and registry', async () => {
     }) }))
         .resolves.toEqual({ schemaVersion: 2, pack: 'legacy', registry: 'baseline', overall: 'inconclusive',
             static: { status: 'inconclusive', reason: 'no_reference', classes: [] },
-            empirical: expect.objectContaining({ status: 'evidence', classes: [expect.objectContaining({ outcome: 'unmapped-class' })] }) });
+            empirical: expect.objectContaining({ status: 'evidence', classes: [expect.objectContaining({ outcome: 'coverage-unverifiable' })] }) });
 });
 
 test('ready input observes every declared detector and evaluates once', async () => {

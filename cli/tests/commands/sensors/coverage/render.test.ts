@@ -1,4 +1,5 @@
 import { renderCoverageHuman, renderCoverageJson } from '../../../../src/commands/sensors/coverage/render';
+import { evaluateEmpiricalCoverage } from '../../../../src/commands/sensors/coverage/empirical';
 
 const report = {
     schemaVersion: 2 as const, pack: 'js-ts', registry: 'baseline', overall: 'gaps' as const,
@@ -84,6 +85,16 @@ test('renders sanitized empirical outcomes without ledger descriptions or signat
     expect(human).toContain('PR #2');
     expect(human).not.toContain('signature');
     expect(human).not.toContain('desc');
+});
+
+test('renders a report generated with both invalid and scanner-omitted evidence refs', () => {
+    const empirical = evaluateEmpiricalCoverage({
+        entries: [{ entry: { ts: '2026-08-14', branch: 'main', phase: 'qa', source_skill: 'test', polarity: 'finding', class: 'structural', signature: 'private', severity: 'important', desc: 'secret', defectClass: 'lint-errors' }, source: '.awm/ledger/main.jsonl:1', evidenceRef: 'not an allowed ref' }],
+        sources: { activeFiles: 1, archivedFiles: 0, validEntries: 1, validFindings: 1, skippedFindings: 3, skippedByReason: { 'evidence-ref-limit': 3 } }, omittedEvidenceRefs: 3,
+    }, { 'lint-errors': 'missing' }, 2);
+
+    expect(() => renderCoverageJson({ ...report, empirical })).not.toThrow();
+    expect(renderCoverageHuman({ ...report, empirical })).toContain('omitted evidence refs: 4');
 });
 
 test('renders recurrence emphasis and rejects the retired complete empirical state', () => {
