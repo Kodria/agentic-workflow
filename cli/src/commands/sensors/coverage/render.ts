@@ -1,11 +1,13 @@
 import type { CoverageEnvelope } from '.';
+import type { CompatibilityEvidence } from '../compatibility/types';
 
 const ANSI = /\x1B\[[0-?]*[ -/]*[@-~]/g;
 const OSC = /\x1B\][\s\S]*?(?:\x07|\x1B\\)/g;
 const CONTROLS = /[\u0000-\u001F\u007F-\u009F]/g;
 const OVERALL = ['covered', 'gaps', 'inconclusive'];
-const CLASS_STATUS = ['covered', 'missing', 'unverifiable'];
+const CLASS_STATUS = ['covered', 'missing', 'unverifiable', 'not-applicable'];
 const DETECTOR_STATUS = ['covered', 'missing', 'disabled', 'ineffective', 'unverifiable'];
+const COMPATIBILITY_STATE = ['certified', 'compatible-unverified', 'incompatible', 'missing-tool', 'unverifiable', 'not-applicable'];
 const REASON = ['not_configured', 'no_reference'];
 const COMMAND_EVIDENCE_STATUS = ['matched', 'custom', 'missing'];
 const FILE_EVIDENCE_STATUS = ['matched', 'missing', 'unverifiable'];
@@ -50,10 +52,25 @@ function assertEvidence(evidence: unknown, renderer: string): void {
     }
 }
 
+function assertCompatibility(value: unknown, renderer: string): asserts value is CompatibilityEvidence {
+    if (!isRecord(value) || !hasExactFields(value, ['state', 'reason', 'variantId', 'toolVersion', 'runtimeVersion', 'certifiedRange', 'evidence'])
+        || !isOneOf(value.state, COMPATIBILITY_STATE) || !isNonBlankString(value.reason)
+        || !(value.variantId === null || isNonBlankString(value.variantId))
+        || !(value.toolVersion === null || isNonBlankString(value.toolVersion))
+        || !(value.runtimeVersion === null || isNonBlankString(value.runtimeVersion))
+        || !(value.certifiedRange === null || isNonBlankString(value.certifiedRange))
+        || !Array.isArray(value.evidence)) invalidReport(renderer);
+    for (const evidence of value.evidence) {
+        if (!isRecord(evidence) || !hasExactFields(evidence, 'path' in evidence ? ['kind', 'status', 'path'] : ['kind', 'status'])
+            || !isNonBlankString(evidence.kind) || !isNonBlankString(evidence.status)
+            || ('path' in evidence && !isNonBlankString(evidence.path))) invalidReport(renderer);
+    }
+}
+
 function assertCoverageEnvelope(report: unknown, renderer: string): asserts report is CoverageEnvelope {
     if (!isRecord(report) || !hasExactFields(report, 'empirical' in report
         ? ['schemaVersion', 'pack', 'registry', 'overall', 'static', 'empirical']
-        : ['schemaVersion', 'pack', 'registry', 'overall', 'static']) || report.schemaVersion !== 1
+        : ['schemaVersion', 'pack', 'registry', 'overall', 'static']) || report.schemaVersion !== 2
         || !(report.pack === null || isNonBlankString(report.pack))
         || !(report.registry === null || isNonBlankString(report.registry))
         || !isOneOf(report.overall, OVERALL) || !isRecord(report.static)) {
@@ -99,23 +116,30 @@ function assertCoverageEnvelope(report: unknown, renderer: string): asserts repo
         previousId = coverageClass.id;
         if (!hasExactFields(coverageClass.remedy, ['summary', 'command'])) invalidReport(renderer);
         if (!isNonBlankString(coverageClass.remedy.summary) || !isNonBlankString(coverageClass.remedy.command)) invalidReport(renderer);
-        let hasCoveredDetector = false;
-        let hasUnverifiableDetector = false;
+        let classStatus: 'covered' | 'missing' | 'unverifiable' | 'not-applicable' | undefined;
         for (const detector of coverageClass.detectors) {
-            if (!isRecord(detector) || !hasExactFields(detector, ['sensor', 'status', 'evidence'])
+            if (!isRecord(detector) || !hasExactFields(detector, ['sensor', 'status', 'evidence', 'compatibility'])
                 || !isNonBlankString(detector.sensor) || !isOneOf(detector.status, DETECTOR_STATUS)) {
                 invalidReport(renderer);
             }
             assertEvidence(detector.evidence, renderer);
-            hasCoveredDetector ||= detector.status === 'covered';
-            hasUnverifiableDetector ||= detector.status === 'unverifiable';
+            assertCompatibility(detector.compatibility, renderer);
+            const state = detector.compatibility.state;
+            const detectorStatus = state === 'not-applicable' ? 'not-applicable'
+                : state === 'compatible-unverified' || state === 'unverifiable' || detector.status === 'unverifiable' ? 'unverifiable'
+                : state === 'incompatible' || state === 'missing-tool' || detector.status !== 'covered' ? 'missing'
+                : 'covered';
+            const rank = { covered: 4, unverifiable: 3, missing: 2, 'not-applicable': 1 } as const;
+            if (classStatus === undefined || rank[detectorStatus] > rank[classStatus]) classStatus = detectorStatus;
         }
-        const expectedClassStatus = hasCoveredDetector ? 'covered' : hasUnverifiableDetector ? 'unverifiable' : 'missing';
+        const expectedClassStatus = classStatus!;
         if (coverageClass.status !== expectedClassStatus) invalidReport(renderer);
         hasMissingClass ||= expectedClassStatus === 'missing';
         hasUnverifiableClass ||= expectedClassStatus === 'unverifiable';
     }
-    const expectedOverall = hasMissingClass ? 'gaps' : hasUnverifiableClass ? 'inconclusive' : 'covered';
+    const applicableClasses = staticReport.classes.filter((entry) => entry.status !== 'not-applicable');
+    const expectedOverall = hasMissingClass ? 'gaps' : hasUnverifiableClass ? 'inconclusive'
+        : applicableClasses.some((entry) => entry.status === 'covered') ? 'covered' : 'inconclusive';
     if (report.overall !== expectedOverall) invalidReport(renderer);
 }
 
@@ -140,12 +164,12 @@ export function renderCoverageHuman(report: unknown): string {
 
     const lines = ['Sensor coverage', `Pack: ${safeHumanText(report.pack ?? 'unknown')}`, `Registry: ${safeHumanText(report.registry ?? 'unknown')}`,
         `Overall: ${report.overall}`, ''];
-    for (const item of report.static.classes.filter((entry) => entry.status !== 'covered')) {
+    for (const item of report.static.classes.filter((entry) => entry.status !== 'covered' && entry.status !== 'not-applicable')) {
         lines.push(`${item.status} ${safeHumanText(item.id)} — ${safeHumanText(item.description)}`);
         item.detectors.forEach((detector) => lines.push(`  detector: ${safeHumanText(detector.sensor)} (${detector.status})`));
         lines.push(`  remedy: ${safeHumanText(item.remedy.summary)}`, `  command: ${safeHumanText(item.remedy.command)}`);
     }
-    const count = (status: 'covered' | 'missing' | 'unverifiable') => report.static.classes.filter((item) => item.status === status).length;
-    lines.push('', `Summary: ${count('covered')} covered, ${count('missing')} missing, ${count('unverifiable')} unverifiable`, '');
+    const count = (status: 'covered' | 'missing' | 'unverifiable' | 'not-applicable') => report.static.classes.filter((item) => item.status === status).length;
+    lines.push('', `Summary: ${count('covered')} covered, ${count('missing')} missing, ${count('unverifiable')} unverifiable, ${count('not-applicable')} not applicable`, '');
     return lines.join('\n');
 }

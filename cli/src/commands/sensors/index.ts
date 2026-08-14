@@ -26,9 +26,9 @@ export function registerSensorsCommand(program: Command): void {
         .command('coverage')
         .description('report static gaps between configured sensors and the pack reference')
         .option('--json', 'emit the versioned machine-readable envelope')
-        .action((opts: { json?: boolean }) => {
+        .action(async (opts: { json?: boolean }) => {
             try {
-                const report = runCoverage(process.cwd());
+                const report = await runCoverage(process.cwd());
                 process.stdout.write(opts.json ? renderCoverageJson(report) : renderCoverageHuman(report));
             } catch (error) {
                 log.error(error instanceof Error ? error.message : String(error));

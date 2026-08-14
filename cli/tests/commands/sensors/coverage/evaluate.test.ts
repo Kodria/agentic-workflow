@@ -1,5 +1,6 @@
-import { evaluateCoverage, type IndexedDetectorObservation } from '../../../../src/commands/sensors/coverage/evaluate';
+import { crossEmpiricalOutcome, evaluateCoverage, type IndexedDetectorObservation } from '../../../../src/commands/sensors/coverage/evaluate';
 import type { CoverageContract } from '../../../../src/commands/sensors/coverage/contract';
+import type { CompatibilityEvidence } from '../../../../src/commands/sensors/compatibility/types';
 
 const contract: CoverageContract = {
     schemaVersion: 1,
@@ -25,6 +26,38 @@ const observation = (
 ): IndexedDetectorObservation => ({ classId, detectorIndex, sensor, status, evidence: [] });
 
 describe('coverage evaluation', () => {
+    test('empirical evidence contradicts an inapplicable static class', () => {
+        expect(crossEmpiricalOutcome('not-applicable', true)).toBe('applicability-contradiction');
+    });
+    test.each([
+        [['certified', 'incompatible'], 'covered'],
+        [['compatible-unverified', 'missing-tool'], 'unverifiable'],
+        [['unverifiable', 'not-applicable'], 'unverifiable'],
+        [['incompatible', 'not-applicable'], 'missing'],
+        [['not-applicable', 'not-applicable'], 'not-applicable'],
+    ] as const)('reduces compatibility states %p to %s', (states, expected) => {
+        const compatibility = (state: CompatibilityEvidence['state']): CompatibilityEvidence => ({
+            state,
+            reason: 'fixture',
+            variantId: null,
+            toolVersion: null,
+            runtimeVersion: null,
+            certifiedRange: null,
+            evidence: [],
+        });
+        const observations = states.map((state, detectorIndex) => ({
+            ...observation('alpha', detectorIndex, detectorIndex === 0 ? 'one' : 'two', 'covered'),
+            compatibility: compatibility(state),
+        }));
+
+        const result = evaluateCoverage(contract, [...observations, {
+            ...observation('zeta', 0, 'three', 'covered'),
+            compatibility: compatibility('certified'),
+        }]);
+
+        expect(result.classes.find((item) => item.id === 'alpha')?.status).toBe(expected);
+    });
+
     test.each([
         [[observation('alpha', 0, 'one', 'covered'), observation('alpha', 1, 'two', 'missing')], 'covered'],
         [[observation('alpha', 0, 'one', 'missing'), observation('alpha', 1, 'two', 'disabled')], 'missing'],

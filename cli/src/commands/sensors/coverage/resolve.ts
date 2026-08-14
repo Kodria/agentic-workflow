@@ -1,19 +1,18 @@
 import fs from 'fs';
 import path from 'path';
-import { listRegistries } from '../../../core/registries';
 import {
     MAX_COVERAGE_FILE_BYTES,
     parseCoverageContract,
     type CoverageContract,
 } from './contract';
 import { parseSensorPack } from '../compatibility/contract';
-import { parseSensorManifest } from '../compatibility/manifest';
-import type { SensorManifest } from '../types';
+import { parseSensorManifest, type ParsedSensorManifest } from '../compatibility/manifest';
+import { resolvePackSource } from '../compatibility/pack-source';
 
 export type CoverageInputs =
     | { kind: 'not_configured' }
-    | { kind: 'no_reference'; projectRoot: string; pack: string; registry: string; manifest: SensorManifest }
-    | { kind: 'ready'; projectRoot: string; pack: string; registry: string; manifest: SensorManifest; contract: CoverageContract };
+    | { kind: 'no_reference'; projectRoot: string; pack: string; registry: string; manifest: ParsedSensorManifest }
+    | { kind: 'ready'; projectRoot: string; pack: string; registry: string; manifest: ParsedSensorManifest; contract: CoverageContract };
 
 function readFailure(file: string, error: unknown): Error {
     return new Error(`Cannot read ${file}: ${error instanceof Error ? error.message : String(error)}`);
@@ -62,12 +61,6 @@ export function readBoundedJson(file: unknown): unknown {
     }
 }
 
-function safeRegistryName(name: string): void {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name) || name.includes('..')) {
-        throw new Error(`Invalid registry name '${name}': expected a safe path component`);
-    }
-}
-
 /** Finds the nearest manifest without following a symlink during discovery. */
 function findManifestDirNoFollow(startCwd: string): string | null {
     let dir = path.resolve(startCwd);
@@ -91,28 +84,22 @@ export function resolveCoverageInputs(cwd: unknown): CoverageInputs {
     if (!projectRoot) return { kind: 'not_configured' };
 
     const manifestPath = path.join(projectRoot, '.awm', 'sensors.json');
-    const parsedManifest = parseSensorManifest(readBoundedJson(manifestPath), manifestPath);
-    if (parsedManifest.kind === 'v2') throw new Error(`Invalid coverage manifest at ${manifestPath}: v2 requires the compatibility resolver`);
-    const manifest = parsedManifest.pack;
-    for (const registry of listRegistries()) {
-        safeRegistryName(registry.name);
-        const packPath = path.join(registry.contentRoot, 'sensor-packs', manifest.pack, 'pack.json');
-        try {
-            fs.lstatSync(packPath);
-        } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-            throw readFailure(packPath, error);
-        }
-        const parsedPack = parseSensorPack(readBoundedJson(packPath), packPath);
-        if (parsedPack.pack.name !== manifest.pack) {
-            throw new Error(`Invalid pack at ${packPath}: name must equal '${manifest.pack}'`);
-        }
-        const { coverage } = parsedPack.pack;
-        if (coverage === undefined) return { kind: 'no_reference', projectRoot, pack: manifest.pack, registry: registry.name, manifest };
-        return {
-            kind: 'ready', projectRoot, pack: manifest.pack, registry: registry.name,
-            manifest, contract: parseCoverageContract(coverage, packPath),
-        };
+    const manifest = parseSensorManifest(readBoundedJson(manifestPath), manifestPath);
+    const source = manifest.kind === 'v2' && manifest.pack.registryRoot !== undefined
+        ? resolvePackSource(manifest.pack.pack, { registries: [{ name: 'manifest-provenance', remote: 'local', contentRoot: manifest.pack.registryRoot }] })
+        : resolvePackSource(manifest.pack.pack);
+    let sourceJson: unknown;
+    try { sourceJson = JSON.parse(source.content) as unknown; } catch (error) {
+        throw new Error(`Invalid JSON at ${source.path}: ${error instanceof Error ? error.message : String(error)}`);
     }
-    throw new Error(`Pack '${manifest.pack}' was not found in configured registries`);
+    const parsedPack = parseSensorPack(sourceJson, source.path);
+    if (parsedPack.pack.name !== manifest.pack.pack) {
+        throw new Error(`Invalid pack at ${source.path}: name must equal '${manifest.pack.pack}'`);
+    }
+    const { coverage } = parsedPack.pack;
+    if (coverage === undefined) return { kind: 'no_reference', projectRoot, pack: manifest.pack.pack, registry: source.registry.name, manifest };
+    return {
+        kind: 'ready', projectRoot, pack: manifest.pack.pack, registry: source.registry.name,
+        manifest, contract: parseCoverageContract(coverage, source.path),
+    };
 }

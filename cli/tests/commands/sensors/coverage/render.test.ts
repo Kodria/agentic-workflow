@@ -1,13 +1,13 @@
 import { renderCoverageHuman, renderCoverageJson } from '../../../../src/commands/sensors/coverage/render';
 
 const report = {
-    schemaVersion: 1 as const, pack: 'js-ts', registry: 'baseline', overall: 'gaps' as const,
+    schemaVersion: 2 as const, pack: 'js-ts', registry: 'baseline', overall: 'gaps' as const,
     static: { status: 'gaps' as const, reason: null, classes: [
         { id: 'formatting', description: 'Formatting', status: 'missing' as const,
-            detectors: [{ sensor: 'format', status: 'missing' as const, evidence: [] }],
+            detectors: [{ sensor: 'format', status: 'missing' as const, evidence: [], compatibility: { state: 'missing-tool' as const, reason: 'fixture', variantId: null, toolVersion: null, runtimeVersion: null, certifiedRange: null, evidence: [] } }],
             remedy: { summary: 'Add formatter', command: 'npm i -D prettier' } },
         { id: 'style', description: 'Style', status: 'unverifiable' as const,
-            detectors: [{ sensor: 'lint', status: 'unverifiable' as const, evidence: [{ kind: 'command' as const, status: 'custom' as const }] }],
+            detectors: [{ sensor: 'lint', status: 'unverifiable' as const, evidence: [{ kind: 'command' as const, status: 'custom' as const }], compatibility: { state: 'unverifiable' as const, reason: 'fixture', variantId: null, toolVersion: null, runtimeVersion: null, certifiedRange: null, evidence: [] } }],
             remedy: { summary: 'Declare evidence', command: 'awm sensors init' } },
     ] },
 };
@@ -18,7 +18,7 @@ test('human output shows every non-green class, remedy and totals without raw ev
         'Sensor coverage', 'Pack: js-ts', 'Registry: baseline', 'Overall: gaps', '',
         'missing formatting — Formatting', '  detector: format (missing)', '  remedy: Add formatter', '  command: npm i -D prettier',
         'unverifiable style — Style', '  detector: lint (unverifiable)', '  remedy: Declare evidence', '  command: awm sensors init', '',
-        'Summary: 0 covered, 1 missing, 1 unverifiable', '',
+        'Summary: 0 covered, 1 missing, 1 unverifiable, 0 not applicable', '',
     ].join('\n'));
     expect(human).not.toContain('commandIncludes');
     expect(human).not.toContain('custom');
@@ -33,11 +33,11 @@ test('keeps the R2 static shape when an optional empirical section is added (R2.
     const parsed = JSON.parse(renderCoverageJson(extended));
     expect(parsed.static).toEqual(report.static);
     expect(parsed.empirical).toEqual({ status: 'no_evidence' });
-    expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.schemaVersion).toBe(2);
 });
 
 test('not_configured names the remedy and no_reference stays distinct (R2.6)', () => {
-    const notConfigured = { schemaVersion: 1 as const, pack: null, registry: null, overall: 'inconclusive' as const,
+    const notConfigured = { schemaVersion: 2 as const, pack: null, registry: null, overall: 'inconclusive' as const,
         static: { status: 'inconclusive' as const, reason: 'not_configured' as const, classes: [] } };
     expect(renderCoverageHuman(notConfigured)).toContain('Run: awm sensors init');
     expect(renderCoverageHuman({ ...notConfigured, pack: 'legacy', registry: 'baseline', static: { ...notConfigured.static, reason: 'no_reference' as const } }))
@@ -56,6 +56,7 @@ test('human output never renders structured detector evidence', () => {
                     { kind: 'file' as const, path: '.prettierrc', status: 'matched' as const },
                     { kind: 'marker' as const, path: '.prettierrc', ordinal: 1, status: 'missing' as const },
                 ],
+                compatibility: report.static.classes[0].detectors[0].compatibility,
             }] }],
         },
     };

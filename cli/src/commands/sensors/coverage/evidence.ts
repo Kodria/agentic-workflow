@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { SensorConfig } from '../types';
+import type { StructuredCommand } from '../compatibility/types';
 import { MAX_COVERAGE_FILE_BYTES, type CoverageDetectorContract } from './contract';
 import type { CoverageEvidenceResult, IndexedDetectorObservation } from './evaluate';
 
@@ -11,6 +12,8 @@ export type EvidenceIo = {
     readSync?: (fd: number, buffer: Uint8Array, offset: number, length: number, position: number | null) => number;
     closeSync?: (fd: number) => void;
 };
+
+type CoverageSensorConfig = SensorConfig | { enabled: boolean; command: StructuredCommand };
 
 const realIo: EvidenceIo = {
     lstatSync: fs.lstatSync,
@@ -102,7 +105,7 @@ export function observeDetector(
     classId: unknown,
     detectorIndex: unknown,
     detector: CoverageDetectorContract,
-    sensor: SensorConfig | undefined,
+    sensor: CoverageSensorConfig | undefined,
     io: EvidenceIo = realIo,
 ): IndexedDetectorObservation {
     if (typeof root !== 'string' || root.trim().length === 0) throw new Error('observeDetector: root must be a non-empty string');
@@ -116,7 +119,11 @@ export function observeDetector(
     if (sensor.enabled === false) return { ...base, status: 'disabled', evidence: [] };
 
     const requiredCommand = detector.evidence?.commandIncludes ?? [];
-    const command = sensor.cmd;
+    // v2 commands are compared only in-memory to the catalog's structural
+    // fragments. Neither the command nor its args cross the coverage boundary.
+    const command = 'command' in sensor
+        ? [sensor.command.executable, ...sensor.command.args].join(' ')
+        : sensor.cmd;
     if (requiredCommand.length > 0 && typeof command !== 'string') {
         return { ...base, status: 'unverifiable', evidence: [{ kind: 'command', status: 'missing' }] };
     }

@@ -114,7 +114,7 @@ test.each([
 
 test.each([
     ['pack-malformed', '{broken', /Invalid JSON.*pack\.json/],
-    ['pack-oversize', Buffer.alloc(1024 * 1024 + 1), /pack\.json.*exceeds 1 MiB/],
+    ['pack-oversize', Buffer.alloc(1024 * 1024 + 1), /pack.*pack\.json.*exceeds the 1 MiB limit/],
 ] as const)('rejects %s', (_name, body, expected) => {
     writeManifest({ pack: 'js-ts', sensors: {} });
     configure(['baseline']);

@@ -1,4 +1,5 @@
 import type { CoverageContract } from './contract';
+import type { CompatibilityEvidence, CompatibilityState } from '../compatibility/types';
 
 export type DetectorStatus = 'covered' | 'missing' | 'disabled' | 'ineffective' | 'unverifiable';
 
@@ -11,6 +12,8 @@ export type DetectorObservation = {
     sensor: string;
     status: DetectorStatus;
     evidence: CoverageEvidenceResult[];
+    /** Live, sanitized resolver result. Omitted only for the retained R2 unit API. */
+    compatibility?: CompatibilityEvidence;
 };
 
 export type IndexedDetectorObservation = DetectorObservation & {
@@ -21,7 +24,7 @@ export type IndexedDetectorObservation = DetectorObservation & {
 export type CoverageClassResult = {
     id: string;
     description: string;
-    status: 'covered' | 'missing' | 'unverifiable';
+    status: CoverageClassStatus;
     detectors: DetectorObservation[];
     remedy: { summary: string; command: string };
 };
@@ -31,9 +34,14 @@ export type StaticCoverageResult = {
     classes: CoverageClassResult[];
 };
 
+export type CoverageClassStatus = 'covered' | 'missing' | 'unverifiable' | 'not-applicable';
+
 const detectorStatuses: readonly DetectorStatus[] = ['covered', 'missing', 'disabled', 'ineffective', 'unverifiable'];
 const commandStatuses = ['matched', 'custom', 'missing'];
 const fileStatuses = ['matched', 'missing', 'unverifiable'];
+const compatibilityStates: readonly CompatibilityState[] = [
+    'certified', 'compatible-unverified', 'incompatible', 'missing-tool', 'unverifiable', 'not-applicable',
+];
 
 function keyFor(classId: string, detectorIndex: number): string {
     return `${classId}:${detectorIndex}`;
@@ -61,6 +69,20 @@ function validateEvidence(evidence: unknown): evidence is CoverageEvidenceResult
     });
 }
 
+function validateCompatibility(value: unknown): value is CompatibilityEvidence {
+    if (!isRecord(value) || !compatibilityStates.includes(value.state as CompatibilityState)
+        || !isNonEmptyString(value.reason)
+        || !(value.variantId === null || isNonEmptyString(value.variantId))
+        || !(value.toolVersion === null || isNonEmptyString(value.toolVersion))
+        || !(value.runtimeVersion === null || isNonEmptyString(value.runtimeVersion))
+        || !(value.certifiedRange === null || isNonEmptyString(value.certifiedRange))
+        || !Array.isArray(value.evidence)) return false;
+    return value.evidence.every((item) => isRecord(item)
+        && isNonEmptyString(item.kind) && isNonEmptyString(item.status)
+        && (!('path' in item) || isNonEmptyString(item.path))
+        && Object.keys(item).every((key) => key === 'kind' || key === 'status' || key === 'path'));
+}
+
 function validateContract(contract: unknown): asserts contract is CoverageContract {
     if (!isRecord(contract) || contract.schemaVersion !== 1 || !isRecord(contract.classes) || Object.keys(contract.classes).length === 0) {
         throw new Error('evaluateCoverage: invalid coverage contract');
@@ -83,11 +105,61 @@ function validateContract(contract: unknown): asserts contract is CoverageContra
 function validateObservation(item: unknown): item is IndexedDetectorObservation {
     return isRecord(item) && isNonEmptyString(item.classId) && typeof item.detectorIndex === 'number' && Number.isSafeInteger(item.detectorIndex)
         && item.detectorIndex >= 0 && isNonEmptyString(item.sensor) && typeof item.status === 'string'
-        && detectorStatuses.includes(item.status as DetectorStatus) && validateEvidence(item.evidence);
+        && detectorStatuses.includes(item.status as DetectorStatus) && validateEvidence(item.evidence)
+        && (!('compatibility' in item) || validateCompatibility(item.compatibility));
 }
 
 function copyEvidence(evidence: CoverageEvidenceResult[]): CoverageEvidenceResult[] {
     return evidence.map((item) => ({ ...item } as CoverageEvidenceResult));
+}
+
+function copyCompatibility(value: CompatibilityEvidence | undefined): CompatibilityEvidence | undefined {
+    return value === undefined ? undefined : {
+        ...value,
+        evidence: value.evidence.map((item) => ({ ...item })),
+    };
+}
+
+/** Map a detector's live compatibility plus its R2 structural evidence to a
+ * deterministic class alternative. A missing compatibility field is the R2
+ * compatibility path retained for direct callers while legacy/v2 coverage
+ * collection always supplies an explicit live resolution. */
+export function toClassStatus(detector: DetectorObservation): CoverageClassStatus {
+    if (!detector || typeof detector !== 'object' || !detectorStatuses.includes(detector.status)
+        || !validateEvidence(detector.evidence)) throw new Error('toClassStatus: malformed detector observation');
+    const state = detector.compatibility?.state;
+    if (state === 'not-applicable') return 'not-applicable';
+    if (state === 'compatible-unverified' || state === 'unverifiable') return 'unverifiable';
+    if (state === 'incompatible' || state === 'missing-tool') return 'missing';
+    if (detector.status === 'unverifiable') return 'unverifiable';
+    if (detector.status === 'covered') return 'covered';
+    return 'missing';
+}
+
+const rank: Readonly<Record<CoverageClassStatus, number>> = {
+    covered: 4,
+    unverifiable: 3,
+    missing: 2,
+    'not-applicable': 1,
+};
+
+export function reduceClassStatus(detectors: DetectorObservation[]): CoverageClassStatus {
+    if (!Array.isArray(detectors) || detectors.length === 0) throw new Error('coverage class requires detectors');
+    const statuses = detectors.map(toClassStatus);
+    return statuses.reduce((best, current) => rank[current] > rank[best] ? current : best);
+}
+
+/** Shared static/empirical vocabulary. The empirical analyzer supplies the
+ * occurrence boolean in T6; keeping the contradiction decision here prevents
+ * a second interpretation of applicability in that later layer. */
+export function crossEmpiricalOutcome(status: CoverageClassStatus, hasEvidence: boolean):
+    'covered-by-sensor' | 'gap' | 'coverage-unverifiable' | 'applicability-contradiction' {
+    if (typeof hasEvidence !== 'boolean' || !['covered', 'missing', 'unverifiable', 'not-applicable'].includes(status)) {
+        throw new Error('crossEmpiricalOutcome: invalid static status or evidence flag');
+    }
+    if (status === 'not-applicable' && hasEvidence) return 'applicability-contradiction';
+    if (status === 'covered') return 'covered-by-sensor';
+    return status === 'missing' ? 'gap' : 'coverage-unverifiable';
 }
 
 export function evaluateCoverage(contract: CoverageContract, observations: IndexedDetectorObservation[]): StaticCoverageResult {
@@ -111,11 +183,14 @@ export function evaluateCoverage(contract: CoverageContract, observations: Index
             if (found.sensor !== detector.sensor) {
                 throw new Error(`evaluateCoverage: observation for '${identity}' must use sensor '${detector.sensor}'`);
             }
-            return { sensor: found.sensor, status: found.status, evidence: copyEvidence(found.evidence) };
+            return {
+                sensor: found.sensor,
+                status: found.status,
+                evidence: copyEvidence(found.evidence),
+                ...(found.compatibility === undefined ? {} : { compatibility: copyCompatibility(found.compatibility) }),
+            };
         });
-        const status = detectors.some((item) => item.status === 'covered') ? 'covered'
-            : detectors.some((item) => item.status === 'unverifiable') ? 'unverifiable'
-            : 'missing';
+        const status = reduceClassStatus(detectors);
         return {
             id,
             description: expected.description,
@@ -132,8 +207,10 @@ export function evaluateCoverage(contract: CoverageContract, observations: Index
         }
     }
 
-    const overall = classes.some((item) => item.status === 'missing') ? 'gaps'
+    const applicable = classes.filter((item) => item.status !== 'not-applicable');
+    const overall = applicable.some((item) => item.status === 'missing') ? 'gaps'
         : classes.some((item) => item.status === 'unverifiable') ? 'inconclusive'
-        : 'covered';
+        : applicable.some((item) => item.status === 'covered') ? 'covered'
+        : 'inconclusive';
     return { overall, classes };
 }

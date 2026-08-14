@@ -58,6 +58,18 @@ test('active matching sensor with all AND evidence is covered (R2.2)', () => {
     });
 });
 
+test('structured v2 commands supply structural coverage evidence without exposing argv', () => {
+    fs.writeFileSync(path.join(root, 'eslint.config.js'), "rules: { 'no-unreachable': 'error' }");
+
+    const observed = observeDetector(root, 'style', 0, detector, {
+        enabled: true,
+        command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.', '--config', 'eslint.config.js'] },
+    });
+
+    expect(observed.status).toBe(regularFileStatus('covered'));
+    expect(JSON.stringify(observed)).not.toContain('--config');
+});
+
 test.each([
     [undefined, 'missing'],
     [{ cmd: 'npx eslint .', enabled: false }, 'disabled'],
