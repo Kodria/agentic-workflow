@@ -1208,7 +1208,7 @@ _Requirements: R6.4, R6.5, R6.7, R9.2, R9.4, R10.2, R10.3, R10.5, R10.6, R10.7, 
 
 **Skills:** `test-driven-development`, `writing-skills`, `verification-before-completion`
 
-- [ ] **Step 1: Escribir contrato rojo del orden terminal y emisión tipada**
+- [x] **Step 1: Escribir contrato rojo del orden terminal y emisión tipada**
 
 ```js
 test('runs coverage exactly once before archive (R6.4)', () => {
@@ -1236,11 +1236,11 @@ test('keeps empirical coverage terminal and out of implementation QA (R6.7)', ()
 });
 ```
 
-- [ ] **Step 2: Actualizar skills y versiones sin ampliar autoridad**
+- [x] **Step 2: Actualizar skills y versiones sin ampliar autoridad**
 
 Agregar coverage como nuevo paso del checklist tras leer el ledger y antes de triage/archive. Interactivo presenta outcomes; desatendido usa solo reglas vigentes y registra recomendaciones no autorizadas. Emisores agregan flag únicamente al mapear un catálogo exacto. `setup-sensors` queda como escape para custom/compatible-unverified/hardening. Bumps: harness-retro `2.4.0`, setup-sensors `1.1.0`, SDD `1.7.0`, QA `1.5.0`, verification `1.2.0`, debugging `1.1.0`.
 
-- [ ] **Step 3: Crear renderer y freshness del soporte del registry**
+- [x] **Step 3: Crear renderer y freshness del soporte del registry**
 
 ```js
 export function renderSensorSupport(packs, pins) {
@@ -1252,7 +1252,7 @@ export function renderSensorSupport(packs, pins) {
 
 `SUPPORT.md` tiene markers y solo contenido generado. Test regenera y compara bytes; incluye certified/compatible-unverified/not-applicable, tool/range/OS y fecha/pins, sin prosa duplicada.
 
-- [ ] **Step 4: Construir workflow de certificación que bloquee el tag**
+- [x] **Step 4: Construir workflow de certificación que bloquee el tag**
 
 Workflow reusable con resolver/contract suite en Ubuntu/macOS/Windows; real tools min/current principalmente Ubuntu; smoke current macOS/Windows; future sintético debe ser compatible-unverified. `validate.yml` lo llama. `auto-tag.yml` también lo llama y el job `tag` declara `needs: sensor-certification`; no confiar en un workflow paralelo.
 
