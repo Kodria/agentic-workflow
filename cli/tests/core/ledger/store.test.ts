@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { addEntry, listEntries, ledgerPath, detectBranch, recurring, archiveLedger } from '../../../src/core/ledger/store';
+import { parseLedgerEntry } from '../../../src/core/ledger/types';
 import type { LedgerEntry } from '../../../src/core/ledger/types';
 
 function mkTmp(): string {
@@ -44,6 +45,26 @@ describe('ledger store — add/list', () => {
         addEntry(cwd, entry());
         addEntry(cwd, entry({ signature: 'second', desc: 'another' }));
         expect(listEntries(cwd, 'feat-x')).toHaveLength(2);
+    });
+
+    test('persists an optional reusable defect class', () => {
+        addEntry(cwd, entry({ defectClass: 'lint-errors' }));
+        expect(JSON.parse(fs.readFileSync(ledgerPath(cwd, 'feat-x'), 'utf-8'))).toMatchObject({ defectClass: 'lint-errors' });
+    });
+
+    test('keeps a legacy entry without defectClass valid and unclassified', () => {
+        const parsed = parseLedgerEntry(entry(), 'line 1');
+        expect(parsed).toMatchObject({ ok: true, entry: { defectClass: undefined } });
+    });
+
+    test.each(['', 'Bad_ID', '../escape', 'a b', '-leading', 'trailing-'])
+    ('skips a persisted invalid defect class %p', (defectClass) => {
+        const parsed = parseLedgerEntry({ ...entry(), defectClass }, 'line 1');
+        expect(parsed).toMatchObject({ ok: false, reason: 'invalid-defect-class' });
+    });
+
+    test('rejects a non-string durable source instead of returning an unsafe parse result', () => {
+        expect(() => parseLedgerEntry(entry(), null as unknown as string)).toThrow(/source.*string/i);
     });
 
     test('listEntries on a branch with no ledger returns []', () => {

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
+import { parseLedgerEntry } from './types';
 import type { LedgerEntry } from './types';
 import { clusterEntries } from './cluster';
 import type { RecurringCluster } from './cluster';
@@ -29,21 +30,6 @@ export function addEntry(cwd: string, entry: LedgerEntry): void {
     fs.appendFileSync(p, JSON.stringify(entry) + '\n', 'utf-8');
 }
 
-/** Required LedgerEntry fields that `cluster.ts` reads unconditionally
- * (`signature`, `desc`, `ref` when present). A JSONL line can be syntactically
- * valid JSON while still being shape-invalid (e.g. missing `desc`) — that's
- * not a parse error, so it needs its own check, extending the same "skip
- * malformed line" policy this function already applies to JSON syntax errors. */
-function isWellFormedEntry(x: unknown): x is LedgerEntry {
-    if (!x || typeof x !== 'object') return false;
-    const e = x as Record<string, unknown>;
-    return typeof e.signature === 'string'
-        && typeof e.desc === 'string'
-        && typeof e.branch === 'string'
-        && typeof e.polarity === 'string'
-        && (e.ref === undefined || typeof e.ref === 'string');
-}
-
 export function listEntries(cwd: string, branch: string): LedgerEntry[] {
     const p = ledgerPath(cwd, branch);
     if (!fs.existsSync(p)) return [];
@@ -52,8 +38,8 @@ export function listEntries(cwd: string, branch: string): LedgerEntry[] {
         const trimmed = line.trim();
         if (!trimmed) continue;
         try {
-            const parsed: unknown = JSON.parse(trimmed);
-            if (isWellFormedEntry(parsed)) out.push(parsed);
+            const parsed = parseLedgerEntry(JSON.parse(trimmed) as unknown, p);
+            if (parsed.ok) out.push(parsed.entry);
         } catch { /* skip malformed line */ }
     }
     return out;

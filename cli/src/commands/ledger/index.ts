@@ -1,10 +1,11 @@
 import { Command } from 'commander';
 import { addEntry, listEntries, recurring, archiveLedger, detectBranch } from '../../core/ledger/store';
+import { DEFECT_CLASS } from '../../core/ledger/types';
 import type { LedgerEntry, Polarity, LedgerClass, Severity } from '../../core/ledger/types';
 
 interface AddOpts {
     branch?: string; polarity: Polarity; class: LedgerClass; signature: string;
-    severity: Severity; desc: string; ref?: string; phase?: string; sourceSkill?: string;
+    severity: Severity; desc: string; ref?: string; phase?: string; sourceSkill?: string; defectClass?: string;
 }
 
 function archiveLabel(): string {
@@ -25,8 +26,12 @@ export function registerLedgerCommand(program: Command): void {
         .option('--ref <ref>', 'file:line or PR/commit reference')
         .option('--phase <phase>', 'lifecycle phase', 'unknown')
         .option('--source-skill <skill>', 'emitting skill', 'unknown')
+        .option('--defect-class <id>', 'reusable lowercase kebab-case defect class')
         .option('--branch <branch>', 'override branch (default: git current branch)')
         .action((opts: AddOpts) => {
+            if (opts.defectClass !== undefined && !DEFECT_CLASS.test(opts.defectClass)) {
+                throw new Error('--defect-class requires a lowercase kebab-case value');
+            }
             const cwd = process.cwd();
             const branch = opts.branch ?? detectBranch(cwd);
             const entry: LedgerEntry = {
@@ -40,6 +45,7 @@ export function registerLedgerCommand(program: Command): void {
                 severity: opts.severity,
                 desc: opts.desc,
                 ref: opts.ref,
+                defectClass: opts.defectClass,
             };
             addEntry(cwd, entry);
         });
