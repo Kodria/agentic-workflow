@@ -520,7 +520,7 @@ _Requirements: R3.1, R3.2, R3.3, R3.4, R3.5, R3.6, R3.7, R7.3, R7.4_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tablas rojas de precedencia**
+- [x] **Step 1: Escribir tablas rojas de precedencia**
 
 ```ts
 test.each([
@@ -542,17 +542,17 @@ test('overall keeps R2 static semantics (R3.6)', () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar tabla roja**
+- [x] **Step 2: Ejecutar tabla roja**
 
 Run: `cd cli && npx jest tests/commands/sensors/coverage/evaluate.test.ts --runInBand`
 
 Expected: FAIL porque `not-applicable` y compatibilidad no existen.
 
-- [ ] **Step 3: Adjuntar evidencia de compatibilidad sanitizada**
+- [x] **Step 3: Adjuntar evidencia de compatibilidad sanitizada**
 
 `observeDetector` recibe `CompatibilityResolution` y produce el status R2 más `compatibility`. El renderer solo acepta `state`, reason code, variant ID, versiones normalizadas, rango y evidencia sanitizada; rechaza full command, raw output, environment y fields desconocidos.
 
-- [ ] **Step 4: Implementar el reducer y envelope v2**
+- [x] **Step 4: Implementar el reducer y envelope v2**
 
 ```ts
 const rank: Record<CoverageClassStatus, number> = {
@@ -567,11 +567,11 @@ export function reduceClassStatus(detectors: DetectorObservation[]): CoverageCla
 
 `CoverageEnvelope.schemaVersion` pasa a 2; `overall` sigue `gaps` si hay missing, `inconclusive` si no hay missing y hay unverifiable, `covered` si el resto es covered/not-applicable y existe al menos una clase aplicable cubierta. Cero clases aplicables es `inconclusive`, nunca covered.
 
-- [ ] **Step 5: Actualizar resolución y render exhaustivo**
+- [x] **Step 5: Actualizar resolución y render exhaustivo**
 
 `resolveCoverageInputs` siempre devuelve `projectRoot`, usa parser de manifest único y pack-source central. `renderCoverageJson` valida static+compatibility aun cuando reason sea `not_configured`/`no_reference`; `renderCoverageHuman` nombra gaps y estados inciertos, omite clases cubiertas y N/A del cuerpo, y resume todas las categorías.
 
-- [ ] **Step 6: Ejecutar tests, mutación y commit**
+- [x] **Step 6: Ejecutar tests, mutación y commit**
 
 Run:
 
