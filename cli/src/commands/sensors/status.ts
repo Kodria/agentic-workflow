@@ -68,7 +68,7 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
             const checks: Record<string, SensorCheck> = {};
             let live: Awaited<ReturnType<typeof resolveLiveCompatibility>>;
             try {
-                live = await resolveLiveCompatibility(cwd, parsed.pack.pack, parsed.pack.registryRoot, { explicitPackSelection: parsed.pack.packSelection === 'explicit' });
+                live = await resolveLiveCompatibility(cwd, parsed.pack.pack, parsed.pack.registryRoot, { packSelection: parsed.pack.packSelection });
             } catch (error) {
                 const detail = `compatibility revalidation failed: ${error instanceof Error ? error.message : String(error)}`;
                 for (const [name, sensor] of Object.entries(parsed.pack.sensors)) {

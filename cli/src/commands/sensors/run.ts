@@ -75,7 +75,7 @@ function readManifest(cwd: string): SensorManifest | null {
 async function resolveLiveV2(cwd: string, manifest: ReturnType<typeof parseSensorManifest>): Promise<Awaited<ReturnType<typeof resolveLiveCompatibility>> | null> {
     if (manifest.kind !== 'v2') return null;
     try {
-        return await resolveLiveCompatibility(cwd, manifest.pack.pack, manifest.pack.registryRoot, { explicitPackSelection: manifest.pack.packSelection === 'explicit' });
+        return await resolveLiveCompatibility(cwd, manifest.pack.pack, manifest.pack.registryRoot, { packSelection: manifest.pack.packSelection });
     } catch { return null; }
 }
 

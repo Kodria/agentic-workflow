@@ -37,4 +37,13 @@ describe('runCompatibilityProbe', () => {
             expect.any(Object),
         );
     });
+
+    it.each(['mypy', 'ruff', 'pytest'])('probes a %s variant through the contained Python environment', async (toolExecutable) => {
+        await runCompatibilityProbe({ kind: 'version' }, { ...evidence, toolExecutable, toolResolution: 'python-environment' }, fakeExecutor);
+
+        expect(fakeExecutor).toHaveBeenCalledWith(
+            expect.objectContaining({ executable: toolExecutable, resolution: 'python-environment', args: ['--version'] }),
+            expect.any(Object),
+        );
+    });
 });

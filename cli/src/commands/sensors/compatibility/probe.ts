@@ -3,20 +3,19 @@ import type { CompatibilityProbe, StructuredCommand } from './types';
 
 export type ProbeStatus = 'matched' | 'not-matched' | 'unverifiable';
 export type ProbeResult = { status: ProbeStatus; reason: string };
-export type ProbeEvidence = { cwd: string; toolExecutable?: string; configFiles?: string[]; scripts?: string[] };
+export type ProbeEvidence = { cwd: string; toolExecutable?: string; toolResolution?: StructuredCommand['resolution']; configFiles?: string[]; scripts?: string[] };
 export type ProbeExecutor = (command: StructuredCommand, options: ExecOptions) => Promise<ExecResult>;
 const KINDS = new Set<CompatibilityProbe>(['version', 'eslint-print-config', 'typescript-show-config', 'semgrep-validate', 'package-script-present', 'config-present']);
 
 function commandFor(kind: CompatibilityProbe, evidence: ProbeEvidence): StructuredCommand | null {
     const executable = evidence.toolExecutable ?? (kind.startsWith('typescript') ? 'tsc' : kind.startsWith('eslint') ? 'eslint' : kind.startsWith('semgrep') ? 'semgrep' : 'node');
-    // A tool version certified from local package metadata must be probed through
-    // the same project installation. Only the Node runtime is intentionally PATH
-    // resolved: it is runtime evidence, not a package-local tool assertion.
+    // Probe an executable through the same bounded resolver as its variant's
+    // eventual execution. Falling back preserves legacy probe-only kinds.
     const resolution = executable === 'node'
         ? 'path'
-        : kind === 'semgrep-validate'
+        : evidence.toolResolution ?? (kind === 'semgrep-validate'
             ? 'python-environment'
-            : 'node-modules-bin' as const;
+            : 'node-modules-bin');
     if (kind === 'package-script-present') return null;
     if (kind === 'config-present') return null;
     if (kind === 'version') return { executable, resolution, args: ['--version'] };

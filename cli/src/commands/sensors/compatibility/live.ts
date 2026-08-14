@@ -10,7 +10,7 @@ export type LiveCompatibility = {
     pack: SensorPackV2;
     sensors: Record<string, CompatibilityEvidence>;
 };
-export type LiveCompatibilityOptions = { explicitPackSelection?: boolean };
+export type LiveCompatibilityOptions = { packSelection?: 'explicit' };
 
 /**
  * Re-resolve a v2 pack from the configured registry and current project evidence.
@@ -37,7 +37,7 @@ export async function resolveParsedPackCompatibility(cwd: string, pack: SensorPa
     if (typeof cwd !== 'string' || cwd.trim() === '') throw new Error('cwd must be a non-empty path');
     if (!pack || typeof pack !== 'object' || pack.schemaVersion !== 2) throw new Error('pack must be a parsed v2 sensor pack');
     const evidence = discoverProjectEvidence(cwd, pack);
-    const resolutionEvidence = { ...evidence, explicitPackSelection: options.explicitPackSelection === true };
+    const resolutionEvidence = { ...evidence, ...(options.packSelection === 'explicit' ? { packSelection: 'explicit' as const } : {}) };
     const initial = resolveProjectCompatibility(pack, resolutionEvidence).sensors;
     const sensors: Record<string, CompatibilityEvidence> = {};
     for (const [name, sensor] of Object.entries(pack.sensors)) {
@@ -47,6 +47,7 @@ export async function resolveParsedPackCompatibility(cwd: string, pack: SensorPa
             ? await runCompatibilityProbe(variant.probe, {
                 cwd,
                 toolExecutable: variant.command.executable,
+                toolResolution: variant.command.resolution,
                 configFiles: evidence.configFiles,
                 scripts: evidence.scripts,
             })

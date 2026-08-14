@@ -280,7 +280,7 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
         const resolvedV2 = readV2Pack(resolvedPack, opts.registryRoot);
         if (resolvedV2) {
             const packSelection = opts.pack ? 'explicit' as const : undefined;
-            const compatibility = (await resolveParsedPackCompatibility(cwd, resolvedV2.pack, { explicitPackSelection: packSelection === 'explicit' })).sensors;
+            const compatibility = (await resolveParsedPackCompatibility(cwd, resolvedV2.pack, { packSelection })).sensors;
             const sensors: Record<string, any> = {};
             for (const [name, sensor] of Object.entries(resolvedV2.pack.sensors)) {
                 const resolved = compatibility[name];
