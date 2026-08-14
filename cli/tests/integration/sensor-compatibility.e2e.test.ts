@@ -62,7 +62,11 @@ beforeAll(() => {
     if (!fs.existsSync(bin)) throw new Error(`Compatibility E2E requires the compiled CLI at ${bin}; run npm run build before this test.`);
 });
 
-test.each(['linux', 'darwin', 'win32'] as const)('resolves a local fake tool and probe consistently on %s (R9.1)', async (platform) => {
+// This is a portable resolver *semantic* matrix: `platform` is injected into
+// the resolver, so it proves the three path/selection branches but does not
+// claim that this Linux process is a native macOS or Windows execution. Native
+// binary coverage is exercised separately below and by the CI OS matrix.
+test.each(['linux', 'darwin', 'win32'] as const)('keeps injected resolver semantics consistent on %s (R9.1)', async (platform) => {
     const fixture = createFixture();
     try {
         const source = JSON.parse(fs.readFileSync(path.join(fixture.registryRoot, 'sensor-packs', 'js-ts', 'pack.json'), 'utf8'));
@@ -74,6 +78,16 @@ test.each(['linux', 'darwin', 'win32'] as const)('resolves a local fake tool and
         }));
         const result = resolveSensorCompatibility(parsed.pack.sensors.lint, { ...discovered, probe }, { pack: 'js-ts', sensor: 'lint' });
         expect(result).toMatchObject({ state: 'certified', variantId: 'eslint-10', toolVersion: '10.4.1' });
+    } finally {
+        fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+});
+
+test('compiled binary dispatches coverage and emits parseable JSON on the native CI platform', () => {
+    const fixture = createFixture();
+    try {
+        const report = json(runCli(fixture, 'coverage', '--json'));
+        expect(report).toMatchObject({ schemaVersion: 2, static: expect.any(Object), empirical: expect.any(Object) });
     } finally {
         fs.rmSync(fixture.root, { recursive: true, force: true });
     }

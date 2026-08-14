@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceHead": "5a73920967b6dde41f250a8f1e44d769daaa0868",
+  "sourceHead": "79fa142aa0b2bf74edf799304c33917e3508a886",
   "cli": {
     "package": "agentic-workflow-manager",
     "targetVersion": "7.0.0",
@@ -29,10 +29,10 @@
     "registry/sensor-packs/js-ts/pack.json": "8b19e15fd1b186aa2d6a49dd08299d23d94eb6d99246c0de20bdfb314dc6d7e0"
   },
   "commands": [
-    "cd cli && npm ci",
-    "cd cli && npm run typecheck",
-    "cd cli && npm test -- --runInBand",
-    "cd cli && npm run build",
+    "(cd cli && npm ci)",
+    "(cd cli && npm run typecheck)",
+    "(cd cli && npm test -- --runInBand)",
+    "(cd cli && npm run build)",
     "node cli/dist/src/index.js sensors run",
     "node cli/dist/src/index.js sensors coverage --json --min 2",
     "cd cli && npx jest tests/integration/sensor-compatibility.e2e.test.ts --runInBand"

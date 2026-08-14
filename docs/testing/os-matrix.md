@@ -11,6 +11,17 @@ Only the **deltas per operating system**. Run [core-acceptance.md](core-acceptan
 
 The macOS CI suite proves the CLI on the platform; the manual playbook remains necessary because CI does not exercise a user's real agent binary or configuration.
 
+### R3 version-aware coverage evidence
+
+The R3 resolver test matrix injects `linux`, `darwin`, and `win32` into the
+platform-aware resolver and controls the probe executable. It is a **unit
+semantic matrix**, not evidence that a Linux process has executed Windows or
+macOS binaries. `sensor-compatibility.e2e.test.ts` also executes the compiled
+CLI on its actual current host and requires parseable coverage JSON. Native
+platform evidence comes from the required three-OS CI matrix above, where that
+same E2E is part of the regular Jest suite. Keep these two evidence levels
+separate in reports and pack certification claims.
+
 ## Sensor-pack certification evidence
 
 For every first-party pack, record one real-tool boundary run on Linux, macOS,
