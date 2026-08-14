@@ -230,6 +230,22 @@ function regularFile(candidate: string): boolean {
     } catch { return false; }
 }
 
+/** Resolve a Python environment executable only when every selected path
+ * component is a non-symbolic-link local entry. A leaf-only lstat follows a
+ * linked .venv/venv ancestor and can otherwise execute outside the project. */
+function localPythonEnvironmentExecutable(cwd: string, environmentRoot: '.venv' | 'venv', executable: string): string | null {
+    const parts = [environmentRoot, isWindowsNative() ? 'Scripts' : 'bin', executable];
+    let candidate = cwd;
+    try {
+        for (const part of parts) {
+            candidate = path.join(candidate, part);
+            const stat = fs.lstatSync(candidate);
+            if (stat.isSymbolicLink()) return null;
+        }
+        return fs.lstatSync(candidate).isFile() ? candidate : null;
+    } catch { return null; }
+}
+
 function containedPath(root: string, candidate: string): boolean {
     const relative = path.relative(root, candidate);
     return relative !== '' && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);
@@ -277,7 +293,20 @@ function resolveStructuredExecutable(command: StructuredCommand, cwd: string): s
     const candidates: string[] = [];
     if (command.resolution === 'python-environment') {
         if (path.isAbsolute(command.executable)) throw new Error('python environment executable must be a contained local name');
-        candidates.push(path.join(cwd, command.pythonEnvironmentRoot!, isWindowsNative() ? 'Scripts' : 'bin', command.executable));
+        if (!isWindowsNative()) {
+            const local = localPythonEnvironmentExecutable(cwd, command.pythonEnvironmentRoot!, command.executable);
+            if (local) return local;
+            throw new Error('python environment executable is not a contained local regular file');
+        }
+        const extensions = safeWindowsExecutableExtensions();
+        if (extensions.length === 0) throw new Error('PATHEXT contains no safe Windows executable extension for structured commands');
+        for (const executable of [command.executable, ...extensions.map(extension => command.executable + extension)]) {
+            const lower = executable.toLowerCase();
+            if (lower.endsWith('.cmd') || lower.endsWith('.bat')) throw new Error('structured commands cannot execute Windows command wrappers');
+            const local = localPythonEnvironmentExecutable(cwd, command.pythonEnvironmentRoot!, executable);
+            if (local && extensions.some(extension => lower.endsWith(extension))) return local;
+        }
+        throw new Error('python environment executable is not a contained local regular file');
     } else if (path.isAbsolute(command.executable)) candidates.push(command.executable);
     else {
         for (const entry of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) candidates.push(path.join(entry, command.executable));
@@ -285,7 +314,6 @@ function resolveStructuredExecutable(command: StructuredCommand, cwd: string): s
     if (!isWindowsNative()) {
         const found = candidates.find(regularFile);
         if (found) return found;
-        if (command.resolution === 'python-environment') throw new Error('python environment executable is not a contained local regular file');
         return command.executable;
     }
     const extensions = safeWindowsExecutableExtensions();
@@ -296,7 +324,6 @@ function resolveStructuredExecutable(command: StructuredCommand, cwd: string): s
         if (regularFile(candidate) && extensions.some(ext => lower.endsWith(ext))) return candidate;
         for (const extension of extensions) if (regularFile(candidate + extension)) return candidate + extension;
     }
-    if (command.resolution === 'python-environment') throw new Error('python environment executable is not a contained local regular file');
     return command.executable;
 }
 

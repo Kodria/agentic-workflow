@@ -197,6 +197,25 @@ onPosix('runStructuredCommand — local node_modules binaries', () => {
 });
 
 onPosix('runStructuredCommand — Python environments', () => {
+    it.each(['.venv', 'venv'] as const)('rejects a symlinked %s ancestor instead of executing outside the project', environment => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-python-env-ancestor-'));
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-python-env-outside-'));
+        const marker = path.join(dir, 'must-not-exist');
+        try {
+            const executable = path.join(outside, 'bin', 'semgrep');
+            fs.mkdirSync(path.dirname(executable), { recursive: true });
+            fs.writeFileSync(executable, `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
+            fs.symlinkSync(outside, path.join(dir, environment));
+
+            expect(() => runStructuredCommand({ executable: 'semgrep', resolution: 'python-environment', pythonEnvironmentRoot: environment, args: ['--validate'] }, { timeout: 5000, cwd: dir }))
+                .toThrow(/python.*environment.*local|contained/i);
+            expect(fs.existsSync(marker)).toBe(false);
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
+
     it('rejects a missing project Python executable instead of falling back to PATH', () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-python-env-missing-'));
         const global = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-python-env-global-'));
