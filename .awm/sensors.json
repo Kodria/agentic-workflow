@@ -1,0 +1,32 @@
+{
+  "pack": "agentic-workflow-monorepo",
+  "concurrency": 1,
+  "sensors": {
+    "typecheck": {
+      "cmd": "npm --prefix cli run typecheck",
+      "fast": true,
+      "formatter": "tsc"
+    },
+    "lint": {
+      "cmd": "npm --prefix cli run lint",
+      "fast": true,
+      "formatter": "eslint-llm"
+    },
+    "security": {
+      "cmd": "semgrep --config cli/.semgrep.awm.yml --json cli",
+      "fast": false,
+      "formatter": "semgrep"
+    },
+    "depcheck": {
+      "cmd": "npm --prefix cli run depcheck",
+      "fast": false,
+      "formatter": "generic"
+    },
+    "test": {
+      "cmd": "npm --prefix cli run build && npm --prefix cli test -- --runInBand",
+      "fast": false,
+      "timeout": 300000,
+      "formatter": "test"
+    }
+  }
+}

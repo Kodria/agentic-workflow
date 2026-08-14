@@ -3,148 +3,93 @@
 [![Version](https://img.shields.io/npm/v/agentic-workflow-manager)](https://www.npmjs.com/package/agentic-workflow-manager)
 [![CI](https://github.com/Kodria/agentic-workflow/actions/workflows/ci.yml/badge.svg)](https://github.com/Kodria/agentic-workflow/actions/workflows/ci.yml)
 
-> A package manager for AI-agent context: distribute your team's skills, processes and quality gates to every developer's coding agent, from one git registry.
+AWM is an engineering framework for agentic software development. It turns an
+incomplete need into a reviewable pull request through explicit human decisions,
+bounded agent execution, deterministic quality gates, and durable evidence.
 
-As teams adopt AI coding assistants, knowledge scatters. One developer has a great prompt for Next.js components, another a workflow for migrating legacy databases, and nobody else can use either. **AWM turns those into versioned, installable artifacts** — and installs them into whichever agent each developer actually uses.
+It is not a library of prompts or an autonomous code generator. AWM combines
+versioned skills and workflows with a CLI, provider adapters, project contracts,
+and executable sensors so that a team can make agent-assisted development
+repeatable and reviewable.
 
-It also carries the part most prompt libraries skip: **deterministic quality gates**. Sensors (typecheck, lint, tests, security) run as real commands with real exit codes, so "done" is verified by the machine, not asserted by a model.
+## Choose your path
 
----
+### Understand the framework
 
-## Install
+Start with [How AWM works](docs/framework.md) to learn the lifecycle, its
+components, which phases are optional, and which quality gates are mandatory.
+
+### Start using AWM
+
+1. [Install AWM and prepare your machine](docs/installation.md)
+2. [Configure providers and registries](docs/configuration.md)
+3. [Initialize a project](docs/project-setup.md)
+4. [Operate AWM day to day](docs/runbook.md)
+
+The [documentation hub](docs/README.md) maps the complete set of active guides
+by intent.
+
+## Five-minute machine setup
 
 Requires **Node.js 22+** and **git**.
 
 ```bash
 npm i -g agentic-workflow-manager
-awm --version
+awm init --agent claude-code --machine-only
+awm agent list
+awm doctor --agent claude-code
 ```
 
-Then, inside the repo where you want the harness:
+This prepares the machine only. Run [project initialization](docs/project-setup.md)
+separately inside the repository you want AWM to manage.
+
+## Framework at a glance
+
+AWM provides a complete engineering loop:
+
+1. Turn a raw need into a brief when product discovery is needed.
+2. Confirm readiness, design when it adds value, and create a traceable plan.
+3. Execute bounded work through a controller and focused agents.
+4. Run deterministic type, lint, test, security, and dependency checks.
+5. Review evidence, prepare the pull request, and record learning for the next cycle.
+
+Humans retain intent, priority, and consequential decisions. Agents work within
+the declared scope. The harness makes the process observable; it does not claim
+that an LLM is always correct.
+
+## Daily commands
 
 ```bash
-awm init            # Claude Code (default)
-awm init -a codex   # or: opencode, cursor, copilot, antigravity
-awm doctor          # read machine + project state at any time
-```
-
-`awm init` is idempotent — run it as often as you like. It bootstraps `~/.awm`, clones the baseline registry, and installs the artifacts your project declares.
-
-**Detailed, per-OS instructions** (including native Windows and WSL): **[docs/installation.md](docs/installation.md)**
-
----
-
-## Support matrix
-
-This is a **contract**, not a wish list. Every row is verified against source and CI — see [`CONSTITUTION.md`](CONSTITUTION.md#matriz-de-soporte) for the authoritative version with source citations.
-
-### Operating systems
-
-| OS | Status |
-|---|---|
-| Linux | Supported · verified on every PR (`ubuntu-latest`) |
-| macOS | Supported |
-| Windows (native) | Supported · verified on every PR (`windows-latest`) |
-| Windows (WSL) | Supported — reports as Linux |
-
-> **One known, narrow gap on native Windows:** the crash-recovery path of `awm watch`'s supervisor (spawn → identity capture → adoption after the supervisor is killed) has not converged on real Windows CI, and its 4 end-to-end tests are POSIX-scoped. Everything else — `init`, `update`, `sync`, `add`, `sensors`, `preflight`, `doctor`, hooks — is continuously green on Windows. Details in [`cli/src/core/journal/process.ts`](cli/src/core/journal/process.ts).
-
-### Agents
-
-Not every agent can enforce the same things. AWM reports each one's **tier** honestly rather than implying parity — a lower tier is a limitation of the target agent's architecture, not a defect in AWM.
-
-| Agent | Tier | What that means |
-|---|---|---|
-| `claude-code` | hooks-native | Full spine: session hooks fire, skills invoke, phase gates enforce |
-| `codex` | hooks-native | Full spine (requires Codex ≥ 0.145.0) |
-| `opencode` | config-managed | Context delivered via managed config instructions |
-| `cursor` | agents-md-managed | Context delivered as project rules; no global context file |
-| `copilot` | agents-md-managed | Context delivered project-locally; no global skills directory |
-| `antigravity` | context-only | Context is read by the agent; no hooks, no managed injection |
-
-**How to configure each one:** **[docs/agents-setup.md](docs/agents-setup.md)**
-
-**Exactly what is supported, with what evidence, and what is not:**
-**[docs/support-matrix.md](docs/support-matrix.md)** — install paths generated from the
-source and locked by a test, plus an explicit `verified / unverified / not supported /
-planned` level for every provider, OS, registry and sensor pack. Nothing there asks you
-to take its word for it.
-
-### Stacks (for sensors)
-
-`js-ts`, `python`, `shell`, and a `generic` fallback. Detection is a convenience; `awm sensors init --pack <name>` is the explicit override and the real contract.
-
-**Explicitly out of scope** (by decision, not omission): other languages (Go, Java, .NET, Ruby…), other git hosts for PR automation (Bitbucket, Azure DevOps — detected and warned about, never driven), and external contributions to this repo.
-
----
-
-## How it fits together
-
-```
-   Your team's git registry                 Each developer's machine
-  ┌────────────────────────┐               ┌──────────────────────────┐
-  │  skills/               │  awm update   │  ~/.awm/registries/…     │
-  │  bundles/              │ ────────────► │        │                 │
-  │  sensor-packs/         │               │        │ awm init / add  │
-  │  agents/  workflows/   │               │        ▼                 │
-  └────────────────────────┘               │  ~/.claude/skills/  …    │
-         versioned by tag                  │  .cursor/rules/     …    │
-                                           │  AGENTS.md          …    │
-                                           └──────────────────────────┘
-                                              rendered per agent
-```
-
-The **CLI** and the **content** are separate on purpose. The CLI ships on npm; the content lives in git registries you control and version independently:
-
-- [`awm-baseline-registry`](https://github.com/Kodria/awm-baseline-registry) — seeded by default
-- [`awm-documentation-registry`](https://github.com/Kodria/awm-documentation-registry) — opt-in via `awm registry add`
-- **your own team registry** — the point of the whole thing ([how to build one](docs/runbook.md#chapter-4--team-setup--customization))
-
----
-
-## Day-to-day
-
-```bash
-awm add                  # install a skill / workflow / process (interactive)
-awm list                 # see what's available
+awm add                  # install a project bundle or artifact
+awm list                 # inspect available content
 awm sensors run          # run the project's quality gates
-awm preflight            # verify the harness can actually gate before you start
-awm update               # pull the latest content from every registry
-awm doctor               # what state is everything in?
-awm track status         # parallel tracks: phase of each track and of the cohort
+awm preflight            # verify that the harness can gate work
+awm update               # refresh registered content
+awm doctor               # inspect machine and project state
+awm track status         # inspect parallel execution tracks
 ```
 
-The two processes the system runs day to day:
+The main workflows are [Product process](docs/guides/product-process.md), from
+a raw idea to a ready brief, and [Development process](docs/guides/development-process.md),
+from a concrete requirement to verified code.
 
-- **[Product process](docs/guides/product-process.md)** — from a raw idea to a certified-ready brief.
-- **[Development process](docs/guides/development-process.md)** — from a brief or a concrete requirement to merged, verified code.
+## Support and scope
 
----
+AWM supports Claude Code, Codex, OpenCode, Cursor, Copilot, and Antigravity
+through capability tiers that state the real integration level instead of
+pretending every provider is identical. Linux, macOS, native Windows, and WSL
+have distinct setup guidance.
 
-## Documentation
+The generated [support matrix](docs/support-matrix.md) is the authoritative
+source for provider capabilities, operating-system evidence, paths, and known
+limitations. It is derived from the CLI source and checked in tests.
 
-**Get running**
-- [Installation](docs/installation.md) — per OS, prerequisites, troubleshooting
-- [Agent setup](docs/agents-setup.md) — per agent, what each tier gives you
-- [Runbook](docs/runbook.md) — the complete operating manual, install → team rollout → authoring
+## Contributing
 
-**Use it**
-- [Product process guide](docs/guides/product-process.md) · [Development process guide](docs/guides/development-process.md)
-- [CLI reference](docs/cli-reference.md) — every command and non-interactive flag
-- [Parallel tracks](docs/guides/parallel-tracks.md) — running a plan's tasks in parallel worktrees, when it degrades to serial, and what `BLOCKED` means
+Use the [architecture guide](docs/architecture.md) to understand the CLI and
+registry design, the [CLI developer guide](cli/README.md) to work on the CLI,
+and the [constitution](CONSTITUTION.md) for non-negotiable project rules.
 
-**Understand it**
-- [Architecture](docs/architecture.md) — components, data flow, on-disk state
-- [Software development lifecycle](docs/sdlc.md) — how the phases, gates and learning loop compose
-- [`CONSTITUTION.md`](CONSTITUTION.md) — the project's non-negotiable rules
-- [Harness retros](docs/harness-retros.md) — auditable log of recurring gaps turned into structural rules
+## License
 
-**Verify it**
-- [Support matrix](docs/support-matrix.md) — what is supported, at what evidence level, and what is missing
-- [Decisions](docs/decisions.md) — product and process decisions, with their reason and consequence
-- [End-to-end acceptance playbooks](docs/testing/README.md) — scripted checks per OS and per agent
-
-**Extend it**
-- [Authoring content](docs/runbook.md#chapter-5--extensibility-authoring-content) — write your own skills, bundles and packs
-- [CLI developer guide](cli/README.md) — work on the CLI itself
-
+MIT. See [package metadata](cli/package.json) for the published package details.

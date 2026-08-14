@@ -40,7 +40,8 @@ async function rmSyncRetryingBusy(target: string, attempts = 10, delayMs = 100):
 
 function makeRegistryWithManifest(base: string, name: string, manifest: Record<string, unknown>): string {
     const dir = path.join(base, name);
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(path.join(dir, 'skills'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'skills', '.keep'), 'fixture');
     GIT(dir, 'init -q -b main');
     fs.writeFileSync(path.join(dir, 'awm-registry.json'), JSON.stringify(manifest));
     GIT(dir, 'add -A');

@@ -1,8 +1,11 @@
 # Architecture
 
-How AWM is put together, what it writes where, and which invariants hold it up.
+This document explains how the CLI is implemented. To understand the engineering
+workflow and its lifecycle, start with [How AWM works](framework.md).
 
-For *why* the lifecycle is shaped this way, see [sdlc.md](sdlc.md). For the authoritative support matrix, see [`CONSTITUTION.md`](../CONSTITUTION.md#matriz-de-soporte).
+It describes internal implementation: how AWM is put together, what it writes,
+and which invariants hold it up. For supported providers and platforms, see the
+[support matrix](support-matrix.md).
 
 ---
 
@@ -162,7 +165,7 @@ Never run `npm publish` by hand, and never add a parallel publish workflow. CI g
 
 ## Related
 
-- [SDLC](sdlc.md) · [Installation](installation.md) · [Agent setup](agents-setup.md)
+- [How AWM works](framework.md) · [Installation](installation.md) · [Agent setup](agents-setup.md)
 - [CLI reference](cli-reference.md) · [Runbook](runbook.md)
 - [Support matrix](support-matrix.md) — what is supported, at what evidence level
 - [Acceptance playbooks](testing/README.md)

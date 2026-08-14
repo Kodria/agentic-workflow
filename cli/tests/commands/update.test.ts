@@ -142,7 +142,7 @@ describe('awm update — honest outcome', () => {
         // `unusableSyncedRegistries` mira contenido EN DISCO: se siembra el content root
         // y el registries.json para que `docs` cuente como stale, no como roto.
         const registriesDir = path.join(process.env.AWM_HOME as string, 'registries');
-        fs.mkdirSync(path.join(registriesDir, 'docs'), { recursive: true });
+        fs.mkdirSync(path.join(registriesDir, 'docs', 'skills'), { recursive: true });
         fs.writeFileSync(
             path.join(process.env.AWM_HOME as string, 'registries.json'),
             JSON.stringify([{ name: 'docs', remote: 'https://example.test/docs.git' }]),

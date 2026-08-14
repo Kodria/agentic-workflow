@@ -1,155 +1,157 @@
-# Installation
+# Install AWM and prepare the machine
 
-AWM is a global npm CLI. Installing it does **not** install any content — content comes from git registries on first `awm init`.
+This guide prepares a developer machine. It deliberately stops before project
+initialization: run that separate phase only inside the repository AWM will
+manage.
+
+Prepare the machine first, then initialize a project; the two phases have
+different owners and write different artifacts.
+
+## What this phase changes
+
+Machine preparation can install the CLI, AWM preferences and registry cache,
+provider hooks, global skills, and global provider context where a provider
+supports them. It must not create a project profile, sensors, a constitution,
+or local provider instructions in the current directory.
+
+Copilot has no global skill scope. Its machine setup records the provider and
+defers project-only content until normal project initialization; see
+[Configure AWM](configuration.md#choose-a-provider).
 
 ## Prerequisites
 
 | Requirement | Why | Check |
 |---|---|---|
-| **Node.js 22+** | The CLI targets Node 22; older runtimes fail with cryptic errors. | `node --version` |
-| **git** | Registries are git repos; AWM clones and fetches them. | `git --version` |
-| An agent | At least one of: Claude Code, Codex, OpenCode, Cursor, Copilot, Antigravity. | see [agents-setup.md](agents-setup.md) |
+| Node.js 22 or newer | Required by the published CLI. | `node --version` |
+| Git | Registries are Git repositories. | `git --version` |
+| One supported provider | AWM configures one provider per init run. | [Agent-specific setup](agents-setup.md) |
 
-`package.json` declares `engines: { node: ">=22" }`, so npm warns you on an unsupported runtime instead of letting you discover it at runtime.
+`gh` or `glab` are optional: they are useful when a workflow prepares pull
+requests, but they are not required to initialize AWM. Project sensors may need
+additional tools for the selected stack; their manifest reports a missing tool
+as a failure or inconclusive result rather than a clean pass.
 
-Optional, per feature:
-
-- **`gh` / `glab`** — only if you want the PR/MR automation in the finishing skills. AWM itself never calls them; it detects your git host and warns if the matching tool is absent.
-- **Sensor tools** (`tsc`, `eslint`, `semgrep`, `pytest`, `shellcheck`…) — whatever your stack's sensor pack declares. A missing tool reports `skipped` with a reason; it never silently passes.
-
----
-
-## Install
+## Install or upgrade the CLI
 
 ```bash
 npm i -g agentic-workflow-manager
 awm --version
 ```
 
-Upgrading later:
+Upgrade the CLI through npm:
 
 ```bash
 npm i -g agentic-workflow-manager@latest
 ```
 
-> `awm update` updates **content** (your registries). The **CLI** updates through npm. They are deliberately separate: your team's skills move at a different cadence than the tool.
+`awm update` always refreshes registry content. When it detects a newer published
+CLI, it can also offer the npm self-update; pass `--yes` to accept that update in a
+non-interactive run. The explicit alternative remains:
 
----
+```bash
+npm i -g agentic-workflow-manager@latest
+```
 
-## Per-OS notes
+## Operating-system setup
 
 ### Linux
 
-Nothing special. If npm's global prefix is root-owned you'll need `sudo`, or better, point npm at a user-owned prefix:
+Use a supported Node.js installation and ensure npm's global bin directory is
+on `PATH`. If npm's prefix is root-owned, configure a user-owned prefix instead
+of relying on `sudo` for normal use.
 
 ```bash
-mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global
-export PATH="$HOME/.npm-global/bin:$PATH"   # add to ~/.bashrc or ~/.zshrc
+mkdir -p ~/.npm-global
+npm config set prefix ~/.npm-global
+export PATH="$HOME/.npm-global/bin:$PATH"
 ```
+
+Add the export to the shell profile used to run your provider.
 
 ### macOS
 
-Same as Linux. With Homebrew Node, the global prefix is already user-owned, so no `sudo`.
-
-macOS is **not covered by CI** — it's supported and expected to work (it's a POSIX platform like Linux), but the verification is the [acceptance playbook](testing/os-matrix.md#macos) rather than an automated matrix. If you use AWM on macOS, running that playbook after an upgrade is genuinely useful.
+Use Node.js 22+ and Git as on Linux. Homebrew installations normally provide a
+user-owned npm prefix. macOS is included in the repository CI matrix together
+with Linux and Windows; use the [OS acceptance playbook](testing/os-matrix.md)
+for a local provider-and-OS check.
 
 ### Windows (native)
 
-Supported and verified on `windows-latest` in CI on every PR. Two things to know:
+Native Windows is supported. AWM uses symlinks by default so registry updates
+can propagate to installed content. Enable **Developer Mode** to permit
+unprivileged symlink creation:
 
-**1. Symlinks need Developer Mode.** AWM's default install method is a symlink into the registry clone, so content updates propagate instantly. Windows only allows unprivileged symlink creation with **Developer Mode** enabled:
+> Settings → System → For developers → Developer Mode
 
-> Settings → System → For developers → Developer Mode → On
-
-Without it, use copy mode:
+If that is not possible, use copy mode when installing an affected artifact:
 
 ```powershell
-awm add <name> --method copy
+awm add <bundle> --method copy
 ```
 
-Copy is a hard clone: it works everywhere, but it disconnects that artifact from `awm update` until you re-add it.
+Copy mode is functional but no longer tracks a registry update automatically;
+reinstall the copied artifact when the source changes.
 
-**2. One known gap.** The crash-recovery path of `awm watch`'s supervisor has not converged on Windows CI and its end-to-end tests are POSIX-scoped. Everything else — `init`, `update`, `sync`, `add`, `sensors`, `preflight`, `doctor`, hooks — is continuously green. See [`cli/src/core/journal/process.ts`](../cli/src/core/journal/process.ts).
+### Windows through WSL
 
-### Windows via WSL
+WSL follows the Linux path. Keep repositories on the Linux filesystem (for
+example, under `~/projects`) rather than `/mnt/c/...`: mounted Windows paths do
+not provide the same symlink and permission semantics.
 
-Works normally — WSL reports as Linux and takes the Linux path. Keep your projects on the **Linux filesystem** (`~/...`), not on `/mnt/c/...`: the Windows mount doesn't give POSIX symlink and permission semantics, which is exactly what AWM relies on.
+## Prepare one provider
 
----
-
-## First run
-
-Inside the repo where you want the harness:
+Choose one provider and run its machine-only initialization:
 
 ```bash
-awm init            # Claude Code (default)
-awm init -a codex   # or: opencode, cursor, copilot, antigravity
+awm init --agent claude-code --machine-only
 ```
 
-This is **idempotent** and **transactional**: run it as often as you like, and if a step fails, every file it touched is restored.
+This seeds or synchronizes the official registry and installs machine-scope
+baseline or ambient bundles where that provider has a machine scope. The
+official baseline currently includes `dev` and `product`; project bundles such
+as `frontend` and `authoring` wait for [project setup](project-setup.md).
 
-### Reading the result
+To prepare additional providers, repeat the command once per provider. The
+[configuration guide](configuration.md) has the exact variants and explains
+how multiple providers coexist.
 
-`awm init` exits **`1` on a normal, successful run.** Exit `1` means *degraded* — usually "two steps need an agent session to finish", not "something failed".
+## Verify machine state
 
 ```bash
-awm init --yes --json
+awm agent list
+awm doctor --agent claude-code
 ```
 
-```json
-{ "result": "degraded", "applied": 4, "pending": 2, "failed": 0 }
-```
+`awm doctor` reports provider state and actionable degraded or deferred steps.
+Do not initialize a project yet just to make this command green: a
+machine-only run and a project run have different ownership boundaries.
 
-Judge on **`failed`**:
+## Next: initialize a project
 
-| | Meaning |
-|---|---|
-| `failed: 0` | Nothing broke. `pending` steps need an agent to write `CONSTITUTION.md` / `AGENTS.md`. |
-| `failed: > 0` | A real failure. The transaction rolled back; `modifiedFiles` lists what was restored. |
+Once the machine is ready, enter the repository and follow
+[Initialize a project](project-setup.md). That phase creates the shared
+repository contract.
 
-Exit codes: `0` clean · `1` degraded · `2` a gate refused (missing binary, version below minimum) — a `2` with a clear message is a *correct* refusal.
+## Installation troubleshooting
 
-Then:
+**`awm: command not found`**
 
-```bash
-awm doctor    # what state is everything in?
-```
+The npm global bin directory is not on `PATH`. Check npm's configured prefix
+and add its bin directory to the shell profile.
 
----
+**Registry clone or update fails**
 
-## Verify the install
+Check network, proxy, and Git authentication. For a private registry, first
+confirm that `git clone <url>` succeeds in the same shell.
 
-Run the [core acceptance suite](testing/core-acceptance.md) — 20 checks, about 15 minutes, and it tells you whether this machine is actually working rather than whether the commands merely printed something.
+**Provider binary is missing or too old**
 
----
+Install or upgrade the provider, then repeat `awm init --agent <provider>
+--machine-only`. Codex has a minimum version gate documented in
+[Agent-specific setup](agents-setup.md#codex).
 
-## Troubleshooting
+**A machine-only run says content is deferred**
 
-**`awm: command not found` after install**
-npm's global bin isn't on `PATH`. `npm bin -g` prints it; add that to your shell profile.
-
-**`awm init` leaves `registries/` empty**
-The baseline clone failed — network, proxy, or auth. Run `awm update` to see the real git error. For a private registry over SSH, confirm `git clone <url>` works standalone first.
-
-**A skill shows an empty description, or `awm add` errors on one artifact**
-Its `SKILL.md` frontmatter is likely malformed. `awm list` shows what AWM parsed. Frontmatter is parsed with YAML semantics verified against a real parser, so if AWM disagrees with your expectation, the file probably says something different than you think.
-
-**Sensors report `skipped: not found` for a tool you have installed**
-The binary isn't on the `PATH` of the shell AWM runs in. On Windows this also covers `.cmd`/`.ps1` shims — resolving those was a real bug fixed in R1, and [WIN-04](testing/os-matrix.md#windows-native) is its regression check.
-
-**Something wrote to the wrong place / I want to experiment safely**
-Override the home:
-
-```bash
-export AWM_HOME="$HOME/.awm-sandbox"
-```
-
-Never hand-edit `~/.awm` to fix a problem — that directory is owned by `awm init` / `awm update`, and editing it produces states the CLI can't reason about.
-
-**I need to roll something back**
-
-```bash
-awm backup    # inspect and restore AWM's filesystem backups
-```
-
-Any command that rewrote a user-owned file leaves a restorable copy.
+That is expected for project-only provider capabilities such as Copilot. Move
+to [project setup](project-setup.md); do not work around it by creating local
+files during machine preparation.

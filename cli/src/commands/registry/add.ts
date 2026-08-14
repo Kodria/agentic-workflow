@@ -10,7 +10,7 @@ import {
     registryContentRoot,
     validateRegistryLayout,
     contentRoots,
-    CONTENT_DIR_NAMES,
+    REGISTRY_DIR_NAMES,
 } from '../../core/registries';
 import { discoverSkills, discoverWorkflows, discoverAgents } from '../../core/discovery';
 import { discoverAllBundles } from '../../core/bundles';
@@ -35,7 +35,7 @@ export function deriveRegistryName(remote: string): string {
 
 export async function addRegistry(remote: string, nameOverride?: string): Promise<AddRegistryResult> {
     const name = nameOverride ?? deriveRegistryName(remote);
-    if (!name || name === '.' || /[/\\]/.test(name)) {
+    if (!name || name === '.' || name.includes('..') || /[/\\]/.test(name)) {
         return { ok: false, error: `Invalid registry name "${name}" — use --name <simple-dir-name>` };
     }
     const existing = readRegistriesConfig();
@@ -60,7 +60,7 @@ export async function addRegistry(remote: string, nameOverride?: string): Promis
         return {
             ok: false,
             name,
-            error: `Invalid registry layout: expected at least one of ${CONTENT_DIR_NAMES.map((d) => `${d}/`).join(', ')} at the repo root of ${remote}`,
+            error: `Invalid registry layout: expected at least one of ${REGISTRY_DIR_NAMES.map((d) => `${d}/`).join(', ')} at the repo root of ${remote}`,
         };
     }
 

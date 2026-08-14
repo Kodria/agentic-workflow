@@ -3,6 +3,15 @@
 Auditable log of recurring/structural harness gaps converted into rules. See the
 `harness-retro` skill for the process. Newest first.
 
+## 2026-08-14 — límites de contenido de registry: una frontera, no guards aislados
+
+- **Class:** seguridad y lógica de trust boundary.
+- **Occurrences (ledger count):** 8 hallazgos convergentes en `registry-sync-empty-root-fail-open` y 5 en `registry-catalog-source-root-symlink-escape`; varios fueron blocker.
+- **Rule:** `cli/src/core/registries.ts` centraliza nombres de registry, inspección `lstat` fail-closed de raíz/directorios/metadatos, layout utilizable y gates de sincronización. `cli/src/core/bundles.ts` valida contención y cada componente de la ruta del catálogo antes de leer un manifest. Los comandos consumidores detienen la operación si el sync no deja contenido utilizable.
+- **Sensor:** regresiones conductuales en `registries.test.ts`, `registries-sync.test.ts`, `bundles.test.ts`, `project-skill-links.test.ts`, `status.test.ts`, `sync-gates.test.ts` y `profile-pins.test.ts`; build y `awm sensors run` del cierre.
+- **Verificación de la cura:** cada escape o estado fail-open tuvo prueba RED antes del guard y GREEN después; los fixtures Git ahora contienen un archivo real en sus directorios gestionados, para que el clone ejercite la misma condición que producción.
+- **Descartes (modo desatendido):** `documentation-refresh-unplanned-registry-scope`, `documentation-refresh-rename-verification-mismatch` e `installation-update-cli-self-update-contradiction` se resolvieron en el plan y la documentación activa, con el contrato documental en verde. Los hallazgos anteriores de matriz de soporte y ruta Windows ya tenían corrección y regresión en los commits previos de esta rama; no se agregan reglas duplicadas.
+
 ## 2026-08-11 — R2 static sensor coverage: dos hallazgos QA cubiertos, sin regla nueva
 
 - **Class:** seguridad (`r2-coverage-evidence-arbitrary-regular-file-oracle`) y proceso de pruebas (`r2-registry-coverage-symlink-containment-untested`).

@@ -9,6 +9,13 @@ export interface OverrideStatus {
     active: boolean;
 }
 
+/** Registry discovery is permitted only for a root that survived the core
+ * safety scan. Kept as a small pure guard so the command wiring has a
+ * behavioral regression test instead of relying on source-text fragments. */
+export function canDiscoverRegistryContent(contentRoot: string, safeRoots: ReadonlySet<string>): boolean {
+    return safeRoots.has(contentRoot);
+}
+
 function artifactNamesInRoot(root: string): Set<string> {
     const names = new Set<string>();
     for (const s of discoverSkills([root])) names.add(s.name);

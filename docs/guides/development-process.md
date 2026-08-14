@@ -54,7 +54,10 @@ The plan also declares its **execution mode**:
 **Modo de ejecución:** desatendido
 ```
 
-`interactivo` (default) pauses for confirmation between phases. `desatendido` runs the whole thing without check-ins — the gates still run identically, it only removes the pauses. Use unattended for long autonomous runs; use interactive when you want to steer.
+The literal plan values `interactivo` (the default) and `desatendido` respectively pause for
+confirmation between phases or run the whole process without check-ins. The gates still run
+identically; unattended mode only removes the pauses. Use it for long autonomous runs and use
+interactive mode when you want to steer.
 
 ### 3 · Execution
 
@@ -139,6 +142,6 @@ Three failed fixes is not "try a fourth" — it's a signal to question the archi
 ## Related
 
 - [Product process](product-process.md) — the layer before this one
-- [SDLC](../sdlc.md) — how the phases, gates and learning loop compose
+- [How AWM works](../framework.md) — how the phases, gates and learning loop compose
 - [CLI reference](../cli-reference.md) — every command
 - [Runbook ch. 3](../runbook.md#chapter-3--day-to-day-in-a-project) — day-to-day mechanics

@@ -14,7 +14,7 @@ import { AgentTarget } from '../providers';
 import { noteWindowsCaveat } from '../core/paths';
 import { findProjectRoot, readProfile } from '../core/profile';
 import {
-    syncRegistries, readRegistriesConfig, verifyMinCliVersions, assertRegistryGates, RegistrySyncResult,
+    syncRegistries, readRegistriesConfig, verifyMinCliVersions, assertRegistryGates, assertSyncedRegistriesUsable, RegistrySyncResult,
 } from '../core/registries';
 import { discoverAllBundles } from '../core/bundles';
 import { syncProfile as realSyncProfile, SyncResult } from '../core/bundle-install';
@@ -101,6 +101,13 @@ export async function runSyncCore(
     const syncResults = await d.syncRegistries();
     for (const r of syncResults) {
         if (r.action === 'error') console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
+    }
+
+    try {
+        assertSyncedRegistriesUsable(syncResults);
+    } catch (e) {
+        console.error(pc.red((e as Error).message));
+        return { code: 1, selectedAgents };
     }
 
     // Gate minCliVersion (WS-4) before pins (contract gates first — CONSTITUTION).

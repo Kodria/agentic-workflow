@@ -22,7 +22,7 @@ import {
 import { preflightLinkArtifactsForCli } from './ui/provider-preflight';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
 import { discoverAllBundles } from './core/bundles';
-import { syncRegistries } from './core/registries';
+import { assertSyncedRegistriesUsable, syncRegistries } from './core/registries';
 import { planInstall } from './core/install-planner';
 import { applyInstallPlan } from './core/install-transaction';
 import { findProjectRoot } from './core/profile';
@@ -125,6 +125,14 @@ program.command('add [name]')
       s.stop('Registries synced.');
       for (const r of results) {
           if (r.action === 'error') console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
+      }
+      try {
+          assertSyncedRegistriesUsable(results);
+      } catch (e) {
+          s.stop('Registry sync failed.');
+          console.error(pc.red((e as Error).message));
+          process.exitCode = 1;
+          return;
       }
 
       // 1b. If `name` matches a bundle, run the bundle-activation flow and exit.
@@ -483,6 +491,13 @@ program.command('list [package]')
       s.stop('Registries synced.');
       for (const r of listSyncResults) {
           if (r.action === 'error') console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
+      }
+      try {
+          assertSyncedRegistriesUsable(listSyncResults);
+      } catch (e) {
+          console.error(pc.red((e as Error).message));
+          process.exitCode = 1;
+          return;
       }
 
       const fullView = buildPackageView(discoverSkills(), discoverWorkflows(), discoverAgents(), discoverAllBundles());

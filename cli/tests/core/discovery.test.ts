@@ -16,6 +16,10 @@ const WORKFLOWS_DIR = path.join(CONTENT_ROOT, 'workflows');
 describe('Artifact Discovery', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        (fs.lstatSync as jest.Mock).mockImplementation(() => {
+            const error = Object.assign(new Error('missing'), { code: 'ENOENT' });
+            throw error;
+        });
     });
 
     describe('discoverSkills', () => {

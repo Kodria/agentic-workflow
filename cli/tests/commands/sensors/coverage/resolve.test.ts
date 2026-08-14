@@ -135,5 +135,5 @@ test('rejects a JSON object that is not a valid pack', () => {
 test('rejects registry names that are not safe path components', () => {
     writeManifest({ pack: 'js-ts', sensors: {} });
     configure(['']);
-    expect(() => resolveCoverageInputs(project)).toThrow(noFollowUnavailableOnNativeWindows ? safetyError : /Invalid registry name/);
+    expect(() => resolveCoverageInputs(project)).toThrow(noFollowUnavailableOnNativeWindows ? safetyError : /malformed entry name|Invalid registry name/);
 });

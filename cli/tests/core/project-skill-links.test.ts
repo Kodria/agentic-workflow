@@ -183,4 +183,32 @@ describe('awm sync reaches the project-scope reconciliation', () => {
         expect(out.code).toBe(0);
         expect(spy).toHaveBeenCalledTimes(1);
     });
+
+    it('fails before project reconciliation when registry sync leaves unsafe content', async () => {
+        writeProfile(['demo']);
+        const registry = path.join(process.env.AWM_HOME as string, 'registries', 'baseline');
+        const outside = path.join(home, 'outside-skill');
+        fs.writeFileSync(outside, 'outside');
+        fs.mkdirSync(path.join(registry, 'skills'), { recursive: true });
+        fs.symlinkSync(outside, path.join(registry, 'skills', 'artifact'));
+        fs.writeFileSync(
+            path.join(process.env.AWM_HOME as string, 'registries.json'),
+            JSON.stringify([{ name: 'baseline', remote: 'r' }]),
+        );
+        const reconcile = jest.fn(() => []);
+        const syncProfile = jest.fn(() => ({ installed: [], skipped: [], extensions: [], transactionIds: [], modifiedFiles: [] }));
+        const { runSyncCore } = require('../../src/commands/sync');
+
+        const out = await runSyncCore({ cwd: projectRoot }, {
+            syncRegistries: async () => [{ name: 'baseline', action: 'error', error: 'unsafe layout' }],
+            verifyMinCliVersions: () => [],
+            verifyProjectPins: async () => [],
+            syncProfile,
+            reconcileProjectSkillLinks: reconcile,
+        });
+
+        expect(out.code).toBe(1);
+        expect(reconcile).not.toHaveBeenCalled();
+        expect(syncProfile).not.toHaveBeenCalled();
+    });
 });

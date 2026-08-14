@@ -6,7 +6,7 @@ import { renderReport } from './doctor';
 import { gatherContext } from '../core/diagnostics/context';
 import { discoverAllBundles } from '../core/bundles';
 import {
-    contentRoots, listRegistries, seedBaselineRegistry, capabilityRoot,
+    contentRoots, registriesNeedSync, seedBaselineRegistry, capabilityRoot,
     assertSyncedRegistriesUsable,
 } from '../core/registries';
 import { runInitSteps } from '../core/init/orchestrator';
@@ -206,7 +206,7 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
             savePreferences(nextPreferences);
 
             seedBaselineRegistry();
-            if (listRegistries().some((r) => !fs.existsSync(r.contentRoot))) {
+            if (registriesNeedSync()) {
                 // `syncRegistries()` reports per-registry failures as RESULTS,
                 // never as throws (core/registries.ts) — swallowing them here
                 // let an unavailable registry degrade silently into some later

@@ -61,6 +61,49 @@ describe('docs/support-matrix.md refleja el codigo', () => {
         }
     });
 
+    it('documents default provider paths even when this machine overrides CODEX_HOME', () => {
+        const saved = process.env.CODEX_HOME;
+        process.env.CODEX_HOME = '/private/codex-home';
+        try {
+            jest.resetModules();
+            const { renderProviderTables: fresh } = require('../../scripts/support-matrix');
+            expect(fresh()).toContain('`~/.codex/agents`');
+            expect(fresh()).not.toContain('/private/codex-home');
+        } finally {
+            if (saved === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = saved;
+            jest.resetModules();
+        }
+    });
+
+    it('does not leak a normalized CODEX_HOME override into generated documentation', () => {
+        const saved = process.env.CODEX_HOME;
+        process.env.CODEX_HOME = '/private/codex/../secret-codex/';
+        try {
+            jest.resetModules();
+            const { renderProviderTables: fresh } = require('../../scripts/support-matrix');
+            const generated: string = fresh();
+            expect(generated).toContain('`~/.codex/agents`');
+            expect(generated).not.toContain('/private/');
+            expect(generated).not.toContain('secret-codex');
+        } finally {
+            if (saved === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = saved;
+            jest.resetModules();
+        }
+    });
+
+    it('keeps a separator when CODEX_HOME has a trailing slash', () => {
+        const saved = process.env.CODEX_HOME;
+        process.env.CODEX_HOME = '/private/codex-home/';
+        try {
+            jest.resetModules();
+            const { renderProviderTables: fresh } = require('../../scripts/support-matrix');
+            expect(fresh()).toContain('`~/.codex/agents`');
+        } finally {
+            if (saved === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = saved;
+            jest.resetModules();
+        }
+    });
+
     // La abreviacion a `~` se probaba solo end-to-end, y en Linux eso no distingue entre
     // "normaliza bien" y "los separadores ya coincidian". La CI de Windows encontro que no
     // normalizaba: comparaba el prefijo ANTES de convertir separadores, asi que alla no
@@ -93,12 +136,12 @@ describe('docs/support-matrix.md refleja el codigo', () => {
         expect(out.split('\r\n').length - 1).toBe(out.split('\n').length - 1); // ni un LF suelto
     });
 
-    it('marca como no soportado, no como ausente, el scope que un provider no tiene', () => {
+    it('marks an unsupported scope rather than leaving it absent', () => {
         // La diferencia entre "no soportado" y una celda vacia es exactamente lo que el
         // documento existe para no dejar ambiguo: Copilot no tiene scope global por
         // decision del producto que integramos, no porque falte implementarlo.
         const generated = renderProviderTables();
         const copilotRow = generated.split('\n').find((l) => l.startsWith('| `copilot` |'))!;
-        expect(copilotRow).toContain('**no soportado**');
+        expect(copilotRow).toContain('**unsupported**');
     });
 });

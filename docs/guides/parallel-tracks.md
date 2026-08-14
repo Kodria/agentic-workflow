@@ -1,48 +1,50 @@
 # Parallel tracks (`awm track`)
 
-Cómo correr las tasks de un plan **en paralelo**, cada una en su propio worktree, y cómo leer
-el sistema cuando decide no hacerlo.
+How to run a plan's tasks **in parallel**, each in its own worktree, and how to read the
+system when it decides not to do so.
 
-> **Lo primero, porque ahorra tiempo:** el paralelismo es una **optimización opcional**. Un
-> plan sin sección `## Tracks` corre serial exactamente como siempre — no hay nada que migrar
-> y nada se rompe por no adoptarlo.
+> **First, because it saves time:** parallelism is an **optional optimisation**. A plan
+> without a `## Tracks` section runs serially exactly as it always has — there is nothing to
+> migrate and nothing breaks if you do not adopt it.
 
-## Estado de verificación
+## Verification status
 
-Sin ambigüedad sobre qué está probado y qué no:
+There is no ambiguity about what is verified and what is not:
 
-| Capacidad | Estado | Cómo se verificó |
+| Capability | Status | How it was verified |
 |---|---|---|
-| Bootstrap de la cohorte (tracks a `ARMED`, cohorte `ACTIVE`) | ✅ Verificado | Suite con git real + certificación con supervisor y procesos reales |
-| Degradación a serial ante cualquier condición no probada | ✅ Verificado | Suite con git real, incluida paridad de árbol serial-vs-paralelo |
-| Recuperación tras crash sin duplicar recursos | ✅ Verificado | `SIGKILL` real al grupo del supervisor + relevo |
-| Aislamiento por worktree y ownership declarado/real | ✅ Verificado | Suite con git real, incluidos renames por sus dos puntas |
-| `join → COMPLETE` bajo supervisor vivo con relevo de controller | ✅ Verificado | Certificación con supervisor y procesos reales (`provider-run.mjs --certify-scripted`): `COMPLETE`, 2 tracks `JOINED` y **1** job de integración final. Evidencia en [`docs/research/r5/evidence/scripted-local.json`](../research/r5/evidence/scripted-local.json) |
-| Un agente LLM real como controller | ⚠ Sin verificar | Opcional; certificado solo con controller determinista |
-| `awm track remove` (teardown pedido por el controller) | ❌ **No implementado** | El supervisor no tiene handler para `track-teardown-request`: el comando emite la request y el supervisor la **rechaza** de forma visible. El teardown que sí funciona es el automático de la degradación a serial. |
+| Cohort bootstrap (tracks to `ARMED`, cohort `ACTIVE`) | ✅ Verified | Real-git suite plus certification with a supervisor and real processes |
+| Serial fallback for any unverified condition | ✅ Verified | Real-git suite, including serial-versus-parallel tree parity |
+| Crash recovery without duplicated resources | ✅ Verified | Real `SIGKILL` to the supervisor group, followed by takeover |
+| Worktree isolation and declared/actual ownership | ✅ Verified | Real-git suite, including both ends of renames |
+| `join → COMPLETE` with a live supervisor and controller takeover | ✅ Verified | Certification with a supervisor and real processes (`provider-run.mjs --certify-scripted`): `COMPLETE`, two `JOINED` tracks, and **one** final integration job. Evidence: [`docs/research/r5/evidence/scripted-local.json`](../research/r5/evidence/scripted-local.json) |
+| A real LLM agent as controller | ⚠ Not verified | Optional; certified only with a deterministic controller |
+| `awm track remove` (controller-requested teardown) | ❌ **Not implemented** | The supervisor has no handler for `track-teardown-request`: the command emits the request and the supervisor visibly **rejects** it. The supported teardown is the automatic one used by serial fallback. |
 
-## El modelo mental
+## Mental model
 
-Hay **dos roles**, y confundirlos es el error más común:
+There are **two roles**, and confusing them is the most common mistake:
 
-- El **supervisor del plan** (`awm watch`) es el único que integra: congela la cohorte,
-  mergea, corre QA global y ejecuta el comando canónico de integración. Es un proceso de
-  larga vida.
-- El **controller** (tu agente) **solo emite requests**. `awm track add` y `awm track join`
-  no crean ni mergean nada: dejan una request que el supervisor consume en su próximo tick.
+- The **plan supervisor** (`awm watch`) is the only component that integrates: it freezes the
+  cohort, merges, runs global QA, and executes the canonical integration command. It is a
+  long-lived process.
+- The **controller** (your agent) **only emits requests**. `awm track add` and `awm track join`
+  do not create or merge anything; they leave a request for the supervisor to consume on its
+  next tick.
 
-Por eso todo comando que muta lleva `--generation <token>`: el token lo emite el supervisor
-al lanzar al controller y viaja en su prompt. Es un **fencing token** — si el supervisor
-relevó al controller, las requests del anterior se rechazan (`request-rejected-stale`). Eso
-no es un error a reintentar: significa que otro controller tomó el trabajo.
+That is why every mutating command carries `--generation <token>`: the supervisor emits the
+token when it starts the controller and includes it in the prompt. It is a **fencing token** —
+if the supervisor has replaced a controller, the prior controller's requests are rejected
+(`request-rejected-stale`). That is not an error to retry: another controller has taken over
+the work.
 
-## Declarar un plan paralelo
+## Declaring a parallel plan
 
-Tres cosas, todas obligatorias:
+Three things are all mandatory:
 
-1. **Membresía por task** — cada `### Task N:` lleva `**Track:** <id>`.
-2. **Tabla `## Tracks`** — una fila por track con `Depends on` y `Shared resources`.
-3. **Comando de integración** — argv como **array JSON**, nunca una línea de shell.
+1. **Task membership** — every `### Task N:` includes `**Track:** <id>`.
+2. A **`## Tracks` table** — one row per track with `Depends on` and `Shared resources`.
+3. An **integration command** — argv as a **JSON array**, never a shell line.
 
 ```markdown
 ## Tracks
@@ -56,107 +58,109 @@ Tres cosas, todas obligatorias:
 | ui  | none | [] |
 ```
 
-El ownership de cada track sale de los `**Files:**` de sus tasks — no se declara aparte, para
-que no pueda divergir de lo que las tasks dicen que van a tocar.
+Each track's ownership comes from the `**Files:**` entries in its tasks. It is not declared
+separately, so it cannot drift from the files the tasks say they will change.
 
-Antes de arrancar: `awm track verify-independence` sale `!= 0` ante cualquier violación.
+Before starting, `awm track verify-independence` exits `!= 0` for any violation.
 
-## El flujo diario
-
-```bash
-awm watch                # supervisor del plan: arranca o retoma. Lanza al controller.
-awm track status         # agregado read-only: fase de cada track y de la cohorte
-awm track list           # los TrackRef declarados, con su worktreePath
-```
-
-El controller, con su token:
+## Daily workflow
 
 ```bash
-awm track add <id>  --generation "$GEN"    # emite la request de preparación
-awm track join <id> --generation "$GEN"    # pide la integración de su track
-awm track finalize  --generation "$GEN"    # autoreporta la QA global sobre el HEAD mergeado
+awm watch                # plan supervisor: starts or resumes and launches the controller
+awm track status         # read-only aggregate: each track's and the cohort's phase
+awm track list           # declared TrackRefs with their worktreePath
 ```
 
-Cada track trabaja en un worktree hermano del repo (`<repo>.track-<id>`) y commitea **solo
-sus archivos asignados**. Ningún merge arranca hasta que **toda** la cohorte esté congelada, y
-el comando canónico corre **una vez sobre el HEAD final** — no una vez por track.
+The controller, with its token:
 
-### Los joins no cierran la cohorte
+```bash
+awm track add <id>  --generation "$GEN"    # emits the preparation request
+awm track join <id> --generation "$GEN"    # requests integration of its track
+awm track finalize  --generation "$GEN"    # self-reports global QA for the merged HEAD
+```
 
-Con todos los tracks mergeados la cohorte **no** está completa: queda el tramo que verifica el
-resultado combinado, y ese tramo lo maneja el controller del plan.
+Each track works in a sibling worktree (`<repo>.track-<id>`) and commits **only its assigned
+files**. No merge begins until the **entire** cohort is frozen, and the canonical command runs
+**once against the final HEAD** — not once per track.
 
-1. El supervisor pide la **QA global** sobre el HEAD que ya tiene todos los tracks adentro.
-2. El controller corre esa QA, **comitea las correcciones** que salgan, y lo autoreporta con
-   `awm track finalize`. El HEAD sale del repo, no de un flag: es *tu* HEAD el que reportás.
-   Con el árbol sucio el comando falla nombrando lo que falta, en vez de emitir un
-   autoreporte que el supervisor va a descartar en silencio.
-3. El supervisor **re-verifica por su cuenta** (HEAD real + árbol limpio) antes de aceptarlo:
-   el autoreporte declara, nunca prueba.
-4. Recién ahí corre la integración canónica y el interlock final, y la cohorte pasa a
+### Joins do not close the cohort
+
+With every track merged, the cohort is **not** complete: the combined result still needs
+verification, and the plan controller owns that step.
+
+1. The supervisor requests **global QA** against the HEAD that already contains every track.
+2. The controller runs that QA, **commits any resulting corrections**, and self-reports it with
+   `awm track finalize`. The HEAD comes from the repository, not a flag: it is *your* HEAD that
+   you report. With a dirty tree, the command fails and names what is missing instead of
+   emitting a self-report the supervisor would silently discard.
+3. The supervisor **verifies independently** (real HEAD plus a clean tree) before accepting it:
+   a self-report declares; it never proves.
+4. Only then does it run canonical integration and the final interlock, and the cohort reaches
    `COMPLETE`.
 
-Si la cohorte se queda quieta con todos los tracks en `MERGED_UNVERIFIED`, está esperando el
-paso 2: `awm track status` lo muestra, y el `next_action` del journal dice `run-global-qa`.
+If the cohort is still with every track in `MERGED_UNVERIFIED`, it is waiting for step 2:
+`awm track status` shows it, and the journal's `next_action` says `run-global-qa`.
 
-## Cuándo degrada a serial (y por qué está bien)
+## When it falls back to serial (and why that is correct)
 
-El sistema **prefiere ser lento antes que ser incorrecto**. Cualquiera de estas condiciones
-apaga el paralelismo de **toda la cohorte**, no solo del track involucrado:
+The system **prefers being slow to being wrong**. Any of these conditions disables parallelism
+for the **entire cohort**, not only the affected track:
 
-| Condición | Razón |
+| Condition | Reason |
 |---|---|
-| Falta una declaración (membresía, fila, `Shared resources`, argv) | Un contrato incompleto no puede probar independencia |
-| Dos tracks se pisan en paths o recursos | Trabajarían sobre lo mismo |
-| Un track declara un **lockfile, manifest o migración** | Clase global: dos tracks reescribiéndola en paralelo se pisan aunque el resto no |
-| Un glob que el sistema no sabe expandir | Un patrón inexpandible no puede *afirmar* que dos tracks no se cruzan |
-| `Depends on` distinto de `none` | Hay orden, entonces no hay paralelo |
-| El worktree no se puede crear, o `.awm` no está gitignoreado | Sin aislamiento probado, no hay track |
+| A declaration is missing (membership, row, `Shared resources`, argv) | An incomplete contract cannot prove independence |
+| Two tracks overlap in paths or resources | They would work on the same thing |
+| A track declares a **lockfile, manifest, or migration** | It is a global class: two tracks rewriting it in parallel overlap even if nothing else does |
+| A glob the system cannot expand | An unexpandable pattern cannot *assert* that two tracks do not overlap |
+| `Depends on` is not `none` | There is ordering, so there is no parallel execution |
+| The worktree cannot be created, or `.awm` is not gitignored | Without verified isolation, there is no track |
 
-La degradación queda registrada con su causa (`cohortFallbackReason`, y el evento
-`enter-serial` la nombra). **Serial produce el mismo árbol que paralelo** — es un criterio de
-aceptación verificado, no una aspiración.
+The fallback is recorded with its reason (`cohortFallbackReason`, named by the `enter-serial`
+event). **Serial produces the same tree as parallel execution** — that is a verified acceptance
+criterion, not an aspiration.
 
-## `BLOCKED` — qué significa y qué NO hacer
+## `BLOCKED` — what it means and what NOT to do
 
-`BLOCKED` significa exactamente una cosa: **no se pudo probar la propiedad o la identidad de
-un recurso**. No es "falló", es "no me consta".
+`BLOCKED` means exactly one thing: **the system could not prove a resource's property or
+identity**. It does not mean "failed"; it means "not established".
 
-Un track `BLOCKED` **nunca** habilita el fallback serial. Degradar con worktrees ajenos
-posiblemente vivos sería correr encima de algo no probado — justo lo que el diseño evita.
+A `BLOCKED` track **never** enables serial fallback. Falling back while other worktrees might
+still be live would mean running over something unverified — exactly what the design prevents.
 
-**No borres un worktree, una branch, un lock ni un proceso para que el sistema avance.** Eso
-no lo desbloquea: destruye la evidencia de por qué estaba bloqueado, y puede matar trabajo
-ajeno. `BLOCKED` es un dead-end deliberado que pide a un operador aportar evidencia:
+**Do not delete a worktree, branch, lock, or process to make the system move forward.** That
+does not unblock it: it destroys the evidence of why it was blocked and can kill someone
+else's work. `BLOCKED` is a deliberate dead end that asks an operator to provide evidence:
 
 ```bash
-awm track status                    # qué track, y su blockedReason
-git -C <repo> worktree list         # qué hay realmente registrado
-git -C <worktree> status            # ¿hay trabajo sin commitear que se perdería?
+awm track status                    # which track, and its blockedReason
+git -C <repo> worktree list         # what is actually registered
+git -C <worktree> status            # is there uncommitted work that would be lost?
 ```
 
-Recién con eso decidís. El teardown usa siempre `git branch -d` (nunca `-D`) y rehúsa remover
-un worktree sucio nombrando los paths, en vez de descartar trabajo real sin dejar rastro.
+Only then do you decide. Teardown always uses `git branch -d` (never `-D`) and refuses to
+remove a dirty worktree while naming the paths, rather than discarding real work without a
+trace.
 
-## Diagnóstico
+## Diagnosis
 
-Todo el estado durable vive en `<repo>/.awm/journal/<rama>/`:
+All durable state lives in `<repo>/.awm/journal/<branch>/`:
 
-- `state.json` — `cohortPhase`, los `TrackRef` con su fase, `cohortFallbackReason`
-- `events.jsonl` — la traza: creación de worktrees, spawns, freezes, merges, rechazos
+- `state.json` — `cohortPhase`, the `TrackRef` values with their phase, and
+  `cohortFallbackReason`
+- `events.jsonl` — the trace: worktree creation, spawns, freezes, merges, and rejections
 
-Cuando algo no avanza, tres preguntas en orden:
+When something does not progress, ask three questions in order:
 
-1. **¿La cohorte degradó?** `cohortPhase: SERIAL` + `cohortFallbackReason` dice por qué.
-2. **¿Hay un track `BLOCKED`?** Su `blockedReason` nombra qué no se pudo probar.
-3. **¿Las requests se están rechazando?** `request-rejected-stale` en los eventos significa
-   que el controller que las emitió ya fue relevado — el nuevo retoma, no reintentes a mano.
+1. **Did the cohort fall back?** `cohortPhase: SERIAL` plus `cohortFallbackReason` says why.
+2. **Is there a `BLOCKED` track?** Its `blockedReason` names what could not be proven.
+3. **Are requests being rejected?** `request-rejected-stale` in the events means the controller
+   that emitted them has been replaced — the new one resumes; do not retry manually.
 
-Un controller que trabaja en silencio es declarado en stall y reemplazado: si escribís uno
-propio, tiene que emitir `awm job controller-heartbeat --generation <token>` mientras trabaja.
+A controller that works silently is declared stalled and replaced. If you write your own, it
+must emit `awm job controller-heartbeat --generation <token>` while it works.
 
-## Referencias
+## References
 
-- [CLI reference](../cli-reference.md) — todos los flags
-- [Arquitectura](../architecture.md) — componentes y estado en disco
-- [`docs/research/r5/README.md`](../research/r5/README.md) — qué está certificado, cómo, y qué queda abierto
+- [CLI reference](../cli-reference.md) — every flag
+- [Architecture](../architecture.md) — components and on-disk state
+- [`docs/research/r5/README.md`](../research/r5/README.md) — what is certified, how, and what remains open

@@ -1,205 +1,104 @@
-# Agent setup
+# Agent-specific setup
 
-AWM installs into whichever agent each developer already uses. Six are supported, and they do **not** get the same product — because they don't have the same capabilities.
+This guide covers provider mechanics only. Start with [installation](installation.md)
+to prepare a machine, use [configuration](configuration.md) for defaults and
+multiple providers, and use [project setup](project-setup.md) for repository
+content.
 
-> **The authoritative paths live in [support-matrix.md](support-matrix.md)**, generated from
-> `cli/src/providers/index.ts` and locked by a test. If this page ever disagrees with it,
-> the generated one wins — and the disagreement is a bug on this page.
+The generated [support matrix](support-matrix.md) is authoritative for artifact
+paths and capability tiers. It is derived from the provider source and checked
+in tests; this guide explains the operational differences that matter to a
+developer.
 
-This page is deliberately blunt about that. Promising uniform behaviour and then degrading silently is how a tool loses trust; knowing up front that Cursor won't fire hooks is far better than discovering it when a gate doesn't hold.
-
-## Choosing: what each tier actually gives you
-
-| Tier | Agents | Skills available | Session hooks | Phase gates enforced | Deterministic sensors |
-|---|---|---|---|---|---|
-| **hooks-native** | `claude-code`, `codex` | yes | yes | yes | yes |
-| **config-managed** | `opencode` | yes | no | read, not enforced | yes |
-| **agents-md-managed** | `cursor`, `copilot` | yes (rendered) | no | read, not enforced | yes |
-| **context-only** | `antigravity` | yes | no | read, not enforced | yes |
-
-The rightmost column is the point: **`awm sensors run` behaves identically for every agent**, because it's a real command with a real exit code. No model can talk its way past it. What varies is how much of the *process discipline* the harness can enforce versus merely deliver as context.
-
-`awm doctor` prints each installed agent's tier, so nobody has to guess.
-
----
-
-## `claude-code` — hooks-native
-
-The reference target: everything AWM can do, it does here.
+## Claude Code
 
 ```bash
-awm init            # claude-code is the default
-awm doctor -a claude-code
+awm init --agent claude-code --machine-only
 ```
 
-**What gets installed**
-
-| | Path |
-|---|---|
-| Skills (global) | `~/.claude/skills/` (symlinks into the registry clone) |
-| Skills (project) | `.claude/skills/` |
-| Agent profiles | `~/.claude/agents/` · `.claude/agents/` |
-| Session hook | merged into `~/.claude/settings.json` |
-
-**The hook** registers on `SessionStart` (matcher `startup|clear|compact`) and re-anchors the agent's context at the start of every session and after every compaction. That's what makes the process survive long conversations.
-
-AWM **merges** into `settings.json` — your own keys are preserved. `awm backup` keeps a restorable copy of every rewrite.
+Claude Code is hooks-native. AWM merges its session hook into the provider's
+settings without replacing unrelated user configuration. The hook re-anchors
+managed context at session start, clear, and compaction. Check it with:
 
 ```bash
-awm hooks status    # is the hook registered?
+awm hooks status
+awm doctor --agent claude-code
 ```
 
-## `codex` — hooks-native
-
-Full parity with Claude Code, with a version floor.
+## Codex
 
 ```bash
-codex --version               # must be >= 0.145.0
-awm init -a codex
+codex --version
+awm init --agent codex --machine-only
 ```
 
-**What gets installed**
-
-| | Path |
-|---|---|
-| Skills | `~/.agents/skills/` · `.agents/skills/` |
-| Agent profiles | `~/.codex/agents/` · `.codex/agents/` — rendered as **TOML** |
-| Session hook | `~/.codex/hooks.json` (`startup|resume|clear|compact`) |
-| Context | managed `AGENTS.md` block (project) + `~/.codex/AGENTS.md` |
-
-If Codex is below `0.145.0`, `awm init -a codex` refuses with exit `2` and names the minimum. That's a correct refusal, not a bug — upgrade Codex and re-run.
-
-**Si tenés `CODEX_HOME` seteado, esas rutas cambian.** Codex lee su configuración desde
-`$CODEX_HOME` cuando esa variable existe, y AWM la respeta desde la **v6.0.0**: `hooks.json`,
-`agents/` y el `AGENTS.md` global pasan a colgar de ahí. Las skills **no** se mueven —
-`~/.agents/skills` es una convención compartida con OpenCode, no un directorio de Codex.
-
-Comprobalo antes de dar nada por instalado:
+Codex is hooks-native and requires version 0.145.0 or newer. It asks the user to
+trust a new or changed hook; approve that trust prompt before expecting the hook
+to run. AWM respects `CODEX_HOME` for Codex-managed configuration, while shared
+skills remain co-owned with OpenCode. Inspect the resolved state with:
 
 ```bash
-echo "$CODEX_HOME"
-awm doctor --json -a codex     # los `target` deben empezar con tu $CODEX_HOME
+awm doctor --agent codex
 ```
 
-> Antes de la v6.0.0 AWM ignoraba esa variable y escribía en `~/.codex`: instalación
-> correcta, en el archivo que Codex no lee. El hook quedaba instalado y mudo, y `doctor`
-> lo reportaba presente porque verificaba en el mismo lugar equivocado donde había
-> escrito. Si venís de una versión anterior, corré `awm init -a codex` de nuevo y borrá a
-> mano lo que haya quedado en `~/.codex`.
-
-**La primera sesión te va a pedir confianza.** Codex no ejecuta hooks hasta aprobarlos:
-
-```
-Hooks need review
-1 hook is new or changed.
-Hooks can run outside the sandbox after you trust them.
-```
-
-Elegí **"Trust all and continue"**. Hasta entonces `awm hooks status --agent codex` reporta
-`PENDING_TRUST` — instalado, nunca ejecutado. Si elegís "Continue without trusting", el hook
-no corre y AWM no tiene forma de forzarlo.
-
-## `opencode` — config-managed
+## OpenCode
 
 ```bash
-awm init -a opencode
+awm init --agent opencode --machine-only
 ```
 
-| | Path |
-|---|---|
-| Skills | `~/.agents/skills/` · `.agents/skills/` |
-| Agent profiles | `~/.config/opencode/agents/` · `.agents/profiles/` |
-| Context | the `instructions` field in `~/.config/opencode/opencode.json` |
+OpenCode receives managed configuration instructions and shares skills with
+Codex. It has no session-hook mechanism, so context is delivered rather than
+re-anchored automatically during a long session. If the conversation drifts,
+ask the provider to reread the relevant project guidance.
 
-Skills load normally. There's no hook mechanism, so nothing re-anchors the context mid-session — after a long conversation or a compaction, ask the agent to re-read the process docs if it starts drifting.
-
-## `cursor` — agents-md-managed
+## Cursor
 
 ```bash
-awm init -a cursor
+awm init --agent cursor --machine-only
 ```
 
-| | Path |
-|---|---|
-| Skills | `~/.cursor/rules/` · `.cursor/rules/` — rendered as `.mdc` |
-| Project context | managed `AGENTS.md` block |
-| Global context | **none** |
+Cursor receives rendered rules and project context. Rule relevance is selected
+by Cursor, so it does not have the same always-on hook behavior as a
+hooks-native provider. AWM does not invent a global context file where Cursor
+has no verified file-based equivalent.
 
-Each skill renders as a Cursor rule with `alwaysApply: false`, so Cursor pulls it in **contextually** by description rather than force-loading every skill into every request. That's the right trade — but it means relevance depends on Cursor's own matching, so a skill may not activate when you expect.
-
-There is deliberately **no global context path**: Cursor's user rules live inside its app settings, not as a file on disk. AWM won't invent a path it can't verify, so `awm doctor` reports that as N/A rather than as an error.
-
-## `copilot` — agents-md-managed
+## Copilot
 
 ```bash
-awm init -a copilot
+awm init --agent copilot --machine-only
 ```
 
-| | Path |
-|---|---|
-| Skills | **project only** — `.github/instructions/*.instructions.md` |
-| Project context | managed `AGENTS.md` block |
-| Global scope | **not supported** |
-
-GitHub Copilot has no user-level skill discovery, so there is nothing for a global install to write to. `awm add -a copilot --scope global` fails **with that explanation**.
-
-Instructions render with `applyTo: "**"`. Copilot's instruction format is file-glob triggered, which doesn't map onto trigger-phrase activation — `**` keeps the guidance present rather than guessing a file-type restriction that means nothing here. This is a real format mismatch, documented rather than papered over.
-
-Because everything is project-local, **commit `.github/instructions/` and `AGENTS.md`** — that's how the rest of the team gets the same context.
-
-## `antigravity` — context-only
+Copilot has project-only skill delivery. Machine initialization records the
+provider but deliberately defers skills and instructions until normal project
+initialization. This is expected, not a failed setup:
 
 ```bash
-awm init -a antigravity
+cd <repository>
+awm init --agent copilot
 ```
 
-| | Path |
-|---|---|
-| Skills | `~/.gemini/antigravity/skills/` · `.agent/skills/` |
-| Workflows | `~/.gemini/antigravity/global_workflows/` |
-| Hooks / injection | none |
+Commit the resulting project instructions and shared context according to the
+[project setup guide](project-setup.md#commit-the-shared-contract).
 
-> Note the singular `.agent/skills` at project scope, and that Antigravity does **not**
-> share `~/.agents/skills` with Codex/OpenCode — it has its own tree. This table said
-> otherwise for several releases; the authoritative, code-generated version is in
-> [support-matrix.md](support-matrix.md).
-
-Content is delivered and read by the agent. No hooks, no managed injection — `awm doctor` won't report those as missing, because the agent has no such mechanism to begin with.
-
----
-
-## Several agents on one machine
-
-Normal and supported — different developers on a team use different agents against the same registry.
+## Antigravity
 
 ```bash
-awm agent            # manage which targets AWM tracks
-awm doctor           # state of every enabled agent
-awm doctor -a cursor,copilot
+awm init --agent antigravity --machine-only
 ```
 
-`awm init` targets one agent per run; run it once per agent you use.
+Antigravity receives linked skills and workflows, but has no hooks or managed
+context injection. Treat AWM's process material as contextual guidance and use
+the deterministic project sensors for mechanical enforcement.
 
-Note that `codex` and `opencode` share `~/.agents/skills/`. That's intentional — one installed copy serves both, and the installer treats them as a group so enabling one without the other is refused rather than silently divergent. **`antigravity` does not share it**: it has its own `~/.gemini/antigravity/skills/`.
-
----
-
-## Team distribution
-
-`.awm/profile.json` records what the project uses. **Commit it.** A teammate then reproduces the setup with:
+## Verify a provider
 
 ```bash
-git clone <repo> && cd <repo>
-awm init -a <their agent>   # their agent, your project's content
-awm sync                    # rebuild from profile.json
+awm agent list
+awm doctor --agent <provider>
 ```
 
-The profile is agent-agnostic: it records *what* the project needs, and each developer's `awm init` decides *where* that lands for their agent.
-
-Full team model — registries, pinning, onboarding — in [Runbook ch. 4](runbook.md#chapter-4--team-setup--customization).
-
----
-
-## Verify
-
-Per-agent acceptance checks, including what is *supposed* to degrade: [testing/agent-matrix.md](testing/agent-matrix.md).
+If a provider reports a missing binary, version gate, trust prompt, or deferred
+project-only capability, follow the named action rather than creating files by
+hand. The [acceptance playbooks](testing/agent-matrix.md) provide provider-level
+checks.

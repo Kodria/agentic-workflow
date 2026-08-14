@@ -109,6 +109,25 @@ describe('syncRegistries (git fixtures locales)', () => {
         expect(synced).toContain('v2');
     });
 
+    it('reports an unsafe symlink introduced by an update instead of a successful pull', async () => {
+        const m = require('../../src/core/registries');
+        const source = makeSourceRepo(tmpWork, 'alpha');
+        m.writeRegistriesConfig([{ name: 'personal', remote: source }]);
+        await m.syncRegistries();
+        const outside = path.join(tmpWork, 'outside-skill.md');
+        fs.writeFileSync(outside, 'outside');
+        fs.rmSync(path.join(source, 'skills', 'alpha', 'SKILL.md'));
+        fs.symlinkSync(outside, path.join(source, 'skills', 'alpha', 'SKILL.md'));
+        GIT(source, 'add -A');
+        GIT(source, 'commit -qm unsafe-link');
+
+        const results = await m.syncRegistries();
+
+        expect(results[0].action).toBe('error');
+        expect(results[0].error).toMatch(/unsafe|layout/i);
+        expect(m.contentRoots()).toEqual([]);
+    });
+
     it('registry con tags queda en el último tag y reporta la versión', async () => {
         const m = require('../../src/core/registries');
         const source = makeSourceRepo(tmpWork, 'alpha');

@@ -95,6 +95,27 @@ describe('copilot provider — isolated home E2E (devCore global-scope guard reg
         return JSON.parse(fs.readFileSync(path.join(tmpHome, '.awm/preferences.json'), 'utf8'));
     }
 
+    it('machine-only enables Copilot without writing project artifacts (R7, R15)', async () => {
+        seedPublicRegistryFixture(path.join(tmpHome, '.awm/registries/baseline'));
+        fs.rmSync(path.join(tmpWork, 'package.json'));
+        const before = fs.readdirSync(tmpWork).sort();
+        const { runInit } = require('../../src/commands/init');
+
+        const code = await runInit({
+            cwd: tmpWork,
+            yes: true,
+            agent: 'copilot',
+            machineOnly: true,
+        });
+
+        expect(code).toBe(0);
+        expect(readPrefs().enabledAgents).toEqual(['copilot']);
+        expect(fs.readdirSync(tmpWork).sort()).toEqual(before);
+        expect(fs.existsSync(path.join(tmpWork, 'AGENTS.md'))).toBe(false);
+        expect(fs.existsSync(path.join(tmpWork, '.github'))).toBe(false);
+        expect(fs.existsSync(path.join(tmpWork, '.awm'))).toBe(false);
+    });
+
     it('completes without crashing/rolling back (real bug repro) and delivers content via AGENTS.md, not a doomed global-scope install', async () => {
         seedPublicRegistryFixture(path.join(tmpHome, '.awm/registries/baseline'));
 
