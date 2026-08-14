@@ -4,15 +4,15 @@ import { listRegistries } from '../../../core/registries';
 import {
     MAX_COVERAGE_FILE_BYTES,
     parseCoverageContract,
-    parseCoverageManifest,
     type CoverageContract,
-    type CoverageManifest,
 } from './contract';
+import { parseSensorManifest } from '../compatibility/manifest';
+import type { SensorManifest } from '../types';
 
 export type CoverageInputs =
     | { kind: 'not_configured' }
-    | { kind: 'no_reference'; projectRoot: string; pack: string; registry: string; manifest: CoverageManifest }
-    | { kind: 'ready'; projectRoot: string; pack: string; registry: string; manifest: CoverageManifest; contract: CoverageContract };
+    | { kind: 'no_reference'; projectRoot: string; pack: string; registry: string; manifest: SensorManifest }
+    | { kind: 'ready'; projectRoot: string; pack: string; registry: string; manifest: SensorManifest; contract: CoverageContract };
 
 function readFailure(file: string, error: unknown): Error {
     return new Error(`Cannot read ${file}: ${error instanceof Error ? error.message : String(error)}`);
@@ -102,7 +102,8 @@ export function resolveCoverageInputs(cwd: unknown): CoverageInputs {
     if (!projectRoot) return { kind: 'not_configured' };
 
     const manifestPath = path.join(projectRoot, '.awm', 'sensors.json');
-    const manifest = parseCoverageManifest(readBoundedJson(manifestPath), manifestPath);
+    const manifest = parseSensorManifest(readBoundedJson(manifestPath), manifestPath);
+    if ('schemaVersion' in manifest) throw new Error(`Invalid coverage manifest at ${manifestPath}: v2 requires the compatibility resolver`);
     for (const registry of listRegistries()) {
         safeRegistryName(registry.name);
         const packPath = path.join(registry.contentRoot, 'sensor-packs', manifest.pack, 'pack.json');

@@ -1,8 +1,18 @@
-import type { SensorConfig, SensorManifest, SensorManifestV2 } from '../types';
+import type { SensorConfig, SensorManifest } from '../types';
 import type { CompatibilityEvidence, StructuredCommand } from './types';
 import { parseStructuredCommand } from './contract';
 
 type UnknownRecord = Record<string, unknown>;
+
+export type SensorManifestV2 = {
+    schemaVersion: 2;
+    pack: string;
+    sensors: Record<string, { selectedVariantId: string; command: StructuredCommand }>;
+    concurrency?: number;
+};
+
+export type LegacySensorManifest = SensorManifest & { compatibility: CompatibilityEvidence };
+export type ParsedSensorManifest = LegacySensorManifest | SensorManifestV2;
 
 function isRecord(value: unknown): value is UnknownRecord {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -86,13 +96,13 @@ function parseLegacySensor(input: unknown, source: unknown, location: string): S
     return sensor;
 }
 
-function parseLegacyManifest(value: UnknownRecord, source: unknown): SensorManifest {
+function parseLegacyManifest(value: UnknownRecord, source: unknown): LegacySensorManifest {
     fields(value, ['pack', 'sensors', 'concurrency'], source, 'root');
     const pack = id(value.pack, source, 'pack');
     const sensorsInput = record(value.sensors, source, 'sensors');
     const sensors: Record<string, SensorConfig> = {};
     for (const name of Object.keys(sensorsInput)) sensors[id(name, source, 'sensor id')] = parseLegacySensor(sensorsInput[name], source, `sensors.${name}`);
-    const manifest: SensorManifest = { pack, sensors, compatibility: legacyCompatibility() };
+    const manifest: LegacySensorManifest = { pack, sensors, compatibility: legacyCompatibility() };
     if ('concurrency' in value) {
         if (typeof value.concurrency !== 'number' || !Number.isSafeInteger(value.concurrency) || value.concurrency <= 0) invalid(source, 'concurrency must be a positive safe integer');
         manifest.concurrency = value.concurrency;
@@ -124,13 +134,13 @@ function parseV2Manifest(value: UnknownRecord, source: unknown): SensorManifestV
     return manifest;
 }
 
-export function parseSensorManifest(input: unknown, source: unknown): SensorManifest | SensorManifestV2 {
+export function parseSensorManifest(input: unknown, source: unknown): ParsedSensorManifest {
     const value = record(input, source, 'root');
     return 'schemaVersion' in value ? parseV2Manifest(value, source) : parseLegacyManifest(value, source);
 }
 
 export function serializeManifestV2(input: unknown): string {
     const parsed = parseSensorManifest(input, 'manifest serialization');
-    if (parsed.schemaVersion !== 2) throw new Error('Cannot serialize a legacy sensor manifest as v2');
+    if (!('schemaVersion' in parsed) || parsed.schemaVersion !== 2) throw new Error('Cannot serialize a legacy sensor manifest as v2');
     return JSON.stringify(parsed, null, 2);
 }

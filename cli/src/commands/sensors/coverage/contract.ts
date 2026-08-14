@@ -1,5 +1,3 @@
-import type { SensorManifest } from '../types';
-
 export const COVERAGE_SCHEMA_VERSION = 1;
 export const MAX_COVERAGE_FILE_BYTES = 1024 * 1024;
 const COVERAGE_EVIDENCE_PATHS: ReadonlySet<string> = new Set([
@@ -39,23 +37,6 @@ export type CoverageContract = {
     schemaVersion: typeof COVERAGE_SCHEMA_VERSION;
     classes: Record<string, CoverageClassContract>;
 };
-
-/** @deprecated Use parseSensorManifest from the compatibility boundary. */
-export type CoverageManifest = SensorManifest;
-
-/**
- * Compatibility shim for the legacy coverage reader. It delegates all structural
- * validation to the manifest boundary and intentionally refuses v2 until the v2
- * coverage resolver consumes structured commands.
- */
-export function parseCoverageManifest(input: unknown, source: unknown): CoverageManifest {
-    // Lazy to avoid a module cycle: the v2 pack parser itself imports this coverage
-    // contract, while this legacy shim only runs when coverage resolution is invoked.
-    const { parseSensorManifest } = require('../compatibility/manifest') as typeof import('../compatibility/manifest');
-    const manifest = parseSensorManifest(input, source);
-    if (manifest.schemaVersion === 2) throw new Error(`Invalid coverage manifest in ${String(source)}: v2 requires the compatibility resolver`);
-    return manifest;
-}
 
 type UnknownRecord = Record<string, unknown>;
 

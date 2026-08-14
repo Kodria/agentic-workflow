@@ -1,5 +1,3 @@
-import type { CoverageContract } from '../coverage/contract';
-
 export type CompatibilityState =
     | 'certified'
     | 'compatible-unverified'
@@ -50,7 +48,7 @@ export type SensorPackV2 = {
     id: string;
     assets: string[];
     sensors: Record<string, SensorPackSensor>;
-    coverage: CoverageContract;
+    coverage: unknown;
 };
 
 export type LegacySensorPack = {
@@ -58,7 +56,7 @@ export type LegacySensorPack = {
     description?: string;
     detects?: unknown[];
     sensors: Record<string, unknown>;
-    coverage?: CoverageContract;
+    coverage?: unknown;
     compatibility: CompatibilityEvidence;
 };
 

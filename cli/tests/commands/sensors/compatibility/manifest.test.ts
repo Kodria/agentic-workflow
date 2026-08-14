@@ -1,6 +1,15 @@
 import { legacyCompatibility, parseSensorManifest, serializeManifestV2 } from '../../../../src/commands/sensors/compatibility/manifest';
+import fs from 'fs';
+import path from 'path';
 
 describe('sensor manifest contract', () => {
+    it('keeps compatibility contracts on an acyclic import boundary', () => {
+        const source = (relative: string) => fs.readFileSync(path.join(__dirname, '../../../../src/commands/sensors', relative), 'utf8');
+        expect(source('types.ts')).not.toContain('./compatibility/');
+        expect(source('compatibility/types.ts')).not.toContain('../coverage/');
+        expect(source('coverage/contract.ts')).not.toContain('../compatibility/manifest');
+    });
+
     it('normalizes a legacy string command with compatible-unverified evidence', () => {
         expect(parseSensorManifest({ pack: 'js-ts', sensors: { lint: 'npm run lint' } }, 'sensors.json')).toMatchObject({
             pack: 'js-ts',
