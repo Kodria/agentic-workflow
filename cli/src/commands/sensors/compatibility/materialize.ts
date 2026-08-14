@@ -7,6 +7,7 @@ export type MaterializeInput = {
     projectRoot: string;
     packRoot: string;
     pack: string;
+    registryRoot?: string;
     sensors: Record<string, V2Sensor>;
     configure?: boolean;
 };
@@ -74,7 +75,7 @@ export function materializeResolvedSensors(input: MaterializeInput): Materialize
         if (parsed.kind !== 'v2') throw new Error('materialized sensor must be v2');
         sensors[name] = parsed.pack.sensors[name];
     }
-    const manifest: SensorManifestV2 = { schemaVersion: 2, pack, sensors };
+    const manifest: SensorManifestV2 = { schemaVersion: 2, pack, sensors, ...(input.registryRoot ? { registryRoot: input.registryRoot } : {}) };
     const selected = [...new Set(Object.values(sensors).flatMap(sensor => sensor.assets ?? []))].map((asset, index) => containedAsset(asset, `assets[${index}]`)).sort();
     const prior = priorAssets(projectRoot);
     const configured: string[] = [];

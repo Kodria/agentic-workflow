@@ -267,14 +267,27 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
                 // Unresolved states do not receive an arbitrary command. They remain
                 // represented in the manifest so status/coverage can explain them,
                 // but run cannot accidentally dispatch a mismatched executable.
-                if (variant) sensors[name] = {
-                    enabled: true, variantId: variant.id, command: variant.command,
-                    assets: variant.assets, initializedCompatibility: resolved,
-                };
+                if (variant) {
+                    const prior = existing?.sensors[name];
+                    // Legacy string commands cannot be translated into a shell-free
+                    // structured command without guessing. Preserve the operator's
+                    // enabled/fast intent but make that migration non-certified.
+                    const migratedOverride = prior?.cmd !== undefined;
+                    sensors[name] = {
+                        enabled: prior?.enabled ?? true,
+                        fast: prior?.fast ?? sensor.fast ?? false,
+                        variantId: variant.id,
+                        command: variant.command,
+                        assets: variant.assets,
+                        initializedCompatibility: migratedOverride
+                            ? { ...resolved, state: 'compatible-unverified', reason: 'legacy custom command requires explicit v2 migration' }
+                            : resolved,
+                    };
+                }
             }
             const materialized = materializeResolvedSensors({
                 projectRoot: cwd, packRoot: path.join(opts.registryRoot, 'sensor-packs', resolvedPack),
-                pack: resolvedPack, sensors, configure,
+                pack: resolvedPack, registryRoot: opts.registryRoot, sensors, configure,
             });
             return { detection, ...materialized,
                 compatibility, ...(unavailablePack ? { unavailablePack } : {}) };

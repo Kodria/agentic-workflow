@@ -48,7 +48,7 @@ describe('computeSensorStatus', () => {
         fs.writeFileSync(path.join(binDir, tool), '');
     }
 
-    it('returns HEALTHY when an npx tool is installed locally', async () => {
+    it('keeps an operational legacy manifest DEGRADED even when its npx tool is installed locally', async () => {
         installLocalBin('tsc');
         fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
@@ -56,7 +56,7 @@ describe('computeSensorStatus', () => {
             sensors: { typecheck: { cmd: 'npx tsc --noEmit', fast: true } }
         }));
         const result = await computeSensorStatus(tmpDir);
-        expect(result.overall).toBe('HEALTHY');
+        expect(result.overall).toBe('DEGRADED');
         expect(result.pack).toBe('js-ts');
         expect(result.checks.typecheck.ok).toBe(true);
     });
@@ -131,7 +131,7 @@ describe('computeSensorStatus', () => {
             installOnPath('semgrep');
 
             const result = await computeSensorStatus(tmpDir);
-            expect(result.overall).toBe('HEALTHY');
+            expect(result.overall).toBe('DEGRADED');
             expect(result.checks.security.ok).toBe(true);
         });
     });

@@ -296,7 +296,27 @@ describe('initSensors', () => {
             // Without init awaiting the probe the resolver stays `unverifiable`; this
             // exact assertion therefore distinguishes the async probe integration.
             expect(written.sensors.lint.initializedCompatibility).toMatchObject({ variantId: 'eslint-10', state: 'certified', reason: 'range-and-probe' });
+            expect(written.registryRoot).toBe(v2Registry);
             expect(fs.existsSync(path.join(tmpDir, 'eslint.config.awm.mjs'))).toBe(true);
+        } finally {
+            fs.rmSync(v2Registry, { recursive: true, force: true });
+        }
+    });
+
+    it('migrates legacy overrides explicitly without silently certifying or re-enabling them', async () => {
+        const v2Registry = makeV2Registry();
+        try {
+            fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ devDependencies: { eslint: '^10.0.0' } }));
+            fs.mkdirSync(path.join(tmpDir, 'node_modules', 'eslint'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version: '10.0.0' }));
+            fs.mkdirSync(path.join(tmpDir, '.awm'));
+            fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+                pack: 'js-ts', sensors: { lint: { cmd: 'my-company-eslint .', enabled: false, fast: true } },
+            }));
+            await initSensors({ cwd: tmpDir, registryRoot: v2Registry });
+            const written = JSON.parse(fs.readFileSync(path.join(tmpDir, '.awm', 'sensors.json'), 'utf8'));
+            expect(written.sensors.lint).toMatchObject({ enabled: false, fast: true });
+            expect(written.sensors.lint.initializedCompatibility).toMatchObject({ state: 'compatible-unverified', reason: expect.stringContaining('legacy custom command') });
         } finally {
             fs.rmSync(v2Registry, { recursive: true, force: true });
         }

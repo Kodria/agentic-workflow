@@ -72,10 +72,10 @@ function readManifest(cwd: string): SensorManifest | null {
     try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { return null; }
 }
 
-async function resolveLiveV2(cwd: string, manifest: ReturnType<typeof parseSensorManifest>): Promise<Record<string, import('./compatibility/types').CompatibilityEvidence> | null> {
+async function resolveLiveV2(cwd: string, manifest: ReturnType<typeof parseSensorManifest>): Promise<Awaited<ReturnType<typeof resolveLiveCompatibility>> | null> {
     if (manifest.kind !== 'v2') return null;
     try {
-        return (await resolveLiveCompatibility(cwd, manifest.pack.pack)).sensors;
+        return await resolveLiveCompatibility(cwd, manifest.pack.pack, manifest.pack.registryRoot);
     } catch { return null; }
 }
 
@@ -315,8 +315,13 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         const live = await resolveLiveV2(manifestDir, parsedManifest);
         const tasks: Array<() => Promise<SensorResult>> = [];
         for (const [name, sensor] of Object.entries(parsedManifest.pack.sensors)) {
-            if (!shouldRun(false, opts)) continue;
-            const state = live?.[name];
+            const state = live?.sensors[name];
+            const liveSensor = live?.pack.sensors[name];
+            if (!shouldRun(sensor.fast ?? liveSensor?.fast ?? false, opts)) continue;
+            if (sensor.enabled === false) {
+                tasks.push(() => Promise.resolve({ name, status: 'skipped', errors: [], skipReason: 'disabled' }));
+                continue;
+            }
             if (!state || state.state !== 'certified') {
                 tasks.push(() => Promise.resolve({ name, status: 'inconclusive', errors: [], skipReason: state ? `${state.state}: ${state.reason}` : 'compatibility could not be revalidated' }));
                 continue;
@@ -325,7 +330,14 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
                 tasks.push(() => Promise.resolve({ name, status: 'inconclusive', errors: [], skipReason: `variant-drift: manifest ${sensor.variantId}, live ${state.variantId ?? 'none'}; run \`awm sensors init\`` }));
                 continue;
             }
-            tasks.push(() => runV2Sensor(name, sensor.command, DEFAULT_SLOW_TIMEOUT, manifestDir));
+            const selected = liveSensor?.variants.find(candidate => candidate.id === state.variantId);
+            if (!selected) {
+                tasks.push(() => Promise.resolve({ name, status: 'inconclusive', errors: [], skipReason: 'variant-drift: selected live variant has no command; run `awm sensors init`' }));
+                continue;
+            }
+            // Variant IDs are stable selectors, not immutable command snapshots.
+            // Only the just re-resolved pack command is authorized to execute.
+            tasks.push(() => runV2Sensor(name, selected.command, (sensor.fast ?? liveSensor?.fast ?? false) ? DEFAULT_FAST_TIMEOUT : DEFAULT_SLOW_TIMEOUT, manifestDir, selected.formatter));
         }
         const sensors = await pooled(tasks, Math.min(MAX_CONCURRENCY, Math.max(1, tasks.length)));
         return { sensors, overall: sensors.some(sensor => sensor.status === 'fail') ? 'fail' : sensors.some(sensor => sensor.status === 'inconclusive') ? 'not_certified' : sensors.length ? 'pass' : 'skipped' };
@@ -442,6 +454,10 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         : results.length > 0 && results.every(r => r.status === 'skipped') ? 'skipped'
         : results.length === 0 ? 'skipped'
         : 'pass';
+
+    // Legacy commands retain operational compatibility but their unversioned,
+    // shell-backed contract can never certify a run.
+    if (parsedManifest.kind === 'legacy' && overall === 'pass') overall = 'not_certified';
 
     // Honest floor: a benign-green 'skipped' over a tree that clearly HAS a stack
     // (indicators present) is a false green — the gate ran nothing real. Never green.

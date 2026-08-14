@@ -68,7 +68,7 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
             const checks: Record<string, SensorCheck> = {};
             let live: Awaited<ReturnType<typeof resolveLiveCompatibility>>;
             try {
-                live = await resolveLiveCompatibility(cwd, parsed.pack.pack);
+                live = await resolveLiveCompatibility(cwd, parsed.pack.pack, parsed.pack.registryRoot);
             } catch (error) {
                 const detail = `compatibility revalidation failed: ${error instanceof Error ? error.message : String(error)}`;
                 for (const [name, sensor] of Object.entries(parsed.pack.sensors)) {
@@ -120,6 +120,7 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
     if (Object.keys(manifest.sensors ?? {}).length === 0) {
         return { overall: 'DEGRADED', pack: manifest.pack, checks };
     }
-    const allOk = Object.values(checks).every(c => c.ok);
-    return { overall: allOk ? 'HEALTHY' : 'DEGRADED', pack: manifest.pack, checks };
+    // A legacy manifest may be operational (the checks are still useful), but it
+    // has no versioned/structured contract and must never present as certified.
+    return { overall: 'DEGRADED', pack: manifest.pack, checks };
 }

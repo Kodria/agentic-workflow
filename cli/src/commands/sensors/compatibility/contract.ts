@@ -148,7 +148,7 @@ export function assertNoEqualPriorityOverlap(variants: unknown): void {
 
 function parseSensor(input: unknown, source: unknown, location: string, variantIds: Set<string>): SensorPackSensor {
     const value = record(input, source, location);
-    fields(value, ['applicability', 'variants'], source, location);
+    fields(value, ['applicability', 'variants', 'fast'], source, location);
     if (!Array.isArray(value.variants) || value.variants.length === 0) invalid(source, `${location}.variants must be a nonempty array`);
     const variants = value.variants.map((variant, index) => parseVariant(variant, source, `${location}.variants[${index}]`));
     for (const variant of variants) {
@@ -167,7 +167,8 @@ function parseSensor(input: unknown, source: unknown, location: string, variantI
     if ('anyFiles' in applicabilityInput) applicability.anyFiles = stringArray(applicabilityInput.anyFiles, source, `${location}.applicability.anyFiles`).map((file, index) => asset(file, source, `${location}.applicability.anyFiles[${index}]`));
     if ('kind' in applicabilityInput) applicability.kind = text(applicabilityInput.kind, source, `${location}.applicability.kind`);
     if (Object.keys(applicability).length === 0) invalid(source, `${location}.applicability must declare a condition`);
-    return { applicability, variants };
+    if ('fast' in value && typeof value.fast !== 'boolean') invalid(source, `${location}.fast must be a boolean`);
+    return { applicability, variants, ...('fast' in value ? { fast: value.fast as boolean } : {}) };
 }
 
 function legacyCompatibility(): CompatibilityEvidence {

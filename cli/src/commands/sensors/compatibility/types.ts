@@ -45,6 +45,7 @@ export type SensorVariant = {
 export type SensorPackSensor = {
     applicability: { allFiles?: string[]; anyFiles?: string[]; kind?: string };
     variants: SensorVariant[];
+    fast?: boolean;
 };
 
 export type SensorPackV2 = {

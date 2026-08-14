@@ -9,9 +9,11 @@ function mkTmp(): string {
 
 // Define stable mock before jest.mock hoisting
 const mockRunCommand = jest.fn();
+const mockRunStructuredCommand = jest.fn();
 
 jest.mock('../../../src/commands/sensors/exec', () => ({
     runCommand: (...args: any[]) => mockRunCommand(...args),
+    runStructuredCommand: (...args: any[]) => mockRunStructuredCommand(...args),
 }));
 
 const { ok, exited, timedOut } = require('./exec-fixtures');
@@ -37,6 +39,7 @@ describe('runSensors', () => {
         fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify(MANIFEST));
         mockRunCommand.mockReset();
+        mockRunStructuredCommand.mockReset();
     });
     afterEach(() => { fs.rmSync(tmpDir, { recursive: true }); });
 
@@ -58,7 +61,7 @@ describe('runSensors', () => {
         const result = await runSensors({ fast: true, cwd: tmpDir });
         expect(mockRunCommand).toHaveBeenCalledTimes(2); // typecheck + lint (security disabled, mutation disabled)
         expect(result.sensors.some((s: any) => s.name === 'security')).toBe(false);
-        expect(result.overall).toBe('pass');
+        expect(result.overall).toBe('not_certified');
     });
 
     it('returns fail when a fast sensor has errors', async () => {
@@ -188,7 +191,7 @@ describe('runSensors', () => {
         const tc = second.sensors.find((s: any) => s.name === 'typecheck');
         expect(tc!.status).toBe('pass');
         expect(tc!.baselineCount).toBe(1);
-        expect(second.overall).toBe('pass');
+        expect(second.overall).toBe('not_certified');
     });
 
     it('baseline lets NEW findings through (still fails)', async () => {
@@ -215,6 +218,70 @@ describe('runSensors', () => {
         mockRunCommand.mockResolvedValueOnce(tcError()).mockResolvedValueOnce(ok());
         const result = await runSensors({ fast: true, cwd: tmpDir, ignoreBaseline: true });
         expect(result.overall).toBe('fail');
+    });
+});
+
+describe('runSensors v2 lifecycle contract', () => {
+    let project: string;
+    let home: string;
+    const version = '10.0.0';
+
+    beforeEach(() => {
+        jest.resetModules();
+        project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-v2-run-project-'));
+        home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-v2-run-home-'));
+        process.env.AWM_HOME = home;
+        const registry = path.join(home, 'registries', 'baseline', 'sensor-packs', 'js-ts');
+        fs.mkdirSync(registry, { recursive: true });
+        fs.writeFileSync(path.join(registry, 'eslint.config.awm.mjs'), 'export default []');
+        fs.writeFileSync(path.join(home, 'registries.json'), JSON.stringify([{ name: 'baseline', remote: 'https://example.test/baseline.git' }]));
+        fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ scripts: { lint: 'eslint .' }, devDependencies: { eslint: '^10.0.0' } }));
+        fs.mkdirSync(path.join(project, 'node_modules', 'eslint'), { recursive: true });
+        fs.writeFileSync(path.join(project, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version }));
+        fs.writeFileSync(path.join(registry, 'pack.json'), JSON.stringify({
+            schemaVersion: 2, name: 'js-ts', description: 'fixture', detects: ['package.json'],
+            coverage: { schemaVersion: 1, classes: { lint: { description: 'lint', detectors: [{ sensor: 'lint' }], remedy: { summary: 'fix', command: 'awm sensors init' } } } },
+            sensors: { lint: { fast: true, applicability: { allFiles: ['package.json'] }, variants: [{
+                id: 'eslint-10', priority: 1, certifiedRange: '>=10 <11',
+                requirements: { tool: 'eslint', toolRange: '>=10 <11', runtime: 'node', runtimeRange: '>=0' },
+                assets: ['eslint.config.awm.mjs'], formatter: 'generic', probe: { kind: 'package-script-present' },
+                command: { executable: 'live-eslint', resolution: 'node-modules-bin', args: ['.'] },
+            }] } },
+        }));
+        fs.mkdirSync(path.join(project, '.awm'));
+        fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify({
+            schemaVersion: 2, pack: 'js-ts', registryRoot: path.join(home, 'registries', 'baseline'), sensors: { lint: {
+                enabled: true, fast: true, variantId: 'eslint-10',
+                command: { executable: 'stale-eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['eslint.config.awm.mjs'],
+                initializedCompatibility: { state: 'certified', reason: 'range-and-probe', variantId: 'eslint-10', toolVersion: version, runtimeVersion: process.versions.node, certifiedRange: '>=10 <11', evidence: [] },
+            } },
+        }));
+        mockRunStructuredCommand.mockReset();
+        mockRunStructuredCommand.mockResolvedValue(ok());
+    });
+    afterEach(() => {
+        delete process.env.AWM_HOME;
+        fs.rmSync(project, { recursive: true, force: true });
+        fs.rmSync(home, { recursive: true, force: true });
+    });
+
+    it('runs the re-resolved command for an unchanged variant id, never the stale manifest command', async () => {
+        const { resolveLiveCompatibility } = require('../../../src/commands/sensors/compatibility/live');
+        await expect(resolveLiveCompatibility(project, 'js-ts', path.join(home, 'registries', 'baseline'))).resolves.toBeDefined();
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, fast: true });
+        expect(result).toEqual(expect.objectContaining({ overall: 'pass' }));
+        expect(mockRunStructuredCommand).toHaveBeenCalledWith(expect.objectContaining({ executable: 'live-eslint' }), expect.any(Object));
+    });
+
+    it('honors disabled v2 sensors before dispatching them', async () => {
+        const manifest = JSON.parse(fs.readFileSync(path.join(project, '.awm', 'sensors.json'), 'utf8'));
+        manifest.sensors.lint.enabled = false;
+        fs.writeFileSync(path.join(project, '.awm', 'sensors.json'), JSON.stringify(manifest));
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, fast: true });
+        expect(result.sensors).toEqual([expect.objectContaining({ status: 'skipped', skipReason: 'disabled' })]);
+        expect(mockRunStructuredCommand).not.toHaveBeenCalled();
     });
 });
 
@@ -309,7 +376,7 @@ describe('runSensors — not_certified + auto-discovery', () => {
         const nested = path.join(tmpDir, 'a', 'b');
         fs.mkdirSync(nested, { recursive: true });
         const out = await runSensors({ cwd: nested });
-        expect(out.overall).toBe('pass');
+        expect(out.overall).toBe('not_certified');
         expect(out.sensors.length).toBe(1);
     });
 });

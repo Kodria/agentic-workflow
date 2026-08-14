@@ -4,6 +4,7 @@ import { discoverProjectEvidence } from './discovery';
 import { resolveProjectCompatibility } from './resolve';
 import { runCompatibilityProbe } from './probe';
 import type { CompatibilityEvidence, SensorPackV2 } from './types';
+import path from 'path';
 
 export type LiveCompatibility = {
     pack: SensorPackV2;
@@ -16,10 +17,15 @@ export type LiveCompatibility = {
  * live certification source. Probes are bounded and structured through the shared
  * compatibility probe runner.
  */
-export async function resolveLiveCompatibility(cwd: string, packName: string): Promise<LiveCompatibility> {
+export async function resolveLiveCompatibility(cwd: string, packName: string, registryRoot?: string): Promise<LiveCompatibility> {
     if (typeof cwd !== 'string' || cwd.trim() === '') throw new Error('cwd must be a non-empty path');
     if (typeof packName !== 'string' || !/^[a-z][a-z0-9-]*$/.test(packName)) throw new Error('pack name must be a stable lowercase id');
-    const source = resolvePackSource(packName);
+    if (registryRoot !== undefined && (typeof registryRoot !== 'string' || !path.isAbsolute(registryRoot) || path.normalize(registryRoot) !== registryRoot || /[\0\r\n]/.test(registryRoot))) {
+        throw new Error('registry root provenance must be an absolute normalized path');
+    }
+    const source = registryRoot === undefined
+        ? resolvePackSource(packName)
+        : resolvePackSource(packName, { registries: [{ name: 'manifest-provenance', remote: 'local', contentRoot: registryRoot }] });
     const parsed = parseSensorPack(JSON.parse(source.content), source.path);
     if (parsed.kind !== 'v2') throw new Error(`sensor pack "${packName}" does not provide a v2 compatibility contract`);
     return resolveParsedPackCompatibility(cwd, parsed.pack);
