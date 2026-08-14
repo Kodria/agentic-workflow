@@ -152,7 +152,10 @@ content or unrelated working-tree changes.
 ## Team registries
 
 A team registry is a Git repository that distributes skills, bundles, sensor
-packs, and related content. A minimal registry has this shape:
+packs, and related content. A registry needs at least one content directory:
+`skills/`, `bundles/`, `workflows/`, or `agents/`. The following is a
+bundle-oriented example; `catalog.json` is required only when the registry
+publishes bundles:
 
 ```text
 <registry>/
@@ -161,9 +164,9 @@ packs, and related content. A minimal registry has this shape:
 └── catalog.json
 ```
 
-Create the repository, add the content and catalog entries, commit it, and
-give teammates its Git remote. Register it locally without silently installing
-every available bundle:
+Create the repository, add the relevant content (and catalog entries when it
+publishes bundles), commit it, and give teammates its Git remote. Register it
+locally without silently installing every available bundle:
 
 ```bash
 awm registry add <git-url> --no-install

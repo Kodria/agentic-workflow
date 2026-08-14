@@ -42,6 +42,25 @@ function cell(value: string | null, absent: string, home: string): string {
     return `\`${homeRelative(value, home)}\``;
 }
 
+/** The matrix documents portable defaults, not one operator's provider override.
+ * `providers()` deliberately honors settings such as CODEX_HOME at runtime; turning
+ * that runtime path into public documentation would make the checked-in matrix vary
+ * by the machine used to regenerate it. Rebase only the provider-owned prefix onto
+ * its declared default while preserving every suffix derived by the provider table. */
+function defaultProviderPath(value: string | null, c: ProviderConfig, home: string): string | null {
+    if (value === null) return null;
+    if (c.configHome.envVar === null) return value;
+
+    const resolved = toPosix(c.configHome.resolved);
+    const standard = toPosix(path.join(home, c.configHome.dir));
+    const target = toPosix(value);
+    return target.startsWith(resolved) ? `${standard}${target.slice(resolved.length)}` : value;
+}
+
+function providerCell(value: string | null, absent: string, c: ProviderConfig, home: string): string {
+    return cell(defaultProviderPath(value, c, home), absent, home);
+}
+
 /** El tier declarado por la forma de la config — la misma derivacion que `providerTier`
  *  en `core/diagnostics/provider-checks.ts`, no una segunda opinion. */
 function tier(c: ProviderConfig): string {
@@ -53,12 +72,12 @@ function tier(c: ProviderConfig): string {
 
 function injectionCell(c: ProviderConfig, home: string): string {
     const inj = c.injection;
-    if (!inj) return '— (ninguna)';
+    if (!inj) return '— (none)';
     if (inj.type === 'cc-settings-merge') return 'hook `SessionStart`';
-    if (inj.type === 'config-instructions') return `\`${homeRelative(inj.configPath, home)}\` → campo \`${inj.field}\``;
+    if (inj.type === 'config-instructions') return `${providerCell(inj.configPath, '**unsupported**', c, home)} → \`${inj.field}\` field`;
     return inj.globalPath === null
-        ? `\`${inj.localFile}\` del proyecto (sin equivalente global)`
-        : `\`${inj.localFile}\` + \`${homeRelative(inj.globalPath, home)}\``;
+        ? `project \`${inj.localFile}\` (no global equivalent)`
+        : `\`${inj.localFile}\` + ${providerCell(inj.globalPath, '**unsupported**', c, home)}`;
 }
 
 export function renderProviderTables(): string {
@@ -72,35 +91,35 @@ export function renderProviderTables(): string {
 
     const lines: string[] = [];
 
-    lines.push('### Dónde aterriza cada artefacto');
+    lines.push('### Where each artifact is installed');
     lines.push('');
-    lines.push('| Agente | Tier | Skills (global) | Skills (proyecto) | Formato |');
+    lines.push('| Agent | Tier | Skills (global) | Skills (project) | Renderer |');
     lines.push('|---|---|---|---|---|');
     for (const a of AGENT_TARGETS) {
         const c = row(a);
-        lines.push(`| \`${a}\` | ${tier(c)} | ${cell(c.skill.global, '**no soportado**', home)} | \`${c.skill.local}\` | \`${c.skill.renderer}\` |`);
+        lines.push(`| \`${a}\` | ${tier(c)} | ${providerCell(c.skill.global, '**unsupported**', c, home)} | \`${c.skill.local}\` | \`${c.skill.renderer}\` |`);
     }
     lines.push('');
-    lines.push('### Perfiles de agente, workflows, hooks y contexto');
+    lines.push('### Agent profiles, workflows, hooks, and context');
     lines.push('');
-    lines.push('| Agente | Perfiles de agente | Workflows | Hooks | Entrega de contexto | Versión mínima |');
+    lines.push('| Agent | Agent profiles | Workflows | Hooks | Context delivery | Minimum version |');
     lines.push('|---|---|---|---|---|---|');
     for (const a of AGENT_TARGETS) {
         const c = row(a);
         const agentCell = c.agent === null
-            ? '— (no aplica)'
-            : `${cell(c.agent.global, '**no soportado**', home)} · \`${c.agent.renderer}\``;
+            ? '— (not applicable)'
+            : `${providerCell(c.agent.global, '**unsupported**', c, home)} · \`${c.agent.renderer}\``;
         const wfCell = c.workflow === null
-            ? '— (no aplica)'
-            : cell(c.workflow.global, '**no soportado**', home);
+            ? '— (not applicable)'
+            : providerCell(c.workflow.global, '**unsupported**', c, home);
         lines.push(
-            `| \`${a}\` | ${agentCell} | ${wfCell} | ${c.hooks ? `\`${c.hooks.type}\`` : '— (no tiene)'} ` +
-            `| ${injectionCell(c, home)} | ${c.minimumVersion ?? '— (sin gate)'} |`,
+            `| \`${a}\` | ${agentCell} | ${wfCell} | ${c.hooks ? `\`${c.hooks.type}\`` : '— (none)'} ` +
+            `| ${injectionCell(c, home)} | ${c.minimumVersion ?? '— (no gate)'} |`,
         );
     }
     lines.push('');
-    lines.push('> Generado desde `cli/src/providers/index.ts`. **No editar a mano** — `npm run docs:matrix` lo regenera y');
-    lines.push('> `tests/structural/support-matrix-is-current.test.ts` falla si el documento y el código se separan.');
+    lines.push('> Generated from `cli/src/providers/index.ts`. **Do not edit by hand** — `npm run docs:matrix` regenerates it and');
+    lines.push('> `tests/structural/support-matrix-is-current.test.ts` fails when the document and code diverge.');
     return lines.join('\n');
 }
 

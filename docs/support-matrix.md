@@ -30,43 +30,43 @@ The generated source is the provider configuration, so installation paths and de
 
 <!-- BEGIN GENERATED: provider-capabilities -->
 
-### Dónde aterriza cada artefacto
+### Where each artifact is installed
 
-| Agente | Tier | Skills (global) | Skills (proyecto) | Formato |
+| Agent | Tier | Skills (global) | Skills (project) | Renderer |
 |---|---|---|---|---|
 | `antigravity` | context-only | `~/.gemini/antigravity/skills` | `.agent/skills` | `link` |
 | `opencode` | config-managed | `~/.agents/skills` | `.agents/skills` | `link` |
 | `claude-code` | hooks-native | `~/.claude/skills` | `.claude/skills` | `link` |
 | `codex` | hooks-native | `~/.agents/skills` | `.agents/skills` | `link` |
 | `cursor` | agents-md-managed | `~/.cursor/rules` | `.cursor/rules` | `cursor-mdc` |
-| `copilot` | agents-md-managed | **no soportado** | `.github/instructions` | `copilot-instructions` |
+| `copilot` | agents-md-managed | **unsupported** | `.github/instructions` | `copilot-instructions` |
 
-### Perfiles de agente, workflows, hooks y contexto
+### Agent profiles, workflows, hooks, and context
 
-| Agente | Perfiles de agente | Workflows | Hooks | Entrega de contexto | Versión mínima |
+| Agent | Agent profiles | Workflows | Hooks | Context delivery | Minimum version |
 |---|---|---|---|---|---|
-| `antigravity` | — (no aplica) | `~/.gemini/antigravity/global_workflows` | — (no tiene) | — (ninguna) | — (sin gate) |
-| `opencode` | `~/.config/opencode/agents` · `link` | — (no aplica) | — (no tiene) | `~/.config/opencode/opencode.json` → campo `instructions` | — (sin gate) |
-| `claude-code` | `~/.claude/agents` · `link` | — (no aplica) | `cc-settings-merge` | hook `SessionStart` | — (sin gate) |
-| `codex` | `~/.codex/agents` · `codex-agent-toml` | — (no aplica) | `codex-hooks-json` | `AGENTS.md` + `~/.codex/AGENTS.md` | 0.145.0 |
-| `cursor` | — (no aplica) | — (no aplica) | — (no tiene) | `AGENTS.md` del proyecto (sin equivalente global) | — (sin gate) |
-| `copilot` | — (no aplica) | — (no aplica) | — (no tiene) | `AGENTS.md` del proyecto (sin equivalente global) | — (sin gate) |
+| `antigravity` | — (not applicable) | `~/.gemini/antigravity/global_workflows` | — (none) | — (none) | — (no gate) |
+| `opencode` | `~/.config/opencode/agents` · `link` | — (not applicable) | — (none) | `~/.config/opencode/opencode.json` → `instructions` field | — (no gate) |
+| `claude-code` | `~/.claude/agents` · `link` | — (not applicable) | `cc-settings-merge` | hook `SessionStart` | — (no gate) |
+| `codex` | `~/.codex/agents` · `codex-agent-toml` | — (not applicable) | `codex-hooks-json` | `AGENTS.md` + `~/.codex/AGENTS.md` | 0.145.0 |
+| `cursor` | — (not applicable) | — (not applicable) | — (none) | project `AGENTS.md` (no global equivalent) | — (no gate) |
+| `copilot` | — (not applicable) | — (not applicable) | — (none) | project `AGENTS.md` (no global equivalent) | — (no gate) |
 
-> Generado desde `cli/src/providers/index.ts`. **No editar a mano** — `npm run docs:matrix` lo regenera y
-> `tests/structural/support-matrix-is-current.test.ts` falla si el documento y el código se separan.
+> Generated from `cli/src/providers/index.ts`. **Do not edit by hand** — `npm run docs:matrix` regenerates it and
+> `tests/structural/support-matrix-is-current.test.ts` fails when the document and code diverge.
 
 <!-- END GENERATED: provider-capabilities -->
 
 ### What each tier means
 
-| Tier | Loads skills | Runs hooks | Enforces process phases |
+| Tier | Loads skills | Runs hooks | Process role |
 |---|---|---|---|
-| `hooks-native` | yes | yes | yes — the harness re-anchors context at each session |
-| `config-managed` | yes | no | no — context is delivered; discipline is read |
-| `agents-md-managed` | yes (rendered) | no | no — context is delivered; discipline is read |
-| `context-only` | yes | no | no automatic context-delivery mechanism |
+| `hooks-native` | yes | yes | Re-anchors process guidance at session boundaries; it does not enforce agent behavior |
+| `config-managed` | yes | no | Context is delivered; discipline is read |
+| `agents-md-managed` | yes (rendered) | no | Context is delivered; discipline is read |
+| `context-only` | yes | no | No automatic context-delivery mechanism |
 
-The deterministic layer—`awm sensors run`, its exit status, and its quality gate—is **independent of the provider** and identical for all six providers. It is a real command with a real exit status; it does not depend on agent cooperation. Tiers change context delivery, not code verification.
+The deterministic layer—`awm sensors run`, its exit status, and its quality gate—is **independent of the provider** and identical for all six providers. It is a real command with a real exit status; it does not depend on agent cooperation. Only `awm sensors run` is an enforceable deterministic gate; tiers change context delivery, not code verification.
 
 ---
 

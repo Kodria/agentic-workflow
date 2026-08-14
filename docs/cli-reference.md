@@ -340,22 +340,28 @@ Install the **`PostToolUse`** hook in `~/.claude/settings.json` so fast sensors 
 
 ---
 
-## Hooks (Claude Code `SessionStart`)
+## Hooks (`SessionStart` for Claude Code and Codex)
 
-Manage the bootstrap hook that injects `using-awm` + `CONSTITUTION.md` into every Claude session. `awm init` installs this for you; these subcommands are for manual repair/inspection.
+Manage the bootstrap hook that re-anchors `using-awm` + `CONSTITUTION.md` at
+session start for `claude-code` and `codex`. `awm init` installs the hook for
+the selected provider; these subcommands are for manual repair or inspection.
 
 ```
-awm hooks install   [-t <target>] [-y]
-awm hooks uninstall [-t <target>] [-y]
-awm hooks status    [-t <target>]
+awm hooks install   [-t <target> | -a <agent>] [-y]
+awm hooks uninstall [-t <target> | -a <agent>] [-y]
+awm hooks status    [-t <target> | -a <agent>]
 ```
 
 | Flag | Description |
 |---|---|
-| `-t, --target <target>` | Target harness. `claude-code` only in this version. |
+| `-t, --target <target>` | Target harness: `claude-code` or `codex`; defaults to `claude-code`. |
+| `-a, --agent <agent>` | `--agent` is an alias for `--target`. |
 | `-y, --yes` | Skip interactive confirmations (install/uninstall). |
 
-`status` reports `HEALTHY` plus the four checks (bootstrap skill, session-start script, run-hook wrapper, settings entry).
+`status` reports the target-specific checks and an overall state. Claude Code
+includes its bootstrap skill and run-hook wrapper; Codex may additionally
+report whether the hook is trusted. Use `awm hooks status --agent codex` when
+inspecting Codex explicitly.
 
 ---
 

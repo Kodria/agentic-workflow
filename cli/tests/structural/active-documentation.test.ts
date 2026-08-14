@@ -97,4 +97,25 @@ describe('active documentation contract', () => {
         expect(read('docs/configuration.md')).toContain('[Support matrix](support-matrix.md)');
         expect(read('docs/configuration.md')).not.toMatch(/~\/\.(?:claude|codex|cursor|gemini)/);
     });
+
+    it('keeps generated provider support prose in the canonical language (R2)', () => {
+        const matrix = read('docs/support-matrix.md');
+        expect(matrix).toContain('### Where each artifact is installed');
+        expect(matrix).toContain('### Agent profiles, workflows, hooks, and context');
+        expect(matrix).not.toContain('Dónde aterriza cada artefacto');
+        expect(matrix).not.toContain('Perfiles de agente, workflows, hooks y contexto');
+    });
+
+    it('keeps provider tiers, registries, and hook targets technically precise (R2)', () => {
+        const matrix = read('docs/support-matrix.md');
+        const runbook = read('docs/runbook.md');
+        const cliReference = read('docs/cli-reference.md');
+
+        expect(matrix).toContain('Re-anchors process guidance');
+        expect(matrix).toContain('Only `awm sensors run` is an enforceable deterministic gate');
+        expect(runbook).toContain('A registry needs at least one content directory');
+        expect(runbook).toMatch(/`catalog\.json` is required only when the registry\s+publishes bundles/);
+        expect(cliReference).toContain('`claude-code` and `codex`');
+        expect(cliReference).toContain('`--agent` is an alias for `--target`');
+    });
 });
