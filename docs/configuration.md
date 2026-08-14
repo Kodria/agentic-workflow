@@ -184,14 +184,13 @@ intent, adding v2 variants and contained assets, then testing the command with
 the real local tool before claiming certification. Custom registries may extend
 the baseline with additional packs; pin and review them as dependencies.
 
-This is a representative project manifest. `registryRoot` is local provenance,
-not a path to copy into another repository:
+This is a representative portable project manifest. Registry provenance is
+local, not a path to copy into another repository:
 
 ```json
 {
   "schemaVersion": 2,
   "pack": "js-ts",
-  "registryRoot": "/opt/awm/registries/baseline",
   "sensors": {
     "lint": {
       "enabled": true,

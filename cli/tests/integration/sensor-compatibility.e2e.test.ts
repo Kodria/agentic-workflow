@@ -13,6 +13,12 @@ const bin = path.join(cliDir, 'dist/src/index.js');
 const fixtureRoot = path.join(cliDir, 'tests/fixtures/sensor-compatibility');
 const projectFixture = path.join(fixtureRoot, 'project');
 const registryFixture = path.join(fixtureRoot, 'registry');
+const noFollowUnavailableOnNativeWindows = process.platform === 'win32'
+    && typeof fs.constants.O_NOFOLLOW !== 'number';
+// Other native platforms exercise coverage through testWithNoFollow; this
+// branch preserves the deliberate Windows fail-closed behavior instead.
+const testWithNoFollow = noFollowUnavailableOnNativeWindows ? test.skip : test;
+const testWithoutNoFollowOnNativeWindows = noFollowUnavailableOnNativeWindows ? test : test.skip;
 
 type Fixture = { root: string; project: string; awmHome: string; registryRoot: string };
 
@@ -83,7 +89,7 @@ test.each(['linux', 'darwin', 'win32'] as const)('keeps injected resolver semant
     }
 });
 
-test('compiled binary dispatches coverage and emits parseable JSON on the native CI platform', () => {
+testWithNoFollow('compiled binary dispatches coverage and emits parseable JSON on the native CI platform', () => {
     const fixture = createFixture();
     try {
         const report = json(runCli(fixture, 'coverage', '--json'));
@@ -93,7 +99,7 @@ test('compiled binary dispatches coverage and emits parseable JSON on the native
     }
 });
 
-test('legacy coverage stays unverified, init migrates explicitly, and version drift is visible (R7.2, R7.8)', () => {
+testWithNoFollow('legacy coverage stays unverified, init migrates explicitly, and version drift is visible (R7.2, R7.8)', () => {
     const fixture = createFixture();
     try {
         const before = [hashTree(fixture.project), hashTree(fixture.awmHome)];
@@ -119,6 +125,17 @@ test('legacy coverage stays unverified, init migrates explicitly, and version dr
         expect(drift).toMatchObject({ overall: 'inconclusive', static: { classes: [expect.objectContaining({
             id: 'lint-errors', status: 'unverifiable', detectors: expect.arrayContaining([expect.objectContaining({ compatibility: expect.objectContaining({ state: 'compatible-unverified' }) })]),
         })] } });
+    } finally {
+        fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+});
+
+testWithoutNoFollowOnNativeWindows('coverage fails closed when native Windows cannot prevent symlink dereference', () => {
+    const fixture = createFixture();
+    try {
+        const result = runCli(fixture, 'coverage', '--json');
+        expect(result.status).toBe(1);
+        expect(`${result.stdout ?? ''}${result.stderr ?? ''}`).toContain('platform cannot guarantee no symlink dereference');
     } finally {
         fs.rmSync(fixture.root, { recursive: true, force: true });
     }

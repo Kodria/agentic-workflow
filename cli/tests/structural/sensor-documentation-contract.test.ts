@@ -46,6 +46,13 @@ describe('R3 canonical sensor documentation', () => {
         examples.forEach((example) => expect(() => parseSensorManifest(example, 'documented example')).not.toThrow());
     });
 
+    test('keeps documented v2 sensor manifests portable across native platforms', () => {
+        const examples = documentedJson(['docs/configuration.md', 'docs/cli-reference.md'])
+            .filter((value): value is Record<string, unknown> => typeof value === 'object' && value !== null && (value as Record<string, unknown>).schemaVersion === 2);
+        expect(examples.length).toBeGreaterThan(0);
+        examples.forEach((example) => expect(example).not.toHaveProperty('registryRoot'));
+    });
+
     test('documents exact Commander flags', () => {
         expect(helpFor('sensors coverage')).toContain('--min <count>');
         expect(helpFor('ledger add')).toContain('--defect-class <id>');
