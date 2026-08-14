@@ -59,8 +59,8 @@ export type SensorPackV2 = {
 export type LegacySensorPack = {
     name: string;
     description?: string;
-    detects?: unknown[];
-    sensors: Record<string, unknown>;
+    detects?: string[];
+    sensors: Record<string, { defaultCmd?: string; fast?: boolean; enabled?: boolean; changedCmd?: string; changedExtensions?: string[]; formatter?: string }>;
     coverage?: unknown;
     compatibility: CompatibilityEvidence;
 };

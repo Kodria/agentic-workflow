@@ -48,6 +48,16 @@ describe('sensor pack v2 contract', () => {
     });
 
     test.each([
+        [{ name: 'legacy', detects: [null], sensors: {} }, 'detects[0]'],
+        [{ name: 'legacy', detects: ['package.json'], sensors: { lint: { unknown: true } } }, 'unknown field'],
+        [{ name: 'legacy', detects: ['package.json'], sensors: { lint: { defaultCmd: 'eslint\u0000 .' } } }, 'defaultCmd'],
+        [{ name: 'legacy', detects: ['package.json'], sensors: { lint: { changedExtensions: ['.ts', 3] } } }, 'changedExtensions[1]'],
+        [{ name: 'legacy', detects: ['package.json'], sensors: { 'bad/name': {} } }, 'sensor id'],
+    ])('rejects recursively malformed legacy content %j', (input, message) => {
+        expect(() => parseSensorPack(input, 'legacy-pack.json')).toThrow(message);
+    });
+
+    test.each([
         [{ ...validPack(), schemaVersion: 3 }, 'supported: legacy, 2'],
         [{ ...validPack(), sensors: { lint: { variants: [] } } }, 'variants'],
         [{ ...validPack(), name: '../escape' }, 'name'],

@@ -179,12 +179,25 @@ function legacyCompatibility(): CompatibilityEvidence {
 function parseLegacyPack(value: UnknownRecord, source: unknown): LegacySensorPack {
     fields(value, ['name', 'description', 'detects', 'sensors', 'coverage'], source, 'root');
     const name = id(value.name, source, 'name');
-    const sensors = record(value.sensors, source, 'sensors');
+    const sensorsInput = record(value.sensors, source, 'sensors');
+    const sensors: LegacySensorPack['sensors'] = {};
+    for (const sensorName of Object.keys(sensorsInput)) {
+        const sensor = record(sensorsInput[sensorName], source, `sensors.${sensorName}`);
+        fields(sensor, ['defaultCmd', 'fast', 'enabled', 'changedCmd', 'changedExtensions', 'formatter'], source, `sensors.${sensorName}`);
+        const parsed: LegacySensorPack['sensors'][string] = {};
+        if ('defaultCmd' in sensor) parsed.defaultCmd = text(sensor.defaultCmd, source, `sensors.${sensorName}.defaultCmd`);
+        if ('fast' in sensor) { if (typeof sensor.fast !== 'boolean') invalid(source, `sensors.${sensorName}.fast must be a boolean`); parsed.fast = sensor.fast; }
+        if ('enabled' in sensor) { if (typeof sensor.enabled !== 'boolean') invalid(source, `sensors.${sensorName}.enabled must be a boolean`); parsed.enabled = sensor.enabled; }
+        if ('changedCmd' in sensor) parsed.changedCmd = text(sensor.changedCmd, source, `sensors.${sensorName}.changedCmd`);
+        if ('changedExtensions' in sensor) parsed.changedExtensions = stringArray(sensor.changedExtensions, source, `sensors.${sensorName}.changedExtensions`);
+        if ('formatter' in sensor) parsed.formatter = text(sensor.formatter, source, `sensors.${sensorName}.formatter`);
+        sensors[id(sensorName, source, 'sensor id')] = parsed;
+    }
     const legacy: LegacySensorPack = { name, sensors, compatibility: legacyCompatibility() };
     if ('description' in value) legacy.description = text(value.description, source, 'description');
     if ('detects' in value) {
         if (!Array.isArray(value.detects)) invalid(source, 'detects must be an array');
-        legacy.detects = value.detects;
+        legacy.detects = value.detects.map((detect, index) => text(detect, source, `detects[${index}]`));
     }
     if ('coverage' in value) legacy.coverage = parseCoverageContract(value.coverage, source);
     return legacy;
