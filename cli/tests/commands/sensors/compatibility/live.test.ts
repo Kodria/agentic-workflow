@@ -3,20 +3,26 @@ import os from 'os';
 import path from 'path';
 import { resolveParsedPackCompatibility } from '../../../../src/commands/sensors/compatibility/live';
 import { runStructuredCommand } from '../../../../src/commands/sensors/exec';
+import { createSemgrepVenvFixture } from './python-venv-fixture';
 
 describe('resolveParsedPackCompatibility — contained Python commands', () => {
+    test.each([
+        ['linux', ['.venv', 'bin', 'semgrep']],
+        ['win32', ['.venv', 'Scripts', 'semgrep.exe']],
+    ] as const)('creates a local Semgrep executable in the %s virtual-environment layout', (targetPlatform, executableParts) => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-semgrep-venv-layout-'));
+        try {
+            createSemgrepVenvFixture(root, targetPlatform);
+            expect(fs.lstatSync(path.join(root, ...executableParts)).isFile()).toBe(true);
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
     it('binds Semgrep discovery, probe, and execution to the same local virtual-environment executable', async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-semgrep-contained-'));
         const global = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-semgrep-global-'));
         const savedPath = process.env.PATH;
         try {
-            const localBin = path.join(root, '.venv', 'bin');
-            const sitePackages = path.join(root, '.venv', 'lib', 'python3.12', 'site-packages');
-            fs.mkdirSync(localBin, { recursive: true });
-            fs.mkdirSync(path.join(sitePackages, 'semgrep-1.91.0.dist-info'), { recursive: true });
-            fs.writeFileSync(path.join(root, '.venv', 'pyvenv.cfg'), 'version = 3.12.4\n');
-            fs.writeFileSync(path.join(sitePackages, 'semgrep-1.91.0.dist-info', 'METADATA'), 'Name: semgrep\nVersion: 1.91.0\n');
-            fs.writeFileSync(path.join(localBin, 'semgrep'), '#!/bin/sh\necho local-semgrep\n', { mode: 0o755 });
+            createSemgrepVenvFixture(root);
             fs.writeFileSync(path.join(global, 'semgrep'), '#!/bin/sh\necho global-semgrep\n', { mode: 0o755 });
             process.env.PATH = global;
 
@@ -32,8 +38,8 @@ describe('resolveParsedPackCompatibility — contained Python commands', () => {
                         variants: [{
                             id: 'semgrep-1', priority: 1, certifiedRange: '>=1 <2',
                             requirements: { tool: 'semgrep', toolRange: '>=1 <2', runtime: 'python', runtimeRange: '>=3.12 <4' },
-                            assets: [], formatter: 'semgrep', probe: { kind: 'semgrep-validate' },
-                            command: { executable: 'semgrep', resolution: 'path', args: ['--validate'] },
+                            assets: [], formatter: 'semgrep', probe: { kind: 'version' },
+                            command: { executable: 'semgrep', resolution: 'path', args: ['--version'] },
                         }],
                     },
                 },
@@ -44,7 +50,10 @@ describe('resolveParsedPackCompatibility — contained Python commands', () => {
             const command = live.pack.sensors.security.variants[0].command;
             expect(live.sensors.security).toMatchObject({ state: 'certified', toolVersion: '1.91.0' });
             expect(command).toMatchObject({ executable: 'semgrep', resolution: 'python-environment' });
-            await expect(runStructuredCommand(command, { cwd: root, timeout: 5_000 })).resolves.toMatchObject({ code: 0, stdout: 'local-semgrep\n' });
+            await expect(runStructuredCommand(command, { cwd: root, timeout: 5_000 })).resolves.toMatchObject({
+                code: 0,
+                stdout: process.platform === 'win32' ? `${process.version}\n` : 'local-semgrep\n',
+            });
         } finally {
             process.env.PATH = savedPath;
             fs.rmSync(root, { recursive: true, force: true });
@@ -55,13 +64,8 @@ describe('resolveParsedPackCompatibility — contained Python commands', () => {
     it('never falls back from the discovered .venv to a sibling venv executable', async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-semgrep-environment-identity-'));
         try {
-            const discoveredSitePackages = path.join(root, '.venv', 'lib', 'python3.12', 'site-packages');
-            const siblingBin = path.join(root, 'venv', 'bin');
-            fs.mkdirSync(path.join(discoveredSitePackages, 'semgrep-1.91.0.dist-info'), { recursive: true });
-            fs.mkdirSync(siblingBin, { recursive: true });
-            fs.writeFileSync(path.join(root, '.venv', 'pyvenv.cfg'), 'version = 3.12.4\n');
-            fs.writeFileSync(path.join(discoveredSitePackages, 'semgrep-1.91.0.dist-info', 'METADATA'), 'Name: semgrep\nVersion: 1.91.0\n');
-            fs.writeFileSync(path.join(siblingBin, 'semgrep'), '#!/bin/sh\necho sibling-semgrep\n', { mode: 0o755 });
+            createSemgrepVenvFixture(root, process.platform, '.venv', { executable: false });
+            createSemgrepVenvFixture(root, process.platform, 'venv');
             fs.writeFileSync(path.join(root, 'pyproject.toml'), '[project]\nname = "sample"\n');
 
             const pack = {
