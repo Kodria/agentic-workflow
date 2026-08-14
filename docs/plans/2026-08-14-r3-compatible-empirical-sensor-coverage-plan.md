@@ -817,7 +817,7 @@ _Requirements: R10.1, R10.2, R10.4, R10.5, R10.6, R10.7, R10.8, R10.9, R10.10, R
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tests rojos por propietario canónico**
+- [x] **Step 1: Escribir tests rojos por propietario canónico**
 
 ```ts
 test.each([
@@ -845,21 +845,21 @@ test('documents exact Commander flags (R10.9)', () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar contrato documental rojo**
+- [x] **Step 2: Ejecutar contrato documental rojo**
 
 Run: `cd cli && npx jest tests/structural/sensor-documentation-contract.test.ts --runInBand`
 
 Expected: FAIL por contenido y generator inexistentes.
 
-- [ ] **Step 3: Extender el generador de matriz sin editar tablas manualmente**
+- [x] **Step 3: Extender el generador de matriz sin editar tablas manualmente**
 
 `sensor-support-matrix.ts` recibe `--registry-root`, parsea los cuatro manifests con `parseSensorPack`, genera solo entre `BEGIN/END GENERATED: sensor-pack-support`, y expone función pura. `cli/package.json` hace que `npm run docs:matrix` ejecute, en orden, el renderer existente y el renderer de sensores. `support-matrix-is-current.test.ts` usa una fixture v2 inicialmente byte-equivalente a los manifests que se entregarán en T10/T11; T13 coteja el tag productivo exacto.
 
-- [ ] **Step 4: Actualizar cada documento en inglés y una sola vez**
+- [x] **Step 4: Actualizar cada documento en inglés y una sola vez**
 
 Aplicar el mapa del diseño: framework explica el loop; configuration enlaza a `sensor-packs/README.md`; project setup cubre new/legacy y niveles; runbook cubre retro/manual/drift; CLI reference define flags/states/exits/envelope; support matrix es generada; architecture define fronteras; testing define la matriz; decisions registra compatibilidad, falso verde, schemas y retro placement; changelog marca breaking y migración. README/hub solo cambian si hace falta un enlace, no contenido duplicado.
 
-- [ ] **Step 5: Ejecutar freshness, links, idioma y mutación**
+- [x] **Step 5: Ejecutar freshness, links, idioma y mutación**
 
 Run:
 
@@ -872,7 +872,7 @@ npx jest tests/structural/active-documentation.test.ts tests/structural/support-
 
 Expected: PASS y `git diff --exit-code docs/support-matrix.md` después de regenerar. Mutación: cambiar un flag documentado a `--minimum`; contrato debe fallar. Restaurar.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add docs/framework.md docs/configuration.md docs/project-setup.md docs/runbook.md docs/cli-reference.md docs/support-matrix.md docs/architecture.md docs/testing docs/decisions.md CHANGELOG.md cli/package.json cli/scripts cli/tests/structural
