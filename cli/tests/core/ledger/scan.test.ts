@@ -103,6 +103,25 @@ describe('scanProjectLedgers', () => {
         expect(scan.sources.skippedByReason).toMatchObject({ 'json-too-deep': 1 });
     });
 
+    test('keeps every finding for analysis while bounding renderable references per defect class', () => {
+        write(root, '.awm/ledger/a.jsonl', [
+            entry({ signature: 'first', defectClass: 'lint-errors' }),
+            entry({ signature: 'second', defectClass: 'lint-errors' }),
+            entry({ signature: 'other', defectClass: 'static-type-errors' }),
+        ]);
+        const scan = scanProjectLedgers(root, { maxRefsPerClass: 1 });
+        expect(scan.entries.map(item => item.entry.signature)).toEqual(['first', 'second', 'other']);
+        expect(scan.entries.map(item => item.evidenceRef)).toEqual([
+            '.awm/ledger/a.jsonl:1', null, '.awm/ledger/a.jsonl:3',
+        ]);
+        expect(scan.omittedEvidenceRefs).toBe(1);
+        expect(scan.sources).toMatchObject({
+            validFindings: 3,
+            skippedFindings: 1,
+            skippedByReason: { 'evidence-ref-limit': 1 },
+        });
+    });
+
     test('rejects non-object limit overrides instead of accepting an impossible public input', () => {
         expect(() => scanProjectLedgers(root, null as unknown as Record<string, number>)).toThrow(/limits.*object/i);
     });

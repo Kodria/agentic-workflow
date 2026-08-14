@@ -27,6 +27,8 @@ export type LedgerScanReason = LedgerParseReason | 'invalid-json' | 'line-too-la
 export interface ScannedLedgerEntry {
     entry: LedgerEntry;
     source: string;
+    /** Safe relative reference available to renderers, or null once its class is bounded. */
+    evidenceRef: string | null;
 }
 
 export interface LedgerScanSources {
@@ -41,6 +43,8 @@ export interface LedgerScanSources {
 export interface LedgerScanResult {
     entries: ScannedLedgerEntry[];
     sources: LedgerScanSources;
+    /** Number of valid findings retained for analysis but omitted from rendered evidence. */
+    omittedEvidenceRefs: number;
 }
 
 function isWithin(root: string, candidate: string): boolean {
@@ -104,7 +108,7 @@ export function scanProjectLedgers(projectRoot: string, overrides: Partial<Ledge
         sources.skippedFindings += 1;
         sources.skippedByReason[reason] = (sources.skippedByReason[reason] ?? 0) + 1;
     };
-    if (!fs.existsSync(ledgerRoot)) return { entries, sources };
+    if (!fs.existsSync(ledgerRoot)) return { entries, sources, omittedEvidenceRefs: 0 };
     if (!assertDirectoryInside(root, path.join(root, '.awm')) || !assertDirectoryInside(root, ledgerRoot)) {
         throw new Error('ledger directory escapes project root');
     }
@@ -117,6 +121,8 @@ export function scanProjectLedgers(projectRoot: string, overrides: Partial<Ledge
     let filesSeen = 0;
     let linesSeen = 0;
     let entryLimitReached = false;
+    let omittedEvidenceRefs = 0;
+    const evidenceRefsByClass = new Map<string, number>();
     for (const { directory, archive: isArchive } of directories) {
         if (entryLimitReached) break;
         const candidates = fs.readdirSync(directory, { withFileTypes: true })
@@ -160,10 +166,15 @@ export function scanProjectLedgers(projectRoot: string, overrides: Partial<Ledge
                 sources.validEntries += 1;
                 if (parsed.entry.polarity === 'finding') {
                     sources.validFindings += 1;
-                    entries.push({ entry: parsed.entry, source });
+                    const defectClass = parsed.entry.defectClass ?? 'unclassified';
+                    const count = evidenceRefsByClass.get(defectClass) ?? 0;
+                    const evidenceRef = count < limits.maxRefsPerClass ? source : null;
+                    if (evidenceRef === null) omittedEvidenceRefs += 1;
+                    else evidenceRefsByClass.set(defectClass, count + 1);
+                    entries.push({ entry: parsed.entry, source, evidenceRef });
                 }
             }
         }
     }
-    return { entries, sources };
+    return { entries, sources, omittedEvidenceRefs };
 }
