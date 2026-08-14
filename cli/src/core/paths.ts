@@ -171,10 +171,11 @@ export function resolveOnPath(bin: string): boolean {
  * cohorte no llegaba nunca ni a `SERIAL` ni a `ACTIVE`. Un solo bug de comparación, quince
  * tests en cascada.
  *
- * La identidad se toma del filesystem — `(dev, ino)` — que es agnóstica a separadores, a
- * mayúsculas y a nombres cortos. Cuando el volumen no expone inode (`ino === 0`, posible en
- * algunos filesystems de Windows) se cae a `realpathSync.native` — que sí resuelve 8.3 vía
- * la API del SO — normalizando separadores y capitalización.
+ * La identidad se toma primero de `realpathSync.native`, que resuelve la ruta con la API
+ * del SO (incluyendo nombres cortos 8.3) antes de normalizar separadores y capitalización.
+ * En POSIX, dos hard links de archivo conservan el mismo `(dev, ino)` aunque el realpath
+ * mantenga sus nombres distintos; ese fallback preserva su identidad. En Windows no se usa:
+ * dos directorios temporales distintos pueden reportar el mismo par de metadatos.
  *
  * Cualquier fallo de `stat` significa que al menos una no existe: `false`. La identidad
  * nunca se afirma sin prueba.
@@ -188,9 +189,6 @@ export function sameExistingPath(a: string, b: string): boolean {
   } catch {
     return false;
   }
-  // `ino === 0` en AMBOS lados no prueba identidad: probaría que el filesystem no la
-  // reporta. Tratarlo como match haría coincidir dos rutas cualesquiera del mismo volumen.
-  if (sa.ino !== 0 && sb.ino !== 0) return sa.dev === sb.dev && sa.ino === sb.ino;
   const canonical = (p: string): string | null => {
     try {
       const real = fs.realpathSync.native(p).replaceAll('\\', '/');
@@ -201,5 +199,7 @@ export function sameExistingPath(a: string, b: string): boolean {
   };
   const ca = canonical(a);
   const cb = canonical(b);
-  return ca !== null && ca === cb;
+  if (ca === null || cb === null) return false;
+  if (ca === cb) return true;
+  return !isWindowsNative() && sa.ino !== 0 && sb.ino !== 0 && sa.dev === sb.dev && sa.ino === sb.ino;
 }
