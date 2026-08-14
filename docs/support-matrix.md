@@ -1,32 +1,32 @@
-# Matriz de soporte
+# Support matrix
 
-**Qué soporta AWM, con qué nivel de evidencia, y qué no soporta todavía.**
+**What AWM supports, the evidence behind it, and what it does not support yet.**
 
-Este documento existe para que nadie tenga que inferir. Si una combinación no está acá, no está soportada. Si está marcada `⚠ sin verificar`, no se puede presentar como funcionando — se puede presentar como *implementado y pendiente de verificación*, que es una afirmación distinta y honesta.
+This document is an explicit contract. A combination not listed here is not supported. A row marked `⚠ unverified` may be described as *implemented and awaiting verification*, never as working.
 
 ---
 
-## Los cuatro niveles
+## Evidence levels
 
-Un solo vocabulario, usado igual en todas las tablas de abajo. La distinción entre los dos primeros es la que más se malinterpreta y la que más importa:
+The same vocabulary applies to every table. The distinction between the first two levels is especially important:
 
-| Nivel | Qué significa exactamente | Qué se puede afirmar en público |
+| Level | Exact meaning | Public claim |
 |---|---|---|
-| **✅ Verificado** | Implementado **y** ejercitado por una comprobación automática que corre en CI, o por un playbook ejecutado con resultado registrado. | "Funciona." |
-| **⚠ Sin verificar** | Implementado según la documentación del proveedor, pero **ninguna máquina lo ejecutó nunca** contra el binario real. | "Está implementado; falta verificarlo." Nunca "funciona". |
-| **⛔ No soportado** | Decisión deliberada, con una razón. No es un bug ni una tarea pendiente. | "No lo soportamos, y esta es la razón." |
-| **🔜 Planeado** | Reconocido como faltante. Es trabajo por hacer, con lo que falta enunciado. | "Todavía no." |
-| **❌ Verificado que NO funciona** | Implementado, **ejecutado contra el binario real**, y no hace lo que promete. | "Está, se probó, y no anda." Nunca se degrada a ⚠: perder evidencia negativa es peor que no haberla tenido. |
+| **✅ Verified** | Implemented **and** exercised by an automated CI check or a recorded playbook run. | “Works.” |
+| **⚠ Unverified** | Implemented from provider documentation, but **not executed against the real binary**. | “Implemented; verification remains.” Never “works.” |
+| **⛔ Unsupported** | A deliberate decision with a stated reason, not a bug or deferred task. | “Unsupported, for this reason.” |
+| **🔜 Planned** | A known gap with the required work identified. | “Not yet.” |
+| **❌ Verified not working** | Implemented and **executed against the real binary**, but did not deliver its promise. | “Tested and does not work.” Do not degrade negative evidence to ⚠. |
 
-> **Regla dura:** `BLOCKED` en un playbook (no pude correrlo) **nunca** se registra como verificado. Una combinación sin verificar es sin verificar; decir otra cosa es cómo una matriz de soporte empieza a mentir.
+> **Hard rule:** a `BLOCKED` playbook run is never recorded as verified. It remains unverified.
 
 ---
 
-## Capacidades por proveedor
+## Provider capabilities
 
-Esta sección se **genera desde `cli/src/providers/index.ts`**. No se edita a mano.
+This section is **generated from `cli/src/providers/index.ts`**. Do not edit it by hand.
 
-Existe generada porque la versión escrita a mano ya mintió: afirmaba que Antigravity instalaba en `~/.agents/skills` y `.agents/skills`, cuando el código dice `~/.gemini/antigravity/skills` y `.agent/skills` (singular), y omitía que es el único proveedor con `global_workflows`. Una tabla citada en una presentación y desalineada del código es peor que no tenerla.
+The generated source is the provider configuration, so installation paths and declared capabilities cannot drift from the code.
 
 <!-- BEGIN GENERATED: provider-capabilities -->
 
@@ -57,169 +57,117 @@ Existe generada porque la versión escrita a mano ya mintió: afirmaba que Antig
 
 <!-- END GENERATED: provider-capabilities -->
 
-### Qué significa cada tier
+### What each tier means
 
-| Tier | Cargan las skills | Disparan los hooks | Las fases del proceso se **imponen** |
+| Tier | Loads skills | Runs hooks | Enforces process phases |
 |---|---|---|---|
-| `hooks-native` | sí | sí | sí — el harness re-ancla el contexto en cada sesión |
-| `config-managed` | sí | no | no — el contexto se entrega, la disciplina se lee |
-| `agents-md-managed` | sí (renderizadas) | no | no — ídem |
-| `context-only` | sí | no | no — sin mecanismo de entrega automática |
+| `hooks-native` | yes | yes | yes — the harness re-anchors context at each session |
+| `config-managed` | yes | no | no — context is delivered; discipline is read |
+| `agents-md-managed` | yes (rendered) | no | no — context is delivered; discipline is read |
+| `context-only` | yes | no | no automatic context-delivery mechanism |
 
-La parte determinística —`awm sensors run`, su código de salida y el gate de calidad— es **idéntica en los seis**. Es un comando real con un exit code real: no depende de que el agente coopere. Lo que varía por tier es cuánto se re-ancla el *contexto*, no cuánto se verifica el *código*.
+The deterministic layer—`awm sensors run`, its exit status, and its quality gate—is **independent of the provider** and identical for all six providers. It is a real command with a real exit status; it does not depend on agent cooperation. Tiers change context delivery, not code verification.
 
 ---
 
-## Estado de soporte por proveedor
+## Provider support status
 
-| Proveedor | Instalación de artefactos | Entrega de contexto | Hooks | Evidencia |
+| Provider | Artifact installation | Context delivery | Hooks | Evidence |
 |---|---|---|---|---|
-| **Claude Code** | ✅ Verificado | ✅ Verificado | ✅ Verificado | Suite + E2E aislado en CI (ubuntu, windows, macos) + playbook [`agent-matrix`](testing/agent-matrix.md) corrido contra el binario real (AG-01…AG-06, CC-01, CC-02), incluido **AG-06 con control negativo**: un `HOME` sin AWM responde que no tiene ninguna skill de AWM, así que lo que la sesión nombró vino de la instalación observada y no de su ambiente. |
-| **Codex** | ✅ Verificado | ✅ Verificado | ✅ Verificado | Playbook completo contra `codex-cli 0.146.0` real, en una máquina con `CODEX_HOME`. **El hook se observó ejecutándose**: Codex mostró su prompt `Hooks need review`, se otorgó la confianza, la sesión imprimió `Running SessionStart hook` y el hook dejó su `heartbeat.json`. `hook.trust: healthy`, `overall: healthy`. Evidencia abajo. |
-| **OpenCode** | ✅ Verificado | ✅ Verificado | ⛔ No tiene | Playbook aislado ejecutado el 2026-08-10 en macOS 15.6 arm64 con OpenCode 1.16.2 y AWM 6.4.1. Prueba causal de AG-06: sin symlinks de skills visibles, una sesión con `opencode.json.instructions` recitó el orden exacto de prioridad del contexto materializado; al retirar únicamente `instructions`, una nueva invocación con el mismo prompt dijo no tener instrucciones AWM. |
-| **Cursor** | ✅ Verificado | ⚠ Sin verificar | ⛔ No tiene | El `.mdc` se genera, se valida su forma **y se verifica que su contenido siga intacto** (marcador `alwaysApply:`). Que Cursor **cargue** un `.mdc` con `alwaysApply: false` no fue observado. |
-| **Copilot** | ✅ Verificado (solo proyecto) | ✅ Verificado | ⛔ No tiene | Playbook aislado ejecutado el 2026-08-10 en macOS 15.6 arm64 con Copilot Pro en VS Code y AWM 6.4.1. CP-01 rechazó scope global explicando que no hay descubrimiento a nivel usuario; CP-02 generó 36 `.instructions.md`. Una conversación nueva citó `using-awm`, `development-process` y `writing-plans` en References y respondió correctamente `awm preflight`. |
-| **Antigravity** | ✅ Verificado | ⛔ No tiene mecanismo | ⛔ No tiene | Que Antigravity **lea** `global_workflows/` no fue observado. |
+| **Claude Code** | ✅ Verified | ✅ Verified | ✅ Verified | CI suite and isolated E2E coverage, plus the real-binary [`agent-matrix`](testing/agent-matrix.md) playbook. |
+| **Codex** | ✅ Verified | ✅ Verified | ✅ Verified | Real-binary playbook verified configuration under `CODEX_HOME`, trusted `SessionStart`, and the resulting heartbeat. The minimum supported version is `0.145.0`, from `providers/index.ts`. |
+| **OpenCode** | ✅ Verified | ✅ Verified | ⛔ Unsupported by provider | Isolated real-binary playbook verifies the `instructions` configuration path; OpenCode has no hook mechanism. |
+| **Cursor** | ✅ Verified | ⚠ Unverified | ⛔ Unsupported by provider | AWM renders and integrity-checks the `.mdc` rule; loading it in a real Cursor session is not recorded. |
+| **Copilot** | ✅ Verified (project only) | ✅ Verified | ⛔ Unsupported by provider | Project-scoped rendered instructions and context were verified with the provider. Global skill delivery is deliberately unsupported. |
+| **Antigravity** | ✅ Verified | ⛔ Unsupported by provider | ⛔ Unsupported by provider | Artifact delivery is verified. It has no managed context or hook mechanism. |
 
-### Las decisiones ⛔, con su razón
+### Unsupported scope vs. absent configuration
 
-Ninguna de estas es una tarea pendiente. Son límites del proveedor, no del producto:
+An unsupported capability is an explicit provider limit; an absent configuration path means AWM has no confirmed file-based path and does not invent one. Neither is a pending defect.
 
-- **Copilot no tiene scope global.** GitHub Copilot no expone ningún mecanismo de descubrimiento de skills a nivel usuario. Las skills van por proyecto. `awm add -a copilot --scope global` **debe fallar nombrando esa razón**; un stack trace genérico ahí es un bug.
-- **Cursor no tiene archivo de contexto global.** Sus "User Rules" viven dentro de la configuración de la app, no en un archivo en disco. AWM **no inventa una ruta**: declara `null` y lo reporta como N/A, no como error.
-- **Antigravity no tiene mecanismo de entrega de contexto.** Ni hooks ni archivo de instrucciones. Recibe artefactos; la disciplina de proceso se lee, no se impone.
-- **OpenCode, Cursor, Copilot y Antigravity no tienen hooks.** No existe el mecanismo en esos productos. `awm doctor` **no emite fila de hook** para ellos — un ✖ ahí sería una falsa alarma con un remedio imposible.
-
----
-
-## Estado de soporte por sistema operativo
-
-| Sistema | Nivel | Evidencia |
-|---|---|---|
-| **Linux** | ✅ Verificado | Matriz de CI en cada PR (`ubuntu-latest`), suite completa |
-| **Windows** | ✅ Verificado | Matriz de CI en cada PR (`windows-latest`), suite completa. Cubre junctions, PATHEXT y separadores. Playbook manual registrado el 2026-08-10 en Windows Server 2022 Datacenter, Node 24.19.0: CORE-01…20 y WIN-01…06 (ver [os-matrix](testing/os-matrix.md)), corrido primero contra AWM 6.4.1 — encontró 4 bugs reales (banner de `--json`, `remove --yes` sin saltar el prompt de scope, `add --method copy` ignorado, `.cmd` de Codex no resuelto), cerrados en [#68](https://github.com/Kodria/agentic-workflow/pull/68) (AWM 6.4.2). WIN-05 quedó `BLOCKED` por una precondición del propio check ajena a Windows. |
-| **macOS** | ✅ Verificado | Matriz de CI en cada PR (`macos-latest`) más playbook manual registrado el 2026-08-10 en macOS 15.6 arm64, Node 24.18.0 y AWM 6.4.1: CORE-01…20 y MAC-01…04. |
-| **WSL** | ⚠ Sin verificar | Se comporta como Linux por diseño; sin ejecución registrada. Ver la advertencia de rutas cruzadas en [os-matrix](testing/os-matrix.md). |
-
-**Node.js:** 22 o superior (declarado en `engines`). Versiones menores no están soportadas.
-
-### Capacidades por comando, donde el soporte NO es uniforme
-
-Casi todo el CLI se comporta igual en los cuatro sistemas. Estas son las excepciones, enunciadas para que nadie las descubra en una demo:
-
-| Capacidad | Linux / macOS / WSL | Windows nativo |
-|---|---|---|
-| `init` · `update` · `sync` · `add` · `remove` · `sensors` · `preflight` · `doctor` · `export` · `backup` · hooks | ✅ Verificado | ✅ Verificado (matriz de CI) |
-| Instalación por **symlink** (updates se propagan solos) | ✅ Verificado | ✅ Verificado vía *junction* para directorios. Para archivos requiere Modo Desarrollador; si no, cae a **copia** — funciona, pero `awm update` deja de propagar y hay que reinstalar. |
-| `awm watch` — supervisión y gate | ✅ Verificado | ✅ Verificado |
-| `awm watch` — **el wrapper sobrevive a la muerte del supervisor** | ✅ Verificado | ⚠ **Sin verificar.** En POSIX la garantía se sostiene con `detached: true` (sesión nueva, sobrevive un SIGKILL al padre). En win32, dos rondas reales de CI no encontraron una configuración de spawn que sostenga la misma garantía, así que el E2E de crash-recovery tiene alcance POSIX. Ver `cli/src/core/journal/process.ts`. |
-
-Esa última fila es la única capacidad del producto con un nivel distinto según el sistema operativo. No es una regresión pendiente: es un límite conocido, con el intento registrado.
-
-### Lo que encontró agregar macOS
-
-Vale registrarlo porque justifica la distinción entre los dos primeros niveles. macOS estaba en `⚠` únicamente porque nadie lo había agregado a la matriz — "nada es específico de macOS en el código" era el argumento. Su primera corrida encontró un defecto de producto:
-
-En macOS `/var/folders/…` es un symlink a `/private/var/folders/…`. `planInitMutationTargets` derivaba unos destinos de `cwd` tal cual y otros de `findProjectRoot(cwd)`, que canonicaliza — así que enumeraba **el mismo archivo dos veces**, una por forma. Esa lista es la que el backup respalda y la que el rollback restaura: un archivo con dos entradas se respalda dos veces y se restaura dos veces, en el mecanismo cuyo único trabajo es dejar el disco como estaba. En Linux y Windows las dos formas coinciden y el `Set` lo tapaba.
-
-El bug no era de macOS: cualquier `cwd` alcanzado a través de un symlink lo reproduce. macOS solo fue el primero en pisarlo. Está cubierto por un test que arma esa situación a mano y falla en cualquier sistema.
-
-### Advertencia de Windows que sí es real
-
-Crear un symlink de directorio en Windows requiere `SeCreateSymbolicLinkPrivilege`, denegado por defecto en cuentas sin privilegios. AWM usa **junctions** para directorios (no requieren privilegio) y cae a **copia** para archivos cuando el symlink falla. La consecuencia práctica: en el modo copia, `awm update` **no propaga** cambios del registry automáticamente — hay que volver a instalar. Está soportado y funciona; simplemente no es el mismo mecanismo.
+- **Claude Code:** workflows are not a provider capability; hooks and managed context are configured.
+- **Codex:** workflows are not a provider capability; `CODEX_HOME` is the configuration root when set, while shared skills remain under `~/.agents/skills`.
+- **OpenCode:** workflows and hooks are not provider capabilities; its `opencode.json` instructions path is configured.
+- **Cursor:** profiles, workflows, and hooks are not provider capabilities. Its global context path is absent (`null`), not an unsupported filesystem scope, because its user rules are app settings rather than a confirmed file.
+- **Copilot:** global skills are explicitly **unsupported**: it has no user-level skill discovery. `awm add -a copilot --scope global` must fail with that reason. Profiles, workflows, hooks, and a global context file are not provider capabilities.
+- **Antigravity:** profiles, hooks, and managed context delivery are not provider capabilities; its skill and workflow paths are configured.
 
 ---
 
-## Registries de contenido
+## Operating-system support status
 
-| Registry | Nivel | Rol |
+| System | Level | Evidence |
 |---|---|---|
-| `awm-baseline-registry` | ✅ Verificado | Sembrado por defecto en `awm init` |
-| `awm-documentation-registry` | ⚠ Sin verificar | Opt-in vía `awm registry add` |
-| Registries propios de un equipo | ✅ Verificado | Cualquier repo git con el layout de contenido. Ver [runbook](runbook.md). |
-| Hosts de git | ✅ Verificado | Agnóstico al host (GitHub, GitLab, self-hosted): se resuelve por URL de git, sin API del proveedor. |
+| **Linux** | ✅ Verified | Full suite in CI on every pull request and push to `main` (`ubuntu-latest`). |
+| **Windows (native)** | ✅ Verified | Full suite in CI on every pull request and push to `main` (`windows-latest`). |
+| **macOS** | ✅ Verified | Full suite in CI on every pull request and push to `main` (`macos-latest`). |
+| **WSL** | ⚠ Unverified | WSL is Linux (`process.platform === 'linux'`), but requires the Linux filesystem and has no separate recorded run. See [os-matrix](testing/os-matrix.md). |
 
-## Packs de sensores
+**Node.js:** 22 or newer, as declared in `engines`. Older versions are unsupported.
 
-| Pack | Nivel | Herramientas |
+### Where support differs by command
+
+Most CLI commands behave consistently across supported systems. The exceptions are explicit:
+
+| Capability | Linux / macOS / WSL | Native Windows |
 |---|---|---|
-| `js-ts` | ✅ Verificado | tsc, eslint, semgrep, tests |
-| `python` | ⚠ Sin verificar | mypy, ruff |
-| `shell` | ⚠ Sin verificar | shellcheck |
-| `generic` | ✅ Verificado | semgrep |
+| `init` · `update` · `sync` · `add` · `remove` · `sensors` · `preflight` · `doctor` · `export` · `backup` · hooks | ✅ Verified | ✅ Verified in CI |
+| **Symlink** installation (updates propagate automatically) | ✅ Verified | Directory artifacts use **junctions**. File symlinks require Developer Mode; otherwise AWM falls back to a **copy**. Copy mode works, but `awm update` cannot propagate registry changes—reinstall the copied artifact. |
+| `awm watch` supervision and gate | ✅ Verified | ✅ Verified |
+| `awm watch`: wrapper survives supervisor death | ✅ Verified | ⚠ **Unverified.** POSIX uses `detached: true` so the wrapper survives parent termination. The crash-recovery E2E is POSIX-only; native Windows does not claim that guarantee. See `cli/src/core/journal/process.ts`. |
 
-Un pack ausente del registry instalado **no se inventa**: `awm sensors init` cae a un pack que sí exista, nombra el que falta, y `awm preflight` falla mientras el gate esté vacío.
+The final row is the only product capability with different OS evidence. It is a documented native-Windows limitation, not an assertion of crash recovery that has not been verified.
+
+### Windows symlink caveat
+
+Windows directory symlinks need `SeCreateSymbolicLinkPrivilege`, which ordinary accounts usually lack. AWM therefore uses **junctions** for directories and falls back to a **copy** when a file symlink fails. Copy-mode artifacts are supported but must be reinstalled after their registry source changes.
 
 ---
 
-## 🔜 Lo que falta desarrollar
+## Content registries
 
-Enunciado como trabajo, no como defecto. Esto es lo que hay que construir para subir de nivel algo que hoy está en ⚠ o para ampliar el alcance:
+| Registry | Level | Role |
+|---|---|---|
+| `awm-baseline-registry` | ✅ Verified | Seeded by default by `awm init`. |
+| `awm-documentation-registry` | ⚠ Unverified | Opt in with `awm registry add`. |
+| Team-owned registries | ✅ Verified | Any Git repository with the supported content layout. See the [runbook](runbook.md). |
+| Git hosts | ✅ Verified | Host-agnostic (GitHub, GitLab, and self-hosted); resolved from the Git URL without provider APIs. |
 
-| # | Falta | Por qué importa | Qué destraba |
+## Sensor packs
+
+| Pack | Level | Tools |
+|---|---|---|
+| `js-ts` | ✅ Verified | tsc, eslint, semgrep, tests |
+| `python` | ⚠ Unverified | mypy, ruff |
+| `shell` | ⚠ Unverified | shellcheck |
+| `generic` | ✅ Verified | semgrep |
+
+An absent pack is **not invented**: `awm sensors init` selects an available pack and reports the missing one; `awm preflight` fails while the gate is empty.
+
+---
+
+## 🔜 Planned work
+
+These are identified improvements, not current product defects:
+
+| # | Work | Why it matters | Result |
 |---|---|---|---|
-| 1 | **CI con binarios de agente reales** | Es la única razón por la que Cursor, Copilot, OpenCode y Antigravity siguen en ⚠. Ninguna cantidad de tests unitarios la sustituye. | Sube 4 proveedores de ⚠ a ✅ |
-| 3 | **Reconciliación de scope de proyecto en `awm update`** | `update` reconcilia artefactos de máquina; los de proyecto son trabajo de `awm sync`. Un proyecto sin `sync` queda desactualizado en silencio. | Elimina un paso manual |
-| 4 | **Pruebas de los packs `python` y `shell` contra proyectos reales** | Existen y están completos; nadie los corrió contra un repo Python o de shell de verdad. | Sube 2 packs a ✅ |
-| 5 | **Un séptimo proveedor** | El modelo de capacidades ya lo soporta como una edición localizada (tabla de renderers + entrada de provider). No hay ninguno pedido todavía. | Amplía la cobertura |
+| 1 | **CI with real provider binaries** | Unit tests cannot replace real-provider execution. | More provider rows can become verified. |
+| 3 | **Project-scope reconciliation in `awm update`** | `update` reconciles machine artifacts; `awm sync` owns project artifacts. | Removes a manual synchronization step. |
+| 4 | **Run `python` and `shell` packs against real projects** | Their tool integration is implemented but lacks recorded real-project evidence. | Can verify two sensor packs. |
+| 5 | **A seventh provider** | The capability model supports a localized provider entry and renderer mapping. | Broadens coverage. |
 
 ---
 
-## Cómo verificar todo esto vos mismo
+## Verify these claims
 
-Nada de esta matriz pide que confíes en ella. Cada afirmación tiene una forma de comprobarse:
+Each claim has a direct check:
 
-| Afirmación | Cómo la comprobás |
+| Claim | Verification |
 |---|---|
-| Las capacidades por proveedor | `npm run docs:matrix` — si el documento cambia, el documento estaba mal |
-| Que la tabla no puede quedar desalineada | `npx jest tests/structural/support-matrix-is-current` |
-| Linux y Windows | La matriz de CI de cualquier PR |
-| Todo lo demás | Los playbooks: [core-acceptance](testing/core-acceptance.md), [os-matrix](testing/os-matrix.md), [agent-matrix](testing/agent-matrix.md) |
+| Provider capabilities | `npm run docs:matrix`—a change means the checked-in generated block was stale. |
+| The generated table cannot drift | `npx jest tests/structural/support-matrix-is-current` |
+| Linux, native Windows, and macOS | The CI matrix on every pull request and push to `main`. |
+| Provider and OS acceptance | [core-acceptance](testing/core-acceptance.md), [os-matrix](testing/os-matrix.md), and [agent-matrix](testing/agent-matrix.md). |
 
-Los playbooks están escritos para que los corras vos **o para que se los pases a un agente y los corra él**. Piden `--json` y aserciones sobre campos parseados y códigos de salida, no sobre texto legible.
-
-
----
-
-## Evidencia — los hooks de Codex, de ❌ a ✅ en el mismo día (2026-08-09)
-
-Vale contarlo entero porque es el caso que justifica los cinco niveles.
-
-**Primera corrida — ❌.** El script era sano (a mano emitía su JSON y escribía el heartbeat),
-pero tras una sesión real de Codex no aparecía heartbeat en **ninguna** de las dos rutas
-registradas. La matriz pasó de ⚠ a ❌: no era "falta verificar", se verificó y no corría.
-
-**La causa no era la que suponíamos.** La hipótesis era la compuerta de confianza. El
-diagnóstico encontró otra cosa: esa máquina define `CODEX_HOME`, Codex lee
-`$CODEX_HOME/hooks.json`, y AWM escribía en `~/.codex/hooks.json`. Instalación correcta, en
-el archivo que nadie mira — y `doctor` lo reportaba presente porque verificaba en el mismo
-lugar equivocado donde había escrito. Corregido en la v6.0.0 (ver
-[`decisions.md`](decisions.md) D-011).
-
-**Segunda corrida — ✅.** Con el hook registrado donde Codex mira, Codex mostró:
-
-```
-Hooks need review
-1 hook is new or changed.
-Hooks can run outside the sandbox after you trust them.
-```
-
-Otorgada la confianza (`Trust all and continue`), la sesión imprimió `Running SessionStart
-hook: Loading AWM session state` → `SessionStart hook (completed)` y entregó el contexto de
-AWM. El hook dejó su `heartbeat.json`, y `awm hooks status` pasó a `Trust: ✓ healthy`,
-`Status: HEALTHY`. **Sin bypass** — sesión normal.
-
-**Lo que deja el episodio:**
-
-- La compuerta de confianza era real, pero **no** era la causa: nunca se llegó a ella
-  porque el hook no estaba donde Codex lo busca. Una hipótesis plausible que resultó falsa,
-  y solo el diagnóstico de la ruta lo separó.
-- `hooks-native` para Codex ahora es una promesa con evidencia detrás.
-- El código `open-hooks-trust` era un remedio inejecutable: `doctor` lo emitía y no estaba
-  explicado en ningún lado. Ahora `awm hooks status` reproduce el prompt exacto que Codex
-  muestra y nombra la opción que otorga la confianza — texto observado, no parafraseado.
-**Actualización (misma fecha):** la causa de que el hook no se descubriera está
-identificada y corregida — AWM ignoraba `CODEX_HOME` y escribía en `~/.codex/hooks.json`
-mientras Codex leía `$CODEX_HOME/hooks.json` (ver [`decisions.md`](decisions.md) D-011).
-**Esto no sube a Codex de ❌ todavía:** saber por qué no se descubría no es lo mismo que
-haberlo visto correr. Falta una corrida donde el hook, ya descubierto, deje su heartbeat.
+The playbooks use `--json`, parsed fields, and exit statuses rather than human-readable output. For Codex configuration-root evidence, see [`decisions.md`](decisions.md) D-011.
