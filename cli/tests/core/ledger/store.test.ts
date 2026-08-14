@@ -52,6 +52,11 @@ describe('ledger store — add/list', () => {
         expect(JSON.parse(fs.readFileSync(ledgerPath(cwd, 'feat-x'), 'utf-8'))).toMatchObject({ defectClass: 'lint-errors' });
     });
 
+    test('rejects an invalid direct entry before it can cross the durable boundary', () => {
+        expect(() => addEntry(cwd, { ...entry(), defectClass: 'Bad_ID' })).toThrow(/invalid-defect-class/i);
+        expect(fs.existsSync(ledgerPath(cwd, 'feat-x'))).toBe(false);
+    });
+
     test('keeps a legacy entry without defectClass valid and unclassified', () => {
         const parsed = parseLedgerEntry(entry(), 'line 1');
         expect(parsed).toMatchObject({ ok: true, entry: { defectClass: undefined } });

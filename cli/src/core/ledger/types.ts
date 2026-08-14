@@ -58,7 +58,8 @@ export function parseLedgerEntry(input: unknown, source: string): LedgerParseRes
     if ('ref' in input && input.ref !== undefined && typeof input.ref !== 'string') {
         return { ok: false, source, reason: 'invalid-ref' };
     }
-    if ('defectClass' in input && (typeof input.defectClass !== 'string' || !DEFECT_CLASS.test(input.defectClass))) {
+    if ('defectClass' in input && input.defectClass !== undefined
+        && (typeof input.defectClass !== 'string' || !DEFECT_CLASS.test(input.defectClass))) {
         return { ok: false, source, reason: 'invalid-defect-class' };
     }
     return {

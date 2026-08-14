@@ -25,9 +25,11 @@ export function ledgerPath(cwd: string, branch: string): string {
 }
 
 export function addEntry(cwd: string, entry: LedgerEntry): void {
+    const parsed = parseLedgerEntry(entry, 'ledger entry');
+    if (!parsed.ok) throw new Error(`invalid ledger entry: ${parsed.reason}`);
     const p = ledgerPath(cwd, entry.branch);
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.appendFileSync(p, JSON.stringify(entry) + '\n', 'utf-8');
+    fs.appendFileSync(p, JSON.stringify(parsed.entry) + '\n', 'utf-8');
 }
 
 export function listEntries(cwd: string, branch: string): LedgerEntry[] {
