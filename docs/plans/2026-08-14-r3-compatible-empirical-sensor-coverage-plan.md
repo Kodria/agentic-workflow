@@ -121,7 +121,7 @@ T1 contratos/parsers
  -> T5 ledger tipado y scan bounded
  -> T6 cobertura empírica y CLI
  -> T7 documentación y freshness CLI
- -> T8 aceptación + PR CLI + npm 7.0.0
+ -> T8 aceptación + PR CLI + npm 8.0.0
  -> T9 gate/schema/autores registry
  -> T10 pack js-ts
  -> T11 packs python/shell/generic
@@ -944,11 +944,11 @@ Invocar `requesting-code-review`; por cada hallazgo agregar un test discriminant
 git status --short --branch
 git diff origin/main...HEAD --check
 git push -u origin feat/issue-20-r3-empirical-coverage
-gh pr create --repo Kodria/agentic-workflow --base main --head feat/issue-20-r3-empirical-coverage --title "feat(sensors)!: add compatible empirical coverage" --body "Refs #20; resolves the CLI portion of #70; registry v2 remains ordered after npm 7.0.0."
+gh pr create --repo Kodria/agentic-workflow --base main --head feat/issue-20-r3-empirical-coverage --title "feat(sensors)!: add compatible empirical coverage" --body "Refs #20; resolves the CLI portion of #70; registry v2 remains ordered after npm 8.0.0."
 gh pr checks --watch
 ```
 
-Expected: PR URL real y CI verde en tres OS. Tras merge, esperar release workflow verde y verificar `npm view agentic-workflow-manager@7.0.0 version` devuelve `7.0.0` antes de T9. No elevar todavía el registry.
+Expected: PR URL real y CI verde en tres OS. Tras merge, esperar release workflow verde y verificar `npm view agentic-workflow-manager@8.0.0 version` devuelve `8.0.0` antes de T9. No elevar todavía el registry.
 
 ### Task 9: Contrato de autor pack v2 y gate estructural del registry
 
@@ -1311,7 +1311,7 @@ _Requirements: R7.7, R7.8, R9.1, R9.2, R9.3, R9.4, R10.11, R10.13_
 
 - [ ] **Step 1: Instalar consumidor publicado y pin exacto en homes temporales**
 
-Crear tmpdirs con `mktemp -d`; instalar `agentic-workflow-manager@7.0.0` allí y clonar/registrar exclusivamente `awm-baseline-registry@v2.0.0`. No tocar `~/.awm`. Guardar comandos y hashes, no rutas temporales absolutas.
+Crear tmpdirs con `mktemp -d`; instalar `agentic-workflow-manager@8.0.0` allí y clonar/registrar exclusivamente `awm-baseline-registry@v2.0.0`. No tocar `~/.awm`. Guardar comandos y hashes, no rutas temporales absolutas.
 
 - [ ] **Step 2: Ejecutar matriz end-to-end new/legacy/future**
 
@@ -1332,7 +1332,7 @@ npx jest tests/structural/support-matrix-is-current.test.ts --runInBand
 git diff --check ../docs/support-matrix.md
 ```
 
-Expected: tabla idéntica a manifests de `v2.0.0`. `published-acceptance.json` registra `cliVersion:7.0.0`, `registryTag:v2.0.0`, commit/tag hashes, resultado 3-OS y hashes de fixtures.
+Expected: tabla idéntica a manifests de `v2.0.0`. `published-acceptance.json` registra `cliVersion:8.0.0`, `registryTag:v2.0.0`, commit/tag hashes, resultado 3-OS y hashes de fixtures.
 
 - [ ] **Step 5: Ejecutar reconciliación completa de ambos repos**
 
@@ -1357,7 +1357,7 @@ REGISTRY_PR_URL=$(gh pr list --repo Kodria/awm-baseline-registry --head feat/iss
 test -n "$CLI_PR_URL" && test -n "$REGISTRY_PR_URL"
 ```
 
-Comentar issue #20 con PRs, npm 7.0.0, registry v2.0.0, comandos, schemas, matriz y retro. Cerrar #70 citando las variantes ESLint/TS y hardening opt-in. Cerrar #20 solo si sus demás releases están completas; si no, dejar baton exacto sin afirmar cierre global.
+Comentar issue #20 con PRs, npm 8.0.0, registry v2.0.0, comandos, schemas, matriz y retro. Cerrar #70 citando las variantes ESLint/TS y hardening opt-in. Cerrar #20 solo si sus demás releases están completas; si no, dejar baton exacto sin afirmar cierre global.
 
 - [ ] **Step 7: Persistir aceptación, solicitar review final y transferir a QA/retro/finishing**
 
@@ -1428,7 +1428,7 @@ Invocar `requesting-code-review`, corregir todo hallazgo, marcar únicamente che
 | R7.3 | T4 | renderer tests exigen envelope público `schemaVersion: 2` |
 | R7.4 | T1, T4, T9 | contratos prueban `coverage.schemaVersion: 1` anidado |
 | R7.5 | T1 | corpus future-schema rechaza versiones desconocidas con mensaje accionable |
-| R7.6 | T8 | suite/release verifica versión CLI major `7.0.0` |
+| R7.6 | T8 | suite/release verifica versión CLI major `8.0.0` |
 | R7.7 | T13 | aceptación exige dos URLs reales y registra ambos artefactos publicados |
 | R7.8 | T8, T13 | E2E legacy y aceptación publicada prueban orden CLI-antes-registry |
 | R8.1 | T5 | `scan.test.ts` cubre archivos, bytes, líneas, refs y profundidad acotados |
@@ -1452,7 +1452,7 @@ Invocar `requesting-code-review`, corregir todo hallazgo, marcar únicamente che
 | R10.10 | T7 | ejemplos JSON documentados pasan los parsers productivos |
 | R10.11 | T7, T12, T13 | tests de freshness regeneran ambas matrices y cotejan el tag publicado |
 | R10.12 | T7, T12 | tests de documentación activa y enlaces prueban reachability bidireccional |
-| R10.13 | T8, T12, T13 | evidencia exige npm 7.0.0, registry v2.0.0, hashes y URLs reales |
+| R10.13 | T8, T12, T13 | evidencia exige npm 8.0.0, registry v2.0.0, hashes y URLs reales |
 | R10.14 | T7 | `active-documentation.test.ts` verifica inglés y prohíbe prosa R3 fuera de owners |
 
 ## Auto-revisión y analyze gate
