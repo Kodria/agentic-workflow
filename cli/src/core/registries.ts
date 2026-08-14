@@ -108,7 +108,14 @@ export function capabilityRoot(dirName: string): string | null {
 
 /** Un registry válido tiene ≥1 dir de contenido en su raíz. */
 export function validateRegistryLayout(root: string): boolean {
-    return CONTENT_DIR_NAMES.some((d) => fs.existsSync(path.join(root, d)));
+    return CONTENT_DIR_NAMES.some((d) => {
+        const candidate = path.join(root, d);
+        try {
+            return fs.statSync(candidate).isDirectory();
+        } catch {
+            return false;
+        }
+    });
 }
 
 export type RegistrySyncResult =
