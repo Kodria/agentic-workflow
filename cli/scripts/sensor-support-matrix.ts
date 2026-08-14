@@ -12,6 +12,13 @@ export const SENSOR_BEGIN_MARKER = '<!-- BEGIN GENERATED: sensor-pack-support --
 export const SENSOR_END_MARKER = '<!-- END GENERATED: sensor-pack-support -->';
 export const SENSOR_PACKS = ['generic', 'js-ts', 'python', 'shell'] as const;
 export const SENSOR_DOC_PATH = path.resolve(__dirname, '..', '..', 'docs', 'support-matrix.md');
+export const R3_PREPUBLICATION_FIXTURE_RELATIVE_PATH = 'tests/fixtures/sensor-support-matrix/registry';
+/**
+ * The CLI R3 contract is implemented before the baseline registry publishes its
+ * v2 manifests. The generated matrix intentionally renders this pinned fixture,
+ * never an invented description of an unpublished registry release.
+ */
+export const R3_PREPUBLICATION_FIXTURE_PURPOSE = 'R3 pre-publication contract fixture';
 
 function registryPath(value: unknown): string {
     if (typeof value !== 'string' || value.trim().length === 0 || value.includes('\0')) {
@@ -48,7 +55,7 @@ function variants(pack: Extract<ParsedSensorPack, { kind: 'v2' }>['pack']): stri
 /** Pure renderer used by freshness tests and the documentation command. */
 export function renderSensorSupportMatrix(registryRoot: unknown): string {
     const lines = [
-        '### Sensor-pack compatibility evidence',
+        `### Sensor-pack compatibility contract (${R3_PREPUBLICATION_FIXTURE_PURPOSE})`,
         '',
         '| Pack | Contract | Version-aware variants and certified ranges | Evidence status |',
         '|---|---|---|---|',
@@ -57,11 +64,11 @@ export function renderSensorSupportMatrix(registryRoot: unknown): string {
         if (parsed.kind === 'legacy') {
             lines.push(`| \`${name}\` | legacy pack | No v2 variants declared | compatible-unverified — migrate the pack before claiming version certification |`);
         } else {
-            lines.push(`| \`${name}\` | pack schema v2 | ${variants(parsed.pack)} | Manifest-declared ranges; real-tool and OS certification is recorded by the registry release evidence |`);
+            lines.push(`| \`${name}\` | pack schema v2 | ${variants(parsed.pack)} | Fixture-declared ranges only; real-tool and OS certification awaits published registry release evidence |`);
         }
     }
     lines.push('');
-    lines.push('> Generated from four first-party `sensor-packs/*/pack.json` manifests. **Do not edit by hand** — `npm run docs:matrix` regenerates this block.');
+    lines.push('> Generated from the pinned R3 pre-publication contract fixture, not the published `awm-baseline-registry` manifests. **Do not edit by hand** — `npm run docs:matrix` regenerates this block. T13 verifies the actual registry tag and release evidence.');
     return lines.join('\n');
 }
 

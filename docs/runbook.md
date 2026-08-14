@@ -40,13 +40,16 @@ loop is:
 `awm sensors run` is the full completion gate. `--fast` and `--slow` are useful
 iteration slices, not substitutes for the full run.
 
-Before the retrospective archives a branch ledger, it automatically evaluates
-coverage feedback. Use the same evidence manually when investigating a control
-gap:
+Before the retrospective archives a branch ledger, run coverage feedback
+manually while active and archived evidence remains bounded and attributable:
 
 ```bash
 awm sensors coverage --min 2
 ```
+
+Run `awm sensors coverage --min 2` manually before archive. Automatic
+coverage-before-archive enforcement is delivered by the registry in T12; until
+then, the CLI reports evidence but does not intercept `awm ledger archive`.
 
 `--min` changes recurrence emphasis only; coverage remains read-only. Treat a
 reported **compatibility drift** as a configuration review: inspect the selected

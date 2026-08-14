@@ -313,8 +313,10 @@ envelope. Its `static` section reports declared coverage and its `empirical`
 section reports bounded, sanitized ledger clustering. `--min <count>` is a
 positive safe integer (default `2`) that controls the recurrence emphasis; it
 does not execute sensors or modify the ledger. Human output shows class
-descriptions, compatibility states, and pack-provided remedies. It excludes
-configured commands, evidence paths, marker values, and inspected file content.
+descriptions, compatibility states, and pack-provided remedies. It prints safe,
+sanitized evidence references and safe cluster signatures, and never ledger
+descriptions, raw ledger lines, or unsafe values. It does not expose selected
+sensor commands, marker values, or inspected file content.
 
 Coverage gaps, unverifiable custom configuration, a missing `.awm/sensors.json`, and packs without a coverage reference are informative and exit `0`. A missing manifest returns `inconclusive/not_configured` and recommends `awm sensors init`; a legacy pack returns the distinct `inconclusive/no_reference` state and is never reported as covered. Malformed or unreadable manifests, packs, and coverage contracts exit non-zero with an actionable error.
 

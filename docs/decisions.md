@@ -480,4 +480,6 @@ review, never as a hidden rewrite during a diagnostic command.
 The retrospective consumes static and empirical coverage while active and
 archived ledger evidence is still bounded and attributable. It may recommend a
 new reusable control from repeated classified findings, but archival must not
-erase the feedback signal first.
+erase the feedback signal first. Until the registry's T12 integration is
+published, this is an operating rule: run `awm sensors coverage --min 2`
+manually before `awm ledger archive`; the CLI does not yet enforce ordering.

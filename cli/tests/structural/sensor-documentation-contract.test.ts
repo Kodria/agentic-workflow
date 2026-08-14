@@ -53,4 +53,15 @@ describe('R3 canonical sensor documentation', () => {
         expect(reference).toContain('awm sensors coverage [--json] [--min <count>]');
         expect(reference).toContain('--defect-class <id>');
     });
+
+    test('does not overstate the human coverage renderer or retrospective archive wiring', () => {
+        const reference = read('docs/cli-reference.md');
+        const runbook = read('docs/runbook.md');
+
+        expect(reference).toMatch(/safe,\s+sanitized evidence references and safe cluster signatures/);
+        expect(reference).toMatch(/never ledger\s+descriptions, raw ledger lines, or unsafe values/);
+        expect(runbook).toContain('Run `awm sensors coverage --min 2` manually before archive');
+        expect(runbook).toMatch(/Automatic\s+coverage-before-archive enforcement is delivered by the registry in T12/);
+        expect(runbook).not.toContain('it automatically evaluates\ncoverage feedback');
+    });
 });

@@ -16,6 +16,7 @@ import {
     BEGIN_MARKER, END_MARKER, DOC_PATH, homeRelative, renderProviderTables, spliceGenerated,
 } from '../../scripts/support-matrix';
 import {
+    R3_PREPUBLICATION_FIXTURE_PURPOSE, R3_PREPUBLICATION_FIXTURE_RELATIVE_PATH,
     SENSOR_BEGIN_MARKER, SENSOR_END_MARKER, renderSensorSupportMatrix, spliceSensorSupportMatrix,
 } from '../../scripts/sensor-support-matrix';
 
@@ -38,11 +39,20 @@ describe('docs/support-matrix.md refleja el codigo', () => {
         expect(doc).toContain(END_MARKER);
     });
 
-    it('the generated v2 sensor-pack block is current', () => {
+    it('the generated pre-publication v2 sensor-pack contract fixture is current', () => {
         const doc = fs.readFileSync(DOC_PATH, 'utf-8');
         expect(doc).toContain(SENSOR_BEGIN_MARKER);
         expect(doc).toContain(SENSOR_END_MARKER);
+        expect(doc).toContain(R3_PREPUBLICATION_FIXTURE_PURPOSE);
+        expect(doc).toContain('not the published `awm-baseline-registry` manifests');
         expect(doc).toBe(spliceSensorSupportMatrix(doc, renderSensorSupportMatrix(SENSOR_FIXTURE_REGISTRY)));
+    });
+
+    it('pins the documentation generator to the declared R3 pre-publication fixture', () => {
+        const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as {
+            scripts?: { ['docs:matrix']?: unknown };
+        };
+        expect(packageJson.scripts?.['docs:matrix']).toContain(`--registry-root ${R3_PREPUBLICATION_FIXTURE_RELATIVE_PATH}`);
     });
 
     it('la tabla nombra a los seis providers declarados', () => {
