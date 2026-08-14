@@ -1,3 +1,8 @@
+## v8.0.0 - 2026-08-14
+
+### Breaking Changes
+- **sensors:** add compatible empirical coverage (#77)
+
 ## Unreleased
 
 ### Breaking changes
