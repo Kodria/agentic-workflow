@@ -605,7 +605,7 @@ _Requirements: R5.1, R5.2, R5.3, R5.11, R5.12, R8.1, R8.2, R8.3_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tests rojos del flag y gramática**
+- [x] **Step 1: Escribir tests rojos del flag y gramática**
 
 ```ts
 test('persists an optional reusable defect class (R5.2)', () => {
@@ -626,13 +626,13 @@ test('keeps an entry without defectClass valid and unclassified (R5.3)', () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar tests rojos**
+- [x] **Step 2: Ejecutar tests rojos**
 
 Run: `cd cli && npx jest tests/commands/ledger/index.test.ts tests/core/ledger/store.test.ts --runInBand`
 
 Expected: FAIL por option/type inexistente.
 
-- [ ] **Step 3: Implementar parser durable completo y CLI**
+- [x] **Step 3: Implementar parser durable completo y CLI**
 
 ```ts
 export const DEFECT_CLASS = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
@@ -649,7 +649,7 @@ export function parseLedgerEntry(input: unknown, source: string): LedgerParseRes
 
 `ledger add` valida el flag antes de construir/escribir. `listEntries` conserva tolerancia legacy, usa el parser y omite malformed sin cambiar su retorno público.
 
-- [ ] **Step 4: Escribir corpus rojo del scan bounded**
+- [x] **Step 4: Escribir corpus rojo del scan bounded**
 
 ```ts
 test('reads direct active and archive files in deterministic order (R5.1)', () => {
@@ -669,11 +669,11 @@ test.each(['external-symlink', 'directory-entry', 'oversize-file', 'too-many-fil
     });
 ```
 
-- [ ] **Step 5: Implementar `scanProjectLedgers`**
+- [x] **Step 5: Implementar `scanProjectLedgers`**
 
 Límites iniciales constantes y configurables por dependencia de test: 256 archivos, 4 MiB por archivo, 20 000 líneas/entries, 64 KiB por línea, 128 refs renderizables por clase y profundidad JSON 16. Usar `lstat`+`realpath`, rechazar symlinks/nonregular/escape, leer solo los dos directorios directos y ordenar path+línea. Wins se parsean y contabilizan como válidos, pero `validFindings` y la salida de análisis solo incluyen findings.
 
-- [ ] **Step 6: Probar sanitización, mutación y commit**
+- [x] **Step 6: Probar sanitización, mutación y commit**
 
 Run:
 
