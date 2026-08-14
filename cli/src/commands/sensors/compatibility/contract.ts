@@ -137,7 +137,9 @@ export function assertNoEqualPriorityOverlap(variants: unknown): void {
         const first = parsed[left];
         for (let right = left + 1; right < variants.length; right++) {
             const second = parsed[right];
-            if (first.priority === second.priority && (semver.intersects(first.certifiedRange, second.certifiedRange) || semver.intersects(first.requirements.toolRange, second.requirements.toolRange))) {
+            const toolRangesIntersect = semver.intersects(first.requirements.toolRange, second.requirements.toolRange);
+            const runtimeRangesIntersect = semver.intersects(first.requirements.runtimeRange, second.requirements.runtimeRange);
+            if (first.priority === second.priority && toolRangesIntersect && runtimeRangesIntersect) {
                 throw new Error(`variants "${first.id}" and "${second.id}" overlap at priority ${first.priority}`);
             }
         }
