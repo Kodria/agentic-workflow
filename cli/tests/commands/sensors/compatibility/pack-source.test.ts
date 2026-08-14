@@ -27,4 +27,18 @@ describe('resolvePackSource', () => {
             expect(() => resolvePackSource('../escape', { registries: [] })).toThrow(/pack/i);
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
+
+    it('rejects a symlinked pack directory even when its target remains inside the registry', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-internal-link-'));
+        try {
+            const packRoot = path.join(root, 'sensor-packs');
+            const target = path.join(packRoot, 'js-ts-source');
+            fs.mkdirSync(target, { recursive: true });
+            fs.writeFileSync(path.join(target, 'pack.json'), '{}');
+            fs.symlinkSync(target, path.join(packRoot, 'js-ts'), 'dir');
+
+            expect(() => resolvePackSource('js-ts', { registries: [{ name: 'linked', remote: '', contentRoot: root }] }))
+                .toThrow(/symbolic|symlink/i);
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
 });

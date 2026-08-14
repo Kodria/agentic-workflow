@@ -15,6 +15,26 @@ function contained(root: string, candidate: string): boolean {
     return candidate.startsWith(prefix);
 }
 
+/** Walk each component under contentRoot with lstat: realpath alone would hide an
+ * internal symlink whose target happens to remain inside the registry. */
+function inspectContainedPack(root: string, pack: string): { candidate: string; stat: fs.Stats } | undefined {
+    const components = ['sensor-packs', pack, 'pack.json'];
+    let candidate = root;
+    for (let index = 0; index < components.length; index++) {
+        candidate = path.join(candidate, components[index]);
+        let stat: fs.Stats;
+        try { stat = fs.lstatSync(candidate); } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+            if ((error as NodeJS.ErrnoException).code === 'ENOTDIR') throw new Error(`pack source ${candidate} has a non-regular or symbolic parent`);
+            throw new Error(`cannot inspect pack source ${candidate}`);
+        }
+        if (stat.isSymbolicLink()) throw new Error(`pack source ${candidate} must not contain symbolic links`);
+        if (index < components.length - 1 && !stat.isDirectory()) throw new Error(`pack source ${candidate} has a non-regular parent`);
+        if (index === components.length - 1) return { candidate, stat };
+    }
+    throw new Error('pack source component walk did not reach pack.json');
+}
+
 /** Resolve only an exact, regular pack.json beneath the first configured registry.
  * Registry order is authority; an unsafe claimed source is a hard failure, not a fallback. */
 export function resolvePackSource(pack: unknown, options: { registries?: RegistrySource[] } = {}): PackSource {
@@ -23,14 +43,10 @@ export function resolvePackSource(pack: unknown, options: { registries?: Registr
     if (!Array.isArray(registries)) throw new Error('registries must be an array');
     for (const registry of registries) {
         if (!registry || typeof registry.contentRoot !== 'string' || registry.contentRoot.trim() === '') throw new Error('registry has an invalid content root');
-        const candidate = path.join(registry.contentRoot, 'sensor-packs', pack, 'pack.json');
-        let stat: fs.Stats;
-        try { stat = fs.lstatSync(candidate); } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-            if ((error as NodeJS.ErrnoException).code === 'ENOTDIR') throw new Error(`pack source ${candidate} has a non-regular or symbolic parent`);
-            throw new Error(`cannot inspect pack source ${candidate}`);
-        }
-        if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`pack source ${candidate} must be a contained regular file, never a symbolic link`);
+        const inspected = inspectContainedPack(registry.contentRoot, pack);
+        if (!inspected) continue;
+        const { candidate, stat } = inspected;
+        if (!stat.isFile()) throw new Error(`pack source ${candidate} must be a contained regular file, never a symbolic link`);
         if (stat.size > MAX_PACK_BYTES) throw new Error(`pack source ${candidate} exceeds the 1 MiB limit`);
         let root: string; let real: string;
         try { root = fs.realpathSync(registry.contentRoot); real = fs.realpathSync(candidate); } catch { throw new Error(`cannot canonicalize pack source ${candidate}`); }
