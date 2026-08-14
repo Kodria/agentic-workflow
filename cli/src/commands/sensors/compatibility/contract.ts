@@ -109,8 +109,8 @@ export function parseStructuredCommand(input: unknown, source: unknown): Structu
     if ('environment' in value) {
         const environment = record(value.environment, source, 'command.environment');
         fields(environment, ['ESLINT_USE_FLAT_CONFIG'], source, 'command.environment');
-        if (environment.ESLINT_USE_FLAT_CONFIG !== 'false' || Object.keys(environment).length !== 1) invalid(source, 'command.environment must be the allowlisted ESLINT_USE_FLAT_CONFIG=false mapping');
-        command.environment = { ESLINT_USE_FLAT_CONFIG: 'false' };
+        if ((environment.ESLINT_USE_FLAT_CONFIG !== 'true' && environment.ESLINT_USE_FLAT_CONFIG !== 'false') || Object.keys(environment).length !== 1) invalid(source, 'command.environment must be the exact allowlisted ESLINT_USE_FLAT_CONFIG=true or false mapping');
+        command.environment = { ESLINT_USE_FLAT_CONFIG: environment.ESLINT_USE_FLAT_CONFIG };
     }
     if ('fileInput' in value) {
         const fileInput = record(value.fileInput, source, 'command.fileInput');

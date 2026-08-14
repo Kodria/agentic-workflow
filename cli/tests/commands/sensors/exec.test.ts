@@ -149,6 +149,14 @@ describe('runStructuredCommand — public boundary validation', () => {
     });
 
     it.each([
+        { ESLINT_USE_FLAT_CONFIG: 'invalid' },
+        { ESLINT_USE_FLAT_CONFIG: 'true', OTHER: 'value' },
+    ])('rejects an unknown or expanded environment mapping at the public boundary', environment => {
+        expect(() => runStructuredCommand({ executable: 'node', resolution: 'path', args: ['--version'], environment } as any, { timeout: 5000, cwd: process.cwd() }))
+            .toThrow(/exact allowlisted/);
+    });
+
+    it.each([
         [{ executable: 'node', resolution: 'path', args: [] }, /nonempty array/],
         [{ executable: 'node', resolution: 'path', args: [''] }, /nonempty single-line/],
         [{ executable: 'node', resolution: 'path', args: ['one\ntwo'] }, /single-line/],

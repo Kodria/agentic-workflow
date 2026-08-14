@@ -77,6 +77,31 @@ describe('runCommand — win32', () => {
         }
     });
 
+    it('spawns the allowlisted flat-config environment for ESLint 8', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-structured-win-env-'));
+        const savedPath = process.env.PATH;
+        const savedPathExt = process.env.PATHEXT;
+        try {
+            fs.writeFileSync(path.join(dir, 'tool.exe'), 'fixture');
+            process.env.PATH = dir;
+            process.env.PATHEXT = '.EXE';
+            const child = fakeChild();
+            mockSpawn.mockReturnValue(child);
+
+            const pending = runStructuredCommand({ executable: 'tool', resolution: 'path', args: ['--version'], environment: { ESLINT_USE_FLAT_CONFIG: 'true' } }, { timeout: 5000, cwd: dir });
+            expect(mockSpawn).toHaveBeenCalledWith(path.join(dir, 'tool.exe'), ['--version'], expect.objectContaining({
+                shell: false,
+                env: expect.objectContaining({ ESLINT_USE_FLAT_CONFIG: 'true' }),
+            }));
+            child.emit('close', 0, null);
+            await expect(pending).resolves.toMatchObject({ code: 0 });
+        } finally {
+            restoreEnvironment('PATH', savedPath);
+            restoreEnvironment('PATHEXT', savedPathExt);
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     it('uses the project node_modules executable instead of a same-named global command', async () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-local-bin-win-'));
         const global = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-global-bin-win-'));

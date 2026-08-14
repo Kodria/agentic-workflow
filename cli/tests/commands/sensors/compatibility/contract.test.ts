@@ -59,16 +59,25 @@ describe('sensor pack v2 contract', () => {
         });
     });
 
-    it('accepts only the explicit ESLint v8 environment and package-manager selection', () => {
+    it.each(['true', 'false'] as const)('accepts the exact ESLINT_USE_FLAT_CONFIG=%s environment mapping', flatConfig => {
         const command = {
             executable: 'npm',
             resolution: 'path',
             args: ['run', 'lint'],
             packageManager: 'npm',
-            environment: { ESLINT_USE_FLAT_CONFIG: 'false' },
+            environment: { ESLINT_USE_FLAT_CONFIG: flatConfig },
         };
         expect(parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command }] } } }, 'pack.json'))
             .toMatchObject({ kind: 'v2', pack: { sensors: { lint: { variants: [{ command }] } } } });
+    });
+
+    it.each([
+        { ESLINT_USE_FLAT_CONFIG: 'yes' },
+        { ESLINT_USE_FLAT_CONFIG: 'true', OTHER: 'value' },
+    ])('rejects an unknown or expanded ESLint environment mapping', environment => {
+        const command = { executable: 'npm', resolution: 'path', args: ['run', 'lint'], packageManager: 'npm', environment };
+        expect(() => parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command }] } } }, 'pack.json'))
+            .toThrow('command.environment');
     });
 
     it('normalizes package-manager executable spelling before enforcing its explicit selection', () => {

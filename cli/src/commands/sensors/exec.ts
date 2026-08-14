@@ -27,7 +27,7 @@ export type ExecOptions = {
     killGraceMs?: number;
 };
 
-type SpawnInput = { executable: string; args: string[]; shell: boolean; environment?: { ESLINT_USE_FLAT_CONFIG: 'false' } };
+type SpawnInput = { executable: string; args: string[]; shell: boolean; environment?: { ESLINT_USE_FLAT_CONFIG: 'true' | 'false' } };
 
 const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
 const DEFAULT_KILL_GRACE_MS = 2_000;
@@ -187,7 +187,14 @@ function validateStructuredCommand(command: StructuredCommand): void {
     if (packageManagers.has(normalizedExecutable) && normalizedPackageManager !== normalizedExecutable) throw new Error('structured command packageManager must explicitly match its executable');
     if (normalizedPackageManager !== undefined && !packageManagers.has(normalizedPackageManager)) throw new Error('structured command packageManager is unsupported');
     if (normalizedPackageManager !== undefined && normalizedPackageManager !== normalizedExecutable) throw new Error('structured command packageManager must explicitly match its executable');
-    if (command.environment !== undefined && (Object.keys(command.environment).length !== 1 || command.environment.ESLINT_USE_FLAT_CONFIG !== 'false')) throw new Error('structured command environment is not allowlisted');
+    if (command.environment !== undefined) {
+        const environment = command.environment as unknown;
+        if (!environment || typeof environment !== 'object' || Array.isArray(environment) || Object.keys(environment).length !== 1 || !Object.prototype.hasOwnProperty.call(environment, 'ESLINT_USE_FLAT_CONFIG')) {
+            throw new Error('structured command environment must be the exact allowlisted ESLINT_USE_FLAT_CONFIG=true or false mapping');
+        }
+        const flatConfig = (environment as { ESLINT_USE_FLAT_CONFIG?: unknown }).ESLINT_USE_FLAT_CONFIG;
+        if (flatConfig !== 'true' && flatConfig !== 'false') throw new Error('structured command environment must be the exact allowlisted ESLINT_USE_FLAT_CONFIG=true or false mapping');
+    }
     const fileArguments = command.args.filter(arg => arg === '{files}').length;
     if (command.fileInput === undefined) {
         if (fileArguments !== 0) throw new Error('structured command {files} argument requires fileInput');

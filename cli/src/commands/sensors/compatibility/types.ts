@@ -12,8 +12,8 @@ export type StructuredCommand = {
     args: string[];
     /** A script runner is explicit: v2 never guesses npm/pnpm/yarn/bun. */
     packageManager?: 'npm' | 'pnpm' | 'yarn' | 'bun';
-    /** Closed execution environment; only contract-approved keys may be set. */
-    environment?: { ESLINT_USE_FLAT_CONFIG: 'false' };
+    /** Closed execution environment; choose ESLint flat config or legacy eslintrc mode explicitly. */
+    environment?: { ESLINT_USE_FLAT_CONFIG: 'true' | 'false' };
     fileInput?: { placeholder: '{files}'; extensions: string[] };
 };
 
