@@ -1,5 +1,6 @@
 import type { CoverageEnvelope } from '.';
 import type { CompatibilityEvidence } from '../compatibility/types';
+import type { EmpiricalCoverage, EmpiricalOutcome } from './empirical';
 
 const ANSI = /\x1B\[[0-?]*[ -/]*[@-~]/g;
 const OSC = /\x1B\][\s\S]*?(?:\x07|\x1B\\)/g;
@@ -103,7 +104,7 @@ function assertClusters(value: unknown, threshold: number, renderer: string): { 
     return { occurrences, recurrent, severity: highestSeverity };
 }
 
-function assertEmpirical(value: unknown, renderer: string): void {
+function assertEmpirical(value: unknown, renderer: string): asserts value is EmpiricalCoverage {
     if (!isRecord(value) || !hasExactFields(value, ['recurrenceThreshold', 'status', 'classes', 'unclassified', 'sources', 'omittedEvidenceRefs'])
         || !isOneOf(value.status, EMPIRICAL_STATUS) || !Array.isArray(value.classes) || !isRecord(value.unclassified)
         || !isRecord(value.sources)) invalidReport(renderer);
@@ -150,6 +151,33 @@ function assertEmpirical(value: unknown, renderer: string): void {
     if (value.status !== expectedStatus) invalidReport(renderer);
 }
 
+/**
+ * An empirical class is public only as an aggregate, but its outcome is still
+ * constrained by the already-public static catalog. Keeping the lookup local
+ * to the renderer avoids expanding the JSON schema with an internal state map.
+ */
+function assertEmpiricalStaticInvariant(
+    empirical: EmpiricalCoverage,
+    staticStates: ReadonlyMap<string, string> | null,
+    renderer: string,
+): void {
+    for (const item of empirical.classes) {
+        let expected: EmpiricalOutcome;
+        if (staticStates === null) {
+            expected = 'coverage-unverifiable';
+        } else {
+            const state = staticStates.get(item.defectClass);
+            expected = state === undefined ? 'unmapped-class'
+                : state === 'covered' ? 'covered-by-sensor'
+                : state === 'missing' ? 'gap'
+                : state === 'unverifiable' ? 'coverage-unverifiable'
+                : state === 'not-applicable' ? 'applicability-contradiction'
+                : invalidReport(renderer);
+        }
+        if (item.outcome !== expected) invalidReport(renderer);
+    }
+}
+
 function assertCoverageEnvelope(report: unknown, renderer: string): asserts report is CoverageEnvelope {
     if (!isRecord(report) || !hasExactFields(report, 'empirical' in report
         ? ['schemaVersion', 'pack', 'registry', 'overall', 'static', 'empirical']
@@ -172,14 +200,22 @@ function assertCoverageEnvelope(report: unknown, renderer: string): asserts repo
         if (report.overall !== 'inconclusive' || report.pack !== null || report.registry !== null || staticReport.classes.length !== 0) {
             invalidReport(renderer);
         }
-        if (report.empirical !== undefined) assertEmpirical(report.empirical, renderer); return;
+        if (report.empirical !== undefined) {
+            assertEmpirical(report.empirical, renderer);
+            assertEmpiricalStaticInvariant(report.empirical, null, renderer);
+        }
+        return;
     }
     if (staticReport.reason === 'no_reference') {
         if (report.overall !== 'inconclusive' || !isNonBlankString(report.pack) || !isNonBlankString(report.registry)
             || staticReport.classes.length !== 0) {
             invalidReport(renderer);
         }
-        if (report.empirical !== undefined) assertEmpirical(report.empirical, renderer); return;
+        if (report.empirical !== undefined) {
+            assertEmpirical(report.empirical, renderer);
+            assertEmpiricalStaticInvariant(report.empirical, null, renderer);
+        }
+        return;
     }
     if (!isNonBlankString(report.pack) || !isNonBlankString(report.registry) || staticReport.classes.length === 0) {
         invalidReport(renderer);
@@ -188,6 +224,7 @@ function assertCoverageEnvelope(report: unknown, renderer: string): asserts repo
     let previousId: string | undefined;
     let hasMissingClass = false;
     let hasUnverifiableClass = false;
+    const staticStates = new Map<string, string>();
     for (const coverageClass of staticReport.classes) {
         if (!isRecord(coverageClass) || !hasExactFields(coverageClass, ['id', 'description', 'status', 'detectors', 'remedy'])
             || !isNonBlankString(coverageClass.id) || !isNonBlankString(coverageClass.description)
@@ -217,6 +254,7 @@ function assertCoverageEnvelope(report: unknown, renderer: string): asserts repo
         }
         const expectedClassStatus = classStatus!;
         if (coverageClass.status !== expectedClassStatus) invalidReport(renderer);
+        staticStates.set(coverageClass.id, expectedClassStatus);
         hasMissingClass ||= expectedClassStatus === 'missing';
         hasUnverifiableClass ||= expectedClassStatus === 'unverifiable';
     }
@@ -224,7 +262,10 @@ function assertCoverageEnvelope(report: unknown, renderer: string): asserts repo
     const expectedOverall = hasMissingClass ? 'gaps' : hasUnverifiableClass ? 'inconclusive'
         : applicableClasses.some((entry) => entry.status === 'covered') ? 'covered' : 'inconclusive';
     if (report.overall !== expectedOverall) invalidReport(renderer);
-    if (report.empirical !== undefined) assertEmpirical(report.empirical, renderer);
+    if (report.empirical !== undefined) {
+        assertEmpirical(report.empirical, renderer);
+        assertEmpiricalStaticInvariant(report.empirical, staticStates, renderer);
+    }
 }
 
 function safeHumanText(value: string): string {

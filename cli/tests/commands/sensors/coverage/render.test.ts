@@ -4,7 +4,7 @@ import { evaluateEmpiricalCoverage } from '../../../../src/commands/sensors/cove
 const report = {
     schemaVersion: 2 as const, pack: 'js-ts', registry: 'baseline', overall: 'gaps' as const,
     static: { status: 'gaps' as const, reason: null, classes: [
-        { id: 'formatting', description: 'Formatting', status: 'missing' as const,
+        { id: 'lint-errors', description: 'Formatting', status: 'missing' as const,
             detectors: [{ sensor: 'format', status: 'missing' as const, evidence: [], compatibility: { state: 'missing-tool' as const, reason: 'fixture', variantId: null, toolVersion: null, runtimeVersion: null, certifiedRange: null, evidence: [] } }],
             remedy: { summary: 'Add formatter', command: 'npm i -D prettier' } },
         { id: 'style', description: 'Style', status: 'unverifiable' as const,
@@ -36,7 +36,7 @@ test('human output shows every non-green class, remedy and totals without raw ev
     const human = renderCoverageHuman(report);
     expect(human).toBe([
         'Sensor coverage', 'Pack: js-ts', 'Registry: baseline', 'Overall: gaps', '',
-        'missing formatting — Formatting', '  detector: format (missing)', '  compatibility: missing-tool — fixture', '  remedy: Add formatter', '  command: npm i -D prettier',
+        'missing lint-errors — Formatting', '  detector: format (missing)', '  compatibility: missing-tool — fixture', '  remedy: Add formatter', '  command: npm i -D prettier',
         'unverifiable style — Style', '  detector: lint (unverifiable)', '  compatibility: unverifiable — fixture', '  remedy: Declare evidence', '  command: awm sensors init', '',
         'Summary: 0 covered, 1 missing, 1 unverifiable, 0 not applicable', '',
     ].join('\n'));
@@ -163,6 +163,57 @@ test.each([
     }
 });
 
+test.each([
+    ['a covered class reported as a gap', {
+        static: { ...report.static, status: 'covered' as const, classes: [{
+            ...report.static.classes[0], status: 'covered' as const,
+            detectors: [{ ...report.static.classes[0].detectors[0], status: 'covered' as const,
+                compatibility: { ...report.static.classes[0].detectors[0].compatibility, state: 'certified' as const } }],
+        }] },
+        empirical: { ...empiricalEvidence, classes: [{ ...empiricalEvidence.classes[0], outcome: 'gap' as const }] },
+    }],
+    ['a missing-tool class reported as covered', {
+        static: report.static,
+        empirical: { ...empiricalEvidence, classes: [{ ...empiricalEvidence.classes[0], outcome: 'covered-by-sensor' as const }] },
+    }],
+    ['an unverifiable class reported as a gap', {
+        static: { ...report.static, status: 'inconclusive' as const, classes: [{ ...report.static.classes[1], id: 'lint-errors' }] },
+        empirical: { ...empiricalEvidence, classes: [{ ...empiricalEvidence.classes[0], outcome: 'gap' as const }] },
+    }],
+    ['a not-applicable class with evidence reported without a contradiction', {
+        static: { ...report.static, status: 'inconclusive' as const, classes: [{
+            ...report.static.classes[0], status: 'not-applicable' as const,
+            detectors: [{ ...report.static.classes[0].detectors[0], status: 'covered' as const,
+                compatibility: { ...report.static.classes[0].detectors[0].compatibility, state: 'not-applicable' as const } }],
+        }] },
+        empirical: { ...empiricalEvidence, classes: [{ ...empiricalEvidence.classes[0], outcome: 'coverage-unverifiable' as const }] },
+    }],
+    ['an unmapped class reported as a gap while the catalog is available', {
+        static: report.static,
+        empirical: { ...empiricalEvidence, classes: [{ ...empiricalEvidence.classes[0], defectClass: 'unknown-class', outcome: 'gap' as const }] },
+    }],
+    ['a mapped class reported as unmapped', {
+        static: report.static,
+        empirical: { ...empiricalEvidence, classes: [{ ...empiricalEvidence.classes[0], outcome: 'unmapped-class' as const }] },
+    }],
+])('renderers reject an empirical outcome incompatible with static coverage: %s', (_case, invalid) => {
+    const envelope = { ...report, overall: invalid.static.status, static: invalid.static, empirical: invalid.empirical };
+    for (const render of [renderCoverageJson, renderCoverageHuman]) {
+        expect(() => render(envelope)).toThrow(/^renderCoverage(?:Json|Human): invalid report/);
+    }
+});
+
+test('renderers reject non-unverifiable empirical outcomes when the catalog is unavailable', () => {
+    const unavailable = {
+        schemaVersion: 2 as const, pack: null, registry: null, overall: 'inconclusive' as const,
+        static: { status: 'inconclusive' as const, reason: 'not_configured' as const, classes: [] },
+        empirical: { ...empiricalEvidence, classes: [{ ...empiricalEvidence.classes[0], outcome: 'gap' as const }] },
+    };
+    for (const render of [renderCoverageJson, renderCoverageHuman]) {
+        expect(() => render(unavailable)).toThrow(/^renderCoverage(?:Json|Human): invalid report/);
+    }
+});
+
 test('not_configured names the remedy and no_reference stays distinct (R2.6)', () => {
     const notConfigured = { schemaVersion: 2 as const, pack: null, registry: null, overall: 'inconclusive' as const,
         static: { status: 'inconclusive' as const, reason: 'not_configured' as const, classes: [] } };
@@ -216,7 +267,7 @@ test('human output removes OSC controls from pack-provided text while retaining 
     };
 
     const human = renderCoverageHuman(hostile);
-    expect(human).toContain('missing formatting — Formatting');
+    expect(human).toContain('missing lint-errors — Formatting');
     expect(human).toContain('  remedy: Add formatter');
     expect(human).toContain('  compatibility: missing-tool — tool version is unsupported');
     expect(human.replace(/\n/g, '')).not.toMatch(/[\u0000-\u001F\u007F-\u009F]/);
