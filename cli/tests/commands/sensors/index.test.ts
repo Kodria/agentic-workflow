@@ -59,8 +59,8 @@ describe('sensors coverage Commander wiring', () => {
         expect(stdoutWrite).toHaveBeenCalledWith('human\n');
     });
 
-    it.each(['0', '-1', '1.5', '2x', 'Infinity', 'NaN', '9007199254740992'])('rejects unsafe --min %s before coverage I/O (R5.5)', (value) => {
-        expect(() => parsePositiveSafeInteger(value)).toThrow('--min must be a positive safe integer');
+    it.each(['0', '-1', '1.5', '2x', 'Infinity', 'NaN', '9007199254740992'])('Commander rejects unsafe --min %s before coverage I/O (R5.5)', async (value) => {
+        await expect(programWithSensors().parseAsync(['node', 'awm', 'sensors', 'coverage', '--min', value])).rejects.toThrow('--min must be a positive safe integer');
         expect(runCoverage).not.toHaveBeenCalled();
     });
 

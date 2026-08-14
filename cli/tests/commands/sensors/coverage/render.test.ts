@@ -61,7 +61,7 @@ test('json is the exact versioned envelope and ends in newline (R2.8, R2.14)', (
 
 test('keeps the R2 static shape when an optional empirical section is added (R2.14)', () => {
     const extended = { ...report, empirical: {
-        status: 'partial', classes: [{ defectClass: 'lint-errors', occurrences: 1, recurrent: false, severity: 'important', outcome: 'gap', evidenceRefs: ['src/a.ts:1'], omittedEvidenceRefs: 0 }],
+        recurrenceThreshold: 2, status: 'partial', classes: [{ defectClass: 'lint-errors', occurrences: 1, recurrent: false, severity: 'important', outcome: 'gap', evidenceRefs: ['src/a.ts:1'], omittedEvidenceRefs: 0 }],
         unclassified: { occurrences: 1, evidenceRefs: [], omittedEvidenceRefs: 1 },
         sources: { activeFiles: 1, archivedFiles: 0, validEntries: 2, validFindings: 2, skippedFindings: 1, skippedByReason: { 'invalid-json': 1 } }, omittedEvidenceRefs: 1,
     } };
@@ -73,16 +73,27 @@ test('keeps the R2 static shape when an optional empirical section is added (R2.
 
 test('renders sanitized empirical outcomes without ledger descriptions or signatures', () => {
     const empirical = {
-        status: 'partial', classes: [{ defectClass: 'lint-errors', occurrences: 1, recurrent: false, severity: 'important', outcome: 'gap', evidenceRefs: ['PR #2'], omittedEvidenceRefs: 0 }],
+        recurrenceThreshold: 2, status: 'partial', classes: [{ defectClass: 'lint-errors', occurrences: 1, recurrent: false, severity: 'important', outcome: 'gap', evidenceRefs: ['PR #2'], omittedEvidenceRefs: 0 }],
         unclassified: { occurrences: 1, evidenceRefs: [], omittedEvidenceRefs: 1 },
         sources: { activeFiles: 1, archivedFiles: 0, validEntries: 2, validFindings: 2, skippedFindings: 1, skippedByReason: { 'invalid-json': 1 } }, omittedEvidenceRefs: 1,
     };
     const human = renderCoverageHuman({ ...report, empirical });
     expect(human).toContain('Empirical coverage: partial');
     expect(human).toContain('gap lint-errors — 1 occurrence');
+    expect(human).toContain('below recurrence threshold (2)');
     expect(human).toContain('PR #2');
     expect(human).not.toContain('signature');
     expect(human).not.toContain('desc');
+});
+
+test('renders recurrence emphasis and rejects the retired complete empirical state', () => {
+    const empirical = {
+        recurrenceThreshold: 2, status: 'evidence', classes: [{ defectClass: 'lint-errors', occurrences: 2, recurrent: true, severity: 'important', outcome: 'gap', evidenceRefs: [], omittedEvidenceRefs: 0 }],
+        unclassified: { occurrences: 0, evidenceRefs: [], omittedEvidenceRefs: 0 },
+        sources: { activeFiles: 1, archivedFiles: 0, validEntries: 2, validFindings: 2, skippedFindings: 0, skippedByReason: {} }, omittedEvidenceRefs: 0,
+    };
+    expect(renderCoverageHuman({ ...report, empirical })).toContain('recurrent at threshold 2');
+    expect(() => renderCoverageJson({ ...report, empirical: { ...empirical, status: 'complete' } })).toThrow('invalid report');
 });
 
 test('not_configured names the remedy and no_reference stays distinct (R2.6)', () => {

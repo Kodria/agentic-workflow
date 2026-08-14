@@ -11,8 +11,8 @@ const COMPATIBILITY_STATE = ['certified', 'compatible-unverified', 'incompatible
 const REASON = ['not_configured', 'no_reference'];
 const COMMAND_EVIDENCE_STATUS = ['matched', 'custom', 'missing'];
 const FILE_EVIDENCE_STATUS = ['matched', 'missing', 'unverifiable'];
-const EMPIRICAL_STATUS = ['no-evidence', 'complete', 'partial'];
-const EMPIRICAL_OUTCOME = ['covered-by-sensor', 'gap', 'coverage-unverifiable', 'applicability-contradiction'];
+const EMPIRICAL_STATUS = ['no-evidence', 'evidence', 'partial', 'inconclusive'];
+const EMPIRICAL_OUTCOME = ['covered-by-sensor', 'gap', 'coverage-unverifiable', 'applicability-contradiction', 'unmapped-class'];
 const SEVERITY = ['blocker', 'important', 'minor', 'info'];
 const SAFE_REF = /^(?:PR #[1-9][0-9]*|[a-f0-9]{7,64}|(?!\/)(?!.*(?:^|\/)\.\.?\/)[A-Za-z0-9._@+~=-]+(?:\/[A-Za-z0-9._@+~=-]+)*:[1-9][0-9]*)$/i;
 
@@ -81,10 +81,11 @@ function assertRefs(value: unknown, renderer: string): void {
 }
 
 function assertEmpirical(value: unknown, renderer: string): void {
-    if (!isRecord(value) || !hasExactFields(value, ['status', 'classes', 'unclassified', 'sources', 'omittedEvidenceRefs'])
+    if (!isRecord(value) || !hasExactFields(value, ['recurrenceThreshold', 'status', 'classes', 'unclassified', 'sources', 'omittedEvidenceRefs'])
         || !isOneOf(value.status, EMPIRICAL_STATUS) || !Array.isArray(value.classes) || !isRecord(value.unclassified)
         || !isRecord(value.sources)) invalidReport(renderer);
     assertCount(value.omittedEvidenceRefs, renderer);
+    if (typeof value.recurrenceThreshold !== 'number' || !Number.isSafeInteger(value.recurrenceThreshold) || value.recurrenceThreshold < 1) invalidReport(renderer);
     let previous = '';
     let occurrenceCount = 0;
     for (const item of value.classes) {
@@ -106,9 +107,11 @@ function assertEmpirical(value: unknown, renderer: string): void {
     const unclassifiedOccurrences = value.unclassified.occurrences as number;
     const omitted = value.omittedEvidenceRefs as number;
     if (validFindings !== occurrenceCount + unclassifiedOccurrences || validEntries < validFindings) invalidReport(renderer);
-    if (value.status === 'no-evidence' && (validFindings !== 0 || value.classes.length !== 0 || unclassifiedOccurrences !== 0)) invalidReport(renderer);
-    if (value.status === 'complete' && (skippedFindings !== 0 || omitted !== 0 || unclassifiedOccurrences !== 0)) invalidReport(renderer);
-    if (value.status === 'partial' && validFindings === 0) invalidReport(renderer);
+    const hasSkips = skippedFindings > 0 || omitted > 0 || unclassifiedOccurrences > 0;
+    if (value.status === 'no-evidence' && (validFindings !== 0 || hasSkips || value.classes.length !== 0)) invalidReport(renderer);
+    if (value.status === 'evidence' && (validFindings === 0 || hasSkips)) invalidReport(renderer);
+    if (value.status === 'partial' && (validFindings === 0 || !hasSkips)) invalidReport(renderer);
+    if (value.status === 'inconclusive' && (validFindings !== 0 || !hasSkips || value.classes.length !== 0 || unclassifiedOccurrences !== 0)) invalidReport(renderer);
 }
 
 function assertCoverageEnvelope(report: unknown, renderer: string): asserts report is CoverageEnvelope {
@@ -233,7 +236,10 @@ function empiricalHuman(report: CoverageEnvelope): string {
     if (!empirical) return '';
     const lines = [`Empirical coverage: ${empirical.status}`];
     for (const item of empirical.classes) {
-        lines.push(`${item.outcome} ${safeHumanText(item.defectClass)} — ${item.occurrences} occurrence${item.occurrences === 1 ? '' : 's'} (${item.severity})`);
+        const recurrence = item.recurrent
+            ? `recurrent at threshold ${empirical.recurrenceThreshold}`
+            : `below recurrence threshold (${empirical.recurrenceThreshold})`;
+        lines.push(`${item.outcome} ${safeHumanText(item.defectClass)} — ${item.occurrences} occurrence${item.occurrences === 1 ? '' : 's'} (${item.severity}; ${recurrence})`);
         if (item.evidenceRefs.length > 0) lines.push(`  evidence: ${item.evidenceRefs.map(safeHumanText).join(', ')}`);
     }
     if (empirical.unclassified.occurrences > 0) lines.push(`unclassified findings: ${empirical.unclassified.occurrences}`);

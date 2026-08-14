@@ -3,7 +3,7 @@ import type { LedgerEntry, Severity } from '../../../core/ledger/types';
 import type { LedgerScanResult, ScannedLedgerEntry } from '../../../core/ledger/scan';
 import type { CoverageClassStatus } from './evaluate';
 
-export type EmpiricalOutcome = 'covered-by-sensor' | 'gap' | 'coverage-unverifiable' | 'applicability-contradiction';
+export type EmpiricalOutcome = 'covered-by-sensor' | 'gap' | 'coverage-unverifiable' | 'applicability-contradiction' | 'unmapped-class';
 export type EmpiricalStaticState = CoverageClassStatus | 'incompatible' | 'missing-tool' | 'compatible-unverified';
 
 export type EmpiricalClass = {
@@ -17,7 +17,9 @@ export type EmpiricalClass = {
 };
 
 export type EmpiricalCoverage = {
-    status: 'no-evidence' | 'complete' | 'partial';
+    /** The threshold used to classify each aggregate as recurrent. */
+    recurrenceThreshold: number;
+    status: 'no-evidence' | 'evidence' | 'partial' | 'inconclusive';
     classes: EmpiricalClass[];
     unclassified: { occurrences: number; evidenceRefs: string[]; omittedEvidenceRefs: number };
     sources: LedgerScanResult['sources'];
@@ -57,7 +59,8 @@ function maxSeverity(entries: LedgerEntry[]): Severity {
 
 export function outcomeFor(staticState: EmpiricalStaticState | undefined, hasEvidence: boolean): EmpiricalOutcome {
     if (typeof hasEvidence !== 'boolean') throw new Error('outcomeFor: hasEvidence must be boolean');
-    if (!hasEvidence || staticState === undefined || staticState === 'unverifiable' || staticState === 'compatible-unverified') return 'coverage-unverifiable';
+    if (!hasEvidence || staticState === 'unverifiable' || staticState === 'compatible-unverified') return 'coverage-unverifiable';
+    if (staticState === undefined) return 'unmapped-class';
     if (staticState === 'covered') return 'covered-by-sensor';
     if (staticState === 'not-applicable') return 'applicability-contradiction';
     if (staticState === 'missing' || staticState === 'incompatible' || staticState === 'missing-tool') return 'gap';
@@ -91,12 +94,17 @@ export function evaluateEmpiricalCoverage(scan: LedgerScanResult, staticStates: 
                 evidenceRefs: evidence.refs, omittedEvidenceRefs: evidence.omitted });
         }
     }
-    classes.sort((a, b) => a.defectClass.localeCompare(b.defectClass) || b.occurrences - a.occurrences
+    // Stable public order: class first, then items meeting the supplied recurrence
+    // threshold, then count and evidence. This makes --min observable without
+    // changing the static verdict or leaking private cluster signatures.
+    classes.sort((a, b) => a.defectClass.localeCompare(b.defectClass) || Number(b.recurrent) - Number(a.recurrent) || b.occurrences - a.occurrences
         || a.evidenceRefs.join('\u0000').localeCompare(b.evidenceRefs.join('\u0000')));
     const unclassifiedEvidence = refsFor(unclassified, scanned);
     const retained = classes.reduce((total, item) => total + item.occurrences, 0) + unclassified.length;
+    const skipped = scan.sources.skippedFindings > 0 || scan.omittedEvidenceRefs > 0 || unclassified.length > 0;
     return {
-        status: retained === 0 ? 'no-evidence' : scan.sources.skippedFindings > 0 || scan.omittedEvidenceRefs > 0 || unclassified.length > 0 ? 'partial' : 'complete',
+        recurrenceThreshold: min,
+        status: retained === 0 ? (skipped ? 'inconclusive' : 'no-evidence') : (skipped ? 'partial' : 'evidence'),
         classes,
         unclassified: { occurrences: unclassified.length, evidenceRefs: unclassifiedEvidence.refs, omittedEvidenceRefs: unclassifiedEvidence.omitted },
         sources: { ...scan.sources, skippedByReason: { ...scan.sources.skippedByReason } },

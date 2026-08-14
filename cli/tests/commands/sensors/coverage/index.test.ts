@@ -20,7 +20,7 @@ test('old pack is no_reference and preserves pack and registry', async () => {
     }) }))
         .resolves.toEqual({ schemaVersion: 2, pack: 'legacy', registry: 'baseline', overall: 'inconclusive',
             static: { status: 'inconclusive', reason: 'no_reference', classes: [] },
-            empirical: expect.objectContaining({ status: 'complete', classes: [expect.objectContaining({ outcome: 'coverage-unverifiable' })] }) });
+            empirical: expect.objectContaining({ status: 'evidence', classes: [expect.objectContaining({ outcome: 'unmapped-class' })] }) });
 });
 
 test('ready input observes every declared detector and evaluates once', async () => {

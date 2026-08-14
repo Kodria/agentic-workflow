@@ -14,6 +14,14 @@ const scanOf = (entries: ReturnType<typeof finding>[]) => ({
     omittedEvidenceRefs: 0,
 });
 
+test('distinguishes evidence, partial, no-evidence and inconclusive ledger states (R5.11)', () => {
+    const valid = scanOf([finding('lint-errors', 'valid', 'src/a.ts:1')]);
+    expect(evaluateEmpiricalCoverage(valid, { 'lint-errors': 'covered' }, 2).status).toBe('evidence');
+    expect(evaluateEmpiricalCoverage({ ...valid, sources: { ...valid.sources, skippedFindings: 1, skippedByReason: { 'invalid-json': 1 } } }, { 'lint-errors': 'covered' }, 2).status).toBe('partial');
+    expect(evaluateEmpiricalCoverage(scanOf([]), {}, 2).status).toBe('no-evidence');
+    expect(evaluateEmpiricalCoverage({ ...scanOf([]), sources: { activeFiles: 1, archivedFiles: 0, validEntries: 0, validFindings: 0, skippedFindings: 1, skippedByReason: { 'invalid-json': 1 } } }, {}, 2).status).toBe('inconclusive');
+});
+
 test('clusters only inside defectClass and keeps singles below min (R5.4, R5.6)', () => {
     const report = evaluateEmpiricalCoverage(scanOf([
         finding('lint-errors', 'same-signature', 'a.ts:1'),
@@ -29,6 +37,27 @@ test.each([
     ['compatible-unverified', 'coverage-unverifiable'], ['not-applicable', 'applicability-contradiction'],
 ] as const)('crosses %s to %s (R5.9)', (staticState, outcome) => {
     expect(outcomeFor(staticState, true)).toBe(outcome);
+});
+
+test('maps a valid defect class absent from the static contract to unmapped-class (R5.12)', () => {
+    expect(outcomeFor(undefined, true)).toBe('unmapped-class');
+    expect(evaluateEmpiricalCoverage(scanOf([finding('legacy-lint', 'legacy', 'src/a.ts:1')]), {}, 2).classes[0].outcome)
+        .toBe('unmapped-class');
+});
+
+test('changes recurrence emphasis and stable ordering when --min changes (R5.13)', () => {
+    const entries = scanOf([
+        { ...finding('lint-errors', 'solo-orange', 'src/a.ts:1'), entry: { ...finding('lint-errors', 'solo-orange', 'src/a.ts:1').entry, desc: 'orchard fruit gamma' } },
+        { ...finding('lint-errors', 'repeat-protocol', 'src/b.ts:1'), entry: { ...finding('lint-errors', 'repeat-protocol', 'src/b.ts:1').entry, desc: 'network handshake delta' } },
+        { ...finding('lint-errors', 'repeat-protocol', 'src/b.ts:2'), entry: { ...finding('lint-errors', 'repeat-protocol', 'src/b.ts:2').entry, desc: 'network handshake delta' } },
+    ]);
+    const minTwo = evaluateEmpiricalCoverage(entries, { 'lint-errors': 'covered' }, 2);
+    const minThree = evaluateEmpiricalCoverage(entries, { 'lint-errors': 'covered' }, 3);
+    expect(minTwo.recurrenceThreshold).toBe(2);
+    expect(minTwo.classes.map((item) => [item.occurrences, item.recurrent])).toEqual([[2, true], [1, false]]);
+    expect(minThree.recurrenceThreshold).toBe(3);
+    expect(minThree.classes.map((item) => [item.occurrences, item.recurrent])).toEqual([[2, false], [1, false]]);
+    expect(JSON.stringify(minTwo)).not.toEqual(JSON.stringify(minThree));
 });
 
 test('does not infer a missing class from text and never emits description or signature (R5.3, R5.10)', () => {
