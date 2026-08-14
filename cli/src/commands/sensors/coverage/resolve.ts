@@ -6,6 +6,7 @@ import {
     parseCoverageContract,
     type CoverageContract,
 } from './contract';
+import { parseSensorPack } from '../compatibility/contract';
 import { parseSensorManifest } from '../compatibility/manifest';
 import type { SensorManifest } from '../types';
 
@@ -61,18 +62,6 @@ export function readBoundedJson(file: unknown): unknown {
     }
 }
 
-function readPackEnvelope(input: unknown, file: string, expectedName: string): { coverage?: unknown } {
-    if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new Error(`Invalid pack at ${file}: expected object`);
-    const pack = input as Record<string, unknown>;
-    if (typeof pack.name !== 'string' || pack.name !== expectedName) {
-        throw new Error(`Invalid pack at ${file}: name must equal '${expectedName}'`);
-    }
-    if (typeof pack.sensors !== 'object' || pack.sensors === null || Array.isArray(pack.sensors)) {
-        throw new Error(`Invalid pack at ${file}: sensors must be an object`);
-    }
-    return 'coverage' in pack ? { coverage: pack.coverage } : {};
-}
-
 function safeRegistryName(name: string): void {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name) || name.includes('..')) {
         throw new Error(`Invalid registry name '${name}': expected a safe path component`);
@@ -114,7 +103,11 @@ export function resolveCoverageInputs(cwd: unknown): CoverageInputs {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
             throw readFailure(packPath, error);
         }
-        const { coverage } = readPackEnvelope(readBoundedJson(packPath), packPath, manifest.pack);
+        const parsedPack = parseSensorPack(readBoundedJson(packPath), packPath);
+        if (parsedPack.pack.name !== manifest.pack) {
+            throw new Error(`Invalid pack at ${packPath}: name must equal '${manifest.pack}'`);
+        }
+        const { coverage } = parsedPack.pack;
         if (coverage === undefined) return { kind: 'no_reference', projectRoot, pack: manifest.pack, registry: registry.name, manifest };
         return {
             kind: 'ready', projectRoot, pack: manifest.pack, registry: registry.name,

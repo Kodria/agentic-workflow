@@ -41,7 +41,18 @@ test('no manifest returns not_configured without reading registries', () => {
     fs.rmSync(path.join(project, '.awm', 'sensors.json'), { force: true });
     fs.mkdirSync(awmHome, { recursive: true });
     fs.writeFileSync(path.join(awmHome, 'registries.json'), '{malformed');
-    expect(resolveCoverageInputs(project)).toEqual({ kind: 'not_configured' });
+    const originalLstat = fs.lstatSync;
+    const lstat = jest.spyOn(fs, 'lstatSync').mockImplementation(((file: fs.PathLike, ...args: unknown[]) => {
+        if (typeof file === 'string' && file.endsWith(path.join('.awm', 'sensors.json'))) {
+            throw Object.assign(new Error('missing manifest'), { code: 'ENOENT' });
+        }
+        return originalLstat(file, ...(args as []));
+    }) as typeof fs.lstatSync);
+    try {
+        expect(resolveCoverageInputs(project)).toEqual({ kind: 'not_configured' });
+    } finally {
+        lstat.mockRestore();
+    }
 });
 
 test('selects the first configured registry containing the exact pack', () => {
@@ -129,11 +140,21 @@ test('rejects a JSON object that is not a valid pack', () => {
     writeManifest({ pack: 'js-ts', sensors: {} });
     configure(['baseline']);
     writePack('baseline', 'js-ts', { coverage });
-    expect(() => resolveCoverageInputs(project)).toThrow(noFollowUnavailableOnNativeWindows ? safetyError : /Invalid pack.*name/);
+    expect(() => resolveCoverageInputs(project)).toThrow(noFollowUnavailableOnNativeWindows ? safetyError : /Invalid sensor pack.*name/);
 });
 
 test('rejects registry names that are not safe path components', () => {
     writeManifest({ pack: 'js-ts', sensors: {} });
     configure(['']);
     expect(() => resolveCoverageInputs(project)).toThrow(noFollowUnavailableOnNativeWindows ? safetyError : /malformed entry name|Invalid registry name/);
+});
+
+test.each([
+    [{ schemaVersion: 3, name: 'js-ts', sensors: {}, coverage: {} }, /supported: legacy, 2/],
+    [{ schemaVersion: 2, name: 'js-ts', sensors: {}, coverage: {} }, /sensors must be nonempty/],
+])('fails closed before reading coverage from invalid versioned packs', (pack, expected) => {
+    writeManifest({ pack: 'js-ts', sensors: {} });
+    configure(['baseline']);
+    writePack('baseline', 'js-ts', pack);
+    expect(() => resolveCoverageInputs(project)).toThrow(noFollowUnavailableOnNativeWindows ? safetyError : expected);
 });
