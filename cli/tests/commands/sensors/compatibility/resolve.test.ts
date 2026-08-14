@@ -17,6 +17,10 @@ describe('resolveSensorCompatibility', () => {
             evidence({ applicable: undefined, paths: [], toolVersion: '1.0.0', runtimeVersion: '3.12.0', probe: { status: 'matched' } }), { pack: 'generic', sensor: 'security' });
         expect(resolved).toMatchObject({ state: 'not-applicable', reason: 'applicability-not-met' });
     });
+    it('treats explicit generic pack selection as positive capability in project resolution', () => {
+        const resolved = resolveProjectCompatibility({ schemaVersion: 2, name: 'generic', sensors: { security: { applicability: { kind: 'explicit-or-supported-language' }, variants: [variant('semgrep')] } } } as any, evidence());
+        expect(resolved.sensors.security.state).not.toBe('not-applicable');
+    });
     test.each([
         ['certified', evidence(), 'eslint-main'],
         ['compatible-unverified', evidence({ toolVersion: '11.0.0' }), 'eslint-main'],

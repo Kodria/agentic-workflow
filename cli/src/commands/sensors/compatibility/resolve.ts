@@ -74,7 +74,10 @@ export function resolveProjectCompatibility(pack: SensorPack, evidence: ProjectE
         return { sensors };
     }
     for (const [name, sensor] of Object.entries(pack.sensors)) {
-        sensors[name] = resolveSensorCompatibility(sensor, evidence, { pack: pack.name, sensor: name });
+        // Generic is selected explicitly by the caller; never infer that broad
+        // capability merely from arbitrary project files.
+        const resolvedEvidence = pack.name === 'generic' ? { ...evidence, applicable: true } : evidence;
+        sensors[name] = resolveSensorCompatibility(sensor, resolvedEvidence, { pack: pack.name, sensor: name });
     }
     return { sensors };
 }
