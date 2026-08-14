@@ -59,6 +59,18 @@ describe('sensor pack v2 contract', () => {
         });
     });
 
+    it('accepts only the explicit ESLint v8 environment and package-manager selection', () => {
+        const command = {
+            executable: 'npm',
+            resolution: 'path',
+            args: ['run', 'lint'],
+            packageManager: 'npm',
+            environment: { ESLINT_USE_FLAT_CONFIG: 'false' },
+        };
+        expect(parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command }] } } }, 'pack.json'))
+            .toMatchObject({ kind: 'v2', pack: { sensors: { lint: { variants: [{ command }] } } } });
+    });
+
     it('keeps an unversioned pack on the legacy compatibility path', () => {
         const legacy = { name: 'legacy', sensors: {} };
         expect(parseSensorPack(legacy, 'pack.json')).toMatchObject({ kind: 'legacy', pack: { ...legacy, compatibility: { state: 'compatible-unverified' } } });
@@ -116,6 +128,9 @@ describe('sensor pack v2 contract', () => {
         [{ ...validPack(), sensors: { lint: { variants: [validPack().sensors.lint.variants[0], { ...validPack().sensors.lint.variants[0], id: 'eslint-9-next', certifiedRange: '>=9.1.0 <10.0.0' }] } } }, 'overlap'],
         [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], assets: ['C:/secret'] }] } } }, 'asset'],
         [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command: { executable: 'cmd.exe', resolution: 'path', args: ['x'] } }] } } }, 'executable'],
+        [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command: { executable: 'npm', resolution: 'path', args: ['run', 'lint'] } }] } } }, 'packageManager'],
+        [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command: { executable: 'npm', resolution: 'path', args: ['run', 'lint'], packageManager: 'pnpm' } }] } } }, 'match executable'],
+        [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command: { ...validPack().sensors.lint.variants[0].command, environment: { NODE_OPTIONS: '--require unsafe' } } }] } } }, 'environment'],
         [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command: { ...validPack().sensors.lint.variants[0].command, args: ['prefix{files}'] } }] } } }, 'embed'],
         [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], formatter: 'bad\nformat' }] } } }, 'formatter'],
         [{ ...validPack(), hardening: { 'typescript-strict': { assets: ['../tsconfig.awm.json'] } } }, 'asset'],

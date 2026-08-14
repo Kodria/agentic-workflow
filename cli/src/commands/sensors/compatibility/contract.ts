@@ -13,6 +13,7 @@ import type {
 
 const PACK_SCHEMA_VERSION = 2;
 const SHELL_EXECUTABLES = new Set(['sh', 'bash', 'cmd', 'powershell']);
+const PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
 const ALLOWED_PROBES = new Set<CompatibilityProbe>([
     'version',
     'eslint-print-config',
@@ -80,7 +81,7 @@ function assetArray(value: unknown, source: unknown, location: string, allowEmpt
 
 export function parseStructuredCommand(input: unknown, source: unknown): StructuredCommand {
     const value = record(input, source, 'command');
-    fields(value, ['executable', 'resolution', 'args', 'fileInput'], source, 'command');
+    fields(value, ['executable', 'resolution', 'args', 'packageManager', 'environment', 'fileInput'], source, 'command');
     const executable = text(value.executable, source, 'command.executable');
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(executable) || SHELL_EXECUTABLES.has(executable.toLowerCase().replace(/\.exe$/, ''))) {
         invalid(source, 'command.executable must not be a shell or path');
@@ -93,6 +94,18 @@ export function parseStructuredCommand(input: unknown, source: unknown): Structu
         if (arg.includes('{files}') && arg !== '{files}') invalid(source, `command.args[${index}] must not embed {files}`);
     }
     const command: StructuredCommand = { executable, resolution: value.resolution, args };
+    if (PACKAGE_MANAGERS.has(executable) && !('packageManager' in value)) invalid(source, 'command.packageManager is required for a package-manager executable');
+    if ('packageManager' in value) {
+        if (typeof value.packageManager !== 'string' || !PACKAGE_MANAGERS.has(value.packageManager)) invalid(source, 'command.packageManager must be npm, pnpm, yarn, or bun');
+        if (value.packageManager !== executable) invalid(source, 'command.packageManager must match executable');
+        command.packageManager = value.packageManager as StructuredCommand['packageManager'];
+    }
+    if ('environment' in value) {
+        const environment = record(value.environment, source, 'command.environment');
+        fields(environment, ['ESLINT_USE_FLAT_CONFIG'], source, 'command.environment');
+        if (environment.ESLINT_USE_FLAT_CONFIG !== 'false' || Object.keys(environment).length !== 1) invalid(source, 'command.environment must be the allowlisted ESLINT_USE_FLAT_CONFIG=false mapping');
+        command.environment = { ESLINT_USE_FLAT_CONFIG: 'false' };
+    }
     if ('fileInput' in value) {
         const fileInput = record(value.fileInput, source, 'command.fileInput');
         fields(fileInput, ['placeholder', 'extensions'], source, 'command.fileInput');

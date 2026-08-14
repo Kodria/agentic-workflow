@@ -27,7 +27,7 @@ export type ExecOptions = {
     killGraceMs?: number;
 };
 
-type SpawnInput = { executable: string; args: string[]; shell: boolean };
+type SpawnInput = { executable: string; args: string[]; shell: boolean; environment?: { ESLINT_USE_FLAT_CONFIG: 'false' } };
 
 const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
 const DEFAULT_KILL_GRACE_MS = 2_000;
@@ -104,8 +104,9 @@ function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult>
             })
             : spawn(input.executable, input.args, {
                 shell: false,
-            cwd: opts.cwd,
-            detached: !isWindowsNative(),
+                cwd: opts.cwd,
+                detached: !isWindowsNative(),
+                ...(input.environment ? { env: { ...process.env, ...input.environment } } : {}),
             // stdin closed: a sensor must never block waiting for input, and the
             // EOF also tells watch-mode-capable tools (vitest, jest) to run once.
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -169,6 +170,10 @@ function validateStructuredCommand(command: StructuredCommand): void {
         throw new Error('structured command args must be an array of single-line strings without NUL');
     }
     if (!['node-modules-bin', 'python-environment', 'path'].includes(command.resolution)) throw new Error('structured command resolution is unsupported');
+    const packageManagers = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+    if (packageManagers.has(command.executable) && command.packageManager !== command.executable) throw new Error('structured command packageManager must explicitly match its executable');
+    if (command.packageManager !== undefined && !packageManagers.has(command.packageManager)) throw new Error('structured command packageManager is unsupported');
+    if (command.environment !== undefined && (Object.keys(command.environment).length !== 1 || command.environment.ESLINT_USE_FLAT_CONFIG !== 'false')) throw new Error('structured command environment is not allowlisted');
 }
 
 function regularFile(candidate: string): boolean {
@@ -250,7 +255,7 @@ function resolveStructuredExecutable(command: StructuredCommand, cwd: string): s
 /** Execute a v2 command as an executable plus literal argv; it never starts a shell. */
 export function runStructuredCommand(command: StructuredCommand, opts: ExecOptions): Promise<ExecResult> {
     validateStructuredCommand(command);
-    return collectSpawn({ executable: resolveStructuredExecutable(command, opts.cwd), args: command.args, shell: false }, opts);
+    return collectSpawn({ executable: resolveStructuredExecutable(command, opts.cwd), args: command.args, shell: false, environment: command.environment }, opts);
 }
 
 /** Legacy sensor strings intentionally retain their documented shell semantics. */

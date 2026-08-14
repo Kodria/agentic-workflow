@@ -10,6 +10,10 @@ export type StructuredCommand = {
     executable: string;
     resolution: 'node-modules-bin' | 'python-environment' | 'path';
     args: string[];
+    /** A script runner is explicit: v2 never guesses npm/pnpm/yarn/bun. */
+    packageManager?: 'npm' | 'pnpm' | 'yarn' | 'bun';
+    /** Closed execution environment; only contract-approved keys may be set. */
+    environment?: { ESLINT_USE_FLAT_CONFIG: 'false' };
     fileInput?: { placeholder: '{files}'; extensions: string[] };
 };
 
