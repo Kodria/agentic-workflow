@@ -9,12 +9,16 @@ const KINDS = new Set<CompatibilityProbe>(['version', 'eslint-print-config', 'ty
 
 function commandFor(kind: CompatibilityProbe, evidence: ProbeEvidence): StructuredCommand | null {
     const executable = evidence.toolExecutable ?? (kind.startsWith('typescript') ? 'tsc' : kind.startsWith('eslint') ? 'eslint' : kind.startsWith('semgrep') ? 'semgrep' : 'node');
+    // A tool version certified from local package metadata must be probed through
+    // the same project installation. Only the Node runtime is intentionally PATH
+    // resolved: it is runtime evidence, not a package-local tool assertion.
+    const resolution = executable === 'node' ? 'path' : 'node-modules-bin' as const;
     if (kind === 'package-script-present') return null;
     if (kind === 'config-present') return null;
-    if (kind === 'version') return { executable, resolution: 'path', args: ['--version'] };
-    if (kind === 'eslint-print-config') return { executable, resolution: 'path', args: ['--print-config', evidence.configFiles?.[0] ?? 'package.json'] };
-    if (kind === 'typescript-show-config') return { executable, resolution: 'path', args: ['--showConfig'] };
-    return { executable, resolution: 'path', args: ['--validate'] };
+    if (kind === 'version') return { executable, resolution, args: ['--version'] };
+    if (kind === 'eslint-print-config') return { executable, resolution, args: ['--print-config', evidence.configFiles?.[0] ?? 'package.json'] };
+    if (kind === 'typescript-show-config') return { executable, resolution, args: ['--showConfig'] };
+    return { executable, resolution, args: ['--validate'] };
 }
 
 /** Executes only the closed probe enum. Raw output is intentionally discarded. */

@@ -19,4 +19,13 @@ describe('runCompatibilityProbe', () => {
         fakeExecutor.mockResolvedValueOnce({ code: 0, signal: null, timedOut: false, overflowed: true, stdout: 'ok', stderr: '' });
         await expect(runCompatibilityProbe({ kind: 'version' }, evidence, fakeExecutor)).resolves.toMatchObject({ status: 'unverifiable' });
     });
+
+    it('binds tool probes to the project node_modules executable instead of PATH', async () => {
+        await runCompatibilityProbe({ kind: 'eslint-print-config' }, evidence, fakeExecutor);
+
+        expect(fakeExecutor).toHaveBeenCalledWith(
+            expect.objectContaining({ executable: 'eslint', resolution: 'node-modules-bin' }),
+            expect.any(Object),
+        );
+    });
 });

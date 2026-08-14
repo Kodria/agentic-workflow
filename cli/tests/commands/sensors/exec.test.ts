@@ -134,3 +134,30 @@ describe('runCommand — spawn failure', () => {
         expect(r.code).not.toBe(0);
     });
 });
+
+onPosix('runStructuredCommand — local node_modules binaries', () => {
+    it('follows an npm-style contained shim but rejects one escaping node_modules', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-local-bin-symlink-'));
+        const modules = path.join(dir, 'node_modules');
+        const bin = path.join(modules, '.bin');
+        const contained = path.join(modules, 'tool', 'bin', 'tool');
+        const outside = path.join(dir, 'outside-tool');
+        try {
+            fs.mkdirSync(path.dirname(contained), { recursive: true });
+            fs.writeFileSync(contained, '#!/bin/sh\necho contained\n', { mode: 0o755 });
+            fs.writeFileSync(outside, '#!/bin/sh\necho outside\n', { mode: 0o755 });
+            fs.mkdirSync(bin, { recursive: true });
+            fs.symlinkSync('../tool/bin/tool', path.join(bin, 'tool'));
+
+            await expect(runStructuredCommand({ executable: 'tool', resolution: 'node-modules-bin', args: [] }, { timeout: 5000, cwd: dir }))
+                .resolves.toMatchObject({ code: 0, stdout: 'contained\n' });
+
+            fs.unlinkSync(path.join(bin, 'tool'));
+            fs.symlinkSync(outside, path.join(bin, 'tool'));
+            expect(() => runStructuredCommand({ executable: 'tool', resolution: 'node-modules-bin', args: [] }, { timeout: 5000, cwd: dir }))
+                .toThrow(/node_modules.*contain|local/i);
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+});

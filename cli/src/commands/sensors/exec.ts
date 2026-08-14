@@ -178,12 +178,51 @@ function regularFile(candidate: string): boolean {
     } catch { return false; }
 }
 
+function containedPath(root: string, candidate: string): boolean {
+    const relative = path.relative(root, candidate);
+    return relative !== '' && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);
+}
+
+/** Resolve a local npm shim to its real regular-file target. npm commonly uses
+ * symlinks in .bin on POSIX, so rejecting every symlink would reject valid local
+ * installs. The real target must remain inside the project's node_modules. */
+function localNodeModulesExecutable(candidate: string, modulesRoot: string): string | null {
+    try {
+        const shim = fs.lstatSync(candidate);
+        if (!shim.isFile() && !shim.isSymbolicLink()) return null;
+        const real = fs.realpathSync(candidate);
+        const target = fs.statSync(real);
+        return target.isFile() && containedPath(modulesRoot, real) ? real : null;
+    } catch { return null; }
+}
+
 /** Find a real executable without a shell. Windows .cmd/.bat shims are deliberately
  * excluded: CreateProcess cannot execute them safely without cmd.exe. */
 function resolveStructuredExecutable(command: StructuredCommand, cwd: string): string {
+    if (command.resolution === 'node-modules-bin') {
+        let modulesRoot: string;
+        try {
+            modulesRoot = fs.realpathSync(path.join(cwd, 'node_modules'));
+            if (!fs.statSync(modulesRoot).isDirectory()) throw new Error();
+        } catch { throw new Error('node_modules executable not found locally'); }
+        const bin = path.join(modulesRoot, '.bin');
+        if (!isWindowsNative()) {
+            const local = localNodeModulesExecutable(path.join(bin, command.executable), modulesRoot);
+            if (local) return local;
+            throw new Error('node_modules executable is not a contained local file');
+        }
+        const extensions = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map(ext => ext.toLowerCase()).filter(ext => ext === '.exe' || ext === '.com');
+        const candidates = [path.join(bin, command.executable), ...extensions.map(extension => path.join(bin, command.executable + extension))];
+        for (const candidate of candidates) {
+            const lower = candidate.toLowerCase();
+            if (lower.endsWith('.cmd') || lower.endsWith('.bat')) throw new Error('structured commands cannot execute Windows command wrappers');
+            const local = localNodeModulesExecutable(candidate, modulesRoot);
+            if (local && extensions.some(extension => local.toLowerCase().endsWith(extension))) return local;
+        }
+        throw new Error('node_modules executable is not a contained local file');
+    }
     const candidates: string[] = [];
-    if (command.resolution === 'node-modules-bin') candidates.push(path.join(cwd, 'node_modules', '.bin', command.executable));
-    else if (path.isAbsolute(command.executable)) candidates.push(command.executable);
+    if (path.isAbsolute(command.executable)) candidates.push(command.executable);
     else if (command.resolution === 'python-environment') {
         candidates.push(path.join(cwd, '.venv', isWindowsNative() ? 'Scripts' : 'bin', command.executable));
         candidates.push(path.join(cwd, 'venv', isWindowsNative() ? 'Scripts' : 'bin', command.executable));
@@ -193,7 +232,6 @@ function resolveStructuredExecutable(command: StructuredCommand, cwd: string): s
     if (!isWindowsNative()) {
         const found = candidates.find(regularFile);
         if (found) return found;
-        if (command.resolution === 'node-modules-bin') throw new Error('node_modules executable not found locally');
         return command.executable;
     }
     const extensions = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map(ext => ext.toLowerCase()).filter(ext => ext === '.exe' || ext === '.com');
@@ -203,7 +241,6 @@ function resolveStructuredExecutable(command: StructuredCommand, cwd: string): s
         if (regularFile(candidate) && extensions.some(ext => lower.endsWith(ext))) return candidate;
         for (const extension of extensions) if (regularFile(candidate + extension)) return candidate + extension;
     }
-    if (command.resolution === 'node-modules-bin') throw new Error('node_modules executable not found locally');
     return command.executable;
 }
 
