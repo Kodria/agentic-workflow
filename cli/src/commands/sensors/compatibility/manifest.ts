@@ -150,7 +150,7 @@ function parseV2Sensor(input: unknown, source: unknown, location: string): Senso
     if (['certified', 'compatible-unverified', 'incompatible'].includes(sensor.initializedCompatibility.state) && sensor.initializedCompatibility.variantId === null) invalid(source, `${location}.initializedCompatibility.variantId is required for ${sensor.initializedCompatibility.state}`);
     if (sensor.initializedCompatibility.state === 'certified' && (sensor.initializedCompatibility.toolVersion === null || sensor.initializedCompatibility.runtimeVersion === null || sensor.initializedCompatibility.certifiedRange === null)) invalid(source, `${location}.initializedCompatibility certified evidence is incomplete`);
     if (sensor.initializedCompatibility.state === 'certified' && !semver.satisfies(sensor.initializedCompatibility.toolVersion!, sensor.initializedCompatibility.certifiedRange!)) invalid(source, `${location}.initializedCompatibility.toolVersion must satisfy certifiedRange`);
-    if ('assets' in value) sensor.assets = stringArray(value.assets, source, `${location}.assets`, false).map((entry, index) => asset(entry, source, `${location}.assets[${index}]`));
+    if ('assets' in value) sensor.assets = stringArray(value.assets, source, `${location}.assets`, true).map((entry, index) => asset(entry, source, `${location}.assets[${index}]`));
     if ('fast' in value) {
         if (typeof value.fast !== 'boolean') invalid(source, `${location}.fast must be a boolean`);
         sensor.fast = value.fast;

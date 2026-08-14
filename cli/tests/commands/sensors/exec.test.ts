@@ -24,7 +24,7 @@ describe('runCommand — exit codes and output', () => {
             const literal = `;touch ${marker}`;
             const received = path.join(dir, 'received');
             const result = await runStructuredCommand({
-                executable: process.execPath,
+                executable: 'node',
                 resolution: 'path',
                 args: ['-e', "require('fs').writeFileSync(process.argv[1], process.argv[2])", received, literal],
             }, { timeout: 5000, cwd: dir });
@@ -132,6 +132,20 @@ describe('runCommand — spawn failure', () => {
         const r = await runCommand('echo hi', { timeout: 5000, cwd: path.join(os.tmpdir(), 'awm-no-such-dir-xyz') });
         expect(r.spawnError).toBeDefined();
         expect(r.code).not.toBe(0);
+    });
+});
+
+describe('runStructuredCommand — public boundary validation', () => {
+    it.each(['sh', 'cmd.exe', '/usr/bin/node', 'nested/tool', 'nested\\tool'])('rejects unsafe executable %j before resolution', executable => {
+        expect(() => runStructuredCommand({ executable, resolution: 'path', args: [] }, { timeout: 5000, cwd: process.cwd() }))
+            .toThrow(/safe executable name|shell/i);
+    });
+
+    it('normalizes package-manager spellings while requiring an equivalent explicit selection', () => {
+        expect(() => runStructuredCommand({ executable: 'NPM.exe', resolution: 'path', args: [] }, { timeout: 5000, cwd: process.cwd() }))
+            .toThrow(/packageManager/);
+        expect(() => runStructuredCommand({ executable: 'NPM.exe', resolution: 'path', args: [], packageManager: 'pnpm' }, { timeout: 5000, cwd: process.cwd() }))
+            .toThrow(/packageManager/);
     });
 });
 

@@ -319,6 +319,27 @@ describe('initSensors', () => {
         }
     });
 
+    it('initializes a selected v2 variant with an explicitly empty assets list', async () => {
+        const v2Registry = makeV2Registry();
+        try {
+            const packPath = path.join(v2Registry, 'sensor-packs', 'js-ts', 'pack.json');
+            const pack = JSON.parse(fs.readFileSync(packPath, 'utf8'));
+            pack.sensors.lint.variants[0].assets = [];
+            fs.writeFileSync(packPath, JSON.stringify(pack));
+            fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ devDependencies: { eslint: '^10.0.0' } }));
+            fs.mkdirSync(path.join(tmpDir, 'node_modules', 'eslint'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version: '10.0.0' }));
+
+            await expect(initSensors({ cwd: tmpDir, registryRoot: v2Registry })).resolves.toMatchObject({
+                manifest: { schemaVersion: 2, sensors: { lint: { assets: [] } } },
+                configured: [],
+            });
+            expect(fs.existsSync(path.join(tmpDir, 'eslint.config.awm.mjs'))).toBe(false);
+        } finally {
+            fs.rmSync(v2Registry, { recursive: true, force: true });
+        }
+    });
+
     it('preserves enabled and fast choices when a valid v2 manifest is re-initialized', async () => {
         const v2Registry = makeV2Registry();
         try {

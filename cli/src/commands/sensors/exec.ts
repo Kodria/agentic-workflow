@@ -163,16 +163,22 @@ function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult>
 }
 
 function validateStructuredCommand(command: StructuredCommand): void {
-    if (!command || typeof command !== 'object' || typeof command.executable !== 'string' || (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(command.executable) && !path.isAbsolute(command.executable))) {
+    if (!command || typeof command !== 'object' || typeof command.executable !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(command.executable)) {
         throw new Error('structured command executable must be a safe executable name');
+    }
+    const normalizedExecutable = command.executable.toLowerCase().replace(/\.exe$/, '');
+    if (new Set(['sh', 'bash', 'cmd', 'powershell']).has(normalizedExecutable)) {
+        throw new Error('structured command executable must not be a shell');
     }
     if (!Array.isArray(command.args) || command.args.some(arg => typeof arg !== 'string' || /[\0\r\n]/.test(arg))) {
         throw new Error('structured command args must be an array of single-line strings without NUL');
     }
     if (!['node-modules-bin', 'python-environment', 'path'].includes(command.resolution)) throw new Error('structured command resolution is unsupported');
     const packageManagers = new Set(['npm', 'pnpm', 'yarn', 'bun']);
-    if (packageManagers.has(command.executable) && command.packageManager !== command.executable) throw new Error('structured command packageManager must explicitly match its executable');
-    if (command.packageManager !== undefined && !packageManagers.has(command.packageManager)) throw new Error('structured command packageManager is unsupported');
+    const normalizedPackageManager = typeof command.packageManager === 'string' ? command.packageManager.toLowerCase().replace(/\.exe$/, '') : undefined;
+    if (packageManagers.has(normalizedExecutable) && normalizedPackageManager !== normalizedExecutable) throw new Error('structured command packageManager must explicitly match its executable');
+    if (normalizedPackageManager !== undefined && !packageManagers.has(normalizedPackageManager)) throw new Error('structured command packageManager is unsupported');
+    if (normalizedPackageManager !== undefined && normalizedPackageManager !== normalizedExecutable) throw new Error('structured command packageManager must explicitly match its executable');
     if (command.environment !== undefined && (Object.keys(command.environment).length !== 1 || command.environment.ESLINT_USE_FLAT_CONFIG !== 'false')) throw new Error('structured command environment is not allowlisted');
 }
 

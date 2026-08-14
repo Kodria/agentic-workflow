@@ -71,6 +71,23 @@ describe('sensor pack v2 contract', () => {
             .toMatchObject({ kind: 'v2', pack: { sensors: { lint: { variants: [{ command }] } } } });
     });
 
+    it('normalizes package-manager executable spelling before enforcing its explicit selection', () => {
+        const variant = validPack().sensors.lint.variants[0];
+        const withExecutable = (executable: string, packageManager?: string) => ({
+            ...validPack(),
+            sensors: { lint: { ...validPack().sensors.lint, variants: [{
+                ...variant,
+                command: { executable, resolution: 'path', args: ['run', 'lint'], ...(packageManager === undefined ? {} : { packageManager }) },
+            }] } },
+        });
+
+        expect(() => parseSensorPack(withExecutable('NPM'), 'pack.json')).toThrow('packageManager');
+        expect(parseSensorPack(withExecutable('npm.exe', 'NPM'), 'pack.json')).toMatchObject({
+            kind: 'v2', pack: { sensors: { lint: { variants: [{ command: { executable: 'npm.exe', packageManager: 'npm' } }] } } },
+        });
+        expect(() => parseSensorPack(withExecutable('NPM', 'pnpm'), 'pack.json')).toThrow('match executable');
+    });
+
     it('keeps an unversioned pack on the legacy compatibility path', () => {
         const legacy = { name: 'legacy', sensors: {} };
         expect(parseSensorPack(legacy, 'pack.json')).toMatchObject({ kind: 'legacy', pack: { ...legacy, compatibility: { state: 'compatible-unverified' } } });

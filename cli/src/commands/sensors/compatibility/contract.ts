@@ -25,6 +25,10 @@ const ALLOWED_PROBES = new Set<CompatibilityProbe>([
 
 type UnknownRecord = Record<string, unknown>;
 
+function normalizedPackageManager(value: string): string {
+    return value.toLowerCase().replace(/\.exe$/, '');
+}
+
 function isRecord(value: unknown): value is UnknownRecord {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -94,11 +98,13 @@ export function parseStructuredCommand(input: unknown, source: unknown): Structu
         if (arg.includes('{files}') && arg !== '{files}') invalid(source, `command.args[${index}] must not embed {files}`);
     }
     const command: StructuredCommand = { executable, resolution: value.resolution, args };
-    if (PACKAGE_MANAGERS.has(executable) && !('packageManager' in value)) invalid(source, 'command.packageManager is required for a package-manager executable');
+    const executablePackageManager = normalizedPackageManager(executable);
+    if (PACKAGE_MANAGERS.has(executablePackageManager) && !('packageManager' in value)) invalid(source, 'command.packageManager is required for a package-manager executable');
     if ('packageManager' in value) {
-        if (typeof value.packageManager !== 'string' || !PACKAGE_MANAGERS.has(value.packageManager)) invalid(source, 'command.packageManager must be npm, pnpm, yarn, or bun');
-        if (value.packageManager !== executable) invalid(source, 'command.packageManager must match executable');
-        command.packageManager = value.packageManager as StructuredCommand['packageManager'];
+        if (typeof value.packageManager !== 'string' || !PACKAGE_MANAGERS.has(normalizedPackageManager(value.packageManager))) invalid(source, 'command.packageManager must be npm, pnpm, yarn, or bun');
+        const packageManager = normalizedPackageManager(value.packageManager);
+        if (packageManager !== executablePackageManager) invalid(source, 'command.packageManager must match executable');
+        command.packageManager = packageManager as StructuredCommand['packageManager'];
     }
     if ('environment' in value) {
         const environment = record(value.environment, source, 'command.environment');
