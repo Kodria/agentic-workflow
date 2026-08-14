@@ -121,13 +121,27 @@ describe('scanProjectLedgers', () => {
         }
     });
 
-    test('stops enumerating a directory after the bounded candidate window', () => {
+    test('sorts the retained candidate window instead of assuming host directory order', () => {
         write(root, '.awm/ledger/a.jsonl', [entry({ signature: 'first' })]);
         write(root, '.awm/ledger/b.jsonl', [entry({ signature: 'witness' })]);
         write(root, '.awm/ledger/c.jsonl', [entry({ signature: 'must-not-enumerate' })]);
+        const ledgerDirectory = path.join(root, '.awm', 'ledger');
         const originalOpen = fs.opendirSync;
         let readCalls = 0;
         const openSpy = jest.spyOn(fs, 'opendirSync').mockImplementation((directory, options) => {
+            if (String(directory) === ledgerDirectory) {
+                const names = ['b.jsonl', 'a.jsonl', 'c.jsonl'];
+                let index = 0;
+                return {
+                    closeSync: jest.fn(),
+                    readSync: jest.fn(() => {
+                        readCalls += 1;
+                        if (readCalls > 2) throw new Error('candidate enumeration exceeded bounded window');
+                        const name = names[index++];
+                        return name === undefined ? null : { name };
+                    }),
+                } as unknown as fs.Dir;
+            }
             const handle = originalOpen(directory, options);
             const originalRead = handle.readSync.bind(handle);
             jest.spyOn(handle, 'readSync').mockImplementation(() => {
