@@ -892,7 +892,7 @@ _Requirements: R7.6, R7.8, R9.1, R9.3, R10.13_
 
 **Skills:** `test-driven-development`, `requesting-code-review`, `verification-before-completion`
 
-- [ ] **Step 1: Crear E2E rojo para legacy, v2 y drift**
+- [x] **Step 1: Crear E2E rojo para legacy, v2 y drift**
 
 ```ts
 test.each(['linux', 'darwin', 'win32'] as const)('keeps compatibility semantics on %s (R9.1)', async (platform) => {
@@ -909,11 +909,11 @@ test('legacy runs but never certifies and init migrates explicitly (R7.2, R7.8)'
 });
 ```
 
-- [ ] **Step 2: Integrar fixtures portables y la matriz CI**
+- [x] **Step 2: Integrar fixtures portables y la matriz CI**
 
 Fixtures nunca dependen de binarios globales: tools fake controlados emiten versiones/probe output. La matriz real de release sigue Ubuntu/macOS/Windows Node 22. Añadir E2E a suite Jest normal, no job opcional.
 
-- [ ] **Step 3: Ejecutar suite CLI completa y sensores reales**
+- [x] **Step 3: Ejecutar suite CLI completa y sensores reales**
 
 Run desde raíz:
 
@@ -930,11 +930,11 @@ node cli/dist/src/index.js sensors coverage --json --min 2
 
 Expected: typecheck/build/tests PASS; sensors `overall: pass`; coverage JSON schema 2 parseable, proyecto byte-idéntico antes/después y static/empirical presentes.
 
-- [ ] **Step 4: Guardar evidencia reproducible sin datos locales**
+- [x] **Step 4: Guardar evidencia reproducible sin datos locales**
 
 `docs/research/r3/cli-contract.json` incluye schema versions, estados, hashes de fixtures y comandos; no incluye homes, descriptions del ledger ni salida raw. `README.md` de research explica reproducción y marca que la certificación de packs queda pendiente del registry tag.
 
-- [ ] **Step 5: Solicitar review antes del PR y corregir todo hallazgo**
+- [x] **Step 5: Solicitar review antes del PR y corregir todo hallazgo**
 
 Invocar `requesting-code-review`; por cada hallazgo agregar un test discriminante rojo/verde. Reejecutar Step 3 y `git diff --check`. No mezclar `cli/.awm/ledger/` en staging.
 
