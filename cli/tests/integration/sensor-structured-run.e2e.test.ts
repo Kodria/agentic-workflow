@@ -86,6 +86,23 @@ function runCli(fixture: Fixture, ...args: string[]) {
     });
 }
 
+function assertSuccessfulCli(result: ReturnType<typeof runCli>, phase: string, requireStdout = false): void {
+    const details = [
+        `status=${String(result.status)}`,
+        `signal=${String(result.signal)}`,
+        `error=${result.error ? `${result.error.name}: ${result.error.message}` : 'none'}`,
+        `stdout=${JSON.stringify(result.stdout ?? '')}`,
+        `stderr=${JSON.stringify(result.stderr ?? '')}`,
+    ].join('\n');
+
+    if (result.error || result.status !== 0 || result.signal !== null) {
+        throw new Error(`${phase} child process failed:\n${details}`);
+    }
+    if (requireStdout && !(result.stdout ?? '').trim()) {
+        throw new Error(`${phase} child process emitted no JSON:\n${details}`);
+    }
+}
+
 beforeAll(() => {
     if (!fs.existsSync(bin)) throw new Error(`Structured sensor E2E requires the compiled CLI at ${bin}; run npm run build before this test.`);
 });
@@ -94,7 +111,7 @@ test('compiled sensors run materializes a v2 registry command and passes its lit
     const fixture = createFixture();
     try {
         const initialized = runCli(fixture, 'init', '--registry-root', fixture.registryRoot, '--pack', 'fixture', '--no-configure');
-        if (initialized.status !== 0) throw new Error(`init failed: ${initialized.stdout ?? ''}\n${initialized.stderr ?? ''}`);
+        assertSuccessfulCli(initialized, 'init');
         const manifest = JSON.parse(fs.readFileSync(path.join(fixture.project, '.awm', 'sensors.json'), 'utf8'));
         expect(manifest).toMatchObject({
             schemaVersion: 2,
@@ -103,8 +120,8 @@ test('compiled sensors run materializes a v2 registry command and passes its lit
         });
 
         const result = runCli(fixture, 'run', '--fast');
-        expect(result.status).toBe(0);
-        expect(JSON.parse(result.stdout ?? '')).toMatchObject({
+        assertSuccessfulCli(result, 'run --fast', true);
+        expect(JSON.parse(result.stdout)).toMatchObject({
             overall: 'pass', sensors: [expect.objectContaining({ name: 'structured', status: 'pass' })],
         });
         expect(JSON.parse(fs.readFileSync(path.join(fixture.project, 'structured-argv.json'), 'utf8'))).toEqual([fixture.literal]);
