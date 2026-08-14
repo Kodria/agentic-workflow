@@ -206,6 +206,17 @@ describe('ledger store — archive', () => {
         expect(archiveLedger(cwd, 'feat-x', '20260606T000000')).toBe(false);
     });
 
+    test('refuses to overwrite an existing archive and preserves both ledger files', () => {
+        addEntry(cwd, entry({ signature: 'active-evidence' }));
+        const archivePath = path.join(cwd, '.awm', 'ledger', 'archive', 'feat-x-20260606T000000.jsonl');
+        fs.mkdirSync(path.dirname(archivePath), { recursive: true });
+        fs.writeFileSync(archivePath, JSON.stringify(entry({ signature: 'archived-evidence' })) + '\n');
+
+        expect(() => archiveLedger(cwd, 'feat-x', '20260606T000000')).toThrow(/archive.*already exists/i);
+        expect(listEntries(cwd, 'feat-x')).toEqual([expect.objectContaining({ signature: 'active-evidence' })]);
+        expect(fs.readFileSync(archivePath, 'utf-8')).toContain('archived-evidence');
+    });
+
     test.each(['', '.', '..', '../outside', '/tmp/outside', 'C:\\temp\\outside'])
     ('rejects an unsafe archive label %p before touching a ledger', (label) => {
         expect(() => archiveLedger(cwd, 'feat-x', label)).toThrow(/invalid ledger label/i);

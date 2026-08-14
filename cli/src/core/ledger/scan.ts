@@ -99,6 +99,50 @@ function relativePath(root: string, target: string): string {
     return path.relative(root, target).split(path.sep).join('/');
 }
 
+interface LedgerCandidate {
+    isArchive: boolean;
+    target: string;
+    sourcePath: string;
+}
+
+function compareCandidates(a: LedgerCandidate, b: LedgerCandidate): number {
+    return a.sourcePath < b.sourcePath ? -1 : a.sourcePath > b.sourcePath ? 1 : 0;
+}
+
+/**
+ * Retains only the lexically first candidates plus one truncation witness.
+ * Directory entries may be numerous, but candidate memory remains bounded and
+ * callers never open a file that falls after the configured file limit.
+ */
+function collectBoundedCandidates(
+    root: string,
+    directories: Array<{ directory: string; archive: boolean }>,
+    maxFiles: number,
+): { candidates: LedgerCandidate[]; truncated: boolean } {
+    const candidates: LedgerCandidate[] = [];
+    const capacity = maxFiles + 1;
+    let truncated = false;
+    for (const { directory, archive } of directories) {
+        const handle = fs.opendirSync(directory);
+        try {
+            let item: fs.Dirent | null;
+            while ((item = handle.readSync()) !== null) {
+                if (!item.name.endsWith('.jsonl')) continue;
+                const target = path.join(directory, item.name);
+                candidates.push({ isArchive: archive, target, sourcePath: relativePath(root, target) });
+                candidates.sort(compareCandidates);
+                if (candidates.length > capacity) {
+                    candidates.pop();
+                    truncated = true;
+                }
+            }
+        } finally {
+            handle.closeSync();
+        }
+    }
+    return { candidates, truncated: truncated || candidates.length > maxFiles };
+}
+
 /** Reads only direct .jsonl children of active/archive ledger roots; never follows links. */
 export function scanProjectLedgers(projectRoot: string, overrides: Partial<LedgerScanLimits> = {}): LedgerScanResult {
     if (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot)) throw new Error('projectRoot must be an absolute path');
@@ -128,21 +172,9 @@ export function scanProjectLedgers(projectRoot: string, overrides: Partial<Ledge
     let entryLimitReached = false;
     let omittedEvidenceRefs = 0;
     const evidenceRefsByClass = new Map<string, number>();
-    const candidates = directories.flatMap(({ directory, archive: isArchive }) => fs.readdirSync(directory, { withFileTypes: true })
-        .filter(item => item.name.endsWith('.jsonl'))
-        .map(candidate => {
-            const target = path.join(directory, candidate.name);
-            return { isArchive, target, sourcePath: relativePath(root, target) };
-        }))
-        .sort((a, b) => a.sourcePath < b.sourcePath ? -1 : a.sourcePath > b.sourcePath ? 1 : 0);
-    for (const { isArchive, target } of candidates) {
+    const collected = collectBoundedCandidates(root, directories, limits.maxFiles);
+    for (const { isArchive, target } of collected.candidates.slice(0, limits.maxFiles)) {
         if (entryLimitReached) break;
-        if (filesSeen >= limits.maxFiles) {
-            // The limit is a bound, not merely a reporting preference.  Do
-            // not keep opening candidates once it is reached.
-            skip('file-limit');
-            break;
-        }
         filesSeen += 1;
         const stat = fs.lstatSync(target);
         if (stat.isSymbolicLink()) { skip('symlink-entry'); continue; }
@@ -189,5 +221,6 @@ export function scanProjectLedgers(projectRoot: string, overrides: Partial<Ledge
             }
         }
     }
+    if (!entryLimitReached && collected.truncated) skip('file-limit');
     return { entries, sources, omittedEvidenceRefs };
 }

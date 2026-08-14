@@ -84,6 +84,7 @@ export function archiveLedger(cwd: string, branch: string, label: string): boole
     const safe = ledgerFilename(branch);
     const dst = path.join(cwd, LEDGER_DIR, 'archive', `${safe}-${safeLabel}.jsonl`);
     fs.mkdirSync(path.dirname(dst), { recursive: true });
+    if (fs.existsSync(dst)) throw new Error(`ledger archive already exists: ${dst}`);
     fs.renameSync(src, dst);
     return true;
 }

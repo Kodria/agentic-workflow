@@ -100,6 +100,27 @@ describe('scanProjectLedgers', () => {
         expect(entries.sources.skippedByReason).toMatchObject({ 'entry-limit': 1 });
     });
 
+    test('enumerates file candidates with bounded memory and never opens a source after maxFiles', () => {
+        write(root, '.awm/ledger/a.jsonl', [entry({ signature: 'first' })]);
+        write(root, '.awm/ledger/b.jsonl', [entry({ signature: 'must-not-open' })]);
+        write(root, '.awm/ledger/archive/c.jsonl', [entry({ signature: 'also-must-not-open' })]);
+        const readSpy = jest.spyOn(fs, 'readFileSync');
+        const readdirSpy = jest.spyOn(fs, 'readdirSync').mockImplementation(() => {
+            throw new Error('unbounded readdir must not be used for ledger candidates');
+        });
+
+        try {
+            const scan = scanProjectLedgers(root, { maxFiles: 1 });
+            expect(scan.entries.map(item => item.entry.signature)).toEqual(['first']);
+            expect(scan.sources.skippedByReason).toMatchObject({ 'file-limit': 1 });
+            expect(readSpy.mock.calls.map(([candidate]) => String(candidate))).not.toContain(path.join(root, '.awm', 'ledger', 'b.jsonl'));
+            expect(readSpy.mock.calls.map(([candidate]) => String(candidate))).not.toContain(path.join(root, '.awm', 'ledger', 'archive', 'c.jsonl'));
+        } finally {
+            readdirSpy.mockRestore();
+            readSpy.mockRestore();
+        }
+    });
+
     test('reports a too-large file without parsing it', () => {
         write(root, '.awm/ledger/a.jsonl', [entry()]);
         const scan = scanProjectLedgers(root, { maxFileBytes: 1 });
