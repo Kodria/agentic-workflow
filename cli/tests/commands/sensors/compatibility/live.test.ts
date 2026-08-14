@@ -51,4 +51,34 @@ describe('resolveParsedPackCompatibility — contained Python commands', () => {
             fs.rmSync(global, { recursive: true, force: true });
         }
     });
+
+    it('never falls back from the discovered .venv to a sibling venv executable', async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-semgrep-environment-identity-'));
+        try {
+            const discoveredSitePackages = path.join(root, '.venv', 'lib', 'python3.12', 'site-packages');
+            const siblingBin = path.join(root, 'venv', 'bin');
+            fs.mkdirSync(path.join(discoveredSitePackages, 'semgrep-1.91.0.dist-info'), { recursive: true });
+            fs.mkdirSync(siblingBin, { recursive: true });
+            fs.writeFileSync(path.join(root, '.venv', 'pyvenv.cfg'), 'version = 3.12.4\n');
+            fs.writeFileSync(path.join(discoveredSitePackages, 'semgrep-1.91.0.dist-info', 'METADATA'), 'Name: semgrep\nVersion: 1.91.0\n');
+            fs.writeFileSync(path.join(siblingBin, 'semgrep'), '#!/bin/sh\necho sibling-semgrep\n', { mode: 0o755 });
+            fs.writeFileSync(path.join(root, 'pyproject.toml'), '[project]\nname = "sample"\n');
+
+            const pack = {
+                schemaVersion: 2, name: 'python', description: 'test', detects: ['pyproject.toml'], coverage: {},
+                sensors: { security: { applicability: { allFiles: ['pyproject.toml'] }, variants: [{
+                    id: 'semgrep-1', priority: 1, certifiedRange: '>=1 <2',
+                    requirements: { tool: 'semgrep', toolRange: '>=1 <2', runtime: 'python', runtimeRange: '>=3.12 <4' },
+                    assets: [], formatter: 'semgrep', probe: { kind: 'semgrep-validate' },
+                    command: { executable: 'semgrep', resolution: 'path', args: ['--validate'] },
+                }] } },
+            } as any;
+
+            const live = await resolveParsedPackCompatibility(root, pack);
+
+            expect(live.sensors.security).toMatchObject({ state: 'unverifiable', reason: 'probe-inconclusive', toolVersion: '1.91.0' });
+            expect(() => runStructuredCommand(live.pack.sensors.security.variants[0].command, { cwd: root, timeout: 5_000 }))
+                .toThrow('python environment executable is not a contained local regular file');
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
 });

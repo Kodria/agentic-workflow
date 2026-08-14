@@ -20,17 +20,24 @@ export type LiveCompatibilityOptions = { packSelection?: 'explicit' };
  * Keep this at the live pack boundary so the command used by probing, init's
  * materialized manifest, and `sensors run` is one identical structured command.
  */
-function containedRuntimeCommand(variant: SensorVariant): SensorVariant {
+function containedRuntimeCommand(variant: SensorVariant, pythonEnvironmentRoot: '.venv' | 'venv' | null): SensorVariant {
     if (variant.requirements.runtime !== 'python') return variant;
-    return { ...variant, command: { ...variant.command, resolution: 'python-environment' } };
+    return {
+        ...variant,
+        command: {
+            ...variant.command,
+            resolution: 'python-environment',
+            ...(pythonEnvironmentRoot ? { pythonEnvironmentRoot } : {}),
+        },
+    };
 }
 
-function bindContainedRuntimeCommands(pack: SensorPackV2): SensorPackV2 {
+function bindContainedRuntimeCommands(pack: SensorPackV2, pythonEnvironmentRoot: '.venv' | 'venv' | null): SensorPackV2 {
     return {
         ...pack,
         sensors: Object.fromEntries(Object.entries(pack.sensors).map(([name, sensor]) => [
             name,
-            { ...sensor, variants: sensor.variants.map(containedRuntimeCommand) },
+            { ...sensor, variants: sensor.variants.map(variant => containedRuntimeCommand(variant, pythonEnvironmentRoot)) },
         ])),
     };
 }
@@ -59,8 +66,8 @@ export async function resolveLiveCompatibility(cwd: string, packName: string, re
 export async function resolveParsedPackCompatibility(cwd: string, pack: SensorPackV2, options: LiveCompatibilityOptions = {}): Promise<LiveCompatibility> {
     if (typeof cwd !== 'string' || cwd.trim() === '') throw new Error('cwd must be a non-empty path');
     if (!pack || typeof pack !== 'object' || pack.schemaVersion !== 2) throw new Error('pack must be a parsed v2 sensor pack');
-    const executionPack = bindContainedRuntimeCommands(pack);
-    const evidence = discoverProjectEvidence(cwd, executionPack);
+    const evidence = discoverProjectEvidence(cwd, pack);
+    const executionPack = bindContainedRuntimeCommands(pack, evidence.pythonEnvironmentRoot);
     const resolutionEvidence = { ...evidence, ...(options.packSelection === 'explicit' ? { packSelection: 'explicit' as const } : {}) };
     const initial = resolveProjectCompatibility(executionPack, resolutionEvidence).sensors;
     const sensors: Record<string, CompatibilityEvidence> = {};
@@ -72,6 +79,7 @@ export async function resolveParsedPackCompatibility(cwd: string, pack: SensorPa
                 cwd,
                 toolExecutable: variant.command.executable,
                 toolResolution: variant.command.resolution,
+                pythonEnvironmentRoot: variant.command.pythonEnvironmentRoot,
                 configFiles: evidence.configFiles,
                 scripts: evidence.scripts,
             })

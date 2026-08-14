@@ -182,6 +182,10 @@ function validateStructuredCommand(command: StructuredCommand): void {
         }
     }
     if (!['node-modules-bin', 'python-environment', 'path'].includes(command.resolution)) throw new Error('structured command resolution is unsupported');
+    if (command.pythonEnvironmentRoot !== undefined && (command.resolution !== 'python-environment' || (command.pythonEnvironmentRoot !== '.venv' && command.pythonEnvironmentRoot !== 'venv'))) {
+        throw new Error('structured command pythonEnvironmentRoot must name the selected .venv or venv Python environment');
+    }
+    if (command.resolution === 'python-environment' && command.pythonEnvironmentRoot === undefined) throw new Error('python environment command requires a discovery-bound contained local environment root');
     const packageManagers = new Set(['npm', 'pnpm', 'yarn', 'bun']);
     const normalizedPackageManager = typeof command.packageManager === 'string' ? command.packageManager.toLowerCase().replace(/\.exe$/, '') : undefined;
     if (packageManagers.has(normalizedExecutable) && normalizedPackageManager !== normalizedExecutable) throw new Error('structured command packageManager must explicitly match its executable');
@@ -273,8 +277,7 @@ function resolveStructuredExecutable(command: StructuredCommand, cwd: string): s
     const candidates: string[] = [];
     if (command.resolution === 'python-environment') {
         if (path.isAbsolute(command.executable)) throw new Error('python environment executable must be a contained local name');
-        candidates.push(path.join(cwd, '.venv', isWindowsNative() ? 'Scripts' : 'bin', command.executable));
-        candidates.push(path.join(cwd, 'venv', isWindowsNative() ? 'Scripts' : 'bin', command.executable));
+        candidates.push(path.join(cwd, command.pythonEnvironmentRoot!, isWindowsNative() ? 'Scripts' : 'bin', command.executable));
     } else if (path.isAbsolute(command.executable)) candidates.push(command.executable);
     else {
         for (const entry of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) candidates.push(path.join(entry, command.executable));

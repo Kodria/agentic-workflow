@@ -9,6 +9,8 @@ export type CompatibilityState =
 export type StructuredCommand = {
     executable: string;
     resolution: 'node-modules-bin' | 'python-environment' | 'path';
+    /** Discovery-bound virtual environment identity for Python commands. */
+    pythonEnvironmentRoot?: '.venv' | 'venv';
     args: string[];
     /** A script runner is explicit: v2 never guesses npm/pnpm/yarn/bun. */
     packageManager?: 'npm' | 'pnpm' | 'yarn' | 'bun';

@@ -3,7 +3,7 @@ import type { CompatibilityProbe, StructuredCommand } from './types';
 
 export type ProbeStatus = 'matched' | 'not-matched' | 'unverifiable';
 export type ProbeResult = { status: ProbeStatus; reason: string };
-export type ProbeEvidence = { cwd: string; toolExecutable?: string; toolResolution?: StructuredCommand['resolution']; configFiles?: string[]; scripts?: string[] };
+export type ProbeEvidence = { cwd: string; toolExecutable?: string; toolResolution?: StructuredCommand['resolution']; pythonEnvironmentRoot?: StructuredCommand['pythonEnvironmentRoot']; configFiles?: string[]; scripts?: string[] };
 export type ProbeExecutor = (command: StructuredCommand, options: ExecOptions) => Promise<ExecResult>;
 const KINDS = new Set<CompatibilityProbe>(['version', 'eslint-print-config', 'typescript-show-config', 'semgrep-validate', 'package-script-present', 'config-present']);
 
@@ -18,10 +18,11 @@ function commandFor(kind: CompatibilityProbe, evidence: ProbeEvidence): Structur
             : 'node-modules-bin');
     if (kind === 'package-script-present') return null;
     if (kind === 'config-present') return null;
-    if (kind === 'version') return { executable, resolution, args: ['--version'] };
-    if (kind === 'eslint-print-config') return { executable, resolution, args: ['--print-config', evidence.configFiles?.[0] ?? 'package.json'] };
-    if (kind === 'typescript-show-config') return { executable, resolution, args: ['--showConfig'] };
-    return { executable, resolution, args: ['--validate'] };
+    const command = { executable, resolution, ...(resolution === 'python-environment' && evidence.pythonEnvironmentRoot ? { pythonEnvironmentRoot: evidence.pythonEnvironmentRoot } : {}) };
+    if (kind === 'version') return { ...command, args: ['--version'] };
+    if (kind === 'eslint-print-config') return { ...command, args: ['--print-config', evidence.configFiles?.[0] ?? 'package.json'] };
+    if (kind === 'typescript-show-config') return { ...command, args: ['--showConfig'] };
+    return { ...command, args: ['--validate'] };
 }
 
 /** Executes only the closed probe enum. Raw output is intentionally discarded. */

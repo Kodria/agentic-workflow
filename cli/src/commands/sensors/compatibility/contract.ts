@@ -128,7 +128,7 @@ export function resolveSemgrepPolicy(policyRef: unknown, source: unknown, locati
 
 export function parseStructuredCommand(input: unknown, source: unknown): StructuredCommand {
     const value = record(input, source, 'command');
-    fields(value, ['executable', 'resolution', 'args', 'packageManager', 'environment', 'fileInput'], source, 'command');
+    fields(value, ['executable', 'resolution', 'args', 'packageManager', 'environment', 'fileInput', 'pythonEnvironmentRoot'], source, 'command');
     const executable = text(value.executable, source, 'command.executable');
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(executable) || SHELL_EXECUTABLES.has(executable.toLowerCase().replace(/\.exe$/, ''))) {
         invalid(source, 'command.executable must not be a shell or path');
@@ -141,6 +141,10 @@ export function parseStructuredCommand(input: unknown, source: unknown): Structu
         if (arg.includes('{files}') && arg !== '{files}') invalid(source, `command.args[${index}] must not embed {files}`);
     }
     const command: StructuredCommand = { executable, resolution: value.resolution, args };
+    if ('pythonEnvironmentRoot' in value) {
+        if (value.resolution !== 'python-environment' || (value.pythonEnvironmentRoot !== '.venv' && value.pythonEnvironmentRoot !== 'venv')) invalid(source, 'command.pythonEnvironmentRoot must name the selected .venv or venv Python environment');
+        command.pythonEnvironmentRoot = value.pythonEnvironmentRoot;
+    }
     const executablePackageManager = normalizedPackageManager(executable);
     if (PACKAGE_MANAGERS.has(executablePackageManager) && !('packageManager' in value)) invalid(source, 'command.packageManager is required for a package-manager executable');
     if ('packageManager' in value) {

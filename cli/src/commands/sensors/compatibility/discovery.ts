@@ -9,6 +9,8 @@ export type ProjectEvidence = {
     cwd: string;
     os: NodeJS.Platform;
     runtimeVersions: Record<string, string | null>;
+    /** The exact contained environment from which Python metadata was read. */
+    pythonEnvironmentRoot: '.venv' | 'venv' | null;
     /** Declared package ranges are context only, never evidence that a tool is installed. */
     declaredToolRanges: Record<string, string>;
     /** Exact versions inspected from contained local node_modules package metadata. */
@@ -60,8 +62,8 @@ function exactVersion(value: unknown): string | null {
     return typeof value === 'string' && semver.valid(value.trim()) !== null ? semver.clean(value.trim()) : null;
 }
 
-function pythonEnvironment(root: string): { rootParts: string[]; runtimeVersion: string | null } | null {
-    for (const name of ['.venv', 'venv']) {
+function pythonEnvironment(root: string): { rootParts: ['.venv' | 'venv']; runtimeVersion: string | null } | null {
+    for (const name of ['.venv', 'venv'] as const) {
         if (!containedEntry(root, [name], 'directory')) continue;
         const config = readBoundedLocalFile(root, [name, 'pyvenv.cfg']);
         const version = config?.match(/^version\s*=\s*([^\r\n#]+)\s*$/mi)?.[1] ?? null;
@@ -160,7 +162,7 @@ export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependen
     const sitePackages = environment ? pythonSitePackages(root, environment.rootParts, targetPlatform) : [];
     const toolVersions = Object.fromEntries([...tools].sort().map(tool => [tool, pythonToolVersion(root, sitePackages, tool) ?? installedPackageVersion(root, tool)]));
     return {
-        cwd: root, os: targetPlatform, runtimeVersions: { node: process.versions.node ?? null, ...(environment ? { python: environment.runtimeVersion } : {}) }, declaredToolRanges, toolVersions,
+        cwd: root, os: targetPlatform, runtimeVersions: { node: process.versions.node ?? null, ...(environment ? { python: environment.runtimeVersion } : {}) }, pythonEnvironmentRoot: environment?.rootParts[0] ?? null, declaredToolRanges, toolVersions,
         packageManager: declaredManager ?? (lockManagers.size === 1 ? [...lockManagers][0] : null), packageManagerConflict: lockManagers.size > 1,
         scripts, configFiles, paths: [...new Set([...(safeFile(root, 'package.json') ? ['package.json'] : []), ...locks, ...configFiles])].sort(),
     };
