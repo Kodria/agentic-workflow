@@ -11,8 +11,13 @@ describe('discoverProjectEvidence', () => {
             fs.writeFileSync(path.join(root, 'package-lock.json'), '{}');
             fs.writeFileSync(path.join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9');
             fs.writeFileSync(path.join(root, 'eslint.config.js'), 'export default []');
-            const evidence = discoverProjectEvidence(root, { name: 'js-ts', detects: ['package.json'], sensors: {} } as any);
+            fs.mkdirSync(path.join(root, 'node_modules', 'eslint'), { recursive: true });
+            fs.writeFileSync(path.join(root, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ name: 'eslint', version: '10.4.1' }));
+            const evidence = discoverProjectEvidence(root, { schemaVersion: 2, name: 'js-ts', detects: ['package.json'], sensors: { lint: { applicability: { allFiles: ['package.json'] }, variants: [{ requirements: { tool: 'eslint', configFiles: [] } }] } } } as any, { platform: () => 'darwin' });
             expect(evidence.packageManagerConflict).toBe(true);
+            expect(evidence.os).toBe('darwin');
+            expect(evidence.declaredToolRanges.eslint).toBe('10.0.0');
+            expect(evidence.toolVersions.eslint).toBe('10.4.1');
             expect(evidence.scripts).toContain('lint');
             expect(evidence.configFiles).toContain('eslint.config.js');
             expect(evidence.paths.every((item: string) => !path.isAbsolute(item) && !item.includes('..'))).toBe(true);
