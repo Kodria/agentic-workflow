@@ -800,4 +800,10 @@ registerJobCommand(program);
 registerWatchCommand(program);
 registerTrackCommand(program);
 
-program.parse();
+// Commander only waits for async action handlers through parseAsync().  The CLI has
+// async commands (including `sensors coverage`), so returning its promise keeps the
+// process alive until their JSON/output contract has been completed.
+program.parseAsync().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+});

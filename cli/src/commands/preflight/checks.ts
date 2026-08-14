@@ -140,8 +140,8 @@ function checkManifest(cwd: string, manifest: SensorManifest | null): PreflightC
 }
 
 /** Every enabled sensor's command must resolve. This is the check nothing was calling. */
-function checkTools(cwd: string): PreflightCheck {
-    const status = computeSensorStatus(cwd);
+async function checkTools(cwd: string): Promise<PreflightCheck> {
+    const status = await computeSensorStatus(cwd);
     if (status.overall === 'NOT_CONFIGURED') {
         return { id: 'tools', ok: false, detail: 'no manifest to check', remedy: 'run `awm sensors init`' };
     }
@@ -325,7 +325,7 @@ function checkHost(cwd: string): PreflightCheck {
     return { id: 'host', ok: true, detail: 'git host not recognized (github/gitlab) — PR/MR automation not applicable' };
 }
 
-export function preflight(cwd: string = process.cwd()): PreflightReport {
+export async function preflight(cwd: string = process.cwd()): Promise<PreflightReport> {
     const manifest = readManifest(cwd);
     const manifestExists = fs.existsSync(path.join(cwd, MANIFEST));
 
@@ -335,7 +335,7 @@ export function preflight(cwd: string = process.cwd()): PreflightReport {
         // Skipped when there is no manifest: reporting "tools broken" (or nudging toward
         // a baseline that has nothing to snapshot) on a repo that was never set up
         // buries the one thing the operator needs to read.
-        ...(manifestExists ? [checkTools(cwd), checkPack(cwd, manifest), checkSensorsBaseline(cwd, manifest)] : []),
+        ...(manifestExists ? [await checkTools(cwd), checkPack(cwd, manifest), checkSensorsBaseline(cwd, manifest)] : []),
         // Runs unconditionally — orthogonal to sensor configuration entirely, this is
         // about PR/MR tooling, not sensors.
         checkHost(cwd),

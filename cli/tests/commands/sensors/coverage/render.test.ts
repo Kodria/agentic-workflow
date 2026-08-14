@@ -1,27 +1,78 @@
 import { renderCoverageHuman, renderCoverageJson } from '../../../../src/commands/sensors/coverage/render';
+import { evaluateEmpiricalCoverage } from '../../../../src/commands/sensors/coverage/empirical';
 
 const report = {
-    schemaVersion: 1 as const, pack: 'js-ts', registry: 'baseline', overall: 'gaps' as const,
+    schemaVersion: 2 as const, pack: 'js-ts', registry: 'baseline', overall: 'gaps' as const,
     static: { status: 'gaps' as const, reason: null, classes: [
-        { id: 'formatting', description: 'Formatting', status: 'missing' as const,
-            detectors: [{ sensor: 'format', status: 'missing' as const, evidence: [] }],
+        { id: 'lint-errors', description: 'Formatting', status: 'missing' as const,
+            detectors: [{ sensor: 'format', status: 'missing' as const, evidence: [], compatibility: { state: 'missing-tool' as const, reason: 'fixture', variantId: null, toolVersion: null, runtimeVersion: null, certifiedRange: null, evidence: [] } }],
             remedy: { summary: 'Add formatter', command: 'npm i -D prettier' } },
         { id: 'style', description: 'Style', status: 'unverifiable' as const,
-            detectors: [{ sensor: 'lint', status: 'unverifiable' as const, evidence: [{ kind: 'command' as const, status: 'custom' as const }] }],
+            detectors: [{ sensor: 'lint', status: 'unverifiable' as const, evidence: [{ kind: 'command' as const, status: 'custom' as const }], compatibility: { state: 'unverifiable' as const, reason: 'fixture', variantId: null, toolVersion: null, runtimeVersion: null, certifiedRange: null, evidence: [] } }],
             remedy: { summary: 'Declare evidence', command: 'awm sensors init' } },
     ] },
+};
+
+const redactedCluster = {
+    occurrences: 1,
+    recurrent: false,
+    severity: 'important' as const,
+    kind: 'exact' as const,
+    signatures: [],
+    omittedSignatures: 1,
+    evidenceRefs: ['src/a.ts:1'],
+    omittedEvidenceRefs: 0,
+};
+
+const empiricalEvidence = {
+    recurrenceThreshold: 2, status: 'evidence' as const,
+    classes: [{ defectClass: 'lint-errors', occurrences: 1, recurrent: false, severity: 'important' as const, outcome: 'gap' as const, evidenceRefs: ['src/a.ts:1'], omittedEvidenceRefs: 0, clusters: [redactedCluster] }],
+    unclassified: { occurrences: 0, evidenceRefs: [], omittedEvidenceRefs: 0 },
+    sources: { activeFiles: 1, archivedFiles: 0, validEntries: 1, validFindings: 1, skippedFindings: 0, skippedByReason: {} },
+    omittedEvidenceRefs: 0,
 };
 
 test('human output shows every non-green class, remedy and totals without raw evidence (R2.8)', () => {
     const human = renderCoverageHuman(report);
     expect(human).toBe([
         'Sensor coverage', 'Pack: js-ts', 'Registry: baseline', 'Overall: gaps', '',
-        'missing formatting — Formatting', '  detector: format (missing)', '  remedy: Add formatter', '  command: npm i -D prettier',
-        'unverifiable style — Style', '  detector: lint (unverifiable)', '  remedy: Declare evidence', '  command: awm sensors init', '',
-        'Summary: 0 covered, 1 missing, 1 unverifiable', '',
+        'missing lint-errors — Formatting', '  detector: format (missing)', '  compatibility: missing-tool — fixture', '  remedy: Add formatter', '  command: npm i -D prettier',
+        'unverifiable style — Style', '  detector: lint (unverifiable)', '  compatibility: unverifiable — fixture', '  remedy: Declare evidence', '  command: awm sensors init', '',
+        'Summary: 0 covered, 1 missing, 1 unverifiable, 0 not applicable', '',
     ].join('\n'));
     expect(human).not.toContain('commandIncludes');
     expect(human).not.toContain('custom');
+});
+
+test('human output explains an incompatible detector even when its structural evidence is covered (R3.3)', () => {
+    const compatibility = {
+        state: 'incompatible' as const,
+        reason: 'installed eslint version is outside the certified range',
+        variantId: 'eslint-v9',
+        toolVersion: '10.0.0',
+        runtimeVersion: null,
+        certifiedRange: '^9.0.0',
+        evidence: [],
+    };
+    const incompatible = {
+        ...report,
+        static: {
+            ...report.static,
+            classes: [{
+                ...report.static.classes[0],
+                detectors: [{
+                    ...report.static.classes[0].detectors[0],
+                    status: 'covered' as const,
+                    compatibility,
+                }],
+            }],
+        },
+    };
+
+    const human = renderCoverageHuman(incompatible);
+
+    expect(human).toContain('  detector: format (covered)');
+    expect(human).toContain('  compatibility: incompatible — installed eslint version is outside the certified range');
 });
 
 test('json is the exact versioned envelope and ends in newline (R2.8, R2.14)', () => {
@@ -29,15 +80,142 @@ test('json is the exact versioned envelope and ends in newline (R2.8, R2.14)', (
 });
 
 test('keeps the R2 static shape when an optional empirical section is added (R2.14)', () => {
-    const extended = { ...report, empirical: { status: 'no_evidence' } };
+    const extended = { ...report, empirical: {
+        recurrenceThreshold: 2, status: 'partial', classes: [{ defectClass: 'lint-errors', occurrences: 1, recurrent: false, severity: 'important', outcome: 'gap', evidenceRefs: ['src/a.ts:1'], omittedEvidenceRefs: 0, clusters: [redactedCluster] }],
+        unclassified: { occurrences: 1, evidenceRefs: [], omittedEvidenceRefs: 1 },
+        sources: { activeFiles: 1, archivedFiles: 0, validEntries: 2, validFindings: 2, skippedFindings: 1, skippedByReason: { 'invalid-json': 1 } }, omittedEvidenceRefs: 1,
+    } };
     const parsed = JSON.parse(renderCoverageJson(extended));
     expect(parsed.static).toEqual(report.static);
-    expect(parsed.empirical).toEqual({ status: 'no_evidence' });
-    expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.empirical).toEqual(extended.empirical);
+    expect(parsed.schemaVersion).toBe(2);
+});
+
+test('renders sanitized empirical outcomes without ledger descriptions or unsafe signatures', () => {
+    const empirical = {
+        recurrenceThreshold: 2, status: 'partial', classes: [{ defectClass: 'lint-errors', occurrences: 1, recurrent: false, severity: 'important', outcome: 'gap', evidenceRefs: ['PR #2'], omittedEvidenceRefs: 0, clusters: [redactedCluster] }],
+        unclassified: { occurrences: 1, evidenceRefs: [], omittedEvidenceRefs: 1 },
+        sources: { activeFiles: 1, archivedFiles: 0, validEntries: 2, validFindings: 2, skippedFindings: 1, skippedByReason: { 'invalid-json': 1 } }, omittedEvidenceRefs: 1,
+    };
+    const human = renderCoverageHuman({ ...report, empirical });
+    expect(human).toContain('Empirical coverage: partial');
+    expect(human).toContain('gap lint-errors — 1 occurrence');
+    expect(human).toContain('below recurrence threshold (2)');
+    expect(human).toContain('PR #2');
+    expect(human).toContain('omitted cluster signatures: 1');
+    expect(human).not.toContain('desc');
+});
+
+test('renders a report generated with both invalid and scanner-omitted evidence refs', () => {
+    const empirical = evaluateEmpiricalCoverage({
+        entries: [{ entry: { ts: '2026-08-14', branch: 'main', phase: 'qa', source_skill: 'test', polarity: 'finding', class: 'structural', signature: 'private', severity: 'important', desc: 'secret', defectClass: 'lint-errors' }, source: '.awm/ledger/main.jsonl:1', evidenceRef: 'not an allowed ref' }],
+        sources: { activeFiles: 1, archivedFiles: 0, validEntries: 1, validFindings: 1, skippedFindings: 3, skippedByReason: { 'evidence-ref-limit': 3 } }, omittedEvidenceRefs: 3,
+    }, { 'lint-errors': 'missing' }, 2);
+
+    expect(() => renderCoverageJson({ ...report, empirical })).not.toThrow();
+    expect(renderCoverageHuman({ ...report, empirical })).toContain('omitted evidence refs: 4');
+});
+
+test('renders recurrence emphasis and rejects the retired complete empirical state', () => {
+    const empirical = {
+        recurrenceThreshold: 2, status: 'evidence', classes: [{ defectClass: 'lint-errors', occurrences: 2, recurrent: true, severity: 'important', outcome: 'gap', evidenceRefs: [], omittedEvidenceRefs: 0, clusters: [{ ...redactedCluster, occurrences: 2, recurrent: true, evidenceRefs: [] }] }],
+        unclassified: { occurrences: 0, evidenceRefs: [], omittedEvidenceRefs: 0 },
+        sources: { activeFiles: 1, archivedFiles: 0, validEntries: 2, validFindings: 2, skippedFindings: 0, skippedByReason: {} }, omittedEvidenceRefs: 0,
+    };
+    expect(renderCoverageHuman({ ...report, empirical })).toContain('recurrent at threshold 2');
+    expect(() => renderCoverageJson({ ...report, empirical: { ...empirical, status: 'complete' } })).toThrow('invalid report');
+});
+
+test.each([
+    ['a recurrence flag that disagrees with its threshold', {
+        ...empiricalEvidence,
+        classes: [{ ...empiricalEvidence.classes[0], recurrent: true }],
+    }],
+    ['a skipped finding total that disagrees with its reason totals', {
+        ...empiricalEvidence,
+        status: 'partial' as const,
+        sources: { ...empiricalEvidence.sources, skippedFindings: 2, skippedByReason: { 'invalid-json': 1 } },
+    }],
+    ['an omitted evidence total that disagrees with its component omissions', {
+        ...empiricalEvidence,
+        status: 'partial' as const,
+        sources: { ...empiricalEvidence.sources, skippedFindings: 1, skippedByReason: { 'evidence-ref-limit': 1 } },
+    }],
+    ['evidence status when findings were skipped', {
+        ...empiricalEvidence,
+        sources: { ...empiricalEvidence.sources, skippedFindings: 1, skippedByReason: { 'invalid-json': 1 } },
+    }],
+    ['partial status without any incomplete evidence', {
+        ...empiricalEvidence,
+        status: 'partial' as const,
+    }],
+    ['no-evidence status with a valid finding', {
+        ...empiricalEvidence,
+        status: 'no-evidence' as const,
+    }],
+    ['inconclusive status with a valid finding', {
+        ...empiricalEvidence,
+        status: 'inconclusive' as const,
+    }],
+])('renderers reject an empirical envelope with %s', (_case, empirical) => {
+    for (const render of [renderCoverageJson, renderCoverageHuman]) {
+        expect(() => render({ ...report, empirical })).toThrow(/^renderCoverage(?:Json|Human): invalid report/);
+    }
+});
+
+test.each([
+    ['a covered class reported as a gap', {
+        static: { ...report.static, status: 'covered' as const, classes: [{
+            ...report.static.classes[0], status: 'covered' as const,
+            detectors: [{ ...report.static.classes[0].detectors[0], status: 'covered' as const,
+                compatibility: { ...report.static.classes[0].detectors[0].compatibility, state: 'certified' as const } }],
+        }] },
+        empirical: { ...empiricalEvidence, classes: [{ ...empiricalEvidence.classes[0], outcome: 'gap' as const }] },
+    }],
+    ['a missing-tool class reported as covered', {
+        static: report.static,
+        empirical: { ...empiricalEvidence, classes: [{ ...empiricalEvidence.classes[0], outcome: 'covered-by-sensor' as const }] },
+    }],
+    ['an unverifiable class reported as a gap', {
+        static: { ...report.static, status: 'inconclusive' as const, classes: [{ ...report.static.classes[1], id: 'lint-errors' }] },
+        empirical: { ...empiricalEvidence, classes: [{ ...empiricalEvidence.classes[0], outcome: 'gap' as const }] },
+    }],
+    ['a not-applicable class with evidence reported without a contradiction', {
+        static: { ...report.static, status: 'inconclusive' as const, classes: [{
+            ...report.static.classes[0], status: 'not-applicable' as const,
+            detectors: [{ ...report.static.classes[0].detectors[0], status: 'covered' as const,
+                compatibility: { ...report.static.classes[0].detectors[0].compatibility, state: 'not-applicable' as const } }],
+        }] },
+        empirical: { ...empiricalEvidence, classes: [{ ...empiricalEvidence.classes[0], outcome: 'coverage-unverifiable' as const }] },
+    }],
+    ['an unmapped class reported as a gap while the catalog is available', {
+        static: report.static,
+        empirical: { ...empiricalEvidence, classes: [{ ...empiricalEvidence.classes[0], defectClass: 'unknown-class', outcome: 'gap' as const }] },
+    }],
+    ['a mapped class reported as unmapped', {
+        static: report.static,
+        empirical: { ...empiricalEvidence, classes: [{ ...empiricalEvidence.classes[0], outcome: 'unmapped-class' as const }] },
+    }],
+])('renderers reject an empirical outcome incompatible with static coverage: %s', (_case, invalid) => {
+    const envelope = { ...report, overall: invalid.static.status, static: invalid.static, empirical: invalid.empirical };
+    for (const render of [renderCoverageJson, renderCoverageHuman]) {
+        expect(() => render(envelope)).toThrow(/^renderCoverage(?:Json|Human): invalid report/);
+    }
+});
+
+test('renderers reject non-unverifiable empirical outcomes when the catalog is unavailable', () => {
+    const unavailable = {
+        schemaVersion: 2 as const, pack: null, registry: null, overall: 'inconclusive' as const,
+        static: { status: 'inconclusive' as const, reason: 'not_configured' as const, classes: [] },
+        empirical: { ...empiricalEvidence, classes: [{ ...empiricalEvidence.classes[0], outcome: 'gap' as const }] },
+    };
+    for (const render of [renderCoverageJson, renderCoverageHuman]) {
+        expect(() => render(unavailable)).toThrow(/^renderCoverage(?:Json|Human): invalid report/);
+    }
 });
 
 test('not_configured names the remedy and no_reference stays distinct (R2.6)', () => {
-    const notConfigured = { schemaVersion: 1 as const, pack: null, registry: null, overall: 'inconclusive' as const,
+    const notConfigured = { schemaVersion: 2 as const, pack: null, registry: null, overall: 'inconclusive' as const,
         static: { status: 'inconclusive' as const, reason: 'not_configured' as const, classes: [] } };
     expect(renderCoverageHuman(notConfigured)).toContain('Run: awm sensors init');
     expect(renderCoverageHuman({ ...notConfigured, pack: 'legacy', registry: 'baseline', static: { ...notConfigured.static, reason: 'no_reference' as const } }))
@@ -56,6 +234,7 @@ test('human output never renders structured detector evidence', () => {
                     { kind: 'file' as const, path: '.prettierrc', status: 'matched' as const },
                     { kind: 'marker' as const, path: '.prettierrc', ordinal: 1, status: 'missing' as const },
                 ],
+                compatibility: report.static.classes[0].detectors[0].compatibility,
             }] }],
         },
     };
@@ -76,13 +255,21 @@ test('human output removes OSC controls from pack-provided text while retaining 
                 ...report.static.classes[0],
                 description: `${osc8Open}Formatting${osc8Close}`,
                 remedy: { summary: `Add ${osc8Open}formatter${osc8Close}`, command: 'npm i -D prettier' },
+                detectors: [{
+                    ...report.static.classes[0].detectors[0],
+                    compatibility: {
+                        ...report.static.classes[0].detectors[0].compatibility,
+                        reason: `tool ${osc8Open}version${osc8Close} is unsupported`,
+                    },
+                }],
             }],
         },
     };
 
     const human = renderCoverageHuman(hostile);
-    expect(human).toContain('missing formatting — Formatting');
+    expect(human).toContain('missing lint-errors — Formatting');
     expect(human).toContain('  remedy: Add formatter');
+    expect(human).toContain('  compatibility: missing-tool — tool version is unsupported');
     expect(human.replace(/\n/g, '')).not.toMatch(/[\u0000-\u001F\u007F-\u009F]/);
 });
 

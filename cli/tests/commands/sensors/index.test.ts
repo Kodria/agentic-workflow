@@ -13,7 +13,7 @@ import { Command } from 'commander';
 import { log } from '@clack/prompts';
 import { runCoverage } from '../../../src/commands/sensors/coverage';
 import { renderCoverageHuman, renderCoverageJson } from '../../../src/commands/sensors/coverage/render';
-import { exitCodeFor, registerSensorsCommand, RunOutputLike } from '../../../src/commands/sensors/index';
+import { exitCodeFor, parsePositiveSafeInteger, registerSensorsCommand, RunOutputLike } from '../../../src/commands/sensors/index';
 
 describe('exitCodeFor — sensor run verdict → exit code', () => {
     const base = (overall: RunOutputLike['overall']): RunOutputLike => ({ sensors: [], overall });
@@ -57,6 +57,16 @@ describe('sensors coverage Commander wiring', () => {
         await program.parseAsync(['node', 'awm', 'sensors', 'coverage']);
         expect(renderCoverageHuman).toHaveBeenCalledWith(report);
         expect(stdoutWrite).toHaveBeenCalledWith('human\n');
+    });
+
+    it.each(['0', '-1', '1.5', '2x', 'Infinity', 'NaN', '9007199254740992'])('Commander rejects unsafe --min %s before coverage I/O (R5.5)', async (value) => {
+        await expect(programWithSensors().parseAsync(['node', 'awm', 'sensors', 'coverage', '--min', value])).rejects.toThrow('--min must be a positive safe integer');
+        expect(runCoverage).not.toHaveBeenCalled();
+    });
+
+    it('passes --min as a positive integer to coverage', async () => {
+        await programWithSensors().parseAsync(['node', 'awm', 'sensors', 'coverage', '--min', '3']);
+        expect(runCoverage).toHaveBeenCalledWith(process.cwd(), {}, { min: 3 });
     });
 
     it('emits JSON for --json and does not exit for gaps or inconclusive (R2.9)', async () => {

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 2,
+  "name": "js-ts",
+  "description": "R3 deterministic compatibility fixture",
+  "detects": ["package.json"],
+  "sensors": {
+    "lint": {
+      "applicability": { "allFiles": ["package.json"] },
+      "variants": [{
+        "id": "eslint-10",
+        "priority": 100,
+        "requirements": {
+          "tool": "eslint",
+          "toolRange": ">=10.0.0 <12.0.0",
+          "runtime": "node",
+          "runtimeRange": ">=20.0.0"
+        },
+        "certifiedRange": ">=10.0.0 <11.0.0",
+        "command": {
+          "executable": "eslint",
+          "resolution": "node-modules-bin",
+          "args": ["."]
+        },
+        "assets": ["eslint.fixture.mjs"],
+        "formatter": "eslint",
+        "probe": { "kind": "config-present" }
+      }]
+    }
+  },
+  "coverage": {
+    "schemaVersion": 1,
+    "classes": {
+      "lint-errors": {
+        "description": "Lint findings",
+        "detectors": [{ "sensor": "lint" }],
+        "remedy": {
+          "summary": "Configure lint",
+          "command": "awm sensors init --pack js-ts"
+        }
+      }
+    }
+  }
+}

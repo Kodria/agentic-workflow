@@ -44,29 +44,29 @@ describe('computeSensorStatus — Windows PATH resolution', () => {
         }));
     }
 
-    it('resuelve un binario instalado en win32 via PATHEXT (incluido un shim .cmd)', () => {
+    it('resuelve un binario instalado en win32 via PATHEXT (incluido un shim .cmd)', async () => {
         writeManifest();
         // En win32 el usuario escribe `semgrep` y en disco existe `semgrep.cmd`.
         fs.writeFileSync(path.join(pathDir, 'semgrep.cmd'), '@echo off\r\n');
 
-        const result = computeSensorStatus(tmpDir);
-        expect(result.overall).toBe('HEALTHY');
+        const result = await computeSensorStatus(tmpDir);
+        expect(result.overall).toBe('DEGRADED');
         expect(result.checks.security.ok).toBe(true);
     });
 
-    it('reporta ok:false en win32 cuando el binario no esta en PATH', () => {
+    it('reporta ok:false en win32 cuando el binario no esta en PATH', async () => {
         writeManifest();
         // PATH aislado y vacio.
-        const result = computeSensorStatus(tmpDir);
+        const result = await computeSensorStatus(tmpDir);
         expect(result.overall).toBe('DEGRADED');
         expect(result.checks.security.ok).toBe(false);
     });
 
-    it('en win32 no exige bit de ejecucion — un .exe sin permisos POSIX igual resuelve', () => {
+    it('en win32 no exige bit de ejecucion — un .exe sin permisos POSIX igual resuelve', async () => {
         writeManifest();
         fs.writeFileSync(path.join(pathDir, 'semgrep.exe'), '');
         fs.chmodSync(path.join(pathDir, 'semgrep.exe'), 0o644);
 
-        expect(computeSensorStatus(tmpDir).checks.security.ok).toBe(true);
+        expect((await computeSensorStatus(tmpDir)).checks.security.ok).toBe(true);
     });
 });

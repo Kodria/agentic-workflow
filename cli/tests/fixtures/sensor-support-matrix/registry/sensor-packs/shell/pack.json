@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "name": "shell",
+  "description": "Shell baseline",
+  "detects": ["scripts"],
+  "sensors": {
+    "lint": {
+      "applicability": { "kind": "shell" },
+      "variants": [{
+        "id": "shellcheck-0", "priority": 1, "certifiedRange": ">=0.9 <1",
+        "requirements": { "tool": "shellcheck", "toolRange": ">=0.9 <1", "runtime": "node", "runtimeRange": ">=22 <23" },
+        "command": { "executable": "shellcheck", "resolution": "path", "args": ["scripts/*.sh"] },
+        "assets": ["README.md"], "formatter": "shellcheck", "probe": { "kind": "version" }
+      }]
+    }
+  },
+  "coverage": { "schemaVersion": 1, "classes": { "shell-errors": { "description": "Shell lint errors", "detectors": [{ "sensor": "lint" }], "remedy": { "summary": "Configure ShellCheck", "command": "awm sensors init --pack shell" } } } }
+}

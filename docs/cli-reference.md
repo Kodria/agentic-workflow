@@ -285,23 +285,38 @@ Sensors are deterministic checks (tsc, ESLint, Semgrep, depcheck, …) whose out
 Detect the stack and write `.awm/sensors.json`, copying the pack's config files into the project by default.
 
 ```
-awm sensors init [--no-configure] [--registry-root <path>]
+awm sensors init [--no-configure] [--registry-root <path>] [--pack <name>]
 ```
 
 | Flag | Description |
 |---|---|
 | `--no-configure` | Write the manifest only; do not copy pack config files. |
 | `--registry-root <path>` | Override the AWM registry root (defaults to the cache). |
+| `--pack <name>` | Explicitly select a pack when stack detection is not the intended contract. |
+
+New manifests use `schemaVersion: 2`. They materialize the selected variant,
+structured command, contained assets, provenance, and initialization
+compatibility evidence. Legacy manifests remain readable but are reported as
+`compatible-unverified`; run `awm sensors init` deliberately to migrate after
+reviewing the new manifest.
 
 ### `awm sensors coverage`
 
 Compare configured sensors with the static coverage reference owned by the selected sensor-pack. This diagnostic is read-only: it does not run sensors, install tools, edit `.awm/sensors.json`, or apply a remedy.
 
 ```
-awm sensors coverage [--json]
+awm sensors coverage [--json] [--min <count>]
 ```
 
-Human output is the default. `--json` emits the versioned `schemaVersion: 1` envelope, whose stable `static` section contains the current analysis; a future release may add optional `empirical` data without changing existing field meanings. Human output shows class descriptions, detector sensor statuses, and pack-provided remedies. It excludes configured sensor commands, evidence paths, marker values, and inspected file content.
+Human output is the default. `--json` emits the versioned `schemaVersion: 2`
+envelope. Its `static` section reports declared coverage and its `empirical`
+section reports bounded, sanitized ledger clustering. `--min <count>` is a
+positive safe integer (default `2`) that controls the recurrence emphasis; it
+does not execute sensors or modify the ledger. Human output shows class
+descriptions, compatibility states, and pack-provided remedies. It prints safe,
+sanitized evidence references and safe cluster signatures, and never ledger
+descriptions, raw ledger lines, or unsafe values. It does not expose selected
+sensor commands, marker values, or inspected file content.
 
 Coverage gaps, unverifiable custom configuration, a missing `.awm/sensors.json`, and packs without a coverage reference are informative and exit `0`. A missing manifest returns `inconclusive/not_configured` and recommends `awm sensors init`; a legacy pack returns the distinct `inconclusive/no_reference` state and is never reported as covered. Malformed or unreadable manifests, packs, and coverage contracts exit non-zero with an actionable error.
 
@@ -375,7 +390,7 @@ Append one finding or win to the current branch's ledger.
 
 ```
 awm ledger add --polarity <p> --class <c> --signature <slug> --severity <s> --desc <text>
-               [--ref <ref>] [--phase <phase>] [--source-skill <skill>] [--branch <branch>]
+               [--ref <ref>] [--phase <phase>] [--source-skill <skill>] [--defect-class <id>] [--branch <branch>]
 ```
 
 | Flag | Required | Description |
@@ -388,6 +403,7 @@ awm ledger add --polarity <p> --class <c> --signature <slug> --severity <s> --de
 | `--ref <ref>` | no | `file:line` or PR/commit reference. |
 | `--phase <phase>` | no | Lifecycle phase (default `unknown`). |
 | `--source-skill <skill>` | no | Emitting skill (default `unknown`). |
+| `--defect-class <id>` | no | Reusable lowercase kebab-case class for empirical coverage; invalid values fail before ledger I/O. |
 
 > Capture is best-effort: skill prose tells agents to skip silently if `awm` isn't on `PATH`.
 

@@ -17,6 +17,22 @@ There are 4 OS targets and 6 agents. A document per combination would be 24 file
 
 Run **core-acceptance** first. Then the OS section for your machine, then the agent section for each agent you use.
 
+## R3 sensor certification policy
+
+Version-aware packs are certified by representative boundaries, not an
+unbounded Cartesian product: the minimum supported tool version, the current
+version, and one representative future version, across Linux, native Windows,
+and macOS. Each claim records the pack variant, local package-manager or native
+configuration fixture, command result, and OS. A manifest range is only a
+declaration until that evidence exists.
+
+Coverage acceptance has two independent read-only checks: static coverage
+compares the materialized manifest with the pack contract; empirical coverage
+scans active and archived ledgers under fixed file, line, entry, and evidence
+bounds. The acceptance record must include the command, sanitized output, and
+before/after tree hash. Never replace this certification evidence with prose in
+the support matrix.
+
 ## Before you start
 
 **Isolation is mandatory.** These playbooks install and delete things. Never run them against a machine state you care about without an override:

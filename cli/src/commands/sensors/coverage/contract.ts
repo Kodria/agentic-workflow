@@ -1,5 +1,3 @@
-import type { SensorConfig } from '../types';
-
 export const COVERAGE_SCHEMA_VERSION = 1;
 export const MAX_COVERAGE_FILE_BYTES = 1024 * 1024;
 const COVERAGE_EVIDENCE_PATHS: ReadonlySet<string> = new Set([
@@ -38,12 +36,6 @@ export type CoverageClassContract = {
 export type CoverageContract = {
     schemaVersion: typeof COVERAGE_SCHEMA_VERSION;
     classes: Record<string, CoverageClassContract>;
-};
-
-export type CoverageManifest = {
-    pack: string;
-    sensors: Record<string, SensorConfig>;
-    concurrency?: number;
 };
 
 type UnknownRecord = Record<string, unknown>;
@@ -157,48 +149,4 @@ export function parseCoverageContract(input: unknown, source: unknown): Coverage
         classes[name] = parseClass(classesInput[name], source, `classes.${name}`);
     }
     return { schemaVersion: COVERAGE_SCHEMA_VERSION, classes };
-}
-
-function manifestString(value: unknown, source: unknown, location: string): string {
-    return nonEmptyString(value, source, location);
-}
-
-function parseManifestSensor(input: unknown, source: unknown, location: string): SensorConfig {
-    const value = record(input, source, location);
-    fields(value, ['cmd', 'fast', 'enabled', 'timeout', 'changedCmd', 'changedExtensions', 'formatter'], source, location);
-    const sensor: SensorConfig = {};
-    if ('cmd' in value) sensor.cmd = manifestString(value.cmd, source, `${location}.cmd`);
-    if ('fast' in value) {
-        if (typeof value.fast !== 'boolean') invalid(source, `${location}.fast must be a boolean`);
-        sensor.fast = value.fast;
-    }
-    if ('enabled' in value) {
-        if (typeof value.enabled !== 'boolean') invalid(source, `${location}.enabled must be a boolean`);
-        sensor.enabled = value.enabled;
-    }
-    if ('timeout' in value) {
-        if (typeof value.timeout !== 'number' || !Number.isSafeInteger(value.timeout) || value.timeout <= 0) invalid(source, `${location}.timeout must be a positive safe integer`);
-        sensor.timeout = value.timeout;
-    }
-    if ('changedCmd' in value) sensor.changedCmd = manifestString(value.changedCmd, source, `${location}.changedCmd`);
-    if ('changedExtensions' in value) sensor.changedExtensions = stringArray(value.changedExtensions, source, `${location}.changedExtensions`, true);
-    if ('formatter' in value) sensor.formatter = manifestString(value.formatter, source, `${location}.formatter`);
-    return sensor;
-}
-
-export function parseCoverageManifest(input: unknown, source: unknown): CoverageManifest {
-    const value = record(input, source, 'manifest root');
-    fields(value, ['pack', 'sensors', 'concurrency'], source, 'manifest root');
-    const pack = safeName(value.pack, source, 'manifest.pack');
-    const sensorsInput = record(value.sensors, source, 'manifest.sensors');
-    const sensors: Record<string, SensorConfig> = {};
-    for (const name of Object.keys(sensorsInput)) {
-        sensors[safeName(name, source, 'manifest sensor name')] = parseManifestSensor(sensorsInput[name], source, `manifest.sensors.${name}`);
-    }
-    const manifest: CoverageManifest = { pack, sensors };
-    if ('concurrency' in value) {
-        if (typeof value.concurrency !== 'number' || !Number.isSafeInteger(value.concurrency) || value.concurrency <= 0) invalid(source, 'manifest.concurrency must be a positive safe integer');
-        manifest.concurrency = value.concurrency;
-    }
-    return manifest;
 }

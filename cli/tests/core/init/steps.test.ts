@@ -406,13 +406,13 @@ describe('stepActivation', () => {
 });
 
 describe('stepSensors', () => {
-    it('skips when sensors present', () => {
+    it('skips when sensors present', async () => {
         const a = spies();
-        expect(stepSensors(deps({ machine: machine(), project: project() }, a)).action).toBe('skipped');
+        expect((await stepSensors(deps({ machine: machine(), project: project() }, a))).action).toBe('skipped');
     });
-    it('inits sensors when absent', () => {
+    it('inits sensors when absent', async () => {
         const a = spies();
-        const r = stepSensors(deps({ machine: machine(), project: project({ sensors: { present: false } }) }, a));
+        const r = await stepSensors(deps({ machine: machine(), project: project({ sensors: { present: false } }) }, a));
         expect(r.action).toBe('applied');
         expect(a.initSensors).toHaveBeenCalledWith({ cwd: '/repo', registryRoot: '/cache/registry', configure: true }); // sensorPacksRoot='/cache/registry' from deps()
     });

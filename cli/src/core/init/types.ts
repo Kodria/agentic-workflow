@@ -54,13 +54,13 @@ export interface InitActions {
         projectRoot: string; bundles: BundleDefinition[]; agents: AgentTarget[];
         method: InstallMethod; contentDir: string;
     }) => SyncResult;
-    initSensors: (o: { cwd: string; registryRoot: string; configure: boolean }) => {
+    initSensors: (o: { cwd: string; registryRoot: string; configure: boolean }) => Promise<{
         detection: { pack: string };
         /** Set when the registry ships no pack for the detected stack — `stepSensors`
          *  reports it, so `awm init` never hands back a silently empty quality gate. */
         unavailablePack?: string;
         manifest?: { pack: string };
-    };
+    }>;
     addExtension: (root: string, name: string) => void;
     ensureProfile: (root: string) => void;
     gatherProject: (cwd: string, bundles: BundleDefinition[], agent?: AgentTarget) => ProjectFacts | null;

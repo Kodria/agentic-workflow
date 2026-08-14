@@ -186,7 +186,7 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         expect(out.overall).toBe('not_certified');
     });
 
-    it('does not degrade the verdict for a disabled sensor alongside healthy ones', async () => {  // verifies R6
+    it('does not let healthy legacy commands certify a run when another sensor is disabled', async () => {  // verifies R6 + R3 legacy contract
         fs.writeFileSync(path.join(root, '.awm', 'sensors.json'), JSON.stringify({
             pack: 'js-ts',
             sensors: {
@@ -199,7 +199,14 @@ describe('runSensors — inconclusive: a sensor that could not certify is never 
         const { runSensors } = load();
         const out = await runSensors({ cwd: root });
 
-        expect(out.overall).toBe('pass');
+        // `enabled: false` is informational; the non-certification comes solely
+        // from this pre-R3 (schema-less) manifest.  Legacy commands remain
+        // operational, but their shell-backed, unversioned contract cannot issue
+        // a certified `pass` verdict (R3 design R1.4 / R7.2).
+        expect(out.sensors.find((s: any) => s.name === 'typecheck').status).toBe('pass');
+        expect(out.sensors.find((s: any) => s.name === 'mutation').status).toBe('skipped');
+        expect(out.sensors.find((s: any) => s.name === 'mutation').skipReason).toBe('disabled');
+        expect(out.overall).toBe('not_certified');
     });
 
     it('still refuses to certify a tree whose sensors are all disabled', async () => {  // verifies R10

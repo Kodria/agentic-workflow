@@ -19,6 +19,15 @@ export function exitCodeFor(output: RunOutputLike): number {
     return output.overall === 'fail' ? 1 : 0;
 }
 
+/** Commander coercion for coverage recurrence emphasis. It deliberately runs
+ * before the action, so an invalid value cannot trigger ledger I/O. */
+export function parsePositiveSafeInteger(value: string): number {
+    if (typeof value !== 'string' || !/^[1-9][0-9]*$/.test(value)) throw new Error('--min must be a positive safe integer');
+    const parsed = Number(value);
+    if (!Number.isSafeInteger(parsed)) throw new Error('--min must be a positive safe integer');
+    return parsed;
+}
+
 export function registerSensorsCommand(program: Command): void {
     const sensors = program.command('sensors').description('manage computational sensors for the current project');
 
@@ -26,9 +35,10 @@ export function registerSensorsCommand(program: Command): void {
         .command('coverage')
         .description('report static gaps between configured sensors and the pack reference')
         .option('--json', 'emit the versioned machine-readable envelope')
-        .action((opts: { json?: boolean }) => {
+        .option('--min <count>', 'recurrence emphasis threshold', parsePositiveSafeInteger, 2)
+        .action(async (opts: { json?: boolean; min: number }) => {
             try {
-                const report = runCoverage(process.cwd());
+                const report = await runCoverage(process.cwd(), {}, { min: opts.min });
                 process.stdout.write(opts.json ? renderCoverageJson(report) : renderCoverageHuman(report));
             } catch (error) {
                 log.error(error instanceof Error ? error.message : String(error));
@@ -62,10 +72,10 @@ export function registerSensorsCommand(program: Command): void {
         .option('--no-configure', 'skip copying sensor pack config files into the project')
         .option('--registry-root <path>', 'path to AWM registry root')
         .option('--pack <name>', 'skip auto-detection, use this pack explicitly')
-        .action((opts) => {
+        .action(async (opts) => {
             const registryRoot = opts.registryRoot ?? capabilityRoot('sensor-packs') ?? undefined;
             try {
-                const result = initSensors({ configure: opts.configure, registryRoot, pack: opts.pack });
+                const result = await initSensors({ configure: opts.configure, registryRoot, pack: opts.pack });
                 log.success(`Detected: ${result.detection.pack} (${result.detection.indicators.join(', ') || 'fallback'})`);
                 // Said BEFORE "Wrote .awm/sensors.json": the manifest about to be
                 // reported as written is not the one the detection implied.
@@ -101,8 +111,8 @@ export function registerSensorsCommand(program: Command): void {
     sensors
         .command('status')
         .description('check sensor health for the current project')
-        .action(() => {
-            const status = computeSensorStatus();
+        .action(async () => {
+            const status = await computeSensorStatus();
             const icon = status.overall === 'HEALTHY' ? pc.green('✔') : pc.yellow('⚠');
             console.log(`\nPack:    ${status.pack ?? 'none'}`);
             console.log(`Overall: ${icon} ${status.overall}\n`);

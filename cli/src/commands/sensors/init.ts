@@ -1,6 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { SensorManifest } from './types';
+import { parseSensorPack } from './compatibility/contract';
+import { materializeResolvedSensors } from './compatibility/materialize';
+import { resolveParsedPackCompatibility } from './compatibility/live';
+import { parseSensorManifest, type SensorManifestV2 } from './compatibility/manifest';
+import { resolvePackSource } from './compatibility/pack-source';
+import type { SensorPackV2 } from './compatibility/types';
 
 export type InitOptions = {
     configure?: boolean;
@@ -8,6 +14,32 @@ export type InitOptions = {
     registryRoot?: string;
     pack?: string;
 };
+
+type ResolvedV2Pack = { pack: SensorPackV2; packRoot: string };
+
+/** Read a pack only through the shared source resolver.  Init is a registry
+ * boundary: a pack path that is absent is harmless, but a symlink or escaping
+ * claimed source is never silently downgraded to an empty manifest. */
+function readResolvedPack(pack: string, registryRoot: string): { path: string; content: string } | null {
+    try {
+        const source = resolvePackSource(pack, {
+            registries: [{ name: 'init-registry', remote: 'local', contentRoot: registryRoot }],
+        });
+        return { path: source.path, content: source.content };
+    } catch (error) {
+        if (error instanceof Error && error.message.includes('was not found in configured registries')) return null;
+        throw error;
+    }
+}
+
+function readV2Pack(pack: string, registryRoot: string): ResolvedV2Pack | null {
+    const source = readResolvedPack(pack, registryRoot);
+    if (!source) return null;
+    let raw: unknown;
+    try { raw = JSON.parse(source.content); } catch { throw new Error(`cannot parse sensor pack ${source.path}`); }
+    const parsed = parseSensorPack(raw, source.path);
+    return parsed.kind === 'v2' ? { pack: parsed.pack, packRoot: path.dirname(source.path) } : null;
+}
 
 // Widened from a hardcoded union to `string` on purpose: `--pack <name>` (below) must
 // accept any pack name present in the registry — including packs this CLI's source
@@ -85,10 +117,10 @@ type PackJson = {
  * with the project's actual source dirs. Returns null if the pack has no pack.json.
  */
 function readPackDefaults(pack: string, registryRoot: string, cwd: string): SensorManifest['sensors'] | null {
-    const packJsonPath = path.join(registryRoot, 'sensor-packs', pack, 'pack.json');
-    if (!fs.existsSync(packJsonPath)) return null;
+    const source = readResolvedPack(pack, registryRoot);
+    if (!source) return null;
     let parsed: PackJson;
-    try { parsed = JSON.parse(fs.readFileSync(packJsonPath, 'utf-8')); } catch { return null; }
+    try { parsed = JSON.parse(source.content); } catch { return null; }
 
     const sourceDirs = detectSourceDirs(cwd).join(' ');
     const sensors: SensorManifest['sensors'] = {};
@@ -196,7 +228,7 @@ function assertPackExists(pack: string, registryRoot: string): void {
     }
 }
 
-export function initSensors(opts: InitOptions = {}): {
+export async function initSensors(opts: InitOptions = {}): Promise<{
     manifest: SensorManifest;
     detection: StackDetection;
     configured: string[];
@@ -204,7 +236,10 @@ export function initSensors(opts: InitOptions = {}): {
      *  manifest was built from the fallback pack (or left empty) instead — callers
      *  MUST surface this: an unannounced empty gate is the failure being prevented. */
     unavailablePack?: string;
-} {
+    compatibility?: Record<string, unknown>;
+    preserved?: string[];
+    orphaned?: string[];
+}> {
     const cwd = opts.cwd ?? process.cwd();
     const configure = opts.configure ?? true; // configure (copy pack config files) by default
     const manifestPath = path.join(cwd, '.awm', 'sensors.json');
@@ -222,13 +257,62 @@ export function initSensors(opts: InitOptions = {}): {
     }
 
     let existing: SensorManifest | undefined;
+    let existingV2: SensorManifestV2 | undefined;
     if (fs.existsSync(manifestPath)) {
-        try { existing = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')); } catch { /* ignore corrupt manifest */ }
+        let raw: unknown;
+        try { raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')); }
+        catch { throw new Error(`cannot parse existing sensor manifest ${manifestPath}`); }
+        // Never overwrite a corrupt or future-version manifest during init. Legacy
+        // manifests remain a supported migration input; v2 is validated before a new
+        // materialized selection becomes the commit point.
+        const parsed = parseSensorManifest(raw, manifestPath);
+        if (parsed.kind === 'legacy') existing = parsed.pack;
+        else existingV2 = parsed.pack;
     }
 
     // `detection` keeps saying what the tree IS; `pack` is what the registry can serve
     // for it. They diverge only when the registry lacks the detected pack.
     const { pack: resolvedPack, unavailablePack } = resolvePack(detection.pack, opts.registryRoot);
+
+    // v2 packs own the executable contract. Legacy packs deliberately retain the
+    // old string-command path below until a registry author publishes a v2 contract.
+    if (opts.registryRoot) {
+        const resolvedV2 = readV2Pack(resolvedPack, opts.registryRoot);
+        if (resolvedV2) {
+            const compatibility = (await resolveParsedPackCompatibility(cwd, resolvedV2.pack)).sensors;
+            const sensors: Record<string, any> = {};
+            for (const [name, sensor] of Object.entries(resolvedV2.pack.sensors)) {
+                const resolved = compatibility[name];
+                const variant = resolved.variantId === null ? null : sensor.variants.find(candidate => candidate.id === resolved.variantId) ?? null;
+                // Unresolved states do not receive an arbitrary command. They remain
+                // represented in the manifest so status/coverage can explain them,
+                // but run cannot accidentally dispatch a mismatched executable.
+                if (variant) {
+                    const prior = existing?.sensors[name] ?? existingV2?.sensors[name];
+                    // Legacy string commands cannot be translated into a shell-free
+                    // structured command without guessing. Preserve the operator's
+                    // enabled/fast intent but make that migration non-certified.
+                    const migratedOverride = existing?.sensors[name]?.cmd !== undefined;
+                    sensors[name] = {
+                        enabled: prior?.enabled ?? true,
+                        fast: prior?.fast ?? sensor.fast ?? false,
+                        variantId: variant.id,
+                        command: variant.command,
+                        assets: variant.assets,
+                        initializedCompatibility: migratedOverride
+                            ? { ...resolved, state: 'compatible-unverified', reason: 'legacy custom command requires explicit v2 migration' }
+                            : resolved,
+                    };
+                }
+            }
+            const materialized = materializeResolvedSensors({
+                projectRoot: cwd, packRoot: resolvedV2.packRoot,
+                pack: resolvedPack, registryRoot: opts.registryRoot, sensors, configure,
+            });
+            return { detection, ...materialized,
+                compatibility, ...(unavailablePack ? { unavailablePack } : {}) };
+        }
+    }
 
     const manifest = buildManifest(resolvedPack, existing, opts.registryRoot, cwd);
     fs.mkdirSync(path.join(cwd, '.awm'), { recursive: true });

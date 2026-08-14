@@ -24,6 +24,7 @@ engineering system and the second to configure and operate it.
 - [Provider and operating-system support](support-matrix.md)
 - [Agent-specific setup](agents-setup.md)
 - [Testing and acceptance](testing/README.md)
+- [Engineering decisions](decisions.md)
 
 ## Project evidence
 

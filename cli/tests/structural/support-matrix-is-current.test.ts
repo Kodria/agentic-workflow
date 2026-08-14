@@ -11,9 +11,16 @@
 // Este test hace que ese desvio sea imposible de mergear. No verifica que la tabla sea
 // "linda": verifica que sea LA MISMA que produce el codigo hoy.
 import fs from 'fs';
+import path from 'path';
 import {
     BEGIN_MARKER, END_MARKER, DOC_PATH, homeRelative, renderProviderTables, spliceGenerated,
 } from '../../scripts/support-matrix';
+import {
+    R3_PREPUBLICATION_FIXTURE_PURPOSE, R3_PREPUBLICATION_FIXTURE_RELATIVE_PATH,
+    SENSOR_BEGIN_MARKER, SENSOR_END_MARKER, renderSensorSupportMatrix, spliceSensorSupportMatrix,
+} from '../../scripts/sensor-support-matrix';
+
+const SENSOR_FIXTURE_REGISTRY = path.join(__dirname, '..', 'fixtures', 'sensor-support-matrix', 'registry');
 
 
 describe('docs/support-matrix.md refleja el codigo', () => {
@@ -30,6 +37,22 @@ describe('docs/support-matrix.md refleja el codigo', () => {
         const doc = fs.readFileSync(DOC_PATH, 'utf-8');
         expect(doc).toContain(BEGIN_MARKER);
         expect(doc).toContain(END_MARKER);
+    });
+
+    it('the generated pre-publication v2 sensor-pack contract fixture is current', () => {
+        const doc = fs.readFileSync(DOC_PATH, 'utf-8');
+        expect(doc).toContain(SENSOR_BEGIN_MARKER);
+        expect(doc).toContain(SENSOR_END_MARKER);
+        expect(doc).toContain(R3_PREPUBLICATION_FIXTURE_PURPOSE);
+        expect(doc).toContain('not the published `awm-baseline-registry` manifests');
+        expect(doc).toBe(spliceSensorSupportMatrix(doc, renderSensorSupportMatrix(SENSOR_FIXTURE_REGISTRY)));
+    });
+
+    it('pins the documentation generator to the declared R3 pre-publication fixture', () => {
+        const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as {
+            scripts?: { ['docs:matrix']?: unknown };
+        };
+        expect(packageJson.scripts?.['docs:matrix']).toContain(`--registry-root ${R3_PREPUBLICATION_FIXTURE_RELATIVE_PATH}`);
     });
 
     it('la tabla nombra a los seis providers declarados', () => {

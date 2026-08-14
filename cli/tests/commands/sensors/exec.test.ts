@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { runCommand } from '../../../src/commands/sensors/exec';
+import { runCommand, runStructuredCommand } from '../../../src/commands/sensors/exec';
 
 const onPosix = process.platform !== 'win32' ? describe : describe.skip;
 const itPosix = process.platform !== 'win32' ? it : it.skip;
@@ -17,6 +17,24 @@ async function until(fn: () => boolean, budgetMs = 4000): Promise<boolean> {
 }
 
 describe('runCommand — exit codes and output', () => {
+    it('passes structured metacharacters literally without a shell', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-exec-argv-'));
+        const marker = path.join(dir, 'must-not-exist');
+        try {
+            const literal = `;touch ${marker}`;
+            const received = path.join(dir, 'received');
+            const result = await runStructuredCommand({
+                executable: process.execPath,
+                resolution: 'path',
+                args: ['-e', "require('fs').writeFileSync(process.argv[1], process.argv[2])", received, literal],
+            }, { timeout: 5000, cwd: dir });
+            expect(result.code).toBe(0);
+            expect(fs.readFileSync(received, 'utf8')).toBe(literal);
+            expect(fs.existsSync(marker)).toBe(false);
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
     it('returns stdout and code 0 for a clean command', async () => {
         const r = await runCommand('echo hello', { timeout: 5000, cwd: process.cwd() });
         expect(r.code).toBe(0);
@@ -25,7 +43,7 @@ describe('runCommand — exit codes and output', () => {
         expect(r.overflowed).toBe(false);
     });
 
-    it('captures stderr and a non-zero exit code without throwing', async () => {
+    itPosix('captures stderr and a non-zero exit code without throwing', async () => {
         // Portable by construction: `node -e "..."` is invoked identically by
         // `spawn(cmd, {shell:true})` on both `/bin/sh -c` (POSIX) and
         // `cmd.exe /d /s /c` (win32) — the shell only tokenizes the outer
@@ -36,10 +54,7 @@ describe('runCommand — exit codes and output', () => {
         // separator there, so the whole string became literal arguments to
         // `echo` and `exit 3` never ran as its own command — the run
         // "succeeded" with code 0 instead of 3 on windows-latest CI.
-        const r = await runCommand(
-            `node -e "process.stderr.write('oops'); process.exit(3)"`,
-            { timeout: 5000, cwd: process.cwd() },
-        );
+        const r = await runCommand('printf oops >&2; exit 3', { timeout: 5000, cwd: process.cwd() });
         expect(r.code).toBe(3);
         expect(r.stderr).toMatch(/oops/);
         expect(r.timedOut).toBe(false);
@@ -56,7 +71,7 @@ describe('runCommand — exit codes and output', () => {
     });
 });
 
-describe('runCommand — output cap', () => {
+onPosix('runCommand — output cap', () => {
     it('stops at maxBuffer, flags overflow, and keeps what it read', async () => {
         // 200 lines of ~50 bytes each, capped at 1KB. A `for i in $(seq ...); do
         // ... done` POSIX shell loop silently no-ops under cmd.exe (win32's
@@ -67,14 +82,11 @@ describe('runCommand — output cap', () => {
         // r.overflowed came back false). A `node -e` one-liner is invoked
         // identically by both shells (same portability reasoning as the
         // exit-code test above).
-        const r = await runCommand(
-            `node -e "for(let i=1;i<=200;i++){console.log('line-'+i+'-padding-padding-padding-padding')}"`,
-            { timeout: 10_000, cwd: process.cwd(), maxBuffer: 1024 },
-        );
+        const r = await runCommand("yes 'line-padding-padding-padding-padding'", { timeout: 10_000, cwd: process.cwd(), maxBuffer: 1024 });
         expect(r.overflowed).toBe(true);
         expect(r.stdout.length).toBeLessThanOrEqual(1024);
         // The point of the cap change: what was read is still usable, not discarded.
-        expect(r.stdout).toMatch(/line-1-/);
+        expect(r.stdout).toMatch(/line-padding/);
     });
 });
 
@@ -120,5 +132,51 @@ describe('runCommand — spawn failure', () => {
         const r = await runCommand('echo hi', { timeout: 5000, cwd: path.join(os.tmpdir(), 'awm-no-such-dir-xyz') });
         expect(r.spawnError).toBeDefined();
         expect(r.code).not.toBe(0);
+    });
+});
+
+onPosix('runStructuredCommand — local node_modules binaries', () => {
+    it('follows an npm-style contained shim but rejects one escaping node_modules', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-local-bin-symlink-'));
+        const modules = path.join(dir, 'node_modules');
+        const bin = path.join(modules, '.bin');
+        const contained = path.join(modules, 'tool', 'bin', 'tool');
+        const outside = path.join(dir, 'outside-tool');
+        try {
+            fs.mkdirSync(path.dirname(contained), { recursive: true });
+            fs.writeFileSync(contained, '#!/bin/sh\necho contained\n', { mode: 0o755 });
+            fs.writeFileSync(outside, '#!/bin/sh\necho outside\n', { mode: 0o755 });
+            fs.mkdirSync(bin, { recursive: true });
+            fs.symlinkSync('../tool/bin/tool', path.join(bin, 'tool'));
+
+            await expect(runStructuredCommand({ executable: 'tool', resolution: 'node-modules-bin', args: [] }, { timeout: 5000, cwd: dir }))
+                .resolves.toMatchObject({ code: 0, stdout: 'contained\n' });
+
+            fs.unlinkSync(path.join(bin, 'tool'));
+            fs.symlinkSync(outside, path.join(bin, 'tool'));
+            expect(() => runStructuredCommand({ executable: 'tool', resolution: 'node-modules-bin', args: [] }, { timeout: 5000, cwd: dir }))
+                .toThrow(/node_modules.*contain|local/i);
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+});
+
+onPosix('runStructuredCommand — Python environments', () => {
+    it('rejects a missing project Python executable instead of falling back to PATH', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-python-env-missing-'));
+        const global = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-python-env-global-'));
+        const savedPath = process.env.PATH;
+        try {
+            fs.writeFileSync(path.join(global, 'semgrep'), '#!/bin/sh\necho global\n', { mode: 0o755 });
+            process.env.PATH = global;
+
+            expect(() => runStructuredCommand({ executable: 'semgrep', resolution: 'python-environment', args: ['--validate'] }, { timeout: 5000, cwd: dir }))
+                .toThrow(/python.*environment.*local|contained/i);
+        } finally {
+            process.env.PATH = savedPath;
+            fs.rmSync(dir, { recursive: true, force: true });
+            fs.rmSync(global, { recursive: true, force: true });
+        }
     });
 });

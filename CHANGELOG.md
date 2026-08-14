@@ -1,3 +1,17 @@
+## Unreleased
+
+### Breaking changes
+- **sensors:** schema v2 materializes version-aware variants and reports
+  compatibility explicitly. Legacy manifests and packs remain readable as
+  `compatible-unverified`; re-run `awm sensors init` and review the generated
+  migration before relying on certified coverage.
+
+### Features
+- **sensors:** add empirical coverage from bounded, sanitized ledger evidence
+  and `awm sensors coverage --min <count>`.
+- **ledger:** accept an optional reusable `--defect-class <id>` for coverage
+  analysis.
+
 ## v6.5.2 - 2026-08-11
 
 ### Fixes
@@ -467,4 +481,3 @@
 - **ws4:** address code-quality review findings — stale paths + dead scripts
 - **ws4:** update-check timer .unref() — eliminates Jest open handle warning
 - **ws4:** checks.ts — registry cache missing remedy is awm init not update
-

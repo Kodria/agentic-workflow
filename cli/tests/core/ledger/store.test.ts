@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { addEntry, listEntries, ledgerPath, detectBranch, recurring, archiveLedger } from '../../../src/core/ledger/store';
+import { parseLedgerEntry } from '../../../src/core/ledger/types';
 import type { LedgerEntry } from '../../../src/core/ledger/types';
 
 function mkTmp(): string {
@@ -33,6 +34,17 @@ describe('ledger store — add/list', () => {
         expect(ledgerPath(cwd, 'feature/foo')).toBe(path.join(cwd, '.awm', 'ledger', 'feature__foo.jsonl'));
     });
 
+    test.each(['..\\outside', 'feature\\..\\outside'])
+    ('rejects a Windows path-traversal branch %p before it can escape the ledger directory', (branch) => {
+        // On Windows, a backslash is a separator even when this test suite runs on POSIX.
+        // Keep the regression explicit so future path changes cannot reintroduce the escape.
+        expect(branch.split(path.win32.sep)).toContain('..');
+
+        expect(() => ledgerPath(cwd, branch)).toThrow(/invalid ledger branch/i);
+        expect(() => addEntry(cwd, entry({ branch }))).toThrow(/invalid ledger branch/i);
+        expect(fs.existsSync(path.join(cwd, '.awm', 'ledger'))).toBe(false);
+    });
+
     test('addEntry creates .awm/ledger/ and appends one jsonl line', () => {
         addEntry(cwd, entry());
         const raw = fs.readFileSync(ledgerPath(cwd, 'feat-x'), 'utf-8');
@@ -44,6 +56,31 @@ describe('ledger store — add/list', () => {
         addEntry(cwd, entry());
         addEntry(cwd, entry({ signature: 'second', desc: 'another' }));
         expect(listEntries(cwd, 'feat-x')).toHaveLength(2);
+    });
+
+    test('persists an optional reusable defect class', () => {
+        addEntry(cwd, entry({ defectClass: 'lint-errors' }));
+        expect(JSON.parse(fs.readFileSync(ledgerPath(cwd, 'feat-x'), 'utf-8'))).toMatchObject({ defectClass: 'lint-errors' });
+    });
+
+    test('rejects an invalid direct entry before it can cross the durable boundary', () => {
+        expect(() => addEntry(cwd, { ...entry(), defectClass: 'Bad_ID' })).toThrow(/invalid-defect-class/i);
+        expect(fs.existsSync(ledgerPath(cwd, 'feat-x'))).toBe(false);
+    });
+
+    test('keeps a legacy entry without defectClass valid and unclassified', () => {
+        const parsed = parseLedgerEntry(entry(), 'line 1');
+        expect(parsed).toMatchObject({ ok: true, entry: { defectClass: undefined } });
+    });
+
+    test.each(['', 'Bad_ID', '../escape', 'a b', '-leading', 'trailing-'])
+    ('skips a persisted invalid defect class %p', (defectClass) => {
+        const parsed = parseLedgerEntry({ ...entry(), defectClass }, 'line 1');
+        expect(parsed).toMatchObject({ ok: false, reason: 'invalid-defect-class' });
+    });
+
+    test('rejects a non-string durable source instead of returning an unsafe parse result', () => {
+        expect(() => parseLedgerEntry(entry(), null as unknown as string)).toThrow(/source.*string/i);
     });
 
     test('listEntries on a branch with no ledger returns []', () => {
@@ -167,5 +204,93 @@ describe('ledger store — archive', () => {
 
     test('archiving a non-existent ledger is a no-op returning false', () => {
         expect(archiveLedger(cwd, 'feat-x', '20260606T000000')).toBe(false);
+    });
+
+    test('refuses to overwrite an existing archive and preserves both ledger files', () => {
+        addEntry(cwd, entry({ signature: 'active-evidence' }));
+        const archivePath = path.join(cwd, '.awm', 'ledger', 'archive', 'feat-x-20260606T000000.jsonl');
+        fs.mkdirSync(path.dirname(archivePath), { recursive: true });
+        fs.writeFileSync(archivePath, JSON.stringify(entry({ signature: 'archived-evidence' })) + '\n');
+
+        expect(() => archiveLedger(cwd, 'feat-x', '20260606T000000')).toThrow(/archive.*already exists/i);
+        expect(listEntries(cwd, 'feat-x')).toEqual([expect.objectContaining({ signature: 'active-evidence' })]);
+        expect(fs.readFileSync(archivePath, 'utf-8')).toContain('archived-evidence');
+    });
+
+    test('refuses a dangling symlink archive destination and preserves the active ledger', () => {
+        addEntry(cwd, entry({ signature: 'active-evidence' }));
+        const archivePath = path.join(cwd, '.awm', 'ledger', 'archive', 'feat-x-20260606T000000.jsonl');
+        fs.mkdirSync(path.dirname(archivePath), { recursive: true });
+        try {
+            fs.symlinkSync(path.join(cwd, 'missing-target.jsonl'), archivePath);
+        } catch (error) {
+            if (process.platform === 'win32') return;
+            throw error;
+        }
+
+        expect(() => archiveLedger(cwd, 'feat-x', '20260606T000000')).toThrow(/archive.*already exists/i);
+        expect(fs.lstatSync(archivePath).isSymbolicLink()).toBe(true);
+        expect(listEntries(cwd, 'feat-x')).toEqual([expect.objectContaining({ signature: 'active-evidence' })]);
+    });
+
+    test('rejects a symlinked archive directory without moving the active ledger outside the project', () => {
+        addEntry(cwd, entry({ signature: 'active-evidence' }));
+        const archive = path.join(cwd, '.awm', 'ledger', 'archive');
+        const outside = path.join(cwd, 'outside');
+        fs.mkdirSync(outside, { recursive: true });
+        try {
+            fs.symlinkSync(outside, archive, 'dir');
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'EPERM') return;
+            throw error;
+        }
+
+        expect(() => archiveLedger(cwd, 'feat-x', '20260606T000000')).toThrow(/unsafe|escape|symlink/i);
+        expect(listEntries(cwd, 'feat-x')).toEqual([expect.objectContaining({ signature: 'active-evidence' })]);
+        expect(fs.readdirSync(outside)).toEqual([]);
+    });
+
+    test('rejects a symlinked source ledger and preserves the link target', () => {
+        const outside = path.join(cwd, 'outside.jsonl');
+        fs.writeFileSync(outside, JSON.stringify(entry({ signature: 'outside-evidence' })) + '\n');
+        const source = ledgerPath(cwd, 'feat-x');
+        fs.mkdirSync(path.dirname(source), { recursive: true });
+        try {
+            fs.symlinkSync(outside, source);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'EPERM') return;
+            throw error;
+        }
+
+        expect(() => archiveLedger(cwd, 'feat-x', '20260606T000000')).toThrow(/unsafe|escape|symlink/i);
+        expect(fs.lstatSync(source).isSymbolicLink()).toBe(true);
+        expect(fs.readFileSync(outside, 'utf-8')).toContain('outside-evidence');
+        expect(fs.existsSync(path.join(cwd, '.awm', 'ledger', 'archive', 'feat-x-20260606T000000.jsonl'))).toBe(false);
+    });
+
+    test.each(['', '.', '..', '../outside', '/tmp/outside', 'C:\\temp\\outside'])
+    ('rejects an unsafe archive label %p before touching a ledger', (label) => {
+        expect(() => archiveLedger(cwd, 'feat-x', label)).toThrow(/invalid ledger label/i);
+        expect(fs.existsSync(path.join(cwd, '.awm', 'ledger'))).toBe(false);
+    });
+
+    test.each(['safe/child', 'safe\\child'])
+    ('rejects an archive label with a separator %p before it can create ledger files', (label) => {
+        expect(() => archiveLedger(cwd, 'feat-x', label)).toThrow(/invalid ledger label/i);
+        expect(fs.existsSync(path.join(cwd, '.awm', 'ledger'))).toBe(false);
+        expect(fs.existsSync(ledgerPath(cwd, 'feat-x'))).toBe(false);
+    });
+
+    test('rejects a Windows traversal archive label before it can create an escaped file', () => {
+        const label = '..\\outside';
+        const archiveRoot = path.win32.join('C:\\project', '.awm', 'ledger', 'archive');
+        const escaped = path.win32.resolve(archiveRoot, label);
+        addEntry(cwd, entry());
+
+        expect(escaped.startsWith(`${archiveRoot}\\`)).toBe(false);
+        expect(() => archiveLedger(cwd, 'feat-x', label)).toThrow(/invalid ledger label/i);
+        expect(fs.existsSync(path.join(cwd, '.awm', 'ledger', 'archive'))).toBe(false);
+        expect(fs.existsSync(path.join(cwd, 'outside.jsonl'))).toBe(false);
+        expect(fs.existsSync(ledgerPath(cwd, 'feat-x'))).toBe(true);
     });
 });

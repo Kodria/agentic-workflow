@@ -1,5 +1,8 @@
 import { spawn, execFile } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import { isWindowsNative } from '../../core/paths';
+import type { StructuredCommand } from './compatibility/types';
 
 /** Outcome of a sensor command. Never throws — every failure mode is a field. */
 export type ExecResult = {
@@ -23,6 +26,8 @@ export type ExecOptions = {
     /** SIGTERM → SIGKILL grace for the process group. */
     killGraceMs?: number;
 };
+
+type SpawnInput = { executable: string; args: string[]; shell: boolean };
 
 const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
 const DEFAULT_KILL_GRACE_MS = 2_000;
@@ -69,7 +74,16 @@ function killTree(pid: number, signal: NodeJS.Signals): void {
  *     throws away 60s of eslint output costs double: the wall clock, and then
  *     the re-run the caller has to do to learn anything at all.
  */
-export function runCommand(cmd: string, opts: ExecOptions): Promise<ExecResult> {
+function validateOptions(opts: ExecOptions): void {
+    if (!opts || typeof opts !== 'object' || typeof opts.cwd !== 'string' || opts.cwd.trim() === '' || !Number.isSafeInteger(opts.timeout) || opts.timeout <= 0) {
+        throw new Error('exec options require a non-empty cwd and positive safe-integer timeout');
+    }
+    if (opts.maxBuffer !== undefined && (!Number.isSafeInteger(opts.maxBuffer) || opts.maxBuffer <= 0)) throw new Error('exec options maxBuffer must be a positive safe integer');
+    if (opts.killGraceMs !== undefined && (!Number.isSafeInteger(opts.killGraceMs) || opts.killGraceMs < 0)) throw new Error('exec options killGraceMs must be a non-negative safe integer');
+}
+
+function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult> {
+    validateOptions(opts);
     const maxBuffer = opts.maxBuffer ?? DEFAULT_MAX_BUFFER;
     const killGraceMs = opts.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
 
@@ -81,8 +95,15 @@ export function runCommand(cmd: string, opts: ExecOptions): Promise<ExecResult> 
         let settled = false;
         const timers: NodeJS.Timeout[] = [];
 
-        const child = spawn(cmd, {
-            shell: true,
+        const child = input.shell
+            ? spawn(input.executable, {
+                shell: true,
+                cwd: opts.cwd,
+                detached: !isWindowsNative(),
+                stdio: ['ignore', 'pipe', 'pipe'],
+            })
+            : spawn(input.executable, input.args, {
+                shell: false,
             cwd: opts.cwd,
             detached: !isWindowsNative(),
             // stdin closed: a sensor must never block waiting for input, and the
@@ -138,4 +159,102 @@ export function runCommand(cmd: string, opts: ExecOptions): Promise<ExecResult> 
 
         later(() => { timedOut = true; cutShort(); }, opts.timeout);
     });
+}
+
+function validateStructuredCommand(command: StructuredCommand): void {
+    if (!command || typeof command !== 'object' || typeof command.executable !== 'string' || (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(command.executable) && !path.isAbsolute(command.executable))) {
+        throw new Error('structured command executable must be a safe executable name');
+    }
+    if (!Array.isArray(command.args) || command.args.some(arg => typeof arg !== 'string' || /[\0\r\n]/.test(arg))) {
+        throw new Error('structured command args must be an array of single-line strings without NUL');
+    }
+    if (!['node-modules-bin', 'python-environment', 'path'].includes(command.resolution)) throw new Error('structured command resolution is unsupported');
+}
+
+function regularFile(candidate: string): boolean {
+    try {
+        const stat = fs.lstatSync(candidate);
+        return stat.isFile() && !stat.isSymbolicLink();
+    } catch { return false; }
+}
+
+function containedPath(root: string, candidate: string): boolean {
+    const relative = path.relative(root, candidate);
+    return relative !== '' && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);
+}
+
+/** Resolve a local npm shim to its real regular-file target. npm commonly uses
+ * symlinks in .bin on POSIX, so rejecting every symlink would reject valid local
+ * installs. The real target must remain inside the project's node_modules. */
+function localNodeModulesExecutable(candidate: string, modulesRoot: string): string | null {
+    try {
+        const shim = fs.lstatSync(candidate);
+        if (!shim.isFile() && !shim.isSymbolicLink()) return null;
+        const real = fs.realpathSync(candidate);
+        const target = fs.statSync(real);
+        return target.isFile() && containedPath(modulesRoot, real) ? real : null;
+    } catch { return null; }
+}
+
+/** Find a real executable without a shell. Windows .cmd/.bat shims are deliberately
+ * excluded: CreateProcess cannot execute them safely without cmd.exe. */
+function resolveStructuredExecutable(command: StructuredCommand, cwd: string): string {
+    if (command.resolution === 'node-modules-bin') {
+        let modulesRoot: string;
+        try {
+            modulesRoot = fs.realpathSync(path.join(cwd, 'node_modules'));
+            if (!fs.statSync(modulesRoot).isDirectory()) throw new Error();
+        } catch { throw new Error('node_modules executable not found locally'); }
+        const bin = path.join(modulesRoot, '.bin');
+        if (!isWindowsNative()) {
+            const local = localNodeModulesExecutable(path.join(bin, command.executable), modulesRoot);
+            if (local) return local;
+            throw new Error('node_modules executable is not a contained local file');
+        }
+        const extensions = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map(ext => ext.toLowerCase()).filter(ext => ext === '.exe' || ext === '.com');
+        const candidates = [path.join(bin, command.executable), ...extensions.map(extension => path.join(bin, command.executable + extension))];
+        for (const candidate of candidates) {
+            const lower = candidate.toLowerCase();
+            if (lower.endsWith('.cmd') || lower.endsWith('.bat')) throw new Error('structured commands cannot execute Windows command wrappers');
+            const local = localNodeModulesExecutable(candidate, modulesRoot);
+            if (local && extensions.some(extension => local.toLowerCase().endsWith(extension))) return local;
+        }
+        throw new Error('node_modules executable is not a contained local file');
+    }
+    const candidates: string[] = [];
+    if (command.resolution === 'python-environment') {
+        if (path.isAbsolute(command.executable)) throw new Error('python environment executable must be a contained local name');
+        candidates.push(path.join(cwd, '.venv', isWindowsNative() ? 'Scripts' : 'bin', command.executable));
+        candidates.push(path.join(cwd, 'venv', isWindowsNative() ? 'Scripts' : 'bin', command.executable));
+    } else if (path.isAbsolute(command.executable)) candidates.push(command.executable);
+    else {
+        for (const entry of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) candidates.push(path.join(entry, command.executable));
+    }
+    if (!isWindowsNative()) {
+        const found = candidates.find(regularFile);
+        if (found) return found;
+        if (command.resolution === 'python-environment') throw new Error('python environment executable is not a contained local regular file');
+        return command.executable;
+    }
+    const extensions = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map(ext => ext.toLowerCase()).filter(ext => ext === '.exe' || ext === '.com');
+    for (const candidate of candidates) {
+        const lower = candidate.toLowerCase();
+        if (lower.endsWith('.cmd') || lower.endsWith('.bat')) throw new Error('structured commands cannot execute Windows command wrappers');
+        if (regularFile(candidate) && extensions.some(ext => lower.endsWith(ext))) return candidate;
+        for (const extension of extensions) if (regularFile(candidate + extension)) return candidate + extension;
+    }
+    if (command.resolution === 'python-environment') throw new Error('python environment executable is not a contained local regular file');
+    return command.executable;
+}
+
+/** Execute a v2 command as an executable plus literal argv; it never starts a shell. */
+export function runStructuredCommand(command: StructuredCommand, opts: ExecOptions): Promise<ExecResult> {
+    validateStructuredCommand(command);
+    return collectSpawn({ executable: resolveStructuredExecutable(command, opts.cwd), args: command.args, shell: false }, opts);
+}
+
+/** Legacy sensor strings intentionally retain their documented shell semantics. */
+export function runCommand(cmd: string, opts: ExecOptions): Promise<ExecResult> {
+    if (typeof cmd !== 'string' || cmd.trim() === '' || /[\0\r\n]/.test(cmd)) throw new Error('runCommand: cmd must be a non-empty single-line legacy string without NUL');
+    return collectSpawn({ executable: cmd, args: [], shell: true }, opts);
 }

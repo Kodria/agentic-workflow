@@ -39,6 +39,20 @@ describe('awm ledger CLI', () => {
         expect(entries[0].ts).toMatch(/\d{4}-\d{2}-\d{2}T/);
     });
 
+    test('add persists an optional reusable defect class', () => {
+        run(['add', '--branch', 'feat-x', '--polarity', 'finding', '--class', 'logica',
+             '--signature', 'sig-1', '--severity', 'blocker', '--desc', 'boom', '--defect-class', 'lint-errors'], cwd);
+        expect(listEntries(cwd, 'feat-x')).toEqual([expect.objectContaining({ defectClass: 'lint-errors' })]);
+    });
+
+    test.each(['', 'Bad_ID', '../escape', 'a b', '-leading', 'trailing-'])
+    ('add rejects invalid defect class %p before writing', (defectClass) => {
+        expect(() => run(['add', '--branch', 'feat-x', '--polarity', 'finding', '--class', 'logica',
+            '--signature', 'sig-1', '--severity', 'blocker', '--desc', 'boom', '--defect-class', defectClass], cwd))
+            .toThrow(/defect-class.*kebab-case/i);
+        expect(listEntries(cwd, 'feat-x')).toEqual([]);
+    });
+
     test('list emits the branch entries as JSON', () => {
         run(['add', '--branch', 'feat-x', '--polarity', 'win', '--class', 'proceso',
              '--signature', 'good', '--severity', 'info', '--desc', 'nice'], cwd);

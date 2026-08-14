@@ -15,6 +15,7 @@ const ACTIVE = [
     'docs/cli-reference.md',
     'docs/support-matrix.md',
     'docs/architecture.md',
+    'docs/decisions.md',
     'docs/guides/product-process.md',
     'docs/guides/development-process.md',
     'docs/guides/parallel-tracks.md',
@@ -104,6 +105,18 @@ describe('active documentation contract', () => {
         expect(matrix).toContain('### Agent profiles, workflows, hooks, and context');
         expect(matrix).not.toContain('Dónde aterriza cada artefacto');
         expect(matrix).not.toContain('Perfiles de agente, workflows, hooks y contexto');
+    });
+
+    it('keeps R3 canonical documentation in English and reachable from the hub', () => {
+        const hub = read('docs/README.md');
+        expect(hub).toContain('decisions.md');
+        for (const file of [
+            'docs/framework.md', 'docs/configuration.md', 'docs/project-setup.md',
+            'docs/runbook.md', 'docs/cli-reference.md', 'docs/support-matrix.md',
+            'docs/architecture.md',
+        ]) {
+            expect(read(file)).not.toContain('### Metodología');
+        }
     });
 
     it('keeps provider tiers, registries, and hook targets technically precise (R2)', () => {
