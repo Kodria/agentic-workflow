@@ -16,7 +16,10 @@ function seedRegistry(contentRoot: string) {
     fs.chmodSync(path.join(contentRoot, 'hooks', 'run-hook.cmd'), 0o755);
     fs.mkdirSync(path.join(contentRoot, 'sensor-packs', 'js-ts'), { recursive: true });
     fs.writeFileSync(path.join(contentRoot, 'sensor-packs', 'js-ts', 'pack.json'),
-        JSON.stringify({ sensors: { lint: { defaultCmd: 'eslint {{SOURCE_DIRS}}', fast: true } } }));
+        // R3 validates even a legacy pack at the registry boundary.  This fixture
+        // intentionally stays legacy (no schemaVersion) but must still carry its
+        // required stable identity, just like a real legacy registry pack.
+        JSON.stringify({ name: 'js-ts', sensors: { lint: { defaultCmd: 'eslint {{SOURCE_DIRS}}', fast: true } } }));
     // catalog + bundle dev (baseline)
     fs.writeFileSync(path.join(contentRoot, 'catalog.json'), JSON.stringify({
         version: 1, bundles: [{ name: 'dev', source: './bundles/dev', version: '1.0.0', scope: 'baseline' }],
