@@ -56,6 +56,11 @@ describe('sensor manifest contract', () => {
         expect(() => parseSensorManifest({ schemaVersion: 2, pack: 'js-ts', sensors: { lint: sensor } }, 'source')).toThrow('variantId');
     });
 
+    it('rejects a certified tool version outside its certified range', () => {
+        const sensor = { enabled: true, variantId: 'eslint-9', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, initializedCompatibility: { state: 'certified', reason: 'ok', variantId: 'eslint-9', toolVersion: '10.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [] } };
+        expect(() => parseSensorManifest({ schemaVersion: 2, pack: 'js-ts', sensors: { lint: sensor } }, 'source')).toThrow('certifiedRange');
+    });
+
     test.each([
         [null, 'object'],
         [{}, 'pack'],
