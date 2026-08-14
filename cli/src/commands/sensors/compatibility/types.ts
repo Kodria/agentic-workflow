@@ -43,7 +43,17 @@ export type SensorVariant = {
     assets: string[];
     formatter: string;
     probe: { kind: CompatibilityProbe };
+    /** A registry-owned policy whose compatibility requirements are authoritative. */
+    policyRef?: 'shared/semgrep-policy.json';
     command: StructuredCommand;
+};
+
+export type SemgrepPolicy = {
+    tool: 'semgrep';
+    toolRange: string;
+    runtime: 'python';
+    runtimeRange: string;
+    probe: 'semgrep-validate';
 };
 
 /**

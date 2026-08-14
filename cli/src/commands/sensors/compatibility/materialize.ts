@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { parseSensorManifest, serializeManifestV2, type SensorManifestV2 } from './manifest';
+import { resolveSemgrepPolicy } from './contract';
 
 type V2Sensor = SensorManifestV2['sensors'][string];
 export type MaterializeInput = {
@@ -76,6 +77,12 @@ export function materializeResolvedSensors(input: MaterializeInput): Materialize
         sensors[name] = parsed.pack.sensors[name];
     }
     const manifest: SensorManifestV2 = { schemaVersion: 2, pack, sensors, ...(input.registryRoot ? { registryRoot: input.registryRoot } : {}) };
+    // A policy reference is deliberately not a materialized asset. Resolve it here
+    // from the registry-owned sibling only, so a manifest cannot turn arbitrary
+    // registry content into a project write through a cosmetic policy field.
+    for (const [name, sensor] of Object.entries(sensors)) {
+        if (sensor.policyRef) resolveSemgrepPolicy(sensor.policyRef, path.join(packRoot, 'pack.json'), `sensors.${name}`);
+    }
     const selected = [...new Set(Object.values(sensors).flatMap(sensor => sensor.assets ?? []))].map((asset, index) => containedAsset(asset, `assets[${index}]`)).sort();
     const prior = priorAssets(projectRoot);
     const configured: string[] = [];

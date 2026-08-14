@@ -1,4 +1,7 @@
 import { assertNoEqualPriorityOverlap, parseSensorPack } from '../../../../src/commands/sensors/compatibility/contract';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 const coverage = {
     schemaVersion: 1,
@@ -38,6 +41,40 @@ function validPack() {
 }
 
 describe('sensor pack v2 contract', () => {
+    it('derives Semgrep compatibility from a contained shared policy reference', () => {
+        const sensorPacks = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-semgrep-policy-'));
+        const packDir = path.join(sensorPacks, 'python');
+        try {
+            fs.mkdirSync(path.join(sensorPacks, 'shared'), { recursive: true });
+            fs.mkdirSync(packDir);
+            fs.writeFileSync(path.join(sensorPacks, 'shared', 'semgrep-policy.json'), JSON.stringify({
+                tool: 'semgrep', toolRange: '>=1.0.0', runtime: 'python', runtimeRange: '>=3.9.0', probe: 'semgrep-validate',
+            }));
+            const pack = validPack();
+            pack.sensors.lint.variants[0] = {
+                id: 'semgrep-python', priority: 10, certifiedRange: '>=1.0.0', policyRef: 'shared/semgrep-policy.json',
+                command: { executable: 'semgrep', resolution: 'path', args: ['--config', '.semgrep.awm.yml', '--json', '.'] },
+                assets: ['.semgrep.awm.yml'], formatter: 'semgrep',
+            } as any;
+            const parsed = parseSensorPack(pack, path.join(packDir, 'pack.json'));
+            expect(parsed).toMatchObject({ kind: 'v2', pack: { sensors: { lint: { variants: [{
+                policyRef: 'shared/semgrep-policy.json', requirements: { tool: 'semgrep', runtime: 'python' }, probe: { kind: 'semgrep-validate' },
+            }] } } } });
+        } finally {
+            fs.rmSync(sensorPacks, { recursive: true, force: true });
+        }
+    });
+
+    it('fails closed when a policy reference is not the AWM-owned shared Semgrep policy', () => {
+        const pack = validPack();
+        pack.sensors.lint.variants[0] = {
+            id: 'semgrep-python', priority: 10, certifiedRange: '>=1.0.0', policyRef: '../secret.json',
+            command: { executable: 'semgrep', resolution: 'path', args: ['--config', '.semgrep.awm.yml', '--json', '.'] },
+            assets: ['.semgrep.awm.yml'], formatter: 'semgrep',
+        } as any;
+        expect(() => parseSensorPack(pack, '/tmp/sensor-packs/python/pack.json')).toThrow('policyRef');
+    });
+
     it('parses a valid versioned pack', () => {
         expect(parseSensorPack(validPack(), 'pack.json')).toMatchObject({ kind: 'v2', pack: validPack() });
     });

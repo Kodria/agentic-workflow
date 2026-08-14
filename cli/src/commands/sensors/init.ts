@@ -299,6 +299,7 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
                         variantId: variant.id,
                         command: variant.command,
                         assets: variant.assets,
+                        ...(variant.policyRef ? { policyRef: variant.policyRef } : {}),
                         initializedCompatibility: migratedOverride
                             ? { ...resolved, state: 'compatible-unverified', reason: 'legacy custom command requires explicit v2 migration' }
                             : resolved,

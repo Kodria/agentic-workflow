@@ -10,7 +10,7 @@ export type SensorManifestV2 = {
     schemaVersion: 2;
     pack: string;
     registryRoot?: string;
-    sensors: Record<string, { enabled: boolean; fast?: boolean; variantId: string; command: StructuredCommand; assets?: string[]; initializedCompatibility: CompatibilityEvidence }>;
+    sensors: Record<string, { enabled: boolean; fast?: boolean; variantId: string; command: StructuredCommand; assets?: string[]; policyRef?: 'shared/semgrep-policy.json'; initializedCompatibility: CompatibilityEvidence }>;
     concurrency?: number;
 };
 
@@ -139,7 +139,7 @@ function parseLegacyManifest(value: UnknownRecord, source: unknown): LegacySenso
 
 function parseV2Sensor(input: unknown, source: unknown, location: string): SensorManifestV2['sensors'][string] {
     const value = record(input, source, location);
-    fields(value, ['enabled', 'fast', 'variantId', 'command', 'assets', 'initializedCompatibility'], source, location);
+    fields(value, ['enabled', 'fast', 'variantId', 'command', 'assets', 'policyRef', 'initializedCompatibility'], source, location);
     if (typeof value.enabled !== 'boolean') invalid(source, `${location}.enabled must be a boolean`);
     const sensor: SensorManifestV2['sensors'][string] = {
         enabled: value.enabled, variantId: id(value.variantId, source, `${location}.variantId`),
@@ -151,6 +151,10 @@ function parseV2Sensor(input: unknown, source: unknown, location: string): Senso
     if (sensor.initializedCompatibility.state === 'certified' && (sensor.initializedCompatibility.toolVersion === null || sensor.initializedCompatibility.runtimeVersion === null || sensor.initializedCompatibility.certifiedRange === null)) invalid(source, `${location}.initializedCompatibility certified evidence is incomplete`);
     if (sensor.initializedCompatibility.state === 'certified' && !semver.satisfies(sensor.initializedCompatibility.toolVersion!, sensor.initializedCompatibility.certifiedRange!)) invalid(source, `${location}.initializedCompatibility.toolVersion must satisfy certifiedRange`);
     if ('assets' in value) sensor.assets = stringArray(value.assets, source, `${location}.assets`, true).map((entry, index) => asset(entry, source, `${location}.assets[${index}]`));
+    if ('policyRef' in value) {
+        if (value.policyRef !== 'shared/semgrep-policy.json') invalid(source, `${location}.policyRef must be the contained AWM-owned shared/semgrep-policy.json`);
+        sensor.policyRef = value.policyRef;
+    }
     if ('fast' in value) {
         if (typeof value.fast !== 'boolean') invalid(source, `${location}.fast must be a boolean`);
         sensor.fast = value.fast;

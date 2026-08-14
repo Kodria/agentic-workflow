@@ -38,6 +38,25 @@ describe('materializeResolvedSensors', () => {
         expect(fs.readFileSync(path.join(projectRoot, 'eslint.config.awm.mjs'), 'utf8')).toBe('owner content');
     });
 
+    it('revalidates a shared Semgrep policy reference without materializing the policy itself', () => {
+        const sensorPacks = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-materialize-policy-'));
+        const semgrepPack = path.join(sensorPacks, 'python');
+        try {
+            fs.mkdirSync(path.join(sensorPacks, 'shared'), { recursive: true });
+            fs.mkdirSync(semgrepPack);
+            fs.writeFileSync(path.join(semgrepPack, 'pack.json'), '{}');
+            fs.writeFileSync(path.join(semgrepPack, '.semgrep.awm.yml'), 'rules: []\n');
+            fs.writeFileSync(path.join(sensorPacks, 'shared', 'semgrep-policy.json'), JSON.stringify({ tool: 'semgrep', toolRange: '>=1.0.0', runtime: 'python', runtimeRange: '>=3.9.0', probe: 'semgrep-validate' }));
+            const result = materializeResolvedSensors({ projectRoot, packRoot: semgrepPack, pack: 'python', sensors: {
+                security: { enabled: true, variantId: 'semgrep-python', command: { executable: 'semgrep', resolution: 'path', args: ['--config', '.semgrep.awm.yml', '--json', '.'] }, assets: ['.semgrep.awm.yml'], policyRef: 'shared/semgrep-policy.json', initializedCompatibility: { ...evidence, variantId: 'semgrep-python' } },
+            } });
+            expect(result.configured).toEqual(['.semgrep.awm.yml']);
+            expect(fs.existsSync(path.join(projectRoot, 'shared', 'semgrep-policy.json'))).toBe(false);
+        } finally {
+            fs.rmSync(sensorPacks, { recursive: true, force: true });
+        }
+    });
+
     it('reports previous AWM assets as orphaned and never deletes them', () => {
         fs.mkdirSync(path.join(projectRoot, '.awm'));
         fs.writeFileSync(path.join(projectRoot, '.awm', 'sensors.json'), JSON.stringify({ schemaVersion: 2, pack: 'js-ts', sensors: {
