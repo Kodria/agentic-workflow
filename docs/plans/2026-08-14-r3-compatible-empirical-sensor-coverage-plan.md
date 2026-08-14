@@ -288,7 +288,7 @@ _Requirements: R1.2, R1.3, R1.4, R1.5, R2.1, R2.2, R2.7, R2.8, R8.4, R9.1_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tests rojos del executor argv y probes**
+- [x] **Step 1: Escribir tests rojos del executor argv y probes**
 
 ```ts
 test('passes metacharacters literally with shell false (R2.8)', async () => {
@@ -307,13 +307,13 @@ test.each(['eslint-print-config', 'typescript-show-config', 'semgrep-validate', 
     });
 ```
 
-- [ ] **Step 2: Ejecutar tests rojos**
+- [x] **Step 2: Ejecutar tests rojos**
 
 Run: `cd cli && npx jest tests/commands/sensors/compatibility/probe.test.ts tests/commands/sensors/exec.test.ts --runInBand`
 
 Expected: FAIL por exports inexistentes.
 
-- [ ] **Step 3: Implementar executor estructurado preservando legacy**
+- [x] **Step 3: Implementar executor estructurado preservando legacy**
 
 ```ts
 export function runStructuredCommand(command: ResolvedCommand, opts: ExecOptions): Promise<ExecResult> {
@@ -329,11 +329,11 @@ export function runCommand(cmd: string, opts: ExecOptions): Promise<ExecResult> 
 
 Extraer `collectSpawn` sin cambiar timeout, overflow ni kill-tree. En Windows resolver `.cmd`/`.exe` con PATHEXT sin insertar shell para ejecutables reales; wrappers `.cmd` legacy permanecen por la ruta legacy y nunca certifican v2.
 
-- [ ] **Step 4: Implementar discovery y fuente exacta del pack**
+- [x] **Step 4: Implementar discovery y fuente exacta del pack**
 
 `discoverProjectEvidence(cwd, pack)` retorna OS, runtime/tool versions, `packageManager`, conflictos de lockfiles, scripts y configs como paths relativos. `resolvePackSource` recorre `listRegistries()` y elige el primer registry que contenga exactamente `sensor-packs/<pack>/pack.json`; verifica archivo regular, realpath contenido y máximo 1 MiB.
 
-- [ ] **Step 5: Escribir el corpus rojo de los seis estados y precedencia**
+- [x] **Step 5: Escribir el corpus rojo de los seis estados y precedencia**
 
 ```ts
 test.each([
@@ -357,11 +357,11 @@ test('reports conflicting lockfiles as unverifiable (R2.7)', () => {
 });
 ```
 
-- [ ] **Step 6: Implementar probes y resolver puro**
+- [x] **Step 6: Implementar probes y resolver puro**
 
 El resolver filtra aplicabilidad, ordena por `priority` descendente y especificidad, y exige un único ganador. `certified` requiere rango certificado y probe `matched`; rango operativo+probe sin certificación produce `compatible-unverified`; fallo concluyente de rango produce `incompatible`; ausencia produce `missing-tool`; evidencia incompleta produce `unverifiable`. Legacy llama `legacyCompatibility()` y nunca ejecuta probe declarativo.
 
-- [ ] **Step 7: Ejecutar corpus, mutaciones y commit**
+- [x] **Step 7: Ejecutar corpus, mutaciones y commit**
 
 Run:
 
