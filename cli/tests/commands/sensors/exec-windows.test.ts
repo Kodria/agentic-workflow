@@ -1,6 +1,9 @@
 import { EventEmitter } from 'events';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { spawn, execFile } from 'child_process';
-import { runCommand } from '../../../src/commands/sensors/exec';
+import { runCommand, runStructuredCommand } from '../../../src/commands/sensors/exec';
 
 jest.mock('child_process', () => ({
     spawn: jest.fn(),
@@ -24,13 +27,13 @@ describe('runCommand — win32', () => {
     const originalPlatform = process.platform;
 
     beforeEach(() => {
-        Object.defineProperty(process, 'platform', { value: 'win32' });
+        Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
         mockSpawn.mockReset();
         mockExecFile.mockReset();
     });
 
     afterEach(() => {
-        Object.defineProperty(process, 'platform', { value: originalPlatform });
+        Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
         jest.useRealTimers();
     });
 
@@ -45,6 +48,28 @@ describe('runCommand — win32', () => {
         child.emit('close', 0, null);
         const r = await pending;
         expect(r.code).toBe(0);
+    });
+
+    it('resolves a PATHEXT executable and keeps structured argv shell-free', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-structured-win-'));
+        const savedPath = process.env.PATH;
+        const savedPathExt = process.env.PATHEXT;
+        try {
+            fs.writeFileSync(path.join(dir, 'tool.exe'), 'fixture');
+            process.env.PATH = dir;
+            process.env.PATHEXT = '.CMD;.EXE';
+            const child = fakeChild();
+            mockSpawn.mockReturnValue(child);
+            const pending = runStructuredCommand({ executable: 'tool', resolution: 'path', args: ['literal;&'] }, { timeout: 5000, cwd: dir });
+            expect(mockSpawn).toHaveBeenCalledWith(path.join(dir, 'tool.exe'), ['literal;&'], expect.objectContaining({ shell: false, detached: false }));
+            child.emit('close', 0, null);
+            await expect(pending).resolves.toMatchObject({ code: 0 });
+            expect(() => runStructuredCommand({ executable: 'tool.cmd', resolution: 'path', args: [] }, { timeout: 5000, cwd: dir })).toThrow(/wrappers/);
+        } finally {
+            process.env.PATH = savedPath;
+            process.env.PATHEXT = savedPathExt;
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
     });
 
     it('propagates cmd.exe\'s own exit code for a command that does not exist (1, not the POSIX 127)', async () => {

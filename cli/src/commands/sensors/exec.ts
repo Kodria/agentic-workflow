@@ -1,5 +1,8 @@
 import { spawn, execFile } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import { isWindowsNative } from '../../core/paths';
+import type { StructuredCommand } from './compatibility/types';
 
 /** Outcome of a sensor command. Never throws — every failure mode is a field. */
 export type ExecResult = {
@@ -23,6 +26,8 @@ export type ExecOptions = {
     /** SIGTERM → SIGKILL grace for the process group. */
     killGraceMs?: number;
 };
+
+type SpawnInput = { executable: string; args: string[]; shell: boolean };
 
 const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
 const DEFAULT_KILL_GRACE_MS = 2_000;
@@ -69,7 +74,16 @@ function killTree(pid: number, signal: NodeJS.Signals): void {
  *     throws away 60s of eslint output costs double: the wall clock, and then
  *     the re-run the caller has to do to learn anything at all.
  */
-export function runCommand(cmd: string, opts: ExecOptions): Promise<ExecResult> {
+function validateOptions(opts: ExecOptions): void {
+    if (!opts || typeof opts !== 'object' || typeof opts.cwd !== 'string' || opts.cwd.trim() === '' || !Number.isSafeInteger(opts.timeout) || opts.timeout <= 0) {
+        throw new Error('exec options require a non-empty cwd and positive safe-integer timeout');
+    }
+    if (opts.maxBuffer !== undefined && (!Number.isSafeInteger(opts.maxBuffer) || opts.maxBuffer <= 0)) throw new Error('exec options maxBuffer must be a positive safe integer');
+    if (opts.killGraceMs !== undefined && (!Number.isSafeInteger(opts.killGraceMs) || opts.killGraceMs < 0)) throw new Error('exec options killGraceMs must be a non-negative safe integer');
+}
+
+function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult> {
+    validateOptions(opts);
     const maxBuffer = opts.maxBuffer ?? DEFAULT_MAX_BUFFER;
     const killGraceMs = opts.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
 
@@ -81,8 +95,15 @@ export function runCommand(cmd: string, opts: ExecOptions): Promise<ExecResult> 
         let settled = false;
         const timers: NodeJS.Timeout[] = [];
 
-        const child = spawn(cmd, {
-            shell: true,
+        const child = input.shell
+            ? spawn(input.executable, {
+                shell: true,
+                cwd: opts.cwd,
+                detached: !isWindowsNative(),
+                stdio: ['ignore', 'pipe', 'pipe'],
+            })
+            : spawn(input.executable, input.args, {
+                shell: false,
             cwd: opts.cwd,
             detached: !isWindowsNative(),
             // stdin closed: a sensor must never block waiting for input, and the
@@ -138,4 +159,56 @@ export function runCommand(cmd: string, opts: ExecOptions): Promise<ExecResult> 
 
         later(() => { timedOut = true; cutShort(); }, opts.timeout);
     });
+}
+
+function validateStructuredCommand(command: StructuredCommand): void {
+    if (!command || typeof command !== 'object' || typeof command.executable !== 'string' || (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(command.executable) && !path.isAbsolute(command.executable))) {
+        throw new Error('structured command executable must be a safe executable name');
+    }
+    if (!Array.isArray(command.args) || command.args.some(arg => typeof arg !== 'string' || /[\0\r\n]/.test(arg))) {
+        throw new Error('structured command args must be an array of single-line strings without NUL');
+    }
+    if (!['node-modules-bin', 'python-environment', 'path'].includes(command.resolution)) throw new Error('structured command resolution is unsupported');
+}
+
+function regularFile(candidate: string): boolean {
+    try {
+        const stat = fs.lstatSync(candidate);
+        return stat.isFile() && !stat.isSymbolicLink();
+    } catch { return false; }
+}
+
+/** Find a real executable without a shell. Windows .cmd/.bat shims are deliberately
+ * excluded: CreateProcess cannot execute them safely without cmd.exe. */
+function resolveStructuredExecutable(command: StructuredCommand, cwd: string): string {
+    const candidates: string[] = [];
+    if (path.isAbsolute(command.executable)) candidates.push(command.executable);
+    else if (command.resolution === 'node-modules-bin') candidates.push(path.join(cwd, 'node_modules', '.bin', command.executable));
+    else if (command.resolution === 'python-environment') {
+        candidates.push(path.join(cwd, '.venv', isWindowsNative() ? 'Scripts' : 'bin', command.executable));
+        candidates.push(path.join(cwd, 'venv', isWindowsNative() ? 'Scripts' : 'bin', command.executable));
+    } else {
+        for (const entry of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) candidates.push(path.join(entry, command.executable));
+    }
+    if (!isWindowsNative()) return candidates.find(regularFile) ?? command.executable;
+    const extensions = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map(ext => ext.toLowerCase()).filter(ext => ext === '.exe' || ext === '.com');
+    for (const candidate of candidates) {
+        const lower = candidate.toLowerCase();
+        if (lower.endsWith('.cmd') || lower.endsWith('.bat')) throw new Error('structured commands cannot execute Windows command wrappers');
+        if (regularFile(candidate) && extensions.some(ext => lower.endsWith(ext))) return candidate;
+        for (const extension of extensions) if (regularFile(candidate + extension)) return candidate + extension;
+    }
+    return command.executable;
+}
+
+/** Execute a v2 command as an executable plus literal argv; it never starts a shell. */
+export function runStructuredCommand(command: StructuredCommand, opts: ExecOptions): Promise<ExecResult> {
+    validateStructuredCommand(command);
+    return collectSpawn({ executable: resolveStructuredExecutable(command, opts.cwd), args: command.args, shell: false }, opts);
+}
+
+/** Legacy sensor strings intentionally retain their documented shell semantics. */
+export function runCommand(cmd: string, opts: ExecOptions): Promise<ExecResult> {
+    if (typeof cmd !== 'string' || cmd.trim() === '' || /[\0\r\n]/.test(cmd)) throw new Error('runCommand: cmd must be a non-empty single-line legacy string without NUL');
+    return collectSpawn({ executable: cmd, args: [], shell: true }, opts);
 }
