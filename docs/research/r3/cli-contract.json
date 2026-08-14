@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceHead": "4e68f48",
+  "sourceHead": "0b7c691",
   "cli": {
     "package": "agentic-workflow-manager",
     "targetVersion": "7.0.0",
