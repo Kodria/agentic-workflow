@@ -967,7 +967,7 @@ _Requirements: R1.1, R1.6, R1.7, R4.10, R7.1, R9.4, R10.3_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Crear rama limpia del registry después de CLI 7 publicado**
+- [x] **Step 1: Crear rama limpia del registry después de CLI 7 publicado**
 
 ```bash
 git -C ../awm-baseline-registry fetch origin
@@ -977,7 +977,7 @@ git -C ../awm-baseline-registry status --short --branch
 
 Expected: rama nueva limpia desde `origin/main`; si ya existe, verificar que su base coincide y reutilizar sin reescribir trabajo ajeno.
 
-- [ ] **Step 2: Escribir corpus rojo de pack v2**
+- [x] **Step 2: Escribir corpus rojo de pack v2**
 
 ```js
 test('valid fixture carries v2 variants and coverage v1', () => {
@@ -994,15 +994,15 @@ for (const [fixture, message] of [
 ]) test(`rejects ${fixture}`, () => assert.throws(() => validateFixture(fixture), message));
 ```
 
-- [ ] **Step 3: Implementar schema y validador cerrado**
+- [x] **Step 3: Implementar schema y validador cerrado**
 
 `pack.schema.json` refleja exactamente el contrato T1, con `additionalProperties:false`, IDs kebab, arrays nonempty, commands argv y probes enum. `sensor-pack-variants.test.mjs` agrega validaciones semánticas: overlap, referencias, assets reales/contenidos, coverage detector→sensor, comando→asset, y clases genéricas sin nombres de proyecto.
 
-- [ ] **Step 4: Escribir la referencia canónica de autores**
+- [x] **Step 4: Escribir la referencia canónica de autores**
 
 En inglés: v2 completo, legacy, custom registries, operational vs certified, future compatible-unverified, probes cerrados, assets, native/baseline/hardening, ejemplos válidos, migración y enlace al CLI configuration guide. No duplicar tablas de soporte.
 
-- [ ] **Step 5: Ejecutar el gate compatible con legacy y commit del contrato**
+- [x] **Step 5: Ejecutar el gate compatible con legacy y commit del contrato**
 
 Run:
 
@@ -1040,7 +1040,7 @@ _Requirements: R4.2, R4.3, R4.4, R4.5, R4.6, R9.2_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tests rojos de las variantes obligatorias**
+- [x] **Step 1: Escribir tests rojos de las variantes obligatorias**
 
 ```js
 const expectedLint = ['eslint-8-eslintrc', 'eslint-8-flat', 'eslint-9-flat', 'eslint-10-flat'];
@@ -1064,7 +1064,7 @@ test('commands are local argv and test variants cover npm/pnpm/yarn/bun (R4.5, R
 });
 ```
 
-- [ ] **Step 2: Generar y congelar pins de certificación**
+- [x] **Step 2: Generar y congelar pins de certificación**
 
 `resolve-certification-pins.mjs` consulta registries oficiales una sola vez para las familias declaradas (`eslint@8/9/10`, TypeScript, Prettier, dependency-cruiser, Stryker), selecciona el patch más reciente de cada frontera, escribe JSON ordenado con `resolvedAt` y URL fuente, y falla si una versión no satisface el rango del manifest. Ejecutar:
 
@@ -1072,15 +1072,15 @@ test('commands are local argv and test variants cover npm/pnpm/yarn/bun (R4.5, R
 
 Expected: `tests/fixtures/certification-pins.json` reproducible y sin tags flotantes en CI posterior.
 
-- [ ] **Step 3: Implementar manifests y assets por nivel**
+- [x] **Step 3: Implementar manifests y assets por nivel**
 
 ESLint declara las cuatro variantes; flat v8 usa env estático allowlisted si hace falta, v9/v10 no dependen de eslintrc. TypeScript normal ejecuta `tsc --noEmit` contra config nativa sin asset; `tsconfig.awm.json` vive solo en `hardening`. Prettier/depcruise/Stryker/test script declaran probes/version ranges y argv. `formatter` queda en cada variante.
 
-- [ ] **Step 4: Certificar carga real de ESLint y configs nativas**
+- [x] **Step 4: Certificar carga real de ESLint y configs nativas**
 
 Extender `sensor-pack-eslint.test.mjs` para matriz de pins y cuatro formas de config. Cada fixture instala exact version pin en tmpdir, ejecuta el command resuelto y afirma config/código de salida. Casos native config dañada deben fallar; ausencia de config usa baseline compatible solo donde la variante lo declara.
 
-- [ ] **Step 5: Ejecutar gate completo js-ts y mutaciones**
+- [x] **Step 5: Ejecutar gate completo js-ts y mutaciones**
 
 Run:
 
@@ -1095,7 +1095,7 @@ node tests/sensor-pack-coverage.test.mjs
 
 Expected: todos los comandos salen 0; `js-ts` pasa como v2 y los otros tres packs siguen aceptados por la ruta legacy `compatible-unverified`. Mutaciones: mover `tsconfig.awm.json` a assets default y usar `npx`; ambos casos deben fallar.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add sensor-packs/js-ts tests/sensor-pack-eslint.test.mjs tests/sensor-pack-js-ts-variants.test.mjs tests/fixtures/certification-pins.json scripts/resolve-certification-pins.mjs
@@ -1121,7 +1121,7 @@ _Requirements: R4.1, R4.7, R4.8, R4.9, R9.2_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tests rojos por capacidad**
+- [x] **Step 1: Escribir tests rojos por capacidad**
 
 ```js
 test('python variants cover native configured tools (R4.7)', () => {
@@ -1143,19 +1143,19 @@ test('generic declares only Semgrep capability (R4.9)', () => {
 });
 ```
 
-- [ ] **Step 2: Ampliar pins y declarar rangos operativos/certificados**
+- [x] **Step 2: Ampliar pins y declarar rangos operativos/certificados**
 
 Ejecutar el mismo resolver para Python 3.9/actual, mypy, Ruff, pytest, Semgrep y ShellCheck; persistir versiones exactas. Mutmut permanece opt-in. Rangos se validan contra pins, no se deducen del latest en CI.
 
-- [ ] **Step 3: Migrar los tres packs y compartir política Semgrep**
+- [x] **Step 3: Migrar los tres packs y compartir política Semgrep**
 
 Cada pack referencia `shared/semgrep-policy.json` para requisitos/probe, manteniendo reglas YAML específicas por lenguaje. ShellCheck usa `{files}` como argumento entero. Python resuelve environment local y configs nativas. Generic es N/A/inconclusive fuera de su capacidad explícita, nunca covered por vacío. `sensor-pack-variants.test.mjs` activa ahora la aserción productiva de que los cuatro packs oficiales usan `schemaVersion: 2`; desde este punto el gate ya no permite legacy oficial.
 
-- [ ] **Step 4: Convertir rules-fire en gate real sin skip**
+- [x] **Step 4: Convertir rules-fire en gate real sin skip**
 
 Eliminar el skip por Semgrep ausente dentro del job de certificación: el workflow instalará el pin. Los tests disparan una regla real por pack y fallan si salida no contiene el rule ID esperado.
 
-- [ ] **Step 5: Ejecutar todos los packs, mutaciones y commit**
+- [x] **Step 5: Ejecutar todos los packs, mutaciones y commit**
 
 Run:
 
