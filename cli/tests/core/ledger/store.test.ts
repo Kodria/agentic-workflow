@@ -212,6 +212,13 @@ describe('ledger store — archive', () => {
         expect(fs.existsSync(path.join(cwd, '.awm', 'ledger'))).toBe(false);
     });
 
+    test.each(['safe/child', 'safe\\child'])
+    ('rejects an archive label with a separator %p before it can create ledger files', (label) => {
+        expect(() => archiveLedger(cwd, 'feat-x', label)).toThrow(/invalid ledger label/i);
+        expect(fs.existsSync(path.join(cwd, '.awm', 'ledger'))).toBe(false);
+        expect(fs.existsSync(ledgerPath(cwd, 'feat-x'))).toBe(false);
+    });
+
     test('rejects a Windows traversal archive label before it can create an escaped file', () => {
         const label = '..\\outside';
         const archiveRoot = path.win32.join('C:\\project', '.awm', 'ledger', 'archive');
