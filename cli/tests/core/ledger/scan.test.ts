@@ -34,9 +34,20 @@ describe('scanProjectLedgers', () => {
         write(root, '.awm/ledger/archive/nested/ignored.jsonl', [entry({ signature: 'ignored' })]);
         const scan = scanProjectLedgers(root);
         expect(scan.entries.map(item => item.source)).toEqual([
-            '.awm/ledger/a.jsonl:1', '.awm/ledger/z.jsonl:1', '.awm/ledger/archive/b.jsonl:1',
+            '.awm/ledger/a.jsonl:1', '.awm/ledger/archive/b.jsonl:1', '.awm/ledger/z.jsonl:1',
         ]);
         expect(scan.sources).toMatchObject({ activeFiles: 2, archivedFiles: 1, validFindings: 3, skippedFindings: 0 });
+    });
+
+    test('orders direct active and archive sources together by their relative path', () => {
+        write(root, '.awm/ledger/b.jsonl', [entry({ signature: 'active-b' })]);
+        write(root, '.awm/ledger/archive/a.jsonl', [entry({ signature: 'archive-a' })]);
+
+        const scan = scanProjectLedgers(root);
+
+        expect(scan.entries.map(item => item.source)).toEqual([
+            '.awm/ledger/archive/a.jsonl:1', '.awm/ledger/b.jsonl:1',
+        ]);
     });
 
     test('counts wins as valid but excludes them from findings', () => {

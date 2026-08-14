@@ -205,4 +205,23 @@ describe('ledger store — archive', () => {
     test('archiving a non-existent ledger is a no-op returning false', () => {
         expect(archiveLedger(cwd, 'feat-x', '20260606T000000')).toBe(false);
     });
+
+    test.each(['', '.', '..', '../outside', '/tmp/outside', 'C:\\temp\\outside'])
+    ('rejects an unsafe archive label %p before touching a ledger', (label) => {
+        expect(() => archiveLedger(cwd, 'feat-x', label)).toThrow(/invalid ledger label/i);
+        expect(fs.existsSync(path.join(cwd, '.awm', 'ledger'))).toBe(false);
+    });
+
+    test('rejects a Windows traversal archive label before it can create an escaped file', () => {
+        const label = '..\\outside';
+        const archiveRoot = path.win32.join('C:\\project', '.awm', 'ledger', 'archive');
+        const escaped = path.win32.resolve(archiveRoot, label);
+        addEntry(cwd, entry());
+
+        expect(escaped.startsWith(`${archiveRoot}\\`)).toBe(false);
+        expect(() => archiveLedger(cwd, 'feat-x', label)).toThrow(/invalid ledger label/i);
+        expect(fs.existsSync(path.join(cwd, '.awm', 'ledger', 'archive'))).toBe(false);
+        expect(fs.existsSync(path.join(cwd, 'outside.jsonl'))).toBe(false);
+        expect(fs.existsSync(ledgerPath(cwd, 'feat-x'))).toBe(true);
+    });
 });

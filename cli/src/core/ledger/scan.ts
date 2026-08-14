@@ -92,7 +92,11 @@ function boundedLimits(overrides: Partial<LedgerScanLimits>): LedgerScanLimits {
 }
 
 function relativeSource(root: string, target: string, line: number): string {
-    return `${path.relative(root, target).split(path.sep).join('/')}:${line}`;
+    return `${relativePath(root, target)}:${line}`;
+}
+
+function relativePath(root: string, target: string): string {
+    return path.relative(root, target).split(path.sep).join('/');
 }
 
 /** Reads only direct .jsonl children of active/archive ledger roots; never follows links. */
@@ -124,64 +128,64 @@ export function scanProjectLedgers(projectRoot: string, overrides: Partial<Ledge
     let entryLimitReached = false;
     let omittedEvidenceRefs = 0;
     const evidenceRefsByClass = new Map<string, number>();
-    for (const { directory, archive: isArchive } of directories) {
+    const candidates = directories.flatMap(({ directory, archive: isArchive }) => fs.readdirSync(directory, { withFileTypes: true })
+        .filter(item => item.name.endsWith('.jsonl'))
+        .map(candidate => {
+            const target = path.join(directory, candidate.name);
+            return { isArchive, target, sourcePath: relativePath(root, target) };
+        }))
+        .sort((a, b) => a.sourcePath < b.sourcePath ? -1 : a.sourcePath > b.sourcePath ? 1 : 0);
+    for (const { isArchive, target } of candidates) {
         if (entryLimitReached) break;
-        const candidates = fs.readdirSync(directory, { withFileTypes: true })
-            .filter(item => item.name.endsWith('.jsonl'))
-            .sort((a, b) => a.name.localeCompare(b.name));
-        for (const candidate of candidates) {
-            if (entryLimitReached) break;
-            if (filesSeen >= limits.maxFiles) {
-                // The limit is a bound, not merely a reporting preference.  Do
-                // not keep opening candidates once it is reached.
-                skip('file-limit');
+        if (filesSeen >= limits.maxFiles) {
+            // The limit is a bound, not merely a reporting preference.  Do
+            // not keep opening candidates once it is reached.
+            skip('file-limit');
+            break;
+        }
+        filesSeen += 1;
+        const stat = fs.lstatSync(target);
+        if (stat.isSymbolicLink()) { skip('symlink-entry'); continue; }
+        if (!stat.isFile()) { skip('nonregular-entry'); continue; }
+        const real = fs.realpathSync(target);
+        if (!isWithin(root, real)) { skip('path-escape'); continue; }
+        if (stat.size > limits.maxFileBytes) { skip('file-too-large'); continue; }
+        if (isArchive) sources.archivedFiles += 1;
+        else sources.activeFiles += 1;
+        const lines = fs.readFileSync(target, 'utf-8').split('\n');
+        for (let index = 0; index < lines.length; index += 1) {
+            const raw = lines[index];
+            if (!raw.trim()) continue;
+            if (linesSeen >= limits.maxEntries) {
+                skip('entry-limit');
+                entryLimitReached = true;
                 break;
             }
-            const target = path.join(directory, candidate.name);
-            filesSeen += 1;
-            const stat = fs.lstatSync(target);
-            if (stat.isSymbolicLink()) { skip('symlink-entry'); continue; }
-            if (!stat.isFile()) { skip('nonregular-entry'); continue; }
-            const real = fs.realpathSync(target);
-            if (!isWithin(root, real)) { skip('path-escape'); continue; }
-            if (stat.size > limits.maxFileBytes) { skip('file-too-large'); continue; }
-            if (isArchive) sources.archivedFiles += 1;
-            else sources.activeFiles += 1;
-            const lines = fs.readFileSync(target, 'utf-8').split('\n');
-            for (let index = 0; index < lines.length; index += 1) {
-                const raw = lines[index];
-                if (!raw.trim()) continue;
-                if (linesSeen >= limits.maxEntries) {
-                    skip('entry-limit');
-                    entryLimitReached = true;
-                    break;
+            linesSeen += 1;
+            if (Buffer.byteLength(raw, 'utf-8') > limits.maxLineBytes) { skip('line-too-large'); continue; }
+            if (!isJsonDepthWithinLimit(raw, limits.maxJsonDepth)) { skip('json-too-deep'); continue; }
+            let value: unknown;
+            try { value = JSON.parse(raw); } catch { skip('invalid-json'); continue; }
+            const source = relativeSource(root, target, index + 1);
+            const parsed = parseLedgerEntry(value, source);
+            if (!parsed.ok) { skip(parsed.reason); continue; }
+            sources.validEntries += 1;
+            if (parsed.entry.polarity === 'finding') {
+                sources.validFindings += 1;
+                const defectClass = parsed.entry.defectClass ?? 'unclassified';
+                const count = evidenceRefsByClass.get(defectClass) ?? 0;
+                const evidenceRef = count < limits.maxRefsPerClass ? source : null;
+                if (evidenceRef === null) {
+                    omittedEvidenceRefs += 1;
+                    // The finding remains available for recurrence analysis, but
+                    // its public evidence is deliberately omitted. Record the
+                    // truncation through the same typed source contract as every
+                    // other scan bound so downstream renderers cannot call it a
+                    // complete report.
+                    skip('evidence-ref-limit');
                 }
-                linesSeen += 1;
-                if (Buffer.byteLength(raw, 'utf-8') > limits.maxLineBytes) { skip('line-too-large'); continue; }
-                if (!isJsonDepthWithinLimit(raw, limits.maxJsonDepth)) { skip('json-too-deep'); continue; }
-                let value: unknown;
-                try { value = JSON.parse(raw); } catch { skip('invalid-json'); continue; }
-                const source = relativeSource(root, target, index + 1);
-                const parsed = parseLedgerEntry(value, source);
-                if (!parsed.ok) { skip(parsed.reason); continue; }
-                sources.validEntries += 1;
-                if (parsed.entry.polarity === 'finding') {
-                    sources.validFindings += 1;
-                    const defectClass = parsed.entry.defectClass ?? 'unclassified';
-                    const count = evidenceRefsByClass.get(defectClass) ?? 0;
-                    const evidenceRef = count < limits.maxRefsPerClass ? source : null;
-                    if (evidenceRef === null) {
-                        omittedEvidenceRefs += 1;
-                        // The finding remains available for recurrence analysis, but
-                        // its public evidence is deliberately omitted. Record the
-                        // truncation through the same typed source contract as every
-                        // other scan bound so downstream renderers cannot call it a
-                        // complete report.
-                        skip('evidence-ref-limit');
-                    }
-                    else evidenceRefsByClass.set(defectClass, count + 1);
-                    entries.push({ entry: parsed.entry, source, evidenceRef });
-                }
+                else evidenceRefsByClass.set(defectClass, count + 1);
+                entries.push({ entry: parsed.entry, source, evidenceRef });
             }
         }
     }

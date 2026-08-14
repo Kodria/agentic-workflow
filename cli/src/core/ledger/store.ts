@@ -20,6 +20,19 @@ function ledgerFilename(branch: string): string {
     return branch.replace(/\//g, '__');
 }
 
+function archiveLabel(label: string): string {
+    if (typeof label !== 'string'
+        || label.length === 0
+        || label === '.'
+        || label.includes('..')
+        || /[/\\]/.test(label)
+        || path.posix.isAbsolute(label)
+        || path.win32.isAbsolute(label)) {
+        throw new Error('invalid ledger label');
+    }
+    return label;
+}
+
 export function detectBranch(cwd: string): string {
     try {
         const b = execSync('git rev-parse --abbrev-ref HEAD', {
@@ -65,10 +78,11 @@ export function recurring(cwd: string, branch: string, min: number): RecurringCl
 }
 
 export function archiveLedger(cwd: string, branch: string, label: string): boolean {
+    const safeLabel = archiveLabel(label);
     const src = ledgerPath(cwd, branch);
     if (!fs.existsSync(src)) return false;
     const safe = ledgerFilename(branch);
-    const dst = path.join(cwd, LEDGER_DIR, 'archive', `${safe}-${label}.jsonl`);
+    const dst = path.join(cwd, LEDGER_DIR, 'archive', `${safe}-${safeLabel}.jsonl`);
     fs.mkdirSync(path.dirname(dst), { recursive: true });
     fs.renameSync(src, dst);
     return true;
