@@ -106,7 +106,11 @@ whether recurring classified findings are actually being caught. Neither result
 pretends that an unknown tool version is a clean pass: compatibility must be
 certified, compatible-unverified, or explicitly inconclusive.
 
-The retrospective feedback loop consumes those two views before archival. A
+The retrospective feedback loop can consume those two views before archival. In
+the current CLI, that evaluation is a **manual operator step**: run coverage,
+inspect the result, and decide the follow-up before calling archive. This stays
+manual **until the registry delivers automatic enforcement in T12**; `awm ledger
+archive` does not currently run coverage or block archival on its result. A
 repeated class that lacks a credible detector becomes a candidate for a pack,
 process rule, or focused guidance; a single finding remains evidence, not an
 automatic new policy. This is how AWM improves controls without turning every

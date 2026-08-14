@@ -17,10 +17,18 @@ For every first-party pack, record one real-tool boundary run on Linux, macOS,
 and native Windows: minimum supported version, current version, and a
 representative future version. Include native config and package-manager
 fixtures where the pack supports both. The expected future-version result is an
-explicit compatibility state, never a fallback to PATH or an assumed pass.
+explicit compatibility state, never an assumed pass. For version-aware packs,
+**v2 local resolution modes use project-local `node_modules` or `.venv`/`venv`
+environments**: version evidence is read from those contained project paths,
+not inferred from a global tool. Those are v2 guarantees only. **Legacy string
+commands remain separate and retain their documented shell/PATH semantics**;
+they do not establish a version-aware certified result.
 
-Windows-specific certification must run the local `.cmd` or environment shim;
-macOS and Linux must demonstrate the same structured command without a shell.
+Windows-specific certification must exercise the same contained local
+environment. **Windows `.cmd`/`.bat` wrappers are rejected for structured v2
+commands** because executing them would require `cmd.exe`; certify a real local
+`.exe`/`.com` target or a Python-environment executable instead. macOS and Linux
+must demonstrate the same structured command without a shell.
 This supplements the CI suite—it is not permission to describe an unrecorded
 combination as verified.
 
@@ -115,12 +123,18 @@ awm init --yes --json > init.json
 ```
 **Expect:** `failed: 0`. Historically the richest source of Windows bugs — quoting, argument splitting, and `cmd.exe` metacharacter handling all surface here.
 
-**WIN-04 · Sensors resolve their binaries on PATH**
+**WIN-04 · Structured v2 sensors use a contained local executable**
 ```powershell
 npm init -y; npm i -D typescript
 awm sensors init; awm sensors run
 ```
-**Expect:** the typecheck sensor **runs** (pass or fail), not `skipped: not found`. Resolving `.cmd`/`.ps1` shims on Windows was a real published bug (v3.9.0); this is its regression check.
+**Expect:** inspect the selected v2 variant. A command using a local-resolution
+mode may run only through a contained local executable. If its only npm entry
+point is a `.cmd`/`.bat` wrapper (as is common for Node tools), it must report
+that wrapper as not runnable; it must not fall back to a global PATH binary or
+run through `cmd.exe`. Certify a variant with a real contained `.exe`/`.com`
+target or a Python-environment executable separately. A legacy string sensor
+follows its documented shell semantics and is not evidence for this v2 check.
 
 **WIN-05 · Line endings don't corrupt managed files**
 ```powershell
@@ -167,7 +181,7 @@ Run the suite from `~` inside the distro, **not** from `/mnt/c/...`.
 | WIN-01 | PASS | 2026-08-10 — Windows Server 2022 Datacenter, Node 24.19.0, Developer Mode on, AWM 6.4.1. `LinkType: Junction` for the `development-process` directory artifact, as intended (this row's own criterion above was corrected the same day — it previously required `SymbolicLink`). |
 | WIN-02 | PASS | **Real bug found and closed.** 2026-08-10 against AWM 6.4.1: `awm add dev --scope local --method copy --agent claude-code --yes` reported exit `0` but installed a Junction, not a real directory — `--method copy` was silently discarded (`runAddBundleCore` hardcoded `method: 'symlink'`). Reproduced in two independently fresh `AWM_HOME`/project setups to rule out state bleed from earlier steps. Fixed in [#68](https://github.com/Kodria/agentic-workflow/pull/68) (AWM 6.4.2) and verified via a real, unmocked `addBundle → installBundle → executor.stageArtifact` pipeline test (`tests/commands/add.test.ts`) green on `windows-latest` CI. |
 | WIN-03 | PASS | 2026-08-10, AWM 6.4.1. `awm init --yes --json` from `%TEMP%\awm e2e con espacios` returned `failed: 0`. |
-| WIN-04 | PASS | 2026-08-10, AWM 6.4.1. `npm i -D typescript` + `awm sensors init` + `awm sensors run`: the typecheck sensor resolved its `.cmd` shim and ran (not `skipped: not found`). |
+| WIN-04 | NEEDS RECERTIFICATION | The 2026-08-10 `typescript` run predates the v2 rule that rejects Windows `.cmd`/`.bat` wrappers. It is not evidence that a structured v2 command can run that shim; certify a contained `.exe`/`.com` or Python-environment variant with the current contract. |
 | WIN-05 | BLOCKED | 2026-08-10. Not a Windows bug — see the precondition-gap note under WIN-05 above: `awm init --yes` (bare, `claude-code` default) never produces an `AGENTS.md` to inspect on any OS. In a separate live run, `awm init -a codex --yes` (AWM 6.4.2, patched build) *did* write `AGENTS.md` directly — worth re-running this exact check against that target before it can PASS or FAIL for real. |
 | WIN-06 | PASS | 2026-08-10, AWM 6.4.1. `awm watch --init` exited `0`; the documented crash-recovery known-gap was not exercised. |
 | WSL-01 · 02 |  |  |

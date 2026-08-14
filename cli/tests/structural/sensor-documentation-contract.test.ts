@@ -64,4 +64,15 @@ describe('R3 canonical sensor documentation', () => {
         expect(runbook).toMatch(/Automatic\s+coverage-before-archive enforcement is delivered by the registry in T12/);
         expect(runbook).not.toContain('it automatically evaluates\ncoverage feedback');
     });
+
+    test('keeps archival coverage manual until registry enforcement and scopes v2 binary resolution', () => {
+        const framework = read('docs/framework.md');
+        const osMatrix = read('docs/testing/os-matrix.md');
+
+        expect(framework).toMatch(/manual operator step[\s\S]*until the registry delivers automatic enforcement in T12/i);
+        expect(osMatrix).toMatch(/v2 local resolution modes use project-local `node_modules` or `.venv`\/`venv`\s+environments/i);
+        expect(osMatrix).toMatch(/Windows `.cmd`\/`.bat` wrappers are rejected for structured v2\s+commands/i);
+        expect(osMatrix).toMatch(/Legacy string\s+commands remain separate and retain their documented shell\/PATH semantics/i);
+        expect(osMatrix).not.toContain('Sensors resolve their binaries on PATH');
+    });
 });
