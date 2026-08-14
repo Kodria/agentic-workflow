@@ -62,10 +62,10 @@ export function registerSensorsCommand(program: Command): void {
         .option('--no-configure', 'skip copying sensor pack config files into the project')
         .option('--registry-root <path>', 'path to AWM registry root')
         .option('--pack <name>', 'skip auto-detection, use this pack explicitly')
-        .action((opts) => {
+        .action(async (opts) => {
             const registryRoot = opts.registryRoot ?? capabilityRoot('sensor-packs') ?? undefined;
             try {
-                const result = initSensors({ configure: opts.configure, registryRoot, pack: opts.pack });
+                const result = await initSensors({ configure: opts.configure, registryRoot, pack: opts.pack });
                 log.success(`Detected: ${result.detection.pack} (${result.detection.indicators.join(', ') || 'fallback'})`);
                 // Said BEFORE "Wrote .awm/sensors.json": the manifest about to be
                 // reported as written is not the one the detection implied.
@@ -101,8 +101,8 @@ export function registerSensorsCommand(program: Command): void {
     sensors
         .command('status')
         .description('check sensor health for the current project')
-        .action(() => {
-            const status = computeSensorStatus();
+        .action(async () => {
+            const status = await computeSensorStatus();
             const icon = status.overall === 'HEALTHY' ? pc.green('✔') : pc.yellow('⚠');
             console.log(`\nPack:    ${status.pack ?? 'none'}`);
             console.log(`Overall: ${icon} ${status.overall}\n`);

@@ -63,8 +63,8 @@ export const defaultActions: InitActions = {
         contentDir: o.contentDir,
     }),
 
-    initSensors: (o) => {
-        const result = realInitSensors({ cwd: o.cwd, registryRoot: o.registryRoot, configure: o.configure });
+    initSensors: async (o) => {
+        const result = await realInitSensors({ cwd: o.cwd, registryRoot: o.registryRoot, configure: o.configure });
         // `unavailablePack`/`manifest` viajan a proposito: `stepSensors` los reporta.
         // Este wrapper proyectaba solo `detection`, asi que cualquier hallazgo nuevo de
         // initSensors moria aca en silencio antes de llegar al step que lo muestra.
@@ -348,12 +348,12 @@ export function stepActivation(d: InitDeps): StepResult {
 }
 
 /** Step 7 – Initialize the sensor manifest if absent. */
-export function stepSensors(d: InitDeps): StepResult {
+export async function stepSensors(d: InitDeps): Promise<StepResult> {
     const proj = d.ctx.project;
     if (!proj) return ok('project.sensors', 'project', 'skipped', 'no project');
     if (proj.sensors.present) return ok('project.sensors', 'project', 'skipped');
 
-    const res = d.actions.initSensors({ cwd: proj.root, registryRoot: d.sensorPacksRoot, configure: true });
+    const res = await d.actions.initSensors({ cwd: proj.root, registryRoot: d.sensorPacksRoot, configure: true });
     // A registry without the detected pack yields a fallback (or empty) manifest. The
     // step still succeeded — a manifest was written — but reporting a bare 'applied'
     // would let `awm init` hand back a quality gate that measures less than the

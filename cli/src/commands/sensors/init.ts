@@ -2,9 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import { SensorManifest } from './types';
 import { parseSensorPack } from './compatibility/contract';
-import { discoverProjectEvidence } from './compatibility/discovery';
-import { resolveProjectCompatibility } from './compatibility/resolve';
 import { materializeResolvedSensors } from './compatibility/materialize';
+import { resolveParsedPackCompatibility } from './compatibility/live';
+import { parseSensorManifest } from './compatibility/manifest';
 import type { SensorPackV2 } from './compatibility/types';
 
 export type InitOptions = {
@@ -210,7 +210,7 @@ function assertPackExists(pack: string, registryRoot: string): void {
     }
 }
 
-export function initSensors(opts: InitOptions = {}): {
+export async function initSensors(opts: InitOptions = {}): Promise<{
     manifest: SensorManifest;
     detection: StackDetection;
     configured: string[];
@@ -221,7 +221,7 @@ export function initSensors(opts: InitOptions = {}): {
     compatibility?: Record<string, unknown>;
     preserved?: string[];
     orphaned?: string[];
-} {
+}> {
     const cwd = opts.cwd ?? process.cwd();
     const configure = opts.configure ?? true; // configure (copy pack config files) by default
     const manifestPath = path.join(cwd, '.awm', 'sensors.json');
@@ -240,7 +240,14 @@ export function initSensors(opts: InitOptions = {}): {
 
     let existing: SensorManifest | undefined;
     if (fs.existsSync(manifestPath)) {
-        try { existing = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')); } catch { /* ignore corrupt manifest */ }
+        let raw: unknown;
+        try { raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')); }
+        catch { throw new Error(`cannot parse existing sensor manifest ${manifestPath}`); }
+        // Never overwrite a corrupt or future-version manifest during init. Legacy
+        // manifests remain a supported migration input; v2 is validated before a new
+        // materialized selection becomes the commit point.
+        const parsed = parseSensorManifest(raw, manifestPath);
+        if (parsed.kind === 'legacy') existing = parsed.pack;
     }
 
     // `detection` keeps saying what the tree IS; `pack` is what the registry can serve
@@ -252,8 +259,7 @@ export function initSensors(opts: InitOptions = {}): {
     if (opts.registryRoot) {
         const v2 = readV2Pack(resolvedPack, opts.registryRoot);
         if (v2) {
-            const evidence = discoverProjectEvidence(cwd, v2);
-            const compatibility = resolveProjectCompatibility(v2, evidence).sensors;
+            const compatibility = (await resolveParsedPackCompatibility(cwd, v2)).sensors;
             const sensors: Record<string, any> = {};
             for (const [name, sensor] of Object.entries(v2.sensors)) {
                 const resolved = compatibility[name];

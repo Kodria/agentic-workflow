@@ -48,54 +48,54 @@ describe('awm sensors init — detected pack missing from the registry', () => {
 
     afterAll(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true }); });
 
-    it('names the missing pack instead of writing an empty manifest silently', () => {
+    it('names the missing pack instead of writing an empty manifest silently', async () => {
         const cwd = project();
-        const result = initSensors({ cwd, registryRoot: registry({ 'js-ts': {}, generic: GENERIC }) });
+        const result = await initSensors({ cwd, registryRoot: registry({ 'js-ts': {}, generic: GENERIC }) });
 
         expect(result.unavailablePack).toBe('python');
         expect(result.detection.pack).toBe('python'); // what the tree actually is — unchanged
     });
 
-    it('falls back to a pack the registry does have, so the gate still measures something', () => {
+    it('falls back to a pack the registry does have, so the gate still measures something', async () => {
         const cwd = project();
-        const result = initSensors({ cwd, registryRoot: registry({ 'js-ts': {}, generic: GENERIC }) });
+        const result = await initSensors({ cwd, registryRoot: registry({ 'js-ts': {}, generic: GENERIC }) });
 
         expect(result.manifest.pack).toBe('generic');
         expect(Object.keys(result.manifest.sensors)).toEqual(['security']);
         expect(manifestOf(cwd).pack).toBe('generic');
     });
 
-    it('stays on the detected pack when the registry has no fallback either', () => {
+    it('stays on the detected pack when the registry has no fallback either', async () => {
         // Nothing better exists. The manifest is honestly empty and still says so —
         // preflight's `manifest` check fails on `total === 0` with a registry remedy.
         const cwd = project();
-        const result = initSensors({ cwd, registryRoot: registry({ 'js-ts': {} }) });
+        const result = await initSensors({ cwd, registryRoot: registry({ 'js-ts': {} }) });
 
         expect(result.unavailablePack).toBe('python');
         expect(result.manifest.pack).toBe('python');
         expect(result.manifest.sensors).toEqual({});
     });
 
-    it('is quiet when the registry does have the detected pack', () => {
+    it('is quiet when the registry does have the detected pack', async () => {
         const cwd = project();
-        const result = initSensors({ cwd, registryRoot: registry({ python: PYTHON, generic: GENERIC }) });
+        const result = await initSensors({ cwd, registryRoot: registry({ python: PYTHON, generic: GENERIC }) });
 
         expect(result.unavailablePack).toBeUndefined();
         expect(result.manifest.pack).toBe('python');
         expect(Object.keys(result.manifest.sensors)).toEqual(['typecheck']);
     });
 
-    it('does not fall back when there is no registry to check against', () => {
+    it('does not fall back when there is no registry to check against', async () => {
         // No registryRoot means nothing to validate against, the same tolerance
         // `--pack` already has — not evidence that the pack is missing.
         const cwd = project();
-        const result = initSensors({ cwd });
+        const result = await initSensors({ cwd });
 
         expect(result.unavailablePack).toBeUndefined();
         expect(result.manifest.pack).toBe('python');
     });
 
-    it('keeps sensors the user already had when falling back', () => {
+    it('keeps sensors the user already had when falling back', async () => {
         // The fallback must not be a way to lose hand-written configuration.
         const cwd = project();
         fs.mkdirSync(path.join(cwd, '.awm'), { recursive: true });
@@ -104,7 +104,7 @@ describe('awm sensors init — detected pack missing from the registry', () => {
             JSON.stringify({ pack: 'python', sensors: { test: { cmd: 'pytest -q', fast: false } } }),
         );
 
-        const result = initSensors({ cwd, registryRoot: registry({ generic: GENERIC }) });
+        const result = await initSensors({ cwd, registryRoot: registry({ generic: GENERIC }) });
 
         expect(result.manifest.sensors.test?.cmd).toBe('pytest -q');
         expect(Object.keys(result.manifest.sensors).sort()).toEqual(['security', 'test']);

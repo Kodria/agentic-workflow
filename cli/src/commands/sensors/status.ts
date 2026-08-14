@@ -3,6 +3,7 @@ import path from 'path';
 import { resolveOnPath } from '../../core/paths';
 import { SensorCheck, SensorStatusResult, SensorManifest } from './types';
 import { parseSensorManifest } from './compatibility/manifest';
+import { resolveLiveCompatibility } from './compatibility/live';
 
 /** First non-flag token after `npx` — the tool the command actually runs. */
 function npxTool(parts: string[]): string | undefined {
@@ -53,7 +54,7 @@ function checkCmd(cmd: string, cwd: string): SensorCheck {
     return configCheck(parts, cwd) ?? { ok: true, detail: bin };
 }
 
-export function computeSensorStatus(cwd: string = process.cwd()): SensorStatusResult {
+export async function computeSensorStatus(cwd: string = process.cwd()): Promise<SensorStatusResult> {
     const manifestPath = path.join(cwd, '.awm', 'sensors.json');
     if (!fs.existsSync(manifestPath)) {
         return { overall: 'NOT_CONFIGURED', pack: null, checks: {} };
@@ -65,15 +66,29 @@ export function computeSensorStatus(cwd: string = process.cwd()): SensorStatusRe
         const parsed = parseSensorManifest(raw, manifestPath);
         if (parsed.kind === 'v2') {
             const checks: Record<string, SensorCheck> = {};
+            let live: Awaited<ReturnType<typeof resolveLiveCompatibility>>;
+            try {
+                live = await resolveLiveCompatibility(cwd, parsed.pack.pack);
+            } catch (error) {
+                const detail = `compatibility revalidation failed: ${error instanceof Error ? error.message : String(error)}`;
+                for (const [name, sensor] of Object.entries(parsed.pack.sensors)) {
+                    checks[name] = sensor.enabled === false ? { ok: true, detail: 'disabled' } : { ok: false, detail };
+                }
+                return { overall: 'DEGRADED', pack: parsed.pack.pack, checks };
+            }
             for (const [name, sensor] of Object.entries(parsed.pack.sensors)) {
-                const state = sensor.initializedCompatibility.state;
+                const state = live.sensors[name];
                 checks[name] = sensor.enabled === false
                     ? { ok: true, detail: 'disabled' }
-                    : state === 'certified'
-                        ? { ok: true, detail: `certified (${sensor.variantId})` }
-                        : state === 'not-applicable'
+                    : !state
+                        ? { ok: false, detail: 'variant-drift: sensor no longer exists in the live pack; run `awm sensors init`' }
+                        : state.variantId !== sensor.variantId
+                            ? { ok: false, detail: `variant-drift: manifest ${sensor.variantId}, live ${state.variantId ?? 'none'}; run \`awm sensors init\`` }
+                    : state.state === 'certified'
+                        ? { ok: true, detail: `certified (${state.variantId})` }
+                        : state.state === 'not-applicable'
                             ? { ok: true, detail: 'not applicable' }
-                            : { ok: false, detail: `${state}: ${sensor.initializedCompatibility.reason}` };
+                            : { ok: false, detail: `${state.state}: ${state.reason}` };
             }
             return { overall: Object.keys(checks).length > 0 && Object.values(checks).every(check => check.ok) ? 'HEALTHY' : 'DEGRADED', pack: parsed.pack.pack, checks };
         }

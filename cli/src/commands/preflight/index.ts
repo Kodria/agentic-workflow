@@ -45,8 +45,8 @@ export function registerPreflightCommand(program: Command): void {
         .description('verify the project harness can actually gate before development starts')
         .option('--json', 'emit the report as JSON')
         .option('--cwd <path>', 'project directory to check (default: current)')
-        .action((opts) => {
-            const report = preflight(opts.cwd ?? process.cwd());
+        .action(async (opts) => {
+            const report = await preflight(opts.cwd ?? process.cwd());
             process.stdout.write(opts.json ? JSON.stringify(report, null, 2) + '\n' : formatReport(report));
             const code = exitCodeFor(report);
             if (code !== 0) process.exit(code);

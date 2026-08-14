@@ -38,33 +38,51 @@ function makePythonRegistry(): string {
     return registryRoot;
 }
 
+function makeV2Registry(): string {
+    const registryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-reg-v2-'));
+    const packDir = path.join(registryRoot, 'sensor-packs', 'js-ts');
+    fs.mkdirSync(packDir, { recursive: true });
+    fs.writeFileSync(path.join(packDir, 'eslint.config.awm.mjs'), 'export default []\n');
+    fs.writeFileSync(path.join(packDir, 'pack.json'), JSON.stringify({
+        schemaVersion: 2, name: 'js-ts', description: 'fixture', detects: ['package.json'],
+        coverage: { schemaVersion: 1, classes: { lint: { description: 'lint', detectors: [{ sensor: 'lint' }], remedy: { summary: 'fix lint', command: 'awm sensors init --pack js-ts' } } } },
+        sensors: { lint: { applicability: { allFiles: ['package.json'] }, variants: [{
+            id: 'eslint-10', priority: 10, certifiedRange: '>=10.0.0 <11.0.0',
+            requirements: { tool: 'eslint', toolRange: '>=10.0.0 <11.0.0', runtime: 'node', runtimeRange: '>=0.0.0' },
+            assets: ['eslint.config.awm.mjs'], formatter: 'eslint-llm', probe: { kind: 'config-present' },
+            command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
+        }] } },
+    }));
+    return registryRoot;
+}
+
 describe('detectStack', () => {
     let tmpDir: string;
     beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-init-')); });
     afterEach(() => { fs.rmSync(tmpDir, { recursive: true }); });
 
-    it('detects js-ts when package.json exists', () => {
+    it('detects js-ts when package.json exists', async () => {
         fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
         expect(detectStack(tmpDir).pack).toBe('js-ts');
     });
 
-    it('detects python when pyproject.toml exists', () => {
+    it('detects python when pyproject.toml exists', async () => {
         fs.writeFileSync(path.join(tmpDir, 'pyproject.toml'), '');
         expect(detectStack(tmpDir).pack).toBe('python');
     });
 
-    it('falls back to generic when no indicators found', () => {
+    it('falls back to generic when no indicators found', async () => {
         expect(detectStack(tmpDir).pack).toBe('generic');
     });
 
-    it('detects shell from a root-level *.sh file when no js-ts/python marker exists', () => {
+    it('detects shell from a root-level *.sh file when no js-ts/python marker exists', async () => {
         fs.writeFileSync(path.join(tmpDir, 'deploy.sh'), '#!/bin/sh\n');
         const result = detectStack(tmpDir);
         expect(result.pack).toBe('shell');
         expect(result.indicators).toEqual(['deploy.sh']);
     });
 
-    it('detects shell from a scripts/*.sh file when root has nothing', () => {
+    it('detects shell from a scripts/*.sh file when root has nothing', async () => {
         fs.mkdirSync(path.join(tmpDir, 'scripts'));
         fs.writeFileSync(path.join(tmpDir, 'scripts', 'build.sh'), '#!/bin/sh\n');
         const result = detectStack(tmpDir);
@@ -72,48 +90,48 @@ describe('detectStack', () => {
         expect(result.indicators).toEqual([path.join('scripts', 'build.sh')]);
     });
 
-    it('js-ts wins over shell when both package.json and a root .sh file exist', () => {
+    it('js-ts wins over shell when both package.json and a root .sh file exist', async () => {
         fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
         fs.writeFileSync(path.join(tmpDir, 'deploy.sh'), '#!/bin/sh\n');
         expect(detectStack(tmpDir).pack).toBe('js-ts');
     });
 
-    it('python wins over shell when both a python marker and a root .sh file exist', () => {
+    it('python wins over shell when both a python marker and a root .sh file exist', async () => {
         fs.writeFileSync(path.join(tmpDir, 'pyproject.toml'), '');
         fs.writeFileSync(path.join(tmpDir, 'deploy.sh'), '#!/bin/sh\n');
         expect(detectStack(tmpDir).pack).toBe('python');
     });
 
-    it('falls through to generic when scripts/ has only non-.sh files (glob must not over-match)', () => {
+    it('falls through to generic when scripts/ has only non-.sh files (glob must not over-match)', async () => {
         fs.mkdirSync(path.join(tmpDir, 'scripts'));
         fs.writeFileSync(path.join(tmpDir, 'scripts', 'notes.txt'), 'not shell');
         expect(detectStack(tmpDir).pack).toBe('generic');
     });
 
-    it('detects python from requirements.txt alone', () => {
+    it('detects python from requirements.txt alone', async () => {
         fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), '');
         expect(detectStack(tmpDir).pack).toBe('python');
     });
 
-    it('detects python from Pipfile alone', () => {
+    it('detects python from Pipfile alone', async () => {
         fs.writeFileSync(path.join(tmpDir, 'Pipfile'), '');
         expect(detectStack(tmpDir).pack).toBe('python');
     });
 
-    it('python (via Pipfile) wins over shell when both a Pipfile and a root .sh file exist', () => {
+    it('python (via Pipfile) wins over shell when both a Pipfile and a root .sh file exist', async () => {
         fs.writeFileSync(path.join(tmpDir, 'Pipfile'), '');
         fs.writeFileSync(path.join(tmpDir, 'deploy.sh'), '#!/bin/sh\n');
         expect(detectStack(tmpDir).pack).toBe('python');
     });
 
-    it('does not report a directory named "*.sh" as a shell indicator', () => {
+    it('does not report a directory named "*.sh" as a shell indicator', async () => {
         // Directory literally named `something.sh` (not a file) — findShellIndicators'
         // `entry.isFile()` guard must exclude it. Nothing else present → generic.
         fs.mkdirSync(path.join(tmpDir, 'something.sh'));
         expect(detectStack(tmpDir).pack).toBe('generic');
     });
 
-    it('ignores a directory named "*.sh" but still finds a real .sh file alongside it', () => {
+    it('ignores a directory named "*.sh" but still finds a real .sh file alongside it', async () => {
         fs.mkdirSync(path.join(tmpDir, 'notreal.sh'));
         fs.writeFileSync(path.join(tmpDir, 'deploy.sh'), '#!/bin/sh\n');
         const result = detectStack(tmpDir);
@@ -127,17 +145,17 @@ describe('detectSourceDirs', () => {
     beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-src-')); });
     afterEach(() => { fs.rmSync(tmpDir, { recursive: true }); });
 
-    it('returns the App-Router-style dirs that exist', () => {
+    it('returns the App-Router-style dirs that exist', async () => {
         for (const d of ['app', 'lib', 'components']) fs.mkdirSync(path.join(tmpDir, d));
         expect(detectSourceDirs(tmpDir)).toEqual(['app', 'lib', 'components']);
     });
 
-    it('returns src when it exists', () => {
+    it('returns src when it exists', async () => {
         fs.mkdirSync(path.join(tmpDir, 'src'));
         expect(detectSourceDirs(tmpDir)).toEqual(['src']);
     });
 
-    it('falls back to ["src"] when no known source dir exists', () => {
+    it('falls back to ["src"] when no known source dir exists', async () => {
         expect(detectSourceDirs(tmpDir)).toEqual(['src']);
     });
 });
@@ -154,28 +172,28 @@ describe('buildManifest', () => {
         fs.rmSync(cwd, { recursive: true });
     });
 
-    it('builds manifest from the pack.json single source', () => {
+    it('builds manifest from the pack.json single source', async () => {
         const m = buildManifest('js-ts', undefined, registryRoot, cwd);
         expect(m.pack).toBe('js-ts');
         expect(m.sensors.typecheck.cmd).toBe('npx tsc --noEmit');
         expect(m.sensors.lint.cmd).toContain('--config eslint.config.awm.mjs');
     });
 
-    it('substitutes {{SOURCE_DIRS}} in depcheck with the detected dirs', () => {
+    it('substitutes {{SOURCE_DIRS}} in depcheck with the detected dirs', async () => {
         for (const d of ['app', 'lib']) fs.mkdirSync(path.join(cwd, d));
         const m = buildManifest('js-ts', undefined, registryRoot, cwd);
         expect(m.sensors.depcheck.cmd).toBe('npx depcruise --config .dep-cruiser.awm.js app lib');
         expect(m.sensors.depcheck.cmd).not.toContain('{{SOURCE_DIRS}}');
     });
 
-    it('merges conservatively — existing sensor commands are preserved', () => {
+    it('merges conservatively — existing sensor commands are preserved', async () => {
         const existing = { pack: 'js-ts', sensors: { typecheck: { cmd: 'custom-tsc', fast: true } } };
         const m = buildManifest('js-ts', existing, registryRoot, cwd);
         expect(m.sensors.typecheck.cmd).toBe('custom-tsc');
         expect(m.sensors.lint).toBeDefined();
     });
 
-    it('carries the formatter field through from pack.json into the built manifest', () => {
+    it('carries the formatter field through from pack.json into the built manifest', async () => {
         // readPackDefaults must copy `formatter` the same way it already copies
         // `changedCmd`/`changedExtensions` — this is what lets run.ts's getFormatter
         // dispatch by real tool (ruff/mypy/shellcheck) instead of guessing from the
@@ -186,7 +204,7 @@ describe('buildManifest', () => {
         expect(m.sensors.lint.formatter).toBe('eslint-llm');
     });
 
-    it('returns an empty sensors object when the pack has no pack.json in the registry', () => {
+    it('returns an empty sensors object when the pack has no pack.json in the registry', async () => {
         // No FALLBACK_DEFAULTS anymore: `python` has no pack dir in this fixture
         // registry (only js-ts does — see makeRegistry) → the honest floor is `{}`,
         // never CLI-hardcoded commands that can drift from what the registry ships.
@@ -194,7 +212,7 @@ describe('buildManifest', () => {
         expect(m.sensors).toEqual({});
     });
 
-    it('per-field merge: an existing sensor missing a newer pack field still inherits it', () => {
+    it('per-field merge: an existing sensor missing a newer pack field still inherits it', async () => {
         // Regression for Finding 1: a manifest written by the old FALLBACK_DEFAULTS-era
         // CLI has `typecheck: { cmd: 'mypy .', fast: true }` — no `formatter`, because
         // that field didn't exist yet. A naive `{ ...defaults, ...existingSensors }`
@@ -230,39 +248,58 @@ describe('initSensors', () => {
         fs.rmSync(registryRoot, { recursive: true });
     });
 
-    it('creates .awm/sensors.json for js-ts project', () => {
+    it('creates .awm/sensors.json for js-ts project', async () => {
         fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
-        const result = initSensors({ cwd: tmpDir, registryRoot });
+        const result = await initSensors({ cwd: tmpDir, registryRoot });
         expect(fs.existsSync(path.join(tmpDir, '.awm', 'sensors.json'))).toBe(true);
         expect(result.detection.pack).toBe('js-ts');
         expect(result.manifest.sensors.typecheck).toBeDefined();
     });
 
-    it('is idempotent — existing sensor commands survive re-init', () => {
+    it('is idempotent — existing sensor commands survive re-init', async () => {
         fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
         fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
         const existing = { pack: 'js-ts', sensors: { typecheck: { cmd: 'my-tsc', fast: true } } };
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify(existing));
-        initSensors({ cwd: tmpDir, registryRoot });
+        await initSensors({ cwd: tmpDir, registryRoot });
         const written = JSON.parse(fs.readFileSync(path.join(tmpDir, '.awm', 'sensors.json'), 'utf-8'));
         expect(written.sensors.typecheck.cmd).toBe('my-tsc');
         expect(written.sensors.lint).toBeDefined(); // new sensor added
     });
 
-    it('copies pack config files into the repo by default (configure on)', () => {
+    it('copies pack config files into the repo by default (configure on)', async () => {
         fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
         fs.writeFileSync(path.join(registryRoot, 'sensor-packs', 'js-ts', 'tsconfig.awm.json'), '{}');
-        const result = initSensors({ cwd: tmpDir, registryRoot }); // no explicit configure → default true
+        const result = await initSensors({ cwd: tmpDir, registryRoot }); // no explicit configure → default true
         expect(result.configured).toContain('tsconfig.awm.json');
         expect(fs.existsSync(path.join(tmpDir, 'tsconfig.awm.json'))).toBe(true);
     });
 
-    it('does NOT copy config files when configure is false', () => {
+    it('does NOT copy config files when configure is false', async () => {
         fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
         fs.writeFileSync(path.join(registryRoot, 'sensor-packs', 'js-ts', 'tsconfig.awm.json'), '{}');
-        const result = initSensors({ cwd: tmpDir, registryRoot, configure: false });
+        const result = await initSensors({ cwd: tmpDir, registryRoot, configure: false });
         expect(result.configured).toEqual([]);
         expect(fs.existsSync(path.join(tmpDir, 'tsconfig.awm.json'))).toBe(false);
+    });
+
+    it('awaits v2 compatibility probes and persists their materialized evidence', async () => {
+        const v2Registry = makeV2Registry();
+        try {
+            fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ devDependencies: { eslint: '^10.0.0' } }));
+            fs.mkdirSync(path.join(tmpDir, 'node_modules', 'eslint'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version: '10.0.0' }));
+            const result = await initSensors({ cwd: tmpDir, registryRoot: v2Registry });
+            const written = JSON.parse(fs.readFileSync(path.join(tmpDir, '.awm', 'sensors.json'), 'utf8'));
+            expect(result.manifest).toMatchObject({ schemaVersion: 2, sensors: { lint: { variantId: 'eslint-10' } } });
+            // `package.json` is a declared detection file, so config-present matches.
+            // Without init awaiting the probe the resolver stays `unverifiable`; this
+            // exact assertion therefore distinguishes the async probe integration.
+            expect(written.sensors.lint.initializedCompatibility).toMatchObject({ variantId: 'eslint-10', state: 'certified', reason: 'range-and-probe' });
+            expect(fs.existsSync(path.join(tmpDir, 'eslint.config.awm.mjs'))).toBe(true);
+        } finally {
+            fs.rmSync(v2Registry, { recursive: true, force: true });
+        }
     });
 });
 
@@ -278,40 +315,34 @@ describe('initSensors — --pack override', () => {
         fs.rmSync(registryRoot, { recursive: true });
     });
 
-    it('skips detection and uses the override pack when it exists in the registry', () => {
+    it('skips detection and uses the override pack when it exists in the registry', async () => {
         // No package.json/pyproject.toml here — if detection ran, this would be 'generic'.
-        const result = initSensors({ pack: 'js-ts', registryRoot, cwd: tmpDir });
+        const result = await initSensors({ pack: 'js-ts', registryRoot, cwd: tmpDir });
         expect(result.detection.pack).toBe('js-ts');
         // Indicators must reflect an override, not file-based detection.
         expect(result.detection.indicators).not.toEqual(['package.json']);
         expect(result.detection.indicators.join(' ')).toMatch(/pack override/i);
     });
 
-    it('throws listing available packs when the override pack is not in the registry', () => {
-        expect(() => initSensors({ pack: 'bogus', registryRoot, cwd: tmpDir })).toThrow(/js-ts/);
-        try {
-            initSensors({ pack: 'bogus', registryRoot, cwd: tmpDir });
-            throw new Error('expected initSensors to throw');
-        } catch (e) {
-            expect((e as Error).message).toContain('bogus');
-            expect((e as Error).message).toContain('js-ts');
-        }
+    it('throws listing available packs when the override pack is not in the registry', async () => {
+        await expect(initSensors({ pack: 'bogus', registryRoot, cwd: tmpDir })).rejects.toThrow(/js-ts/);
+        await expect(initSensors({ pack: 'bogus', registryRoot, cwd: tmpDir })).rejects.toThrow(/bogus/);
     });
 
-    it('does not throw when no registryRoot is given — nothing to validate against', () => {
-        expect(() => initSensors({ pack: 'anything', cwd: tmpDir })).not.toThrow();
-        const result = initSensors({ pack: 'anything', cwd: tmpDir });
+    it('does not throw when no registryRoot is given — nothing to validate against', async () => {
+        await expect(initSensors({ pack: 'anything', cwd: tmpDir })).resolves.toBeDefined();
+        const result = await initSensors({ pack: 'anything', cwd: tmpDir });
         expect(result.detection.pack).toBe('anything');
     });
 
-    it('throws a distinct message when the registry root has no sensor-packs directory at all', () => {
+    it('throws a distinct message when the registry root has no sensor-packs directory at all', async () => {
         // Different failure shape from "pack not in the list": the registry root
         // itself is missing sensor-packs/, so there's no list to show — must say
         // so plainly instead of reporting an empty `available: `.
         const emptyRegistryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-empty-reg-'));
         try {
-            expect(() => initSensors({ pack: 'js-ts', registryRoot: emptyRegistryRoot, cwd: tmpDir }))
-                .toThrow(/no sensor-packs directory/);
+            await expect(initSensors({ pack: 'js-ts', registryRoot: emptyRegistryRoot, cwd: tmpDir }))
+                .rejects.toThrow(/no sensor-packs directory/);
         } finally {
             fs.rmSync(emptyRegistryRoot, { recursive: true });
         }

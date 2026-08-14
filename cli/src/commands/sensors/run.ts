@@ -18,11 +18,7 @@ import { changedFiles, applyChangedCmd, filterByExtension, hasUnsafeWin32Chars }
 import { detectStack } from './init';
 import { isWindowsNative } from '../../core/paths';
 import { parseSensorManifest } from './compatibility/manifest';
-import { resolvePackSource } from './compatibility/pack-source';
-import { parseSensorPack } from './compatibility/contract';
-import { discoverProjectEvidence } from './compatibility/discovery';
-import { resolveProjectCompatibility } from './compatibility/resolve';
-import { runCompatibilityProbe } from './compatibility/probe';
+import { resolveLiveCompatibility } from './compatibility/live';
 
 const MANIFEST_FILE = '.awm/sensors.json';
 const DEFAULT_FAST_TIMEOUT = 10_000;
@@ -79,19 +75,7 @@ function readManifest(cwd: string): SensorManifest | null {
 async function resolveLiveV2(cwd: string, manifest: ReturnType<typeof parseSensorManifest>): Promise<Record<string, import('./compatibility/types').CompatibilityEvidence> | null> {
     if (manifest.kind !== 'v2') return null;
     try {
-        const source = resolvePackSource(manifest.pack.pack);
-        const parsed = parseSensorPack(JSON.parse(source.content), source.path);
-        if (parsed.kind !== 'v2') return null;
-        const evidence = discoverProjectEvidence(cwd, parsed.pack);
-        const initial = resolveProjectCompatibility(parsed.pack, evidence).sensors;
-        const resolved: Record<string, import('./compatibility/types').CompatibilityEvidence> = {};
-        for (const [name, sensor] of Object.entries(parsed.pack.sensors)) {
-            const base = initial[name];
-            const variant = base.variantId === null ? null : sensor.variants.find(item => item.id === base.variantId);
-            const probe = variant ? await runCompatibilityProbe(variant.probe, { cwd, toolExecutable: variant.command.executable, configFiles: evidence.configFiles, scripts: evidence.scripts }) : null;
-            resolved[name] = resolveProjectCompatibility({ ...parsed.pack, sensors: { [name]: sensor } }, { ...evidence, probe: probe ?? undefined }).sensors[name];
-        }
-        return resolved;
+        return (await resolveLiveCompatibility(cwd, manifest.pack.pack)).sensors;
     } catch { return null; }
 }
 
@@ -335,6 +319,10 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
             const state = live?.[name];
             if (!state || state.state !== 'certified') {
                 tasks.push(() => Promise.resolve({ name, status: 'inconclusive', errors: [], skipReason: state ? `${state.state}: ${state.reason}` : 'compatibility could not be revalidated' }));
+                continue;
+            }
+            if (state.variantId !== sensor.variantId) {
+                tasks.push(() => Promise.resolve({ name, status: 'inconclusive', errors: [], skipReason: `variant-drift: manifest ${sensor.variantId}, live ${state.variantId ?? 'none'}; run \`awm sensors init\`` }));
                 continue;
             }
             tasks.push(() => runV2Sensor(name, sensor.command, DEFAULT_SLOW_TIMEOUT, manifestDir));

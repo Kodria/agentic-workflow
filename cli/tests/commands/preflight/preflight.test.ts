@@ -53,22 +53,22 @@ const dirs: string[] = [];
 const make = (o?: Parameters<typeof project>[0]) => { const d = project(o); dirs.push(d); return d; };
 afterAll(() => dirs.forEach(d => fs.rmSync(d, { recursive: true, force: true })));
 
-const check = (r: ReturnType<typeof preflight>, id: string) => r.checks.find(c => c.id === id)!;
+const check = (r: Awaited<ReturnType<typeof preflight>>, id: string) => r.checks.find(c => c.id === id)!;
 
 describe('preflight', () => {
-    it('reports not_configured when no sensor manifest exists', () => {
+    it('reports not_configured when no sensor manifest exists', async () => {
         // The team-rollout case: a developer clones the repo and never runs
         // `awm sensors init`. Today nothing notices until an unattended run is already
         // in flight and every quality phase is consuming a gate that certifies nothing.
         const dir = make();
 
-        const report = preflight(dir);
+        const report = await preflight(dir);
 
         expect(report.status).toBe('not_configured');
         expect(check(report, 'manifest').ok).toBe(false);
     });
 
-    it('keeps not_configured and degraded apart', () => {
+    it('keeps not_configured and degraded apart', async () => {
         // "You never set this up" and "you set it up and it broke" need different
         // remedies. Collapsing them is how an absent check reads as a passing one.
         const never = make();
@@ -76,50 +76,50 @@ describe('preflight', () => {
             manifest: { pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .' } } },   // no local eslint
         });
 
-        expect(preflight(never).status).toBe('not_configured');
-        expect(preflight(broken).status).toBe('degraded');
+        expect((await preflight(never)).status).toBe('not_configured');
+        expect((await preflight(broken)).status).toBe('degraded');
     });
 
-    it('is ready when the declared sensors can actually run', () => {
+    it('is ready when the declared sensors can actually run', async () => {
         const dir = make({
             manifest: { pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .' } } },
             bins: ['eslint'],
             files: ['package.json'],
         });
 
-        const report = preflight(dir);
+        const report = await preflight(dir);
 
         expect(report.status).toBe('ready');
         expect(exitCodeFor(report)).toBe(0);
     });
 
-    it('catches a sensor whose tool is not installed locally', () => {
+    it('catches a sensor whose tool is not installed locally', async () => {
         // This is the check that existed and nothing in the flow was calling.
         const dir = make({
             manifest: { pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .' } } },
             files: ['package.json'],
         });
 
-        const report = preflight(dir);
+        const report = await preflight(dir);
 
         expect(report.status).toBe('degraded');
         expect(check(report, 'tools').detail).toContain('eslint');
     });
 
-    it('accepts a deliberate opt-out, but only when it is written down', () => {
+    it('accepts a deliberate opt-out, but only when it is written down', async () => {
         // A repo may legitimately have no sensors — it just has to SAY so in a committed
         // file, so "we decided not to gate this" cannot be mistaken for "nobody set it up".
         const optedOut = make({
             manifest: { pack: 'generic', sensors: { security: { cmd: 'semgrep .', enabled: false } } },
         });
 
-        const report = preflight(optedOut);
+        const report = await preflight(optedOut);
 
         expect(report.status).toBe('ready');
         expect(check(report, 'manifest').detail).toContain('opt-out');
     });
 
-    it('flags a manifest with zero sensor entries as degraded, distinct from a deliberate opt-out', () => {
+    it('flags a manifest with zero sensor entries as degraded, distinct from a deliberate opt-out', async () => {
         // Genuinely different manifest shape from the opt-out test above: no sensor
         // NAMES at all, vs. an opt-out which lists every known sensor explicitly with
         // `enabled: false`. This is the honest-floor case from init.ts — the registry
@@ -128,7 +128,7 @@ describe('preflight', () => {
             manifest: { pack: 'python', sensors: {} },
         });
 
-        const report = preflight(noPack);
+        const report = await preflight(noPack);
 
         expect(report.status).toBe('degraded');
         expect(check(report, 'manifest').ok).toBe(false);
@@ -137,7 +137,7 @@ describe('preflight', () => {
         expect(check(report, 'manifest').remedy).toContain('python');
     });
 
-    it('flags the tools check as failing (not "0/0 runnable") for a manifest with zero sensor entries', () => {
+    it('flags the tools check as failing (not "0/0 runnable") for a manifest with zero sensor entries', async () => {
         // Regression for Finding 6: `checkTools` independently inspects
         // `status.checks`, which is also `{}` for a zero-sensor manifest —
         // `Object.entries({}).filter(...)` is vacuously `[]`, so before the fix this
@@ -149,44 +149,44 @@ describe('preflight', () => {
             manifest: { pack: 'python', sensors: {} },
         });
 
-        const report = preflight(noPack);
+        const report = await preflight(noPack);
 
         expect(check(report, 'tools').ok).toBe(false);
         expect(report.status).toBe('degraded');
     });
 
-    it('flags a manifest stuck on generic while the tree has a real stack', () => {
+    it('flags a manifest stuck on generic while the tree has a real stack', async () => {
         // The gate would run, report green, and have checked almost nothing.
         const dir = make({
             manifest: { pack: 'generic', sensors: {} },
             files: ['package.json'],
         });
 
-        const report = preflight(dir);
+        const report = await preflight(dir);
 
         expect(report.status).toBe('degraded');
         expect(check(report, 'pack').ok).toBe(false);
     });
 
-    it('flags a repo with no context contract at all', () => {
+    it('flags a repo with no context contract at all', async () => {
         const dir = make({
             context: [],
             manifest: { pack: 'generic', sensors: {} },
         });
 
-        expect(check(preflight(dir), 'context').ok).toBe(false);
+        expect(check(await preflight(dir), 'context').ok).toBe(false);
     });
 
-    it('treats an unparseable manifest as a failure, not as absent', () => {
+    it('treats an unparseable manifest as a failure, not as absent', async () => {
         const dir = make({ manifest: '{ not json' });
 
-        const report = preflight(dir);
+        const report = await preflight(dir);
 
         expect(report.status).toBe('degraded');
         expect(check(report, 'manifest').detail).toContain('not valid JSON');
     });
 
-    it('exits non-zero for anything but ready, so the caller need not parse JSON', () => {
+    it('exits non-zero for anything but ready, so the caller need not parse JSON', async () => {
         // Unlike `awm sensors run` — which exits 0 on not_certified because exit 2 blocks
         // Claude Code hooks — preflight is never a hook, so the verdict rides the exit code
         // instead of depending on every agent remembering to read a field.
@@ -224,26 +224,26 @@ describe('preflight', () => {
             fs.chmodSync(f, 0o755);
         }
 
-        it('reports github + gh available, and does not affect status', () => {
+        it('reports github + gh available, and does not affect status', async () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'git@github.com:kodria/agentic-workflow.git');
             installOnPath('gh');
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'host').ok).toBe(true);
             expect(check(report, 'host').detail).toBe('github detected, gh available');
             expect(report.status).toBe('ready');
         });
 
-        it('is still ok:true (advisory only) when gitlab is detected but glab is not on PATH, and status stays ready', () => {
+        it('is still ok:true (advisory only) when gitlab is detected but glab is not on PATH, and status stays ready', async () => {
             // The only thing "wrong" in this fixture is the missing `glab` — proving the
             // advisory contract: it must not drag an otherwise-clean repo to `degraded`.
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'https://gitlab.com/kodria/agentic-workflow.git');
             // PATH aislado y vacio => glab no resuelve.
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'host').ok).toBe(true);
             expect(check(report, 'host').detail).toContain('glab not on PATH');
@@ -251,11 +251,11 @@ describe('preflight', () => {
             expect(report.status).toBe('ready');
         });
 
-        it('handles no origin remote gracefully — no throw, ok:true, minimal detail', () => {
+        it('handles no origin remote gracefully — no throw, ok:true, minimal detail', async () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             // Not a git repo at all — the common case for `execFileSync` failing here.
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'host').ok).toBe(true);
             expect(check(report, 'host').detail).toBe('no git remote detected — PR/MR automation not applicable');
@@ -263,28 +263,28 @@ describe('preflight', () => {
             expect(report.status).toBe('ready');
         });
 
-        it('handles a git repo with no origin remote configured gracefully', () => {
+        it('handles a git repo with no origin remote configured gracefully', async () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir); // git init, no remote
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'host').ok).toBe(true);
             expect(check(report, 'host').detail).toContain('no git remote detected');
         });
 
-        it('does not overclaim support for an unrecognized host', () => {
+        it('does not overclaim support for an unrecognized host', async () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'git@bitbucket.org:kodria/agentic-workflow.git');
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'host').ok).toBe(true);
             expect(check(report, 'host').detail).toContain('not recognized');
             expect(report.status).toBe('ready');
         });
 
-        it('does not misclassify a GitHub Enterprise host whose repo NAME contains "gitlab"', () => {
+        it('does not misclassify a GitHub Enterprise host whose repo NAME contains "gitlab"', async () => {
             // The bug: a bare `remote.includes('gitlab')` matches the full remote URL
             // string, so an org/repo name containing "gitlab" false-positives even though
             // the actual host is unrelated. Hostname must be extracted first and matched
@@ -292,27 +292,27 @@ describe('preflight', () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'git@github.enterprise.internal:kodria/gitlab-migration-tool.git');
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'host').ok).toBe(true);
             expect(check(report, 'host').detail).toContain('not recognized');
             expect(report.status).toBe('ready');
         });
 
-        it('does not misclassify a non-GitHub host whose repo NAME contains "github"', () => {
+        it('does not misclassify a non-GitHub host whose repo NAME contains "github"', async () => {
             // Same class of bug on the github side: "something-github-tool" is a repo
             // name, not the host.
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'https://example.com/kodria/something-github-tool.git');
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'host').ok).toBe(true);
             expect(check(report, 'host').detail).toContain('not recognized');
             expect(report.status).toBe('ready');
         });
 
-        it('does not misclassify a GitHub Enterprise host whose SSH USERNAME is "gitlab"', () => {
+        it('does not misclassify a GitHub Enterprise host whose SSH USERNAME is "gitlab"', async () => {
             // The related bug: the scheme-based regex captured everything between
             // `scheme://` and the first `/`, including `userinfo@` — so an SSH username
             // of "gitlab" leaked into the matched "host" string and false-positived the
@@ -328,7 +328,7 @@ describe('preflight', () => {
             gitRepo(dir, 'ssh://gitlab@github.company-internal.com:22/team/repo.git');
             // PATH real: estos casos no dependen de gh/glab.
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'host').ok).toBe(true);
             expect(check(report, 'host').detail).toContain('github detected');
@@ -336,7 +336,7 @@ describe('preflight', () => {
             expect(report.status).toBe('ready');
         });
 
-        it('does not misclassify a host whose injected credential/token contains "gitlab"', () => {
+        it('does not misclassify a host whose injected credential/token contains "gitlab"', async () => {
             // A realistic CI credential-injection remote:
             // `git remote set-url origin https://x-access-token:$TOKEN@host/...`. If the
             // token or password happens to contain "gitlab", it must not leak into the
@@ -344,14 +344,14 @@ describe('preflight', () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'https://user:gitlab@example-host.com/org/repo.git');
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'host').ok).toBe(true);
             expect(check(report, 'host').detail).toContain('not recognized');
             expect(report.status).toBe('ready');
         });
 
-        it('does not misclassify an SCP-style remote with a second "@" in it', () => {
+        it('does not misclassify an SCP-style remote with a second "@" in it', async () => {
             // `user@host:path` shorthand has no scheme for `URL` to parse, so it falls
             // back to a regex. A second "@" (e.g. a malformed/adversarial remote) must
             // not let a bogus "host@evil"-shaped capture slip past the colon check —
@@ -360,56 +360,56 @@ describe('preflight', () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'user@github.com@gitlab.evil:org/repo.git');
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'host').ok).toBe(true);
             expect(check(report, 'host').detail).toContain('not recognized');
             expect(report.status).toBe('ready');
         });
 
-        it('still detects github.com over HTTPS', () => {
+        it('still detects github.com over HTTPS', async () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'https://github.com/org/repo.git');
             // PATH real: estos casos no dependen de gh/glab.
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'host').detail).toContain('github detected');
         });
 
-        it('still detects github.com over SSH shorthand', () => {
+        it('still detects github.com over SSH shorthand', async () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'git@github.com:org/repo.git');
             // PATH real: estos casos no dependen de gh/glab.
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'host').detail).toContain('github detected');
         });
 
-        it('still detects gitlab over HTTPS', () => {
+        it('still detects gitlab over HTTPS', async () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'https://gitlab.example.com/org/repo.git');
             // PATH real: estos casos no dependen de gh/glab.
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'host').detail).toContain('gitlab detected');
         });
 
-        it('still detects gitlab over SSH shorthand', () => {
+        it('still detects gitlab over SSH shorthand', async () => {
             const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
             gitRepo(dir, 'git@gitlab.example.com:org/repo.git');
             // PATH real: estos casos no dependen de gh/glab.
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'host').detail).toContain('gitlab detected');
         });
     });
 
     describe('sensors-baseline check (advisory — never changes the exit code)', () => {
-        it('nudges toward `awm sensors baseline` when sensors are configured but no baseline exists', () => {
+        it('nudges toward `awm sensors baseline` when sensors are configured but no baseline exists', async () => {
             // The team-rollout gap this addresses: a legacy repo adopts AWM, sensors get
             // configured, and the ratchet mechanism exists to snapshot pre-existing debt —
             // but nothing tells the operator it's there until they hit a wall of red
@@ -420,7 +420,7 @@ describe('preflight', () => {
                 files: ['package.json'],
             });
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'sensors-baseline').ok).toBe(true);
             expect(check(report, 'sensors-baseline').detail).toContain('no baseline yet');
@@ -428,7 +428,7 @@ describe('preflight', () => {
             expect(report.status).toBe('ready');
         });
 
-        it('reports the no-advisory-needed state when a baseline already exists, without nudging', () => {
+        it('reports the no-advisory-needed state when a baseline already exists, without nudging', async () => {
             const dir = make({
                 manifest: { pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .' } } },
                 bins: ['eslint'],
@@ -437,7 +437,7 @@ describe('preflight', () => {
             fs.mkdirSync(path.join(dir, '.awm'), { recursive: true });
             fs.writeFileSync(path.join(dir, '.awm', 'sensors.baseline.json'), JSON.stringify({ lint: [] }));
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'sensors-baseline').ok).toBe(true);
             expect(check(report, 'sensors-baseline').detail).toBe('baseline present');
@@ -445,16 +445,16 @@ describe('preflight', () => {
             expect(report.status).toBe('ready');
         });
 
-        it('is omitted entirely when there is no manifest at all — nothing to baseline without sensors', () => {
+        it('is omitted entirely when there is no manifest at all — nothing to baseline without sensors', async () => {
             const dir = make();
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(report.checks.find(c => c.id === 'sensors-baseline')).toBeUndefined();
             expect(report.status).toBe('not_configured');
         });
 
-        it('does not nudge on a deliberate opt-out (every sensor disabled) — nothing to baseline', () => {
+        it('does not nudge on a deliberate opt-out (every sensor disabled) — nothing to baseline', async () => {
             // Regression: the trigger condition originally checked only manifestExists, so a
             // repo that deliberately opted out (checkManifest's own documented pattern: every
             // sensor `enabled: false`) still got told to run `awm sensors baseline` — nothing
@@ -463,24 +463,24 @@ describe('preflight', () => {
                 manifest: { pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .', enabled: false } } },
             });
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'sensors-baseline').ok).toBe(true);
             expect(check(report, 'sensors-baseline').detail).toBe('no enabled sensors — nothing to baseline');
             expect(check(report, 'sensors-baseline').remedy).toBeUndefined();
         });
 
-        it('does not nudge on an unparseable manifest — nothing to baseline', () => {
+        it('does not nudge on an unparseable manifest — nothing to baseline', async () => {
             const dir = make({ manifest: '{not valid json' });
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'sensors-baseline').ok).toBe(true);
             expect(check(report, 'sensors-baseline').detail).toBe('no enabled sensors — nothing to baseline');
             expect(check(report, 'sensors-baseline').remedy).toBeUndefined();
         });
 
-        it('still nudges when the baseline path exists but is not a readable file (e.g. a stray directory)', () => {
+        it('still nudges when the baseline path exists but is not a readable file (e.g. a stray directory)', async () => {
             // Regression: checking presence via `fs.existsSync` alone would have reported
             // "baseline present" here, reassuring the operator that debt is suppressed —
             // but the real gate (`readBaseline`, used by `partition()`) treats an unreadable
@@ -493,7 +493,7 @@ describe('preflight', () => {
             });
             fs.mkdirSync(path.join(dir, '.awm', 'sensors.baseline.json'), { recursive: true });
 
-            const report = preflight(dir);
+            const report = await preflight(dir);
 
             expect(check(report, 'sensors-baseline').ok).toBe(true);
             expect(check(report, 'sensors-baseline').detail).toContain('no baseline yet');
@@ -501,7 +501,7 @@ describe('preflight', () => {
         });
     });
 
-    it('tells the operator not to hand a broken harness to an unattended run', () => {
+    it('tells the operator not to hand a broken harness to an unattended run', async () => {
         const out = formatReport({
             status: 'not_configured',
             checks: [{ id: 'manifest', ok: false, detail: 'no .awm/sensors.json', remedy: 'run `awm sensors init`' }],
@@ -511,7 +511,7 @@ describe('preflight', () => {
         expect(out).toContain('awm sensors init');
     });
 
-    it('pads the id column to the widest id actually present, not a hardcoded width', () => {
+    it('pads the id column to the widest id actually present, not a hardcoded width', async () => {
         // Regression: a literal `.padEnd(9)` silently misaligned once `sensors-baseline`
         // (16 chars) was added as a check id — every detail column shifted left of where
         // shorter ids' details landed. The width must be derived from the report itself.
