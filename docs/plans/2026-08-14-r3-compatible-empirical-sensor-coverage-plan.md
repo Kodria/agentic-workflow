@@ -710,7 +710,7 @@ _Requirements: R5.4, R5.5, R5.6, R5.7, R5.8, R5.9, R5.10, R6.6, R6.7, R9.3_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir corpus rojo de clustering y outcomes**
+- [x] **Step 1: Escribir corpus rojo de clustering y outcomes**
 
 ```ts
 test('clusters only inside defectClass and keeps singles below min (R5.4, R5.6)', () => {
@@ -737,17 +737,17 @@ test('does not infer missing class from text (R5.3, R5.10)', () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar corpus rojo**
+- [x] **Step 2: Ejecutar corpus rojo**
 
 Run: `cd cli && npx jest tests/commands/sensors/coverage/empirical.test.ts --runInBand`
 
 Expected: FAIL por módulo inexistente.
 
-- [ ] **Step 3: Implementar analizador puro y sanitización de evidencia**
+- [x] **Step 3: Implementar analizador puro y sanitización de evidencia**
 
 Agrupar findings con clase, llamar `clusterEntries(group, 1)`, remover `entries` del output, calcular severidad por `blocker > important > minor > info`, deduplicar/sortear refs permitiendo solo path relativo con línea, `PR #n` o hash; retirar ANSI/OSC/controls y limitar a 256 chars. `omittedEvidenceRefs` registra el excedente. `unclassified` solo lleva count+refs, nunca desc/signature inferida.
 
-- [ ] **Step 4: Fijar parser de `--min` antes de I/O**
+- [x] **Step 4: Fijar parser de `--min` antes de I/O**
 
 ```ts
 export function parsePositiveSafeInteger(value: string): number {
@@ -764,15 +764,15 @@ sensors.command('coverage')
 
 Tests `0`, `-1`, `1.5`, `2x`, `Infinity`, `NaN` y overflow deben afirmar que `runCoverage` no fue llamado.
 
-- [ ] **Step 5: Integrar análisis incluso con static inconclusive**
+- [x] **Step 5: Integrar análisis incluso con static inconclusive**
 
 `runCoverage(cwd, { min, ...deps })` siempre escanea el ledger y emite empirical. `not_configured`/`no_reference` no hacen early return antes del análisis; findings con static no disponible son `coverage-unverifiable`. `overall` y exit siguen estáticos. `render.ts` valida exhaustivamente empirical, including impossible counters/status, y muestra resumen humano.
 
-- [ ] **Step 6: Extender E2E read-only**
+- [x] **Step 6: Extender E2E read-only**
 
 Fixture con ledger activo+archive, finding tipado, unclassified, win y línea malformed. Ejecutar binario compilado con default y `--min 3`; comparar hashes de proyecto y AWM_HOME antes/después; afirmar schema 2, static estable, empirical partial, singles visibles y cero `desc`/secretos en stdout.
 
-- [ ] **Step 7: Ejecutar tests, mutaciones y commit**
+- [x] **Step 7: Ejecutar tests, mutaciones y commit**
 
 Run:
 
