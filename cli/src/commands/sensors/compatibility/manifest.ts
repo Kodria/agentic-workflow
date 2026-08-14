@@ -145,6 +145,7 @@ function parseV2Sensor(input: unknown, source: unknown, location: string): Senso
         initializedCompatibility: parseCompatibilityEvidence(value.initializedCompatibility, source, `${location}.initializedCompatibility`),
     };
     if (sensor.initializedCompatibility.variantId !== null && sensor.initializedCompatibility.variantId !== sensor.variantId) invalid(source, `${location}.initializedCompatibility.variantId must match variantId`);
+    if (['certified', 'compatible-unverified', 'incompatible'].includes(sensor.initializedCompatibility.state) && sensor.initializedCompatibility.variantId === null) invalid(source, `${location}.initializedCompatibility.variantId is required for ${sensor.initializedCompatibility.state}`);
     if (sensor.initializedCompatibility.state === 'certified' && (sensor.initializedCompatibility.toolVersion === null || sensor.initializedCompatibility.runtimeVersion === null || sensor.initializedCompatibility.certifiedRange === null)) invalid(source, `${location}.initializedCompatibility certified evidence is incomplete`);
     if ('assets' in value) sensor.assets = stringArray(value.assets, source, `${location}.assets`, false).map((entry, index) => asset(entry, source, `${location}.assets[${index}]`));
     return sensor;

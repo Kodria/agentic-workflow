@@ -134,17 +134,31 @@ export function assertNoEqualPriorityOverlap(variants: unknown): void {
     if (!Array.isArray(variants) || variants.length === 0) throw new Error('variants must be a nonempty array');
     for (let left = 0; left < variants.length; left++) {
         const first = variants[left] as SensorVariant;
-        if (!first || typeof first !== 'object' || !/^[a-z][a-z0-9-]*$/.test(first.id) || !Number.isSafeInteger(first.priority) || typeof first.certifiedRange !== 'string' || semver.validRange(first.certifiedRange) === null || !first.command || !Array.isArray(first.command.args)) {
+        if (!completeVariant(first)) {
             throw new Error('variants must contain complete variant records');
         }
         for (let right = left + 1; right < variants.length; right++) {
             const second = variants[right] as SensorVariant;
-            if (!second || typeof second !== 'object' || !/^[a-z][a-z0-9-]*$/.test(second.id) || !Number.isSafeInteger(second.priority) || typeof second.certifiedRange !== 'string' || semver.validRange(second.certifiedRange) === null || !second.command || !Array.isArray(second.command.args)) throw new Error('variants must contain complete variant records');
+            if (!completeVariant(second)) throw new Error('variants must contain complete variant records');
             if (first.priority === second.priority && semver.intersects(first.certifiedRange, second.certifiedRange)) {
                 throw new Error(`variants "${first.id}" and "${second.id}" overlap at priority ${first.priority}`);
             }
         }
     }
+}
+
+function completeVariant(value: unknown): value is SensorVariant {
+    if (!value || typeof value !== 'object') return false;
+    const variant = value as SensorVariant;
+    return /^[a-z][a-z0-9-]*$/.test(variant.id)
+        && Number.isSafeInteger(variant.priority)
+        && typeof variant.certifiedRange === 'string' && semver.validRange(variant.certifiedRange) !== null
+        && !!variant.requirements && typeof variant.requirements.tool === 'string' && typeof variant.requirements.runtime === 'string'
+        && typeof variant.requirements.toolRange === 'string' && semver.validRange(variant.requirements.toolRange) !== null
+        && typeof variant.requirements.runtimeRange === 'string' && semver.validRange(variant.requirements.runtimeRange) !== null
+        && Array.isArray(variant.assets) && typeof variant.formatter === 'string'
+        && !!variant.probe && ALLOWED_PROBES.has(variant.probe.kind)
+        && !!variant.command && typeof variant.command.executable === 'string' && Array.isArray(variant.command.args);
 }
 
 function parseSensor(input: unknown, source: unknown, location: string, variantIds: Set<string>): SensorPackSensor {

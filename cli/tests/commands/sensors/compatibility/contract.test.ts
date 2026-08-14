@@ -70,7 +70,8 @@ describe('sensor pack v2 contract', () => {
     it('preserves configFiles and rejects incomplete public overlap input', () => {
         const variant = { ...validPack().sensors.lint.variants[0], requirements: { ...validPack().sensors.lint.variants[0].requirements, configFiles: ['eslint.config.js'] } };
         expect(parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [variant] } } }, 'pack')).toMatchObject({ kind: 'v2', pack: { sensors: { lint: { variants: [{ requirements: { configFiles: ['eslint.config.js'] } }] } } } });
-        expect(() => assertNoEqualPriorityOverlap([{ id: '../bad', priority: 1, certifiedRange: '>=1' }] as unknown)).toThrow('complete');
+        expect(() => assertNoEqualPriorityOverlap([{ id: '../bad', priority: 1, certifiedRange: '>=1', command: { args: [] } }] as unknown)).toThrow('complete');
+        expect(() => assertNoEqualPriorityOverlap([{ id: 'valid-id', priority: 1, certifiedRange: '>=1' }] as unknown)).toThrow('complete');
     });
 
     test.each([

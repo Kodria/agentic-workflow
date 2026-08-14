@@ -40,10 +40,20 @@ describe('sensor manifest contract', () => {
         expect(() => parseSensorManifest({ schemaVersion: 2, pack: 'js-ts', sensors: { lint: { ...sensor, assets: ['C:/secret'] } } }, 'sensors.json')).toThrow('asset');
     });
 
-    it('rejects incoherent compatibility evidence and hostile source labels', () => {
-        const sensor = { enabled: true, variantId: 'eslint-9', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, initializedCompatibility: { state: 'certified', reason: 'ok', variantId: 'other', toolVersion: 'bad', runtimeVersion: '24.0.0', certifiedRange: 'bad', evidence: [] } };
+    it('rejects mismatched compatibility variant and hostile source labels', () => {
+        const sensor = { enabled: true, variantId: 'eslint-9', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, initializedCompatibility: { state: 'certified', reason: 'ok', variantId: 'other', toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [] } };
         expect(() => parseSensorManifest({ schemaVersion: 2, pack: 'js-ts', sensors: { lint: sensor } }, { path: 'bad' })).toThrow('<unknown source>');
         expect(() => parseSensorManifest({ schemaVersion: 2, pack: 'js-ts', sensors: { lint: sensor } }, 'source\nleak')).toThrow('<unknown source>');
+    });
+
+    it('rejects invalid semver evidence independently', () => {
+        const sensor = { enabled: true, variantId: 'eslint-9', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, initializedCompatibility: { state: 'certified', reason: 'ok', variantId: 'eslint-9', toolVersion: 'bad', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [] } };
+        expect(() => parseSensorManifest({ schemaVersion: 2, pack: 'js-ts', sensors: { lint: sensor } }, 'source')).toThrow('toolVersion');
+    });
+
+    it('rejects certified evidence without a selected variant', () => {
+        const sensor = { enabled: true, variantId: 'eslint-9', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, initializedCompatibility: { state: 'certified', reason: 'ok', variantId: null, toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [] } };
+        expect(() => parseSensorManifest({ schemaVersion: 2, pack: 'js-ts', sensors: { lint: sensor } }, 'source')).toThrow('variantId');
     });
 
     test.each([
