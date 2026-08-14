@@ -11,6 +11,10 @@ const COMPATIBILITY_STATE = ['certified', 'compatible-unverified', 'incompatible
 const REASON = ['not_configured', 'no_reference'];
 const COMMAND_EVIDENCE_STATUS = ['matched', 'custom', 'missing'];
 const FILE_EVIDENCE_STATUS = ['matched', 'missing', 'unverifiable'];
+const EMPIRICAL_STATUS = ['no-evidence', 'complete', 'partial'];
+const EMPIRICAL_OUTCOME = ['covered-by-sensor', 'gap', 'coverage-unverifiable', 'applicability-contradiction'];
+const SEVERITY = ['blocker', 'important', 'minor', 'info'];
+const SAFE_REF = /^(?:PR #[1-9][0-9]*|[a-f0-9]{7,64}|(?!\/)(?!.*(?:^|\/)\.\.?\/)[A-Za-z0-9._@+~=-]+(?:\/[A-Za-z0-9._@+~=-]+)*:[1-9][0-9]*)$/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -67,6 +71,46 @@ function assertCompatibility(value: unknown, renderer: string): asserts value is
     }
 }
 
+function assertCount(value: unknown, renderer: string): asserts value is number {
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) invalidReport(renderer);
+}
+
+function assertRefs(value: unknown, renderer: string): void {
+    if (!Array.isArray(value) || value.some((ref) => !isNonBlankString(ref) || ref.length > 256 || /[\u0000-\u001F\u007F-\u009F]/.test(ref) || !SAFE_REF.test(ref))) invalidReport(renderer);
+    for (let index = 1; index < value.length; index += 1) if (value[index - 1] >= value[index]) invalidReport(renderer);
+}
+
+function assertEmpirical(value: unknown, renderer: string): void {
+    if (!isRecord(value) || !hasExactFields(value, ['status', 'classes', 'unclassified', 'sources', 'omittedEvidenceRefs'])
+        || !isOneOf(value.status, EMPIRICAL_STATUS) || !Array.isArray(value.classes) || !isRecord(value.unclassified)
+        || !isRecord(value.sources)) invalidReport(renderer);
+    assertCount(value.omittedEvidenceRefs, renderer);
+    let previous = '';
+    let occurrenceCount = 0;
+    for (const item of value.classes) {
+        if (!isRecord(item) || !hasExactFields(item, ['defectClass', 'occurrences', 'recurrent', 'severity', 'outcome', 'evidenceRefs', 'omittedEvidenceRefs'])
+            || !isNonBlankString(item.defectClass) || !isOneOf(item.severity, SEVERITY) || !isOneOf(item.outcome, EMPIRICAL_OUTCOME)
+            || typeof item.recurrent !== 'boolean') invalidReport(renderer);
+        assertCount(item.occurrences, renderer); assertCount(item.omittedEvidenceRefs, renderer); assertRefs(item.evidenceRefs, renderer);
+        if (item.occurrences < 1 || previous > item.defectClass) invalidReport(renderer);
+        previous = item.defectClass; occurrenceCount += item.occurrences;
+    }
+    if (!hasExactFields(value.unclassified, ['occurrences', 'evidenceRefs', 'omittedEvidenceRefs'])) invalidReport(renderer);
+    assertCount(value.unclassified.occurrences, renderer); assertCount(value.unclassified.omittedEvidenceRefs, renderer); assertRefs(value.unclassified.evidenceRefs, renderer);
+    if (!hasExactFields(value.sources, ['activeFiles', 'archivedFiles', 'validEntries', 'validFindings', 'skippedFindings', 'skippedByReason']) || !isRecord(value.sources.skippedByReason)) invalidReport(renderer);
+    for (const key of ['activeFiles', 'archivedFiles', 'validEntries', 'validFindings', 'skippedFindings']) assertCount(value.sources[key], renderer);
+    for (const count of Object.values(value.sources.skippedByReason)) assertCount(count, renderer);
+    const validFindings = value.sources.validFindings as number;
+    const validEntries = value.sources.validEntries as number;
+    const skippedFindings = value.sources.skippedFindings as number;
+    const unclassifiedOccurrences = value.unclassified.occurrences as number;
+    const omitted = value.omittedEvidenceRefs as number;
+    if (validFindings !== occurrenceCount + unclassifiedOccurrences || validEntries < validFindings) invalidReport(renderer);
+    if (value.status === 'no-evidence' && (validFindings !== 0 || value.classes.length !== 0 || unclassifiedOccurrences !== 0)) invalidReport(renderer);
+    if (value.status === 'complete' && (skippedFindings !== 0 || omitted !== 0 || unclassifiedOccurrences !== 0)) invalidReport(renderer);
+    if (value.status === 'partial' && validFindings === 0) invalidReport(renderer);
+}
+
 function assertCoverageEnvelope(report: unknown, renderer: string): asserts report is CoverageEnvelope {
     if (!isRecord(report) || !hasExactFields(report, 'empirical' in report
         ? ['schemaVersion', 'pack', 'registry', 'overall', 'static', 'empirical']
@@ -89,14 +133,14 @@ function assertCoverageEnvelope(report: unknown, renderer: string): asserts repo
         if (report.overall !== 'inconclusive' || report.pack !== null || report.registry !== null || staticReport.classes.length !== 0) {
             invalidReport(renderer);
         }
-        return;
+        if (report.empirical !== undefined) assertEmpirical(report.empirical, renderer); return;
     }
     if (staticReport.reason === 'no_reference') {
         if (report.overall !== 'inconclusive' || !isNonBlankString(report.pack) || !isNonBlankString(report.registry)
             || staticReport.classes.length !== 0) {
             invalidReport(renderer);
         }
-        return;
+        if (report.empirical !== undefined) assertEmpirical(report.empirical, renderer); return;
     }
     if (!isNonBlankString(report.pack) || !isNonBlankString(report.registry) || staticReport.classes.length === 0) {
         invalidReport(renderer);
@@ -141,6 +185,7 @@ function assertCoverageEnvelope(report: unknown, renderer: string): asserts repo
     const expectedOverall = hasMissingClass ? 'gaps' : hasUnverifiableClass ? 'inconclusive'
         : applicableClasses.some((entry) => entry.status === 'covered') ? 'covered' : 'inconclusive';
     if (report.overall !== expectedOverall) invalidReport(renderer);
+    if (report.empirical !== undefined) assertEmpirical(report.empirical, renderer);
 }
 
 function safeHumanText(value: string): string {
@@ -155,11 +200,11 @@ export function renderCoverageJson(report: unknown): string {
 export function renderCoverageHuman(report: unknown): string {
     assertCoverageEnvelope(report, 'renderCoverageHuman');
     if (report.static.reason === 'not_configured') {
-        return ['Sensor coverage', 'Overall: inconclusive', 'Reason: sensors are not configured', 'Run: awm sensors init', ''].join('\n');
+        return ['Sensor coverage', 'Overall: inconclusive', 'Reason: sensors are not configured', 'Run: awm sensors init', ...(report.empirical ? [empiricalHuman(report)] : []), ''].join('\n');
     }
     if (report.static.reason === 'no_reference') {
         return ['Sensor coverage', `Pack: ${safeHumanText(report.pack ?? 'unknown')}`, `Registry: ${safeHumanText(report.registry ?? 'unknown')}`,
-            'Overall: inconclusive', `No coverage reference for pack '${safeHumanText(report.pack ?? 'unknown')}'`, ''].join('\n');
+            'Overall: inconclusive', `No coverage reference for pack '${safeHumanText(report.pack ?? 'unknown')}'`, ...(report.empirical ? [empiricalHuman(report)] : []), ''].join('\n');
     }
 
     const lines = ['Sensor coverage', `Pack: ${safeHumanText(report.pack ?? 'unknown')}`, `Registry: ${safeHumanText(report.registry ?? 'unknown')}`,
@@ -177,6 +222,21 @@ export function renderCoverageHuman(report: unknown): string {
         lines.push(`  remedy: ${safeHumanText(item.remedy.summary)}`, `  command: ${safeHumanText(item.remedy.command)}`);
     }
     const count = (status: 'covered' | 'missing' | 'unverifiable' | 'not-applicable') => report.static.classes.filter((item) => item.status === status).length;
-    lines.push('', `Summary: ${count('covered')} covered, ${count('missing')} missing, ${count('unverifiable')} unverifiable, ${count('not-applicable')} not applicable`, '');
+    lines.push('', `Summary: ${count('covered')} covered, ${count('missing')} missing, ${count('unverifiable')} unverifiable, ${count('not-applicable')} not applicable`);
+    if (report.empirical) lines.push(empiricalHuman(report));
+    lines.push('');
+    return lines.join('\n');
+}
+
+function empiricalHuman(report: CoverageEnvelope): string {
+    const empirical = report.empirical;
+    if (!empirical) return '';
+    const lines = [`Empirical coverage: ${empirical.status}`];
+    for (const item of empirical.classes) {
+        lines.push(`${item.outcome} ${safeHumanText(item.defectClass)} — ${item.occurrences} occurrence${item.occurrences === 1 ? '' : 's'} (${item.severity})`);
+        if (item.evidenceRefs.length > 0) lines.push(`  evidence: ${item.evidenceRefs.map(safeHumanText).join(', ')}`);
+    }
+    if (empirical.unclassified.occurrences > 0) lines.push(`unclassified findings: ${empirical.unclassified.occurrences}`);
+    if (empirical.omittedEvidenceRefs > 0) lines.push(`omitted evidence refs: ${empirical.omittedEvidenceRefs}`);
     return lines.join('\n');
 }

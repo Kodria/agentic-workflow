@@ -19,6 +19,15 @@ export function exitCodeFor(output: RunOutputLike): number {
     return output.overall === 'fail' ? 1 : 0;
 }
 
+/** Commander coercion for coverage recurrence emphasis. It deliberately runs
+ * before the action, so an invalid value cannot trigger ledger I/O. */
+export function parsePositiveSafeInteger(value: string): number {
+    if (typeof value !== 'string' || !/^[1-9][0-9]*$/.test(value)) throw new Error('--min must be a positive safe integer');
+    const parsed = Number(value);
+    if (!Number.isSafeInteger(parsed)) throw new Error('--min must be a positive safe integer');
+    return parsed;
+}
+
 export function registerSensorsCommand(program: Command): void {
     const sensors = program.command('sensors').description('manage computational sensors for the current project');
 
@@ -26,9 +35,10 @@ export function registerSensorsCommand(program: Command): void {
         .command('coverage')
         .description('report static gaps between configured sensors and the pack reference')
         .option('--json', 'emit the versioned machine-readable envelope')
-        .action(async (opts: { json?: boolean }) => {
+        .option('--min <count>', 'recurrence emphasis threshold', parsePositiveSafeInteger, 2)
+        .action(async (opts: { json?: boolean; min: number }) => {
             try {
-                const report = await runCoverage(process.cwd());
+                const report = await runCoverage(process.cwd(), {}, { min: opts.min });
                 process.stdout.write(opts.json ? renderCoverageJson(report) : renderCoverageHuman(report));
             } catch (error) {
                 log.error(error instanceof Error ? error.message : String(error));

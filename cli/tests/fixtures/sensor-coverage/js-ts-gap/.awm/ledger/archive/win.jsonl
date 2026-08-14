@@ -1,0 +1,1 @@
+{"ts":"2026-08-14T00:00:00Z","branch":"windows","phase":"qa","source_skill":"fixture","polarity":"finding","class":"seguridad","signature":"private-windows-signature","severity":"blocker","desc":"windows secret","ref":"C:\\outside\\secret.ts:9","defectClass":"lint-errors"}

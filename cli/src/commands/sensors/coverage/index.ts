@@ -4,6 +4,9 @@ import { resolveCoverageInputs, type CoverageInputs } from './resolve';
 import { resolveLiveCompatibility } from '../compatibility/live';
 import { legacyCompatibility } from '../compatibility/manifest';
 import type { CompatibilityEvidence } from '../compatibility/types';
+import { scanProjectLedgers, type LedgerScanResult } from '../../../core/ledger/scan';
+import { evaluateEmpiricalCoverage, type EmpiricalCoverage, type EmpiricalStaticState } from './empirical';
+import path from 'path';
 
 export type CoverageEnvelope = {
     schemaVersion: 2;
@@ -15,27 +18,43 @@ export type CoverageEnvelope = {
         reason: null | 'not_configured' | 'no_reference';
         classes: CoverageClassResult[];
     };
-    empirical?: unknown;
+    empirical?: EmpiricalCoverage;
 };
 
 type Dependencies = {
     resolve: (cwd: string) => CoverageInputs | Promise<CoverageInputs>;
     observe: typeof observeDetector;
     resolveLive: typeof resolveLiveCompatibility;
+    scan: (projectRoot: string) => LedgerScanResult;
 };
 
-const defaults: Dependencies = { resolve: resolveCoverageInputs, observe: observeDetector, resolveLive: resolveLiveCompatibility };
+const defaults: Dependencies = { resolve: resolveCoverageInputs, observe: observeDetector, resolveLive: resolveLiveCompatibility, scan: scanProjectLedgers };
+
+export type CoverageOptions = { min?: number };
+
+function normalizedMin(value: unknown): number {
+    if (value === undefined) return 2;
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) throw new Error('runCoverage: min must be a positive safe integer');
+    return value;
+}
+
+function empirical(deps: Dependencies, projectRoot: string, states: Readonly<Record<string, EmpiricalStaticState>>, min: number): EmpiricalCoverage {
+    return evaluateEmpiricalCoverage(deps.scan(projectRoot), states, min);
+}
 
 /** Build static coverage data only: no command execution and no writes. */
-export async function runCoverage(cwd: unknown, dependencies: Partial<Dependencies> = {}): Promise<CoverageEnvelope> {
+export async function runCoverage(cwd: unknown, dependencies: Partial<Dependencies> = {}, options: CoverageOptions = {}): Promise<CoverageEnvelope> {
     if (typeof cwd !== 'string' || cwd.trim().length === 0) throw new Error('runCoverage: cwd must be a non-empty string');
+    const min = normalizedMin(options.min);
     const deps = { ...defaults, ...dependencies };
     const input = await deps.resolve(cwd);
     if (input.kind === 'not_configured') {
-        return { schemaVersion: 2, pack: null, registry: null, overall: 'inconclusive', static: { status: 'inconclusive', reason: 'not_configured', classes: [] } };
+        return { schemaVersion: 2, pack: null, registry: null, overall: 'inconclusive', static: { status: 'inconclusive', reason: 'not_configured', classes: [] },
+            empirical: empirical(deps, path.resolve(cwd), {}, min) };
     }
     if (input.kind === 'no_reference') {
-        return { schemaVersion: 2, pack: input.pack, registry: input.registry, overall: 'inconclusive', static: { status: 'inconclusive', reason: 'no_reference', classes: [] } };
+        return { schemaVersion: 2, pack: input.pack, registry: input.registry, overall: 'inconclusive', static: { status: 'inconclusive', reason: 'no_reference', classes: [] },
+            empirical: empirical(deps, input.projectRoot, {}, min) };
     }
 
     let live: Record<string, CompatibilityEvidence>;
@@ -61,8 +80,10 @@ export async function runCoverage(cwd: unknown, dependencies: Partial<Dependenci
         });
     }
     const evaluated = evaluateCoverage(input.contract, observations);
+    const states = Object.fromEntries(evaluated.classes.map((entry) => [entry.id, entry.status]));
     return {
         schemaVersion: 2, pack: input.pack, registry: input.registry, overall: evaluated.overall,
         static: { status: evaluated.overall, reason: null, classes: evaluated.classes },
+        empirical: empirical(deps, input.projectRoot, states, min),
     };
 }
