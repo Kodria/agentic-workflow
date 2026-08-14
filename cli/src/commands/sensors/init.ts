@@ -1,6 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import { SensorManifest } from './types';
+import { parseSensorPack } from './compatibility/contract';
+import { discoverProjectEvidence } from './compatibility/discovery';
+import { resolveProjectCompatibility } from './compatibility/resolve';
+import { materializeResolvedSensors } from './compatibility/materialize';
+import type { SensorPackV2 } from './compatibility/types';
 
 export type InitOptions = {
     configure?: boolean;
@@ -8,6 +13,15 @@ export type InitOptions = {
     registryRoot?: string;
     pack?: string;
 };
+
+function readV2Pack(pack: string, registryRoot: string): SensorPackV2 | null {
+    const packPath = path.join(registryRoot, 'sensor-packs', pack, 'pack.json');
+    if (!fs.existsSync(packPath)) return null;
+    let raw: unknown;
+    try { raw = JSON.parse(fs.readFileSync(packPath, 'utf8')); } catch { throw new Error(`cannot parse sensor pack ${packPath}`); }
+    const parsed = parseSensorPack(raw, packPath);
+    return parsed.kind === 'v2' ? parsed.pack : null;
+}
 
 // Widened from a hardcoded union to `string` on purpose: `--pack <name>` (below) must
 // accept any pack name present in the registry — including packs this CLI's source
@@ -204,6 +218,9 @@ export function initSensors(opts: InitOptions = {}): {
      *  manifest was built from the fallback pack (or left empty) instead — callers
      *  MUST surface this: an unannounced empty gate is the failure being prevented. */
     unavailablePack?: string;
+    compatibility?: Record<string, unknown>;
+    preserved?: string[];
+    orphaned?: string[];
 } {
     const cwd = opts.cwd ?? process.cwd();
     const configure = opts.configure ?? true; // configure (copy pack config files) by default
@@ -229,6 +246,34 @@ export function initSensors(opts: InitOptions = {}): {
     // `detection` keeps saying what the tree IS; `pack` is what the registry can serve
     // for it. They diverge only when the registry lacks the detected pack.
     const { pack: resolvedPack, unavailablePack } = resolvePack(detection.pack, opts.registryRoot);
+
+    // v2 packs own the executable contract. Legacy packs deliberately retain the
+    // old string-command path below until a registry author publishes a v2 contract.
+    if (opts.registryRoot) {
+        const v2 = readV2Pack(resolvedPack, opts.registryRoot);
+        if (v2) {
+            const evidence = discoverProjectEvidence(cwd, v2);
+            const compatibility = resolveProjectCompatibility(v2, evidence).sensors;
+            const sensors: Record<string, any> = {};
+            for (const [name, sensor] of Object.entries(v2.sensors)) {
+                const resolved = compatibility[name];
+                const variant = resolved.variantId === null ? null : sensor.variants.find(candidate => candidate.id === resolved.variantId) ?? null;
+                // Unresolved states do not receive an arbitrary command. They remain
+                // represented in the manifest so status/coverage can explain them,
+                // but run cannot accidentally dispatch a mismatched executable.
+                if (variant) sensors[name] = {
+                    enabled: true, variantId: variant.id, command: variant.command,
+                    assets: variant.assets, initializedCompatibility: resolved,
+                };
+            }
+            const materialized = materializeResolvedSensors({
+                projectRoot: cwd, packRoot: path.join(opts.registryRoot, 'sensor-packs', resolvedPack),
+                pack: resolvedPack, sensors, configure,
+            });
+            return { detection, ...materialized,
+                compatibility, ...(unavailablePack ? { unavailablePack } : {}) };
+        }
+    }
 
     const manifest = buildManifest(resolvedPack, existing, opts.registryRoot, cwd);
     fs.mkdirSync(path.join(cwd, '.awm'), { recursive: true });

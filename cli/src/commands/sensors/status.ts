@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { resolveOnPath } from '../../core/paths';
 import { SensorCheck, SensorStatusResult, SensorManifest } from './types';
+import { parseSensorManifest } from './compatibility/manifest';
 
 /** First non-flag token after `npx` — the tool the command actually runs. */
 function npxTool(parts: string[]): string | undefined {
@@ -60,8 +61,33 @@ export function computeSensorStatus(cwd: string = process.cwd()): SensorStatusRe
 
     let manifest: SensorManifest;
     try {
-        manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+        const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+        const parsed = parseSensorManifest(raw, manifestPath);
+        if (parsed.kind === 'v2') {
+            const checks: Record<string, SensorCheck> = {};
+            for (const [name, sensor] of Object.entries(parsed.pack.sensors)) {
+                const state = sensor.initializedCompatibility.state;
+                checks[name] = sensor.enabled === false
+                    ? { ok: true, detail: 'disabled' }
+                    : state === 'certified'
+                        ? { ok: true, detail: `certified (${sensor.variantId})` }
+                        : state === 'not-applicable'
+                            ? { ok: true, detail: 'not applicable' }
+                            : { ok: false, detail: `${state}: ${sensor.initializedCompatibility.reason}` };
+            }
+            return { overall: Object.keys(checks).length > 0 && Object.values(checks).every(check => check.ok) ? 'HEALTHY' : 'DEGRADED', pack: parsed.pack.pack, checks };
+        }
+        manifest = parsed.pack;
     } catch {
+        // Preserve the historic diagnostic path for a hand-edited legacy manifest:
+        // malformed v2 is fail-closed, while a legacy `sensors:null` is surfaced as
+        // degraded rather than crashing the status command.
+        try {
+            const raw: unknown = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+            if (raw && typeof raw === 'object' && !Array.isArray(raw) && !('schemaVersion' in raw) && typeof (raw as any).pack === 'string') {
+                return { overall: 'DEGRADED', pack: (raw as any).pack, checks: {} };
+            }
+        } catch { /* malformed JSON is not configured */ }
         return { overall: 'NOT_CONFIGURED', pack: null, checks: {} };
     }
 

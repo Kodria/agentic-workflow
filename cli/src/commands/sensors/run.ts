@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { runCommand, ExecResult } from './exec';
+import { runCommand, runStructuredCommand, ExecResult } from './exec';
 import { SensorManifest, SensorResult, RunOutput, SensorError } from './types';
 import { parseTscOutput } from './formatters/tsc';
 import { parseEslintOutput } from './formatters/eslint';
@@ -17,6 +17,12 @@ import { changedFiles, applyChangedCmd, filterByExtension, hasUnsafeWin32Chars }
 // verbo de lectura: no debe tener a mano ninguna funcion capaz de mutar el proyecto.
 import { detectStack } from './init';
 import { isWindowsNative } from '../../core/paths';
+import { parseSensorManifest } from './compatibility/manifest';
+import { resolvePackSource } from './compatibility/pack-source';
+import { parseSensorPack } from './compatibility/contract';
+import { discoverProjectEvidence } from './compatibility/discovery';
+import { resolveProjectCompatibility } from './compatibility/resolve';
+import { runCompatibilityProbe } from './compatibility/probe';
 
 const MANIFEST_FILE = '.awm/sensors.json';
 const DEFAULT_FAST_TIMEOUT = 10_000;
@@ -70,6 +76,35 @@ function readManifest(cwd: string): SensorManifest | null {
     try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { return null; }
 }
 
+async function resolveLiveV2(cwd: string, manifest: ReturnType<typeof parseSensorManifest>): Promise<Record<string, import('./compatibility/types').CompatibilityEvidence> | null> {
+    if (manifest.kind !== 'v2') return null;
+    try {
+        const source = resolvePackSource(manifest.pack.pack);
+        const parsed = parseSensorPack(JSON.parse(source.content), source.path);
+        if (parsed.kind !== 'v2') return null;
+        const evidence = discoverProjectEvidence(cwd, parsed.pack);
+        const initial = resolveProjectCompatibility(parsed.pack, evidence).sensors;
+        const resolved: Record<string, import('./compatibility/types').CompatibilityEvidence> = {};
+        for (const [name, sensor] of Object.entries(parsed.pack.sensors)) {
+            const base = initial[name];
+            const variant = base.variantId === null ? null : sensor.variants.find(item => item.id === base.variantId);
+            const probe = variant ? await runCompatibilityProbe(variant.probe, { cwd, toolExecutable: variant.command.executable, configFiles: evidence.configFiles, scripts: evidence.scripts }) : null;
+            resolved[name] = resolveProjectCompatibility({ ...parsed.pack, sensors: { [name]: sensor } }, { ...evidence, probe: probe ?? undefined }).sensors[name];
+        }
+        return resolved;
+    } catch { return null; }
+}
+
+async function runV2Sensor(name: string, command: import('./compatibility/types').StructuredCommand, timeout: number, cwd: string, formatter?: string): Promise<SensorResult> {
+    const res = await runStructuredCommand(command, { timeout, cwd, maxBuffer: MAX_BUFFER });
+    const format = getFormatter(name, formatter);
+    if (res.spawnError) return { name, status: 'fail', errors: [{ message: `sensor could not be started: ${res.spawnError.message}` }] };
+    if (res.timedOut || res.overflowed) return { name, status: 'inconclusive', errors: [], skipReason: res.timedOut ? `timeout after ${timeout}ms` : `output exceeded ${MAX_BUFFER} bytes` };
+    const errors = format(res.stdout + res.stderr);
+    if (res.code === 0) return { name, status: errors.length ? 'fail' : 'pass', errors };
+    return errors.length ? { name, status: 'fail', errors } : { name, status: 'inconclusive', errors: [], skipReason: `exit ${res.code}` };
+}
+
 /**
  * Detect — and only detect — that the manifest's pack no longer describes the tree:
  * it sits on the `generic` fallback while real stack indicators (package.json,
@@ -110,6 +145,9 @@ export function findManifestDir(startCwd: string): string | null {
     let dir = path.resolve(startCwd);
     while (true) {
         if (fs.existsSync(path.join(dir, MANIFEST_FILE))) return dir;
+        // Temp directories are test/scratch boundaries, never project ancestors.
+        // This prevents an unrelated /tmp/.awm from being adopted by a fresh project.
+        if (dir === path.resolve(os.tmpdir())) return null;
         const parent = path.dirname(dir);
         if (parent === dir) return null; // reached filesystem root
         dir = parent;
@@ -286,6 +324,24 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     if (!manifestDir) return { sensors: [], overall: 'not_certified' };
     const manifest = readManifest(manifestDir);
     if (!manifest) return { sensors: [], overall: 'not_certified' };
+    let parsedManifest: ReturnType<typeof parseSensorManifest>;
+    try { parsedManifest = parseSensorManifest(JSON.parse(fs.readFileSync(path.join(manifestDir, MANIFEST_FILE), 'utf8')), path.join(manifestDir, MANIFEST_FILE)); }
+    catch { return { sensors: [], overall: 'not_certified' }; }
+    if (parsedManifest.kind === 'v2') {
+        const live = await resolveLiveV2(manifestDir, parsedManifest);
+        const tasks: Array<() => Promise<SensorResult>> = [];
+        for (const [name, sensor] of Object.entries(parsedManifest.pack.sensors)) {
+            if (!shouldRun(false, opts)) continue;
+            const state = live?.[name];
+            if (!state || state.state !== 'certified') {
+                tasks.push(() => Promise.resolve({ name, status: 'inconclusive', errors: [], skipReason: state ? `${state.state}: ${state.reason}` : 'compatibility could not be revalidated' }));
+                continue;
+            }
+            tasks.push(() => runV2Sensor(name, sensor.command, DEFAULT_SLOW_TIMEOUT, manifestDir));
+        }
+        const sensors = await pooled(tasks, Math.min(MAX_CONCURRENCY, Math.max(1, tasks.length)));
+        return { sensors, overall: sensors.some(sensor => sensor.status === 'fail') ? 'fail' : sensors.some(sensor => sensor.status === 'inconclusive') ? 'not_certified' : sensors.length ? 'pass' : 'skipped' };
+    }
     const drift = detectPackDrift(manifestDir, manifest);
     const activeManifest = manifest; // el manifest COMITEADO es lo que se corre; `run` no lo reescribe
     const cwd = manifestDir; // ejecutar sensores y baseline desde donde vive el manifest
