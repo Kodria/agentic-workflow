@@ -20,7 +20,11 @@ function result(state: CompatibilityEvidence['state'], reason: string, variant: 
     return { state, reason, variantId: variant?.id ?? null, toolVersion, runtimeVersion, certifiedRange: variant?.certifiedRange ?? null, evidence: refs.slice(0, 32) };
 }
 function applies(sensor: SensorPackSensor, evidence: ResolveEvidence): boolean {
-    if (sensor.applicability.kind === 'explicit-or-supported-language') return evidence.applicable === true;
+    if (sensor.applicability.kind === 'explicit-or-supported-language') {
+        if (evidence.applicable === true) return true;
+        const supportedMarkers = new Set(['package.json', 'pyproject.toml', 'requirements.txt', 'setup.py', 'setup.cfg', 'Pipfile']);
+        return (evidence.paths ?? []).some(path => supportedMarkers.has(path));
+    }
     if (evidence.applicable === false) return false;
     const paths = new Set(evidence.paths ?? []);
     const rule = sensor.applicability;
@@ -74,10 +78,7 @@ export function resolveProjectCompatibility(pack: SensorPack, evidence: ProjectE
         return { sensors };
     }
     for (const [name, sensor] of Object.entries(pack.sensors)) {
-        // Generic is selected explicitly by the caller; never infer that broad
-        // capability merely from arbitrary project files.
-        const resolvedEvidence = pack.name === 'generic' ? { ...evidence, applicable: true } : evidence;
-        sensors[name] = resolveSensorCompatibility(sensor, resolvedEvidence, { pack: pack.name, sensor: name });
+        sensors[name] = resolveSensorCompatibility(sensor, evidence, { pack: pack.name, sensor: name });
     }
     return { sensors };
 }
