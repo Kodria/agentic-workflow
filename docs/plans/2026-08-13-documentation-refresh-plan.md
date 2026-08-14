@@ -1,5 +1,6 @@
 # AWM Documentation Refresh Implementation Plan
 <!-- awm-qa-complete: 2026-08-14 -->
+<!-- awm-retro-complete: 2026-08-14 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
