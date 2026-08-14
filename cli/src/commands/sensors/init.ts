@@ -279,7 +279,8 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
     if (opts.registryRoot) {
         const resolvedV2 = readV2Pack(resolvedPack, opts.registryRoot);
         if (resolvedV2) {
-            const compatibility = (await resolveParsedPackCompatibility(cwd, resolvedV2.pack)).sensors;
+            const packSelection = opts.pack ? 'explicit' as const : undefined;
+            const compatibility = (await resolveParsedPackCompatibility(cwd, resolvedV2.pack, { explicitPackSelection: packSelection === 'explicit' })).sensors;
             const sensors: Record<string, any> = {};
             for (const [name, sensor] of Object.entries(resolvedV2.pack.sensors)) {
                 const resolved = compatibility[name];
@@ -308,7 +309,7 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
             }
             const materialized = materializeResolvedSensors({
                 projectRoot: cwd, packRoot: resolvedV2.packRoot,
-                pack: resolvedPack, registryRoot: opts.registryRoot, sensors, configure,
+                pack: resolvedPack, ...(packSelection ? { packSelection } : {}), registryRoot: opts.registryRoot, sensors, configure,
             });
             return { detection, ...materialized,
                 compatibility, ...(unavailablePack ? { unavailablePack } : {}) };

@@ -9,6 +9,8 @@ type UnknownRecord = Record<string, unknown>;
 export type SensorManifestV2 = {
     schemaVersion: 2;
     pack: string;
+    /** Durable operator intent. Absent means detected/fallback, never explicit. */
+    packSelection?: 'explicit';
     registryRoot?: string;
     sensors: Record<string, { enabled: boolean; fast?: boolean; variantId: string; command: StructuredCommand; assets?: string[]; policyRef?: 'shared/semgrep-policy.json'; initializedCompatibility: CompatibilityEvidence }>;
     concurrency?: number;
@@ -169,13 +171,17 @@ function provenanceRoot(value: unknown, source: unknown): string {
 }
 
 function parseV2Manifest(value: UnknownRecord, source: unknown): SensorManifestV2 {
-    fields(value, ['schemaVersion', 'pack', 'registryRoot', 'sensors', 'concurrency'], source, 'root');
+    fields(value, ['schemaVersion', 'pack', 'packSelection', 'registryRoot', 'sensors', 'concurrency'], source, 'root');
     if (value.schemaVersion !== 2) invalid(source, `unsupported manifest schemaVersion ${String(value.schemaVersion)}; supported: legacy, 2; upgrade or migrate the manifest`);
     const pack = id(value.pack, source, 'pack');
     const sensorsInput = record(value.sensors, source, 'sensors');
     const sensors: SensorManifestV2['sensors'] = {};
     for (const name of Object.keys(sensorsInput)) sensors[id(name, source, 'sensor id')] = parseV2Sensor(sensorsInput[name], source, `sensors.${name}`);
     const manifest: SensorManifestV2 = { schemaVersion: 2, pack, sensors };
+    if ('packSelection' in value) {
+        if (value.packSelection !== 'explicit') invalid(source, 'packSelection must be "explicit" when present');
+        manifest.packSelection = 'explicit';
+    }
     if ('registryRoot' in value) manifest.registryRoot = provenanceRoot(value.registryRoot, source);
     if ('concurrency' in value) {
         if (typeof value.concurrency !== 'number' || !Number.isSafeInteger(value.concurrency) || value.concurrency <= 0) invalid(source, 'concurrency must be a positive safe integer');

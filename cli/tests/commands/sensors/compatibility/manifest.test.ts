@@ -34,6 +34,16 @@ describe('sensor manifest contract', () => {
         expect(JSON.parse(serializeManifestV2(manifest))).toEqual(manifest);
     });
 
+    it('persists only an explicit v2 pack selection as applicability provenance', () => {
+        const manifest = {
+            schemaVersion: 2, pack: 'generic', packSelection: 'explicit',
+            sensors: {},
+        };
+        expect(parseSensorManifest(manifest, 'sensors.json')).toMatchObject({ kind: 'v2', pack: { packSelection: 'explicit' } });
+        expect(JSON.parse(serializeManifestV2(manifest))).toEqual(manifest);
+        expect(() => parseSensorManifest({ ...manifest, packSelection: 'detected' }, 'sensors.json')).toThrow('packSelection');
+    });
+
     it('accepts optional contained assets and rejects traversal', () => {
         const sensor = { enabled: true, variantId: 'eslint-9', assets: ['eslint.config.awm.mjs'], command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, initializedCompatibility: { state: 'certified', reason: 'ok', variantId: 'eslint-9', toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [] } };
         expect(parseSensorManifest({ schemaVersion: 2, pack: 'js-ts', sensors: { lint: sensor } }, 'sensors.json')).toMatchObject({ kind: 'v2' });

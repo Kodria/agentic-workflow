@@ -8,6 +8,7 @@ export type MaterializeInput = {
     projectRoot: string;
     packRoot: string;
     pack: string;
+    packSelection?: 'explicit';
     registryRoot?: string;
     sensors: Record<string, V2Sensor>;
     configure?: boolean;
@@ -76,7 +77,7 @@ export function materializeResolvedSensors(input: MaterializeInput): Materialize
         if (parsed.kind !== 'v2') throw new Error('materialized sensor must be v2');
         sensors[name] = parsed.pack.sensors[name];
     }
-    const manifest: SensorManifestV2 = { schemaVersion: 2, pack, sensors, ...(input.registryRoot ? { registryRoot: input.registryRoot } : {}) };
+    const manifest: SensorManifestV2 = { schemaVersion: 2, pack, sensors, ...(input.packSelection === 'explicit' ? { packSelection: 'explicit' } : {}), ...(input.registryRoot ? { registryRoot: input.registryRoot } : {}) };
     // A policy reference is deliberately not a materialized asset. Resolve it here
     // from the registry-owned sibling only, so a manifest cannot turn arbitrary
     // registry content into a project write through a cosmetic policy field.

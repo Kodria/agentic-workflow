@@ -18,7 +18,8 @@ describe('resolveSensorCompatibility', () => {
         expect(resolved).toMatchObject({ state: 'not-applicable', reason: 'applicability-not-met' });
     });
     it('treats explicit generic pack selection as positive capability in project resolution', () => {
-        const resolved = resolveProjectCompatibility({ schemaVersion: 2, name: 'generic', sensors: { security: { applicability: { kind: 'explicit-or-supported-language' }, variants: [variant('semgrep')] } } } as any, evidence());
+        const resolved = resolveProjectCompatibility({ schemaVersion: 2, name: 'generic', sensors: { security: { applicability: { kind: 'explicit-or-supported-language' }, variants: [variant('semgrep')] } } } as any,
+            evidence({ applicable: undefined, paths: [], explicitPackSelection: true }));
         expect(resolved.sensors.security.state).not.toBe('not-applicable');
     });
     test.each([

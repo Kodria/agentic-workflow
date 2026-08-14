@@ -3,7 +3,7 @@ import { legacyCompatibility } from './manifest';
 import type { CompatibilityEvidence, SensorPack, SensorPackSensor, SensorVariant } from './types';
 import type { ProjectEvidence } from './discovery';
 
-export type ResolveEvidence = { paths?: string[]; applicable?: boolean; packageManagerConflict?: boolean; toolVersion?: string | null; runtimeVersion?: string | null; toolVersions?: Record<string, string | null>; runtimeVersions?: Record<string, string | null>; os?: NodeJS.Platform; probe?: { status?: string } };
+export type ResolveEvidence = { paths?: string[]; applicable?: boolean; explicitPackSelection?: boolean; packageManagerConflict?: boolean; toolVersion?: string | null; runtimeVersion?: string | null; toolVersions?: Record<string, string | null>; runtimeVersions?: Record<string, string | null>; os?: NodeJS.Platform; probe?: { status?: string } };
 export type ResolveContext = { pack: string; sensor: string };
 
 function result(state: CompatibilityEvidence['state'], reason: string, variant: SensorVariant | null, evidence: ResolveEvidence): CompatibilityEvidence {
@@ -21,7 +21,7 @@ function result(state: CompatibilityEvidence['state'], reason: string, variant: 
 }
 function applies(sensor: SensorPackSensor, evidence: ResolveEvidence): boolean {
     if (sensor.applicability.kind === 'explicit-or-supported-language') {
-        if (evidence.applicable === true) return true;
+        if (evidence.applicable === true || evidence.explicitPackSelection === true) return true;
         const supportedMarkers = new Set(['package.json', 'pyproject.toml', 'requirements.txt', 'setup.py', 'setup.cfg', 'Pipfile']);
         return (evidence.paths ?? []).some(path => supportedMarkers.has(path));
     }
