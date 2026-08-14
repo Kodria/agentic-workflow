@@ -40,6 +40,12 @@ describe('sensor manifest contract', () => {
         expect(() => parseSensorManifest({ schemaVersion: 2, pack: 'js-ts', sensors: { lint: { ...sensor, assets: ['C:/secret'] } } }, 'sensors.json')).toThrow('asset');
     });
 
+    it('rejects incoherent compatibility evidence and hostile source labels', () => {
+        const sensor = { enabled: true, variantId: 'eslint-9', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, initializedCompatibility: { state: 'certified', reason: 'ok', variantId: 'other', toolVersion: 'bad', runtimeVersion: '24.0.0', certifiedRange: 'bad', evidence: [] } };
+        expect(() => parseSensorManifest({ schemaVersion: 2, pack: 'js-ts', sensors: { lint: sensor } }, { path: 'bad' })).toThrow('<unknown source>');
+        expect(() => parseSensorManifest({ schemaVersion: 2, pack: 'js-ts', sensors: { lint: sensor } }, 'source\nleak')).toThrow('<unknown source>');
+    });
+
     test.each([
         [null, 'object'],
         [{}, 'pack'],

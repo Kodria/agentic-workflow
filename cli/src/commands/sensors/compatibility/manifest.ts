@@ -1,6 +1,7 @@
 import type { SensorConfig, SensorManifest } from '../types';
 import type { CompatibilityEvidence, StructuredCommand } from './types';
 import { parseStructuredCommand } from './contract';
+import semver from 'semver';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -19,7 +20,7 @@ function isRecord(value: unknown): value is UnknownRecord {
 }
 
 function sourceSuffix(source: unknown): string {
-    return typeof source === 'string' && source.length > 0 ? ` in ${source}` : '';
+    return typeof source === 'string' && source.length > 0 && !/[\0\r\n]/.test(source) ? ` in ${source}` : ' in <unknown source>';
 }
 
 function invalid(source: unknown, message: string): never {
@@ -74,7 +75,11 @@ function parseCompatibilityEvidence(input: unknown, source: unknown, location: s
     fields(value, ['state', 'reason', 'variantId', 'toolVersion', 'runtimeVersion', 'certifiedRange', 'evidence'], source, location);
     if (typeof value.state !== 'string' || !STATES.has(value.state as CompatibilityEvidence['state'])) invalid(source, `${location}.state must be a supported state`);
     if (!Array.isArray(value.evidence)) invalid(source, `${location}.evidence must be an array`);
-    return { state: value.state as CompatibilityEvidence['state'], reason: text(value.reason, source, `${location}.reason`), variantId: nullableText(value.variantId, source, `${location}.variantId`), toolVersion: nullableText(value.toolVersion, source, `${location}.toolVersion`), runtimeVersion: nullableText(value.runtimeVersion, source, `${location}.runtimeVersion`), certifiedRange: nullableText(value.certifiedRange, source, `${location}.certifiedRange`), evidence: value.evidence.map((entry, index) => { const item = record(entry, source, `${location}.evidence[${index}]`); fields(item, ['kind', 'status', 'path'], source, `${location}.evidence[${index}]`); return { kind: text(item.kind, source, `${location}.evidence[${index}].kind`), status: text(item.status, source, `${location}.evidence[${index}].status`), ...('path' in item ? { path: asset(item.path, source, `${location}.evidence[${index}].path`) } : {}) }; }) };
+    const evidence = { state: value.state as CompatibilityEvidence['state'], reason: text(value.reason, source, `${location}.reason`), variantId: nullableText(value.variantId, source, `${location}.variantId`), toolVersion: nullableText(value.toolVersion, source, `${location}.toolVersion`), runtimeVersion: nullableText(value.runtimeVersion, source, `${location}.runtimeVersion`), certifiedRange: nullableText(value.certifiedRange, source, `${location}.certifiedRange`), evidence: value.evidence.map((entry, index) => { const item = record(entry, source, `${location}.evidence[${index}]`); fields(item, ['kind', 'status', 'path'], source, `${location}.evidence[${index}]`); return { kind: text(item.kind, source, `${location}.evidence[${index}].kind`), status: text(item.status, source, `${location}.evidence[${index}].status`), ...('path' in item ? { path: asset(item.path, source, `${location}.evidence[${index}].path`) } : {}) }; }) };
+    if (evidence.toolVersion !== null && semver.valid(evidence.toolVersion) === null) invalid(source, `${location}.toolVersion must be a valid semver version`);
+    if (evidence.runtimeVersion !== null && semver.valid(evidence.runtimeVersion) === null) invalid(source, `${location}.runtimeVersion must be a valid semver version`);
+    if (evidence.certifiedRange !== null && semver.validRange(evidence.certifiedRange) === null) invalid(source, `${location}.certifiedRange must be a valid semver range`);
+    return evidence;
 }
 
 export function legacyCompatibility(reason = 'legacy manifest without schemaVersion'): CompatibilityEvidence {
@@ -139,6 +144,8 @@ function parseV2Sensor(input: unknown, source: unknown, location: string): Senso
         command: parseStructuredCommand(value.command, source),
         initializedCompatibility: parseCompatibilityEvidence(value.initializedCompatibility, source, `${location}.initializedCompatibility`),
     };
+    if (sensor.initializedCompatibility.variantId !== null && sensor.initializedCompatibility.variantId !== sensor.variantId) invalid(source, `${location}.initializedCompatibility.variantId must match variantId`);
+    if (sensor.initializedCompatibility.state === 'certified' && (sensor.initializedCompatibility.toolVersion === null || sensor.initializedCompatibility.runtimeVersion === null || sensor.initializedCompatibility.certifiedRange === null)) invalid(source, `${location}.initializedCompatibility certified evidence is incomplete`);
     if ('assets' in value) sensor.assets = stringArray(value.assets, source, `${location}.assets`, false).map((entry, index) => asset(entry, source, `${location}.assets[${index}]`));
     return sensor;
 }

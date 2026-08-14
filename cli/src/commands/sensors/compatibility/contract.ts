@@ -130,16 +130,16 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
     };
 }
 
-export function assertNoEqualPriorityOverlap(variants: readonly SensorVariant[]): void {
+export function assertNoEqualPriorityOverlap(variants: unknown): void {
     if (!Array.isArray(variants) || variants.length === 0) throw new Error('variants must be a nonempty array');
     for (let left = 0; left < variants.length; left++) {
-        const first = variants[left];
-        if (!first || typeof first !== 'object' || typeof first.id !== 'string' || !Number.isSafeInteger(first.priority) || typeof first.certifiedRange !== 'string' || semver.validRange(first.certifiedRange) === null) {
+        const first = variants[left] as SensorVariant;
+        if (!first || typeof first !== 'object' || !/^[a-z][a-z0-9-]*$/.test(first.id) || !Number.isSafeInteger(first.priority) || typeof first.certifiedRange !== 'string' || semver.validRange(first.certifiedRange) === null || !first.command || !Array.isArray(first.command.args)) {
             throw new Error('variants must contain complete variant records');
         }
         for (let right = left + 1; right < variants.length; right++) {
-            const second = variants[right];
-            if (!second || typeof second !== 'object' || typeof second.id !== 'string' || !Number.isSafeInteger(second.priority) || typeof second.certifiedRange !== 'string' || semver.validRange(second.certifiedRange) === null) throw new Error('variants must contain complete variant records');
+            const second = variants[right] as SensorVariant;
+            if (!second || typeof second !== 'object' || !/^[a-z][a-z0-9-]*$/.test(second.id) || !Number.isSafeInteger(second.priority) || typeof second.certifiedRange !== 'string' || semver.validRange(second.certifiedRange) === null || !second.command || !Array.isArray(second.command.args)) throw new Error('variants must contain complete variant records');
             if (first.priority === second.priority && semver.intersects(first.certifiedRange, second.certifiedRange)) {
                 throw new Error(`variants "${first.id}" and "${second.id}" overlap at priority ${first.priority}`);
             }

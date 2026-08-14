@@ -1,4 +1,4 @@
-import { parseSensorPack } from '../../../../src/commands/sensors/compatibility/contract';
+import { assertNoEqualPriorityOverlap, parseSensorPack } from '../../../../src/commands/sensors/compatibility/contract';
 
 const coverage = {
     schemaVersion: 1,
@@ -55,6 +55,22 @@ describe('sensor pack v2 contract', () => {
         [{ name: 'legacy', detects: ['package.json'], sensors: { 'bad/name': {} } }, 'sensor id'],
     ])('rejects recursively malformed legacy content %j', (input, message) => {
         expect(() => parseSensorPack(input, 'legacy-pack.json')).toThrow(message);
+    });
+
+    it('preserves legacy config file fallbacks', () => {
+        expect(parseSensorPack({ name: 'legacy', sensors: { lint: { configFile: 'eslint.config.js', configFileFallback: '.eslintrc.json' } } }, 'legacy')).toMatchObject({ kind: 'legacy', pack: { sensors: { lint: { configFile: 'eslint.config.js', configFileFallback: '.eslintrc.json' } } } });
+    });
+
+    it('rejects malformed applicability and probe extensions', () => {
+        const variant = validPack().sensors.lint.variants[0];
+        expect(() => parseSensorPack({ ...validPack(), sensors: { lint: { applicability: { allFiles: [3] }, variants: [variant] } } }, 'pack')).toThrow('allFiles[0]');
+        expect(() => parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...variant, probe: { kind: 'version', extra: true } }] } } }, 'pack')).toThrow('unknown field');
+    });
+
+    it('preserves configFiles and rejects incomplete public overlap input', () => {
+        const variant = { ...validPack().sensors.lint.variants[0], requirements: { ...validPack().sensors.lint.variants[0].requirements, configFiles: ['eslint.config.js'] } };
+        expect(parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [variant] } } }, 'pack')).toMatchObject({ kind: 'v2', pack: { sensors: { lint: { variants: [{ requirements: { configFiles: ['eslint.config.js'] } }] } } } });
+        expect(() => assertNoEqualPriorityOverlap([{ id: '../bad', priority: 1, certifiedRange: '>=1' }] as unknown)).toThrow('complete');
     });
 
     test.each([
