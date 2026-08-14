@@ -44,4 +44,47 @@ describe('discoverProjectEvidence', () => {
             expect(evidence.paths).toEqual(expect.arrayContaining(['pack-marker', 'sensor-marker', 'one-of-these']));
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
+
+    test.each([
+        ['linux', ['.venv', 'lib', 'python3.12', 'site-packages']],
+        ['win32', ['.venv', 'Lib', 'site-packages']],
+    ] as const)('discovers exact local Python runtime and tool metadata on %s', (targetPlatform, sitePackages) => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-python-discovery-'));
+        try {
+            fs.mkdirSync(path.join(root, ...sitePackages), { recursive: true });
+            fs.writeFileSync(path.join(root, '.venv', 'pyvenv.cfg'), 'version = 3.12.4\n');
+            for (const [tool, version] of Object.entries({ mypy: '1.11.2', ruff: '0.6.9', pytest: '8.3.3', semgrep: '1.91.0' })) {
+                const info = path.join(root, ...sitePackages, `${tool}-${version}.dist-info`);
+                fs.mkdirSync(info);
+                fs.writeFileSync(path.join(info, 'METADATA'), `Metadata-Version: 2.3\nName: ${tool}\nVersion: ${version}\n`);
+            }
+            const pack = { schemaVersion: 2, name: 'python', detects: ['pyproject.toml'], sensors: {
+                quality: { applicability: { allFiles: ['pyproject.toml'] }, variants: Object.keys({ mypy: 0, ruff: 0, pytest: 0, semgrep: 0 }).map(tool => ({ requirements: { tool, runtime: 'python', configFiles: [] } })) },
+            } } as any;
+            fs.writeFileSync(path.join(root, 'pyproject.toml'), '[project]\nname = "sample"');
+            const evidence = discoverProjectEvidence(root, pack, { platform: () => targetPlatform });
+            expect(evidence.runtimeVersions.python).toBe('3.12.4');
+            expect(evidence.toolVersions).toMatchObject({ mypy: '1.11.2', ruff: '0.6.9', pytest: '8.3.3', semgrep: '1.91.0' });
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
+    it('does not trust missing or escaping Python environment metadata', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-python-discovery-untrusted-'));
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-python-discovery-outside-'));
+        try {
+            fs.mkdirSync(path.join(root, '.venv', 'lib', 'python3.12', 'site-packages'), { recursive: true });
+            fs.writeFileSync(path.join(root, '.venv', 'pyvenv.cfg'), 'version = not-a-version\n');
+            const escaped = path.join(root, '.venv', 'lib', 'python3.12', 'site-packages', 'ruff-0.6.9.dist-info');
+            fs.mkdirSync(path.join(outside, 'ruff-0.6.9.dist-info'));
+            fs.writeFileSync(path.join(outside, 'ruff-0.6.9.dist-info', 'METADATA'), 'Name: ruff\nVersion: 0.6.9\n');
+            fs.symlinkSync(path.join(outside, 'ruff-0.6.9.dist-info'), escaped, 'dir');
+            const pack = { schemaVersion: 2, name: 'python', detects: [], sensors: { lint: { applicability: {}, variants: [{ requirements: { tool: 'ruff', runtime: 'python', configFiles: [] } }] } } } as any;
+            const evidence = discoverProjectEvidence(root, pack, { platform: () => 'linux' });
+            expect(evidence.runtimeVersions.python).toBeNull();
+            expect(evidence.toolVersions.ruff).toBeNull();
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
 });
