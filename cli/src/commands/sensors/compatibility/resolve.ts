@@ -4,7 +4,7 @@ import type { CompatibilityEvidence, SensorPack, SensorPackSensor, SensorVariant
 import type { ProjectEvidence } from './discovery';
 
 export type ResolveEvidence = { paths?: string[]; applicable?: boolean; packageManagerConflict?: boolean; toolVersion?: string | null; runtimeVersion?: string | null; toolVersions?: Record<string, string | null>; runtimeVersions?: Record<string, string | null>; os?: NodeJS.Platform; probe?: { status?: string } };
-type ResolveContext = { pack?: string; sensor?: string };
+export type ResolveContext = { pack: string; sensor: string };
 
 function result(state: CompatibilityEvidence['state'], reason: string, variant: SensorVariant | null, evidence: ResolveEvidence): CompatibilityEvidence {
     const toolVersion = (variant ? toolFor(variant, evidence) : evidence.toolVersion) ?? null;
@@ -33,8 +33,9 @@ function toolFor(variant: SensorVariant, evidence: ResolveEvidence): string | nu
 function runtimeFor(variant: SensorVariant, evidence: ResolveEvidence): string | null | undefined { return evidence.runtimeVersions?.[variant.requirements.runtime] ?? evidence.runtimeVersion; }
 
 /** Pure precedence resolver. It consumes discovered evidence and neither probes nor executes commands. */
-export function resolveSensorCompatibility(sensor: SensorPackSensor | Record<string, unknown>, evidence: ResolveEvidence, context: ResolveContext = {}): CompatibilityEvidence {
+export function resolveSensorCompatibility(sensor: SensorPackSensor | Record<string, unknown>, evidence: ResolveEvidence, context: ResolveContext): CompatibilityEvidence {
     if (!sensor || typeof sensor !== 'object' || !evidence || typeof evidence !== 'object') throw new Error('sensor and discovered evidence are required');
+    if (!context || typeof context.pack !== 'string' || !context.pack.trim() || typeof context.sensor !== 'string' || !context.sensor.trim()) throw new Error('pack and sensor identity are required for compatibility resolution');
     if (!('variants' in sensor)) return legacyCompatibility('legacy pack without schemaVersion');
     const v2 = sensor as SensorPackSensor;
     if (!Array.isArray(v2.variants) || !v2.applicability) throw new Error('v2 sensor must declare variants and applicability');
@@ -50,7 +51,7 @@ export function resolveSensorCompatibility(sensor: SensorPackSensor | Record<str
     const tied = matches.filter(variant => variant.priority === best.priority && specificity(variant) === specificity(best));
     if (tied.length !== 1) {
         const matching = tied.sort((a, b) => a.id.localeCompare(b.id)).map(variant => `${variant.id} (tool ${variant.requirements.toolRange}, runtime ${variant.requirements.runtimeRange})`).join(', ');
-        throw new Error(`ambiguous sensor variants in pack "${context.pack ?? '<unknown-pack>'}" sensor "${context.sensor ?? '<unknown-sensor>'}": ${matching}`);
+        throw new Error(`ambiguous sensor variants in pack "${context.pack}" sensor "${context.sensor}": ${matching}`);
     }
     if (evidence.probe?.status !== 'matched') return result('unverifiable', evidence.probe?.status === 'not-matched' ? 'probe-not-matched' : 'probe-inconclusive', best, evidence);
     return semver.satisfies(toolFor(best, evidence)!, best.certifiedRange)
