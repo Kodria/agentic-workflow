@@ -938,7 +938,7 @@ Expected: typecheck/build/tests PASS; sensors `overall: pass`; coverage JSON sch
 
 Invocar `requesting-code-review`; por cada hallazgo agregar un test discriminante rojo/verde. Reejecutar Step 3 y `git diff --check`. No mezclar `cli/.awm/ledger/` en staging.
 
-- [ ] **Step 6: Push y PR del consumidor con release major verificable**
+- [x] **Step 6: Push y PR del consumidor con release major verificable**
 
 ```bash
 git status --short --branch
