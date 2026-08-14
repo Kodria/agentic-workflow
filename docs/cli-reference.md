@@ -2,11 +2,13 @@
 
 The `awm` (Agentic Workflow Manager) binary is the entry point for the registry and the harness. It supports an interactive Text User Interface (TUI) via Clack Prompts by default, plus quiet, flag-based execution for scripting and CI.
 
-New to AWM? Start with the [AWM Runbook](runbook.md). This page is the exhaustive command surface.
+New to AWM? Start with [installation](installation.md), [configuration](configuration.md),
+and [project setup](project-setup.md). This page is the exhaustive command surface;
+the [runbook](runbook.md) covers ongoing operations.
 
 ## Concepts used across commands
 
-- **Agent target** (`-a, --agent`): `claude-code` (default), `opencode`, or `antigravity`. Determines where artifacts install and how context is delivered.
+- **Agent target** (`-a, --agent`): one of `claude-code`, `codex`, `opencode`, `cursor`, `copilot`, or `antigravity`. It determines where artifacts install and how context is delivered. See [configuration](configuration.md) for provider capabilities, defaults, and coexistence.
 - **Scope** (`-s, --scope`): `global` (machine-wide, in the agent's global dir) or `local` (inside the current repo).
 - **Method** (`-m, --method`): `symlink` (default — links to the `~/.awm` cache so `awm update` patches everything at once) or `copy` (ejects a standalone copy).
 
@@ -16,7 +18,10 @@ New to AWM? Start with the [AWM Runbook](runbook.md). This page is the exhaustiv
 
 ### `awm init`
 
-Bootstraps the AWM harness on this machine **and** the current project, in one idempotent pass. This is the command you run first in any repo — it subsumes the older manual sequence (`hooks install` + `sensors init` + installing the skill pack).
+Bootstraps AWM for one provider per run. Without `--agent`, a fresh machine uses
+`claude-code`; subsequent commands use the configured default unless an agent is
+explicit. A normal run can reconcile both machine state and the current project.
+For the lifecycle and provider choices, see [configuration](configuration.md).
 
 ```
 awm init [--agent <agent>] [--machine-only] [--yes] [--json]
@@ -24,16 +29,16 @@ awm init [--agent <agent>] [--machine-only] [--yes] [--json]
 
 | Flag | Description |
 |---|---|
-| `-a, --agent <agent>` | Target agent. Default `claude-code`. |
-| `--machine-only` | Run only machine-level steps; skip all project steps. Nothing is written under the working directory — including for providers whose context delivery is itself project-scope (Cursor, Copilot), which are skipped rather than written to the current directory. |
+| `-a, --agent <agent>` | Target one provider for this run. On a fresh machine, the default is `claude-code`. |
+| `--machine-only` | Run only machine-level steps and exclude **every** project-scoped write. Providers without global delivery defer their content until normal project initialization; AWM does not write project files to work around that limitation. |
 | `-y, --yes` | Skip confirmation prompts (for scripts). |
 | `--json` | Emit the full `InitOutcome` as JSON instead of the rendered report — on success **and** on failure. |
 
 **Exit codes:** `0` init did its job — including a run that ends `degraded`, i.e. ran to completion with checks still pending · `2` did not complete: a gate refused, or a step failed and every write was rolled back. **`1` is not used.**
 
-> **Cambió en la v5.0.0.** `degraded` salía `1`, así que un run donde no fallaba nada
-> reportaba fallo y `awm init --yes && …` moría bajo `set -e`. El exit code responde por
-> init; la salud del harness la responde `awm doctor`. Ver [`decisions.md`](decisions.md) D-008.
+> **Changed in v5.0.0.** `degraded` previously exited `1`, which made a completed
+> init fail under `set -e`. The exit code now answers whether init completed;
+> `awm doctor` answers harness health. See [decisions D-008](decisions.md#d-008).
 
 **`--json` contract.** Both documents carry a `result` field, so a script that wants the `ok` / `degraded` distinction can branch on it — the exit code no longer encodes it:
 
@@ -48,7 +53,9 @@ Human mode renders the same evidence: on failure the three-panel report is print
 
 **What it does:** syncs the registry cache · installs the agent's context mechanism (Claude: `SessionStart` hook; OpenCode: global `opencode.json` `instructions[]`) · installs the `dev` **baseline** skill pack · bootstraps `.awm/profile.json` · detects the stack and writes `.awm/sensors.json` · wires `CONSTITUTION.md` into the repo-local `opencode.json` (OpenCode). It **flags** (but does not perform) the steps that need an agent or a deliberate choice: generating `CONSTITUTION.md` / agent context, and installing the Claude per-edit sensor hook.
 
-The output has three panels: **Estado inicial** (state before), **Acciones** (what each step did), **Estado final** (state after). A red row in *Estado inicial* that turns green in *Estado final* means the step fixed it — read the final panel for the result.
+The output has three panels: **Initial state**, **Actions**, and **Final state**.
+A red initial row that turns green in the final panel means the step repaired it;
+the final panel is the result to act on.
 
 ### `awm doctor`
 
@@ -70,6 +77,37 @@ red one nobody can act on. Two rows worth knowing:
   extension. Advisory; `awm sync` heals or prunes them.
 - **`workflows.global`** — machine-scope workflows, for the providers that use them
   (today: Antigravity).
+
+### `awm agent list`
+
+List every supported provider and this machine's enabled/default state.
+
+```
+awm agent list [--json]
+```
+
+The human output marks enabled providers and the default; `--json` emits rows
+with `id`, `label`, `enabled`, and `default`. This command only inspects AWM
+preferences. See [configuration](configuration.md#inspect-enabled-and-default-providers)
+for how the provider set affects normal commands.
+
+### `awm agent disable <agent>`
+
+Stop AWM from managing an enabled provider without deleting that provider's
+existing hooks, skills, or instruction files.
+
+```
+awm agent disable <agent> [--default <replacement-agent>]
+```
+
+If `<agent>` is the current default, `--default <replacement-agent>` is
+required, and that replacement must remain enabled. For example:
+
+```bash
+awm agent disable claude-code --default codex
+```
+
+Re-enable a provider through a normal `awm init --agent <provider>` run.
 
 ---
 

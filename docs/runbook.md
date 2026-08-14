@@ -1,662 +1,298 @@
-# AWM Runbook
+# AWM runbook
 
-The complete operating manual for AWM: install it, wire a project, use it day to day,
-set it up for a team, and extend it with your own content.
+This is the operating guide for an AWM-enabled project: daily work, team
+content, recovery, and rollout. It does not repeat installation or project
+bootstrap instructions.
 
----
+## Before using this runbook
 
-## Who this is for
+Prepare the developer machine with [installation](installation.md), choose and
+manage providers in [configuration](configuration.md), then create or adopt
+the repository contract with [project setup](project-setup.md). Those guides
+define the ownership boundary between machine state and committed project state.
 
-**Individual developer** — you want AWM running on your machine and wired into one or more repos. Start with [Chapter 1](#chapter-1--install--machine-setup) and follow [Chapter 2](#chapter-2--project-setup).
+Use this runbook once that boundary exists. For command syntax and every flag,
+use the [CLI reference](cli-reference.md).
 
-**Team lead setting up a shared registry** — you want every engineer on the team to share the same skills, sensor packs, and rules. After completing Chapters 1-2 yourself, go to [Chapter 4](#chapter-4--team-setup--customization).
+<a id="chapter-3--day-to-day-in-a-project"></a>
 
-**Contributor authoring skills or packs** — you want to create new skills, sensor packs, or registry bundles. Go to [Chapter 5](#chapter-5--extensibility-authoring-content).
+## Daily development loop
 
----
-
-## Mental model
-
-AWM has **two layers**, and **one command (`awm init`) bootstraps both**:
-
-| Layer | Lives in | Set up | Holds |
-|---|---|---|---|
-| **Machine (global)** | `~/.awm/` + the agent's global skills dir | once per machine | the CLI cache, the baseline skill pack, the agent's context-delivery mechanism |
-| **Project (per repo)** | `<repo>/.awm/`, `CONSTITUTION.md`, sensor configs | once per repo | the project profile, the sensor manifest, the project's rules |
-
-`awm init` is **idempotent** — re-run it any time; it only fills gaps, never clobbers. `awm doctor` reports the state of both layers and **changes nothing**. You rarely call the low-level commands (`awm hooks install`, `awm sensors init`, …) by hand; `init` orchestrates them.
-
-**How each agent stores skills and receives context** — the *only* per-agent difference:
-
-| Agent | Global skills dir | Context delivery (how the agent learns AWM + your rules) |
-|---|---|---|
-| **Claude Code** | `~/.claude/skills/` | a `SessionStart` **hook** injects `using-awm` + `CONSTITUTION.md` into every session |
-| **OpenCode** | `~/.agents/skills/` | `instructions[]` entries in `~/.config/opencode/opencode.json` (global AWM context) **+** `<repo>/opencode.json` (project `CONSTITUTION.md`) |
-
----
-
-## Chapter 1 — Install & machine setup
-
-### 1.1 Prerequisites
-
-- `git`, `node` (**22+**), `npm` on your `$PATH`.
-- A working directory that is a git repo. If it isn't one yet: `git init`.
-- **Linux, macOS, or Windows.** All three are supported; Linux and Windows are verified on every PR by the CI matrix. On native Windows, enable Developer Mode so symlink installs work unprivileged, or use `awm add --method copy`. [WSL](https://learn.microsoft.com/en-us/windows/wsl/) also works and reports as Linux. Full per-OS detail: [installation.md](installation.md).
-
-### 1.2 Install the CLI
-
-```bash
-npm i -g agentic-workflow-manager
-awm --help        # verify it's on PATH
-```
-
-This installs the `awm` binary globally. **Nothing is wired into any agent yet** — that happens in [Chapter 2](#chapter-2--project-setup) with `awm init`. This step is machine-wide; you do it once, not per repo.
-
-`awm init` will seed `~/.awm/registries/baseline/` by cloning [`awm-baseline-registry`](https://github.com/Kodria/awm-baseline-registry) the first time it runs.
-
-### 1.3 Keeping the CLI itself up to date
-
-The CLI and content (registries) are updated separately — this is an important distinction:
-
-- **To update the CLI binary** (new `awm` commands, bug fixes in the tool itself):
-  ```bash
-  npm i -g agentic-workflow-manager@latest
-  ```
-
-- **To update content** (skills, sensor packs, registry bundles):
-  ```bash
-  awm update
-  ```
-  `awm update` pulls the latest content from each configured registry clone. It does **not** update the CLI binary — those are delivered via npm.
-
-After `awm update`, re-run `awm init` to reconcile the wiring to any new defaults (it's idempotent).
-
----
-
-## Chapter 2 — Project setup
-
-### 2.1 Bootstrap: `awm init`
-
-Run **inside the repo**. Pick your agent:
-
-```bash
-awm init                    # Claude Code (the default)
-awm init --agent opencode   # OpenCode
-```
-
-Flags: `--machine-only` (bootstrap only the global layer, no project changes) · `--yes` (skip prompts, for scripts) · `--json` (machine-readable outcome).
-
-**What `awm init` does in one idempotent pass:**
-
-- **Machine layer:** syncs the registry cache · installs the agent's context mechanism (Claude: `SessionStart` hook; OpenCode: `instructions[]` in the global `opencode.json`) · installs the **baseline skill pack** (`dev`) — the full spine: `using-awm`, `development-process`, `brainstorming`, `writing-plans`, `subagent-driven-development`, `test-driven-development`, `systematic-debugging`, `verification-before-completion`, `post-implementation-qa`, `harness-retro`, `setup-sensors`, `project-constitution`, `project-context-init`, and more.
-- **Project layer:** bootstraps `.awm/profile.json` · detects your stack and writes `.awm/sensors.json` (+ copies the pack's config files) · for OpenCode, wires `CONSTITUTION.md` into the repo-local `opencode.json` once that file exists.
-
-**What `awm init` deliberately leaves for you** — it flags these, it does not do them, because each needs an agent or a choice:
-
-| Left for you | How to do it |
-|---|---|
-| `CONSTITUTION.md` (the repo's rules) | run the `project-constitution` skill through the agent |
-| Agent context (`AGENTS.md` / `CLAUDE.md`) | run the `project-context-init` skill through the agent |
-| Per-edit fast-sensor trigger **(Claude only)** | `awm sensors install` |
-
-### 2.2 Read the state: `awm doctor`
+Start work from a current branch and a known harness state:
 
 ```bash
 awm doctor
+awm preflight
 ```
 
-```text
-AWM · harness status
+Follow the lifecycle in [How AWM works](framework.md): discover and make
+decisions when the need is still open; plan a concrete change; implement within
+the plan; then run the project's verification evidence. A normal implementation
+loop is:
 
-Machine (global)
-  ✔ CLI v2.x.x
-  ✔ hook SessionStart
-  ✔ dev-core (baseline)
-  ✔ global skills
+1. Read the project's `CONSTITUTION.md` and context before editing.
+2. Make the bounded change and run the focused checks while iterating.
+3. Run `awm sensors run` with no speed flag before declaring completion.
+4. Run the review and verification steps required by the plan.
+5. Record recurring findings through the ledger/retrospective flow when the
+   process calls for it.
 
-Project: my-repo
-  ✔ .awm/profile.json
-  ✔ active bundles
-  ✔ sensors
-  ✖ CONSTITUTION.md absent        → skill: project-constitution
-  ⚠ agent context absent          → skill: project-context-init
+`awm sensors run` is the full completion gate. `--fast` and `--slow` are useful
+iteration slices, not substitutes for the full run.
 
-status: degraded · 2 suggested actions
-```
+## Diagnose machine and project state
 
-Glyphs: `✔` healthy · `⚠` advisory (does not degrade) · `✖` missing (degrades state). Every non-`✔` row carries its **own remedy** — a command (`→ awm …`) or a skill to ask the agent to run (`→ skill: …`).
+Use the least invasive command that answers the question:
 
-**A `✖ CONSTITUTION.md absent` row is not a bug.** It is `init` telling you the next step requires the agent. A fresh repo is *expected* to read degraded until you run those skills — that is the normal starting state, not an error.
-
-### 2.3 Track A — greenfield
-
-For **new repos with no existing stack**. Pick your scenario and follow the ordered list. Each line is a real command or a plain-language prompt to your agent.
-
-```text
- 1. npm i -g agentic-workflow-manager      # install AWM (once per machine)
- 2. cd <your-repo>                         # a git repo (run `git init` if needed)
- 3. awm init                               # or: awm init --agent opencode
- 4. awm doctor                             # confirm machine layer is green
- 5. (reload the agent session)             # Claude: /clear or restart · OpenCode: new session
- 6. ask agent: "Generate the CONSTITUTION.md with project-constitution."
- 7. ask agent: "Initialize the project context with project-context-init."
- 8. (reload the agent session again)       # so it starts receiving CONSTITUTION.md
- 9. awm sensors install                    # (Claude only) per-edit fast-sensor trigger
-10. ready — give your first development prompt
-```
-
-On a brand-new repo with no stack files yet (`package.json`/`pyproject.toml`), sensors start as the `generic` pack. Once your tree has a real stack, run `awm sensors init` once to adopt the matching pack (tsc/lint/test). You do not have to remember to: `awm sensors run` reports the drift on every run (`packDrift`, naming the pack it detected), and `awm preflight` fails on it — but neither rewrites `.awm/sensors.json` for you. That file is committed and shared; changing it is a reviewable diff, not something a read command does behind your back.
-
-### 2.4 Track B — legacy
-
-For **existing codebases with a real stack and pre-existing debt**. Same spine as Track A, plus two extra steps (6 and 9) because an existing codebase has a real stack and pre-existing debt from day one:
-
-```text
- 1. npm i -g agentic-workflow-manager      # install AWM (once per machine)
- 2. cd <your-repo>
- 3. awm init                               # detects your real stack → real sensors immediately
- 4. awm doctor                             # confirm machine layer is green
- 5. (reload the agent session)             # Claude: /clear or restart · OpenCode: new session
- 6. awm sensors status                     # EXTRA: are the gate tools healthy on this stack?
-       └─ if DEGRADED → ask agent: "Adapt the sensors with setup-sensors."
-       └─ if "tool not installed" → npm i -D <tool>
- 7. ask agent: "Generate the CONSTITUTION.md with project-constitution."
- 8. ask agent: "Initialize the project context with project-context-init."
- 9. awm sensors baseline                   # EXTRA: accept existing debt → commit the file
-10. (reload the agent session again)
-11. awm sensors install                    # (Claude only) per-edit fast-sensor trigger
-12. ready — give your first development prompt
-```
-
-**Why the two extra steps on legacy?** Step 6: an existing project pins specific tool versions, so the templated sensor configs may need adapting before the gate is trustworthy. Step 9: your first `awm sensors run` on a legacy repo will typically come back with a wall of red — **expect that, it is not a sign anything is broken.** It is the debt a real codebase accumulates before the gate existed. `awm sensors baseline` snapshots that debt as *accepted* so the gate fails only on **new** problems you introduce, never on what was already there. See [§2.7 — Baseline existing debt](#27-sensors-the-quality-gate) for exactly what gets captured, how the gate reads it afterward, and how the "ratchet" tightens as the team pays debt down. On greenfield there is no debt to baseline, so you skip both.
-
-### 2.5 Load the agent context
-
-After `awm init`, trigger a fresh context load so the wiring takes effect:
-
-- **Claude Code:** `/clear`, or restart the session. The `SessionStart` hook injects `using-awm` (and `CONSTITUTION.md` once it exists).
-- **OpenCode:** start a new session. The `instructions[]` entries in `opencode.json` load each session.
-
-Confirm it worked — ask the agent: *"what AWM skills do you have available?"* It should reference `development-process` and the spine skills. If it does not, see [Troubleshooting](#troubleshooting).
-
-### 2.6 Constitution & agent context files
-
-These run **through your agent**, in the session you just loaded. Ask in plain language; the agent invokes the skill.
-
-**Generate `CONSTITUTION.md`:**
-
-`CONSTITUTION.md` holds the repo's **non-negotiable rules**. AWM delivers it into every session automatically (Claude: hook; OpenCode: repo-local `opencode.json`).
-
-> *"Generate the `CONSTITUTION.md` with `project-constitution`."*
-
-The skill reads `CLAUDE.md`/`AGENTS.md`/`README`/`.awm/sensors.json`, drafts the rules section by section (with your approval), writes the file at the repo root, and commits it. **After it exists, reload the session** (see [2.5](#25-load-the-agent-context)) so the agent starts receiving it.
-
-**Generate the agent context file:**
-
-`AGENTS.md` (agent-agnostic, preferred) or `CLAUDE.md` (Claude-specific) **describes** the repo — purpose, structure, commands. The split is deliberate: **rules → `CONSTITUTION.md`; description → `AGENTS.md`.**
-
-> *"Initialize the project context with `project-context-init`."*
-
-Prefer `AGENTS.md` — every agent reads it. Use `CLAUDE.md` only for Claude-specific notes.
-
-### 2.7 Sensors: the quality gate
-
-Sensors are **deterministic computational checks** (tsc, ESLint, Semgrep, test runner, …) whose output is LLM-readable. They are the project's quality gate. `awm init` already wrote `.awm/sensors.json` and copied the pack configs — these steps make the gate **trustworthy**.
-
-> **Are sensors agnostic? — Yes.**
->
-> **The checks and the completion gate are 100% agent-agnostic.** `awm sensors run` executes the exact same tsc/eslint/semgrep/tests on Claude, OpenCode, or any agent. There is **no** "Claude-only sensor."
->
-> What *is* Claude-only is the **automatic per-edit trigger** — a `PostToolUse` hook (see step 9/11 in the tracks above). It is a matter of **cadence, not coverage**:
->
-> | | Per-edit fast feedback | Full gate at "done" |
-> |---|---|---|
-> | **Claude Code** | hook runs fast sensors after each edit | `awm sensors run` |
-> | **OpenCode** | — (no hooks exist) | `awm sensors run` |
->
-> Both agents enforce the **same floor** at the completion gate (driven by `verification-before-completion`). Claude additionally gets a tighter, earlier feedback loop. Installing the hook does **not** make sensors "Claude-only" — it only adds an *extra, earlier* check on Claude.
-
-**Check sensor health:**
-
-```bash
-awm sensors status
-```
-
-- `HEALTHY` — ready.
-- `DEGRADED` — the templated config does not match your installed tool versions (common on legacy repos).
-- `NOT_CONFIGURED` — no manifest yet (should not happen after `awm init`).
-
-**Adapt the configs (mostly legacy):**
-
-If `status` shows `DEGRADED`, ask the agent:
-
-> *"Adapt the sensors with `setup-sensors`."*
-
-Also: tools that run via `npx` (eslint, depcruise, …) must be **devDependencies**, or `npx` fetches them remotely and `status` reports them as not installed. Fix with `npm i -D <tool>`.
-
-**Baseline existing debt (legacy only):**
-
-The first `awm sensors run` on a legacy repo is expected to come back **red — often heavily so**. That is not a misconfiguration signal; it is the accumulated debt of a codebase that predates the gate. Do not chase it file by file. Instead, accept it as one deliberate snapshot, and commit the snapshot so the whole team shares the same accepted debt:
-
-```bash
-awm sensors baseline      # writes .awm/sensors.baseline.json — commit it
-```
-
-*What gets captured.* `awm sensors baseline` re-runs every sensor and records, per sensor, one fingerprint per finding. The fingerprint is built from `sensor|file|rule` — the rule id every real sensor already sets (eslint's `ruleId`, tsc's error code, semgrep's `check_id`) — and **deliberately excludes line/column and the human-readable message**. Findings that share a file and rule stack up as repeated entries, so in effect the baseline is a *count per (file, rule)*, not a list of exact locations.
-
-*How the gate reads it afterward.* Every later `awm sensors run` fingerprints the current findings the same way and matches them against the accepted baseline as a budget: the Nth finding for a given file+rule is suppressed only while baseline "budget" remains for that fingerprint. A file that had 3 accepted `no-explicit-any` findings and now has 5 reports exactly **2 new** — the 3 inherited ones stay suppressed, the 2 you introduced fail the gate. The same file dropping from 3 to 1 reports **0 new** — nothing to complain about, the extra budget just goes unused. The gate only ever fails on findings **above** the accepted count for their class; it never fails on the pre-existing debt itself.
-
-*Ratcheting the bar tighter.* The baseline is a manual snapshot — `awm sensors baseline` never runs on its own and the file never updates itself. As the team pays down debt (fixes findings, deletes dead code, tightens a lint rule), re-run `awm sensors baseline` and commit the new snapshot. Because the fresh run now has fewer findings, the new baseline carries a lower count per fingerprint — the accepted budget shrinks and the gate gets stricter. Nothing in the mechanism lets a re-baseline grow the accepted count beyond what the tree currently has, so re-baselining can only tighten the bar, never loosen it — hence "ratchet."
-
-> **Why count-based, not `file:line`-based?**
->
-> Baselining exact line numbers would be brittle: reformatting a file, adding an import above a flagged line, or any unrelated edit that shifts line numbers would silently "un-baseline" a finding that was never actually touched — failing the gate for reasons that have nothing to do with the change under review. That's why the fingerprint excludes line/column (and the message text, which drifts with tool-version bumps and rule-config tweaks) and keys on `sensor|file|rule` instead, with occurrence **count** as the only thing that has to match. A finding only re-enters "new" territory when the actual count for its class changes — i.e. when someone genuinely fixed or introduced findings of that kind, not when unrelated code around it moved.
-
-Skip this step entirely on greenfield — there is no debt to accept, and `awm sensors run` fails on any finding from day one.
-
-*Forgot to baseline?* `awm preflight` will flag a repo that has at least one enabled sensor but no `.awm/sensors.baseline.json` yet, so you don't have to remember this step from memory.
-
-**(Claude only) Add the per-edit fast-sensor trigger:**
-
-```bash
-awm sensors install
-```
-
-This installs the `PostToolUse` hook so fast sensors (tsc/eslint) run automatically after each file edit. OpenCode has no hooks, so it has nothing to install here — it runs the same sensors at the completion gate instead.
-
-**How the gate stays honest:**
-
-`awm sensors run` **re-detects your stack on every run and tells you when the manifest no longer matches it** — a `generic` manifest over a real stack comes back with a `packDrift` field naming the pack it detected and the command that adopts it. And if a run executed nothing real over a tree that clearly has a stack, it refuses to report green (`not_certified`) instead of a false pass.
-
-What it will **not** do is rewrite `.awm/sensors.json`. It used to: a run would silently overwrite the committed manifest and copy the new pack's config files into your repo, so a single root `deploy.sh` could pull in the whole shell pack and turn a green harness red — from a command whose job is only to measure. `awm sensors init` is the verb that changes the manifest, and it is the only one.
-
-### 2.8 Ready checklist
-
-You are ready when **all** of these hold:
-
-- [ ] `awm doctor` — machine layer all `✔`.
-- [ ] `CONSTITUTION.md` exists and the session was reloaded after it was created.
-- [ ] Agent context (`AGENTS.md`/`CLAUDE.md`) exists.
-- [ ] `awm sensors status` — `HEALTHY` (and on legacy, a committed baseline).
-- [ ] **(Claude only)** `awm sensors install` done.
-
-Now just describe the work in plain language. Your default entry point for any development is the **`development-process`** orchestrator — you do not pick the skill, *it* reads project state and routes the phases:
-
-```text
-brainstorming → writing-plans → subagent-driven-development → post-implementation-qa → harness-retro → finishing-a-development-branch
-```
-
----
-
-## Chapter 3 — Day-to-day in a project
-
-### 3.1 The development loop
-
-AWM plugs into your work via the `development-process` skill — a lightweight orchestrator you invoke by describing what you want to build. It reads project state and routes you through the correct phases automatically:
-
-```
-brainstorming → writing-plans → subagent-driven-development → post-implementation-qa → harness-retro → finishing-a-development-branch
-```
-
-Cross-cutting skills kick in within phases: `test-driven-development` (write the test first), `systematic-debugging` (root-cause before fixing), `verification-before-completion` (run sensors before declaring done).
-
-To start any development task, just describe it in plain language — `development-process` decides what's next.
-
-### 3.2 What happens automatically
-
-| Trigger | Claude Code | OpenCode |
+| Question | Command | What to do with the result |
 |---|---|---|
-| New session in the repo | `SessionStart` hook injects `using-awm` + `CONSTITUTION.md` | `instructions[]` load the global AWM context + project `CONSTITUTION.md` |
-| Agent edits a file | `PostToolUse` hook runs fast sensors (tsc/lint), surfaces findings | — (no per-edit hook; caught at the gate) |
-| Agent about to declare "done" | `verification-before-completion` runs `awm sensors run` and reads the output | **same** |
-| Same sensor fails a 2nd time | the skill recommends `harness-retro` to turn it into a structural rule | **same** |
+| Which providers are enabled and which is default? | `awm agent list` | Enable a missing provider with `awm init --agent <provider>`; manage defaults through `awm agent disable`. |
+| Is provider delivery or project wiring degraded? | `awm doctor` | Follow its named remedy; it distinguishes advisory rows from missing requirements. |
+| Can this project actually gate work? | `awm preflight` | Resolve its actionable check before handing work to an unattended quality phase. |
+| Are project links missing or stale? | `awm sync` | It repairs supported dangling links and reconciles declared extensions. |
+| Is sensor configuration or a tool unhealthy? | `awm sensors status` | Repair configuration/tooling, then re-run the actual sensors. |
 
-The common thread: **recurrence becomes a rule, not a repeated symptom fix.**
+`awm doctor` is read-only. `awm preflight` validates that the configured gate is
+runnable; it does not run the code checks. Use both `awm preflight` and
+`awm sensors run` when you need evidence about project readiness.
 
-### 3.3 The quality gate in practice
+If a provider has project-only delivery, a machine-only init intentionally
+defers its content. Run normal project initialization in the repository instead
+of creating provider files by hand; see [configuration](configuration.md).
 
-The project's quality gate is `awm sensors run` (no flag — runs all sensors). Here is how to use it:
+## Update CLI versus update content
 
-- **Per-edit (Claude Code only):** fast sensors (tsc/lint) run automatically after each file edit via the `PostToolUse` hook. This is early feedback, not the gate.
-- **Completion gate (all agents):** before declaring a task done, the `verification-before-completion` skill runs `awm sensors run` (all sensors, no flag) and reads `overall`. Only `overall: "pass"` counts as green.
-- **Do not use `--slow` as the gate.** `awm sensors run --slow` runs only semgrep/mutation and skips lint/typecheck, where most findings surface.
-- **Baseline ratchet:** `awm sensors baseline` snapshots current findings as accepted. Re-take it deliberately when you want to move the ratchet forward (e.g. after a debt-reduction sprint). It never updates itself. See [§2.7 — Baseline existing debt](#27-sensors-the-quality-gate) for what exactly gets captured and why it's count-based, not line-based.
+These are separate release streams:
 
-### 3.4 The learning loop
+```bash
+# Upgrade the AWM executable
+npm i -g agentic-workflow-manager@latest
 
-AWM builds institutional memory per branch without bloating your context:
-
-- During development, skills append wins and findings to a per-branch **ledger** (`awm ledger`) — ephemeral working memory, gitignored, never injected into agent context.
-- At the end of a branch, **`harness-retro`** reads the ledger and *cures* recurring lessons into durable docs:
-  - Structural / security / logic findings → the remediation tree (`eslint.config.awm.mjs`, `.semgrep.awm.yml`, `tests/structural/`)
-  - Process lessons → `CONSTITUTION.md`
-  - Agent working-style lessons + wins → `AGENTS.md`
-
-You rarely touch `awm ledger` directly. Inspect it if curious: `awm ledger list` / `awm ledger recurring --min 2`.
-
-> **Project-specific vs framework rules.** Rules born from a bug in *your* repo live in *your* repo (grown by `harness-retro` into your config files / `CONSTITUTION.md`). Only universally-avoidable patterns (e.g. "never `eval`") belong in the AWM registry. AWM ships the *mechanism*, not your project's bug list.
-
-### 3.5 Update cadence
-
-Keep your installed content current without over-running updates:
-
-| What | When | Command |
-|---|---|---|
-| Team registry content (new skills, fixes) | When a teammate cuts a release, or at the start of a sprint | `awm update` |
-| Machine harness health | When something feels off | `awm doctor` |
-| Re-run project init | After a large `awm update` that adds new defaults | `awm init` (idempotent — safe to re-run) |
-| CLI itself | When a new AWM CLI version ships | `npm i -g agentic-workflow-manager@latest` (separate from `awm update`) |
-
----
-
-## Chapter 4 — Team setup & customization
-
-### 4.1 The team model
-
-AWM supports a self-service team workflow:
-
-```
-senior authors a skill → PR to team registry → tagged release vX.Y.Z → teammates run awm update to receive it
-new developer → git clone → awm init → awm sync → awm doctor → ready
+# Refresh registered registry content
+awm update
 ```
 
-Skills live in a git repo (the team registry). You author them, tag a release, and every teammate's `awm update` pulls the new version. A new developer joins by cloning the project, running three commands, and their machine is fully wired — no manual file copying, no shared drives.
+`awm update` fetches registry content and honors pins. With symlink installs,
+the refreshed content is visible to existing installs immediately; copied
+artifacts need deliberate reinstallation. The command may offer a CLI upgrade
+in an interactive terminal, but npm remains the explicit way to update the
+binary.
 
-### 4.2 Create your team registry
+After a substantial content update, inspect state with `awm doctor`. Re-run
+`awm init` only when its idempotent reconciliation is needed; do not use it as
+a substitute for updating the CLI.
 
-A registry is a git repo with this minimum structure:
+## Synchronize project extensions
 
+The committed `.awm/profile.json` declares project extensions independently of
+each developer's provider. After pulling a profile change or joining a project:
+
+```bash
+awm sync
+awm doctor
 ```
-<registry-repo>/
-├── skills/
-│   └── <skill-name>/
-│       └── SKILL.md
-├── bundles/
-│   └── <bundle-name>/
-│       └── bundle.json
+
+Run `awm sync --agent <provider>` to limit reconciliation to an enabled
+provider. It first repairs only dangling AWM skill links that are safe to
+reconcile, then applies the profile in one transaction. It does not overwrite
+your unrelated files.
+
+If the profile references a team registry that this machine does not have,
+add it first, update it, then sync:
+
+```bash
+awm registry add <team-registry-url> --no-install
+awm update
+awm sync
+```
+
+## Sensors, preflight, and baselines
+
+Sensors are deterministic project checks; `preflight` confirms their harness
+configuration is credible. Keep the manifest, its config files, and any
+accepted baseline under review and committed as part of the shared project
+contract.
+
+```bash
+awm sensors run        # all configured sensors: completion gate
+awm preflight          # configuration/readiness gate
+```
+
+For an existing project, review a full initial run before accepting existing
+debt:
+
+```bash
+awm sensors run
+awm sensors baseline
+```
+
+The baseline is a ratchet: it accepts reviewed existing findings while new
+findings fail the gate. It is not a way to turn an unknown or broken check into
+a pass. If the stack changes or the manifest reports pack drift, run
+`awm sensors init`, review the generated change, and commit it before relying
+on the new configuration.
+
+## Backups and recovery
+
+Mutating AWM operations use transactions for the filesystem paths they manage.
+Successful `awm init` and `awm sync` output a transaction id and the exact
+undo command. Inspect records before restoring:
+
+```bash
+awm backup list
+awm backup restore <transaction-id>
+```
+
+If an init fails, its JSON or human report says whether rollback completed. If
+rollback could not restore every target, use the reported transaction id with
+`awm backup restore`; do not manually delete provider configuration or project
+links first. Backups restore AWM-managed targets, not arbitrary registry
+content or unrelated working-tree changes.
+
+## Team registries
+
+A team registry is a Git repository that distributes skills, bundles, sensor
+packs, and related content. A minimal registry has this shape:
+
+```text
+<registry>/
+├── skills/<skill-name>/SKILL.md
+├── bundles/<bundle-name>.json
 └── catalog.json
 ```
 
-`catalog.json` declares the bundles:
-
-```json
-{
-  "version": 1,
-  "bundles": [
-    { "name": "dev", "source": "bundles/dev", "version": "1.0.0", "scope": "baseline" }
-  ]
-}
-```
-
-The registry can be **public or private** from day one. SSH remotes work the same as any git repo (see §4.4).
-
-### 4.3 Wire it: awm registry add
-
-Register an additional registry on your machine:
+Create the repository, add the content and catalog entries, commit it, and
+give teammates its Git remote. Register it locally without silently installing
+every available bundle:
 
 ```bash
-awm registry add <git-url>               # prompts for a name
-awm registry add <git-url> --name <name> # skip the prompt
-awm registry add <git-url> --install-all # install every bundle after cloning
-awm registry add <git-url> --no-install  # clone only, skip bundle install
+awm registry add <git-url> --no-install
+awm registry list
 ```
 
-AWM clones the registry under `~/.awm/registries/<name>/` and registers it in the machine config. Once added, `awm update` keeps it in sync alongside the baseline.
+`--install-all` is available when the deliberate goal is to install every
+bundle for the current default provider. Otherwise, select an intended bundle
+with `awm add <bundle>` or declare it in a project profile.
 
-> **Tip:** If your registry has no semver tags yet (a common starting state for new team registries), `awm update` reports `updated @ HEAD` and syncs to the latest commit. Add a tag when you're ready to version your releases.
+### Private registries over SSH
 
-Inspect and remove registries:
+Use the same SSH remote that works for Git:
 
 ```bash
-awm registry list                # list all configured registries
-awm registry remove <name>       # remove registry config + clone (-y to skip confirmation)
+git clone git@github.com:your-org/your-registry.git
+awm registry add git@github.com:your-org/your-registry.git --no-install
 ```
 
-### 4.4 Private registries (SSH)
+AWM invokes Git, so the shell's `ssh-agent` and `~/.ssh/config` apply normally.
+For headless automation, set `GIT_TERMINAL_PROMPT=0` so a bad credential fails
+instead of waiting for interactive input. A failed registry add is atomic: it
+does not leave a configured registry or partial clone behind.
 
-Use an SSH remote for private repositories:
+## Version pins and rollout
+
+By default `awm update` follows the newest semver tag of each registry. Pin a
+version locally when you need to hold one machine at a known release:
 
 ```bash
-awm registry add git@github.com:your-org/your-registry.git
+awm pin baseline 1.2.0
+awm update
+awm unpin baseline
 ```
 
-Clone and fetch run through git, so your `ssh-agent` and `~/.ssh/config` apply exactly as with any git repository. No AWM-specific configuration needed.
-
-**If access fails:** AWM reports a git authentication error and exits cleanly. It does not hang waiting for credentials. In CI or headless environments, export `GIT_TERMINAL_PROMPT=0` before running any `awm` command that touches git — this tells git to fail immediately instead of prompting for a username/password:
-
-```bash
-GIT_TERMINAL_PROMPT=0 awm registry add <url>
-```
-
-A failed `awm registry add` leaves no clone on disk and no entry in the machine config (atomic — either it works or nothing changes).
-
-> **Note:** `awm registry add` against a truly non-existent or inaccessible repository exits cleanly in ~2 seconds with a `Clone failed:` prefix, leaving no partial files or config entries behind.
-
-### 4.5 Version pinning
-
-By default, `awm update` checks out the latest semver tag in each registry (the **stable channel**). There are two ways to pin a registry to a specific version, depending on whether the pin is for your machine only or for the whole team.
-
-**Machine-level pin (local convenience only):**
-
-```bash
-awm pin <registry> <version>    # e.g. awm pin baseline 1.0.0
-awm unpin <registry>             # return to latest-tag behavior
-```
-
-`awm pin` is a machine-level convenience — it stores the pin in `~/.awm/preferences.json` (not committed). This affects only your local `awm update` runs; teammates are not affected.
-
-**Team pin (project contract — commit it):**
-
-To pin for the whole team, edit `.awm/profile.json`'s `registries` map directly and commit it:
+A machine pin lives in preferences and is not a team contract. For a rollout
+that every developer must reproduce, commit the desired registry versions in
+the project's `.awm/profile.json`:
 
 ```json
 {
   "extensions": ["frontend"],
-  "registries": {
-    "baseline": "1.0.0"
-  }
+  "registries": { "baseline": "1.2.0" }
 }
 ```
 
-**Commit `.awm/profile.json`.** The whole team is pinned as soon as they pull — the pin is a project contract. After committing a pin, `awm update` in any teammate's sandbox respects it.
-
-### 4.6 The shared profile: .awm/profile.json
-
-`.awm/profile.json` is the project's AWM configuration:
-
-```json
-{
-  "extensions": ["frontend"],
-  "registries": {
-    "baseline": "1.1.0"
-  }
-}
-```
-
-| Field | What it does |
-|---|---|
-| `extensions` | Skill bundles installed for the project (names from your registries' catalogs) |
-| `registries` | Version pins per registry (omit a registry to use the latest tag) |
-
-**Commit this file.** It is the onboarding contract — a new developer's `awm sync` reads it and materializes the correct symlinks for every declared extension.
-
-### 4.7 Onboarding a new developer
-
-A developer joining the project:
+Roll out a registry release by merging reviewed content, tagging a semver
+release, then asking consumers to pull the project contract and run `awm
+update` followed by `awm sync`. Untagged commits remain staging content rather
+than part of the stable channel. For registry tags on machines that default to
+GPG signing, use:
 
 ```bash
-npm i -g agentic-workflow-manager   # 1. install AWM CLI (once per machine)
-git clone <project> && cd <project> # 2. clone the project
-awm init                            # 3. machine layer + reads the committed profile
-# 3a. If the team uses a non-baseline registry, add it now:
-# awm registry add <team-registry-url>   # SSH for private: git@github.com:org/repo.git
-awm sync                            # 4. materializes skill symlinks the profile declares
-awm doctor                          # 5. verify everything is green
+git -c tag.gpgSign=false tag v1.2.0
+git push --tags
 ```
 
-After step 5, the developer has the same skill set as every other teammate. No manual file copying.
+## Onboard another developer
 
-> **Team registry note:** `.awm/profile.json` stores extension names and version pins but not registry URLs. If your team uses a non-baseline registry, document its URL in the project README and have new developers run `awm registry add <url>` (step 3a) before `awm sync`. Otherwise `awm sync` will report `<bundle> (bundle not found in registry)` for each missing extension.
+The new developer should follow the two-stage sequence, not copy a teammate's
+provider directories:
 
-> `awm sync` confirms what it did — if `.awm/profile.json` declares no extensions it emits `No extensions in .awm/profile.json — nothing to sync.` It becomes necessary once a teammate has run `awm add <bundle>` to add project extensions; the sync materializes those symlinks on a fresh machine.
+```bash
+# Prepare their own provider and CLI first (see installation/configuration).
+git clone <project-url>
+cd <project>
+awm init --agent <provider>
 
-### 4.8 Provider capability matrix
-
-Not every agent re-anchors AWM context the same way. `awm doctor` labels each provider with a **tier** — `hooks-native`, `agents-md-managed`, `config-managed`, or `context-only` — right next to its name, so you know at a glance how strongly a given agent is actually wired in, not just whether its skills are installed.
-
-| Provider | Tier | Session hook | Context delivery | Skill install format |
-|---|---|---|---|---|
-| Claude Code | `hooks-native` | `SessionStart` (settings merge) | rides the hook — re-anchored every session | symlink (`~/.claude/skills`) |
-| Codex | `hooks-native` | `SessionStart` (`hooks.json`) | `~/.codex/AGENTS.md` (managed block, global) | symlink (`~/.agents/skills`, shared with OpenCode) |
-| OpenCode | `config-managed` | none | `opencode.json`'s `instructions` field (global) | symlink (`~/.agents/skills`, shared with Codex) |
-| Cursor | `agents-md-managed` | none | project `AGENTS.md` (context + project guidance combined in one managed block) + a redundant `.cursor/rules/awm.mdc` carrier (local only — no confirmed global file) | rendered `.mdc` (`~/.cursor/rules`) |
-| Copilot | `agents-md-managed` | none | project `AGENTS.md` (context + project guidance combined in one managed block, local only — Copilot is repo-scoped) | rendered `.instructions.md` (project-only — no global skill dir) |
-| Antigravity | `context-only` | none | none — no automated delivery mechanism | symlink (`~/.gemini/antigravity/skills`) |
-
-`hooks-native` re-anchors state at the start of every session — the strongest guarantee. `agents-md-managed` relies on the agent reading its managed AGENTS.md file on its own trigger, with no active re-anchor. `config-managed` is the same "no active re-anchor" reliability, but delivers via the agent's own config file (a JSON field) rather than the AGENTS.md convention — a materially different mechanism, so OpenCode gets its own tier rather than being folded into `agents-md-managed`. `context-only` means AWM has no automated way to hand context to that agent at all — skills still install, but nothing tells the agent to read them.
-
-Cursor and Copilot's `context.global` and `skills.global` doctor rows deliberately mean something narrower than they do for the other four providers: `context.global` reflects LOCAL (project) delivery, not a global file, since neither has a confirmed user-level AGENTS.md-equivalent; `skills.global` reports presence only (`rendered install — content integrity not verified`), because their skill format is real files (`.mdc` / `.instructions.md`), not symlinks, and AWM's symlink-integrity scan structurally cannot verify rendered content.
-
----
-
-## Chapter 5 — Extensibility: authoring content
-
-### 5.1 Registry layout
-
-A registry is a git repo with this directory structure:
-
-```
-<registry>/
-├── skills/
-│   └── <skill-name>/
-│       ├── SKILL.md          # required
-│       ├── scripts/          # optional helper scripts
-│       └── examples/         # optional implementation references
-├── bundles/
-│   └── <bundle-name>.json
-├── sensor-packs/
-│   └── <pack-name>/          # eslint/semgrep configs
-├── hooks/                    # agent hook files
-└── catalog.json              # registry manifest
+# Required only when the committed profile uses a non-baseline registry.
+awm registry add <team-registry-url> --no-install
+awm update
+awm sync
+awm doctor
+awm preflight
 ```
 
-### 5.2 Anatomy of a skill
+Document team registry URLs in the repository README or team operating notes:
+the profile can declare extension names and pins but does not contain credentials
+or invent a missing remote. The project setup guide explains what generated
+project files to review and commit.
 
-A skill is a `SKILL.md` file with a YAML frontmatter block and a Markdown body:
+## Author and release custom content
 
-```yaml
+Skills are Markdown instructions with a small frontmatter contract. Start a
+new skill with a clear trigger and keep references or scripts beside it:
+
+```md
 ---
 name: your-skill-name
-description: >
-  Short definition (1-3 sentences) explaining WHEN the agent should use this skill.
-  Written from the agent's perspective: "Use when…", "Invoke when…"
+description: Use when the agent needs to perform the named task.
 ---
 
-# Your Skill Title
-
-Detailed Markdown instructions. Use `<HARD-GATE>` XML tags to enforce strict rules on the agent.
+# Your skill title
 ```
 
-The `description` frontmatter is parsed by `awm list` to show the skill's purpose. Write it as a trigger: the agent reads it to decide when to invoke the skill.
+Group compatible skills into a bundle in `bundles/<bundle-name>.json`, declare
+that bundle in `catalog.json`, and test it in a target project before release.
+Use the `authoring` extension when available: it provides the content-authoring
+workflow rather than requiring authors to infer registry conventions.
 
-### 5.3 Anatomy of a workflow
+Release custom content deliberately:
 
-A workflow is a Markdown file under `skills/workflows/<name>.md`:
+1. Make and review the registry change.
+2. Commit and push it to the registry repository.
+3. Tag a semver version and push the tag.
+4. Update and sync a representative consumer project.
+5. Pin that version in the project profile when the rollout needs a fixed
+   contract.
 
-```yaml
----
-description: Short title describing what this workflow achieves
----
-
-# My Workflow Title
-
-1. Step one instructions.
-// turbo
-2. Step two instructions (`// turbo` tells the agent to auto-run this step's shell commands if safe).
-```
-
-The filename becomes the `/slash-command` used to invoke it.
-
-### 5.4 Defining bundles
-
-Bundles let users install a collection of skills in one shot instead of individually.
-
-Create `bundles/<bundle-name>.json`:
-
-```json
-{
-  "name": "domain-docs",
-  "description": "Essential skills for documenting domain service architectures.",
-  "artifacts": [
-    { "type": "skill", "name": "documenting-modules" },
-    { "type": "skill", "name": "business-documenting-modules" }
-  ]
-}
-```
-
-Then `awm add domain-docs` installs all artifacts. Declare bundles in `catalog.json` (see §4.2) so `awm init` can install them automatically.
-
-### 5.5 Releasing a version
-
-The team release cycle (connect this with §4.1):
-
-1. Author a skill (or fix an existing one) in the registry repo.
-2. Commit and push to the main branch.
-3. Tag the release: `git -c tag.gpgSign=false tag vX.Y.Z && git push --tags`
-4. Teammates run `awm update` — they receive the new version.
-
-The `git -c tag.gpgSign=false` flag suppresses GPG signing (not needed for registry tags, and avoids errors on machines without a signing key configured).
-
-The **stable channel** always resolves to the latest semver tag, so untagged commits on main are not distributed until you tag them. This gives you a staging area: merge your changes, then tag when you're ready to distribute.
-
-### 5.6 Mutation testing (opt-in)
-
-The `js-ts` sensor-pack ships a `mutation` sensor (Stryker) **disabled by default** (`enabled: false`): mutation runs are slow and noisy as a per-commit gate, so AWM treats them as an opt-in tool for critical paths.
-
-To enable it in a project, edit `.awm/sensors.json`:
-
-```json
-{
-  "sensors": {
-    "mutation": { "enabled": true }
-  }
-}
-```
-
-Keep only the `mutation` entry — the rest of the file stays as generated by `awm sensors init`. Scope Stryker to critical paths via its own config (`stryker.conf.json`) to keep run times manageable.
-
-Once enabled, mutation runs on every `awm sensors run` (the full gate). Use `awm sensors run --slow` to run only slow sensors (mutation + semgrep) and skip fast ones (typecheck, lint, test).
-
-### 5.7 Contributing to the default registries
-
-AWM ships two public registries:
-
-- [`awm-baseline-registry`](https://github.com/Kodria/awm-baseline-registry) — the baseline skill pack seeded by default on `awm init`
-- [`awm-documentation-registry`](https://github.com/Kodria/awm-documentation-registry) — documentation-focused skills (opt-in: `awm registry add https://github.com/Kodria/awm-documentation-registry.git`)
-
-To contribute, open a PR in the relevant registry repo. This CLI repo (`agentic-workflow-manager`) does **not** contain content — it only contains the CLI tool.
-
----
+For critical code paths, mutation testing can be enabled in the project's
+sensor manifest and then runs as part of the full sensor command. Keep it
+opt-in and scoped so normal development remains practical.
 
 ## Troubleshooting
 
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| `awm: command not found` | npm global bin not on PATH, or npm package not installed | `npm i -g agentic-workflow-manager` and ensure `npm bin -g` is on your `$PATH` |
-| `awm doctor` shows `✖ .awm/profile.json → awm init` right after `awm init` | (fixed) profile was not bootstrapped on zero-extension repos | `awm update` to get latest content, then `awm init` |
-| New session does not show `using-awm` in context | session opened before the wiring existed | Claude: `/clear` or restart · OpenCode: start a new session |
-| Sensors never run after an edit (Claude) | `PostToolUse` hook not installed | `awm sensors install` |
-| Sensors do not run after edits (OpenCode) | **by design** — OpenCode has no hooks | they run at the completion gate via `awm sensors run` |
-| `awm sensors status` says a tool is "not installed locally" | `npx` tool missing from devDependencies | `npm i -D <tool>` |
-| Sensor always red on a legacy repo | no baseline accepted yet | `awm sensors baseline` |
-| `DEGRADED` sensor that will not clear | config templated for a different tool version | ask the agent to run `setup-sensors` |
-| Gate reports `generic` / nothing ran on a real stack | stack appeared after `awm init` | `awm sensors init` to adopt the real pack — `awm sensors run` reports the drift (`packDrift`) but never rewrites the committed manifest, and never reports a false green |
-| A skill is not in the agent's catalog | baseline pack not installed | re-run `awm init` (installs the `dev` baseline) |
-| OpenCode is not receiving `CONSTITUTION.md` | repo-local `opencode.json` missing the entry | re-run `awm init --agent opencode` (it wires it when `CONSTITUTION.md` exists) |
-
----
+| Symptom | Action |
+|---|---|
+| `awm` is not found | Return to [installation](installation.md#install-or-upgrade-the-cli) and fix npm's global bin path. |
+| Registry add/update cannot authenticate | Verify `git clone <url>` in the same shell; use an SSH remote and a working agent for private content. |
+| A project extension is missing | Add its documented registry, run `awm update`, then `awm sync`. |
+| A provider's machine-only run deferred content | This is expected for project-only delivery; run `awm init --agent <provider>` inside the repository. |
+| `awm preflight` is degraded | Follow the named remedy, then run `awm sensors run` to collect actual check evidence. |
+| A legacy project always has findings | Review a full run and use `awm sensors baseline` only to record accepted pre-existing debt. |
+| A session lacks new context | Start a new provider session after normal initialization; see [agent-specific setup](agents-setup.md). |
+| An operation needs undoing | Find its transaction with `awm backup list`, then run `awm backup restore <transaction-id>`. |
 
 ## See also
 
-- [cli-reference.md](cli-reference.md) — full `awm` command surface and non-interactive flags.
-- [architecture.md](architecture.md) — how AWM routes artifacts between the registry and your local install.
+- [Installation](installation.md) — CLI and machine preparation.
+- [Configuration](configuration.md) — providers, defaults, and multiple-provider setup.
+- [Project setup](project-setup.md) — initialize or adopt a repository.
+- [CLI reference](cli-reference.md) — commands and flags.
