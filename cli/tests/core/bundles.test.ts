@@ -43,6 +43,16 @@ describe('readCatalog', () => {
         expect(entries.map((e) => e.name).sort()).toEqual(['dev', 'frontend']);
         expect(entries.find((e) => e.name === 'dev')!.scope).toBe('baseline');
     });
+
+    it('rejects a catalog symlink instead of reading outside the registry', () => {
+        const content = makeFixture();
+        const outside = path.join(path.dirname(content), 'outside-catalog.json');
+        fs.writeFileSync(outside, JSON.stringify({ bundles: [] }));
+        fs.rmSync(path.join(content, 'catalog.json'));
+        fs.symlinkSync(outside, path.join(content, 'catalog.json'));
+
+        expect(() => readCatalog(content)).toThrow(/symbolic link/);
+    });
 });
 
 describe('discoverBundles', () => {
@@ -61,6 +71,41 @@ describe('discoverBundles', () => {
     it('returns [] when catalog is missing', () => {
         const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-empty-'));
         expect(discoverBundles(empty)).toEqual([]);
+    });
+
+    it('rejects catalog sources that escape the registry content root', () => {
+        const content = makeFixture();
+        const outside = path.join(path.dirname(content), 'outside');
+        fs.mkdirSync(outside, { recursive: true });
+        fs.writeFileSync(path.join(outside, 'bundle.json'), JSON.stringify({ name: 'outside' }));
+        fs.writeFileSync(path.join(content, 'catalog.json'), JSON.stringify({
+            bundles: [{ name: 'outside', source: '../outside', version: '1.0.0', scope: 'project' }],
+        }));
+
+        expect(() => discoverBundles(content)).toThrow(/invalid bundle source/i);
+    });
+
+    it('rejects a bundle manifest symlink instead of reading outside the registry', () => {
+        const content = makeFixture();
+        const outside = path.join(path.dirname(content), 'outside-bundle.json');
+        fs.writeFileSync(outside, JSON.stringify({ name: 'outside' }));
+        fs.rmSync(path.join(content, 'bundles', 'dev', 'bundle.json'));
+        fs.symlinkSync(outside, path.join(content, 'bundles', 'dev', 'bundle.json'));
+
+        expect(() => discoverBundles(content)).toThrow(/symbolic link/);
+    });
+
+    it('rejects a catalog source that reaches a bundle through an intermediate symlink', () => {
+        const content = makeFixture();
+        const outside = path.join(path.dirname(content), 'outside-bundle');
+        fs.mkdirSync(outside, { recursive: true });
+        fs.writeFileSync(path.join(outside, 'bundle.json'), JSON.stringify({ name: 'outside' }));
+        fs.symlinkSync(outside, path.join(content, 'outside'));
+        fs.writeFileSync(path.join(content, 'catalog.json'), JSON.stringify({
+            bundles: [{ name: 'outside', source: 'outside', version: '1.0.0', scope: 'project' }],
+        }));
+
+        expect(() => discoverBundles(content)).toThrow(/symbolic link/);
     });
 });
 

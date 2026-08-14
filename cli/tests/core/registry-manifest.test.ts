@@ -59,6 +59,15 @@ describe('registry manifest (awm-registry.json)', () => {
         expect(() => readRegistryManifest(tmpWork)).toThrow(/awm-registry\.json/);
     });
 
+    it('rejects a manifest symlink instead of reading outside the registry', () => {
+        const outside = path.join(tmpHome, 'outside-manifest.json');
+        fs.writeFileSync(outside, JSON.stringify({ overrides: ['outside'] }));
+        fs.symlinkSync(outside, path.join(tmpWork, 'awm-registry.json'));
+        const { readRegistryManifest } = load();
+
+        expect(() => readRegistryManifest(tmpWork)).toThrow(/symbolic link/);
+    });
+
     it('throws when overrides is not an array of strings', () => {
         fs.writeFileSync(path.join(tmpWork, 'awm-registry.json'), JSON.stringify({ overrides: 'brainstorming' }));
         const { readRegistryManifest } = load();

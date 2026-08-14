@@ -44,4 +44,21 @@ describe('registry override status', () => {
         const { overrideStatus } = require('../../../src/commands/registry/status');
         expect(overrideStatus(team, [])).toEqual([]);
     });
+
+    it('registry list delegates discovery eligibility to the validated-roots guard', () => {
+        const source = fs.readFileSync(path.resolve(__dirname, '../../../src/commands/registry/index.ts'), 'utf8');
+        expect(source).toContain('const safeRoots = new Set(contentRoots());');
+        expect(source).toContain('if (!canDiscoverRegistryContent(r.contentRoot, safeRoots))');
+    });
+
+    it('prevents discovery when a registry root was excluded from validated roots', () => {
+        const { canDiscoverRegistryContent } = require('../../../src/commands/registry/status');
+        expect(canDiscoverRegistryContent('/unsafe/registry', new Set())).toBe(false);
+        expect(canDiscoverRegistryContent('/safe/registry', new Set(['/safe/registry']))).toBe(true);
+    });
+
+    it('registry list gives a recoverable instruction for an unsafe existing registry', () => {
+        const source = fs.readFileSync(path.resolve(__dirname, '../../../src/commands/registry/index.ts'), 'utf8');
+        expect(source).toContain("unsafe layout — remove the registry and add it again");
+    });
 });

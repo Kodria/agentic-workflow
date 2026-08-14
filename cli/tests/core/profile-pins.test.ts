@@ -9,7 +9,8 @@ const GIT = (cwd: string, cmd: string) =>
 
 function makeTaggedRepo(base: string, name: string, versions: string[]): string {
     const dir = path.join(base, name);
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(path.join(dir, 'skills'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'skills', '.keep'), 'fixture');
     GIT(dir, 'init -q -b main');
     fs.writeFileSync(path.join(dir, 'VERSION'), 'init');
     GIT(dir, 'add -A');

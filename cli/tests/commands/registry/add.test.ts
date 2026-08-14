@@ -7,16 +7,23 @@ import { execSync } from 'child_process';
 const GIT = (cwd: string, cmd: string) =>
     execSync(`git -c user.email=t@t.t -c user.name=t ${cmd}`, { cwd, stdio: 'pipe' });
 
-function makeSourceRepo(base: string, opts: { skill?: string; empty?: boolean; contentFile?: string; contentSymlink?: string }): string {
+function makeSourceRepo(base: string, opts: { skill?: string; empty?: boolean; contentFile?: string; contentSymlink?: string; nestedSkillSymlink?: string; nestedHookSymlink?: string }): string {
     const dir = path.join(base, `src-${opts.skill ?? 'empty'}`);
     fs.mkdirSync(dir, { recursive: true });
     if (opts.contentSymlink) {
         fs.symlinkSync(opts.contentSymlink, path.join(dir, 'skills'));
     } else if (opts.contentFile) {
         fs.writeFileSync(path.join(dir, opts.contentFile), 'not a content directory');
+    } else if (opts.nestedHookSymlink) {
+        fs.mkdirSync(path.join(dir, 'hooks'), { recursive: true });
+        fs.symlinkSync(opts.nestedHookSymlink, path.join(dir, 'hooks', 'session-start'));
     } else if (!opts.empty && opts.skill) {
         fs.mkdirSync(path.join(dir, 'skills', opts.skill), { recursive: true });
-        fs.writeFileSync(path.join(dir, 'skills', opts.skill, 'SKILL.md'), `---\nname: ${opts.skill}\ndescription: d\n---\n`);
+        if (opts.nestedSkillSymlink) {
+            fs.symlinkSync(opts.nestedSkillSymlink, path.join(dir, 'skills', opts.skill, 'SKILL.md'));
+        } else {
+            fs.writeFileSync(path.join(dir, 'skills', opts.skill, 'SKILL.md'), `---\nname: ${opts.skill}\ndescription: d\n---\n`);
+        }
     } else {
         fs.writeFileSync(path.join(dir, 'README.md'), 'no content dirs');
     }
@@ -130,6 +137,32 @@ describe('addRegistry', () => {
         expect(fs.existsSync(path.join(tmpHome, '.awm/registries/linked-content'))).toBe(false);
     });
 
+    it('rejects a nested artifact symlink before discovery can read it', async () => {
+        const outside = path.join(tmpWork, 'outside-skill.md');
+        fs.writeFileSync(outside, 'host-only content');
+        const source = makeSourceRepo(tmpWork, { skill: 'linked', nestedSkillSymlink: outside });
+        const { addRegistry } = require('../../../src/commands/registry/add');
+        const result = await addRegistry(source, 'nested-link');
+
+        expect(result.ok).toBe(false);
+        const { readRegistriesConfig } = require('../../../src/core/registries');
+        expect(readRegistriesConfig()).toEqual([]);
+        expect(fs.existsSync(path.join(tmpHome, '.awm/registries/nested-link'))).toBe(false);
+    });
+
+    it('rejects a nested hook symlink before capability consumers can use it', async () => {
+        const outside = path.join(tmpWork, 'outside-hook');
+        fs.writeFileSync(outside, 'host-only content');
+        const source = makeSourceRepo(tmpWork, { nestedHookSymlink: outside });
+        const { addRegistry } = require('../../../src/commands/registry/add');
+        const result = await addRegistry(source, 'nested-hook-link');
+
+        expect(result.ok).toBe(false);
+        const { readRegistriesConfig } = require('../../../src/core/registries');
+        expect(readRegistriesConfig()).toEqual([]);
+        expect(fs.existsSync(path.join(tmpHome, '.awm/registries/nested-hook-link'))).toBe(false);
+    });
+
     it('is atomic: artifact collision with existing configured registry → no config, cleanup, error names both', async () => {
         // First registry already registered with the 'alpha' skill
         const source1 = path.join(tmpWork, 'src-alpha-1');
@@ -170,6 +203,18 @@ describe('addRegistry', () => {
         expect(result.error).toMatch(/Invalid registry name/);
         const { readRegistriesConfig } = require('../../../src/core/registries');
         expect(readRegistriesConfig()).toEqual([]);
+    });
+
+    it.each(['', '..', 'bad..name', 'a/b', 'a\\b'])('rejects unsafe registry name %s without cloning or writing config', async (name) => {
+        const source = makeSourceRepo(tmpWork, { skill: 'alpha' });
+        const { addRegistry } = require('../../../src/commands/registry/add');
+        const result = await addRegistry(source, name);
+
+        expect(result.ok).toBe(false);
+        expect(result.error).toMatch(/Invalid registry name/);
+        const { readRegistriesConfig } = require('../../../src/core/registries');
+        expect(readRegistriesConfig()).toEqual([]);
+        expect(fs.existsSync(path.join(tmpHome, '.awm/registries', name))).toBe(false);
     });
 
     it('rejects duplicate registry name and clone failure without writing config', async () => {

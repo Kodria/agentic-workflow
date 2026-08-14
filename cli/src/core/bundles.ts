@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { Scope } from '../providers';
-import { contentRoots, readRegistryManifest } from './registries';
+import { assertRegularRegistryFile, contentRoots, readRegistryManifest } from './registries';
 
 export type BundleScope = 'baseline' | 'project' | 'ambient';
 export type BundleVisibility = 'public' | 'private';
@@ -39,6 +39,39 @@ function catalogPath(contentDir: string): string {
     return path.join(contentDir, 'catalog.json');
 }
 
+function bundleManifestPath(contentDir: string, source: string): string {
+    const root = path.resolve(contentDir);
+    const manifest = path.resolve(root, source, 'bundle.json');
+    const relative = path.relative(root, manifest);
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        throw new Error(`Invalid bundle source "${source}" in ${catalogPath(contentDir)}: it must remain inside the registry content root.`);
+    }
+    let rootStat: fs.Stats;
+    try {
+        rootStat = fs.lstatSync(root);
+    } catch (error) {
+        throw new Error(`Cannot inspect registry content root ${root}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+        throw new Error(`Registry content root ${root} must be a regular directory`);
+    }
+    let current = root;
+    for (const segment of relative.split(path.sep)) {
+        current = path.join(current, segment);
+        let stat: fs.Stats;
+        try {
+            stat = fs.lstatSync(current);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') break;
+            throw new Error(`Cannot inspect registry bundle path ${current}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        if (stat.isSymbolicLink()) {
+            throw new Error(`Registry bundle path ${current} must not be a symbolic link`);
+        }
+    }
+    return manifest;
+}
+
 /** Lee `catalog.json` de un registry.
  *
  *  El contenido de un registry es INPUT NO CONFIABLE (un registry de equipo,
@@ -51,7 +84,7 @@ function catalogPath(contentDir: string): string {
  *  dos eran los que faltaban. */
 export function readCatalog(contentDir: string): CatalogEntry[] {
     const file = catalogPath(contentDir);
-    if (!fs.existsSync(file)) return [];
+    if (!assertRegularRegistryFile(file)) return [];
     let parsed: unknown;
     try {
         parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
@@ -96,8 +129,8 @@ export function discoverBundles(contentDir: string): BundleDefinition[] {
     const entries = readCatalog(contentDir);
     const bundles: BundleDefinition[] = [];
     for (const entry of entries) {
-        const manifestPath = path.join(contentDir, entry.source, 'bundle.json');
-        if (!fs.existsSync(manifestPath)) continue;
+        const manifestPath = bundleManifestPath(contentDir, entry.source);
+        if (!assertRegularRegistryFile(manifestPath)) continue;
         let raw: unknown;
         try {
             raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));

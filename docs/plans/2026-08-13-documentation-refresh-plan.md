@@ -1,4 +1,5 @@
 # AWM Documentation Refresh Implementation Plan
+<!-- awm-qa-complete: 2026-08-14 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
@@ -48,6 +49,16 @@ The implementation is serial. Several tasks update the same navigation links and
 - `docs/research/`
 - `docs/harness-retros.md`
 - `.awm/ledger/` and other harness-owned evidence
+
+### QA remediation closure
+
+The final QA pass found trust-boundary defects in the registry reader and synchronizer.
+They are included in this PR as required security corrections, rather than deferred from
+a documentation change that directly teaches custom-registry configuration. The remediation
+rejects unsafe registry names, symlinked or traversal-based registry content, and a sync
+failure that would otherwise let a command reconcile against unusable content. Its scope is
+limited to the registry trust boundary and its regression tests; it does not introduce a
+new registry feature or alter the documented provider/onboarding journeys.
 
 ## Verification order
 
@@ -530,7 +541,9 @@ cd cli
 npx jest tests/structural/active-documentation.test.ts --runInBand
 ```
 
-Expected: Git reports `rename docs/{sdlc.md => framework.md}` and the link checker has no `sdlc.md` failure.
+Expected: Git reports either the explicit rename or an add/delete pair when the final rewrite
+falls below Git's similarity threshold; `git log --follow` must retain the pre-branch history
+through the explicit rename commit, and the link checker has no `sdlc.md` failure.
 
 - [x] **Step 5: Commit**
 
@@ -933,7 +946,9 @@ git diff --summary origin/main...HEAD -- docs/sdlc.md docs/framework.md
 git log --follow --oneline -- docs/framework.md | head
 ```
 
-Expected: Git detects the rename and `git log --follow` includes history predating this branch.
+Expected: Git detects the rename or reports an add/delete pair for the heavily rewritten final
+content; in both cases `git log --follow` includes history predating this branch through the
+explicit rename commit.
 
 - [x] **Step 5: Fix only concrete audit findings and commit**
 

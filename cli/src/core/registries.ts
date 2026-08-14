@@ -23,6 +23,10 @@ export function registriesConfigPath(): string {
 }
 
 export const CONTENT_DIR_NAMES = ['skills', 'bundles', 'workflows', 'agents'] as const;
+export const CAPABILITY_DIR_NAMES = ['hooks', 'sensor-packs'] as const;
+export const REGISTRY_DIR_NAMES = [...CONTENT_DIR_NAMES, ...CAPABILITY_DIR_NAMES] as const;
+export const REGISTRY_MANIFEST_NAME = 'awm-registry.json';
+export const REGISTRY_METADATA_FILE_NAMES = [REGISTRY_MANIFEST_NAME, 'catalog.json'] as const;
 
 export interface RegistryEntry {
     name: string;
@@ -35,7 +39,7 @@ export interface RegistrySource extends RegistryEntry {
 
 export function registryContentRoot(name: string): string {
     const root = path.join(registriesDir(), name);
-    if (!path.resolve(root).startsWith(path.resolve(registriesDir()) + path.sep)) {
+    if (!name || name === '.' || name.includes('..') || /[/\\]/.test(name) || !path.resolve(root).startsWith(path.resolve(registriesDir()) + path.sep)) {
         throw new Error(`Invalid registry name "${name}" — must not contain path separators`);
     }
     return root;
@@ -60,7 +64,7 @@ export function readRegistriesConfig(): RegistryEntry[] {
                 `Invalid registries config at ${registriesConfigPath()}: malformed entry ${JSON.stringify(entry)}`
             );
         }
-        if (entry.name === '.' || entry.name.includes('/') || entry.name.includes('\\') || entry.name.includes('..')) {
+        if (!entry.name || entry.name === '.' || entry.name.includes('/') || entry.name.includes('\\') || entry.name.includes('..')) {
             throw new Error(
                 `Invalid registries config at ${registriesConfigPath()}: malformed entry name "${entry.name}" (path traversal)`
             );
@@ -92,7 +96,7 @@ export function listRegistries(): RegistrySource[] {
 export function contentRoots(): string[] {
     const roots: string[] = [];
     for (const reg of listRegistries()) {
-        if (fs.existsSync(reg.contentRoot)) roots.push(reg.contentRoot);
+        if (isSafeRegistryRoot(reg.contentRoot)) roots.push(reg.contentRoot);
     }
     return roots;
 }
@@ -101,21 +105,113 @@ export function contentRoots(): string[] {
  *  directorio pedido ('hooks', 'sensor-packs', 'skills'…). null si ninguno. */
 export function capabilityRoot(dirName: string): string | null {
     for (const root of contentRoots()) {
-        if (fs.existsSync(path.join(root, dirName))) return root;
+        if (isRegularDirectory(path.join(root, dirName))) return root;
     }
     return null;
 }
 
-/** Un registry válido tiene ≥1 dir de contenido en su raíz. */
-export function validateRegistryLayout(root: string): boolean {
-    return CONTENT_DIR_NAMES.some((d) => {
+/** Todo symlink bajo directorios consumidos de un registry es no confiable: discovery,
+ *  hooks y sensores no pueden consumir contenido que podría resolver fuera del clone. */
+function containsManagedSymlink(dir: string): boolean {
+    let entries: fs.Dirent[];
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+        return true;
+    }
+    for (const entry of entries) {
+        const candidate = path.join(dir, entry.name);
+        let stat: fs.Stats;
+        try {
+            stat = fs.lstatSync(candidate);
+        } catch {
+            return true;
+        }
+        if (stat.isSymbolicLink()) return true;
+        if (stat.isDirectory() && containsManagedSymlink(candidate)) return true;
+    }
+    return false;
+}
+
+function isMissing(error: unknown): boolean {
+    return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
+}
+
+function isRegularDirectory(candidate: string): boolean {
+    try {
+        const stat = fs.lstatSync(candidate);
+        return stat.isDirectory() && !stat.isSymbolicLink();
+    } catch {
+        return false;
+    }
+}
+
+function isSafeOptionalRegistryFile(candidate: string): boolean {
+    try {
+        const stat = fs.lstatSync(candidate);
+        return stat.isFile() && !stat.isSymbolicLink();
+    } catch (error) {
+        return isMissing(error);
+    }
+}
+
+/** Returns false when absent; throws when an existing registry metadata file cannot be
+ * safely read as a regular file. Kept public so catalog and manifest readers share the
+ * same trust boundary instead of relying only on an earlier layout scan. */
+export function assertRegularRegistryFile(file: string): boolean {
+    let stat: fs.Stats;
+    try {
+        stat = fs.lstatSync(file);
+    } catch (error) {
+        if (isMissing(error)) return false;
+        throw new Error(`Cannot inspect registry metadata at ${file}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (stat.isSymbolicLink()) throw new Error(`Registry metadata at ${file} must not be a symbolic link`);
+    if (!stat.isFile()) throw new Error(`Registry metadata at ${file} must be a regular file`);
+    return true;
+}
+
+/** Verifica que la raíz y cada directorio que AWM consume sean regulares y no tengan
+ *  symlinks anidados. Los registries capability-only siguen siendo válidos. */
+function inspectRegistrySafety(root: string): { safe: boolean; hasManagedDirectory: boolean } {
+    if (!isRegularDirectory(root)) return { safe: false, hasManagedDirectory: false };
+    let hasManagedDirectory = false;
+    for (const d of REGISTRY_DIR_NAMES) {
         const candidate = path.join(root, d);
         try {
-            return fs.lstatSync(candidate).isDirectory();
-        } catch {
-            return false;
+            const stat = fs.lstatSync(candidate);
+            if (stat.isSymbolicLink()) return { safe: false, hasManagedDirectory: false };
+            if (!stat.isDirectory()) continue;
+            hasManagedDirectory = true;
+            if (containsManagedSymlink(candidate)) return { safe: false, hasManagedDirectory: false };
+        } catch (error) {
+            if (isMissing(error)) continue;
+            return { safe: false, hasManagedDirectory: false };
         }
-    });
+    }
+    for (const file of REGISTRY_METADATA_FILE_NAMES) {
+        if (!isSafeOptionalRegistryFile(path.join(root, file))) {
+            return { safe: false, hasManagedDirectory: false };
+        }
+    }
+    return { safe: true, hasManagedDirectory };
+}
+
+export function isSafeRegistryRoot(root: string): boolean {
+    return inspectRegistrySafety(root).safe;
+}
+
+/** Un registry válido tiene ≥1 directorio de contenido o capability regular y ningún
+ *  symlink en las rutas que AWM consume. */
+export function validateRegistryLayout(root: string): boolean {
+    const state = inspectRegistrySafety(root);
+    return state.safe && state.hasManagedDirectory;
+}
+
+/** Whether machine setup must synchronize before any registry-backed discovery.
+ * An empty root is safe to keep configured, but cannot yet supply AWM content. */
+export function registriesNeedSync(): boolean {
+    return listRegistries().some((registry) => !validateRegistryLayout(registry.contentRoot));
 }
 
 export type RegistrySyncResult =
@@ -129,6 +225,9 @@ export async function syncRegistries(): Promise<RegistrySyncResult[]> {
     for (const reg of listRegistries()) {
         try {
             const freshClone = !fs.existsSync(reg.contentRoot);
+            if (!freshClone && !isSafeRegistryRoot(reg.contentRoot)) {
+                throw new Error(`Unsafe registry layout at ${reg.contentRoot}`);
+            }
             if (freshClone) {
                 fs.mkdirSync(registriesDir(), { recursive: true });
                 try {
@@ -146,6 +245,9 @@ export async function syncRegistries(): Promise<RegistrySyncResult[]> {
                 resolved = await resolveTargetRef(reg.contentRoot, machineVersionOpts(reg.name));
                 await git.checkout(resolved.ref);
                 if (resolved.kind !== 'tag') await git.pull('origin', resolved.ref);
+                if (!validateRegistryLayout(reg.contentRoot)) {
+                    throw new Error(`Unsafe registry layout at ${reg.contentRoot}`);
+                }
             } catch (e) {
                 if (freshClone) fs.rmSync(reg.contentRoot, { recursive: true, force: true });
                 throw e;
@@ -177,13 +279,14 @@ export function describeRegistrySyncErrors(errors: { name: string; error: string
 }
 
 /**
- * Registries that both errored during sync AND have no content on disk
- * afterwards — i.e. genuinely unusable, as opposed to merely stale.
+ * Registries that both errored during sync AND no longer have a usable content
+ * layout afterwards — i.e. genuinely unusable, as opposed to merely stale.
  *
  * `syncRegistries()` deliberately reports per-registry failures as results
  * rather than throwing, so a flaky secondary registry never aborts a whole
  * run. Callers that go on to READ registry content (init) still need to know
- * whether what they are about to read exists: otherwise a missing registry
+ * whether what they are about to read remains usable: otherwise a missing,
+ * empty, or unsafe registry
  * resurfaces much later as an unrelated step's failure, with its real cause
  * already discarded. Note that "usable" is deliberately about content on disk,
  * not about being a healthy git clone — a seeded content root with no `.git`
@@ -197,7 +300,7 @@ export function unusableSyncedRegistries(
     const roots = new Map(listRegistries().map((r) => [r.name, r.contentRoot]));
     return errors.filter((e) => {
         const root = roots.get(e.name);
-        return root === undefined || !fs.existsSync(root);
+        return root === undefined || !validateRegistryLayout(root);
     });
 }
 
@@ -206,11 +309,9 @@ export function assertSyncedRegistriesUsable(results: RegistrySyncResult[]): voi
     const unusable = unusableSyncedRegistries(results);
     if (unusable.length === 0) return;
     throw new Error(
-        `registry sync failed and left no content on disk — ${describeRegistrySyncErrors(unusable)}`,
+        `registry sync failed and left no usable content on disk — ${describeRegistrySyncErrors(unusable)}`,
     );
 }
-
-export const REGISTRY_MANIFEST_NAME = 'awm-registry.json';
 
 export interface RegistryManifest {
     /** Nombres de artifacts que este registry puede sobreescribir de roots anteriores. */
@@ -221,7 +322,7 @@ export interface RegistryManifest {
 
 export function readRegistryManifest(root: string): RegistryManifest {
     const file = path.join(root, REGISTRY_MANIFEST_NAME);
-    if (!fs.existsSync(file)) return { overrides: new Set() };
+    if (!assertRegularRegistryFile(file)) return { overrides: new Set() };
     let raw: unknown;
     try {
         raw = JSON.parse(fs.readFileSync(file, 'utf-8'));

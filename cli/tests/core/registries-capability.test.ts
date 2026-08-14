@@ -45,4 +45,16 @@ describe('capabilityRoot', () => {
         m.writeRegistriesConfig([]);
         expect(m.capabilityRoot('hooks')).toBeNull();
     });
+
+    it('ignora una capability que no es un directorio y selecciona la primera regular', () => {
+        const m = require('../../src/core/registries');
+        const aRoot = path.join(tmpHome, '.awm', 'registries', 'a');
+        const bRoot = path.join(tmpHome, '.awm', 'registries', 'b');
+        fs.mkdirSync(aRoot, { recursive: true });
+        fs.writeFileSync(path.join(aRoot, 'hooks'), 'not a directory');
+        fs.mkdirSync(path.join(bRoot, 'hooks'), { recursive: true });
+        m.writeRegistriesConfig([{ name: 'a', remote: 'x' }, { name: 'b', remote: 'y' }]);
+
+        expect(m.capabilityRoot('hooks')).toBe(bRoot);
+    });
 });

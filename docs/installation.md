@@ -44,8 +44,13 @@ Upgrade the CLI through npm:
 npm i -g agentic-workflow-manager@latest
 ```
 
-`awm update` refreshes registry content. It does not upgrade the CLI; the two
-version streams are intentionally independent.
+`awm update` always refreshes registry content. When it detects a newer published
+CLI, it can also offer the npm self-update; pass `--yes` to accept that update in a
+non-interactive run. The explicit alternative remains:
+
+```bash
+npm i -g agentic-workflow-manager@latest
+```
 
 ## Operating-system setup
 

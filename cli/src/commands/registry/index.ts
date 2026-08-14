@@ -10,7 +10,7 @@ import { reconcileAllSkillLinks } from '../../core/skill-integrity';
 import { regenerateGlobalContext } from '../../core/context/regenerate';
 import { addRegistry } from './add';
 import { removeRegistry } from './remove';
-import { overrideStatus } from './status';
+import { canDiscoverRegistryContent, overrideStatus } from './status';
 import { getPreferences } from '../../utils/config';
 import { findProjectRoot } from '../../core/profile';
 import { AGENT_TARGETS, AgentTarget } from '../../providers';
@@ -99,6 +99,7 @@ export function registerRegistryCommand(program: Command): void {
                 console.log(pc.dim('No additional registries. Add one with `awm registry add <git-url>`.'));
                 return;
             }
+            const safeRoots = new Set(contentRoots());
             const earlier: string[] = [];
             for (const r of regs) {
                 if (!fs.existsSync(r.contentRoot)) {
@@ -106,6 +107,10 @@ export function registerRegistryCommand(program: Command): void {
                     // Push before continue so overrides declared against this missing registry
                     // are correctly shown as "sin efecto" (orphan) rather than "active".
                     earlier.push(r.contentRoot);
+                    continue;
+                }
+                if (!canDiscoverRegistryContent(r.contentRoot, safeRoots)) {
+                    console.log(`${pc.cyan(r.name)}  ${r.remote}  ${pc.yellow("unsafe layout — remove the registry and add it again")}`);
                     continue;
                 }
                 try {
