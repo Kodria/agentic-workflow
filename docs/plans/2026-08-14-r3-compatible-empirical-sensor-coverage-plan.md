@@ -404,7 +404,7 @@ _Requirements: R2.3, R2.4, R2.5, R2.6, R6.1, R6.2, R6.3, R7.2_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tests rojos de materialización y preservación**
+- [x] **Step 1: Escribir tests rojos de materialización y preservación**
 
 ```ts
 test('copies only selected assets and writes manifest v2 atomically (R2.3)', async () => {
@@ -432,17 +432,17 @@ test('reports old AWM asset as orphaned and never deletes it (R2.5)', async () =
 });
 ```
 
-- [ ] **Step 2: Ejecutar tests rojos**
+- [x] **Step 2: Ejecutar tests rojos**
 
 Run: `cd cli && npx jest tests/commands/sensors/compatibility/materialize.test.ts tests/commands/sensors/init.test.ts --runInBand`
 
 Expected: FAIL por materializador inexistente y manifest legacy actual.
 
-- [ ] **Step 3: Implementar materialización transaccional**
+- [x] **Step 3: Implementar materialización transaccional**
 
 `materializeResolvedSensors` valida root/paths, calcula assets desde la variante, usa archivos temporales+rename para cada asset y manifest, y hace rollback best-effort de archivos que creó si falla antes del commit del manifest. Un destino existente jamás se reemplaza. Huérfanos se derivan de `initializedAssets` del manifest previo y solo se reportan.
 
-- [ ] **Step 4: Reescribir `initSensors` como orquestador async del resolver**
+- [x] **Step 4: Reescribir `initSensors` como orquestador async del resolver**
 
 ```ts
 export async function initSensors(opts: InitOptions = {}): Promise<InitResult> {
@@ -459,7 +459,7 @@ export async function initSensors(opts: InitOptions = {}): Promise<InitResult> {
 
 Un manifest corrupto o future-version falla sin sobrescribir. `--no-configure` escribe selección/evidencia, pero no assets. Pack ausente conserva el fallback honesto actual.
 
-- [ ] **Step 5: Escribir tests rojos de revalidación compartida**
+- [x] **Step 5: Escribir tests rojos de revalidación compartida**
 
 ```ts
 test.each(['status', 'preflight', 'run'] as const)('%s re-resolves live drift (R2.6, R6.2, R6.3)', async (consumer) => {
@@ -477,11 +477,11 @@ test('run never dispatches a known incompatible command (R6.3)', async () => {
 });
 ```
 
-- [ ] **Step 6: Integrar status, preflight y run sin cambiar sus propietarios**
+- [x] **Step 6: Integrar status, preflight y run sin cambiar sus propietarios**
 
 `computeSensorStatus` traduce resolver state: certified sano; compatible-unverified/unverifiable degradado; incompatible/missing-tool degradado; not-applicable informativo. `checkTools` consume ese resultado. `runSensors` parsea manifest por la frontera única, re-resuelve, ejecuta v2 con `runStructuredCommand`, expande `{files}` como argumentos separados y ejecuta legacy con `runCommand`, siempre degradando la certificación legacy.
 
-- [ ] **Step 7: Probar read-only y regresión completa dirigida**
+- [x] **Step 7: Probar read-only y regresión completa dirigida**
 
 Run:
 
@@ -493,7 +493,7 @@ npm run typecheck
 
 Expected: PASS. Mutación: retirar la revalidación de `run`; `variant-drift` debe quedar rojo. Restaurar.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add cli/src/commands/sensors cli/src/commands/preflight/checks.ts cli/src/core/init/steps.ts cli/tests/commands/sensors cli/tests/commands/preflight/preflight.test.ts
