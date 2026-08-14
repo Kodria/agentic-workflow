@@ -10,7 +10,7 @@
 
 **Tech Stack:** Markdown, TypeScript 5.9, Commander, Jest 30, Node.js 22, npm, GitHub Actions.
 
-**Modo de ejecución:** interactivo
+**Modo de ejecución:** desatendido
 
 ---
 
