@@ -303,6 +303,44 @@ describe('initSensors', () => {
         }
     });
 
+    it('preserves enabled and fast choices when a valid v2 manifest is re-initialized', async () => {
+        const v2Registry = makeV2Registry();
+        try {
+            fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ devDependencies: { eslint: '^10.0.0' } }));
+            fs.mkdirSync(path.join(tmpDir, 'node_modules', 'eslint'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version: '10.0.0' }));
+            await initSensors({ cwd: tmpDir, registryRoot: v2Registry });
+            const manifestPath = path.join(tmpDir, '.awm', 'sensors.json');
+            const selected = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+            selected.sensors.lint.enabled = false;
+            selected.sensors.lint.fast = true;
+            fs.writeFileSync(manifestPath, JSON.stringify(selected));
+
+            await initSensors({ cwd: tmpDir, registryRoot: v2Registry });
+
+            const written = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+            expect(written.sensors.lint).toMatchObject({ enabled: false, fast: true, variantId: 'eslint-10' });
+        } finally {
+            fs.rmSync(v2Registry, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects a symlinked v2 pack source instead of reading it through init', async () => {
+        const v2Registry = makeV2Registry();
+        try {
+            const packPath = path.join(v2Registry, 'sensor-packs', 'js-ts', 'pack.json');
+            const outside = path.join(v2Registry, 'outside-pack.json');
+            fs.renameSync(packPath, outside);
+            fs.symlinkSync(outside, packPath);
+            fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
+
+            await expect(initSensors({ cwd: tmpDir, registryRoot: v2Registry })).rejects.toThrow(/symbolic|regular|contain/i);
+            expect(fs.existsSync(path.join(tmpDir, '.awm', 'sensors.json'))).toBe(false);
+        } finally {
+            fs.rmSync(v2Registry, { recursive: true, force: true });
+        }
+    });
+
     it('migrates legacy overrides explicitly without silently certifying or re-enabling them', async () => {
         const v2Registry = makeV2Registry();
         try {
