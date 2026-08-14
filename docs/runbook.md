@@ -223,27 +223,15 @@ git push --tags
 
 ## Onboard another developer
 
-The new developer should follow the two-stage sequence, not copy a teammate's
-provider directories:
+Have each developer follow [installation](installation.md), choose their
+provider in [configuration](configuration.md), and use the cloned-project path
+in [project setup](project-setup.md#clone-a-repository-that-already-uses-awm).
+Do not copy another developer's provider directories.
 
-```bash
-# Prepare their own provider and CLI first (see installation/configuration).
-git clone <project-url>
-cd <project>
-awm init --agent <provider>
-
-# Required only when the committed profile uses a non-baseline registry.
-awm registry add <team-registry-url> --no-install
-awm update
-awm sync
-awm doctor
-awm preflight
-```
-
-Document team registry URLs in the repository README or team operating notes:
-the profile can declare extension names and pins but does not contain credentials
-or invent a missing remote. The project setup guide explains what generated
-project files to review and commit.
+Document non-baseline registry URLs in the repository README or team operating
+notes. The profile can declare extension names and pins but does not contain
+credentials or invent a missing remote; add the documented registry before
+running the project-setup synchronization step.
 
 ## Author and release custom content
 

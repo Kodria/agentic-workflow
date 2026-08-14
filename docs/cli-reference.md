@@ -18,9 +18,8 @@ the [runbook](runbook.md) covers ongoing operations.
 
 ### `awm init`
 
-Bootstraps AWM for one provider per run. Without `--agent`, a fresh machine uses
-`claude-code`; subsequent commands use the configured default unless an agent is
-explicit. A normal run can reconcile both machine state and the current project.
+Bootstraps AWM for one provider per run. Without `--agent`, it targets
+`claude-code`. A normal run can reconcile both machine state and the current project.
 For the lifecycle and provider choices, see [configuration](configuration.md).
 
 ```
@@ -29,7 +28,7 @@ awm init [--agent <agent>] [--machine-only] [--yes] [--json]
 
 | Flag | Description |
 |---|---|
-| `-a, --agent <agent>` | Target one provider for this run. On a fresh machine, the default is `claude-code`. |
+| `-a, --agent <agent>` | Target one provider for this run. Without this flag, init targets `claude-code`. |
 | `--machine-only` | Run only machine-level steps and exclude **every** project-scoped write. Providers without global delivery defer their content until normal project initialization; AWM does not write project files to work around that limitation. |
 | `-y, --yes` | Skip confirmation prompts (for scripts). |
 | `--json` | Emit the full `InitOutcome` as JSON instead of the rendered report — on success **and** on failure. |
