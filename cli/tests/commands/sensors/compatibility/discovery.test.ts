@@ -45,6 +45,22 @@ describe('discoverProjectEvidence', () => {
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
 
+    it('does not report package.json as evidence when the project has none', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-discovery-no-package-'));
+        try {
+            fs.writeFileSync(path.join(root, 'pyproject.toml'), '[project]\nname = "sample"');
+            const evidence = discoverProjectEvidence(root, {
+                schemaVersion: 2,
+                name: 'python',
+                detects: ['pyproject.toml'],
+                sensors: {
+                    lint: { applicability: { allFiles: ['package.json'] }, variants: [{ requirements: { tool: 'ruff', configFiles: [] } }] },
+                },
+            } as any);
+            expect(evidence.paths).not.toContain('package.json');
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
     test.each([
         ['linux', ['.venv', 'lib', 'python3.12', 'site-packages']],
         ['win32', ['.venv', 'Lib', 'site-packages']],

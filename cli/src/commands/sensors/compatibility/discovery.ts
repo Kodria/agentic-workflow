@@ -162,6 +162,6 @@ export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependen
     return {
         cwd: root, os: targetPlatform, runtimeVersions: { node: process.versions.node ?? null, ...(environment ? { python: environment.runtimeVersion } : {}) }, declaredToolRanges, toolVersions,
         packageManager: declaredManager ?? (lockManagers.size === 1 ? [...lockManagers][0] : null), packageManagerConflict: lockManagers.size > 1,
-        scripts, configFiles, paths: [...new Set(['package.json', ...locks, ...configFiles])].sort(),
+        scripts, configFiles, paths: [...new Set([...(safeFile(root, 'package.json') ? ['package.json'] : []), ...locks, ...configFiles])].sort(),
     };
 }
