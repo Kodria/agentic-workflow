@@ -93,7 +93,7 @@ function assertEmpirical(value: unknown, renderer: string): void {
             || !isNonBlankString(item.defectClass) || !isOneOf(item.severity, SEVERITY) || !isOneOf(item.outcome, EMPIRICAL_OUTCOME)
             || typeof item.recurrent !== 'boolean') invalidReport(renderer);
         assertCount(item.occurrences, renderer); assertCount(item.omittedEvidenceRefs, renderer); assertRefs(item.evidenceRefs, renderer);
-        if (item.occurrences < 1 || previous > item.defectClass) invalidReport(renderer);
+        if (item.occurrences < 1 || item.recurrent !== (item.occurrences >= value.recurrenceThreshold) || previous > item.defectClass) invalidReport(renderer);
         previous = item.defectClass; occurrenceCount += item.occurrences;
     }
     if (!hasExactFields(value.unclassified, ['occurrences', 'evidenceRefs', 'omittedEvidenceRefs'])) invalidReport(renderer);
@@ -107,11 +107,18 @@ function assertEmpirical(value: unknown, renderer: string): void {
     const unclassifiedOccurrences = value.unclassified.occurrences as number;
     const omitted = value.omittedEvidenceRefs as number;
     if (validFindings !== occurrenceCount + unclassifiedOccurrences || validEntries < validFindings) invalidReport(renderer);
-    const hasSkips = skippedFindings > 0 || omitted > 0 || unclassifiedOccurrences > 0;
-    if (value.status === 'no-evidence' && (validFindings !== 0 || hasSkips || value.classes.length !== 0)) invalidReport(renderer);
-    if (value.status === 'evidence' && (validFindings === 0 || hasSkips)) invalidReport(renderer);
-    if (value.status === 'partial' && (validFindings === 0 || !hasSkips)) invalidReport(renderer);
-    if (value.status === 'inconclusive' && (validFindings !== 0 || !hasSkips || value.classes.length !== 0 || unclassifiedOccurrences !== 0)) invalidReport(renderer);
+    const skippedByReason = Object.values(value.sources.skippedByReason) as number[];
+    const totalSkippedByReason = skippedByReason.reduce((total, count) => total + count, 0);
+    if (skippedFindings !== totalSkippedByReason) invalidReport(renderer);
+    const classOmitted = value.classes.reduce((total, item) => total + (item.omittedEvidenceRefs as number), 0);
+    const unclassifiedOmitted = value.unclassified.omittedEvidenceRefs as number;
+    const scannerOmitted = (value.sources.skippedByReason['evidence-ref-limit'] ?? 0) as number;
+    if (omitted !== scannerOmitted + classOmitted + unclassifiedOmitted) invalidReport(renderer);
+    const incomplete = skippedFindings + omitted + unclassifiedOccurrences;
+    const expectedStatus = validFindings === 0
+        ? incomplete === 0 ? 'no-evidence' : 'inconclusive'
+        : incomplete === 0 ? 'evidence' : 'partial';
+    if (value.status !== expectedStatus) invalidReport(renderer);
 }
 
 function assertCoverageEnvelope(report: unknown, renderer: string): asserts report is CoverageEnvelope {

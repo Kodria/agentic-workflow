@@ -13,6 +13,14 @@ const report = {
     ] },
 };
 
+const empiricalEvidence = {
+    recurrenceThreshold: 2, status: 'evidence' as const,
+    classes: [{ defectClass: 'lint-errors', occurrences: 1, recurrent: false, severity: 'important' as const, outcome: 'gap' as const, evidenceRefs: ['src/a.ts:1'], omittedEvidenceRefs: 0 }],
+    unclassified: { occurrences: 0, evidenceRefs: [], omittedEvidenceRefs: 0 },
+    sources: { activeFiles: 1, archivedFiles: 0, validEntries: 1, validFindings: 1, skippedFindings: 0, skippedByReason: {} },
+    omittedEvidenceRefs: 0,
+};
+
 test('human output shows every non-green class, remedy and totals without raw evidence (R2.8)', () => {
     const human = renderCoverageHuman(report);
     expect(human).toBe([
@@ -105,6 +113,43 @@ test('renders recurrence emphasis and rejects the retired complete empirical sta
     };
     expect(renderCoverageHuman({ ...report, empirical })).toContain('recurrent at threshold 2');
     expect(() => renderCoverageJson({ ...report, empirical: { ...empirical, status: 'complete' } })).toThrow('invalid report');
+});
+
+test.each([
+    ['a recurrence flag that disagrees with its threshold', {
+        ...empiricalEvidence,
+        classes: [{ ...empiricalEvidence.classes[0], recurrent: true }],
+    }],
+    ['a skipped finding total that disagrees with its reason totals', {
+        ...empiricalEvidence,
+        status: 'partial' as const,
+        sources: { ...empiricalEvidence.sources, skippedFindings: 2, skippedByReason: { 'invalid-json': 1 } },
+    }],
+    ['an omitted evidence total that disagrees with its component omissions', {
+        ...empiricalEvidence,
+        status: 'partial' as const,
+        sources: { ...empiricalEvidence.sources, skippedFindings: 1, skippedByReason: { 'evidence-ref-limit': 1 } },
+    }],
+    ['evidence status when findings were skipped', {
+        ...empiricalEvidence,
+        sources: { ...empiricalEvidence.sources, skippedFindings: 1, skippedByReason: { 'invalid-json': 1 } },
+    }],
+    ['partial status without any incomplete evidence', {
+        ...empiricalEvidence,
+        status: 'partial' as const,
+    }],
+    ['no-evidence status with a valid finding', {
+        ...empiricalEvidence,
+        status: 'no-evidence' as const,
+    }],
+    ['inconclusive status with a valid finding', {
+        ...empiricalEvidence,
+        status: 'inconclusive' as const,
+    }],
+])('renderers reject an empirical envelope with %s', (_case, empirical) => {
+    for (const render of [renderCoverageJson, renderCoverageHuman]) {
+        expect(() => render({ ...report, empirical })).toThrow(/^renderCoverage(?:Json|Human): invalid report/);
+    }
 });
 
 test('not_configured names the remedy and no_reference stays distinct (R2.6)', () => {
