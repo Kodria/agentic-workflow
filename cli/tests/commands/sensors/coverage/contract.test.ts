@@ -1,4 +1,4 @@
-import { parseCoverageContract, parseCoverageManifest } from '../../../../src/commands/sensors/coverage/contract';
+import { parseCoverageContract } from '../../../../src/commands/sensors/coverage/contract';
 
 describe('coverage contract v1', () => {
     it('returns a complete valid contract unchanged', () => {
@@ -99,33 +99,18 @@ describe('coverage contract v1', () => {
         };
         expect(() => parseCoverageContract(input, 'coverage.json')).toThrow('unknown field');
     });
-});
 
-describe('coverage manifest boundary', () => {
-    it('accepts all legacy sensor fields', () => {
+    it('rejects a detector sensor name that is not a safe component', () => {
         const input = {
-            pack: 'js-ts',
-            concurrency: 2,
-            sensors: {
-                lint: {
-                    cmd: 'npm run lint', fast: true, enabled: true, timeout: 120, changedCmd: 'npm run lint -- {files}', changedExtensions: ['.ts'], formatter: 'eslint-llm',
+            schemaVersion: 1,
+            classes: {
+                valid: {
+                    description: 'x',
+                    detectors: [{ sensor: '../escape' }],
+                    remedy: { summary: 'x', command: 'x' },
                 },
             },
         };
-        expect(parseCoverageManifest(input, 'sensors.json')).toEqual(input);
-    });
-
-    test.each([
-        [null, 'object'],
-        [{}, 'pack'],
-        [{ pack: '', sensors: {} }, 'pack'],
-        [{ pack: ' js-ts', sensors: {} }, 'pack'],
-        [{ pack: 'js ts', sensors: {} }, 'pack'],
-        [{ pack: 'js@ts', sensors: {} }, 'pack'],
-        [{ pack: 'js-ts', sensors: null }, 'sensors'],
-        [{ pack: 'js-ts', sensors: { lint: { cmd: 3 } } }, 'cmd'],
-        [{ pack: 'js-ts', sensors: { 'lint!': {} } }, 'sensor name'],
-    ])('rejects malformed manifest %j', (input, message) => {
-        expect(() => parseCoverageManifest(input, 'sensors.json')).toThrow(message);
+        expect(() => parseCoverageContract(input, 'coverage.json')).toThrow('sensor');
     });
 });

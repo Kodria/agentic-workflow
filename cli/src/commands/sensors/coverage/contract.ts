@@ -1,4 +1,4 @@
-import type { SensorConfig } from '../types';
+import type { SensorManifest } from '../types';
 
 export const COVERAGE_SCHEMA_VERSION = 1;
 export const MAX_COVERAGE_FILE_BYTES = 1024 * 1024;
@@ -40,11 +40,22 @@ export type CoverageContract = {
     classes: Record<string, CoverageClassContract>;
 };
 
-export type CoverageManifest = {
-    pack: string;
-    sensors: Record<string, SensorConfig>;
-    concurrency?: number;
-};
+/** @deprecated Use parseSensorManifest from the compatibility boundary. */
+export type CoverageManifest = SensorManifest;
+
+/**
+ * Compatibility shim for the legacy coverage reader. It delegates all structural
+ * validation to the manifest boundary and intentionally refuses v2 until the v2
+ * coverage resolver consumes structured commands.
+ */
+export function parseCoverageManifest(input: unknown, source: unknown): CoverageManifest {
+    // Lazy to avoid a module cycle: the v2 pack parser itself imports this coverage
+    // contract, while this legacy shim only runs when coverage resolution is invoked.
+    const { parseSensorManifest } = require('../compatibility/manifest') as typeof import('../compatibility/manifest');
+    const manifest = parseSensorManifest(input, source);
+    if (manifest.schemaVersion === 2) throw new Error(`Invalid coverage manifest in ${String(source)}: v2 requires the compatibility resolver`);
+    return manifest;
+}
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -157,48 +168,4 @@ export function parseCoverageContract(input: unknown, source: unknown): Coverage
         classes[name] = parseClass(classesInput[name], source, `classes.${name}`);
     }
     return { schemaVersion: COVERAGE_SCHEMA_VERSION, classes };
-}
-
-function manifestString(value: unknown, source: unknown, location: string): string {
-    return nonEmptyString(value, source, location);
-}
-
-function parseManifestSensor(input: unknown, source: unknown, location: string): SensorConfig {
-    const value = record(input, source, location);
-    fields(value, ['cmd', 'fast', 'enabled', 'timeout', 'changedCmd', 'changedExtensions', 'formatter'], source, location);
-    const sensor: SensorConfig = {};
-    if ('cmd' in value) sensor.cmd = manifestString(value.cmd, source, `${location}.cmd`);
-    if ('fast' in value) {
-        if (typeof value.fast !== 'boolean') invalid(source, `${location}.fast must be a boolean`);
-        sensor.fast = value.fast;
-    }
-    if ('enabled' in value) {
-        if (typeof value.enabled !== 'boolean') invalid(source, `${location}.enabled must be a boolean`);
-        sensor.enabled = value.enabled;
-    }
-    if ('timeout' in value) {
-        if (typeof value.timeout !== 'number' || !Number.isSafeInteger(value.timeout) || value.timeout <= 0) invalid(source, `${location}.timeout must be a positive safe integer`);
-        sensor.timeout = value.timeout;
-    }
-    if ('changedCmd' in value) sensor.changedCmd = manifestString(value.changedCmd, source, `${location}.changedCmd`);
-    if ('changedExtensions' in value) sensor.changedExtensions = stringArray(value.changedExtensions, source, `${location}.changedExtensions`, true);
-    if ('formatter' in value) sensor.formatter = manifestString(value.formatter, source, `${location}.formatter`);
-    return sensor;
-}
-
-export function parseCoverageManifest(input: unknown, source: unknown): CoverageManifest {
-    const value = record(input, source, 'manifest root');
-    fields(value, ['pack', 'sensors', 'concurrency'], source, 'manifest root');
-    const pack = safeName(value.pack, source, 'manifest.pack');
-    const sensorsInput = record(value.sensors, source, 'manifest.sensors');
-    const sensors: Record<string, SensorConfig> = {};
-    for (const name of Object.keys(sensorsInput)) {
-        sensors[safeName(name, source, 'manifest sensor name')] = parseManifestSensor(sensorsInput[name], source, `manifest.sensors.${name}`);
-    }
-    const manifest: CoverageManifest = { pack, sensors };
-    if ('concurrency' in value) {
-        if (typeof value.concurrency !== 'number' || !Number.isSafeInteger(value.concurrency) || value.concurrency <= 0) invalid(source, 'manifest.concurrency must be a positive safe integer');
-        manifest.concurrency = value.concurrency;
-    }
-    return manifest;
 }

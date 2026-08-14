@@ -1,3 +1,5 @@
+import type { CompatibilityEvidence, StructuredCommand } from './compatibility/types';
+
 export type SensorConfig = {
     cmd?: string;
     fast?: boolean;
@@ -39,6 +41,18 @@ export type SensorManifest = {
     sensors: Record<string, SensorConfig>;
     /** How many sensors may run at once. Defaults to a core-count-derived cap. */
     concurrency?: number;
+    /** Versioned manifests select a tested pack variant and retain argv boundaries. */
+    schemaVersion?: 2;
+    /** Compatibility evidence is absent on pre-v2 manifests. */
+    compatibility?: CompatibilityEvidence;
+};
+
+export type SensorManifestV2 = Omit<SensorManifest, 'schemaVersion' | 'sensors'> & {
+    schemaVersion: 2;
+    sensors: Record<string, {
+        selectedVariantId: string;
+        command: StructuredCommand;
+    }>;
 };
 
 export type SensorError = {
