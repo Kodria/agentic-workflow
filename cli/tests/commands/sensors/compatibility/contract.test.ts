@@ -75,6 +75,12 @@ describe('sensor pack v2 contract', () => {
         expect(() => assertNoEqualPriorityOverlap([{ ...complete, command: undefined }] as unknown)).toThrow('command');
     });
 
+    it('rejects equal-priority variants with overlapping operational tool ranges', () => {
+        const first = validPack().sensors.lint.variants[0];
+        const second = { ...first, id: 'eslint-9-alt', certifiedRange: '>=10 <11', requirements: { ...first.requirements, toolRange: '>=9.5 <10.5' } };
+        expect(() => assertNoEqualPriorityOverlap([first, second])).toThrow('overlap');
+    });
+
     test.each([
         [{ ...validPack(), schemaVersion: 3 }, 'supported: legacy, 2'],
         [{ ...validPack(), sensors: { lint: { variants: [] } } }, 'variants'],
