@@ -33,6 +33,16 @@ function archiveLabel(label: string): string {
     return label;
 }
 
+function destinationExists(destination: string): boolean {
+    try {
+        fs.lstatSync(destination);
+        return true;
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+        throw error;
+    }
+}
+
 export function detectBranch(cwd: string): string {
     try {
         const b = execSync('git rev-parse --abbrev-ref HEAD', {
@@ -84,7 +94,7 @@ export function archiveLedger(cwd: string, branch: string, label: string): boole
     const safe = ledgerFilename(branch);
     const dst = path.join(cwd, LEDGER_DIR, 'archive', `${safe}-${safeLabel}.jsonl`);
     fs.mkdirSync(path.dirname(dst), { recursive: true });
-    if (fs.existsSync(dst)) throw new Error(`ledger archive already exists: ${dst}`);
+    if (destinationExists(dst)) throw new Error(`ledger archive already exists: ${dst}`);
     fs.renameSync(src, dst);
     return true;
 }

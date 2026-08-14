@@ -121,6 +121,33 @@ describe('scanProjectLedgers', () => {
         }
     });
 
+    test('stops enumerating a directory after the bounded candidate window', () => {
+        write(root, '.awm/ledger/a.jsonl', [entry({ signature: 'first' })]);
+        write(root, '.awm/ledger/b.jsonl', [entry({ signature: 'witness' })]);
+        write(root, '.awm/ledger/c.jsonl', [entry({ signature: 'must-not-enumerate' })]);
+        const originalOpen = fs.opendirSync;
+        let readCalls = 0;
+        const openSpy = jest.spyOn(fs, 'opendirSync').mockImplementation((directory, options) => {
+            const handle = originalOpen(directory, options);
+            const originalRead = handle.readSync.bind(handle);
+            jest.spyOn(handle, 'readSync').mockImplementation(() => {
+                readCalls += 1;
+                if (readCalls > 2) throw new Error('candidate enumeration exceeded bounded window');
+                return originalRead();
+            });
+            return handle;
+        });
+
+        try {
+            const scan = scanProjectLedgers(root, { maxFiles: 1 });
+            expect(scan.entries.map(item => item.entry.signature)).toEqual(['first']);
+            expect(scan.sources.skippedByReason).toMatchObject({ 'file-limit': 1 });
+            expect(readCalls).toBe(2);
+        } finally {
+            openSpy.mockRestore();
+        }
+    });
+
     test('reports a too-large file without parsing it', () => {
         write(root, '.awm/ledger/a.jsonl', [entry()]);
         const scan = scanProjectLedgers(root, { maxFileBytes: 1 });

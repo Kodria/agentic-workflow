@@ -217,6 +217,22 @@ describe('ledger store — archive', () => {
         expect(fs.readFileSync(archivePath, 'utf-8')).toContain('archived-evidence');
     });
 
+    test('refuses a dangling symlink archive destination and preserves the active ledger', () => {
+        addEntry(cwd, entry({ signature: 'active-evidence' }));
+        const archivePath = path.join(cwd, '.awm', 'ledger', 'archive', 'feat-x-20260606T000000.jsonl');
+        fs.mkdirSync(path.dirname(archivePath), { recursive: true });
+        try {
+            fs.symlinkSync(path.join(cwd, 'missing-target.jsonl'), archivePath);
+        } catch (error) {
+            if (process.platform === 'win32') return;
+            throw error;
+        }
+
+        expect(() => archiveLedger(cwd, 'feat-x', '20260606T000000')).toThrow(/archive.*already exists/i);
+        expect(fs.lstatSync(archivePath).isSymbolicLink()).toBe(true);
+        expect(listEntries(cwd, 'feat-x')).toEqual([expect.objectContaining({ signature: 'active-evidence' })]);
+    });
+
     test.each(['', '.', '..', '../outside', '/tmp/outside', 'C:\\temp\\outside'])
     ('rejects an unsafe archive label %p before touching a ledger', (label) => {
         expect(() => archiveLedger(cwd, 'feat-x', label)).toThrow(/invalid ledger label/i);

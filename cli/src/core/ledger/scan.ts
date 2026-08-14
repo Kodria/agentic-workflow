@@ -110,9 +110,10 @@ function compareCandidates(a: LedgerCandidate, b: LedgerCandidate): number {
 }
 
 /**
- * Retains only the lexically first candidates plus one truncation witness.
- * Directory entries may be numerous, but candidate memory remains bounded and
- * callers never open a file that falls after the configured file limit.
+ * Reads a bounded window from each direct ledger directory, then sorts only
+ * that window. This deliberately does not claim to find a globally lexical
+ * prefix in an unbounded directory: the extra candidate is a truncation
+ * witness, and no later directory entry is opened or read.
  */
 function collectBoundedCandidates(
     root: string,
@@ -124,22 +125,25 @@ function collectBoundedCandidates(
     let truncated = false;
     for (const { directory, archive } of directories) {
         const handle = fs.opendirSync(directory);
+        const directoryCandidates: LedgerCandidate[] = [];
         try {
             let item: fs.Dirent | null;
             while ((item = handle.readSync()) !== null) {
                 if (!item.name.endsWith('.jsonl')) continue;
                 const target = path.join(directory, item.name);
-                candidates.push({ isArchive: archive, target, sourcePath: relativePath(root, target) });
-                candidates.sort(compareCandidates);
-                if (candidates.length > capacity) {
-                    candidates.pop();
+                directoryCandidates.push({ isArchive: archive, target, sourcePath: relativePath(root, target) });
+                if (directoryCandidates.length === capacity) {
                     truncated = true;
+                    break;
                 }
             }
         } finally {
             handle.closeSync();
         }
+        directoryCandidates.sort(compareCandidates);
+        candidates.push(...directoryCandidates);
     }
+    candidates.sort(compareCandidates);
     return { candidates, truncated: truncated || candidates.length > maxFiles };
 }
 
