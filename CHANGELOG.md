@@ -1,3 +1,8 @@
+## v8.1.0 - 2026-08-15
+
+### Features
+- **sensors:** harden pack v2 execution contract (#78)
+
 ## v8.0.0 - 2026-08-14
 
 ### Breaking Changes
