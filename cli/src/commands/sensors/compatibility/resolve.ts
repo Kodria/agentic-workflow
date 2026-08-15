@@ -39,6 +39,15 @@ function runtimeFor(variant: SensorVariant, evidence: ResolveEvidence): string |
     return evidence.runtimeVersions === undefined ? evidence.runtimeVersion : evidence.runtimeVersions[variant.requirements.runtime];
 }
 
+/** A variant may name alternative native configuration files that make it
+ * applicable. They are alternatives (for example `.eslintrc.*`), not a list
+ * that a project must contain in full. A variant without this requirement is
+ * configuration-agnostic. */
+function hasRequiredConfig(variant: SensorVariant, evidence: ResolveEvidence): boolean {
+    const required = variant.requirements.configFiles ?? [];
+    return required.length === 0 || required.some(file => evidence.paths?.includes(file));
+}
+
 /** Pure precedence resolver. It consumes discovered evidence and neither probes nor executes commands. */
 export function resolveSensorCompatibility(sensor: SensorPackSensor | Record<string, unknown>, evidence: ResolveEvidence, context: ResolveContext): CompatibilityEvidence {
     if (!sensor || typeof sensor !== 'object' || !evidence || typeof evidence !== 'object') throw new Error('sensor and discovered evidence are required');
@@ -52,7 +61,9 @@ export function resolveSensorCompatibility(sensor: SensorPackSensor | Record<str
     if (availableTools.every(version => version === null || version === undefined)) return result('missing-tool', 'tool-not-found', null, evidence);
     const operational = v2.variants.filter(variant => validVersion(toolFor(variant, evidence)) && validVersion(runtimeFor(variant, evidence)));
     if (operational.length === 0) return result('unverifiable', 'invalid-or-missing-version-evidence', null, evidence);
-    const matches = operational.filter(variant => semver.satisfies(toolFor(variant, evidence)!, variant.requirements.toolRange) && semver.satisfies(runtimeFor(variant, evidence)!, variant.requirements.runtimeRange));
+    const matches = operational.filter(variant => semver.satisfies(toolFor(variant, evidence)!, variant.requirements.toolRange)
+        && semver.satisfies(runtimeFor(variant, evidence)!, variant.requirements.runtimeRange)
+        && hasRequiredConfig(variant, evidence));
     if (matches.length === 0) return result('incompatible', 'no-operational-variant', null, evidence);
     matches.sort((a, b) => b.priority - a.priority || specificity(b) - specificity(a) || a.id.localeCompare(b.id));
     const best = matches[0];
