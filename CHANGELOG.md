@@ -1,3 +1,8 @@
+## v8.1.2 - 2026-08-15
+
+### Fixes
+- **sensors:** select ESLint variants by native config (#82)
+
 ## v8.1.1 - 2026-08-15
 
 ### Fixes
