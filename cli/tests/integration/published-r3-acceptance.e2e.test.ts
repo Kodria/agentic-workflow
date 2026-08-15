@@ -5,7 +5,12 @@ import os from 'os';
 import path from 'path';
 
 const publishedCliRoot = process.env.AWM_PUBLISHED_CLI_ROOT;
-const publishedRegistryRoot = process.env.AWM_PUBLISHED_REGISTRY_ROOT;
+// GitHub's Windows workspace expression can combine backslashes with a trailing
+// forward-slash path segment. The CLI rightly requires normalized provenance;
+// normalize the CI fixture boundary before passing it as user input.
+const publishedRegistryRoot = process.env.AWM_PUBLISHED_REGISTRY_ROOT
+    ? path.resolve(process.env.AWM_PUBLISHED_REGISTRY_ROOT)
+    : undefined;
 // This gate is pinned to the npm release that contains the native ESLint
 // configuration selection fix merged for R3.
 const expectedVersion = process.env.AWM_PUBLISHED_CLI_VERSION ?? '8.1.2';
