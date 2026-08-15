@@ -49,6 +49,9 @@ export function registerPreflightCommand(program: Command): void {
             const report = await preflight(opts.cwd ?? process.cwd());
             process.stdout.write(opts.json ? JSON.stringify(report, null, 2) + '\n' : formatReport(report));
             const code = exitCodeFor(report);
-            if (code !== 0) process.exit(code);
+            // `process.exit()` may truncate the JSON written immediately above when
+            // stdout is a pipe (CI, an API consumer, or a shell capture). Preserve
+            // the semantic exit code while allowing Node to flush the report.
+            if (code !== 0) process.exitCode = code;
         });
 }
