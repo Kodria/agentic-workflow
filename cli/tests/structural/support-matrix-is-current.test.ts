@@ -17,7 +17,7 @@ import {
 } from '../../scripts/support-matrix';
 import {
     R3_PREPUBLICATION_FIXTURE_PURPOSE, R3_PREPUBLICATION_FIXTURE_RELATIVE_PATH,
-    SENSOR_BEGIN_MARKER, SENSOR_END_MARKER, extractPublishedSupportMetadata, renderSensorSupportMatrix, spliceSensorSupportMatrix,
+    SENSOR_BEGIN_MARKER, SENSOR_END_MARKER, extractPublishedSupportMetadata, renderSensorSupportMatrix, spliceSensorSupportMatrix, verifyPublishedRegistryIdentity,
 } from '../../scripts/sensor-support-matrix';
 
 const SENSOR_FIXTURE_REGISTRY = path.join(__dirname, '..', 'fixtures', 'sensor-support-matrix', 'registry');
@@ -85,6 +85,11 @@ describe('docs/support-matrix.md refleja el codigo', () => {
         expect(extractPublishedSupportMetadata(publishedSupport)).toContain('`eslint-10-flat`');
         expect(extractPublishedSupportMetadata(publishedSupport)).toContain('compatible-unverified');
         expect(extractPublishedSupportMetadata(publishedSupport)).not.toContain('Fixture-declared ranges only');
+    });
+
+    it('rejects a mutable checkout even when it contains the published v2.0.0 tag', () => {
+        const registryRoot = path.resolve(__dirname, '../../../../awm-baseline-registry');
+        expect(() => verifyPublishedRegistryIdentity(registryRoot, 'v2.0.0', 'c35c087a0801c0b4e69e0a4ac3eafef9ecdf37cd')).toThrow(/HEAD .*expected commit/i);
     });
 
     it('la tabla nombra a los seis providers declarados', () => {

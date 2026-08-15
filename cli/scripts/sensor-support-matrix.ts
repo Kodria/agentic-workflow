@@ -5,6 +5,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { execFileSync } from 'child_process';
 import { parseSensorPack } from '../src/commands/sensors/compatibility/contract';
 import type { ParsedSensorPack } from '../src/commands/sensors/compatibility/types';
 
@@ -19,6 +20,8 @@ export const R3_PREPUBLICATION_FIXTURE_RELATIVE_PATH = 'tests/fixtures/sensor-su
  * never an invented description of an unpublished registry release.
  */
 export const R3_PREPUBLICATION_FIXTURE_PURPOSE = 'R3 pre-publication contract fixture';
+export const R3_PUBLISHED_REGISTRY_TAG = 'v2.0.0';
+export const R3_PUBLISHED_REGISTRY_COMMIT = 'c35c087a0801c0b4e69e0a4ac3eafef9ecdf37cd';
 
 /**
  * Extract the registry-owned certification matrix without copying or rewording it.
@@ -48,6 +51,33 @@ export function extractPublishedSupportMetadata(source: unknown): string {
         throw new Error('published sensor support metadata lacks certification status semantics');
     }
     return metadata;
+}
+
+function exactArgument(argv: readonly string[], flag: string): string {
+    const index = argv.indexOf(flag);
+    if (index === -1 || argv[index + 1] === undefined || argv[index + 1].startsWith('--') || index !== argv.lastIndexOf(flag)) {
+        throw new Error(`sensor support matrix requires exactly one ${flag} <value>`);
+    }
+    return argv[index + 1];
+}
+
+/** Refuse a mutable sibling checkout: published evidence is valid only for this immutable release. */
+export function verifyPublishedRegistryIdentity(registryRoot: unknown, tag: unknown, commit: unknown): void {
+    const root = registryPath(registryRoot);
+    if (tag !== R3_PUBLISHED_REGISTRY_TAG || commit !== R3_PUBLISHED_REGISTRY_COMMIT) {
+        throw new Error(`sensor support matrix requires published registry ${R3_PUBLISHED_REGISTRY_TAG}@${R3_PUBLISHED_REGISTRY_COMMIT}`);
+    }
+    const resolve = (revision: string): string => {
+        try {
+            return execFileSync('git', ['-C', root, 'rev-parse', revision], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+        } catch {
+            throw new Error(`published registry root must be a git checkout at ${R3_PUBLISHED_REGISTRY_TAG}`);
+        }
+    };
+    const head = resolve('HEAD');
+    const taggedCommit = resolve(`${tag}^{commit}`);
+    if (head !== commit) throw new Error(`published registry HEAD ${head} does not match expected commit ${commit}`);
+    if (taggedCommit !== commit) throw new Error(`published registry tag ${tag} resolves to ${taggedCommit}, expected commit ${commit}`);
 }
 
 function registryPath(value: unknown): string {
@@ -133,16 +163,25 @@ export function spliceSensorSupportMatrix(markdown: string, generated: string): 
 }
 
 export function registryRootFromArgs(argv: readonly string[]): string {
-    const index = argv.indexOf('--registry-root');
-    if (index === -1 || argv[index + 1] === undefined || argv[index + 1].startsWith('--') || index !== argv.lastIndexOf('--registry-root')) {
-        throw new Error('sensor support matrix requires exactly one --registry-root <path>');
-    }
-    return registryPath(argv[index + 1]);
+    return registryPath(exactArgument(argv, '--registry-root'));
 }
 
 /* istanbul ignore next: command shell is covered through exported functions. */
 if (require.main === module) {
-    const root = registryRootFromArgs(process.argv.slice(2));
+    const argv = process.argv.slice(2);
+    const root = registryRootFromArgs(argv);
+    const stdout = argv.includes('--stdout');
+    if (argv.includes('--prepublication-fixture')) {
+        if (argv.filter((value) => value === '--prepublication-fixture').length !== 1 || argv.filter((value) => value === '--stdout').length > 1 || (argv.length !== 3 && argv.length !== 4)) {
+            throw new Error('sensor support matrix fixture mode accepts only --registry-root <path> --prepublication-fixture [--stdout]');
+        }
+    } else {
+        verifyPublishedRegistryIdentity(root, exactArgument(argv, '--registry-tag'), exactArgument(argv, '--registry-commit'));
+    }
+    if (stdout) {
+        process.stdout.write(`${renderSensorSupportMatrix(root)}\n`);
+        process.exit(0);
+    }
     const current = fs.readFileSync(SENSOR_DOC_PATH, 'utf8');
     fs.writeFileSync(SENSOR_DOC_PATH, spliceSensorSupportMatrix(current, renderSensorSupportMatrix(root)), 'utf8');
     process.stdout.write('support-matrix.md sensor-pack evidence regenerated from registry manifests\n');
