@@ -3,7 +3,7 @@ import { legacyCompatibility } from './manifest';
 import type { CompatibilityEvidence, SensorPack, SensorPackSensor, SensorVariant } from './types';
 import type { ProjectEvidence } from './discovery';
 
-export type ResolveEvidence = { paths?: string[]; applicable?: boolean; packSelection?: 'explicit'; packageManagerConflict?: boolean; toolVersion?: string | null; runtimeVersion?: string | null; toolVersions?: Record<string, string | null>; runtimeVersions?: Record<string, string | null>; os?: NodeJS.Platform; probe?: { status?: string } };
+export type ResolveEvidence = { paths?: string[]; applicable?: boolean; packSelection?: 'explicit'; packageManagerConflict?: boolean; toolVersion?: string | null; runtimeVersion?: string | null; toolVersions?: Record<string, string | null>; runtimeVersions?: Record<string, string | null>; packageJsonFields?: string[]; os?: NodeJS.Platform; probe?: { status?: string } };
 export type ResolveContext = { pack: string; sensor: string };
 
 function result(state: CompatibilityEvidence['state'], reason: string, variant: SensorVariant | null, evidence: ResolveEvidence): CompatibilityEvidence {
@@ -44,8 +44,11 @@ function runtimeFor(variant: SensorVariant, evidence: ResolveEvidence): string |
  * that a project must contain in full. A variant without this requirement is
  * configuration-agnostic. */
 function hasRequiredConfig(variant: SensorVariant, evidence: ResolveEvidence): boolean {
-    const required = variant.requirements.configFiles ?? [];
-    return required.length === 0 || required.some(file => evidence.paths?.includes(file));
+    const requiredFiles = variant.requirements.configFiles ?? [];
+    const requiredFields = variant.requirements.packageJsonFields ?? [];
+    return (requiredFiles.length === 0 && requiredFields.length === 0)
+        || requiredFiles.some(file => evidence.paths?.includes(file))
+        || requiredFields.some(field => evidence.packageJsonFields?.includes(field));
 }
 
 /** Pure precedence resolver. It consumes discovered evidence and neither probes nor executes commands. */

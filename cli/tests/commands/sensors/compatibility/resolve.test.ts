@@ -73,6 +73,23 @@ describe('resolveSensorCompatibility', () => {
         expect(resolved).toMatchObject({ state: 'certified', variantId: 'eslint-8-flat' });
     });
 
+    it('selects the ESLint 8 eslintrc variant from package.json eslintConfig evidence', () => {
+        const eslintrc = {
+            ...variant('eslint-8-eslintrc', 40, '>=8 <9', '=8.57.1'),
+            requirements: { ...variant('eslint-8-eslintrc').requirements, toolRange: '>=8 <9', packageJsonFields: ['eslintConfig'] },
+        };
+        const flat = {
+            ...variant('eslint-8-flat', 30, '>=8 <9', '=8.57.1'),
+            requirements: { ...variant('eslint-8-flat').requirements, toolRange: '>=8 <9', configFiles: ['eslint.config.mjs'] },
+        };
+        const resolved = resolveSensorCompatibility({ applicability: { allFiles: ['package.json'] }, variants: [eslintrc, flat] } as any,
+            evidence({ toolVersion: '8.57.1', paths: ['package.json'], packageJsonFields: ['eslintConfig'] }), context);
+        expect(resolved).toMatchObject({ state: 'certified', variantId: 'eslint-8-eslintrc' });
+        expect(resolveSensorCompatibility({ applicability: { allFiles: ['package.json'] }, variants: [eslintrc, flat] } as any,
+            evidence({ toolVersion: '8.57.1', paths: ['package.json'], packageJsonFields: [] }), context))
+            .toMatchObject({ state: 'incompatible', variantId: null });
+    });
+
     it('does not reuse scalar evidence for a missing key in a version map', () => {
         const biome = { ...variant('biome'), requirements: { ...variant('biome').requirements, tool: 'biome', runtime: 'bun' } };
         expect(resolveSensorCompatibility({ applicability: { allFiles: ['package.json'] }, variants: [biome] } as any,

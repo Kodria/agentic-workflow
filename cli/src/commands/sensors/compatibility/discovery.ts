@@ -19,6 +19,8 @@ export type ProjectEvidence = {
     packageManagerConflict: boolean;
     scripts: string[];
     configFiles: string[];
+    /** Names only; package.json values are never emitted as compatibility evidence. */
+    packageJsonFields: string[];
     paths: string[];
 };
 
@@ -155,6 +157,7 @@ export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependen
     }
     const configFiles = [...configCandidates].filter(file => safeFile(root, file)).sort();
     const scripts = Object.keys(stringMap(pkg?.scripts)).sort();
+    const packageJsonFields = Object.keys(pkg ?? {}).filter(field => /^[A-Za-z][A-Za-z0-9]*$/.test(field)).sort();
     const declaredToolRanges = { ...stringMap(pkg?.dependencies), ...stringMap(pkg?.devDependencies), ...stringMap(pkg?.peerDependencies) };
     const tools = new Set<string>();
     if ('schemaVersion' in pack) for (const sensor of Object.values(pack.sensors)) for (const variant of sensor.variants) tools.add(variant.requirements.tool);
@@ -164,6 +167,6 @@ export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependen
     return {
         cwd: root, os: targetPlatform, runtimeVersions: { node: process.versions.node ?? null, ...(environment ? { python: environment.runtimeVersion } : {}) }, pythonEnvironmentRoot: environment?.rootParts[0] ?? null, declaredToolRanges, toolVersions,
         packageManager: declaredManager ?? (lockManagers.size === 1 ? [...lockManagers][0] : null), packageManagerConflict: lockManagers.size > 1,
-        scripts, configFiles, paths: [...new Set([...(safeFile(root, 'package.json') ? ['package.json'] : []), ...locks, ...configFiles])].sort(),
+        scripts, configFiles, packageJsonFields, paths: [...new Set([...(safeFile(root, 'package.json') ? ['package.json'] : []), ...locks, ...configFiles])].sort(),
     };
 }

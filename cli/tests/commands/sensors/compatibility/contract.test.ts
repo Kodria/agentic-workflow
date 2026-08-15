@@ -159,9 +159,11 @@ describe('sensor pack v2 contract', () => {
         expect(() => parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...variant, probe: { kind: 'version', extra: true } }] } } }, 'pack')).toThrow('unknown field');
     });
 
-    it('preserves configFiles and rejects incomplete public overlap input', () => {
-        const variant = { ...validPack().sensors.lint.variants[0], requirements: { ...validPack().sensors.lint.variants[0].requirements, configFiles: ['eslint.config.js'] } };
-        expect(parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [variant] } } }, 'pack')).toMatchObject({ kind: 'v2', pack: { sensors: { lint: { variants: [{ requirements: { configFiles: ['eslint.config.js'] } }] } } } });
+    it('preserves config selectors and validates package.json field names', () => {
+        const variant = { ...validPack().sensors.lint.variants[0], requirements: { ...validPack().sensors.lint.variants[0].requirements, configFiles: ['eslint.config.js'], packageJsonFields: ['eslintConfig'] } };
+        expect(parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [variant] } } }, 'pack')).toMatchObject({ kind: 'v2', pack: { sensors: { lint: { variants: [{ requirements: { configFiles: ['eslint.config.js'], packageJsonFields: ['eslintConfig'] } }] } } } });
+        const malformed = { ...variant, requirements: { ...variant.requirements, packageJsonFields: ['eslint-config'] } };
+        expect(() => parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [malformed] } } }, 'pack')).toThrow('packageJsonFields[0]');
         const complete = validPack().sensors.lint.variants[0];
         expect(() => assertNoEqualPriorityOverlap([{ ...complete, id: '../bad' }] as unknown)).toThrow('stable lowercase id');
         expect(() => assertNoEqualPriorityOverlap([{ ...complete, command: undefined }] as unknown)).toThrow('command');
