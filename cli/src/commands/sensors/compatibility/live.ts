@@ -80,6 +80,7 @@ export async function resolveParsedPackCompatibility(cwd: string, pack: SensorPa
                 toolExecutable: variant.command.executable,
                 toolResolution: variant.command.resolution,
                 pythonEnvironmentRoot: variant.command.pythonEnvironmentRoot,
+                environment: variant.command.environment,
                 configFiles: evidence.configFiles,
                 scripts: evidence.scripts,
             })

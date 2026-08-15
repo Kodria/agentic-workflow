@@ -29,6 +29,20 @@ describe('runCompatibilityProbe', () => {
         );
     });
 
+    it('propagates the selected ESLint mode to its compatibility probe', async () => {
+        await runCompatibilityProbe({ kind: 'eslint-print-config' }, {
+            ...evidence,
+            toolExecutable: 'eslint',
+            toolResolution: 'node-modules-bin',
+            environment: { ESLINT_USE_FLAT_CONFIG: 'true' },
+        }, fakeExecutor);
+
+        expect(fakeExecutor).toHaveBeenCalledWith(
+            expect.objectContaining({ environment: { ESLINT_USE_FLAT_CONFIG: 'true' } }),
+            expect.any(Object),
+        );
+    });
+
     it('binds Semgrep validation to the contained Python environment', async () => {
         await runCompatibilityProbe({ kind: 'semgrep-validate' }, evidence, fakeExecutor);
 

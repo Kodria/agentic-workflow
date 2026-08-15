@@ -3,7 +3,7 @@ import type { CompatibilityProbe, StructuredCommand } from './types';
 
 export type ProbeStatus = 'matched' | 'not-matched' | 'unverifiable';
 export type ProbeResult = { status: ProbeStatus; reason: string };
-export type ProbeEvidence = { cwd: string; toolExecutable?: string; toolResolution?: StructuredCommand['resolution']; pythonEnvironmentRoot?: StructuredCommand['pythonEnvironmentRoot']; configFiles?: string[]; scripts?: string[] };
+export type ProbeEvidence = { cwd: string; toolExecutable?: string; toolResolution?: StructuredCommand['resolution']; pythonEnvironmentRoot?: StructuredCommand['pythonEnvironmentRoot']; environment?: StructuredCommand['environment']; configFiles?: string[]; scripts?: string[] };
 export type ProbeExecutor = (command: StructuredCommand, options: ExecOptions) => Promise<ExecResult>;
 const KINDS = new Set<CompatibilityProbe>(['version', 'eslint-print-config', 'typescript-show-config', 'semgrep-validate', 'package-script-present', 'config-present']);
 
@@ -18,7 +18,12 @@ function commandFor(kind: CompatibilityProbe, evidence: ProbeEvidence): Structur
             : 'node-modules-bin');
     if (kind === 'package-script-present') return null;
     if (kind === 'config-present') return null;
-    const command = { executable, resolution, ...(resolution === 'python-environment' && evidence.pythonEnvironmentRoot ? { pythonEnvironmentRoot: evidence.pythonEnvironmentRoot } : {}) };
+    const command = {
+        executable,
+        resolution,
+        ...(resolution === 'python-environment' && evidence.pythonEnvironmentRoot ? { pythonEnvironmentRoot: evidence.pythonEnvironmentRoot } : {}),
+        ...(evidence.environment ? { environment: evidence.environment } : {}),
+    };
     if (kind === 'version') return { ...command, args: ['--version'] };
     if (kind === 'eslint-print-config') return { ...command, args: ['--print-config', evidence.configFiles?.[0] ?? 'package.json'] };
     if (kind === 'typescript-show-config') return { ...command, args: ['--showConfig'] };
