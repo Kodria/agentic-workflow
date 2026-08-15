@@ -11,13 +11,15 @@
 // Este test hace que ese desvio sea imposible de mergear. No verifica que la tabla sea
 // "linda": verifica que sea LA MISMA que produce el codigo hoy.
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
+import { execFileSync } from 'child_process';
 import {
     BEGIN_MARKER, END_MARKER, DOC_PATH, homeRelative, renderProviderTables, spliceGenerated,
 } from '../../scripts/support-matrix';
 import {
     R3_PREPUBLICATION_FIXTURE_PURPOSE, R3_PREPUBLICATION_FIXTURE_RELATIVE_PATH,
-    SENSOR_BEGIN_MARKER, SENSOR_END_MARKER, renderSensorSupportMatrix, spliceSensorSupportMatrix,
+    SENSOR_BEGIN_MARKER, SENSOR_END_MARKER, extractPublishedSupportMetadata, renderSensorSupportMatrix, spliceSensorSupportMatrix, verifyPublishedRegistryIdentity,
 } from '../../scripts/sensor-support-matrix';
 
 const SENSOR_FIXTURE_REGISTRY = path.join(__dirname, '..', 'fixtures', 'sensor-support-matrix', 'registry');
@@ -39,20 +41,73 @@ describe('docs/support-matrix.md refleja el codigo', () => {
         expect(doc).toContain(END_MARKER);
     });
 
-    it('the generated pre-publication v2 sensor-pack contract fixture is current', () => {
+    it('keeps the generated pre-publication v2 fixture separately renderable', () => {
         const doc = fs.readFileSync(DOC_PATH, 'utf-8');
+        const fixture = renderSensorSupportMatrix(SENSOR_FIXTURE_REGISTRY);
+        expect(fixture).toContain(R3_PREPUBLICATION_FIXTURE_PURPOSE);
+        expect(fixture).toContain('not the published `awm-baseline-registry` manifests');
+        expect(fixture).not.toContain('Published certification evidence');
         expect(doc).toContain(SENSOR_BEGIN_MARKER);
         expect(doc).toContain(SENSOR_END_MARKER);
-        expect(doc).toContain(R3_PREPUBLICATION_FIXTURE_PURPOSE);
-        expect(doc).toContain('not the published `awm-baseline-registry` manifests');
-        expect(doc).toBe(spliceSensorSupportMatrix(doc, renderSensorSupportMatrix(SENSOR_FIXTURE_REGISTRY)));
+        expect(doc).toContain('published registry evidence');
+        expect(doc).toContain('Published certification evidence');
     });
 
-    it('pins the documentation generator to the declared R3 pre-publication fixture', () => {
+    it('uses a published registry root for documentation and retains a fixture-only command', () => {
         const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as {
-            scripts?: { ['docs:matrix']?: unknown };
+            scripts?: { ['docs:matrix']?: unknown; ['docs:matrix:prepublication']?: unknown };
         };
-        expect(packageJson.scripts?.['docs:matrix']).toContain(`--registry-root ${R3_PREPUBLICATION_FIXTURE_RELATIVE_PATH}`);
+        expect(packageJson.scripts?.['docs:matrix']).toContain('--registry-root ../../awm-baseline-registry');
+        expect(packageJson.scripts?.['docs:matrix:prepublication']).toContain(`--registry-root ${R3_PREPUBLICATION_FIXTURE_RELATIVE_PATH}`);
+    });
+
+    it('retains the published registry certification rows verbatim instead of inventing fixture evidence', () => {
+        const publishedSupport = [
+            '# Sensor pack support',
+            '',
+            '<!-- BEGIN GENERATED: sensor-pack-support -->',
+            'Generated from pack manifests and certification pins resolved at `2026-08-14T22:14:34.365Z`.',
+            '',
+            'Status: `certified` has a matching frozen tool pin; `compatible-unverified` has no matching frozen pin; `not-applicable` is reserved for variants without a tool contract.',
+            '',
+            '| Pack | Sensor | Variant | Tool | Certified range | Supported OS | OS certification evidence | Status | Evidence |',
+            '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+            '| `js-ts` | `lint` | `eslint-10-flat` | `eslint` | `=10.8.1` | Ubuntu, macOS, Windows | Ubuntu/macOS/Windows: contract | certified | pin: `eslint@10.8.1` |',
+            '| `js-ts` | `test` | `npm-script` | `npm` | `>=8.0.0` | Ubuntu, macOS, Windows | Ubuntu/macOS/Windows: contract | compatible-unverified | no matching pinned tool |',
+            '',
+            '| Certification status | Derived variant count | Meaning |',
+            '| --- | --- | --- |',
+            '| certified | 15 | Matching frozen tool pin |',
+            '| compatible-unverified | 6 | No matching frozen tool pin |',
+            '| not-applicable | 0 | Variant has no tool contract |',
+            '<!-- END GENERATED: sensor-pack-support -->',
+            '',
+        ].join('\n');
+
+        expect(extractPublishedSupportMetadata(publishedSupport)).toContain('`eslint-10-flat`');
+        expect(extractPublishedSupportMetadata(publishedSupport)).toContain('compatible-unverified');
+        expect(extractPublishedSupportMetadata(publishedSupport)).not.toContain('Fixture-declared ranges only');
+    });
+
+    it('rejects a mutable checkout even when it contains the published v2.0.0 tag', () => {
+        const registryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-published-registry-'));
+        const git = (...args: string[]) => execFileSync('git', ['-C', registryRoot, ...args], { stdio: 'pipe' });
+        try {
+            git('init');
+            git('config', 'user.email', 'test@example.com');
+            git('config', 'user.name', 'AWM test');
+            fs.writeFileSync(path.join(registryRoot, 'published.txt'), 'published\n');
+            git('add', '.');
+            git('commit', '-m', 'published registry');
+            git('tag', 'v2.0.0');
+            fs.writeFileSync(path.join(registryRoot, 'mutable.txt'), 'newer checkout\n');
+            git('add', '.');
+            git('commit', '-m', 'mutable checkout');
+
+            expect(() => verifyPublishedRegistryIdentity(registryRoot, 'v2.0.0', 'c35c087a0801c0b4e69e0a4ac3eafef9ecdf37cd')).toThrow(/HEAD .*expected commit/i);
+        } finally {
+            fs.rmSync(registryRoot, { recursive: true, force: true });
+        }
     });
 
     it('la tabla nombra a los seis providers declarados', () => {

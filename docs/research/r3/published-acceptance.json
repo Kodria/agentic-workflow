@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-15",
+  "scope": "partial-published-acceptance",
+  "sanitization": {
+    "temporaryPathsRedacted": true,
+    "homeDirectoryUntouched": true,
+    "rawLedgerDescriptionsExcluded": true,
+    "rawCommandOutputExcluded": true
+  },
+  "publishedCli": {
+    "package": "agentic-workflow-manager",
+    "version": "8.1.0",
+    "npmGitHead": "54956723ace942dd3e65808841c9b7cf64a13016",
+    "tarball": "https://registry.npmjs.org/agentic-workflow-manager/-/agentic-workflow-manager-8.1.0.tgz",
+    "integrity": "sha512-QN6ycZGZkD8uVRufPDF/aHliPNj61EF54ToPejXv4XkW3a9XrwTyEjMYNGCe/Ois3vqAXPlNCVnmKwS/rssEeA=="
+  },
+  "registry": {
+    "repository": "https://github.com/Kodria/awm-baseline-registry.git",
+    "tag": "v2.0.0",
+    "configuredOriginAdvertisedTagObject": "7d20924f1b6339cbdb028a0c56ad2520d191f805",
+    "publicCloneLocalTagObject": "7d20924f1b6339cbdb028a0c56ad2520d191f805",
+    "checkedOutTargetCommit": "c35c087a0801c0b4e69e0a4ac3eafef9ecdf37cd",
+    "minCliVersion": "8.1.0",
+    "tagReferenceReconciliation": "verified: configured origin and a fresh public shallow clone resolve the same annotated-tag object and target commit",
+    "packSha256": {
+      "generic": "9dc7f656d2a9b7565e8771e11d2922f75c35d55dbc08a49b48b2c1b3972774f8",
+      "js-ts": "ff08addec60aa1eaf54a65a594d1adfb11d5606dda5b4de66b6646306398a768",
+      "python": "c83922012f2bf1c33853b52769df30e11191691b25760da39560f728aa1f787f",
+      "shell": "c2ea2976342911d9801603d23dd11ed1270fbeecc14d4c3b727aecaabeb61620"
+    }
+  },
+  "host": {
+    "nativePlatform": "linux",
+    "node": "24.19.0",
+    "python": "3.12.3",
+    "nativeMacosExecuted": false,
+    "nativeWindowsExecuted": false
+  },
+  "commands": [
+    "npm install --prefix <temporary-consumer> --no-audit --no-fund agentic-workflow-manager@8.1.0",
+    "git clone --depth 1 --branch v2.0.0 https://github.com/Kodria/awm-baseline-registry.git <temporary-registry>",
+    "awm sensors init --registry-root <temporary-registry> --pack js-ts",
+    "awm sensors status",
+    "awm preflight --json",
+    "awm sensors run --fast",
+    "awm sensors coverage --json --min 2",
+    "awm ledger archive --branch published-acceptance"
+  ],
+  "matrix": {
+    "eslint": [
+      { "version": "8.57.1", "initExit": 0, "status": "unverifiable", "reason": "probe-not-matched", "runOverall": "not_certified", "coverageExit": 0 },
+      { "version": "9.39.5", "initExit": 0, "status": "unverifiable", "reason": "probe-not-matched", "runOverall": "not_certified", "coverageExit": 0 },
+      { "version": "10.8.1", "initExit": 0, "status": "unverifiable", "reason": "probe-not-matched", "runOverall": "not_certified", "coverageExit": 0 }
+    ],
+    "notExecuted": [
+      "ESLint eslintrc-versus-flat split beyond the installed native fixtures",
+      "TypeScript native and hardening opt-in",
+      "npm, pnpm, Yarn, and Bun package-manager variants",
+      "Python, shell, and generic real-tool full run matrix",
+      "legacy and synthetic-future published-registry cases",
+      "native macOS and Windows"
+    ]
+  },
+  "retroExecution": {
+    "ledgerEntriesBeforeArchive": 2,
+    "typedFindingDefectClass": "hardcoded-secrets",
+    "unclassifiedFindings": 1,
+    "coverageBeforeArchive": true,
+    "coverageOverall": "inconclusive",
+    "empiricalStatus": "partial",
+    "archiveExit": 0,
+    "archiveCreated": true,
+    "recommendationMutation": false
+  },
+  "supportMatrix": {
+    "updated": false,
+    "reason": "the checked-in generator and freshness test are pinned to the pre-publication fixture and explicitly reject a published-registry block; changing this requires a separate generator/test migration"
+  },
+  "verdict": "incomplete: preserve as evidence only; do not treat as T13 completion or published cross-platform certification"
+}

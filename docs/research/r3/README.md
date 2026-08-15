@@ -55,11 +55,26 @@ source snapshot whenever this evidence changes; it identifies the snapshot used
 to create the artifact and is intentionally not a claim about a future merge
 commit. Update it only with an intentional fixture or contract change.
 
-## Certification boundary
+## Published-acceptance boundary
 
-This is **partial** certification. It validates the CLI consumer contract and
-the portable synthetic resolver matrix. Official pack certification remains
-pending until the dependent `awm-baseline-registry` v2.0.0 tag is published
-after the CLI 7.0.0 release. The registry must not be elevated first: a pack
-v2 declaration needs a released CLI capable of parsing, probing, and reporting
-its structured contract.
+The published consumer check ran on 2026-08-15 with
+`agentic-workflow-manager@8.1.0` downloaded from npm and a temporary clone of
+the public `v2.0.0` registry release. It did not use `~/.awm`; the sanitized
+command results, package integrity, pack hashes, and ledger/archive evidence
+are in [`published-acceptance.json`](published-acceptance.json).
+
+This remains **partial acceptance**, not a cross-platform certification claim.
+The native Linux run exercised init, status, preflight, run, coverage, and a
+real ledger-to-coverage-to-archive sequence. The installed certified ESLint
+8.57.1, 9.39.5, and 10.8.1 fixtures each initialized successfully, but their
+published-CLI status was `unverifiable` with `probe-not-matched`; they are not
+reported as certified. Native macOS and Windows execution is not represented by
+this host run.
+
+The release reference was rechecked from a fresh public shallow clone: both it
+and the configured origin resolve `v2.0.0` to annotated tag `7d20924f…` and
+target commit `c35c087…`. The pack hashes below are from that checked-out public
+release target. The support-matrix generator is now pinned to that exact tag,
+and regeneration produced no documentation drift. Native macOS and Windows
+published-consumer execution remains outside this host run, so the record stays
+partial rather than claiming cross-platform certification.

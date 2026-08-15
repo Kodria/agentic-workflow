@@ -1256,11 +1256,11 @@ export function renderSensorSupport(packs, pins) {
 
 Workflow reusable con resolver/contract suite en Ubuntu/macOS/Windows; real tools min/current principalmente Ubuntu; smoke current macOS/Windows; future sintético debe ser compatible-unverified. `validate.yml` lo llama. `auto-tag.yml` también lo llama y el job `tag` declara `needs: sensor-certification`; no confiar en un workflow paralelo.
 
-- [ ] **Step 5: Elevar contratos/versiones y registrar ruptura**
+- [x] **Step 5: Elevar contratos/versiones y registrar ruptura**
 
-Solo ahora, con npm 7 publicado: `awm-registry.json.minCliVersion` → `7.0.0`; bundle `dev` y catalog `2.10.0` → `3.0.0`; changelog explica pack v2, migración, retro y compatibilidad. El PR usa conventional breaking para que tag `v1.16.0` → `v2.0.0`.
+Solo ahora, con `agentic-workflow-manager@8.1.0` publicado: `awm-registry.json.minCliVersion` → `8.1.0`; bundle `dev` y catalog `2.10.0` → `3.0.0`; changelog explica pack v2, migración, retro y compatibilidad. El PR usa conventional breaking para que tag `v1.16.1` → `v2.0.0`.
 
-- [ ] **Step 6: Ejecutar todos los gates locales**
+- [x] **Step 6: Ejecutar todos los gates locales**
 
 Run:
 
@@ -1285,7 +1285,7 @@ node tests/r3-retro-contract.test.mjs
 
 Expected: todos exit 0. Mutaciones obligatorias: coverage después de archive, auto-tag sin `needs`, support edit manual y probe future→certified; cada test correspondiente debe fallar, luego restaurar.
 
-- [ ] **Step 7: Commit, review y PR registry**
+- [x] **Step 7: Commit, review y PR registry**
 
 ```bash
 git -C ../awm-baseline-registry add skills sensor-packs tests scripts .github awm-registry.json bundles/dev/bundle.json catalog.json CHANGELOG.md
