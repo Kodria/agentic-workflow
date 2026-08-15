@@ -3,7 +3,7 @@ import { legacyCompatibility } from './manifest';
 import type { CompatibilityEvidence, SensorPack, SensorPackSensor, SensorVariant } from './types';
 import type { ProjectEvidence } from './discovery';
 
-export type ResolveEvidence = { paths?: string[]; applicable?: boolean; packageManagerConflict?: boolean; toolVersion?: string | null; runtimeVersion?: string | null; toolVersions?: Record<string, string | null>; runtimeVersions?: Record<string, string | null>; os?: NodeJS.Platform; probe?: { status?: string } };
+export type ResolveEvidence = { paths?: string[]; applicable?: boolean; packSelection?: 'explicit'; packageManagerConflict?: boolean; toolVersion?: string | null; runtimeVersion?: string | null; toolVersions?: Record<string, string | null>; runtimeVersions?: Record<string, string | null>; os?: NodeJS.Platform; probe?: { status?: string } };
 export type ResolveContext = { pack: string; sensor: string };
 
 function result(state: CompatibilityEvidence['state'], reason: string, variant: SensorVariant | null, evidence: ResolveEvidence): CompatibilityEvidence {
@@ -20,6 +20,9 @@ function result(state: CompatibilityEvidence['state'], reason: string, variant: 
     return { state, reason, variantId: variant?.id ?? null, toolVersion, runtimeVersion, certifiedRange: variant?.certifiedRange ?? null, evidence: refs.slice(0, 32) };
 }
 function applies(sensor: SensorPackSensor, evidence: ResolveEvidence): boolean {
+    if (sensor.applicability.kind === 'explicit-or-supported-language') {
+        return evidence.applicable === true || evidence.packSelection === 'explicit';
+    }
     if (evidence.applicable === false) return false;
     const paths = new Set(evidence.paths ?? []);
     const rule = sensor.applicability;

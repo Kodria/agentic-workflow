@@ -121,7 +121,7 @@ T1 contratos/parsers
  -> T5 ledger tipado y scan bounded
  -> T6 cobertura empírica y CLI
  -> T7 documentación y freshness CLI
- -> T8 aceptación + PR CLI + npm 7.0.0
+ -> T8 aceptación + PR CLI + npm 8.0.0
  -> T9 gate/schema/autores registry
  -> T10 pack js-ts
  -> T11 packs python/shell/generic
@@ -944,11 +944,11 @@ Invocar `requesting-code-review`; por cada hallazgo agregar un test discriminant
 git status --short --branch
 git diff origin/main...HEAD --check
 git push -u origin feat/issue-20-r3-empirical-coverage
-gh pr create --repo Kodria/agentic-workflow --base main --head feat/issue-20-r3-empirical-coverage --title "feat(sensors)!: add compatible empirical coverage" --body "Refs #20; resolves the CLI portion of #70; registry v2 remains ordered after npm 7.0.0."
+gh pr create --repo Kodria/agentic-workflow --base main --head feat/issue-20-r3-empirical-coverage --title "feat(sensors)!: add compatible empirical coverage" --body "Refs #20; resolves the CLI portion of #70; registry v2 remains ordered after npm 8.0.0."
 gh pr checks --watch
 ```
 
-Expected: PR URL real y CI verde en tres OS. Tras merge, esperar release workflow verde y verificar `npm view agentic-workflow-manager@7.0.0 version` devuelve `7.0.0` antes de T9. No elevar todavía el registry.
+Expected: PR URL real y CI verde en tres OS. Tras merge, esperar release workflow verde y verificar `npm view agentic-workflow-manager@8.0.0 version` devuelve `8.0.0` antes de T9. No elevar todavía el registry.
 
 ### Task 9: Contrato de autor pack v2 y gate estructural del registry
 
@@ -967,7 +967,7 @@ _Requirements: R1.1, R1.6, R1.7, R4.10, R7.1, R9.4, R10.3_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Crear rama limpia del registry después de CLI 7 publicado**
+- [x] **Step 1: Crear rama limpia del registry después de CLI 7 publicado**
 
 ```bash
 git -C ../awm-baseline-registry fetch origin
@@ -977,7 +977,7 @@ git -C ../awm-baseline-registry status --short --branch
 
 Expected: rama nueva limpia desde `origin/main`; si ya existe, verificar que su base coincide y reutilizar sin reescribir trabajo ajeno.
 
-- [ ] **Step 2: Escribir corpus rojo de pack v2**
+- [x] **Step 2: Escribir corpus rojo de pack v2**
 
 ```js
 test('valid fixture carries v2 variants and coverage v1', () => {
@@ -994,15 +994,15 @@ for (const [fixture, message] of [
 ]) test(`rejects ${fixture}`, () => assert.throws(() => validateFixture(fixture), message));
 ```
 
-- [ ] **Step 3: Implementar schema y validador cerrado**
+- [x] **Step 3: Implementar schema y validador cerrado**
 
 `pack.schema.json` refleja exactamente el contrato T1, con `additionalProperties:false`, IDs kebab, arrays nonempty, commands argv y probes enum. `sensor-pack-variants.test.mjs` agrega validaciones semánticas: overlap, referencias, assets reales/contenidos, coverage detector→sensor, comando→asset, y clases genéricas sin nombres de proyecto.
 
-- [ ] **Step 4: Escribir la referencia canónica de autores**
+- [x] **Step 4: Escribir la referencia canónica de autores**
 
 En inglés: v2 completo, legacy, custom registries, operational vs certified, future compatible-unverified, probes cerrados, assets, native/baseline/hardening, ejemplos válidos, migración y enlace al CLI configuration guide. No duplicar tablas de soporte.
 
-- [ ] **Step 5: Ejecutar el gate compatible con legacy y commit del contrato**
+- [x] **Step 5: Ejecutar el gate compatible con legacy y commit del contrato**
 
 Run:
 
@@ -1040,7 +1040,7 @@ _Requirements: R4.2, R4.3, R4.4, R4.5, R4.6, R9.2_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tests rojos de las variantes obligatorias**
+- [x] **Step 1: Escribir tests rojos de las variantes obligatorias**
 
 ```js
 const expectedLint = ['eslint-8-eslintrc', 'eslint-8-flat', 'eslint-9-flat', 'eslint-10-flat'];
@@ -1064,7 +1064,7 @@ test('commands are local argv and test variants cover npm/pnpm/yarn/bun (R4.5, R
 });
 ```
 
-- [ ] **Step 2: Generar y congelar pins de certificación**
+- [x] **Step 2: Generar y congelar pins de certificación**
 
 `resolve-certification-pins.mjs` consulta registries oficiales una sola vez para las familias declaradas (`eslint@8/9/10`, TypeScript, Prettier, dependency-cruiser, Stryker), selecciona el patch más reciente de cada frontera, escribe JSON ordenado con `resolvedAt` y URL fuente, y falla si una versión no satisface el rango del manifest. Ejecutar:
 
@@ -1072,15 +1072,15 @@ test('commands are local argv and test variants cover npm/pnpm/yarn/bun (R4.5, R
 
 Expected: `tests/fixtures/certification-pins.json` reproducible y sin tags flotantes en CI posterior.
 
-- [ ] **Step 3: Implementar manifests y assets por nivel**
+- [x] **Step 3: Implementar manifests y assets por nivel**
 
 ESLint declara las cuatro variantes; flat v8 usa env estático allowlisted si hace falta, v9/v10 no dependen de eslintrc. TypeScript normal ejecuta `tsc --noEmit` contra config nativa sin asset; `tsconfig.awm.json` vive solo en `hardening`. Prettier/depcruise/Stryker/test script declaran probes/version ranges y argv. `formatter` queda en cada variante.
 
-- [ ] **Step 4: Certificar carga real de ESLint y configs nativas**
+- [x] **Step 4: Certificar carga real de ESLint y configs nativas**
 
 Extender `sensor-pack-eslint.test.mjs` para matriz de pins y cuatro formas de config. Cada fixture instala exact version pin en tmpdir, ejecuta el command resuelto y afirma config/código de salida. Casos native config dañada deben fallar; ausencia de config usa baseline compatible solo donde la variante lo declara.
 
-- [ ] **Step 5: Ejecutar gate completo js-ts y mutaciones**
+- [x] **Step 5: Ejecutar gate completo js-ts y mutaciones**
 
 Run:
 
@@ -1095,7 +1095,7 @@ node tests/sensor-pack-coverage.test.mjs
 
 Expected: todos los comandos salen 0; `js-ts` pasa como v2 y los otros tres packs siguen aceptados por la ruta legacy `compatible-unverified`. Mutaciones: mover `tsconfig.awm.json` a assets default y usar `npx`; ambos casos deben fallar.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add sensor-packs/js-ts tests/sensor-pack-eslint.test.mjs tests/sensor-pack-js-ts-variants.test.mjs tests/fixtures/certification-pins.json scripts/resolve-certification-pins.mjs
@@ -1121,7 +1121,7 @@ _Requirements: R4.1, R4.7, R4.8, R4.9, R9.2_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tests rojos por capacidad**
+- [x] **Step 1: Escribir tests rojos por capacidad**
 
 ```js
 test('python variants cover native configured tools (R4.7)', () => {
@@ -1143,19 +1143,19 @@ test('generic declares only Semgrep capability (R4.9)', () => {
 });
 ```
 
-- [ ] **Step 2: Ampliar pins y declarar rangos operativos/certificados**
+- [x] **Step 2: Ampliar pins y declarar rangos operativos/certificados**
 
 Ejecutar el mismo resolver para Python 3.9/actual, mypy, Ruff, pytest, Semgrep y ShellCheck; persistir versiones exactas. Mutmut permanece opt-in. Rangos se validan contra pins, no se deducen del latest en CI.
 
-- [ ] **Step 3: Migrar los tres packs y compartir política Semgrep**
+- [x] **Step 3: Migrar los tres packs y compartir política Semgrep**
 
 Cada pack referencia `shared/semgrep-policy.json` para requisitos/probe, manteniendo reglas YAML específicas por lenguaje. ShellCheck usa `{files}` como argumento entero. Python resuelve environment local y configs nativas. Generic es N/A/inconclusive fuera de su capacidad explícita, nunca covered por vacío. `sensor-pack-variants.test.mjs` activa ahora la aserción productiva de que los cuatro packs oficiales usan `schemaVersion: 2`; desde este punto el gate ya no permite legacy oficial.
 
-- [ ] **Step 4: Convertir rules-fire en gate real sin skip**
+- [x] **Step 4: Convertir rules-fire en gate real sin skip**
 
 Eliminar el skip por Semgrep ausente dentro del job de certificación: el workflow instalará el pin. Los tests disparan una regla real por pack y fallan si salida no contiene el rule ID esperado.
 
-- [ ] **Step 5: Ejecutar todos los packs, mutaciones y commit**
+- [x] **Step 5: Ejecutar todos los packs, mutaciones y commit**
 
 Run:
 
@@ -1208,7 +1208,7 @@ _Requirements: R6.4, R6.5, R6.7, R9.2, R9.4, R10.2, R10.3, R10.5, R10.6, R10.7, 
 
 **Skills:** `test-driven-development`, `writing-skills`, `verification-before-completion`
 
-- [ ] **Step 1: Escribir contrato rojo del orden terminal y emisión tipada**
+- [x] **Step 1: Escribir contrato rojo del orden terminal y emisión tipada**
 
 ```js
 test('runs coverage exactly once before archive (R6.4)', () => {
@@ -1236,11 +1236,11 @@ test('keeps empirical coverage terminal and out of implementation QA (R6.7)', ()
 });
 ```
 
-- [ ] **Step 2: Actualizar skills y versiones sin ampliar autoridad**
+- [x] **Step 2: Actualizar skills y versiones sin ampliar autoridad**
 
 Agregar coverage como nuevo paso del checklist tras leer el ledger y antes de triage/archive. Interactivo presenta outcomes; desatendido usa solo reglas vigentes y registra recomendaciones no autorizadas. Emisores agregan flag únicamente al mapear un catálogo exacto. `setup-sensors` queda como escape para custom/compatible-unverified/hardening. Bumps: harness-retro `2.4.0`, setup-sensors `1.1.0`, SDD `1.7.0`, QA `1.5.0`, verification `1.2.0`, debugging `1.1.0`.
 
-- [ ] **Step 3: Crear renderer y freshness del soporte del registry**
+- [x] **Step 3: Crear renderer y freshness del soporte del registry**
 
 ```js
 export function renderSensorSupport(packs, pins) {
@@ -1252,7 +1252,7 @@ export function renderSensorSupport(packs, pins) {
 
 `SUPPORT.md` tiene markers y solo contenido generado. Test regenera y compara bytes; incluye certified/compatible-unverified/not-applicable, tool/range/OS y fecha/pins, sin prosa duplicada.
 
-- [ ] **Step 4: Construir workflow de certificación que bloquee el tag**
+- [x] **Step 4: Construir workflow de certificación que bloquee el tag**
 
 Workflow reusable con resolver/contract suite en Ubuntu/macOS/Windows; real tools min/current principalmente Ubuntu; smoke current macOS/Windows; future sintético debe ser compatible-unverified. `validate.yml` lo llama. `auto-tag.yml` también lo llama y el job `tag` declara `needs: sensor-certification`; no confiar en un workflow paralelo.
 
@@ -1311,7 +1311,7 @@ _Requirements: R7.7, R7.8, R9.1, R9.2, R9.3, R9.4, R10.11, R10.13_
 
 - [ ] **Step 1: Instalar consumidor publicado y pin exacto en homes temporales**
 
-Crear tmpdirs con `mktemp -d`; instalar `agentic-workflow-manager@7.0.0` allí y clonar/registrar exclusivamente `awm-baseline-registry@v2.0.0`. No tocar `~/.awm`. Guardar comandos y hashes, no rutas temporales absolutas.
+Crear tmpdirs con `mktemp -d`; instalar `agentic-workflow-manager@8.0.0` allí y clonar/registrar exclusivamente `awm-baseline-registry@v2.0.0`. No tocar `~/.awm`. Guardar comandos y hashes, no rutas temporales absolutas.
 
 - [ ] **Step 2: Ejecutar matriz end-to-end new/legacy/future**
 
@@ -1332,7 +1332,7 @@ npx jest tests/structural/support-matrix-is-current.test.ts --runInBand
 git diff --check ../docs/support-matrix.md
 ```
 
-Expected: tabla idéntica a manifests de `v2.0.0`. `published-acceptance.json` registra `cliVersion:7.0.0`, `registryTag:v2.0.0`, commit/tag hashes, resultado 3-OS y hashes de fixtures.
+Expected: tabla idéntica a manifests de `v2.0.0`. `published-acceptance.json` registra `cliVersion:8.0.0`, `registryTag:v2.0.0`, commit/tag hashes, resultado 3-OS y hashes de fixtures.
 
 - [ ] **Step 5: Ejecutar reconciliación completa de ambos repos**
 
@@ -1357,7 +1357,7 @@ REGISTRY_PR_URL=$(gh pr list --repo Kodria/awm-baseline-registry --head feat/iss
 test -n "$CLI_PR_URL" && test -n "$REGISTRY_PR_URL"
 ```
 
-Comentar issue #20 con PRs, npm 7.0.0, registry v2.0.0, comandos, schemas, matriz y retro. Cerrar #70 citando las variantes ESLint/TS y hardening opt-in. Cerrar #20 solo si sus demás releases están completas; si no, dejar baton exacto sin afirmar cierre global.
+Comentar issue #20 con PRs, npm 8.0.0, registry v2.0.0, comandos, schemas, matriz y retro. Cerrar #70 citando las variantes ESLint/TS y hardening opt-in. Cerrar #20 solo si sus demás releases están completas; si no, dejar baton exacto sin afirmar cierre global.
 
 - [ ] **Step 7: Persistir aceptación, solicitar review final y transferir a QA/retro/finishing**
 
@@ -1428,7 +1428,7 @@ Invocar `requesting-code-review`, corregir todo hallazgo, marcar únicamente che
 | R7.3 | T4 | renderer tests exigen envelope público `schemaVersion: 2` |
 | R7.4 | T1, T4, T9 | contratos prueban `coverage.schemaVersion: 1` anidado |
 | R7.5 | T1 | corpus future-schema rechaza versiones desconocidas con mensaje accionable |
-| R7.6 | T8 | suite/release verifica versión CLI major `7.0.0` |
+| R7.6 | T8 | suite/release verifica versión CLI major `8.0.0` |
 | R7.7 | T13 | aceptación exige dos URLs reales y registra ambos artefactos publicados |
 | R7.8 | T8, T13 | E2E legacy y aceptación publicada prueban orden CLI-antes-registry |
 | R8.1 | T5 | `scan.test.ts` cubre archivos, bytes, líneas, refs y profundidad acotados |
@@ -1452,7 +1452,7 @@ Invocar `requesting-code-review`, corregir todo hallazgo, marcar únicamente che
 | R10.10 | T7 | ejemplos JSON documentados pasan los parsers productivos |
 | R10.11 | T7, T12, T13 | tests de freshness regeneran ambas matrices y cotejan el tag publicado |
 | R10.12 | T7, T12 | tests de documentación activa y enlaces prueban reachability bidireccional |
-| R10.13 | T8, T12, T13 | evidencia exige npm 7.0.0, registry v2.0.0, hashes y URLs reales |
+| R10.13 | T8, T12, T13 | evidencia exige npm 8.0.0, registry v2.0.0, hashes y URLs reales |
 | R10.14 | T7 | `active-documentation.test.ts` verifica inglés y prohíbe prosa R3 fuera de owners |
 
 ## Auto-revisión y analyze gate

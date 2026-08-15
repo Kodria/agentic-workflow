@@ -279,9 +279,11 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
     if (opts.registryRoot) {
         const resolvedV2 = readV2Pack(resolvedPack, opts.registryRoot);
         if (resolvedV2) {
-            const compatibility = (await resolveParsedPackCompatibility(cwd, resolvedV2.pack)).sensors;
+            const packSelection = opts.pack ? 'explicit' as const : undefined;
+            const live = await resolveParsedPackCompatibility(cwd, resolvedV2.pack, { packSelection });
+            const compatibility = live.sensors;
             const sensors: Record<string, any> = {};
-            for (const [name, sensor] of Object.entries(resolvedV2.pack.sensors)) {
+            for (const [name, sensor] of Object.entries(live.pack.sensors)) {
                 const resolved = compatibility[name];
                 const variant = resolved.variantId === null ? null : sensor.variants.find(candidate => candidate.id === resolved.variantId) ?? null;
                 // Unresolved states do not receive an arbitrary command. They remain
@@ -299,6 +301,7 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
                         variantId: variant.id,
                         command: variant.command,
                         assets: variant.assets,
+                        ...(variant.policyRef ? { policyRef: variant.policyRef } : {}),
                         initializedCompatibility: migratedOverride
                             ? { ...resolved, state: 'compatible-unverified', reason: 'legacy custom command requires explicit v2 migration' }
                             : resolved,
@@ -307,7 +310,7 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
             }
             const materialized = materializeResolvedSensors({
                 projectRoot: cwd, packRoot: resolvedV2.packRoot,
-                pack: resolvedPack, registryRoot: opts.registryRoot, sensors, configure,
+                pack: resolvedPack, ...(packSelection ? { packSelection } : {}), registryRoot: opts.registryRoot, sensors, configure,
             });
             return { detection, ...materialized,
                 compatibility, ...(unavailablePack ? { unavailablePack } : {}) };

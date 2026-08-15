@@ -1,4 +1,6 @@
 import semver from 'semver';
+import fs from 'fs';
+import path from 'path';
 import { parseCoverageContract } from '../coverage/contract';
 import type {
     CompatibilityProbe,
@@ -8,11 +10,13 @@ import type {
     SensorPackSensor,
     SensorPackV2,
     SensorVariant,
+    SemgrepPolicy,
     StructuredCommand,
 } from './types';
 
 const PACK_SCHEMA_VERSION = 2;
 const SHELL_EXECUTABLES = new Set(['sh', 'bash', 'cmd', 'powershell']);
+const PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
 const ALLOWED_PROBES = new Set<CompatibilityProbe>([
     'version',
     'eslint-print-config',
@@ -23,6 +27,10 @@ const ALLOWED_PROBES = new Set<CompatibilityProbe>([
 ]);
 
 type UnknownRecord = Record<string, unknown>;
+
+function normalizedPackageManager(value: string): string {
+    return value.toLowerCase().replace(/\.exe$/, '');
+}
 
 function isRecord(value: unknown): value is UnknownRecord {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -73,9 +81,54 @@ function stringArray(value: unknown, source: unknown, location: string): string[
     return value.map((item, index) => text(item, source, `${location}[${index}]`));
 }
 
+function assetArray(value: unknown, source: unknown, location: string, allowEmpty = false): string[] {
+    if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) invalid(source, `${location} must be a ${allowEmpty ? '' : 'nonempty '}array`);
+    return value.map((item, index) => asset(item, source, `${location}[${index}]`));
+}
+
+const SEMGREP_POLICY_REF = 'shared/semgrep-policy.json' as const;
+const MAX_POLICY_BYTES = 64 * 1024;
+
+function contained(root: string, candidate: string): boolean {
+    const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+    return candidate.startsWith(prefix);
+}
+
+export function parseSemgrepPolicy(input: unknown, source: unknown): SemgrepPolicy {
+    const value = record(input, source, 'Semgrep policy');
+    fields(value, ['tool', 'toolRange', 'runtime', 'runtimeRange', 'probe'], source, 'Semgrep policy');
+    if (value.tool !== 'semgrep' || value.runtime !== 'python' || value.probe !== 'semgrep-validate') {
+        invalid(source, 'Semgrep policy must declare semgrep, python, and semgrep-validate');
+    }
+    const toolRange = text(value.toolRange, source, 'Semgrep policy.toolRange');
+    const runtimeRange = text(value.runtimeRange, source, 'Semgrep policy.runtimeRange');
+    if (semver.validRange(toolRange) === null || semver.validRange(runtimeRange) === null) invalid(source, 'Semgrep policy ranges must be valid semver ranges');
+    return { tool: 'semgrep', toolRange, runtime: 'python', runtimeRange, probe: 'semgrep-validate' };
+}
+
+export function resolveSemgrepPolicy(policyRef: unknown, source: unknown, location = 'policy'): SemgrepPolicy {
+    if (policyRef !== SEMGREP_POLICY_REF) invalid(source, `${location}.policyRef must be the contained AWM-owned ${SEMGREP_POLICY_REF}`);
+    if (typeof source !== 'string' || !path.isAbsolute(source) || path.normalize(source) !== source || path.basename(source) !== 'pack.json') {
+        invalid(source, `${location}.policyRef requires an absolute pack.json source`);
+    }
+    const packRoot = path.dirname(source);
+    const sensorPacksRoot = path.dirname(packRoot);
+    const candidate = path.join(sensorPacksRoot, ...SEMGREP_POLICY_REF.split('/'));
+    if (!contained(sensorPacksRoot, candidate)) invalid(source, `${location}.policyRef escapes sensor-packs root`);
+    let stat: fs.Stats;
+    try { stat = fs.lstatSync(candidate); } catch { invalid(source, `${location}.policyRef does not resolve to a regular policy file`); }
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_POLICY_BYTES) invalid(source, `${location}.policyRef must resolve to a bounded regular policy file`);
+    let realRoot: string; let realPolicy: string;
+    try { realRoot = fs.realpathSync(sensorPacksRoot); realPolicy = fs.realpathSync(candidate); } catch { invalid(source, `${location}.policyRef cannot be canonicalized`); }
+    if (!contained(realRoot, realPolicy)) invalid(source, `${location}.policyRef escapes sensor-packs root`);
+    let parsed: unknown;
+    try { parsed = JSON.parse(fs.readFileSync(realPolicy, 'utf8')); } catch { invalid(source, `${location}.policyRef must contain valid JSON`); }
+    return parseSemgrepPolicy(parsed, realPolicy);
+}
+
 export function parseStructuredCommand(input: unknown, source: unknown): StructuredCommand {
     const value = record(input, source, 'command');
-    fields(value, ['executable', 'resolution', 'args', 'fileInput'], source, 'command');
+    fields(value, ['executable', 'resolution', 'args', 'packageManager', 'environment', 'fileInput', 'pythonEnvironmentRoot'], source, 'command');
     const executable = text(value.executable, source, 'command.executable');
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(executable) || SHELL_EXECUTABLES.has(executable.toLowerCase().replace(/\.exe$/, ''))) {
         invalid(source, 'command.executable must not be a shell or path');
@@ -88,6 +141,24 @@ export function parseStructuredCommand(input: unknown, source: unknown): Structu
         if (arg.includes('{files}') && arg !== '{files}') invalid(source, `command.args[${index}] must not embed {files}`);
     }
     const command: StructuredCommand = { executable, resolution: value.resolution, args };
+    if ('pythonEnvironmentRoot' in value) {
+        if (value.resolution !== 'python-environment' || (value.pythonEnvironmentRoot !== '.venv' && value.pythonEnvironmentRoot !== 'venv')) invalid(source, 'command.pythonEnvironmentRoot must name the selected .venv or venv Python environment');
+        command.pythonEnvironmentRoot = value.pythonEnvironmentRoot;
+    }
+    const executablePackageManager = normalizedPackageManager(executable);
+    if (PACKAGE_MANAGERS.has(executablePackageManager) && !('packageManager' in value)) invalid(source, 'command.packageManager is required for a package-manager executable');
+    if ('packageManager' in value) {
+        if (typeof value.packageManager !== 'string' || !PACKAGE_MANAGERS.has(normalizedPackageManager(value.packageManager))) invalid(source, 'command.packageManager must be npm, pnpm, yarn, or bun');
+        const packageManager = normalizedPackageManager(value.packageManager);
+        if (packageManager !== executablePackageManager) invalid(source, 'command.packageManager must match executable');
+        command.packageManager = packageManager as StructuredCommand['packageManager'];
+    }
+    if ('environment' in value) {
+        const environment = record(value.environment, source, 'command.environment');
+        fields(environment, ['ESLINT_USE_FLAT_CONFIG'], source, 'command.environment');
+        if ((environment.ESLINT_USE_FLAT_CONFIG !== 'true' && environment.ESLINT_USE_FLAT_CONFIG !== 'false') || Object.keys(environment).length !== 1) invalid(source, 'command.environment must be the exact allowlisted ESLINT_USE_FLAT_CONFIG=true or false mapping');
+        command.environment = { ESLINT_USE_FLAT_CONFIG: environment.ESLINT_USE_FLAT_CONFIG };
+    }
     if ('fileInput' in value) {
         const fileInput = record(value.fileInput, source, 'command.fileInput');
         fields(fileInput, ['placeholder', 'extensions'], source, 'command.fileInput');
@@ -106,36 +177,55 @@ export function parseStructuredCommand(input: unknown, source: unknown): Structu
 
 function parseVariant(input: unknown, source: unknown, location: string): SensorVariant {
     const value = record(input, source, location);
-    fields(value, ['id', 'priority', 'requirements', 'certifiedRange', 'command', 'assets', 'formatter', 'probe'], source, location);
+    fields(value, ['id', 'priority', 'requirements', 'certifiedRange', 'command', 'assets', 'formatter', 'probe', 'policyRef'], source, location);
     const certifiedRange = text(value.certifiedRange, source, `${location}.certifiedRange`);
     if (semver.validRange(certifiedRange) === null) invalid(source, `${location}.certifiedRange must be a valid semver range`);
     if (typeof value.priority !== 'number' || !Number.isSafeInteger(value.priority)) invalid(source, `${location}.priority must be a safe integer`);
-    const requirements = record(value.requirements, source, `${location}.requirements`);
-    fields(requirements, ['tool', 'toolRange', 'runtime', 'runtimeRange', 'configFiles'], source, `${location}.requirements`);
-    const toolRange = text(requirements.toolRange, source, `${location}.requirements.toolRange`);
-    const runtimeRange = text(requirements.runtimeRange, source, `${location}.requirements.runtimeRange`);
+    const policy = 'policyRef' in value ? resolveSemgrepPolicy(value.policyRef, source, location) : undefined;
+    if (policy && ('requirements' in value || 'probe' in value)) invalid(source, `${location}.policyRef is authoritative; requirements and probe must not duplicate it`);
+    if (!policy && (!('requirements' in value) || !('probe' in value))) invalid(source, `${location} requires requirements and probe when policyRef is absent`);
+    const requirements = policy ? undefined : record(value.requirements, source, `${location}.requirements`);
+    if (requirements) fields(requirements, ['tool', 'toolRange', 'runtime', 'runtimeRange', 'configFiles'], source, `${location}.requirements`);
+    const toolRange = policy?.toolRange ?? text(requirements!.toolRange, source, `${location}.requirements.toolRange`);
+    const runtimeRange = policy?.runtimeRange ?? text(requirements!.runtimeRange, source, `${location}.requirements.runtimeRange`);
     if (semver.validRange(toolRange) === null || semver.validRange(runtimeRange) === null) invalid(source, `${location}.requirements ranges must be valid semver ranges`);
-    const probe = record(value.probe, source, `${location}.probe`);
-    fields(probe, ['kind'], source, `${location}.probe`);
-    if (typeof probe.kind !== 'string' || !ALLOWED_PROBES.has(probe.kind as CompatibilityProbe)) invalid(source, `${location}.probe.kind must be an allowed probe`);
+    const probe = policy ? undefined : record(value.probe, source, `${location}.probe`);
+    if (probe) {
+        fields(probe, ['kind'], source, `${location}.probe`);
+        if (typeof probe.kind !== 'string' || !ALLOWED_PROBES.has(probe.kind as CompatibilityProbe)) invalid(source, `${location}.probe.kind must be an allowed probe`);
+    }
     return {
         id: id(value.id, source, `${location}.id`),
         priority: value.priority,
         certifiedRange,
-        requirements: { tool: text(requirements.tool, source, `${location}.requirements.tool`), toolRange, runtime: text(requirements.runtime, source, `${location}.requirements.runtime`), runtimeRange, ...('configFiles' in requirements ? { configFiles: stringArray(requirements.configFiles, source, `${location}.requirements.configFiles`).map((file, index) => asset(file, source, `${location}.requirements.configFiles[${index}]`)) } : {}) },
-        assets: stringArray(value.assets, source, `${location}.assets`).map((entry, index) => asset(entry, source, `${location}.assets[${index}]`)),
+        requirements: policy
+            ? { tool: policy.tool, toolRange, runtime: policy.runtime, runtimeRange }
+            : { tool: text(requirements!.tool, source, `${location}.requirements.tool`), toolRange, runtime: text(requirements!.runtime, source, `${location}.requirements.runtime`), runtimeRange, ...('configFiles' in requirements! ? { configFiles: stringArray(requirements!.configFiles, source, `${location}.requirements.configFiles`).map((file, index) => asset(file, source, `${location}.requirements.configFiles[${index}]`)) } : {}) },
+        assets: assetArray(value.assets, source, `${location}.assets`, true),
         formatter: text(value.formatter, source, `${location}.formatter`),
-        probe: { kind: probe.kind as CompatibilityProbe },
+        probe: { kind: policy?.probe ?? probe!.kind as CompatibilityProbe },
+        ...(policy ? { policyRef: SEMGREP_POLICY_REF } : {}),
         command: parseStructuredCommand(value.command, source),
     };
 }
 
-export function assertNoEqualPriorityOverlap(variants: unknown): void {
-    if (!Array.isArray(variants) || variants.length === 0) throw new Error('variants must be a nonempty array');
-    const parsed = variants.map((variant, index) => parseVariant(variant, 'public overlap validator', `variants[${index}]`));
+function parseHardening(input: unknown, source: unknown): SensorPackV2['hardening'] {
+    const value = record(input, source, 'hardening');
+    const names = Object.keys(value);
+    if (names.length === 0) invalid(source, 'hardening must be nonempty when declared');
+    const hardening: NonNullable<SensorPackV2['hardening']> = {};
+    for (const name of names) {
+        const entry = record(value[name], source, `hardening.${name}`);
+        fields(entry, ['assets'], source, `hardening.${name}`);
+        hardening[id(name, source, 'hardening id')] = { assets: assetArray(entry.assets, source, `hardening.${name}.assets`) };
+    }
+    return hardening;
+}
+
+function assertNoEqualPriorityOverlapParsed(parsed: SensorVariant[]): void {
     for (let left = 0; left < parsed.length; left++) {
         const first = parsed[left];
-        for (let right = left + 1; right < variants.length; right++) {
+        for (let right = left + 1; right < parsed.length; right++) {
             const second = parsed[right];
             const toolRangesIntersect = semver.intersects(first.requirements.toolRange, second.requirements.toolRange);
             const runtimeRangesIntersect = semver.intersects(first.requirements.runtimeRange, second.requirements.runtimeRange);
@@ -144,6 +234,11 @@ export function assertNoEqualPriorityOverlap(variants: unknown): void {
             }
         }
     }
+}
+
+export function assertNoEqualPriorityOverlap(variants: unknown): void {
+    if (!Array.isArray(variants) || variants.length === 0) throw new Error('variants must be a nonempty array');
+    assertNoEqualPriorityOverlapParsed(variants.map((variant, index) => parseVariant(variant, 'public overlap validator', `variants[${index}]`)));
 }
 
 function parseSensor(input: unknown, source: unknown, location: string, variantIds: Set<string>): SensorPackSensor {
@@ -156,7 +251,7 @@ function parseSensor(input: unknown, source: unknown, location: string, variantI
         variantIds.add(variant.id);
     }
     try {
-        assertNoEqualPriorityOverlap(variants);
+        assertNoEqualPriorityOverlapParsed(variants);
     } catch (error) {
         invalid(source, `${location}.variants ${error instanceof Error ? error.message : 'overlap validation failed'}`);
     }
@@ -215,7 +310,7 @@ function parseLegacyPack(value: UnknownRecord, source: unknown): LegacySensorPac
 export function parseSensorPack(input: unknown, source: unknown): ParsedSensorPack {
     const value = record(input, source, 'root');
     if (!('schemaVersion' in value)) return { kind: 'legacy', pack: parseLegacyPack(value, source) };
-    fields(value, ['schemaVersion', 'name', 'description', 'detects', 'sensors', 'coverage'], source, 'root');
+    fields(value, ['schemaVersion', 'name', 'description', 'detects', 'sensors', 'coverage', 'hardening'], source, 'root');
     if (value.schemaVersion !== PACK_SCHEMA_VERSION) invalid(source, `unsupported pack schemaVersion ${String(value.schemaVersion)}; supported: legacy, 2; upgrade or migrate the pack`);
     const sensorsInput = record(value.sensors, source, 'sensors');
     const sensorNames = Object.keys(sensorsInput);
@@ -229,10 +324,11 @@ export function parseSensorPack(input: unknown, source: unknown): ParsedSensorPa
     } catch (error) {
         invalid(source, `coverage.${error instanceof Error ? error.message.replace(/^.*?: /, '') : 'is invalid'}`);
     }
+    const hardening = 'hardening' in value ? parseHardening(value.hardening, source) : undefined;
     return { kind: 'v2', pack: {
         schemaVersion: PACK_SCHEMA_VERSION,
         name: id(value.name, source, 'name'), description: text(value.description, source, 'description'), detects: stringArray(value.detects, source, 'detects'),
-        sensors,
+        sensors, ...(hardening ? { hardening } : {}),
         coverage,
     } };
 }

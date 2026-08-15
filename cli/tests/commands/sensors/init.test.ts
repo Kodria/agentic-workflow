@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { detectStack, detectSourceDirs, buildManifest, initSensors } from '../../../src/commands/sensors/init';
+import { computeSensorStatus } from '../../../src/commands/sensors/status';
 
 // Build a throwaway registry with a js-ts pack.json (the single source of truth
 // init now reads from). `defaultCmd` uses the {{SOURCE_DIRS}} placeholder for depcheck.
@@ -43,13 +44,33 @@ function makeV2Registry(): string {
     const packDir = path.join(registryRoot, 'sensor-packs', 'js-ts');
     fs.mkdirSync(packDir, { recursive: true });
     fs.writeFileSync(path.join(packDir, 'eslint.config.awm.mjs'), 'export default []\n');
+    fs.writeFileSync(path.join(packDir, 'tsconfig.awm.json'), '{ "compilerOptions": { "strict": true } }\n');
     fs.writeFileSync(path.join(packDir, 'pack.json'), JSON.stringify({
         schemaVersion: 2, name: 'js-ts', description: 'fixture', detects: ['package.json'],
         coverage: { schemaVersion: 1, classes: { lint: { description: 'lint', detectors: [{ sensor: 'lint' }], remedy: { summary: 'fix lint', command: 'awm sensors init --pack js-ts' } } } },
+        hardening: { 'typescript-strict': { assets: ['tsconfig.awm.json'] } },
         sensors: { lint: { applicability: { allFiles: ['package.json'] }, variants: [{
             id: 'eslint-10', priority: 10, certifiedRange: '>=10.0.0 <11.0.0',
             requirements: { tool: 'eslint', toolRange: '>=10.0.0 <11.0.0', runtime: 'node', runtimeRange: '>=0.0.0' },
             assets: ['eslint.config.awm.mjs'], formatter: 'eslint-llm', probe: { kind: 'config-present' },
+            command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
+        }] } },
+    }));
+    return registryRoot;
+}
+
+function makeGenericV2Registry(): string {
+    const registryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-reg-generic-v2-'));
+    const packDir = path.join(registryRoot, 'sensor-packs', 'generic');
+    fs.mkdirSync(packDir, { recursive: true });
+    fs.writeFileSync(path.join(packDir, 'generic.config'), 'fixture\n');
+    fs.writeFileSync(path.join(packDir, 'pack.json'), JSON.stringify({
+        schemaVersion: 2, name: 'generic', description: 'fixture', detects: ['README.md'],
+        coverage: { schemaVersion: 1, classes: { security: { description: 'security', detectors: [{ sensor: 'security' }], remedy: { summary: 'run security', command: 'awm sensors init --pack generic' } } } },
+        sensors: { security: { applicability: { kind: 'explicit-or-supported-language' }, variants: [{
+            id: 'eslint-10', priority: 10, certifiedRange: '>=10.0.0 <11.0.0',
+            requirements: { tool: 'eslint', toolRange: '>=10.0.0 <11.0.0', runtime: 'node', runtimeRange: '>=0.0.0', configFiles: ['generic.config'] },
+            assets: ['generic.config'], formatter: 'eslint-llm', probe: { kind: 'config-present' },
             command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
         }] } },
     }));
@@ -298,6 +319,61 @@ describe('initSensors', () => {
             expect(written.sensors.lint.initializedCompatibility).toMatchObject({ variantId: 'eslint-10', state: 'certified', reason: 'range-and-probe' });
             expect(written.registryRoot).toBe(v2Registry);
             expect(fs.existsSync(path.join(tmpDir, 'eslint.config.awm.mjs'))).toBe(true);
+        } finally {
+            fs.rmSync(v2Registry, { recursive: true, force: true });
+        }
+    });
+
+    it('persists an explicit generic selection for live revalidation without promoting automatic generic fallback', async () => {
+        const v2Registry = makeGenericV2Registry();
+        try {
+            fs.mkdirSync(path.join(tmpDir, 'node_modules', 'eslint'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version: '10.0.0' }));
+
+            const automatic = await initSensors({ cwd: tmpDir, registryRoot: v2Registry, configure: false });
+            expect(automatic.manifest).toMatchObject({ schemaVersion: 2, pack: 'generic', sensors: {} });
+            expect((automatic.manifest as any).packSelection).toBeUndefined();
+
+            const explicit = await initSensors({ cwd: tmpDir, registryRoot: v2Registry, pack: 'generic' });
+            const written = JSON.parse(fs.readFileSync(path.join(tmpDir, '.awm', 'sensors.json'), 'utf8'));
+            expect(explicit.manifest).toMatchObject({ schemaVersion: 2, pack: 'generic', packSelection: 'explicit', sensors: { security: { variantId: 'eslint-10' } } });
+            expect(written.packSelection).toBe('explicit');
+            await expect(computeSensorStatus(tmpDir)).resolves.toMatchObject({ overall: 'HEALTHY', checks: { security: { ok: true } } });
+        } finally {
+            fs.rmSync(v2Registry, { recursive: true, force: true });
+        }
+    });
+
+    it('never materializes an opt-in hardening asset during ordinary v2 init', async () => {
+        const v2Registry = makeV2Registry();
+        try {
+            fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ devDependencies: { eslint: '^10.0.0' } }));
+            fs.mkdirSync(path.join(tmpDir, 'node_modules', 'eslint'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version: '10.0.0' }));
+            await initSensors({ cwd: tmpDir, registryRoot: v2Registry });
+            expect(fs.existsSync(path.join(tmpDir, 'eslint.config.awm.mjs'))).toBe(true);
+            expect(fs.existsSync(path.join(tmpDir, 'tsconfig.awm.json'))).toBe(false);
+        } finally {
+            fs.rmSync(v2Registry, { recursive: true, force: true });
+        }
+    });
+
+    it('initializes a selected v2 variant with an explicitly empty assets list', async () => {
+        const v2Registry = makeV2Registry();
+        try {
+            const packPath = path.join(v2Registry, 'sensor-packs', 'js-ts', 'pack.json');
+            const pack = JSON.parse(fs.readFileSync(packPath, 'utf8'));
+            pack.sensors.lint.variants[0].assets = [];
+            fs.writeFileSync(packPath, JSON.stringify(pack));
+            fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ devDependencies: { eslint: '^10.0.0' } }));
+            fs.mkdirSync(path.join(tmpDir, 'node_modules', 'eslint'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version: '10.0.0' }));
+
+            await expect(initSensors({ cwd: tmpDir, registryRoot: v2Registry })).resolves.toMatchObject({
+                manifest: { schemaVersion: 2, sensors: { lint: { assets: [] } } },
+                configured: [],
+            });
+            expect(fs.existsSync(path.join(tmpDir, 'eslint.config.awm.mjs'))).toBe(false);
         } finally {
             fs.rmSync(v2Registry, { recursive: true, force: true });
         }

@@ -27,7 +27,7 @@ export type ExecOptions = {
     killGraceMs?: number;
 };
 
-type SpawnInput = { executable: string; args: string[]; shell: boolean };
+type SpawnInput = { executable: string; args: string[]; shell: boolean; environment?: { ESLINT_USE_FLAT_CONFIG: 'true' | 'false' } };
 
 const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
 const DEFAULT_KILL_GRACE_MS = 2_000;
@@ -104,8 +104,9 @@ function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult>
             })
             : spawn(input.executable, input.args, {
                 shell: false,
-            cwd: opts.cwd,
-            detached: !isWindowsNative(),
+                cwd: opts.cwd,
+                detached: !isWindowsNative(),
+                ...(input.environment ? { env: { ...process.env, ...input.environment } } : {}),
             // stdin closed: a sensor must never block waiting for input, and the
             // EOF also tells watch-mode-capable tools (vitest, jest) to run once.
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -162,13 +163,64 @@ function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult>
 }
 
 function validateStructuredCommand(command: StructuredCommand): void {
-    if (!command || typeof command !== 'object' || typeof command.executable !== 'string' || (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(command.executable) && !path.isAbsolute(command.executable))) {
+    if (!command || typeof command !== 'object' || typeof command.executable !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(command.executable)) {
         throw new Error('structured command executable must be a safe executable name');
     }
-    if (!Array.isArray(command.args) || command.args.some(arg => typeof arg !== 'string' || /[\0\r\n]/.test(arg))) {
-        throw new Error('structured command args must be an array of single-line strings without NUL');
+    const normalizedExecutable = command.executable.toLowerCase().replace(/\.exe$/, '');
+    if (new Set(['sh', 'bash', 'cmd', 'powershell']).has(normalizedExecutable)) {
+        throw new Error('structured command executable must not be a shell');
+    }
+    if (!Array.isArray(command.args) || command.args.length === 0) {
+        throw new Error('structured command args must be a nonempty array');
+    }
+    for (const [index, arg] of command.args.entries()) {
+        if (typeof arg !== 'string' || arg.trim() === '' || /[\0\r\n]/.test(arg)) {
+            throw new Error(`structured command args[${index}] must be a nonempty single-line string without NUL`);
+        }
+        if (arg.includes('{files}') && arg !== '{files}') {
+            throw new Error(`structured command args[${index}] must not embed {files}`);
+        }
     }
     if (!['node-modules-bin', 'python-environment', 'path'].includes(command.resolution)) throw new Error('structured command resolution is unsupported');
+    if (command.pythonEnvironmentRoot !== undefined && (command.resolution !== 'python-environment' || (command.pythonEnvironmentRoot !== '.venv' && command.pythonEnvironmentRoot !== 'venv'))) {
+        throw new Error('structured command pythonEnvironmentRoot must name the selected .venv or venv Python environment');
+    }
+    if (command.resolution === 'python-environment' && command.pythonEnvironmentRoot === undefined) throw new Error('python environment command requires a discovery-bound contained local environment root');
+    const packageManagers = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+    const normalizedPackageManager = typeof command.packageManager === 'string' ? command.packageManager.toLowerCase().replace(/\.exe$/, '') : undefined;
+    if (packageManagers.has(normalizedExecutable) && normalizedPackageManager !== normalizedExecutable) throw new Error('structured command packageManager must explicitly match its executable');
+    if (normalizedPackageManager !== undefined && !packageManagers.has(normalizedPackageManager)) throw new Error('structured command packageManager is unsupported');
+    if (normalizedPackageManager !== undefined && normalizedPackageManager !== normalizedExecutable) throw new Error('structured command packageManager must explicitly match its executable');
+    if (command.environment !== undefined) {
+        const environment = command.environment as unknown;
+        if (!environment || typeof environment !== 'object' || Array.isArray(environment) || Object.keys(environment).length !== 1 || !Object.prototype.hasOwnProperty.call(environment, 'ESLINT_USE_FLAT_CONFIG')) {
+            throw new Error('structured command environment must be the exact allowlisted ESLINT_USE_FLAT_CONFIG=true or false mapping');
+        }
+        const flatConfig = (environment as { ESLINT_USE_FLAT_CONFIG?: unknown }).ESLINT_USE_FLAT_CONFIG;
+        if (flatConfig !== 'true' && flatConfig !== 'false') throw new Error('structured command environment must be the exact allowlisted ESLINT_USE_FLAT_CONFIG=true or false mapping');
+    }
+    const fileArguments = command.args.filter(arg => arg === '{files}').length;
+    if (command.fileInput === undefined) {
+        if (fileArguments !== 0) throw new Error('structured command {files} argument requires fileInput');
+        return;
+    }
+    const fileInput = command.fileInput as unknown;
+    if (!fileInput || typeof fileInput !== 'object' || Array.isArray(fileInput) || Object.keys(fileInput).length !== 2 || !Object.prototype.hasOwnProperty.call(fileInput, 'placeholder') || !Object.prototype.hasOwnProperty.call(fileInput, 'extensions')) {
+        throw new Error('structured command fileInput must contain only placeholder and extensions');
+    }
+    const { placeholder, extensions } = fileInput as { placeholder?: unknown; extensions?: unknown };
+    if (placeholder !== '{files}') throw new Error('structured command fileInput.placeholder must be {files}');
+    if (!Array.isArray(extensions) || extensions.length === 0 || extensions.some(extension => typeof extension !== 'string' || extension.trim() === '' || /[\0\r\n]/.test(extension) || !/^\.[A-Za-z0-9]+$/.test(extension))) {
+        throw new Error('structured command fileInput.extensions must be a nonempty array of extensions');
+    }
+    if (fileArguments !== 1) throw new Error('structured command fileInput requires exactly one {files} argument');
+}
+
+function safeWindowsExecutableExtensions(): string[] {
+    return (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+        .split(';')
+        .map(ext => ext.toLowerCase())
+        .filter(ext => ext === '.exe' || ext === '.com');
 }
 
 function regularFile(candidate: string): boolean {
@@ -176,6 +228,22 @@ function regularFile(candidate: string): boolean {
         const stat = fs.lstatSync(candidate);
         return stat.isFile() && !stat.isSymbolicLink();
     } catch { return false; }
+}
+
+/** Resolve a Python environment executable only when every selected path
+ * component is a non-symbolic-link local entry. A leaf-only lstat follows a
+ * linked .venv/venv ancestor and can otherwise execute outside the project. */
+function localPythonEnvironmentExecutable(cwd: string, environmentRoot: '.venv' | 'venv', executable: string): string | null {
+    const parts = [environmentRoot, isWindowsNative() ? 'Scripts' : 'bin', executable];
+    let candidate = cwd;
+    try {
+        for (const part of parts) {
+            candidate = path.join(candidate, part);
+            const stat = fs.lstatSync(candidate);
+            if (stat.isSymbolicLink()) return null;
+        }
+        return fs.lstatSync(candidate).isFile() ? candidate : null;
+    } catch { return null; }
 }
 
 function containedPath(root: string, candidate: string): boolean {
@@ -211,7 +279,8 @@ function resolveStructuredExecutable(command: StructuredCommand, cwd: string): s
             if (local) return local;
             throw new Error('node_modules executable is not a contained local file');
         }
-        const extensions = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map(ext => ext.toLowerCase()).filter(ext => ext === '.exe' || ext === '.com');
+        const extensions = safeWindowsExecutableExtensions();
+        if (extensions.length === 0) throw new Error('PATHEXT contains no safe Windows executable extension for structured commands');
         const candidates = [path.join(bin, command.executable), ...extensions.map(extension => path.join(bin, command.executable + extension))];
         for (const candidate of candidates) {
             const lower = candidate.toLowerCase();
@@ -224,8 +293,20 @@ function resolveStructuredExecutable(command: StructuredCommand, cwd: string): s
     const candidates: string[] = [];
     if (command.resolution === 'python-environment') {
         if (path.isAbsolute(command.executable)) throw new Error('python environment executable must be a contained local name');
-        candidates.push(path.join(cwd, '.venv', isWindowsNative() ? 'Scripts' : 'bin', command.executable));
-        candidates.push(path.join(cwd, 'venv', isWindowsNative() ? 'Scripts' : 'bin', command.executable));
+        if (!isWindowsNative()) {
+            const local = localPythonEnvironmentExecutable(cwd, command.pythonEnvironmentRoot!, command.executable);
+            if (local) return local;
+            throw new Error('python environment executable is not a contained local regular file');
+        }
+        const extensions = safeWindowsExecutableExtensions();
+        if (extensions.length === 0) throw new Error('PATHEXT contains no safe Windows executable extension for structured commands');
+        for (const executable of [command.executable, ...extensions.map(extension => command.executable + extension)]) {
+            const lower = executable.toLowerCase();
+            if (lower.endsWith('.cmd') || lower.endsWith('.bat')) throw new Error('structured commands cannot execute Windows command wrappers');
+            const local = localPythonEnvironmentExecutable(cwd, command.pythonEnvironmentRoot!, executable);
+            if (local && extensions.some(extension => lower.endsWith(extension))) return local;
+        }
+        throw new Error('python environment executable is not a contained local regular file');
     } else if (path.isAbsolute(command.executable)) candidates.push(command.executable);
     else {
         for (const entry of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) candidates.push(path.join(entry, command.executable));
@@ -233,24 +314,23 @@ function resolveStructuredExecutable(command: StructuredCommand, cwd: string): s
     if (!isWindowsNative()) {
         const found = candidates.find(regularFile);
         if (found) return found;
-        if (command.resolution === 'python-environment') throw new Error('python environment executable is not a contained local regular file');
         return command.executable;
     }
-    const extensions = (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map(ext => ext.toLowerCase()).filter(ext => ext === '.exe' || ext === '.com');
+    const extensions = safeWindowsExecutableExtensions();
+    if (extensions.length === 0) throw new Error('PATHEXT contains no safe Windows executable extension for structured commands');
     for (const candidate of candidates) {
         const lower = candidate.toLowerCase();
         if (lower.endsWith('.cmd') || lower.endsWith('.bat')) throw new Error('structured commands cannot execute Windows command wrappers');
         if (regularFile(candidate) && extensions.some(ext => lower.endsWith(ext))) return candidate;
         for (const extension of extensions) if (regularFile(candidate + extension)) return candidate + extension;
     }
-    if (command.resolution === 'python-environment') throw new Error('python environment executable is not a contained local regular file');
     return command.executable;
 }
 
 /** Execute a v2 command as an executable plus literal argv; it never starts a shell. */
 export function runStructuredCommand(command: StructuredCommand, opts: ExecOptions): Promise<ExecResult> {
     validateStructuredCommand(command);
-    return collectSpawn({ executable: resolveStructuredExecutable(command, opts.cwd), args: command.args, shell: false }, opts);
+    return collectSpawn({ executable: resolveStructuredExecutable(command, opts.cwd), args: command.args, shell: false, environment: command.environment }, opts);
 }
 
 /** Legacy sensor strings intentionally retain their documented shell semantics. */

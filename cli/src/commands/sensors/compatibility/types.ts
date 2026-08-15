@@ -9,7 +9,13 @@ export type CompatibilityState =
 export type StructuredCommand = {
     executable: string;
     resolution: 'node-modules-bin' | 'python-environment' | 'path';
+    /** Discovery-bound virtual environment identity for Python commands. */
+    pythonEnvironmentRoot?: '.venv' | 'venv';
     args: string[];
+    /** A script runner is explicit: v2 never guesses npm/pnpm/yarn/bun. */
+    packageManager?: 'npm' | 'pnpm' | 'yarn' | 'bun';
+    /** Closed execution environment; choose ESLint flat config or legacy eslintrc mode explicitly. */
+    environment?: { ESLINT_USE_FLAT_CONFIG: 'true' | 'false' };
     fileInput?: { placeholder: '{files}'; extensions: string[] };
 };
 
@@ -39,8 +45,25 @@ export type SensorVariant = {
     assets: string[];
     formatter: string;
     probe: { kind: CompatibilityProbe };
+    /** A registry-owned policy whose compatibility requirements are authoritative. */
+    policyRef?: 'shared/semgrep-policy.json';
     command: StructuredCommand;
 };
+
+export type SemgrepPolicy = {
+    tool: 'semgrep';
+    toolRange: string;
+    runtime: 'python';
+    runtimeRange: string;
+    probe: 'semgrep-validate';
+};
+
+/**
+ * Stricter pack configuration that is deliberately inert until an explicit opt-in
+ * surface selects it. That future surface must require a named hardening choice and
+ * package-manager/environment resolution before it can materialize any asset.
+ */
+export type SensorPackHardening = Record<string, { assets: string[] }>;
 
 export type SensorPackSensor = {
     applicability: { allFiles?: string[]; anyFiles?: string[]; kind?: string };
@@ -55,6 +78,7 @@ export type SensorPackV2 = {
     detects: string[];
     sensors: Record<string, SensorPackSensor>;
     coverage: unknown;
+    hardening?: SensorPackHardening;
 };
 
 export type LegacySensorPack = {

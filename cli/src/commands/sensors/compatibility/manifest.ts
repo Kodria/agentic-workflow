@@ -9,8 +9,10 @@ type UnknownRecord = Record<string, unknown>;
 export type SensorManifestV2 = {
     schemaVersion: 2;
     pack: string;
+    /** Durable operator intent. Absent means detected/fallback, never explicit. */
+    packSelection?: 'explicit';
     registryRoot?: string;
-    sensors: Record<string, { enabled: boolean; fast?: boolean; variantId: string; command: StructuredCommand; assets?: string[]; initializedCompatibility: CompatibilityEvidence }>;
+    sensors: Record<string, { enabled: boolean; fast?: boolean; variantId: string; command: StructuredCommand; assets?: string[]; policyRef?: 'shared/semgrep-policy.json'; initializedCompatibility: CompatibilityEvidence }>;
     concurrency?: number;
 };
 
@@ -139,7 +141,7 @@ function parseLegacyManifest(value: UnknownRecord, source: unknown): LegacySenso
 
 function parseV2Sensor(input: unknown, source: unknown, location: string): SensorManifestV2['sensors'][string] {
     const value = record(input, source, location);
-    fields(value, ['enabled', 'fast', 'variantId', 'command', 'assets', 'initializedCompatibility'], source, location);
+    fields(value, ['enabled', 'fast', 'variantId', 'command', 'assets', 'policyRef', 'initializedCompatibility'], source, location);
     if (typeof value.enabled !== 'boolean') invalid(source, `${location}.enabled must be a boolean`);
     const sensor: SensorManifestV2['sensors'][string] = {
         enabled: value.enabled, variantId: id(value.variantId, source, `${location}.variantId`),
@@ -150,7 +152,11 @@ function parseV2Sensor(input: unknown, source: unknown, location: string): Senso
     if (['certified', 'compatible-unverified', 'incompatible'].includes(sensor.initializedCompatibility.state) && sensor.initializedCompatibility.variantId === null) invalid(source, `${location}.initializedCompatibility.variantId is required for ${sensor.initializedCompatibility.state}`);
     if (sensor.initializedCompatibility.state === 'certified' && (sensor.initializedCompatibility.toolVersion === null || sensor.initializedCompatibility.runtimeVersion === null || sensor.initializedCompatibility.certifiedRange === null)) invalid(source, `${location}.initializedCompatibility certified evidence is incomplete`);
     if (sensor.initializedCompatibility.state === 'certified' && !semver.satisfies(sensor.initializedCompatibility.toolVersion!, sensor.initializedCompatibility.certifiedRange!)) invalid(source, `${location}.initializedCompatibility.toolVersion must satisfy certifiedRange`);
-    if ('assets' in value) sensor.assets = stringArray(value.assets, source, `${location}.assets`, false).map((entry, index) => asset(entry, source, `${location}.assets[${index}]`));
+    if ('assets' in value) sensor.assets = stringArray(value.assets, source, `${location}.assets`, true).map((entry, index) => asset(entry, source, `${location}.assets[${index}]`));
+    if ('policyRef' in value) {
+        if (value.policyRef !== 'shared/semgrep-policy.json') invalid(source, `${location}.policyRef must be the contained AWM-owned shared/semgrep-policy.json`);
+        sensor.policyRef = value.policyRef;
+    }
     if ('fast' in value) {
         if (typeof value.fast !== 'boolean') invalid(source, `${location}.fast must be a boolean`);
         sensor.fast = value.fast;
@@ -165,13 +171,17 @@ function provenanceRoot(value: unknown, source: unknown): string {
 }
 
 function parseV2Manifest(value: UnknownRecord, source: unknown): SensorManifestV2 {
-    fields(value, ['schemaVersion', 'pack', 'registryRoot', 'sensors', 'concurrency'], source, 'root');
+    fields(value, ['schemaVersion', 'pack', 'packSelection', 'registryRoot', 'sensors', 'concurrency'], source, 'root');
     if (value.schemaVersion !== 2) invalid(source, `unsupported manifest schemaVersion ${String(value.schemaVersion)}; supported: legacy, 2; upgrade or migrate the manifest`);
     const pack = id(value.pack, source, 'pack');
     const sensorsInput = record(value.sensors, source, 'sensors');
     const sensors: SensorManifestV2['sensors'] = {};
     for (const name of Object.keys(sensorsInput)) sensors[id(name, source, 'sensor id')] = parseV2Sensor(sensorsInput[name], source, `sensors.${name}`);
     const manifest: SensorManifestV2 = { schemaVersion: 2, pack, sensors };
+    if ('packSelection' in value) {
+        if (value.packSelection !== 'explicit') invalid(source, 'packSelection must be "explicit" when present');
+        manifest.packSelection = 'explicit';
+    }
     if ('registryRoot' in value) manifest.registryRoot = provenanceRoot(value.registryRoot, source);
     if ('concurrency' in value) {
         if (typeof value.concurrency !== 'number' || !Number.isSafeInteger(value.concurrency) || value.concurrency <= 0) invalid(source, 'concurrency must be a positive safe integer');

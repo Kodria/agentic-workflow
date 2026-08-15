@@ -1,4 +1,7 @@
 import { assertNoEqualPriorityOverlap, parseSensorPack } from '../../../../src/commands/sensors/compatibility/contract';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 const coverage = {
     schemaVersion: 1,
@@ -38,8 +41,97 @@ function validPack() {
 }
 
 describe('sensor pack v2 contract', () => {
+    it('derives Semgrep compatibility from a contained shared policy reference', () => {
+        const sensorPacks = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-semgrep-policy-'));
+        const packDir = path.join(sensorPacks, 'python');
+        try {
+            fs.mkdirSync(path.join(sensorPacks, 'shared'), { recursive: true });
+            fs.mkdirSync(packDir);
+            fs.writeFileSync(path.join(sensorPacks, 'shared', 'semgrep-policy.json'), JSON.stringify({
+                tool: 'semgrep', toolRange: '>=1.0.0', runtime: 'python', runtimeRange: '>=3.9.0', probe: 'semgrep-validate',
+            }));
+            const pack = validPack();
+            pack.sensors.lint.variants[0] = {
+                id: 'semgrep-python', priority: 10, certifiedRange: '>=1.0.0', policyRef: 'shared/semgrep-policy.json',
+                command: { executable: 'semgrep', resolution: 'path', args: ['--config', '.semgrep.awm.yml', '--json', '.'] },
+                assets: ['.semgrep.awm.yml'], formatter: 'semgrep',
+            } as any;
+            const parsed = parseSensorPack(pack, path.join(packDir, 'pack.json'));
+            expect(parsed).toMatchObject({ kind: 'v2', pack: { sensors: { lint: { variants: [{
+                policyRef: 'shared/semgrep-policy.json', requirements: { tool: 'semgrep', runtime: 'python' }, probe: { kind: 'semgrep-validate' },
+            }] } } } });
+        } finally {
+            fs.rmSync(sensorPacks, { recursive: true, force: true });
+        }
+    });
+
+    it('fails closed when a policy reference is not the AWM-owned shared Semgrep policy', () => {
+        const pack = validPack();
+        pack.sensors.lint.variants[0] = {
+            id: 'semgrep-python', priority: 10, certifiedRange: '>=1.0.0', policyRef: '../secret.json',
+            command: { executable: 'semgrep', resolution: 'path', args: ['--config', '.semgrep.awm.yml', '--json', '.'] },
+            assets: ['.semgrep.awm.yml'], formatter: 'semgrep',
+        } as any;
+        expect(() => parseSensorPack(pack, '/tmp/sensor-packs/python/pack.json')).toThrow('policyRef');
+    });
+
     it('parses a valid versioned pack', () => {
         expect(parseSensorPack(validPack(), 'pack.json')).toMatchObject({ kind: 'v2', pack: validPack() });
+    });
+
+    it('accepts an opt-in hardening asset while variants may require no assets', () => {
+        const pack = {
+            ...validPack(),
+            hardening: { 'typescript-strict': { assets: ['tsconfig.awm.json'] } },
+            sensors: {
+                lint: {
+                    ...validPack().sensors.lint,
+                    variants: [{ ...validPack().sensors.lint.variants[0], assets: [] }],
+                },
+            },
+        };
+        expect(parseSensorPack(pack, 'pack.json')).toMatchObject({
+            kind: 'v2',
+            pack: { hardening: { 'typescript-strict': { assets: ['tsconfig.awm.json'] } }, sensors: { lint: { variants: [{ assets: [] }] } } },
+        });
+    });
+
+    it.each(['true', 'false'] as const)('accepts the exact ESLINT_USE_FLAT_CONFIG=%s environment mapping', flatConfig => {
+        const command = {
+            executable: 'npm',
+            resolution: 'path',
+            args: ['run', 'lint'],
+            packageManager: 'npm',
+            environment: { ESLINT_USE_FLAT_CONFIG: flatConfig },
+        };
+        expect(parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command }] } } }, 'pack.json'))
+            .toMatchObject({ kind: 'v2', pack: { sensors: { lint: { variants: [{ command }] } } } });
+    });
+
+    it.each([
+        { ESLINT_USE_FLAT_CONFIG: 'yes' },
+        { ESLINT_USE_FLAT_CONFIG: 'true', OTHER: 'value' },
+    ])('rejects an unknown or expanded ESLint environment mapping', environment => {
+        const command = { executable: 'npm', resolution: 'path', args: ['run', 'lint'], packageManager: 'npm', environment };
+        expect(() => parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command }] } } }, 'pack.json'))
+            .toThrow('command.environment');
+    });
+
+    it('normalizes package-manager executable spelling before enforcing its explicit selection', () => {
+        const variant = validPack().sensors.lint.variants[0];
+        const withExecutable = (executable: string, packageManager?: string) => ({
+            ...validPack(),
+            sensors: { lint: { ...validPack().sensors.lint, variants: [{
+                ...variant,
+                command: { executable, resolution: 'path', args: ['run', 'lint'], ...(packageManager === undefined ? {} : { packageManager }) },
+            }] } },
+        });
+
+        expect(() => parseSensorPack(withExecutable('NPM'), 'pack.json')).toThrow('packageManager');
+        expect(parseSensorPack(withExecutable('npm.exe', 'NPM'), 'pack.json')).toMatchObject({
+            kind: 'v2', pack: { sensors: { lint: { variants: [{ command: { executable: 'npm.exe', packageManager: 'npm' } }] } } },
+        });
+        expect(() => parseSensorPack(withExecutable('NPM', 'pnpm'), 'pack.json')).toThrow('match executable');
     });
 
     it('keeps an unversioned pack on the legacy compatibility path', () => {
@@ -99,8 +191,14 @@ describe('sensor pack v2 contract', () => {
         [{ ...validPack(), sensors: { lint: { variants: [validPack().sensors.lint.variants[0], { ...validPack().sensors.lint.variants[0], id: 'eslint-9-next', certifiedRange: '>=9.1.0 <10.0.0' }] } } }, 'overlap'],
         [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], assets: ['C:/secret'] }] } } }, 'asset'],
         [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command: { executable: 'cmd.exe', resolution: 'path', args: ['x'] } }] } } }, 'executable'],
+        [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command: { executable: 'npm', resolution: 'path', args: ['run', 'lint'] } }] } } }, 'packageManager'],
+        [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command: { executable: 'npm', resolution: 'path', args: ['run', 'lint'], packageManager: 'pnpm' } }] } } }, 'match executable'],
+        [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command: { ...validPack().sensors.lint.variants[0].command, environment: { NODE_OPTIONS: '--require unsafe' } } }] } } }, 'environment'],
         [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], command: { ...validPack().sensors.lint.variants[0].command, args: ['prefix{files}'] } }] } } }, 'embed'],
         [{ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...validPack().sensors.lint.variants[0], formatter: 'bad\nformat' }] } } }, 'formatter'],
+        [{ ...validPack(), hardening: { 'typescript-strict': { assets: ['../tsconfig.awm.json'] } } }, 'asset'],
+        [{ ...validPack(), hardening: { 'typescript-strict': { assets: [] } } }, 'hardening'],
+        [{ ...validPack(), hardening: { 'typescript-strict': { assets: ['tsconfig.awm.json'], command: {} } } }, 'unknown field'],
     ])('rejects malformed pack %j', (input, message) => {
         expect(() => parseSensorPack(input, 'pack.json')).toThrow(message);
     });
