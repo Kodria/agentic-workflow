@@ -141,16 +141,53 @@ registry release evidence is the source for that separate claim.
 
 <!-- BEGIN GENERATED: sensor-pack-support -->
 
-### Sensor-pack compatibility contract (R3 pre-publication contract fixture)
+### Sensor-pack compatibility contract (published registry evidence)
 
 | Pack | Contract | Version-aware variants and certified ranges | Evidence status |
 |---|---|---|---|
-| `generic` | pack schema v2 | `security/semgrep-1`: semgrep >=1 <2; node >=22 <23; certified >=1 <2 | Fixture-declared ranges only; real-tool and OS certification awaits published registry release evidence |
-| `js-ts` | pack schema v2 | `lint/eslint-10`: eslint >=10 <11; node >=22 <23; certified >=10 <11 | Fixture-declared ranges only; real-tool and OS certification awaits published registry release evidence |
-| `python` | pack schema v2 | `lint/ruff-0`: ruff >=0.8 <1; python >=3.10 <4; certified >=0.8 <1 | Fixture-declared ranges only; real-tool and OS certification awaits published registry release evidence |
-| `shell` | pack schema v2 | `lint/shellcheck-0`: shellcheck >=0.9 <1; node >=22 <23; certified >=0.9 <1 | Fixture-declared ranges only; real-tool and OS certification awaits published registry release evidence |
+| `generic` | pack schema v2 | `security/semgrep-generic`: semgrep >=1.0.0; python >=3.9.0; certified =1.173.0 | Published compatibility contract; certification evidence is reproduced below from the registry |
+| `js-ts` | pack schema v2 | `lint/eslint-8-eslintrc`: eslint >=8.0.0 <9.0.0; node >=16.0.0; certified =8.57.1<br>`lint/eslint-8-flat`: eslint >=8.0.0 <9.0.0; node >=16.0.0; certified =8.57.1<br>`lint/eslint-9-flat`: eslint >=9.0.0 <10.0.0; node >=18.18.0; certified =9.39.5<br>`lint/eslint-10-flat`: eslint >=10.0.0 <11.0.0; node >=20.19.0; certified =10.8.1<br>`typecheck/typescript-native`: typescript >=5.0.0; node >=16.0.0; certified =5.9.3<br>`security/semgrep-js-ts`: semgrep >=1.0.0; python >=3.9.0; certified =1.173.0<br>`depcheck/dependency-cruiser`: dependency-cruiser >=16.0.0; node >=18.0.0; certified =16.10.4<br>`format/prettier`: prettier >=3.0.0; node >=16.0.0; certified =3.9.6<br>`test/npm-script`: npm >=8.0.0; node >=16.0.0; certified >=8.0.0<br>`test/pnpm-script`: pnpm >=8.0.0; node >=16.0.0; certified >=8.0.0<br>`test/yarn-script`: yarn >=1.22.0; node >=16.0.0; certified >=1.22.0<br>`test/bun-script`: bun >=1.0.0; bun >=1.0.0; certified >=1.0.0<br>`mutation/stryker`: stryker >=8.0.0; node >=18.0.0; certified >=8.0.0 | Published compatibility contract; certification evidence is reproduced below from the registry |
+| `python` | pack schema v2 | `typecheck/mypy-native`: mypy >=1.18.0 <2.0.0; python >=3.9.0; certified =1.18.2<br>`lint/ruff-native`: ruff >=0.1.0; python >=3.9.0; certified =0.16.3<br>`security/semgrep-python`: semgrep >=1.0.0; python >=3.9.0; certified =1.173.0<br>`test/pytest-native`: pytest >=8.0.0 <9.0.0; python >=3.9.0; certified =8.4.2<br>`mutation/mutmut-opt-in`: mutmut >=2.0.0; python >=3.9.0; certified >=2.0.0 | Published compatibility contract; certification evidence is reproduced below from the registry |
+| `shell` | pack schema v2 | `lint/shellcheck-files`: shellcheck >=0.9.0; shellcheck >=0.9.0; certified =0.11.0<br>`security/semgrep-shell`: semgrep >=1.0.0; python >=3.9.0; certified =1.173.0 | Published compatibility contract; certification evidence is reproduced below from the registry |
 
-> Generated from the pinned R3 pre-publication contract fixture, not the published `awm-baseline-registry` manifests. **Do not edit by hand** — `npm run docs:matrix` regenerates this block. T13 verifies the actual registry tag and release evidence.
+
+#### Published certification evidence
+
+Generated from pack manifests and certification pins resolved at `2026-08-14T22:14:34.365Z`.
+
+Status: `certified` has a matching frozen tool pin; `compatible-unverified` has no matching frozen pin; `not-applicable` is reserved for variants without a tool contract.
+
+| Pack | Sensor | Variant | Tool | Certified range | Supported OS | OS certification evidence | Status | Evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `generic` | `security` | `semgrep-generic` | `semgrep` | `=1.173.0` | Ubuntu, macOS, Windows | Ubuntu: real tool; macOS/Windows: contract | certified | pin: `semgrep@1.173.0` |
+| `js-ts` | `depcheck` | `dependency-cruiser` | `dependency-cruiser` | `=16.10.4` | Ubuntu, macOS, Windows | Ubuntu/macOS/Windows: contract | certified | pin: `dependency-cruiser@16.10.4` |
+| `js-ts` | `format` | `prettier` | `prettier` | `=3.9.6` | Ubuntu, macOS, Windows | Ubuntu/macOS/Windows: contract | certified | pin: `prettier@3.9.6` |
+| `js-ts` | `lint` | `eslint-10-flat` | `eslint` | `=10.8.1` | Ubuntu, macOS, Windows | Ubuntu/macOS/Windows: contract | certified | pin: `eslint@10.8.1` |
+| `js-ts` | `lint` | `eslint-8-eslintrc` | `eslint` | `=8.57.1` | Ubuntu, macOS, Windows | Ubuntu/macOS/Windows: contract | certified | pin: `eslint@8.57.1` |
+| `js-ts` | `lint` | `eslint-8-flat` | `eslint` | `=8.57.1` | Ubuntu, macOS, Windows | Ubuntu/macOS/Windows: contract | certified | pin: `eslint@8.57.1` |
+| `js-ts` | `lint` | `eslint-9-flat` | `eslint` | `=9.39.5` | Ubuntu, macOS, Windows | Ubuntu/macOS/Windows: contract | certified | pin: `eslint@9.39.5` |
+| `js-ts` | `mutation` | `stryker` | `stryker` | `>=8.0.0` | Ubuntu, macOS, Windows | Ubuntu/macOS/Windows: contract | compatible-unverified | no matching pinned tool |
+| `js-ts` | `security` | `semgrep-js-ts` | `semgrep` | `=1.173.0` | Ubuntu, macOS, Windows | Ubuntu: real tool; macOS/Windows: contract | certified | pin: `semgrep@1.173.0` |
+| `js-ts` | `test` | `bun-script` | `bun` | `>=1.0.0` | Ubuntu, macOS, Windows | Ubuntu/macOS/Windows: contract | compatible-unverified | no matching pinned tool |
+| `js-ts` | `test` | `npm-script` | `npm` | `>=8.0.0` | Ubuntu, macOS, Windows | Ubuntu/macOS/Windows: contract | compatible-unverified | no matching pinned tool |
+| `js-ts` | `test` | `pnpm-script` | `pnpm` | `>=8.0.0` | Ubuntu, macOS, Windows | Ubuntu/macOS/Windows: contract | compatible-unverified | no matching pinned tool |
+| `js-ts` | `test` | `yarn-script` | `yarn` | `>=1.22.0` | Ubuntu, macOS, Windows | Ubuntu/macOS/Windows: contract | compatible-unverified | no matching pinned tool |
+| `js-ts` | `typecheck` | `typescript-native` | `typescript` | `=5.9.3` | Ubuntu, macOS, Windows | Ubuntu/macOS/Windows: contract | certified | pin: `typescript@5.9.3` |
+| `python` | `lint` | `ruff-native` | `ruff` | `=0.16.3` | Ubuntu, macOS, Windows | Ubuntu: 3.9 + 3.12 real; macOS/Windows: 3.12 smoke | certified | pin: `ruff@0.16.3` |
+| `python` | `mutation` | `mutmut-opt-in` | `mutmut` | `>=2.0.0` | Ubuntu, macOS, Windows | Ubuntu/macOS/Windows: contract | compatible-unverified | no matching pinned tool |
+| `python` | `security` | `semgrep-python` | `semgrep` | `=1.173.0` | Ubuntu, macOS, Windows | Ubuntu: real tool; macOS/Windows: contract | certified | pin: `semgrep@1.173.0` |
+| `python` | `test` | `pytest-native` | `pytest` | `=8.4.2` | Ubuntu, macOS, Windows | Ubuntu: 3.9 + 3.12 real; macOS/Windows: 3.12 smoke | certified | pin: `pytest@8.4.2` |
+| `python` | `typecheck` | `mypy-native` | `mypy` | `=1.18.2` | Ubuntu, macOS, Windows | Ubuntu: 3.9 + 3.12 real; macOS/Windows: 3.12 smoke | certified | pin: `mypy@1.18.2` |
+| `shell` | `lint` | `shellcheck-files` | `shellcheck` | `=0.11.0` | Ubuntu, macOS, Windows | Ubuntu: real tool; macOS/Windows: contract | certified | pin: `shellcheck@0.11.0` |
+| `shell` | `security` | `semgrep-shell` | `semgrep` | `=1.173.0` | Ubuntu, macOS, Windows | Ubuntu: real tool; macOS/Windows: contract | certified | pin: `semgrep@1.173.0` |
+
+| Certification status | Derived variant count | Meaning |
+| --- | --- | --- |
+| certified | 15 | Matching frozen tool pin |
+| compatible-unverified | 6 | No matching frozen tool pin |
+| not-applicable | 0 | Variant has no tool contract |
+
+> Generated from the supplied published `awm-baseline-registry` root. Certification states, frozen pins, and OS evidence are registry-owned metadata reproduced verbatim; **do not edit by hand**.
 
 <!-- END GENERATED: sensor-pack-support -->
 

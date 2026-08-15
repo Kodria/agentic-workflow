@@ -27,7 +27,8 @@
     "release": "node dist/src/release/index.js",
     "prepack": "npm run build",
     "prepublishOnly": "npm run build",
-    "docs:matrix": "ts-node scripts/support-matrix.ts && ts-node scripts/sensor-support-matrix.ts --registry-root tests/fixtures/sensor-support-matrix/registry"
+    "docs:matrix": "ts-node scripts/support-matrix.ts && ts-node scripts/sensor-support-matrix.ts --registry-root ../../awm-baseline-registry",
+    "docs:matrix:prepublication": "ts-node scripts/sensor-support-matrix.ts --registry-root tests/fixtures/sensor-support-matrix/registry"
   },
   "keywords": [
     "agentic",
