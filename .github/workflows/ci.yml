@@ -52,6 +52,24 @@ jobs:
         working-directory: cli
         run: npx tsc --noEmit
 
+      # The support-matrix block is derived from an immutable registry release,
+      # not from the mutable sibling checkout available to maintainers. Checking
+      # out the exact public tag on every supported OS prevents documentation
+      # drift from being merged as an untested assertion.
+      - name: Checkout published sensor registry
+        uses: actions/checkout@v4
+        with:
+          repository: Kodria/awm-baseline-registry
+          ref: v2.0.0
+          path: awm-baseline-registry
+
+      - name: Regenerate published sensor support matrix
+        working-directory: cli
+        run: npx ts-node scripts/sensor-support-matrix.ts --registry-root ../awm-baseline-registry --registry-tag v2.0.0 --registry-commit c35c087a0801c0b4e69e0a4ac3eafef9ecdf37cd
+
+      - name: Verify published sensor support matrix
+        run: git diff --exit-code -- docs/support-matrix.md
+
       - name: Test
         working-directory: cli
         run: npx jest --runInBand

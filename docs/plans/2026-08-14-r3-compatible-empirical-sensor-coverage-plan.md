@@ -1311,7 +1311,7 @@ _Requirements: R7.7, R7.8, R9.1, R9.2, R9.3, R9.4, R10.11, R10.13_
 
 - [ ] **Step 1: Instalar consumidor publicado y pin exacto en homes temporales**
 
-Crear tmpdirs con `mktemp -d`; instalar `agentic-workflow-manager@8.0.0` allí y clonar/registrar exclusivamente `awm-baseline-registry@v2.0.0`. No tocar `~/.awm`. Guardar comandos y hashes, no rutas temporales absolutas.
+Crear tmpdirs con `mktemp -d`; instalar `agentic-workflow-manager@8.1.0` allí y clonar/registrar exclusivamente `awm-baseline-registry@v2.0.0`. No tocar `~/.awm`. Guardar comandos y hashes, no rutas temporales absolutas.
 
 - [ ] **Step 2: Ejecutar matriz end-to-end new/legacy/future**
 
@@ -1327,12 +1327,12 @@ Run:
 
 ```bash
 cd cli
-npx ts-node scripts/sensor-support-matrix.ts --registry-root ../../awm-baseline-registry
+npx ts-node scripts/sensor-support-matrix.ts --registry-root ../../awm-baseline-registry --registry-tag v2.0.0 --registry-commit c35c087a0801c0b4e69e0a4ac3eafef9ecdf37cd
 npx jest tests/structural/support-matrix-is-current.test.ts --runInBand
 git diff --check ../docs/support-matrix.md
 ```
 
-Expected: tabla idéntica a manifests de `v2.0.0`. `published-acceptance.json` registra `cliVersion:8.0.0`, `registryTag:v2.0.0`, commit/tag hashes, resultado 3-OS y hashes de fixtures.
+Expected: tabla idéntica a manifests de `v2.0.0`. `published-acceptance.json` registra `cliVersion:8.1.0`, `registryTag:v2.0.0`, commit/tag hashes, resultado 3-OS y hashes de fixtures.
 
 - [ ] **Step 5: Ejecutar reconciliación completa de ambos repos**
 
@@ -1352,12 +1352,12 @@ Expected: solo artefactos R3 intencionales; suites verdes; no harness evidence a
 Resolver URLs y abortar si falta alguna:
 
 ```bash
-CLI_PR_URL=$(gh pr list --repo Kodria/agentic-workflow --head feat/issue-20-r3-empirical-coverage --state all --json url --jq '.[0].url')
+CLI_PR_URL=$(gh pr list --repo Kodria/agentic-workflow --head feat/r3-pack-hardening-bridge --state all --json url --jq '.[0].url')
 REGISTRY_PR_URL=$(gh pr list --repo Kodria/awm-baseline-registry --head feat/issue-20-r3-compatible-packs --state all --json url --jq '.[0].url')
 test -n "$CLI_PR_URL" && test -n "$REGISTRY_PR_URL"
 ```
 
-Comentar issue #20 con PRs, npm 8.0.0, registry v2.0.0, comandos, schemas, matriz y retro. Cerrar #70 citando las variantes ESLint/TS y hardening opt-in. Cerrar #20 solo si sus demás releases están completas; si no, dejar baton exacto sin afirmar cierre global.
+Comentar issue #20 con PRs, npm 8.1.0, registry v2.0.0, comandos, schemas, matriz y retro. Cerrar #70 citando las variantes ESLint/TS y hardening opt-in. Cerrar #20 solo si sus demás releases están completas; si no, dejar baton exacto sin afirmar cierre global.
 
 - [ ] **Step 7: Persistir aceptación, solicitar review final y transferir a QA/retro/finishing**
 

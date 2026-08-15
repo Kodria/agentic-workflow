@@ -157,7 +157,9 @@ export function spliceSensorSupportMatrix(markdown: string, generated: string): 
     const begin = markdown.indexOf(SENSOR_BEGIN_MARKER);
     const end = markdown.indexOf(SENSOR_END_MARKER);
     if (begin === -1 || end === -1 || end < begin) throw new Error(`support-matrix.md lacks ${SENSOR_BEGIN_MARKER} / ${SENSOR_END_MARKER}`);
-    const eol = markdown.includes('\r\n') ? '\r\n' : '\n';
+    // Preserve the line ending of the block this renderer owns. Another generated
+    // block may legitimately have a different EOL during a Windows checkout.
+    const eol = markdown.slice(begin, end).includes('\r\n') ? '\r\n' : '\n';
     const block = generated.split('\n').join(eol);
     return markdown.slice(0, begin + SENSOR_BEGIN_MARKER.length) + eol + eol + block + eol + eol + markdown.slice(end);
 }
