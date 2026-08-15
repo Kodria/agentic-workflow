@@ -41,7 +41,7 @@ export type SensorVariant = {
     id: string;
     priority: number;
     certifiedRange: string;
-    requirements: { tool: string; toolRange: string; runtime: string; runtimeRange: string; configFiles?: string[] };
+    requirements: { tool: string; toolRange: string; runtime: string; runtimeRange: string; configFiles?: string[]; packageJsonFields?: string[] };
     assets: string[];
     formatter: string;
     probe: { kind: CompatibilityProbe };

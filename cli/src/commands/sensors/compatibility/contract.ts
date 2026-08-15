@@ -185,7 +185,7 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
     if (policy && ('requirements' in value || 'probe' in value)) invalid(source, `${location}.policyRef is authoritative; requirements and probe must not duplicate it`);
     if (!policy && (!('requirements' in value) || !('probe' in value))) invalid(source, `${location} requires requirements and probe when policyRef is absent`);
     const requirements = policy ? undefined : record(value.requirements, source, `${location}.requirements`);
-    if (requirements) fields(requirements, ['tool', 'toolRange', 'runtime', 'runtimeRange', 'configFiles'], source, `${location}.requirements`);
+    if (requirements) fields(requirements, ['tool', 'toolRange', 'runtime', 'runtimeRange', 'configFiles', 'packageJsonFields'], source, `${location}.requirements`);
     const toolRange = policy?.toolRange ?? text(requirements!.toolRange, source, `${location}.requirements.toolRange`);
     const runtimeRange = policy?.runtimeRange ?? text(requirements!.runtimeRange, source, `${location}.requirements.runtimeRange`);
     if (semver.validRange(toolRange) === null || semver.validRange(runtimeRange) === null) invalid(source, `${location}.requirements ranges must be valid semver ranges`);
@@ -200,7 +200,7 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
         certifiedRange,
         requirements: policy
             ? { tool: policy.tool, toolRange, runtime: policy.runtime, runtimeRange }
-            : { tool: text(requirements!.tool, source, `${location}.requirements.tool`), toolRange, runtime: text(requirements!.runtime, source, `${location}.requirements.runtime`), runtimeRange, ...('configFiles' in requirements! ? { configFiles: stringArray(requirements!.configFiles, source, `${location}.requirements.configFiles`).map((file, index) => asset(file, source, `${location}.requirements.configFiles[${index}]`)) } : {}) },
+            : { tool: text(requirements!.tool, source, `${location}.requirements.tool`), toolRange, runtime: text(requirements!.runtime, source, `${location}.requirements.runtime`), runtimeRange, ...('configFiles' in requirements! ? { configFiles: stringArray(requirements!.configFiles, source, `${location}.requirements.configFiles`).map((file, index) => asset(file, source, `${location}.requirements.configFiles[${index}]`)) } : {}), ...('packageJsonFields' in requirements! ? { packageJsonFields: stringArray(requirements!.packageJsonFields, source, `${location}.requirements.packageJsonFields`).map((field, index) => { if (!/^[A-Za-z][A-Za-z0-9]*$/.test(field)) invalid(source, `${location}.requirements.packageJsonFields[${index}] must be a stable package.json field`); return field; }) } : {}) },
         assets: assetArray(value.assets, source, `${location}.assets`, true),
         formatter: text(value.formatter, source, `${location}.formatter`),
         probe: { kind: policy?.probe ?? probe!.kind as CompatibilityProbe },

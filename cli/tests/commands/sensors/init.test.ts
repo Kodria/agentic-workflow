@@ -334,6 +334,7 @@ describe('initSensors', () => {
             expect(automatic.manifest).toMatchObject({ schemaVersion: 2, pack: 'generic', sensors: {} });
             expect((automatic.manifest as any).packSelection).toBeUndefined();
 
+            fs.writeFileSync(path.join(tmpDir, 'generic.config'), 'fixture\n');
             const explicit = await initSensors({ cwd: tmpDir, registryRoot: v2Registry, pack: 'generic' });
             const written = JSON.parse(fs.readFileSync(path.join(tmpDir, '.awm', 'sensors.json'), 'utf8'));
             expect(explicit.manifest).toMatchObject({ schemaVersion: 2, pack: 'generic', packSelection: 'explicit', sensors: { security: { variantId: 'eslint-10' } } });
