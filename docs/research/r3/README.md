@@ -71,11 +71,10 @@ published-CLI status was `unverifiable` with `probe-not-matched`; they are not
 reported as certified. Native macOS and Windows execution is not represented by
 this host run.
 
-The acceptance also found a release-reference discrepancy that must be
-reconciled before T13 can assert the exact registry tag: the configured origin
-advertised `v2.0.0` as `7d20924f…`, while the public shallow clone created a
-local annotated tag object `7dfddc38…` targeting commit `c35c087…`. The pack
-hashes below are from that checked-out public release target. The support-matrix
-generator is still explicitly pinned to the pre-publication fixture, so it
-cannot truthfully be regenerated from the published tag without a separate
-code-and-test change. No generated matrix was changed by this partial record.
+The release reference was rechecked from a fresh public shallow clone: both it
+and the configured origin resolve `v2.0.0` to annotated tag `7d20924f…` and
+target commit `c35c087…`. The pack hashes below are from that checked-out public
+release target. The support-matrix generator is now pinned to that exact tag,
+and regeneration produced no documentation drift. Native macOS and Windows
+published-consumer execution remains outside this host run, so the record stays
+partial rather than claiming cross-platform certification.

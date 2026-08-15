@@ -19,10 +19,10 @@
     "repository": "https://github.com/Kodria/awm-baseline-registry.git",
     "tag": "v2.0.0",
     "configuredOriginAdvertisedTagObject": "7d20924f1b6339cbdb028a0c56ad2520d191f805",
-    "publicCloneLocalTagObject": "7dfddc389c20aa936484eb3660250fdd132ae7eb",
+    "publicCloneLocalTagObject": "7d20924f1b6339cbdb028a0c56ad2520d191f805",
     "checkedOutTargetCommit": "c35c087a0801c0b4e69e0a4ac3eafef9ecdf37cd",
     "minCliVersion": "8.1.0",
-    "tagReferenceReconciliation": "required: configured origin and public clone reported different annotated-tag object IDs",
+    "tagReferenceReconciliation": "verified: configured origin and a fresh public shallow clone resolve the same annotated-tag object and target commit",
     "packSha256": {
       "generic": "9dc7f656d2a9b7565e8771e11d2922f75c35d55dbc08a49b48b2c1b3972774f8",
       "js-ts": "ff08addec60aa1eaf54a65a594d1adfb11d5606dda5b4de66b6646306398a768",
