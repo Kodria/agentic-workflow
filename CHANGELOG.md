@@ -1,3 +1,8 @@
+## v8.1.1 - 2026-08-15
+
+### Fixes
+- **preflight:** preserve JSON output on failure (#81)
+
 ## v8.1.0 - 2026-08-15
 
 ### Features
