@@ -66,10 +66,10 @@ describe('docs/support-matrix.md refleja el codigo', () => {
         const workflow = fs.readFileSync(CI_WORKFLOW_PATH, 'utf8');
 
         expect(workflow).toContain('repository: Kodria/awm-baseline-registry');
-        expect(workflow).toContain('ref: v2.0.0');
+        expect(workflow).toContain('ref: v2.0.1');
         expect(workflow).toContain('path: awm-baseline-registry');
         expect(workflow).toContain('Verify published sensor support matrix');
-        expect(workflow).toContain('--registry-root ../awm-baseline-registry --registry-tag v2.0.0 --registry-commit c35c087a0801c0b4e69e0a4ac3eafef9ecdf37cd');
+        expect(workflow).toContain('--registry-root ../awm-baseline-registry --registry-tag v2.0.1 --registry-commit 6f40632006fc65300ac633c5a54f2635cf0eb8e9');
         expect(workflow).toContain('git diff --exit-code -- docs/support-matrix.md');
     });
 
@@ -101,7 +101,7 @@ describe('docs/support-matrix.md refleja el codigo', () => {
         expect(extractPublishedSupportMetadata(publishedSupport)).not.toContain('Fixture-declared ranges only');
     });
 
-    it('rejects a mutable checkout even when it contains the published v2.0.0 tag', () => {
+    it('rejects a mutable checkout even when it contains the published v2.0.1 tag', () => {
         const registryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-published-registry-'));
         const git = (...args: string[]) => execFileSync('git', ['-C', registryRoot, ...args], { stdio: 'pipe' });
         try {
@@ -111,12 +111,12 @@ describe('docs/support-matrix.md refleja el codigo', () => {
             fs.writeFileSync(path.join(registryRoot, 'published.txt'), 'published\n');
             git('add', '.');
             git('commit', '-m', 'published registry');
-            git('tag', 'v2.0.0');
+            git('tag', 'v2.0.1');
             fs.writeFileSync(path.join(registryRoot, 'mutable.txt'), 'newer checkout\n');
             git('add', '.');
             git('commit', '-m', 'mutable checkout');
 
-            expect(() => verifyPublishedRegistryIdentity(registryRoot, 'v2.0.0', 'c35c087a0801c0b4e69e0a4ac3eafef9ecdf37cd')).toThrow(/HEAD .*expected commit/i);
+            expect(() => verifyPublishedRegistryIdentity(registryRoot, 'v2.0.1', '6f40632006fc65300ac633c5a54f2635cf0eb8e9')).toThrow(/HEAD .*expected commit/i);
         } finally {
             fs.rmSync(registryRoot, { recursive: true, force: true });
         }

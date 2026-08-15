@@ -6,9 +6,9 @@ import path from 'path';
 
 const publishedCliRoot = process.env.AWM_PUBLISHED_CLI_ROOT;
 const publishedRegistryRoot = process.env.AWM_PUBLISHED_REGISTRY_ROOT;
-// This test is introduced by the fix that follows npm 8.1.0; release CI turns
-// its conventional `fix` commit into 8.1.1 before this acceptance PR runs.
-const expectedVersion = process.env.AWM_PUBLISHED_CLI_VERSION ?? '8.1.1';
+// This gate is pinned to the npm release that contains the native ESLint
+// configuration selection fix merged for R3.
+const expectedVersion = process.env.AWM_PUBLISHED_CLI_VERSION ?? '8.1.2';
 const enabled = Boolean(publishedCliRoot && publishedRegistryRoot);
 const acceptance = enabled ? describe : describe.skip;
 

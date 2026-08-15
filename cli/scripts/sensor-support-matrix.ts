@@ -20,8 +20,8 @@ export const R3_PREPUBLICATION_FIXTURE_RELATIVE_PATH = 'tests/fixtures/sensor-su
  * never an invented description of an unpublished registry release.
  */
 export const R3_PREPUBLICATION_FIXTURE_PURPOSE = 'R3 pre-publication contract fixture';
-export const R3_PUBLISHED_REGISTRY_TAG = 'v2.0.0';
-export const R3_PUBLISHED_REGISTRY_COMMIT = 'c35c087a0801c0b4e69e0a4ac3eafef9ecdf37cd';
+export const R3_PUBLISHED_REGISTRY_TAG = 'v2.0.1';
+export const R3_PUBLISHED_REGISTRY_COMMIT = '6f40632006fc65300ac633c5a54f2635cf0eb8e9';
 
 /**
  * Extract the registry-owned certification matrix without copying or rewording it.

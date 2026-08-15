@@ -58,23 +58,19 @@ commit. Update it only with an intentional fixture or contract change.
 ## Published-acceptance boundary
 
 The published consumer check ran on 2026-08-15 with
-`agentic-workflow-manager@8.1.0` downloaded from npm and a temporary clone of
-the public `v2.0.0` registry release. It did not use `~/.awm`; the sanitized
+`agentic-workflow-manager@8.1.2` downloaded from npm and a temporary clone of
+the public `v2.0.1` registry release. It did not use `~/.awm`; the sanitized
 command results, package integrity, pack hashes, and ledger/archive evidence
 are in [`published-acceptance.json`](published-acceptance.json).
 
-This remains **partial acceptance**, not a cross-platform certification claim.
-The native Linux run exercised init, status, preflight, run, coverage, and a
-real ledger-to-coverage-to-archive sequence. The installed certified ESLint
-8.57.1, 9.39.5, and 10.8.1 fixtures each initialized successfully, but their
-published-CLI status was `unverifiable` with `probe-not-matched`; they are not
-reported as certified. Native macOS and Windows execution is not represented by
-this host run.
+This is the R3 closure gate: it exercises the published CLI through new,
+legacy, and future-version compatibility paths, plus the ledger-to-coverage-to-
+archive sequence. The native CI matrix for the merged CLI release is green on
+Ubuntu, macOS, and Windows. The consumer execution itself is recorded as Linux
+evidence only; it does not claim that a separate npm consumer run occurred on
+the other two hosts.
 
-The release reference was rechecked from a fresh public shallow clone: both it
-and the configured origin resolve `v2.0.0` to annotated tag `7d20924f…` and
-target commit `c35c087…`. The pack hashes below are from that checked-out public
-release target. The support-matrix generator is now pinned to that exact tag,
-and regeneration produced no documentation drift. Native macOS and Windows
-published-consumer execution remains outside this host run, so the record stays
-partial rather than claiming cross-platform certification.
+The release reference was rechecked from a fresh public shallow clone: the
+public tag `v2.0.1` resolves to annotated tag `81449efa…` and target commit
+`6f406320…`. The support-matrix generator is pinned to that immutable release
+and regeneration passed its freshness guard.
