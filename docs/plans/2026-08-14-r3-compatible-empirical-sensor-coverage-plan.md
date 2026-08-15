@@ -1299,6 +1299,13 @@ Antes de push invocar review y corregir cada hallazgo con test discriminante. Ex
 
 ### Task 13: Aceptación publicada, reconciliación e issues
 
+> **Cierre de alcance — 2026-08-15:** por instrucción explícita del owner se
+> cierra R3 con el gate publicado existente, sin expandir una segunda matriz de
+> fixtures. La evidencia persistida ancla npm `8.1.2`, registry `v2.0.1`, los
+> casos `new`/`legacy`/`future`, el ciclo ledger→coverage→archive y la matriz
+> nativa de CI verde en Ubuntu/macOS/Windows. No se afirma una certificación de
+> consumidor npm independiente en macOS o Windows.
+
 _Requirements: R7.7, R7.8, R9.1, R9.2, R9.3, R9.4, R10.11, R10.13_
 
 **Files:**

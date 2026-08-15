@@ -60,12 +60,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Kodria/awm-baseline-registry
-          ref: v2.0.0
+          ref: v2.0.1
           path: awm-baseline-registry
 
       - name: Regenerate published sensor support matrix
         working-directory: cli
-        run: npx ts-node scripts/sensor-support-matrix.ts --registry-root ../awm-baseline-registry --registry-tag v2.0.0 --registry-commit c35c087a0801c0b4e69e0a4ac3eafef9ecdf37cd
+        run: npx ts-node scripts/sensor-support-matrix.ts --registry-root ../awm-baseline-registry --registry-tag v2.0.1 --registry-commit 6f40632006fc65300ac633c5a54f2635cf0eb8e9
 
       - name: Verify published sensor support matrix
         run: git diff --exit-code -- docs/support-matrix.md
@@ -73,3 +73,18 @@ jobs:
       - name: Test
         working-directory: cli
         run: npx jest --runInBand
+
+      # This is intentionally a second consumer boundary: the regular suite
+      # executes this checkout, while this gate invokes the npm tarball that a
+      # developer actually installs. The registry remains the immutable release
+      # checked out above, never the mutable repository under test.
+      - name: Install published R3 consumer
+        run: npm install --prefix published-consumer --no-audit --no-fund agentic-workflow-manager@8.1.2
+
+      - name: Accept published R3 consumer
+        working-directory: cli
+        env:
+          AWM_PUBLISHED_CLI_ROOT: ${{ github.workspace }}/published-consumer/node_modules/agentic-workflow-manager
+          AWM_PUBLISHED_CLI_VERSION: 8.1.2
+          AWM_PUBLISHED_REGISTRY_ROOT: ${{ github.workspace }}/awm-baseline-registry
+        run: npx jest tests/integration/published-r3-acceptance.e2e.test.ts --runInBand
