@@ -11,7 +11,9 @@
 // Este test hace que ese desvio sea imposible de mergear. No verifica que la tabla sea
 // "linda": verifica que sea LA MISMA que produce el codigo hoy.
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
+import { execFileSync } from 'child_process';
 import {
     BEGIN_MARKER, END_MARKER, DOC_PATH, homeRelative, renderProviderTables, spliceGenerated,
 } from '../../scripts/support-matrix';
@@ -88,8 +90,24 @@ describe('docs/support-matrix.md refleja el codigo', () => {
     });
 
     it('rejects a mutable checkout even when it contains the published v2.0.0 tag', () => {
-        const registryRoot = path.resolve(__dirname, '../../../../awm-baseline-registry');
-        expect(() => verifyPublishedRegistryIdentity(registryRoot, 'v2.0.0', 'c35c087a0801c0b4e69e0a4ac3eafef9ecdf37cd')).toThrow(/HEAD .*expected commit/i);
+        const registryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-published-registry-'));
+        const git = (...args: string[]) => execFileSync('git', ['-C', registryRoot, ...args], { stdio: 'pipe' });
+        try {
+            git('init');
+            git('config', 'user.email', 'test@example.com');
+            git('config', 'user.name', 'AWM test');
+            fs.writeFileSync(path.join(registryRoot, 'published.txt'), 'published\n');
+            git('add', '.');
+            git('commit', '-m', 'published registry');
+            git('tag', 'v2.0.0');
+            fs.writeFileSync(path.join(registryRoot, 'mutable.txt'), 'newer checkout\n');
+            git('add', '.');
+            git('commit', '-m', 'mutable checkout');
+
+            expect(() => verifyPublishedRegistryIdentity(registryRoot, 'v2.0.0', 'c35c087a0801c0b4e69e0a4ac3eafef9ecdf37cd')).toThrow(/HEAD .*expected commit/i);
+        } finally {
+            fs.rmSync(registryRoot, { recursive: true, force: true });
+        }
     });
 
     it('la tabla nombra a los seis providers declarados', () => {
