@@ -73,3 +73,18 @@ jobs:
       - name: Test
         working-directory: cli
         run: npx jest --runInBand
+
+      # This is intentionally a second consumer boundary: the regular suite
+      # executes this checkout, while this gate invokes the npm tarball that a
+      # developer actually installs. The registry remains the immutable release
+      # checked out above, never the mutable repository under test.
+      - name: Install published R3 consumer
+        run: npm install --prefix published-consumer --no-audit --no-fund agentic-workflow-manager@8.1.1
+
+      - name: Accept published R3 consumer
+        working-directory: cli
+        env:
+          AWM_PUBLISHED_CLI_ROOT: ${{ github.workspace }}/published-consumer/node_modules/agentic-workflow-manager
+          AWM_PUBLISHED_CLI_VERSION: 8.1.1
+          AWM_PUBLISHED_REGISTRY_ROOT: ${{ github.workspace }}/awm-baseline-registry
+        run: npx jest tests/integration/published-r3-acceptance.e2e.test.ts --runInBand
