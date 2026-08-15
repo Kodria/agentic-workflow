@@ -141,7 +141,10 @@ export function spliceGenerated(markdown: string, generated: string): string {
     if (begin === -1 || end === -1 || end < begin) {
         throw new Error(`support-matrix.md no tiene los marcadores ${BEGIN_MARKER} / ${END_MARKER}`);
     }
-    const eol = markdown.includes('\r\n') ? '\r\n' : '\n';
+    // Each renderer owns only its marked block. A document can temporarily contain
+    // another generated block with different line endings, so using the first CRLF
+    // anywhere in the file would rewrite this block and create CI-only drift.
+    const eol = markdown.slice(begin, end).includes('\r\n') ? '\r\n' : '\n';
     const block = generated.split('\n').join(eol);
     return markdown.slice(0, begin + BEGIN_MARKER.length)
         + eol + eol + block + eol + eol

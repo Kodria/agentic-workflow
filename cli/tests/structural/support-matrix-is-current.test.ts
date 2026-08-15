@@ -23,6 +23,7 @@ import {
 } from '../../scripts/sensor-support-matrix';
 
 const SENSOR_FIXTURE_REGISTRY = path.join(__dirname, '..', 'fixtures', 'sensor-support-matrix', 'registry');
+const CI_WORKFLOW_PATH = path.resolve(__dirname, '../../..', '.github', 'workflows', 'ci.yml');
 
 
 describe('docs/support-matrix.md refleja el codigo', () => {
@@ -59,6 +60,17 @@ describe('docs/support-matrix.md refleja el codigo', () => {
         };
         expect(packageJson.scripts?.['docs:matrix']).toContain('--registry-root ../../awm-baseline-registry');
         expect(packageJson.scripts?.['docs:matrix:prepublication']).toContain(`--registry-root ${R3_PREPUBLICATION_FIXTURE_RELATIVE_PATH}`);
+    });
+
+    it('CI regenerates the published matrix from the immutable registry tag', () => {
+        const workflow = fs.readFileSync(CI_WORKFLOW_PATH, 'utf8');
+
+        expect(workflow).toContain('repository: Kodria/awm-baseline-registry');
+        expect(workflow).toContain('ref: v2.0.0');
+        expect(workflow).toContain('path: awm-baseline-registry');
+        expect(workflow).toContain('Verify published sensor support matrix');
+        expect(workflow).toContain('--registry-root ../awm-baseline-registry --registry-tag v2.0.0 --registry-commit c35c087a0801c0b4e69e0a4ac3eafef9ecdf37cd');
+        expect(workflow).toContain('git diff --exit-code -- docs/support-matrix.md');
     });
 
     it('retains the published registry certification rows verbatim instead of inventing fixture evidence', () => {
@@ -212,6 +224,20 @@ describe('docs/support-matrix.md refleja el codigo', () => {
 
         expect(out).toContain('linea uno\r\nlinea dos');
         expect(out.split('\r\n').length - 1).toBe(out.split('\n').length - 1); // ni un LF suelto
+    });
+
+    it('preserva el EOL del bloque de providers aunque otro bloque sea CRLF', () => {
+        const mixedDoc = `intro\r\n${BEGIN_MARKER}\nold\n${END_MARKER}\nfin\n`;
+        const out = spliceGenerated(mixedDoc, 'linea uno\nlinea dos');
+
+        expect(out).toContain(`${BEGIN_MARKER}\n\nlinea uno\nlinea dos\n\n${END_MARKER}`);
+    });
+
+    it('preserva el EOL del bloque de sensores aunque otro bloque sea CRLF', () => {
+        const mixedDoc = `intro\r\n${SENSOR_BEGIN_MARKER}\nold\n${SENSOR_END_MARKER}\nfin\n`;
+        const out = spliceSensorSupportMatrix(mixedDoc, 'linea uno\nlinea dos');
+
+        expect(out).toContain(`${SENSOR_BEGIN_MARKER}\n\nlinea uno\nlinea dos\n\n${SENSOR_END_MARKER}`);
     });
 
     it('marks an unsupported scope rather than leaving it absent', () => {

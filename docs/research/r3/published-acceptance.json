@@ -74,8 +74,10 @@
     "recommendationMutation": false
   },
   "supportMatrix": {
-    "updated": false,
-    "reason": "the checked-in generator and freshness test are pinned to the pre-publication fixture and explicitly reject a published-registry block; changing this requires a separate generator/test migration"
+    "updated": true,
+    "registryTag": "v2.0.0",
+    "registryCommit": "c35c087a0801c0b4e69e0a4ac3eafef9ecdf37cd",
+    "freshnessGate": "CI checks out the immutable registry tag, regenerates the matrix, and rejects documentation drift on Linux, macOS, and Windows"
   },
   "verdict": "incomplete: preserve as evidence only; do not treat as T13 completion or published cross-platform certification"
 }
