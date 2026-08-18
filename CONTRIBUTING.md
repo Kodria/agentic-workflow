@@ -8,23 +8,35 @@ Changes to a skill belong there, not here.
 
 ## Licensing of contributions
 
-This project is licensed under the [Apache License 2.0](LICENSE). By submitting
-a contribution you agree that it is licensed under the same terms (inbound =
-outbound), and that you have the right to submit it.
+This project is licensed under the [Apache License 2.0](LICENSE). Section 5 of
+that licence already makes every contribution inbound = outbound: unless you
+state otherwise, what you submit is submitted under these same terms. There is
+nothing extra to sign for the licence to apply.
 
-### Sign your commits (DCO)
+**The pull request is the certification.** By opening one you state that you
+have the right to submit its contents under this licence — whether you typed
+the commits yourself or an agent produced them on your behalf. We deliberately
+do not require a per-commit `Signed-off-by` line: in an agent-delegated
+workflow the commit author is a tool, and a certification signed by a tool
+certifies nothing. The human act is opening and merging the pull request, so
+that is where the statement belongs. (A tool that builds agent-delegated
+workflows should not ship a contribution policy its own workflow cannot
+satisfy.)
 
-Every commit must carry a `Signed-off-by` line certifying the
-[Developer Certificate of Origin](https://developercertificate.org/):
+If you are contributing in the course of employment, confirm first that you are
+permitted to do so — the copyright in work made during employment often belongs
+to the employer, regardless of who or what wrote the commit.
 
-```bash
-git commit -s -m "fix(sensors): ..."
-```
+### If you are not the project owner
 
-The sign-off states that you wrote the contribution, or otherwise have the
-right to submit it under this project's license. If you are contributing on
-behalf of an employer, confirm first that you are permitted to do so — the
-copyright in work made during employment often belongs to the employer.
+The project owner can relicense this work only while they hold copyright in all
+of it. That remains true today. **The first merged contribution from anyone
+else ends it**, unless a contributor licence agreement granting the right to
+relicense is in place *before* that pull request is merged.
+
+So the rule is a trigger, not a plan: no CLA is needed while the owner is the
+sole contributor. The moment a third-party pull request is worth merging, the
+CLA decision is taken before the merge button, not after.
 
 ## Before you open a pull request
 

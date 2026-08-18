@@ -507,16 +507,27 @@ que pasa revisión corporativa sin discusión.
 - Las skills del registry llevan `license: Apache-2.0` en su frontmatter: el
   campo es parte de la especificación Agent Skills y hace que la procedencia
   viaje con la skill incluso fuera del registry.
-- Las contribuciones entran bajo la misma licencia (inbound = outbound) con
-  firma DCO. **Un DCO certifica origen pero no habilita relicenciar**: si en
-  algún momento se quiere una capa comercial, hace falta un CLA con cesión, y
-  esa decisión debe tomarse antes de que crezca la base de contribuyentes, no
-  después.
+- Las contribuciones entran bajo la misma licencia sin trámite adicional: la
+  §5 de Apache-2.0 ya establece inbound = outbound. **No se exige firma DCO por
+  commit.** En un flujo delegado a agentes el autor del commit es una
+  herramienta, y una certificación firmada por una herramienta no certifica
+  nada; el acto humano es abrir y mergear el PR, así que ahí vive la
+  declaración. Una herramienta que construye flujos agénticos no puede publicar
+  una política de contribución que su propio flujo incumple en cada commit.
+- **Relicenciar sigue siendo posible mientras el titular sea el único
+  contribuyente**, y deja de serlo con el primer PR de un tercero que se
+  mergee. Por eso no queda un CLA pendiente: queda una regla con disparador —
+  el día que un PR externo valga la pena, la decisión de CLA se toma **antes**
+  del merge, no después. Está escrita en `CONTRIBUTING.md` de ambos repos.
 - **La marca no viaja con el código.** Apache-2.0 §6 no concede derechos de
   marca, y eso es intencional: el código es libre, el nombre es el control que
   queda. Un fork puede existir y usar todo el código; no puede presentarse como
   AWM.
 
-**Pendiente, y no lo resuelve esta decisión:** la titularidad. Ver
-[#84](https://github.com/Kodria/agentic-workflow/issues/84) — elegir licencia
-presupone ser el titular, y esa verificación ocurre fuera del repositorio.
+**Lo único que esta decisión NO resuelve es la titularidad**, y no puede
+resolverlo desde el repositorio: elegir licencia presupone ser el titular. Ver
+[#84](https://github.com/Kodria/agentic-workflow/issues/84). Si esa
+verificación arrojara titularidad compartida, la licencia elegida no se
+invalida — se vuelve una decisión que hay que acordar con el cotitular, y una
+licencia coherente sigue siendo estrictamente mejor que la contradicción
+MIT/ISC que había antes.
