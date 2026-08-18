@@ -25,6 +25,7 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-018](#d-018) | 2026-08-14 | Coverage reports never create a false green | Active |
 | [D-019](#d-019) | 2026-08-14 | Schema v2 is a deliberate, reviewable migration | Active |
 | [D-020](#d-020) | 2026-08-14 | Retrospective coverage runs before ledger archive | Active |
+| [D-021](#d-021) | 2026-08-18 | AWM se licencia bajo Apache-2.0; la marca queda fuera del grant | Vigente |
 
 ---
 
@@ -483,3 +484,39 @@ new reusable control from repeated classified findings, but archival must not
 erase the feedback signal first. Until the registry's T12 integration is
 published, this is an operating rule: run `awm sensors coverage --min 2`
 manually before `awm ledger archive`; the CLI does not yet enforce ordering.
+
+## D-021
+
+**AWM se licencia bajo Apache-2.0, y la marca queda deliberadamente fuera del grant.**
+
+El proyecto se publicaba en npm sin licencia coherente: no existía archivo
+`LICENSE`, el README declaraba MIT y `cli/package.json` publicaba ISC. Un
+equipo con revisión de compliance no puede adoptar un paquete cuya licencia
+declarada difiere entre el repositorio y el registro.
+
+Se elige Apache-2.0 sobre MIT/ISC por tres razones concretas, no por
+preferencia: concede patentes de forma explícita (MIT e ISC no dicen nada al
+respecto, y el silencio es el problema cuando una organización adopta la
+herramienta), obliga a señalar los cambios en obras derivadas, y es la licencia
+que pasa revisión corporativa sin discusión.
+
+**Implica:**
+- `LICENSE` (texto verbatim) y `NOTICE` en la raíz de este repo y del registry;
+  ambos repos comparten licencia para que no haya que razonar dos veces.
+- `cli/package.json` declara `Apache-2.0`, y el README dejó de decir MIT.
+- Las skills del registry llevan `license: Apache-2.0` en su frontmatter: el
+  campo es parte de la especificación Agent Skills y hace que la procedencia
+  viaje con la skill incluso fuera del registry.
+- Las contribuciones entran bajo la misma licencia (inbound = outbound) con
+  firma DCO. **Un DCO certifica origen pero no habilita relicenciar**: si en
+  algún momento se quiere una capa comercial, hace falta un CLA con cesión, y
+  esa decisión debe tomarse antes de que crezca la base de contribuyentes, no
+  después.
+- **La marca no viaja con el código.** Apache-2.0 §6 no concede derechos de
+  marca, y eso es intencional: el código es libre, el nombre es el control que
+  queda. Un fork puede existir y usar todo el código; no puede presentarse como
+  AWM.
+
+**Pendiente, y no lo resuelve esta decisión:** la titularidad. Ver
+[#84](https://github.com/Kodria/agentic-workflow/issues/84) — elegir licencia
+presupone ser el titular, y esa verificación ocurre fuera del repositorio.
