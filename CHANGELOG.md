@@ -1,3 +1,8 @@
+## v8.1.4 - 2026-08-19
+
+### Fixes
+- **release:** sincronizar package-lock.json en el bump de version (#94)
+
 ## v8.1.3 - 2026-08-19
 
 ### Fixes
