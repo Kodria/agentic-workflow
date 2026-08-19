@@ -92,7 +92,28 @@ describe('runner concurrente', () => {
     });
 
     test('job largo pasa por running con identidad real; jamas se mata por duracion (R3.5)', async () => {  // verifies R3.5
-        seedJob(repo, { argv: ['node', '-e', 'setTimeout(()=>process.exit(0), 1500)'] });
+        // El hijo vive hasta que EL TEST lo libera, no hasta que se cumple un reloj.
+        //
+        // Con una duracion fija (era 1500 ms) esto era una carrera imposible de ganar:
+        // el test espera OBSERVAR el estado transitorio `running`, y en win32 cada
+        // consulta de vitalidad spawnea tasklist/WMI — cientos de ms bajo carga, el mismo
+        // costo que documenta el `jest.setTimeout` de arriba. Si la primera observacion
+        // llegaba despues de que el hijo ya habia muerto, el estado saltaba directo a
+        // `exited` y `running` NO VOLVIA A OCURRIR NUNCA: la condicion quedaba
+        // permanentemente falsa y `until` giraba hasta agotar su presupuesto. Subir el
+        // timeout no lo arregla — no falta tiempo, falta que el estado sea observable.
+        // Fallo real: run 32211063150, solo windows-latest, con Ubuntu y macOS en verde.
+        //
+        // El centinela invierte el control: el hijo sigue vivo mientras el test lo
+        // necesite, asi que `running` es observable con cualquier latencia de plataforma.
+        // Refuerza R3.5 en vez de aflojarlo — "jamas se mata por duracion" se prueba
+        // mejor con un job que vive tanto como haga falta que con uno de 1,5 s. El
+        // setTimeout de 60 s es solo una red: si el test muere antes de liberar, el hijo
+        // no queda huerfano reteniendo handles sobre el tmpdir (ver rmSyncRetryingEbusy).
+        const sentinel = path.join(repo, 'release-r35.sentinel');
+        seedJob(repo, {
+            argv: ['node', '-e', `const fs=require('fs'),f=${JSON.stringify(sentinel)};setTimeout(()=>process.exit(0),60000);setInterval(()=>{if(fs.existsSync(f))process.exit(0)},50)`],
+        });
         spawnPendingWrappers(repo, 'rama', fakeSpawner);
         await until(() => {
             collectAndReconcile(repo, 'rama');
@@ -107,6 +128,9 @@ describe('runner concurrente', () => {
         // exec-wrapper.test.ts) — este test no puede exigir mas certeza de
         // la que la plataforma real puede dar.
         expect(running.processRef!.psArgsDigest).toMatch(/^([0-9a-f]{16}|unknown)$/);
+        // Recien ahora se libera al hijo: la transicion a `exited` la decide el test,
+        // no el reloj, asi que tampoco esa mitad depende de la latencia de la plataforma.
+        fs.writeFileSync(sentinel, '');
         await until(() => {
             collectAndReconcile(repo, 'rama');
             return readJournal(repo, 'rama').state!.jobs['j1'].executionState === 'exited';
