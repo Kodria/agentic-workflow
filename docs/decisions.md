@@ -26,6 +26,7 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-019](#d-019) | 2026-08-14 | Schema v2 is a deliberate, reviewable migration | Active |
 | [D-020](#d-020) | 2026-08-14 | Retrospective coverage runs before ledger archive | Active |
 | [D-021](#d-021) | 2026-08-18 | AWM se licencia bajo Apache-2.0; la marca queda fuera del grant | Vigente |
+| [D-022](#d-022) | 2026-08-19 | Un cambio de metadata publicada se titula `fix:`, y CI puede forzar el bump | Vigente |
 
 ---
 
@@ -531,3 +532,38 @@ verificación arrojara titularidad compartida, la licencia elegida no se
 invalida — se vuelve una decisión que hay que acordar con el cotitular, y una
 licencia coherente sigue siendo estrictamente mejor que la contradicción
 MIT/ISC que había antes.
+
+## D-022
+
+**Un cambio que altera metadata publicada del paquete se titula `fix:`, y CI tiene una salida de emergencia para forzar el bump.**
+
+`determineBump` devuelve `null` cuando ningún commit desde el último release es `feat`,
+`fix`, `perf` ni breaking (`cli/src/release/core.ts`). Eso es correcto y hay que
+conservarlo: un `chore:` de documentación no debe publicar a npm.
+
+Pero deja un hueco que costó un release. El PR #88 corrigió la licencia publicada
+—`"license": "ISC"` → `"Apache-2.0"`— y se mergeó titulado `chore(legal):`. El workflow
+corrió **en verde**, `determineBump` devolvió `null`, y no se publicó nada: `main` quedó
+con la licencia correcta mientras npm siguió entregando `8.1.2` con `ISC`. El defecto que
+el PR venía a arreglar siguió vivo justo donde importaba, y el pipeline verde decía lo
+contrario.
+
+Es la misma familia que D-005 y que la lección de `auto-tag` en el registry: **un job
+verde tiene dos causas posibles, y desde afuera son indistinguibles.** Acá el job no
+falló — simplemente no hizo nada, que es la variante más silenciosa.
+
+**Implica:**
+- **Regla de título:** un cambio que altera lo que se publica —campos de
+  `cli/package.json` que viajan al registro, contenido del paquete— se titula `fix:`,
+  aunque coloquialmente sea "una tarea". El criterio no es cómo se siente el cambio, es
+  si el consumidor recibe algo distinto.
+- **Salida de emergencia:** `release.yml` expone un input `bump` en `workflow_dispatch`
+  (`auto` | `patch` | `minor` | `major`) que se traduce a `--force`. El flag ya existía en
+  el CLI y estaba cubierto por tests; lo que faltaba era que CI pudiera alcanzarlo. Un
+  push a `main` nunca fuerza nada: `auto` es el default y el camino normal queda idéntico.
+- **Gate que lo sostiene:** `tests/structural/release-flags-are-reachable-from-ci.test.ts`
+  deriva los flags del propio `parseArgs` y exige que cada uno esté expuesto en el
+  workflow o excluido con un motivo escrito. Un flag agregado mañana obliga a decidir en
+  vez de heredar el silencio. La comprobación corre sobre el workflow **sin comentarios**:
+  mencionar un flag en un comentario no lo hace invocable, y la primera versión del test
+  se dejaba engañar por eso.
