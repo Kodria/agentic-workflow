@@ -108,6 +108,36 @@ awm agent disable claude-code --default codex
 
 Re-enable a provider through a normal `awm init --agent <provider>` run.
 
+### `awm preflight`
+
+Verify the project harness can actually gate **before** development starts.
+
+```
+awm preflight [--json] [--cwd <path>]
+```
+
+| Flag | Description |
+|---|---|
+| `--json` | Emit the report as JSON. Preserved on failure, so a red run is still machine-readable. |
+| `--cwd <path>` | Project directory to check. Default: current directory. |
+
+Where `awm doctor` answers *"is AWM installed correctly?"*, preflight answers *"can this project stop bad work from landing?"* — the distinction matters when onboarding a repository, because an install can be perfect while the project has nothing enforceable behind it.
+
+### `awm context-budget`
+
+Check the size of the files injected into **every** agent session.
+
+```
+awm context-budget [--json] [--cwd <path>]
+```
+
+| Flag | Description |
+|---|---|
+| `--json` | Emit the report as JSON. |
+| `--cwd <path>` | Directory to measure. Default: current directory. |
+
+`CONSTITUTION.md`, `AGENTS.md`, and the skills the harness re-anchors are paid for on **every** session, not once. This command makes that recurring cost visible before it starts crowding out the work.
+
 ---
 
 ## Registry & artifacts
@@ -435,6 +465,81 @@ clustering signal, and a win is never merged with a finding on the strength of a
 ### `awm ledger archive`
 
 Rotate the current branch's ledger out of the active flow (into `.awm/ledger/archive/`). `harness-retro` calls this when it closes a branch.
+
+---
+
+## Durable execution (journal, supervisor, parallel tracks)
+
+The three commands below are one mechanism seen from three angles. `awm job` is the
+**journal**: the durable record of what work was requested and what came back. `awm watch`
+is the **supervisor**: the process that actually runs that work and relieves controllers
+that died. `awm track` coordinates **parallel tracks** over worktrees.
+
+The division of labour is deliberate and load-bearing: `job` and `track` are almost
+entirely **request-only and read-only** surfaces. They record intent; the supervisor is
+what mutates state. That is what lets a controller die mid-flight without losing work or
+duplicating it.
+
+### `awm job`
+
+The durable work journal of the SDD cycle. Subcommands split into requests, reads, and
+gates:
+
+| Subcommand | Description |
+|---|---|
+| `request <cmd...>` | Record the *intent* to run a verification. The supervisor executes it — this does not. |
+| `register` | Record a cycle entity (`task`, `cycle-plan`, `dispatch`, `task-status`, `next-action`, `custody-decision`) **before** acting on it. |
+| `verdict` | Record a ReviewObligation verdict at the moment it is received. |
+| `list` / `ps` / `show <jobId>` | Read the journal: declared jobs, live processes, one job in full. |
+| `reconcile` | Read-only report of the R1.8 matrix plus `next_action`. The mutation belongs to the supervisor. |
+| `gate` | Fail-closed interlock: exits non-zero if **anything** blocks certification. |
+| `reap` | List job processes with full identity. `--execute --jobs <ids...>` terminates them, with confirmation. |
+| `export` | Export the journal. |
+| `controller-heartbeat` | Emit the controller liveness signal the supervisor watches. |
+
+> `gate` is the one to reach for in automation: it is the interlock that refuses to
+> certify, not a report you have to interpret.
+
+### `awm watch`
+
+The durable supervisor. It executes requested jobs, relieves controllers whose heartbeat
+went silent, and **never kills live work**.
+
+```
+awm watch [--init] [--provider <p>] [--heartbeat-timeout <min>]
+          [--activity-window <min>] [--max-parallel <n>]
+```
+
+| Flag | Description |
+|---|---|
+| `--init` | Bootstrap: create the current branch's journal, detect verifiers, and exit. |
+| `--provider <p>` | `codex` or `claude-code`. Default: `codex`. |
+| `--heartbeat-timeout <min>` | Minutes of heartbeat silence before a controller is considered gone. Default: `5`. |
+| `--activity-window <min>` | Extra minutes without process activity before relieving it. Default: `10`. |
+| `--max-parallel <n>` | Cap of simultaneously ACTIVE tracks. Default: derived from the bundled benchmark. |
+
+The two timeouts are separate on purpose: a silent heartbeat is not the same as a dead
+process. A controller can stop reporting while its work is still advancing, and the
+activity window is what keeps that work from being reclaimed out from under it.
+
+### `awm track`
+
+Parallel tracks over worktrees: a request-only surface plus a read-only aggregate status.
+
+| Subcommand | Description |
+|---|---|
+| `add <trackId>` | Emit a track-prepare request. The plan supervisor consumes it. |
+| `join <trackId>` | Emit a track-join request. Integration is owned exclusively by the plan supervisor. |
+| `finalize` | Emit a track-finalize request: the plan controller's global QA self-report over the already-merged HEAD. |
+| `list` | List the `TrackRef`s declared in the plan journal (read-only). |
+| `status` | Read-only aggregate: each track's gate plus the cohort phase. |
+| `verify-independence` | Verify a track plan's declared independence. Exits non-zero on any violation, so it is usable as a gate. |
+| `remove <trackId>` | **Not implemented.** Emits a teardown request the supervisor does not yet know how to apply, and rejects it. |
+| `supervisor-wrapper` | **Internal process**, launched detached by the plan supervisor. Not for manual invocation. |
+
+> `add`, `join` and `finalize` only *request*. Nothing integrates because you ran them —
+> the plan supervisor decides, which is what keeps two tracks from merging into each other
+> at the same time.
 
 ---
 
