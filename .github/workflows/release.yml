@@ -10,6 +10,22 @@ on:
         description: 'Dry run (no publica)'
         type: boolean
         default: false
+      # `determineBump` devuelve null cuando ningun commit desde el ultimo release es
+      # feat/fix/perf ni breaking (cli/src/release/core.ts). Es lo correcto: un `chore:`
+      # de docs no debe publicar a npm. Pero deja un hueco real — un cambio que altera
+      # METADATA PUBLICADA del paquete y no es feat ni fix no tiene forma de llegar al
+      # registro. Paso con el PR #88: corrigio `"license": "ISC"` -> `"Apache-2.0"`,
+      # se mergeo como `chore(legal):`, el workflow corrio en verde y no publico nada.
+      # `main` quedo correcto y npm siguio entregando ISC.
+      #
+      # El CLI ya sabia resolverlo (`--force major|minor|patch`, cubierto por
+      # tests/release/orchestrator.test.ts); lo que faltaba era que CI pudiera
+      # alcanzarlo. Ver docs/decisions.md D-022.
+      bump:
+        description: 'Forzar un release aunque no haya commits releasables (metadata publicada)'
+        type: choice
+        default: 'auto'
+        options: ['auto', 'patch', 'minor', 'major']
 
 permissions:
   contents: write
@@ -97,7 +113,13 @@ jobs:
       # Repetirlos en ubuntu seria correr por cuarta vez lo que ya paso, y daria la
       # impresion de que el gate vive en este job cuando vive en la matriz.
 
+      # `bump` solo existe en workflow_dispatch: un push a main nunca fuerza nada, sigue
+      # decidiendo `determineBump`. El valor 'auto' es el default explicito y no agrega
+      # flag, de modo que el camino normal es byte-identico al anterior.
       - name: Release
         working-directory: cli
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true && '--dry-run' || '' }}
+          FORCE_BUMP: ${{ github.event_name == 'workflow_dispatch' && inputs.bump != 'auto' && format('--force {0}', inputs.bump) || '' }}
         run: |
-          node dist/src/release/index.js ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true && '--dry-run' || '' }}
+          node dist/src/release/index.js $DRY_RUN $FORCE_BUMP
