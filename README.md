@@ -86,10 +86,19 @@ limitations. It is derived from the CLI source and checked in tests.
 
 ## Contributing
 
-Use the [architecture guide](docs/architecture.md) to understand the CLI and
-registry design, the [CLI developer guide](cli/README.md) to work on the CLI,
-and the [constitution](CONSTITUTION.md) for non-negotiable project rules.
+Start with [CONTRIBUTING.md](CONTRIBUTING.md) for how to submit changes and how
+contributions are licensed. Then use the
+[architecture guide](docs/architecture.md) to understand the CLI and registry
+design, the [CLI developer guide](cli/README.md) to work on the CLI, and the
+[constitution](CONSTITUTION.md) for non-negotiable project rules.
+
+To report a security vulnerability, follow [SECURITY.md](SECURITY.md) rather
+than opening a public issue.
 
 ## License
 
-MIT. See [package metadata](cli/package.json) for the published package details.
+[Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
+
+The name "AWM" and the Kodria name and marks are not covered by that grant —
+Apache-2.0 §6 conveys no trademark rights. You may use, modify, and
+redistribute the software; naming a derivative "AWM" requires permission.

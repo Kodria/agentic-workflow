@@ -25,6 +25,7 @@ Formato: qué se decidió, por qué, qué implica. Sin historia larga — eso vi
 | [D-018](#d-018) | 2026-08-14 | Coverage reports never create a false green | Active |
 | [D-019](#d-019) | 2026-08-14 | Schema v2 is a deliberate, reviewable migration | Active |
 | [D-020](#d-020) | 2026-08-14 | Retrospective coverage runs before ledger archive | Active |
+| [D-021](#d-021) | 2026-08-18 | AWM se licencia bajo Apache-2.0; la marca queda fuera del grant | Vigente |
 
 ---
 
@@ -483,3 +484,50 @@ new reusable control from repeated classified findings, but archival must not
 erase the feedback signal first. Until the registry's T12 integration is
 published, this is an operating rule: run `awm sensors coverage --min 2`
 manually before `awm ledger archive`; the CLI does not yet enforce ordering.
+
+## D-021
+
+**AWM se licencia bajo Apache-2.0, y la marca queda deliberadamente fuera del grant.**
+
+El proyecto se publicaba en npm sin licencia coherente: no existía archivo
+`LICENSE`, el README declaraba MIT y `cli/package.json` publicaba ISC. Un
+equipo con revisión de compliance no puede adoptar un paquete cuya licencia
+declarada difiere entre el repositorio y el registro.
+
+Se elige Apache-2.0 sobre MIT/ISC por tres razones concretas, no por
+preferencia: concede patentes de forma explícita (MIT e ISC no dicen nada al
+respecto, y el silencio es el problema cuando una organización adopta la
+herramienta), obliga a señalar los cambios en obras derivadas, y es la licencia
+que pasa revisión corporativa sin discusión.
+
+**Implica:**
+- `LICENSE` (texto verbatim) y `NOTICE` en la raíz de este repo y del registry;
+  ambos repos comparten licencia para que no haya que razonar dos veces.
+- `cli/package.json` declara `Apache-2.0`, y el README dejó de decir MIT.
+- Las skills del registry llevan `license: Apache-2.0` en su frontmatter: el
+  campo es parte de la especificación Agent Skills y hace que la procedencia
+  viaje con la skill incluso fuera del registry.
+- Las contribuciones entran bajo la misma licencia sin trámite adicional: la
+  §5 de Apache-2.0 ya establece inbound = outbound. **No se exige firma DCO por
+  commit.** En un flujo delegado a agentes el autor del commit es una
+  herramienta, y una certificación firmada por una herramienta no certifica
+  nada; el acto humano es abrir y mergear el PR, así que ahí vive la
+  declaración. Una herramienta que construye flujos agénticos no puede publicar
+  una política de contribución que su propio flujo incumple en cada commit.
+- **Relicenciar sigue siendo posible mientras el titular sea el único
+  contribuyente**, y deja de serlo con el primer PR de un tercero que se
+  mergee. Por eso no queda un CLA pendiente: queda una regla con disparador —
+  el día que un PR externo valga la pena, la decisión de CLA se toma **antes**
+  del merge, no después. Está escrita en `CONTRIBUTING.md` de ambos repos.
+- **La marca no viaja con el código.** Apache-2.0 §6 no concede derechos de
+  marca, y eso es intencional: el código es libre, el nombre es el control que
+  queda. Un fork puede existir y usar todo el código; no puede presentarse como
+  AWM.
+
+**Lo único que esta decisión NO resuelve es la titularidad**, y no puede
+resolverlo desde el repositorio: elegir licencia presupone ser el titular. Ver
+[#84](https://github.com/Kodria/agentic-workflow/issues/84). Si esa
+verificación arrojara titularidad compartida, la licencia elegida no se
+invalida — se vuelve una decisión que hay que acordar con el cotitular, y una
+licencia coherente sigue siendo estrictamente mejor que la contradicción
+MIT/ISC que había antes.
