@@ -33,6 +33,7 @@ export function parseArgs(argv: string[]): ReleaseOpts {
 
 function realIO(repoRoot: string, cliDir: string): ReleaseIO {
   const pkgPath = path.join(cliDir, 'package.json');
+  const lockPath = path.join(cliDir, 'package-lock.json');
   const changelogPath = path.join(repoRoot, 'CHANGELOG.md');
   const npmrcPath = path.join(cliDir, '.npmrc');
   return {
@@ -44,6 +45,16 @@ function realIO(repoRoot: string, cliDir: string): ReleaseIO {
       const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
       pkg.version = v;
       fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+    },
+    // El round-trip JSON.parse/stringify preserva el orden de claves y el formato que
+    // npm escribe (2 espacios + newline final), asi que el diff de un bump son las dos
+    // lineas de version y nada mas — verificado sobre el lockfile real de este repo.
+    writeLockVersion: (v) => {
+      if (!fs.existsSync(lockPath)) return;
+      const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+      lock.version = v;
+      if (lock.packages?.['']) lock.packages[''].version = v;
+      fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2) + '\n');
     },
     readChangelog: () => (fs.existsSync(changelogPath) ? fs.readFileSync(changelogPath, 'utf8') : ''),
     writeChangelog: (c) => fs.writeFileSync(changelogPath, c),
