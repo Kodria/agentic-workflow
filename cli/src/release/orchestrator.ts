@@ -10,6 +10,13 @@ export interface ReleaseIO {
   run(cmd: string, args: string[], opts?: { cwd?: string }): string;
   readPackageVersion(): string;
   writePackageVersion(v: string): void;
+  /** Sincroniza la version del paquete raiz en `package-lock.json`. Va aparte de
+   *  `writePackageVersion` a proposito: el lockfile tiene DOS campos que deben moverse
+   *  juntos (`version` y `packages[""].version`), y el resto del archivo —resolucion de
+   *  dependencias— no le corresponde a un bump. Sin esto el lockfile queda una version
+   *  atras en CADA release y `r3-cli-major-version.test.ts` deja `main` en rojo, invisible
+   *  hasta el PR siguiente por el `[skip ci]` del commit de bump. Ver #92. */
+  writeLockVersion(v: string): void;
   readChangelog(): string;
   writeChangelog(content: string): void;
   writeNpmrc(token: string): void;
@@ -93,9 +100,10 @@ export function release(opts: ReleaseOpts, io: ReleaseIO): ReleaseResult {
 
   // aplicar
   io.writePackageVersion(version);
+  io.writeLockVersion(version);
   const section = renderChangelog(version, io.today(), commits);
   io.writeChangelog(section + '\n' + io.readChangelog());
-  io.run('git', ['add', 'cli/package.json', 'CHANGELOG.md']);
+  io.run('git', ['add', 'cli/package.json', 'cli/package-lock.json', 'CHANGELOG.md']);
   io.run('git', ['commit', '-m', `chore(release): v${version} [skip ci]`]);
   io.run('git', ['tag', '-a', `v${version}`, '-m', `v${version}`]);
 

@@ -3,10 +3,14 @@ import { release, ReleaseIO, ReleaseOpts } from '../../src/release/orchestrator'
 import { GIT_LOG_FORMAT, US, RS } from '../../src/release/core';
 
 function makeIO(over: Partial<ReleaseIO> & { commits?: string; tags?: string; npmView?: string } = {}): {
-  io: ReleaseIO; calls: string[];
+  io: ReleaseIO; calls: string[]; versions: () => { pkg: string; lock: string };
 } {
   const calls: string[] = [];
   let pkgVersion = '2.1.1';
+  // El lockfile arranca en la MISMA version que el package.json, como en el repo real.
+  // Si el release no lo sincroniza, este valor se queda atras — que es exactamente el
+  // estado que dejaba `main` en rojo (#92).
+  let lockVersion = '2.1.1';
   const io: ReleaseIO = {
     run(cmd, args) {
       const full = `${cmd} ${args.join(' ')}`;
@@ -21,6 +25,7 @@ function makeIO(over: Partial<ReleaseIO> & { commits?: string; tags?: string; np
     },
     readPackageVersion: () => pkgVersion,
     writePackageVersion: (v) => { pkgVersion = v; calls.push(`WRITE_PKG ${v}`); },
+    writeLockVersion: (v) => { lockVersion = v; calls.push(`WRITE_LOCK ${v}`); },
     readChangelog: () => '',
     writeChangelog: (c) => calls.push(`WRITE_CHANGELOG ${c.split('\n')[0]}`),
     writeNpmrc: () => calls.push('WRITE_NPMRC'),
@@ -30,7 +35,7 @@ function makeIO(over: Partial<ReleaseIO> & { commits?: string; tags?: string; np
     env: { NPM_TOKEN: 'tok' },
     ...over,
   };
-  return { io, calls };
+  return { io, calls, versions: () => ({ pkg: pkgVersion, lock: lockVersion }) };
 }
 
 const opts = (o: Partial<ReleaseOpts> = {}): ReleaseOpts =>
@@ -51,6 +56,29 @@ describe('release — happy path', () => {
     // npmrc creado y SIEMPRE removido
     expect(calls).toContain('WRITE_NPMRC');
     expect(calls).toContain('REMOVE_NPMRC');
+  });
+
+  // #92: el bump escribia solo package.json, asi que el lockfile quedaba una version
+  // atras en CADA release. `r3-cli-major-version.test.ts` exige que coincidan, y el
+  // `[skip ci]` del commit de bump hacia que ese rojo no apareciera hasta el PR
+  // siguiente — que llegaba roto por algo que no habia hecho.
+  it('sincroniza package-lock.json con package.json y lo incluye en el commit de bump', () => {
+    const { io, calls, versions } = makeIO({ commits: `feat: x${US}${RS}` });
+    release(opts(), io);
+
+    expect(versions()).toEqual({ pkg: '2.2.0', lock: '2.2.0' });
+    expect(calls).toContain('WRITE_LOCK 2.2.0');
+    // Escribir el archivo no alcanza: si no se stagea, el commit de release lo deja
+    // fuera y el lockfile queda sucio en el working tree del runner.
+    expect(calls).toContain('git add cli/package.json cli/package-lock.json CHANGELOG.md');
+  });
+
+  it('no toca el lockfile cuando no hay nada que publicar', () => {
+    const { io, calls, versions } = makeIO({ commits: `docs: solo docs${US}${RS}` });
+    release(opts(), io);
+
+    expect(versions()).toEqual({ pkg: '2.1.1', lock: '2.1.1' });
+    expect(calls.some((c) => c.startsWith('WRITE_LOCK'))).toBe(false);
   });
 
   it('sin commits releasables → no publica (exit 0 lógico)', () => {
