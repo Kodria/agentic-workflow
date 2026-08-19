@@ -1,3 +1,9 @@
+## v8.1.3 - 2026-08-19
+
+### Fixes
+- **tests:** eliminar la carrera de observacion que rompia R3.5 en Windows (#90)
+- **release:** permitir publicar desde CI un cambio de metadata que no es feat ni fix (#89)
+
 ## v8.1.2 - 2026-08-15
 
 ### Fixes
