@@ -759,7 +759,7 @@ Expected: todos exit 0 y `awm sensors run` produce `overall: pass`. Confirmar qu
 
 Repetir las mutaciones discriminantes de T1–T7 contra sus tests exactos. Invocar `requesting-code-review`; corregir cada hallazgo con test rojo/verde y commit separado cuando cambie comportamiento.
 
-- [ ] **Step 5: Commit documental y PR CLI**
+- [x] **Step 5: Commit documental y PR CLI**
 
 ```bash
 git add docs/cli-reference.md docs/configuration.md docs/testing/core-acceptance.md docs/testing/os-matrix.md CHANGELOG.md cli/tests/integration/sensor-compatibility.e2e.test.ts
