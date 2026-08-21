@@ -638,7 +638,7 @@ _Requirements: R7, R7.1, R7.2_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tests rojos del modo opcional**
+- [x] **Step 1: Escribir tests rojos del modo opcional**
 
 ```ts
 test('default preflight remains static (R6.2)', async () => {
@@ -663,13 +663,13 @@ test('empirical preflight is read-only (R7.2)', async () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar y comprobar rojo**
+- [x] **Step 2: Ejecutar y comprobar rojo**
 
 Run: `cd cli && npx jest tests/commands/preflight/preflight.test.ts tests/integration/preflight-json-pipe.e2e.test.ts --runInBand`
 
 Expected: FAIL porque no existe `verifySensors` ni el check `sensors-execution`.
 
-- [ ] **Step 3: Implementar opción y check empírico**
+- [x] **Step 3: Implementar opción y check empírico**
 
 ```ts
 export type PreflightOptions = { verifySensors?: boolean };
@@ -688,11 +688,11 @@ export async function checkSensorExecution(cwd: string): Promise<PreflightCheck>
 
 `preflight(cwd, opts)` agrega el check solo si `opts.verifySensors === true`. Commander registra `.option('--verify-sensors', 'run the complete sensor gate before unattended execution')` y pasa la opción. El render usa nombre, status, timeout efectivo, elapsed y reason sanitizado; no vuelca stdout/stderr crudo.
 
-- [ ] **Step 4: Probar el fallo real de exit 2/unparseable y la ausencia de diff**
+- [x] **Step 4: Probar el fallo real de exit 2/unparseable y la ausencia de diff**
 
 El e2e crea un comando v2 estructurado que termina 2 sin findings parseables, ejecuta `dist/src/index.js preflight --verify-sensors --json --cwd "$FIXTURE_ROOT"`, afirma exit 1, JSON válido, `status: degraded`, sensor/reason, y tree snapshot idéntico.
 
-- [ ] **Step 5: Verde, mutación y commit**
+- [x] **Step 5: Verde, mutación y commit**
 
 Run: `cd cli && npm run build && npx jest tests/commands/preflight/preflight.test.ts tests/integration/preflight-json-pipe.e2e.test.ts --runInBand`
 
