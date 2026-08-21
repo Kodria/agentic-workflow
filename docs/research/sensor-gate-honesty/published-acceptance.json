@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "cli": {
+    "version": "8.1.6",
+    "packageHash": "7a4e0e3b9fa8a1a32e1ae9604780f306d218c3d9b290e6a1f842b808307c2fa2"
+  },
+  "registry": {
+    "tag": "v3.0.0",
+    "commit": "3db85c92eecc449fb8f14252fe2c64bb493cfb3f",
+    "packHash": "0be244deaece90ad8671de0ca517abd7f0fce5567d0e688c8b76b8ee4f490348"
+  },
+  "platforms": {
+    "linux": {
+      "status": "pass",
+      "evidence": "https://github.com/Kodria/agentic-workflow/actions/runs/32494284592/job/96808918456"
+    },
+    "macos": {
+      "status": "pass",
+      "evidence": "https://github.com/Kodria/agentic-workflow/actions/runs/32494284592/job/96808918234"
+    },
+    "windows": {
+      "status": "pass",
+      "evidence": "https://github.com/Kodria/agentic-workflow/actions/runs/32494284592/job/96808917901"
+    }
+  },
+  "matrix": {
+    "report": "published-sensor-gate-matrix.json",
+    "commandCount": 11
+  }
+}

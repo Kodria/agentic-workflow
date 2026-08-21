@@ -14,7 +14,7 @@ import path from 'path';
  */
 const enabled = process.env.AWM_RUN_PUBLISHED_SENSOR_GATE_MATRIX === '1';
 const acceptance = enabled ? describe : describe.skip;
-const cliVersion = process.env.AWM_PUBLISHED_CLI_VERSION ?? '8.1.5';
+const cliVersion = process.env.AWM_PUBLISHED_CLI_VERSION ?? '8.1.6';
 const registryTag = process.env.AWM_PUBLISHED_REGISTRY_TAG ?? 'v3.0.0';
 const registryRemote = process.env.AWM_PUBLISHED_REGISTRY_REMOTE ?? 'https://github.com/Kodria/awm-baseline-registry.git';
 // Keep the shorter name used by the release orchestrator, while accepting the
@@ -126,7 +126,11 @@ function writeReport(root: string, cliRoot: string, registryRoot: string, record
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),
         cli: { version: cliVersion, packageHash: hash(fs.readFileSync(path.join(cliRoot, 'package.json'), 'utf8')) },
-        registry: { tag: registryTag, packHash: hash(fs.readFileSync(path.join(registryRoot, 'sensor-packs', 'js-ts', 'pack.json'), 'utf8')) },
+        registry: {
+            tag: registryTag,
+            commit: command(registryRoot, 'git', ['rev-parse', 'HEAD']).stdout.trim(),
+            packHash: hash(fs.readFileSync(path.join(registryRoot, 'sensor-packs', 'js-ts', 'pack.json'), 'utf8')),
+        },
         commands: records,
     });
     process.stdout.write(`published sensor gate matrix: ${target}\n`);
@@ -147,7 +151,7 @@ acceptance('published sensor gate matrix', () => {
 
             const v2 = createFixture(root, registryRoot, 'v2');
             const initialized = runCli(cliRoot, v2, 'sensors', 'init', '--registry-root', registryRoot, '--pack', 'js-ts');
-            record(records, 'v2-init', ['sensors', 'init', '--registry-root', registryRoot, '--pack', 'js-ts'], initialized);
+            record(records, 'v2-init', ['sensors', 'init', '--registry-root', '<registry-root>', '--pack', 'js-ts'], initialized);
             assertProcess(initialized, 'v2 init');
             const status = runCli(cliRoot, v2, 'sensors', 'status');
             record(records, 'v2-status', ['sensors', 'status'], status);
@@ -158,11 +162,24 @@ acceptance('published sensor gate matrix', () => {
 
             const clean = runJson(records, 'v2-clean-fast', cliRoot, v2, 'sensors', 'run', '--fast');
             assertExitMatchesVerdict(clean.result, clean.output);
+            expect(clean.output.sensors).toEqual(expect.arrayContaining([
+                expect.objectContaining({ execution: expect.objectContaining({ timeoutSource: 'pack' }) }),
+            ]));
+            const v2ManifestPath = path.join(v2.project, '.awm', 'sensors.json');
+            const projectTimeoutManifest = JSON.parse(fs.readFileSync(v2ManifestPath, 'utf8')) as { sensors: Record<string, { timeout?: number }> };
+            projectTimeoutManifest.sensors.lint.timeout = 30_000;
+            writeJson(v2ManifestPath, projectTimeoutManifest);
+            const projectTimeout = runJson(records, 'v2-project-timeout-fast', cliRoot, v2, 'sensors', 'run', '--fast');
+            assertExitMatchesVerdict(projectTimeout.result, projectTimeout.output);
+            expect(projectTimeout.output.sensors).toEqual(expect.arrayContaining([
+                expect.objectContaining({ execution: expect.objectContaining({ timeoutMs: 30_000, timeoutSource: 'project' }) }),
+            ]));
+            delete projectTimeoutManifest.sensors.lint.timeout;
+            writeJson(v2ManifestPath, projectTimeoutManifest);
             // A v2 manifest can deliberately disable an otherwise applicable
             // sensor. Exercise the published skip verdict before any failing
             // fixture source is introduced, so this is a real all-skipped run
             // rather than a filtered pass or a baseline side effect.
-            const v2ManifestPath = path.join(v2.project, '.awm', 'sensors.json');
             const disabledManifest = JSON.parse(fs.readFileSync(v2ManifestPath, 'utf8')) as { sensors: Record<string, { enabled?: boolean; fast?: boolean }> };
             const fastSensor = Object.entries(disabledManifest.sensors).find(([, sensor]) => sensor.fast === true);
             expect(fastSensor).toBeDefined();
@@ -174,6 +191,19 @@ acceptance('published sensor gate matrix', () => {
             expect(skipped.output.overall).toBe('skipped');
             disabledManifest.sensors[fastSensor[0]].enabled = true;
             writeJson(v2ManifestPath, disabledManifest);
+            const invalidTimeoutManifest = JSON.parse(fs.readFileSync(v2ManifestPath, 'utf8')) as { sensors: Record<string, { timeout?: number }> };
+            invalidTimeoutManifest.sensors.lint.timeout = 0;
+            writeJson(v2ManifestPath, invalidTimeoutManifest);
+            const invalidTimeout = runCli(cliRoot, v2, 'sensors', 'run', '--fast');
+            expect(invalidTimeout.status).toBe(1);
+            // Release 8.1.6 does not surface the parser rejection required by
+            // the target contract. Record its actual fallback rather than
+            // inventing a pre-spawn guarantee the artifact does not provide.
+            const invalidTimeoutOutput = parseJson(invalidTimeout, 'v2 invalid timeout');
+            record(records, 'v2-invalid-timeout-fast', ['sensors', 'run', '--fast'], invalidTimeout, invalidTimeoutOutput);
+            expect(invalidTimeoutOutput.overall).toBe('not_certified');
+            delete invalidTimeoutManifest.sensors.lint.timeout;
+            writeJson(v2ManifestPath, invalidTimeoutManifest);
             fs.writeFileSync(path.join(v2.project, 'failure.js'), 'missingPublishedSensorGateValue;\n');
             const failing = runJson(records, 'v2-failing-fast', cliRoot, v2, 'sensors', 'run', '--fast');
             assertExitMatchesVerdict(failing.result, failing.output);
@@ -198,12 +228,16 @@ acceptance('published sensor gate matrix', () => {
             writeJson(path.join(legacy.project, '.awm', 'sensors.json'), { pack: 'js-ts', sensors: { lint: { fast: true, cmd: 'npx eslint . --format json' } } });
             const legacyRun = runJson(records, 'legacy-fast', cliRoot, legacy, 'sensors', 'run', '--fast');
             assertExitMatchesVerdict(legacyRun.result, legacyRun.output);
+            expect(legacyRun.output.sensors).toEqual(expect.arrayContaining([
+                expect.objectContaining({ execution: expect.objectContaining({ timeoutSource: 'fallback' }) }),
+            ]));
 
-            const outcomes = new Set(records.flatMap(record => record.output?.overall ? [`${String(record.output.overall)}:${String(record.exit)}`] : []));
-            // The matrix's purpose is to make distinct real outcome/exit pairs
-            // visible. Do not prescribe their values here: those are the release
-            // artifact's evidence, recorded above for review.
-            expect(outcomes.size).toBeGreaterThanOrEqual(4);
+            const outcomes = new Map(records.flatMap(record => record.output?.overall ? [[String(record.output.overall), record.exit] as const] : []));
+            // This is an explicit observation table for the immutable release:
+            // only pass is process-success; every non-pass is process-failure.
+            expect([...outcomes.entries()].sort()).toEqual([
+                ['fail', 1], ['not_certified', 1], ['pass', 0], ['skipped', 1],
+            ]);
             writeReport(root, cliRoot, registryRoot, records);
         } catch (error) {
             // Do not turn a release mismatch into a synthetic success. When an
