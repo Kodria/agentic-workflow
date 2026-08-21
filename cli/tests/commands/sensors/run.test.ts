@@ -65,6 +65,13 @@ describe('runSensors', () => {
         expect(result.overall).toBe('not_certified');
     });
 
+    it('runs both fast and slow sensors when --fast and --slow are combined', async () => {
+        mockRunCommand.mockResolvedValue(ok());
+        const { runSensors } = load();
+        const result = await runSensors({ fast: true, slow: true, cwd: tmpDir });
+        expect(result.sensors.map((sensor: any) => sensor.name)).toEqual(['typecheck', 'lint', 'security', 'mutation']);
+    });
+
     it('returns fail when a fast sensor has errors', async () => {
         mockRunCommand
             .mockResolvedValueOnce(exited(1, 'src/a.ts(1,1): error TS0001: Bad type.'))

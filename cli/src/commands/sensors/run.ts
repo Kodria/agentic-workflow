@@ -109,7 +109,11 @@ export function findManifestDir(startCwd: string): string | null {
 }
 
 function shouldRun(isFast: boolean, opts: RunOptions): boolean {
-    return opts.all === true || (opts.fast === true ? isFast : opts.slow === true ? !isFast : true);
+    if (opts.all) return true;
+    if (opts.fast && opts.slow) return true;
+    if (opts.fast) return isFast;
+    if (opts.slow) return !isFast;
+    return true;
 }
 
 /**
