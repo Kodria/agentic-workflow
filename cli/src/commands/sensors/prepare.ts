@@ -62,7 +62,11 @@ export function expandFileInput(command: StructuredCommand, files: string[]): St
     if (index < 0 || command.args.lastIndexOf(command.fileInput.placeholder) !== index) {
         throw new Error('changed command requires exactly one standalone {files} argument');
     }
-    return { ...command, args: [...command.args.slice(0, index), ...files, ...command.args.slice(index + 1)] };
+    // `fileInput` describes the unexpanded registry template. Leaving it on the
+    // materialized command makes the execution boundary (correctly) demand a
+    // placeholder that has already been replaced with literal argv entries.
+    const { fileInput: _templateInput, ...materialized } = command;
+    return { ...materialized, args: [...command.args.slice(0, index), ...files, ...command.args.slice(index + 1)] };
 }
 
 function timeout(project: number | undefined, pack: number | undefined, fast: boolean): Pick<PreparedSensorExecution, 'timeoutMs' | 'timeoutSource'> {

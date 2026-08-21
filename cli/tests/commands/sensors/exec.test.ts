@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { runCommand, runStructuredCommand } from '../../../src/commands/sensors/exec';
 import { executePrepared } from '../../../src/commands/sensors/result';
+import { expandFileInput } from '../../../src/commands/sensors/prepare';
 
 const sensor = (overrides: Record<string, unknown> = {}) => ({
     name: 'lint',
@@ -156,6 +157,26 @@ describe('runCommand — spawn failure', () => {
 });
 
 describe('runStructuredCommand — public boundary validation', () => {
+    it('dispatches argv materialized from a validated changed-command template without requiring its placeholder again', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-exec-changed-argv-'));
+        const received = path.join(dir, 'received.json');
+        try {
+            const command = expandFileInput({
+                executable: 'node',
+                resolution: 'path',
+                args: ['-e', "require('fs').writeFileSync(process.argv[1], JSON.stringify(process.argv.slice(2)))", received, '{files}'],
+                fileInput: { placeholder: '{files}', extensions: ['.ts'] },
+            }, ['src/a.ts', 'src/with space.ts']);
+
+            const result = await runStructuredCommand(command, { timeout: 5_000, cwd: dir });
+
+            expect(result.code).toBe(0);
+            expect(JSON.parse(fs.readFileSync(received, 'utf8'))).toEqual(['src/a.ts', 'src/with space.ts']);
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     it.each(['sh', 'cmd.exe', '/usr/bin/node', 'nested/tool', 'nested\\tool'])('rejects unsafe executable %j before resolution', executable => {
         expect(() => runStructuredCommand({ executable, resolution: 'path', args: ['--version'] }, { timeout: 5000, cwd: process.cwd() }))
             .toThrow(/safe executable name|shell/i);

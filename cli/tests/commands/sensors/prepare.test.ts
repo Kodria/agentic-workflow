@@ -33,7 +33,7 @@ describe('prepareV2Sensor', () => {
     test('v2 uses the live command and project > pack > fallback timeout (R1.1, R3.1)', () => {
         const prepared = prepareV2Sensor(v2Input());
 
-        expect(prepared.command).toEqual({ kind: 'structured', value: { ...changedCommand, args: ['--format', 'json', 'src/a.ts'] } });
+        expect(prepared.command).toEqual({ kind: 'structured', value: { executable: 'live-eslint', resolution: 'path', args: ['--format', 'json', 'src/a.ts'] } });
         expect(prepared.timeoutMs).toBe(90_000);
         expect(prepared.timeoutSource).toBe('project');
         expect(prepareV2Sensor(v2Input({ projectTimeout: undefined })).timeoutSource).toBe('pack');
@@ -47,7 +47,7 @@ describe('prepareV2Sensor', () => {
     test('expands changed paths as literal argv entries (R4.1, R10.2)', () => {
         const prepared = prepareV2Sensor(v2Input({ changed: { files: ['src/a b.ts', 'src/$x.ts'] } }));
 
-        expect(prepared.command).toEqual({ kind: 'structured', value: { ...changedCommand, args: ['--format', 'json', 'src/a b.ts', 'src/$x.ts'] } });
+        expect(prepared.command).toEqual({ kind: 'structured', value: { executable: 'live-eslint', resolution: 'path', args: ['--format', 'json', 'src/a b.ts', 'src/$x.ts'] } });
         expect(prepared.effectiveScope).toBe('changed');
     });
 
