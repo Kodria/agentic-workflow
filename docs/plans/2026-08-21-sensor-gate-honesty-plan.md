@@ -242,7 +242,7 @@ _Requirements: R1, R1.1, R1.2, R1.3, R3.1, R4.1, R4.2, R4.3, R4.4, R4.6, R10.2_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tests rojos del adaptador y de scope literal**
+- [x] **Step 1: Escribir tests rojos del adaptador y de scope literal**
 
 ```ts
 test('v2 uses the live command and project > pack > fallback timeout (R1.1, R3.1)', () => {
@@ -271,13 +271,13 @@ test('returns a zero-file pass plan without a process (R4.4)', () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar tests y comprobar rojo**
+- [x] **Step 2: Ejecutar tests y comprobar rojo**
 
 Run: `cd cli && npx jest tests/commands/sensors/prepare.test.ts tests/commands/sensors/changed.test.ts tests/commands/sensors/changed-windows.test.ts --runInBand`
 
 Expected: FAIL porque `prepareV2Sensor`/`PreparedSensorExecution` no existen.
 
-- [ ] **Step 3: Implementar el contrato de preparación**
+- [x] **Step 3: Implementar el contrato de preparación**
 
 ```ts
 export type PreparedSensorExecution = {
@@ -306,7 +306,7 @@ export function expandFileInput(command: StructuredCommand, files: string[]): St
 
 El input v2 recibe manifest parseado y resolución viva. Solo busca `variantId` en `live.pack`; nunca lee `manifest.command` para dispatch. El adaptador legacy conserva `changedCmd` y el rechazo Win32 actual; ambos adaptadores llaman a `resolveTimeout`.
 
-- [ ] **Step 4: Validar argumentos incompatibles antes de Git/proceso**
+- [x] **Step 4: Validar argumentos incompatibles antes de Git/proceso**
 
 Agregar en el entry de preparación, antes de cargar manifest, baseline o diff:
 
@@ -321,7 +321,7 @@ export function validateRunOptions(opts: RunOptions): void {
 
 El test espía `changedFiles`, `runCommand` y `runStructuredCommand` y afirma cero llamadas ante esa combinación.
 
-- [ ] **Step 5: Verde, mutación y commit**
+- [x] **Step 5: Verde, mutación y commit**
 
 Run: `cd cli && npx jest tests/commands/sensors/prepare.test.ts tests/commands/sensors/changed.test.ts tests/commands/sensors/changed-windows.test.ts --runInBand`
 
