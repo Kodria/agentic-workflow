@@ -402,6 +402,37 @@ describe('initSensors', () => {
         }
     });
 
+    it('preserves only the project timeout override, never prior executable authority (R3, R10)', async () => {
+        const v2Registry = makeV2Registry();
+        try {
+            fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ devDependencies: { eslint: '^10.0.0' } }));
+            fs.mkdirSync(path.join(tmpDir, 'node_modules', 'eslint'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version: '10.0.0' }));
+            await initSensors({ cwd: tmpDir, registryRoot: v2Registry });
+            const manifestPath = path.join(tmpDir, '.awm', 'sensors.json');
+            const selected = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+            selected.sensors.lint.timeout = 45_000;
+            selected.sensors.lint.command = {
+                executable: 'otherlint', resolution: 'path', args: ['--custom'],
+                environment: { ESLINT_USE_FLAT_CONFIG: 'false' },
+            };
+            selected.sensors.lint.assets = ['prior-owned.config'];
+            fs.writeFileSync(manifestPath, JSON.stringify(selected));
+
+            await initSensors({ cwd: tmpDir, registryRoot: v2Registry });
+
+            const written = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+            expect(written.sensors.lint).toMatchObject({
+                timeout: 45_000,
+                command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
+                assets: ['eslint.config.awm.mjs'],
+            });
+            expect(written.sensors.lint.command.environment).toBeUndefined();
+        } finally {
+            fs.rmSync(v2Registry, { recursive: true, force: true });
+        }
+    });
+
     it('rejects a symlinked v2 pack source instead of reading it through init', async () => {
         const v2Registry = makeV2Registry();
         try {

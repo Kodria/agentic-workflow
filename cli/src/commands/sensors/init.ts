@@ -298,6 +298,7 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
                     sensors[name] = {
                         enabled: prior?.enabled ?? true,
                         fast: prior?.fast ?? sensor.fast ?? false,
+                        ...(prior?.timeout !== undefined ? { timeout: prior.timeout } : {}),
                         variantId: variant.id,
                         command: variant.command,
                         assets: variant.assets,

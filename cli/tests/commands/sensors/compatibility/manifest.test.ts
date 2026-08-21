@@ -2,6 +2,20 @@ import { legacyCompatibility, parseSensorManifest, serializeManifestV2 } from '.
 import fs from 'fs';
 import path from 'path';
 
+function validV2Manifest() {
+    return {
+        schemaVersion: 2,
+        pack: 'js-ts',
+        sensors: {
+            lint: {
+                enabled: true, variantId: 'eslint-9',
+                command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.', '--format', 'json'] },
+                initializedCompatibility: { state: 'certified', reason: 'range-and-probe', variantId: 'eslint-9', toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [] },
+            },
+        },
+    };
+}
+
 describe('sensor manifest contract', () => {
     it('keeps compatibility contracts on an acyclic import boundary', () => {
         const source = (relative: string) => fs.readFileSync(path.join(__dirname, '../../../../src/commands/sensors', relative), 'utf8');
@@ -19,19 +33,24 @@ describe('sensor manifest contract', () => {
     });
 
     it('accepts a v2 selected variant and structured command', () => {
-        const manifest = {
-            schemaVersion: 2,
-            pack: 'js-ts',
-            sensors: {
-                lint: {
-                    enabled: true, variantId: 'eslint-9',
-                    command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.', '--format', 'json'] },
-                    initializedCompatibility: { state: 'certified', reason: 'range-and-probe', variantId: 'eslint-9', toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [] },
-                },
-            },
-        };
+        const manifest = validV2Manifest();
         expect(parseSensorManifest(manifest, 'sensors.json')).toMatchObject({ kind: 'v2', pack: manifest });
         expect(JSON.parse(serializeManifestV2(manifest))).toEqual(manifest);
+    });
+
+    it('accepts and serializes a positive v2 project timeout (R3)', () => {
+        const manifest = validV2Manifest();
+        (manifest.sensors.lint as Record<string, unknown>).timeout = 45_000;
+        expect(parseSensorManifest(manifest, '/project/.awm/sensors.json')).toMatchObject({
+            kind: 'v2', pack: { sensors: { lint: { timeout: 45_000 } } },
+        });
+        expect(JSON.parse(serializeManifestV2(manifest))).toEqual(manifest);
+    });
+
+    test.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '1000'])('rejects v2 timeout %p before execution (R3.3)', timeout => {
+        const manifest = validV2Manifest();
+        (manifest.sensors.lint as Record<string, unknown>).timeout = timeout;
+        expect(() => parseSensorManifest(manifest, '/project/.awm/sensors.json')).toThrow(/timeout.*positive safe integer/);
     });
 
     it('persists only an explicit v2 pack selection as applicability provenance', () => {
