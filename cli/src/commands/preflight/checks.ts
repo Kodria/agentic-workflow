@@ -382,7 +382,7 @@ function checkHost(cwd: string): PreflightCheck {
 }
 
 export async function preflight(cwd: string = process.cwd(), opts: PreflightOptions = {}): Promise<PreflightReport> {
-    if (!opts || typeof opts !== 'object' || (opts.verifySensors !== undefined && typeof opts.verifySensors !== 'boolean')) {
+    if (!opts || typeof opts !== 'object' || Array.isArray(opts) || (opts.verifySensors !== undefined && typeof opts.verifySensors !== 'boolean')) {
         throw new Error('preflight options must contain an optional boolean verifySensors');
     }
     const manifest = readManifest(cwd);

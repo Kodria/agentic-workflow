@@ -74,6 +74,11 @@ describe('preflight', () => {
         expect(mockRunSensors).not.toHaveBeenCalled();
     });
 
+    it('rejects an array passed as public preflight options before filesystem work', async () => {
+        await expect(preflight(process.cwd(), [] as unknown as { verifySensors?: boolean }))
+            .rejects.toThrow('preflight options must contain an optional boolean verifySensors');
+    });
+
     it('requires an empirical sensor pass when verification is requested', async () => {
         const dir = make({
             manifest: { pack: 'generic', sensors: { security: { enabled: false } } },
