@@ -718,11 +718,11 @@ _Requirements: R3, R3.1, R3.2, R3.4, R4.1, R4.2, R4.3, R4.4, R4.5, R4.6, R5, R5.
 
 **Skills:** `test-driven-development`, `requesting-code-review`, `verification-before-completion`
 
-- [ ] **Step 1: Escribir/actualizar aceptación ejecutable**
+- [x] **Step 1: Escribir/actualizar aceptación ejecutable**
 
 `CORE-12` y `CORE-13` ejecutan y verifican: legacy sin campos nuevos; v2 sin campos nuevos; v2 timeout proyecto/pack/fallback; changed supported/unsupported/empty/Git error; cuatro verdicts/exit; status READY estático; preflight empírico read-only. `os-matrix.md` repite el contrato en Ubuntu, macOS y Windows nativo y comprueba que v2 no usa shell.
 
-- [ ] **Step 2: Actualizar documentación canónica**
+- [x] **Step 2: Actualizar documentación canónica**
 
 Documentar JSON aditivo con `execution.timeoutMs`, `timeoutSource`, `elapsedMs`, requested/effective scope, files/reason; tabla de exits; diferencia `status` vs `preflight --verify-sensors`; precedencia y ejemplo de timeout finito:
 
@@ -738,7 +738,7 @@ Documentar JSON aditivo con `execution.timeoutMs`, `timeoutSource`, `elapsedMs`,
 
 Aclarar que el ejemplo omite campos materializados solo para mostrar el override, no es un manifest completo copiables.
 
-- [ ] **Step 3: Ejecutar suites completas y sensores**
+- [x] **Step 3: Ejecutar suites completas y sensores**
 
 ```bash
 cd cli
@@ -755,7 +755,7 @@ git diff --check
 
 Expected: todos exit 0 y `awm sensors run` produce `overall: pass`. Confirmar que `cli/.awm/ledger/` sigue no rastreado y no staged.
 
-- [ ] **Step 4: Ejecutar mutaciones obligatorias y review**
+- [x] **Step 4: Ejecutar mutaciones obligatorias y review**
 
 Repetir las mutaciones discriminantes de T1–T7 contra sus tests exactos. Invocar `requesting-code-review`; corregir cada hallazgo con test rojo/verde y commit separado cuando cambie comportamiento.
 
