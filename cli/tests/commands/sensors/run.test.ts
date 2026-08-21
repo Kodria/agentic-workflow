@@ -236,6 +236,10 @@ describe('reduceVerdict', () => {
             { name: 'typecheck', status: 'fail', errors: [{ message: 'broken' }] },
         ])).toBe('fail');
     });
+
+    it('rejects malformed result statuses instead of treating them as skipped', () => {
+        expect(() => reduceVerdict([{ name: 'lint', status: 'bogus', errors: [] } as any])).toThrow('sensor result status is invalid');
+    });
 });
 
 describe('runSensors v2 lifecycle contract', () => {
