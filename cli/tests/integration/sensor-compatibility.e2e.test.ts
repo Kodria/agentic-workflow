@@ -58,6 +58,14 @@ function runCli(fixture: Fixture, ...args: string[]) {
     });
 }
 
+function runAwm(fixture: Fixture, ...args: string[]) {
+    return spawnSync(process.execPath, [bin, ...args], {
+        cwd: fixture.project,
+        encoding: 'utf8',
+        env: { ...process.env, AWM_HOME: fixture.awmHome, AWM_NO_UPDATE_CHECK: '1' },
+    });
+}
+
 function json(result: ReturnType<typeof runCli>): any {
     expect(result.status).toBe(0);
     if (!(result.stdout ?? '').trim()) throw new Error(`coverage emitted no JSON: stderr=${result.stderr ?? ''}`);
@@ -108,6 +116,31 @@ testWithNoFollow('compiled sensors run returns nonzero while preserving parseabl
 
         expect(result.status).toBe(1);
         expect(JSON.parse(result.stdout ?? '')).toMatchObject({ sensors: [], overall: 'not_certified' });
+    } finally {
+        fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+});
+
+testWithNoFollow('compiled status reports static READY without writing or executing the project sensor (R6, R6.2)', () => {
+    const fixture = createFixture();
+    try {
+        const localBin = path.join(fixture.project, 'node_modules', '.bin', 'eslint');
+        fs.mkdirSync(path.dirname(localBin), { recursive: true });
+        fs.writeFileSync(localBin, 'this fixture must never be executed by status\n');
+        fs.copyFileSync(
+            path.join(fixture.registryRoot, 'sensor-packs', 'js-ts', 'eslint.fixture.mjs'),
+            path.join(fixture.project, 'eslint.fixture.mjs'),
+        );
+
+        const initialized = runCli(fixture, 'init', '--registry-root', fixture.registryRoot, '--pack', 'js-ts', '--no-configure');
+        expect(initialized.status).toBe(0);
+        const before = hashTree(fixture.project);
+        const result = runAwm(fixture, 'sensors', 'status');
+
+        expect(result.status).toBe(0);
+        expect(result.stdout).toContain('READY');
+        expect(result.stderr).toBe('');
+        expect(hashTree(fixture.project)).toBe(before);
     } finally {
         fs.rmSync(fixture.root, { recursive: true, force: true });
     }

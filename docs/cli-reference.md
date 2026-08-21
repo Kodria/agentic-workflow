@@ -113,15 +113,24 @@ Re-enable a provider through a normal `awm init --agent <provider>` run.
 Verify the project harness can actually gate **before** development starts.
 
 ```
-awm preflight [--json] [--cwd <path>]
+awm preflight [--json] [--verify-sensors] [--cwd <path>]
 ```
 
 | Flag | Description |
 |---|---|
 | `--json` | Emit the report as JSON. Preserved on failure, so a red run is still machine-readable. |
+| `--verify-sensors` | Run the full, empirical sensor gate. This is the read-only handoff check for unattended execution. |
 | `--cwd <path>` | Project directory to check. Default: current directory. |
 
 Where `awm doctor` answers *"is AWM installed correctly?"*, preflight answers *"can this project stop bad work from landing?"* — the distinction matters when onboarding a repository, because an install can be perfect while the project has nothing enforceable behind it.
+
+By default preflight is static and does not dispatch a sensor. Add
+`--verify-sensors` immediately before an unattended handoff: it runs the full
+sensor set, remains read-only, and accepts only an overall `pass`. Its failed
+`sensors-execution` check names the sensor and only bounded execution facts
+(timeout, source, elapsed time, and reason); it never relays arbitrary tool
+output. This makes a timeout or an inconclusive result actionable before a
+human has gone away.
 
 ### `awm context-budget`
 
@@ -357,7 +366,7 @@ On native Windows, when Node does not expose a safe no-follow file-open primitiv
 Run the sensors in the manifest. With no flag, runs **all** sensors (the completion gate). The speed flags scope the run:
 
 ```
-awm sensors run [--fast | --slow | --all] [--json]
+awm sensors run [--fast | --slow | --all] [--changed] [--base <ref>] [--json]
 ```
 
 | Flag | Description |
@@ -371,9 +380,35 @@ awm sensors run [--fast | --slow | --all] [--json]
 
 `awm sensors run` only ever **reads** your project. It runs the manifest exactly as committed: it does not rewrite `.awm/sensors.json`, does not copy pack config files into the tree, and does not install anything. When the manifest's pack no longer matches the tree (a `generic` manifest over a real stack), the output carries a `packDrift` field naming the detected pack and the command that adopts it — `awm sensors init`.
 
+Each prepared sensor includes additive `execution` evidence in JSON:
+`execution.timeoutMs`, `timeoutSource`, and `elapsedMs`, plus
+`requestedScope`, `effectiveScope`, and (when applicable) `files` or
+`scopeReason`. A timeout is always finite. Its precedence is `project` →
+`pack` → `fallback`: 10,000 ms for a fast sensor and 120,000 ms otherwise.
+`--changed` uses a structured `changedCommand` only where the pack opts in;
+changed filenames are literal argv values, never shell text. An unsupported
+sensor or a Git-resolution error falls back to full scope with `scopeReason`.
+Zero applicable changed files yields a scoped pass for that sensor; other full
+sensors still execute.
+
+| Overall verdict | Process exit |
+| --- | --- |
+| `pass` | `0` |
+| `fail` | `1` |
+| `not_certified` | `1` |
+| `skipped` | `1` |
+
+The JSON is written before the process exit is set, so non-pass automation can
+still parse the evidence. A baseline can only suppress findings from a sensor
+that produced its own verdict; it never certifies an incomplete execution.
+
 ### `awm sensors status`
 
-Report each sensor's health: `HEALTHY` (ready), `DEGRADED` (config present but failing — usually a version mismatch; fix with the `setup-sensors` skill), or `NOT_CONFIGURED`.
+Report static readiness: `READY`, `DEGRADED` (a declared prerequisite is
+missing), or `NOT_CONFIGURED`. `READY` is not a health or certification claim:
+`status` never dispatches a project sensor. Use `awm sensors run` for an
+empirical verdict, or `awm preflight --verify-sensors` for the full read-only
+handoff gate.
 
 ### `awm sensors baseline`
 
