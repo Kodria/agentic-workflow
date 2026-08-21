@@ -5,6 +5,10 @@ import type { SensorManifestV2 } from './compatibility/manifest';
 import type { PreparedSensorExecution, SensorConfig } from './types';
 
 export type PrepareRunOptions = {
+    fast?: boolean;
+    slow?: boolean;
+    all?: boolean;
+    cwd?: string;
     changed?: boolean;
     ignoreBaseline?: boolean;
     base?: string;
@@ -39,6 +43,10 @@ export type PrepareV2SensorInput = {
 
 export function validateRunOptions(opts: PrepareRunOptions): void {
     if (!opts || typeof opts !== 'object' || Array.isArray(opts)) throw new Error('run options must be an object');
+    if (opts.fast !== undefined && typeof opts.fast !== 'boolean') throw new Error('run option fast must be a boolean');
+    if (opts.slow !== undefined && typeof opts.slow !== 'boolean') throw new Error('run option slow must be a boolean');
+    if (opts.all !== undefined && typeof opts.all !== 'boolean') throw new Error('run option all must be a boolean');
+    if (opts.cwd !== undefined && (typeof opts.cwd !== 'string' || opts.cwd.trim() === '')) throw new Error('run option cwd must be a nonempty string');
     if (opts.changed !== undefined && typeof opts.changed !== 'boolean') throw new Error('run option changed must be a boolean');
     if (opts.ignoreBaseline !== undefined && typeof opts.ignoreBaseline !== 'boolean') throw new Error('run option ignoreBaseline must be a boolean');
     if (opts.base !== undefined && (typeof opts.base !== 'string' || opts.base.trim() === '')) throw new Error('run option base must be a nonempty string');

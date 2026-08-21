@@ -5,10 +5,10 @@ import { preflight, PreflightReport } from './checks';
 /**
  * Exit code. Anything but `ready` exits 1.
  *
- * Unlike `awm sensors run` — which exits 0 on `not_certified` because exit 2 is a
- * blocking error in Claude Code hooks — preflight is never a hook. It is invoked
- * explicitly by a phase gate, so the exit code can carry the verdict and the caller
- * does not have to remember to read a field out of JSON.
+ * `awm sensors run` exits zero only for an empirical `pass`; preflight mirrors that
+ * binary-gate rule for its own `ready` status. It is invoked explicitly by a phase
+ * gate, so the exit code carries the verdict and the caller need not infer it from
+ * a field in JSON.
  */
 export function exitCodeFor(report: PreflightReport): number {
     return report.status === 'ready' ? 0 : 1;

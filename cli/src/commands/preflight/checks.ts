@@ -17,11 +17,11 @@ import { resolveOnPath } from '../../core/paths';
  * `npx` that would fetch a remote package, validates referenced config files); nothing
  * in the flow ever called it.
  *
- * The consequence is a discovery point at the worst possible moment. `awm sensors run`
- * exits 0 on `not_certified` by design (exit 2 is a blocking error in Claude Code
- * hooks), so the only thing standing between "no sensors configured" and "sensors
- * green" is each agent remembering to read `overall` out of the JSON instead of the
- * exit code. That is a prose defence over a mechanical problem, and prose does not hold.
+ * The consequence is a discovery point at the worst possible moment. Although `awm
+ * sensors run` now exits nonzero for every non-pass verdict, a static readiness check
+ * cannot prove that the project's real commands complete. The empirical option below
+ * makes that missing evidence a mechanical preflight failure rather than a prose
+ * defence over a mechanical problem.
  *
  * So this answers one question, mechanically, before any of that matters — and it is
  * deliberately agnostic to stack, language and tooling. It never asks "is eslint

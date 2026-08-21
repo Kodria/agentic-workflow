@@ -56,6 +56,19 @@ describe('runSensors', () => {
         } finally { fs.rmSync(emptyDir, { recursive: true }); }
     });
 
+    it.each([
+        ['fast', { fast: 'yes' }, 'run option fast must be a boolean'],
+        ['slow', { slow: 1 }, 'run option slow must be a boolean'],
+        ['all', { all: null }, 'run option all must be a boolean'],
+        ['cwd', { cwd: '   ' }, 'run option cwd must be a nonempty string'],
+    ])('rejects invalid public %s options before selecting or dispatching sensors', async (_name, options, message) => {
+        const { runSensors } = load();
+
+        await expect(runSensors(options)).rejects.toThrow(message);
+        expect(mockRunCommand).not.toHaveBeenCalled();
+        expect(mockRunStructuredCommand).not.toHaveBeenCalled();
+    });
+
     it('runs only fast sensors with --fast flag', async () => {
         mockRunCommand.mockResolvedValue(ok());
         const { runSensors } = load();
