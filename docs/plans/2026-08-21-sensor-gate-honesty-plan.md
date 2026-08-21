@@ -574,7 +574,7 @@ _Requirements: R6, R6.1, R6.2_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir regresiones rojas de estados y coste**
+- [x] **Step 1: Escribir regresiones rojas de estados y coste**
 
 ```ts
 test.each([
@@ -596,13 +596,13 @@ test('human output makes no empirical health claim (R6)', async () => {
 });
 ```
 
-- [ ] **Step 2: Comprobar rojo**
+- [x] **Step 2: Comprobar rojo**
 
 Run: `cd cli && npx jest tests/commands/sensors/status.test.ts tests/commands/sensors/status-windows.test.ts tests/commands/sensors/router.test.ts --runInBand`
 
 Expected: FAIL porque el enum/render actual usa `HEALTHY`.
 
-- [ ] **Step 3: Cambiar semántica y prosa sin ampliar ejecución**
+- [x] **Step 3: Cambiar semántica y prosa sin ampliar ejecución**
 
 ```ts
 export type SensorStatusResult = {
@@ -614,7 +614,7 @@ export type SensorStatusResult = {
 
 Mantener discovery, resolución, assets, versiones y probes estáticos existentes. La prosa puede describir `registry-certified range` dentro del detalle de compatibilidad, pero headline/summary no dice que el proyecto ejecutó o certificó.
 
-- [ ] **Step 4: Verde, mutación y commit**
+- [x] **Step 4: Verde, mutación y commit**
 
 Run: `cd cli && npx jest tests/commands/sensors/status.test.ts tests/commands/sensors/status-windows.test.ts tests/commands/sensors/router.test.ts --runInBand`
 
