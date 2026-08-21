@@ -1,6 +1,17 @@
 import { runCompatibilityProbe } from '../../../../src/commands/sensors/compatibility/probe';
+import type { ExecResult } from '../../../../src/commands/sensors/exec';
 
-const fakeExecutor: jest.Mock<any, any> = jest.fn(async () => ({ code: 0, signal: null, timedOut: false, overflowed: false, stdout: 'SECRET_VALUE\nmatched', stderr: '' }));
+const execResult = (overrides: Partial<ExecResult> = {}): ExecResult => ({
+    code: 0,
+    signal: null,
+    timedOut: false,
+    overflowed: false,
+    elapsedMs: 0,
+    stdout: 'SECRET_VALUE\nmatched',
+    stderr: '',
+    ...overrides,
+});
+const fakeExecutor = jest.fn<Promise<ExecResult>, [unknown, unknown]>(async () => execResult());
 const evidence = { cwd: process.cwd(), configFiles: ['eslint.config.js'], scripts: ['lint'] } as any;
 
 describe('runCompatibilityProbe', () => {
@@ -14,9 +25,9 @@ describe('runCompatibilityProbe', () => {
         });
 
     it('never treats a timeout or overflow as a match', async () => {
-        fakeExecutor.mockResolvedValueOnce({ code: null, signal: 'SIGKILL', timedOut: true, overflowed: false, stdout: '', stderr: '' });
+        fakeExecutor.mockResolvedValueOnce(execResult({ code: null, signal: 'SIGKILL', timedOut: true, stdout: '' }));
         await expect(runCompatibilityProbe({ kind: 'version' }, evidence, fakeExecutor)).resolves.toMatchObject({ status: 'unverifiable' });
-        fakeExecutor.mockResolvedValueOnce({ code: 0, signal: null, timedOut: false, overflowed: true, stdout: 'ok', stderr: '' });
+        fakeExecutor.mockResolvedValueOnce(execResult({ overflowed: true, stdout: 'ok' }));
         await expect(runCompatibilityProbe({ kind: 'version' }, evidence, fakeExecutor)).resolves.toMatchObject({ status: 'unverifiable' });
     });
 
