@@ -5,6 +5,7 @@ import { execFileSync, execSync } from 'child_process';
 
 import { preflight } from '../../../src/commands/preflight/checks';
 import { exitCodeFor, formatReport } from '../../../src/commands/preflight';
+import { runSensors } from '../../../src/commands/sensors/run';
 
 // Only `execSync` (used by `resolveOnPath` to check for `gh`/`glab`) is mocked — `git
 // remote get-url origin` runs for real via `execFileSync` against real tmpdir git repos,
@@ -13,7 +14,12 @@ jest.mock('child_process', () => ({
     ...jest.requireActual('child_process'),
     execSync: jest.fn(),
 }));
+jest.mock('../../../src/commands/sensors/run', () => ({
+    ...jest.requireActual('../../../src/commands/sensors/run'),
+    runSensors: jest.fn(),
+}));
 const mockExecSync = execSync as jest.MockedFunction<typeof execSync>;
+const mockRunSensors = runSensors as jest.MockedFunction<typeof runSensors>;
 
 /** Turn a tmpdir into a real git repo with (optionally) an `origin` remote. */
 function gitRepo(dir: string, remoteUrl?: string): void {
@@ -56,6 +62,40 @@ afterAll(() => dirs.forEach(d => fs.rmSync(d, { recursive: true, force: true }))
 const check = (r: Awaited<ReturnType<typeof preflight>>, id: string) => r.checks.find(c => c.id === id)!;
 
 describe('preflight', () => {
+    afterEach(() => mockRunSensors.mockReset());
+
+    it('keeps default preflight static and does not dispatch sensors', async () => {
+        const dir = make({
+            manifest: { pack: 'generic', sensors: { security: { enabled: false } } },
+        });
+
+        await preflight(dir);
+
+        expect(mockRunSensors).not.toHaveBeenCalled();
+    });
+
+    it('requires an empirical sensor pass when verification is requested', async () => {
+        const dir = make({
+            manifest: { pack: 'generic', sensors: { security: { enabled: false } } },
+        });
+        mockRunSensors.mockResolvedValue({
+            overall: 'not_certified',
+            sensors: [{
+                name: 'lint', status: 'inconclusive', errors: [], skipReason: 'timeout after 30000ms',
+                execution: { timeoutMs: 30000, timeoutSource: 'project', elapsedMs: 30012, requestedScope: 'full', effectiveScope: 'full' },
+            }],
+        });
+
+        const report = await preflight(dir, { verifySensors: true });
+
+        expect(mockRunSensors).toHaveBeenCalledWith({ cwd: dir, all: true });
+        expect(report.status).toBe('degraded');
+        expect(check(report, 'sensors-execution')).toMatchObject({
+            ok: false,
+            detail: expect.stringMatching(/lint.*30000ms.*elapsed.*timeout/i),
+        });
+    });
+
     it('reports not_configured when no sensor manifest exists', async () => {
         // The team-rollout case: a developer clones the repo and never runs
         // `awm sensors init`. Today nothing notices until an unattended run is already
