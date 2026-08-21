@@ -1,6 +1,6 @@
 {
   "name": "agentic-workflow-manager",
-  "version": "8.1.5",
+  "version": "8.1.6",
   "main": "dist/src/index.js",
   "bin": {
     "awm": "./dist/src/index.js"

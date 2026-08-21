@@ -1,3 +1,8 @@
+## v8.1.6 - 2026-08-21
+
+### Fixes
+- **sensors:** execute materialized changed commands (#101)
+
 ## v8.1.5 - 2026-08-21
 
 ### Fixes
