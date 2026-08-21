@@ -516,7 +516,7 @@ _Requirements: R5, R5.1, R5.2_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir la tabla roja de cuatro verdicts y flush**
+- [x] **Step 1: Escribir la tabla roja de cuatro verdicts y flush**
 
 ```ts
 test.each([
@@ -533,13 +533,13 @@ test('writes JSON before assigning a nonzero exit code (R5.1)', async () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar y comprobar rojo**
+- [x] **Step 2: Ejecutar y comprobar rojo**
 
 Run: `cd cli && npx jest tests/commands/sensors/index.test.ts tests/commands/sensors/router.test.ts --runInBand`
 
 Expected: FAIL para `not_certified` y `skipped`, y/o por uso de `process.exit`.
 
-- [ ] **Step 3: Centralizar mapping y wiring**
+- [x] **Step 3: Centralizar mapping y wiring**
 
 ```ts
 export function exitCodeForVerdict(overall: RunOutput['overall']): 0 | 1 {
@@ -549,7 +549,7 @@ export function exitCodeForVerdict(overall: RunOutput['overall']): 0 | 1 {
 
 `index.ts` delega en esta función, escribe JSON completo y luego asigna `process.exitCode = code`; no llama `process.exit()`.
 
-- [ ] **Step 4: Verde, mutación y commit**
+- [x] **Step 4: Verde, mutación y commit**
 
 Run: `cd cli && npx jest tests/commands/sensors/index.test.ts tests/commands/sensors/router.test.ts tests/integration/sensor-compatibility.e2e.test.ts --runInBand`
 
