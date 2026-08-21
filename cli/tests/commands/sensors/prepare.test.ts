@@ -75,6 +75,11 @@ describe('prepareV2Sensor', () => {
         expect(prepared).toMatchObject({ effectiveScope: 'changed', files: 0, syntheticStatus: 'pass' });
         expect(prepared.command).toBeUndefined();
     });
+
+    test('rejects an invalid requested scope before preparing a command', () => {
+        expect(() => prepareV2Sensor({ ...v2Input(), requestedScope: 'sideways' as unknown as 'changed' }))
+            .toThrow('requested scope must be "full" or "changed"');
+    });
 });
 
 describe('prepareLegacySensor', () => {

@@ -12,6 +12,12 @@ export type PrepareRunOptions = {
 
 type RequestedScope = PreparedSensorExecution['requestedScope'];
 
+function resolveRequestedScope(value: unknown): RequestedScope {
+    if (value === undefined) return 'full';
+    if (value === 'full' || value === 'changed') return value;
+    throw new Error('requested scope must be "full" or "changed"');
+}
+
 export type PrepareLegacySensorInput = {
     name: string;
     config: SensorConfig;
@@ -57,7 +63,7 @@ function timeout(project: number | undefined, pack: number | undefined, fast: bo
 }
 
 function fullLegacy(input: PrepareLegacySensorInput, scopeReason?: string): PreparedSensorExecution {
-    const requestedScope = input.requestedScope ?? 'full';
+    const requestedScope = resolveRequestedScope(input.requestedScope);
     return {
         name: input.name,
         ...(input.config.cmd ? { command: { kind: 'legacy' as const, value: input.config.cmd } } : { syntheticStatus: 'inconclusive' as const, syntheticReason: 'no cmd configured' }),
@@ -72,7 +78,7 @@ function fullLegacy(input: PrepareLegacySensorInput, scopeReason?: string): Prep
 /** Prepare one legacy command without dispatching it. */
 export function prepareLegacySensor(input: PrepareLegacySensorInput): PreparedSensorExecution {
     if (!input || typeof input !== 'object' || !input.config || typeof input.name !== 'string' || input.name === '') throw new Error('legacy preparation input is invalid');
-    const requestedScope = input.requestedScope ?? 'full';
+    const requestedScope = resolveRequestedScope(input.requestedScope);
     if (requestedScope !== 'changed' || !input.changed) return fullLegacy(input);
     const scopeError = changedScopeError(input.changed);
     if (scopeError) return fullLegacy(input, `changed scope could not be resolved safely: ${scopeError}`);
@@ -98,7 +104,7 @@ export function prepareLegacySensor(input: PrepareLegacySensorInput): PreparedSe
 }
 
 function v2Synthetic(input: PrepareV2SensorInput, reason: string): PreparedSensorExecution {
-    const requestedScope = input.requestedScope ?? 'full';
+    const requestedScope = resolveRequestedScope(input.requestedScope);
     return {
         name: input.name,
         ...timeout(input.projectTimeout ?? input.sensor.timeout, input.packTimeout ?? input.liveSensor?.timeout, input.sensor.fast ?? input.liveSensor?.fast ?? false),
@@ -115,7 +121,7 @@ function v2Synthetic(input: PrepareV2SensorInput, reason: string): PreparedSenso
  */
 export function prepareV2Sensor(input: PrepareV2SensorInput): PreparedSensorExecution {
     if (!input || typeof input !== 'object' || !input.sensor || typeof input.name !== 'string' || input.name === '') throw new Error('v2 preparation input is invalid');
-    const requestedScope = input.requestedScope ?? 'full';
+    const requestedScope = resolveRequestedScope(input.requestedScope);
     if (!input.liveState || input.liveState.state !== 'certified') return v2Synthetic(input, input.liveState ? `${input.liveState.state}: ${input.liveState.reason}` : 'compatibility could not be revalidated');
     if (input.liveState.variantId !== input.sensor.variantId) return v2Synthetic(input, `variant-drift: manifest ${input.sensor.variantId}, live ${input.liveState.variantId ?? 'none'}; run \`awm sensors init\``);
     const variant: SensorVariant | undefined = input.liveSensor?.variants.find(candidate => candidate.id === input.sensor.variantId);
