@@ -9,6 +9,26 @@
     "windows": "pass"
   },
   "verdict": "pass",
+  "cases": {
+    "legacyBaseline": { "argv": ["sensors", "run", "--fast"], "overall": "pass", "processExit": 0, "fixtureHash": "sha256:legacy-baseline-sanitized" },
+    "v2Baseline": { "argv": ["sensors", "run", "--fast"], "overall": "pass", "processExit": 0, "fixtureHash": "sha256:v2-baseline-sanitized" },
+    "timeoutProject": { "argv": ["sensors", "run", "--fast"], "overall": "pass", "processExit": 0, "fixtureHash": "sha256:timeout-project-sanitized" },
+    "timeoutPack": { "argv": ["sensors", "run", "--fast"], "overall": "pass", "processExit": 0, "fixtureHash": "sha256:timeout-pack-sanitized" },
+    "timeoutFallback": { "argv": ["sensors", "run", "--fast"], "overall": "pass", "processExit": 0, "fixtureHash": "sha256:timeout-fallback-sanitized" },
+    "timeoutInvalidBeforeSpawn": { "argv": ["sensors", "run", "--fast"], "overall": "not_certified", "processExit": 1, "fixtureHash": "sha256:timeout-invalid-sanitized" },
+    "changedLiteral": { "argv": ["sensors", "run", "--changed"], "overall": "pass", "processExit": 0, "fixtureHash": "sha256:changed-literal-sanitized" },
+    "changedUnsupported": { "argv": ["sensors", "run", "--changed"], "overall": "pass", "processExit": 0, "fixtureHash": "sha256:changed-unsupported-sanitized" },
+    "changedEmpty": { "argv": ["sensors", "run", "--changed"], "overall": "pass", "processExit": 0, "fixtureHash": "sha256:changed-empty-sanitized" },
+    "changedGitError": { "argv": ["sensors", "run", "--changed"], "overall": "pass", "processExit": 0, "fixtureHash": "sha256:changed-git-error-sanitized" },
+    "changedMixed": { "argv": ["sensors", "run", "--changed"], "overall": "fail", "processExit": 1, "fixtureHash": "sha256:changed-mixed-sanitized" },
+    "verdictPass": { "argv": ["sensors", "run", "--fast"], "overall": "pass", "processExit": 0, "fixtureHash": "sha256:verdict-pass-sanitized" },
+    "verdictFail": { "argv": ["sensors", "run", "--fast"], "overall": "fail", "processExit": 1, "fixtureHash": "sha256:verdict-fail-sanitized" },
+    "verdictNotCertified": { "argv": ["sensors", "run", "--fast"], "overall": "not_certified", "processExit": 1, "fixtureHash": "sha256:verdict-not-certified-sanitized" },
+    "verdictSkipped": { "argv": ["sensors", "run", "--fast"], "overall": "skipped", "processExit": 1, "fixtureHash": "sha256:verdict-skipped-sanitized" },
+    "statusReadyStatic": { "argv": ["sensors", "status"], "overall": "READY", "processExit": 0, "fixtureHash": "sha256:status-ready-sanitized" },
+    "preflightExit2ReadOnly": { "argv": ["preflight", "--verify-sensors", "--json"], "overall": "degraded", "processExit": 1, "fixtureHash": "sha256:preflight-exit-2-sanitized" },
+    "eslint8TsJsGenerated": { "argv": ["sensors", "run", "--fast"], "overall": "fail", "processExit": 1, "fixtureHash": "sha256:eslint8-ts-js-generated-sanitized" }
+  },
   "evidence": {
     "cliWorkflow": "https://github.com/Kodria/agentic-workflow/actions/runs/32470501705",
     "registryWorkflow": "https://github.com/Kodria/awm-baseline-registry/actions/runs/32479729036",

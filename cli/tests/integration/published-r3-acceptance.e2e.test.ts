@@ -13,7 +13,7 @@ const publishedRegistryRoot = process.env.AWM_PUBLISHED_REGISTRY_ROOT
     : undefined;
 // This gate is pinned to the npm release that contains the native ESLint
 // configuration selection fix merged for R3.
-const expectedVersion = process.env.AWM_PUBLISHED_CLI_VERSION ?? '8.1.2';
+const expectedVersion = process.env.AWM_PUBLISHED_CLI_VERSION ?? '8.1.5';
 const enabled = Boolean(publishedCliRoot && publishedRegistryRoot);
 const acceptance = enabled ? describe : describe.skip;
 

@@ -97,6 +97,15 @@ describe('R3 canonical sensor documentation', () => {
         expect(acceptance.platforms).toEqual({ linux: 'pass', macos: 'pass', windows: 'pass' });
         expect(acceptance.verdict).toBe('pass');
         expect(acceptance).toMatchObject({ cliVersion: '8.1.5', registryTag: 'v3.0.0', registryCommit: '3db85c92eecc449fb8f14252fe2c64bb493cfb3f' });
+        const cases = acceptance.cases as Record<string, Record<string, unknown>>;
+        for (const id of [
+            'legacyBaseline', 'v2Baseline', 'timeoutProject', 'timeoutPack', 'timeoutFallback', 'timeoutInvalidBeforeSpawn',
+            'changedLiteral', 'changedUnsupported', 'changedEmpty', 'changedGitError', 'changedMixed',
+            'verdictPass', 'verdictFail', 'verdictNotCertified', 'verdictSkipped',
+            'statusReadyStatic', 'preflightExit2ReadOnly', 'eslint8TsJsGenerated',
+        ]) {
+            expect(cases[id]).toEqual(expect.objectContaining({ argv: expect.any(Array), overall: expect.any(String), processExit: expect.any(Number), fixtureHash: expect.any(String) }));
+        }
     });
 
     test('documents exact Commander flags', () => {

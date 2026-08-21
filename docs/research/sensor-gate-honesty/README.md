@@ -39,3 +39,19 @@ passed, including its Ubuntu, macOS, and native Windows pack jobs:
 
 The machine-readable identities and case evidence are in
 [`published-acceptance.json`](published-acceptance.json).
+
+## Matriz reproducible
+
+La matriz se ejecutó con el binario instalado desde npm y un árbol extraído del
+tag, en directorios temporales hermanos (el home nunca queda bajo el proyecto).
+Cada entrada de `cases` registra argv, resultado semántico, exit del proceso y
+un hash sanitizado del fixture, sin rutas temporales ni salida de herramientas.
+
+| Grupo | Casos | Resultado exigido |
+| --- | --- | --- |
+| Compatibilidad | legacy/v2 baseline | `pass`, exit 0 |
+| Timeout | project, pack, fallback, inválido antes de spawn | precedencia acotada; inválido es non-pass |
+| Changed | literal, unsupported, empty, Git error, mixed | argv literal o fallback explícito; mixed conserva `fail` |
+| Veredictos | pass, fail, not_certified, skipped | sólo `pass` usa exit 0 |
+| Readiness | `status` READY; preflight con sensor exit 2 | status no ejecuta; preflight es read-only y degrada |
+| ESLint 8 | TypeScript, JavaScript y outputs generados | TS limpio, JS intencional reportado, outputs ignorados |
