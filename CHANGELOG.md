@@ -1,3 +1,8 @@
+## v8.1.5 - 2026-08-21
+
+### Fixes
+- **sensors:** make execution gates conclusive (#99)
+
 ## v8.1.4 - 2026-08-19
 
 ### Fixes
