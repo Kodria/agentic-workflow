@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { fingerprint, partition, readBaseline, writeBaseline, buildBaseline } from '../../../src/commands/sensors/baseline';
 import { SensorError } from '../../../src/commands/sensors/types';
+import { applyBaseline } from '../../../src/commands/sensors/result';
 
 const err = (over: Partial<SensorError> = {}): SensorError => ({
     file: 'lib/a.ts', rule: 'TS2345', message: 'Argument of type X', ...over,
@@ -80,6 +81,23 @@ describe('partition', () => {
         const { newErrors, suppressed } = partition('lint', [err()], baseline);
         expect(suppressed).toBe(1);
         expect(newErrors).toHaveLength(0);
+    });
+});
+
+describe('applyBaseline', () => {
+    it('applies the same baseline to structured findings (R2)', () => {
+        const finding = { file: 'src/a.ts', line: 1, message: 'x' };
+        const accepted = [fingerprint('lint', finding)];
+
+        expect(applyBaseline({ name: 'lint', status: 'fail', errors: [finding] }, accepted))
+            .toMatchObject({ status: 'pass', baselineCount: 1, newCount: 0 });
+    });
+
+    test.each(['inconclusive', 'skipped'] as const)('baseline never changes %s to pass (R2.1)', status => {
+        const finding = { file: 'src/a.ts', line: 1, message: 'fixture finding' };
+        const accepted = [fingerprint('lint', finding)];
+
+        expect(applyBaseline({ name: 'lint', status, errors: [finding], skipReason: 'fixture' }, accepted).status).toBe(status);
     });
 });
 

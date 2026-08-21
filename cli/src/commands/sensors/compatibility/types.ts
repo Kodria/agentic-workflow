@@ -48,6 +48,7 @@ export type SensorVariant = {
     /** A registry-owned policy whose compatibility requirements are authoritative. */
     policyRef?: 'shared/semgrep-policy.json';
     command: StructuredCommand;
+    changedCommand?: StructuredCommand;
 };
 
 export type SemgrepPolicy = {
@@ -69,6 +70,7 @@ export type SensorPackSensor = {
     applicability: { allFiles?: string[]; anyFiles?: string[]; kind?: string };
     variants: SensorVariant[];
     fast?: boolean;
+    timeout?: number;
 };
 
 export type SensorPackV2 = {

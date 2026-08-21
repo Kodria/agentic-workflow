@@ -58,6 +58,14 @@ function runCli(fixture: Fixture, ...args: string[]) {
     });
 }
 
+function runAwm(fixture: Fixture, ...args: string[]) {
+    return spawnSync(process.execPath, [bin, ...args], {
+        cwd: fixture.project,
+        encoding: 'utf8',
+        env: { ...process.env, AWM_HOME: fixture.awmHome, AWM_NO_UPDATE_CHECK: '1' },
+    });
+}
+
 function json(result: ReturnType<typeof runCli>): any {
     expect(result.status).toBe(0);
     if (!(result.stdout ?? '').trim()) throw new Error(`coverage emitted no JSON: stderr=${result.stderr ?? ''}`);
@@ -80,7 +88,7 @@ test.each(['linux', 'darwin', 'win32'] as const)('keeps injected resolver semant
         if (parsed.kind !== 'v2') throw new Error('fixture must be a v2 pack');
         const discovered = discoverProjectEvidence(fixture.project, parsed.pack, { platform: () => platform });
         const probe = await runCompatibilityProbe({ kind: 'version' }, { cwd: fixture.project, toolExecutable: 'eslint' }, async () => ({
-            code: 0, signal: null, timedOut: false, overflowed: false, stdout: 'eslint v10.4.1', stderr: '',
+            code: 0, signal: null, timedOut: false, overflowed: false, elapsedMs: 0, stdout: 'eslint v10.4.1', stderr: '',
         }));
         const result = resolveSensorCompatibility(parsed.pack.sensors.lint, { ...discovered, probe }, { pack: 'js-ts', sensor: 'lint' });
         expect(result).toMatchObject({ state: 'certified', variantId: 'eslint-10', toolVersion: '10.4.1' });
@@ -94,6 +102,45 @@ testWithNoFollow('compiled binary dispatches coverage and emits parseable JSON o
     try {
         const report = json(runCli(fixture, 'coverage', '--json'));
         expect(report).toMatchObject({ schemaVersion: 2, static: expect.any(Object), empirical: expect.any(Object) });
+    } finally {
+        fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+});
+
+testWithNoFollow('compiled sensors run returns nonzero while preserving parseable not_certified JSON', () => {
+    const fixture = createFixture();
+    try {
+        fs.rmSync(path.join(fixture.project, '.awm', 'sensors.json'));
+
+        const result = runCli(fixture, 'run', '--fast');
+
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout ?? '')).toMatchObject({ sensors: [], overall: 'not_certified' });
+    } finally {
+        fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+});
+
+testWithNoFollow('compiled status reports static READY without writing or executing the project sensor (R6, R6.2)', () => {
+    const fixture = createFixture();
+    try {
+        const localBin = path.join(fixture.project, 'node_modules', '.bin', 'eslint');
+        fs.mkdirSync(path.dirname(localBin), { recursive: true });
+        fs.writeFileSync(localBin, 'this fixture must never be executed by status\n');
+        fs.copyFileSync(
+            path.join(fixture.registryRoot, 'sensor-packs', 'js-ts', 'eslint.fixture.mjs'),
+            path.join(fixture.project, 'eslint.fixture.mjs'),
+        );
+
+        const initialized = runCli(fixture, 'init', '--registry-root', fixture.registryRoot, '--pack', 'js-ts', '--no-configure');
+        expect(initialized.status).toBe(0);
+        const before = hashTree(fixture.project);
+        const result = runAwm(fixture, 'sensors', 'status');
+
+        expect(result.status).toBe(0);
+        expect(result.stdout).toContain('READY');
+        expect(result.stderr).toBe('');
+        expect(hashTree(fixture.project)).toBe(before);
     } finally {
         fs.rmSync(fixture.root, { recursive: true, force: true });
     }

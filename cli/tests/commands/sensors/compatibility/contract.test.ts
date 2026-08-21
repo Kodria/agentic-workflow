@@ -1,4 +1,5 @@
 import { assertNoEqualPriorityOverlap, parseSensorPack } from '../../../../src/commands/sensors/compatibility/contract';
+import { positiveTimeout, resolveTimeout } from '../../../../src/commands/sensors/compatibility/timeout';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -41,6 +42,25 @@ function validPack() {
 }
 
 describe('sensor pack v2 contract', () => {
+    it('exports bounded timeout validation and resolution (R3.1, R3.4)', () => {
+        expect(positiveTimeout(1, 'sensor timeout')).toBe(1);
+        expect(resolveTimeout({ project: 90_000, pack: 30_000, fast: true })).toEqual({ timeoutMs: 90_000, source: 'project' });
+        expect(resolveTimeout({ pack: 30_000, fast: true })).toEqual({ timeoutMs: 30_000, source: 'pack' });
+        expect(resolveTimeout({ fast: true })).toEqual({ timeoutMs: 10_000, source: 'fallback' });
+        expect(resolveTimeout({ fast: false })).toEqual({ timeoutMs: 120_000, source: 'fallback' });
+    });
+
+    test.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '1000'])('rejects invalid resolved timeout %p (R3.3)', timeout => {
+        expect(() => positiveTimeout(timeout, 'sensor timeout')).toThrow(/sensor timeout.*positive safe integer/);
+        expect(() => resolveTimeout({ project: timeout as number, fast: true })).toThrow(/project timeout.*positive safe integer/);
+    });
+
+    it('rejects malformed timeout helper inputs loudly (R3.4)', () => {
+        expect(() => positiveTimeout(1000, '')).toThrow('timeout location must be a nonempty string');
+        expect(() => resolveTimeout(null as unknown as { fast: boolean })).toThrow('timeout resolution input is invalid');
+        expect(() => resolveTimeout({ fast: 'true' } as unknown as { fast: boolean })).toThrow('timeout resolution input is invalid');
+    });
+
     it('derives Semgrep compatibility from a contained shared policy reference', () => {
         const sensorPacks = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-semgrep-policy-'));
         const packDir = path.join(sensorPacks, 'python');
@@ -77,6 +97,44 @@ describe('sensor pack v2 contract', () => {
 
     it('parses a valid versioned pack', () => {
         expect(parseSensorPack(validPack(), 'pack.json')).toMatchObject({ kind: 'v2', pack: validPack() });
+    });
+
+    it('accepts one standalone files placeholder in changedCommand (R4)', () => {
+        const pack = validPack();
+        (pack.sensors.lint.variants[0] as Record<string, unknown>).changedCommand = {
+            executable: 'eslint', resolution: 'node-modules-bin',
+            args: ['--format', 'json', '{files}'],
+            fileInput: { placeholder: '{files}', extensions: ['.js', '.ts'] },
+        };
+        expect(parseSensorPack(pack, '/registry/sensor-packs/js-ts/pack.json')).toMatchObject({
+            kind: 'v2', pack: { sensors: { lint: { variants: [{ changedCommand: { args: ['--format', 'json', '{files}'] } }] } } },
+        });
+    });
+
+    test.each([
+        { args: ['{files}', '{files}'], fileInput: { placeholder: '{files}', extensions: ['.ts'] } },
+        { args: ['prefix-{files}'], fileInput: { placeholder: '{files}', extensions: ['.ts'] } },
+        { args: ['{files}'], fileInput: { placeholder: '{files}', extensions: [] } },
+    ])('rejects unsafe changedCommand %# (R4)', changedCommand => {
+        const pack = validPack();
+        (pack.sensors.lint.variants[0] as Record<string, unknown>).changedCommand = {
+            executable: 'eslint', resolution: 'node-modules-bin', ...changedCommand,
+        };
+        expect(() => parseSensorPack(pack, '/registry/sensor-packs/js-ts/pack.json')).toThrow(/changedCommand|fileInput|\{files\}/);
+    });
+
+    test.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '1000'])('rejects pack sensor timeout %p (R3.3)', timeout => {
+        const pack = validPack();
+        (pack.sensors.lint as Record<string, unknown>).timeout = timeout;
+        expect(() => parseSensorPack(pack, '/registry/sensor-packs/js-ts/pack.json')).toThrow(/timeout.*positive safe integer/);
+    });
+
+    it('accepts an optional positive pack sensor timeout (R3.1)', () => {
+        const pack = validPack();
+        (pack.sensors.lint as Record<string, unknown>).timeout = 30_000;
+        expect(parseSensorPack(pack, '/registry/sensor-packs/js-ts/pack.json')).toMatchObject({
+            kind: 'v2', pack: { sensors: { lint: { timeout: 30_000 } } },
+        });
     });
 
     it('accepts an opt-in hardening asset while variants may require no assets', () => {

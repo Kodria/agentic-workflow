@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { runSensors } from '../../../src/commands/sensors/run';
+import { reduceVerdict } from '../../../src/commands/sensors/verdict';
 
 function mkTmp(): string {
     return fs.mkdtempSync(path.join(os.tmpdir(), 'awm-sensors-'));
@@ -55,6 +56,19 @@ describe('runSensors', () => {
         } finally { fs.rmSync(emptyDir, { recursive: true }); }
     });
 
+    it.each([
+        ['fast', { fast: 'yes' }, 'run option fast must be a boolean'],
+        ['slow', { slow: 1 }, 'run option slow must be a boolean'],
+        ['all', { all: null }, 'run option all must be a boolean'],
+        ['cwd', { cwd: '   ' }, 'run option cwd must be a nonempty string'],
+    ])('rejects invalid public %s options before selecting or dispatching sensors', async (_name, options, message) => {
+        const { runSensors } = load();
+
+        await expect(runSensors(options)).rejects.toThrow(message);
+        expect(mockRunCommand).not.toHaveBeenCalled();
+        expect(mockRunStructuredCommand).not.toHaveBeenCalled();
+    });
+
     it('runs only fast sensors with --fast flag', async () => {
         mockRunCommand.mockResolvedValue(ok());
         const { runSensors } = load();
@@ -62,6 +76,13 @@ describe('runSensors', () => {
         expect(mockRunCommand).toHaveBeenCalledTimes(2); // typecheck + lint (security disabled, mutation disabled)
         expect(result.sensors.some((s: any) => s.name === 'security')).toBe(false);
         expect(result.overall).toBe('not_certified');
+    });
+
+    it('runs both fast and slow sensors when --fast and --slow are combined', async () => {
+        mockRunCommand.mockResolvedValue(ok());
+        const { runSensors } = load();
+        const result = await runSensors({ fast: true, slow: true, cwd: tmpDir });
+        expect(result.sensors.map((sensor: any) => sensor.name)).toEqual(['typecheck', 'lint', 'security', 'mutation']);
     });
 
     it('returns fail when a fast sensor has errors', async () => {
@@ -218,6 +239,19 @@ describe('runSensors', () => {
         mockRunCommand.mockResolvedValueOnce(tcError()).mockResolvedValueOnce(ok());
         const result = await runSensors({ fast: true, cwd: tmpDir, ignoreBaseline: true });
         expect(result.overall).toBe('fail');
+    });
+});
+
+describe('reduceVerdict', () => {
+    it('lets a failing full sensor outrank an empty changed-scope synthetic pass', () => {
+        expect(reduceVerdict([
+            { name: 'lint', status: 'pass', errors: [], scope: 'changed' },
+            { name: 'typecheck', status: 'fail', errors: [{ message: 'broken' }] },
+        ])).toBe('fail');
+    });
+
+    it('rejects malformed result statuses instead of treating them as skipped', () => {
+        expect(() => reduceVerdict([{ name: 'lint', status: 'bogus', errors: [] } as any])).toThrow('sensor result status is invalid');
     });
 });
 

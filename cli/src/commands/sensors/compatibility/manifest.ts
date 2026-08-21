@@ -1,6 +1,7 @@
 import type { SensorConfig, SensorManifest } from '../types';
 import type { CompatibilityEvidence, StructuredCommand } from './types';
 import { parseStructuredCommand } from './contract';
+import { positiveTimeout } from './timeout';
 import semver from 'semver';
 import path from 'path';
 
@@ -12,7 +13,7 @@ export type SensorManifestV2 = {
     /** Durable operator intent. Absent means detected/fallback, never explicit. */
     packSelection?: 'explicit';
     registryRoot?: string;
-    sensors: Record<string, { enabled: boolean; fast?: boolean; variantId: string; command: StructuredCommand; assets?: string[]; policyRef?: 'shared/semgrep-policy.json'; initializedCompatibility: CompatibilityEvidence }>;
+    sensors: Record<string, { enabled: boolean; fast?: boolean; timeout?: number; variantId: string; command: StructuredCommand; assets?: string[]; policyRef?: 'shared/semgrep-policy.json'; initializedCompatibility: CompatibilityEvidence }>;
     concurrency?: number;
 };
 
@@ -116,8 +117,8 @@ function parseLegacySensor(input: unknown, source: unknown, location: string): S
         sensor.enabled = value.enabled;
     }
     if ('timeout' in value) {
-        if (typeof value.timeout !== 'number' || !Number.isSafeInteger(value.timeout) || value.timeout <= 0) invalid(source, `${location}.timeout must be a positive safe integer`);
-        sensor.timeout = value.timeout;
+        try { sensor.timeout = positiveTimeout(value.timeout, `${location}.timeout`); }
+        catch (error) { invalid(source, error instanceof Error ? error.message : `${location}.timeout must be a positive safe integer`); }
     }
     if ('changedCmd' in value) sensor.changedCmd = text(value.changedCmd, source, `${location}.changedCmd`);
     if ('changedExtensions' in value) sensor.changedExtensions = stringArray(value.changedExtensions, source, `${location}.changedExtensions`, true);
@@ -141,7 +142,7 @@ function parseLegacyManifest(value: UnknownRecord, source: unknown): LegacySenso
 
 function parseV2Sensor(input: unknown, source: unknown, location: string): SensorManifestV2['sensors'][string] {
     const value = record(input, source, location);
-    fields(value, ['enabled', 'fast', 'variantId', 'command', 'assets', 'policyRef', 'initializedCompatibility'], source, location);
+    fields(value, ['enabled', 'fast', 'timeout', 'variantId', 'command', 'assets', 'policyRef', 'initializedCompatibility'], source, location);
     if (typeof value.enabled !== 'boolean') invalid(source, `${location}.enabled must be a boolean`);
     const sensor: SensorManifestV2['sensors'][string] = {
         enabled: value.enabled, variantId: id(value.variantId, source, `${location}.variantId`),
@@ -160,6 +161,10 @@ function parseV2Sensor(input: unknown, source: unknown, location: string): Senso
     if ('fast' in value) {
         if (typeof value.fast !== 'boolean') invalid(source, `${location}.fast must be a boolean`);
         sensor.fast = value.fast;
+    }
+    if ('timeout' in value) {
+        try { sensor.timeout = positiveTimeout(value.timeout, `${location}.timeout`); }
+        catch (error) { invalid(source, error instanceof Error ? error.message : `${location}.timeout must be a positive safe integer`); }
     }
     return sensor;
 }

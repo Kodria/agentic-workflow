@@ -13,22 +13,67 @@ import { Command } from 'commander';
 import { log } from '@clack/prompts';
 import { runCoverage } from '../../../src/commands/sensors/coverage';
 import { renderCoverageHuman, renderCoverageJson } from '../../../src/commands/sensors/coverage/render';
-import { exitCodeFor, parsePositiveSafeInteger, registerSensorsCommand, RunOutputLike } from '../../../src/commands/sensors/index';
+import { parsePositiveSafeInteger, registerSensorsCommand } from '../../../src/commands/sensors/index';
+import { exitCodeForVerdict } from '../../../src/commands/sensors/verdict';
 
-describe('exitCodeFor — sensor run verdict → exit code', () => {
-    const base = (overall: RunOutputLike['overall']): RunOutputLike => ({ sensors: [], overall });
-    it('pass → 0', () => expect(exitCodeFor(base('pass'))).toBe(0));
-    it('skipped → 0', () => expect(exitCodeFor(base('skipped'))).toBe(0));
-    it('not_certified → 0 (signal is in overall, not exit code)', () =>
-        expect(exitCodeFor(base('not_certified'))).toBe(0));
-    it('fail → 1', () => expect(exitCodeFor(base('fail'))).toBe(1));
+const processExit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+const stdoutWrite = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+describe('exitCodeForVerdict — sensor run verdict → exit code', () => {
+    it.each([
+        ['pass', 0],
+        ['fail', 1],
+        ['skipped', 1],
+        ['not_certified', 1],
+    ] as const)('%s → %i', (overall, code) => {
+        expect(exitCodeForVerdict(overall)).toBe(code);
+    });
+});
+
+describe('sensors run Commander wiring', () => {
+    const originalExitCode = process.exitCode;
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        process.exitCode = undefined;
+    });
+
+    afterAll(() => {
+        process.exitCode = originalExitCode;
+    });
+
+    const programWithSensors = (): Command => {
+        const program = new Command();
+        program.exitOverride();
+        registerSensorsCommand(program);
+        return program;
+    };
+
+    it.each([
+        ['pass', 0],
+        ['fail', 1],
+        ['skipped', 1],
+        ['not_certified', 1],
+    ] as const)('writes full %s JSON before assigning exit code %i without process.exit', async (overall, code) => {
+        (require('../../../src/commands/sensors/run').runSensors as jest.Mock).mockResolvedValue({ sensors: [], overall });
+        const calls: string[] = [];
+        stdoutWrite.mockImplementation(() => {
+            calls.push(`stdout:${process.exitCode ?? 0}`);
+            return true;
+        });
+
+        await programWithSensors().parseAsync(['node', 'awm', 'sensors', 'run']);
+
+        expect(JSON.parse(String(stdoutWrite.mock.calls[0][0]))).toEqual({ sensors: [], overall });
+        expect(calls).toEqual(['stdout:0']);
+        expect(process.exitCode).toBe(code);
+        expect(processExit).not.toHaveBeenCalled();
+    });
 });
 
 describe('sensors coverage Commander wiring', () => {
     const report = { schemaVersion: 1 as const, pack: 'js-ts', registry: 'baseline', overall: 'gaps' as const,
         static: { status: 'gaps' as const, reason: null, classes: [] } };
-    const stdoutWrite = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
-    const processExit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
 
     beforeEach(() => {
         jest.clearAllMocks();

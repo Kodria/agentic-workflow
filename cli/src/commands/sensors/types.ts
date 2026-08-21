@@ -1,3 +1,32 @@
+/**
+ * Kept structural so the legacy runtime contract does not import the v2
+ * compatibility layer. `compatibility/types`.StructuredCommand is assignable to
+ * this shape at the preparation boundary.
+ */
+export type PreparedStructuredCommand = {
+    executable: string;
+    resolution: 'node-modules-bin' | 'python-environment' | 'path';
+    pythonEnvironmentRoot?: '.venv' | 'venv';
+    args: string[];
+    packageManager?: 'npm' | 'pnpm' | 'yarn' | 'bun';
+    environment?: { ESLINT_USE_FLAT_CONFIG: 'true' | 'false' };
+    fileInput?: { placeholder: '{files}'; extensions: string[] };
+};
+
+export type PreparedSensorExecution = {
+    name: string;
+    command?: { kind: 'legacy'; value: string } | { kind: 'structured'; value: PreparedStructuredCommand };
+    formatter?: string;
+    timeoutMs: number;
+    timeoutSource: 'project' | 'pack' | 'fallback';
+    requestedScope: 'full' | 'changed';
+    effectiveScope: 'full' | 'changed';
+    scopeReason?: string;
+    files?: number;
+    syntheticStatus?: 'pass' | 'skipped' | 'inconclusive';
+    syntheticReason?: string;
+};
+
 export type SensorConfig = {
     cmd?: string;
     fast?: boolean;
@@ -49,6 +78,17 @@ export type SensorError = {
     rule?: string;
 };
 
+/** Bounded execution facts attached to every prepared sensor result. */
+export type ExecutionEvidence = {
+    timeoutMs: number;
+    timeoutSource: 'project' | 'pack' | 'fallback';
+    elapsedMs: number;
+    requestedScope: 'full' | 'changed';
+    effectiveScope: 'full' | 'changed';
+    files?: number;
+    scopeReason?: string;
+};
+
 export type SensorResult = {
     name: string;
     /**
@@ -91,6 +131,8 @@ export type SensorResult = {
     newCount?: number;
     /** Findings suppressed by the baseline. Present only when a baseline is applied. */
     baselineCount?: number;
+    /** Execution configuration and observed duration, when this result was prepared. */
+    execution?: ExecutionEvidence;
 };
 
 export type RunOutput = {
@@ -118,7 +160,12 @@ export type SensorCheck = {
 };
 
 export type SensorStatusResult = {
-    overall: 'HEALTHY' | 'DEGRADED' | 'NOT_CONFIGURED';
+    /**
+     * Static readiness only: manifest and declared local prerequisites are present.
+     * This command never executes a project sensor, so READY is not a health or
+     * certification claim; use `awm sensors run` for an empirical verdict.
+     */
+    overall: 'READY' | 'DEGRADED' | 'NOT_CONFIGURED';
     pack: string | null;
     checks: Record<string, SensorCheck>;
 };

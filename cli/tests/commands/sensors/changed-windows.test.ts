@@ -1,4 +1,4 @@
-import { applyChangedCmd } from '../../../src/commands/sensors/changed';
+import { applyChangedCmd, changedScopeError } from '../../../src/commands/sensors/changed';
 
 describe('applyChangedCmd — Windows quoting', () => {
     const originalPlatform = process.platform;
@@ -45,5 +45,9 @@ describe('applyChangedCmd — Windows quoting', () => {
         // wrapper cleanly and recovering exactly the original single trailing `\`.
         expect(applyChangedCmd('eslint {files}', ['report\\']))
             .toBe(`eslint "report\\\\"`);
+    });
+
+    it('refuses unsafe filenames for legacy shell interpolation', () => {
+        expect(changedScopeError({ files: ['src/a&b.ts'] })).toMatch(/cmd\.exe metacharacter/);
     });
 });

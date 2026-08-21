@@ -5,6 +5,7 @@ import { computeSensorStatus } from '../sensors/status';
 import { detectStack } from '../sensors/init';
 import { SensorManifest } from '../sensors/types';
 import { readBaseline } from '../sensors/baseline';
+import { runSensors } from '../sensors/run';
 import { resolveOnPath } from '../../core/paths';
 
 /**
@@ -16,11 +17,11 @@ import { resolveOnPath } from '../../core/paths';
  * `npx` that would fetch a remote package, validates referenced config files); nothing
  * in the flow ever called it.
  *
- * The consequence is a discovery point at the worst possible moment. `awm sensors run`
- * exits 0 on `not_certified` by design (exit 2 is a blocking error in Claude Code
- * hooks), so the only thing standing between "no sensors configured" and "sensors
- * green" is each agent remembering to read `overall` out of the JSON instead of the
- * exit code. That is a prose defence over a mechanical problem, and prose does not hold.
+ * The consequence is a discovery point at the worst possible moment. Although `awm
+ * sensors run` now exits nonzero for every non-pass verdict, a static readiness check
+ * cannot prove that the project's real commands complete. The empirical option below
+ * makes that missing evidence a mechanical preflight failure rather than a prose
+ * defence over a mechanical problem.
  *
  * So this answers one question, mechanically, before any of that matters — and it is
  * deliberately agnostic to stack, language and tooling. It never asks "is eslint
@@ -28,7 +29,7 @@ import { resolveOnPath } from '../../core/paths';
  */
 
 export type PreflightCheck = {
-    id: 'context' | 'manifest' | 'tools' | 'pack' | 'host' | 'sensors-baseline';
+    id: 'context' | 'manifest' | 'tools' | 'pack' | 'host' | 'sensors-baseline' | 'sensors-execution';
     ok: boolean;
     detail: string;
     /** What the operator should do. Absent when `ok`. */
@@ -48,6 +49,11 @@ export type PreflightReport = {
      */
     status: 'ready' | 'degraded' | 'not_configured';
     checks: PreflightCheck[];
+};
+
+export type PreflightOptions = {
+    /** Run the full sensor gate and require its empirical verdict to be `pass`. */
+    verifySensors?: boolean;
 };
 
 const MANIFEST = path.join('.awm', 'sensors.json');
@@ -239,6 +245,63 @@ function checkSensorsBaseline(cwd: string, manifest: SensorManifest | null): Pre
 }
 
 /**
+ * Empirical diagnostics intentionally name only stable execution facts. Sensor output
+ * can include source, environment values, or tool-specific unbounded text; preflight
+ * is a phase gate, not a log transport, so none of that crosses this boundary.
+ */
+function executionReason(sensor: Awaited<ReturnType<typeof runSensors>>['sensors'][number]): string {
+    const reason = sensor.skipReason ?? sensor.incomplete ?? '';
+    if (/^timeout after \d+ms/.test(reason)) return 'timeout';
+    if (/^output exceeded \d+ bytes/.test(reason)) return 'output limit exceeded';
+    const exit = /^exit (\d+):/.exec(reason);
+    if (exit) return `exit ${exit[1]} without parseable findings`;
+    if (sensor.status === 'fail') return 'reported findings or an actionable execution failure';
+    if (sensor.status === 'skipped') return 'not applicable to this execution';
+    return 'execution did not establish a conclusive result';
+}
+
+function renderExecutionFailure(output: Awaited<ReturnType<typeof runSensors>>): string {
+    const failed = output.sensors.filter(sensor => sensor.status !== 'pass');
+    if (failed.length === 0) return `sensor verdict was ${output.overall}; no sensor established an empirical pass`;
+    return failed.map(sensor => {
+        const evidence = sensor.execution;
+        if (!evidence) return `${sensor.name} (${sensor.status}): no bounded execution evidence; ${executionReason(sensor)}`;
+        return `${sensor.name} (${sensor.status}): timeout ${evidence.timeoutMs}ms (${evidence.timeoutSource}), `
+            + `elapsed ${evidence.elapsedMs}ms; ${executionReason(sensor)}`;
+    }).join('; ');
+}
+
+function executionRemedy(output: Awaited<ReturnType<typeof runSensors>>): string {
+    if (output.sensors.every(sensor => sensor.status === 'pass')) {
+        return 'configure at least one runnable sensor with `awm sensors init`, then rerun `awm preflight --verify-sensors`';
+    }
+    return 'diagnose the named sensor; if a healthy progressing run needs longer, set a finite sensor timeout and rerun `awm preflight --verify-sensors`';
+}
+
+/** Run the full read-only sensor gate and reject every verdict except `pass`. */
+export async function checkSensorExecution(cwd: string): Promise<PreflightCheck> {
+    try {
+        const output = await runSensors({ cwd, all: true });
+        if (output.overall === 'pass') {
+            return { id: 'sensors-execution', ok: true, detail: 'all selected sensors completed with pass' };
+        }
+        return {
+            id: 'sensors-execution',
+            ok: false,
+            detail: renderExecutionFailure(output),
+            remedy: executionRemedy(output),
+        };
+    } catch {
+        // Fail closed without relaying an arbitrary tool/configuration error to JSON.
+        return {
+            id: 'sensors-execution', ok: false,
+            detail: 'sensor execution could not establish an empirical verdict',
+            remedy: 'repair the sensor configuration, then rerun `awm preflight --verify-sensors`',
+        };
+    }
+}
+
+/**
  * Extract just the hostname portion of a git remote URL — never match against the
  * full URL string. A bare substring check against the whole remote (`remote.includes
  * ('gitlab')`) false-positives on an org/repo name that happens to contain the word,
@@ -325,7 +388,10 @@ function checkHost(cwd: string): PreflightCheck {
     return { id: 'host', ok: true, detail: 'git host not recognized (github/gitlab) — PR/MR automation not applicable' };
 }
 
-export async function preflight(cwd: string = process.cwd()): Promise<PreflightReport> {
+export async function preflight(cwd: string = process.cwd(), opts: PreflightOptions = {}): Promise<PreflightReport> {
+    if (!opts || typeof opts !== 'object' || Array.isArray(opts) || (opts.verifySensors !== undefined && typeof opts.verifySensors !== 'boolean')) {
+        throw new Error('preflight options must contain an optional boolean verifySensors');
+    }
     const manifest = readManifest(cwd);
     const manifestExists = fs.existsSync(path.join(cwd, MANIFEST));
 
@@ -336,6 +402,9 @@ export async function preflight(cwd: string = process.cwd()): Promise<PreflightR
         // a baseline that has nothing to snapshot) on a repo that was never set up
         // buries the one thing the operator needs to read.
         ...(manifestExists ? [await checkTools(cwd), checkPack(cwd, manifest), checkSensorsBaseline(cwd, manifest)] : []),
+        // The empirical mode is intentionally opt-in: ordinary preflight remains a
+        // quick static inspection and must not dispatch project software.
+        ...(opts.verifySensors === true ? [await checkSensorExecution(cwd)] : []),
         // Runs unconditionally — orthogonal to sensor configuration entirely, this is
         // about PR/MR tooling, not sensors.
         checkHost(cwd),

@@ -98,14 +98,14 @@ describe('runSensors --changed', () => {
         expect(out.changedScope).toEqual({ files: 0, error: 'not a git repository' });
     });
 
-    it('skips an opted-in sensor when nothing changed, without touching the others', async () => {
+    it('records a clean synthetic pass when an opted-in sensor has no changed files, without touching the others', async () => {
         dir = project({ lint: LINT, typecheck: TYPECHECK });
         mockChangedFiles.mockReturnValue({ files: [] });
 
         const out = await load().runSensors({ cwd: dir, changed: true });
 
         const lint = out.sensors.find((s: any) => s.name === 'lint');
-        expect(lint.status).toBe('skipped');
+        expect(lint.status).toBe('pass');
         expect(lint.skipReason).toBe('no changed files in scope');
         expect(cmds()).toEqual(['tsc --noEmit']);
     });
@@ -121,7 +121,7 @@ describe('runSensors --changed', () => {
         expect(cmds()).toEqual([`eslint --format json 'src/a.ts'`]);
     });
 
-    it('skips the sensor when the filter empties the scope, rather than running repo-wide', async () => {
+    it('records a clean synthetic pass when the filter empties the scope, rather than running repo-wide', async () => {
         // A docs-only commit means the lint sensor has nothing to say. Falling back to
         // the full command here would reintroduce exactly the cost --changed removes.
         dir = project({ lint: { ...LINT, changedExtensions: ['.ts'] }, typecheck: TYPECHECK });
@@ -129,7 +129,7 @@ describe('runSensors --changed', () => {
 
         const out = await load().runSensors({ cwd: dir, changed: true });
 
-        expect(out.sensors.find((s: any) => s.name === 'lint').status).toBe('skipped');
+        expect(out.sensors.find((s: any) => s.name === 'lint').status).toBe('pass');
         expect(cmds()).toEqual(['tsc --noEmit']);
     });
 

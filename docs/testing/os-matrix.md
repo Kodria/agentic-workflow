@@ -22,6 +22,23 @@ platform evidence comes from the required three-OS CI matrix above, where that
 same E2E is part of the regular Jest suite. Keep these two evidence levels
 separate in reports and pack certification claims.
 
+## Sensor execution contract on native CI
+
+Ubuntu, macOS, and native Windows must each execute the compiled binary against
+legacy manifests and v2 manifests without new fields, then cover project,
+pack, and fallback finite timeouts. On every platform, test changed scope for a
+supported sensor, an unsupported sensor, zero applicable files, and a Git
+error; record requested/effective scope and files/reason in the JSON.
+
+For v2, assert shell-free dispatch: filenames containing spaces and shell
+metacharacters are separate literal argv entries and no command is routed
+through a shell. This is a native three-OS requirement, not a Linux simulation.
+The four verdicts must remain consistent everywhere: only `pass` exits 0;
+`fail`, `not_certified`, and `skipped` write parseable JSON and exit 1.
+`sensors status` may say `READY` only as static readiness; the empirical,
+read-only `preflight --verify-sensors` must execute the full gate and reject
+every non-pass without mutating the project.
+
 ## Sensor-pack certification evidence
 
 For every first-party pack, record one real-tool boundary run on Linux, macOS,

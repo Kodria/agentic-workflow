@@ -50,7 +50,7 @@ describe('computeSensorStatus — Windows PATH resolution', () => {
         fs.writeFileSync(path.join(pathDir, 'semgrep.cmd'), '@echo off\r\n');
 
         const result = await computeSensorStatus(tmpDir);
-        expect(result.overall).toBe('DEGRADED');
+        expect(result.overall).toBe('READY');
         expect(result.checks.security.ok).toBe(true);
     });
 

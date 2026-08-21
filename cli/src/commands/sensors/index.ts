@@ -9,15 +9,7 @@ import { buildBaseline, writeBaseline } from './baseline';
 import { runCoverage } from './coverage';
 import { renderCoverageHuman, renderCoverageJson } from './coverage/render';
 import { capabilityRoot } from '../../core/registries';
-
-export type RunOutputLike = { sensors: unknown[]; overall: 'pass' | 'fail' | 'skipped' | 'not_certified' };
-
-/** Map a sensor run verdict to a process exit code. fail → 1; everything else → 0.
- *  not_certified intentionally exits 0: its signal lives in `overall`, because
- *  exit code 2 is a blocking error in Claude Code hooks. */
-export function exitCodeFor(output: RunOutputLike): number {
-    return output.overall === 'fail' ? 1 : 0;
-}
+import { exitCodeForVerdict } from './verdict';
 
 /** Commander coercion for coverage recurrence emphasis. It deliberately runs
  * before the action, so an invalid value cannot trigger ledger I/O. */
@@ -62,8 +54,7 @@ export function registerSensorsCommand(program: Command): void {
             // Emit the verdict ALWAYS — an empty `sensors` with overall:'not_certified'
             // must be visible, never a silent exit-0 that reads as "clean".
             process.stdout.write(JSON.stringify(output, null, 2) + '\n');
-            const code = exitCodeFor(output);
-            if (code !== 0) process.exit(code);
+            process.exitCode = exitCodeForVerdict(output.overall);
         });
 
     sensors
@@ -110,10 +101,10 @@ export function registerSensorsCommand(program: Command): void {
 
     sensors
         .command('status')
-        .description('check sensor health for the current project')
+        .description('check static sensor readiness for the current project')
         .action(async () => {
             const status = await computeSensorStatus();
-            const icon = status.overall === 'HEALTHY' ? pc.green('✔') : pc.yellow('⚠');
+            const icon = status.overall === 'READY' ? pc.green('✔') : pc.yellow('⚠');
             console.log(`\nPack:    ${status.pack ?? 'none'}`);
             console.log(`Overall: ${icon} ${status.overall}\n`);
             for (const [name, check] of Object.entries(status.checks)) {
@@ -121,7 +112,7 @@ export function registerSensorsCommand(program: Command): void {
                 console.log(`  ${mark}  ${name.padEnd(12)} ${check.detail}`);
             }
             console.log('');
-            if (status.overall !== 'HEALTHY') process.exit(1);
+            if (status.overall !== 'READY') process.exit(1);
         });
 
     sensors

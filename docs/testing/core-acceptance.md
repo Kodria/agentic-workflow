@@ -159,7 +159,20 @@ the gate is thin at the moment it is created, not from an unrelated command days
 awm sensors run; echo "exit=$?"
 ```
 
-**Expect:** each configured sensor reported with a real state. A sensor whose tool isn't installed must report a clear `fail` explaining that the gate could not run it — **never silently `pass`**. A non-zero exit from `awm sensors run` is correct when the output reports findings or a missing tool.
+**Expect:** each configured sensor reports a real state and additive execution
+evidence (`execution.timeoutMs`, `timeoutSource`, `elapsedMs`, requested and
+effective scope, and files/reason when scoped). Exercise a legacy manifest,
+then a v2 manifest without new fields: both remain runnable. For v2 also
+exercise project, pack, and fallback timeouts; all must be finite and report
+their source. A sensor whose tool isn't installed must report a clear `fail` —
+**never silently `pass`**.
+
+Exercise `awm sensors run --changed` with a supported sensor, an unsupported
+sensor, zero applicable files, and a Git-resolution error. The cases must be
+reported as supported, unsupported, empty, and Git-error scope outcomes;
+changed v2 execution must preserve filenames as literal argv, without a shell.
+Finally force all four global verdicts: `pass` exits `0`; `fail`,
+`not_certified`, and `skipped` each emit parseable JSON then exit `1`.
 
 ## CORE-12b · `sensors run` changes nothing
 
@@ -221,6 +234,26 @@ awm preflight --json > pre.json; echo "exit=$?"
 ```
 
 **Expect:** a JSON report with per-check results. Advisory checks (e.g. git-host detection for PR automation) must never flip the overall status on their own.
+
+Also verify the boundary before unattended work:
+
+```bash
+git status --porcelain > before.txt
+awm sensors status
+awm preflight --verify-sensors --json > preflight-sensors.json; echo "exit=$?"
+git status --porcelain > after.txt
+diff before.txt after.txt
+```
+
+**Expect:** `sensors status` may report static `READY`, but that is not a
+health or certification claim and must not execute a sensor. The empirical,
+read-only `--verify-sensors` run requires overall `pass`. When sensors were
+selected, every non-pass is a degraded preflight report with sensor name,
+timeout, source, elapsed time and safe reason. When no sensor execution is
+established (for example `not_certified` and an empty list), the report must
+say so and direct the operator to `awm sensors init`; it must not fabricate a
+sensor name, timeout, source, or elapsed time. The before/after trees must
+match.
 
 ## CORE-14 · Context budget is measurable
 

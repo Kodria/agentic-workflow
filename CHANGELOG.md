@@ -42,6 +42,11 @@
   and `awm sensors coverage --min <count>`.
 - **ledger:** accept an optional reusable `--defect-class <id>` for coverage
   analysis.
+- **sensors:** make execution evidence explicit and bounded: v2 timeout
+  precedence, shell-free changed scope, conclusive verdict exits, and static
+  `READY` distinct from empirical execution.
+- **preflight:** add the read-only `--verify-sensors` handoff gate, which
+  rejects every sensor verdict except `pass` before unattended work begins.
 
 ## v6.5.2 - 2026-08-11
 

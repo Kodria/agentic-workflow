@@ -15,6 +15,8 @@ export type ExecResult = {
     timedOut: boolean;
     /** Collected output hit `maxBuffer`; the process group was killed. */
     overflowed: boolean;
+    /** Monotonic wall-clock duration from spawn attempt through settlement. */
+    elapsedMs: number;
     /** The shell itself could not be spawned (bad cwd, no shell). */
     spawnError?: NodeJS.ErrnoException;
 };
@@ -88,6 +90,7 @@ function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult>
     const killGraceMs = opts.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
 
     return new Promise<ExecResult>((resolve) => {
+        const startedAt = process.hrtime.bigint();
         let stdout = '';
         let stderr = '';
         let timedOut = false;
@@ -123,7 +126,8 @@ function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult>
             if (settled) return;
             settled = true;
             timers.forEach(clearTimeout);
-            resolve({ stdout, stderr, code: null, signal: null, timedOut, overflowed, ...extra });
+            const elapsedMs = Number((process.hrtime.bigint() - startedAt) / 1_000_000n);
+            resolve({ stdout, stderr, code: null, signal: null, timedOut, overflowed, elapsedMs, ...extra });
         };
 
         /** Cut the run short: kill the tree, escalate, and never hang waiting for it. */

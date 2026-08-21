@@ -6,7 +6,7 @@ import type { ExecResult } from '../../../src/commands/sensors/exec';
  * never throws, so a mocked run is a value, not an exception.
  */
 
-const base = { stdout: '', stderr: '', code: null as number | null, signal: null as NodeJS.Signals | null, timedOut: false, overflowed: false };
+const base = { stdout: '', stderr: '', code: null as number | null, signal: null as NodeJS.Signals | null, timedOut: false, overflowed: false, elapsedMs: 0 };
 
 /** Clean run: exit 0. */
 export const ok = (stdout = ''): ExecResult => ({ ...base, stdout, code: 0 });

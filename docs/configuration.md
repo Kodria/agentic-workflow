@@ -212,6 +212,32 @@ local, not a path to copy into another repository:
 }
 ```
 
+### Bounded sensor execution overrides
+
+Schema-v2 preserves a project timeout override while re-resolving the live
+pack command. The timeout must be a positive safe integer in milliseconds;
+there is no unlimited value. Resolution is `project` → `pack` → `fallback`
+(10,000 ms for fast sensors and 120,000 ms otherwise). For example, this
+intentionally incomplete fragment shows only the project override — it is not
+a complete manifest to copy:
+
+```json
+{
+  "schemaVersion": 2,
+  "pack": "js-ts",
+  "sensors": {
+    "test": { "enabled": true, "fast": false, "timeout": 600000, "variantId": "npm-script" }
+  }
+}
+```
+
+Run output adds `execution.timeoutMs`, `timeoutSource`, `elapsedMs`,
+`requestedScope`, and `effectiveScope`; scoped work can also expose `files` or
+`scopeReason`. Packs may declare a shell-free structured `changedCommand`.
+AWM expands its sole `{files}` placeholder as literal argv entries; unsupported
+scope, no applicable files, and Git errors remain explicit rather than looking
+like a full clean run.
+
 ## What machine initialization installs
 
 Machine initialization seeds and synchronizes registries, records enabled

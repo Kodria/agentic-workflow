@@ -27,6 +27,33 @@ const CI_WORKFLOW_PATH = path.resolve(__dirname, '../../..', '.github', 'workflo
 
 
 describe('docs/support-matrix.md refleja el codigo', () => {
+    it('documents the bounded, empirical sensor gate contract (R3-R7, R10)', () => {
+        const root = path.resolve(__dirname, '../../..');
+        const cliReference = fs.readFileSync(path.join(root, 'docs', 'cli-reference.md'), 'utf8');
+        const configuration = fs.readFileSync(path.join(root, 'docs', 'configuration.md'), 'utf8');
+        const acceptance = fs.readFileSync(path.join(root, 'docs', 'testing', 'core-acceptance.md'), 'utf8');
+        const osMatrix = fs.readFileSync(path.join(root, 'docs', 'testing', 'os-matrix.md'), 'utf8');
+
+        for (const expected of [
+            '`execution.timeoutMs`', '`timeoutSource`', '`elapsedMs`',
+            '`requestedScope`', '`effectiveScope`', '`files`', '`scopeReason`',
+            '`project` → `pack` → `fallback`', '10,000 ms', '120,000 ms',
+            '`pass`', '`fail`', '`not_certified`', '`skipped`',
+            '`awm preflight --verify-sensors`', 'read-only', 'READY', 'not a health or certification claim',
+        ]) expect(cliReference + configuration + acceptance).toContain(expected);
+
+        expect(acceptance).toContain('legacy manifest');
+        expect(acceptance).toContain('v2 manifest without new fields');
+        expect(acceptance).toContain('supported, unsupported, empty, and Git-error');
+        expect(acceptance).toContain('project, pack, and fallback');
+        expect(cliReference).toContain('`not_certified` with an empty sensor list');
+        expect(cliReference).toContain('`awm sensors init`');
+        expect(acceptance).toContain('established (for example `not_certified` and an empty list)');
+        expect(acceptance).toMatch(/must not fabricate a\s+sensor name, timeout, source, or elapsed time/);
+        expect(osMatrix).toContain('Ubuntu, macOS, and native Windows');
+        expect(osMatrix).toContain('shell-free');
+    });
+
     it('el bloque generado esta al dia', () => {
         const doc = fs.readFileSync(DOC_PATH, 'utf-8');
         const expected = spliceGenerated(doc, renderProviderTables());

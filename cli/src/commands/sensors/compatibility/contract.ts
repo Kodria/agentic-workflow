@@ -2,6 +2,7 @@ import semver from 'semver';
 import fs from 'fs';
 import path from 'path';
 import { parseCoverageContract } from '../coverage/contract';
+import { positiveTimeout } from './timeout';
 import type {
     CompatibilityProbe,
     CompatibilityEvidence,
@@ -177,7 +178,7 @@ export function parseStructuredCommand(input: unknown, source: unknown): Structu
 
 function parseVariant(input: unknown, source: unknown, location: string): SensorVariant {
     const value = record(input, source, location);
-    fields(value, ['id', 'priority', 'requirements', 'certifiedRange', 'command', 'assets', 'formatter', 'probe', 'policyRef'], source, location);
+    fields(value, ['id', 'priority', 'requirements', 'certifiedRange', 'command', 'changedCommand', 'assets', 'formatter', 'probe', 'policyRef'], source, location);
     const certifiedRange = text(value.certifiedRange, source, `${location}.certifiedRange`);
     if (semver.validRange(certifiedRange) === null) invalid(source, `${location}.certifiedRange must be a valid semver range`);
     if (typeof value.priority !== 'number' || !Number.isSafeInteger(value.priority)) invalid(source, `${location}.priority must be a safe integer`);
@@ -194,6 +195,8 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
         fields(probe, ['kind'], source, `${location}.probe`);
         if (typeof probe.kind !== 'string' || !ALLOWED_PROBES.has(probe.kind as CompatibilityProbe)) invalid(source, `${location}.probe.kind must be an allowed probe`);
     }
+    const changedCommand = 'changedCommand' in value ? parseStructuredCommand(value.changedCommand, source) : undefined;
+    if (changedCommand && !changedCommand.fileInput) invalid(source, `${location}.changedCommand must declare fileInput`);
     return {
         id: id(value.id, source, `${location}.id`),
         priority: value.priority,
@@ -206,6 +209,7 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
         probe: { kind: policy?.probe ?? probe!.kind as CompatibilityProbe },
         ...(policy ? { policyRef: SEMGREP_POLICY_REF } : {}),
         command: parseStructuredCommand(value.command, source),
+        ...(changedCommand ? { changedCommand } : {}),
     };
 }
 
@@ -243,7 +247,7 @@ export function assertNoEqualPriorityOverlap(variants: unknown): void {
 
 function parseSensor(input: unknown, source: unknown, location: string, variantIds: Set<string>): SensorPackSensor {
     const value = record(input, source, location);
-    fields(value, ['applicability', 'variants', 'fast'], source, location);
+    fields(value, ['applicability', 'variants', 'fast', 'timeout'], source, location);
     if (!Array.isArray(value.variants) || value.variants.length === 0) invalid(source, `${location}.variants must be a nonempty array`);
     const variants = value.variants.map((variant, index) => parseVariant(variant, source, `${location}.variants[${index}]`));
     for (const variant of variants) {
@@ -263,7 +267,12 @@ function parseSensor(input: unknown, source: unknown, location: string, variantI
     if ('kind' in applicabilityInput) applicability.kind = text(applicabilityInput.kind, source, `${location}.applicability.kind`);
     if (Object.keys(applicability).length === 0) invalid(source, `${location}.applicability must declare a condition`);
     if ('fast' in value && typeof value.fast !== 'boolean') invalid(source, `${location}.fast must be a boolean`);
-    return { applicability, variants, ...('fast' in value ? { fast: value.fast as boolean } : {}) };
+    let timeout: number | undefined;
+    if ('timeout' in value) {
+        try { timeout = positiveTimeout(value.timeout, `${location}.timeout`); }
+        catch (error) { invalid(source, error instanceof Error ? error.message : `${location}.timeout must be a positive safe integer`); }
+    }
+    return { applicability, variants, ...('fast' in value ? { fast: value.fast as boolean } : {}), ...(timeout !== undefined ? { timeout } : {}) };
 }
 
 function legacyCompatibility(): CompatibilityEvidence {
