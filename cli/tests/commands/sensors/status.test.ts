@@ -222,7 +222,7 @@ describe('computeSensorStatus', () => {
             const variant = (id: string, range: string) => ({
                 id, priority: 10, certifiedRange: range,
                 requirements: { tool: 'eslint', toolRange: range, runtime: 'node', runtimeRange: '>=0.0.0' },
-                assets: ['eslint.config.awm.mjs'], formatter: 'eslint-llm', probe: { kind: 'config-present' },
+                assets: ['eslint.config.awm.mjs'], formatter: 'eslint-llm', probe: { kind: 'package-script-present' },
                 command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
             });
             fs.writeFileSync(path.join(registry, 'sensor-packs', 'js-ts', 'pack.json'), JSON.stringify({
@@ -245,6 +245,14 @@ describe('computeSensorStatus', () => {
             const result = await computeSensorStatus(tmpDir);
             expect(result).toMatchObject({ overall: 'DEGRADED', checks: { lint: { ok: false } } });
             expect(result.checks.lint.detail).toMatch(/drift|eslint-10/i);
+
+            // Once the installed tool matches the initialized variant, a failed
+            // static probe is still evidence of degraded readiness — it is not
+            // a runtime probe and cannot be waived as merely inconclusive.
+            fs.writeFileSync(path.join(tmpDir, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version: '9.0.0' }));
+            const staticProbeFailure = await computeSensorStatus(tmpDir);
+            expect(staticProbeFailure).toMatchObject({ overall: 'DEGRADED', checks: { lint: { ok: false } } });
+            expect(staticProbeFailure.checks.lint.detail).toMatch(/probe-not-matched|unverifiable/i);
             expect(runCommand).not.toHaveBeenCalled();
             expect(runStructuredCommand).not.toHaveBeenCalled();
         } finally {

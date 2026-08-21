@@ -129,7 +129,7 @@ function staticCompatibilityCheck(sensor: SensorManifestV2['sensors'][string], l
     if (live.variantId !== sensor.variantId) {
         return { ok: false, detail: `compatibility drift: initialized ${sensor.variantId}, resolved ${live.variantId ?? live.state}` };
     }
-    if (live.state === 'incompatible' || live.state === 'missing-tool' || live.state === 'not-applicable') {
+    if (live.state === 'incompatible' || live.state === 'missing-tool' || live.state === 'not-applicable' || live.reason === 'probe-not-matched') {
         return { ok: false, detail: `live compatibility ${live.state}: ${live.reason}` };
     }
     return null;
