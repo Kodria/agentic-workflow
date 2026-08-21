@@ -1,5 +1,10 @@
 import type { RunOutput, SensorResult } from './types';
 
+/** Map the semantic sensor verdict to the CLI process status. Only a global pass succeeds. */
+export function exitCodeForVerdict(overall: RunOutput['overall']): 0 | 1 {
+    return overall === 'pass' ? 0 : 1;
+}
+
 /** Reduce all selected sensor outcomes through one format-agnostic verdict rule. */
 export function reduceVerdict(results: SensorResult[]): RunOutput['overall'] {
     if (!Array.isArray(results)) throw new Error('sensor results must be an array');

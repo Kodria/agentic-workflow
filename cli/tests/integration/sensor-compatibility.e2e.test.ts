@@ -99,6 +99,20 @@ testWithNoFollow('compiled binary dispatches coverage and emits parseable JSON o
     }
 });
 
+testWithNoFollow('compiled sensors run returns nonzero while preserving parseable not_certified JSON', () => {
+    const fixture = createFixture();
+    try {
+        fs.rmSync(path.join(fixture.project, '.awm', 'sensors.json'));
+
+        const result = runCli(fixture, 'run', '--fast');
+
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout ?? '')).toMatchObject({ sensors: [], overall: 'not_certified' });
+    } finally {
+        fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+});
+
 testWithNoFollow('legacy coverage stays unverified, init migrates explicitly, and version drift is visible (R7.2, R7.8)', () => {
     const fixture = createFixture();
     try {
