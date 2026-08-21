@@ -348,7 +348,7 @@ _Requirements: R1, R2, R2.1, R3.2, R3.4, R5.2, R7.1_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tests rojos de elapsed, baseline v2 y non-pass incompleto**
+- [x] **Step 1: Escribir tests rojos de elapsed, baseline v2 y non-pass incompleto**
 
 ```ts
 test('records bounded execution evidence on timeout (R3.2, R3.4, R7.1)', async () => {
@@ -369,13 +369,13 @@ test.each(['inconclusive', 'skipped'] as const)('baseline never changes %s to pa
 });
 ```
 
-- [ ] **Step 2: Ejecutar focal y comprobar rojo**
+- [x] **Step 2: Ejecutar focal y comprobar rojo**
 
 Run: `cd cli && npx jest tests/commands/sensors/exec.test.ts tests/commands/sensors/baseline.test.ts tests/commands/sensors/run-inconclusive.test.ts --runInBand`
 
 Expected: FAIL por ausencia de `elapsedMs`/`execution` y de `executePrepared`.
 
-- [ ] **Step 3: Medir elapsed en el executor común**
+- [x] **Step 3: Medir elapsed en el executor común**
 
 ```ts
 export type ExecResult = {
@@ -395,7 +395,7 @@ const finish = (extra: Partial<ExecResult>) => {
 
 Los tests mockeados que construyen `ExecResult` añaden `elapsedMs` explícito; no se infiere ni se deja `undefined`.
 
-- [ ] **Step 4: Implementar `executePrepared` e `interpretResult`**
+- [x] **Step 4: Implementar `executePrepared` e `interpretResult`**
 
 `executePrepared` selecciona `runCommand` o `runStructuredCommand` por discriminante y siempre pasa el timeout validado. `interpretResult` conserva findings parciales, clasifica spawn/timeout/overflow/parse/exit como fail o inconclusive según el contrato actual y adjunta:
 
@@ -413,13 +413,13 @@ const execution = {
 
 Aplicar baseline después de interpretar únicamente `pass`/`fail`; re-exportar `applyBaseline` desde `run.ts` para no romper imports públicos existentes.
 
-- [ ] **Step 5: Verificar y probar mutación**
+- [x] **Step 5: Verificar y probar mutación**
 
 Run: `cd cli && npx jest tests/commands/sensors/exec.test.ts tests/commands/sensors/exec-windows.test.ts tests/commands/sensors/baseline.test.ts tests/commands/sensors/run-inconclusive.test.ts --runInBand`
 
 Expected: PASS. Retirar temporalmente el guard de `inconclusive` en `applyBaseline`: el test R2.1 debe fallar; restaurar.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cli/src/commands/sensors/result.ts cli/src/commands/sensors/exec.ts cli/src/commands/sensors/run.ts cli/src/commands/sensors/types.ts cli/tests/commands/sensors
