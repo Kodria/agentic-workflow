@@ -104,6 +104,20 @@ export function hasUnsafeWin32Chars(file: string): boolean {
 }
 
 /**
+ * Explain why a resolved diff cannot safely be interpolated into a legacy shell
+ * command. Structured v2 commands never need this check: their file names remain
+ * literal argv entries and never meet a shell.
+ */
+export function changedScopeError(changed: ChangedFiles): string | undefined {
+    if (changed.error) return changed.error;
+    if (isWindowsNative() && changed.files.some(hasUnsafeWin32Chars)) {
+        return 'a changed filename contains a cmd.exe metacharacter (& | < > ^ % or newline/CR) '
+            + 'that quoting cannot reliably neutralize on native Windows — refusing to interpolate it';
+    }
+    return undefined;
+}
+
+/**
  * CommandLineToArgvW-safe quoting (the algorithm behind Python's
  * `subprocess.list2cmdline`, Rust's `std::process::Command` on Windows, and .NET's
  * argument escaper). Per the documented rule

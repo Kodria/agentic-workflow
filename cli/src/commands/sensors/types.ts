@@ -1,3 +1,32 @@
+/**
+ * Kept structural so the legacy runtime contract does not import the v2
+ * compatibility layer. `compatibility/types`.StructuredCommand is assignable to
+ * this shape at the preparation boundary.
+ */
+export type PreparedStructuredCommand = {
+    executable: string;
+    resolution: 'node-modules-bin' | 'python-environment' | 'path';
+    pythonEnvironmentRoot?: '.venv' | 'venv';
+    args: string[];
+    packageManager?: 'npm' | 'pnpm' | 'yarn' | 'bun';
+    environment?: { ESLINT_USE_FLAT_CONFIG: 'true' | 'false' };
+    fileInput?: { placeholder: '{files}'; extensions: string[] };
+};
+
+export type PreparedSensorExecution = {
+    name: string;
+    command?: { kind: 'legacy'; value: string } | { kind: 'structured'; value: PreparedStructuredCommand };
+    formatter?: string;
+    timeoutMs: number;
+    timeoutSource: 'project' | 'pack' | 'fallback';
+    requestedScope: 'full' | 'changed';
+    effectiveScope: 'full' | 'changed';
+    scopeReason?: string;
+    files?: number;
+    syntheticStatus?: 'pass' | 'skipped' | 'inconclusive';
+    syntheticReason?: string;
+};
+
 export type SensorConfig = {
     cmd?: string;
     fast?: boolean;
