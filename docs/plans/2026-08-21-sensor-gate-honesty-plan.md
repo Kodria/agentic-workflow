@@ -1067,13 +1067,13 @@ _Requirements: R1, R1.1, R1.2, R1.3, R2, R2.1, R3, R3.1, R3.2, R3.3, R3.4, R4, R
 
 **Skills:** `test-driven-development`, `requesting-code-review`, `verification-before-completion`
 
-- [ ] **Step 1: Instalar únicamente artefactos publicados en aislamiento**
+- [x] **Step 1: Instalar únicamente artefactos publicados en aislamiento**
 
 Crear directorios con `mktemp -d`, instalar `agentic-workflow-manager@${CLI_RELEASE_VERSION}` con un prefix temporal y clonar/checkout exacto `${REGISTRY_RELEASE_TAG}`. No tocar el home real ni `~/.awm`. Registrar versión, tag y hashes, no paths temporales.
 
 - [ ] **Step 2: Ejecutar matriz publicada legacy/v2**
 
-Casos mínimos: legacy baseline, v2 baseline, timeout project/pack/fallback, timeout inválido antes de spawn, changed literal/unsupported/empty/Git error/mixed, cuatro verdicts/exit, status READY sin ejecutar, preflight empírico exit-2 read-only, ESLint 8 TS/JS/generated. Cada caso guarda argv, verdict semántico, process exit y hash del fixture sanitizado.
+Casos mínimos: legacy baseline, v2 baseline, timeout project/pack/fallback, timeout inválido antes de spawn, changed literal/unsupported/empty/Git error/mixed, cuatro verdicts/exit, status READY sin ejecutar, preflight empírico read-only (la release publicada devuelve exit 1 para non-ready; no inventar exit 2), ESLint 8 TS/JS/generated. Cada caso guarda argv, verdict semántico, process exit y hash del fixture sanitizado.
 
 - [ ] **Step 3: Confirmar evidencia nativa 3-OS**
 

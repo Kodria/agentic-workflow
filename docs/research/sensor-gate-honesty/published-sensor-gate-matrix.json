@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-21T15:09:36.538Z",
+  "sanitization": { "registryRoot": "<registry-root>", "temporaryPaths": "removed" },
+  "cli": {
+    "version": "8.1.6",
+    "packageHash": "7a4e0e3b9fa8a1a32e1ae9604780f306d218c3d9b290e6a1f842b808307c2fa2"
+  },
+  "registry": {
+    "tag": "v3.0.0",
+    "commit": "3db85c92eecc449fb8f14252fe2c64bb493cfb3f",
+    "packHash": "0be244deaece90ad8671de0ca517abd7f0fce5567d0e688c8b76b8ee4f490348"
+  },
+  "commands": [
+    {
+      "name": "v2-init", "argv": ["sensors", "init", "--registry-root", "<registry-root>", "--pack", "js-ts"], "exit": 0, "signal": null,
+      "stdoutHash": "165297552e45dbc058d89d94ceb10230c9c503425c55495dcb72c746f0e1a33e", "stderrHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "v2-status", "argv": ["sensors", "status"], "exit": 0, "signal": null,
+      "stdoutHash": "86a161721eb013e9efa3053ebfdff2e623c51789c177ac35013a3446ae7e2fe0", "stderrHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "v2-preflight", "argv": ["preflight", "--verify-sensors", "--json"], "exit": 1, "signal": null,
+      "stdoutHash": "f2a4fb55acb8cf7b7c816e3a8356b850b25b302aae04484d05dd2dcf7537dae3", "stderrHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output": { "status": "degraded", "checks": [{ "id": "context", "ok": false }, { "id": "manifest", "ok": true }, { "id": "tools", "ok": true }, { "id": "pack", "ok": true }, { "id": "sensors-baseline", "ok": true }, { "id": "sensors-execution", "ok": true }, { "id": "host", "ok": true }] }
+    },
+    {
+      "name": "v2-clean-fast", "argv": ["sensors", "run", "--fast"], "exit": 0, "signal": null,
+      "stdoutHash": "a89f0fd139e90124c010406b6e069924653fd9104943df7fc7cfdbd2a95b8fbc", "stderrHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output": { "overall": "pass", "sensors": [{ "name": "lint", "status": "pass", "execution": { "timeoutMs": 30000, "timeoutSource": "pack", "requestedScope": "full", "effectiveScope": "full" } }] }
+    },
+    {
+      "name": "v2-project-timeout-fast", "argv": ["sensors", "run", "--fast"], "exit": 0, "signal": null,
+      "stdoutHash": "7f7b432fe0609acb3bf3d20321d96273c25d13affab5409cc30e092e36fbc687", "stderrHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output": { "overall": "pass", "sensors": [{ "name": "lint", "status": "pass", "execution": { "timeoutMs": 30000, "timeoutSource": "project", "requestedScope": "full", "effectiveScope": "full" } }] }
+    },
+    {
+      "name": "v2-disabled-fast", "argv": ["sensors", "run", "--fast"], "exit": 1, "signal": null,
+      "stdoutHash": "f1a3153f120467c7f834260f12250f24e632d83cf77484f21ec9e6b2286818ac", "stderrHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output": { "overall": "skipped", "sensors": [{ "name": "lint", "status": "skipped", "skipReason": "disabled", "execution": { "timeoutMs": 30000, "timeoutSource": "pack", "requestedScope": "full", "effectiveScope": "full" } }] }
+    },
+    {
+      "name": "v2-invalid-timeout-fast", "argv": ["sensors", "run", "--fast"], "exit": 1, "signal": null,
+      "stdoutHash": "deed2d199cc4451dcb9400be368ba4735d4d8ba15e7c124e3d199c1e919f6d35", "stderrHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output": { "sensors": [], "overall": "not_certified" }
+    },
+    {
+      "name": "v2-failing-fast", "argv": ["sensors", "run", "--fast"], "exit": 1, "signal": null,
+      "stdoutHash": "28d153aa95dffc348f33a21617724a93e99984df4cd416057b147bc3847da3b3", "stderrHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output": { "overall": "fail", "sensors": [{ "name": "lint", "status": "fail", "errors": [{ "file": "failure.js", "line": 1, "column": 1, "rule": "no-undef" }], "execution": { "timeoutMs": 30000, "timeoutSource": "pack", "requestedScope": "full", "effectiveScope": "full" } }] }
+    },
+    {
+      "name": "v2-baseline", "argv": ["sensors", "baseline"], "exit": 0, "signal": null,
+      "stdoutHash": "99515b51a1e0cc232e2a25bf7d45b257cf6c4ef14377c855c9da76fdbd7d021f", "stderrHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "v2-baselined-fast", "argv": ["sensors", "run", "--fast"], "exit": 0, "signal": null,
+      "stdoutHash": "e461ecbacdaa90afd868a5d5bf29d74af7afd0448c436ab23a59bb480180dd32", "stderrHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output": { "overall": "pass", "sensors": [{ "name": "lint", "status": "pass", "newCount": 0, "baselineCount": 1, "execution": { "timeoutMs": 30000, "timeoutSource": "pack", "requestedScope": "full", "effectiveScope": "full" } }] }
+    },
+    {
+      "name": "v2-changed-fast", "argv": ["sensors", "run", "--fast", "--changed"], "exit": 0, "signal": null,
+      "stdoutHash": "a09bae79f44dba0bef4c7d699b5835087e523385ee68fec7f15729552cf37fa4", "stderrHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output": { "overall": "pass", "changedScope": { "files": 1 }, "sensors": [{ "name": "lint", "status": "pass", "scope": "changed", "execution": { "timeoutMs": 30000, "timeoutSource": "pack", "requestedScope": "changed", "effectiveScope": "changed", "files": 1 } }] }
+    },
+    {
+      "name": "legacy-fast", "argv": ["sensors", "run", "--fast"], "exit": 1, "signal": null,
+      "stdoutHash": "81bc6506e9104b3c2b40837fa613d04d8d8a5b6d9d0bdaa21beafbd63f92e1cd", "stderrHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output": { "overall": "not_certified", "sensors": [{ "name": "lint", "status": "pass", "execution": { "timeoutMs": 10000, "timeoutSource": "fallback", "requestedScope": "full", "effectiveScope": "full" } }] }
+    }
+  ]
+}
