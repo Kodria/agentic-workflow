@@ -5,6 +5,7 @@
     "typecheck": {
       "cmd": "npm --prefix cli run typecheck",
       "fast": true,
+      "timeout": 30000,
       "formatter": "tsc"
     },
     "lint": {
