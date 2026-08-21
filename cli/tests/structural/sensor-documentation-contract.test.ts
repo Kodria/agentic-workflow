@@ -88,6 +88,17 @@ describe('R3 canonical sensor documentation', () => {
         }, 'invalid full manifest')).toThrow();
     });
 
+    test('records published gate acceptance with exact stable release identities and native OS evidence', () => {
+        const acceptance = JSON.parse(read('docs/research/sensor-gate-honesty/published-acceptance.json')) as Record<string, unknown>;
+
+        expect(acceptance.cliVersion).toMatch(/^\d+\.\d+\.\d+$/);
+        expect(acceptance.registryTag).toMatch(/^v\d+\.\d+\.\d+$/);
+        expect(acceptance.issues).toEqual([95, 96, 97, 98]);
+        expect(acceptance.platforms).toEqual({ linux: 'pass', macos: 'pass', windows: 'pass' });
+        expect(acceptance.verdict).toBe('pass');
+        expect(acceptance).toMatchObject({ cliVersion: '8.1.5', registryTag: 'v3.0.0', registryCommit: '3db85c92eecc449fb8f14252fe2c64bb493cfb3f' });
+    });
+
     test('documents exact Commander flags', () => {
         expect(helpFor('sensors coverage')).toContain('--min <count>');
         expect(helpFor('ledger add')).toContain('--defect-class <id>');

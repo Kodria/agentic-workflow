@@ -1014,7 +1014,7 @@ _Requirements: R3.1, R4, R7.3, R8, R8.1, R9, R9.1, R9.2, R9.3, R10.1, R10.2_
 
 **Skills:** `test-driven-development`, `requesting-code-review`, `verification-before-completion`
 
-- [ ] **Step 1: Fijar la versión mínima al CLI publicado real**
+- [x] **Step 1: Fijar la versión mínima al CLI publicado real**
 
 Editar `awm-registry.json.minCliVersion` con `${CLI_RELEASE_VERSION}` observado en T8, no con una versión anticipada. Actualizar catálogo/changelog mediante el patrón vigente del registry; el cambio breaking debe producir el siguiente major/minor que determine su workflow, sin tag manual.
 
@@ -1038,7 +1038,7 @@ node tests/r8-sensor-gate-contract.test.mjs
 
 Expected: todos exit 0, incluyendo proceso real ESLint 8. Ejecutar `git diff --check` y confirmar que no hay rutas temporales, node_modules ni outputs generados staged.
 
-- [ ] **Step 3: Review y PR registry**
+- [x] **Step 3: Review y PR registry**
 
 Invocar `requesting-code-review`, corregir todos los hallazgos con TDD y volver a correr la suite completa. Luego:
 
@@ -1052,7 +1052,7 @@ gh pr checks --repo Kodria/awm-baseline-registry --watch
 
 Expected: PR real y workflows verdes; ninguna publicación antes del CLI.
 
-- [ ] **Step 4: Observar merge y auto-tag**
+- [x] **Step 4: Observar merge y auto-tag**
 
 Tras merge autorizado, obtener el tag nuevo con `gh release list --repo Kodria/awm-baseline-registry --limit 5` y verificar que su commit contiene el PR y `minCliVersion=${CLI_RELEASE_VERSION}`. Guardarlo como `REGISTRY_RELEASE_TAG`.
 
@@ -1067,7 +1067,7 @@ _Requirements: R1, R1.1, R1.2, R1.3, R2, R2.1, R3, R3.1, R3.2, R3.3, R3.4, R4, R
 
 **Skills:** `test-driven-development`, `requesting-code-review`, `verification-before-completion`
 
-- [ ] **Step 1: Instalar únicamente artefactos publicados en aislamiento**
+- [x] **Step 1: Instalar únicamente artefactos publicados en aislamiento**
 
 Crear directorios con `mktemp -d`, instalar `agentic-workflow-manager@${CLI_RELEASE_VERSION}` con un prefix temporal y clonar/checkout exacto `${REGISTRY_RELEASE_TAG}`. No tocar el home real ni `~/.awm`. Registrar versión, tag y hashes, no paths temporales.
 
@@ -1075,7 +1075,7 @@ Crear directorios con `mktemp -d`, instalar `agentic-workflow-manager@${CLI_RELE
 
 Casos mínimos: legacy baseline, v2 baseline, timeout project/pack/fallback, timeout inválido antes de spawn, changed literal/unsupported/empty/Git error/mixed, cuatro verdicts/exit, status READY sin ejecutar, preflight empírico exit-2 read-only, ESLint 8 TS/JS/generated. Cada caso guarda argv, verdict semántico, process exit y hash del fixture sanitizado.
 
-- [ ] **Step 3: Confirmar evidencia nativa 3-OS**
+- [x] **Step 3: Confirmar evidencia nativa 3-OS**
 
 Enlazar las corridas verdes de los PRs/workflows para Ubuntu, macOS y Windows. No sustituir Windows nativo con Wine ni inferir portabilidad desde Linux. `published-acceptance.json` contiene:
 

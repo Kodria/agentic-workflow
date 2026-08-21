@@ -1,0 +1,64 @@
+{
+  "cliVersion": "8.1.5",
+  "registryTag": "v3.0.0",
+  "registryCommit": "3db85c92eecc449fb8f14252fe2c64bb493cfb3f",
+  "issues": [95, 96, 97, 98],
+  "platforms": {
+    "linux": "pass",
+    "macos": "pass",
+    "windows": "pass"
+  },
+  "verdict": "pass",
+  "evidence": {
+    "cliWorkflow": "https://github.com/Kodria/agentic-workflow/actions/runs/32470501705",
+    "registryWorkflow": "https://github.com/Kodria/awm-baseline-registry/actions/runs/32479729036",
+    "cliNpm": "agentic-workflow-manager@8.1.5",
+    "registryMinCliVersion": "8.1.5"
+  },
+  "publishedCases": {
+    "bareEslint10": {
+      "toolVersion": "10.8.1",
+      "variant": "eslint-10-flat",
+      "expected": "not_certified before sensor spawn when the compatibility probe has no matching project configuration",
+      "observed": {
+        "processExit": 1,
+        "overall": "not_certified",
+        "sensorStatus": "inconclusive",
+        "reason": "unverifiable: probe-not-matched",
+        "elapsedMs": 0,
+        "timeoutMs": 30000,
+        "timeoutSource": "pack"
+      }
+    },
+    "eslint8Fixture": {
+      "toolVersion": "8.57.1",
+      "variant": "eslint-8-eslintrc",
+      "observed": {
+        "status": "READY",
+        "processExit": 1,
+        "overall": "fail",
+        "lint": {
+          "status": "fail",
+          "timeoutMs": 30000,
+          "timeoutSource": "pack",
+          "elapsedMs": 1051,
+          "intentionalRules": ["no-undef", "no-unused-vars"]
+        },
+        "typecheck": {
+          "status": "pass",
+          "timeoutMs": 120000,
+          "timeoutSource": "pack",
+          "elapsedMs": 1777
+        }
+      }
+    },
+    "preflightReadOnly": {
+      "observed": {
+        "processExit": 1,
+        "status": "degraded",
+        "projectHashUnchanged": true,
+        "reason": "bareEslint10 remains probe-not-matched before sensor execution"
+      }
+    }
+  }
+}
