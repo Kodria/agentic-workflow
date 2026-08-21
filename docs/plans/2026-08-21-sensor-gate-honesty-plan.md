@@ -442,7 +442,7 @@ _Requirements: R1, R1.1, R1.2, R1.3, R2, R2.1, R4.3, R4.4, R4.5, R4.6, R5.1, R5.
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Congelar legacy y escribir regresiones v2 rojas**
+- [x] **Step 1: Congelar legacy y escribir regresiones v2 rojas**
 
 ```ts
 test('loads baseline and changed files once for a mixed v2 run (R1.2)', async () => {
@@ -467,13 +467,13 @@ test('git failure runs full and never claims changed scope (R4.3, R4.6)', async 
 });
 ```
 
-- [ ] **Step 2: Comprobar rojo sin alterar los tests legacy**
+- [x] **Step 2: Comprobar rojo sin alterar los tests legacy**
 
 Run: `cd cli && npx jest tests/commands/sensors/run.test.ts tests/commands/sensors/run-changed.test.ts tests/commands/sensors/run-partial.test.ts tests/commands/sensors/run-tool-missing.test.ts tests/commands/sensors/run-is-read-only.test.ts --runInBand`
 
 Expected: tests legacy existentes PASS; nuevos casos v2 FAIL por el early return.
 
-- [ ] **Step 3: Implementar contexto y reducer únicos**
+- [x] **Step 3: Implementar contexto y reducer únicos**
 
 ```ts
 export function reduceVerdict(results: SensorResult[]): RunOutput['overall'] {
@@ -486,17 +486,17 @@ export function reduceVerdict(results: SensorResult[]): RunOutput['overall'] {
 
 `runSensors` ejecuta en este orden: validar opciones → localizar/parsar manifest → cargar baseline una vez → resolver changed/base una vez → resolver live v2 una vez si aplica → preparar todas las entradas → pool común → interpretar/baseline → reducer. Eliminar `runV2Sensor` y el `return` v2 separado. Los synthetic pass/skipped/inconclusive entran al mismo reducer.
 
-- [ ] **Step 4: Asegurar fail-closed y read-only**
+- [x] **Step 4: Asegurar fail-closed y read-only**
 
 La tabla de regresión debe cubrir spawn error, tool missing, timeout limpio, overflow limpio, salida no parseable, variant drift y cero seleccionados. Ninguno puede devolver `pass`. Capturar `git status --porcelain=v1` antes/después del fixture v2 y afirmar igualdad byte a byte.
 
-- [ ] **Step 5: Verde y mutación discriminante**
+- [x] **Step 5: Verde y mutación discriminante**
 
 Run: `cd cli && npx jest tests/commands/sensors/run.test.ts tests/commands/sensors/run-changed.test.ts tests/commands/sensors/run-partial.test.ts tests/commands/sensors/run-tool-missing.test.ts tests/commands/sensors/run-is-read-only.test.ts --runInBand`
 
 Expected: PASS. Reintroducir temporalmente el early return v2 anterior: los casos baseline/changed/mixed deben fallar; restaurar.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cli/src/commands/sensors/run.ts cli/src/commands/sensors/verdict.ts cli/src/commands/sensors/types.ts cli/tests/commands/sensors
