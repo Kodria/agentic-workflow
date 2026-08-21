@@ -6,7 +6,7 @@ mode: brief
 readiness: ready
 created: 2026-08-21
 updated: 2026-08-21
-open_decisions: [DA-1, DA-2, DA-3, DA-4]
+open_decisions: [DA-4]
 project: agentic-workflow
 ---
 
@@ -188,12 +188,14 @@ flowchart TD
 
 ## Open Decisions
 
-| ID | Decisión | Bloquea | Posiciones conocidas |
+Resueltas durante la fase de diseño (`brainstorming`, Brief Preload Mode); se conservan en la tabla por trazabilidad, con su resolución registrada. Solo `DA-4` sigue abierta, y no bloquea ningún release.
+
+| ID | Decisión | Bloquea | Estado y resolución |
 |---|---|---|---|
-| DA-1 | Cómo se garantiza que un orquestador de un registry personal sea invisible para otra persona con acceso a la misma máquina o al mismo repositorio | Release 1 | Depende de lo que R0 encuentre sobre el modelo de instalación y symlinks. Posiciones a evaluar: aislamiento por directorio de usuario del sistema operativo / registry marcado como privado en su manifiesto / instalación fuera del alcance compartido. No se elige sin el hallazgo de R0. |
-| DA-2 | Si la precedencia entre orquestadores la declara cada registry o si es fija y la define el framework | Release 2 | Declarada por el registry: más flexible, permite que un autor exprese "voy antes que el flujo de desarrollo". Fija en el framework: más predecible, evita que dos autores se declaren ambos primeros. |
-| DA-3 | Qué ocurre cuando dos orquestadores declarados resultan aplicables a la vez y la precedencia no los desempata | Release 2 | Posición registrada en RF-2.3 como comportamiento por defecto seguro (no aplicar ninguno). Alternativas a evaluar: preguntar al usuario / desempatar por orden de instalación / rechazar la instalación que introduce el solapamiento. |
-| DA-4 | Si se incorpora, y bajo qué disparador, la capa aditiva O1 (predicado determinista evaluado por el framework sobre un espacio de hechos de sesión) | ninguna | Se difiere deliberadamente. Se incorpora solo si el uso real demuestra que el juicio del agente sobre el disparador en prosa activa de más o de menos con frecuencia intolerable. Es aditiva por diseño: no rompe registries existentes. |
+| DA-1 | Cómo se garantiza que un orquestador de un registry personal sea invisible para quien no lo instaló | ninguna (resuelta) | **Resuelta.** El dueño acotó el modelo de amenaza: el vector real es el repositorio compartido — compañeros en sus propias máquinas, sin cuentas ni equipos comunes. La garantía exigible es por tanto "nada del registry personal toca el árbol versionado del repositorio", que el modelo de instalación por `HOME` ya satisface (skills bajo `~/.claude/skills`, hooks bajo `~/.awm/hooks`). Escenarios de cuenta compartida, contenedor con `HOME` común y sesiones de CI quedan fuera del modelo de amenaza y por tanto fuera de alcance. `RNF-T.3` se verifica con `CA-T.3`, cuya parte de árbol limpio es la que ahora manda. |
+| DA-2 | Si la precedencia entre orquestadores la declara cada registry o si es fija y la define el framework | ninguna (resuelta) | **Resuelta: ninguna de las dos.** La precedencia deja de ser un concepto del framework. AWM fija una sola regla agnóstica — los orquestadores declarados se consideran antes que `development-process` y `product-process` — y el orden **entre** declarados emerge del contrato de terminación (`PR-2`): cada orquestador nombra a quién cede el control, igual que hoy `product-process` cede a `development-process`. Descartada la precedencia declarada por ser un namespace compartido sin coordinador (dos equipos declarándose primeros colisionan sin árbitro posible bajo O2b) y por agregar la fricción de autoría que `RF-4.1` busca eliminar. Consecuencia aceptada: el acoplamiento pasa a estar entre procesos, que es donde corresponde, y no en el framework. |
+| DA-3 | Qué ocurre cuando dos orquestadores declarados resultan aplicables a la vez | ninguna (reducida) | **Reducida por la resolución de DA-2.** Dos declarados aplicables ya no compiten: uno se ejecuta y nombra al siguiente en su terminación. El caso residual —dos aplicables y ninguno nombra al otro— queda cubierto por el comportamiento por defecto seguro que `RF-2.3` ya especifica: no aplicar ninguno y continuar con el ruteo actual. No requiere mecanismo adicional. |
+| DA-4 | Si se incorpora, y bajo qué disparador, la capa aditiva O1 (predicado determinista evaluado por el framework sobre un espacio de hechos de sesión) | ninguna | **Abierta, diferida deliberadamente.** Se incorpora solo si el uso real demuestra que el juicio del agente sobre el disparador en prosa activa de más o de menos con frecuencia intolerable. Es aditiva por diseño: no rompe registries existentes. |
 
 ## Out of Scope
 
@@ -218,14 +220,14 @@ Orden por valor de negocio, no por dependencia técnica. Release 1 va primero po
 
 - **Valor productivo independiente:** el proceso propio deja de ser un skill suelto y pasa a estar versionado, aislado y distribuible con el contrato de registry que ya existe y funciona, sin tocar el CLI. Elimina la deuda de N2 y satisface la frontera personal↔corporativo, aun si Release 2 nunca se hiciera.
 - **Alcance:** RF-4.1, RF-4.2, RNF-T.3, RNF-T.5. Método de autoría documentado (PR-3) y un registry propio real construido con ese método.
-- **Bloqueado por:** DA-1.
+- **Bloqueado por:** nada (DA-1 resuelta en fase de diseño).
 - **Aceptación:** CA-4.1, CA-4.2, CA-T.3, CA-T.5.
 
 ### Release 2 — Punto de extensión en `use-awm`
 
 - **Valor productivo independiente:** cualquier equipo declara su orquestador y AWM lo considera y lo rutea. Es lo que convierte a AWM de herramienta con dos procesos fijos en plataforma extensible, y es lo comprometido con los líderes.
 - **Alcance:** RF-1.1, RF-1.2, RF-1.3, RF-2.1, RF-2.2, RF-2.3, RF-3.1, RF-3.2, RNF-T.1, RNF-T.2, RNF-T.4. Implementa PR-1 y PR-2.
-- **Bloqueado por:** DA-2, DA-3.
+- **Bloqueado por:** nada (DA-2 resuelta, DA-3 reducida a un caso ya especificado por RF-2.3).
 - **Aceptación:** CA-1.1, CA-1.2, CA-1.3, CA-2.1, CA-2.2, CA-2.3, CA-3.1, CA-3.2, CA-T.1, CA-T.2, CA-T.4.
 
 ## Risks
