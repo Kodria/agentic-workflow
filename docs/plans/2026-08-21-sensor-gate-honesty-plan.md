@@ -136,7 +136,7 @@ _Requirements: R3, R3.1, R3.3, R3.4, R4, R10_
 
 **Skills:** `test-driven-development`
 
-- [ ] **Step 1: Escribir tests rojos de timeout y changedCommand**
+- [x] **Step 1: Escribir tests rojos de timeout y changedCommand**
 
 ```ts
 test.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '1000'])('rejects v2 timeout %p before execution (R3.3)', (timeout) => {
@@ -166,13 +166,13 @@ test.each([
 });
 ```
 
-- [ ] **Step 2: Ejecutar el corpus focal y comprobar rojo**
+- [x] **Step 2: Ejecutar el corpus focal y comprobar rojo**
 
 Run: `cd cli && npx jest tests/commands/sensors/compatibility/contract.test.ts tests/commands/sensors/compatibility/manifest.test.ts tests/commands/sensors/init.test.ts --runInBand`
 
 Expected: FAIL porque `timeout` es campo desconocido en v2 y `changedCommand` aún no pertenece a `SensorVariant`.
 
-- [ ] **Step 3: Implementar validación compartida y tipos aditivos**
+- [x] **Step 3: Implementar validación compartida y tipos aditivos**
 
 ```ts
 // compatibility/timeout.ts
@@ -196,7 +196,7 @@ export function resolveTimeout(input: {
 
 Agregar `changedCommand?: StructuredCommand` a `SensorVariant`, `timeout?: number` a `SensorPackSensor` y al sensor de `SensorManifestV2`. `parseVariant` acepta/parsa `changedCommand`; `parseSensor` acepta `timeout`; `parseV2Sensor` acepta `timeout`. Mantener estricto el resto de campos.
 
-- [ ] **Step 4: Preservar el override de proyecto en init**
+- [x] **Step 4: Preservar el override de proyecto en init**
 
 En el objeto v2 materializado de `init.ts`, copiar solo `prior.timeout`:
 
@@ -215,13 +215,13 @@ sensors[name] = {
 
 No copiar `command`, `assets`, formatter ni environment desde el manifest previo.
 
-- [ ] **Step 5: Verificar verde y mutación discriminante**
+- [x] **Step 5: Verificar verde y mutación discriminante**
 
 Run: `cd cli && npx jest tests/commands/sensors/compatibility/contract.test.ts tests/commands/sensors/compatibility/manifest.test.ts tests/commands/sensors/init.test.ts --runInBand`
 
 Expected: PASS. Luego retirar temporalmente la copia de `prior.timeout`, ejecutar el test de preservación y observar FAIL; restaurar y obtener PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cli/src/commands/sensors/compatibility cli/src/commands/sensors/init.ts cli/tests/commands/sensors/compatibility cli/tests/commands/sensors/init.test.ts
