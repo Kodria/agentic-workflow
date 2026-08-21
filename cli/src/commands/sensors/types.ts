@@ -78,6 +78,17 @@ export type SensorError = {
     rule?: string;
 };
 
+/** Bounded execution facts attached to every prepared sensor result. */
+export type ExecutionEvidence = {
+    timeoutMs: number;
+    timeoutSource: 'project' | 'pack' | 'fallback';
+    elapsedMs: number;
+    requestedScope: 'full' | 'changed';
+    effectiveScope: 'full' | 'changed';
+    files?: number;
+    scopeReason?: string;
+};
+
 export type SensorResult = {
     name: string;
     /**
@@ -120,6 +131,8 @@ export type SensorResult = {
     newCount?: number;
     /** Findings suppressed by the baseline. Present only when a baseline is applied. */
     baselineCount?: number;
+    /** Execution configuration and observed duration, when this result was prepared. */
+    execution?: ExecutionEvidence;
 };
 
 export type RunOutput = {

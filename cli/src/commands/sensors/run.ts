@@ -11,7 +11,9 @@ import { parseTestOutput } from './formatters/test';
 import { parseMypyOutput } from './formatters/mypy';
 import { parseRuffOutput } from './formatters/ruff';
 import { parseShellcheckOutput } from './formatters/shellcheck';
-import { readBaseline, partition } from './baseline';
+import { readBaseline } from './baseline';
+import { applyBaseline } from './result';
+export { applyBaseline };
 import { changedFiles, applyChangedCmd, filterByExtension, hasUnsafeWin32Chars } from './changed';
 // Solo `detectStack` (puro, lee el arbol) — NO `initSensors`, que escribe. `run` es un
 // verbo de lectura: no debe tener a mano ninguna funcion capaz de mutar el proyecto.
@@ -45,26 +47,6 @@ export type RunOptions = {
     /** Comparison point for `changed`. Defaults to `HEAD` (uncommitted work only). */
     base?: string;
 };
-
-/**
- * Apply the baseline to a sensor result: keep only findings not already accepted.
- * `status` becomes 'pass' when every finding was baseline-suppressed. Results
- * without a verdict of their own — skipped and inconclusive — are returned
- * untouched: there is nothing to ratchet, and letting them through here would
- * hand back a `pass` for a sensor that never reported anything.
- */
-export function applyBaseline(result: SensorResult, accepted: string[] | undefined): SensorResult {
-    if (result.status === 'skipped' || result.status === 'inconclusive') return result;
-    const { newErrors, suppressed } = partition(result.name, result.errors, accepted);
-    if (suppressed === 0) return result;
-    return {
-        ...result,
-        errors: newErrors,
-        status: newErrors.length > 0 ? 'fail' : 'pass',
-        newCount: newErrors.length,
-        baselineCount: suppressed,
-    };
-}
 
 function readManifest(cwd: string): SensorManifest | null {
     const p = path.join(cwd, MANIFEST_FILE);

@@ -2,6 +2,18 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { runCommand, runStructuredCommand } from '../../../src/commands/sensors/exec';
+import { executePrepared } from '../../../src/commands/sensors/result';
+
+const sensor = (overrides: Record<string, unknown> = {}) => ({
+    name: 'lint',
+    command: { kind: 'legacy' as const, value: 'node -e "setTimeout(() => {}, 1000)"' },
+    formatter: 'generic',
+    timeoutMs: 5_000,
+    timeoutSource: 'fallback' as const,
+    requestedScope: 'full' as const,
+    effectiveScope: 'full' as const,
+    ...overrides,
+});
 
 const onPosix = process.platform !== 'win32' ? describe : describe.skip;
 const itPosix = process.platform !== 'win32' ? it : it.skip;
@@ -17,6 +29,14 @@ async function until(fn: () => boolean, budgetMs = 4000): Promise<boolean> {
 }
 
 describe('runCommand — exit codes and output', () => {
+    it('records bounded execution evidence on timeout (R3.2,R3.4,R7.1)', async () => {
+        const result = await executePrepared(sensor({ timeoutMs: 25, timeoutSource: 'project' }));
+
+        expect(result.status).toBe('inconclusive');
+        expect(result.execution).toMatchObject({ timeoutMs: 25, timeoutSource: 'project', effectiveScope: 'full' });
+        expect(result.execution!.elapsedMs).toBeGreaterThanOrEqual(0);
+    });
+
     it('passes structured metacharacters literally without a shell', async () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-exec-argv-'));
         const marker = path.join(dir, 'must-not-exist');

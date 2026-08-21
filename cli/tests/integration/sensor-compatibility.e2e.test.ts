@@ -80,7 +80,7 @@ test.each(['linux', 'darwin', 'win32'] as const)('keeps injected resolver semant
         if (parsed.kind !== 'v2') throw new Error('fixture must be a v2 pack');
         const discovered = discoverProjectEvidence(fixture.project, parsed.pack, { platform: () => platform });
         const probe = await runCompatibilityProbe({ kind: 'version' }, { cwd: fixture.project, toolExecutable: 'eslint' }, async () => ({
-            code: 0, signal: null, timedOut: false, overflowed: false, stdout: 'eslint v10.4.1', stderr: '',
+            code: 0, signal: null, timedOut: false, overflowed: false, elapsedMs: 0, stdout: 'eslint v10.4.1', stderr: '',
         }));
         const result = resolveSensorCompatibility(parsed.pack.sensors.lint, { ...discovered, probe }, { pack: 'js-ts', sensor: 'lint' });
         expect(result).toMatchObject({ state: 'certified', variantId: 'eslint-10', toolVersion: '10.4.1' });
