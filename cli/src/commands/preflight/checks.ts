@@ -271,6 +271,13 @@ function renderExecutionFailure(output: Awaited<ReturnType<typeof runSensors>>):
     }).join('; ');
 }
 
+function executionRemedy(output: Awaited<ReturnType<typeof runSensors>>): string {
+    if (output.sensors.every(sensor => sensor.status === 'pass')) {
+        return 'configure at least one runnable sensor with `awm sensors init`, then rerun `awm preflight --verify-sensors`';
+    }
+    return 'diagnose the named sensor; if a healthy progressing run needs longer, set a finite sensor timeout and rerun `awm preflight --verify-sensors`';
+}
+
 /** Run the full read-only sensor gate and reject every verdict except `pass`. */
 export async function checkSensorExecution(cwd: string): Promise<PreflightCheck> {
     try {
@@ -282,7 +289,7 @@ export async function checkSensorExecution(cwd: string): Promise<PreflightCheck>
             id: 'sensors-execution',
             ok: false,
             detail: renderExecutionFailure(output),
-            remedy: 'diagnose the named sensor; if a healthy progressing run needs longer, set a finite sensor timeout and rerun `awm preflight --verify-sensors`',
+            remedy: executionRemedy(output),
         };
     } catch {
         // Fail closed without relaying an arbitrary tool/configuration error to JSON.

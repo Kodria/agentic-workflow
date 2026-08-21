@@ -101,6 +101,22 @@ describe('preflight', () => {
         });
     });
 
+    it('does not invent a sensor or timeout when empirical verification has no executed sensors', async () => {
+        const dir = make();
+        mockRunSensors.mockResolvedValue({ overall: 'not_certified', sensors: [] });
+
+        const report = await preflight(dir, { verifySensors: true });
+        const execution = check(report, 'sensors-execution');
+
+        expect(execution).toMatchObject({
+            ok: false,
+            detail: 'sensor verdict was not_certified; no sensor established an empirical pass',
+        });
+        expect(execution.detail).not.toMatch(/timeout|elapsed|named sensor/i);
+        expect(execution.remedy).toContain('awm sensors init');
+        expect(execution.remedy).not.toContain('named sensor');
+    });
+
     it('reports not_configured when no sensor manifest exists', async () => {
         // The team-rollout case: a developer clones the repo and never runs
         // `awm sensors init`. Today nothing notices until an unattended run is already
