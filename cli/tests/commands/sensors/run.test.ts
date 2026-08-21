@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { runSensors } from '../../../src/commands/sensors/run';
+import { reduceVerdict } from '../../../src/commands/sensors/verdict';
 
 function mkTmp(): string {
     return fs.mkdtempSync(path.join(os.tmpdir(), 'awm-sensors-'));
@@ -218,6 +219,15 @@ describe('runSensors', () => {
         mockRunCommand.mockResolvedValueOnce(tcError()).mockResolvedValueOnce(ok());
         const result = await runSensors({ fast: true, cwd: tmpDir, ignoreBaseline: true });
         expect(result.overall).toBe('fail');
+    });
+});
+
+describe('reduceVerdict', () => {
+    it('lets a failing full sensor outrank an empty changed-scope synthetic pass', () => {
+        expect(reduceVerdict([
+            { name: 'lint', status: 'pass', errors: [], scope: 'changed' },
+            { name: 'typecheck', status: 'fail', errors: [{ message: 'broken' }] },
+        ])).toBe('fail');
     });
 });
 
