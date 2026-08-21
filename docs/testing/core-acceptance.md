@@ -247,9 +247,13 @@ diff before.txt after.txt
 
 **Expect:** `sensors status` may report static `READY`, but that is not a
 health or certification claim and must not execute a sensor. The empirical,
-read-only `--verify-sensors` run requires overall `pass`; every non-pass is a
-degraded preflight report with sensor name, timeout, source, elapsed time and
-safe reason. The before/after trees must match.
+read-only `--verify-sensors` run requires overall `pass`. When sensors were
+selected, every non-pass is a degraded preflight report with sensor name,
+timeout, source, elapsed time and safe reason. When no sensor execution is
+established (for example `not_certified` and an empty list), the report must
+say so and direct the operator to `awm sensors init`; it must not fabricate a
+sensor name, timeout, source, or elapsed time. The before/after trees must
+match.
 
 ## CORE-14 · Context budget is measurable
 

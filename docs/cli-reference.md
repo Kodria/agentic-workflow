@@ -127,10 +127,14 @@ Where `awm doctor` answers *"is AWM installed correctly?"*, preflight answers *"
 By default preflight is static and does not dispatch a sensor. Add
 `--verify-sensors` immediately before an unattended handoff: it runs the full
 sensor set, remains read-only, and accepts only an overall `pass`. Its failed
-`sensors-execution` check names the sensor and only bounded execution facts
-(timeout, source, elapsed time, and reason); it never relays arbitrary tool
-output. This makes a timeout or an inconclusive result actionable before a
-human has gone away.
+`sensors-execution` check identifies each selected non-pass sensor with only
+bounded execution facts (timeout, source, elapsed time, and reason); it never
+relays arbitrary tool output. If no sensor execution is established — for
+example, `not_certified` with an empty sensor list — it reports that no sensor
+established an empirical pass and directs the operator to `awm sensors init`.
+It does not fabricate a sensor name, timeout, source, or elapsed time. This
+makes a timeout, an inconclusive result, or a missing configuration actionable
+before a human has gone away.
 
 ### `awm context-budget`
 

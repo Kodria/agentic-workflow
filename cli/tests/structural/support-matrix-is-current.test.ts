@@ -46,6 +46,10 @@ describe('docs/support-matrix.md refleja el codigo', () => {
         expect(acceptance).toContain('v2 manifest without new fields');
         expect(acceptance).toContain('supported, unsupported, empty, and Git-error');
         expect(acceptance).toContain('project, pack, and fallback');
+        expect(cliReference).toContain('`not_certified` with an empty sensor list');
+        expect(cliReference).toContain('`awm sensors init`');
+        expect(acceptance).toContain('established (for example `not_certified` and an empty list)');
+        expect(acceptance).toMatch(/must not fabricate a\s+sensor name, timeout, source, or elapsed time/);
         expect(osMatrix).toContain('Ubuntu, macOS, and native Windows');
         expect(osMatrix).toContain('shell-free');
     });
