@@ -2,8 +2,13 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { computeSensorStatus } from '../../../src/commands/sensors/status';
-import { preflight } from '../../../src/commands/preflight/checks';
-import { runSensors } from '../../../src/commands/sensors/run';
+
+jest.mock('../../../src/commands/sensors/exec', () => ({
+    runCommand: jest.fn(),
+    runStructuredCommand: jest.fn(),
+}));
+
+const { runCommand, runStructuredCommand } = require('../../../src/commands/sensors/exec');
 
 // `resolveOnPath` resuelve PATH en proceso (ya no invoca un shell — ver
 // core/paths.ts). Por eso estos tests controlan un PATH aislado en vez de
@@ -41,6 +46,29 @@ describe('computeSensorStatus', () => {
         expect(result.pack).toBeNull();
     });
 
+    it.each([
+        ['valid manifest', 'READY', () => {
+            installLocalBin('eslint');
+            fs.writeFileSync(path.join(tmpDir, 'eslint.config.awm.mjs'), 'export default []');
+            fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+                pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint . --config eslint.config.awm.mjs' } },
+            }));
+        }],
+        ['missing tool', 'DEGRADED', () => {
+            fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+                pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .' } },
+            }));
+        }],
+        ['absent manifest', 'NOT_CONFIGURED', () => {}],
+    ] as const)('reports %s as %s without dispatching sensor commands', async (_case, overall, setup) => {
+        setup();
+        await expect(computeSensorStatus(tmpDir)).resolves.toMatchObject({ overall });
+        expect(runCommand).not.toHaveBeenCalled();
+        expect(runStructuredCommand).not.toHaveBeenCalled();
+    });
+
     // Helper: simulate a tool installed locally (node_modules/.bin/<tool>)
     function installLocalBin(tool: string) {
         const binDir = path.join(tmpDir, 'node_modules', '.bin');
@@ -48,7 +76,7 @@ describe('computeSensorStatus', () => {
         fs.writeFileSync(path.join(binDir, tool), '');
     }
 
-    it('keeps an operational legacy manifest DEGRADED even when its npx tool is installed locally', async () => {
+    it('reports READY for an operational legacy manifest when its declared npx tool is installed locally', async () => {
         installLocalBin('tsc');
         fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
@@ -56,7 +84,7 @@ describe('computeSensorStatus', () => {
             sensors: { typecheck: { cmd: 'npx tsc --noEmit', fast: true } }
         }));
         const result = await computeSensorStatus(tmpDir);
-        expect(result.overall).toBe('DEGRADED');
+        expect(result.overall).toBe('READY');
         expect(result.pack).toBe('js-ts');
         expect(result.checks.typecheck.ok).toBe(true);
     });
@@ -86,7 +114,7 @@ describe('computeSensorStatus', () => {
         expect(result.checks.lint.detail).toMatch(/missing config/i);
     });
 
-    it('is HEALTHY when the npx tool is installed and the --config file exists', async () => {
+    it('is READY when the declared npx tool and config are present without running a sensor command', async () => {
         installLocalBin('eslint');
         fs.writeFileSync(path.join(tmpDir, 'eslint.config.awm.mjs'), 'export default []');
         fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
@@ -95,7 +123,10 @@ describe('computeSensorStatus', () => {
             sensors: { lint: { cmd: 'npx eslint . --config eslint.config.awm.mjs --format json', fast: true } }
         }));
         const result = await computeSensorStatus(tmpDir);
+        expect(result.overall).toBe('READY');
         expect(result.checks.lint.ok).toBe(true);
+        expect(runCommand).not.toHaveBeenCalled();
+        expect(runStructuredCommand).not.toHaveBeenCalled();
     });
 
     it('returns DEGRADED when a binary is missing', async () => {
@@ -131,7 +162,7 @@ describe('computeSensorStatus', () => {
             installOnPath('semgrep');
 
             const result = await computeSensorStatus(tmpDir);
-            expect(result.overall).toBe('DEGRADED');
+            expect(result.overall).toBe('READY');
             expect(result.checks.security.ok).toBe(true);
         });
     });
@@ -177,10 +208,10 @@ describe('computeSensorStatus', () => {
         expect(result.checks.mutation.detail).toBe('disabled');
     });
 
-    it('does not trust the initialized v2 variant after local tool drift', async () => {
-        // The manifest records ESLint 9 at init time, but local evidence is now ESLint
-        // 10. Status must resolve the installed pack again, not certify the stale
-        // initializedCompatibility record.
+    it('reports v2 manifest static readiness without re-running compatibility probes', async () => {
+        // The manifest's initialization evidence remains durable diagnostic context.
+        // Status only checks its declared local executable; it never re-runs a project
+        // compatibility probe or calls a sensor command.
         const previousHome = process.env.AWM_HOME;
         const home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-home-'));
         try {
@@ -201,6 +232,8 @@ describe('computeSensorStatus', () => {
             fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ devDependencies: { eslint: '^10.0.0' } }));
             fs.mkdirSync(path.join(tmpDir, 'node_modules', 'eslint'), { recursive: true });
             fs.writeFileSync(path.join(tmpDir, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version: '10.0.0' }));
+            fs.mkdirSync(path.join(tmpDir, 'node_modules', '.bin'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, 'node_modules', '.bin', 'eslint'), '');
             fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
             fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
                 schemaVersion: 2, pack: 'js-ts', sensors: { lint: {
@@ -210,15 +243,9 @@ describe('computeSensorStatus', () => {
             }));
 
             const result = await computeSensorStatus(tmpDir);
-            expect(result.overall).toBe('DEGRADED');
-            expect(result.checks.lint).toMatchObject({ ok: false, detail: expect.stringContaining('variant-drift') });
-            fs.writeFileSync(path.join(tmpDir, 'AGENTS.md'), '# test\n');
-            const gate = await preflight(tmpDir);
-            expect(gate.status).toBe('degraded');
-            expect(gate.checks.find(check => check.id === 'tools')).toMatchObject({ ok: false, detail: expect.stringContaining('variant-drift') });
-            const run = await runSensors({ cwd: tmpDir, all: true });
-            expect(run.overall).toBe('not_certified');
-            expect(run.sensors).toEqual([expect.objectContaining({ name: 'lint', status: 'inconclusive', skipReason: expect.stringContaining('variant-drift') })]);
+            expect(result).toMatchObject({ overall: 'READY', checks: { lint: { ok: true } } });
+            expect(runCommand).not.toHaveBeenCalled();
+            expect(runStructuredCommand).not.toHaveBeenCalled();
         } finally {
             if (previousHome === undefined) delete process.env.AWM_HOME;
             else process.env.AWM_HOME = previousHome;

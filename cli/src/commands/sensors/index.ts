@@ -101,10 +101,10 @@ export function registerSensorsCommand(program: Command): void {
 
     sensors
         .command('status')
-        .description('check sensor health for the current project')
+        .description('check static sensor readiness for the current project')
         .action(async () => {
             const status = await computeSensorStatus();
-            const icon = status.overall === 'HEALTHY' ? pc.green('✔') : pc.yellow('⚠');
+            const icon = status.overall === 'READY' ? pc.green('✔') : pc.yellow('⚠');
             console.log(`\nPack:    ${status.pack ?? 'none'}`);
             console.log(`Overall: ${icon} ${status.overall}\n`);
             for (const [name, check] of Object.entries(status.checks)) {
@@ -112,7 +112,7 @@ export function registerSensorsCommand(program: Command): void {
                 console.log(`  ${mark}  ${name.padEnd(12)} ${check.detail}`);
             }
             console.log('');
-            if (status.overall !== 'HEALTHY') process.exit(1);
+            if (status.overall !== 'READY') process.exit(1);
         });
 
     sensors

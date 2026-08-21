@@ -160,7 +160,12 @@ export type SensorCheck = {
 };
 
 export type SensorStatusResult = {
-    overall: 'HEALTHY' | 'DEGRADED' | 'NOT_CONFIGURED';
+    /**
+     * Static readiness only: manifest and declared local prerequisites are present.
+     * This command never executes a project sensor, so READY is not a health or
+     * certification claim; use `awm sensors run` for an empirical verdict.
+     */
+    overall: 'READY' | 'DEGRADED' | 'NOT_CONFIGURED';
     pack: string | null;
     checks: Record<string, SensorCheck>;
 };

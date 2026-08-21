@@ -339,7 +339,7 @@ describe('initSensors', () => {
             const written = JSON.parse(fs.readFileSync(path.join(tmpDir, '.awm', 'sensors.json'), 'utf8'));
             expect(explicit.manifest).toMatchObject({ schemaVersion: 2, pack: 'generic', packSelection: 'explicit', sensors: { security: { variantId: 'eslint-10' } } });
             expect(written.packSelection).toBe('explicit');
-            await expect(computeSensorStatus(tmpDir)).resolves.toMatchObject({ overall: 'HEALTHY', checks: { security: { ok: true } } });
+            await expect(computeSensorStatus(tmpDir)).resolves.toMatchObject({ overall: 'DEGRADED', checks: { security: { ok: false } } });
         } finally {
             fs.rmSync(v2Registry, { recursive: true, force: true });
         }
