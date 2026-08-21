@@ -1075,7 +1075,7 @@ Crear directorios con `mktemp -d`, instalar `agentic-workflow-manager@${CLI_RELE
 
 Casos mínimos: legacy baseline, v2 baseline, timeout project/pack/fallback, timeout inválido antes de spawn, changed literal/unsupported/empty/Git error/mixed, cuatro verdicts/exit, status READY sin ejecutar, preflight empírico read-only (la release publicada devuelve exit 1 para non-ready; no inventar exit 2), ESLint 8 TS/JS/generated. Cada caso guarda argv, verdict semántico, process exit y hash del fixture sanitizado.
 
-- [x] **Step 3: Confirmar evidencia nativa 3-OS**
+- [ ] **Step 3: Confirmar evidencia nativa 3-OS**
 
 Enlazar las corridas verdes de los PRs/workflows para Ubuntu, macOS y Windows. No sustituir Windows nativo con Wine ni inferir portabilidad desde Linux. `published-acceptance.json` contiene:
 

@@ -1,5 +1,7 @@
 {
   "schemaVersion": 1,
+  "issues": [95, 96, 97, 98],
+  "verdict": "partial",
   "cli": {
     "version": "8.1.6",
     "packageHash": "7a4e0e3b9fa8a1a32e1ae9604780f306d218c3d9b290e6a1f842b808307c2fa2"
@@ -25,6 +27,6 @@
   },
   "matrix": {
     "report": "published-sensor-gate-matrix.json",
-    "commandCount": 11
+    "commandCount": 12
   }
 }

@@ -37,8 +37,12 @@ does not upgrade them to published evidence. The registry's ESLint 8
 TS/JS/generated certification is evidenced by its native CI run, while the
 local published harness exercised the JavaScript ESLint fixture only.
 
-Native CI evidence for the CLI acceptance commit is recorded in
-[`published-acceptance.json`](published-acceptance.json): Ubuntu, macOS, and
-native Windows jobs all passed. The registry's v3.0.0 validation/certification
-run is [also published](https://github.com/Kodria/awm-baseline-registry/actions/runs/32479729036),
+The persisted, sanitized report is
+[`published-sensor-gate-matrix.json`](published-sensor-gate-matrix.json). It is
+the Linux execution above; this is the only platform on which this opt-in
+matrix was run. Native CI evidence for the CLI acceptance commit is recorded
+in [`published-acceptance.json`](published-acceptance.json): Ubuntu, macOS,
+and native Windows jobs all passed the general CI suite, but those jobs did not
+run this opt-in matrix. The registry's v3.0.0 validation/certification run is
+[also published](https://github.com/Kodria/awm-baseline-registry/actions/runs/32479729036),
 including Ubuntu, macOS, and Windows certification jobs.

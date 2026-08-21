@@ -155,10 +155,11 @@ acceptance('published sensor gate matrix', () => {
             assertProcess(initialized, 'v2 init');
             const status = runCli(cliRoot, v2, 'sensors', 'status');
             record(records, 'v2-status', ['sensors', 'status'], status);
-            expect([0, 1]).toContain(status.status);
+            expect(status.status).toBe(0);
             const preflight = runJson(records, 'v2-preflight', cliRoot, v2, 'preflight', '--verify-sensors', '--json');
             expect(['ready', 'degraded', 'not_configured']).toContain(preflight.output.status);
-            expect([0, 1]).toContain(preflight.result.status);
+            expect(preflight.output.status).toBe('degraded');
+            expect(preflight.result.status).toBe(1);
 
             const clean = runJson(records, 'v2-clean-fast', cliRoot, v2, 'sensors', 'run', '--fast');
             assertExitMatchesVerdict(clean.result, clean.output);
@@ -207,11 +208,13 @@ acceptance('published sensor gate matrix', () => {
             fs.writeFileSync(path.join(v2.project, 'failure.js'), 'missingPublishedSensorGateValue;\n');
             const failing = runJson(records, 'v2-failing-fast', cliRoot, v2, 'sensors', 'run', '--fast');
             assertExitMatchesVerdict(failing.result, failing.output);
+            expect(failing.output.overall).toBe('fail');
             const baseline = runCli(cliRoot, v2, 'sensors', 'baseline');
             record(records, 'v2-baseline', ['sensors', 'baseline'], baseline);
             assertProcess(baseline, 'v2 baseline');
             const baselined = runJson(records, 'v2-baselined-fast', cliRoot, v2, 'sensors', 'run', '--fast');
             assertExitMatchesVerdict(baselined.result, baselined.output);
+            expect(baselined.output.overall).toBe('pass');
 
             assertProcess(command(v2.project, 'git', ['init']), 'git init changed fixture');
             assertProcess(command(v2.project, 'git', ['config', 'user.email', 'acceptance@example.invalid']), 'git user email');
@@ -221,7 +224,7 @@ acceptance('published sensor gate matrix', () => {
             fs.writeFileSync(path.join(v2.project, 'clean.js'), 'const changed = 1;\nconsole.log(changed);\n');
             const changed = runJson(records, 'v2-changed-fast', cliRoot, v2, 'sensors', 'run', '--fast', '--changed');
             assertExitMatchesVerdict(changed.result, changed.output);
-            expect(changed.output).toHaveProperty('changedScope');
+            expect(changed.output).toMatchObject({ overall: 'pass', changedScope: { files: 1 } });
 
             const legacy = createFixture(root, registryRoot, 'legacy');
             fs.mkdirSync(path.join(legacy.project, '.awm'), { recursive: true });
@@ -229,8 +232,9 @@ acceptance('published sensor gate matrix', () => {
             const legacyRun = runJson(records, 'legacy-fast', cliRoot, legacy, 'sensors', 'run', '--fast');
             assertExitMatchesVerdict(legacyRun.result, legacyRun.output);
             expect(legacyRun.output.sensors).toEqual(expect.arrayContaining([
-                expect.objectContaining({ execution: expect.objectContaining({ timeoutSource: 'fallback' }) }),
+                expect.objectContaining({ status: 'pass', execution: expect.objectContaining({ timeoutSource: 'fallback' }) }),
             ]));
+            expect(legacyRun.output.overall).toBe('not_certified');
 
             const outcomes = new Map(records.flatMap(record => record.output?.overall ? [[String(record.output.overall), record.exit] as const] : []));
             // This is an explicit observation table for the immutable release:
