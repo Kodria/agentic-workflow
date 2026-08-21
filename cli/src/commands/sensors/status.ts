@@ -3,7 +3,12 @@ import path from 'path';
 import { resolveOnPath } from '../../core/paths';
 import { SensorCheck, SensorStatusResult, SensorManifest } from './types';
 import { parseSensorManifest } from './compatibility/manifest';
-import type { StructuredCommand } from './compatibility/types';
+import { parseSensorPack } from './compatibility/contract';
+import { discoverProjectEvidence } from './compatibility/discovery';
+import { resolvePackSource } from './compatibility/pack-source';
+import { resolveProjectCompatibility, resolveSensorCompatibility } from './compatibility/resolve';
+import type { CompatibilityEvidence, StructuredCommand } from './compatibility/types';
+import type { SensorManifestV2 } from './compatibility/manifest';
 
 /** First non-flag token after `npx` — the tool the command actually runs. */
 function npxTool(parts: string[]): string | undefined {
@@ -82,6 +87,54 @@ function checkStructuredCommand(command: StructuredCommand, cwd: string, assets:
         : { ok: false, detail: `${command.executable} not found in PATH` };
 }
 
+/**
+ * Re-evaluate only locally discoverable v2 compatibility evidence. Unlike the
+ * execution path, status never runs a compatibility probe: probes such as
+ * `eslint --print-config` are process execution and would turn this command
+ * into a health check. A selected variant still proves that its current tool
+ * and runtime ranges are compatible; its probe state remains unverifiable.
+ */
+function resolveStaticV2Compatibility(cwd: string, manifest: SensorManifestV2): Record<string, CompatibilityEvidence> {
+    const source = manifest.registryRoot === undefined
+        ? resolvePackSource(manifest.pack)
+        : resolvePackSource(manifest.pack, { registries: [{ name: 'manifest-provenance', remote: 'local', contentRoot: manifest.registryRoot }] });
+    const parsed = parseSensorPack(JSON.parse(source.content), source.path);
+    if (parsed.kind !== 'v2') throw new Error(`sensor pack "${manifest.pack}" does not provide a v2 compatibility contract`);
+    const evidence = discoverProjectEvidence(cwd, parsed.pack);
+    const resolutionEvidence = {
+        ...evidence,
+        ...(manifest.packSelection === 'explicit' ? { packSelection: 'explicit' as const } : {}),
+    };
+    const initial = resolveProjectCompatibility(parsed.pack, resolutionEvidence).sensors;
+    return Object.fromEntries(Object.entries(parsed.pack.sensors).map(([name, sensor]) => {
+        const variant = initial[name]?.variantId === null
+            ? null
+            : sensor.variants.find(candidate => candidate.id === initial[name]?.variantId) ?? null;
+        // These two probe kinds consume discovery output only. Keep their useful
+        // static validation in status while leaving every command-backed probe
+        // inconclusive rather than dispatching it.
+        const probeStatus = variant?.probe.kind === 'config-present'
+            ? (evidence.configFiles.length > 0 ? 'matched' : 'not-matched')
+            : variant?.probe.kind === 'package-script-present'
+                ? (evidence.scripts.length > 0 ? 'matched' : 'not-matched')
+                : undefined;
+        return [name, probeStatus === undefined
+            ? initial[name]
+            : resolveSensorCompatibility(sensor, { ...resolutionEvidence, probe: { status: probeStatus } }, { pack: parsed.pack.name, sensor: name })];
+    }));
+}
+
+function staticCompatibilityCheck(sensor: SensorManifestV2['sensors'][string], live: CompatibilityEvidence | undefined): SensorCheck | null {
+    if (!live) return { ok: false, detail: 'live compatibility unavailable' };
+    if (live.variantId !== sensor.variantId) {
+        return { ok: false, detail: `compatibility drift: initialized ${sensor.variantId}, resolved ${live.variantId ?? live.state}` };
+    }
+    if (live.state === 'incompatible' || live.state === 'missing-tool' || live.state === 'not-applicable') {
+        return { ok: false, detail: `live compatibility ${live.state}: ${live.reason}` };
+    }
+    return null;
+}
+
 export async function computeSensorStatus(cwd: string = process.cwd()): Promise<SensorStatusResult> {
     const manifestPath = path.join(cwd, '.awm', 'sensors.json');
     if (!fs.existsSync(manifestPath)) {
@@ -94,10 +147,23 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
         const parsed = parseSensorManifest(raw, manifestPath);
         if (parsed.kind === 'v2') {
             const checks: Record<string, SensorCheck> = {};
+            let compatibility: Record<string, CompatibilityEvidence>;
+            try {
+                compatibility = resolveStaticV2Compatibility(cwd, parsed.pack);
+            } catch (error) {
+                const detail = error instanceof Error ? error.message : 'live compatibility unavailable';
+                for (const [name, sensor] of Object.entries(parsed.pack.sensors)) {
+                    checks[name] = sensor.enabled === false ? { ok: true, detail: 'disabled' } : { ok: false, detail };
+                }
+                return { overall: 'DEGRADED', pack: parsed.pack.pack, checks };
+            }
             for (const [name, sensor] of Object.entries(parsed.pack.sensors)) {
-                checks[name] = sensor.enabled === false
-                    ? { ok: true, detail: 'disabled' }
-                    : checkStructuredCommand(sensor.command, cwd, sensor.assets);
+                if (sensor.enabled === false) {
+                    checks[name] = { ok: true, detail: 'disabled' };
+                    continue;
+                }
+                checks[name] = staticCompatibilityCheck(sensor, compatibility[name])
+                    ?? checkStructuredCommand(sensor.command, cwd, sensor.assets);
             }
             return { overall: Object.keys(checks).length > 0 && Object.values(checks).every(check => check.ok) ? 'READY' : 'DEGRADED', pack: parsed.pack.pack, checks };
         }

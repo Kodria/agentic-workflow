@@ -208,7 +208,7 @@ describe('computeSensorStatus', () => {
         expect(result.checks.mutation.detail).toBe('disabled');
     });
 
-    it('reports v2 manifest static readiness without re-running compatibility probes', async () => {
+    it('degrades a v2 manifest whose live static compatibility has drifted', async () => {
         // The manifest's initialization evidence remains durable diagnostic context.
         // Status only checks its declared local executable; it never re-runs a project
         // compatibility probe or calls a sensor command.
@@ -243,7 +243,8 @@ describe('computeSensorStatus', () => {
             }));
 
             const result = await computeSensorStatus(tmpDir);
-            expect(result).toMatchObject({ overall: 'READY', checks: { lint: { ok: true } } });
+            expect(result).toMatchObject({ overall: 'DEGRADED', checks: { lint: { ok: false } } });
+            expect(result.checks.lint.detail).toMatch(/drift|eslint-10/i);
             expect(runCommand).not.toHaveBeenCalled();
             expect(runStructuredCommand).not.toHaveBeenCalled();
         } finally {
