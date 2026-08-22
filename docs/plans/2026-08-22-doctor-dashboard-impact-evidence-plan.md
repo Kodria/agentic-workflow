@@ -233,7 +233,7 @@ _Requirements: R2.2, R2.3, R2.4, R2.5, R2.7, R2.8, R2.9, R2.10, R3.3, R3.4, R4.6
 - Create: `cli/tests/core/dashboard/plan-state.test.ts`
 - Modify: `cli/tests/commands/doctor-is-read-only.test.ts`
 
-- [ ] **Step 1: Write failing sanitizer and machine-only tests**
+- [x] **Step 1: Write failing sanitizer and machine-only tests**
 
 ```ts
 it('omits project, plan, journal, ledger, and evidence reads outside a project', () => {
@@ -251,13 +251,13 @@ it('removes hostile and secret-bearing dynamic values before rendering', () => {
 });
 ```
 
-- [ ] **Step 2: Run and observe failure**
+- [x] **Step 2: Run and observe failure**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/dashboard/collect.test.ts tests/core/dashboard/plan-state.test.ts`
 
 Expected: FAIL with missing `collect`, `sanitize`, and `plan-state` modules.
 
-- [ ] **Step 3: Implement explicit source adapters and canonical findings**
+- [x] **Step 3: Implement explicit source adapters and canonical findings**
 
 ```ts
 export interface DashboardSourceAdapters {
@@ -278,7 +278,7 @@ export const REMEDIATION_BY_FINDING_ID: Readonly<Record<string, string>> = {
 
 `collectDashboardSnapshot` must use injected adapters, isolate optional-source errors to their owning section, omit findings without a verified command, and validate the sanitized result before returning it. It must never call preference writers, ledger writers, journal writers, Git mutators, or configuration mutators.
 
-- [ ] **Step 4: Implement and test deterministic plan-state precedence**
+- [x] **Step 4: Implement and test deterministic plan-state precedence**
 
 ```ts
 export type PlanState =
@@ -298,15 +298,15 @@ export function classifyPlanState(input: PlanStateInput): PlanState {
 
 Tests must name each precedence rule and assert journal authority, QA pending, retro pending, executed, and legacy fallback (R7.6–R7.10).
 
-- [ ] **Step 5: Add lifecycle and stress fixtures**
+- [x] **Step 5: Add lifecycle and stress fixtures**
 
 Add table-driven fixtures for healthy project, degraded project, missing optional source, corrupt optional source, hostile text, 500 history rows, and 2,000 plan tasks. Assert the section order `machine → project → planning → execution → qa → retro → history`, stable IDs, exact non-ok commands, no score/ranking fields, and no hidden observations (R2.2–R2.10, R5.1–R5.9, R8.3).
 
-- [ ] **Step 6: Prove collection is byte-for-byte read-only**
+- [x] **Step 6: Prove collection is byte-for-byte read-only**
 
 Snapshot the project tree, preferences, journal, ledger, and Git status before and after collection. Assert equality. For HTML mode in Task 3, the same helper will allow only the requested target and adjacent temporary name during the write (R4.6, R4.7, R8.4).
 
-- [ ] **Step 7: Run tests and commit**
+- [x] **Step 7: Run tests and commit**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/dashboard/collect.test.ts tests/core/dashboard/plan-state.test.ts tests/commands/doctor-is-read-only.test.ts`
 
