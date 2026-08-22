@@ -515,7 +515,7 @@ _Requirements: R5.1_
 - Modify: `cli/src/core/context/orchestrator.ts`
 - Test: `cli/tests/core/context/provider.test.ts` (extender)
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 Agregar a `cli/tests/core/context/provider.test.ts`:
 
@@ -539,7 +539,7 @@ npx jest tests/core/context/provider.test.ts --runInBand
 
 Esperado: PASS ya en verde — `readDeclaredOrchestrators` de la Task 1 nunca lanza, así que la garantía se hereda. **Si falla, hay una ruta que sí propaga la excepción: encontrarla antes de seguir.**
 
-- [ ] **Step 3: Cablear la recoleccion en el orquestador de inyeccion**
+- [x] **Step 3: Cablear la recoleccion en el orquestador de inyeccion**
 
 En `cli/src/core/context/orchestrator.ts`, dentro de `inputFor`, recolectar de todos los registries instalados y pasar el resultado a `buildContext`:
 
@@ -571,7 +571,7 @@ Y en `inputFor`:
         });
 ```
 
-- [ ] **Step 4: Correr la suite completa de context**
+- [x] **Step 4: Correr la suite completa de context**
 
 ```bash
 cd /home/user/agentic-workflow/cli
@@ -580,7 +580,7 @@ npx jest tests/core/context --runInBand
 
 Esperado: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/user/agentic-workflow/cli && npm run typecheck && npm run lint
@@ -588,6 +588,8 @@ cd /home/user/agentic-workflow
 git add cli/src/core/context/orchestrator.ts cli/tests/core/context/provider.test.ts
 git commit -m "feat(cli): recolectar declaraciones de todos los registries, degradando ante error"
 ```
+
+**Desviación del plan (verificada, no scope creep):** `orchestrator.ts` tiene un segundo call site de `buildContext` — `statusInputFor` (usado por `contextStatus`/`awm hooks status`) — que el texto literal del plan no mencionaba. Cablear la recolección solo en `inputFor` habría hecho que el hash "esperado" de `statusInputFor` divergiera del hash realmente materializado en cuanto algún registry declarara un orquestador, reportando `stale` de forma permanente incluso justo después de un install correcto (afecta `ConfigInstructionsStrategy` y `CodexAgentsStrategy`; `HookMergeStrategy`/Claude Code no usa `contentHash`). Se cableó también ahí, con test de regresión que falla sin el fix y pasa con él (verificado por el spec reviewer revirtiendo el fix manualmente). Post-review se extrajo `collectAndWarn()` como punto único compartido entre ambos call sites, precisamente para que esta clase de divergencia no pueda reintroducirse en silencio.
 
 ---
 
