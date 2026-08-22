@@ -28,6 +28,16 @@ import { collectAndWarn } from '../../core/orchestrators';
  * Usada por `installClaudeHook` Y por `resyncClaudeHookFiles` — con proposito: si solo
  * una de las dos escribiera el payload materializado, la otra seguiria symlinkeando al
  * SKILL.md crudo y el siguiente `awm update` reabriria el mismo bypass que esto cierra.
+ *
+ * Escritura atomica via write-then-rename (post-implementation-qa Finding 1, TOCTOU):
+ * el patron previo (`unlinkSync` seguido de `writeFileSync`) dejaba una ventana entre
+ * ambas llamadas donde un symlink recreado en `skillDest` seria seguido por
+ * `writeFileSync` (que no usa `O_EXCL`), escribiendo a traves de el sobre lo que sea
+ * que apunte. Escribir a un temporal unico en el MISMO directorio (para que el rename
+ * quede en el mismo filesystem y sea atomico) y luego `renameSync` al destino evita eso
+ * por completo: el rename reemplaza la entrada de directorio de forma atomica sin
+ * dereferenciar un symlink preexistente en el destino, y sin ventana entre borrar y
+ * escribir — no hace falta unlink previo, el rename ya sobrescribe en un solo paso.
  */
 function writeMaterializedSkill(skillDest: string, registryRoot: string): void {
     const ctx = buildContext({
@@ -35,8 +45,9 @@ function writeMaterializedSkill(skillDest: string, registryRoot: string): void {
         profileExtensions: [],
         declaredOrchestrators: collectAndWarn(),
     });
-    try { fs.unlinkSync(skillDest); } catch { /* not exists */ }
-    fs.writeFileSync(skillDest, ctx.markdown, 'utf-8');
+    const tmpPath = path.join(path.dirname(skillDest), `.using-awm.md.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    fs.writeFileSync(tmpPath, ctx.markdown, 'utf-8');
+    fs.renameSync(tmpPath, skillDest);
 }
 
 function isAwmEntry(entry: any, scriptsDir: string, matcher: string): boolean {

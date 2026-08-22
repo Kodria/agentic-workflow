@@ -245,6 +245,62 @@ describe('installHook (happy path + merge)', () => {
         expect(fs.readFileSync(registrySkillPath, 'utf-8')).toBe(originalSkillContent);
     });
 
+    // Finding 2 (post-implementation-qa, Release 2): R5.1's fail-safe guarantee (a broken
+    // declaration in one registry never blocks context construction for the others) was
+    // already regression-tested for the generic InjectionOrchestrator/opencode path
+    // (tests/core/context/orchestrator.test.ts, 'installContext still succeeds when a
+    // DIFFERENT installed registry has a broken declaration') but not through
+    // installClaudeHook/resyncClaudeHookFiles — Task 6's own highest-risk change. Mirrors
+    // that test's two-registries setup (one valid orchestrator declaration, one broken
+    // JSON) via writeRegistriesConfig/registryContentRoot, same as 'el hook recibe los
+    // orquestadores declarados...' above, but installs from the VALID registry and asserts
+    // the broken sibling never surfaces as a thrown error.
+    it('installHook succeeds and materializes the valid registry\'s orchestrator when a sibling registry has a broken declaration', () => { // verifies R5.1
+        const { installHook } = require('../../../src/commands/hooks/install');
+        const { writeRegistriesConfig, registryContentRoot } = require('../../../src/core/registries');
+
+        writeRegistriesConfig([
+            { name: 'broken-sibling', remote: 'unused' },
+            { name: 'valid-declaring', remote: 'unused' },
+        ]);
+
+        // Broken sibling: unparsable awm-registry.json. No hooks/skill content needed —
+        // it is never the registryRoot passed to installHook, only a sibling
+        // collectAndWarn() walks while gathering declared orchestrators.
+        const brokenRoot = registryContentRoot('broken-sibling');
+        fs.mkdirSync(brokenRoot, { recursive: true });
+        fs.writeFileSync(path.join(brokenRoot, 'awm-registry.json'), '{ not json');
+
+        // Valid registry: the one actually installed from.
+        const registryRoot = registryContentRoot('valid-declaring');
+        const regHooks = path.join(registryRoot, 'hooks');
+        const regSkill = path.join(registryRoot, 'skills/using-awm');
+        fs.mkdirSync(regHooks, { recursive: true });
+        fs.mkdirSync(regSkill, { recursive: true });
+        fs.writeFileSync(path.join(regHooks, 'session-start'), '#!/usr/bin/env bash\necho "{}"', { mode: 0o755 });
+        fs.writeFileSync(path.join(regHooks, 'run-hook.cmd'), '#!/usr/bin/env bash\nexec bash "$1"', { mode: 0o755 });
+        fs.writeFileSync(path.join(regSkill, 'SKILL.md'), '---\nname: using-awm\n---\nMUST invoke skills.');
+        fs.writeFileSync(
+            path.join(registryRoot, 'awm-registry.json'),
+            JSON.stringify({ orchestrator: { name: 'proceso-valido', appliesWhen: 'al arrancar', terminatesTo: 'development-process' } }),
+        );
+
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+        let result: any;
+        expect(() => {
+            result = installHook({ agent: 'claude-code', registryRoot, installMethod: 'symlink' });
+        }).not.toThrow();
+
+        expect(result.status).toBe('installed');
+        const content = fs.readFileSync(path.join(tmpHome, '.awm', 'hooks', 'using-awm.md'), 'utf-8');
+        expect(content).toContain('proceso-valido');       // valid registry's declared orchestrator reached Claude Code
+        expect(content).toContain('MUST invoke skills.');  // and the skill body is intact
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('warning:')); // broken sibling warned, not thrown
+
+        warnSpy.mockRestore();
+    });
+
     it('throws for unsupported agent target', () => {
         const { installHook } = require('../../../src/commands/hooks/install');
         expect(() => installHook({ agent: 'antigravity', registryRoot: tmpRegistry, installMethod: 'symlink' }))
