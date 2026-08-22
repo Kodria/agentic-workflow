@@ -146,10 +146,14 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
         const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
         const parsed = parseSensorManifest(raw, manifestPath);
         if (parsed.kind === 'v2') {
+            // Monorepo support (mirrors run.ts/init.ts): detection and structured-command
+            // asset resolution both need to see the real package, not the (possibly
+            // unrelated) directory the manifest lives in.
+            const projectCwd = parsed.pack.packageRoot ? path.resolve(cwd, parsed.pack.packageRoot) : cwd;
             const checks: Record<string, SensorCheck> = {};
             let compatibility: Record<string, CompatibilityEvidence>;
             try {
-                compatibility = resolveStaticV2Compatibility(cwd, parsed.pack);
+                compatibility = resolveStaticV2Compatibility(projectCwd, parsed.pack);
             } catch (error) {
                 const detail = error instanceof Error ? error.message : 'live compatibility unavailable';
                 for (const [name, sensor] of Object.entries(parsed.pack.sensors)) {
@@ -163,7 +167,7 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
                     continue;
                 }
                 checks[name] = staticCompatibilityCheck(sensor, compatibility[name])
-                    ?? checkStructuredCommand(sensor.command, cwd, sensor.assets);
+                    ?? checkStructuredCommand(sensor.command, projectCwd, sensor.assets);
             }
             return { overall: Object.keys(checks).length > 0 && Object.values(checks).every(check => check.ok) ? 'READY' : 'DEGRADED', pack: parsed.pack.pack, checks };
         }

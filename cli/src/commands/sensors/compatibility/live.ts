@@ -83,6 +83,7 @@ export async function resolveParsedPackCompatibility(cwd: string, pack: SensorPa
                 environment: variant.command.environment,
                 configFiles: evidence.configFiles,
                 scripts: evidence.scripts,
+                variantArgs: variant.command.args,
             })
             : null;
         sensors[name] = resolveProjectCompatibility(

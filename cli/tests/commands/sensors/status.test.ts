@@ -197,6 +197,65 @@ describe('computeSensorStatus', () => {
         expect(result.checks).toEqual({});
     });
 
+    it('resolves v2 compatibility and structured-command assets against packageRoot in a monorepo', async () => {
+        // Monorepo support (mirrors run.ts/init.ts): the manifest lives at the repo
+        // root, but package.json/node_modules/the config asset all live under the
+        // declared packageRoot subdirectory. Without threading packageRoot through,
+        // detection finds no package.json at the manifest's own directory and every
+        // sensor reads back "not-applicable" — a false compatibility drift on every
+        // check, even immediately after a correct `awm sensors init --package-root`.
+        const previousHome = process.env.AWM_HOME;
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-home-'));
+        try {
+            process.env.AWM_HOME = home;
+            const registry = path.join(home, 'registries', 'baseline');
+            fs.mkdirSync(path.join(registry, 'sensor-packs', 'js-ts'), { recursive: true });
+            fs.writeFileSync(path.join(home, 'registries.json'), JSON.stringify([{ name: 'baseline', remote: 'https://example.test/baseline.git' }]));
+            fs.writeFileSync(path.join(registry, 'sensor-packs', 'js-ts', 'pack.json'), JSON.stringify({
+                schemaVersion: 2, name: 'js-ts', description: 'test', detects: ['package.json'],
+                coverage: { schemaVersion: 1, classes: { lint: { description: 'lint', detectors: [{ sensor: 'lint' }], remedy: { summary: 'fix lint', command: 'awm sensors init --pack js-ts' } } } },
+                sensors: { lint: {
+                    applicability: { allFiles: ['package.json'] },
+                    variants: [{
+                        id: 'eslint-10', priority: 10, certifiedRange: '>=10.0.0 <11.0.0',
+                        requirements: { tool: 'eslint', toolRange: '>=10.0.0 <11.0.0', runtime: 'node', runtimeRange: '>=0.0.0' },
+                        assets: ['eslint.config.awm.mjs'], formatter: 'eslint-llm', probe: { kind: 'package-script-present' },
+                        command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.', '--config', 'eslint.config.awm.mjs'] },
+                    }],
+                } },
+            }));
+
+            const packageDir = path.join(tmpDir, 'cli');
+            fs.mkdirSync(packageDir, { recursive: true });
+            fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({ devDependencies: { eslint: '^10.0.0' }, scripts: { lint: 'eslint .' } }));
+            fs.mkdirSync(path.join(packageDir, 'node_modules', 'eslint'), { recursive: true });
+            fs.writeFileSync(path.join(packageDir, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version: '10.4.1' }));
+            fs.mkdirSync(path.join(packageDir, 'node_modules', '.bin'), { recursive: true });
+            fs.writeFileSync(path.join(packageDir, 'node_modules', '.bin', 'eslint'), '');
+            fs.writeFileSync(path.join(packageDir, 'eslint.config.awm.mjs'), 'export default []');
+
+            fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+                schemaVersion: 2, pack: 'js-ts', packageRoot: 'cli', registryRoot: registry,
+                sensors: { lint: {
+                    enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.', '--config', 'eslint.config.awm.mjs'] },
+                    assets: ['eslint.config.awm.mjs'],
+                    initializedCompatibility: { state: 'certified', reason: 'range-and-probe', variantId: 'eslint-10', toolVersion: '10.4.1', runtimeVersion: process.versions.node, certifiedRange: '>=10.0.0 <11.0.0', evidence: [] },
+                } },
+            }));
+
+            const result = await computeSensorStatus(tmpDir);
+            expect(result.checks.lint).toMatchObject({ ok: true });
+            expect(result.overall).toBe('READY');
+            expect(runCommand).not.toHaveBeenCalled();
+            expect(runStructuredCommand).not.toHaveBeenCalled();
+        } finally {
+            if (previousHome === undefined) delete process.env.AWM_HOME;
+            else process.env.AWM_HOME = previousHome;
+            fs.rmSync(home, { recursive: true, force: true });
+        }
+    });
+
     it('marks disabled sensors as ok', async () => {
         fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
