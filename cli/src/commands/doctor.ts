@@ -208,10 +208,10 @@ export function registerDoctorCommand(program: Command): void {
         .description('Read-only dashboard of the AWM harness state, per provider')
         .option('--json', 'Emit the diagnostic report as JSON')
         .option('--full', 'Emit the full dashboard snapshot')
-        .option('--html <file>', 'Write the dashboard snapshot as HTML')
+        .option('--html [file]', 'Write the dashboard snapshot as HTML')
         .option('--force', 'Allow replacing an existing HTML file')
         .option('-a, --agent <agent>', 'Target agent subset (comma-separated); defaults to every enabled agent')
-        .action((options: { json?: boolean; full?: boolean; html?: string; force?: boolean; agent?: string }) => {
-            process.exitCode = runDoctor({ json: options.json, full: options.full, html: options.html, force: options.force, agent: options.agent });
+        .action((options: { json?: boolean; full?: boolean; html?: string | boolean; force?: boolean; agent?: string }) => {
+            process.exitCode = runDoctor({ json: options.json, full: options.full, html: typeof options.html === 'string' ? options.html : options.html === true ? '' : undefined, force: options.force, agent: options.agent });
         });
 }
