@@ -220,6 +220,31 @@ describe('installHook (happy path + merge)', () => {
         expect(content).toContain('MUST invoke skills.');   // y el skill sigue entero
     });
 
+    // Finding 2 (code quality review, Task 6): regression-locks what the reviewer verified
+    // by hand — a pre-Task-6 install left using-awm.md as a REAL symlink to the registry's
+    // raw SKILL.md. writeMaterializedSkill() must fs.unlinkSync() that symlink (removing
+    // only the directory entry) before writing the materialized file, never dereference it
+    // and clobber the registry's own SKILL.md.
+    it('migrates a pre-Task-6 symlinked using-awm.md to a materialized file without touching the registry SKILL.md', () => {
+        const scriptsDir = path.join(tmpHome, '.awm/hooks');
+        fs.mkdirSync(scriptsDir, { recursive: true });
+        const skillDest = path.join(scriptsDir, 'using-awm.md');
+        const registrySkillPath = path.join(tmpRegistry, 'skills/using-awm/SKILL.md');
+        const originalSkillContent = fs.readFileSync(registrySkillPath, 'utf-8');
+        fs.symlinkSync(registrySkillPath, skillDest, 'file');
+        expect(fs.lstatSync(skillDest).isSymbolicLink()).toBe(true);
+
+        const { installHook } = require('../../../src/commands/hooks/install');
+        installHook({ agent: 'claude-code', registryRoot: tmpRegistry, installMethod: 'symlink' });
+
+        expect(fs.lstatSync(skillDest).isSymbolicLink()).toBe(false);
+        expect(fs.readFileSync(skillDest, 'utf-8')).toContain('MUST invoke skills.');
+        // The registry's own SKILL.md must be untouched — proves unlinkSync removed only
+        // the directory entry and never dereferenced/deleted the symlink's target.
+        expect(fs.existsSync(registrySkillPath)).toBe(true);
+        expect(fs.readFileSync(registrySkillPath, 'utf-8')).toBe(originalSkillContent);
+    });
+
     it('throws for unsupported agent target', () => {
         const { installHook } = require('../../../src/commands/hooks/install');
         expect(() => installHook({ agent: 'antigravity', registryRoot: tmpRegistry, installMethod: 'symlink' }))

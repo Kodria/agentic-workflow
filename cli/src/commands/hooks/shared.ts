@@ -128,7 +128,7 @@ export function checkFile(file: string): CheckResult {
         fs.statSync(file);
         return { ok: true, detail: file };
     } catch {
-        return { ok: false, detail: `broken link: ${file}` };
+        return { ok: false, detail: `cannot read file: ${file}` };
     }
 }
 
