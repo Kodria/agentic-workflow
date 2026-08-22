@@ -13,7 +13,7 @@ export interface CycleEvidenceV1 {
   plan: { ref: string; state: PlanState };
   tasks: Array<{ id: string; attempts: number; retries: number }>;
   qa: { findings: number; fixes: number; signatures: string[] };
-  gates: { required: number; firstEvaluationsPassed: number; firstPass: boolean };
+  gates: { required: number; firstEvaluationsPassed: boolean[]; firstPass: boolean };
   cures: Array<{ signature: string; curedAt: string }>;
   pr?: { provider: 'github' | 'gitlab' | 'other'; number: number };
 }
@@ -28,7 +28,7 @@ function keys(value: Record<string, unknown>, label: string, allowed: readonly s
   if (Object.keys(value).some((key) => !allowed.includes(key))) throw new Error(`${label} has unsupported fields`);
 }
 function timestamp(value: unknown, label: string): string {
-  if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) throw new Error(`${label} must be an ISO timestamp`);
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) || Number.isNaN(Date.parse(value)) || new Date(value).toISOString() !== value) throw new Error(`${label} must be a canonical ISO timestamp`);
   return value;
 }
 function count(value: unknown, label: string): number {
@@ -71,11 +71,11 @@ export function validateCycleEvidence(input: unknown): CycleEvidenceV1 {
   const findings = count(qa.findings, 'qa findings'); const fixes = count(qa.fixes, 'qa fixes');
   if (signatures.length !== findings || fixes > findings) throw new Error('qa counts are inconsistent');
   const gates = record(value.gates, 'gates'); keys(gates, 'gates', ['required', 'firstEvaluationsPassed', 'firstPass']);
-  const required = count(gates.required, 'required gates'); const firstEvaluationsPassed = count(gates.firstEvaluationsPassed, 'first gate evaluations passed');
-  if (typeof gates.firstPass !== 'boolean' || firstEvaluationsPassed > required || gates.firstPass !== (required === firstEvaluationsPassed)) throw new Error('gate counts are inconsistent');
+  const required = count(gates.required, 'required gates');
+  if (!Array.isArray(gates.firstEvaluationsPassed) || !gates.firstEvaluationsPassed.every((passed) => typeof passed === 'boolean') || gates.firstEvaluationsPassed.length !== required || typeof gates.firstPass !== 'boolean' || gates.firstPass !== gates.firstEvaluationsPassed.every(Boolean)) throw new Error('gate evaluations are inconsistent');
   if (!Array.isArray(value.cures)) throw new Error('cures must be an array');
   const cures = value.cures.map((item, index) => { const cure = record(item, `cures[${index}]`); keys(cure, `cures[${index}]`, ['signature', 'curedAt']); return { signature: digest(cure.signature, 'cure signature'), curedAt: timestamp(cure.curedAt, 'curedAt') }; });
   let pr: CycleEvidenceV1['pr'];
   if (value.pr !== undefined) { const raw = record(value.pr, 'pr'); keys(raw, 'pr', ['provider', 'number']); if (raw.provider !== 'github' && raw.provider !== 'gitlab' && raw.provider !== 'other') throw new Error('pr provider is invalid'); const number = count(raw.number, 'pr number'); if (number < 1) throw new Error('pr number is invalid'); pr = { provider: raw.provider, number }; }
-  return { schema: 1, cycleId: digest(value.cycleId, 'cycleId'), startedAt, endedAt, durationMs, cycleState: value.cycleState, plan: { ref: relativePlanRef(plan.ref), state: plan.state as PlanState }, tasks, qa: { findings, fixes, signatures }, gates: { required, firstEvaluationsPassed, firstPass: gates.firstPass }, cures, ...(pr ? { pr } : {}) };
+  return { schema: 1, cycleId: digest(value.cycleId, 'cycleId'), startedAt, endedAt, durationMs, cycleState: value.cycleState, plan: { ref: relativePlanRef(plan.ref), state: plan.state as PlanState }, tasks, qa: { findings, fixes, signatures }, gates: { required, firstEvaluationsPassed: [...gates.firstEvaluationsPassed] as boolean[], firstPass: gates.firstPass }, cures, ...(pr ? { pr } : {}) };
 }

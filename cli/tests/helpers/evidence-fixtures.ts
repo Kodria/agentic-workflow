@@ -8,6 +8,6 @@ export const cycleEvidenceFixture = () => ({
   plan: { ref: 'plans/current.md', state: 'executed' as const },
   tasks: [{ id: 'task-1', attempts: 2, retries: 1 }],
   qa: { findings: 1, fixes: 1, signatures: ['b'.repeat(64)] },
-  gates: { required: 1, firstEvaluationsPassed: 1, firstPass: true },
+  gates: { required: 1, firstEvaluationsPassed: [true], firstPass: true },
   cures: [{ signature: 'c'.repeat(64), curedAt: '2026-08-22T10:00:30.000Z' }],
 });

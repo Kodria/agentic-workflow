@@ -12,8 +12,14 @@ describe('CycleEvidenceV1 validation', () => {
     ['raw prose', { qa: { findings: 1, fixes: 1, signatures: ['found alice failed a secret prompt'] } }],
     ['host identities', { pr: { provider: 'github', number: 42, repository: 'alice/private' } }],
     ['invalid retry totals', { tasks: [{ id: 'task-1', attempts: 2, retries: 0 }] }],
+    ['non-canonical timestamp', { startedAt: '2026-08-22T10:00:00Z' }],
   ])('rejects %s', (_label, patch) => {
     expect(() => validateCycleEvidence({ ...cycleEvidenceFixture(), ...patch })).toThrow();
+  });
+
+  test('stores first gate evaluations as booleans, not an aggregate count', () => {
+    const evidence = cycleEvidenceFixture();
+    expect(validateCycleEvidence({ ...evidence, gates: { required: 2, firstEvaluationsPassed: [true, false], firstPass: false } }).gates.firstEvaluationsPassed).toEqual([true, false]);
   });
 
   test('permits every dashboard plan state and an absent PR', () => {
