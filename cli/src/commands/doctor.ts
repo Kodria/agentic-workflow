@@ -144,7 +144,10 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
             if (opts.full) process.stdout.write([
                 `AWM dashboard · ${snapshot.overall}`,
                 `Project: ${snapshot.project.label}`,
-                ...snapshot.sections.map((section) => `${section.id}: ${section.availability} (${section.items.length})`),
+                ...snapshot.sections.flatMap((section) => [
+                    `${section.id}: ${section.availability} (${section.items.length})`,
+                    ...section.items.map((item) => `  ${item.state} ${item.id} · ${item.label}${item.remediation ? ` → ${item.remediation}` : ''}`),
+                ]),
             ].join('\n') + '\n');
             if (htmlRequested) {
                 const body = `<html><body><pre>${JSON.stringify(snapshot, null, 2).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</pre></body></html>\n`;
