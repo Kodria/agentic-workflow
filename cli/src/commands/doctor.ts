@@ -11,6 +11,7 @@ import { readPreferences } from '../utils/config';
 import { resolveAgentTargets } from '../core/agent-targets';
 import { collectDashboardSnapshot } from '../core/dashboard/collect';
 import { resolveHtmlTarget, writeHtmlAtomically } from '../core/dashboard/write-html';
+import type { DashboardFinding } from '../core/dashboard/collect';
 
 function glyph(status: CheckResult['status']): string {
     if (status === 'ok') return pc.green('✔');
@@ -141,7 +142,16 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
         try {
             const cwd = opts.cwd ?? process.cwd();
             const target = htmlRequested ? resolveHtmlTarget({ cwd, target: opts.html!, force: opts.force }) : undefined;
-            const snapshot = (opts.collectSnapshot ?? collectDashboardSnapshot)({ cwd, now: new Date().toISOString() });
+            const collectSnapshot = opts.collectSnapshot ?? collectDashboardSnapshot;
+            const context = gatherContext({ cwd });
+            const machineFindings: DashboardFinding[] = (context.providers ?? []).flatMap((provider) => provider.checks.flatMap((check): DashboardFinding[] => {
+                if (check.state === 'absent' || check.state === 'broken') return [{ id: 'machine.preferences.missing', label: 'Preferences', state: 'missing' as const }];
+                if (check.state === 'stale') return [{ id: 'machine.registries.stale', label: 'Registries', state: 'attention' as const }];
+                return [];
+            }));
+            const snapshot = collectSnapshot({ cwd, now: new Date().toISOString(), adapters: {
+                machine: () => ({ findings: machineFindings }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined,
+            } });
             if (opts.full) process.stdout.write([
                 `AWM dashboard · ${snapshot.overall}`,
                 `Project: ${snapshot.project.label}`,
