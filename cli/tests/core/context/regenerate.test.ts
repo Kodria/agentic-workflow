@@ -131,6 +131,28 @@ describe('regenerateGlobalContext', () => {
         expect(seen).toEqual(['codex']);
     });
 
+    // Regresion: el if/else if no tenia rama para 'cc-settings-merge' (claude-code),
+    // asi que caia sin guardia por ambos checks y llegaba a contextStatus/installContext.
+    // Eso duplicaba el warning de collectAndWarn (ya disparado por el path legitimo del
+    // hook, hooks/claude.ts) y escribia un ~/.awm/context/awm-context.md huerfano que
+    // nada lee (el contexto real de Claude Code vive en el scriptsDir del hook). Claude
+    // Code se regenera exclusivamente via resyncInstalledHooks (hooks/resync.ts).
+    it('claude-code se saltea: su contexto se regenera via el hook, no aca', () => {
+        seedRegistry();
+        const seen: string[] = [];
+        const orch = {
+            contextStatus: (op: { agent: string }) => { seen.push(op.agent); return 'absent'; },
+            installContext: () => undefined,
+        };
+        const { regenerateGlobalContext } = require('../../../src/core/context/regenerate');
+        // Igual que config-instructions sin configPath / managed-agents-md con
+        // globalPath null: el salteo temprano no empuja entrada a `out` (mismo
+        // patron que el test de cursor/copilot de arriba).
+        expect(regenerateGlobalContext(['claude-code'], orch as never)).toEqual([]);
+        expect(seen).toEqual([]); // ni contextStatus ni installContext se llaman
+        expect(fs.existsSync(contextPath())).toBe(false); // no se escribe el archivo huerfano
+    });
+
     it('cursor y copilot se saltean: no tienen archivo de contexto GLOBAL que regenerar', () => {
         seedRegistry();
         const { regenerateGlobalContext } = require('../../../src/core/context/regenerate');

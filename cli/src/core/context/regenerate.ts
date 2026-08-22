@@ -38,6 +38,17 @@ export function regenerateGlobalContext(
             if (!fs.existsSync(inj.configPath)) continue;
         } else if (inj.type === 'managed-agents-md') {
             if (inj.globalPath === null) continue;
+        } else if (inj.type === 'cc-settings-merge') {
+            // Claude Code no pasa por este dispatcher generico: su contexto se
+            // materializa via el hook dedicado (hooks/claude.ts's installClaudeHook/
+            // resyncClaudeHookFiles), invocado por `awm update` a traves de un path
+            // separado (hooks/resync.ts's resyncInstalledHooks). Mismo salteo que
+            // stepContextInjection (init/steps.ts) y contextGlobalCheck
+            // (diagnostics/provider-checks.ts) — "covered by hook". Sin este
+            // continue, orch.contextStatus/installContext corrian igual para
+            // claude-code y escribian un ~/.awm/context/awm-context.md huerfano que
+            // nadie lee (el archivo real vive en el scriptsDir del hook).
+            continue;
         }
 
         const op: ContextOp = {
