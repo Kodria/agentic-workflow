@@ -159,6 +159,27 @@ describe('buildContext — declared orchestrators', () => {
         expect(declaredLine).not.toMatch(/[<>]/);
     });
 
+    it('sanitiza asterisco y guion bajo para que no puedan forjar enfasis markdown', () => {  // security: prompt-injection via emphasis markers
+        const root = registryRootWithSkill();
+        created.push(root);
+        const ctx = buildContext({
+            registryRoot: root,
+            profileExtensions: [],
+            declaredOrchestrators: [
+                {
+                    name: 'evil',
+                    appliesWhen: 'x *bold* and _italic_ y',
+                    terminatesTo: 'none',
+                },
+            ],
+        });
+        // No debe sobrevivir ningun marcador de enfasis markdown.
+        expect(ctx.markdown).not.toContain('*bold*');
+        expect(ctx.markdown).not.toContain('_italic_');
+        // El texto sobrevive pero aplanado, sin los marcadores.
+        expect(ctx.markdown).toContain('x bold and italic y');
+    });
+
     it('un registry con declaracion rota no impide construir el contexto', () => {   // verifies R5.1
         const root = registryRootWithSkill();
         created.push(root);

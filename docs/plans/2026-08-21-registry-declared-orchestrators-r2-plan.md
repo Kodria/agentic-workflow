@@ -505,6 +505,8 @@ git add cli/src/core/context/provider.ts cli/tests/core/context/provider.test.ts
 git commit -m "feat(cli): componer orquestadores declarados en buildContext"
 ```
 
+**Desviación del plan (verificada, no scope creep):** durante el code-quality review de este Task se agregó `sanitizeForMarkdown` en `provider.ts`, no anticipada por el requirement set original (R1.1 solo pedía componer los descriptores, no saneaba su contenido). `name`/`appliesWhen`/`terminatesTo` son strings de un registry declarado — input no confiable — que `renderDeclared` interpola sin escapar en el markdown que consume el proveedor de IA; sin saneo, un registry malicioso/comprometido podía usar saltos de línea o marcadores markdown (`##`, backtick, `*`, `_`) para forjar una sección o bloque instruccional nuevo dentro del payload de contexto — un vector de prompt-injection. `readDeclaredOrchestrators` (orchestrators.ts) solo valida que los campos sean strings no vacíos; el saneo se agregó en esta frontera de render porque es donde el contenido no confiable se interpola. Post-implementation-qa (Track B, lente de robustez/seguridad) encontró después que el fix original dejaba un hueco — no se despojaban `<`/`>`, permitiendo forjar pseudo-tags XML/HTML (ej. `<system>...</system>`) — y lo cerró como hallazgo de severidad blocker antes de cerrar esta rama.
+
 ---
 
 ### Task 4: Degradacion sin excepcion (fail-safe)
