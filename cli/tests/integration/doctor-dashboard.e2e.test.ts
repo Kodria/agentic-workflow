@@ -95,7 +95,6 @@ describe('built doctor dashboard end-to-end (R4.8, R8.3-R8.5)', () => {
             // A hostile optional evidence file must not turn raw markup into HTML.
             writeEvidence(f, 'a'.repeat(64));
             for (let index = 1; index < 500; index++) writeEvidence(f, crypto.createHash('sha256').update(String(index)).digest('hex'));
-            fs.writeFileSync(path.join(f.project, 'large-plan.md'), `${'- [ ] task\n'.repeat(2_000)}<script>hostile</script>`);
             const json = command(f, 'doctor', '--json');
             expect([0, 1]).toContain(json.status);
             expect(snapshot(json)).toEqual(expect.objectContaining({ overall: expect.any(String), providers: expect.any(Array) }));
@@ -104,6 +103,15 @@ describe('built doctor dashboard end-to-end (R4.8, R8.3-R8.5)', () => {
             expect(full.stdout).toContain('Final / history');
             expect(full.stdout).toContain('Cycle');
             expect(treeHash(f.root)).toBe(before);
+            // Feed hostile text through the evidence reader itself, not an
+            // unrelated project file: malformed evidence is isolated and its
+            // raw script is never copied into the static dashboard.
+            fs.writeFileSync(path.join(f.project, '.awm', 'evidence', 'cycles', `${'f'.repeat(64)}.json`), JSON.stringify({
+                schema: 1, cycleId: 'f'.repeat(64), startedAt: '2026-08-22T10:00:00.000Z', endedAt: '2026-08-22T10:01:00.000Z', durationMs: 60_000,
+                cycleState: 'completed', plan: { ref: 'docs/plans/current.md', state: 'executed' }, tasks: [{ id: '<script>hostile</script>', attempts: 1, retries: 0 }],
+                qa: { findings: 0, fixes: 0, signatures: [] }, gates: { required: 0, firstEvaluationsPassed: [], firstPass: true }, cures: [],
+            }));
+            const hostileBeforeHtml = treeHash(f.root);
             const html = command(f, 'doctor', '--html', 'dashboard.html');
             expect([0, 1]).toContain(html.status);
             const page = fs.readFileSync(path.join(f.project, 'dashboard.html'), 'utf8');
@@ -111,7 +119,8 @@ describe('built doctor dashboard end-to-end (R4.8, R8.3-R8.5)', () => {
             expect(page).toContain("script-src 'none'");
             expect(page).toContain('data-project-evidence');
             expect(page).not.toContain('<script>hostile</script>');
-            expect(treeHash(f.root, new Set(['project/dashboard.html']))).toBe(before);
+            expect(page).toContain('Source unavailable');
+            expect(treeHash(f.root, new Set(['project/dashboard.html']))).toBe(hostileBeforeHtml);
         } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
     });
 
