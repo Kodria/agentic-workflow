@@ -26,14 +26,15 @@ function parseVersion(skill: string): string {
  * Neutraliza contenido no confiable proveniente de registries declarados
  * (name/appliesWhen/terminatesTo) antes de interpolarlo en markdown.
  * Sin esto, un registry malicioso/comprometido podria inyectar saltos de
- * linea y marcadores markdown (##, `, *, _) para forjar una seccion nueva
- * dentro del payload de contexto que consume el proveedor de IA — un
- * vector de prompt-injection. `readDeclaredOrchestrators` solo valida que
- * los campos sean strings no vacios; el saneo pertenece a esta frontera
- * de render, no a la validacion de lectura.
+ * linea, marcadores markdown (##, `, *, _) o pseudo-tags XML/HTML (<, >)
+ * para forjar una seccion nueva o un bloque instruccional dentro del
+ * payload de contexto que consume el proveedor de IA — un vector de
+ * prompt-injection. `readDeclaredOrchestrators` solo valida que los
+ * campos sean strings no vacios; el saneo pertenece a esta frontera de
+ * render, no a la validacion de lectura.
  */
 function sanitizeForMarkdown(s: string): string {
-    return s.replace(/\r?\n/g, ' ').replace(/[`*_#]/g, '');
+    return s.replace(/\r?\n/g, ' ').replace(/[`*_#<>]/g, '');
 }
 
 function renderDeclared(list: DeclaredOrchestrator[]): string {
