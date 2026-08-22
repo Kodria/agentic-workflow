@@ -701,29 +701,29 @@ _Requirements: R4.8, R8.3, R8.4, R8.5, R8.7_
 - Modify: `.github/workflows/ci.yml`
 - Modify: `.github/workflows/release.yml`
 
-- [ ] **Step 1: Add failing local end-to-end fixtures**
+- [x] **Step 1: Add failing local end-to-end fixtures**
 
 Test machine-only, healthy project, degraded project, partial source, corrupt source, hostile text, long history, and large task counts through the built `dist/src/index.js`. Assert exit 0/1/2, JSON compatibility, complete `--full`, CSP/static HTML, target-only mutation, and evidence rows (R4.8, R8.3, R8.4).
 
-- [ ] **Step 2: Run and observe failure before wiring build artifacts**
+- [x] **Step 2: Run and observe failure before wiring build artifacts**
 
 Run: `cd cli && npm run build && npm test -- --runTestsByPath tests/integration/doctor-dashboard.e2e.test.ts`
 
 Expected: FAIL until the integration fixture invokes the newly built command and normalizes only environmental timestamps.
 
-- [ ] **Step 3: Add published-artifact acceptance**
+- [x] **Step 3: Add published-artifact acceptance**
 
 The published test must install the exact CLI package version and exact registry tag into a fresh temporary environment, run `awm doctor`, `awm doctor --json`, `awm doctor --full`, `awm doctor --html`, one evidence capture, and one retro capture contract. It must reject local workspace paths, `file:` dependencies, mutable branches, and unpinned registry refs.
 
-- [ ] **Step 4: Add Linux/macOS/Windows matrix jobs**
+- [x] **Step 4: Add Linux/macOS/Windows matrix jobs**
 
 In `.github/workflows/release.yml`, add `os: [ubuntu-latest, macos-latest, windows-latest]` after publish verification. Each matrix cell installs immutable artifacts and runs only `published-doctor-evidence.e2e.test.ts`. The release job must fail if any platform does not complete the same contract (R8.7).
 
-- [ ] **Step 5: Demonstrate the end-to-end regression boundary**
+- [x] **Step 5: Demonstrate the end-to-end regression boundary**
 
 Temporarily remove the HTML CSP meta tag, observe the E2E test fail, restore it, and observe PASS. Repeat by allowing an extra project mutation and confirming the read-only assertion fails. Do not commit either temporary mutation (R8.5).
 
-- [ ] **Step 6: Run all CLI gates and commit**
+- [x] **Step 6: Run all CLI gates and commit**
 
 Run:
 
