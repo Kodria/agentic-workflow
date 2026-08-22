@@ -50,7 +50,10 @@ describe('installHook (happy path + merge)', () => {
         const scriptsDir = path.join(tmpHome, '.awm/hooks');
         expect(fs.existsSync(path.join(scriptsDir, 'session-start'))).toBe(true);
         expect(fs.existsSync(path.join(scriptsDir, 'run-hook.cmd'))).toBe(true);
-        expect(fs.lstatSync(path.join(scriptsDir, 'using-awm.md')).isSymbolicLink()).toBe(true);
+        // Task 6: using-awm.md is now a materialized file (buildContext's output), not a
+        // symlink to the raw SKILL.md — so declared orchestrators actually reach Claude Code.
+        expect(fs.lstatSync(path.join(scriptsDir, 'using-awm.md')).isSymbolicLink()).toBe(false);
+        expect(fs.readFileSync(path.join(scriptsDir, 'using-awm.md'), 'utf-8')).toContain('MUST invoke skills.');
 
         const settings = JSON.parse(fs.readFileSync(path.join(tmpHome, '.claude/settings.json'), 'utf-8'));
         expect(settings.hooks.SessionStart).toHaveLength(1);
@@ -153,11 +156,15 @@ describe('installHook (happy path + merge)', () => {
         expect(fs.existsSync(path.join(tmpHome, '.claude/settings.json'))).toBe(false);
     });
 
-    it('symlinks using-awm.md even when installMethod is copy (UX choice)', () => {
+    // Task 6: using-awm.md is materialized (buildContext's composed output), never a
+    // symlink, regardless of installMethod — superseding the pre-Task-6 "UX choice" of
+    // always symlinking this one file even under installMethod 'copy'.
+    it('materializes using-awm.md (never a symlink) even when installMethod is copy', () => {
         const { installHook } = require('../../../src/commands/hooks/install');
         installHook({ agent: 'claude-code', registryRoot: tmpRegistry, installMethod: 'copy' });
         const skillPath = path.join(tmpHome, '.awm/hooks/using-awm.md');
-        expect(fs.lstatSync(skillPath).isSymbolicLink()).toBe(true);
+        expect(fs.lstatSync(skillPath).isSymbolicLink()).toBe(false);
+        expect(fs.readFileSync(skillPath, 'utf-8')).toContain('MUST invoke skills.');
     });
 
     // Non-regression net (Task 5, Step 1): fixes the hook's observable
@@ -171,6 +178,46 @@ describe('installHook (happy path + merge)', () => {
         expect(fs.existsSync(skillDest)).toBe(true);
         const content = fs.readFileSync(skillDest, 'utf-8');
         expect(content).toContain('MUST invoke skills.');
+    });
+
+    // Task 6, Step 1: closes the bypass — everything buildContext composes (declared
+    // orchestrators, Tasks 1-4) must actually reach Claude Code's using-awm.md, not just
+    // the raw SKILL.md. Verifies R1.1.
+    //
+    // Investigation note: the plan's literal sample writes `awm-registry.json` straight
+    // into `tmpRegistry` and expects `collectAndWarn()` to pick it up via `listRegistries()`
+    // — but `listRegistries()` reads registries.json under AWM_HOME, and `tmpRegistry` here
+    // is a bare mkdtemp dir, never registered there via `awm registry add`. Writing the
+    // manifest into an unregistered dir would leave `declared` empty and this test green
+    // for the wrong reason (or red for the wrong reason, pre-fix). Instead this test
+    // registers a REAL listed registry via `writeRegistriesConfig` + `registryContentRoot`
+    // (the same pattern `tests/core/context/orchestrator.test.ts` already uses for this
+    // exact situation) and installs FROM that registry, so `options.registryRoot` and the
+    // one entry `listRegistries()` returns are the same directory — exercising the real
+    // collection path end to end.
+    it('el hook recibe los orquestadores declarados, no el SKILL.md crudo', () => { // verifies R1.1
+        const { installHook } = require('../../../src/commands/hooks/install');
+        const { writeRegistriesConfig, registryContentRoot } = require('../../../src/core/registries');
+
+        writeRegistriesConfig([{ name: 'declaring-test', remote: 'unused' }]);
+        const registryRoot = registryContentRoot('declaring-test');
+        const regHooks = path.join(registryRoot, 'hooks');
+        const regSkill = path.join(registryRoot, 'skills/using-awm');
+        fs.mkdirSync(regHooks, { recursive: true });
+        fs.mkdirSync(regSkill, { recursive: true });
+        fs.writeFileSync(path.join(regHooks, 'session-start'), '#!/usr/bin/env bash\necho "{}"', { mode: 0o755 });
+        fs.writeFileSync(path.join(regHooks, 'run-hook.cmd'), '#!/usr/bin/env bash\nexec bash "$1"', { mode: 0o755 });
+        fs.writeFileSync(path.join(regSkill, 'SKILL.md'), '---\nname: using-awm\n---\nMUST invoke skills.');
+        fs.writeFileSync(
+            path.join(registryRoot, 'awm-registry.json'),
+            JSON.stringify({ orchestrator: { name: 'mi-proceso', appliesWhen: 'al arrancar', terminatesTo: 'development-process' } }),
+        );
+
+        installHook({ agent: 'claude-code', registryRoot, installMethod: 'symlink' });
+
+        const content = fs.readFileSync(path.join(tmpHome, '.awm', 'hooks', 'using-awm.md'), 'utf-8');
+        expect(content).toContain('mi-proceso');            // la composicion LLEGA a Claude Code
+        expect(content).toContain('MUST invoke skills.');   // y el skill sigue entero
     });
 
     it('throws for unsupported agent target', () => {

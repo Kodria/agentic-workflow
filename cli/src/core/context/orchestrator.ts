@@ -7,32 +7,7 @@ import { CodexAgentsStrategy } from './strategies/codex-agents';
 import { buildContext } from './provider';
 import { materialize, globalContextPath, projectContextPath } from './materializer';
 import { InjectionInput, InjectionState, MaterializedRef } from './types';
-import { listRegistries } from '../registries';
-import { readDeclaredOrchestrators, DeclaredOrchestrator } from '../orchestrators';
-
-/** Recolecta declaraciones de orquestador de TODOS los registries instalados (no solo
- *  el que se esta operando) y diagnosticos de las que estan rotas. Nunca lanza:
- *  `readDeclaredOrchestrators` ya garantiza eso por-registry (R1.2), asi que un registry
- *  con declaracion rota se omite del resultado sin impedir construir el contexto (R5.1). */
-function collectDeclaredOrchestrators(): { declared: DeclaredOrchestrator[]; diagnostics: string[] } {
-    const declared: DeclaredOrchestrator[] = [];
-    const diagnostics: string[] = [];
-    for (const reg of listRegistries()) {
-        const r = readDeclaredOrchestrators(reg.contentRoot);
-        declared.push(...r.orchestrators);
-        diagnostics.push(...r.diagnostics);
-    }
-    return { declared, diagnostics };
-}
-
-/** Recolecta declarados y emite sus diagnosticos como warnings. Punto unico usado por
- *  `inputFor` y `statusInputFor` para que ambos permanezcan sincronizados por construccion
- *  (ver R5.1 y el bug de staleness que motivo esta extraccion). */
-function collectAndWarn(): DeclaredOrchestrator[] {
-    const { declared, diagnostics } = collectDeclaredOrchestrators();
-    for (const d of diagnostics) console.warn(`warning: ${d}`);
-    return declared;
-}
+import { collectAndWarn } from '../orchestrators';
 
 export type ContextOp = {
     agent: AgentTarget;

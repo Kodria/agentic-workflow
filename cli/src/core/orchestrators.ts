@@ -8,7 +8,7 @@
 // entre al framework (R1.3, R5.3).
 import fs from 'fs';
 import path from 'path';
-import { REGISTRY_MANIFEST_NAME, assertRegularRegistryFile } from './registries';
+import { REGISTRY_MANIFEST_NAME, assertRegularRegistryFile, listRegistries } from './registries';
 
 export interface DeclaredOrchestrator {
     name: string;
@@ -89,4 +89,40 @@ export function readDeclaredOrchestrators(root: string): DeclaredOrchestratorsRe
         }],
         diagnostics: [],
     };
+}
+
+/**
+ * Recolecta declaraciones de orquestador de TODOS los registries instalados (no solo
+ * el que se esta operando) y diagnosticos de las que estan rotas. Nunca lanza:
+ * `readDeclaredOrchestrators` ya garantiza eso por-registry (R1.2), asi que un registry
+ * con declaracion rota se omite del resultado sin impedir construir el contexto (R5.1).
+ *
+ * Vive aca (no en core/context/orchestrator.ts, que la definia originalmente) porque
+ * este modulo es una hoja: solo depende de `./registries`, que a su vez no depende de
+ * nada bajo commands/*. core/context/orchestrator.ts en cambio arrastra
+ * strategies/hook-merge.ts, que importa commands/hooks/install.ts — y claude.ts
+ * necesita esta funcion para cerrar el bypass del SKILL.md crudo (Task 6). Si
+ * `collectAndWarn` siguiera viviendo en orchestrator.ts, que commands/hooks/claude.ts
+ * la importara cerraria un ciclo real: claude.ts -> orchestrator.ts ->
+ * strategies/hook-merge.ts -> commands/hooks/install.ts -> claude.ts.
+ */
+export function collectDeclaredOrchestrators(): { declared: DeclaredOrchestrator[]; diagnostics: string[] } {
+    const declared: DeclaredOrchestrator[] = [];
+    const diagnostics: string[] = [];
+    for (const reg of listRegistries()) {
+        const r = readDeclaredOrchestrators(reg.contentRoot);
+        declared.push(...r.orchestrators);
+        diagnostics.push(...r.diagnostics);
+    }
+    return { declared, diagnostics };
+}
+
+/** Recolecta declarados y emite sus diagnosticos como warnings. Punto unico usado por
+ *  `InjectionOrchestrator.inputFor`/`statusInputFor` y por `commands/hooks/claude.ts`
+ *  para que todos permanezcan sincronizados por construccion (ver R5.1 y el bug de
+ *  staleness que motivo esta extraccion). */
+export function collectAndWarn(): DeclaredOrchestrator[] {
+    const { declared, diagnostics } = collectDeclaredOrchestrators();
+    for (const d of diagnostics) console.warn(`warning: ${d}`);
+    return declared;
 }
