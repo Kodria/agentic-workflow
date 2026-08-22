@@ -26,6 +26,19 @@ describe('writeHtmlAtomically', () => {
         expect(() => resolveHtmlTarget({ cwd: root, target: 'link.html', force: true })).toThrow();
     });
 
+    it('rejects absent parents and non-regular existing targets', () => {
+        expect(() => resolveHtmlTarget({ cwd: root, target: 'missing/report.html' })).toThrow(/parent/i);
+        fs.mkdirSync(path.join(root, 'regular-dir'));
+        expect(() => resolveHtmlTarget({ cwd: root, target: 'regular-dir', force: true })).toThrow(/regular/i);
+    });
+
+    it('accepts a new absolute target and force-replaces only regular files', () => {
+        const target = path.join(root, 'absolute.html');
+        expect(resolveHtmlTarget({ cwd: root, target })).toBe(target);
+        fs.writeFileSync(target, 'old');
+        expect(resolveHtmlTarget({ cwd: root, target, force: true })).toBe(target);
+    });
+
     it.each(['openSync', 'writeFileSync', 'fsyncSync', 'renameSync'] as const)('preserves old target and cleans only owned temp when %s fails', (failedOperation) => {
         const target = path.join(root, 'report.html');
         fs.writeFileSync(target, 'previous');
