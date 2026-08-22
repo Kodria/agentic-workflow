@@ -102,6 +102,14 @@ describe('runDoctor dashboard modes', () => {
             if (previousAwmHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = previousAwmHome;
         }
     });
+
+    it('applies doctor agent selection validation to full dashboard mode', () => {
+        const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        try {
+            expect(runDoctor({ full: true, cwd: '/definitely-not-a-project', agent: 'not-a-real-agent' })).toBe(2);
+            expect(stderr.mock.calls.map((call) => String(call[0])).join('')).toContain('Invalid agent');
+        } finally { stderr.mockRestore(); }
+    });
 });
 
 function report(partial: Partial<CheckReport> = {}): CheckReport {

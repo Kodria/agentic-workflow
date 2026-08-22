@@ -132,6 +132,7 @@ export interface RunDoctorOptions {
 }
 
 export function runDoctor(opts: RunDoctorOptions = {}): number {
+    const resolveTargets = opts.resolveTargets ?? resolveAgentTargets;
     const invalid = (message: string): number => { process.stderr.write(`awm doctor: ${message}\n`); return 2; };
     const htmlRequested = opts.html !== undefined;
     if (opts.json && opts.full) return invalid('--json cannot be combined with --full');
@@ -142,8 +143,9 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
         try {
             const cwd = opts.cwd ?? process.cwd();
             const target = htmlRequested ? resolveHtmlTarget({ cwd, target: opts.html!, force: opts.force }) : undefined;
+            const targets = resolveTargets({ prefs: readPreferences(), explicit: opts.agent });
             const collectSnapshot = opts.collectSnapshot ?? collectDashboardSnapshot;
-            const context = gatherContext({ cwd });
+            const context = gatherContext({ cwd, agents: targets });
             const machineFindings = Array.from(new Map((context.providers ?? []).flatMap((provider) => provider.checks.flatMap((check): DashboardFinding[] => {
                 // These are the only production mappings whose operator remedy is
                 // verified by the diagnostics contract; unknown checks stay out.
@@ -170,8 +172,6 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
             return snapshot.overall === 'healthy' ? 0 : 1;
         } catch (error) { return invalid((error as Error).message); }
     }
-    const resolveTargets = opts.resolveTargets ?? resolveAgentTargets;
-
     // Validates --agent separately from the general diagnostic gathering below:
     // an unknown or disabled agent is a normal input-validation failure (the
     // user typo'd or forgot `awm init --agent <x>`), not an "internal error" —
