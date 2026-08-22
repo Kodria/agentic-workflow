@@ -18,21 +18,26 @@ export function resolveHtmlTarget(input: { cwd: string; target: string; force?: 
     return target;
 }
 
-export function writeHtmlAtomically(input: { target: string; html: string }): void {
+export interface HtmlWriteOperations {
+    openSync: typeof fs.openSync; writeFileSync: typeof fs.writeFileSync; fsyncSync: typeof fs.fsyncSync;
+    closeSync: typeof fs.closeSync; renameSync: typeof fs.renameSync; existsSync: typeof fs.existsSync; unlinkSync: typeof fs.unlinkSync;
+}
+
+export function writeHtmlAtomically(input: { target: string; html: string }, operations: HtmlWriteOperations = fs): void {
     if (!input || typeof input.target !== 'string' || typeof input.html !== 'string') throw new Error('writeHtmlAtomically requires target and html');
     const temp = path.join(path.dirname(input.target), `.${path.basename(input.target)}.${process.pid}.${randomUUID()}.tmp`);
     let fd: number | undefined;
     let tempCreated = false;
     try {
-        fd = process.platform === 'win32' ? fs.openSync(temp, 'wx') : fs.openSync(temp, 'wx', 0o600);
+        fd = process.platform === 'win32' ? operations.openSync(temp, 'wx') : operations.openSync(temp, 'wx', 0o600);
         tempCreated = true;
-        fs.writeFileSync(fd, input.html, 'utf8');
-        fs.fsyncSync(fd);
-        fs.closeSync(fd); fd = undefined;
-        fs.renameSync(temp, input.target);
+        operations.writeFileSync(fd, input.html, 'utf8');
+        operations.fsyncSync(fd);
+        operations.closeSync(fd); fd = undefined;
+        operations.renameSync(temp, input.target);
     } catch (error) {
-        if (fd !== undefined) try { fs.closeSync(fd); } catch { /* best effort */ }
-        try { if (tempCreated) fs.unlinkSync(temp); } catch { /* known temp only */ }
+        if (fd !== undefined) try { operations.closeSync(fd); } catch { /* best effort */ }
+        try { if (tempCreated && operations.existsSync(temp)) operations.unlinkSync(temp); } catch { /* known temp only */ }
         throw error;
     }
 }
