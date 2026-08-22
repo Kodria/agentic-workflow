@@ -88,3 +88,10 @@ jobs:
           AWM_PUBLISHED_CLI_VERSION: 8.1.2
           AWM_PUBLISHED_REGISTRY_ROOT: ${{ github.workspace }}/awm-baseline-registry
         run: npx jest tests/integration/published-r3-acceptance.e2e.test.ts --runInBand
+
+      # Keep provenance assertions in normal CI too.  The full published doctor
+      # consumer is deliberately post-publish in release.yml below: a PR cannot
+      # truthfully claim to exercise an artifact that has not been published.
+      - name: Verify immutable published doctor provenance guard
+        working-directory: cli
+        run: npx jest tests/integration/published-doctor-evidence.e2e.test.ts --runInBand

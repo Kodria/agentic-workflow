@@ -123,3 +123,36 @@ jobs:
           FORCE_BUMP: ${{ github.event_name == 'workflow_dispatch' && inputs.bump != 'auto' && format('--force {0}', inputs.bump) || '' }}
         run: |
           node dist/src/release/index.js $DRY_RUN $FORCE_BUMP
+
+  # This is intentionally after `release`, not a replacement for its test
+  # gate.  It downloads npm and git artifacts into a clean consumer on each
+  # supported native platform, so no workspace path, file: dependency, or
+  # mutable branch participates in the final acceptance boundary.
+  published-doctor-evidence:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install test runner
+        working-directory: cli
+        run: npm ci
+      - name: Resolve exact published CLI version
+        id: published-cli
+        shell: bash
+        run: echo "version=$(npm view agentic-workflow-manager version)" >> "$GITHUB_OUTPUT"
+      - name: Accept published dashboard and evidence artifacts
+        working-directory: cli
+        env:
+          AWM_PUBLISHED_CLI_VERSION: ${{ steps.published-cli.outputs.version }}
+          AWM_PUBLISHED_REGISTRY_TAG: v3.2.0
+          AWM_PUBLISHED_REGISTRY_REMOTE: https://github.com/Kodria/awm-baseline-registry.git
+        run: npx jest tests/integration/published-doctor-evidence.e2e.test.ts --runInBand
