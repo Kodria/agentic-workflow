@@ -13,6 +13,10 @@ export type InitOptions = {
     cwd?: string;
     registryRoot?: string;
     pack?: string;
+    /** Contained relative path from cwd to the real project (package.json/tsconfig/
+     *  etc). Monorepo support: the manifest is still written under cwd/.awm, but
+     *  detection and materialized assets both resolve against cwd/packageRoot. */
+    packageRoot?: string;
 };
 
 type ResolvedV2Pack = { pack: SensorPackV2; packRoot: string };
@@ -243,6 +247,10 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
     const cwd = opts.cwd ?? process.cwd();
     const configure = opts.configure ?? true; // configure (copy pack config files) by default
     const manifestPath = path.join(cwd, '.awm', 'sensors.json');
+    // Monorepo support: detection and evidence both need to see the real project,
+    // not the (possibly unrelated) directory the manifest lives in. The manifest
+    // write itself stays pinned to cwd regardless — see manifestPath above.
+    const detectionCwd = opts.packageRoot ? path.resolve(cwd, opts.packageRoot) : cwd;
 
     // --pack skips the heuristic entirely. Only validate against the registry when a
     // registryRoot was actually given — same tolerance pattern as readPackDefaults /
@@ -253,7 +261,7 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
         if (opts.registryRoot) assertPackExists(opts.pack, opts.registryRoot);
         detection = { pack: opts.pack, indicators: ['--pack override'] };
     } else {
-        detection = detectStack(cwd);
+        detection = detectStack(detectionCwd);
     }
 
     let existing: SensorManifest | undefined;
@@ -280,7 +288,7 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
         const resolvedV2 = readV2Pack(resolvedPack, opts.registryRoot);
         if (resolvedV2) {
             const packSelection = opts.pack ? 'explicit' as const : undefined;
-            const live = await resolveParsedPackCompatibility(cwd, resolvedV2.pack, { packSelection });
+            const live = await resolveParsedPackCompatibility(detectionCwd, resolvedV2.pack, { packSelection });
             const compatibility = live.sensors;
             const sensors: Record<string, any> = {};
             for (const [name, sensor] of Object.entries(live.pack.sensors)) {
@@ -311,7 +319,8 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
             }
             const materialized = materializeResolvedSensors({
                 projectRoot: cwd, packRoot: resolvedV2.packRoot,
-                pack: resolvedPack, ...(packSelection ? { packSelection } : {}), registryRoot: opts.registryRoot, sensors, configure,
+                pack: resolvedPack, ...(packSelection ? { packSelection } : {}), registryRoot: opts.registryRoot,
+                ...(opts.packageRoot ? { packageRoot: opts.packageRoot } : {}), sensors, configure,
             });
             return { detection, ...materialized,
                 compatibility, ...(unavailablePack ? { unavailablePack } : {}) };

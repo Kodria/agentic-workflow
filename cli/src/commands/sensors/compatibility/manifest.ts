@@ -13,6 +13,13 @@ export type SensorManifestV2 = {
     /** Durable operator intent. Absent means detected/fallback, never explicit. */
     packSelection?: 'explicit';
     registryRoot?: string;
+    /** Contained relative path from this manifest's directory to the actual
+     *  project root (package.json/tsconfig/etc) sensors should detect against
+     *  and execute in. Absent means the manifest's own directory — unchanged
+     *  behavior for a single-package repo. Exists for a monorepo where the
+     *  manifest lives at the repo root but the real package lives in a
+     *  subdirectory (e.g. "cli"). */
+    packageRoot?: string;
     sensors: Record<string, { enabled: boolean; fast?: boolean; timeout?: number; variantId: string; command: StructuredCommand; assets?: string[]; policyRef?: 'shared/semgrep-policy.json'; initializedCompatibility: CompatibilityEvidence }>;
     concurrency?: number;
 };
@@ -176,7 +183,7 @@ function provenanceRoot(value: unknown, source: unknown): string {
 }
 
 function parseV2Manifest(value: UnknownRecord, source: unknown): SensorManifestV2 {
-    fields(value, ['schemaVersion', 'pack', 'packSelection', 'registryRoot', 'sensors', 'concurrency'], source, 'root');
+    fields(value, ['schemaVersion', 'pack', 'packSelection', 'registryRoot', 'packageRoot', 'sensors', 'concurrency'], source, 'root');
     if (value.schemaVersion !== 2) invalid(source, `unsupported manifest schemaVersion ${String(value.schemaVersion)}; supported: legacy, 2; upgrade or migrate the manifest`);
     const pack = id(value.pack, source, 'pack');
     const sensorsInput = record(value.sensors, source, 'sensors');
@@ -188,6 +195,7 @@ function parseV2Manifest(value: UnknownRecord, source: unknown): SensorManifestV
         manifest.packSelection = 'explicit';
     }
     if ('registryRoot' in value) manifest.registryRoot = provenanceRoot(value.registryRoot, source);
+    if ('packageRoot' in value) manifest.packageRoot = asset(value.packageRoot, source, 'packageRoot');
     if ('concurrency' in value) {
         if (typeof value.concurrency !== 'number' || !Number.isSafeInteger(value.concurrency) || value.concurrency <= 0) invalid(source, 'concurrency must be a positive safe integer');
         manifest.concurrency = value.concurrency;

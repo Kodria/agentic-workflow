@@ -173,7 +173,15 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         const scopeError = changedScopeError(changed);
         if (scopeError) changed.error = scopeError;
     }
-    const live = parsed.kind === 'v2' ? await resolveLiveV2(manifestDir, parsed) : null;
+    // Monorepo support: a v2 manifest may declare packageRoot so detection and
+    // execution both happen against the real package (e.g. "cli"), while the
+    // manifest itself stays discoverable at the repo root via findManifestDir.
+    // Legacy manifests never carry this field — manifestDir is always correct
+    // for them, unchanged.
+    const projectCwd = parsed.kind === 'v2' && parsed.pack.packageRoot
+        ? path.resolve(manifestDir, parsed.pack.packageRoot)
+        : manifestDir;
+    const live = parsed.kind === 'v2' ? await resolveLiveV2(projectCwd, parsed) : null;
     const drift = parsed.kind === 'legacy' ? detectPackDrift(manifestDir, parsed.pack) : undefined;
     const requestedScope = opts.changed ? 'changed' as const : 'full' as const;
     const prepared: PreparedSensorExecution[] = [];
@@ -194,7 +202,7 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     }
 
     const results = await pooled(prepared.map(entry => async () => {
-        const result = await executePrepared(entry, manifestDir);
+        const result = await executePrepared(entry, projectCwd);
         return baseline ? applyBaseline(result, baseline[entry.name]) : result;
     }), resolveConcurrency(parsed.pack, prepared.length));
 

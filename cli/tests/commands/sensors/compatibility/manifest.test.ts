@@ -90,6 +90,21 @@ describe('sensor manifest contract', () => {
         expect(() => parseSensorManifest({ schemaVersion: 2, pack: 'js-ts', sensors: { lint: sensor } }, 'source')).toThrow('certifiedRange');
     });
 
+    it('accepts a v2 packageRoot for monorepo-scoped sensor detection/execution', () => {
+        const manifest = { ...validV2Manifest(), packageRoot: 'cli' };
+        expect(parseSensorManifest(manifest, 'source')).toMatchObject({ kind: 'v2', pack: { packageRoot: 'cli' } });
+    });
+
+    it('rejects a packageRoot that escapes the manifest directory', () => {
+        const manifest = { ...validV2Manifest(), packageRoot: '../outside' };
+        expect(() => parseSensorManifest(manifest, 'source')).toThrow('packageRoot');
+    });
+
+    it('rejects an absolute packageRoot', () => {
+        const manifest = { ...validV2Manifest(), packageRoot: '/etc' };
+        expect(() => parseSensorManifest(manifest, 'source')).toThrow('packageRoot');
+    });
+
     test.each([
         [null, 'object'],
         [{}, 'pack'],
