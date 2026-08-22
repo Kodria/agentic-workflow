@@ -12,7 +12,7 @@
         {
           "id": "skills.global",
           "state": "absent",
-          "target": "<fixture-home>/.claude/skills"
+          "target": "/tmp/awm-doctor-json-fixture-v1/project/.claude/skills"
         },
         {
           "id": "hook.trust",

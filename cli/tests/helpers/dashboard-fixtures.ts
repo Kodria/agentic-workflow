@@ -1,5 +1,4 @@
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { runDoctor } from '../../src/commands/doctor';
 
@@ -7,15 +6,18 @@ export type DoctorJsonFixture = 'bare-home' | 'project';
 
 export interface CapturedDoctorJsonFixture {
     cleanup(): void;
+    code: number;
     output: string;
 }
 
 /** Captures the legacy doctor JSON in an isolated, deterministic filesystem. */
 export function captureDoctorJsonFixture(kind: DoctorJsonFixture): CapturedDoctorJsonFixture {
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), `awm-doctor-${kind}-`));
+    const tempRoot = path.join('/tmp', 'awm-doctor-json-fixture-v1', kind);
     const previousHome = process.env.HOME;
     const previousAwmHome = process.env.AWM_HOME;
     const output: string[] = [];
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+    fs.mkdirSync(tempRoot, { recursive: true });
     const writeSpy = jest.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
         output.push(String(chunk));
         return true;
@@ -29,11 +31,10 @@ export function captureDoctorJsonFixture(kind: DoctorJsonFixture): CapturedDocto
     }
 
     try {
-        runDoctor({ cwd: tempRoot, json: true });
+        const code = runDoctor({ cwd: tempRoot, json: true });
         return {
-            // `skills.global.target` contains HOME. Canonicalize only this
-            // disposable path so the frozen legacy bytes remain portable.
-            output: output.join('').replaceAll(tempRoot, '<fixture-home>'),
+            code,
+            output: output.join(''),
             cleanup: () => {
                 writeSpy.mockRestore();
                 fs.rmSync(tempRoot, { recursive: true, force: true });

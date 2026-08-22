@@ -12,6 +12,7 @@ describe('runDoctor legacy JSON fixtures', () => {
         try {
             const expected = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'doctor-json', `${kind}.json`), 'utf-8');
             expect(captured.output).toBe(expected);
+            expect(captured.code).toBe(1);
         } finally {
             captured.cleanup();
         }

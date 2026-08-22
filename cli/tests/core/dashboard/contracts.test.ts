@@ -1,5 +1,5 @@
 import { DashboardValidationError, validateDashboardSnapshotV1 } from '../../../src/core/dashboard/validate';
-import type { DashboardSnapshotV1 } from '../../../src/core/dashboard/types';
+import { dashboardSnapshot, type DashboardSnapshotV1 } from '../../../src/core/dashboard/types';
 
 function snapshot(): DashboardSnapshotV1 {
     return {
@@ -16,6 +16,21 @@ function snapshot(): DashboardSnapshotV1 {
 }
 
 describe('validateDashboardSnapshotV1', () => {
+    it('creates the safe deterministic dashboard snapshot default', () => {
+        expect(dashboardSnapshot()).toEqual({
+            schema: 1,
+            generatedAt: '2026-08-22T00:00:00.000Z',
+            overall: 'healthy',
+            project: { detected: false, label: 'No project detected' },
+            confidence: 'none',
+            sections: [{ id: 'machine', availability: 'available', items: [] }],
+        });
+    });
+
+    it('allows callers to override snapshot defaults', () => {
+        expect(dashboardSnapshot({ overall: 'degraded' }).overall).toBe('degraded');
+    });
+
     it('returns a valid V1 snapshot', () => {
         expect(validateDashboardSnapshotV1(snapshot())).toEqual(snapshot());
     });

@@ -22,3 +22,18 @@ export interface DashboardSnapshotV1 {
     confidence: 'none' | 'provisional' | 'observing' | 'supported';
     sections: DashboardSectionV1[];
 }
+
+/** Safe, deterministic V1 fixture and renderer input. */
+export function dashboardSnapshot(
+    overrides: Partial<DashboardSnapshotV1> = {},
+): DashboardSnapshotV1 {
+    return {
+        schema: 1,
+        generatedAt: '2026-08-22T00:00:00.000Z',
+        overall: 'healthy',
+        project: { detected: false, label: 'No project detected' },
+        confidence: 'none',
+        sections: [{ id: 'machine', availability: 'available', items: [] }],
+        ...overrides,
+    };
+}
