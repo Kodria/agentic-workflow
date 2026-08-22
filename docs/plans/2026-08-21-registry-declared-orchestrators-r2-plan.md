@@ -378,7 +378,7 @@ _Requirements: R1.1_
 - Modify: `cli/src/core/context/provider.ts`
 - Test: `cli/tests/core/context/provider.test.ts`
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 Crear `cli/tests/core/context/provider.test.ts`:
 
@@ -441,7 +441,7 @@ describe('buildContext', () => {
 });
 ```
 
-- [ ] **Step 2: Correr el test para verificar que falla**
+- [x] **Step 2: Correr el test para verificar que falla**
 
 ```bash
 cd /home/user/agentic-workflow/cli
@@ -450,7 +450,7 @@ npx jest tests/core/context/provider.test.ts --runInBand
 
 Esperado: FAIL — `declaredOrchestrators` no existe en `ContextInput`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 En `cli/src/core/context/provider.ts`, extender el input y la composición:
 
@@ -487,7 +487,7 @@ export function buildContext(input: ContextInput): AwmContext {
 }
 ```
 
-- [ ] **Step 4: Correr el test para verificar que pasa**
+- [x] **Step 4: Correr el test para verificar que pasa**
 
 ```bash
 cd /home/user/agentic-workflow/cli
@@ -496,7 +496,7 @@ npx jest tests/core/context/provider.test.ts --runInBand
 
 Esperado: PASS los tres.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/user/agentic-workflow/cli && npm run typecheck && npm run lint
