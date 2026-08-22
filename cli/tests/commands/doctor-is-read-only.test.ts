@@ -16,6 +16,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { execFileSync } from 'child_process';
 
 describe('awm doctor no escribe nada', () => {
     let home: string;
@@ -29,7 +30,8 @@ describe('awm doctor no escribe nada', () => {
         process.env.HOME = home;
         process.env.AWM_HOME = path.join(home, '.awm');
         projectRoot = path.join(home, 'proj');
-        fs.mkdirSync(path.join(projectRoot, '.git'), { recursive: true });
+        fs.mkdirSync(projectRoot, { recursive: true });
+        execFileSync('git', ['init', '-q', projectRoot]);
         jest.resetModules();
         writeSpy = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
     });
@@ -53,6 +55,19 @@ describe('awm doctor no escribe nada', () => {
         };
         walk('.');
         return out.sort();
+    };
+
+    const bytesOf = (dir: string): Array<[string, string]> => {
+        const out: Array<[string, string]> = [];
+        const walk = (sub: string) => {
+            for (const entry of fs.readdirSync(path.join(dir, sub), { withFileTypes: true })) {
+                const rel = path.join(sub, entry.name);
+                if (entry.isDirectory()) walk(rel);
+                else out.push([rel, fs.readFileSync(path.join(dir, rel)).toString('base64')]);
+            }
+        };
+        walk('.');
+        return out.sort(([left], [right]) => left.localeCompare(right));
     };
 
     it('no crea AWM_HOME ni preferences.json en una máquina limpia', () => {
@@ -94,5 +109,21 @@ describe('awm doctor no escribe nada', () => {
         expect([0, 1]).toContain(code);   // 0 sano / 1 degradado, nunca 2 (error)
         const emitted = writeSpy.mock.calls.map((c) => String(c[0])).join('');
         expect(JSON.parse(emitted).providers.map((p: { id: string }) => p.id)).toEqual(['claude-code']);
+    });
+
+    it('collecting the dashboard leaves project, preferences, journal, ledger, and git bytes unchanged', () => {
+        fs.mkdirSync(path.join(home, '.awm', 'ledger'), { recursive: true });
+        fs.writeFileSync(path.join(home, '.awm', 'preferences.json'), '{"defaultAgent":"claude-code","enabledAgents":["claude-code"],"installMethod":"symlink","defaultScope":"local"}\n');
+        fs.writeFileSync(path.join(home, '.awm', 'ledger', 'events.jsonl'), '{"event":"before"}\n');
+        fs.mkdirSync(path.join(projectRoot, '.awm', 'journal'), { recursive: true });
+        fs.writeFileSync(path.join(projectRoot, '.awm', 'profile.json'), '{"extensions":[]}\n');
+        fs.writeFileSync(path.join(projectRoot, '.awm', 'journal', 'state.json'), '{"state":"active"}\n');
+        const before = { home: bytesOf(home), project: bytesOf(projectRoot), git: (() => { try { return execFileSync('git', ['status', '--porcelain=v1'], { cwd: projectRoot, encoding: 'utf8' }); } catch (error) { return String(error); } })() };
+
+        const { collectDashboardSnapshot } = require('../../src/core/dashboard/collect');
+        collectDashboardSnapshot({ cwd: projectRoot, now: '2026-08-22T00:00:00.000Z' });
+
+        const after = { home: bytesOf(home), project: bytesOf(projectRoot), git: (() => { try { return execFileSync('git', ['status', '--porcelain=v1'], { cwd: projectRoot, encoding: 'utf8' }); } catch (error) { return String(error); } })() };
+        expect(after).toEqual(before);
     });
 });
