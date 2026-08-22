@@ -67,6 +67,18 @@ describe('renderDashboardHtml', () => {
         expect(html.indexOf('awm sensors run')).toBeLessThan(html.indexOf('awm init'));
     });
 
+    it('uses neutral machine configuration semantics when no project is detected', () => {
+        const html = renderDashboardHtml(validateDashboardSnapshotV1(snapshot({
+            project: { detected: false, label: 'No project detected' },
+            sections: [{ id: 'machine', availability: 'available', items: [] }],
+        })));
+        expect(html).toContain('<h1>Machine configuration</h1>');
+        expect(html).toContain('Machine readiness and safe configuration state outside a project.');
+        expect(html).toContain('aria-label="Machine configuration sections"');
+        expect(html).not.toContain('Project lifecycle');
+        expect(html).not.toContain('Dashboard sections');
+    });
+
     it('matches the project lifecycle composition with machine preparation, timeline, provisional evidence, plans, and history', () => {
         const html = renderDashboardHtml(validateDashboardSnapshotV1(snapshot({ confidence: 'provisional' })));
         expect(html).toContain('data-machine-preparation');
