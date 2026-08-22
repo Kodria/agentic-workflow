@@ -120,6 +120,7 @@ export interface RunDoctorOptions {
     full?: boolean;
     html?: string;
     force?: boolean;
+    collectSnapshot?: typeof collectDashboardSnapshot;
     cwd?: string;
     /** Comma-separated agent subset (R12/R13) — defaults to every enabled agent. */
     agent?: string;
@@ -140,7 +141,7 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
         try {
             const cwd = opts.cwd ?? process.cwd();
             const target = htmlRequested ? resolveHtmlTarget({ cwd, target: opts.html!, force: opts.force }) : undefined;
-            const snapshot = collectDashboardSnapshot({ cwd, now: new Date().toISOString() });
+            const snapshot = (opts.collectSnapshot ?? collectDashboardSnapshot)({ cwd, now: new Date().toISOString() });
             if (opts.full) process.stdout.write([
                 `AWM dashboard · ${snapshot.overall}`,
                 `Project: ${snapshot.project.label}`,

@@ -5,6 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { captureDoctorJsonFixture } from '../helpers/dashboard-fixtures';
+import { dashboardSnapshot } from '../../src/core/dashboard/types';
 
 describe('runDoctor legacy JSON fixtures', () => {
     it.each(['bare-home', 'project'] as const)('keeps %s JSON byte-for-byte compatible', (kind) => {
@@ -57,6 +58,14 @@ describe('runDoctor dashboard modes', () => {
             expect(runDoctor({ html: '' })).toBe(2);
             expect(runDoctor({ html: '/definitely-missing-parent/report.html' })).toBe(2);
         } finally { stdout.mockRestore(); stderr.mockRestore(); }
+    });
+
+    it.each([{ full: true }, { html: 'report.html', force: true }] as const)('returns 1 for a degraded dashboard mode', (options) => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-doctor-degraded-'));
+        const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        try {
+            expect(runDoctor({ ...options, cwd: root, collectSnapshot: () => dashboardSnapshot({ overall: 'degraded' }) })).toBe(1);
+        } finally { stdout.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); }
     });
 });
 
