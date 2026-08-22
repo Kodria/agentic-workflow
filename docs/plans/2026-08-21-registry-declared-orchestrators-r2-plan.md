@@ -1,4 +1,6 @@
 # Orquestadores declarados — Release 2 (capa de CLI) Implementation Plan
+<!-- awm-qa-complete: 2026-08-22 -->
+
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
