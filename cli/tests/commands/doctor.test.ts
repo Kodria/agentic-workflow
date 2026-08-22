@@ -1,4 +1,5 @@
-import { renderProviderReport, renderReport, runDoctor } from '../../src/commands/doctor';
+import { registerDoctorCommand, renderProviderReport, renderReport, runDoctor } from '../../src/commands/doctor';
+import { Command } from 'commander';
 import type { CheckReport, ProviderDiagnosticReport } from '../../src/core/diagnostics/types';
 import type { AwmPreferences } from '../../src/utils/config';
 import fs from 'fs';
@@ -37,6 +38,22 @@ describe('runDoctor legacy JSON fixtures', () => {
 });
 
 describe('runDoctor dashboard modes', () => {
+    it('CLI rejects --html without an argument before collection or writes', async () => {
+        const program = new Command();
+        const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const previousExitCode = process.exitCode;
+        try {
+            registerDoctorCommand(program);
+            await program.parseAsync(['node', 'awm', 'doctor', '--html']);
+            expect(process.exitCode).toBe(2);
+            expect(stderr.mock.calls.map((call) => String(call[0])).join('')).toContain('--html requires a file target');
+            expect(stdout).not.toHaveBeenCalled();
+        } finally {
+            process.exitCode = previousExitCode;
+            stderr.mockRestore(); stdout.mockRestore();
+        }
+    });
     it.each([
         [{ json: true, full: true }, '--json cannot be combined with --full'],
         [{ json: true, html: 'report.html' }, '--json cannot be combined with --html'],
