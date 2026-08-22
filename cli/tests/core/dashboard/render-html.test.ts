@@ -97,6 +97,7 @@ describe('renderDashboardHtml', () => {
         expect(html).toContain('class="lifecycle-timeline" data-lifecycle-timeline');
         expect(html).toContain('data-lifecycle-timeline aria-labelledby="lifecycle-timeline-heading"');
         expect(html).toContain('class="timeline connected-timeline"');
+        expect(html).toContain('<span aria-hidden="true" class="timeline-marker"></span>');
         for (const stage of ['Planning', 'Execution', 'QA', 'Retro', 'Evidence']) expect(html).toContain(`data-stage="${stage.toLowerCase()}"`);
         expect(html).toContain('Provisional evidence');
         expect(html).toContain('data-project-evidence role="group" aria-labelledby="project-evidence-heading"');
@@ -121,6 +122,8 @@ describe('renderDashboardHtml', () => {
         expect(html).toContain('width:min(100%,72rem)');
         expect(html).toContain('.machine-preparation-strip {');
         expect(html).toContain('.connected-timeline::before');
+        expect(html).toContain('.timeline-marker {');
+        expect(html).not.toContain('.timeline li::before');
         expect(html).toContain('.timeline .state.unavailable { background:#38141c; color:#fff0ed;');
         expect(html).toContain('.evidence-grid.compact-composition');
         expect(html).toContain('font:14px/1.35');

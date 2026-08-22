@@ -47,7 +47,7 @@ function projectComposition(snapshot: DashboardSnapshotV1): string {
         const section = byId.get(id);
         const stage = id === 'history' ? 'evidence' : id;
         const available = section?.availability === 'available';
-        return `<li data-stage="${stage}"><strong>${stage === 'evidence' ? 'Evidence' : SECTION_TITLES[id]}</strong><span class="state ${available ? 'ok' : 'unavailable'}">${available ? '● Available' : '⊘ Unavailable'}</span></li>`;
+        return `<li data-stage="${stage}"><span aria-hidden="true" class="timeline-marker"></span><strong>${stage === 'evidence' ? 'Evidence' : SECTION_TITLES[id]}</strong><span class="state ${available ? 'ok' : 'unavailable'}">${available ? '● Available' : '⊘ Unavailable'}</span></li>`;
     }).join('');
     const provisional = snapshot.confidence === 'provisional' ? '<aside data-provisional-evidence aria-label="Provisional evidence"><strong>Provisional evidence</strong><span>Current observations are still being verified by downstream QA and evidence capture.</span></aside>' : '';
     const machineSupplement = `${diagnosticCards(byId.get('machine')?.items ?? [], 'data-machine-preparation')}<nav class="lifecycle-timeline" data-lifecycle-timeline aria-labelledby="lifecycle-timeline-heading"><h3 id="lifecycle-timeline-heading">Línea de ciclo</h3><ol class="timeline connected-timeline">${stages}</ol></nav>${provisional}`;
