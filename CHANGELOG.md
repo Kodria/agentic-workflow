@@ -1,3 +1,8 @@
+## v8.2.0 - 2026-08-22
+
+### Features
+- **sensors:** soporte packageRoot para monorepos + brief y planes de orquestadores declarados (#104)
+
 ## v8.1.6 - 2026-08-21
 
 ### Fixes
