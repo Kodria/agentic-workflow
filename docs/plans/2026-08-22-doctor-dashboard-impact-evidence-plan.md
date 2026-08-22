@@ -1,7 +1,9 @@
 # AWM Doctor Dashboard and Impact Evidence Implementation Plan
 
+<!-- awm-qa-complete: 2026-08-22 (Release B / #87; 5 QA defects closed and re-verified) -->
 <!-- awm-qa-complete: 2026-08-22 (Release A / #86; visual-fidelity exception authorized by user) -->
 <!-- awm-retro-complete: 2026-08-22 (Release A / #86) -->
+<!-- awm-retro-complete: 2026-08-22 (Release B / #87; ledger-emission gap reconciled) -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps

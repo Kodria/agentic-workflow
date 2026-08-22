@@ -35,4 +35,35 @@ describe('evidence capture CLI boundary', () => {
     const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: { journalId: 'ignored', cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:01.000Z' }, tasks: [], fixes: [], cycleVerificationPlan: [{ id: 'review-gate', kind: 'review', satisfiedBy: 'final' }], jobs: {}, verdicts: [{ id: 'first', obligationId: 'review-gate', result: 'fail', fingerprint: 'review-gate', receivedAt: '2026-08-22T10:00:00.000Z' }, { id: 'final', obligationId: 'review-gate', result: 'pass', fingerprint: 'review-gate', receivedAt: '2026-08-22T10:00:01.000Z' }] }, ledger: [] });
     expect(JSON.parse(fs.readFileSync(path.join(root, '.awm', 'evidence', 'cycles', result.stdout.trim() + '.json'), 'utf8')).gates.firstEvaluationsPassed).toEqual([false]);
   });
+
+  test('derives retro_pending from completed checklist tasks and the QA marker in the plan file', () => {
+    fs.writeFileSync(path.join(root, 'plan.md'), '# plan\n<!-- awm-qa-complete: 2026-08-22 -->\n- [x] Build\n- [X] Verify\n');
+    const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: { journalId: 'ignored', cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:01.000Z' }, tasks: [], verdicts: [], fixes: [], jobs: {}, cycleVerificationPlan: [] }, ledger: [] });
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(fs.readFileSync(path.join(root, '.awm', 'evidence', 'cycles', result.stdout.trim() + '.json'), 'utf8')).plan.state).toBe('retro_pending');
+  });
+
+  test('uses a blocked journal state over completed plan markers', () => {
+    fs.writeFileSync(path.join(root, 'plan.md'), '# plan\n<!-- awm-qa-complete: 2026-08-22 -->\n<!-- awm-retro-complete: 2026-08-22 -->\n- [x] Build\n');
+    const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: { journalId: 'ignored', cycle: { status: 'BLOCKED', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:01.000Z' }, tasks: [], verdicts: [], fixes: [], jobs: {}, cycleVerificationPlan: [] }, ledger: [] });
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(fs.readFileSync(path.join(root, '.awm', 'evidence', 'cycles', result.stdout.trim() + '.json'), 'utf8')).plan.state).toBe('blocked');
+  });
+
+  test('does not let Release A markers classify a multi-release plan whose current Release B has no lifecycle markers', () => {
+    fs.writeFileSync(path.join(root, 'plan.md'), '# plan\n<!-- awm-qa-complete: Release A / #86 -->\n<!-- awm-retro-complete: Release A / #86 -->\n\n## Delivery order\n1. **Release A / #86:** dashboard\n2. **Release B / #87:** evidence\n\n- [x] Release B task\n');
+    const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: { journalId: 'ignored', cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:01.000Z' }, tasks: [], verdicts: [], fixes: [], jobs: {}, cycleVerificationPlan: [] }, ledger: [] });
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(fs.readFileSync(path.join(root, '.awm', 'evidence', 'cycles', result.stdout.trim() + '.json'), 'utf8')).plan.state).toBe('qa_pending');
+  });
+
+  test('rejects a malformed checklist instead of silently classifying a plan', () => {
+    fs.writeFileSync(path.join(root, 'plan.md'), '# plan\n- [z] Unknown state\n');
+    const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: { journalId: 'ignored', cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:01.000Z' }, tasks: [], verdicts: [], fixes: [], jobs: {}, cycleVerificationPlan: [] }, ledger: [] });
+
+    expect(result).toEqual(expect.objectContaining({ code: 2, error: expect.stringMatching(/invalid checklist/i) }));
+  });
 });

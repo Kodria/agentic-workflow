@@ -172,6 +172,19 @@ describe('collectDashboardSnapshot', () => {
         fs.rmSync(root, { recursive: true, force: true });
     });
 
+    it('renders a blocked evidence cycle as an actionable history item with a verified remedy', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-evidence-dashboard-'));
+        fs.writeFileSync(path.join(root, 'package.json'), '{}');
+        writeCycleEvidence(root, { ...cycleEvidenceFixture(), cycleState: 'blocked', plan: { ref: 'docs/plans/current.md', state: 'blocked' } });
+
+        const snapshot = collectDashboardSnapshot({ cwd: root, now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined } });
+
+        expect(snapshot.sections.find((section) => section.id === 'history')?.items).toEqual([
+            expect.objectContaining({ state: 'attention', remediation: 'awm preflight' }),
+        ]);
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
     it.each(['.awm', 'evidence', 'cycles'] as const)('does not follow a symlinked %s evidence ancestor', (ancestor) => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-evidence-dashboard-'));
         const external = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-evidence-external-'));

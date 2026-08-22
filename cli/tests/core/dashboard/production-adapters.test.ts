@@ -1,5 +1,13 @@
 import { collectDashboardSnapshot, productionDashboardAdapters } from '../../../src/core/dashboard/collect';
 import type { HarnessContext } from '../../../src/core/diagnostics/types';
+import { writeCycleEvidence } from '../../../src/core/evidence/store';
+import { initJournal, writeJournal } from '../../../src/core/journal/store';
+import { emptyState } from '../../../src/core/journal/types';
+import { cycleEvidenceFixture } from '../../helpers/evidence-fixtures';
+import { execFileSync } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 function context(): HarnessContext {
     return {
@@ -71,5 +79,92 @@ describe('productionDashboardAdapters', () => {
             expect.objectContaining({ id: 'project.bundles.coherent', remediation: 'awm sync' }),
         ]));
         expect(JSON.stringify(snapshot)).not.toMatch(/remediationVerified|private|0\.145\.0|token/i);
+    });
+
+    it('derives plan lifecycle and execution evidence from validated local cycle records', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-dashboard-production-evidence-'));
+        fs.writeFileSync(path.join(root, 'package.json'), '{}');
+        writeCycleEvidence(root, {
+            ...cycleEvidenceFixture(),
+            plan: { ref: 'docs/plans/current.md', state: 'executed' },
+            tasks: [{ id: 'task-1', attempts: 2, retries: 1 }],
+            qa: { findings: 1, fixes: 1, signatures: ['a'.repeat(64)] },
+        });
+
+        const snapshot = collectDashboardSnapshot({
+            cwd: root, now: '2026-08-22T00:00:00.000Z', adapters: productionDashboardAdapters(context()),
+        });
+
+        expect(snapshot.sections.find((section) => section.id === 'planning')?.items).toEqual([
+            expect.objectContaining({ detail: 'executed', state: 'ok' }),
+        ]);
+        expect(snapshot.sections.find((section) => section.id === 'execution')?.items).toEqual([
+            expect.objectContaining({ state: 'ok' }),
+        ]);
+        expect(snapshot.sections.find((section) => section.id === 'qa')?.items).toEqual([
+            expect.objectContaining({ state: 'ok' }),
+        ]);
+        expect(snapshot.sections.find((section) => section.id === 'retro')?.items).toEqual([
+            expect.objectContaining({ state: 'ok' }),
+        ]);
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    it.each([
+        ['IN_PROGRESS', 'active', 'ok'],
+        ['BLOCKED', 'blocked', 'attention'],
+    ] as const)('overlays the current branch journal %s over prior executed evidence', (status, expectedLifecycle, expectedState) => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-dashboard-journal-overlay-'));
+        const branch = 'dashboard-overlay';
+        fs.writeFileSync(path.join(root, 'package.json'), '{}');
+        execFileSync('git', ['init', '--initial-branch', branch], { cwd: root, stdio: 'ignore' });
+        execFileSync('git', ['config', 'user.email', 'dashboard@example.test'], { cwd: root, stdio: 'ignore' });
+        execFileSync('git', ['config', 'user.name', 'Dashboard Test'], { cwd: root, stdio: 'ignore' });
+        execFileSync('git', ['commit', '--allow-empty', '-m', 'fixture'], { cwd: root, stdio: 'ignore' });
+        writeCycleEvidence(root, { ...cycleEvidenceFixture(), plan: { ref: 'docs/plans/current.md', state: 'executed' } });
+        initJournal(root, branch);
+        const journal = emptyState(branch);
+        journal.cycle.status = status;
+        writeJournal(root, branch, journal);
+
+        const snapshot = collectDashboardSnapshot({
+            cwd: root, now: '2026-08-22T00:00:00.000Z', adapters: productionDashboardAdapters(context()),
+        });
+
+        expect(snapshot.sections.find((section) => section.id === 'planning')?.items).toEqual([
+            expect.objectContaining({ detail: expectedLifecycle, state: expectedState }),
+        ]);
+        expect(JSON.stringify(snapshot)).not.toMatch(/dashboard-overlay|dashboard@example|Dashboard Test/i);
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    it.each([
+        ['IN_PROGRESS', 'active', 'ok'],
+        ['BLOCKED', 'blocked', 'attention'],
+    ] as const)('renders the current branch journal %s without prior evidence', (status, expectedLifecycle, expectedState) => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-dashboard-journal-only-'));
+        const branch = 'dashboard-journal-only';
+        fs.writeFileSync(path.join(root, 'package.json'), '{}');
+        execFileSync('git', ['init', '--initial-branch', branch], { cwd: root, stdio: 'ignore' });
+        execFileSync('git', ['config', 'user.email', 'dashboard@example.test'], { cwd: root, stdio: 'ignore' });
+        execFileSync('git', ['config', 'user.name', 'Dashboard Test'], { cwd: root, stdio: 'ignore' });
+        execFileSync('git', ['commit', '--allow-empty', '-m', 'fixture'], { cwd: root, stdio: 'ignore' });
+        initJournal(root, branch);
+        const journal = emptyState(branch);
+        journal.cycle.status = status;
+        writeJournal(root, branch, journal);
+
+        const snapshot = collectDashboardSnapshot({
+            cwd: root, now: '2026-08-22T00:00:00.000Z', adapters: productionDashboardAdapters(context()),
+        });
+
+        expect(snapshot.sections.find((section) => section.id === 'planning')?.items).toEqual([
+            expect.objectContaining({ detail: expectedLifecycle, state: expectedState }),
+        ]);
+        expect(snapshot.sections.find((section) => section.id === 'execution')).toEqual(expect.objectContaining({
+            availability: 'available', items: [expect.objectContaining({ state: expectedState })],
+        }));
+        expect(JSON.stringify(snapshot)).not.toMatch(/dashboard-journal-only|dashboard@example|Dashboard Test/i);
+        fs.rmSync(root, { recursive: true, force: true });
     });
 });

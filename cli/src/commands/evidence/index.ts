@@ -7,6 +7,7 @@ import { writeCycleEvidence } from '../../core/evidence/store';
 import { readJournal } from '../../core/journal/store';
 import { detectBranch, listEntries } from '../../core/ledger/store';
 import type { JournalState } from '../../core/journal/types';
+import { classifyPlanState, type PlanState } from '../../core/dashboard/plan-state';
 
 function assertRepoRelativePlan(value: unknown): string {
   if (typeof value !== 'string' || !value || value.startsWith('--') || path.isAbsolute(value)
@@ -14,6 +15,55 @@ function assertRepoRelativePlan(value: unknown): string {
     throw new Error('--plan requires a repo-relative path');
   }
   return value;
+}
+
+function currentRelease(lines: readonly string[]): string | undefined {
+  const releases = lines.flatMap((line) => {
+    const match = /^\s*\d+\.\s+\*\*Release\s+([A-Za-z0-9][A-Za-z0-9_-]*)\s*\/\s*#\d+:\*\*/.exec(line);
+    return match ? [match[1]] : [];
+  });
+  return releases.length > 1 ? releases.at(-1) : undefined;
+}
+
+function marker(lines: readonly string[], name: 'awm-qa-complete' | 'awm-retro-complete', release: string | undefined): boolean {
+  const expression = new RegExp(`^\\s*<!--\\s*${name}(?:\\s*:\\s*[^\\r\\n]*?)?\\s*-->\\s*$`);
+  if (release === undefined) return lines.some((line) => expression.test(line));
+  const releaseExpression = new RegExp(`\\bRelease\\s+${release.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i');
+  return lines.some((line) => expression.test(line) && releaseExpression.test(line));
+}
+
+/** Reads only structural lifecycle syntax; plan prose never crosses into evidence. */
+function planState(root: string, planPath: string, journal: JournalState): PlanState {
+  const file = path.join(root, planPath);
+  const stat = fs.lstatSync(file);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('--plan must reference a regular file');
+  let source: string;
+  try { source = new TextDecoder('utf-8', { fatal: true }).decode(fs.readFileSync(file)); } catch { throw new Error('--plan must be valid UTF-8'); }
+  if (source.includes('\0')) throw new Error('--plan must not contain NUL bytes');
+  let fenced = false;
+  let total = 0;
+  let completed = 0;
+  const visibleLines: string[] = [];
+  for (const line of source.split(/\r?\n/)) {
+    if (/^\s*(?:```|~~~)/.test(line)) { fenced = !fenced; continue; }
+    if (fenced) continue;
+    visibleLines.push(line);
+    if (!/^\s*[-*+]\s+\[/.test(line)) continue;
+    const candidate = /^\s*[-*+]\s+\[([^\]])\](?:\s+(.*))?$/.exec(line);
+    if (!candidate) throw new Error('--plan contains an invalid checklist task');
+    if ((candidate[1] !== ' ' && candidate[1] !== 'x' && candidate[1] !== 'X') || !candidate[2]?.trim()) throw new Error('--plan contains an invalid checklist task');
+    total += 1;
+    if (candidate[1] === 'x' || candidate[1] === 'X') completed += 1;
+  }
+  if (fenced) throw new Error('--plan contains an unclosed fenced block');
+  const status = journal.cycle?.status;
+  if (status !== 'IN_PROGRESS' && status !== 'COMPLETE' && status !== 'BLOCKED') throw new Error('journal cycle status is invalid');
+  const release = currentRelease(visibleLines);
+  return classifyPlanState({
+    ...(status === 'IN_PROGRESS' ? { journal: { state: 'active' } } : status === 'BLOCKED' ? { journal: { state: 'blocked' } } : {}),
+    markers: { qaComplete: marker(visibleLines, 'awm-qa-complete', release), retroComplete: marker(visibleLines, 'awm-retro-complete', release) },
+    tasks: { total, completed },
+  });
 }
 
 export function registerEvidenceCommand(program: Command): void {
@@ -73,7 +123,7 @@ export function runEvidenceCapture(root: string, plan: unknown, overrides?: { re
       if (overrides.prProvider === undefined || overrides.prNumber === undefined || typeof overrides.prNumber !== 'string' || !/^\d+$/.test(overrides.prNumber)) throw new Error('--pr-provider and --pr-number must be supplied together');
       pr = { provider: overrides.prProvider, number: Number(overrides.prNumber) };
     }
-    const saved = writeCycleEvidence(root, captureCycleEvidence({ root, repositoryIdentity: repositoryIdentity(root, overrides?.repositoryIdentity), planPath, journal: read.state, gates: firstEvaluationGates(read.state), ledger: overrides?.ledger ?? listEntries(root, branch), pr }));
+    const saved = writeCycleEvidence(root, captureCycleEvidence({ root, repositoryIdentity: repositoryIdentity(root, overrides?.repositoryIdentity), planPath, journal: read.state, gates: firstEvaluationGates(read.state), ledger: overrides?.ledger ?? listEntries(root, branch), pr, planState: planState(root, planPath, read.state) }));
     return { code: 0, stdout: `${saved.cycleId}\n` };
   } catch (error) { return { code: 2, stdout: '', error: (error as Error).message }; }
 }
