@@ -645,7 +645,7 @@ El cambio de mayor riesgo. La red de la Task 5 ya está puesta.
 **Files:**
 - Modify: `cli/src/commands/hooks/claude.ts:42-49`
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 Agregar a `cli/tests/commands/hooks/install.test.ts`:
 
@@ -663,7 +663,7 @@ it('el hook recibe los orquestadores declarados, no el SKILL.md crudo', () => { 
 });
 ```
 
-- [ ] **Step 2: Correr para verificar que falla**
+- [x] **Step 2: Correr para verificar que falla**
 
 ```bash
 cd /home/user/agentic-workflow/cli
@@ -672,7 +672,7 @@ npx jest tests/commands/hooks/install.test.ts --runInBand
 
 Esperado: FAIL en el assert de `mi-proceso` — hoy el hook lee el `SKILL.md` crudo y la composición nunca llega.
 
-- [ ] **Step 3: Reemplazar el symlink por el payload materializado**
+- [x] **Step 3: Reemplazar el symlink por el payload materializado**
 
 En `cli/src/commands/hooks/claude.ts`, reemplazar el bloque del paso 3 (`// 3. Link the skill ...`, líneas 42-49) por:
 
@@ -696,7 +696,7 @@ En `cli/src/commands/hooks/claude.ts`, reemplazar el bloque del paso 3 (`// 3. L
 
 Importar arriba lo necesario, y exportar `collectDeclaredOrchestrators` desde `core/context/orchestrator.ts` (era privada en la Task 4 — promoverla).
 
-- [ ] **Step 4: Correr los dos tests**
+- [x] **Step 4: Correr los dos tests**
 
 ```bash
 cd /home/user/agentic-workflow/cli
@@ -705,7 +705,7 @@ npx jest tests/commands/hooks/install.test.ts --runInBand
 
 Esperado: PASS ambos — el nuevo **y** la red de no-regresión de la Task 5. Si la red se rompe, se rompió el contrato observable para usuarios existentes: revertir y replantear.
 
-- [ ] **Step 5: Verificar que `awm update` sigue propagando**
+- [x] **Step 5: Verificar que `awm update` sigue propagando**
 
 Antes el symlink hacía que `awm update` propagara solo. Ahora el archivo es un derivado, así que hay que confirmar que el camino de resync lo regenera:
 
@@ -716,7 +716,7 @@ npx jest tests/commands/hooks --runInBand
 
 Esperado: PASS. **Si algún test de resync falla, es el hallazgo más importante de este plan:** el archivo materializado quedaría rancio tras `awm update`. Arreglarlo cableando la regeneración en el mismo lugar que hoy resuelve el symlink.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /home/user/agentic-workflow/cli && npm run typecheck && npm run lint
@@ -724,6 +724,12 @@ cd /home/user/agentic-workflow
 git add cli/src/commands/hooks/claude.ts cli/src/core/context/orchestrator.ts
 git commit -m "fix(cli): rutear Claude Code por buildContext, cerrando el bypass del SKILL.md crudo"
 ```
+
+**Desviaciones verificadas (no scope creep):**
+1. **Ciclo de imports real.** `claude.ts -> core/context/orchestrator.ts -> strategies/hook-merge.ts -> commands/hooks/install.ts -> claude.ts` es un ciclo genuino si `collectDeclaredOrchestrators`/`collectAndWarn` se exportan desde `orchestrator.ts` como el plan indicaba literalmente. Resuelto reubicando ambas funciones a `core/orchestrators.ts` (módulo hoja, solo depende de `./registries`) — confirmado por el spec reviewer leyendo el grafo de imports real.
+2. **`resyncClaudeHookFiles` también arreglado**, no solo `installClaudeHook` — ambos ahora comparten un `writeMaterializedSkill()` único (evita que un `awm update` posterior reabra el bypass, exactamente el riesgo que este Step 5 señala). Test de regresión dedicado en `resync.test.ts`.
+3. **Migración de instalaciones existentes verificada y fijada con test:** un `using-awm.md` symlink pre-Task-6 se migra correctamente a archivo materializado sin tocar el `SKILL.md` del registry (`fs.unlinkSync` remueve solo la entrada de directorio, nunca el destino del symlink) — verificado a mano por el code reviewer y luego regression-locked con un test dedicado tras su hallazgo.
+4. **Mensajes/comentarios obsoletos corregidos:** `hooks/index.ts` (mensaje post-install), `hooks/shared.ts` (dos ubicaciones: comentario de `HookStatus.checks` y wording de `checkFile`'s catch branch), y `install-symlink-fallback.test.ts` (un test cuyo mock de EPERM había quedado inerte para `using-awm.md` — reescrito para probar y documentar esa irrelevancia explícitamente en vez de pasar en silencio por la razón equivocada).
 
 ---
 
