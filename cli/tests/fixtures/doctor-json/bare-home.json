@@ -1,0 +1,21 @@
+{
+  "providers": [
+    {
+      "id": "copilot",
+      "label": "Copilot",
+      "tier": "agents-md-managed",
+      "checks": [
+        {
+          "id": "binary.version",
+          "state": "supported"
+        },
+        {
+          "id": "context.global",
+          "state": "absent",
+          "remediationCode": "awm-init"
+        }
+      ]
+    }
+  ],
+  "overall": "degraded"
+}

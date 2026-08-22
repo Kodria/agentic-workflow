@@ -1,9 +1,143 @@
-import { renderProviderReport, renderReport, runDoctor } from '../../src/commands/doctor';
+import { registerDoctorCommand, renderProviderReport, renderReport, runDoctor } from '../../src/commands/doctor';
+import { Command } from 'commander';
 import type { CheckReport, ProviderDiagnosticReport } from '../../src/core/diagnostics/types';
 import type { AwmPreferences } from '../../src/utils/config';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { captureDoctorJsonFixture } from '../helpers/dashboard-fixtures';
+import { dashboardSnapshot } from '../../src/core/dashboard/types';
+import { renderDashboardHtml } from '../../src/core/dashboard/render-html';
+
+describe('runDoctor legacy JSON fixtures', () => {
+    it.each(['bare-home', 'project'] as const)('keeps %s JSON byte-for-byte compatible', (kind) => {
+        const captured = captureDoctorJsonFixture(kind);
+        try {
+            const expected = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'doctor-json', `${kind}.json`), 'utf-8');
+            expect(captured.output).toBe(expected);
+            expect(captured.code).toBe(1);
+
+            const parsed: unknown = JSON.parse(captured.output);
+            expect(parsed).toEqual(expect.objectContaining({
+                overall: 'degraded',
+                providers: expect.any(Array),
+            }));
+            const provider = (parsed as { providers: Array<{ id: string; label: string; tier: string; checks: unknown[] }> }).providers[0];
+            expect(provider).toEqual(expect.objectContaining({
+                id: 'copilot',
+                label: 'Copilot',
+                tier: 'agents-md-managed',
+                checks: expect.any(Array),
+            }));
+            expect(provider.checks).toEqual(expect.arrayContaining([
+                expect.objectContaining({ id: 'context.global', state: kind === 'project' ? 'stale' : 'absent' }),
+            ]));
+        } finally {
+            captured.cleanup();
+        }
+    });
+});
+
+describe('runDoctor dashboard modes', () => {
+    it('CLI rejects --html without an argument before collection or writes', async () => {
+        const program = new Command();
+        const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const previousExitCode = process.exitCode;
+        try {
+            registerDoctorCommand(program);
+            await program.parseAsync(['node', 'awm', 'doctor', '--html']);
+            expect(process.exitCode).toBe(2);
+            expect(stderr.mock.calls.map((call) => String(call[0])).join('')).toContain('--html requires a file target');
+            expect(stdout).not.toHaveBeenCalled();
+        } finally {
+            process.exitCode = previousExitCode;
+            stderr.mockRestore(); stdout.mockRestore();
+        }
+    });
+    it.each([
+        [{ json: true, full: true }, '--json cannot be combined with --full'],
+        [{ json: true, html: 'report.html' }, '--json cannot be combined with --html'],
+        [{ full: true, html: 'report.html' }, '--full cannot be combined with --html'],
+        [{ force: true }, '--force requires --html'],
+        [{ html: '' }, '--html requires a file target'],
+    ] as const)('rejects incompatible options before collection', (options, message) => {
+        const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        try {
+            expect(runDoctor({ ...options, collectSnapshot: () => { throw new Error('collection must not run'); } })).toBe(2);
+            expect(stderr.mock.calls.map((call) => String(call[0])).join('')).toContain(message);
+        } finally { stderr.mockRestore(); }
+    });
+
+    it('writes exact dashboard bytes and only prints the final path after successful --html', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-doctor-html-success-'));
+        const target = path.join(root, 'dashboard.html');
+        const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const snapshot = dashboardSnapshot();
+        try {
+            expect(runDoctor({ cwd: root, html: target, collectSnapshot: () => snapshot })).toBe(0);
+            expect(fs.readFileSync(target, 'utf8')).toBe(renderDashboardHtml(snapshot));
+            expect(stdout.mock.calls.map((call) => String(call[0]))).toEqual([`${target}\n`]);
+        } finally { stdout.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
+    it('maps healthy full, invalid, and failing HTML modes to 0, 2, and 2', () => {
+        const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        try {
+            expect(runDoctor({ full: true, cwd: '/definitely-not-a-project', collectSnapshot: () => dashboardSnapshot() })).toBe(0);
+            expect(runDoctor({ html: '' })).toBe(2);
+            expect(runDoctor({ html: '/definitely-missing-parent/report.html' })).toBe(2);
+        } finally { stdout.mockRestore(); stderr.mockRestore(); }
+    });
+
+    it.each([{ full: true }, { html: 'report.html', force: true }] as const)('returns 1 for a degraded dashboard mode', (options) => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-doctor-degraded-'));
+        const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        try {
+            expect(runDoctor({ ...options, cwd: root, collectSnapshot: () => dashboardSnapshot({ overall: 'degraded' }) })).toBe(1);
+        } finally { stdout.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
+    it('renders a real read-only machine finding and its remediation in full mode', () => {
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-doctor-real-dashboard-'));
+        const previousHome = process.env.HOME; const previousAwmHome = process.env.AWM_HOME;
+        const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        try {
+            process.env.HOME = home; process.env.AWM_HOME = path.join(home, '.awm');
+            expect(runDoctor({ full: true, cwd: home })).toBe(1);
+            const output = stdout.mock.calls.map((call) => String(call[0])).join('');
+            expect(output).toContain('machine.preferences.missing');
+            expect(output).toContain('awm init');
+            expect(fs.existsSync(path.join(home, '.awm', 'preferences.json'))).toBe(false);
+        } finally {
+            stdout.mockRestore(); fs.rmSync(home, { recursive: true, force: true });
+            if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+            if (previousAwmHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = previousAwmHome;
+        }
+    });
+
+    it('wires existing read-only project facts into the dashboard without inventing lifecycle observations', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-doctor-project-facts-'));
+        const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        try {
+            fs.writeFileSync(path.join(root, 'package.json'), '{}');
+            expect(runDoctor({ full: true, cwd: root })).toBe(1);
+            const output = stdout.mock.calls.map((call) => String(call[0])).join('');
+            expect(output).toContain('project.profile.missing');
+            expect(output).toContain('project.sensors.unavailable');
+            expect(output).toContain('unavailable');
+        } finally { stdout.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
+    it('applies doctor agent selection validation to full dashboard mode', () => {
+        const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        try {
+            expect(runDoctor({ full: true, cwd: '/definitely-not-a-project', agent: 'not-a-real-agent' })).toBe(2);
+            expect(stderr.mock.calls.map((call) => String(call[0])).join('')).toContain('Invalid agent');
+        } finally { stderr.mockRestore(); }
+    });
+});
 
 function report(partial: Partial<CheckReport> = {}): CheckReport {
     return {

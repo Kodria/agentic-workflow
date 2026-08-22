@@ -1,0 +1,75 @@
+import { collectDashboardSnapshot, productionDashboardAdapters } from '../../../src/core/dashboard/collect';
+import type { HarnessContext } from '../../../src/core/diagnostics/types';
+
+function context(): HarnessContext {
+    return {
+        machine: {} as HarnessContext['machine'],
+        project: {
+            root: '/private/project',
+            profile: { present: true, extensions: ['delivery'], registries: { base: '1.2.3' } },
+            activeBundles: { expected: ['delivery'], linked: ['delivery'], broken: [] },
+            orphanLinks: { repairable: [], dead: [], usurped: [] },
+            sensors: { present: true }, constitution: { present: true }, context: { present: true, file: 'AGENTS.md' },
+        },
+        providers: [{
+            id: 'codex', label: 'Codex', tier: 'hooks-native', checks: [
+                { id: 'binary.version', state: 'supported', target: '0.145.0' },
+                { id: 'hook.trust', state: 'pending-trust', remediationCode: 'awm hooks trust --agent codex' },
+            ],
+        }],
+    };
+}
+
+describe('productionDashboardAdapters', () => {
+    it('maps existing diagnostics into canonical, share-safe machine and project facts', () => {
+        const adapters = productionDashboardAdapters(context());
+        const machine = adapters.machine({ cwd: '/private/project' });
+        const project = adapters.project({ root: '/private/project' });
+
+        expect(machine.findings).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'machine.provider.codex.binary.version', state: 'ok' }),
+            expect.objectContaining({ id: 'machine.provider.codex.hook.trust', state: 'attention' }),
+        ]));
+        expect(project.findings).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'project.profile.present', state: 'ok' }),
+            expect.objectContaining({ id: 'project.extensions.configured', state: 'ok' }),
+            expect.objectContaining({ id: 'project.registry-pins.present', state: 'ok' }),
+            expect.objectContaining({ id: 'project.context.present', state: 'ok' }),
+            expect.objectContaining({ id: 'project.constitution.present', state: 'ok' }),
+            expect.objectContaining({ id: 'project.sensors.present', state: 'ok' }),
+        ]));
+        expect(JSON.stringify({ machine, project })).not.toMatch(/private|0\.145\.0|hooks trust/i);
+    });
+
+    it('reports only source-verified remediation and leaves unavailable lifecycle sources explicit', () => {
+        const adapters = productionDashboardAdapters({ ...context(), project: null });
+        expect(adapters.machine({ cwd: '/tmp' }).findings).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'machine.provider.codex.hook.trust', remediationVerified: false }),
+        ]));
+        expect(adapters.execution({ root: '/tmp' })).toBeUndefined();
+    });
+
+    it('contains no diagnostic prose or raw source details', () => {
+        const facts = context();
+        facts.providers![0].checks[1].detail = 'token=secret /private/path <script>';
+        const serialized = JSON.stringify(productionDashboardAdapters(facts).machine({ cwd: '/private/project' }));
+        expect(serialized).not.toMatch(/token|secret|private|script/i);
+    });
+
+    it('retains stable provider ids after collection and maps a verified bundle remedy', () => {
+        const facts = context();
+        facts.project!.activeBundles.broken = ['delivery'];
+        const snapshot = collectDashboardSnapshot({
+            cwd: process.cwd(), now: '2026-08-22T00:00:00.000Z', adapters: productionDashboardAdapters(facts),
+        });
+        const machine = snapshot.sections.find((section) => section.id === 'machine')!;
+        const project = snapshot.sections.find((section) => section.id === 'project')!;
+        expect(machine.items).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'machine.provider.codex.binary.version', state: 'ok' }),
+        ]));
+        expect(project.items).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'project.bundles.coherent', remediation: 'awm sync' }),
+        ]));
+        expect(JSON.stringify(snapshot)).not.toMatch(/remediationVerified|private|0\.145\.0|token/i);
+    });
+});
