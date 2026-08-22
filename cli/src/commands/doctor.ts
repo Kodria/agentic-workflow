@@ -10,6 +10,8 @@ import { platformLabel, isWindowsNative, WINDOWS_KNOWN_GAP } from '../core/paths
 import { readPreferences } from '../utils/config';
 import { resolveAgentTargets } from '../core/agent-targets';
 import { collectDashboardSnapshot } from '../core/dashboard/collect';
+import { renderDashboardHtml } from '../core/dashboard/render-html';
+import { renderFullTerminal } from '../core/dashboard/render-terminal';
 import { resolveHtmlTarget, writeHtmlAtomically } from '../core/dashboard/write-html';
 import type { DashboardFinding } from '../core/dashboard/collect';
 
@@ -156,17 +158,9 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
             const snapshot = collectSnapshot({ cwd, now: new Date().toISOString(), adapters: {
                 machine: () => ({ findings: machineFindings }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined,
             } });
-            if (opts.full) process.stdout.write([
-                `AWM dashboard · ${snapshot.overall}`,
-                `Project: ${snapshot.project.label}`,
-                ...snapshot.sections.flatMap((section) => [
-                    `${section.id}: ${section.availability} (${section.items.length})`,
-                    ...section.items.map((item) => `  ${item.state} ${item.id} · ${item.label}${item.remediation ? ` → ${item.remediation}` : ''}`),
-                ]),
-            ].join('\n') + '\n');
+            if (opts.full) process.stdout.write(renderFullTerminal(snapshot) + '\n');
             if (htmlRequested) {
-                const body = `<html><body><pre>${JSON.stringify(snapshot, null, 2).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</pre></body></html>\n`;
-                writeHtmlAtomically({ target: target!, html: body });
+                writeHtmlAtomically({ target: target!, html: renderDashboardHtml(snapshot) });
                 process.stdout.write(`${target}\n`);
             }
             return snapshot.overall === 'healthy' ? 0 : 1;
