@@ -1,7 +1,7 @@
 const STATES = new Set(['ok', 'attention', 'missing', 'unavailable', 'not_applicable', 'active', 'blocked']);
 const ALLOWED_KEYS = new Set(['findings', 'label', 'id', 'state', 'detail', 'execution', 'qa', 'retro', 'history', 'lifecycle', 'journal', 'markers', 'tasks', 'total', 'completed', 'qaComplete', 'retroComplete']);
 const CANONICAL_LABELS = new Set(['Preferences', 'Registries', 'Profile', 'Optional source unavailable']);
-const DANGEROUS = /(?:ghp_|sk-[A-Za-z]|<|>|\\\\[^\\\s]+\\[^\\\s]+|\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*|[A-Za-z]:\\|token|secret|password)/iu;
+const DANGEROUS = /(?:ghp_|sk-[A-Za-z]|<|>|\\\\[^\\\s]+\\[^\\\s]+|\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*|[A-Za-z]:\\|(?:^|\s)[A-Za-z_][A-Za-z0-9_]*=|token|secret|password)/iu;
 
 function sanitize(value: unknown, key?: string): unknown {
     if (value === null || typeof value === 'boolean') return value;

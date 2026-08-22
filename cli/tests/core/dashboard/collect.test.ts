@@ -112,8 +112,8 @@ describe('collectDashboardSnapshot', () => {
 
 describe('sanitizeDashboardSource', () => {
     it('removes hostile paths and secrets before rendering', () => {
-        const safe = sanitizeDashboardSource({ path: '/var/lib/private', token: 'ghp_secret', username: 'alice', output: '<script>alert(1)</script>', rawOutput: 'sk-live-secret', detail: 'log:(cwd=/tmp/run/output) unc=(\\\\server\\share\\secret)', label: 'alice workstation' });
-        expect(JSON.stringify(safe)).not.toMatch(/alice|ghp_|script|\/var\/|\/tmp\/|sk-live|alert|server|share/i);
+        const safe = sanitizeDashboardSource({ path: '/var/lib/private', token: 'ghp_secret', username: 'alice', output: '<script>alert(1)</script>', rawOutput: 'sk-live-secret', detail: 'log:(cwd=/tmp/run/output) unc=(\\\\server\\share\\secret) MODE=production', label: 'alice workstation' });
+        expect(JSON.stringify(safe)).not.toMatch(/alice|ghp_|script|\/var\/|\/tmp\/|sk-live|alert|server|share|MODE=production/i);
     });
 
     it('rejects invalid item states explicitly', () => {
