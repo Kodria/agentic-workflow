@@ -231,6 +231,39 @@ describe('addRegistry', () => {
         const { readRegistriesConfig } = require('../../../src/core/registries');
         expect(readRegistriesConfig().map((r: { name: string }) => r.name)).toEqual(['personal']);
     });
+
+    it('reporta una declaracion de orquestador invalida sin abortar la instalacion', async () => {  // verifies R1.2
+        // Registry local con layout valido y declaracion rota
+        const src = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-src-'));
+        fs.mkdirSync(path.join(src, 'skills/mi-proceso'), { recursive: true });
+        fs.writeFileSync(path.join(src, 'skills/mi-proceso/SKILL.md'), '---\nname: mi-proceso\n---\nx');
+        fs.writeFileSync(path.join(src, 'awm-registry.json'), JSON.stringify({ orchestrator: { name: 'roto' } }));
+        GIT(src, 'init -q');
+        GIT(src, 'add -A');
+        GIT(src, 'commit -qm init');
+
+        const { addRegistry } = require('../../../src/commands/registry/add');
+        const result = await addRegistry(src, 'roto-reg');
+
+        expect(result.ok).toBe(true);                       // la instalacion NO se aborta por esto
+        expect(result.ok && result.orchestratorDiagnostics).toBeDefined();
+        expect(result.ok && result.orchestratorDiagnostics!.join('\n')).toMatch(/appliesWhen/);
+    });
+
+    it('un registry sin declaracion se instala sin diagnosticos', async () => {                     // verifies R1.4
+        const src = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-src-'));
+        fs.mkdirSync(path.join(src, 'skills/otro'), { recursive: true });
+        fs.writeFileSync(path.join(src, 'skills/otro/SKILL.md'), '---\nname: otro\n---\nx');
+        GIT(src, 'init -q');
+        GIT(src, 'add -A');
+        GIT(src, 'commit -qm init');
+
+        const { addRegistry } = require('../../../src/commands/registry/add');
+        const result = await addRegistry(src, 'sin-decl');
+
+        expect(result.ok).toBe(true);
+        expect(result.ok && (result.orchestratorDiagnostics ?? [])).toEqual([]);
+    });
 });
 
 describe('registry add + bundle install (post-add flow)', () => {

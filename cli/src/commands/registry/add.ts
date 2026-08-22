@@ -14,9 +14,10 @@ import {
 } from '../../core/registries';
 import { discoverSkills, discoverWorkflows, discoverAgents } from '../../core/discovery';
 import { discoverAllBundles } from '../../core/bundles';
+import { readDeclaredOrchestrators } from '../../core/orchestrators';
 
 export type AddRegistryResult =
-    | { ok: true; name: string; contentRoot: string }
+    | { ok: true; name: string; contentRoot: string; orchestratorDiagnostics: string[] }
     | { ok: false; name?: string; error: string };
 
 export function deriveRegistryName(remote: string): string {
@@ -76,6 +77,11 @@ export async function addRegistry(remote: string, nameOverride?: string): Promis
         return { ok: false, name, error: e instanceof Error ? e.message : String(e) };
     }
 
+    // Una declaracion de orquestador malformada se REPORTA, no aborta: el
+    // registry puede aportar skills utiles aunque su declaracion este rota,
+    // y abortar por eso invalidaria contenido sano (R1.2).
+    const { diagnostics: orchestratorDiagnostics } = readDeclaredOrchestrators(dest);
+
     writeRegistriesConfig([...existing, { name, remote }]);
-    return { ok: true, name, contentRoot: dest };
+    return { ok: true, name, contentRoot: dest, orchestratorDiagnostics };
 }
