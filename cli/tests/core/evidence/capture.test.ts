@@ -3,7 +3,7 @@ import { captureCycleEvidence } from '../../../src/core/evidence/capture';
 describe('captureCycleEvidence', () => {
   test('derives counts and opaque signatures without journal prose or identities', () => {
     const evidence = captureCycleEvidence({
-      root: process.cwd(),
+      root: process.cwd(), repositoryIdentity: 'git@example.test:team/repository.git',
       planPath: 'plans/release.md',
       journal: {
         cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:10.000Z' },
@@ -31,13 +31,15 @@ describe('captureCycleEvidence', () => {
     expect(JSON.stringify(evidence)).not.toContain('secret prompt');
   });
 
-  test('derives cycle identity from repository identity, never journal identity', () => {
+  test('derives cycle identity from stable repository identity, not checkout or journal identity', () => {
     const source = {
       planPath: 'plans/release.md', journal: { journalId: 'repository-identity', cycle: { status: 'BLOCKED', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:01.000Z' }, tasks: [], verdicts: [], fixes: [] }, gates: [], ledger: [],
     };
-    const first = captureCycleEvidence({ ...source, root: process.cwd() });
-    const second = captureCycleEvidence({ ...source, root: process.cwd(), journal: { ...source.journal, journalId: 'different-journal-identity' } });
+    const first = captureCycleEvidence({ ...source, root: process.cwd(), repositoryIdentity: 'git@example.test:team/repository.git' });
+    const second = captureCycleEvidence({ ...source, root: process.cwd(), repositoryIdentity: 'git@example.test:team/repository.git', journal: { ...source.journal, journalId: 'different-journal-identity' } });
+    const distinct = captureCycleEvidence({ ...source, root: process.cwd(), repositoryIdentity: 'git@example.test:other/repository.git' });
     expect(first.cycleId).toBe(second.cycleId);
+    expect(first.cycleId).not.toBe(distinct.cycleId);
     expect(first.cycleState).toBe('blocked');
   });
 });

@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import fs from 'fs';
 import type { PlanState } from '../dashboard/plan-state';
 import { validateCycleEvidence, type CycleEvidenceV1 } from './types';
 
@@ -9,11 +8,12 @@ const object = (value: unknown, name: string): SourceRecord => { if (!value || t
 const iso = (value: unknown, name: string): string => { if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) throw new Error(`${name} must be an ISO timestamp`); return value; };
 const nonNegative = (value: unknown, name: string): number => { if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error(`${name} must be a non-negative integer`); return value as number; };
 
-export interface CaptureCycleEvidenceInput { root: string; planPath: string; journal: unknown; gates: unknown; ledger: unknown; pr?: unknown; planState?: PlanState; }
+export interface CaptureCycleEvidenceInput { root: string; repositoryIdentity: unknown; planPath: string; journal: unknown; gates: unknown; ledger: unknown; pr?: unknown; planState?: PlanState; }
 
 export function captureCycleEvidence(input: CaptureCycleEvidenceInput): CycleEvidenceV1 {
   if (!input || typeof input.root !== 'string' || !input.root) throw new Error('capture root is required');
-  const repositoryIdentity = hash(fs.realpathSync(input.root));
+  if (typeof input.repositoryIdentity !== 'string' || input.repositoryIdentity.length === 0 || input.repositoryIdentity.length > 4096 || /[\r\n]/.test(input.repositoryIdentity)) throw new Error('repository identity is invalid');
+  const repositoryIdentity = hash(input.repositoryIdentity);
   if (typeof input.planPath !== 'string' || !input.planPath) throw new Error('capture planPath is required');
   const journal = object(input.journal, 'journal'); const cycle = object(journal.cycle, 'journal cycle');
   const startedAt = iso(cycle.startedAt, 'cycle startedAt'); const endedAt = iso(cycle.completedAt ?? cycle.endedAt, 'cycle endedAt');
