@@ -1,6 +1,6 @@
 const STATES = new Set(['ok', 'attention', 'missing', 'unavailable', 'not_applicable']);
 const ALLOWED_KEYS = new Set(['findings', 'label', 'id', 'state', 'detail', 'execution', 'qa', 'retro', 'history']);
-const DANGEROUS = /(?:ghp_|sk-[A-Za-z]|<|>|(?:^|\s)\/[^\s]+|[A-Za-z]:\\|token|secret|password)/iu;
+const DANGEROUS = /(?:ghp_|sk-[A-Za-z]|<|>|(?:^|[=:\s])\/[^\s]+|[A-Za-z]:\\|token|secret|password)/iu;
 
 function sanitize(value: unknown, key?: string): unknown {
     if (value === null || typeof value === 'boolean') return value;

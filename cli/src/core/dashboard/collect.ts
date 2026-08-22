@@ -17,6 +17,7 @@ export interface DashboardSourceAdapters {
     execution(input: { root: string }): ExecutionDashboardSource | undefined;
 }
 export interface CollectDashboardOptions { cwd: string; now: string; adapters?: DashboardSourceAdapters; }
+type OptionalFailure = { findingId?: string };
 
 export const REMEDIATION_BY_FINDING_ID: Readonly<Record<string, string>> = {
     'machine.preferences.missing': 'awm init',
@@ -45,8 +46,17 @@ function section(id: DashboardSectionV1['id'], availability: DashboardSectionV1[
     return { id, availability, items };
 }
 
-function optional<T>(source: () => T): { value?: T; failed: boolean } {
-    try { return { value: source(), failed: false }; } catch { return { failed: true }; }
+function optional<T>(source: () => T): { value?: T; failed: boolean; failure: OptionalFailure } {
+    try { return { value: source(), failed: false, failure: {} }; } catch (error) {
+        const findingId = error && typeof error === 'object' && typeof (error as { findingId?: unknown }).findingId === 'string'
+            ? (error as { findingId: string }).findingId : undefined;
+        return { failed: true, failure: { findingId } };
+    }
+}
+
+function canonicalOptionalFailure(failure: OptionalFailure): DashboardItemV1[] {
+    if (!failure.findingId || !Object.hasOwn(REMEDIATION_BY_FINDING_ID, failure.findingId)) return [];
+    return [{ id: failure.findingId, label: 'Optional source unavailable', state: 'unavailable', remediation: REMEDIATION_BY_FINDING_ID[failure.findingId] }];
 }
 
 /** Pure read-only aggregation over injected source adapters. */
@@ -69,7 +79,7 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     const planItems = plansResult.value ? findings(sanitizeDashboardSource(plansResult.value) as PlanDashboardSource[]) : [];
     const sections = [
         machineSection,
-        section('project', projectResult.failed ? 'unavailable' : 'available', findings(projectSource?.findings)),
+        section('project', projectResult.failed ? 'unavailable' : 'available', projectResult.failed ? canonicalOptionalFailure(projectResult.failure) : findings(projectSource?.findings)),
         section('planning', plansResult.failed ? 'unavailable' : 'available', planItems),
         section('execution', executionResult.failed ? 'unavailable' : 'available', findings(execution?.execution)),
         section('qa', executionResult.failed ? 'unavailable' : 'available', findings(execution?.qa)),

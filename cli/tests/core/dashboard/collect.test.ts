@@ -51,6 +51,17 @@ describe('collectDashboardSnapshot', () => {
         expect(snapshot.sections.find((section) => section.id === 'project')?.items).toEqual([]);
     });
 
+    it('renders exact remediation only for a canonical optional source failure', () => {
+        const knownFailure = Object.assign(new Error('sensors unavailable'), { findingId: 'project.sensors.unavailable' });
+        const snapshot = collectDashboardSnapshot({
+            cwd: process.cwd(), now: fixedNow,
+            adapters: { machine: () => ({ findings: [] }), project: () => { throw knownFailure; }, plans: () => [], execution: () => undefined },
+        });
+        expect(snapshot.sections.find((section) => section.id === 'project')?.items).toEqual([
+            expect.objectContaining({ id: 'project.sensors.unavailable', state: 'unavailable', remediation: 'awm sensors status' }),
+        ]);
+    });
+
     it('sorts findings by stable canonical id', () => {
         const snapshot = collectDashboardSnapshot({
             cwd: '/definitely-not-a-project', now: fixedNow,
@@ -74,7 +85,7 @@ describe('collectDashboardSnapshot', () => {
 
 describe('sanitizeDashboardSource', () => {
     it('removes hostile paths and secrets before rendering', () => {
-        const safe = sanitizeDashboardSource({ path: '/var/lib/private', token: 'ghp_secret', username: 'alice', output: '<script>alert(1)</script>', rawOutput: 'sk-live-secret', detail: '/tmp/run/output' });
+        const safe = sanitizeDashboardSource({ path: '/var/lib/private', token: 'ghp_secret', username: 'alice', output: '<script>alert(1)</script>', rawOutput: 'sk-live-secret', detail: 'cwd=/tmp/run/output' });
         expect(JSON.stringify(safe)).not.toMatch(/alice|ghp_|script|\/var\/|\/tmp\/|sk-live|alert/i);
     });
 
