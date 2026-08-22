@@ -26,6 +26,26 @@ function json(result: SpawnSyncReturns<string>): Record<string, unknown> {
     return JSON.parse(result.stdout) as Record<string, unknown>;
 }
 
+function compareSemver(left: string, right: string): number {
+    const parse = (value: string) => value.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/);
+    const a = parse(left); const b = parse(right);
+    if (!a || !b) throw new Error('published compatibility versions must be exact semver');
+    for (let index = 1; index <= 3; index++) { const difference = Number(a[index]) - Number(b[index]); if (difference !== 0) return difference; }
+    return (a[4] ? -1 : 0) - (b[4] ? -1 : 0);
+}
+
+/** The cloned registry, not a loose prose regex, owns the retro ordering contract. */
+export function assertRetroCaptureContract(registry: unknown, retro: string, version: string): void {
+    if (!registry || typeof registry !== 'object' || Array.isArray(registry)) throw new Error('published registry metadata is invalid');
+    const floor = (registry as { minCliVersion?: unknown }).minCliVersion;
+    if (typeof floor !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(floor)) throw new Error('published registry must declare minCliVersion');
+    if (compareSemver(version, floor) < 0) throw new Error(`published CLI ${version} is below registry minCliVersion ${floor}`);
+    const capture = retro.indexOf('awm evidence capture');
+    const archive = retro.indexOf('awm ledger archive');
+    if (capture < 0) throw new Error('installed harness-retro contract lacks evidence capture');
+    if (archive < 0 || capture > archive) throw new Error('installed harness-retro must capture evidence before archive');
+}
+
 acceptance('published doctor and evidence acceptance (R8.7)', () => {
     jest.setTimeout(10 * 60_000);
 
@@ -44,6 +64,15 @@ acceptance('published doctor and evidence acceptance (R8.7)', () => {
             const cliRoot = path.join(artifacts, 'node_modules', 'agentic-workflow-manager');
             expect(JSON.parse(fs.readFileSync(path.join(cliRoot, 'package.json'), 'utf8'))).toEqual(expect.objectContaining({ version: cliVersion }));
             expect(fs.existsSync(path.join(cliRoot, 'dist', 'src', 'index.js'))).toBe(true);
+            const registryMetadata = JSON.parse(fs.readFileSync(path.join(registry, 'awm-registry.json'), 'utf8')) as unknown;
+            const retro = fs.readFileSync(path.join(registry, 'skills', 'harness-retro', 'SKILL.md'), 'utf8');
+            // v8.4.0 predates the #87 registry contract. Keep this live artifact
+            // as an explicit prepublication observation, never synthetic success.
+            if (cliVersion === '8.4.0') {
+                expect(() => assertRetroCaptureContract(registryMetadata, retro, cliVersion)).toThrow(/lacks evidence capture|below registry minCliVersion/);
+                return;
+            }
+            assertRetroCaptureContract(registryMetadata, retro, cliVersion!);
             fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'published-doctor-fixture', private: true }));
             fs.writeFileSync(path.join(project, 'plan.md'), '# published evidence fixture\n');
             expect(command(project, 'git', ['init']).status).toBe(0);
@@ -82,8 +111,6 @@ acceptance('published doctor and evidence acceptance (R8.7)', () => {
             // observation, never instead of it.
             expect(invoke('ledger', 'add', '--branch', branch, '--polarity', 'finding', '--class', 'quality', '--signature', 'published-retro-contract', '--severity', 'important', '--desc', 'published acceptance').status).toBe(0);
             expect(invoke('ledger', 'archive', '--branch', branch).status).toBe(0);
-            const retro = fs.readFileSync(path.join(registry, 'skills', 'harness-retro', 'SKILL.md'), 'utf8');
-            expect(retro).toMatch(/evidence capture|CycleEvidenceV1/i);
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
 });
@@ -94,5 +121,18 @@ describe('published artifact provenance guard', () => {
     });
     test.each(['main', 'HEAD', '', 'v3', 'refs/heads/main'])('rejects mutable registry ref %s', (tag) => {
         expect(() => assertImmutableArtifacts('8.4.0', tag, registryRemote)).toThrow(/registry ref/i);
+    });
+});
+
+describe('future registry retro capture contract', () => {
+    const metadata = { minCliVersion: '8.4.1' };
+    const contract = '1. awm evidence capture --plan docs/plan.md\n2. awm ledger archive\n';
+    test('requires the declared semver floor and capture-before-archive ordering', () => {
+        expect(() => assertRetroCaptureContract(metadata, contract, '8.4.1')).not.toThrow();
+        expect(() => assertRetroCaptureContract(metadata, contract, '8.4.0')).toThrow(/below registry minCliVersion/);
+    });
+    test('fails when minCliVersion is removed or retro ordering is swapped', () => {
+        expect(() => assertRetroCaptureContract({}, contract, '8.4.1')).toThrow(/minCliVersion/);
+        expect(() => assertRetroCaptureContract(metadata, 'awm ledger archive\nawm evidence capture', '8.4.1')).toThrow(/before archive/);
     });
 });
