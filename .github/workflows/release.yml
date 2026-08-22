@@ -134,6 +134,16 @@ jobs:
           else
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
+      - name: Require immutable Task 7 registry commit
+        if: steps.release-result.outputs.published == 'true'
+        env:
+          REGISTRY_COMMIT: ${{ vars.AWM_REGISTRY_V3_3_0_COMMIT }}
+        shell: bash
+        run: |
+          if [[ ! "$REGISTRY_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "AWM_REGISTRY_V3_3_0_COMMIT must contain the full peeled v3.3.0 commit SHA" >&2
+            exit 1
+          fi
 
   # This is intentionally after `release`, not a replacement for its test
   # gate.  It downloads npm and git artifacts into a clean consumer on each

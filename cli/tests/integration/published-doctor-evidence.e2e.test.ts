@@ -7,7 +7,10 @@ const cliVersion = process.env.AWM_PUBLISHED_CLI_VERSION;
 const registryTag = process.env.AWM_PUBLISHED_REGISTRY_TAG;
 const registryCommit = process.env.AWM_PUBLISHED_REGISTRY_COMMIT;
 const registryRemote = process.env.AWM_PUBLISHED_REGISTRY_REMOTE ?? 'https://github.com/Kodria/awm-baseline-registry.git';
-const enabled = Boolean(cliVersion && registryTag && registryCommit);
+// Local contributors lack publish coordinates and skip this network acceptance.
+// A CI run that supplies the published CLI/tag but omits the commit MUST run and
+// fail at the provenance assertion rather than silently describe.skip.
+const enabled = Boolean(cliVersion && registryTag);
 const acceptance = enabled ? describe : describe.skip;
 
 function command(cwd: string, executable: string, args: string[], env = process.env): SpawnSyncReturns<string> {
@@ -131,6 +134,7 @@ describe('published artifact provenance guard', () => {
     });
     test('rejects a short or retagged registry commit pin', () => {
         expect(() => assertImmutableArtifacts('8.4.1', 'v3.3.0', 'deadbeef', registryRemote)).toThrow(/full immutable SHA/);
+        expect(() => assertImmutableArtifacts('8.4.1', 'v3.3.0', undefined, registryRemote)).toThrow(/full immutable SHA/);
     });
 });
 
