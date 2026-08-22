@@ -1,3 +1,8 @@
+## v8.2.1 - 2026-08-22
+
+### Fixes
+- **sensors:** thread packageRoot through status, mirror --config into probes (#105)
+
 ## v8.2.0 - 2026-08-22
 
 ### Features
