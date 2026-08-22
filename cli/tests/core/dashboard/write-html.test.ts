@@ -62,4 +62,14 @@ describe('writeHtmlAtomically', () => {
             open.mockRestore();
         }
     });
+
+    it('uses mode 0600 for a POSIX adjacent temporary file', () => {
+        if (process.platform === 'win32') return;
+        const target = path.join(root, 'posix.html');
+        const open = jest.spyOn(fs, 'openSync');
+        try {
+            writeHtmlAtomically({ target, html: 'ok' });
+            expect(open.mock.calls[0][2]).toBe(0o600);
+        } finally { open.mockRestore(); }
+    });
 });

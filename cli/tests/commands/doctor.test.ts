@@ -48,6 +48,16 @@ describe('runDoctor dashboard modes', () => {
             expect(stderr.mock.calls.map((call) => String(call[0])).join('')).toContain(message);
         } finally { stderr.mockRestore(); }
     });
+
+    it('maps healthy full, invalid, and failing HTML modes to 0, 2, and 2', () => {
+        const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        try {
+            expect(runDoctor({ full: true, cwd: '/definitely-not-a-project' })).toBe(0);
+            expect(runDoctor({ html: '' })).toBe(2);
+            expect(runDoctor({ html: '/definitely-missing-parent/report.html' })).toBe(2);
+        } finally { stdout.mockRestore(); stderr.mockRestore(); }
+    });
 });
 
 function report(partial: Partial<CheckReport> = {}): CheckReport {
