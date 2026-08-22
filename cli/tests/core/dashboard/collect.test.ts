@@ -48,7 +48,7 @@ describe('collectDashboardSnapshot', () => {
         });
         expect(snapshot.sections.find((section) => section.id === 'machine')?.items).toEqual([]);
         expect(snapshot.sections.find((section) => section.id === 'project')?.availability).toBe('unavailable');
-        expect(snapshot.sections.find((section) => section.id === 'project')?.items[0].remediation).toBe('awm sensors status');
+        expect(snapshot.sections.find((section) => section.id === 'project')?.items).toEqual([]);
     });
 
     it('sorts findings by stable canonical id', () => {
@@ -61,12 +61,21 @@ describe('collectDashboardSnapshot', () => {
         });
         expect(snapshot.sections[0].items.map((item) => item.id)).toEqual(['machine.preferences.missing', 'machine.registries.stale']);
     });
+
+    it('degrades a machine-only dashboard for actionable machine findings', () => {
+        const snapshot = collectDashboardSnapshot({
+            cwd: '/definitely-not-a-project', now: fixedNow,
+            adapters: { machine: () => ({ findings: [{ id: 'machine.preferences.missing', label: 'Preferences', state: 'missing' }] }), project: jest.fn(), plans: jest.fn(), execution: jest.fn() },
+        });
+        expect(snapshot.sections.map((section) => section.id)).toEqual(['machine']);
+        expect(snapshot.overall).toBe('degraded');
+    });
 });
 
 describe('sanitizeDashboardSource', () => {
     it('removes hostile paths and secrets before rendering', () => {
-        const safe = sanitizeDashboardSource({ path: '/home/alice/project', token: 'ghp_secret', username: 'alice', output: '<script>alert(1)</script>', rawOutput: 'sk-live-secret' });
-        expect(JSON.stringify(safe)).not.toMatch(/alice|ghp_|script|\/home\/|sk-live|alert/i);
+        const safe = sanitizeDashboardSource({ path: '/var/lib/private', token: 'ghp_secret', username: 'alice', output: '<script>alert(1)</script>', rawOutput: 'sk-live-secret', detail: '/tmp/run/output' });
+        expect(JSON.stringify(safe)).not.toMatch(/alice|ghp_|script|\/var\/|\/tmp\/|sk-live|alert/i);
     });
 
     it('rejects invalid item states explicitly', () => {

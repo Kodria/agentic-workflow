@@ -41,11 +41,6 @@ function findings(items: DashboardFinding[] | undefined): DashboardItemV1[] {
     }).sort((left, right) => left.id.localeCompare(right.id));
 }
 
-function unavailableFinding(id: string, label: string): DashboardItemV1[] {
-    const remediation = REMEDIATION_BY_FINDING_ID[id];
-    return remediation ? [{ id, label, state: 'unavailable', remediation }] : [];
-}
-
 function section(id: DashboardSectionV1['id'], availability: DashboardSectionV1['availability'], items: DashboardItemV1[] = []): DashboardSectionV1 {
     return { id, availability, items };
 }
@@ -61,7 +56,10 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     const machine = adapters.machine({ cwd: options.cwd });
     const root = findProjectRoot(options.cwd);
     const machineSection = section('machine', 'available', findings((sanitizeDashboardSource(machine) as MachineDashboardSource).findings));
-    if (!root) return validateDashboardSnapshotV1({ schema: 1, generatedAt: options.now, overall: 'healthy', project: { detected: false, label: 'No project detected' }, confidence: 'none', sections: [machineSection] });
+    if (!root) {
+        const degraded = machineSection.items.some((item) => item.state !== 'ok' && item.state !== 'not_applicable');
+        return validateDashboardSnapshotV1({ schema: 1, generatedAt: options.now, overall: degraded ? 'degraded' : 'healthy', project: { detected: false, label: 'No project detected' }, confidence: 'none', sections: [machineSection] });
+    }
 
     const projectResult = optional(() => adapters.project({ root }));
     const plansResult = optional(() => adapters.plans({ root }));
@@ -71,9 +69,7 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     const planItems = plansResult.value ? findings(sanitizeDashboardSource(plansResult.value) as PlanDashboardSource[]) : [];
     const sections = [
         machineSection,
-        section('project', projectResult.failed ? 'unavailable' : 'available', projectResult.failed
-            ? unavailableFinding('project.sensors.unavailable', 'Project source unavailable')
-            : findings(projectSource?.findings)),
+        section('project', projectResult.failed ? 'unavailable' : 'available', findings(projectSource?.findings)),
         section('planning', plansResult.failed ? 'unavailable' : 'available', planItems),
         section('execution', executionResult.failed ? 'unavailable' : 'available', findings(execution?.execution)),
         section('qa', executionResult.failed ? 'unavailable' : 'available', findings(execution?.qa)),
