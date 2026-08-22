@@ -6,7 +6,7 @@ function snapshot(): DashboardSnapshotV1 {
         schema: 1,
         generatedAt: '2026-08-22T00:00:00.000Z',
         overall: 'healthy',
-        project: { detected: false, label: 'No project' },
+        project: { detected: true, label: 'Demo project' },
         confidence: 'none',
         sections: [
             { id: 'machine', availability: 'available', items: [{ id: 'cli', label: 'CLI', state: 'ok' }] },
@@ -69,5 +69,16 @@ describe('validateDashboardSnapshotV1', () => {
         const value = snapshot();
         value.sections[0].items[0] = { id: 'cli', label: 'CLI', state: 'not_applicable', remediation: 'remove' };
         expect(() => validateDashboardSnapshotV1(value)).toThrow(DashboardValidationError);
+    });
+
+    it('rejects lifecycle sections when no project is detected', () => {
+        const value = dashboardSnapshot({
+            project: { detected: false, label: 'No project detected' },
+            sections: [
+                { id: 'machine', availability: 'available', items: [] },
+                { id: 'planning', availability: 'not_applicable', items: [] },
+            ],
+        });
+        expect(() => validateDashboardSnapshotV1(value)).toThrow(/no project.*machine/i);
     });
 });

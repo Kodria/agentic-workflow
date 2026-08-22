@@ -55,7 +55,7 @@ describe('writeHtmlAtomically', () => {
         expect(resolveHtmlTarget({ cwd: root, target, force: true })).toBe(target);
     });
 
-    it.each(['openSync', 'writeFileSync', 'fsyncSync', 'renameSync'] as const)('preserves old target and cleans only owned temp when %s fails', (failedOperation) => {
+    it.each(['openSync', 'writeFileSync', 'fsyncSync', 'closeSync', 'renameSync'] as const)('preserves old target and cleans only owned temp when %s fails', (failedOperation) => {
         const target = path.join(root, 'report.html');
         fs.writeFileSync(target, 'previous');
         const operations: HtmlWriteOperations = { ...fs };

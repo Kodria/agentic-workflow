@@ -7,6 +7,7 @@ import os from 'os';
 import path from 'path';
 import { captureDoctorJsonFixture } from '../helpers/dashboard-fixtures';
 import { dashboardSnapshot } from '../../src/core/dashboard/types';
+import { renderDashboardHtml } from '../../src/core/dashboard/render-html';
 
 describe('runDoctor legacy JSON fixtures', () => {
     it.each(['bare-home', 'project'] as const)('keeps %s JSON byte-for-byte compatible', (kind) => {
@@ -59,12 +60,25 @@ describe('runDoctor dashboard modes', () => {
         [{ json: true, html: 'report.html' }, '--json cannot be combined with --html'],
         [{ full: true, html: 'report.html' }, '--full cannot be combined with --html'],
         [{ force: true }, '--force requires --html'],
+        [{ html: '' }, '--html requires a file target'],
     ] as const)('rejects incompatible options before collection', (options, message) => {
         const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
         try {
-            expect(runDoctor(options)).toBe(2);
+            expect(runDoctor({ ...options, collectSnapshot: () => { throw new Error('collection must not run'); } })).toBe(2);
             expect(stderr.mock.calls.map((call) => String(call[0])).join('')).toContain(message);
         } finally { stderr.mockRestore(); }
+    });
+
+    it('writes exact dashboard bytes and only prints the final path after successful --html', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-doctor-html-success-'));
+        const target = path.join(root, 'dashboard.html');
+        const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const snapshot = dashboardSnapshot();
+        try {
+            expect(runDoctor({ cwd: root, html: target, collectSnapshot: () => snapshot })).toBe(0);
+            expect(fs.readFileSync(target, 'utf8')).toBe(renderDashboardHtml(snapshot));
+            expect(stdout.mock.calls.map((call) => String(call[0]))).toEqual([`${target}\n`]);
+        } finally { stdout.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); }
     });
 
     it('maps healthy full, invalid, and failing HTML modes to 0, 2, and 2', () => {
