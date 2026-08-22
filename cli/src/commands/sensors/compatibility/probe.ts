@@ -3,7 +3,7 @@ import type { CompatibilityProbe, StructuredCommand } from './types';
 
 export type ProbeStatus = 'matched' | 'not-matched' | 'unverifiable';
 export type ProbeResult = { status: ProbeStatus; reason: string };
-export type ProbeEvidence = { cwd: string; toolExecutable?: string; toolResolution?: StructuredCommand['resolution']; pythonEnvironmentRoot?: StructuredCommand['pythonEnvironmentRoot']; environment?: StructuredCommand['environment']; configFiles?: string[]; scripts?: string[] };
+export type ProbeEvidence = { cwd: string; toolExecutable?: string; toolResolution?: StructuredCommand['resolution']; pythonEnvironmentRoot?: StructuredCommand['pythonEnvironmentRoot']; environment?: StructuredCommand['environment']; configFiles?: string[]; scripts?: string[]; variantArgs?: string[] };
 export type ProbeExecutor = (command: StructuredCommand, options: ExecOptions) => Promise<ExecResult>;
 const KINDS = new Set<CompatibilityProbe>(['version', 'eslint-print-config', 'typescript-show-config', 'semgrep-validate', 'package-script-present', 'config-present']);
 
@@ -25,9 +25,21 @@ function commandFor(kind: CompatibilityProbe, evidence: ProbeEvidence): Structur
         ...(evidence.environment ? { environment: evidence.environment } : {}),
     };
     if (kind === 'version') return { ...command, args: ['--version'] };
-    if (kind === 'eslint-print-config') return { ...command, args: ['--print-config', evidence.configFiles?.[0] ?? 'package.json'] };
-    if (kind === 'typescript-show-config') return { ...command, args: ['--showConfig'] };
-    return { ...command, args: ['--validate'] };
+    // A pack asset is never named the tool's default config filename (e.g.
+    // `eslint.config.awm.mjs`, not `eslint.config.js`), so the real command always
+    // pins it via an explicit `--config <file>`. Mirroring that same pair here — rather
+    // than probing with a bare invocation — is what lets the probe find the config the
+    // real run will actually use, for whatever name or tool version is in play.
+    if (kind === 'eslint-print-config') return { ...command, args: [...configFlag(evidence.variantArgs), '--print-config', evidence.configFiles?.[0] ?? 'package.json'] };
+    if (kind === 'typescript-show-config') return { ...command, args: [...configFlag(evidence.variantArgs), '--showConfig'] };
+    return { ...command, args: [...configFlag(evidence.variantArgs), '--validate'] };
+}
+
+/** The `--config <file>` pair from a variant's real command args, if it declares one. */
+function configFlag(variantArgs?: string[]): string[] {
+    if (!variantArgs) return [];
+    const i = variantArgs.indexOf('--config');
+    return i !== -1 && variantArgs[i + 1] !== undefined ? ['--config', variantArgs[i + 1]] : [];
 }
 
 /** Executes only the closed probe enum. Raw output is intentionally discarded. */

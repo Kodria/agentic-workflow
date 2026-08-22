@@ -82,4 +82,51 @@ describe('runCompatibilityProbe', () => {
             expect.any(Object),
         );
     });
+
+    // A pack asset is never named the tool's own default (e.g. `eslint.config.awm.mjs`,
+    // not `eslint.config.js`) so the real command always pins it via `--config`. A probe
+    // that omits the same flag never finds a config to load and always reports
+    // not-matched — a false negative on every AWM-configured project. The probe must
+    // mirror the variant's own `--config` argument, not guess a bare invocation.
+    it('carries the variant\'s --config argument into an eslint-print-config probe', async () => {
+        await runCompatibilityProbe({ kind: 'eslint-print-config' }, {
+            ...evidence, variantArgs: ['.', '--config', 'eslint.config.awm.mjs', '--cache', '--format', 'json'],
+        }, fakeExecutor);
+
+        expect(fakeExecutor).toHaveBeenCalledWith(
+            expect.objectContaining({ args: ['--config', 'eslint.config.awm.mjs', '--print-config', 'eslint.config.js'] }),
+            expect.any(Object),
+        );
+    });
+
+    it('carries the variant\'s --config argument into a typescript-show-config probe', async () => {
+        await runCompatibilityProbe({ kind: 'typescript-show-config' }, {
+            ...evidence, variantArgs: ['--config', 'tsconfig.awm.json', '--noEmit'],
+        }, fakeExecutor);
+
+        expect(fakeExecutor).toHaveBeenCalledWith(
+            expect.objectContaining({ args: ['--config', 'tsconfig.awm.json', '--showConfig'] }),
+            expect.any(Object),
+        );
+    });
+
+    it('carries the variant\'s --config argument into a semgrep-validate probe', async () => {
+        await runCompatibilityProbe({ kind: 'semgrep-validate' }, {
+            ...evidence, variantArgs: ['--config', '.semgrep.awm.yml', '--json', '.'],
+        }, fakeExecutor);
+
+        expect(fakeExecutor).toHaveBeenCalledWith(
+            expect.objectContaining({ args: ['--config', '.semgrep.awm.yml', '--validate'] }),
+            expect.any(Object),
+        );
+    });
+
+    it('omits --config from the probe when the variant command declares none', async () => {
+        await runCompatibilityProbe({ kind: 'eslint-print-config' }, { ...evidence, variantArgs: ['.', '--cache'] }, fakeExecutor);
+
+        expect(fakeExecutor).toHaveBeenCalledWith(
+            expect.objectContaining({ args: ['--print-config', 'eslint.config.js'] }),
+            expect.any(Object),
+        );
+    });
 });
