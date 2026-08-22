@@ -1,0 +1,25 @@
+{
+  "providers": [
+    {
+      "id": "claude-code",
+      "label": "Claude Code",
+      "tier": "hooks-native",
+      "checks": [
+        {
+          "id": "binary.version",
+          "state": "supported"
+        },
+        {
+          "id": "skills.global",
+          "state": "absent",
+          "target": "<fixture-home>/.claude/skills"
+        },
+        {
+          "id": "hook.trust",
+          "state": "broken"
+        }
+      ]
+    }
+  ],
+  "overall": "degraded"
+}

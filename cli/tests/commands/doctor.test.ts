@@ -4,6 +4,19 @@ import type { AwmPreferences } from '../../src/utils/config';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { captureDoctorJsonFixture } from '../helpers/dashboard-fixtures';
+
+describe('runDoctor legacy JSON fixtures', () => {
+    it.each(['bare-home', 'project'] as const)('keeps %s JSON byte-for-byte compatible', (kind) => {
+        const captured = captureDoctorJsonFixture(kind);
+        try {
+            const expected = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'doctor-json', `${kind}.json`), 'utf-8');
+            expect(captured.output).toBe(expected);
+        } finally {
+            captured.cleanup();
+        }
+    });
+});
 
 function report(partial: Partial<CheckReport> = {}): CheckReport {
     return {
