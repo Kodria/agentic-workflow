@@ -92,26 +92,37 @@ describe('renderDashboardHtml', () => {
 
     it('matches the project lifecycle composition with machine preparation, timeline, provisional evidence, plans, and history', () => {
         const html = renderDashboardHtml(validateDashboardSnapshotV1(snapshot({ confidence: 'provisional' })));
-        expect(html).toContain('data-machine-preparation');
+        expect(html).toContain('class="machine-preparation-strip" data-machine-preparation');
         expect(html).toContain('data-machine-preparation role="group" aria-labelledby="machine-preparation-heading"');
-        expect(html).toContain('data-lifecycle-timeline');
-        expect(html).toContain('<nav data-lifecycle-timeline aria-labelledby="lifecycle-timeline-heading">');
+        expect(html).toContain('class="lifecycle-timeline" data-lifecycle-timeline');
+        expect(html).toContain('data-lifecycle-timeline aria-labelledby="lifecycle-timeline-heading"');
+        expect(html).toContain('class="timeline connected-timeline"');
         for (const stage of ['Planning', 'Execution', 'QA', 'Retro', 'Evidence']) expect(html).toContain(`data-stage="${stage.toLowerCase()}"`);
         expect(html).toContain('Provisional evidence');
         expect(html).toContain('data-project-evidence role="group" aria-labelledby="project-evidence-heading"');
-        expect(html).toContain('Plans &amp; work');
-        expect(html).toContain('Impact &amp; traceability');
+        expect(html).toContain('Planes de trabajo');
+        expect(html).toContain('Impacto y trazabilidad');
         expect(html).toContain('data-project-header-actions role="group" aria-label="Project actions"');
         expect(html).toContain('data-plan-card="active"');
         expect(html).toContain('data-plan-card="blocked"');
-        expect(html).toContain('Progress: no observation');
-        expect(html).toContain('View plan (static)');
-        expect(html).toContain('<th scope="col">Type</th>');
-        expect(html).toContain('<th scope="col">Source</th>');
-        expect(html).toContain('<th scope="col">Status</th>');
-        expect(html).toContain('<th scope="col">Date</th>');
-        expect(html).toContain('No impact evidence is available in this snapshot.');
+        expect(html).toContain('Progreso: sin observación');
+        expect(html).toContain('Ver plan (estático)');
+        expect(html).toContain('<th scope="col">Tipo</th>');
+        expect(html).toContain('<th scope="col">Fuente</th>');
+        expect(html).toContain('<th scope="col">Estado</th>');
+        expect(html).toContain('<th scope="col">Fecha</th>');
+        expect(html).toContain('No hay evidencia de impacto disponible en este snapshot.');
         expect(html).toContain('data-closure-actions role="group" aria-labelledby="closure-actions-heading"');
+    });
+
+    it('uses the compact approved desktop composition rather than stretched generic cards', () => {
+        const html = renderDashboardHtml(validateDashboardSnapshotV1(snapshot({ confidence: 'provisional' })));
+        expect(html).toContain('<div class="dashboard-content">');
+        expect(html).toContain('width:min(100%,72rem)');
+        expect(html).toContain('.machine-preparation-strip {');
+        expect(html).toContain('.connected-timeline::before');
+        expect(html).toContain('.evidence-grid.compact-composition');
+        expect(html).toContain('font:14px/1.35');
     });
 
     it('includes the artifact-aligned, noninteractive machine toolbar without weakening static CSP', () => {
