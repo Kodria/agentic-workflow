@@ -3,6 +3,15 @@
 Auditable log of recurring/structural harness gaps converted into rules. See the
 `harness-retro` skill for the process. Newest first.
 
+## 2026-08-22 — Release B/#87: QA ledger emission omitted despite real findings
+
+- **Class:** process.
+- **Occurrences (ledger count):** 0 on this branch; the QA panel and two review rounds nevertheless produced five concrete defects. This is contradictory evidence, not a clean ledger.
+- **Rule:** no new rule. `AGENTS.md` already contains the curated rule that direct debugging/review with real findings must emit `awm ledger add`; each defect is now pinned by a discriminating regression test.
+- **Sensor:** full CLI suite (251 suites passed, 2 skipped; 2914 tests passed, 6 skipped) and immutable-registry sensor gate (`lint`, `typecheck`, `depcheck` all pass; depcheck baseline 1/new 0).
+- **Coverage:** `awm sensors coverage --json` could not inspect the tracked `/root/.awm/registries/baseline` provenance path in this host. This is the same cross-host manifest limitation; coverage was not represented as a passing gate.
+- **Descartes (modo desatendido):** `qa-ledger-emission-missing` — already cured by the existing AGENTS.md rule and by the new regressions; adding a duplicate instruction would increase context without a new enforcement mechanism.
+
 ## 2026-08-22 — R2 (orquestadores declarados, capa de CLI): cinco lecciones fusionadas, ninguna nueva
 
 - **Class:** seguridad (default-deny incompleto, dos veces) / proceso (comandos de harness desde subdirectorio, guía sin verificar contra el CLI real) / structural (cobertura de test no heredada entre callers hermanos, rama de dispatcher faltante).
