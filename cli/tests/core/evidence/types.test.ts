@@ -22,6 +22,25 @@ describe('CycleEvidenceV1 validation', () => {
     expect(validateCycleEvidence({ ...evidence, gates: { required: 2, firstEvaluationsPassed: [true, false], firstPass: false } }).gates.firstEvaluationsPassed).toEqual([true, false]);
   });
 
+  test.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1])('rejects a non-finite or negative duration: %p', (durationMs) => {
+    const evidence = cycleEvidenceFixture();
+    expect(() => validateCycleEvidence({
+      ...evidence,
+      startedAt: evidence.endedAt,
+      durationMs,
+    })).toThrow('durationMs must be a non-negative integer');
+  });
+
+  test.each([
+    ['task attempts', (evidence: ReturnType<typeof cycleEvidenceFixture>) => ({ ...evidence, tasks: [{ ...evidence.tasks[0], attempts: -1 }] })],
+    ['task retries', (evidence: ReturnType<typeof cycleEvidenceFixture>) => ({ ...evidence, tasks: [{ ...evidence.tasks[0], retries: -1 }] })],
+    ['QA findings', (evidence: ReturnType<typeof cycleEvidenceFixture>) => ({ ...evidence, qa: { ...evidence.qa, findings: -1 } })],
+    ['QA fixes', (evidence: ReturnType<typeof cycleEvidenceFixture>) => ({ ...evidence, qa: { ...evidence.qa, fixes: -1 } })],
+    ['required gates', (evidence: ReturnType<typeof cycleEvidenceFixture>) => ({ ...evidence, gates: { ...evidence.gates, required: -1 } })],
+  ])('rejects a negative %s count', (_label, patch) => {
+    expect(() => validateCycleEvidence(patch(cycleEvidenceFixture()))).toThrow('must be a non-negative integer');
+  });
+
   test('permits every dashboard plan state and an absent PR', () => {
     for (const state of ['active', 'blocked', 'qa_pending', 'retro_pending', 'executed', 'legacy_unverifiable']) {
       const evidence = cycleEvidenceFixture();
