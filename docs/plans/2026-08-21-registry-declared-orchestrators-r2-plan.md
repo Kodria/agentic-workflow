@@ -759,7 +759,7 @@ ls -la ~/.awm 2>/dev/null && echo "--- ~/.awm debe estar intacto tras la suite"
 
 Los tests nuevos de `orchestrators` y `provider` operan sobre tmpdirs explícitos y no leen `awmHome()`, así que no necesitan sobreescribir `AWM_HOME`. Los que sí lo tocan (`hooks/install.test.ts`) ya siguen el patrón. **Confirmar que `~/.awm` quedó sin modificar.**
 
-- [ ] **Step 3: Push y verificar CI en las tres plataformas**
+- [x] **Step 3: Push y verificar CI en las tres plataformas**
 
 ```bash
 cd /home/user/agentic-workflow
@@ -769,6 +769,12 @@ git push -u origin claude/notion-task-capture-integration-ymltjd
 Esperado: el job `test` verde en `ubuntu-latest`, `windows-latest` y `macos-latest`. **Rojo en cualquiera bloquea la publicación** (D-005): el job `release` declara `needs: test`.
 
 Prestar atención especial a Windows: la Task 6 cambia un symlink por un `writeFileSync`, lo que en principio **mejora** el comportamiento en Windows sin Developer Mode (donde el symlink caía al fallback de copia). Confirmarlo en el log, no asumirlo.
+
+**Confirmado en CI real (commit `00e486e`, PR #107):** las tres plataformas en verde —
+`test (ubuntu-latest)`: success (06:05:37–06:08:59); `test (macos-latest)`: success
+(06:05:38–06:09:06); `test (windows-latest)`: success (06:05:37–06:17:04, cada step previo
+al de test —install/build/typecheck/matrix de sensores— ya había pasado en verde, confirmando
+progreso sano y no un cuelgue). No se asumió: se leyó el log de jobs vía la API de GitHub Actions.
 
 ---
 
