@@ -35,6 +35,21 @@ describe('runDoctor legacy JSON fixtures', () => {
     });
 });
 
+describe('runDoctor dashboard modes', () => {
+    it.each([
+        [{ json: true, full: true }, '--json cannot be combined with --full'],
+        [{ json: true, html: 'report.html' }, '--json cannot be combined with --html'],
+        [{ full: true, html: 'report.html' }, '--full cannot be combined with --html'],
+        [{ force: true }, '--force requires --html'],
+    ] as const)('rejects incompatible options before collection', (options, message) => {
+        const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        try {
+            expect(runDoctor(options)).toBe(2);
+            expect(stderr.mock.calls.map((call) => String(call[0])).join('')).toContain(message);
+        } finally { stderr.mockRestore(); }
+    });
+});
+
 function report(partial: Partial<CheckReport> = {}): CheckReport {
     return {
         results: [

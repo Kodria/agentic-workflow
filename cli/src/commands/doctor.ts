@@ -9,6 +9,8 @@ import { platformLabel, isWindowsNative, WINDOWS_KNOWN_GAP } from '../core/paths
 // read-only y el segundo auto-vivifica el archivo. Ver la nota en config.ts.
 import { readPreferences } from '../utils/config';
 import { resolveAgentTargets } from '../core/agent-targets';
+import { collectDashboardSnapshot } from '../core/dashboard/collect';
+import { resolveHtmlTarget, writeHtmlAtomically } from '../core/dashboard/write-html';
 
 function glyph(status: CheckResult['status']): string {
     if (status === 'ok') return pc.green('✔');
@@ -115,6 +117,9 @@ export function renderProviderReport(report: ProviderDiagnosticReport): string {
 
 export interface RunDoctorOptions {
     json?: boolean;
+    full?: boolean;
+    html?: string;
+    force?: boolean;
     cwd?: string;
     /** Comma-separated agent subset (R12/R13) — defaults to every enabled agent. */
     agent?: string;
@@ -125,6 +130,25 @@ export interface RunDoctorOptions {
 }
 
 export function runDoctor(opts: RunDoctorOptions = {}): number {
+    const invalid = (message: string): number => { process.stderr.write(`awm doctor: ${message}\n`); return 2; };
+    if (opts.json && opts.full) return invalid('--json cannot be combined with --full');
+    if (opts.json && opts.html) return invalid('--json cannot be combined with --html');
+    if (opts.full && opts.html) return invalid('--full cannot be combined with --html');
+    if (opts.force && !opts.html) return invalid('--force requires --html');
+    if (opts.full || opts.html) {
+        try {
+            const cwd = opts.cwd ?? process.cwd();
+            const snapshot = collectDashboardSnapshot({ cwd, now: new Date().toISOString() });
+            if (opts.full) process.stdout.write(JSON.stringify(snapshot, null, 2) + '\n');
+            if (opts.html) {
+                const target = resolveHtmlTarget({ cwd, target: opts.html, force: opts.force });
+                const body = `<html><body><pre>${JSON.stringify(snapshot, null, 2).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</pre></body></html>\n`;
+                writeHtmlAtomically({ target, html: body });
+                process.stdout.write(`${target}\n`);
+            }
+            return snapshot.overall === 'healthy' ? 0 : 1;
+        } catch (error) { return invalid((error as Error).message); }
+    }
     const resolveTargets = opts.resolveTargets ?? resolveAgentTargets;
 
     // Validates --agent separately from the general diagnostic gathering below:
@@ -162,8 +186,11 @@ export function registerDoctorCommand(program: Command): void {
     program.command('doctor')
         .description('Read-only dashboard of the AWM harness state, per provider')
         .option('--json', 'Emit the diagnostic report as JSON')
+        .option('--full', 'Emit the full dashboard snapshot')
+        .option('--html <file>', 'Write the dashboard snapshot as HTML')
+        .option('--force', 'Allow replacing an existing HTML file')
         .option('-a, --agent <agent>', 'Target agent subset (comma-separated); defaults to every enabled agent')
-        .action((options: { json?: boolean; agent?: string }) => {
-            process.exitCode = runDoctor({ json: options.json, agent: options.agent });
+        .action((options: { json?: boolean; full?: boolean; html?: string; force?: boolean; agent?: string }) => {
+            process.exitCode = runDoctor({ json: options.json, full: options.full, html: options.html, force: options.force, agent: options.agent });
         });
 }
