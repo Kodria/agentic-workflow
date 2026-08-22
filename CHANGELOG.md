@@ -1,3 +1,8 @@
+## v8.5.2 - 2026-08-22
+
+### Fixes
+- **release:** make published evidence fixture valid (#116)
+
 ## v8.5.1 - 2026-08-22
 
 ### Fixes
