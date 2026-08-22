@@ -24,6 +24,21 @@ function treeHash(root: string, ignored = new Set<string>()): string {
     return hash.digest('hex');
 }
 
+function treeEntries(root: string, ignored = new Set<string>()): string[] {
+    const entries: string[] = [];
+    const walk = (directory: string): void => {
+        for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+            const item = path.join(directory, entry.name);
+            const relative = path.relative(root, item);
+            if (ignored.has(relative)) continue;
+            entries.push(relative);
+            if (entry.isDirectory()) walk(item);
+        }
+    };
+    walk(root);
+    return entries;
+}
+
 function fixture(name: string, project = true): Fixture {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), `awm-doctor-${name}-`));
     const directory = project ? path.join(root, 'project') : path.join(root, 'machine-only');
@@ -124,6 +139,7 @@ describe('built doctor dashboard end-to-end (R4.8, R8.3-R8.5)', () => {
                 qa: { findings: 0, fixes: 0, signatures: [] }, gates: { required: 0, firstEvaluationsPassed: [], firstPass: true }, cures: [],
             }));
             const hostileBeforeHtml = treeHash(f.root);
+            const entriesBeforeHtml = treeEntries(f.root, new Set(['project/dashboard.html']));
             const html = command(f, 'doctor', '--html', 'dashboard.html');
             expect([0, 1]).toContain(html.status);
             const page = fs.readFileSync(path.join(f.project, 'dashboard.html'), 'utf8');
@@ -132,7 +148,10 @@ describe('built doctor dashboard end-to-end (R4.8, R8.3-R8.5)', () => {
             expect(page).toContain('data-project-evidence');
             expect(page).not.toContain('<script>hostile</script>');
             expect(page).toContain('Source unavailable');
-            expect(treeHash(f.root, new Set(['project/dashboard.html']))).toBe(hostileBeforeHtml);
+            const afterHtml = treeHash(f.root, new Set(['project/dashboard.html']));
+            if (afterHtml !== hostileBeforeHtml) {
+                throw new Error(`doctor --html mutated files other than dashboard.html: before=${entriesBeforeHtml.join(',')} after=${treeEntries(f.root, new Set(['project/dashboard.html'])).join(',')}`);
+            }
         } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
     });
 
