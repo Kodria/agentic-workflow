@@ -84,11 +84,13 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     });
     const projectSource = projectResult.value;
     const execution = executionResult.value;
+    const projectItemsResult = projectSource ? optional(() => findings(projectSource.findings)) : { value: [], failed: false, failure: {} };
     const planItemsResult = plansResult.value ? optional(() => findings(plansResult.value!.map((plan) => plan.lifecycle
         ? { ...plan, detail: classifyPlanState(plan.lifecycle) } : plan))) : { value: [], failed: false, failure: {} };
     const sections = [
         machineSection,
-        section('project', projectResult.failed ? 'unavailable' : 'available', projectResult.failed ? canonicalOptionalFailure(projectResult.failure) : findings(projectSource?.findings)),
+        section('project', projectResult.failed || projectItemsResult.failed ? 'unavailable' : 'available', projectResult.failed
+            ? canonicalOptionalFailure(projectResult.failure) : projectItemsResult.failed ? [] : projectItemsResult.value),
         section('planning', plansResult.failed || planItemsResult.failed ? 'unavailable' : 'available', plansResult.failed
             ? canonicalOptionalFailure(plansResult.failure) : planItemsResult.failed ? [] : planItemsResult.value),
         section('execution', executionResult.failed ? 'unavailable' : 'available', executionResult.failed ? canonicalOptionalFailure(executionResult.failure) : findings(execution?.execution)),
