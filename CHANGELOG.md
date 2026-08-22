@@ -1,3 +1,8 @@
+## v8.4.0 - 2026-08-22
+
+### Features
+- **doctor:** add configuration dashboards (#86) (#108)
+
 ## v8.3.0 - 2026-08-22
 
 ### Features
