@@ -737,7 +737,7 @@ git commit -m "fix(cli): rutear Claude Code por buildContext, cerrando el bypass
 
 _Requirements: R6.1, R6.2, R6.3_
 
-- [ ] **Step 1: Suite entera local**
+- [x] **Step 1: Suite entera local**
 
 ```bash
 cd /home/user/agentic-workflow/cli
@@ -749,7 +749,7 @@ npm test
 
 Esperado: todo verde. Cualquier fallo se arregla acá.
 
-- [ ] **Step 2: Verificar aislamiento de tests (R6.3)**
+- [x] **Step 2: Verificar aislamiento de tests (R6.3)**
 
 ```bash
 cd /home/user/agentic-workflow/cli
