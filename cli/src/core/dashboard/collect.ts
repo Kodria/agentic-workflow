@@ -1,7 +1,7 @@
 import { findProjectRoot } from '../profile';
 import fs from 'fs';
 import path from 'path';
-import { buildEvidenceHistory } from '../evidence/history';
+import { buildEvidenceHistory, type EvidenceHistory } from '../evidence/history';
 import { validateCycleEvidence } from '../evidence/types';
 import { sanitizeDashboardSource } from './sanitize';
 import { validateDashboardSnapshotV1 } from './validate';
@@ -34,6 +34,8 @@ export const REMEDIATION_BY_FINDING_ID: Readonly<Record<string, string>> = {
     'planning.source.unavailable': 'awm preflight',
     'execution.source.unavailable': 'awm sensors status',
 };
+
+const BLOCKED_CYCLE_REMEDIATION = 'awm preflight';
 
 const EMPTY_ADAPTERS: DashboardSourceAdapters = {
     machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined,
@@ -96,8 +98,49 @@ export function productionDashboardAdapters(context: HarnessContext): DashboardS
     return {
         machine: () => ({ findings: machineFindings }),
         project: () => ({ label: 'Project detected', findings: projectFindings }),
-        plans: () => [],
-        execution: () => undefined,
+        plans: ({ root }) => {
+            const history = readEvidenceHistory(root);
+            const latestByPlan = new Map<string, typeof history.cycles[number]>();
+            for (const cycle of history.cycles) latestByPlan.set(cycle.plan.ref, cycle);
+            return [...latestByPlan.values()].map((cycle) => ({
+                id: `planning.cycle.${cycle.cycleId}`,
+                // The plan reference is intentionally never rendered: a plan path
+                // can expose repository-specific names. Its opaque cycle ID gives
+                // the dashboard deterministic identity without exporting it.
+                label: 'Project context',
+                state: cycle.plan.state === 'blocked' ? 'attention' : 'ok',
+                ...(cycle.plan.state === 'blocked' ? { remediation: BLOCKED_CYCLE_REMEDIATION, remediationVerified: true } : {}),
+                lifecycle: lifecycleForCycle(cycle),
+            }));
+        },
+        execution: ({ root }) => {
+            if (!evidenceDirectoryExists(root)) return undefined;
+            const history = readEvidenceHistory(root);
+            return {
+                execution: history.cycles.map((cycle) => cycleFinding('execution', 'Static preflight', cycle, cycle.cycleState === 'blocked')),
+                qa: history.cycles.map((cycle) => cycleFinding('qa', 'Sensors', cycle, cycle.qa.fixes < cycle.qa.findings)),
+                retro: history.cycles.map((cycle) => cycleFinding('retro', 'Project context', cycle, cycle.plan.state !== 'executed')),
+            };
+        },
+    };
+}
+
+function lifecycleForCycle(cycle: ReturnType<typeof readEvidenceHistory>['cycles'][number]): PlanStateInput {
+    const total = cycle.tasks.length;
+    if (cycle.plan.state === 'blocked' || cycle.cycleState === 'blocked') return { journal: { state: 'blocked' }, markers: { qaComplete: false, retroComplete: false }, tasks: { total, completed: 0 } };
+    if (cycle.plan.state === 'active') return { journal: { state: 'active' }, markers: { qaComplete: false, retroComplete: false }, tasks: { total, completed: 0 } };
+    if (cycle.plan.state === 'executed') return { markers: { qaComplete: true, retroComplete: true }, tasks: { total, completed: total } };
+    if (cycle.plan.state === 'retro_pending') return { markers: { qaComplete: true, retroComplete: false }, tasks: { total, completed: total } };
+    if (cycle.plan.state === 'qa_pending') return { markers: { qaComplete: false, retroComplete: false }, tasks: { total, completed: total } };
+    return { markers: { qaComplete: false, retroComplete: false }, tasks: { total: 0, completed: 0 } };
+}
+
+function cycleFinding(section: 'execution' | 'qa' | 'retro', label: string, cycle: ReturnType<typeof readEvidenceHistory>['cycles'][number], actionable: boolean): DashboardFinding {
+    return {
+        id: `${section}.cycle.${cycle.cycleId}`,
+        label,
+        state: actionable ? 'attention' : 'ok',
+        ...(actionable ? { remediation: BLOCKED_CYCLE_REMEDIATION, remediationVerified: true } : {}),
     };
 }
 
@@ -133,14 +176,22 @@ function canonicalOptionalFailure(failure: OptionalFailure): DashboardItemV1[] {
     return [{ id: failure.findingId, label: 'Optional source unavailable', state: 'unavailable', remediation: REMEDIATION_BY_FINDING_ID[failure.findingId] }];
 }
 
-function evidenceHistoryItems(root: string): { confidence: DashboardSnapshotV1['confidence']; items: DashboardItemV1[] } {
+function evidenceDirectoryExists(root: string): boolean {
+    try { return fs.lstatSync(path.join(root, '.awm', 'evidence', 'cycles')).isDirectory(); }
+    catch (error) {
+        if (error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+        throw error;
+    }
+}
+
+function readEvidenceHistory(root: string): EvidenceHistory {
     const awmDirectory = path.join(root, '.awm');
     const evidenceDirectory = path.join(awmDirectory, 'evidence');
     const directory = path.join(evidenceDirectory, 'cycles');
     for (const ancestor of [awmDirectory, evidenceDirectory, directory]) {
         let stat: fs.Stats;
         try { stat = fs.lstatSync(ancestor); } catch (error) {
-            if (error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === 'ENOENT') return { confidence: 'none', items: [] };
+            if (error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === 'ENOENT') return buildEvidenceHistory([]);
             throw error;
         }
         if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('evidence history directory is unsafe');
@@ -157,7 +208,11 @@ function evidenceHistoryItems(root: string): { confidence: DashboardSnapshotV1['
             seenCycleIds.add(evidence.cycleId);
             return evidence;
         });
-    const history = buildEvidenceHistory(records);
+    return buildEvidenceHistory(records);
+}
+
+function evidenceHistoryItems(root: string): { confidence: DashboardSnapshotV1['confidence']; items: DashboardItemV1[] } {
+    const history = readEvidenceHistory(root);
     return {
         confidence: history.confidence,
         items: history.cycles.map((cycle) => {
@@ -166,6 +221,7 @@ function evidenceHistoryItems(root: string): { confidence: DashboardSnapshotV1['
                 id: `history.cycle.${cycle.cycleId}`,
                 label: `Cycle ${cycle.cycleId.slice(0, 12)}`,
                 state: cycle.cycleState === 'blocked' ? 'attention' : 'ok',
+                ...(cycle.cycleState === 'blocked' ? { remediation: BLOCKED_CYCLE_REMEDIATION } : {}),
                 detail: `plan ${cycle.plan.state}; tasks ${cycle.tasks.length}; retries ${cycle.retries}; QA ${cycle.qa.findings}/${cycle.qa.fixes}; first-pass ${cycle.gates.firstPass ? 'yes' : 'no'}; cures ${cures}`,
             };
         }),

@@ -1,5 +1,10 @@
 import { collectDashboardSnapshot, productionDashboardAdapters } from '../../../src/core/dashboard/collect';
 import type { HarnessContext } from '../../../src/core/diagnostics/types';
+import { writeCycleEvidence } from '../../../src/core/evidence/store';
+import { cycleEvidenceFixture } from '../../helpers/evidence-fixtures';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 function context(): HarnessContext {
     return {
@@ -71,5 +76,34 @@ describe('productionDashboardAdapters', () => {
             expect.objectContaining({ id: 'project.bundles.coherent', remediation: 'awm sync' }),
         ]));
         expect(JSON.stringify(snapshot)).not.toMatch(/remediationVerified|private|0\.145\.0|token/i);
+    });
+
+    it('derives plan lifecycle and execution evidence from validated local cycle records', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-dashboard-production-evidence-'));
+        fs.writeFileSync(path.join(root, 'package.json'), '{}');
+        writeCycleEvidence(root, {
+            ...cycleEvidenceFixture(),
+            plan: { ref: 'docs/plans/current.md', state: 'executed' },
+            tasks: [{ id: 'task-1', attempts: 2, retries: 1 }],
+            qa: { findings: 1, fixes: 1, signatures: ['a'.repeat(64)] },
+        });
+
+        const snapshot = collectDashboardSnapshot({
+            cwd: root, now: '2026-08-22T00:00:00.000Z', adapters: productionDashboardAdapters(context()),
+        });
+
+        expect(snapshot.sections.find((section) => section.id === 'planning')?.items).toEqual([
+            expect.objectContaining({ detail: 'executed', state: 'ok' }),
+        ]);
+        expect(snapshot.sections.find((section) => section.id === 'execution')?.items).toEqual([
+            expect.objectContaining({ state: 'ok' }),
+        ]);
+        expect(snapshot.sections.find((section) => section.id === 'qa')?.items).toEqual([
+            expect.objectContaining({ state: 'ok' }),
+        ]);
+        expect(snapshot.sections.find((section) => section.id === 'retro')?.items).toEqual([
+            expect.objectContaining({ state: 'ok' }),
+        ]);
+        fs.rmSync(root, { recursive: true, force: true });
     });
 });
