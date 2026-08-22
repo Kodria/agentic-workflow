@@ -308,6 +308,43 @@ describe('runSensors v2 lifecycle contract', () => {
         expect(mockRunStructuredCommand).toHaveBeenCalledWith(expect.objectContaining({ executable: 'live-eslint' }), expect.any(Object));
     });
 
+    it('scopes applicability detection and execution to packageRoot for a monorepo manifest', async () => {
+        // Move the fixture project into a subdirectory ("cli") and point the
+        // manifest at it via packageRoot — mirrors a monorepo where the
+        // manifest lives at the repo root but the real package lives deeper.
+        const packageDir = path.join(project, 'cli');
+        fs.mkdirSync(packageDir, { recursive: true });
+        fs.renameSync(path.join(project, 'package.json'), path.join(packageDir, 'package.json'));
+        fs.renameSync(path.join(project, 'node_modules'), path.join(packageDir, 'node_modules'));
+
+        const manifestPath = path.join(project, '.awm', 'sensors.json');
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        manifest.packageRoot = 'cli';
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, fast: true });
+
+        expect(result).toEqual(expect.objectContaining({ overall: 'pass' }));
+        expect(mockRunStructuredCommand).toHaveBeenCalledWith(
+            expect.objectContaining({ executable: 'live-eslint' }),
+            expect.objectContaining({ cwd: packageDir }),
+        );
+    });
+
+    it('degrades to not_certified (never a false pass, never a crash) when packageRoot points nowhere', async () => {
+        const manifestPath = path.join(project, '.awm', 'sensors.json');
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        manifest.packageRoot = 'does-not-exist';
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, fast: true });
+
+        expect(result.overall).toBe('not_certified');
+        expect(mockRunStructuredCommand).not.toHaveBeenCalled();
+    });
+
     it('honors disabled v2 sensors before dispatching them', async () => {
         const manifest = JSON.parse(fs.readFileSync(path.join(project, '.awm', 'sensors.json'), 'utf8'));
         manifest.sensors.lint.enabled = false;
