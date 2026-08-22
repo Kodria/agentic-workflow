@@ -205,10 +205,10 @@ The page intentionally avoids a composite score. It presents evidence and confid
 
 ## UI Screens
 
-| Screen | Description | Device | Status |
-|---|---|---|---|
-| Machine-only configuration dashboard | Self-contained projected view outside any project: machine/install health, exact remediation commands, neutral no-project state, privacy-safe source availability, and print/share treatment | DESKTOP | approved — Stitch `9aea6868f567454094cc83b59c73d3a4` |
-| Project lifecycle and impact dashboard | Complete project view with machine readiness followed by planning, execution, QA, retro, and full evidence history; includes honest provisional/observing/supported states and stress-safe dense data | DESKTOP | approved — Stitch `f272908125f54d60a0f81674114461f8` |
+| Screen | Description | Device | Status | Artifacts |
+|---|---|---|---|---|
+| Machine-only configuration dashboard | Self-contained projected view outside any project: machine/install health, exact remediation commands, neutral no-project state, privacy-safe source availability, and print/share treatment | DESKTOP | approved — Stitch `9aea6868f567454094cc83b59c73d3a4` | `.stitch/designs/machine-only-configuration-dashboard.html` · `.stitch/designs/machine-only-configuration-dashboard.png` |
+| Project lifecycle and impact dashboard | Complete project view with machine readiness followed by planning, execution, QA, retro, and full evidence history; includes honest provisional/observing/supported states and stress-safe dense data | DESKTOP | approved — Stitch `f272908125f54d60a0f81674114461f8` | `.stitch/designs/project-lifecycle-impact-evidence.html` · `.stitch/designs/project-lifecycle-impact-evidence.png` |
 
 These are two states of the same renderer, but both require deliberate visual validation because their information density and empty-state behavior differ materially.
 
