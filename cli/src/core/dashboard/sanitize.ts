@@ -19,6 +19,9 @@ function sanitize(value: unknown, key?: string): unknown {
     const out: Record<string, unknown> = {};
     for (const [entryKey, entryValue] of Object.entries(value)) {
         if (!ALLOWED_KEYS.has(entryKey)) continue;
+        // Source details are untrusted command/error output. Renderers only receive
+        // canonical details produced after collection (for example lifecycle state).
+        if (entryKey === 'detail') continue;
         out[entryKey] = sanitize(entryValue, entryKey);
     }
     return out;

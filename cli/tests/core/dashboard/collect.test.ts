@@ -119,6 +119,12 @@ describe('sanitizeDashboardSource', () => {
     it('rejects invalid item states explicitly', () => {
         expect(() => sanitizeDashboardSource({ state: 'invented' })).toThrow(/state/i);
     });
+
+    it('omits raw dynamic command and error details', () => {
+        const safe = sanitizeDashboardSource({ findings: [{ id: 'machine.preferences.missing', label: 'Preferences', state: 'missing', detail: 'Error: ghp_secret at /tmp/private; TOKEN=value' }] });
+        expect(JSON.stringify(safe)).not.toMatch(/Error|ghp_|\/tmp|TOKEN=/i);
+        expect(JSON.stringify(safe)).not.toContain('detail');
+    });
 });
 
 test('exports canonical remediation commands', () => {
