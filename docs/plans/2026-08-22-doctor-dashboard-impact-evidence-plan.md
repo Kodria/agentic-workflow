@@ -478,9 +478,9 @@ git add cli/src/core/dashboard/render-terminal.ts cli/src/core/dashboard/render-
 git commit -m "feat(doctor): render approved terminal and HTML dashboards"
 ```
 
-- [ ] **Step 7: Close and publish Release A before starting Task 5**
+- [x] **Step 7: Close and publish Release A before starting Task 5**
 
-Finish the Release A branch through QA, retro, PR, and immutable package publication. Record the published CLI version and package integrity in the release notes. Start Task 5 only from a branch based on that published Release A tag. Resolve the exact version with `release_a_version=$(node -p "require('./cli/package.json').version")`, then verify `npm view agentic-workflow-manager@"$release_a_version" dist.integrity` returns a non-empty integrity value. This is the enforced #86-before-#87 boundary (R8.1).
+Release A closed through QA, retro, PR #108, and immutable package publication. The published CLI is `v8.4.0` with npm integrity `sha512-n0cCnDBkJqiHre670+uUw6D1E+y4aKGZrQUq0dpM0leuWmAVMeL/hXchJUh3PYDn2m2QbSZg3zk9qIwQXHlOXQ==`; this branch starts from tag `v8.4.0`. This is the enforced #86-before-#87 boundary (R8.1).
 
 ## Task 5: Persist validated `CycleEvidenceV1` observations
 
