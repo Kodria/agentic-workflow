@@ -145,8 +145,10 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
             const collectSnapshot = opts.collectSnapshot ?? collectDashboardSnapshot;
             const context = gatherContext({ cwd });
             const machineFindings = Array.from(new Map((context.providers ?? []).flatMap((provider) => provider.checks.flatMap((check): DashboardFinding[] => {
-                if (check.state === 'absent' || check.state === 'broken') return [{ id: 'machine.preferences.missing', label: 'Preferences', state: 'missing' as const }];
-                if (check.state === 'stale') return [{ id: 'machine.registries.stale', label: 'Registries', state: 'attention' as const }];
+                // These are the only production mappings whose operator remedy is
+                // verified by the diagnostics contract; unknown checks stay out.
+                if (check.id === 'skills.global' && check.state === 'absent') return [{ id: 'machine.preferences.missing', label: 'Preferences', state: 'missing' as const }];
+                if (check.id === 'skills.global' && check.state === 'stale') return [{ id: 'machine.registries.stale', label: 'Registries', state: 'attention' as const }];
                 return [];
             })).map((finding) => [finding.id, finding])).values());
             const snapshot = collectSnapshot({ cwd, now: new Date().toISOString(), adapters: {
