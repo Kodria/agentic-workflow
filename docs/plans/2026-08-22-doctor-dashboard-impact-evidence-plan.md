@@ -497,7 +497,7 @@ _Requirements: R6.1, R6.3, R6.4, R6.5, R6.6, R6.7, R6.11, R7.1, R7.2, R7.3, R7.4
 - Create: `cli/tests/helpers/evidence-fixtures.ts`
 - Modify: `cli/src/index.ts`
 
-- [ ] **Step 1: Write failing contract and privacy tests**
+- [x] **Step 1: Write failing contract and privacy tests**
 
 ```ts
 it('derives an opaque stable cycle ID from repo identity, relative plan, and start time', () => {
@@ -516,13 +516,13 @@ it('rejects host or person identity and raw prose', () => {
 });
 ```
 
-- [ ] **Step 2: Run and observe failure**
+- [x] **Step 2: Run and observe failure**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/evidence/types.test.ts tests/core/evidence/store.test.ts tests/core/evidence/capture.test.ts`
 
 Expected: FAIL because evidence modules do not exist.
 
-- [ ] **Step 3: Define the minimal durable record**
+- [x] **Step 3: Define the minimal durable record**
 
 ```ts
 export interface CycleEvidenceV1 {
@@ -562,19 +562,19 @@ export function validCycleEvidence(
 
 Validation must reject negative counts, non-finite durations, invalid timestamps, retries not equal to `max(attempts - 1, 0)`, raw descriptions, absolute plan paths, usernames, repository names, prompts, logs, and secret-like fields.
 
-- [ ] **Step 4: Implement deterministic atomic storage**
+- [x] **Step 4: Implement deterministic atomic storage**
 
 `writeCycleEvidence(root, evidence)` writes `.awm/evidence/cycles/{cycleId}.json` through an adjacent temp file, fsync/close/rename, and deterministically replaces the same cycle file. Repeated capture must not append or create a second observation (R7.3, R7.4).
 
-- [ ] **Step 5: Implement capture aggregation and the command boundary**
+- [x] **Step 5: Implement capture aggregation and the command boundary**
 
 `captureCycleEvidence({ root, planPath, journal, gates, ledger, pr })` validates every public input and derives only counts, opaque signatures, states, timestamps, and optional host-agnostic PR reference. Register `awm evidence capture --plan docs/plans/2026-08-22-doctor-dashboard-impact-evidence-plan.md`; it must return 2 for invalid/missing central inputs and print the written cycle ID on success.
 
-- [ ] **Step 6: Add exact metric tests**
+- [x] **Step 6: Add exact metric tests**
 
 Assert one cycle per observation, optional PR metadata, findings per cycle/PR, per-task retries and total, first gate evaluation, cure signatures, and allowed plan states (R6.1, R6.3–R6.7).
 
-- [ ] **Step 7: Run tests and commit**
+- [x] **Step 7: Run tests and commit**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/evidence/types.test.ts tests/core/evidence/store.test.ts tests/core/evidence/capture.test.ts`
 
