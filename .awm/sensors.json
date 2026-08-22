@@ -18,8 +18,8 @@
         ]
       },
       "initializedCompatibility": {
-        "state": "unverifiable",
-        "reason": "probe-not-matched",
+        "state": "certified",
+        "reason": "range-and-probe",
         "variantId": "eslint-10-flat",
         "toolVersion": "10.8.1",
         "runtimeVersion": "22.22.2",
@@ -50,7 +50,7 @@
           },
           {
             "kind": "probe",
-            "status": "not-matched"
+            "status": "matched"
           }
         ]
       },
@@ -112,7 +112,7 @@
     },
     "depcheck": {
       "enabled": true,
-      "variantId": "dependency-cruiser",
+      "variantId": "dependency-cruiser-17",
       "command": {
         "executable": "depcruise",
         "resolution": "node-modules-bin",
@@ -123,12 +123,12 @@
         ]
       },
       "initializedCompatibility": {
-        "state": "compatible-unverified",
-        "reason": "operational-range-and-probe",
-        "variantId": "dependency-cruiser",
+        "state": "certified",
+        "reason": "range-and-probe",
+        "variantId": "dependency-cruiser-17",
         "toolVersion": "17.4.3",
         "runtimeVersion": "22.22.2",
-        "certifiedRange": "=16.10.4",
+        "certifiedRange": "=17.4.3",
         "evidence": [
           {
             "kind": "project-path",
