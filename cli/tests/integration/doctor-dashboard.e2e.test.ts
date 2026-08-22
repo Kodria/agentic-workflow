@@ -38,7 +38,17 @@ function command(f: Fixture, ...args: string[]): SpawnSyncReturns<string> {
     return spawnSync(process.execPath, [cli, ...args], {
         cwd: f.project,
         encoding: 'utf8',
-        env: { ...process.env, AWM_HOME: f.home, AWM_NO_UPDATE_CHECK: '1' },
+        // The dashboard examines provider homes too.  Do not inherit the
+        // runner's HOME/CODEX_HOME: that turns the machine-only fixture into
+        // a report about whatever agent state happens to be installed on CI.
+        env: {
+            ...process.env,
+            HOME: f.home,
+            USERPROFILE: f.home,
+            CODEX_HOME: path.join(f.home, '.codex'),
+            AWM_HOME: f.home,
+            AWM_NO_UPDATE_CHECK: '1',
+        },
     });
 }
 
@@ -62,7 +72,7 @@ describe('built doctor dashboard end-to-end (R4.8, R8.3-R8.5)', () => {
 
     afterEach(() => jest.restoreAllMocks());
 
-    test('machine-only, degraded, partial, and corrupt fixtures are real on-disk states with exact exits and discriminating output', () => {
+    test('machine-only-uninitialized, degraded, partial, and corrupt fixtures are real on-disk states with exact exits and discriminating output', () => {
         const machine = fixture('machine', false);
         const degraded = fixture('degraded');
         const partial = fixture('partial');
@@ -73,7 +83,7 @@ describe('built doctor dashboard end-to-end (R4.8, R8.3-R8.5)', () => {
         fs.mkdirSync(path.join(corrupt.project, '.awm', 'evidence', 'cycles'), { recursive: true });
         fs.writeFileSync(path.join(corrupt.project, '.awm', 'evidence', 'cycles', `${'d'.repeat(64)}.json`), '{broken');
         const cases: Array<[string, Fixture, number, RegExp]> = [
-            ['machine-only-healthy', machine, 0, /Machine \/ install/],
+            ['machine-only-uninitialized', machine, 1, /Machine \/ install/],
             ['degraded-project', degraded, 1, /Project readiness/],
             ['partial-source', partial, 1, /source unavailable/i],
             ['corrupt-source', corrupt, 1, /Final \/ history\n  Eligible evidence rows: 0\n  ⊘ source unavailable/],
@@ -82,7 +92,9 @@ describe('built doctor dashboard end-to-end (R4.8, R8.3-R8.5)', () => {
             for (const [, f, exit, discriminant] of cases) {
                 const before = treeHash(f.root);
                 const result = command(f, 'doctor', '--full');
-                expect(result.status).toBe(exit);
+                if (result.status !== exit) {
+                    throw new Error(`${f.project}\nexpected exit ${exit}, received ${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+                }
                 expect(result.stdout).toMatch(discriminant);
                 expect(treeHash(f.root)).toBe(before);
             }
