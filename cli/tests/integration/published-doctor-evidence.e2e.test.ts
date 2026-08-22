@@ -109,7 +109,7 @@ acceptance('published doctor and evidence acceptance (R8.7)', () => {
                 `const store=require(${JSON.stringify(path.join(cliRoot, 'dist', 'src', 'core', 'journal', 'store.js'))});`,
                 'store.initJournal(process.argv[1], process.argv[2]);',
                 'const state=store.readJournal(process.argv[1], process.argv[2]).state;',
-                "state.cycle={...state.cycle,status:'COMPLETE',completedAt:'2026-08-22T10:00:01.000Z'};",
+                "state.cycle={...state.cycle,status:'COMPLETE',completedAt:new Date(Date.now()+1_000).toISOString()};",
                 'store.writeJournal(process.argv[1], process.argv[2], state);',
             ].join('');
             expect(command(project, process.execPath, ['-e', journalScript, project, branch], env).status).toBe(0);
@@ -119,7 +119,7 @@ acceptance('published doctor and evidence acceptance (R8.7)', () => {
             expect(fs.existsSync(path.join(project, '.awm', 'evidence', 'cycles', `${capture.stdout.trim()}.json`))).toBe(true);
             // The retrospective/ledger lifecycle happens after the durable
             // observation, never instead of it.
-            expect(invoke('ledger', 'add', '--branch', branch, '--polarity', 'finding', '--class', 'quality', '--signature', 'published-retro-contract', '--severity', 'important', '--desc', 'published acceptance').status).toBe(0);
+            expect(invoke('ledger', 'add', '--branch', branch, '--polarity', 'finding', '--class', 'proceso', '--signature', 'published-retro-contract', '--severity', 'important', '--desc', 'published acceptance').status).toBe(0);
             expect(invoke('ledger', 'archive', '--branch', branch).status).toBe(0);
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
