@@ -23,17 +23,24 @@ export interface DashboardSnapshotV1 {
     sections: DashboardSectionV1[];
 }
 
+const PROJECT_SECTION_IDS: DashboardSectionV1['id'][] = ['machine', 'project', 'planning', 'execution', 'qa', 'retro', 'history'];
+
 /** Safe, deterministic V1 fixture and renderer input. */
 export function dashboardSnapshot(
     overrides: Partial<DashboardSnapshotV1> = {},
 ): DashboardSnapshotV1 {
+    const { project: projectOverride, sections: sectionsOverride, ...rest } = overrides;
+    const project = projectOverride ?? { detected: false, label: 'No project detected' };
+    const sections = sectionsOverride ?? (project.detected
+        ? PROJECT_SECTION_IDS.map((id) => ({ id, availability: id === 'machine' ? 'available' as const : 'not_applicable' as const, items: [] }))
+        : [{ id: 'machine' as const, availability: 'available' as const, items: [] }]);
     return {
         schema: 1,
         generatedAt: '2026-08-22T00:00:00.000Z',
         overall: 'healthy',
-        project: { detected: false, label: 'No project detected' },
+        project,
         confidence: 'none',
-        sections: [{ id: 'machine', availability: 'available', items: [] }],
-        ...overrides,
+        sections,
+        ...rest,
     };
 }

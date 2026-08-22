@@ -55,12 +55,19 @@ describe('writeHtmlAtomically', () => {
         expect(resolveHtmlTarget({ cwd: root, target, force: true })).toBe(target);
     });
 
+    it('rejects an existing target at the exported writer boundary without force', () => {
+        const target = path.join(root, 'existing.html');
+        fs.writeFileSync(target, 'previous');
+        expect(() => writeHtmlAtomically({ cwd: root, target, html: 'replacement' })).toThrow(/exists.*force/i);
+        expect(fs.readFileSync(target, 'utf8')).toBe('previous');
+    });
+
     it.each(['openSync', 'writeFileSync', 'fsyncSync', 'closeSync', 'renameSync'] as const)('preserves old target and cleans only owned temp when %s fails', (failedOperation) => {
         const target = path.join(root, 'report.html');
         fs.writeFileSync(target, 'previous');
         const operations: HtmlWriteOperations = { ...fs };
         (operations[failedOperation] as unknown as jest.Mock) = jest.fn(() => { throw new Error('injected'); });
-        expect(() => writeHtmlAtomically({ cwd: root, target, html: 'new' }, operations)).toThrow('injected');
+        expect(() => writeHtmlAtomically({ cwd: root, target, html: 'new', force: true }, operations)).toThrow('injected');
         expect(fs.readFileSync(target, 'utf8')).toBe('previous');
         expect(fs.readdirSync(root).filter((name) => name.includes('.tmp'))).toEqual([]);
     });

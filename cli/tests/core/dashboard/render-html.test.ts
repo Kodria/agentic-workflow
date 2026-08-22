@@ -23,7 +23,12 @@ describe('renderDashboardHtml', () => {
     it('emits a self-contained scriptless document with the exact restrictive CSP and escaped dynamic values', () => {
         const html = renderDashboardHtml(validateDashboardSnapshotV1(snapshot({
             project: { detected: true, label: '<img src=x onerror=alert(1)>' },
-            sections: [{ id: 'machine', availability: 'available', items: [{ id: 'hostile', label: '<script>alert(1)</script>', state: 'attention', detail: '"quoted"', remediation: 'awm sync && echo <unsafe>' }] }],
+            sections: [
+                { id: 'machine', availability: 'available', items: [{ id: 'hostile', label: '<script>alert(1)</script>', state: 'attention', detail: '"quoted"', remediation: 'awm sync && echo <unsafe>' }] },
+                { id: 'project', availability: 'not_applicable', items: [] }, { id: 'planning', availability: 'not_applicable', items: [] },
+                { id: 'execution', availability: 'not_applicable', items: [] }, { id: 'qa', availability: 'not_applicable', items: [] },
+                { id: 'retro', availability: 'not_applicable', items: [] }, { id: 'history', availability: 'not_applicable', items: [] },
+            ],
         })));
         expect(html).toContain(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">`);
         expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
@@ -110,6 +115,7 @@ describe('renderDashboardHtml', () => {
     it('includes the artifact-aligned, noninteractive machine toolbar without weakening static CSP', () => {
         const html = renderDashboardHtml(validateDashboardSnapshotV1(snapshot({
             project: { detected: false, label: 'No project detected' },
+            sections: [{ id: 'machine', availability: 'available', items: [] }],
         })));
         expect(html).toContain('data-dashboard-toolbar');
         expect(html).toContain('aria-label="Search dashboard"');

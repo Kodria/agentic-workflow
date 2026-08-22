@@ -11,6 +11,11 @@ function snapshot(): DashboardSnapshotV1 {
         sections: [
             { id: 'machine', availability: 'available', items: [{ id: 'cli', label: 'CLI', state: 'ok' }] },
             { id: 'project', availability: 'not_applicable', items: [] },
+            { id: 'planning', availability: 'not_applicable', items: [] },
+            { id: 'execution', availability: 'not_applicable', items: [] },
+            { id: 'qa', availability: 'not_applicable', items: [] },
+            { id: 'retro', availability: 'not_applicable', items: [] },
+            { id: 'history', availability: 'not_applicable', items: [] },
         ],
     };
 }
@@ -29,6 +34,11 @@ describe('validateDashboardSnapshotV1', () => {
 
     it('allows callers to override snapshot defaults', () => {
         expect(dashboardSnapshot({ overall: 'degraded' }).overall).toBe('degraded');
+    });
+
+    it('builds a complete canonical section set when callers select a project', () => {
+        const value = dashboardSnapshot({ project: { detected: true, label: 'Demo project' }, confidence: 'provisional' });
+        expect(validateDashboardSnapshotV1(value).sections.map((section) => section.id)).toEqual(['machine', 'project', 'planning', 'execution', 'qa', 'retro', 'history']);
     });
 
     it('returns a valid V1 snapshot', () => {
@@ -80,5 +90,14 @@ describe('validateDashboardSnapshotV1', () => {
             ],
         });
         expect(() => validateDashboardSnapshotV1(value)).toThrow(/no project.*machine/i);
+    });
+
+    it('rejects a detected project without the complete canonical lifecycle sections', () => {
+        const value = dashboardSnapshot({
+            project: { detected: true, label: 'Demo project' },
+            confidence: 'provisional',
+            sections: [{ id: 'machine', availability: 'available', items: [] }],
+        });
+        expect(() => validateDashboardSnapshotV1(value)).toThrow(/detected project.*canonical lifecycle/i);
     });
 });

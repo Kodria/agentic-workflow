@@ -35,6 +35,7 @@ export function writeHtmlAtomically(input: { cwd: string; target: string; html: 
     if (input.target.includes('\0')) throw new Error('writeHtmlAtomically target must not contain NUL');
     if (typeof input.html !== 'string' || input.html.length === 0) throw new Error('writeHtmlAtomically requires non-empty html');
     if (input.force !== undefined && typeof input.force !== 'boolean') throw new Error('writeHtmlAtomically force must be boolean');
+    if (operations.existsSync(input.target) && !input.force) throw new Error(`HTML target already exists: ${input.target}; use --force`);
     const platform = input.platform ?? process.platform;
     if (typeof platform !== 'string' || !/^[a-z0-9]+$/i.test(platform)) throw new Error('writeHtmlAtomically platform must be a valid platform');
     const temp = path.join(path.dirname(input.target), `.${path.basename(input.target)}.${process.pid}.${randomUUID()}.tmp`);

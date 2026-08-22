@@ -94,6 +94,9 @@ export function validateDashboardSnapshotV1(value: unknown): DashboardSnapshotV1
     if (!value.project.detected && (value.sections.length !== 1 || value.sections[0].id !== 'machine')) {
         throw new DashboardValidationError('no project snapshot may contain only the machine section');
     }
+    if (value.project.detected && sectionIds.size !== SECTION_ORDER.length) {
+        throw new DashboardValidationError('detected project snapshot must contain the canonical lifecycle sections');
+    }
 
     return value as unknown as DashboardSnapshotV1;
 }
