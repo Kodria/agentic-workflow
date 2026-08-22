@@ -22,10 +22,29 @@ function parseVersion(skill: string): string {
     return m ? m[1].trim() : '0.0.0';
 }
 
+/**
+ * Neutraliza contenido no confiable proveniente de registries declarados
+ * (name/appliesWhen/terminatesTo) antes de interpolarlo en markdown.
+ * Sin esto, un registry malicioso/comprometido podria inyectar saltos de
+ * linea y marcadores markdown (##, `, *, _) para forjar una seccion nueva
+ * dentro del payload de contexto que consume el proveedor de IA — un
+ * vector de prompt-injection. `readDeclaredOrchestrators` solo valida que
+ * los campos sean strings no vacios; el saneo pertenece a esta frontera
+ * de render, no a la validacion de lectura.
+ */
+function sanitizeForMarkdown(s: string): string {
+    return s.replace(/\r?\n/g, ' ').replace(/[`*_#]/g, '');
+}
+
 function renderDeclared(list: DeclaredOrchestrator[]): string {
     if (list.length === 0) return '';
     const rows = list
-        .map(o => `- **${o.name}** — applies when: ${o.appliesWhen}. Terminates to: \`${o.terminatesTo}\`.`)
+        .map(o => {
+            const name = sanitizeForMarkdown(o.name);
+            const appliesWhen = sanitizeForMarkdown(o.appliesWhen);
+            const terminatesTo = sanitizeForMarkdown(o.terminatesTo);
+            return `- **${name}** — applies when: ${appliesWhen}. Terminates to: \`${terminatesTo}\`.`;
+        })
         .join('\n');
     return `## Declared orchestrators\n\nConsider these before the built-in pair:\n\n${rows}\n\n`;
 }
