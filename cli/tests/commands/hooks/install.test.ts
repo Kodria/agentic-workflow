@@ -160,6 +160,19 @@ describe('installHook (happy path + merge)', () => {
         expect(fs.lstatSync(skillPath).isSymbolicLink()).toBe(true);
     });
 
+    // Non-regression net (Task 5, Step 1): fixes the hook's observable
+    // contract before Task 6 replaces the symlink with a materialized
+    // file write in claude.ts. Verifies R6.1.
+    it('el hook queda apuntando a un archivo legible con el contenido de using-awm', () => {
+        const { installHook } = require('../../../src/commands/hooks/install');
+        installHook({ agent: 'claude-code', registryRoot: tmpRegistry, installMethod: 'symlink' });
+
+        const skillDest = path.join(tmpHome, '.awm/hooks/using-awm.md');
+        expect(fs.existsSync(skillDest)).toBe(true);
+        const content = fs.readFileSync(skillDest, 'utf-8');
+        expect(content).toContain('MUST invoke skills.');
+    });
+
     it('throws for unsupported agent target', () => {
         const { installHook } = require('../../../src/commands/hooks/install');
         expect(() => installHook({ agent: 'antigravity', registryRoot: tmpRegistry, installMethod: 'symlink' }))
