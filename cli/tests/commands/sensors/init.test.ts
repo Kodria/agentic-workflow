@@ -469,6 +469,66 @@ describe('initSensors', () => {
     });
 });
 
+describe('initSensors — packageRoot (monorepo)', () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-init-monorepo-'));
+    });
+    afterEach(() => {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('detects the real package under packageRoot, not the manifest directory', async () => {
+        const v2Registry = makeV2Registry();
+        try {
+            // The manifest will live at tmpDir/.awm/sensors.json (repo root), but the
+            // real package — package.json, node_modules — lives under tmpDir/cli.
+            const packageDir = path.join(tmpDir, 'cli');
+            fs.mkdirSync(packageDir, { recursive: true });
+            fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({ devDependencies: { eslint: '^10.0.0' } }));
+            fs.mkdirSync(path.join(packageDir, 'node_modules', 'eslint'), { recursive: true });
+            fs.writeFileSync(path.join(packageDir, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version: '10.0.0' }));
+
+            const result = await initSensors({ cwd: tmpDir, registryRoot: v2Registry, packageRoot: 'cli' });
+
+            // Real detection succeeded — a manifest built against tmpDir root (with no
+            // package.json there) would leave lint unresolved/absent.
+            expect(result.manifest).toMatchObject({ packageRoot: 'cli', sensors: { lint: { variantId: 'eslint-10' } } });
+
+            // The manifest itself stays discoverable at the repo root (findManifestDir
+            // walks up from cwd, never down into subdirectories).
+            expect(fs.existsSync(path.join(tmpDir, '.awm', 'sensors.json'))).toBe(true);
+            expect(fs.existsSync(path.join(packageDir, '.awm', 'sensors.json'))).toBe(false);
+            const written = JSON.parse(fs.readFileSync(path.join(tmpDir, '.awm', 'sensors.json'), 'utf8'));
+            expect(written.packageRoot).toBe('cli');
+        } finally {
+            fs.rmSync(v2Registry, { recursive: true, force: true });
+        }
+    });
+
+    it('copies configured assets into packageRoot, not the manifest directory', async () => {
+        const v2Registry = makeV2Registry();
+        try {
+            const packageDir = path.join(tmpDir, 'cli');
+            fs.mkdirSync(packageDir, { recursive: true });
+            fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({ devDependencies: { eslint: '^10.0.0' } }));
+            fs.mkdirSync(path.join(packageDir, 'node_modules', 'eslint'), { recursive: true });
+            fs.writeFileSync(path.join(packageDir, 'node_modules', 'eslint', 'package.json'), JSON.stringify({ version: '10.0.0' }));
+
+            await initSensors({ cwd: tmpDir, registryRoot: v2Registry, packageRoot: 'cli' });
+
+            // The asset must land where the lint sensor will actually execute (cwd=cli),
+            // not at the manifest's own directory (repo root) — otherwise a config-relative
+            // tool invocation can never find it.
+            expect(fs.existsSync(path.join(packageDir, 'eslint.config.awm.mjs'))).toBe(true);
+            expect(fs.existsSync(path.join(tmpDir, 'eslint.config.awm.mjs'))).toBe(false);
+        } finally {
+            fs.rmSync(v2Registry, { recursive: true, force: true });
+        }
+    });
+});
+
 describe('initSensors — --pack override', () => {
     let tmpDir: string;
     let registryRoot: string;

@@ -63,10 +63,11 @@ export function registerSensorsCommand(program: Command): void {
         .option('--no-configure', 'skip copying sensor pack config files into the project')
         .option('--registry-root <path>', 'path to AWM registry root')
         .option('--pack <name>', 'skip auto-detection, use this pack explicitly')
+        .option('--package-root <dir>', 'run detection/execution from this subdirectory (monorepo support) — the manifest still writes at the current directory')
         .action(async (opts) => {
             const registryRoot = opts.registryRoot ?? capabilityRoot('sensor-packs') ?? undefined;
             try {
-                const result = await initSensors({ configure: opts.configure, registryRoot, pack: opts.pack });
+                const result = await initSensors({ configure: opts.configure, registryRoot, pack: opts.pack, packageRoot: opts.packageRoot });
                 log.success(`Detected: ${result.detection.pack} (${result.detection.indicators.join(', ') || 'fallback'})`);
                 // Said BEFORE "Wrote .awm/sensors.json": the manifest about to be
                 // reported as written is not the one the detection implied.

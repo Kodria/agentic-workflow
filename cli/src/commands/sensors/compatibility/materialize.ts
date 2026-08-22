@@ -10,6 +10,12 @@ export type MaterializeInput = {
     pack: string;
     packSelection?: 'explicit';
     registryRoot?: string;
+    /** Contained relative path from projectRoot to where sensors actually detect
+     *  and execute (monorepo support). When set, configured assets are copied
+     *  here instead of projectRoot — a config-relative tool invocation only
+     *  finds its asset if it sits where the tool's cwd actually is. The
+     *  manifest file itself always stays at projectRoot regardless. */
+    packageRoot?: string;
     sensors: Record<string, V2Sensor>;
     configure?: boolean;
 };
@@ -77,7 +83,11 @@ export function materializeResolvedSensors(input: MaterializeInput): Materialize
         if (parsed.kind !== 'v2') throw new Error('materialized sensor must be v2');
         sensors[name] = parsed.pack.sensors[name];
     }
-    const manifest: SensorManifestV2 = { schemaVersion: 2, pack, sensors, ...(input.packSelection === 'explicit' ? { packSelection: 'explicit' } : {}), ...(input.registryRoot ? { registryRoot: input.registryRoot } : {}) };
+    const manifest: SensorManifestV2 = { schemaVersion: 2, pack, sensors, ...(input.packSelection === 'explicit' ? { packSelection: 'explicit' } : {}), ...(input.registryRoot ? { registryRoot: input.registryRoot } : {}), ...(input.packageRoot ? { packageRoot: containedAsset(input.packageRoot, 'packageRoot') } : {}) };
+    // Assets land where sensors will actually run — projectRoot by default, or
+    // packageRoot underneath it for a monorepo. The manifest write below stays
+    // pinned to projectRoot either way (see atomicWrite call at the end).
+    const configRoot = manifest.packageRoot ? root(path.join(projectRoot, manifest.packageRoot), 'packageRoot') : projectRoot;
     // A policy reference is deliberately not a materialized asset. Resolve it here
     // from the registry-owned sibling only, so a manifest cannot turn arbitrary
     // registry content into a project write through a cosmetic policy field.
@@ -93,7 +103,7 @@ export function materializeResolvedSensors(input: MaterializeInput): Materialize
         if (input.configure !== false) {
             for (const asset of selected) {
                 const source = path.join(packRoot, ...asset.split('/'));
-                const destination = path.join(projectRoot, ...asset.split('/'));
+                const destination = path.join(configRoot, ...asset.split('/'));
                 let stat: fs.Stats;
                 try { stat = fs.lstatSync(source); } catch { throw new Error(`selected asset is missing from pack: ${asset}`); }
                 if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`selected asset must be a regular file: ${asset}`);
