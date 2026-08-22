@@ -20,7 +20,13 @@ describe('evidence capture CLI boundary', () => {
 
   test('uses the first attempted gate evaluation instead of final satisfaction', () => {
     fs.writeFileSync(path.join(root, 'plan.md'), '# plan\n');
-    const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: { journalId: 'ignored', cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:01.000Z' }, tasks: [], verdicts: [], fixes: [], cycleVerificationPlan: [{ id: 'gate', kind: 'test', satisfiedBy: 'retry' }], jobs: { first: { id: 'first', satisfies: ['gate'], verdict: 'fail' }, retry: { id: 'retry', satisfies: ['gate'], attemptOf: 'first', verdict: 'pass' } } }, ledger: [] });
+    const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: { journalId: 'ignored', cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:01.000Z' }, tasks: [], verdicts: [], fixes: [], cycleVerificationPlan: [{ id: 'gate', kind: 'test', satisfiedBy: 'retry' }], jobs: { first: { id: 'first', satisfies: ['gate'], verdict: 'fail', phaseTimestamps: { received: '2026-08-22T10:00:00.000Z' } }, retry: { id: 'retry', satisfies: ['gate'], attemptOf: 'first', verdict: 'pass', phaseTimestamps: { received: '2026-08-22T10:00:01.000Z' } } } }, ledger: [] });
+    expect(JSON.parse(fs.readFileSync(path.join(root, '.awm', 'evidence', 'cycles', result.stdout.trim() + '.json'), 'utf8')).gates.firstEvaluationsPassed).toEqual([false]);
+  });
+
+  test('orders independent root evaluations by durable timestamp then id', () => {
+    fs.writeFileSync(path.join(root, 'plan.md'), '# plan\n');
+    const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: { journalId: 'ignored', cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:03.000Z' }, tasks: [], verdicts: [], fixes: [], cycleVerificationPlan: [{ id: 'gate', kind: 'test', satisfiedBy: 'late-pass' }], jobs: { late: { id: 'late-pass', satisfies: ['gate'], verdict: 'pass', phaseTimestamps: { received: '2026-08-22T10:00:02.000Z' } }, early: { id: 'early-fail', satisfies: ['gate'], verdict: 'fail', phaseTimestamps: { received: '2026-08-22T10:00:01.000Z' } } } }, ledger: [] });
     expect(JSON.parse(fs.readFileSync(path.join(root, '.awm', 'evidence', 'cycles', result.stdout.trim() + '.json'), 'utf8')).gates.firstEvaluationsPassed).toEqual([false]);
   });
 

@@ -16,7 +16,7 @@ export function captureCycleEvidence(input: CaptureCycleEvidenceInput): CycleEvi
   const repositoryIdentity = hash(input.repositoryIdentity);
   if (typeof input.planPath !== 'string' || !input.planPath) throw new Error('capture planPath is required');
   const journal = object(input.journal, 'journal'); const cycle = object(journal.cycle, 'journal cycle');
-  const startedAt = iso(cycle.startedAt, 'cycle startedAt'); const endedAt = iso(cycle.completedAt ?? cycle.endedAt, 'cycle endedAt');
+  const startedAt = iso(cycle.startedAt, 'cycle startedAt'); const endedAt = iso(cycle.completedAt ?? journal.controllerHeartbeatAt, 'cycle endedAt');
   if (cycle.status !== 'COMPLETE' && cycle.status !== 'BLOCKED') throw new Error('journal cycle must be complete or blocked');
   if (!Array.isArray(journal.tasks) || !Array.isArray(journal.verdicts) || !Array.isArray(journal.fixes) || !Array.isArray(input.gates) || !Array.isArray(input.ledger)) throw new Error('capture sources are invalid');
   const tasks = journal.tasks.map((item, index) => { const task = object(item, `task ${index}`); if (typeof task.id !== 'string') throw new Error('task id is invalid'); const attempts = nonNegative(task.attempts, 'task attempts'); return { id: task.id, attempts, retries: Math.max(attempts - 1, 0) }; });

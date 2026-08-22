@@ -17,4 +17,13 @@ describe('cycle evidence store', () => {
     expect(fs.readdirSync(dir)).toEqual([`${evidence.cycleId}.json`]);
     expect(JSON.parse(fs.readFileSync(path.join(dir, `${evidence.cycleId}.json`), 'utf8')).qa.fixes).toBe(0);
   });
+
+  test('rejects symlinked evidence ancestors without writing outside root', () => {
+    if (process.platform === 'win32') return;
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-evidence-outside-'));
+    fs.symlinkSync(outside, path.join(root, '.awm'));
+    expect(() => writeCycleEvidence(root, cycleEvidenceFixture())).toThrow(/symlink/);
+    expect(fs.readdirSync(outside)).toEqual([]);
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
 });

@@ -37,9 +37,16 @@ function firstEvaluationGates(state: JournalState): Array<{ required: true; pass
       return { required: true, passed: verdict?.result === 'pass' };
     }
     const evaluated = Object.values(state.jobs).filter((job) => job.satisfies?.includes(gate.id));
-    const first = evaluated.find((job) => job.attemptOf === undefined || !evaluated.some((candidate) => candidate.id === job.attemptOf));
+    const first = evaluated.filter((job) => job.attemptOf === undefined || !evaluated.some((candidate) => candidate.id === job.attemptOf))
+      .sort((left, right) => jobTimestamp(left).localeCompare(jobTimestamp(right)) || left.id.localeCompare(right.id))[0];
     return { required: true, passed: first?.verdict === 'pass' };
   });
+}
+
+function jobTimestamp(job: JournalState['jobs'][string]): string {
+  const timestamp = job.result?.endedAt ?? job.phaseTimestamps.received ?? job.phaseTimestamps.exited;
+  if (typeof timestamp !== 'string' || Number.isNaN(Date.parse(timestamp))) throw new Error(`gate job ${job.id} lacks a durable evaluation timestamp`);
+  return timestamp;
 }
 
 function repositoryIdentity(root: string, supplied: unknown): string {

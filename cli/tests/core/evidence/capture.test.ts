@@ -42,4 +42,9 @@ describe('captureCycleEvidence', () => {
     expect(first.cycleId).not.toBe(distinct.cycleId);
     expect(first.cycleState).toBe('blocked');
   });
+
+  test('captures a blocked cycle from its durable controller heartbeat when completedAt is absent', () => {
+    const evidence = captureCycleEvidence({ root: process.cwd(), repositoryIdentity: 'git@example.test:team/repository.git', planPath: 'plans/release.md', journal: { cycle: { status: 'BLOCKED', startedAt: '2026-08-22T10:00:00.000Z' }, controllerHeartbeatAt: '2026-08-22T10:00:03.000Z', tasks: [], verdicts: [], fixes: [] }, gates: [], ledger: [] });
+    expect(evidence).toMatchObject({ cycleState: 'blocked', endedAt: '2026-08-22T10:00:03.000Z', durationMs: 3_000 });
+  });
 });
