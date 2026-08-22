@@ -63,4 +63,12 @@ describe('renderFullTerminal', () => {
         expect(first).toContain('Cycle 499');
         expect(first).not.toMatch(/score|ranking/i);
     });
+
+    it('renders explicit confidence and every evidence metric without improvement claims', () => {
+        const output = renderFullTerminal(validateDashboardSnapshotV1(completeSnapshot({ confidence: 'supported' })));
+        expect(output).toContain('Confidence: supported');
+        expect(output).toContain('Eligible evidence rows: 1');
+        expect(output).toContain('5 minutes');
+        expect(output).not.toMatch(/trend|percentage|improvement/i);
+    });
 });

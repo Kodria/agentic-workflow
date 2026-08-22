@@ -176,4 +176,21 @@ describe('renderDashboardHtml', () => {
         expect(first).toContain('Cycle 499');
         expect(first).toContain('Task 1999');
     });
+
+    it('renders supplied plans and evidence facts in the dense project panels', () => {
+        const html = renderDashboardHtml(validateDashboardSnapshotV1(snapshot({
+            confidence: 'supported',
+            sections: [
+                { id: 'machine', availability: 'available', items: [] }, { id: 'project', availability: 'available', items: [] },
+                { id: 'planning', availability: 'available', items: [{ id: 'plan.alpha', label: 'Impact plan', state: 'ok', detail: 'executed' }] },
+                { id: 'execution', availability: 'available', items: [] }, { id: 'qa', availability: 'available', items: [] }, { id: 'retro', availability: 'available', items: [] },
+                { id: 'history', availability: 'available', items: [{ id: 'history.cycle.abc', label: 'Cycle abc', state: 'ok', detail: 'plan executed; tasks 3; retries 2; QA 2/2; first-pass yes; cures supported' }] },
+            ],
+        })));
+        expect(html).toContain('Confidence: supported');
+        expect(html).toContain('Impact plan');
+        expect(html).toContain('Cycle abc');
+        expect(html).toContain('retries 2; QA 2/2; first-pass yes; cures supported');
+        expect(html).not.toContain('Progreso: sin observación');
+    });
 });

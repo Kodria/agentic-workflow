@@ -478,9 +478,9 @@ git add cli/src/core/dashboard/render-terminal.ts cli/src/core/dashboard/render-
 git commit -m "feat(doctor): render approved terminal and HTML dashboards"
 ```
 
-- [ ] **Step 7: Close and publish Release A before starting Task 5**
+- [x] **Step 7: Close and publish Release A before starting Task 5**
 
-Finish the Release A branch through QA, retro, PR, and immutable package publication. Record the published CLI version and package integrity in the release notes. Start Task 5 only from a branch based on that published Release A tag. Resolve the exact version with `release_a_version=$(node -p "require('./cli/package.json').version")`, then verify `npm view agentic-workflow-manager@"$release_a_version" dist.integrity` returns a non-empty integrity value. This is the enforced #86-before-#87 boundary (R8.1).
+Release A closed through QA, retro, PR #108, and immutable package publication. The published CLI is `v8.4.0` with npm integrity `sha512-n0cCnDBkJqiHre670+uUw6D1E+y4aKGZrQUq0dpM0leuWmAVMeL/hXchJUh3PYDn2m2QbSZg3zk9qIwQXHlOXQ==`; this branch starts from tag `v8.4.0`. This is the enforced #86-before-#87 boundary (R8.1).
 
 ## Task 5: Persist validated `CycleEvidenceV1` observations
 
@@ -497,7 +497,7 @@ _Requirements: R6.1, R6.3, R6.4, R6.5, R6.6, R6.7, R6.11, R7.1, R7.2, R7.3, R7.4
 - Create: `cli/tests/helpers/evidence-fixtures.ts`
 - Modify: `cli/src/index.ts`
 
-- [ ] **Step 1: Write failing contract and privacy tests**
+- [x] **Step 1: Write failing contract and privacy tests**
 
 ```ts
 it('derives an opaque stable cycle ID from repo identity, relative plan, and start time', () => {
@@ -516,13 +516,13 @@ it('rejects host or person identity and raw prose', () => {
 });
 ```
 
-- [ ] **Step 2: Run and observe failure**
+- [x] **Step 2: Run and observe failure**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/evidence/types.test.ts tests/core/evidence/store.test.ts tests/core/evidence/capture.test.ts`
 
 Expected: FAIL because evidence modules do not exist.
 
-- [ ] **Step 3: Define the minimal durable record**
+- [x] **Step 3: Define the minimal durable record**
 
 ```ts
 export interface CycleEvidenceV1 {
@@ -562,19 +562,19 @@ export function validCycleEvidence(
 
 Validation must reject negative counts, non-finite durations, invalid timestamps, retries not equal to `max(attempts - 1, 0)`, raw descriptions, absolute plan paths, usernames, repository names, prompts, logs, and secret-like fields.
 
-- [ ] **Step 4: Implement deterministic atomic storage**
+- [x] **Step 4: Implement deterministic atomic storage**
 
 `writeCycleEvidence(root, evidence)` writes `.awm/evidence/cycles/{cycleId}.json` through an adjacent temp file, fsync/close/rename, and deterministically replaces the same cycle file. Repeated capture must not append or create a second observation (R7.3, R7.4).
 
-- [ ] **Step 5: Implement capture aggregation and the command boundary**
+- [x] **Step 5: Implement capture aggregation and the command boundary**
 
 `captureCycleEvidence({ root, planPath, journal, gates, ledger, pr })` validates every public input and derives only counts, opaque signatures, states, timestamps, and optional host-agnostic PR reference. Register `awm evidence capture --plan docs/plans/2026-08-22-doctor-dashboard-impact-evidence-plan.md`; it must return 2 for invalid/missing central inputs and print the written cycle ID on success.
 
-- [ ] **Step 6: Add exact metric tests**
+- [x] **Step 6: Add exact metric tests**
 
 Assert one cycle per observation, optional PR metadata, findings per cycle/PR, per-task retries and total, first gate evaluation, cure signatures, and allowed plan states (R6.1, R6.3–R6.7).
 
-- [ ] **Step 7: Run tests and commit**
+- [x] **Step 7: Run tests and commit**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/evidence/types.test.ts tests/core/evidence/store.test.ts tests/core/evidence/capture.test.ts`
 
@@ -602,7 +602,7 @@ _Requirements: R6.2, R6.8, R6.9, R6.10, R6.11, R7.6, R7.7, R7.8, R7.9, R7.10_
 **Skills:** frontend-craft
 **Design artifacts:** .stitch/designs/project-lifecycle-impact-evidence.html, .stitch/designs/project-lifecycle-impact-evidence.png
 
-- [ ] **Step 1: Write failing threshold and recurrence tests**
+- [x] **Step 1: Write failing threshold and recurrence tests**
 
 ```ts
 it.each([[0, 'none'], [1, 'provisional'], [2, 'observing'], [4, 'observing'], [5, 'supported']] as const)(
@@ -618,21 +618,21 @@ it.each([
 });
 ```
 
-- [ ] **Step 2: Run and observe failure**
+- [x] **Step 2: Run and observe failure**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/evidence/history.test.ts`
 
 Expected: FAIL because history calculations do not exist.
 
-- [ ] **Step 3: Implement complete local history without filtering rows**
+- [x] **Step 3: Implement complete local history without filtering rows**
 
 `buildEvidenceHistory(records)` validates all records, sorts by stable timestamp/cycle ID, returns every eligible sanitized row, computes aggregate confidence only as a label, and never hides rows below thresholds. Zero cycles returns an explicit empty state without trend, percentage, or improvement claims (R6.2, R6.8, R6.11).
 
-- [ ] **Step 4: Overlay plan history and render the evidence panel**
+- [x] **Step 4: Overlay plan history and render the evidence panel**
 
 Load evidence only inside the detected repository. Overlay active journal states before marker-derived states. Render plans, retries, QA counts, first-pass gates, cure efficacy, and confidence labels in terminal and HTML while preserving the existing section order and approved dense project screen.
 
-- [ ] **Step 5: Run UI/history tests and commit**
+- [x] **Step 5: Run UI/history tests and commit**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/evidence/history.test.ts tests/core/dashboard/render-terminal.test.ts tests/core/dashboard/render-html.test.ts tests/core/dashboard/plan-state.test.ts`
 
@@ -653,13 +653,13 @@ _Requirements: R7.1, R8.1, R8.6_
 - Modify: `/srv/agentmobile/workspaces/repos/agentic-project/awm-baseline-registry/awm-registry.json`
 - Create: `/srv/agentmobile/workspaces/repos/agentic-project/awm-baseline-registry/tests/cycle-evidence-capture-contract.test.mjs`
 
-- [ ] **Step 1: Publish and verify Release A before beginning this registry task**
+- [x] **Step 1: Publish and verify Release A before beginning this registry task**
 
 Run from the CLI repository: `npm view agentic-workflow-manager version`
 
 Expected: the published immutable version is at least the Release A version recorded in `awm-registry.json`. If it is not published, stop this task; do not add the registry invocation.
 
-- [ ] **Step 2: Write a failing registry contract test**
+- [x] **Step 2: Write a failing registry contract test**
 
 ```js
 test('retro captures cycle evidence before archive and only with a compatible CLI', () => {
@@ -670,17 +670,17 @@ test('retro captures cycle evidence before archive and only with a compatible CL
 });
 ```
 
-- [ ] **Step 3: Run and observe failure**
+- [x] **Step 3: Run and observe failure**
 
 Run: `cd /srv/agentmobile/workspaces/repos/agentic-project/awm-baseline-registry && node --test tests/cycle-evidence-capture-contract.test.mjs`
 
 Expected: FAIL because `harness-retro` has no capture step or compatibility guard.
 
-- [ ] **Step 4: Add the guarded capture step before ledger archive**
+- [x] **Step 4: Add the guarded capture step before ledger archive**
 
 The skill must read the minimum CLI version declared in `awm-registry.json`, verify `awm --version` satisfies it, resolve the tracked active plan into an `active_plan` shell variable, run `awm evidence capture --plan "$active_plan"`, require exit 0, then archive the ledger. An older CLI must fail loudly with the exact upgrade command and must not archive the ledger. This enforces Release A before Release B and prevents a registry from calling an unavailable contract.
 
-- [ ] **Step 5: Run registry tests and commit in the registry repository**
+- [x] **Step 5: Run registry tests and commit in the registry repository**
 
 Run: `cd /srv/agentmobile/workspaces/repos/agentic-project/awm-baseline-registry && npm test`
 
@@ -701,29 +701,29 @@ _Requirements: R4.8, R8.3, R8.4, R8.5, R8.7_
 - Modify: `.github/workflows/ci.yml`
 - Modify: `.github/workflows/release.yml`
 
-- [ ] **Step 1: Add failing local end-to-end fixtures**
+- [x] **Step 1: Add failing local end-to-end fixtures**
 
 Test machine-only, healthy project, degraded project, partial source, corrupt source, hostile text, long history, and large task counts through the built `dist/src/index.js`. Assert exit 0/1/2, JSON compatibility, complete `--full`, CSP/static HTML, target-only mutation, and evidence rows (R4.8, R8.3, R8.4).
 
-- [ ] **Step 2: Run and observe failure before wiring build artifacts**
+- [x] **Step 2: Run and observe failure before wiring build artifacts**
 
 Run: `cd cli && npm run build && npm test -- --runTestsByPath tests/integration/doctor-dashboard.e2e.test.ts`
 
 Expected: FAIL until the integration fixture invokes the newly built command and normalizes only environmental timestamps.
 
-- [ ] **Step 3: Add published-artifact acceptance**
+- [x] **Step 3: Add published-artifact acceptance**
 
 The published test must install the exact CLI package version and exact registry tag into a fresh temporary environment, run `awm doctor`, `awm doctor --json`, `awm doctor --full`, `awm doctor --html`, one evidence capture, and one retro capture contract. It must reject local workspace paths, `file:` dependencies, mutable branches, and unpinned registry refs.
 
-- [ ] **Step 4: Add Linux/macOS/Windows matrix jobs**
+- [x] **Step 4: Add Linux/macOS/Windows matrix jobs**
 
 In `.github/workflows/release.yml`, add `os: [ubuntu-latest, macos-latest, windows-latest]` after publish verification. Each matrix cell installs immutable artifacts and runs only `published-doctor-evidence.e2e.test.ts`. The release job must fail if any platform does not complete the same contract (R8.7).
 
-- [ ] **Step 5: Demonstrate the end-to-end regression boundary**
+- [x] **Step 5: Demonstrate the end-to-end regression boundary**
 
 Temporarily remove the HTML CSP meta tag, observe the E2E test fail, restore it, and observe PASS. Repeat by allowing an extra project mutation and confirming the read-only assertion fails. Do not commit either temporary mutation (R8.5).
 
-- [ ] **Step 6: Run all CLI gates and commit**
+- [x] **Step 6: Run all CLI gates and commit**
 
 Run:
 

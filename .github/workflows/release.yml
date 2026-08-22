@@ -83,6 +83,9 @@ jobs:
   release:
     needs: test          # rojo en CUALQUIER plataforma no publica
     runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.release-result.outputs.published }}
+      version: ${{ steps.release-result.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -117,9 +120,58 @@ jobs:
       # decidiendo `determineBump`. El valor 'auto' es el default explicito y no agrega
       # flag, de modo que el camino normal es byte-identico al anterior.
       - name: Release
+        id: release-result
         working-directory: cli
         env:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true && '--dry-run' || '' }}
           FORCE_BUMP: ${{ github.event_name == 'workflow_dispatch' && inputs.bump != 'auto' && format('--force {0}', inputs.bump) || '' }}
         run: |
-          node dist/src/release/index.js $DRY_RUN $FORCE_BUMP
+          result="$(node dist/src/release/index.js $DRY_RUN $FORCE_BUMP)"
+          printf '%s\n' "$result"
+          if [[ "$result" =~ Publicado\ v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Require immutable Task 7 registry commit
+        if: steps.release-result.outputs.published == 'true'
+        env:
+          REGISTRY_COMMIT: ${{ vars.AWM_REGISTRY_V3_4_0_COMMIT }}
+        shell: bash
+        run: |
+          if [[ ! "$REGISTRY_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "AWM_REGISTRY_V3_4_0_COMMIT must contain the full peeled v3.4.0 commit SHA" >&2
+            exit 1
+          fi
+
+  # This is intentionally after `release`, not a replacement for its test
+  # gate.  It downloads npm and git artifacts into a clean consumer on each
+  # supported native platform, so no workspace path, file: dependency, or
+  # mutable branch participates in the final acceptance boundary.
+  published-doctor-evidence:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install test runner
+        working-directory: cli
+        run: npm ci
+      - name: Accept published dashboard and evidence artifacts
+        working-directory: cli
+        env:
+          AWM_PUBLISHED_CLI_VERSION: ${{ needs.release.outputs.version }}
+          AWM_PUBLISHED_REGISTRY_TAG: v3.4.0
+          AWM_PUBLISHED_REGISTRY_COMMIT: ${{ vars.AWM_REGISTRY_V3_4_0_COMMIT }}
+          AWM_PUBLISHED_REGISTRY_REMOTE: https://github.com/Kodria/awm-baseline-registry.git
+        run: npx jest tests/integration/published-doctor-evidence.e2e.test.ts --runInBand

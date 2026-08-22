@@ -1,0 +1,160 @@
+import { spawnSync, type SpawnSyncReturns } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+const cliVersion = process.env.AWM_PUBLISHED_CLI_VERSION;
+const registryTag = process.env.AWM_PUBLISHED_REGISTRY_TAG;
+const registryCommit = process.env.AWM_PUBLISHED_REGISTRY_COMMIT;
+const registryRemote = process.env.AWM_PUBLISHED_REGISTRY_REMOTE ?? 'https://github.com/Kodria/awm-baseline-registry.git';
+// Local contributors lack publish coordinates and skip this network acceptance.
+// A CI run that supplies the published CLI/tag but omits the commit MUST run and
+// fail at the provenance assertion rather than silently describe.skip.
+const enabled = Boolean(cliVersion && registryTag);
+const acceptance = enabled ? describe : describe.skip;
+
+function command(cwd: string, executable: string, args: string[], env = process.env): SpawnSyncReturns<string> {
+    return spawnSync(executable, args, { cwd, encoding: 'utf8', env });
+}
+
+/** Published evidence accepts only exact versions and immutable git tags. */
+export function assertImmutableArtifacts(version: string | undefined, tag: string | undefined, commit: string | undefined, remote: string): void {
+    if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('published CLI version must be an exact immutable semver');
+    if (version.includes('file:') || version.includes('/') || version.includes('@')) throw new Error('published CLI must not be a workspace, file dependency, or mutable tag');
+    if (!tag || !/^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag)) throw new Error('published registry ref must be an exact immutable tag');
+    if (!commit || !/^[a-f0-9]{40}$/.test(commit)) throw new Error('published registry commit must be a full immutable SHA');
+    if (!/^https:\/\/github\.com\/Kodria\/awm-baseline-registry\.git$/.test(remote)) throw new Error('published registry remote must be the canonical immutable release remote');
+}
+
+/** R8.7 is bound to the Task 7 registry release, never the preceding tag. */
+export function assertIssue87RegistryPin(tag: string | undefined): void {
+    if (tag !== 'v3.4.0') throw new Error('published doctor evidence requires immutable registry tag v3.4.0');
+}
+
+function json(result: SpawnSyncReturns<string>): Record<string, unknown> {
+    if (!result.stdout.trim()) throw new Error(`missing JSON output: ${result.stderr}`);
+    return JSON.parse(result.stdout) as Record<string, unknown>;
+}
+
+function compareSemver(left: string, right: string): number {
+    const parse = (value: string) => value.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/);
+    const a = parse(left); const b = parse(right);
+    if (!a || !b) throw new Error('published compatibility versions must be exact semver');
+    for (let index = 1; index <= 3; index++) { const difference = Number(a[index]) - Number(b[index]); if (difference !== 0) return difference; }
+    return (a[4] ? -1 : 0) - (b[4] ? -1 : 0);
+}
+
+/** The cloned registry, not a loose prose regex, owns the retro ordering contract. */
+export function assertRetroCaptureContract(registry: unknown, retro: string, version: string): void {
+    if (!registry || typeof registry !== 'object' || Array.isArray(registry)) throw new Error('published registry metadata is invalid');
+    const floor = (registry as { minCliVersion?: unknown }).minCliVersion;
+    if (typeof floor !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(floor)) throw new Error('published registry must declare minCliVersion');
+    if (compareSemver(version, floor) < 0) throw new Error(`published CLI ${version} is below registry minCliVersion ${floor}`);
+    const commands = retro.split(/\r?\n/).map((line, index) => ({ line: line.trim(), index }))
+        .filter(({ line }) => !line.startsWith('#') && !line.startsWith('<!--'))
+        .filter(({ line }) => /^(?:\d+\.\s+)?`?awm (?:evidence capture|ledger archive)(?:\s|`|$)/.test(line));
+    const captures = commands.filter(({ line }) => /awm evidence capture(?:\s|`|$)/.test(line));
+    const archives = commands.filter(({ line }) => /awm ledger archive(?:\s|`|$)/.test(line));
+    if (captures.length !== 1) throw new Error('installed harness-retro contract requires exactly one executable evidence capture command');
+    if (archives.length !== 1 || captures[0].index > archives[0].index) throw new Error('installed harness-retro must capture evidence before archive');
+}
+
+acceptance('published doctor and evidence acceptance (R8.7)', () => {
+    jest.setTimeout(10 * 60_000);
+
+    test('installs exact npm and registry artifacts into a fresh consumer and executes the dashboard/evidence contract', () => {
+        assertImmutableArtifacts(cliVersion, registryTag, registryCommit, registryRemote);
+        assertIssue87RegistryPin(registryTag);
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-published-doctor-'));
+        try {
+            const artifacts = path.join(root, 'artifacts');
+            const registry = path.join(root, 'registry');
+            const project = path.join(root, 'project');
+            const home = path.join(root, 'home');
+            fs.mkdirSync(project, { recursive: true }); fs.mkdirSync(home, { recursive: true });
+            expect(command(root, 'npm', ['install', '--prefix', artifacts, '--ignore-scripts', '--no-audit', '--no-fund', `agentic-workflow-manager@${cliVersion}`]).status).toBe(0);
+            expect(command(root, 'git', ['clone', '--depth', '1', '--branch', registryTag!, registryRemote, registry]).status).toBe(0);
+            expect(command(registry, 'git', ['describe', '--exact-match', '--tags', 'HEAD']).stdout.trim()).toBe(registryTag);
+            expect(command(registry, 'git', ['rev-parse', 'HEAD']).stdout.trim()).toBe(registryCommit);
+            expect(command(registry, 'git', ['rev-parse', `${registryTag}^{}`]).stdout.trim()).toBe(registryCommit);
+            const cliRoot = path.join(artifacts, 'node_modules', 'agentic-workflow-manager');
+            expect(JSON.parse(fs.readFileSync(path.join(cliRoot, 'package.json'), 'utf8'))).toEqual(expect.objectContaining({ version: cliVersion }));
+            expect(fs.existsSync(path.join(cliRoot, 'dist', 'src', 'index.js'))).toBe(true);
+            const registryMetadata = JSON.parse(fs.readFileSync(path.join(registry, 'awm-registry.json'), 'utf8')) as unknown;
+            const retro = fs.readFileSync(path.join(registry, 'skills', 'harness-retro', 'SKILL.md'), 'utf8');
+            assertRetroCaptureContract(registryMetadata, retro, cliVersion!);
+            fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'published-doctor-fixture', private: true }));
+            fs.writeFileSync(path.join(project, 'plan.md'), '# published evidence fixture\n');
+            expect(command(project, 'git', ['init']).status).toBe(0);
+            expect(command(project, 'git', ['config', 'user.email', 'published@example.invalid']).status).toBe(0);
+            expect(command(project, 'git', ['config', 'user.name', 'Published acceptance']).status).toBe(0);
+            expect(command(project, 'git', ['add', '.']).status).toBe(0);
+            expect(command(project, 'git', ['commit', '-m', 'fixture']).status).toBe(0);
+            const branch = command(project, 'git', ['branch', '--show-current']).stdout.trim();
+            expect(branch).not.toBe('');
+            expect(command(project, 'git', ['remote', 'add', 'origin', 'https://github.com/example/published-doctor-fixture.git']).status).toBe(0);
+            const env = { ...process.env, AWM_HOME: home, AWM_NO_UPDATE_CHECK: '1' };
+            const invoke = (...args: string[]) => command(project, process.execPath, [path.join(cliRoot, 'dist', 'src', 'index.js'), ...args], env);
+            expect([0, 1]).toContain(invoke('doctor').status);
+            const report = invoke('doctor', '--json');
+            expect([0, 1]).toContain(report.status); expect(json(report)).toHaveProperty('providers');
+            expect([0, 1]).toContain(invoke('doctor', '--full').status);
+            const html = invoke('doctor', '--html', 'doctor.html');
+            expect([0, 1]).toContain(html.status);
+            expect(fs.readFileSync(path.join(project, 'doctor.html'), 'utf8')).toContain("script-src 'none'");
+            // Seed a completed durable journal using the downloaded package's own
+            // journal store: this stays on the published-artifact boundary while
+            // making capture exercise its real CLI path, not an injected helper.
+            const journalScript = [
+                `const store=require(${JSON.stringify(path.join(cliRoot, 'dist', 'src', 'core', 'journal', 'store.js'))});`,
+                'store.initJournal(process.argv[1], process.argv[2]);',
+                'const state=store.readJournal(process.argv[1], process.argv[2]).state;',
+                "state.cycle={...state.cycle,status:'COMPLETE',completedAt:'2026-08-22T10:00:01.000Z'};",
+                'store.writeJournal(process.argv[1], process.argv[2], state);',
+            ].join('');
+            expect(command(project, process.execPath, ['-e', journalScript, project, branch], env).status).toBe(0);
+            const capture = invoke('evidence', 'capture', '--plan', 'plan.md');
+            expect(capture.status).toBe(0);
+            expect(capture.stdout.trim()).toMatch(/^[a-f0-9]{64}$/);
+            expect(fs.existsSync(path.join(project, '.awm', 'evidence', 'cycles', `${capture.stdout.trim()}.json`))).toBe(true);
+            // The retrospective/ledger lifecycle happens after the durable
+            // observation, never instead of it.
+            expect(invoke('ledger', 'add', '--branch', branch, '--polarity', 'finding', '--class', 'quality', '--signature', 'published-retro-contract', '--severity', 'important', '--desc', 'published acceptance').status).toBe(0);
+            expect(invoke('ledger', 'archive', '--branch', branch).status).toBe(0);
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+});
+
+describe('published artifact provenance guard', () => {
+    test.each(['file:../cli', '../cli', 'latest', 'workspace:*', '8.4.0@latest'])('rejects mutable CLI reference %s', (version) => {
+        expect(() => assertImmutableArtifacts(version, 'v3.2.0', 'a'.repeat(40), registryRemote)).toThrow(/published CLI/i);
+    });
+    test.each(['main', 'HEAD', '', 'v3', 'refs/heads/main'])('rejects mutable registry ref %s', (tag) => {
+        expect(() => assertImmutableArtifacts('8.4.0', tag, 'a'.repeat(40), registryRemote)).toThrow(/registry ref/i);
+    });
+    test('rejects a short or retagged registry commit pin', () => {
+        expect(() => assertImmutableArtifacts('8.4.1', 'v3.4.0', 'deadbeef', registryRemote)).toThrow(/full immutable SHA/);
+        expect(() => assertImmutableArtifacts('8.4.1', 'v3.4.0', undefined, registryRemote)).toThrow(/full immutable SHA/);
+    });
+});
+
+describe('future registry retro capture contract', () => {
+    const metadata = { minCliVersion: '8.4.1' };
+    const contract = '1. awm evidence capture --plan docs/plan.md\n2. awm ledger archive\n';
+    test('requires the declared semver floor and capture-before-archive ordering', () => {
+        expect(() => assertRetroCaptureContract(metadata, contract, '8.4.1')).not.toThrow();
+        expect(() => assertRetroCaptureContract(metadata, contract, '8.4.0')).toThrow(/below registry minCliVersion/);
+    });
+    test('fails when minCliVersion is removed or retro ordering is swapped', () => {
+        expect(() => assertRetroCaptureContract({}, contract, '8.4.1')).toThrow(/minCliVersion/);
+        expect(() => assertRetroCaptureContract(metadata, 'awm ledger archive\nawm evidence capture', '8.4.1')).toThrow(/before archive/);
+    });
+    test('ignores comments and rejects duplicate or non-executable capture text', () => {
+        expect(() => assertRetroCaptureContract(metadata, '# awm evidence capture\nawm ledger archive', '8.4.1')).toThrow(/exactly one executable/);
+        expect(() => assertRetroCaptureContract(metadata, `${contract}awm evidence capture --plan again`, '8.4.1')).toThrow(/exactly one executable/);
+    });
+    test('rejects the prepublication CLI and a preceding registry pin', () => {
+        expect(() => assertRetroCaptureContract(metadata, contract, '8.4.0')).toThrow(/below registry minCliVersion/);
+        expect(() => assertIssue87RegistryPin('v3.2.0')).toThrow(/v3\.4\.0/);
+    });
+});
