@@ -76,12 +76,15 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
         return validateDashboardSnapshotV1({ schema: 1, generatedAt: options.now, overall: degraded ? 'degraded' : 'healthy', project: { detected: false, label: 'No project detected' }, confidence: 'none', sections: [machineSection] });
     }
 
-    const projectResult = optional(() => adapters.project({ root }));
-    const plansResult = optional(() => adapters.plans({ root }));
-    const executionResult = optional(() => adapters.execution({ root }));
-    const projectSource = projectResult.value ? sanitizeDashboardSource(projectResult.value) as ProjectDashboardSource : undefined;
-    const execution = executionResult.value ? sanitizeDashboardSource(executionResult.value) as ExecutionDashboardSource : undefined;
-    const planItems = plansResult.value ? findings((sanitizeDashboardSource(plansResult.value) as PlanDashboardSource[]).map((plan) => plan.lifecycle
+    const projectResult = optional(() => sanitizeDashboardSource(adapters.project({ root })) as ProjectDashboardSource);
+    const plansResult = optional(() => sanitizeDashboardSource(adapters.plans({ root })) as PlanDashboardSource[]);
+    const executionResult = optional(() => {
+        const source = adapters.execution({ root });
+        return source === undefined ? undefined : sanitizeDashboardSource(source) as ExecutionDashboardSource;
+    });
+    const projectSource = projectResult.value;
+    const execution = executionResult.value;
+    const planItems = plansResult.value ? findings(plansResult.value.map((plan) => plan.lifecycle
         ? { ...plan, detail: classifyPlanState(plan.lifecycle) } : plan)) : [];
     const sections = [
         machineSection,

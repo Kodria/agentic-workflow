@@ -51,6 +51,15 @@ describe('collectDashboardSnapshot', () => {
         expect(snapshot.sections.find((section) => section.id === 'project')?.items).toEqual([]);
     });
 
+    it('isolates malformed optional source data to its owning section', () => {
+        const snapshot = collectDashboardSnapshot({
+            cwd: process.cwd(), now: fixedNow,
+            adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [{ id: 'bad', label: 'Profile', state: 'invented' as never }] }), plans: () => [], execution: () => undefined },
+        });
+        expect(snapshot.sections.find((section) => section.id === 'project')?.availability).toBe('unavailable');
+        expect(snapshot.sections.find((section) => section.id === 'machine')?.availability).toBe('available');
+    });
+
     it('renders exact remediation only for a canonical optional source failure', () => {
         const knownFailure = Object.assign(new Error('sensors unavailable'), { findingId: 'project.sensors.unavailable', remediationVerified: true });
         const snapshot = collectDashboardSnapshot({
