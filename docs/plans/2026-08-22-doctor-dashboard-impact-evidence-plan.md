@@ -653,13 +653,13 @@ _Requirements: R7.1, R8.1, R8.6_
 - Modify: `/srv/agentmobile/workspaces/repos/agentic-project/awm-baseline-registry/awm-registry.json`
 - Create: `/srv/agentmobile/workspaces/repos/agentic-project/awm-baseline-registry/tests/cycle-evidence-capture-contract.test.mjs`
 
-- [ ] **Step 1: Publish and verify Release A before beginning this registry task**
+- [x] **Step 1: Publish and verify Release A before beginning this registry task**
 
 Run from the CLI repository: `npm view agentic-workflow-manager version`
 
 Expected: the published immutable version is at least the Release A version recorded in `awm-registry.json`. If it is not published, stop this task; do not add the registry invocation.
 
-- [ ] **Step 2: Write a failing registry contract test**
+- [x] **Step 2: Write a failing registry contract test**
 
 ```js
 test('retro captures cycle evidence before archive and only with a compatible CLI', () => {
@@ -670,17 +670,17 @@ test('retro captures cycle evidence before archive and only with a compatible CL
 });
 ```
 
-- [ ] **Step 3: Run and observe failure**
+- [x] **Step 3: Run and observe failure**
 
 Run: `cd /srv/agentmobile/workspaces/repos/agentic-project/awm-baseline-registry && node --test tests/cycle-evidence-capture-contract.test.mjs`
 
 Expected: FAIL because `harness-retro` has no capture step or compatibility guard.
 
-- [ ] **Step 4: Add the guarded capture step before ledger archive**
+- [x] **Step 4: Add the guarded capture step before ledger archive**
 
 The skill must read the minimum CLI version declared in `awm-registry.json`, verify `awm --version` satisfies it, resolve the tracked active plan into an `active_plan` shell variable, run `awm evidence capture --plan "$active_plan"`, require exit 0, then archive the ledger. An older CLI must fail loudly with the exact upgrade command and must not archive the ledger. This enforces Release A before Release B and prevents a registry from calling an unavailable contract.
 
-- [ ] **Step 5: Run registry tests and commit in the registry repository**
+- [x] **Step 5: Run registry tests and commit in the registry repository**
 
 Run: `cd /srv/agentmobile/workspaces/repos/agentic-project/awm-baseline-registry && npm test`
 
