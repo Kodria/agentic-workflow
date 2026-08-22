@@ -92,7 +92,7 @@ _Requirements: R1.1, R2.1, R2.6, R8.2_
 - Create: `cli/tests/fixtures/doctor-json/project.json`
 - Modify: `cli/tests/commands/doctor.test.ts`
 
-- [ ] **Step 1: Add failing legacy JSON fixture tests**
+- [x] **Step 1: Add failing legacy JSON fixture tests**
 
 ```ts
 function readFixture(name: string): string {
@@ -125,13 +125,13 @@ it('keeps the project provider JSON contract byte-for-byte stable', () => {
 });
 ```
 
-- [ ] **Step 2: Run the compatibility tests and record the expected failure**
+- [x] **Step 2: Run the compatibility tests and record the expected failure**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/commands/doctor.test.ts`
 
 Expected: FAIL because the two fixture files and deterministic fixture helper do not exist.
 
-- [ ] **Step 3: Capture current JSON as immutable fixtures and add the versioned types**
+- [x] **Step 3: Capture current JSON as immutable fixtures and add the versioned types**
 
 ```ts
 export type DashboardItemState =
@@ -177,7 +177,7 @@ export function dashboardSnapshot(
 
 `validateDashboardSnapshotV1(value: unknown): DashboardSnapshotV1` must throw `DashboardValidationError` for invalid schema versions, enums, duplicate IDs, non-deterministic section order, or actionable non-ok items without a remediation command. `not_applicable` must reject remediation text.
 
-- [ ] **Step 4: Add validator tests and make them pass**
+- [x] **Step 4: Add validator tests and make them pass**
 
 ```ts
 it.each(['attention', 'missing', 'unavailable'] as const)(
@@ -207,11 +207,11 @@ Run: `cd cli && npm test -- --runTestsByPath tests/core/dashboard/contracts.test
 
 Expected: PASS.
 
-- [ ] **Step 5: Demonstrate the regression boundary**
+- [x] **Step 5: Demonstrate the regression boundary**
 
 Temporarily rename `providers` to `providerRows` in the JSON serialization seam, rerun the two fixture tests and observe FAIL, then restore `providers` and rerun to PASS. Do not commit the temporary mutation. This records the fail/pass/revert-fail/restore-pass cycle required by R8.5 for the legacy contract.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cli/src/core/dashboard/types.ts cli/src/core/dashboard/validate.ts \
