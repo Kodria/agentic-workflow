@@ -602,7 +602,7 @@ _Requirements: R6.2, R6.8, R6.9, R6.10, R6.11, R7.6, R7.7, R7.8, R7.9, R7.10_
 **Skills:** frontend-craft
 **Design artifacts:** .stitch/designs/project-lifecycle-impact-evidence.html, .stitch/designs/project-lifecycle-impact-evidence.png
 
-- [ ] **Step 1: Write failing threshold and recurrence tests**
+- [x] **Step 1: Write failing threshold and recurrence tests**
 
 ```ts
 it.each([[0, 'none'], [1, 'provisional'], [2, 'observing'], [4, 'observing'], [5, 'supported']] as const)(
@@ -618,21 +618,21 @@ it.each([
 });
 ```
 
-- [ ] **Step 2: Run and observe failure**
+- [x] **Step 2: Run and observe failure**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/evidence/history.test.ts`
 
 Expected: FAIL because history calculations do not exist.
 
-- [ ] **Step 3: Implement complete local history without filtering rows**
+- [x] **Step 3: Implement complete local history without filtering rows**
 
 `buildEvidenceHistory(records)` validates all records, sorts by stable timestamp/cycle ID, returns every eligible sanitized row, computes aggregate confidence only as a label, and never hides rows below thresholds. Zero cycles returns an explicit empty state without trend, percentage, or improvement claims (R6.2, R6.8, R6.11).
 
-- [ ] **Step 4: Overlay plan history and render the evidence panel**
+- [x] **Step 4: Overlay plan history and render the evidence panel**
 
 Load evidence only inside the detected repository. Overlay active journal states before marker-derived states. Render plans, retries, QA counts, first-pass gates, cure efficacy, and confidence labels in terminal and HTML while preserving the existing section order and approved dense project screen.
 
-- [ ] **Step 5: Run UI/history tests and commit**
+- [x] **Step 5: Run UI/history tests and commit**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/evidence/history.test.ts tests/core/dashboard/render-terminal.test.ts tests/core/dashboard/render-html.test.ts tests/core/dashboard/plan-state.test.ts`
 
