@@ -32,6 +32,12 @@ describe('writeHtmlAtomically', () => {
         expect(() => resolveHtmlTarget({ cwd: root, target: 'regular-dir', force: true })).toThrow(/regular/i);
     });
 
+    it('rejects an injected unwritable parent before creating any temporary file', () => {
+        const operations = { ...fs, accessSync: jest.fn(() => { throw new Error('denied'); }) };
+        expect(() => resolveHtmlTarget({ cwd: root, target: 'report.html' }, operations)).toThrow(/writable/i);
+        expect(fs.readdirSync(root)).toEqual([]);
+    });
+
     it('accepts a new absolute target and force-replaces only regular files', () => {
         const target = path.join(root, 'absolute.html');
         expect(resolveHtmlTarget({ cwd: root, target })).toBe(target);

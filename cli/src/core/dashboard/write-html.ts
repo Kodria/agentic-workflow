@@ -2,14 +2,15 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 
-export function resolveHtmlTarget(input: { cwd: string; target: string; force?: boolean }): string {
+export interface HtmlTargetOperations { existsSync: typeof fs.existsSync; statSync: typeof fs.statSync; lstatSync: typeof fs.lstatSync; accessSync: typeof fs.accessSync; }
+export function resolveHtmlTarget(input: { cwd: string; target: string; force?: boolean }, operations: HtmlTargetOperations = fs): string {
     if (!input || typeof input.cwd !== 'string' || typeof input.target !== 'string' || input.target.trim() === '' || input.target.startsWith('--')) throw new Error('--html requires a file target');
     const target = path.isAbsolute(input.target) ? path.normalize(input.target) : path.resolve(input.cwd, input.target);
     const parent = path.dirname(target);
-    if (!fs.existsSync(parent) || !fs.statSync(parent).isDirectory()) throw new Error(`HTML parent directory does not exist: ${parent}`);
-    try { fs.accessSync(parent, fs.constants.W_OK); } catch { throw new Error(`HTML parent directory is not writable: ${parent}`); }
+    if (!operations.existsSync(parent) || !operations.statSync(parent).isDirectory()) throw new Error(`HTML parent directory does not exist: ${parent}`);
+    try { operations.accessSync(parent, fs.constants.W_OK); } catch { throw new Error(`HTML parent directory is not writable: ${parent}`); }
     let stat: fs.Stats;
-    try { stat = fs.lstatSync(target); } catch (error) {
+    try { stat = operations.lstatSync(target); } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return target;
         throw error;
     }
