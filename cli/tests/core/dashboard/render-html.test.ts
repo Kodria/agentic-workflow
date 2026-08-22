@@ -121,6 +121,7 @@ describe('renderDashboardHtml', () => {
         expect(html).toContain('width:min(100%,72rem)');
         expect(html).toContain('.machine-preparation-strip {');
         expect(html).toContain('.connected-timeline::before');
+        expect(html).toContain('.timeline .state.unavailable { background:#38141c; color:#fff0ed;');
         expect(html).toContain('.evidence-grid.compact-composition');
         expect(html).toContain('font:14px/1.35');
     });
