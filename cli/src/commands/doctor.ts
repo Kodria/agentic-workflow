@@ -131,17 +131,22 @@ export interface RunDoctorOptions {
 
 export function runDoctor(opts: RunDoctorOptions = {}): number {
     const invalid = (message: string): number => { process.stderr.write(`awm doctor: ${message}\n`); return 2; };
+    const htmlRequested = opts.html !== undefined;
     if (opts.json && opts.full) return invalid('--json cannot be combined with --full');
-    if (opts.json && opts.html) return invalid('--json cannot be combined with --html');
-    if (opts.full && opts.html) return invalid('--full cannot be combined with --html');
-    if (opts.force && !opts.html) return invalid('--force requires --html');
-    if (opts.full || opts.html) {
+    if (opts.json && htmlRequested) return invalid('--json cannot be combined with --html');
+    if (opts.full && htmlRequested) return invalid('--full cannot be combined with --html');
+    if (opts.force && !htmlRequested) return invalid('--force requires --html');
+    if (opts.full || htmlRequested) {
         try {
             const cwd = opts.cwd ?? process.cwd();
-            const target = opts.html ? resolveHtmlTarget({ cwd, target: opts.html, force: opts.force }) : undefined;
+            const target = htmlRequested ? resolveHtmlTarget({ cwd, target: opts.html!, force: opts.force }) : undefined;
             const snapshot = collectDashboardSnapshot({ cwd, now: new Date().toISOString() });
-            if (opts.full) process.stdout.write(JSON.stringify(snapshot, null, 2) + '\n');
-            if (opts.html) {
+            if (opts.full) process.stdout.write([
+                `AWM dashboard · ${snapshot.overall}`,
+                `Project: ${snapshot.project.label}`,
+                ...snapshot.sections.map((section) => `${section.id}: ${section.availability} (${section.items.length})`),
+            ].join('\n') + '\n');
+            if (htmlRequested) {
                 const body = `<html><body><pre>${JSON.stringify(snapshot, null, 2).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</pre></body></html>\n`;
                 writeHtmlAtomically({ target: target!, html: body });
                 process.stdout.write(`${target}\n`);
