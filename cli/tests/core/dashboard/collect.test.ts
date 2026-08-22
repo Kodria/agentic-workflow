@@ -20,6 +20,10 @@ describe('collectDashboardSnapshot', () => {
         expect(execution).not.toHaveBeenCalled();
     });
 
+    it('fails loudly for malformed central machine findings', () => {
+        expect(() => collectDashboardSnapshot({ cwd: '/definitely-not-a-project', now: fixedNow, adapters: { machine: () => ({ findings: [{ id: '', label: 'Preferences', state: 'ok' }] }), project: jest.fn(), plans: jest.fn(), execution: jest.fn() } })).toThrow(/finding/i);
+    });
+
     it('uses exact verified remediation commands and stable ordered sections', () => {
         const snapshot = collectDashboardSnapshot({
             cwd: process.cwd(), now: fixedNow,

@@ -74,8 +74,8 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     const adapters = { ...EMPTY_ADAPTERS, ...(options.adapters ?? {}) };
     const machine = adapters.machine({ cwd: options.cwd });
     const root = findProjectRoot(options.cwd);
-    const machineItems = isolatedFindings((sanitizeDashboardSource(machine) as MachineDashboardSource).findings);
-    const machineSection = section('machine', machineItems.failed ? 'unavailable' : 'available', machineItems.value);
+    const machineItems = findings((sanitizeDashboardSource(machine) as MachineDashboardSource).findings);
+    const machineSection = section('machine', 'available', machineItems);
     if (!root) {
         const degraded = machineSection.items.some((item) => item.state !== 'ok' && item.state !== 'not_applicable');
         return validateDashboardSnapshotV1({ schema: 1, generatedAt: options.now, overall: degraded ? 'degraded' : 'healthy', project: { detected: false, label: 'No project detected' }, confidence: 'none', sections: [machineSection] });
