@@ -10,7 +10,7 @@
 
 **Tech Stack:** TypeScript, jest + ts-jest (`npm test` → `jest --runInBand`), sin dependencias nuevas (la restricción de costo del brief lo prohíbe).
 
-**Modo de ejecución:** interactivo
+**Modo de ejecución:** desatendido
 
 ---
 
