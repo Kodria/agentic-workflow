@@ -207,10 +207,18 @@ The page intentionally avoids a composite score. It presents evidence and confid
 
 | Screen | Description | Device | Status |
 |---|---|---|---|
-| Machine-only configuration dashboard | Self-contained projected view outside any project: machine/install health, exact remediation commands, neutral no-project state, privacy-safe source availability, and print/share treatment | DESKTOP | pending |
-| Project lifecycle and impact dashboard | Complete project view with machine readiness followed by planning, execution, QA, retro, and full evidence history; includes honest provisional/observing/supported states and stress-safe dense data | DESKTOP | pending |
+| Machine-only configuration dashboard | Self-contained projected view outside any project: machine/install health, exact remediation commands, neutral no-project state, privacy-safe source availability, and print/share treatment | DESKTOP | approved — Stitch `9aea6868f567454094cc83b59c73d3a4` |
+| Project lifecycle and impact dashboard | Complete project view with machine readiness followed by planning, execution, QA, retro, and full evidence history; includes honest provisional/observing/supported states and stress-safe dense data | DESKTOP | approved — Stitch `f272908125f54d60a0f81674114461f8` |
 
 These are two states of the same renderer, but both require deliberate visual validation because their information density and empty-state behavior differ materially.
+
+### Stitch design artifacts
+
+- **Project:** `6188895816624130677` (`Doctor Dashboard Impact Evidence`)
+- **Design system:** `assets/8247239042793499201` (`AWM Doctor Dashboard`)
+- **Machine-only screen:** `.stitch/designs/machine-only-configuration-dashboard.html` and `.stitch/designs/machine-only-configuration-dashboard.png`
+- **Project lifecycle screen:** `.stitch/designs/project-lifecycle-impact-evidence.html` and `.stitch/designs/project-lifecycle-impact-evidence.png`
+- **Review status:** both screens were rendered in Stitch and approved before artifact download.
 
 ## CLI behavior
 

@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="es"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AWM - Proyecto y evidencia del ciclo</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container": "#18202d",
+                        "tertiary-container": "#ca8100",
+                        "on-primary": "#002388",
+                        "primary-fixed": "#dde1ff",
+                        "surface-tint": "#b9c3ff",
+                        "secondary": "#5de6ff",
+                        "on-tertiary-fixed-variant": "#653e00",
+                        "surface-container-highest": "#2d3543",
+                        "on-secondary-fixed": "#001f25",
+                        "primary-container": "#7189f6",
+                        "surface-container-low": "#141c29",
+                        "on-secondary-container": "#00515d",
+                        "surface-bright": "#313948",
+                        "on-error-container": "#ffdad6",
+                        "tertiary": "#ffb95f",
+                        "primary": "#b9c3ff",
+                        "surface-variant": "#2d3543",
+                        "inverse-surface": "#dbe3f5",
+                        "on-tertiary-fixed": "#2a1700",
+                        "on-surface-variant": "#c5c5d5",
+                        "on-secondary": "#00363e",
+                        "on-primary-container": "#001e78",
+                        "surface": "#0b1420",
+                        "error": "#ffb4ab",
+                        "secondary-fixed-dim": "#2fd9f4",
+                        "inverse-on-surface": "#29313e",
+                        "on-tertiary": "#472a00",
+                        "tertiary-fixed": "#ffddb8",
+                        "outline": "#8f909e",
+                        "inverse-primary": "#3c55bf",
+                        "on-tertiary-container": "#3e2400",
+                        "on-surface": "#dbe3f5",
+                        "on-error": "#690005",
+                        "primary-fixed-dim": "#b9c3ff",
+                        "outline-variant": "#444653",
+                        "secondary-fixed": "#a2eeff",
+                        "surface-dim": "#0b1420",
+                        "secondary-container": "#00cbe6",
+                        "surface-container-high": "#222a38",
+                        "on-primary-fixed": "#001356",
+                        "on-secondary-fixed-variant": "#004e5a",
+                        "error-container": "#93000a",
+                        "on-primary-fixed-variant": "#1f3ba6",
+                        "tertiary-fixed-dim": "#ffb95f",
+                        "background": "#0b1420",
+                        "on-background": "#dbe3f5",
+                        "surface-container-lowest": "#060e1b"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Space Grotesk", "sans-serif"],
+                        "display": ["Space Grotesk", "sans-serif"],
+                        "body": ["Space Grotesk", "sans-serif"],
+                        "label": ["IBM Plex Sans", "sans-serif"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body {
+            background-color: theme('colors.background');
+            color: theme('colors.on-background');
+            font-family: theme('fontFamily.body');
+        }
+        .monospace-text-ids {
+            font-family: theme('fontFamily.mono');
+        }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden antialiased">
+<!-- SideNavBar (Simulated JSON inject) -->
+<nav class="fixed left-0 top-0 h-full w-56 border-r border-outline-variant bg-surface-container-highest flex flex-col py-4 z-20">
+<div class="px-6 mb-8">
+<h1 class="font-display text-xl font-bold text-on-surface tracking-tighter">AWM</h1>
+<p class="font-body text-label-sm tracking-tight text-on-surface-variant">Doctor Dashboard</p>
+</div>
+<div class="px-4 mb-6">
+<button class="w-full bg-primary text-on-primary py-2 px-4 rounded font-label font-medium flex items-center justify-center gap-2 hover:opacity-90 transition-opacity">
+<span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+                Nueva Operación
+            </button>
+</div>
+<ul class="flex-1 flex flex-col space-y-1 px-3">
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-150" href="#">
+<span class="material-symbols-outlined" style="font-size: 20px;">dashboard</span>
+<span class="font-body text-sm">Inicio</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-150" href="#">
+<span class="material-symbols-outlined" style="font-size: 20px;">analytics</span>
+<span class="font-body text-sm">Estado</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-primary border-l-2 border-primary bg-surface-variant/50" href="#">
+<span class="material-symbols-outlined" style="font-size: 20px;">account_tree</span>
+<span class="font-body text-sm font-medium">Proyecto</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-150" href="#">
+<span class="material-symbols-outlined" style="font-size: 20px;">fact_check</span>
+<span class="font-body text-sm">Evidencia</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-150" href="#">
+<span class="material-symbols-outlined" style="font-size: 20px;">settings</span>
+<span class="font-body text-sm">Configuración</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-150" href="#">
+<span class="material-symbols-outlined" style="font-size: 20px;">terminal</span>
+<span class="font-body text-sm">Terminal</span>
+</a>
+</li>
+</ul>
+<div class="px-3 border-t border-outline-variant pt-4 mt-auto">
+<ul class="flex flex-col space-y-1">
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-150" href="#">
+<span class="material-symbols-outlined" style="font-size: 20px;">help_outline</span>
+<span class="font-body text-sm">Soporte</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-150" href="#">
+<span class="material-symbols-outlined" style="font-size: 20px;">logout</span>
+<span class="font-body text-sm">Cerrar sesión</span>
+</a>
+</li>
+</ul>
+</div>
+</nav>
+<!-- Main Content Canvas -->
+<main class="ml-56 flex-1 flex flex-col h-screen overflow-y-auto bg-background">
+<!-- Header -->
+<header class="border-b border-outline-variant bg-surface px-8 py-4 flex items-center justify-between sticky top-0 z-10">
+<div class="flex flex-col">
+<div class="flex items-center gap-2 text-on-surface-variant text-sm font-label mb-1">
+<span>AWM</span>
+<span class="material-symbols-outlined" style="font-size: 16px;">chevron_right</span>
+<span class="text-on-surface">Proyecto</span>
+</div>
+<div class="flex items-center gap-4">
+<h2 class="font-mono text-lg text-primary">awm/doctor-dashboard-v2</h2>
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm bg-tertiary-container/20 text-tertiary-fixed text-xs font-label border border-tertiary-container/30">
+<span class="w-1.5 h-1.5 rounded-full bg-tertiary"></span>
+                        Listo con observaciones
+                    </span>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<button class="p-2 rounded hover:bg-surface-variant text-on-surface-variant transition-colors" title="Imprimir">
+<span class="material-symbols-outlined">print</span>
+</button>
+<button class="p-2 rounded hover:bg-surface-variant text-on-surface-variant transition-colors" title="Compartir">
+<span class="material-symbols-outlined">share</span>
+</button>
+</div>
+</header>
+<div class="p-8 max-w-7xl mx-auto w-full space-y-8 pb-24">
+<!-- Title Section -->
+<section>
+<h1 class="font-headline text-3xl font-semibold text-on-surface mb-2">Ciclo del proyecto</h1>
+<p class="text-on-surface-variant max-w-2xl text-sm leading-relaxed">
+                    Trazabilidad de la evolución del proyecto. La evidencia presentada refleja estados honestos extraídos directamente del pipeline de desarrollo, sin alteración humana.
+                </p>
+</section>
+<!-- Preparación de máquina -->
+<section class="border border-outline-variant rounded bg-surface-container-low p-5">
+<h3 class="font-label text-xs uppercase tracking-wider text-on-surface-variant mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined" style="font-size: 16px;">memory</span>
+                    Preparación de máquina
+                </h3>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+<div class="flex items-start gap-3 p-3 bg-surface rounded border border-outline-variant/50">
+<span class="material-symbols-outlined text-secondary" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<div>
+<div class="text-sm font-medium text-on-surface">Instalación disponible</div>
+<div class="text-xs text-on-surface-variant mt-1 font-mono">v1.4.2-stable</div>
+</div>
+</div>
+<div class="flex items-start gap-3 p-3 bg-surface rounded border border-outline-variant/50">
+<span class="material-symbols-outlined text-secondary" style="font-variation-settings: 'FILL' 1;">sensors</span>
+<div>
+<div class="text-sm font-medium text-on-surface">Sensores observando</div>
+<div class="text-xs text-on-surface-variant mt-1 font-mono">active: 4/4</div>
+</div>
+</div>
+<div class="flex items-start gap-3 p-3 bg-surface rounded border border-outline-variant/50">
+<span class="material-symbols-outlined text-secondary" style="font-variation-settings: 'FILL' 1;">save</span>
+<div>
+<div class="text-sm font-medium text-on-surface">Persistencia local</div>
+<div class="text-xs text-secondary mt-1 font-mono">soportada</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Línea de ciclo -->
+<section class="border border-outline-variant rounded bg-surface-container-low p-6">
+<div class="flex justify-between items-center relative">
+<!-- Connecting line -->
+<div class="absolute left-6 right-6 top-5 h-[1px] bg-outline-variant -z-10"></div>
+<!-- Stage 1 -->
+<div class="flex flex-col items-center gap-2 bg-surface-container-low px-2">
+<div class="w-10 h-10 rounded-full bg-surface-variant border border-outline-variant flex items-center justify-center text-on-surface">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+<span class="text-xs font-medium text-on-surface">Planificación</span>
+<span class="text-[10px] font-mono text-on-surface-variant px-1.5 py-0.5 bg-surface rounded-sm border border-outline-variant/50">ejecutado</span>
+</div>
+<!-- Stage 2 -->
+<div class="flex flex-col items-center gap-2 bg-surface-container-low px-2">
+<div class="w-10 h-10 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center shadow-[0_0_15px_rgba(113,137,246,0.2)] border border-primary">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</div>
+<span class="text-xs font-medium text-primary">Ejecución</span>
+<span class="text-[10px] font-mono text-primary px-1.5 py-0.5 bg-primary/10 rounded-sm border border-primary/30">activo</span>
+</div>
+<!-- Stage 3 -->
+<div class="flex flex-col items-center gap-2 bg-surface-container-low px-2">
+<div class="w-10 h-10 rounded-full bg-surface-container-highest border border-outline-variant border-dashed flex items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined">bug_report</span>
+</div>
+<span class="text-xs font-medium text-on-surface-variant">QA</span>
+<span class="text-[10px] font-mono text-on-surface-variant px-1.5 py-0.5 bg-surface rounded-sm border border-outline-variant/50">qa_pending</span>
+</div>
+<!-- Stage 4 -->
+<div class="flex flex-col items-center gap-2 bg-surface-container-low px-2">
+<div class="w-10 h-10 rounded-full bg-surface-container-highest border border-outline-variant border-dashed flex items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined">history</span>
+</div>
+<span class="text-xs font-medium text-on-surface-variant">Retro</span>
+<span class="text-[10px] font-mono text-on-surface-variant px-1.5 py-0.5 bg-surface rounded-sm border border-outline-variant/50">retro_pending</span>
+</div>
+<!-- Stage 5 -->
+<div class="flex flex-col items-center gap-2 bg-surface-container-low px-2">
+<div class="w-10 h-10 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined text-secondary">visibility</span>
+</div>
+<span class="text-xs font-medium text-on-surface-variant">Evidencia</span>
+<span class="text-[10px] font-mono text-secondary px-1.5 py-0.5 bg-surface rounded-sm border border-secondary/30">observando</span>
+</div>
+</div>
+</section>
+<!-- Warning Alert -->
+<div class="bg-tertiary-container/10 border-l-2 border-tertiary-container p-4 flex gap-3 text-sm">
+<span class="material-symbols-outlined text-tertiary-container" style="font-variation-settings: 'FILL' 1;">warning</span>
+<div>
+<strong class="text-tertiary-fixed block mb-1">Evidencia provisional</strong>
+<span class="text-on-surface-variant">El ciclo actual se encuentra en fase de ejecución activa. Los registros de trazabilidad mostrados son provisionales y están sujetos a verificación en la etapa de QA.</span>
+</div>
+</div>
+<!-- Two Column Layout -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+<!-- Column 1: Planes de trabajo -->
+<section class="border border-outline-variant rounded bg-surface-container-low flex flex-col">
+<div class="p-4 border-b border-outline-variant">
+<h3 class="font-label text-sm font-medium text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined" style="font-size: 18px;">list_alt</span>
+                            Planes de trabajo
+                        </h3>
+</div>
+<div class="p-4 flex-1 flex flex-col gap-3">
+<!-- Active Plan -->
+<div class="border border-primary/30 bg-primary/5 rounded p-4 relative overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-primary"></div>
+<div class="flex justify-between items-start mb-3">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="font-mono text-xs text-primary">#86</span>
+<h4 class="text-sm font-medium text-on-surface">Doctor dashboard</h4>
+</div>
+<span class="text-xs font-mono text-primary bg-primary/10 px-1.5 py-0.5 rounded-sm border border-primary/20">active</span>
+</div>
+<span class="text-xs text-on-surface-variant font-mono">14:32 UTC</span>
+</div>
+<div class="flex items-center justify-between mt-4">
+<div class="text-xs text-on-surface-variant">
+                                    Progreso: <span class="text-on-surface font-mono">12/15</span>
+</div>
+<button class="text-xs font-medium text-primary hover:text-primary-fixed transition-colors">Ver plan →</button>
+</div>
+</div>
+<!-- Blocked Plan -->
+<div class="border border-error/30 bg-error/5 rounded p-4 relative overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-error"></div>
+<div class="flex justify-between items-start mb-3">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="font-mono text-xs text-error">#87</span>
+<h4 class="text-sm font-medium text-on-surface text-opacity-80">Impact evidence</h4>
+</div>
+<span class="text-xs font-mono text-error bg-error/10 px-1.5 py-0.5 rounded-sm border border-error/20">blocked</span>
+</div>
+<span class="text-xs text-on-surface-variant font-mono">Ayer</span>
+</div>
+<div class="flex items-center justify-between mt-4">
+<div class="text-xs text-on-surface-variant">
+                                    Progreso: <span class="text-on-surface font-mono">0/4</span>
+</div>
+<button class="text-xs font-medium text-on-surface-variant hover:text-on-surface transition-colors">Ver plan →</button>
+</div>
+</div>
+</div>
+</section>
+<!-- Column 2: Impacto y trazabilidad -->
+<section class="border border-outline-variant rounded bg-surface-container-low flex flex-col">
+<div class="p-4 border-b border-outline-variant">
+<h3 class="font-label text-sm font-medium text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined" style="font-size: 18px;">track_changes</span>
+                            Impacto y trazabilidad
+                        </h3>
+</div>
+<div class="p-0 flex-1 overflow-x-auto">
+<table class="w-full text-left text-sm whitespace-nowrap">
+<thead class="bg-surface-container-highest border-b border-outline-variant text-xs text-on-surface-variant uppercase font-label">
+<tr>
+<th class="px-4 py-3 font-medium">Tipo</th>
+<th class="px-4 py-3 font-medium">Fuente</th>
+<th class="px-4 py-3 font-medium">Estado</th>
+<th class="px-4 py-3 font-medium">Fecha</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/50 text-on-surface">
+<tr class="hover:bg-surface-variant/30 transition-colors">
+<td class="px-4 py-3 font-mono text-xs">ui_component</td>
+<td class="px-4 py-3">src/components/nav</td>
+<td class="px-4 py-3"><span class="text-[10px] font-mono text-secondary px-1.5 py-0.5 bg-secondary/10 border border-secondary/30 rounded-sm">supported</span></td>
+<td class="px-4 py-3 text-on-surface-variant text-xs">Hoy 10:45</td>
+</tr>
+<tr class="hover:bg-surface-variant/30 transition-colors">
+<td class="px-4 py-3 font-mono text-xs">db_schema</td>
+<td class="px-4 py-3">migrations/042_evt</td>
+<td class="px-4 py-3"><span class="text-[10px] font-mono text-tertiary-fixed px-1.5 py-0.5 bg-tertiary-container/20 border border-tertiary-container/30 rounded-sm">provisional</span></td>
+<td class="px-4 py-3 text-on-surface-variant text-xs">Hoy 09:12</td>
+</tr>
+<tr class="hover:bg-surface-variant/30 transition-colors opacity-70">
+<td class="px-4 py-3 font-mono text-xs">api_endpoint</td>
+<td class="px-4 py-3">v1/legacy/sync</td>
+<td class="px-4 py-3"><span class="text-[10px] font-mono text-outline px-1.5 py-0.5 bg-surface border border-outline-variant rounded-sm">legacy_unverifiable</span></td>
+<td class="px-4 py-3 text-on-surface-variant text-xs">Ayer</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</div>
+</div>
+<!-- Footer Actions -->
+<div class="mt-auto border-t border-outline-variant bg-surface-container p-6">
+<div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+<div>
+<h4 class="text-sm font-medium text-on-surface mb-1">Qué falta para cerrar el ciclo</h4>
+<p class="text-xs text-on-surface-variant italic">La ausencia de marcador no equivale a cero hallazgos.</p>
+</div>
+<div class="flex flex-wrap gap-3">
+<button class="px-4 py-2 text-sm font-medium text-on-surface-variant border border-outline-variant rounded hover:bg-surface-variant hover:text-on-surface transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+<span class="material-symbols-outlined" style="font-size: 16px;">bug_report</span>
+                        Completar QA
+                    </button>
+<button class="px-4 py-2 text-sm font-medium text-on-surface-variant border border-outline-variant rounded hover:bg-surface-variant hover:text-on-surface transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+<span class="material-symbols-outlined" style="font-size: 16px;">history_edu</span>
+                        Registrar retro
+                    </button>
+<button class="px-4 py-2 text-sm font-medium bg-primary text-on-primary rounded hover:opacity-90 transition-opacity flex items-center gap-2">
+<span class="material-symbols-outlined" style="font-size: 16px;">attachment</span>
+                        Adjuntar evidencia
+                    </button>
+</div>
+</div>
+</div>
+</main>
+</body></html>

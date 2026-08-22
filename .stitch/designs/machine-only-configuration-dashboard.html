@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="es"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AWM Doctor - Configuración</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "secondary": "#5de6ff",
+                        "tertiary-fixed": "#ffddb8",
+                        "error": "#ffb4ab",
+                        "on-tertiary-fixed": "#2a1700",
+                        "primary-container": "#7189f6",
+                        "on-secondary-container": "#00515d",
+                        "on-surface-variant": "#c5c5d5",
+                        "tertiary-container": "#ca8100",
+                        "secondary-fixed-dim": "#2fd9f4",
+                        "on-tertiary": "#472a00",
+                        "background": "#0b1420",
+                        "secondary-container": "#00cbe6",
+                        "on-secondary": "#00363e",
+                        "error-container": "#93000a",
+                        "outline": "#8f909e",
+                        "on-surface": "#dbe3f5",
+                        "on-error": "#690005",
+                        "on-secondary-fixed": "#001f25",
+                        "on-primary-fixed-variant": "#1f3ba6",
+                        "inverse-surface": "#dbe3f5",
+                        "primary-fixed": "#dde1ff",
+                        "on-secondary-fixed-variant": "#004e5a",
+                        "tertiary-fixed-dim": "#ffb95f",
+                        "on-error-container": "#ffdad6",
+                        "surface-container-lowest": "#060e1b",
+                        "on-tertiary-fixed-variant": "#653e00",
+                        "on-tertiary-container": "#3e2400",
+                        "surface-dim": "#0b1420",
+                        "outline-variant": "#444653",
+                        "primary": "#b9c3ff",
+                        "surface-variant": "#2d3543",
+                        "surface-tint": "#b9c3ff",
+                        "inverse-on-surface": "#29313e",
+                        "surface-container-highest": "#2d3543",
+                        "primary-fixed-dim": "#b9c3ff",
+                        "surface-container-low": "#141c29",
+                        "on-primary": "#002388",
+                        "secondary-fixed": "#a2eeff",
+                        "inverse-primary": "#3c55bf",
+                        "surface-bright": "#313948",
+                        "surface-container-high": "#222a38",
+                        "surface": "#0b1420",
+                        "on-background": "#dbe3f5",
+                        "on-primary-fixed": "#001356",
+                        "surface-container": "#18202d",
+                        "on-primary-container": "#001e78",
+                        "tertiary": "#ffb95f"
+                    },
+                    borderRadius: {
+                        DEFAULT: "0.125rem",
+                        lg: "0.25rem",
+                        xl: "0.5rem",
+                        full: "0.75rem"
+                    },
+                    fontFamily: {
+                        headline: ["Space Grotesk", "sans-serif"],
+                        display: ["Space Grotesk", "sans-serif"],
+                        body: ["Space Grotesk", "sans-serif"],
+                        label: ["IBM Plex Sans", "sans-serif"],
+                        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Monaco", "Consolas", "Liberation Mono", "Courier New", "monospace"]
+                    }
+                }
+            }
+        };
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .material-symbols-outlined.fill {
+            font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        
+        /* Custom Scrollbar for dense look */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: theme('colors.surface-container-lowest');
+        }
+        ::-webkit-scrollbar-thumb {
+            background: theme('colors.outline-variant');
+            border-radius: theme('borderRadius.full');
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: theme('colors.outline');
+        }
+
+        /* Subtle grid pattern for background */
+        .bg-grid-pattern {
+            background-image: 
+                linear-gradient(to right, theme('colors.outline-variant') 1px, transparent 1px),
+                linear-gradient(to bottom, theme('colors.outline-variant') 1px, transparent 1px);
+            background-size: 40px 40px;
+            background-position: center top;
+            opacity: 0.03;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body h-screen flex overflow-hidden">
+<!-- Background Texture -->
+<div class="absolute inset-0 bg-grid-pattern pointer-events-none z-0"></div>
+<!-- SideNavBar -->
+<aside class="bg-surface-container-lowest dark:bg-surface-container-lowest h-screen w-64 border-r border-outline-variant flex flex-col z-10 shrink-0">
+<!-- Header -->
+<div class="p-6 border-b border-outline-variant">
+<div class="flex items-center gap-3 mb-2">
+<span class="material-symbols-outlined text-primary fill text-3xl">developer_board</span>
+<h1 class="font-headline text-lg font-bold text-primary dark:text-primary tracking-tight">AWM Doctor</h1>
+</div>
+<p class="font-mono text-xs text-on-surface-variant opacity-80">v2.4.0-stable</p>
+</div>
+<!-- Navigation Links -->
+<nav class="flex-1 py-4 overflow-y-auto">
+<ul class="space-y-1 px-3">
+<!-- Inicio -->
+<li>
+<a class="flex items-center gap-3 px-4 py-2.5 rounded text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors duration-150 font-body text-label-sm uppercase tracking-wider group" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">dashboard</span>
+<span>Inicio</span>
+</a>
+</li>
+<!-- Estado -->
+<li>
+<a class="flex items-center gap-3 px-4 py-2.5 rounded text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors duration-150 font-body text-label-sm uppercase tracking-wider group" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">analytics</span>
+<span>Estado</span>
+</a>
+</li>
+<!-- Configuración (Active) -->
+<li>
+<a class="flex items-center gap-3 px-4 py-2.5 rounded bg-primary-container text-on-primary-container font-bold border-l-4 border-primary font-body text-label-sm uppercase tracking-wider opacity-80" href="#">
+<span class="material-symbols-outlined fill">settings</span>
+<span>Configuración</span>
+</a>
+</li>
+<!-- Terminal -->
+<li>
+<a class="flex items-center gap-3 px-4 py-2.5 rounded text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors duration-150 font-body text-label-sm uppercase tracking-wider group" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">terminal</span>
+<span>Terminal</span>
+</a>
+</li>
+</ul>
+</nav>
+<!-- CTA Action -->
+<div class="p-4 px-5">
+<button class="w-full bg-primary text-on-primary font-bold py-2.5 px-4 rounded hover:bg-primary-fixed-dim transition-colors flex items-center justify-center gap-2 text-sm uppercase tracking-wider">
+<span class="material-symbols-outlined text-sm">play_arrow</span>
+                Ejecutar Diagnóstico
+            </button>
+</div>
+<!-- Footer Links -->
+<div class="p-4 border-t border-outline-variant mt-auto">
+<!-- User Info Compact -->
+<div class="flex items-center gap-3 px-2 mb-4">
+<div class="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center overflow-hidden border border-outline-variant">
+<img alt="Usuario de Operaciones" class="object-cover w-full h-full" data-alt="A close-up portrait of a female operations engineer in a dark, high-tech server room environment. The lighting is moody with subtle blue and cyan highlights reflecting off her glasses. The overall aesthetic is professional, technical, and dense, fitting a dark mode developer tool interface." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDXsJxFB9AGsdsg2c8GktXZWKqqH6jy8VFaCPqaiqHCf63J8OA63-_IlwixVRH9J1MGv41zLiYGY79dYDgDelEKlOqkYH6Ihg0uBi1hsoz80yPsrmyWozEc7nalw6wBI_qAZiCN3bOIJ_X8kWBpCu4z8Bfyv1WoUxMpWNOp_XpIKPWMdg0DTJvNBxzL_ElgGIfwmVla6MKxeYAPCBlGXxS6s9_4AIf19tChuq53jb6XnnURbx8Ep49NCeDJOJMvegQ18od_koWLPlo"/>
+</div>
+<div class="flex flex-col">
+<span class="text-xs font-semibold text-on-surface">Operaciones</span>
+<span class="text-[10px] text-on-surface-variant">Admin</span>
+</div>
+</div>
+<ul class="space-y-1">
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors duration-150 font-body text-xs uppercase tracking-wider" href="#">
+<span class="material-symbols-outlined text-[18px]">support_agent</span>
+<span>Soporte</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-error hover:bg-error-container hover:text-on-error-container transition-colors duration-150 font-body text-xs uppercase tracking-wider" href="#">
+<span class="material-symbols-outlined text-[18px]">logout</span>
+<span>Cerrar Sesión</span>
+</a>
+</li>
+</ul>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col h-screen overflow-hidden z-10 relative">
+<!-- TopNavBar -->
+<header class="bg-surface dark:bg-surface flex justify-between items-center w-full px-6 py-2 border-b border-outline-variant shrink-0">
+<!-- Brand / Mobile Menu (Hidden on md+) -->
+<div class="flex items-center gap-4 md:hidden">
+<span class="material-symbols-outlined text-on-surface cursor-pointer">menu</span>
+<span class="font-headline font-black text-on-surface">AWM System</span>
+</div>
+<!-- Left Navigation (Hidden on mobile) -->
+<nav class="hidden md:flex gap-6 items-center">
+<span class="font-headline font-black text-on-surface mr-4">AWM System</span>
+<a class="text-on-surface-variant hover:text-on-surface transition-colors text-label-md font-body" href="#">Métricas</a>
+<a class="text-on-surface-variant hover:text-on-surface transition-colors text-label-md font-body" href="#">Registros</a>
+<a class="text-on-surface-variant hover:text-on-surface transition-colors text-label-md font-body" href="#">Alertas</a>
+</nav>
+<!-- Right Actions -->
+<div class="flex items-center gap-4">
+<!-- Search -->
+<div class="relative hidden sm:block">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm">search</span>
+<input class="bg-surface-container h-8 pl-9 pr-4 rounded text-sm text-on-surface border border-outline-variant focus:border-secondary focus:ring-1 focus:ring-secondary outline-none w-48 font-body placeholder:text-on-surface-variant" placeholder="Buscar recursos..." type="text"/>
+</div>
+<!-- Icons -->
+<div class="flex items-center gap-2">
+<button class="p-1.5 rounded hover:bg-surface-container-high transition-colors text-on-surface-variant cursor-pointer active:scale-95 group relative">
+<span class="material-symbols-outlined group-hover:text-secondary-fixed-dim">notifications</span>
+<span class="absolute top-1.5 right-1.5 w-2 h-2 bg-tertiary rounded-full"></span>
+</button>
+<button class="p-1.5 rounded hover:bg-surface-container-high transition-colors text-on-surface-variant cursor-pointer active:scale-95 group hidden sm:block">
+<span class="material-symbols-outlined group-hover:text-secondary-fixed-dim">help_outline</span>
+</button>
+</div>
+<!-- Actions -->
+<div class="hidden lg:flex items-center gap-2 border-l border-outline-variant pl-4">
+<button class="text-xs font-bold text-on-surface-variant hover:text-on-surface uppercase tracking-wider px-3 py-1.5 transition-colors">Exportar PDF</button>
+<button class="bg-secondary text-on-secondary text-xs font-bold uppercase tracking-wider px-4 py-1.5 rounded hover:bg-secondary-fixed transition-colors">Nuevo Despliegue</button>
+</div>
+<!-- Profile -->
+<div class="w-8 h-8 rounded bg-surface-container-high border border-outline-variant ml-2 overflow-hidden cursor-pointer">
+<img alt="Avatar de administrador" class="w-full h-full object-cover" data-alt="A tight, high-contrast headshot of a technical system administrator in a dramatic, dark lighting setup. Subtle neon cyan rim light hints at a complex screen reflection. The tone is serious, focused, and professional, perfectly matching a dark-mode dense developer dashboard interface." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCCxW3VOHv51R3dQMJ1ljYlfYtGYRrUe-uyQUhtRjEKcRQhVbgSGxmaatTQKVE6aomVLcyt1duBLJXw8Ym7rtefrwToyycV3w7_wGCS9iQiPdl48KpgAEmnfZOZysS2WkZXkS8JSDQRVUgQ9h_Uflrc4B4ir11cGlVpQD9WsxHoVGVXGdhOduD_OzQnomPRzN_vYrwWEBWaiG00rpfp8tF9mAMjMgi-DSwB312cR9ytDALl6G9hTXFV385Uk5wgzSvGncTYAqore5w"/>
+</div>
+</div>
+</header>
+<!-- Scrollable Content Canvas -->
+<div class="flex-1 overflow-y-auto p-6 md:p-8">
+<div class="max-w-6xl mx-auto space-y-6">
+<!-- Hero Header -->
+<div class="mb-8">
+<div class="flex items-center gap-2 mb-2">
+<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-surface-container-high text-on-surface border border-outline-variant uppercase tracking-widest">Estado Neutral</span>
+<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-tertiary-container/20 text-tertiary border border-tertiary/30 uppercase tracking-widest">Fuera de Proyecto</span>
+</div>
+<h2 class="text-3xl md:text-4xl font-headline font-bold text-on-surface mb-3 tracking-tight">¿Esta máquina está lista para ejecutar AWM?</h2>
+<p class="text-on-surface-variant font-body max-w-2xl leading-relaxed">Evaluación de sistema global. Los sensores están verificando los prerrequisitos fundamentales de la máquina host antes de inicializar cualquier entorno de proyecto específico.</p>
+</div>
+<!-- Bento Grid for Machine State -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+<!-- Panel 1: Instalación -->
+<div class="bg-surface-container border border-outline-variant rounded p-5 flex flex-col justify-between h-full group hover:border-secondary-fixed-dim/50 transition-colors">
+<div class="flex justify-between items-start mb-4">
+<h3 class="text-sm font-bold uppercase tracking-wider text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-lg text-primary">download_done</span>
+                                Estado Instalación
+                            </h3>
+<span class="flex h-2 w-2 relative mt-1">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-secondary opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2 w-2 bg-secondary"></span>
+</span>
+</div>
+<div class="space-y-4 flex-1">
+<div>
+<span class="text-xs text-on-surface-variant uppercase tracking-wide block mb-1">Versión CLI</span>
+<div class="font-mono text-sm text-secondary bg-surface-container-lowest px-2 py-1 rounded border border-outline-variant inline-block">v2.4.1-stable</div>
+</div>
+<div>
+<span class="text-xs text-on-surface-variant uppercase tracking-wide block mb-1">Ruta Config</span>
+<div class="font-mono text-xs text-on-surface truncate break-all bg-surface-container-lowest px-2 py-1 rounded border border-outline-variant">~/.awm/core.yaml</div>
+</div>
+<div class="pt-2 mt-auto">
+<div class="flex items-center justify-between text-xs">
+<span class="text-on-surface-variant uppercase">Estado Daemon</span>
+<span class="text-secondary font-mono bg-secondary/10 px-2 py-0.5 rounded">RUNNING</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Panel 2: Sensores -->
+<div class="bg-surface-container border border-outline-variant rounded p-5 flex flex-col justify-between h-full group hover:border-tertiary/50 transition-colors">
+<div class="flex justify-between items-start mb-4">
+<h3 class="text-sm font-bold uppercase tracking-wider text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-lg text-tertiary">radar</span>
+                                Sensores Globales
+                            </h3>
+<span class="material-symbols-outlined text-tertiary text-sm">warning</span>
+</div>
+<div class="space-y-4 flex-1">
+<div>
+<div class="flex justify-between text-xs mb-1">
+<span class="text-on-surface-variant uppercase tracking-wide">Activos</span>
+<span class="font-mono text-on-surface">12/12</span>
+</div>
+<div class="w-full bg-surface-container-lowest rounded-full h-1.5 border border-outline-variant overflow-hidden">
+<div class="bg-secondary h-1.5 rounded-full w-full"></div>
+</div>
+</div>
+<div class="pt-2">
+<span class="text-xs text-on-surface-variant uppercase tracking-wide block mb-2">Estado Sensores Proyecto</span>
+<div class="flex items-center gap-2 p-2 rounded bg-tertiary-container/10 border border-tertiary/20">
+<span class="material-symbols-outlined text-tertiary text-[16px]">hourglass_empty</span>
+<span class="text-xs font-mono text-tertiary">PENDIENTE</span>
+</div>
+<p class="text-[10px] text-on-surface-variant mt-2 leading-tight">Requiere inicialización de proyecto para validar sensores contextuales.</p>
+</div>
+</div>
+</div>
+<!-- Panel 3: Persistencia -->
+<div class="bg-surface-container border border-outline-variant rounded p-5 flex flex-col justify-between h-full">
+<div class="flex justify-between items-start mb-4">
+<h3 class="text-sm font-bold uppercase tracking-wider text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-lg text-on-surface-variant">hard_drive_2</span>
+                                Persistencia
+                            </h3>
+</div>
+<div class="space-y-4 flex-1">
+<div>
+<div class="flex justify-between text-xs mb-1">
+<span class="text-on-surface-variant uppercase tracking-wide">Uso de disco (Logs)</span>
+<span class="font-mono text-on-surface">45%</span>
+</div>
+<div class="w-full bg-surface-container-lowest rounded-full h-1.5 border border-outline-variant overflow-hidden">
+<div class="bg-on-surface-variant h-1.5 rounded-full w-[45%]"></div>
+</div>
+<div class="flex justify-between text-[10px] text-on-surface-variant mt-1 font-mono">
+<span>2.4 GB</span>
+<span>Quota: 5 GB</span>
+</div>
+</div>
+<div class="pt-2 mt-auto">
+<span class="text-xs text-on-surface-variant uppercase tracking-wide block mb-1">Directorio Logs</span>
+<div class="font-mono text-xs text-on-surface truncate bg-surface-container-lowest px-2 py-1 rounded border border-outline-variant">/var/log/awm/system</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Privacidad & Seguridad Panel -->
+<div class="bg-surface-container border border-outline-variant rounded mt-6 overflow-hidden">
+<div class="border-b border-outline-variant p-4 bg-surface-container-high/50 flex justify-between items-center">
+<h3 class="text-sm font-bold uppercase tracking-wider text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-lg">shield_lock</span>
+                            Privacidad y Seguridad
+                        </h3>
+</div>
+<div class="p-5 flex flex-col md:flex-row gap-6 items-start md:items-center justify-between">
+<div class="max-w-xl">
+<p class="text-sm text-on-surface font-semibold mb-1">Inspección de secretos y ofuscación</p>
+<p class="text-xs text-on-surface-variant leading-relaxed">Activa esta opción para garantizar que todas las salidas de log, reportes de error y trazas de telemetría ofusquen automáticamente tokens, contraseñas y variables de entorno sensibles antes de la escritura en disco o transmisión.</p>
+</div>
+<!-- Custom Toggle Switch -->
+<div class="flex items-center gap-3 bg-surface-container-lowest p-2 px-3 rounded border border-outline-variant shrink-0">
+<span class="text-xs font-mono text-secondary uppercase">Activo</span>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-secondary"></div>
+</label>
+</div>
+</div>
+</div>
+<!-- Siguiente Acción: Comandos de Remediación -->
+<div class="mt-8">
+<h3 class="text-sm font-bold uppercase tracking-wider text-on-surface mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-lg text-primary">terminal</span>
+                        Siguiente Acción Requerida
+                    </h3>
+<div class="space-y-3">
+<!-- Command 1 -->
+<div class="bg-surface-container border border-outline-variant rounded flex flex-col sm:flex-row sm:items-center overflow-hidden">
+<div class="bg-surface-container-high px-4 py-3 sm:w-1/3 border-b sm:border-b-0 sm:border-r border-outline-variant flex items-center gap-3">
+<div class="w-6 h-6 rounded bg-surface-container border border-outline-variant flex items-center justify-center font-mono text-xs text-on-surface-variant">1</div>
+<span class="text-sm text-on-surface">Validar telemetría</span>
+</div>
+<div class="p-3 flex-1 flex items-center justify-between group bg-surface-container-lowest font-mono text-sm">
+<code class="text-primary select-all overflow-x-auto whitespace-nowrap px-2">awm doctor --network</code>
+<button class="ml-2 p-1.5 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors active:scale-95 shrink-0" onclick="this.querySelector('span').innerText='check'; setTimeout(()=&gt;this.querySelector('span').innerText='content_copy', 2000)" title="Copiar comando">
+<span class="material-symbols-outlined text-sm">content_copy</span>
+</button>
+</div>
+</div>
+<!-- Command 2 -->
+<div class="bg-surface-container border border-outline-variant rounded flex flex-col sm:flex-row sm:items-center overflow-hidden">
+<div class="bg-surface-container-high px-4 py-3 sm:w-1/3 border-b sm:border-b-0 sm:border-r border-outline-variant flex items-center gap-3">
+<div class="w-6 h-6 rounded bg-surface-container border border-outline-variant flex items-center justify-center font-mono text-xs text-on-surface-variant">2</div>
+<span class="text-sm text-on-surface">Forzar lectura sensores</span>
+</div>
+<div class="p-3 flex-1 flex items-center justify-between group bg-surface-container-lowest font-mono text-sm">
+<code class="text-primary select-all overflow-x-auto whitespace-nowrap px-2">awm sensors run --local</code>
+<button class="ml-2 p-1.5 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors active:scale-95 shrink-0" onclick="this.querySelector('span').innerText='check'; setTimeout(()=&gt;this.querySelector('span').innerText='content_copy', 2000)" title="Copiar comando">
+<span class="material-symbols-outlined text-sm">content_copy</span>
+</button>
+</div>
+</div>
+<!-- Command 3 -->
+<div class="bg-surface-container border border-outline-variant rounded flex flex-col sm:flex-row sm:items-center overflow-hidden">
+<div class="bg-surface-container-high px-4 py-3 sm:w-1/3 border-b sm:border-b-0 sm:border-r border-outline-variant flex items-center gap-3">
+<div class="w-6 h-6 rounded bg-primary-container/20 border border-primary/30 flex items-center justify-center font-mono text-xs text-primary">3</div>
+<span class="text-sm text-on-surface font-semibold">Inicializar proyecto</span>
+</div>
+<div class="p-3 flex-1 flex items-center justify-between group bg-surface-container-lowest font-mono text-sm">
+<code class="text-secondary select-all overflow-x-auto whitespace-nowrap px-2">cd ./tu-repo &amp;&amp; awm init</code>
+<button class="ml-2 p-1.5 rounded hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors active:scale-95 shrink-0" onclick="this.querySelector('span').innerText='check'; setTimeout(()=&gt;this.querySelector('span').innerText='content_copy', 2000)" title="Copiar comando">
+<span class="material-symbols-outlined text-sm">content_copy</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>
