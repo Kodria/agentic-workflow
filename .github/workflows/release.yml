@@ -86,6 +86,7 @@ jobs:
     outputs:
       published: ${{ steps.release-result.outputs.published }}
       version: ${{ steps.release-result.outputs.version }}
+      registry_commit: ${{ steps.registry-provenance.outputs.registry_commit }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -97,6 +98,26 @@ jobs:
           node-version: '22'
           # Sin registry-url: evita que setup-node escriba un .npmrc con _authToken
           # placeholder que hace que npm prefiera auth por token sobre OIDC.
+
+      # Esta verificación es ANTES de publicar: el release anterior publicó el
+      # paquete y recién después descubrió que una variable administrativa no
+      # existía. El tag publicado es la frontera inmutable, por lo que no hace
+      # falta depender de una variable de Actions que el maintainer no puede
+      # inspeccionar ni reparar desde el flujo normal.
+      - name: Resolve immutable Task 7 registry commit
+        id: registry-provenance
+        env:
+          REGISTRY_TAG: v3.4.0
+          REGISTRY_REMOTE: https://github.com/Kodria/awm-baseline-registry.git
+        shell: bash
+        run: |
+          set -euo pipefail
+          REGISTRY_COMMIT="$(git ls-remote --exit-code "$REGISTRY_REMOTE" "refs/tags/${REGISTRY_TAG}^{}" | awk '{print $1}')"
+          if [[ ! "$REGISTRY_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "${REGISTRY_TAG} must resolve to one full peeled commit SHA" >&2
+            exit 1
+          fi
+          echo "registry_commit=$REGISTRY_COMMIT" >> "$GITHUB_OUTPUT"
 
       - name: Actualizar npm (OIDC Trusted Publisher requiere >=11.5.1)
         run: npm install -g npm@latest
@@ -134,16 +155,6 @@ jobs:
           else
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Require immutable Task 7 registry commit
-        if: steps.release-result.outputs.published == 'true'
-        env:
-          REGISTRY_COMMIT: ${{ vars.AWM_REGISTRY_V3_4_0_COMMIT }}
-        shell: bash
-        run: |
-          if [[ ! "$REGISTRY_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
-            echo "AWM_REGISTRY_V3_4_0_COMMIT must contain the full peeled v3.4.0 commit SHA" >&2
-            exit 1
-          fi
 
   # This is intentionally after `release`, not a replacement for its test
   # gate.  It downloads npm and git artifacts into a clean consumer on each
@@ -172,6 +183,6 @@ jobs:
         env:
           AWM_PUBLISHED_CLI_VERSION: ${{ needs.release.outputs.version }}
           AWM_PUBLISHED_REGISTRY_TAG: v3.4.0
-          AWM_PUBLISHED_REGISTRY_COMMIT: ${{ vars.AWM_REGISTRY_V3_4_0_COMMIT }}
+          AWM_PUBLISHED_REGISTRY_COMMIT: ${{ needs.release.outputs.registry_commit }}
           AWM_PUBLISHED_REGISTRY_REMOTE: https://github.com/Kodria/awm-baseline-registry.git
         run: npx jest tests/integration/published-doctor-evidence.e2e.test.ts --runInBand
