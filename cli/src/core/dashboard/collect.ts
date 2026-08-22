@@ -3,6 +3,9 @@ import fs from 'fs';
 import path from 'path';
 import { buildEvidenceHistory, type EvidenceHistory } from '../evidence/history';
 import { validateCycleEvidence } from '../evidence/types';
+import { detectBranch } from '../ledger/store';
+import { journalDir, statePath } from '../journal/paths';
+import { readJournal } from '../journal/store';
 import { sanitizeDashboardSource } from './sanitize';
 import { validateDashboardSnapshotV1 } from './validate';
 import { classifyPlanState, type PlanStateInput } from './plan-state';
@@ -24,6 +27,7 @@ export interface DashboardSourceAdapters {
 }
 export interface CollectDashboardOptions { cwd: string; now: string; adapters?: DashboardSourceAdapters; }
 type OptionalFailure = { findingId?: string; remediationVerified?: boolean };
+type JournalOverlay = { state: 'active' | 'blocked'; tasks: { total: number; completed: number } };
 
 export const REMEDIATION_BY_FINDING_ID: Readonly<Record<string, string>> = {
     'machine.preferences.missing': 'awm init',
@@ -100,22 +104,29 @@ export function productionDashboardAdapters(context: HarnessContext): DashboardS
         project: () => ({ label: 'Project detected', findings: projectFindings }),
         plans: ({ root }) => {
             const history = readEvidenceHistory(root);
+            const journal = readJournalOverlay(root);
+            const latestCycleId = history.cycles.at(-1)?.cycleId;
             const latestByPlan = new Map<string, typeof history.cycles[number]>();
             for (const cycle of history.cycles) latestByPlan.set(cycle.plan.ref, cycle);
-            return [...latestByPlan.values()].map((cycle) => ({
+            return [...latestByPlan.values()].map((cycle) => {
+                const overlay = cycle.cycleId === latestCycleId ? journal : undefined;
+                const blocked = overlay?.state === 'blocked' || cycle.plan.state === 'blocked';
+                return {
                 id: `planning.cycle.${cycle.cycleId}`,
                 // The plan reference is intentionally never rendered: a plan path
                 // can expose repository-specific names. Its opaque cycle ID gives
                 // the dashboard deterministic identity without exporting it.
                 label: 'Project context',
-                state: cycle.plan.state === 'blocked' ? 'attention' : 'ok',
-                ...(cycle.plan.state === 'blocked' ? { remediation: BLOCKED_CYCLE_REMEDIATION, remediationVerified: true } : {}),
-                lifecycle: lifecycleForCycle(cycle),
-            }));
+                state: blocked ? 'attention' : 'ok',
+                ...(blocked ? { remediation: BLOCKED_CYCLE_REMEDIATION, remediationVerified: true } : {}),
+                lifecycle: overlay ? lifecycleForJournal(overlay) : lifecycleForCycle(cycle),
+            };
+            });
         },
         execution: ({ root }) => {
             if (!evidenceDirectoryExists(root)) return undefined;
             const history = readEvidenceHistory(root);
+            if (history.cycles.length === 0) return undefined;
             return {
                 execution: history.cycles.map((cycle) => cycleFinding('execution', 'Static preflight', cycle, cycle.cycleState === 'blocked')),
                 qa: history.cycles.map((cycle) => cycleFinding('qa', 'Sensors', cycle, cycle.qa.fixes < cycle.qa.findings)),
@@ -123,6 +134,10 @@ export function productionDashboardAdapters(context: HarnessContext): DashboardS
             };
         },
     };
+}
+
+function lifecycleForJournal(overlay: JournalOverlay): PlanStateInput {
+    return { journal: { state: overlay.state }, markers: { qaComplete: false, retroComplete: false }, tasks: overlay.tasks };
 }
 
 function lifecycleForCycle(cycle: ReturnType<typeof readEvidenceHistory>['cycles'][number]): PlanStateInput {
@@ -182,6 +197,40 @@ function evidenceDirectoryExists(root: string): boolean {
         if (error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === 'ENOENT') return false;
         throw error;
     }
+}
+
+/** Reads only the current branch journal. Missing journals are not observations;
+ * corrupt or redirected journal paths fail closed rather than changing lifecycle
+ * state from untrusted content. */
+function readJournalOverlay(root: string): JournalOverlay | undefined {
+    const branch = detectBranch(root);
+    const file = statePath(root, branch);
+    if (!safeJournalStateExists(root, branch, file)) return undefined;
+    const journal = readJournal(root, branch);
+    if (journal.corrupt || !journal.state) throw new Error('current journal is unavailable or corrupt');
+    if (journal.state.cycle.status === 'COMPLETE') return undefined;
+    return {
+        state: journal.state.cycle.status === 'BLOCKED' ? 'blocked' : 'active',
+        tasks: { total: journal.state.tasks.length, completed: journal.state.tasks.filter((task) => task.status === 'done').length },
+    };
+}
+
+function safeJournalStateExists(root: string, branch: string, file: string): boolean {
+    for (const directory of [path.join(root, '.awm'), path.join(root, '.awm', 'journal'), journalDir(root, branch)]) {
+        let stat: fs.Stats;
+        try { stat = fs.lstatSync(directory); } catch (error) {
+            if (error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+            throw error;
+        }
+        if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('journal directory is unsafe');
+    }
+    let stat: fs.Stats;
+    try { stat = fs.lstatSync(file); } catch (error) {
+        if (error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+        throw error;
+    }
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error('journal state is unsafe');
+    return true;
 }
 
 function readEvidenceHistory(root: string): EvidenceHistory {
