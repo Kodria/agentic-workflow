@@ -14,6 +14,27 @@ jest.mock('../../../src/commands/hooks/status', () => ({
 import { installHook } from '../../../src/commands/hooks/install';
 import { uninstallHook } from '../../../src/commands/hooks/uninstall';
 import { computeHookStatus } from '../../../src/commands/hooks/status';
+import { writeRegistriesConfig, registryContentRoot } from '../../../src/core/registries';
+
+// inputFor/statusInputFor now call listRegistries() (collectDeclaredOrchestrators) on every
+// install/status. Without isolating AWM_HOME here, that reads the REAL ~/.awm/registries.json
+// of whatever machine runs the suite — exactly what CLAUDE.md's testing rule forbids ("ningun
+// test puede tocar el ~/.awm real. Todos usan tmpdirs aislados"). An empty isolated AWM_HOME
+// makes listRegistries() return [] deterministically, matching pre-change behavior everywhere.
+let isolatedAwmHome: string;
+let originalAwmHomeEnv: string | undefined;
+
+beforeEach(() => {
+    isolatedAwmHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-orch-isolated-home-'));
+    originalAwmHomeEnv = process.env.AWM_HOME;
+    process.env.AWM_HOME = isolatedAwmHome;
+});
+
+afterEach(() => {
+    if (originalAwmHomeEnv === undefined) delete process.env.AWM_HOME;
+    else process.env.AWM_HOME = originalAwmHomeEnv;
+    fs.rmSync(isolatedAwmHome, { recursive: true, force: true });
+});
 
 function tmpRegistry(): string {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-orch-'));
@@ -239,5 +260,90 @@ describe('InjectionOrchestrator (local scope materializes under the project, not
         expect(fs.existsSync(globalContextPath())).toBe(false);
         expect(fs.existsSync(path.join(projectRoot, 'AGENTS.md'))).toBe(true);
         expect(orch.contextStatus(op)).toBe('injected');
+    });
+});
+
+describe('InjectionOrchestrator (declared orchestrators from an installed registry reach status too)', () => {
+    // Regression guard for R5.1's wiring: installContext (inputFor) and contextStatus
+    // (statusInputFor) must collect the SAME declared-orchestrator set. If only inputFor
+    // did, the materialized file's hash would include the declared orchestrator while
+    // statusInputFor's "expected" hash would not — contextStatus would report 'stale'
+    // forever, even immediately after a correct install.
+    it('contextStatus reports injected (not stale) right after installing with a declared orchestrator', () => {
+        // The global beforeEach already points AWM_HOME at an isolated, empty home —
+        // register one real registry in it so listRegistries()/collectDeclaredOrchestrators
+        // actually has something to find.
+        writeRegistriesConfig([{ name: 'declaring', remote: 'unused' }]);
+        const registryRoot = registryContentRoot('declaring');
+        fs.mkdirSync(path.join(registryRoot, 'skills/using-awm'), { recursive: true });
+        fs.writeFileSync(
+            path.join(registryRoot, 'skills/using-awm/SKILL.md'),
+            '---\nversion: "1.0.0"\n---\nBODY',
+        );
+        fs.writeFileSync(
+            path.join(registryRoot, 'awm-registry.json'),
+            JSON.stringify({
+                orchestrator: { name: 'mi-proceso', appliesWhen: 'al arrancar', terminatesTo: 'development-process' },
+            }),
+        );
+
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-oc-declared-'));
+        const configPath = path.join(dir, 'opencode.json');
+        const absPath = path.join(dir, 'awm-context.md');
+        const orch = new InjectionOrchestrator({
+            providerOverride: {
+                label: 'OpenCode', configHome: { envVar: null, dir: '.test', resolved: '/tmp/test-config-home' }, skill: { global: '', local: '', renderer: 'link' }, workflow: null, agent: null,
+                injection: { type: 'config-instructions', configPath, field: 'instructions' },
+            },
+            contextPathOverride: absPath,
+        });
+        const args = { agent: 'opencode' as const, scope: 'global' as const, registryRoot, installMethod: 'symlink' as const, profileExtensions: [] };
+
+        orch.installContext(args);
+
+        expect(fs.readFileSync(absPath, 'utf-8')).toContain('mi-proceso');
+        expect(orch.contextStatus(args)).toBe('injected');
+
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('installContext still succeeds when a DIFFERENT installed registry has a broken declaration', () => {  // verifies R5.1
+        // Two registries installed: "broken" has an unparsable awm-registry.json, "clean"
+        // is the one actually being operated on. The broken one must not block install.
+        writeRegistriesConfig([
+            { name: 'broken', remote: 'unused' },
+            { name: 'clean', remote: 'unused' },
+        ]);
+        const brokenRoot = registryContentRoot('broken');
+        fs.mkdirSync(brokenRoot, { recursive: true });
+        fs.writeFileSync(path.join(brokenRoot, 'awm-registry.json'), '{ not json');
+
+        const registryRoot = registryContentRoot('clean');
+        fs.mkdirSync(path.join(registryRoot, 'skills/using-awm'), { recursive: true });
+        fs.writeFileSync(
+            path.join(registryRoot, 'skills/using-awm/SKILL.md'),
+            '---\nversion: "1.0.0"\n---\nBODY',
+        );
+
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-oc-brokensibling-'));
+        const configPath = path.join(dir, 'opencode.json');
+        const absPath = path.join(dir, 'awm-context.md');
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        const orch = new InjectionOrchestrator({
+            providerOverride: {
+                label: 'OpenCode', configHome: { envVar: null, dir: '.test', resolved: '/tmp/test-config-home' }, skill: { global: '', local: '', renderer: 'link' }, workflow: null, agent: null,
+                injection: { type: 'config-instructions', configPath, field: 'instructions' },
+            },
+            contextPathOverride: absPath,
+        });
+        const args = { agent: 'opencode' as const, scope: 'global' as const, registryRoot, installMethod: 'symlink' as const, profileExtensions: [] };
+
+        expect(() => orch.installContext(args)).not.toThrow();
+        expect(fs.readFileSync(absPath, 'utf-8')).toContain('BODY');
+        expect(orch.contextStatus(args)).toBe('injected');
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('warning:'));
+
+        warnSpy.mockRestore();
+        fs.rmSync(dir, { recursive: true, force: true });
     });
 });

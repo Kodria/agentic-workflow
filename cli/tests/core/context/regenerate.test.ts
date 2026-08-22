@@ -131,6 +131,65 @@ describe('regenerateGlobalContext', () => {
         expect(seen).toEqual(['codex']);
     });
 
+    // Regresion: el if/else if no tenia rama para 'cc-settings-merge' (claude-code),
+    // asi que caia sin guardia por ambos checks y llegaba a contextStatus/installContext.
+    // Eso duplicaba el warning de collectAndWarn (ya disparado por el path legitimo del
+    // hook, hooks/claude.ts) y escribia un ~/.awm/context/awm-context.md huerfano que
+    // nada lee (el contexto real de Claude Code vive en el scriptsDir del hook). Claude
+    // Code se regenera exclusivamente via resyncInstalledHooks (hooks/resync.ts).
+    it('claude-code se saltea: su contexto se regenera via el hook, no aca', () => {
+        seedRegistry();
+        const seen: string[] = [];
+        const orch = {
+            contextStatus: (op: { agent: string }) => { seen.push(op.agent); return 'absent'; },
+            installContext: () => undefined,
+        };
+        const { regenerateGlobalContext } = require('../../../src/core/context/regenerate');
+        // Igual que config-instructions sin configPath / managed-agents-md con
+        // globalPath null: el salteo temprano no empuja entrada a `out` (mismo
+        // patron que el test de cursor/copilot de arriba).
+        expect(regenerateGlobalContext(['claude-code'], orch as never)).toEqual([]);
+        expect(seen).toEqual([]); // ni contextStatus ni installContext se llaman
+        expect(fs.existsSync(contextPath())).toBe(false); // no se escribe el archivo huerfano
+    });
+
+    // Finding 3 (post-implementation-qa, minor): antes de este fix, cada agente que
+    // dispara buildContext (via InjectionOrchestrator.inputFor/statusInputFor) vuelve
+    // a llamar collectAndWarn() de orchestrators.ts por su cuenta, asi que un `awm
+    // update` que toca N agentes reimprime el MISMO diagnostico hasta N veces. Este
+    // test prueba la mitad de esa reduccion que vive enteramente en el scope de
+    // regenerateGlobalContext: la coleccion previa al loop (collectDeclaredOrchestrators,
+    // sin pasar por collectAndWarn) imprime cada diagnostico UNA sola vez con
+    // console.warn, sin importar cuantos agentes se procesen despues. Usa un orch
+    // simulado (mismo patron que el test de codex de arriba) que nunca llama a
+    // collectAndWarn internamente, para aislar exactamente el efecto de este fix del
+    // de inputFor/statusInputFor (que siguen coleccionando por su cuenta — ver nota en
+    // regenerate.ts).
+    it('imprime cada diagnostico de orquestador declarado una sola vez, sin importar cuantos agentes se procesen', () => {
+        seedRegistry();
+        // Declaracion rota: falta appliesWhen y terminatesTo.
+        const contentRoot = path.join(tmpHome, '.awm', 'registries', 'baseline');
+        fs.writeFileSync(path.join(contentRoot, 'awm-registry.json'), JSON.stringify({ orchestrator: { name: 'roto' } }));
+
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+            const { regenerateGlobalContext } = require('../../../src/core/context/regenerate');
+            const orch = {
+                contextStatus: () => 'absent',
+                installContext: () => undefined,
+            };
+            // Dos agentes que de otro modo dispararian su propia coleccion via un
+            // InjectionOrchestrator real — el mock aisla ese efecto para medir
+            // exclusivamente la impresion previa al loop que agrega este fix.
+            regenerateGlobalContext(['opencode', 'codex'], orch as never);
+
+            const warnings = warnSpy.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('appliesWhen'));
+            expect(warnings).toHaveLength(1);
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+
     it('cursor y copilot se saltean: no tienen archivo de contexto GLOBAL que regenerar', () => {
         seedRegistry();
         const { regenerateGlobalContext } = require('../../../src/core/context/regenerate');

@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-describe('hooks/install — skill symlink fallback to copy', () => {
+describe('hooks/install — symlink fallback to copy', () => {
   let tmpHome: string;
   let origHome: string | undefined;
   let origAwmHome: string | undefined;
@@ -36,11 +36,19 @@ describe('hooks/install — skill symlink fallback to copy', () => {
     fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# using-awm\n');
   }
 
-  it('copies the skill when symlink throws (EPERM), preserving content', () => {
+  // Historical note: using-awm.md used to be installed via fs.symlinkSync with an
+  // EPERM fallback to a plain copy — this test used to exercise that fallback.
+  // Task 6 (writeMaterializedSkill, hooks/claude.ts) replaced the symlink entirely
+  // with a materialized write (buildContext() composed markdown via fs.writeFileSync,
+  // after an unlinkSync of any prior file): the skill file never routes through
+  // fs.symlinkSync at all anymore, for any installMethod. The EPERM mock is kept
+  // here specifically to prove that irrelevance — the assertions hold even with
+  // symlinkSync forced to throw, and the explicit "never called" check documents
+  // why: there's no fallback logic left to exercise for this file.
+  it('materializes the skill file — never attempts a symlink, so EPERM on symlinkSync never affects it', () => {
     const registryRoot = path.join(tmpHome, 'registry');
     seedRegistry(registryRoot);
 
-    // Force symlinkSync to fail like a platform without symlink permission.
     symlinkSpy = jest.spyOn(fs, 'symlinkSync').mockImplementation(() => {
       const err: any = new Error('EPERM: operation not permitted, symlink');
       err.code = 'EPERM';
@@ -52,8 +60,9 @@ describe('hooks/install — skill symlink fallback to copy', () => {
 
     const skillDest = path.join(result.scriptsDir, 'using-awm.md');
     expect(fs.existsSync(skillDest)).toBe(true);
-    expect(fs.lstatSync(skillDest).isSymbolicLink()).toBe(false); // it was copied, not linked
+    expect(fs.lstatSync(skillDest).isSymbolicLink()).toBe(false); // materialized, not linked
     expect(fs.readFileSync(skillDest, 'utf-8')).toContain('using-awm');
+    expect(symlinkSpy).not.toHaveBeenCalled(); // proves the EPERM mock above was moot
   });
 
   // Regression: syncExecutable (shared.ts) — used for the hook SCRIPT files

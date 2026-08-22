@@ -11,6 +11,44 @@ import path from 'path';
 import { getSettingsMergeHookConfig } from '../../providers';
 import { isDeadAwmHookEntry, backupManagedFile, syncExecutable, checkExecutable, checkFile } from './shared';
 import type { InstallOptions, InstallResult, UninstallResult, HookStatus, CheckResult } from './shared';
+import { buildContext } from '../../core/context/provider';
+import { collectAndWarn } from '../../core/orchestrators';
+
+/**
+ * Materializa el payload compuesto (using-awm + orquestadores declarados) en `skillDest`.
+ *
+ * Antes `using-awm.md` era un symlink al SKILL.md crudo del registry: todo lo que
+ * `buildContext` compone (declared orchestrators — Tasks 1-4) nunca llegaba a Claude
+ * Code, el proveedor PRINCIPAL que este framework existe para servir. Se escribe el
+ * archivo en vez de enlazarlo porque el contenido ya no es un archivo del registry sino
+ * un derivado suyo — igual que `materialize()` hace para los demas proveedores
+ * (core/context/materializer.ts), solo que aca el destino es el propio scriptsDir del
+ * hook en vez del awm-context.md generico.
+ *
+ * Usada por `installClaudeHook` Y por `resyncClaudeHookFiles` — con proposito: si solo
+ * una de las dos escribiera el payload materializado, la otra seguiria symlinkeando al
+ * SKILL.md crudo y el siguiente `awm update` reabriria el mismo bypass que esto cierra.
+ *
+ * Escritura atomica via write-then-rename (post-implementation-qa Finding 1, TOCTOU):
+ * el patron previo (`unlinkSync` seguido de `writeFileSync`) dejaba una ventana entre
+ * ambas llamadas donde un symlink recreado en `skillDest` seria seguido por
+ * `writeFileSync` (que no usa `O_EXCL`), escribiendo a traves de el sobre lo que sea
+ * que apunte. Escribir a un temporal unico en el MISMO directorio (para que el rename
+ * quede en el mismo filesystem y sea atomico) y luego `renameSync` al destino evita eso
+ * por completo: el rename reemplaza la entrada de directorio de forma atomica sin
+ * dereferenciar un symlink preexistente en el destino, y sin ventana entre borrar y
+ * escribir — no hace falta unlink previo, el rename ya sobrescribe en un solo paso.
+ */
+function writeMaterializedSkill(skillDest: string, registryRoot: string): void {
+    const ctx = buildContext({
+        registryRoot,
+        profileExtensions: [],
+        declaredOrchestrators: collectAndWarn(),
+    });
+    const tmpPath = path.join(path.dirname(skillDest), `.using-awm.md.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    fs.writeFileSync(tmpPath, ctx.markdown, 'utf-8');
+    fs.renameSync(tmpPath, skillDest);
+}
 
 function isAwmEntry(entry: any, scriptsDir: string, matcher: string): boolean {
     return (
@@ -38,15 +76,10 @@ export function installClaudeHook(options: InstallOptions): InstallResult {
     syncExecutable(path.join(sourceHooks, 'session-start'), path.join(config.scriptsDir, 'session-start'), options.installMethod);
     syncExecutable(path.join(sourceHooks, 'run-hook.cmd'), path.join(config.scriptsDir, 'run-hook.cmd'), options.installMethod);
 
-    // 3. Link the skill (default: symlink so 'awm update' propagates; fall back to copy if symlink is unavailable, e.g. Windows without Developer Mode)
+    // 3. Materializar el payload compuesto (using-awm + orquestadores declarados) — ver
+    //    writeMaterializedSkill arriba para por que esto ya no es un symlink al SKILL.md crudo.
     const skillDest = path.join(config.scriptsDir, 'using-awm.md');
-    try { fs.unlinkSync(skillDest); } catch { /* not exists */ }
-    try {
-        fs.symlinkSync(sourceSkill, skillDest, 'file'); // ver shared.ts: el tipo no se infiere
-    } catch {
-        // best-effort: copy the single skill file; 'awm update' will not auto-propagate
-        fs.copyFileSync(sourceSkill, skillDest);
-    }
+    writeMaterializedSkill(skillDest, options.registryRoot);
 
     // 4. Backup settings if it exists
     const backupPath = backupManagedFile(config.settingsPath);
@@ -187,27 +220,19 @@ export function uninstallClaudeHook(agent: 'claude-code'): UninstallResult {
 /** Refresh the Claude hook's script/skill files in place (used by resync). Assumes the caller has verified the settings entry is already present. */
 export function resyncClaudeHookFiles(config: { scriptsDir: string }, registryRoot: string, method: 'symlink' | 'copy'): void {
     const sourceHooks = path.join(registryRoot, 'hooks');
-    const sourceSkill = path.join(registryRoot, 'skills/using-awm/SKILL.md');
 
     fs.mkdirSync(config.scriptsDir, { recursive: true });
     syncExecutable(path.join(sourceHooks, 'session-start'), path.join(config.scriptsDir, 'session-start'), method);
     syncExecutable(path.join(sourceHooks, 'run-hook.cmd'), path.join(config.scriptsDir, 'run-hook.cmd'), method);
 
+    // Re-materializar el payload compuesto igual que `installClaudeHook` (arriba) — NO
+    // volver a symlinkear al SKILL.md crudo. Antes este era el segundo escritor del mismo
+    // archivo con el symlink-con-fallback-a-copia; si solo `installClaudeHook` se hubiera
+    // arreglado y este no, el primer `awm update` posterior a un install correcto habria
+    // sobreescrito el payload materializado con un symlink crudo de nuevo — reabriendo el
+    // bypass que esto existe para cerrar.
     const skillDest = path.join(config.scriptsDir, 'using-awm.md');
-    try { fs.unlinkSync(skillDest); } catch { /* not exists */ }
-    // Mismo fallback a copia que `installClaudeHook` (arriba). Sin el, en
-    // Windows sin Developer Mode este symlink tira EPERM, `resyncInstalledHooks`
-    // propaga el throw y `awm update` devuelve 1 — PARA SIEMPRE: el install
-    // funcionaba (tenia el fallback) y el update no, en una plataforma que la
-    // matriz de soporte declara verificada en CI. Dos escritores del mismo
-    // archivo, solo uno endurecido.
-    try {
-        fs.symlinkSync(sourceSkill, skillDest, 'file'); // ver shared.ts: el tipo no se infiere
-    } catch {
-        // best-effort: `awm update` no auto-propagara cambios de esta skill,
-        // pero el hook queda funcional en vez de dejar el comando inservible.
-        fs.copyFileSync(sourceSkill, skillDest);
-    }
+    writeMaterializedSkill(skillDest, registryRoot);
 }
 
 /** True when the registry has everything needed to resync the Claude hook files. */

@@ -4,6 +4,21 @@ import path from 'path';
 import os from 'os';
 import { execSync } from 'child_process';
 
+// @clack/prompts ships as ESM; mock it so Jest (CommonJS mode) can load
+// `commands/registry/index.ts` (same pattern as hooks/router.test.ts and
+// commands/update.test.ts). Only the CLI-wiring describe block below exercises
+// this — the rest of this file talks to `addRegistry` directly and never
+// touches @clack/prompts.
+jest.mock('@clack/prompts', () => ({
+    intro: jest.fn(),
+    outro: jest.fn(),
+    confirm: jest.fn(),
+    isCancel: jest.fn(() => false),
+    spinner: jest.fn(() => ({ start: jest.fn(), stop: jest.fn() })),
+    multiselect: jest.fn(),
+    select: jest.fn(),
+}));
+
 const GIT = (cwd: string, cmd: string) =>
     execSync(`git -c user.email=t@t.t -c user.name=t ${cmd}`, { cwd, stdio: 'pipe' });
 
@@ -231,6 +246,39 @@ describe('addRegistry', () => {
         const { readRegistriesConfig } = require('../../../src/core/registries');
         expect(readRegistriesConfig().map((r: { name: string }) => r.name)).toEqual(['personal']);
     });
+
+    it('reporta una declaracion de orquestador invalida sin abortar la instalacion', async () => {  // verifies R1.2
+        // Registry local con layout valido y declaracion rota
+        const src = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-src-'));
+        fs.mkdirSync(path.join(src, 'skills/mi-proceso'), { recursive: true });
+        fs.writeFileSync(path.join(src, 'skills/mi-proceso/SKILL.md'), '---\nname: mi-proceso\n---\nx');
+        fs.writeFileSync(path.join(src, 'awm-registry.json'), JSON.stringify({ orchestrator: { name: 'roto' } }));
+        GIT(src, 'init -q');
+        GIT(src, 'add -A');
+        GIT(src, 'commit -qm init');
+
+        const { addRegistry } = require('../../../src/commands/registry/add');
+        const result = await addRegistry(src, 'roto-reg');
+
+        expect(result.ok).toBe(true);                       // la instalacion NO se aborta por esto
+        expect(result.ok && result.orchestratorDiagnostics).toBeDefined();
+        expect(result.ok && result.orchestratorDiagnostics!.join('\n')).toMatch(/appliesWhen/);
+    });
+
+    it('un registry sin declaracion se instala sin diagnosticos', async () => {                     // verifies R1.4
+        const src = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-src-'));
+        fs.mkdirSync(path.join(src, 'skills/otro'), { recursive: true });
+        fs.writeFileSync(path.join(src, 'skills/otro/SKILL.md'), '---\nname: otro\n---\nx');
+        GIT(src, 'init -q');
+        GIT(src, 'add -A');
+        GIT(src, 'commit -qm init');
+
+        const { addRegistry } = require('../../../src/commands/registry/add');
+        const result = await addRegistry(src, 'sin-decl');
+
+        expect(result.ok).toBe(true);
+        expect(result.ok && (result.orchestratorDiagnostics ?? [])).toEqual([]);
+    });
 });
 
 describe('registry add + bundle install (post-add flow)', () => {
@@ -355,5 +403,71 @@ describe('registry add + bundle install (post-add flow)', () => {
         // Skill symlink must NOT exist (install failed)
         const skillLink = path.join(tmpHome, '.claude', 'skills', skillName);
         expect(fs.existsSync(skillLink)).toBe(false);
+    });
+});
+
+describe('registry add — CLI wiring prints orchestrator diagnostics', () => {
+    let tmpHome: string;
+    let tmpWork: string;
+    let originalHome: string | undefined;
+    let originalAwmHome: string | undefined;
+
+    beforeEach(() => {
+        tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-regadd-cli-home-'));
+        tmpWork = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-regadd-cli-work-'));
+        originalHome = process.env.HOME;
+        originalAwmHome = process.env.AWM_HOME;
+        process.env.HOME = tmpHome;
+        process.env.AWM_HOME = path.join(tmpHome, '.awm');
+        jest.resetModules();
+    });
+
+    afterEach(() => {
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+        fs.rmSync(tmpWork, { recursive: true, force: true });
+        if (originalHome === undefined) delete process.env.HOME;
+        else process.env.HOME = originalHome;
+        if (originalAwmHome === undefined) delete process.env.AWM_HOME;
+        else process.env.AWM_HOME = originalAwmHome;
+    });
+
+    // Task 2 added a `console.warn` loop after a successful `awm registry add` that
+    // prints each orchestrator diagnostic (`result.orchestratorDiagnostics`) returned
+    // by `addRegistry`. `addRegistry` itself is already covered above ("reporta una
+    // declaracion de orquestador invalida sin abortar la instalacion"), but nothing
+    // proved the CLI command actually surfaces those diagnostics to the user — this
+    // drives the real commander-wired `registry add` action end-to-end (same pattern
+    // as tests/commands/sensors/index.test.ts's `program.parseAsync`).
+    it('prints each orchestrator diagnostic via console.warn after a successful add', async () => {
+        const src = fs.mkdtempSync(path.join(tmpWork, 'awm-cli-src-'));
+        fs.mkdirSync(path.join(src, 'skills/mi-proceso'), { recursive: true });
+        fs.writeFileSync(path.join(src, 'skills/mi-proceso/SKILL.md'), '---\nname: mi-proceso\n---\nx');
+        // Broken orchestrator declaration: missing appliesWhen/terminatesTo.
+        fs.writeFileSync(path.join(src, 'awm-registry.json'), JSON.stringify({ orchestrator: { name: 'roto' } }));
+        GIT(src, 'init -q');
+        GIT(src, 'add -A');
+        GIT(src, 'commit -qm init');
+
+        const { Command } = require('commander');
+        const { registerRegistryCommand } = require('../../../src/commands/registry/index');
+
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+        try {
+            const program = new Command();
+            registerRegistryCommand(program);
+            await program.parseAsync(['node', 'awm', 'registry', 'add', src, '--name', 'cli-roto', '--no-install']);
+
+            expect(warnSpy).toHaveBeenCalled();
+            const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n');
+            expect(warned).toMatch(/appliesWhen/);
+            expect(warned).toMatch(/terminatesTo/);
+
+            const { readRegistriesConfig } = require('../../../src/core/registries');
+            expect(readRegistriesConfig().map((r: { name: string }) => r.name)).toEqual(['cli-roto']);
+        } finally {
+            warnSpy.mockRestore();
+            logSpy.mockRestore();
+        }
     });
 });

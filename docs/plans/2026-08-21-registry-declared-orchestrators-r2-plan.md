@@ -1,4 +1,7 @@
 # Orquestadores declarados — Release 2 (capa de CLI) Implementation Plan
+<!-- awm-qa-complete: 2026-08-22 -->
+<!-- awm-retro-complete: 2026-08-22 -->
+
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
@@ -378,7 +381,7 @@ _Requirements: R1.1_
 - Modify: `cli/src/core/context/provider.ts`
 - Test: `cli/tests/core/context/provider.test.ts`
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 Crear `cli/tests/core/context/provider.test.ts`:
 
@@ -441,7 +444,7 @@ describe('buildContext', () => {
 });
 ```
 
-- [ ] **Step 2: Correr el test para verificar que falla**
+- [x] **Step 2: Correr el test para verificar que falla**
 
 ```bash
 cd /home/user/agentic-workflow/cli
@@ -450,7 +453,7 @@ npx jest tests/core/context/provider.test.ts --runInBand
 
 Esperado: FAIL — `declaredOrchestrators` no existe en `ContextInput`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 En `cli/src/core/context/provider.ts`, extender el input y la composición:
 
@@ -487,7 +490,7 @@ export function buildContext(input: ContextInput): AwmContext {
 }
 ```
 
-- [ ] **Step 4: Correr el test para verificar que pasa**
+- [x] **Step 4: Correr el test para verificar que pasa**
 
 ```bash
 cd /home/user/agentic-workflow/cli
@@ -496,7 +499,7 @@ npx jest tests/core/context/provider.test.ts --runInBand
 
 Esperado: PASS los tres.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/user/agentic-workflow/cli && npm run typecheck && npm run lint
@@ -504,6 +507,8 @@ cd /home/user/agentic-workflow
 git add cli/src/core/context/provider.ts cli/tests/core/context/provider.test.ts
 git commit -m "feat(cli): componer orquestadores declarados en buildContext"
 ```
+
+**Desviación del plan (verificada, no scope creep):** durante el code-quality review de este Task se agregó `sanitizeForMarkdown` en `provider.ts`, no anticipada por el requirement set original (R1.1 solo pedía componer los descriptores, no saneaba su contenido). `name`/`appliesWhen`/`terminatesTo` son strings de un registry declarado — input no confiable — que `renderDeclared` interpola sin escapar en el markdown que consume el proveedor de IA; sin saneo, un registry malicioso/comprometido podía usar saltos de línea o marcadores markdown (`##`, backtick, `*`, `_`) para forjar una sección o bloque instruccional nuevo dentro del payload de contexto — un vector de prompt-injection. `readDeclaredOrchestrators` (orchestrators.ts) solo valida que los campos sean strings no vacíos; el saneo se agregó en esta frontera de render porque es donde el contenido no confiable se interpola. Post-implementation-qa (Track B, lente de robustez/seguridad) encontró después que el fix original dejaba un hueco — no se despojaban `<`/`>`, permitiendo forjar pseudo-tags XML/HTML (ej. `<system>...</system>`) — y lo cerró como hallazgo de severidad blocker antes de cerrar esta rama.
 
 ---
 
@@ -515,7 +520,7 @@ _Requirements: R5.1_
 - Modify: `cli/src/core/context/orchestrator.ts`
 - Test: `cli/tests/core/context/provider.test.ts` (extender)
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 Agregar a `cli/tests/core/context/provider.test.ts`:
 
@@ -539,7 +544,7 @@ npx jest tests/core/context/provider.test.ts --runInBand
 
 Esperado: PASS ya en verde — `readDeclaredOrchestrators` de la Task 1 nunca lanza, así que la garantía se hereda. **Si falla, hay una ruta que sí propaga la excepción: encontrarla antes de seguir.**
 
-- [ ] **Step 3: Cablear la recoleccion en el orquestador de inyeccion**
+- [x] **Step 3: Cablear la recoleccion en el orquestador de inyeccion**
 
 En `cli/src/core/context/orchestrator.ts`, dentro de `inputFor`, recolectar de todos los registries instalados y pasar el resultado a `buildContext`:
 
@@ -571,7 +576,7 @@ Y en `inputFor`:
         });
 ```
 
-- [ ] **Step 4: Correr la suite completa de context**
+- [x] **Step 4: Correr la suite completa de context**
 
 ```bash
 cd /home/user/agentic-workflow/cli
@@ -580,7 +585,7 @@ npx jest tests/core/context --runInBand
 
 Esperado: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/user/agentic-workflow/cli && npm run typecheck && npm run lint
@@ -588,6 +593,8 @@ cd /home/user/agentic-workflow
 git add cli/src/core/context/orchestrator.ts cli/tests/core/context/provider.test.ts
 git commit -m "feat(cli): recolectar declaraciones de todos los registries, degradando ante error"
 ```
+
+**Desviación del plan (verificada, no scope creep):** `orchestrator.ts` tiene un segundo call site de `buildContext` — `statusInputFor` (usado por `contextStatus`/`awm hooks status`) — que el texto literal del plan no mencionaba. Cablear la recolección solo en `inputFor` habría hecho que el hash "esperado" de `statusInputFor` divergiera del hash realmente materializado en cuanto algún registry declarara un orquestador, reportando `stale` de forma permanente incluso justo después de un install correcto (afecta `ConfigInstructionsStrategy` y `CodexAgentsStrategy`; `HookMergeStrategy`/Claude Code no usa `contentHash`). Se cableó también ahí, con test de regresión que falla sin el fix y pasa con él (verificado por el spec reviewer revirtiendo el fix manualmente). Post-review se extrajo `collectAndWarn()` como punto único compartido entre ambos call sites, precisamente para que esta clase de divergencia no pueda reintroducirse en silencio.
 
 ---
 
@@ -600,7 +607,7 @@ Esta task no cambia comportamiento: fija el comportamiento actual para que la Ta
 **Files:**
 - Modify: `cli/tests/commands/hooks/install.test.ts`
 
-- [ ] **Step 1: Agregar un test que fije el contrato observable del hook**
+- [x] **Step 1: Agregar un test que fije el contrato observable del hook**
 
 ```typescript
 it('el hook queda apuntando a un archivo legible con el contenido de using-awm', () => {  // verifies R6.1
@@ -624,7 +631,7 @@ npx jest tests/commands/hooks/install.test.ts --runInBand
 
 Esperado: PASS. **Si falla acá, el test está mal escrito** — corregirlo antes de seguir, porque no sirve como red si no refleja el comportamiento actual.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd /home/user/agentic-workflow
@@ -643,7 +650,7 @@ El cambio de mayor riesgo. La red de la Task 5 ya está puesta.
 **Files:**
 - Modify: `cli/src/commands/hooks/claude.ts:42-49`
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 Agregar a `cli/tests/commands/hooks/install.test.ts`:
 
@@ -661,7 +668,7 @@ it('el hook recibe los orquestadores declarados, no el SKILL.md crudo', () => { 
 });
 ```
 
-- [ ] **Step 2: Correr para verificar que falla**
+- [x] **Step 2: Correr para verificar que falla**
 
 ```bash
 cd /home/user/agentic-workflow/cli
@@ -670,7 +677,7 @@ npx jest tests/commands/hooks/install.test.ts --runInBand
 
 Esperado: FAIL en el assert de `mi-proceso` — hoy el hook lee el `SKILL.md` crudo y la composición nunca llega.
 
-- [ ] **Step 3: Reemplazar el symlink por el payload materializado**
+- [x] **Step 3: Reemplazar el symlink por el payload materializado**
 
 En `cli/src/commands/hooks/claude.ts`, reemplazar el bloque del paso 3 (`// 3. Link the skill ...`, líneas 42-49) por:
 
@@ -694,7 +701,7 @@ En `cli/src/commands/hooks/claude.ts`, reemplazar el bloque del paso 3 (`// 3. L
 
 Importar arriba lo necesario, y exportar `collectDeclaredOrchestrators` desde `core/context/orchestrator.ts` (era privada en la Task 4 — promoverla).
 
-- [ ] **Step 4: Correr los dos tests**
+- [x] **Step 4: Correr los dos tests**
 
 ```bash
 cd /home/user/agentic-workflow/cli
@@ -703,7 +710,7 @@ npx jest tests/commands/hooks/install.test.ts --runInBand
 
 Esperado: PASS ambos — el nuevo **y** la red de no-regresión de la Task 5. Si la red se rompe, se rompió el contrato observable para usuarios existentes: revertir y replantear.
 
-- [ ] **Step 5: Verificar que `awm update` sigue propagando**
+- [x] **Step 5: Verificar que `awm update` sigue propagando**
 
 Antes el symlink hacía que `awm update` propagara solo. Ahora el archivo es un derivado, así que hay que confirmar que el camino de resync lo regenera:
 
@@ -714,7 +721,7 @@ npx jest tests/commands/hooks --runInBand
 
 Esperado: PASS. **Si algún test de resync falla, es el hallazgo más importante de este plan:** el archivo materializado quedaría rancio tras `awm update`. Arreglarlo cableando la regeneración en el mismo lugar que hoy resuelve el symlink.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /home/user/agentic-workflow/cli && npm run typecheck && npm run lint
@@ -723,13 +730,19 @@ git add cli/src/commands/hooks/claude.ts cli/src/core/context/orchestrator.ts
 git commit -m "fix(cli): rutear Claude Code por buildContext, cerrando el bypass del SKILL.md crudo"
 ```
 
+**Desviaciones verificadas (no scope creep):**
+1. **Ciclo de imports real.** `claude.ts -> core/context/orchestrator.ts -> strategies/hook-merge.ts -> commands/hooks/install.ts -> claude.ts` es un ciclo genuino si `collectDeclaredOrchestrators`/`collectAndWarn` se exportan desde `orchestrator.ts` como el plan indicaba literalmente. Resuelto reubicando ambas funciones a `core/orchestrators.ts` (módulo hoja, solo depende de `./registries`) — confirmado por el spec reviewer leyendo el grafo de imports real.
+2. **`resyncClaudeHookFiles` también arreglado**, no solo `installClaudeHook` — ambos ahora comparten un `writeMaterializedSkill()` único (evita que un `awm update` posterior reabra el bypass, exactamente el riesgo que este Step 5 señala). Test de regresión dedicado en `resync.test.ts`.
+3. **Migración de instalaciones existentes verificada y fijada con test:** un `using-awm.md` symlink pre-Task-6 se migra correctamente a archivo materializado sin tocar el `SKILL.md` del registry (`fs.unlinkSync` remueve solo la entrada de directorio, nunca el destino del symlink) — verificado a mano por el code reviewer y luego regression-locked con un test dedicado tras su hallazgo.
+4. **Mensajes/comentarios obsoletos corregidos:** `hooks/index.ts` (mensaje post-install), `hooks/shared.ts` (dos ubicaciones: comentario de `HookStatus.checks` y wording de `checkFile`'s catch branch), y `install-symlink-fallback.test.ts` (un test cuyo mock de EPERM había quedado inerte para `using-awm.md` — reescrito para probar y documentar esa irrelevancia explícitamente en vez de pasar en silencio por la razón equivocada).
+
 ---
 
 ### Task 7: Suite completa y tres plataformas
 
 _Requirements: R6.1, R6.2, R6.3_
 
-- [ ] **Step 1: Suite entera local**
+- [x] **Step 1: Suite entera local**
 
 ```bash
 cd /home/user/agentic-workflow/cli
@@ -741,7 +754,7 @@ npm test
 
 Esperado: todo verde. Cualquier fallo se arregla acá.
 
-- [ ] **Step 2: Verificar aislamiento de tests (R6.3)**
+- [x] **Step 2: Verificar aislamiento de tests (R6.3)**
 
 ```bash
 cd /home/user/agentic-workflow/cli
@@ -751,7 +764,7 @@ ls -la ~/.awm 2>/dev/null && echo "--- ~/.awm debe estar intacto tras la suite"
 
 Los tests nuevos de `orchestrators` y `provider` operan sobre tmpdirs explícitos y no leen `awmHome()`, así que no necesitan sobreescribir `AWM_HOME`. Los que sí lo tocan (`hooks/install.test.ts`) ya siguen el patrón. **Confirmar que `~/.awm` quedó sin modificar.**
 
-- [ ] **Step 3: Push y verificar CI en las tres plataformas**
+- [x] **Step 3: Push y verificar CI en las tres plataformas**
 
 ```bash
 cd /home/user/agentic-workflow
@@ -761,6 +774,12 @@ git push -u origin claude/notion-task-capture-integration-ymltjd
 Esperado: el job `test` verde en `ubuntu-latest`, `windows-latest` y `macos-latest`. **Rojo en cualquiera bloquea la publicación** (D-005): el job `release` declara `needs: test`.
 
 Prestar atención especial a Windows: la Task 6 cambia un symlink por un `writeFileSync`, lo que en principio **mejora** el comportamiento en Windows sin Developer Mode (donde el symlink caía al fallback de copia). Confirmarlo en el log, no asumirlo.
+
+**Confirmado en CI real (commit `00e486e`, PR #107):** las tres plataformas en verde —
+`test (ubuntu-latest)`: success (06:05:37–06:08:59); `test (macos-latest)`: success
+(06:05:38–06:09:06); `test (windows-latest)`: success (06:05:37–06:17:04, cada step previo
+al de test —install/build/typecheck/matrix de sensores— ya había pasado en verde, confirmando
+progreso sano y no un cuelgue). No se asumió: se leyó el log de jobs vía la API de GitHub Actions.
 
 ---
 

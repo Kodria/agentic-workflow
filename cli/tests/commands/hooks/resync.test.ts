@@ -69,7 +69,10 @@ describe('resyncInstalledHooks', () => {
         expect(synced).toContain('NEW VERSION');
         expect(fs.lstatSync(path.join(scriptsDir, 'session-start')).isSymbolicLink()).toBe(false);
         expect(() => fs.accessSync(path.join(scriptsDir, 'session-start'), fs.constants.X_OK)).not.toThrow();
-        expect(fs.lstatSync(path.join(scriptsDir, 'using-awm.md')).isSymbolicLink()).toBe(true);
+        // Task 6: using-awm.md is materialized (buildContext's output), not a symlink to the
+        // raw SKILL.md — resync must not regress the install path back to a raw symlink.
+        expect(fs.lstatSync(path.join(scriptsDir, 'using-awm.md')).isSymbolicLink()).toBe(false);
+        expect(fs.readFileSync(path.join(scriptsDir, 'using-awm.md'), 'utf-8')).toContain('MUST invoke skills.');
     });
 
     it('does NOT touch anything when the hook was never installed (no settings entry)', () => {
@@ -83,6 +86,47 @@ describe('resyncInstalledHooks', () => {
             { agent: 'codex', action: 'not-installed' },
         ]);
         expect(fs.existsSync(path.join(tmpHome, '.awm/hooks/session-start'))).toBe(false);
+    });
+
+    // Task 6, Step 5 regression guard: the exact staleness the plan calls "el hallazgo mas
+    // importante" — if resyncClaudeHookFiles ever regressed back to symlinking the raw
+    // SKILL.md (instead of writing buildContext's materialized output, same as
+    // installClaudeHook), `awm update` would silently strip declared orchestrators back
+    // out of Claude Code's context on the very next resync after a correct install.
+    it('re-materializes using-awm.md with declared orchestrators on resync, not a raw-SKILL.md symlink', () => {
+        const { writeRegistriesConfig, registryContentRoot } = require('../../../src/core/registries');
+        writeRegistriesConfig([{ name: 'declaring-resync-test', remote: 'unused' }]);
+        const registryRoot = registryContentRoot('declaring-resync-test');
+        const regHooks = path.join(registryRoot, 'hooks');
+        const regSkill = path.join(registryRoot, 'skills/using-awm');
+        fs.mkdirSync(regHooks, { recursive: true });
+        fs.mkdirSync(regSkill, { recursive: true });
+        fs.writeFileSync(path.join(regHooks, 'session-start'), '#!/usr/bin/env bash\necho "{}"', { mode: 0o755 });
+        fs.writeFileSync(path.join(regHooks, 'run-hook.cmd'), '#!/usr/bin/env bash\nexec bash "$1"', { mode: 0o755 });
+        fs.writeFileSync(path.join(regSkill, 'SKILL.md'), '---\nname: using-awm\n---\nMUST invoke skills.');
+        fs.writeFileSync(
+            path.join(registryRoot, 'awm-registry.json'),
+            JSON.stringify({ orchestrator: { name: 'mi-proceso', appliesWhen: 'al arrancar', terminatesTo: 'development-process' } }),
+        );
+
+        const { installHook } = require('../../../src/commands/hooks/install');
+        installHook({ agent: 'claude-code', registryRoot, installMethod: 'symlink' });
+
+        const scriptsDir = path.join(tmpHome, '.awm/hooks');
+        const skillDest = path.join(scriptsDir, 'using-awm.md');
+        expect(fs.readFileSync(skillDest, 'utf-8')).toContain('mi-proceso');
+
+        const { resyncInstalledHooks } = require('../../../src/commands/hooks/resync');
+        const results = resyncInstalledHooks(registryRoot);
+
+        expect(results).toEqual([
+            { agent: 'claude-code', action: 'resynced' },
+            { agent: 'codex', action: 'not-installed' },
+        ]);
+        expect(fs.lstatSync(skillDest).isSymbolicLink()).toBe(false);
+        const content = fs.readFileSync(skillDest, 'utf-8');
+        expect(content).toContain('mi-proceso');
+        expect(content).toContain('MUST invoke skills.');
     });
 
     it('preserves symlink install method', () => {
@@ -101,7 +145,9 @@ describe('resyncInstalledHooks', () => {
             { agent: 'codex', action: 'not-installed' },
         ]);
         expect(fs.lstatSync(path.join(scriptsDir, 'session-start')).isSymbolicLink()).toBe(true);
-        expect(fs.lstatSync(path.join(scriptsDir, 'using-awm.md')).isSymbolicLink()).toBe(true);
+        // Task 6: using-awm.md is materialized regardless of the scripts' install method —
+        // it was never governed by `method` in the first place, before or after this change.
+        expect(fs.lstatSync(path.join(scriptsDir, 'using-awm.md')).isSymbolicLink()).toBe(false);
     });
 
     it('skips with registry-missing when the registry has no hooks dir', () => {

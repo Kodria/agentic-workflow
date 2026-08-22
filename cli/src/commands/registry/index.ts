@@ -35,6 +35,9 @@ export function registerRegistryCommand(program: Command): void {
                 process.exit(1);
             }
             s.stop(`Registry ${pc.cyan(result.name)} added at ${result.contentRoot}`);
+            for (const d of result.orchestratorDiagnostics) {
+                console.warn(pc.yellow(`  ⚠  ${d}`));
+            }
             try {
                 regenerateGlobalContext();
             } catch {

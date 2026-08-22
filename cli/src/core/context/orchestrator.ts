@@ -7,6 +7,7 @@ import { CodexAgentsStrategy } from './strategies/codex-agents';
 import { buildContext } from './provider';
 import { materialize, globalContextPath, projectContextPath } from './materializer';
 import { InjectionInput, InjectionState, MaterializedRef } from './types';
+import { collectAndWarn } from '../orchestrators';
 
 export type ContextOp = {
     agent: AgentTarget;
@@ -53,7 +54,11 @@ export class InjectionOrchestrator {
 
     /** Full input: builds context from registry and materializes to disk. Used by installContext only. */
     private inputFor(op: ContextOp): InjectionInput {
-        const ctx = buildContext({ registryRoot: op.registryRoot, profileExtensions: op.profileExtensions });
+        const ctx = buildContext({
+            registryRoot: op.registryRoot,
+            profileExtensions: op.profileExtensions,
+            declaredOrchestrators: collectAndWarn(),
+        });
         const absPath = this.contextPathFor(op);
         const ref = materialize(ctx, absPath, op.scope);
         return {
@@ -80,7 +85,15 @@ export class InjectionOrchestrator {
         const absPath = this.contextPathFor(op);
         let contentHash = '';
         try {
-            const ctx = buildContext({ registryRoot: op.registryRoot, profileExtensions: op.profileExtensions });
+            // Debe recolectar declarados igual que inputFor: si no, el hash "esperado" aqui
+            // diverge del hash realmente materializado por installContext en cuanto algun
+            // registry instalado declare un orquestador, y contextStatus reportaria 'stale'
+            // de forma permanente incluso justo despues de un install correcto.
+            const ctx = buildContext({
+                registryRoot: op.registryRoot,
+                profileExtensions: op.profileExtensions,
+                declaredOrchestrators: collectAndWarn(),
+            });
             contentHash = ctx.contentHash;
         } catch (err) {
             // Only suppress "registry not yet initialised" — all other errors propagate.

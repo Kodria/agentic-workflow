@@ -7,6 +7,7 @@
 import fs from 'fs';
 import { AGENT_TARGETS, AgentTarget, providerFor } from '../../providers';
 import { capabilityRoot } from '../registries';
+import { collectDeclaredOrchestrators } from '../orchestrators';
 import { InjectionOrchestrator, ContextOp } from './orchestrator';
 
 export type RegenAction = 'refreshed' | 'fresh' | 'skipped';
@@ -18,6 +19,22 @@ export function regenerateGlobalContext(
 ): RegenResult[] {
     const skillsRoot = capabilityRoot('skills');
     if (!skillsRoot) return [];
+
+    // Print each declared-orchestrator diagnostic ONCE up front, rather than letting
+    // every agent's contextStatus/installContext call independently re-collect and
+    // re-warn via InjectionOrchestrator.inputFor/statusInputFor (both call
+    // orchestrators.ts's collectAndWarn() internally, unaware of this outer loop). A
+    // single `awm update` touching N agents (e.g. opencode + codex) would otherwise
+    // print the same diagnostic up to 2x per agent (once from statusInputFor, once
+    // from inputFor when stale) — noisy but not incorrect, since no data is lost or
+    // wrong. This only reduces the printing done BY THIS FUNCTION to one line per
+    // diagnostic; inputFor/statusInputFor still call collectAndWarn() internally per
+    // op (they need the declared list to build/hash context), so a per-agent
+    // duplicate can still print alongside this upfront one. Deeper dedup would mean
+    // threading a pre-collected list through ContextOp/InjectionOrchestrator, which
+    // touches shared collection-scope logic other callers (hooks/claude.ts) rely on —
+    // out of proportion for this minor finding.
+    for (const d of collectDeclaredOrchestrators().diagnostics) console.warn(`warning: ${d}`);
 
     const out: RegenResult[] = [];
     for (const agent of targets) {
@@ -38,6 +55,17 @@ export function regenerateGlobalContext(
             if (!fs.existsSync(inj.configPath)) continue;
         } else if (inj.type === 'managed-agents-md') {
             if (inj.globalPath === null) continue;
+        } else if (inj.type === 'cc-settings-merge') {
+            // Claude Code no pasa por este dispatcher generico: su contexto se
+            // materializa via el hook dedicado (hooks/claude.ts's installClaudeHook/
+            // resyncClaudeHookFiles), invocado por `awm update` a traves de un path
+            // separado (hooks/resync.ts's resyncInstalledHooks). Mismo salteo que
+            // stepContextInjection (init/steps.ts) y contextGlobalCheck
+            // (diagnostics/provider-checks.ts) — "covered by hook". Sin este
+            // continue, orch.contextStatus/installContext corrian igual para
+            // claude-code y escribian un ~/.awm/context/awm-context.md huerfano que
+            // nadie lee (el archivo real vive en el scriptsDir del hook).
+            continue;
         }
 
         const op: ContextOp = {

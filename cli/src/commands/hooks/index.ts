@@ -62,7 +62,7 @@ export function registerHooksCommand(program: Command): void {
                 console.log(`  Scripts:        ${result.scriptsDir}/session-start`);
                 if (agent === 'claude-code') {
                     console.log(`                  ${result.scriptsDir}/run-hook.cmd`);
-                    console.log(`                  ${result.scriptsDir}/using-awm.md → ~/.awm/registries/baseline/skills/using-awm/SKILL.md`);
+                    console.log(`                  ${result.scriptsDir}/using-awm.md (composed context, written)`);
                 }
                 console.log('');
                 console.log(`  Settings file:  ${result.settingsPath}`);
