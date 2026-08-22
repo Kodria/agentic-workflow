@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { runDoctor } from '../../src/commands/doctor';
 
@@ -12,12 +13,11 @@ export interface CapturedDoctorJsonFixture {
 
 /** Captures the legacy doctor JSON in an isolated, deterministic filesystem. */
 export function captureDoctorJsonFixture(kind: DoctorJsonFixture): CapturedDoctorJsonFixture {
-    const tempRoot = path.join('/tmp', 'awm-doctor-json-fixture-v1', kind);
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-doctor-json-fixture-'));
     const previousHome = process.env.HOME;
     const previousAwmHome = process.env.AWM_HOME;
     const output: string[] = [];
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-    fs.mkdirSync(tempRoot, { recursive: true });
+    fs.mkdirSync(path.join(tempRoot, '.awm'), { recursive: true });
     const writeSpy = jest.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
         output.push(String(chunk));
         return true;
@@ -25,9 +25,15 @@ export function captureDoctorJsonFixture(kind: DoctorJsonFixture): CapturedDocto
 
     process.env.HOME = tempRoot;
     process.env.AWM_HOME = path.join(tempRoot, '.awm');
+    fs.writeFileSync(path.join(tempRoot, '.awm', 'preferences.json'), JSON.stringify({
+        defaultAgent: 'copilot',
+        enabledAgents: ['copilot'],
+        installMethod: 'symlink',
+        defaultScope: 'local',
+    }, null, 2) + '\n');
     if (kind === 'project') {
-        fs.mkdirSync(path.join(tempRoot, '.awm'), { recursive: true });
         fs.writeFileSync(path.join(tempRoot, '.awm', 'profile.json'), '{\n  "extensions": []\n}\n');
+        fs.writeFileSync(path.join(tempRoot, 'AGENTS.md'), '<!-- AWM:START -->\nstale project context\n<!-- AWM:END -->\n');
     }
 
     try {

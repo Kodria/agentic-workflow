@@ -13,6 +13,22 @@ describe('runDoctor legacy JSON fixtures', () => {
             const expected = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'doctor-json', `${kind}.json`), 'utf-8');
             expect(captured.output).toBe(expected);
             expect(captured.code).toBe(1);
+
+            const parsed: unknown = JSON.parse(captured.output);
+            expect(parsed).toEqual(expect.objectContaining({
+                overall: 'degraded',
+                providers: expect.any(Array),
+            }));
+            const provider = (parsed as { providers: Array<{ id: string; label: string; tier: string; checks: unknown[] }> }).providers[0];
+            expect(provider).toEqual(expect.objectContaining({
+                id: 'copilot',
+                label: 'Copilot',
+                tier: 'agents-md-managed',
+                checks: expect.any(Array),
+            }));
+            expect(provider.checks).toEqual(expect.arrayContaining([
+                expect.objectContaining({ id: 'context.global', state: kind === 'project' ? 'stale' : 'absent' }),
+            ]));
         } finally {
             captured.cleanup();
         }

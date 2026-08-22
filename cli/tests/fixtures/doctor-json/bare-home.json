@@ -1,22 +1,18 @@
 {
   "providers": [
     {
-      "id": "claude-code",
-      "label": "Claude Code",
-      "tier": "hooks-native",
+      "id": "copilot",
+      "label": "Copilot",
+      "tier": "agents-md-managed",
       "checks": [
         {
           "id": "binary.version",
           "state": "supported"
         },
         {
-          "id": "skills.global",
+          "id": "context.global",
           "state": "absent",
-          "target": "/tmp/awm-doctor-json-fixture-v1/bare-home/.claude/skills"
-        },
-        {
-          "id": "hook.trust",
-          "state": "broken"
+          "remediationCode": "awm-init"
         }
       ]
     }
