@@ -153,6 +153,6 @@ jobs:
         working-directory: cli
         env:
           AWM_PUBLISHED_CLI_VERSION: ${{ steps.published-cli.outputs.version }}
-          AWM_PUBLISHED_REGISTRY_TAG: v3.2.0
+          AWM_PUBLISHED_REGISTRY_TAG: v3.3.0
           AWM_PUBLISHED_REGISTRY_REMOTE: https://github.com/Kodria/awm-baseline-registry.git
         run: npx jest tests/integration/published-doctor-evidence.e2e.test.ts --runInBand

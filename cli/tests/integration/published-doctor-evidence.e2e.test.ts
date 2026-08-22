@@ -21,6 +21,11 @@ export function assertImmutableArtifacts(version: string | undefined, tag: strin
     if (!/^https:\/\/github\.com\/Kodria\/awm-baseline-registry\.git$/.test(remote)) throw new Error('published registry remote must be the canonical immutable release remote');
 }
 
+/** R8.7 is bound to the Task 7 registry release, never the preceding tag. */
+export function assertIssue87RegistryPin(tag: string | undefined): void {
+    if (tag !== 'v3.3.0') throw new Error('published doctor evidence requires immutable registry tag v3.3.0');
+}
+
 function json(result: SpawnSyncReturns<string>): Record<string, unknown> {
     if (!result.stdout.trim()) throw new Error(`missing JSON output: ${result.stderr}`);
     return JSON.parse(result.stdout) as Record<string, unknown>;
@@ -51,6 +56,7 @@ acceptance('published doctor and evidence acceptance (R8.7)', () => {
 
     test('installs exact npm and registry artifacts into a fresh consumer and executes the dashboard/evidence contract', () => {
         assertImmutableArtifacts(cliVersion, registryTag, registryRemote);
+        assertIssue87RegistryPin(registryTag);
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-published-doctor-'));
         try {
             const artifacts = path.join(root, 'artifacts');
@@ -66,12 +72,6 @@ acceptance('published doctor and evidence acceptance (R8.7)', () => {
             expect(fs.existsSync(path.join(cliRoot, 'dist', 'src', 'index.js'))).toBe(true);
             const registryMetadata = JSON.parse(fs.readFileSync(path.join(registry, 'awm-registry.json'), 'utf8')) as unknown;
             const retro = fs.readFileSync(path.join(registry, 'skills', 'harness-retro', 'SKILL.md'), 'utf8');
-            // v8.4.0 predates the #87 registry contract. Keep this live artifact
-            // as an explicit prepublication observation, never synthetic success.
-            if (cliVersion === '8.4.0') {
-                expect(() => assertRetroCaptureContract(registryMetadata, retro, cliVersion)).toThrow(/lacks evidence capture|below registry minCliVersion/);
-                return;
-            }
             assertRetroCaptureContract(registryMetadata, retro, cliVersion!);
             fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'published-doctor-fixture', private: true }));
             fs.writeFileSync(path.join(project, 'plan.md'), '# published evidence fixture\n');
@@ -134,5 +134,9 @@ describe('future registry retro capture contract', () => {
     test('fails when minCliVersion is removed or retro ordering is swapped', () => {
         expect(() => assertRetroCaptureContract({}, contract, '8.4.1')).toThrow(/minCliVersion/);
         expect(() => assertRetroCaptureContract(metadata, 'awm ledger archive\nawm evidence capture', '8.4.1')).toThrow(/before archive/);
+    });
+    test('rejects the prepublication CLI and a preceding registry pin', () => {
+        expect(() => assertRetroCaptureContract(metadata, contract, '8.4.0')).toThrow(/below registry minCliVersion/);
+        expect(() => assertIssue87RegistryPin('v3.2.0')).toThrow(/v3\.3\.0/);
     });
 });
