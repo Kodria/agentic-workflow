@@ -85,7 +85,7 @@ describe('runDoctor dashboard modes', () => {
         const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
         const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
         try {
-            expect(runDoctor({ full: true, cwd: '/definitely-not-a-project' })).toBe(0);
+            expect(runDoctor({ full: true, cwd: '/definitely-not-a-project', collectSnapshot: () => dashboardSnapshot() })).toBe(0);
             expect(runDoctor({ html: '' })).toBe(2);
             expect(runDoctor({ html: '/definitely-missing-parent/report.html' })).toBe(2);
         } finally { stdout.mockRestore(); stderr.mockRestore(); }
