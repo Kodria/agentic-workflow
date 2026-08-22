@@ -13,7 +13,7 @@ function treeHash(root: string, ignored = new Set<string>()): string {
     const walk = (directory: string): void => {
         for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
             const item = path.join(directory, entry.name);
-            const relative = path.relative(root, item);
+            const relative = path.relative(root, item).split(path.sep).join('/');
             if (ignored.has(relative)) continue;
             hash.update(relative);
             if (entry.isDirectory()) walk(item);
@@ -29,7 +29,7 @@ function treeEntries(root: string, ignored = new Set<string>()): string[] {
     const walk = (directory: string): void => {
         for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
             const item = path.join(directory, entry.name);
-            const relative = path.relative(root, item);
+            const relative = path.relative(root, item).split(path.sep).join('/');
             if (ignored.has(relative)) continue;
             entries.push(relative);
             if (entry.isDirectory()) walk(item);
