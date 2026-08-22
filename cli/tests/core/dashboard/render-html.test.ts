@@ -65,6 +65,8 @@ describe('renderDashboardHtml', () => {
         })));
         expect(html).toContain('data-machine-bento');
         expect(html.match(/class="bento-card"/g)).toHaveLength(3);
+        expect(html).toContain('<h2>Instalación</h2>');
+        expect(html).not.toContain('<article class="bento-card"><h3>Instalación</h3>');
         expect(html).toContain('Privacy &amp; security');
         expect(html).toContain('data-static-privacy-toggle');
         expect(html).toContain('type="checkbox" checked disabled');

@@ -27,7 +27,7 @@ function machineBento(items: DashboardSectionV1['items']): string {
     const names = ['Instalación', 'Sensores globales', 'Persistencia'];
     return `<div class="machine-bento" data-machine-bento>${names.map((name, index) => {
         const item = items[index];
-        return `<article class="bento-card"><h3>${name}</h3>${item ? `<span class="state ${item.state}">${STATE_GLYPH[item.state]} ${STATE_TEXT[item.state]}</span><strong>${escapeHtml(item.label)}</strong><span>${item.detail ? escapeHtml(item.detail) : 'Sin detalle adicional'}</span>` : '<span class="state unavailable">⊘ Unavailable</span><span>Sin observación disponible</span>'}</article>`;
+        return `<article class="bento-card"><h2>${name}</h2>${item ? `<span class="state ${item.state}">${STATE_GLYPH[item.state]} ${STATE_TEXT[item.state]}</span><strong>${escapeHtml(item.label)}</strong><span>${item.detail ? escapeHtml(item.detail) : 'Sin detalle adicional'}</span>` : '<span class="state unavailable">⊘ Unavailable</span><span>Sin observación disponible</span>'}</article>`;
     }).join('')}</div>`;
 }
 
