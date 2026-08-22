@@ -1,3 +1,9 @@
+## v8.5.1 - 2026-08-22
+
+### Fixes
+- **evidence:** close release B QA gaps (#115)
+- **release:** resolve registry provenance before publish (#114)
+
 ## v8.5.0 - 2026-08-22
 
 ### Features
