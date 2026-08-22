@@ -62,21 +62,28 @@ describe('built doctor dashboard end-to-end (R4.8, R8.3-R8.5)', () => {
 
     afterEach(() => jest.restoreAllMocks());
 
-    test('machine-only, healthy/degraded-shaped, partial and corrupt fixtures preserve the read-only tree and exit honestly', () => {
+    test('machine-only, degraded, partial, and corrupt fixtures are real on-disk states with exact exits and discriminating output', () => {
         const machine = fixture('machine', false);
-        const cases: Array<[string, Fixture, number[]]> = [
-            ['machine-only', machine, [0, 1]],
-            ['healthy-project', fixture('healthy'), [0, 1]],
-            ['degraded-project', fixture('degraded'), [1]],
-            ['partial-source', fixture('partial'), [0, 1]],
-            ['corrupt-source', fixture('corrupt'), [0, 1, 2]],
+        const degraded = fixture('degraded');
+        const partial = fixture('partial');
+        const corrupt = fixture('corrupt');
+        fs.mkdirSync(path.join(degraded.project, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(degraded.project, '.awm', 'profile.json'), '{not-json');
+        fs.mkdirSync(path.join(partial.project, '.awm', 'evidence', 'cycles'), { recursive: true });
+        fs.mkdirSync(path.join(corrupt.project, '.awm', 'evidence', 'cycles'), { recursive: true });
+        fs.writeFileSync(path.join(corrupt.project, '.awm', 'evidence', 'cycles', `${'d'.repeat(64)}.json`), '{broken');
+        const cases: Array<[string, Fixture, number, RegExp]> = [
+            ['machine-only-healthy', machine, 0, /Machine \/ install/],
+            ['degraded-project', degraded, 1, /Project readiness/],
+            ['partial-source', partial, 1, /source unavailable/i],
+            ['corrupt-source', corrupt, 1, /Final \/ history\n  Eligible evidence rows: 0\n  ⊘ source unavailable/],
         ];
         try {
-            for (const [, f, exits] of cases) {
+            for (const [, f, exit, discriminant] of cases) {
                 const before = treeHash(f.root);
                 const result = command(f, 'doctor', '--full');
-                expect(exits).toContain(result.status);
-                expect(result.stdout).toContain('Machine / install');
+                expect(result.status).toBe(exit);
+                expect(result.stdout).toMatch(discriminant);
                 expect(treeHash(f.root)).toBe(before);
             }
         } finally { for (const [, f] of cases) fs.rmSync(f.root, { recursive: true, force: true }); }

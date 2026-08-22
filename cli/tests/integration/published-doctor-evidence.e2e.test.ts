@@ -47,6 +47,12 @@ acceptance('published doctor and evidence acceptance (R8.7)', () => {
             fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: 'published-doctor-fixture', private: true }));
             fs.writeFileSync(path.join(project, 'plan.md'), '# published evidence fixture\n');
             expect(command(project, 'git', ['init']).status).toBe(0);
+            expect(command(project, 'git', ['config', 'user.email', 'published@example.invalid']).status).toBe(0);
+            expect(command(project, 'git', ['config', 'user.name', 'Published acceptance']).status).toBe(0);
+            expect(command(project, 'git', ['add', '.']).status).toBe(0);
+            expect(command(project, 'git', ['commit', '-m', 'fixture']).status).toBe(0);
+            const branch = command(project, 'git', ['branch', '--show-current']).stdout.trim();
+            expect(branch).not.toBe('');
             expect(command(project, 'git', ['remote', 'add', 'origin', 'https://github.com/example/published-doctor-fixture.git']).status).toBe(0);
             const env = { ...process.env, AWM_HOME: home, AWM_NO_UPDATE_CHECK: '1' };
             const invoke = (...args: string[]) => command(project, process.execPath, [path.join(cliRoot, 'dist', 'src', 'index.js'), ...args], env);
@@ -57,11 +63,25 @@ acceptance('published doctor and evidence acceptance (R8.7)', () => {
             const html = invoke('doctor', '--html', 'doctor.html');
             expect([0, 1]).toContain(html.status);
             expect(fs.readFileSync(path.join(project, 'doctor.html'), 'utf8')).toContain("script-src 'none'");
-            // Capture has a strict journal precondition; a fresh published consumer
-            // must reject absent durable state with its documented invocation exit.
+            // Seed a completed durable journal using the downloaded package's own
+            // journal store: this stays on the published-artifact boundary while
+            // making capture exercise its real CLI path, not an injected helper.
+            const journalScript = [
+                `const store=require(${JSON.stringify(path.join(cliRoot, 'dist', 'src', 'core', 'journal', 'store.js'))});`,
+                'store.initJournal(process.argv[1], process.argv[2]);',
+                'const state=store.readJournal(process.argv[1], process.argv[2]).state;',
+                "state.cycle={...state.cycle,status:'COMPLETE',completedAt:'2026-08-22T10:00:01.000Z'};",
+                'store.writeJournal(process.argv[1], process.argv[2], state);',
+            ].join('');
+            expect(command(project, process.execPath, ['-e', journalScript, project, branch], env).status).toBe(0);
             const capture = invoke('evidence', 'capture', '--plan', 'plan.md');
-            expect(capture.status).toBe(2);
-            expect(capture.stderr).toMatch(/journal|evidence capture/i);
+            expect(capture.status).toBe(0);
+            expect(capture.stdout.trim()).toMatch(/^[a-f0-9]{64}$/);
+            expect(fs.existsSync(path.join(project, '.awm', 'evidence', 'cycles', `${capture.stdout.trim()}.json`))).toBe(true);
+            // The retrospective/ledger lifecycle happens after the durable
+            // observation, never instead of it.
+            expect(invoke('ledger', 'add', '--branch', branch, '--polarity', 'finding', '--class', 'quality', '--signature', 'published-retro-contract', '--severity', 'important', '--desc', 'published acceptance').status).toBe(0);
+            expect(invoke('ledger', 'archive', '--branch', branch).status).toBe(0);
             const retro = fs.readFileSync(path.join(registry, 'skills', 'harness-retro', 'SKILL.md'), 'utf8');
             expect(retro).toMatch(/evidence capture|CycleEvidenceV1/i);
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
