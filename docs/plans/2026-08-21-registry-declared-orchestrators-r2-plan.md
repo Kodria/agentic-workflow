@@ -602,7 +602,7 @@ Esta task no cambia comportamiento: fija el comportamiento actual para que la Ta
 **Files:**
 - Modify: `cli/tests/commands/hooks/install.test.ts`
 
-- [ ] **Step 1: Agregar un test que fije el contrato observable del hook**
+- [x] **Step 1: Agregar un test que fije el contrato observable del hook**
 
 ```typescript
 it('el hook queda apuntando a un archivo legible con el contenido de using-awm', () => {  // verifies R6.1
@@ -626,7 +626,7 @@ npx jest tests/commands/hooks/install.test.ts --runInBand
 
 Esperado: PASS. **Si falla acá, el test está mal escrito** — corregirlo antes de seguir, porque no sirve como red si no refleja el comportamiento actual.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd /home/user/agentic-workflow
