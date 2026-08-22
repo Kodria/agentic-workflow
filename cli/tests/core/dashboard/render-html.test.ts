@@ -65,7 +65,11 @@ describe('renderDashboardHtml', () => {
         expect(html).toContain('data-diagnostic-card="sensors"');
         expect(html).toContain('data-diagnostic-card="permissions"');
         expect(html).toContain('Privacy &amp; security');
+        expect(html).toContain('data-static-privacy-toggle');
+        expect(html).toContain('type="checkbox" checked disabled');
         expect(html).toContain('Prioritized actions');
+        expect(html).toContain('Copy command (static)');
+        expect(html).toContain('data-machine-diagnostics');
         expect(html.indexOf('awm sensors run')).toBeLessThan(html.indexOf('awm init'));
     });
 
@@ -90,6 +94,30 @@ describe('renderDashboardHtml', () => {
         expect(html).toContain('data-project-evidence');
         expect(html).toContain('Plans &amp; work');
         expect(html).toContain('Impact &amp; traceability');
+        expect(html).toContain('data-project-header-actions');
+        expect(html).toContain('data-plan-card="active"');
+        expect(html).toContain('data-plan-card="blocked"');
+        expect(html).toContain('Progress: no observation');
+        expect(html).toContain('View plan (static)');
+        expect(html).toContain('<th scope="col">Type</th>');
+        expect(html).toContain('<th scope="col">Source</th>');
+        expect(html).toContain('<th scope="col">Status</th>');
+        expect(html).toContain('<th scope="col">Date</th>');
+        expect(html).toContain('No impact evidence is available in this snapshot.');
+        expect(html).toContain('data-closure-actions');
+    });
+
+    it('includes the artifact-aligned, noninteractive machine toolbar without weakening static CSP', () => {
+        const html = renderDashboardHtml(validateDashboardSnapshotV1(snapshot({
+            project: { detected: false, label: 'No project detected' },
+        })));
+        expect(html).toContain('data-dashboard-toolbar');
+        expect(html).toContain('aria-label="Search dashboard"');
+        expect(html).toContain('placeholder="Search resources" disabled');
+        for (const label of ['Notifications (static)', 'Help (static)', 'Export dashboard (static)', 'New deployment (static)']) {
+            expect(html).toContain(label);
+        }
+        expect(html).toContain("script-src 'none'");
     });
 
     it('renders every canonical project section once and in lifecycle order', () => {
