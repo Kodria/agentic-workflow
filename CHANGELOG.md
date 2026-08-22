@@ -1,3 +1,8 @@
+## v8.3.0 - 2026-08-22
+
+### Features
+- **cli:** orquestadores declarados por registry — lectura, composicion y entrega a los tres proveedores (#107)
+
 ## v8.2.1 - 2026-08-22
 
 ### Fixes
