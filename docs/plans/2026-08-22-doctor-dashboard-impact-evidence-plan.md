@@ -329,7 +329,7 @@ _Requirements: R1.2, R1.3, R1.4, R1.5, R1.6, R1.7, R4.1, R4.2, R4.3, R4.4, R4.5,
 - Modify: `cli/src/commands/doctor.ts`
 - Modify: `cli/tests/commands/doctor.test.ts`
 
-- [ ] **Step 1: Write failing option-matrix tests**
+- [x] **Step 1: Write failing option-matrix tests**
 
 ```ts
 it.each([
@@ -343,13 +343,13 @@ it.each([
 });
 ```
 
-- [ ] **Step 2: Run and observe failure**
+- [x] **Step 2: Run and observe failure**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/commands/doctor.test.ts tests/core/dashboard/write-html.test.ts`
 
 Expected: FAIL because `full`, `html`, `force`, and the writer are absent.
 
-- [ ] **Step 3: Add validated options without touching the JSON branch**
+- [x] **Step 3: Add validated options without touching the JSON branch**
 
 ```ts
 export interface RunDoctorOptions {
@@ -364,7 +364,7 @@ export interface RunDoctorOptions {
 
 `runDoctor` must validate combinations first, return through the existing provider JSON path when `json === true`, build one validated snapshot for `full` or `html`, print the final HTML path only after success, and preserve the existing default text path (R1.1–R1.7).
 
-- [ ] **Step 4: Implement fail-loud target validation**
+- [x] **Step 4: Implement fail-loud target validation**
 
 ```ts
 export interface HtmlWriteInput {
@@ -381,11 +381,11 @@ export function writeHtmlAtomically(input: HtmlWriteInput): void;
 
 Reject absent/empty/flag-token targets, directories, symlinks, non-regular files, existing targets without force, missing/unwritable parents, and unsupported values. Resolve relative targets against `cwd`; preserve absolute targets. On POSIX open the adjacent temp file with `0o600`, write, fsync, close, and rename. On Windows create a regular file using the parent ACL and do not emulate POSIX modes. Any failure removes only its known adjacent temp file and preserves the previous target.
 
-- [ ] **Step 5: Add filesystem matrix tests**
+- [x] **Step 5: Add filesystem matrix tests**
 
 Name and assert each R4.1–R4.12 case, including injected failures after open, after write, after fsync, and before rename. Assert exit 0/1/2 mapping for healthy, degraded, and invalid/failing snapshots (R4.8).
 
-- [ ] **Step 6: Demonstrate writer regression boundary, run, and commit**
+- [x] **Step 6: Demonstrate writer regression boundary, run, and commit**
 
 Temporarily replace atomic rename with a direct target write, observe the preservation test fail, restore atomic rename, and observe PASS. Do not commit the temporary mutation (R8.5).
 
