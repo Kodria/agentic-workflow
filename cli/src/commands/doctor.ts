@@ -138,12 +138,12 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
     if (opts.full || opts.html) {
         try {
             const cwd = opts.cwd ?? process.cwd();
+            const target = opts.html ? resolveHtmlTarget({ cwd, target: opts.html, force: opts.force }) : undefined;
             const snapshot = collectDashboardSnapshot({ cwd, now: new Date().toISOString() });
             if (opts.full) process.stdout.write(JSON.stringify(snapshot, null, 2) + '\n');
             if (opts.html) {
-                const target = resolveHtmlTarget({ cwd, target: opts.html, force: opts.force });
                 const body = `<html><body><pre>${JSON.stringify(snapshot, null, 2).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</pre></body></html>\n`;
-                writeHtmlAtomically({ target, html: body });
+                writeHtmlAtomically({ target: target!, html: body });
                 process.stdout.write(`${target}\n`);
             }
             return snapshot.overall === 'healthy' ? 0 : 1;
