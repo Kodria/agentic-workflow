@@ -142,8 +142,8 @@ export type HookStatus = {
     // that don't have a heartbeat mechanism.
     trust?: 'pending-trust' | 'healthy' | 'stale';
     checks: {
-        // Claude-only checks (the using-awm.md bootstrap skill symlink and the
-        // run-hook.cmd wrapper script). Absent for agents without them.
+        // Claude-only checks (the materialized using-awm.md bootstrap skill file
+        // and the run-hook.cmd wrapper script). Absent for agents without them.
         bootstrapSkill?: CheckResult;
         sessionStartScript: CheckResult;
         runHookWrapper?: CheckResult;
