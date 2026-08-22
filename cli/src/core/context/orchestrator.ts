@@ -7,6 +7,23 @@ import { CodexAgentsStrategy } from './strategies/codex-agents';
 import { buildContext } from './provider';
 import { materialize, globalContextPath, projectContextPath } from './materializer';
 import { InjectionInput, InjectionState, MaterializedRef } from './types';
+import { listRegistries } from '../registries';
+import { readDeclaredOrchestrators, DeclaredOrchestrator } from '../orchestrators';
+
+/** Recolecta declaraciones de orquestador de TODOS los registries instalados (no solo
+ *  el que se esta operando) y diagnosticos de las que estan rotas. Nunca lanza:
+ *  `readDeclaredOrchestrators` ya garantiza eso por-registry (R1.2), asi que un registry
+ *  con declaracion rota se omite del resultado sin impedir construir el contexto (R5.1). */
+function collectDeclaredOrchestrators(): { declared: DeclaredOrchestrator[]; diagnostics: string[] } {
+    const declared: DeclaredOrchestrator[] = [];
+    const diagnostics: string[] = [];
+    for (const reg of listRegistries()) {
+        const r = readDeclaredOrchestrators(reg.contentRoot);
+        declared.push(...r.orchestrators);
+        diagnostics.push(...r.diagnostics);
+    }
+    return { declared, diagnostics };
+}
 
 export type ContextOp = {
     agent: AgentTarget;
@@ -53,7 +70,13 @@ export class InjectionOrchestrator {
 
     /** Full input: builds context from registry and materializes to disk. Used by installContext only. */
     private inputFor(op: ContextOp): InjectionInput {
-        const ctx = buildContext({ registryRoot: op.registryRoot, profileExtensions: op.profileExtensions });
+        const { declared, diagnostics } = collectDeclaredOrchestrators();
+        for (const d of diagnostics) console.warn(`warning: ${d}`);
+        const ctx = buildContext({
+            registryRoot: op.registryRoot,
+            profileExtensions: op.profileExtensions,
+            declaredOrchestrators: declared,
+        });
         const absPath = this.contextPathFor(op);
         const ref = materialize(ctx, absPath, op.scope);
         return {
@@ -80,7 +103,17 @@ export class InjectionOrchestrator {
         const absPath = this.contextPathFor(op);
         let contentHash = '';
         try {
-            const ctx = buildContext({ registryRoot: op.registryRoot, profileExtensions: op.profileExtensions });
+            // Debe recolectar declarados igual que inputFor: si no, el hash "esperado" aqui
+            // diverge del hash realmente materializado por installContext en cuanto algun
+            // registry instalado declare un orquestador, y contextStatus reportaria 'stale'
+            // de forma permanente incluso justo despues de un install correcto.
+            const { declared, diagnostics } = collectDeclaredOrchestrators();
+            for (const d of diagnostics) console.warn(`warning: ${d}`);
+            const ctx = buildContext({
+                registryRoot: op.registryRoot,
+                profileExtensions: op.profileExtensions,
+                declaredOrchestrators: declared,
+            });
             contentHash = ctx.contentHash;
         } catch (err) {
             // Only suppress "registry not yet initialised" — all other errors propagate.
