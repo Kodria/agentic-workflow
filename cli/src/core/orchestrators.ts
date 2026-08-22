@@ -23,6 +23,12 @@ export interface DeclaredOrchestratorsResult {
 
 const ALLOWED_FIELDS = ['name', 'appliesWhen', 'terminatesTo'] as const;
 
+// These fields are semantically short (a short identity, a short trigger condition, a
+// short target name) — no legitimate declaration needs more than this. A registry is
+// untrusted input whose fields flow straight into the AI-provider context payload, so an
+// unbounded string here would let a crafted registry bloat/DoS that context.
+const MAX_FIELD_LENGTH = 500;
+
 export function readDeclaredOrchestrators(root: string): DeclaredOrchestratorsResult {
     const file = path.join(root, REGISTRY_MANIFEST_NAME);
 
@@ -74,6 +80,8 @@ export function readDeclaredOrchestrators(root: string): DeclaredOrchestratorsRe
         const value = entries[field];
         if (typeof value !== 'string' || value.trim() === '') {
             problems.push(`"${field}" must be a non-empty string`);
+        } else if (value.length > MAX_FIELD_LENGTH) {
+            problems.push(`"${field}" must be at most ${MAX_FIELD_LENGTH} characters`);
         }
     }
 
@@ -105,13 +113,29 @@ export function readDeclaredOrchestrators(root: string): DeclaredOrchestratorsRe
  * `collectAndWarn` siguiera viviendo en orchestrator.ts, que commands/hooks/claude.ts
  * la importara cerraria un ciclo real: claude.ts -> orchestrator.ts ->
  * strategies/hook-merge.ts -> commands/hooks/install.ts -> claude.ts.
+ *
+ * Dedupe por "name" entre registries: dos registries instalados pueden declarar el mismo
+ * nombre (posiblemente con appliesWhen/terminatesTo distintos y contradictorios). En vez
+ * de emitir ambas filas al markdown compuesto, gana la primera en el orden de
+ * listRegistries() (= orden de registries.json, ver registries.ts) y la duplicada se
+ * descarta con un diagnostico — misma degradacion tolerante (reportar, no lanzar) que el
+ * resto de este modulo (R1.2, R5.1).
  */
 export function collectDeclaredOrchestrators(): { declared: DeclaredOrchestrator[]; diagnostics: string[] } {
     const declared: DeclaredOrchestrator[] = [];
     const diagnostics: string[] = [];
+    const seenNames = new Set<string>();
     for (const reg of listRegistries()) {
         const r = readDeclaredOrchestrators(reg.contentRoot);
-        declared.push(...r.orchestrators);
+        for (const orch of r.orchestrators) {
+            if (seenNames.has(orch.name)) {
+                const file = path.join(reg.contentRoot, REGISTRY_MANIFEST_NAME);
+                diagnostics.push(`${file}: orchestrator "${orch.name}" duplicates one already declared by an earlier registry — shadowed duplicate dropped`);
+                continue;
+            }
+            seenNames.add(orch.name);
+            declared.push(orch);
+        }
         diagnostics.push(...r.diagnostics);
     }
     return { declared, diagnostics };
