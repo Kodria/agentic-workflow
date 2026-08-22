@@ -90,6 +90,16 @@ describe('renderDashboardHtml', () => {
         expect(html).toContain('Impact &amp; traceability');
     });
 
+    it('renders every canonical project section once and in lifecycle order', () => {
+        const html = renderDashboardHtml(validateDashboardSnapshotV1(snapshot({ confidence: 'provisional' })));
+        const ids = ['machine', 'project', 'planning', 'execution', 'qa', 'retro', 'history'];
+        const positions = ids.map((id) => html.indexOf(`<section id="${id}"`));
+        expect(positions.every((position) => position >= 0)).toBe(true);
+        expect([...positions].sort((left, right) => left - right)).toEqual(positions);
+        for (const id of ids) expect(html.match(new RegExp(`<section id="${id}"`, 'g'))).toHaveLength(1);
+        expect(html.match(/<section[\s>]/g)).toHaveLength(ids.length);
+    });
+
     it('is deterministic and preserves every history and task observation without privacy leakage', () => {
         const sections = ['machine', 'project', 'planning', 'execution', 'qa', 'retro', 'history'].map((id) => ({
             id: id as DashboardSnapshotV1['sections'][number]['id'], availability: 'available' as const,

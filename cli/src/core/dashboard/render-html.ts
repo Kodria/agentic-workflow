@@ -9,17 +9,17 @@ const STATE_GLYPH: Record<DashboardItemState, string> = { ok: '●', attention: 
 
 function escapeHtml(value: string): string { return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
-function sectionHtml(section: DashboardSectionV1): string {
+function sectionHtml(section: DashboardSectionV1, supplement = ''): string {
     const title = SECTION_TITLES[section.id];
     const availability = section.availability === 'available' ? '' : `<p class="availability ${section.availability}">⊘ Source ${escapeHtml(section.availability.replace('_', ' '))}</p>`;
     const rows = section.items.length === 0 ? '<p class="empty">No observations reported.</p>' : `<table><thead><tr><th scope="col">Observation</th><th scope="col">State</th><th scope="col">Detail</th><th scope="col">Remediation</th></tr></thead><tbody>${section.items.map((item) => `<tr><td data-label="Observation">${escapeHtml(item.label)}</td><td data-label="State"><span class="state ${item.state}" aria-label="${item.state}">${STATE_GLYPH[item.state]} ${STATE_TEXT[item.state]}</span></td><td data-label="Detail">${item.detail ? escapeHtml(item.detail) : '—'}</td><td data-label="Remediation">${item.remediation ? `<code>${escapeHtml(item.remediation)}</code>` : '—'}</td></tr>`).join('')}</tbody></table>`;
-    return `<section id="${section.id}" aria-label="${title}"><header><h2>${title}</h2><span class="eyebrow">${escapeHtml(section.availability.replace('_', ' '))}</span></header><div class="section-body">${availability}${rows}</div></section>`;
+    return `<section id="${section.id}" aria-label="${title}"><header><h2>${title}</h2><span class="eyebrow">${escapeHtml(section.availability.replace('_', ' '))}</span></header><div class="section-body">${availability}${supplement}${rows}</div></section>`;
 }
 
 function diagnosticCards(items: DashboardSectionV1['items'], attribute: 'data-machine-diagnostics' | 'data-machine-preparation'): string {
     const labels = ['installation', 'sensors', 'permissions'];
     const cards = items.slice(0, 3).map((item, index) => `<li data-diagnostic-card="${labels[index] ?? 'diagnostic'}"><span class="state ${item.state}" aria-label="${item.state}">${STATE_GLYPH[item.state]} ${STATE_TEXT[item.state]}</span><strong>${escapeHtml(item.label)}</strong><span>${item.detail ? escapeHtml(item.detail) : 'No additional detail'}</span></li>`).join('') || '<li><span class="state not_applicable" aria-label="not applicable">— Not applicable</span><strong>No machine observations</strong><span>Machine diagnostics are not available.</span></li>';
-    return `<section ${attribute} aria-label="Machine preparation"><header><h2>${attribute === 'data-machine-diagnostics' ? 'Machine diagnostics' : 'Machine preparation'}</h2></header><div class="section-body"><ul class="diagnostic-grid">${cards}</ul></div></section>`;
+    return `<div ${attribute} aria-label="Machine preparation"><h3>${attribute === 'data-machine-diagnostics' ? 'Machine diagnostics' : 'Machine preparation'}</h3><ul class="diagnostic-grid">${cards}</ul></div>`;
 }
 
 function privacyAndActions(snapshot: DashboardSnapshotV1): string {
@@ -37,8 +37,9 @@ function projectComposition(snapshot: DashboardSnapshotV1): string {
         return `<li data-stage="${stage}"><strong>${stage === 'evidence' ? 'Evidence' : SECTION_TITLES[id]}</strong><span class="state ${available ? 'ok' : 'unavailable'}">${available ? '● Available' : '⊘ Unavailable'}</span></li>`;
     }).join('');
     const provisional = snapshot.confidence === 'provisional' ? '<aside data-provisional-evidence aria-label="Provisional evidence"><strong>Provisional evidence</strong><span>Current observations are still being verified by downstream QA and evidence capture.</span></aside>' : '';
-    const baseSections = snapshot.sections.map(sectionHtml).join('');
-    return `${diagnosticCards(byId.get('machine')?.items ?? [], 'data-machine-preparation')}<section data-lifecycle-timeline aria-label="Lifecycle timeline"><header><h2>Lifecycle timeline</h2></header><div class="section-body"><ol class="timeline">${stages}</ol></div></section>${provisional}<section data-project-evidence aria-label="Project evidence composition"><div class="evidence-grid"><div><h2>Plans &amp; work</h2><p class="empty">Planning and execution observations remain visible below.</p></div><div><h2>Impact &amp; traceability</h2><p class="empty">QA, retro, and eligible history remain visible below.</p></div></div></section>${baseSections}`;
+    const machineSupplement = `${diagnosticCards(byId.get('machine')?.items ?? [], 'data-machine-preparation')}<div data-lifecycle-timeline aria-label="Lifecycle timeline"><h3>Lifecycle timeline</h3><ol class="timeline">${stages}</ol></div>${provisional}`;
+    const historySupplement = '<div data-project-evidence aria-label="Project evidence composition"><div class="evidence-grid"><div><h3>Plans &amp; work</h3><p class="empty">Planning and execution observations remain visible above.</p></div><div><h3>Impact &amp; traceability</h3><p class="empty">QA, retro, and eligible history are visible here.</p></div></div></div>';
+    return snapshot.sections.map((section) => sectionHtml(section, section.id === 'machine' ? machineSupplement : section.id === 'history' ? historySupplement : '')).join('');
 }
 
 /** Renders a portable, static, share-safe dashboard document. */
@@ -46,7 +47,7 @@ export function renderDashboardHtml(input: DashboardSnapshotV1): string {
     const snapshot = validateDashboardSnapshotV1(input);
     const overall = escapeHtml(snapshot.overall);
     const project = escapeHtml(snapshot.project.label);
-    const sections = snapshot.project.detected ? projectComposition(snapshot) : `${diagnosticCards(snapshot.sections.find((section) => section.id === 'machine')?.items ?? [], 'data-machine-diagnostics')}${privacyAndActions(snapshot)}${snapshot.sections.map(sectionHtml).join('')}`;
+    const sections = snapshot.project.detected ? projectComposition(snapshot) : `${diagnosticCards(snapshot.sections.find((section) => section.id === 'machine')?.items ?? [], 'data-machine-diagnostics')}${privacyAndActions(snapshot)}${snapshot.sections.map((section) => sectionHtml(section)).join('')}`;
     const links = snapshot.sections.map((section) => `<li><a href="#${section.id}">${SECTION_TITLES[section.id]}</a></li>`).join('');
     const projectDetected = snapshot.project.detected;
     const heading = projectDetected ? 'Project lifecycle' : 'Machine configuration';
