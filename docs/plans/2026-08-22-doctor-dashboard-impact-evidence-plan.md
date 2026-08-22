@@ -413,7 +413,7 @@ _Requirements: R3.1, R3.2, R3.3, R3.5, R3.6, R3.7, R5.1, R5.2, R5.3, R5.4, R5.5,
 **Skills:** frontend-craft
 **Design artifacts:** .stitch/designs/machine-only-configuration-dashboard.html, .stitch/designs/machine-only-configuration-dashboard.png, .stitch/designs/project-lifecycle-impact-evidence.html, .stitch/designs/project-lifecycle-impact-evidence.png
 
-- [ ] **Step 1: Write failing renderer contract tests**
+- [x] **Step 1: Write failing renderer contract tests**
 
 ```ts
 it('renders both formats from the same validated snapshot instance', () => {
@@ -437,25 +437,25 @@ it('emits a self-contained scriptless document with restrictive CSP', () => {
 });
 ```
 
-- [ ] **Step 2: Run and observe failure**
+- [x] **Step 2: Run and observe failure**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/dashboard/render-terminal.test.ts tests/core/dashboard/render-html.test.ts`
 
 Expected: FAIL because both renderer modules are absent.
 
-- [ ] **Step 3: Implement terminal rendering in canonical section order**
+- [x] **Step 3: Implement terminal rendering in canonical section order**
 
 `renderFullTerminal(snapshot: DashboardSnapshotV1): string` validates its public input, renders every observation, uses text plus glyphs for state, emits exact remediation commands, and never reads files or invokes commands. Snapshot tests cover machine-only, healthy project, degraded project, partial source, long history, and large task count.
 
-- [ ] **Step 4: Implement semantic static HTML from the approved designs**
+- [x] **Step 4: Implement semantic static HTML from the approved designs**
 
 Use `<header>`, `<nav aria-label="Dashboard sections">`, `<main>`, ordered `<section>` elements, semantic tables/lists, `<code>` for commands, and a `<footer>`. Inline `styles.ts` must provide the approved graphite/ivory/indigo/cyan/amber tokens, visible `:focus-visible`, 1600px desktop composition, narrow stacking without horizontal data loss, and `@media print`. Every dynamic value passes through `escapeHtml` after sanitization.
 
-- [ ] **Step 5: Add deterministic and accessibility assertions**
+- [x] **Step 5: Add deterministic and accessibility assertions**
 
 Render the same snapshot twice and assert byte equality after pinning `generatedAt`. Assert heading order, landmark names, table headers, state text adjacent to icons, print rules, focus rules, absence of score/ranking labels, and visibility of every long-history row (R3.5–R3.7, R5.1–R5.9).
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run: `cd cli && npm test -- --runTestsByPath tests/core/dashboard/render-terminal.test.ts tests/core/dashboard/render-html.test.ts`
 
