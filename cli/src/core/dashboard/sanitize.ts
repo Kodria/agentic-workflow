@@ -1,5 +1,6 @@
 const STATES = new Set(['ok', 'attention', 'missing', 'unavailable', 'not_applicable']);
-const DANGEROUS = /(?:ghp_[A-Za-z0-9_]+|<\/?script\b|(?:\/home\/|\/Users\/|[A-Za-z]:\\)[^\s"']*)/iu;
+const ALLOWED_KEYS = new Set(['findings', 'label', 'id', 'state', 'detail', 'execution', 'qa', 'retro', 'history']);
+const DANGEROUS = /(?:ghp_|sk-[A-Za-z]|<|>|(?:\/home\/|\/Users\/|[A-Za-z]:\\)|token|secret|password)/iu;
 
 function sanitize(value: unknown, key?: string): unknown {
     if (value === null || typeof value === 'boolean') return value;
@@ -15,11 +16,8 @@ function sanitize(value: unknown, key?: string): unknown {
     if (!value || typeof value !== 'object') throw new Error('Dashboard source must contain JSON-compatible values');
     const out: Record<string, unknown> = {};
     for (const [entryKey, entryValue] of Object.entries(value)) {
-        if (/token|secret|password|path/iu.test(entryKey)) {
-            out[entryKey] = '[redacted]';
-        } else {
-            out[entryKey] = sanitize(entryValue, entryKey);
-        }
+        if (!ALLOWED_KEYS.has(entryKey)) continue;
+        out[entryKey] = sanitize(entryValue, entryKey);
     }
     return out;
 }

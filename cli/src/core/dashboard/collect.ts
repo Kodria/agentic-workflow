@@ -38,7 +38,12 @@ function findings(items: DashboardFinding[] | undefined): DashboardItemV1[] {
         const remediation = REMEDIATION_BY_FINDING_ID[item.id];
         if (item.state !== 'ok' && item.state !== 'not_applicable' && !remediation) return [];
         return [{ id: item.id, label: item.label, state: item.state, ...(item.detail ? { detail: item.detail } : {}), ...(remediation ? { remediation } : {}) }];
-    });
+    }).sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function unavailableFinding(id: string, label: string): DashboardItemV1[] {
+    const remediation = REMEDIATION_BY_FINDING_ID[id];
+    return remediation ? [{ id, label, state: 'unavailable', remediation }] : [];
 }
 
 function section(id: DashboardSectionV1['id'], availability: DashboardSectionV1['availability'], items: DashboardItemV1[] = []): DashboardSectionV1 {
@@ -66,7 +71,9 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     const planItems = plansResult.value ? findings(sanitizeDashboardSource(plansResult.value) as PlanDashboardSource[]) : [];
     const sections = [
         machineSection,
-        section('project', projectResult.failed ? 'unavailable' : 'available', findings(projectSource?.findings)),
+        section('project', projectResult.failed ? 'unavailable' : 'available', projectResult.failed
+            ? unavailableFinding('project.sensors.unavailable', 'Project source unavailable')
+            : findings(projectSource?.findings)),
         section('planning', plansResult.failed ? 'unavailable' : 'available', planItems),
         section('execution', executionResult.failed ? 'unavailable' : 'available', findings(execution?.execution)),
         section('qa', executionResult.failed ? 'unavailable' : 'available', findings(execution?.qa)),

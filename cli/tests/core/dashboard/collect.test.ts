@@ -48,13 +48,25 @@ describe('collectDashboardSnapshot', () => {
         });
         expect(snapshot.sections.find((section) => section.id === 'machine')?.items).toEqual([]);
         expect(snapshot.sections.find((section) => section.id === 'project')?.availability).toBe('unavailable');
+        expect(snapshot.sections.find((section) => section.id === 'project')?.items[0].remediation).toBe('awm sensors status');
+    });
+
+    it('sorts findings by stable canonical id', () => {
+        const snapshot = collectDashboardSnapshot({
+            cwd: '/definitely-not-a-project', now: fixedNow,
+            adapters: { machine: () => ({ findings: [
+                { id: 'machine.registries.stale', label: 'Registries', state: 'attention' },
+                { id: 'machine.preferences.missing', label: 'Preferences', state: 'missing' },
+            ] }), project: jest.fn(), plans: jest.fn(), execution: jest.fn() },
+        });
+        expect(snapshot.sections[0].items.map((item) => item.id)).toEqual(['machine.preferences.missing', 'machine.registries.stale']);
     });
 });
 
 describe('sanitizeDashboardSource', () => {
     it('removes hostile paths and secrets before rendering', () => {
-        const safe = sanitizeDashboardSource({ path: '/home/alice/project', token: 'ghp_secret', output: '<script>alert(1)</script>' });
-        expect(JSON.stringify(safe)).not.toMatch(/alice|ghp_|script|\/home\//i);
+        const safe = sanitizeDashboardSource({ path: '/home/alice/project', token: 'ghp_secret', username: 'alice', output: '<script>alert(1)</script>', rawOutput: 'sk-live-secret' });
+        expect(JSON.stringify(safe)).not.toMatch(/alice|ghp_|script|\/home\/|sk-live|alert/i);
     });
 
     it('rejects invalid item states explicitly', () => {
