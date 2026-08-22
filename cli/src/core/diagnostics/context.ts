@@ -280,7 +280,7 @@ function gatherProject(root: string, bundles: BundleDefinition[], agent: AgentTa
 
     return {
         root,
-        profile: { present: profilePresent, extensions: profile.extensions },
+        profile: { present: profilePresent, extensions: profile.extensions, registries: profile.registries },
         activeBundles: { expected, linked, broken },
         orphanLinks,
         sensors: { present: fs.existsSync(path.join(root, '.awm', 'sensors.json')) },

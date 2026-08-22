@@ -3,8 +3,9 @@ import { sanitizeDashboardSource } from './sanitize';
 import { validateDashboardSnapshotV1 } from './validate';
 import { classifyPlanState, type PlanStateInput } from './plan-state';
 import type { DashboardItemState, DashboardItemV1, DashboardSectionV1, DashboardSnapshotV1 } from './types';
+import type { HarnessContext, ProviderCheck, ProviderCheckState } from '../diagnostics/types';
 
-export interface DashboardFinding { id: string; label: string; state: DashboardItemState; detail?: string; }
+export interface DashboardFinding { id: string; label: string; state: DashboardItemState; detail?: string; remediation?: string; remediationVerified?: boolean; }
 export interface MachineDashboardSource { findings?: DashboardFinding[]; }
 export interface ProjectDashboardSource { label?: string; findings?: DashboardFinding[]; }
 export interface PlanDashboardSource { id: string; label: string; state: DashboardItemState; detail?: string; lifecycle?: PlanStateInput; }
@@ -34,13 +35,76 @@ const EMPTY_ADAPTERS: DashboardSourceAdapters = {
     machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined,
 };
 
+const SAFE_REMEDIATIONS = new Set(['awm init', 'awm update', 'awm sync', 'awm sensors status', 'awm preflight']);
+const HEALTHY_PROVIDER_STATES = new Set<ProviderCheckState>(['supported', 'healthy', 'shared', 'delivered']);
+const INAPPLICABLE_PROVIDER_STATES = new Set<ProviderCheckState>(['unsupported']);
+
+function providerState(state: ProviderCheckState): DashboardItemState {
+    if (HEALTHY_PROVIDER_STATES.has(state)) return 'ok';
+    if (INAPPLICABLE_PROVIDER_STATES.has(state)) return 'not_applicable';
+    return 'attention';
+}
+
+/**
+ * Maps the already-gathered diagnostics matrix into the snapshot's read-only
+ * source seam. It deliberately does not re-read providers, execute sensors, or
+ * relay provider detail/remediation prose: those values can contain local paths,
+ * command output, or credentials. The fixed IDs are derived solely from the
+ * provider/check enums and therefore remain stable across runs.
+ */
+export function productionDashboardAdapters(context: HarnessContext): DashboardSourceAdapters {
+    if (!context || typeof context !== 'object' || !Array.isArray(context.providers)) throw new Error('productionDashboardAdapters requires gathered provider diagnostics');
+    const machineFindings: DashboardFinding[] = context.providers.flatMap((provider) => provider.checks.flatMap((check: ProviderCheck) => {
+        const finding: DashboardFinding = {
+            id: `machine.provider.${provider.id}.${check.id}`,
+            // Provider labels are configuration prose. The provider id and check id
+            // are enum-controlled and sufficient for a stable public observation.
+            label: `Provider ${provider.id}: ${check.id}`,
+            state: providerState(check.state),
+            // Provider remediation is intentionally not forwarded. It is free-form
+            // diagnostics text, not a dashboard-approved canonical command.
+            remediationVerified: false,
+        };
+        // These two legacy diagnosis states are the only provider observations
+        // with a pre-existing, exact dashboard command mapping.
+        if (check.id === 'skills.global' && check.state === 'absent') {
+            return [finding, { id: 'machine.preferences.missing', label: 'Preferences', state: 'missing', remediationVerified: true }];
+        }
+        if (check.id === 'skills.global' && check.state === 'stale') {
+            return [finding, { id: 'machine.registries.stale', label: 'Registries', state: 'attention', remediationVerified: true }];
+        }
+        return [finding];
+    }));
+    const project = context.project;
+    const projectFindings: DashboardFinding[] = !project ? [] : [
+        { id: project.profile.present ? 'project.profile.present' : 'project.profile.missing', label: 'Profile', state: project.profile.present ? 'ok' : 'missing', remediation: 'awm init', remediationVerified: true },
+        { id: 'project.extensions.configured', label: 'Extensions', state: project.profile.extensions.length > 0 ? 'ok' : 'not_applicable' },
+        { id: 'project.registry-pins.present', label: 'Registry pins', state: project.profile.registries && Object.keys(project.profile.registries).length > 0 ? 'ok' : 'not_applicable' },
+        { id: 'project.bundles.coherent', label: 'Active bundles', state: project.activeBundles.broken.length === 0 ? 'ok' : 'attention', remediation: 'awm sync', remediationVerified: true },
+        { id: 'project.context.present', label: 'Project context', state: project.context.present ? 'ok' : 'missing', remediation: 'awm init', remediationVerified: true },
+        { id: 'project.constitution.present', label: 'Constitution', state: project.constitution.present ? 'ok' : 'missing' },
+        { id: project.sensors.present ? 'project.sensors.present' : 'project.sensors.unavailable', label: 'Sensors', state: project.sensors.present ? 'ok' : 'unavailable', remediation: 'awm sensors status', remediationVerified: true },
+        // `preflight()` is async because static tool inspection is async. Doctor's
+        // synchronous legacy API must not dispatch it here; make the absence of that
+        // observation explicit rather than inventing a readiness verdict.
+        { id: 'project.preflight.not_collected', label: 'Static preflight', state: 'not_applicable' },
+    ];
+    return {
+        machine: () => ({ findings: machineFindings }),
+        project: () => ({ label: 'Project detected', findings: projectFindings }),
+        plans: () => [],
+        execution: () => undefined,
+    };
+}
+
 function findings(items: unknown, optional = false): DashboardItemV1[] {
     if (optional && items === undefined) return [];
     if (!Array.isArray(items)) throw new Error('Dashboard findings must be an array');
     return items.flatMap((item) => {
         if (!item || typeof item !== 'object' || typeof item.id !== 'string' || item.id.trim() === '' || typeof item.label !== 'string' || item.label.trim() === '') throw new Error('Dashboard finding is invalid');
         if (!['ok', 'attention', 'missing', 'unavailable', 'not_applicable'].includes(item.state)) throw new Error('Dashboard finding state is invalid');
-        const remediation = REMEDIATION_BY_FINDING_ID[item.id];
+        const remediation = REMEDIATION_BY_FINDING_ID[item.id]
+            ?? (item.remediationVerified === true && typeof item.remediation === 'string' && SAFE_REMEDIATIONS.has(item.remediation) ? item.remediation : undefined);
         if (item.state !== 'ok' && item.state !== 'not_applicable' && !remediation) return [];
         return [{ id: item.id, label: item.label, state: item.state, ...(item.detail ? { detail: item.detail } : {}), ...(remediation ? { remediation } : {}) }];
     }).sort((left, right) => left.id.localeCompare(right.id));

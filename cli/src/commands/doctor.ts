@@ -9,11 +9,10 @@ import { platformLabel, isWindowsNative, WINDOWS_KNOWN_GAP } from '../core/paths
 // read-only y el segundo auto-vivifica el archivo. Ver la nota en config.ts.
 import { readPreferences } from '../utils/config';
 import { resolveAgentTargets } from '../core/agent-targets';
-import { collectDashboardSnapshot } from '../core/dashboard/collect';
+import { collectDashboardSnapshot, productionDashboardAdapters } from '../core/dashboard/collect';
 import { renderDashboardHtml } from '../core/dashboard/render-html';
 import { renderFullTerminal } from '../core/dashboard/render-terminal';
 import { resolveHtmlTarget, writeHtmlAtomically } from '../core/dashboard/write-html';
-import type { DashboardFinding } from '../core/dashboard/collect';
 
 function glyph(status: CheckResult['status']): string {
     if (status === 'ok') return pc.green('✔');
@@ -148,24 +147,8 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
             const targets = resolveTargets({ prefs: readPreferences(), explicit: opts.agent });
             const collectSnapshot = opts.collectSnapshot ?? collectDashboardSnapshot;
             const context = gatherContext({ cwd, agents: targets });
-            const machineFindings = Array.from(new Map((context.providers ?? []).flatMap((provider) => provider.checks.flatMap((check): DashboardFinding[] => {
-                // These are the only production mappings whose operator remedy is
-                // verified by the diagnostics contract; unknown checks stay out.
-                if (check.id === 'skills.global' && check.state === 'absent') return [{ id: 'machine.preferences.missing', label: 'Preferences', state: 'missing' as const }];
-                if (check.id === 'skills.global' && check.state === 'stale') return [{ id: 'machine.registries.stale', label: 'Registries', state: 'attention' as const }];
-                return [];
-            })).map((finding) => [finding.id, finding])).values());
             const snapshot = collectSnapshot({ cwd, now: new Date().toISOString(), adapters: {
-                machine: () => ({ findings: machineFindings }),
-                // These facts already come from gatherContext's read-only project
-                // probes. Plans and execution deliberately remain unobserved here:
-                // Release A has no safe adapter that can classify them without
-                // inventing lifecycle state from filesystem names.
-                project: () => ({ findings: context.project ? [
-                    { id: 'project.profile.missing', label: 'Profile', state: context.project.profile.present ? 'ok' as const : 'missing' as const },
-                    { id: 'project.sensors.unavailable', label: 'Sensors', state: context.project.sensors.present ? 'ok' as const : 'unavailable' as const },
-                ] : [] }),
-                plans: () => [], execution: () => undefined,
+                ...productionDashboardAdapters(context),
             } });
             if (opts.full) process.stdout.write(renderFullTerminal(snapshot) + '\n');
             if (htmlRequested) {

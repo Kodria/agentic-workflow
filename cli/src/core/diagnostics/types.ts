@@ -46,7 +46,7 @@ export interface MachineFacts {
 
 export interface ProjectFacts {
     root: string;
-    profile: { present: boolean; extensions: string[] };
+    profile: { present: boolean; extensions: string[]; registries?: Record<string, string> };
     activeBundles: { expected: string[]; linked: string[]; broken: string[] };
     /** Symlinks colgantes en el dir de skills DEL PROYECTO que ya no corresponden a
      *  ninguna extension del profile — huerfanos. `activeBundles.broken` solo mira lo
