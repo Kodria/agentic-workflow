@@ -41,6 +41,58 @@ describe('buildContext', () => {
     });
 });
 
+function registryRootWithSkill(): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-ctx-'));
+    fs.mkdirSync(path.join(root, 'skills/using-awm'), { recursive: true });
+    fs.writeFileSync(
+        path.join(root, 'skills/using-awm/SKILL.md'),
+        '---\nname: using-awm\nversion: "1.3.0"\n---\n\n# Using Skills\n',
+    );
+    return root;
+}
+
+describe('buildContext — declared orchestrators', () => {
+    const created: string[] = [];
+    afterEach(() => { for (const r of created.splice(0)) fs.rmSync(r, { recursive: true, force: true }); });
+
+    it('compone los descriptores declarados en el payload', () => {          // verifies R1.1
+        const root = registryRootWithSkill();
+        created.push(root);
+        const ctx = buildContext({
+            registryRoot: root,
+            profileExtensions: [],
+            declaredOrchestrators: [
+                { name: 'mi-proceso', appliesWhen: 'cuando arranco una tarea', terminatesTo: 'development-process' },
+            ],
+        });
+        expect(ctx.markdown).toContain('mi-proceso');
+        expect(ctx.markdown).toContain('cuando arranco una tarea');
+        expect(ctx.markdown).toContain('development-process');
+        expect(ctx.markdown).toContain('# Using Skills');   // el skill sigue entero
+    });
+
+    it('sin declarados, el payload es identico al de antes del cambio', () => {  // verifies R6.1
+        const root = registryRootWithSkill();
+        created.push(root);
+        const withEmpty = buildContext({ registryRoot: root, profileExtensions: [], declaredOrchestrators: [] });
+        const withNone = buildContext({ registryRoot: root, profileExtensions: [] });
+        expect(withEmpty.markdown).toEqual(withNone.markdown);
+        expect(withEmpty.markdown).not.toContain('Declared orchestrators');
+        expect(withEmpty.contentHash).toEqual(withNone.contentHash);
+    });
+
+    it('el hash cambia cuando cambian los declarados', () => {                    // verifies R1.1
+        const root = registryRootWithSkill();
+        created.push(root);
+        const a = buildContext({ registryRoot: root, profileExtensions: [], declaredOrchestrators: [] });
+        const b = buildContext({
+            registryRoot: root, profileExtensions: [],
+            declaredOrchestrators: [{ name: 'x', appliesWhen: 'y', terminatesTo: 'none' }],
+        });
+        expect(a.contentHash).not.toEqual(b.contentHash);
+    });
+});
+
 // NOTE: the 'generic robustness invariant' test that validated specific prose in the
 // using-awm SKILL.md has been removed — content now lives in awm-baseline-registry
 // (an external repo), not in this monorepo. Content-level tests belong there.
