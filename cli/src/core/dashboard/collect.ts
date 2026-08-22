@@ -2,6 +2,7 @@ import { findProjectRoot } from '../profile';
 import fs from 'fs';
 import path from 'path';
 import { buildEvidenceHistory } from '../evidence/history';
+import { validateCycleEvidence } from '../evidence/types';
 import { sanitizeDashboardSource } from './sanitize';
 import { validateDashboardSnapshotV1 } from './validate';
 import { classifyPlanState, type PlanStateInput } from './plan-state';
@@ -144,13 +145,17 @@ function evidenceHistoryItems(root: string): { confidence: DashboardSnapshotV1['
         }
         if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('evidence history directory is unsafe');
     }
+    const seenCycleIds = new Set<string>();
     const records = fs.readdirSync(directory, { withFileTypes: true })
         .sort((left, right) => left.name.localeCompare(right.name))
         .map((entry) => {
             if (!entry.isFile() || !entry.name.endsWith('.json')) throw new Error('evidence history contains an unsupported entry');
             const file = path.join(directory, entry.name);
             if (fs.lstatSync(file).isSymbolicLink()) throw new Error('evidence history file is unsafe');
-            return JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
+            const evidence = validateCycleEvidence(JSON.parse(fs.readFileSync(file, 'utf8')) as unknown);
+            if (entry.name !== `${evidence.cycleId}.json` || seenCycleIds.has(evidence.cycleId)) throw new Error('evidence history filename is invalid');
+            seenCycleIds.add(evidence.cycleId);
+            return evidence;
         });
     const history = buildEvidenceHistory(records);
     return {

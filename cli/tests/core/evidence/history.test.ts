@@ -29,4 +29,20 @@ describe('evidence history', () => {
     expect(history).toEqual(expect.objectContaining({ empty: true, confidence: 'none', cycles: [] }));
     expect(JSON.stringify(history)).not.toMatch(/trend|percentage|improvement/i);
   });
+
+  it('retains blocked records but excludes them from confidence and cure observation windows', () => {
+    const blocked = Array.from({ length: 5 }, (_, index) => ({
+      ...cycleEvidenceFixture(), cycleId: `${index}`.repeat(64), cycleState: 'blocked' as const, cures: [],
+    }));
+    const history = buildEvidenceHistory(blocked);
+    expect(history.cycles).toHaveLength(5);
+    expect(history.confidence).toBe('none');
+
+    const cured = { ...cycleEvidenceFixture(), cycleId: 'c'.repeat(64), endedAt: '2026-08-22T10:01:00.000Z' };
+    const laterBlocked = { ...cycleEvidenceFixture(), cycleId: 'd'.repeat(64), cycleState: 'blocked' as const, startedAt: '2026-08-22T11:00:00.000Z', endedAt: '2026-08-22T11:01:00.000Z', cures: [] };
+    const laterCompleted = { ...cycleEvidenceFixture(), cycleId: 'e'.repeat(64), startedAt: '2026-08-22T12:00:00.000Z', endedAt: '2026-08-22T12:01:00.000Z', cures: [] };
+    const mixed = buildEvidenceHistory([cured, laterBlocked, laterCompleted]);
+    expect(mixed.confidence).toBe('observing');
+    expect(mixed.cycles[0].cureEfficacy[0].efficacy).toBe('observing');
+  });
 });

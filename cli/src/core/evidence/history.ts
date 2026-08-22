@@ -33,16 +33,17 @@ export function classifyCure(input: unknown): CureEfficacy {
 export function buildEvidenceHistory(records: unknown): EvidenceHistory {
   if (!Array.isArray(records)) throw new Error('evidence history records must be an array');
   const valid = records.map((record) => validateCycleEvidence(record)).sort((left, right) => left.startedAt.localeCompare(right.startedAt) || left.cycleId.localeCompare(right.cycleId));
+  const completed = valid.filter((cycle) => cycle.cycleState === 'completed');
   const cycles = valid.map((cycle, index) => ({
     ...cycle,
     retries: cycle.tasks.reduce((total, task) => total + task.retries, 0),
     cureEfficacy: cycle.cures.map((cure) => {
-      const later = valid.slice(index + 1);
+      const later = valid.slice(index + 1).filter((candidate) => candidate.cycleState === 'completed');
       return {
         signature: cure.signature,
         efficacy: classifyCure({ laterEligibleCycles: later.length, recurred: later.some((candidate) => candidate.qa.signatures.includes(cure.signature)) }),
       };
     }),
   }));
-  return { confidence: confidenceForCycles(cycles.length), empty: cycles.length === 0, cycles };
+  return { confidence: confidenceForCycles(completed.length), empty: cycles.length === 0, cycles };
 }

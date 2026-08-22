@@ -190,6 +190,19 @@ describe('collectDashboardSnapshot', () => {
         fs.rmSync(root, { recursive: true, force: true });
         fs.rmSync(external, { recursive: true, force: true });
     });
+
+    it.each(['duplicate', 'mismatch'] as const)('does not accept %s evidence filenames', (caseName) => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-evidence-dashboard-'));
+        fs.writeFileSync(path.join(root, 'package.json'), '{}');
+        writeCycleEvidence(root, cycleEvidenceFixture());
+        const directory = path.join(root, '.awm', 'evidence', 'cycles');
+        const record = cycleEvidenceFixture();
+        const filename = caseName === 'duplicate' ? `${'b'.repeat(64)}.json` : `${'b'.repeat(64)}.json`;
+        fs.writeFileSync(path.join(directory, filename), JSON.stringify(caseName === 'duplicate' ? record : { ...record, cycleId: 'c'.repeat(64) }));
+        const snapshot = collectDashboardSnapshot({ cwd: root, now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined } });
+        expect(snapshot.sections.find((section) => section.id === 'history')).toEqual(expect.objectContaining({ availability: 'unavailable', items: [] }));
+        fs.rmSync(root, { recursive: true, force: true });
+    });
 });
 
 describe('sanitizeDashboardSource', () => {
