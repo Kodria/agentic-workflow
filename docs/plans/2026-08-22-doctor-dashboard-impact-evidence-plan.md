@@ -1,5 +1,8 @@
 # AWM Doctor Dashboard and Impact Evidence Implementation Plan
 
+<!-- awm-qa-complete: 2026-08-22 (Release A / #86; visual-fidelity exception authorized by user) -->
+<!-- awm-retro-complete: 2026-08-22 (Release A / #86) -->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
 > use checkbox (`- [ ]`) syntax for tracking.
@@ -11,6 +14,13 @@
 **Tech Stack:** TypeScript 5.9, Node.js 22 filesystem APIs, Commander 14, Jest 30, picocolors, static self-contained HTML/CSS, GitHub Actions.
 
 **Modo de ejecución:** desatendido
+
+> **Excepción de fidelidad visual (2026-08-22):** El usuario autorizó cerrar
+> Release A aunque la revisión de fidelidad visual 3/3 conservó divergencias
+> documentadas de densidad, composición y controles frente a los dos artefactos
+> Stitch aprobados. Esta excepción solo libera el cierre de Release A; no
+> declara los diseños idénticos ni relaja las demás pruebas de contrato, datos,
+> seguridad, accesibilidad o publicación inmutable.
 
 > Mandato de ejecución desatendida: ejecución completa sin pausas de check-in
 > entre tareas, ni de confirmación entre fases (development-process rutea
