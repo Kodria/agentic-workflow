@@ -40,7 +40,7 @@ describe('renderDashboardHtml', () => {
     it('uses semantic landmarks and ordered sections with text state, focus, print, responsive, and reduced-motion support', () => {
         const html = renderDashboardHtml(validateDashboardSnapshotV1(snapshot()));
         expect(html).toMatch(/<header[\s>]/);
-        expect(html).toContain('<nav aria-label="Dashboard sections">');
+        expect(html).toContain('data-operational-sidebar aria-label="Dashboard sections"');
         expect(html).toMatch(/<main[\s>]/);
         expect(html).toMatch(/<footer[\s>]/);
         for (const heading of ['Machine / install', 'Project readiness', 'Design / planning', 'Execution', 'QA', 'Retro', 'Final / history']) expect(html).toContain(`<h2>${heading}</h2>`);
@@ -63,18 +63,18 @@ describe('renderDashboardHtml', () => {
                 { id: 'machine.permissions', label: 'Permissions', state: 'missing', remediation: 'awm init' },
             ] }],
         })));
-        expect(html).toContain('data-machine-diagnostics');
-        expect(html).toContain('<section data-machine-diagnostics aria-labelledby="machine-diagnostics-heading">');
-        expect(html).toContain('<h2 id="machine-diagnostics-heading">Machine diagnostics</h2>');
-        expect(html).toContain('data-diagnostic-card="installation"');
-        expect(html).toContain('data-diagnostic-card="sensors"');
-        expect(html).toContain('data-diagnostic-card="permissions"');
+        expect(html).toContain('data-machine-bento');
+        expect(html.match(/class="bento-card"/g)).toHaveLength(3);
         expect(html).toContain('Privacy &amp; security');
         expect(html).toContain('data-static-privacy-toggle');
         expect(html).toContain('type="checkbox" checked disabled');
-        expect(html).toContain('Prioritized actions');
+        expect(html).toContain('Siguiente acción requerida');
         expect(html).toContain('Copy command (static)');
-        expect(html).toContain('data-machine-diagnostics');
+        expect(html).toContain('data-machine-bento');
+        expect(html).toContain('data-next-actions');
+        expect(html.match(/data-next-action=/g)).toHaveLength(3);
+        expect(html).toContain('Inicializar proyecto');
+        expect(html).toContain('<code>awm init</code>');
         expect(html.indexOf('awm sensors run')).toBeLessThan(html.indexOf('awm init'));
     });
 
@@ -104,6 +104,11 @@ describe('renderDashboardHtml', () => {
         expect(html).toContain('Planes de trabajo');
         expect(html).toContain('Impacto y trazabilidad');
         expect(html).toContain('data-project-header-actions role="group" aria-label="Project actions"');
+        expect(html).toContain('data-project-breadcrumb');
+        expect(html).toContain('data-project-nav');
+        expect(html).toContain('data-machine-preparation-card="installation"');
+        expect(html).toContain('data-machine-preparation-card="sensors"');
+        expect(html).toContain('data-machine-preparation-card="persistence"');
         expect(html).toContain('data-plan-card="active"');
         expect(html).toContain('data-plan-card="blocked"');
         expect(html).toContain('Progreso: sin observación');
@@ -136,6 +141,10 @@ describe('renderDashboardHtml', () => {
             sections: [{ id: 'machine', availability: 'available', items: [] }],
         })));
         expect(html).toContain('data-dashboard-toolbar');
+        expect(html).toContain('data-operational-sidebar');
+        for (const label of ['Inicio', 'Estado', 'Configuración', 'Terminal']) expect(html).toContain(`>${label}<`);
+        expect(html).toContain('data-sidebar-diagnose');
+        expect(html).toContain('data-sidebar-operator-controls');
         expect(html).toContain('aria-label="Search dashboard"');
         expect(html).toContain('placeholder="Search resources" disabled');
         for (const label of ['Notifications (static)', 'Help (static)', 'Export dashboard (static)', 'New deployment (static)']) {

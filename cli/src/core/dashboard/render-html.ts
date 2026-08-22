@@ -23,9 +23,22 @@ function diagnosticCards(items: DashboardSectionV1['items'], attribute: 'data-ma
     return `<div class="machine-preparation-strip" data-machine-preparation role="group" aria-labelledby="machine-preparation-heading"><h3 id="machine-preparation-heading">Preparación de máquina</h3><ul class="diagnostic-grid">${cards}</ul></div>`;
 }
 
+function machineBento(items: DashboardSectionV1['items']): string {
+    const names = ['Instalación', 'Sensores globales', 'Persistencia'];
+    return `<div class="machine-bento" data-machine-bento>${names.map((name, index) => {
+        const item = items[index];
+        return `<article class="bento-card"><h3>${name}</h3>${item ? `<span class="state ${item.state}">${STATE_GLYPH[item.state]} ${STATE_TEXT[item.state]}</span><strong>${escapeHtml(item.label)}</strong><span>${item.detail ? escapeHtml(item.detail) : 'Sin detalle adicional'}</span>` : '<span class="state unavailable">⊘ Unavailable</span><span>Sin observación disponible</span>'}</article>`;
+    }).join('')}</div>`;
+}
+
+function nextActions(snapshot: DashboardSnapshotV1): string {
+    const actionable = snapshot.sections.flatMap((section) => section.items.filter((item) => item.remediation)).slice(0, 2);
+    const rows = [...actionable, { id: 'setup.initialize', label: 'Inicializar proyecto', state: 'attention' as const, remediation: 'awm init' }];
+    return `<div data-next-actions role="group" aria-labelledby="next-actions-heading"><h2 id="next-actions-heading">Siguiente acción requerida</h2><ol class="action-list">${rows.map((item) => `<li data-next-action="${escapeHtml(item.id)}"><span class="state ${item.state}">${STATE_GLYPH[item.state]} ${STATE_TEXT[item.state]}</span><span>${escapeHtml(item.label)}</span><code>${item.remediation}</code><button type="button" disabled aria-describedby="static-controls-note">Copy command (static)</button></li>`).join('')}</ol></div>`;
+}
+
 function privacyAndActions(snapshot: DashboardSnapshotV1): string {
-    const actions = snapshot.sections.flatMap((section) => section.items.filter((item) => item.remediation).map((item) => `<li><span class="state ${item.state}">${STATE_GLYPH[item.state]} ${STATE_TEXT[item.state]}</span><span>${escapeHtml(item.label)}</span><code>${escapeHtml(item.remediation!)}</code><button type="button" disabled aria-label="Copy command (static): ${escapeHtml(item.remediation!)}">Copy command (static)</button></li>`)).join('') || '<li class="empty">No remediation is required.</li>';
-    return `<section data-privacy-security aria-label="Privacy and security"><header><h2>Privacy &amp; security</h2></header><div class="section-body privacy-body"><div><p class="lede">This portable view contains sanitized states and exact operator remedies only. It excludes paths, identities, environment values, secret-like values, raw command output, ledger prose, and error stacks.</p><p id="privacy-toggle-note" class="static-note">Static export: this checked setting documents the enforced share-safe boundary and cannot be changed in this file.</p></div><label class="static-toggle" data-static-privacy-toggle><span>Share-safe sanitization</span><input type="checkbox" checked disabled aria-describedby="privacy-toggle-note"><span aria-hidden="true">Enabled</span></label></div></section><section data-prioritized-actions aria-label="Prioritized actions"><header><h2>Prioritized actions</h2></header><div class="section-body"><ol class="action-list">${actions}</ol></div></section>`;
+    return `<section data-privacy-security aria-label="Privacy and security"><header><h2>Privacy &amp; security</h2></header><div class="section-body privacy-body"><div><p class="lede">This portable view contains sanitized states and exact operator remedies only. It excludes paths, identities, environment values, secret-like values, raw command output, ledger prose, and error stacks.</p><p id="privacy-toggle-note" class="static-note">Static export: this checked setting documents the enforced share-safe boundary and cannot be changed in this file.</p></div><label class="static-toggle" data-static-privacy-toggle><span>Share-safe sanitization</span><input type="checkbox" checked disabled aria-describedby="privacy-toggle-note"><span aria-hidden="true">Enabled</span></label></div></section>${nextActions(snapshot)}`;
 }
 
 function dashboardToolbar(): string {
@@ -34,6 +47,10 @@ function dashboardToolbar(): string {
 
 function projectHeaderActions(): string {
     return `<div class="project-header-actions" data-project-header-actions role="group" aria-label="Project actions"><button type="button" disabled aria-describedby="static-controls-note">Export evidence (static)</button><button type="button" disabled aria-describedby="static-controls-note">Attach evidence (static)</button></div>`;
+}
+
+function projectChrome(project: string): string {
+    return `<div class="project-chrome"><p class="eyebrow" data-project-breadcrumb>AWM / Proyecto / ${project}</p><nav data-project-nav aria-label="Project navigation"><span aria-current="page">Proyecto</span><span>Ejecución</span><span>Configuración</span></nav></div>`;
 }
 
 function projectEvidenceComposition(): string {
@@ -50,7 +67,10 @@ function projectComposition(snapshot: DashboardSnapshotV1): string {
         return `<li data-stage="${stage}"><span aria-hidden="true" class="timeline-marker"></span><strong>${stage === 'evidence' ? 'Evidence' : SECTION_TITLES[id]}</strong><span class="state ${available ? 'ok' : 'unavailable'}">${available ? '● Available' : '⊘ Unavailable'}</span></li>`;
     }).join('');
     const provisional = snapshot.confidence === 'provisional' ? '<aside data-provisional-evidence aria-label="Provisional evidence"><strong>Provisional evidence</strong><span>Current observations are still being verified by downstream QA and evidence capture.</span></aside>' : '';
-    const machineSupplement = `${diagnosticCards(byId.get('machine')?.items ?? [], 'data-machine-preparation')}<nav class="lifecycle-timeline" data-lifecycle-timeline aria-labelledby="lifecycle-timeline-heading"><h3 id="lifecycle-timeline-heading">Línea de ciclo</h3><ol class="timeline connected-timeline">${stages}</ol></nav>${provisional}`;
+    const prepItems = byId.get('machine')?.items ?? [];
+    const prepNames = ['installation', 'sensors', 'persistence'];
+    const preparation = `<div class="machine-preparation-strip" data-machine-preparation role="group" aria-labelledby="machine-preparation-heading"><h3 id="machine-preparation-heading">Preparación de máquina</h3><ul class="diagnostic-grid">${prepNames.map((name, index) => { const item = prepItems[index]; return `<li data-machine-preparation-card="${name}">${item ? `<span class="state ${item.state}">${STATE_GLYPH[item.state]} ${STATE_TEXT[item.state]}</span><strong>${escapeHtml(item.label)}</strong><span>${item.detail ? escapeHtml(item.detail) : 'Sin detalle adicional'}</span>` : '<span class="state unavailable">⊘ Unavailable</span><strong>Sin observación</strong><span>Fuente no disponible</span>'}</li>`; }).join('')}</ul></div>`;
+    const machineSupplement = `${preparation}<nav class="lifecycle-timeline" data-lifecycle-timeline aria-labelledby="lifecycle-timeline-heading"><h3 id="lifecycle-timeline-heading">Línea de ciclo</h3><ol class="timeline connected-timeline">${stages}</ol></nav>${provisional}`;
     const historySupplement = projectEvidenceComposition();
     return snapshot.sections.map((section) => sectionHtml(section, section.id === 'machine' ? machineSupplement : section.id === 'history' ? historySupplement : '')).join('');
 }
@@ -60,12 +80,13 @@ export function renderDashboardHtml(input: DashboardSnapshotV1): string {
     const snapshot = validateDashboardSnapshotV1(input);
     const overall = escapeHtml(snapshot.overall);
     const project = escapeHtml(snapshot.project.label);
-    const sections = snapshot.project.detected ? projectComposition(snapshot) : `${diagnosticCards(snapshot.sections.find((section) => section.id === 'machine')?.items ?? [], 'data-machine-diagnostics')}${privacyAndActions(snapshot)}${snapshot.sections.map((section) => sectionHtml(section)).join('')}`;
-    const links = snapshot.sections.map((section) => `<li><a href="#${section.id}">${SECTION_TITLES[section.id]}</a></li>`).join('');
+    const machineItems = snapshot.sections.find((section) => section.id === 'machine')?.items ?? [];
+    const sections = snapshot.project.detected ? projectComposition(snapshot) : `${machineBento(machineItems)}${privacyAndActions(snapshot)}${snapshot.sections.map((section) => sectionHtml(section)).join('')}`;
+    const links = '<li>Inicio</li><li>Estado</li><li class="active">Configuración</li><li>Terminal</li>';
     const projectDetected = snapshot.project.detected;
     const heading = projectDetected ? 'Project lifecycle' : 'Machine configuration';
     const intro = projectDetected ? 'Readiness, lifecycle state, and eligible observations presented directly for operator review.' : 'Machine readiness and safe configuration state outside a project.';
     const navLabel = projectDetected ? 'Dashboard sections' : 'Machine configuration sections';
     const context = projectDetected ? `Project: ${project}` : 'No project detected';
-    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${CSP}"><title>AWM Doctor dashboard</title><style>${DASHBOARD_STYLES}</style></head><body><div class="shell"><nav aria-label="${navLabel}"><p class="brand">AWM<small>Doctor dashboard</small></p><ul>${links}</ul></nav><main>${dashboardToolbar()}<div class="dashboard-content"><header class="page-header"><p class="eyebrow">Read-only diagnostic evidence</p><h1>${heading}</h1><p class="lede">${intro}</p><p><span class="status ${overall}">● ${overall}</span> <span class="status">Confidence: ${escapeHtml(snapshot.confidence)}</span></p><p class="eyebrow">${context}</p>${projectDetected ? projectHeaderActions() : ''}</header>${sections}<footer>Generated ${escapeHtml(snapshot.generatedAt)} · Static share-safe dashboard</footer></div></main></div></body></html>\n`;
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${CSP}"><title>AWM Doctor dashboard</title><style>${DASHBOARD_STYLES}</style></head><body><div class="shell"><nav data-operational-sidebar aria-label="${navLabel}"><p class="brand">AWM<small>Doctor dashboard</small></p><ul>${links}</ul><button data-sidebar-diagnose type="button" disabled aria-describedby="static-controls-note">Ejecutar diagnóstico</button><div data-sidebar-operator-controls><span>Operaciones</span><button type="button" disabled aria-describedby="static-controls-note">Soporte</button><button type="button" disabled aria-describedby="static-controls-note">Cerrar sesión</button></div></nav><main>${dashboardToolbar()}<div class="dashboard-content"><header class="page-header">${projectDetected ? projectChrome(project) : ''}<p class="eyebrow">Read-only diagnostic evidence</p><h1>${heading}</h1><p class="lede">${intro}</p><p><span class="status ${overall}">● ${overall}</span> <span class="status">Confidence: ${escapeHtml(snapshot.confidence)}</span></p><p class="eyebrow">${context}</p>${projectDetected ? projectHeaderActions() : ''}</header>${sections}<footer>Generated ${escapeHtml(snapshot.generatedAt)} · Static share-safe dashboard</footer></div></main></div></body></html>\n`;
 }
