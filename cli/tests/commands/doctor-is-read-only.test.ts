@@ -137,7 +137,8 @@ describe('awm doctor no escribe nada', () => {
 
         const after = { home: bytesOf(home), project: bytesOf(projectRoot) };
         expect([0, 1]).toContain(code);
-        expect(after.home.filter(([name]) => name !== 'proj/dashboard.html')).toEqual(before.home.filter(([name]) => name !== 'proj/dashboard.html'));
+        const targetFromHome = path.join('proj', 'dashboard.html');
+        expect(after.home.filter(([name]) => name !== targetFromHome)).toEqual(before.home.filter(([name]) => name !== targetFromHome));
         expect(after.project.filter(([name]) => name !== 'dashboard.html')).toEqual(before.project.filter(([name]) => name !== 'dashboard.html'));
         expect(fs.readFileSync(target, 'utf8')).not.toBe('old dashboard');
         expect(after.project.map(([name]) => name).filter((name) => name.includes('.tmp'))).toEqual([]);

@@ -3,3 +3,6 @@
 # core.autocrlf=true los entregaba con CRLF y rompia esa comparacion por
 # bytes que no tienen que ver con el contenido. Se fija LF para todos.
 *.md text eol=lf
+# Frozen CLI bytes are platform-independent contracts; do not let a Windows
+# checkout rewrite their final newline before the raw fixture comparison.
+cli/tests/fixtures/doctor-json/*.json text eol=lf
