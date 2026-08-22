@@ -19,7 +19,8 @@ function sectionHtml(section: DashboardSectionV1, supplement = ''): string {
 function diagnosticCards(items: DashboardSectionV1['items'], attribute: 'data-machine-diagnostics' | 'data-machine-preparation'): string {
     const labels = ['installation', 'sensors', 'permissions'];
     const cards = items.slice(0, 3).map((item, index) => `<li data-diagnostic-card="${labels[index] ?? 'diagnostic'}"><span class="state ${item.state}" aria-label="${item.state}">${STATE_GLYPH[item.state]} ${STATE_TEXT[item.state]}</span><strong>${escapeHtml(item.label)}</strong><span>${item.detail ? escapeHtml(item.detail) : 'No additional detail'}</span></li>`).join('') || '<li><span class="state not_applicable" aria-label="not applicable">— Not applicable</span><strong>No machine observations</strong><span>Machine diagnostics are not available.</span></li>';
-    return `<div ${attribute} aria-label="Machine preparation"><h3>${attribute === 'data-machine-diagnostics' ? 'Machine diagnostics' : 'Machine preparation'}</h3><ul class="diagnostic-grid">${cards}</ul></div>`;
+    if (attribute === 'data-machine-diagnostics') return `<section data-machine-diagnostics aria-labelledby="machine-diagnostics-heading"><header><h2 id="machine-diagnostics-heading">Machine diagnostics</h2></header><div class="section-body"><ul class="diagnostic-grid">${cards}</ul></div></section>`;
+    return `<div data-machine-preparation aria-labelledby="machine-preparation-heading"><h3 id="machine-preparation-heading">Machine preparation</h3><ul class="diagnostic-grid">${cards}</ul></div>`;
 }
 
 function privacyAndActions(snapshot: DashboardSnapshotV1): string {

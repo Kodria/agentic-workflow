@@ -59,6 +59,8 @@ describe('renderDashboardHtml', () => {
             ] }],
         })));
         expect(html).toContain('data-machine-diagnostics');
+        expect(html).toContain('<section data-machine-diagnostics aria-labelledby="machine-diagnostics-heading">');
+        expect(html).toContain('<h2 id="machine-diagnostics-heading">Machine diagnostics</h2>');
         expect(html).toContain('data-diagnostic-card="installation"');
         expect(html).toContain('data-diagnostic-card="sensors"');
         expect(html).toContain('data-diagnostic-card="permissions"');
