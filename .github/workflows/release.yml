@@ -137,11 +137,11 @@ jobs:
       - name: Require immutable Task 7 registry commit
         if: steps.release-result.outputs.published == 'true'
         env:
-          REGISTRY_COMMIT: ${{ vars.AWM_REGISTRY_V3_3_0_COMMIT }}
+          REGISTRY_COMMIT: ${{ vars.AWM_REGISTRY_V3_4_0_COMMIT }}
         shell: bash
         run: |
           if [[ ! "$REGISTRY_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
-            echo "AWM_REGISTRY_V3_3_0_COMMIT must contain the full peeled v3.3.0 commit SHA" >&2
+            echo "AWM_REGISTRY_V3_4_0_COMMIT must contain the full peeled v3.4.0 commit SHA" >&2
             exit 1
           fi
 
@@ -171,7 +171,7 @@ jobs:
         working-directory: cli
         env:
           AWM_PUBLISHED_CLI_VERSION: ${{ needs.release.outputs.version }}
-          AWM_PUBLISHED_REGISTRY_TAG: v3.3.0
-          AWM_PUBLISHED_REGISTRY_COMMIT: ${{ vars.AWM_REGISTRY_V3_3_0_COMMIT }}
+          AWM_PUBLISHED_REGISTRY_TAG: v3.4.0
+          AWM_PUBLISHED_REGISTRY_COMMIT: ${{ vars.AWM_REGISTRY_V3_4_0_COMMIT }}
           AWM_PUBLISHED_REGISTRY_REMOTE: https://github.com/Kodria/awm-baseline-registry.git
         run: npx jest tests/integration/published-doctor-evidence.e2e.test.ts --runInBand

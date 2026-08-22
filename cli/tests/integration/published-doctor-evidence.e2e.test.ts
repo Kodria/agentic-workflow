@@ -28,7 +28,7 @@ export function assertImmutableArtifacts(version: string | undefined, tag: strin
 
 /** R8.7 is bound to the Task 7 registry release, never the preceding tag. */
 export function assertIssue87RegistryPin(tag: string | undefined): void {
-    if (tag !== 'v3.3.0') throw new Error('published doctor evidence requires immutable registry tag v3.3.0');
+    if (tag !== 'v3.4.0') throw new Error('published doctor evidence requires immutable registry tag v3.4.0');
 }
 
 function json(result: SpawnSyncReturns<string>): Record<string, unknown> {
@@ -133,8 +133,8 @@ describe('published artifact provenance guard', () => {
         expect(() => assertImmutableArtifacts('8.4.0', tag, 'a'.repeat(40), registryRemote)).toThrow(/registry ref/i);
     });
     test('rejects a short or retagged registry commit pin', () => {
-        expect(() => assertImmutableArtifacts('8.4.1', 'v3.3.0', 'deadbeef', registryRemote)).toThrow(/full immutable SHA/);
-        expect(() => assertImmutableArtifacts('8.4.1', 'v3.3.0', undefined, registryRemote)).toThrow(/full immutable SHA/);
+        expect(() => assertImmutableArtifacts('8.4.1', 'v3.4.0', 'deadbeef', registryRemote)).toThrow(/full immutable SHA/);
+        expect(() => assertImmutableArtifacts('8.4.1', 'v3.4.0', undefined, registryRemote)).toThrow(/full immutable SHA/);
     });
 });
 
@@ -155,6 +155,6 @@ describe('future registry retro capture contract', () => {
     });
     test('rejects the prepublication CLI and a preceding registry pin', () => {
         expect(() => assertRetroCaptureContract(metadata, contract, '8.4.0')).toThrow(/below registry minCliVersion/);
-        expect(() => assertIssue87RegistryPin('v3.2.0')).toThrow(/v3\.3\.0/);
+        expect(() => assertIssue87RegistryPin('v3.2.0')).toThrow(/v3\.4\.0/);
     });
 });
