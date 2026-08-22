@@ -16,12 +16,37 @@ function sectionHtml(section: DashboardSectionV1): string {
     return `<section id="${section.id}" aria-label="${title}"><header><h2>${title}</h2><span class="eyebrow">${escapeHtml(section.availability.replace('_', ' '))}</span></header><div class="section-body">${availability}${rows}</div></section>`;
 }
 
+function diagnosticCards(items: DashboardSectionV1['items'], attribute: 'data-machine-diagnostics' | 'data-machine-preparation'): string {
+    const labels = ['installation', 'sensors', 'permissions'];
+    const cards = items.slice(0, 3).map((item, index) => `<li data-diagnostic-card="${labels[index] ?? 'diagnostic'}"><span class="state ${item.state}" aria-label="${item.state}">${STATE_GLYPH[item.state]} ${STATE_TEXT[item.state]}</span><strong>${escapeHtml(item.label)}</strong><span>${item.detail ? escapeHtml(item.detail) : 'No additional detail'}</span></li>`).join('') || '<li><span class="state not_applicable" aria-label="not applicable">— Not applicable</span><strong>No machine observations</strong><span>Machine diagnostics are not available.</span></li>';
+    return `<section ${attribute} aria-label="Machine preparation"><header><h2>${attribute === 'data-machine-diagnostics' ? 'Machine diagnostics' : 'Machine preparation'}</h2></header><div class="section-body"><ul class="diagnostic-grid">${cards}</ul></div></section>`;
+}
+
+function privacyAndActions(snapshot: DashboardSnapshotV1): string {
+    const actions = snapshot.sections.flatMap((section) => section.items.filter((item) => item.remediation).map((item) => `<li><span class="state ${item.state}" aria-label="${item.state}">${STATE_GLYPH[item.state]} ${STATE_TEXT[item.state]}</span><span>${escapeHtml(item.label)}</span><code>${escapeHtml(item.remediation!)}</code></li>`)).join('') || '<li class="empty">No remediation is required.</li>';
+    return `<section data-privacy-security aria-label="Privacy and security"><header><h2>Privacy &amp; security</h2></header><div class="section-body"><p class="lede">This portable view contains sanitized states and exact operator remedies only. It excludes paths, identities, environment values, secret-like values, raw command output, ledger prose, and error stacks.</p></div></section><section data-prioritized-actions aria-label="Prioritized actions"><header><h2>Prioritized actions</h2></header><div class="section-body"><ol class="action-list">${actions}</ol></div></section>`;
+}
+
+function projectComposition(snapshot: DashboardSnapshotV1): string {
+    const stageSections: DashboardSectionV1['id'][] = ['planning', 'execution', 'qa', 'retro', 'history'];
+    const byId = new Map(snapshot.sections.map((section) => [section.id, section]));
+    const stages = stageSections.map((id) => {
+        const section = byId.get(id);
+        const stage = id === 'history' ? 'evidence' : id;
+        const available = section?.availability === 'available';
+        return `<li data-stage="${stage}"><strong>${stage === 'evidence' ? 'Evidence' : SECTION_TITLES[id]}</strong><span class="state ${available ? 'ok' : 'unavailable'}">${available ? '● Available' : '⊘ Unavailable'}</span></li>`;
+    }).join('');
+    const provisional = snapshot.confidence === 'provisional' ? '<aside data-provisional-evidence aria-label="Provisional evidence"><strong>Provisional evidence</strong><span>Current observations are still being verified by downstream QA and evidence capture.</span></aside>' : '';
+    const baseSections = snapshot.sections.map(sectionHtml).join('');
+    return `${diagnosticCards(byId.get('machine')?.items ?? [], 'data-machine-preparation')}<section data-lifecycle-timeline aria-label="Lifecycle timeline"><header><h2>Lifecycle timeline</h2></header><div class="section-body"><ol class="timeline">${stages}</ol></div></section>${provisional}<section data-project-evidence aria-label="Project evidence composition"><div class="evidence-grid"><div><h2>Plans &amp; work</h2><p class="empty">Planning and execution observations remain visible below.</p></div><div><h2>Impact &amp; traceability</h2><p class="empty">QA, retro, and eligible history remain visible below.</p></div></div></section>${baseSections}`;
+}
+
 /** Renders a portable, static, share-safe dashboard document. */
 export function renderDashboardHtml(input: DashboardSnapshotV1): string {
     const snapshot = validateDashboardSnapshotV1(input);
     const overall = escapeHtml(snapshot.overall);
     const project = escapeHtml(snapshot.project.label);
-    const sections = snapshot.sections.map(sectionHtml).join('');
+    const sections = snapshot.project.detected ? projectComposition(snapshot) : `${diagnosticCards(snapshot.sections.find((section) => section.id === 'machine')?.items ?? [], 'data-machine-diagnostics')}${privacyAndActions(snapshot)}${snapshot.sections.map(sectionHtml).join('')}`;
     const links = snapshot.sections.map((section) => `<li><a href="#${section.id}">${SECTION_TITLES[section.id]}</a></li>`).join('');
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${CSP}"><title>AWM Doctor dashboard</title><style>${DASHBOARD_STYLES}</style></head><body><div class="shell"><nav aria-label="Dashboard sections"><p class="brand">AWM<small>Doctor dashboard</small></p><ul>${links}</ul></nav><main><header><p class="eyebrow">Read-only diagnostic evidence</p><h1>Project lifecycle</h1><p class="lede">Readiness, lifecycle state, and eligible observations presented directly for operator review.</p><p><span class="status ${overall}">● ${overall}</span> <span class="status">Confidence: ${escapeHtml(snapshot.confidence)}</span></p><p class="eyebrow">Project: ${project}</p></header>${sections}<footer>Generated ${escapeHtml(snapshot.generatedAt)} · Static share-safe dashboard</footer></main></div></body></html>\n`;
 }

@@ -49,6 +49,35 @@ describe('renderDashboardHtml', () => {
         expect(html).not.toMatch(/score|ranking/i);
     });
 
+    it('matches the machine-only diagnostic composition with cards, privacy boundary, and prioritized remedies', () => {
+        const html = renderDashboardHtml(validateDashboardSnapshotV1(snapshot({
+            project: { detected: false, label: 'No project detected' },
+            sections: [{ id: 'machine', availability: 'available', items: [
+                { id: 'machine.cli', label: 'Installation', state: 'ok', detail: 'v8.1.6' },
+                { id: 'machine.sensors', label: 'Sensors', state: 'attention', remediation: 'awm sensors run' },
+                { id: 'machine.permissions', label: 'Permissions', state: 'missing', remediation: 'awm init' },
+            ] }],
+        })));
+        expect(html).toContain('data-machine-diagnostics');
+        expect(html).toContain('data-diagnostic-card="installation"');
+        expect(html).toContain('data-diagnostic-card="sensors"');
+        expect(html).toContain('data-diagnostic-card="permissions"');
+        expect(html).toContain('Privacy &amp; security');
+        expect(html).toContain('Prioritized actions');
+        expect(html.indexOf('awm sensors run')).toBeLessThan(html.indexOf('awm init'));
+    });
+
+    it('matches the project lifecycle composition with machine preparation, timeline, provisional evidence, plans, and history', () => {
+        const html = renderDashboardHtml(validateDashboardSnapshotV1(snapshot({ confidence: 'provisional' })));
+        expect(html).toContain('data-machine-preparation');
+        expect(html).toContain('data-lifecycle-timeline');
+        for (const stage of ['Planning', 'Execution', 'QA', 'Retro', 'Evidence']) expect(html).toContain(`data-stage="${stage.toLowerCase()}"`);
+        expect(html).toContain('Provisional evidence');
+        expect(html).toContain('data-project-evidence');
+        expect(html).toContain('Plans &amp; work');
+        expect(html).toContain('Impact &amp; traceability');
+    });
+
     it('is deterministic and preserves every history and task observation without privacy leakage', () => {
         const sections = ['machine', 'project', 'planning', 'execution', 'qa', 'retro', 'history'].map((id) => ({
             id: id as DashboardSnapshotV1['sections'][number]['id'], availability: 'available' as const,
