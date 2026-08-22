@@ -61,7 +61,7 @@ the final panel is the result to act on.
 Read-only dashboard of machine + project harness state. Changes nothing.
 
 ```
-awm doctor [--json]
+awm doctor [--json | --full | --html <file> [--force]] [--agent <agent[,agent...]>]
 ```
 
 Glyphs: `✔` healthy · `⚠` advisory (does not degrade) · `✖` missing (degrades state). Each non-healthy row carries a remedy — a command (`→ awm …`) or a skill to ask the agent to run (`→ skill: …`). `--json` emits a `ProviderDiagnosticReport`: `{ providers: [...], overall }`, one entry
@@ -76,6 +76,31 @@ red one nobody can act on. Two rows worth knowing:
   extension. Advisory; `awm sync` heals or prunes them.
 - **`workflows.global`** — machine-scope workflows, for the providers that use them
   (today: Antigravity).
+
+Use `--full` for the complete, read-only machine/project dashboard in the terminal.
+Use `--html <file>` to write the same snapshot as one self-contained HTML file;
+it writes only the requested file and refuses to replace an existing one unless
+`--force` is supplied. `--json`, `--full`, and `--html` are alternative output
+modes; `--force` is valid only with `--html`. See [Dashboard and project
+evidence](guides/dashboard-and-evidence.md) for how to interpret the lifecycle
+and history sections.
+
+### `awm evidence capture`
+
+Persist one privacy-preserving, local observation for a completed or blocked
+cycle. The retrospective flow normally runs it before archiving the branch
+ledger, so most operators do not need to invoke it directly.
+
+```
+awm evidence capture --plan <repo-relative-plan> [--pr-provider github|gitlab|other --pr-number <number>]
+```
+
+The command prints the opaque cycle identifier on success and stores the
+record in `.awm/evidence/cycles/`. It records structural states and counts,
+not repository identity, plan paths, ledger prose, command output, environment
+values, or secrets. Both PR options must be supplied together. A missing,
+corrupt, or still-active journal is an explicit error rather than an inferred
+result.
 
 ### `awm agent list`
 

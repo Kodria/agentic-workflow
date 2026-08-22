@@ -25,6 +25,7 @@ components, which phases are optional, and which quality gates are mandatory.
 2. [Configure providers and registries](docs/configuration.md)
 3. [Initialize a project](docs/project-setup.md)
 4. [Operate AWM day to day](docs/runbook.md)
+5. [Inspect the dashboard and local project evidence](docs/guides/dashboard-and-evidence.md)
 
 The [documentation hub](docs/README.md) maps the complete set of active guides
 by intent.

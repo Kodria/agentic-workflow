@@ -73,6 +73,10 @@ Use the least invasive command that answers the question:
 runnable; it does not run the code checks. Use both `awm preflight` and
 `awm sensors run` when you need evidence about project readiness.
 
+For the complete terminal dashboard, its self-contained HTML report, and the
+local cycle evidence that appears after development work, see [Dashboard and
+project evidence](guides/dashboard-and-evidence.md).
+
 If a provider has project-only delivery, a machine-only init intentionally
 defers its content. Run normal project initialization in the repository instead
 of creating provider files by hand; see [configuration](configuration.md).
