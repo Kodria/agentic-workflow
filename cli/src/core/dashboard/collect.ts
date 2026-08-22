@@ -133,10 +133,17 @@ function canonicalOptionalFailure(failure: OptionalFailure): DashboardItemV1[] {
 }
 
 function evidenceHistoryItems(root: string): { confidence: DashboardSnapshotV1['confidence']; items: DashboardItemV1[] } {
-    const directory = path.join(root, '.awm', 'evidence', 'cycles');
-    if (!fs.existsSync(directory)) return { confidence: 'none', items: [] };
-    const directoryStat = fs.lstatSync(directory);
-    if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) throw new Error('evidence history directory is unsafe');
+    const awmDirectory = path.join(root, '.awm');
+    const evidenceDirectory = path.join(awmDirectory, 'evidence');
+    const directory = path.join(evidenceDirectory, 'cycles');
+    for (const ancestor of [awmDirectory, evidenceDirectory, directory]) {
+        let stat: fs.Stats;
+        try { stat = fs.lstatSync(ancestor); } catch (error) {
+            if (error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === 'ENOENT') return { confidence: 'none', items: [] };
+            throw error;
+        }
+        if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('evidence history directory is unsafe');
+    }
     const records = fs.readdirSync(directory, { withFileTypes: true })
         .sort((left, right) => left.name.localeCompare(right.name))
         .map((entry) => {

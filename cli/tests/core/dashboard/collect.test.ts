@@ -171,6 +171,25 @@ describe('collectDashboardSnapshot', () => {
         expect(history?.items[0]?.detail).toContain('retries 1; QA 1/1; first-pass yes; cures awaiting_observation');
         fs.rmSync(root, { recursive: true, force: true });
     });
+
+    it.each(['.awm', 'evidence'] as const)('does not follow a symlinked %s evidence ancestor', (ancestor) => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-evidence-dashboard-'));
+        const external = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-evidence-external-'));
+        fs.writeFileSync(path.join(root, 'package.json'), '{}');
+        const externalCycles = ancestor === '.awm' ? path.join(external, 'evidence', 'cycles') : path.join(external, 'cycles');
+        fs.mkdirSync(externalCycles, { recursive: true });
+        fs.writeFileSync(path.join(externalCycles, `${'a'.repeat(64)}.json`), JSON.stringify(cycleEvidenceFixture()));
+        if (ancestor === '.awm') fs.symlinkSync(external, path.join(root, '.awm'));
+        else {
+            fs.mkdirSync(path.join(root, '.awm'));
+            fs.symlinkSync(external, path.join(root, '.awm', 'evidence'));
+        }
+        const snapshot = collectDashboardSnapshot({ cwd: root, now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined } });
+        const history = snapshot.sections.find((section) => section.id === 'history');
+        expect(history).toEqual(expect.objectContaining({ availability: 'unavailable', items: [] }));
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(external, { recursive: true, force: true });
+    });
 });
 
 describe('sanitizeDashboardSource', () => {
