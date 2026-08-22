@@ -67,6 +67,24 @@ describe('runDoctor dashboard modes', () => {
             expect(runDoctor({ ...options, cwd: root, collectSnapshot: () => dashboardSnapshot({ overall: 'degraded' }) })).toBe(1);
         } finally { stdout.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); }
     });
+
+    it('renders a real read-only machine finding and its remediation in full mode', () => {
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-doctor-real-dashboard-'));
+        const previousHome = process.env.HOME; const previousAwmHome = process.env.AWM_HOME;
+        const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        try {
+            process.env.HOME = home; process.env.AWM_HOME = path.join(home, '.awm');
+            expect(runDoctor({ full: true, cwd: home })).toBe(1);
+            const output = stdout.mock.calls.map((call) => String(call[0])).join('');
+            expect(output).toContain('machine.preferences.missing');
+            expect(output).toContain('awm init');
+            expect(fs.existsSync(path.join(home, '.awm', 'preferences.json'))).toBe(false);
+        } finally {
+            stdout.mockRestore(); fs.rmSync(home, { recursive: true, force: true });
+            if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+            if (previousAwmHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = previousAwmHome;
+        }
+    });
 });
 
 function report(partial: Partial<CheckReport> = {}): CheckReport {

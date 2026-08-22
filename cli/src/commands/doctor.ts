@@ -144,11 +144,11 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
             const target = htmlRequested ? resolveHtmlTarget({ cwd, target: opts.html!, force: opts.force }) : undefined;
             const collectSnapshot = opts.collectSnapshot ?? collectDashboardSnapshot;
             const context = gatherContext({ cwd });
-            const machineFindings: DashboardFinding[] = (context.providers ?? []).flatMap((provider) => provider.checks.flatMap((check): DashboardFinding[] => {
+            const machineFindings = Array.from(new Map((context.providers ?? []).flatMap((provider) => provider.checks.flatMap((check): DashboardFinding[] => {
                 if (check.state === 'absent' || check.state === 'broken') return [{ id: 'machine.preferences.missing', label: 'Preferences', state: 'missing' as const }];
                 if (check.state === 'stale') return [{ id: 'machine.registries.stale', label: 'Registries', state: 'attention' as const }];
                 return [];
-            }));
+            })).map((finding) => [finding.id, finding])).values());
             const snapshot = collectSnapshot({ cwd, now: new Date().toISOString(), adapters: {
                 machine: () => ({ findings: machineFindings }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined,
             } });
