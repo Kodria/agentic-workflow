@@ -17,9 +17,19 @@ function assertRepoRelativePlan(value: unknown): string {
   return value;
 }
 
-function marker(lines: readonly string[], name: 'awm-qa-complete' | 'awm-retro-complete'): boolean {
+function currentRelease(lines: readonly string[]): string | undefined {
+  const releases = lines.flatMap((line) => {
+    const match = /^\s*\d+\.\s+\*\*Release\s+([A-Za-z0-9][A-Za-z0-9_-]*)\s*\/\s*#\d+:\*\*/.exec(line);
+    return match ? [match[1]] : [];
+  });
+  return releases.length > 1 ? releases.at(-1) : undefined;
+}
+
+function marker(lines: readonly string[], name: 'awm-qa-complete' | 'awm-retro-complete', release: string | undefined): boolean {
   const expression = new RegExp(`^\\s*<!--\\s*${name}(?:\\s*:\\s*[^\\r\\n]*?)?\\s*-->\\s*$`);
-  return lines.some((line) => expression.test(line));
+  if (release === undefined) return lines.some((line) => expression.test(line));
+  const releaseExpression = new RegExp(`\\bRelease\\s+${release.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i');
+  return lines.some((line) => expression.test(line) && releaseExpression.test(line));
 }
 
 /** Reads only structural lifecycle syntax; plan prose never crosses into evidence. */
@@ -48,9 +58,10 @@ function planState(root: string, planPath: string, journal: JournalState): PlanS
   if (fenced) throw new Error('--plan contains an unclosed fenced block');
   const status = journal.cycle?.status;
   if (status !== 'IN_PROGRESS' && status !== 'COMPLETE' && status !== 'BLOCKED') throw new Error('journal cycle status is invalid');
+  const release = currentRelease(visibleLines);
   return classifyPlanState({
     ...(status === 'IN_PROGRESS' ? { journal: { state: 'active' } } : status === 'BLOCKED' ? { journal: { state: 'blocked' } } : {}),
-    markers: { qaComplete: marker(visibleLines, 'awm-qa-complete'), retroComplete: marker(visibleLines, 'awm-retro-complete') },
+    markers: { qaComplete: marker(visibleLines, 'awm-qa-complete', release), retroComplete: marker(visibleLines, 'awm-retro-complete', release) },
     tasks: { total, completed },
   });
 }

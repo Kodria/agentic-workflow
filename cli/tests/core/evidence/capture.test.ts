@@ -9,7 +9,7 @@ describe('captureCycleEvidence', () => {
         cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:10.000Z' },
         journalId: 'local-repository-identity',
         tasks: [{ id: 'task-a', attempts: 3 }],
-        verdicts: [{ result: 'fail', fingerprint: 'unsafe-input', detail: 'Alice saw secret prompt', receivedAt: '2026-08-22T10:00:05.000Z' }],
+        verdicts: [{ id: 'v1', result: 'fail', fingerprint: 'unsafe-input', detail: 'Alice saw secret prompt', receivedAt: '2026-08-22T10:00:05.000Z' }],
         fixes: [{ verdictId: 'v1', closed: true }],
       },
       gates: [{ required: true, passed: true }],
@@ -53,11 +53,37 @@ describe('captureCycleEvidence', () => {
       root: process.cwd(), repositoryIdentity: 'git@example.test:team/repository.git', planPath: 'plans/release.md',
       journal: {
         cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:01.000Z' },
-        tasks: [], verdicts: [{ result: 'inconclusive', fingerprint: 'probe-unavailable', receivedAt: '2026-08-22T10:00:00.000Z' }],
+        tasks: [], verdicts: [{ id: 'v1', result: 'inconclusive', fingerprint: 'probe-unavailable', receivedAt: '2026-08-22T10:00:00.000Z' }],
         fixes: [{ verdictId: 'v1', closed: true }],
       }, gates: [], ledger: [],
     });
 
     expect(evidence.qa).toMatchObject({ findings: 1, fixes: 1, signatures: [expect.stringMatching(/^[a-f0-9]{64}$/)] });
+  });
+
+  test('counts only closed fixes that reference an adverse verdict', () => {
+    const evidence = captureCycleEvidence({
+      root: process.cwd(), repositoryIdentity: 'git@example.test:team/repository.git', planPath: 'plans/release.md',
+      journal: {
+        cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:01.000Z' }, tasks: [],
+        verdicts: [
+          { id: 'v-fail', result: 'fail', fingerprint: 'failure', receivedAt: '2026-08-22T10:00:00.000Z' },
+          { id: 'v-inconclusive', result: 'inconclusive', fingerprint: 'unknown', receivedAt: '2026-08-22T10:00:00.000Z' },
+        ],
+        fixes: [{ verdictId: 'v-fail', closed: true }, { verdictId: 'v-inconclusive', closed: false }],
+      }, gates: [], ledger: [],
+    });
+
+    expect(evidence.qa).toMatchObject({ findings: 2, fixes: 1 });
+  });
+
+  test.each([
+    { verdicts: [], verdictId: 'missing' },
+    { verdicts: [{ id: 'v-pass', result: 'pass', fingerprint: 'passed', receivedAt: '2026-08-22T10:00:00.000Z' }], verdictId: 'v-pass' },
+  ])('rejects a fix whose verdict reference is absent or not adverse', ({ verdicts, verdictId }) => {
+    expect(() => captureCycleEvidence({
+      root: process.cwd(), repositoryIdentity: 'git@example.test:team/repository.git', planPath: 'plans/release.md',
+      journal: { cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:01.000Z' }, tasks: [], verdicts, fixes: [{ verdictId, closed: true }] }, gates: [], ledger: [],
+    })).toThrow(/fix verdictId/i);
   });
 });
