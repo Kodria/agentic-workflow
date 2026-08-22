@@ -64,13 +64,18 @@ function canonicalOptionalFailure(failure: OptionalFailure): DashboardItemV1[] {
     return [{ id: failure.findingId, label: 'Optional source unavailable', state: 'unavailable', remediation: REMEDIATION_BY_FINDING_ID[failure.findingId] }];
 }
 
+function isolatedFindings(items: DashboardFinding[] | undefined): { value?: DashboardItemV1[]; failed: boolean; failure: OptionalFailure } {
+    return optional(() => findings(items));
+}
+
 /** Pure read-only aggregation over injected source adapters. */
 export function collectDashboardSnapshot(options: CollectDashboardOptions): DashboardSnapshotV1 {
     if (!options || typeof options.cwd !== 'string' || options.cwd.length === 0 || typeof options.now !== 'string' || Number.isNaN(Date.parse(options.now))) throw new Error('collectDashboardSnapshot requires cwd and valid now');
     const adapters = { ...EMPTY_ADAPTERS, ...(options.adapters ?? {}) };
     const machine = adapters.machine({ cwd: options.cwd });
     const root = findProjectRoot(options.cwd);
-    const machineSection = section('machine', 'available', findings((sanitizeDashboardSource(machine) as MachineDashboardSource).findings));
+    const machineItems = isolatedFindings((sanitizeDashboardSource(machine) as MachineDashboardSource).findings);
+    const machineSection = section('machine', machineItems.failed ? 'unavailable' : 'available', machineItems.value);
     if (!root) {
         const degraded = machineSection.items.some((item) => item.state !== 'ok' && item.state !== 'not_applicable');
         return validateDashboardSnapshotV1({ schema: 1, generatedAt: options.now, overall: degraded ? 'degraded' : 'healthy', project: { detected: false, label: 'No project detected' }, confidence: 'none', sections: [machineSection] });
@@ -84,19 +89,23 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     });
     const projectSource = projectResult.value;
     const execution = executionResult.value;
-    const projectItemsResult = projectSource ? optional(() => findings(projectSource.findings)) : { value: [], failed: false, failure: {} };
+    const projectItemsResult = projectSource ? isolatedFindings(projectSource.findings) : { value: [], failed: false, failure: {} };
     const planItemsResult = plansResult.value ? optional(() => findings(plansResult.value!.map((plan) => plan.lifecycle
         ? { ...plan, detail: classifyPlanState(plan.lifecycle) } : plan))) : { value: [], failed: false, failure: {} };
+    const executionItems = isolatedFindings(execution?.execution);
+    const qaItems = isolatedFindings(execution?.qa);
+    const retroItems = isolatedFindings(execution?.retro);
+    const historyItems = isolatedFindings(execution?.history);
     const sections = [
         machineSection,
         section('project', projectResult.failed || projectItemsResult.failed ? 'unavailable' : 'available', projectResult.failed
             ? canonicalOptionalFailure(projectResult.failure) : projectItemsResult.failed ? [] : projectItemsResult.value),
         section('planning', plansResult.failed || planItemsResult.failed ? 'unavailable' : 'available', plansResult.failed
             ? canonicalOptionalFailure(plansResult.failure) : planItemsResult.failed ? [] : planItemsResult.value),
-        section('execution', executionResult.failed ? 'unavailable' : 'available', executionResult.failed ? canonicalOptionalFailure(executionResult.failure) : findings(execution?.execution)),
-        section('qa', executionResult.failed ? 'unavailable' : 'available', findings(execution?.qa)),
-        section('retro', executionResult.failed ? 'unavailable' : 'available', findings(execution?.retro)),
-        section('history', executionResult.failed ? 'unavailable' : 'available', findings(execution?.history)),
+        section('execution', executionResult.failed || executionItems.failed ? 'unavailable' : 'available', executionResult.failed ? canonicalOptionalFailure(executionResult.failure) : executionItems.value),
+        section('qa', executionResult.failed || qaItems.failed ? 'unavailable' : 'available', qaItems.value),
+        section('retro', executionResult.failed || retroItems.failed ? 'unavailable' : 'available', retroItems.value),
+        section('history', executionResult.failed || historyItems.failed ? 'unavailable' : 'available', historyItems.value),
     ];
     const degraded = sections.some((entry) => entry.availability === 'unavailable' || entry.items.some((item) => item.state !== 'ok' && item.state !== 'not_applicable'));
     return validateDashboardSnapshotV1({ schema: 1, generatedAt: options.now, overall: degraded ? 'degraded' : 'healthy', project: { detected: true, label: projectSource?.label || 'Project detected' }, confidence: 'provisional', sections });
