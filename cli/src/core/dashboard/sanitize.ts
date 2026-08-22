@@ -1,6 +1,7 @@
 const STATES = new Set(['ok', 'attention', 'missing', 'unavailable', 'not_applicable']);
 const ALLOWED_KEYS = new Set(['findings', 'label', 'id', 'state', 'detail', 'execution', 'qa', 'retro', 'history']);
-const DANGEROUS = /(?:ghp_|sk-[A-Za-z]|<|>|(?:^|[=:\s])\/[^\s]+|[A-Za-z]:\\|token|secret|password)/iu;
+const CANONICAL_LABELS = new Set(['Preferences', 'Registries', 'Profile', 'Optional source unavailable']);
+const DANGEROUS = /(?:ghp_|sk-[A-Za-z]|<|>|(?:^|[=:\s(\[\{,;])\/[^\s\)\]\},;]+|[A-Za-z]:\\|token|secret|password)/iu;
 
 function sanitize(value: unknown, key?: string): unknown {
     if (value === null || typeof value === 'boolean') return value;
@@ -10,6 +11,7 @@ function sanitize(value: unknown, key?: string): unknown {
     }
     if (typeof value === 'string') {
         if (key === 'state' && !STATES.has(value)) throw new Error(`Dashboard source state is invalid: ${value}`);
+        if (key === 'label' && !CANONICAL_LABELS.has(value)) return '[redacted]';
         return DANGEROUS.test(value) ? '[redacted]' : value;
     }
     if (Array.isArray(value)) return value.map((entry) => sanitize(entry));

@@ -62,6 +62,22 @@ describe('collectDashboardSnapshot', () => {
         ]);
     });
 
+    it.each([
+        ['plans', 'planning.source.unavailable', 'planning', 'awm preflight'],
+        ['execution', 'execution.source.unavailable', 'execution', 'awm sensors status'],
+    ] as const)('renders a known %s failure in its owner section', (adapter, findingId, sectionId, remediation) => {
+        const failure = Object.assign(new Error('unavailable'), { findingId });
+        const snapshot = collectDashboardSnapshot({
+            cwd: process.cwd(), now: fixedNow,
+            adapters: {
+                machine: () => ({ findings: [] }), project: () => ({ findings: [] }),
+                plans: () => { if (adapter === 'plans') throw failure; return []; },
+                execution: () => { if (adapter === 'execution') throw failure; return undefined; },
+            },
+        });
+        expect(snapshot.sections.find((section) => section.id === sectionId)?.items[0]).toEqual(expect.objectContaining({ id: findingId, remediation }));
+    });
+
     it('sorts findings by stable canonical id', () => {
         const snapshot = collectDashboardSnapshot({
             cwd: '/definitely-not-a-project', now: fixedNow,
@@ -85,7 +101,7 @@ describe('collectDashboardSnapshot', () => {
 
 describe('sanitizeDashboardSource', () => {
     it('removes hostile paths and secrets before rendering', () => {
-        const safe = sanitizeDashboardSource({ path: '/var/lib/private', token: 'ghp_secret', username: 'alice', output: '<script>alert(1)</script>', rawOutput: 'sk-live-secret', detail: 'cwd=/tmp/run/output' });
+        const safe = sanitizeDashboardSource({ path: '/var/lib/private', token: 'ghp_secret', username: 'alice', output: '<script>alert(1)</script>', rawOutput: 'sk-live-secret', detail: 'log:(cwd=/tmp/run/output)', label: 'alice workstation' });
         expect(JSON.stringify(safe)).not.toMatch(/alice|ghp_|script|\/var\/|\/tmp\/|sk-live|alert/i);
     });
 

@@ -25,6 +25,8 @@ export const REMEDIATION_BY_FINDING_ID: Readonly<Record<string, string>> = {
     'project.profile.missing': 'awm init',
     'project.sensors.unavailable': 'awm sensors status',
     'project.preflight.degraded': 'awm preflight',
+    'planning.source.unavailable': 'awm preflight',
+    'execution.source.unavailable': 'awm sensors status',
 };
 
 const EMPTY_ADAPTERS: DashboardSourceAdapters = {
@@ -80,8 +82,8 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     const sections = [
         machineSection,
         section('project', projectResult.failed ? 'unavailable' : 'available', projectResult.failed ? canonicalOptionalFailure(projectResult.failure) : findings(projectSource?.findings)),
-        section('planning', plansResult.failed ? 'unavailable' : 'available', planItems),
-        section('execution', executionResult.failed ? 'unavailable' : 'available', findings(execution?.execution)),
+        section('planning', plansResult.failed ? 'unavailable' : 'available', plansResult.failed ? canonicalOptionalFailure(plansResult.failure) : planItems),
+        section('execution', executionResult.failed ? 'unavailable' : 'available', executionResult.failed ? canonicalOptionalFailure(executionResult.failure) : findings(execution?.execution)),
         section('qa', executionResult.failed ? 'unavailable' : 'available', findings(execution?.qa)),
         section('retro', executionResult.failed ? 'unavailable' : 'available', findings(execution?.retro)),
         section('history', executionResult.failed ? 'unavailable' : 'available', findings(execution?.history)),
