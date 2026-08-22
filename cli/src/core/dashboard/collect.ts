@@ -1,4 +1,7 @@
 import { findProjectRoot } from '../profile';
+import fs from 'fs';
+import path from 'path';
+import { buildEvidenceHistory } from '../evidence/history';
 import { sanitizeDashboardSource } from './sanitize';
 import { validateDashboardSnapshotV1 } from './validate';
 import { classifyPlanState, type PlanStateInput } from './plan-state';
@@ -129,6 +132,34 @@ function canonicalOptionalFailure(failure: OptionalFailure): DashboardItemV1[] {
     return [{ id: failure.findingId, label: 'Optional source unavailable', state: 'unavailable', remediation: REMEDIATION_BY_FINDING_ID[failure.findingId] }];
 }
 
+function evidenceHistoryItems(root: string): { confidence: DashboardSnapshotV1['confidence']; items: DashboardItemV1[] } {
+    const directory = path.join(root, '.awm', 'evidence', 'cycles');
+    if (!fs.existsSync(directory)) return { confidence: 'none', items: [] };
+    const directoryStat = fs.lstatSync(directory);
+    if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) throw new Error('evidence history directory is unsafe');
+    const records = fs.readdirSync(directory, { withFileTypes: true })
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .map((entry) => {
+            if (!entry.isFile() || !entry.name.endsWith('.json')) throw new Error('evidence history contains an unsupported entry');
+            const file = path.join(directory, entry.name);
+            if (fs.lstatSync(file).isSymbolicLink()) throw new Error('evidence history file is unsafe');
+            return JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
+        });
+    const history = buildEvidenceHistory(records);
+    return {
+        confidence: history.confidence,
+        items: history.cycles.map((cycle) => {
+            const cures = cycle.cureEfficacy.length === 0 ? 'none' : cycle.cureEfficacy.map((cure) => cure.efficacy).join(', ');
+            return {
+                id: `history.cycle.${cycle.cycleId}`,
+                label: `Cycle ${cycle.cycleId.slice(0, 12)}`,
+                state: cycle.cycleState === 'blocked' ? 'attention' : 'ok',
+                detail: `plan ${cycle.plan.state}; tasks ${cycle.tasks.length}; retries ${cycle.retries}; QA ${cycle.qa.findings}/${cycle.qa.fixes}; first-pass ${cycle.gates.firstPass ? 'yes' : 'no'}; cures ${cures}`,
+            };
+        }),
+    };
+}
+
 function isolatedFindings(items: DashboardFinding[] | undefined): { value?: DashboardItemV1[]; failed: boolean; failure: OptionalFailure } {
     return optional(() => findings(items, true));
 }
@@ -161,7 +192,7 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     const executionItems = isolatedFindings(execution?.execution);
     const qaItems = isolatedFindings(execution?.qa);
     const retroItems = isolatedFindings(execution?.retro);
-    const historyItems = isolatedFindings(execution?.history);
+    const evidenceResult = optional(() => evidenceHistoryItems(root));
     const executionUnavailable = !executionResult.failed && execution === undefined;
     const sections = [
         machineSection,
@@ -174,8 +205,8 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
         // absent execution source is not evidence of a successful empty cycle.
         section('qa', executionResult.failed || executionUnavailable || qaItems.failed ? 'unavailable' : 'available', qaItems.value),
         section('retro', executionResult.failed || executionUnavailable || retroItems.failed ? 'unavailable' : 'available', retroItems.value),
-        section('history', executionResult.failed || executionUnavailable || historyItems.failed ? 'unavailable' : 'available', historyItems.value),
+        section('history', evidenceResult.failed ? 'unavailable' : 'available', evidenceResult.failed ? [] : evidenceResult.value!.items),
     ];
     const degraded = sections.some((entry) => entry.availability === 'unavailable' || entry.items.some((item) => item.state !== 'ok' && item.state !== 'not_applicable'));
-    return validateDashboardSnapshotV1({ schema: 1, generatedAt: options.now, overall: degraded ? 'degraded' : 'healthy', project: { detected: true, label: projectSource?.label || 'Project detected' }, confidence: 'provisional', sections });
+    return validateDashboardSnapshotV1({ schema: 1, generatedAt: options.now, overall: degraded ? 'degraded' : 'healthy', project: { detected: true, label: projectSource?.label || 'Project detected' }, confidence: evidenceResult.failed ? 'none' : evidenceResult.value!.confidence, sections });
 }

@@ -29,6 +29,7 @@ export function renderFullTerminal(input: DashboardSnapshotV1): string {
     ];
     for (const section of snapshot.sections) {
         lines.push('', SECTION_TITLES[section.id]);
+        if (section.id === 'history') lines.push(`  Eligible evidence rows: ${section.items.length}`);
         if (section.availability !== 'available') lines.push(`  ⊘ source ${section.availability.replace('_', ' ')}`);
         if (section.items.length === 0) lines.push('  No observations reported.');
         for (const item of section.items) {

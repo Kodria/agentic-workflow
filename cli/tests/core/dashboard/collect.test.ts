@@ -1,5 +1,10 @@
 import { collectDashboardSnapshot, REMEDIATION_BY_FINDING_ID } from '../../../src/core/dashboard/collect';
 import { sanitizeDashboardSource } from '../../../src/core/dashboard/sanitize';
+import { writeCycleEvidence } from '../../../src/core/evidence/store';
+import { cycleEvidenceFixture } from '../../helpers/evidence-fixtures';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 const fixedNow = '2026-08-22T00:00:00.000Z';
 
@@ -38,13 +43,13 @@ describe('collectDashboardSnapshot', () => {
                 machine: () => ({ findings: [{ id: 'machine.preferences.missing', label: 'Preferences', state: 'missing' }] }),
                 project: () => ({ label: 'Demo', findings: [{ id: 'project.profile.missing', label: 'Profile', state: 'missing' }] }),
                 plans: () => Array.from({ length: 2000 }, (_, index) => ({ id: `plan.${index}`, label: `Plan ${index}`, state: 'ok' as const })),
-                execution: () => ({ history: Array.from({ length: 500 }, (_, index) => ({ id: `history.${index}`, label: `History ${index}`, state: 'ok' as const })) }),
+                execution: () => ({}),
             },
         });
         expect(snapshot.sections.map((section) => section.id)).toEqual(['machine', 'project', 'planning', 'execution', 'qa', 'retro', 'history']);
         expect(snapshot.sections.find((section) => section.id === 'machine')?.items[0].remediation).toBe('awm init');
         expect(snapshot.sections.find((section) => section.id === 'planning')?.items).toHaveLength(2000);
-        expect(snapshot.sections.find((section) => section.id === 'history')?.items).toHaveLength(500);
+        expect(snapshot.sections.find((section) => section.id === 'history')?.items).toHaveLength(0);
         expect(JSON.stringify(snapshot)).not.toMatch(/score|ranking/i);
     });
 
@@ -67,7 +72,7 @@ describe('collectDashboardSnapshot', () => {
             cwd: process.cwd(), now: fixedNow,
             adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined },
         });
-        for (const id of ['execution', 'qa', 'retro', 'history']) {
+        for (const id of ['execution', 'qa', 'retro']) {
             expect(snapshot.sections.find((section) => section.id === id)?.availability).toBe('unavailable');
         }
     });
@@ -92,7 +97,7 @@ describe('collectDashboardSnapshot', () => {
         expect(snapshot.sections.find((section) => section.id === 'planning')?.availability).toBe('available');
     });
 
-    it.each(['execution', 'qa', 'retro', 'history'] as const)('isolates malformed %s findings', (key) => {
+    it.each(['execution', 'qa', 'retro'] as const)('isolates malformed %s findings', (key) => {
         const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => ({ [key]: [{ id: '', label: 'Profile', state: 'ok' }] }) } });
         expect(snapshot.sections.find((section) => section.id === key)?.availability).toBe('unavailable');
     });
@@ -153,6 +158,18 @@ describe('collectDashboardSnapshot', () => {
         });
         expect(snapshot.sections.map((section) => section.id)).toEqual(['machine']);
         expect(snapshot.overall).toBe('degraded');
+    });
+
+    it('loads validated local evidence only after a project is detected and renders every cycle fact', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-evidence-dashboard-'));
+        fs.writeFileSync(path.join(root, 'package.json'), '{}');
+        writeCycleEvidence(root, cycleEvidenceFixture());
+        const snapshot = collectDashboardSnapshot({ cwd: root, now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined } });
+        const history = snapshot.sections.find((section) => section.id === 'history');
+        expect(snapshot.confidence).toBe('provisional');
+        expect(history?.availability).toBe('available');
+        expect(history?.items[0]?.detail).toContain('retries 1; QA 1/1; first-pass yes; cures awaiting_observation');
+        fs.rmSync(root, { recursive: true, force: true });
     });
 });
 
