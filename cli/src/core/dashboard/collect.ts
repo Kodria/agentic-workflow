@@ -108,31 +108,55 @@ export function productionDashboardAdapters(context: HarnessContext): DashboardS
             const latestCycleId = history.cycles.at(-1)?.cycleId;
             const latestByPlan = new Map<string, typeof history.cycles[number]>();
             for (const cycle of history.cycles) latestByPlan.set(cycle.plan.ref, cycle);
+            if (latestByPlan.size === 0 && journal) return [journalPlanFinding(journal)];
             return [...latestByPlan.values()].map((cycle) => {
                 const overlay = cycle.cycleId === latestCycleId ? journal : undefined;
                 const blocked = overlay?.state === 'blocked' || cycle.plan.state === 'blocked';
                 return {
-                id: `planning.cycle.${cycle.cycleId}`,
-                // The plan reference is intentionally never rendered: a plan path
-                // can expose repository-specific names. Its opaque cycle ID gives
-                // the dashboard deterministic identity without exporting it.
-                label: 'Project context',
-                state: blocked ? 'attention' : 'ok',
-                ...(blocked ? { remediation: BLOCKED_CYCLE_REMEDIATION, remediationVerified: true } : {}),
-                lifecycle: overlay ? lifecycleForJournal(overlay) : lifecycleForCycle(cycle),
-            };
+                    id: `planning.cycle.${cycle.cycleId}`,
+                    // The plan reference is intentionally never rendered: a plan path
+                    // can expose repository-specific names. Its opaque cycle ID gives
+                    // the dashboard deterministic identity without exporting it.
+                    label: 'Project context',
+                    state: blocked ? 'attention' : 'ok',
+                    ...(blocked ? { remediation: BLOCKED_CYCLE_REMEDIATION, remediationVerified: true } : {}),
+                    lifecycle: overlay ? lifecycleForJournal(overlay) : lifecycleForCycle(cycle),
+                };
             });
         },
         execution: ({ root }) => {
-            if (!evidenceDirectoryExists(root)) return undefined;
+            const journal = readJournalOverlay(root);
+            if (!evidenceDirectoryExists(root)) return journal ? journalExecutionFinding(journal) : undefined;
             const history = readEvidenceHistory(root);
-            if (history.cycles.length === 0) return undefined;
+            if (history.cycles.length === 0) return journal ? journalExecutionFinding(journal) : undefined;
             return {
                 execution: history.cycles.map((cycle) => cycleFinding('execution', 'Static preflight', cycle, cycle.cycleState === 'blocked')),
                 qa: history.cycles.map((cycle) => cycleFinding('qa', 'Sensors', cycle, cycle.qa.fixes < cycle.qa.findings)),
                 retro: history.cycles.map((cycle) => cycleFinding('retro', 'Project context', cycle, cycle.plan.state !== 'executed')),
             };
         },
+    };
+}
+
+/** A journal has no durable plan reference. Use a generic fixed row so its
+ * authoritative lifecycle remains visible without publishing branch or path. */
+function journalPlanFinding(overlay: JournalOverlay): PlanDashboardSource {
+    const blocked = overlay.state === 'blocked';
+    return {
+        id: 'planning.current-journal', label: 'Project context', state: blocked ? 'attention' : 'ok',
+        ...(blocked ? { remediation: BLOCKED_CYCLE_REMEDIATION, remediationVerified: true } : {}),
+        lifecycle: lifecycleForJournal(overlay),
+    };
+}
+
+function journalExecutionFinding(overlay: JournalOverlay): ExecutionDashboardSource {
+    const blocked = overlay.state === 'blocked';
+    return {
+        execution: [{
+            id: 'execution.current-journal', label: 'Static preflight', state: blocked ? 'attention' : 'ok',
+            ...(blocked ? { remediation: BLOCKED_CYCLE_REMEDIATION, remediationVerified: true } : {}),
+        }],
+        qa: [], retro: [],
     };
 }
 

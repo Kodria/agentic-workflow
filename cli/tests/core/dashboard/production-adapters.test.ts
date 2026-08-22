@@ -137,4 +137,34 @@ describe('productionDashboardAdapters', () => {
         expect(JSON.stringify(snapshot)).not.toMatch(/dashboard-overlay|dashboard@example|Dashboard Test/i);
         fs.rmSync(root, { recursive: true, force: true });
     });
+
+    it.each([
+        ['IN_PROGRESS', 'active', 'ok'],
+        ['BLOCKED', 'blocked', 'attention'],
+    ] as const)('renders the current branch journal %s without prior evidence', (status, expectedLifecycle, expectedState) => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-dashboard-journal-only-'));
+        const branch = 'dashboard-journal-only';
+        fs.writeFileSync(path.join(root, 'package.json'), '{}');
+        execFileSync('git', ['init', '--initial-branch', branch], { cwd: root, stdio: 'ignore' });
+        execFileSync('git', ['config', 'user.email', 'dashboard@example.test'], { cwd: root, stdio: 'ignore' });
+        execFileSync('git', ['config', 'user.name', 'Dashboard Test'], { cwd: root, stdio: 'ignore' });
+        execFileSync('git', ['commit', '--allow-empty', '-m', 'fixture'], { cwd: root, stdio: 'ignore' });
+        initJournal(root, branch);
+        const journal = emptyState(branch);
+        journal.cycle.status = status;
+        writeJournal(root, branch, journal);
+
+        const snapshot = collectDashboardSnapshot({
+            cwd: root, now: '2026-08-22T00:00:00.000Z', adapters: productionDashboardAdapters(context()),
+        });
+
+        expect(snapshot.sections.find((section) => section.id === 'planning')?.items).toEqual([
+            expect.objectContaining({ detail: expectedLifecycle, state: expectedState }),
+        ]);
+        expect(snapshot.sections.find((section) => section.id === 'execution')).toEqual(expect.objectContaining({
+            availability: 'available', items: [expect.objectContaining({ state: expectedState })],
+        }));
+        expect(JSON.stringify(snapshot)).not.toMatch(/dashboard-journal-only|dashboard@example|Dashboard Test/i);
+        fs.rmSync(root, { recursive: true, force: true });
+    });
 });
