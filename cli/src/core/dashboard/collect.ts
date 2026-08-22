@@ -37,7 +37,7 @@ const EMPTY_ADAPTERS: DashboardSourceAdapters = {
 function findings(items: DashboardFinding[] | undefined): DashboardItemV1[] {
     if (!Array.isArray(items)) return [];
     return items.flatMap((item) => {
-        if (!item || typeof item !== 'object' || typeof item.id !== 'string' || typeof item.label !== 'string') throw new Error('Dashboard finding is invalid');
+        if (!item || typeof item !== 'object' || typeof item.id !== 'string' || item.id.trim() === '' || typeof item.label !== 'string' || item.label.trim() === '') throw new Error('Dashboard finding is invalid');
         if (!['ok', 'attention', 'missing', 'unavailable', 'not_applicable'].includes(item.state)) throw new Error('Dashboard finding state is invalid');
         const remediation = REMEDIATION_BY_FINDING_ID[item.id];
         if (item.state !== 'ok' && item.state !== 'not_applicable' && !remediation) return [];
@@ -84,12 +84,13 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     });
     const projectSource = projectResult.value;
     const execution = executionResult.value;
-    const planItems = plansResult.value ? findings(plansResult.value.map((plan) => plan.lifecycle
-        ? { ...plan, detail: classifyPlanState(plan.lifecycle) } : plan)) : [];
+    const planItemsResult = plansResult.value ? optional(() => findings(plansResult.value!.map((plan) => plan.lifecycle
+        ? { ...plan, detail: classifyPlanState(plan.lifecycle) } : plan))) : { value: [], failed: false, failure: {} };
     const sections = [
         machineSection,
         section('project', projectResult.failed ? 'unavailable' : 'available', projectResult.failed ? canonicalOptionalFailure(projectResult.failure) : findings(projectSource?.findings)),
-        section('planning', plansResult.failed ? 'unavailable' : 'available', plansResult.failed ? canonicalOptionalFailure(plansResult.failure) : planItems),
+        section('planning', plansResult.failed || planItemsResult.failed ? 'unavailable' : 'available', plansResult.failed
+            ? canonicalOptionalFailure(plansResult.failure) : planItemsResult.failed ? [] : planItemsResult.value),
         section('execution', executionResult.failed ? 'unavailable' : 'available', executionResult.failed ? canonicalOptionalFailure(executionResult.failure) : findings(execution?.execution)),
         section('qa', executionResult.failed ? 'unavailable' : 'available', findings(execution?.qa)),
         section('retro', executionResult.failed ? 'unavailable' : 'available', findings(execution?.retro)),

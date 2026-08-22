@@ -60,6 +60,11 @@ describe('collectDashboardSnapshot', () => {
         expect(snapshot.sections.find((section) => section.id === 'machine')?.availability).toBe('available');
     });
 
+    it('isolates malformed post-sanitization plan findings', () => {
+        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [{ id: '', label: 'Profile', state: 'ok' }], execution: () => undefined } });
+        expect(snapshot.sections.find((section) => section.id === 'planning')?.availability).toBe('unavailable');
+    });
+
     it('renders exact remediation only for a canonical optional source failure', () => {
         const knownFailure = Object.assign(new Error('sensors unavailable'), { findingId: 'project.sensors.unavailable', remediationVerified: true });
         const snapshot = collectDashboardSnapshot({
