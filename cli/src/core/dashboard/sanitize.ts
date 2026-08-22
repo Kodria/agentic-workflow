@@ -1,6 +1,12 @@
+import { createHash } from 'crypto';
+
 const STATES = new Set(['ok', 'attention', 'missing', 'unavailable', 'not_applicable', 'active', 'blocked']);
 const ALLOWED_KEYS = new Set(['findings', 'label', 'id', 'state', 'detail', 'execution', 'qa', 'retro', 'history', 'lifecycle', 'journal', 'markers', 'tasks', 'total', 'completed', 'qaComplete', 'retroComplete']);
-const CANONICAL_LABELS = new Set(['Preferences', 'Registries', 'Profile', 'Optional source unavailable']);
+const CANONICAL_LABELS = new Set(['Preferences', 'Registries', 'Profile', 'Sensors', 'Optional source unavailable']);
+const CANONICAL_FINDING_IDS = new Set([
+    'machine.preferences.missing', 'machine.registries.stale', 'project.profile.missing',
+    'project.sensors.unavailable', 'project.preflight.degraded', 'planning.source.unavailable', 'execution.source.unavailable',
+]);
 const DANGEROUS = /(?:ghp_|sk-[A-Za-z]|<|>|\\\\[^\\\s]+\\[^\\\s]+|\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*|[A-Za-z]:\\|\b[A-Za-z_][A-Za-z0-9_]*=|token|secret|password)/iu;
 
 function sanitize(value: unknown, key?: string): unknown {
@@ -11,6 +17,14 @@ function sanitize(value: unknown, key?: string): unknown {
     }
     if (typeof value === 'string') {
         if (key === 'state' && !STATES.has(value)) throw new Error(`Dashboard source state is invalid: ${value}`);
+        // IDs are source-controlled and are rendered into snapshots. Preserve only
+        // the small canonical vocabulary; opaque IDs retain deterministic ordering
+        // without exporting repository names, emails, IPs, or local identifiers.
+        if (key === 'id') {
+            if (value.trim() === '') throw new Error('Dashboard finding id is invalid');
+            return CANONICAL_FINDING_IDS.has(value)
+                ? value : `item-${createHash('sha256').update(value).digest('hex').slice(0, 16)}`;
+        }
         if (key === 'label' && !CANONICAL_LABELS.has(value)) return '[redacted]';
         return DANGEROUS.test(value) ? '[redacted]' : value;
     }

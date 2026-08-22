@@ -103,6 +103,19 @@ describe('runDoctor dashboard modes', () => {
         }
     });
 
+    it('wires existing read-only project facts into the dashboard without inventing lifecycle observations', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-doctor-project-facts-'));
+        const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        try {
+            fs.writeFileSync(path.join(root, 'package.json'), '{}');
+            expect(runDoctor({ full: true, cwd: root })).toBe(1);
+            const output = stdout.mock.calls.map((call) => String(call[0])).join('');
+            expect(output).toContain('project.profile.missing');
+            expect(output).toContain('project.sensors.unavailable');
+            expect(output).toContain('unavailable');
+        } finally { stdout.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
     it('applies doctor agent selection validation to full dashboard mode', () => {
         const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
         try {

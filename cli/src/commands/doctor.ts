@@ -156,11 +156,20 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
                 return [];
             })).map((finding) => [finding.id, finding])).values());
             const snapshot = collectSnapshot({ cwd, now: new Date().toISOString(), adapters: {
-                machine: () => ({ findings: machineFindings }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined,
+                machine: () => ({ findings: machineFindings }),
+                // These facts already come from gatherContext's read-only project
+                // probes. Plans and execution deliberately remain unobserved here:
+                // Release A has no safe adapter that can classify them without
+                // inventing lifecycle state from filesystem names.
+                project: () => ({ findings: context.project ? [
+                    { id: 'project.profile.missing', label: 'Profile', state: context.project.profile.present ? 'ok' as const : 'missing' as const },
+                    { id: 'project.sensors.unavailable', label: 'Sensors', state: context.project.sensors.present ? 'ok' as const : 'unavailable' as const },
+                ] : [] }),
+                plans: () => [], execution: () => undefined,
             } });
             if (opts.full) process.stdout.write(renderFullTerminal(snapshot) + '\n');
             if (htmlRequested) {
-                writeHtmlAtomically({ target: target!, html: renderDashboardHtml(snapshot) });
+                writeHtmlAtomically({ cwd, target: target!, html: renderDashboardHtml(snapshot), force: opts.force });
                 process.stdout.write(`${target}\n`);
             }
             return snapshot.overall === 'healthy' ? 0 : 1;

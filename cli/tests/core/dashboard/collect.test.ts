@@ -24,6 +24,13 @@ describe('collectDashboardSnapshot', () => {
         expect(() => collectDashboardSnapshot({ cwd: '/definitely-not-a-project', now: fixedNow, adapters: { machine: () => ({ findings: [{ id: '', label: 'Preferences', state: 'ok' }] }), project: jest.fn(), plans: jest.fn(), execution: jest.fn() } })).toThrow(/finding/i);
     });
 
+    it.each([undefined, null, {}, 'healthy'])('rejects a non-array central machine findings value: %p', (findings) => {
+        expect(() => collectDashboardSnapshot({
+            cwd: '/definitely-not-a-project', now: fixedNow,
+            adapters: { machine: () => ({ findings } as never), project: jest.fn(), plans: jest.fn(), execution: jest.fn() },
+        })).toThrow('Dashboard findings must be an array');
+    });
+
     it('uses exact verified remediation commands and stable ordered sections', () => {
         const snapshot = collectDashboardSnapshot({
             cwd: process.cwd(), now: fixedNow,
@@ -53,6 +60,16 @@ describe('collectDashboardSnapshot', () => {
         expect(snapshot.sections.find((section) => section.id === 'machine')?.items).toEqual([]);
         expect(snapshot.sections.find((section) => section.id === 'project')?.availability).toBe('unavailable');
         expect(snapshot.sections.find((section) => section.id === 'project')?.items).toEqual([]);
+    });
+
+    it('marks execution-derived sections unavailable when no read-only execution source exists', () => {
+        const snapshot = collectDashboardSnapshot({
+            cwd: process.cwd(), now: fixedNow,
+            adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined },
+        });
+        for (const id of ['execution', 'qa', 'retro', 'history']) {
+            expect(snapshot.sections.find((section) => section.id === id)?.availability).toBe('unavailable');
+        }
     });
 
     it('isolates malformed optional source data to its owning section', () => {
@@ -143,6 +160,18 @@ describe('sanitizeDashboardSource', () => {
     it('removes hostile paths and secrets before rendering', () => {
         const safe = sanitizeDashboardSource({ path: '/var/lib/private', token: 'ghp_secret', username: 'alice', output: '<script>alert(1)</script>', rawOutput: 'sk-live-secret', detail: 'log:(cwd=/tmp/run/output) unc=(\\\\server\\share\\secret)(MODE=production)', label: 'alice workstation' });
         expect(JSON.stringify(safe)).not.toMatch(/alice|ghp_|script|\/var\/|\/tmp\/|sk-live|alert|server|share|MODE=production/i);
+    });
+
+    it('replaces dynamic finding identifiers with opaque safe identifiers', () => {
+        const safe = sanitizeDashboardSource({ findings: [
+            { id: 'alice@example.com', label: 'Preferences', state: 'missing' },
+            { id: '192.0.2.44/repository-private', label: 'Profile', state: 'missing' },
+            { id: 'machine.preferences.missing', label: 'Preferences', state: 'missing' },
+        ] });
+        const serialized = JSON.stringify(safe);
+        expect(serialized).not.toMatch(/alice@example|192\.0\.2\.44|repository-private/i);
+        expect(serialized).toContain('machine.preferences.missing');
+        expect(serialized).toMatch(/item-[a-f0-9]{16}/);
     });
 
     it('rejects invalid item states explicitly', () => {

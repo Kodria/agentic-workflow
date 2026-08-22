@@ -34,8 +34,9 @@ const EMPTY_ADAPTERS: DashboardSourceAdapters = {
     machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined,
 };
 
-function findings(items: DashboardFinding[] | undefined): DashboardItemV1[] {
-    if (!Array.isArray(items)) return [];
+function findings(items: unknown, optional = false): DashboardItemV1[] {
+    if (optional && items === undefined) return [];
+    if (!Array.isArray(items)) throw new Error('Dashboard findings must be an array');
     return items.flatMap((item) => {
         if (!item || typeof item !== 'object' || typeof item.id !== 'string' || item.id.trim() === '' || typeof item.label !== 'string' || item.label.trim() === '') throw new Error('Dashboard finding is invalid');
         if (!['ok', 'attention', 'missing', 'unavailable', 'not_applicable'].includes(item.state)) throw new Error('Dashboard finding state is invalid');
@@ -65,7 +66,7 @@ function canonicalOptionalFailure(failure: OptionalFailure): DashboardItemV1[] {
 }
 
 function isolatedFindings(items: DashboardFinding[] | undefined): { value?: DashboardItemV1[]; failed: boolean; failure: OptionalFailure } {
-    return optional(() => findings(items));
+    return optional(() => findings(items, true));
 }
 
 /** Pure read-only aggregation over injected source adapters. */
@@ -73,6 +74,7 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     if (!options || typeof options.cwd !== 'string' || options.cwd.length === 0 || typeof options.now !== 'string' || Number.isNaN(Date.parse(options.now))) throw new Error('collectDashboardSnapshot requires cwd and valid now');
     const adapters = { ...EMPTY_ADAPTERS, ...(options.adapters ?? {}) };
     const machine = adapters.machine({ cwd: options.cwd });
+    if (!Array.isArray(machine?.findings)) throw new Error('Dashboard findings must be an array');
     const root = findProjectRoot(options.cwd);
     const machineItems = findings((sanitizeDashboardSource(machine) as MachineDashboardSource).findings);
     const machineSection = section('machine', 'available', machineItems);
@@ -96,16 +98,19 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     const qaItems = isolatedFindings(execution?.qa);
     const retroItems = isolatedFindings(execution?.retro);
     const historyItems = isolatedFindings(execution?.history);
+    const executionUnavailable = !executionResult.failed && execution === undefined;
     const sections = [
         machineSection,
         section('project', projectResult.failed || projectItemsResult.failed ? 'unavailable' : 'available', projectResult.failed
             ? canonicalOptionalFailure(projectResult.failure) : projectItemsResult.failed ? [] : projectItemsResult.value),
         section('planning', plansResult.failed || planItemsResult.failed ? 'unavailable' : 'available', plansResult.failed
             ? canonicalOptionalFailure(plansResult.failure) : planItemsResult.failed ? [] : planItemsResult.value),
-        section('execution', executionResult.failed || executionItems.failed ? 'unavailable' : 'available', executionResult.failed ? canonicalOptionalFailure(executionResult.failure) : executionItems.value),
-        section('qa', executionResult.failed || qaItems.failed ? 'unavailable' : 'available', qaItems.value),
-        section('retro', executionResult.failed || retroItems.failed ? 'unavailable' : 'available', retroItems.value),
-        section('history', executionResult.failed || historyItems.failed ? 'unavailable' : 'available', historyItems.value),
+        section('execution', executionResult.failed || executionUnavailable || executionItems.failed ? 'unavailable' : 'available', executionResult.failed ? canonicalOptionalFailure(executionResult.failure) : executionUnavailable ? canonicalOptionalFailure({ findingId: 'execution.source.unavailable', remediationVerified: true }) : executionItems.value),
+        // There is no read-only QA, retro, or history adapter in Release A. An
+        // absent execution source is not evidence of a successful empty cycle.
+        section('qa', executionResult.failed || executionUnavailable || qaItems.failed ? 'unavailable' : 'available', qaItems.value),
+        section('retro', executionResult.failed || executionUnavailable || retroItems.failed ? 'unavailable' : 'available', retroItems.value),
+        section('history', executionResult.failed || executionUnavailable || historyItems.failed ? 'unavailable' : 'available', historyItems.value),
     ];
     const degraded = sections.some((entry) => entry.availability === 'unavailable' || entry.items.some((item) => item.state !== 'ok' && item.state !== 'not_applicable'));
     return validateDashboardSnapshotV1({ schema: 1, generatedAt: options.now, overall: degraded ? 'degraded' : 'healthy', project: { detected: true, label: projectSource?.label || 'Project detected' }, confidence: 'provisional', sections });

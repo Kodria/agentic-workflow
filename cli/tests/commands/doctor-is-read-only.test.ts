@@ -126,4 +126,20 @@ describe('awm doctor no escribe nada', () => {
         const after = { home: bytesOf(home), project: bytesOf(projectRoot), git: (() => { try { return execFileSync('git', ['status', '--porcelain=v1'], { cwd: projectRoot, encoding: 'utf8' }); } catch (error) { return String(error); } })() };
         expect(after).toEqual(before);
     });
+
+    it('--html replaces only its explicitly requested target', () => {
+        const target = path.join(projectRoot, 'dashboard.html');
+        fs.writeFileSync(target, 'old dashboard');
+        const before = { home: bytesOf(home), project: bytesOf(projectRoot) };
+        const { runDoctor } = require('../../src/commands/doctor');
+
+        const code = runDoctor({ cwd: projectRoot, html: target, force: true });
+
+        const after = { home: bytesOf(home), project: bytesOf(projectRoot) };
+        expect([0, 1]).toContain(code);
+        expect(after.home.filter(([name]) => name !== 'proj/dashboard.html')).toEqual(before.home.filter(([name]) => name !== 'proj/dashboard.html'));
+        expect(after.project.filter(([name]) => name !== 'dashboard.html')).toEqual(before.project.filter(([name]) => name !== 'dashboard.html'));
+        expect(fs.readFileSync(target, 'utf8')).not.toBe('old dashboard');
+        expect(after.project.map(([name]) => name).filter((name) => name.includes('.tmp'))).toEqual([]);
+    });
 });
