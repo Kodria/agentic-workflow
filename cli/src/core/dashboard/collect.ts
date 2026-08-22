@@ -1,12 +1,13 @@
 import { findProjectRoot } from '../profile';
 import { sanitizeDashboardSource } from './sanitize';
 import { validateDashboardSnapshotV1 } from './validate';
+import { classifyPlanState, type PlanStateInput } from './plan-state';
 import type { DashboardItemState, DashboardItemV1, DashboardSectionV1, DashboardSnapshotV1 } from './types';
 
 export interface DashboardFinding { id: string; label: string; state: DashboardItemState; detail?: string; }
 export interface MachineDashboardSource { findings?: DashboardFinding[]; }
 export interface ProjectDashboardSource { label?: string; findings?: DashboardFinding[]; }
-export interface PlanDashboardSource { id: string; label: string; state: DashboardItemState; detail?: string; }
+export interface PlanDashboardSource { id: string; label: string; state: DashboardItemState; detail?: string; lifecycle?: PlanStateInput; }
 export interface ExecutionDashboardSource {
     execution?: DashboardFinding[]; qa?: DashboardFinding[]; retro?: DashboardFinding[]; history?: DashboardFinding[];
 }
@@ -17,7 +18,7 @@ export interface DashboardSourceAdapters {
     execution(input: { root: string }): ExecutionDashboardSource | undefined;
 }
 export interface CollectDashboardOptions { cwd: string; now: string; adapters?: DashboardSourceAdapters; }
-type OptionalFailure = { findingId?: string };
+type OptionalFailure = { findingId?: string; remediationVerified?: boolean };
 
 export const REMEDIATION_BY_FINDING_ID: Readonly<Record<string, string>> = {
     'machine.preferences.missing': 'awm init',
@@ -52,12 +53,14 @@ function optional<T>(source: () => T): { value?: T; failed: boolean; failure: Op
     try { return { value: source(), failed: false, failure: {} }; } catch (error) {
         const findingId = error && typeof error === 'object' && typeof (error as { findingId?: unknown }).findingId === 'string'
             ? (error as { findingId: string }).findingId : undefined;
-        return { failed: true, failure: { findingId } };
+        const remediationVerified = error !== null && typeof error === 'object'
+            ? (error as { remediationVerified?: unknown }).remediationVerified === true : false;
+        return { failed: true, failure: { findingId, remediationVerified } };
     }
 }
 
 function canonicalOptionalFailure(failure: OptionalFailure): DashboardItemV1[] {
-    if (!failure.findingId || !Object.hasOwn(REMEDIATION_BY_FINDING_ID, failure.findingId)) return [];
+    if (!failure.remediationVerified || !failure.findingId || !Object.hasOwn(REMEDIATION_BY_FINDING_ID, failure.findingId)) return [];
     return [{ id: failure.findingId, label: 'Optional source unavailable', state: 'unavailable', remediation: REMEDIATION_BY_FINDING_ID[failure.findingId] }];
 }
 
@@ -78,7 +81,8 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     const executionResult = optional(() => adapters.execution({ root }));
     const projectSource = projectResult.value ? sanitizeDashboardSource(projectResult.value) as ProjectDashboardSource : undefined;
     const execution = executionResult.value ? sanitizeDashboardSource(executionResult.value) as ExecutionDashboardSource : undefined;
-    const planItems = plansResult.value ? findings(sanitizeDashboardSource(plansResult.value) as PlanDashboardSource[]) : [];
+    const planItems = plansResult.value ? findings((sanitizeDashboardSource(plansResult.value) as PlanDashboardSource[]).map((plan) => plan.lifecycle
+        ? { ...plan, detail: classifyPlanState(plan.lifecycle) } : plan)) : [];
     const sections = [
         machineSection,
         section('project', projectResult.failed ? 'unavailable' : 'available', projectResult.failed ? canonicalOptionalFailure(projectResult.failure) : findings(projectSource?.findings)),

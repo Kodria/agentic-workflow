@@ -52,7 +52,7 @@ describe('collectDashboardSnapshot', () => {
     });
 
     it('renders exact remediation only for a canonical optional source failure', () => {
-        const knownFailure = Object.assign(new Error('sensors unavailable'), { findingId: 'project.sensors.unavailable' });
+        const knownFailure = Object.assign(new Error('sensors unavailable'), { findingId: 'project.sensors.unavailable', remediationVerified: true });
         const snapshot = collectDashboardSnapshot({
             cwd: process.cwd(), now: fixedNow,
             adapters: { machine: () => ({ findings: [] }), project: () => { throw knownFailure; }, plans: () => [], execution: () => undefined },
@@ -66,7 +66,7 @@ describe('collectDashboardSnapshot', () => {
         ['plans', 'planning.source.unavailable', 'planning', 'awm preflight'],
         ['execution', 'execution.source.unavailable', 'execution', 'awm sensors status'],
     ] as const)('renders a known %s failure in its owner section', (adapter, findingId, sectionId, remediation) => {
-        const failure = Object.assign(new Error('unavailable'), { findingId });
+        const failure = Object.assign(new Error('unavailable'), { findingId, remediationVerified: true });
         const snapshot = collectDashboardSnapshot({
             cwd: process.cwd(), now: fixedNow,
             adapters: {
@@ -87,6 +87,17 @@ describe('collectDashboardSnapshot', () => {
             ] }), project: jest.fn(), plans: jest.fn(), execution: jest.fn() },
         });
         expect(snapshot.sections[0].items.map((item) => item.id)).toEqual(['machine.preferences.missing', 'machine.registries.stale']);
+    });
+
+    it.each(['blocked', 'active', 'executed', 'retro_pending', 'qa_pending', 'legacy_unverifiable'] as const)('integrates lifecycle state %s into plan detail', (expected) => {
+        const lifecycle = expected === 'blocked' ? { journal: { state: 'blocked' as const }, markers: { qaComplete: false, retroComplete: false }, tasks: { total: 1, completed: 0 } }
+            : expected === 'active' ? { journal: { state: 'active' as const }, markers: { qaComplete: false, retroComplete: false }, tasks: { total: 1, completed: 0 } }
+                : expected === 'executed' ? { markers: { qaComplete: true, retroComplete: true }, tasks: { total: 1, completed: 1 } }
+                    : expected === 'retro_pending' ? { markers: { qaComplete: true, retroComplete: false }, tasks: { total: 1, completed: 1 } }
+                        : expected === 'qa_pending' ? { markers: { qaComplete: false, retroComplete: false }, tasks: { total: 1, completed: 1 } }
+                            : { markers: { qaComplete: false, retroComplete: false }, tasks: { total: 0, completed: 0 } };
+        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [{ id: 'plan.lifecycle', label: 'Profile', state: 'ok', lifecycle }], execution: () => undefined } });
+        expect(snapshot.sections.find((section) => section.id === 'planning')?.items[0].detail).toBe(expected);
     });
 
     it('degrades a machine-only dashboard for actionable machine findings', () => {
