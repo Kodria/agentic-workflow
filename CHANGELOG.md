@@ -1,3 +1,8 @@
+## v8.5.0 - 2026-08-22
+
+### Features
+- **evidence:** capture and render cycle impact (#109)
+
 ## v8.4.0 - 2026-08-22
 
 ### Features
