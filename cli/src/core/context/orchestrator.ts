@@ -25,6 +25,15 @@ function collectDeclaredOrchestrators(): { declared: DeclaredOrchestrator[]; dia
     return { declared, diagnostics };
 }
 
+/** Recolecta declarados y emite sus diagnosticos como warnings. Punto unico usado por
+ *  `inputFor` y `statusInputFor` para que ambos permanezcan sincronizados por construccion
+ *  (ver R5.1 y el bug de staleness que motivo esta extraccion). */
+function collectAndWarn(): DeclaredOrchestrator[] {
+    const { declared, diagnostics } = collectDeclaredOrchestrators();
+    for (const d of diagnostics) console.warn(`warning: ${d}`);
+    return declared;
+}
+
 export type ContextOp = {
     agent: AgentTarget;
     scope: Scope;
@@ -70,12 +79,10 @@ export class InjectionOrchestrator {
 
     /** Full input: builds context from registry and materializes to disk. Used by installContext only. */
     private inputFor(op: ContextOp): InjectionInput {
-        const { declared, diagnostics } = collectDeclaredOrchestrators();
-        for (const d of diagnostics) console.warn(`warning: ${d}`);
         const ctx = buildContext({
             registryRoot: op.registryRoot,
             profileExtensions: op.profileExtensions,
-            declaredOrchestrators: declared,
+            declaredOrchestrators: collectAndWarn(),
         });
         const absPath = this.contextPathFor(op);
         const ref = materialize(ctx, absPath, op.scope);
@@ -107,12 +114,10 @@ export class InjectionOrchestrator {
             // diverge del hash realmente materializado por installContext en cuanto algun
             // registry instalado declare un orquestador, y contextStatus reportaria 'stale'
             // de forma permanente incluso justo despues de un install correcto.
-            const { declared, diagnostics } = collectDeclaredOrchestrators();
-            for (const d of diagnostics) console.warn(`warning: ${d}`);
             const ctx = buildContext({
                 registryRoot: op.registryRoot,
                 profileExtensions: op.profileExtensions,
-                declaredOrchestrators: declared,
+                declaredOrchestrators: collectAndWarn(),
             });
             contentHash = ctx.contentHash;
         } catch (err) {
