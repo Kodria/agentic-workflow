@@ -306,4 +306,44 @@ describe('InjectionOrchestrator (declared orchestrators from an installed regist
 
         fs.rmSync(dir, { recursive: true, force: true });
     });
+
+    it('installContext still succeeds when a DIFFERENT installed registry has a broken declaration', () => {  // verifies R5.1
+        // Two registries installed: "broken" has an unparsable awm-registry.json, "clean"
+        // is the one actually being operated on. The broken one must not block install.
+        writeRegistriesConfig([
+            { name: 'broken', remote: 'unused' },
+            { name: 'clean', remote: 'unused' },
+        ]);
+        const brokenRoot = registryContentRoot('broken');
+        fs.mkdirSync(brokenRoot, { recursive: true });
+        fs.writeFileSync(path.join(brokenRoot, 'awm-registry.json'), '{ not json');
+
+        const registryRoot = registryContentRoot('clean');
+        fs.mkdirSync(path.join(registryRoot, 'skills/using-awm'), { recursive: true });
+        fs.writeFileSync(
+            path.join(registryRoot, 'skills/using-awm/SKILL.md'),
+            '---\nversion: "1.0.0"\n---\nBODY',
+        );
+
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-oc-brokensibling-'));
+        const configPath = path.join(dir, 'opencode.json');
+        const absPath = path.join(dir, 'awm-context.md');
+        const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+        const orch = new InjectionOrchestrator({
+            providerOverride: {
+                label: 'OpenCode', configHome: { envVar: null, dir: '.test', resolved: '/tmp/test-config-home' }, skill: { global: '', local: '', renderer: 'link' }, workflow: null, agent: null,
+                injection: { type: 'config-instructions', configPath, field: 'instructions' },
+            },
+            contextPathOverride: absPath,
+        });
+        const args = { agent: 'opencode' as const, scope: 'global' as const, registryRoot, installMethod: 'symlink' as const, profileExtensions: [] };
+
+        expect(() => orch.installContext(args)).not.toThrow();
+        expect(fs.readFileSync(absPath, 'utf-8')).toContain('BODY');
+        expect(orch.contextStatus(args)).toBe('injected');
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('warning:'));
+
+        warnSpy.mockRestore();
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
 });
