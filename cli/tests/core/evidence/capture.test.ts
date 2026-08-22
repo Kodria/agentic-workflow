@@ -47,4 +47,17 @@ describe('captureCycleEvidence', () => {
     const evidence = captureCycleEvidence({ root: process.cwd(), repositoryIdentity: 'git@example.test:team/repository.git', planPath: 'plans/release.md', journal: { cycle: { status: 'BLOCKED', startedAt: '2026-08-22T10:00:00.000Z' }, controllerHeartbeatAt: '2026-08-22T10:00:03.000Z', tasks: [], verdicts: [], fixes: [] }, gates: [], ledger: [] });
     expect(evidence).toMatchObject({ cycleState: 'blocked', endedAt: '2026-08-22T10:00:03.000Z', durationMs: 3_000 });
   });
+
+  test('counts inconclusive verdicts as adverse findings because they create fix obligations', () => {
+    const evidence = captureCycleEvidence({
+      root: process.cwd(), repositoryIdentity: 'git@example.test:team/repository.git', planPath: 'plans/release.md',
+      journal: {
+        cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:01.000Z' },
+        tasks: [], verdicts: [{ result: 'inconclusive', fingerprint: 'probe-unavailable', receivedAt: '2026-08-22T10:00:00.000Z' }],
+        fixes: [{ verdictId: 'v1', closed: true }],
+      }, gates: [], ledger: [],
+    });
+
+    expect(evidence.qa).toMatchObject({ findings: 1, fixes: 1, signatures: [expect.stringMatching(/^[a-f0-9]{64}$/)] });
+  });
 });
