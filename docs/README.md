@@ -17,6 +17,7 @@ engineering system and the second to configure and operate it.
 2. [Configuration](configuration.md) — providers, defaults, multiple-provider coexistence, and registries.
 3. [Project setup](project-setup.md) — initialize a new, existing, or already-configured repository.
 4. [Runbook](runbook.md) — daily work, updates, teams, and troubleshooting.
+5. [Dashboard and project evidence](guides/dashboard-and-evidence.md) — inspect and share current readiness plus local cycle evidence.
 
 ## Reference
 
