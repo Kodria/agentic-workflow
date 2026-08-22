@@ -5,8 +5,9 @@ import path from 'path';
 
 const cliVersion = process.env.AWM_PUBLISHED_CLI_VERSION;
 const registryTag = process.env.AWM_PUBLISHED_REGISTRY_TAG;
+const registryCommit = process.env.AWM_PUBLISHED_REGISTRY_COMMIT;
 const registryRemote = process.env.AWM_PUBLISHED_REGISTRY_REMOTE ?? 'https://github.com/Kodria/awm-baseline-registry.git';
-const enabled = Boolean(cliVersion && registryTag);
+const enabled = Boolean(cliVersion && registryTag && registryCommit);
 const acceptance = enabled ? describe : describe.skip;
 
 function command(cwd: string, executable: string, args: string[], env = process.env): SpawnSyncReturns<string> {
@@ -14,10 +15,11 @@ function command(cwd: string, executable: string, args: string[], env = process.
 }
 
 /** Published evidence accepts only exact versions and immutable git tags. */
-export function assertImmutableArtifacts(version: string | undefined, tag: string | undefined, remote: string): void {
+export function assertImmutableArtifacts(version: string | undefined, tag: string | undefined, commit: string | undefined, remote: string): void {
     if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('published CLI version must be an exact immutable semver');
     if (version.includes('file:') || version.includes('/') || version.includes('@')) throw new Error('published CLI must not be a workspace, file dependency, or mutable tag');
     if (!tag || !/^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag)) throw new Error('published registry ref must be an exact immutable tag');
+    if (!commit || !/^[a-f0-9]{40}$/.test(commit)) throw new Error('published registry commit must be a full immutable SHA');
     if (!/^https:\/\/github\.com\/Kodria\/awm-baseline-registry\.git$/.test(remote)) throw new Error('published registry remote must be the canonical immutable release remote');
 }
 
@@ -45,17 +47,20 @@ export function assertRetroCaptureContract(registry: unknown, retro: string, ver
     const floor = (registry as { minCliVersion?: unknown }).minCliVersion;
     if (typeof floor !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(floor)) throw new Error('published registry must declare minCliVersion');
     if (compareSemver(version, floor) < 0) throw new Error(`published CLI ${version} is below registry minCliVersion ${floor}`);
-    const capture = retro.indexOf('awm evidence capture');
-    const archive = retro.indexOf('awm ledger archive');
-    if (capture < 0) throw new Error('installed harness-retro contract lacks evidence capture');
-    if (archive < 0 || capture > archive) throw new Error('installed harness-retro must capture evidence before archive');
+    const commands = retro.split(/\r?\n/).map((line, index) => ({ line: line.trim(), index }))
+        .filter(({ line }) => !line.startsWith('#') && !line.startsWith('<!--'))
+        .filter(({ line }) => /^(?:\d+\.\s+)?`?awm (?:evidence capture|ledger archive)(?:\s|`|$)/.test(line));
+    const captures = commands.filter(({ line }) => /awm evidence capture(?:\s|`|$)/.test(line));
+    const archives = commands.filter(({ line }) => /awm ledger archive(?:\s|`|$)/.test(line));
+    if (captures.length !== 1) throw new Error('installed harness-retro contract requires exactly one executable evidence capture command');
+    if (archives.length !== 1 || captures[0].index > archives[0].index) throw new Error('installed harness-retro must capture evidence before archive');
 }
 
 acceptance('published doctor and evidence acceptance (R8.7)', () => {
     jest.setTimeout(10 * 60_000);
 
     test('installs exact npm and registry artifacts into a fresh consumer and executes the dashboard/evidence contract', () => {
-        assertImmutableArtifacts(cliVersion, registryTag, registryRemote);
+        assertImmutableArtifacts(cliVersion, registryTag, registryCommit, registryRemote);
         assertIssue87RegistryPin(registryTag);
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-published-doctor-'));
         try {
@@ -67,6 +72,8 @@ acceptance('published doctor and evidence acceptance (R8.7)', () => {
             expect(command(root, 'npm', ['install', '--prefix', artifacts, '--ignore-scripts', '--no-audit', '--no-fund', `agentic-workflow-manager@${cliVersion}`]).status).toBe(0);
             expect(command(root, 'git', ['clone', '--depth', '1', '--branch', registryTag!, registryRemote, registry]).status).toBe(0);
             expect(command(registry, 'git', ['describe', '--exact-match', '--tags', 'HEAD']).stdout.trim()).toBe(registryTag);
+            expect(command(registry, 'git', ['rev-parse', 'HEAD']).stdout.trim()).toBe(registryCommit);
+            expect(command(registry, 'git', ['rev-parse', `${registryTag}^{}`]).stdout.trim()).toBe(registryCommit);
             const cliRoot = path.join(artifacts, 'node_modules', 'agentic-workflow-manager');
             expect(JSON.parse(fs.readFileSync(path.join(cliRoot, 'package.json'), 'utf8'))).toEqual(expect.objectContaining({ version: cliVersion }));
             expect(fs.existsSync(path.join(cliRoot, 'dist', 'src', 'index.js'))).toBe(true);
@@ -117,10 +124,13 @@ acceptance('published doctor and evidence acceptance (R8.7)', () => {
 
 describe('published artifact provenance guard', () => {
     test.each(['file:../cli', '../cli', 'latest', 'workspace:*', '8.4.0@latest'])('rejects mutable CLI reference %s', (version) => {
-        expect(() => assertImmutableArtifacts(version, 'v3.2.0', registryRemote)).toThrow(/published CLI/i);
+        expect(() => assertImmutableArtifacts(version, 'v3.2.0', 'a'.repeat(40), registryRemote)).toThrow(/published CLI/i);
     });
     test.each(['main', 'HEAD', '', 'v3', 'refs/heads/main'])('rejects mutable registry ref %s', (tag) => {
-        expect(() => assertImmutableArtifacts('8.4.0', tag, registryRemote)).toThrow(/registry ref/i);
+        expect(() => assertImmutableArtifacts('8.4.0', tag, 'a'.repeat(40), registryRemote)).toThrow(/registry ref/i);
+    });
+    test('rejects a short or retagged registry commit pin', () => {
+        expect(() => assertImmutableArtifacts('8.4.1', 'v3.3.0', 'deadbeef', registryRemote)).toThrow(/full immutable SHA/);
     });
 });
 
@@ -134,6 +144,10 @@ describe('future registry retro capture contract', () => {
     test('fails when minCliVersion is removed or retro ordering is swapped', () => {
         expect(() => assertRetroCaptureContract({}, contract, '8.4.1')).toThrow(/minCliVersion/);
         expect(() => assertRetroCaptureContract(metadata, 'awm ledger archive\nawm evidence capture', '8.4.1')).toThrow(/before archive/);
+    });
+    test('ignores comments and rejects duplicate or non-executable capture text', () => {
+        expect(() => assertRetroCaptureContract(metadata, '# awm evidence capture\nawm ledger archive', '8.4.1')).toThrow(/exactly one executable/);
+        expect(() => assertRetroCaptureContract(metadata, `${contract}awm evidence capture --plan again`, '8.4.1')).toThrow(/exactly one executable/);
     });
     test('rejects the prepublication CLI and a preceding registry pin', () => {
         expect(() => assertRetroCaptureContract(metadata, contract, '8.4.0')).toThrow(/below registry minCliVersion/);
