@@ -20,7 +20,8 @@ describe('R7 — ausencia de modelos y aislamiento', () => {
         process.env.AWM_HOME = path.join(home, '.awm');
     });
     afterEach(() => {
-        process.env.HOME = realHome; process.env.AWM_HOME = realAwmHome;
+        if (realHome === undefined) delete process.env.HOME; else process.env.HOME = realHome;
+        if (realAwmHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = realAwmHome;
         fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true });
     });
 
@@ -34,8 +35,13 @@ describe('R7 — ausencia de modelos y aislamiento', () => {
     });
 
     it('el descubridor no toca el ~/.awm real', () => {                          // verifies R7.4
+        // contentRoots() (usado por default por discoverProcessModels) lee
+        // AWM_HOME dinámicamente en cada llamada — con AWM_HOME apuntando al
+        // tmpdir de este test, sin modelos de proceso instalados ahí, esto
+        // no debe lanzar. (Se descartó una aserción sobre `.awm/process-cache`:
+        // ningún código de este repo escribe ese path, así que nunca podía
+        // fallar y no aportaba evidencia real de aislamiento.)
         expect(() => discoverProcessModels()).not.toThrow();
-        expect(fs.existsSync(path.join(String(realHome), '.awm', 'process-cache'))).toBe(false);
     });
 
     it('usa path.join y no separadores hardcodeados', () => {                    // verifies R7.3
