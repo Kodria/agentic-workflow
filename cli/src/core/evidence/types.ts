@@ -1,5 +1,3 @@
-import type { PlanState } from '../dashboard/plan-state';
-
 export const PLAN_STATES = ['active', 'blocked', 'qa_pending', 'retro_pending', 'executed', 'legacy_unverifiable'] as const;
 export type CycleEvidencePlanState = typeof PLAN_STATES[number];
 
@@ -10,7 +8,7 @@ export interface CycleEvidenceV1 {
   endedAt: string;
   durationMs: number;
   cycleState: 'completed' | 'blocked';
-  plan: { ref: string; state: PlanState };
+  plan: { ref: string; state: CycleEvidencePlanState };
   tasks: Array<{ id: string; attempts: number; retries: number }>;
   qa: { findings: number; fixes: number; signatures: string[] };
   gates: { required: number; firstEvaluationsPassed: boolean[]; firstPass: boolean };
@@ -77,5 +75,5 @@ export function validateCycleEvidence(input: unknown): CycleEvidenceV1 {
   const cures = value.cures.map((item, index) => { const cure = record(item, `cures[${index}]`); keys(cure, `cures[${index}]`, ['signature', 'curedAt']); return { signature: digest(cure.signature, 'cure signature'), curedAt: timestamp(cure.curedAt, 'curedAt') }; });
   let pr: CycleEvidenceV1['pr'];
   if (value.pr !== undefined) { const raw = record(value.pr, 'pr'); keys(raw, 'pr', ['provider', 'number']); if (raw.provider !== 'github' && raw.provider !== 'gitlab' && raw.provider !== 'other') throw new Error('pr provider is invalid'); const number = count(raw.number, 'pr number'); if (number < 1) throw new Error('pr number is invalid'); pr = { provider: raw.provider, number }; }
-  return { schema: 1, cycleId: digest(value.cycleId, 'cycleId'), startedAt, endedAt, durationMs, cycleState: value.cycleState, plan: { ref: relativePlanRef(plan.ref), state: plan.state as PlanState }, tasks, qa: { findings, fixes, signatures }, gates: { required, firstEvaluationsPassed: [...gates.firstEvaluationsPassed] as boolean[], firstPass: gates.firstPass }, cures, ...(pr ? { pr } : {}) };
+  return { schema: 1, cycleId: digest(value.cycleId, 'cycleId'), startedAt, endedAt, durationMs, cycleState: value.cycleState, plan: { ref: relativePlanRef(plan.ref), state: plan.state as CycleEvidencePlanState }, tasks, qa: { findings, fixes, signatures }, gates: { required, firstEvaluationsPassed: [...gates.firstEvaluationsPassed] as boolean[], firstPass: gates.firstPass }, cures, ...(pr ? { pr } : {}) };
 }

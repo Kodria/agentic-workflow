@@ -1,6 +1,5 @@
 import crypto from 'crypto';
-import type { PlanState } from '../dashboard/plan-state';
-import { validateCycleEvidence, type CycleEvidenceV1 } from './types';
+import { validateCycleEvidence, type CycleEvidenceV1, type CycleEvidencePlanState } from './types';
 
 type SourceRecord = Record<string, unknown>;
 const hash = (value: string): string => crypto.createHash('sha256').update(value).digest('hex');
@@ -8,7 +7,7 @@ const object = (value: unknown, name: string): SourceRecord => { if (!value || t
 const iso = (value: unknown, name: string): string => { if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) throw new Error(`${name} must be an ISO timestamp`); return value; };
 const nonNegative = (value: unknown, name: string): number => { if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error(`${name} must be a non-negative integer`); return value as number; };
 
-export interface CaptureCycleEvidenceInput { root: string; repositoryIdentity: unknown; planPath: string; journal: unknown; gates: unknown; ledger: unknown; pr?: unknown; planState?: PlanState; }
+export interface CaptureCycleEvidenceInput { root: string; repositoryIdentity: unknown; planPath: string; journal: unknown; gates: unknown; ledger: unknown; pr?: unknown; planState?: CycleEvidencePlanState; }
 
 export function captureCycleEvidence(input: CaptureCycleEvidenceInput): CycleEvidenceV1 {
   if (!input || typeof input.root !== 'string' || !input.root) throw new Error('capture root is required');

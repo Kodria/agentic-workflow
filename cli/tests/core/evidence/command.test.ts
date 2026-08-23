@@ -2,6 +2,9 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { runEvidenceCapture } from '../../../src/commands/evidence';
+import { PLAN_STATES } from '../../../src/core/evidence/types';
+
+const completeJournal = { journalId: 'ignored', cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:01.000Z' }, tasks: [], verdicts: [], fixes: [], jobs: {}, cycleVerificationPlan: [] };
 
 describe('evidence capture CLI boundary', () => {
   let root: string;
@@ -65,5 +68,32 @@ describe('evidence capture CLI boundary', () => {
     const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: { journalId: 'ignored', cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:01.000Z' }, tasks: [], verdicts: [], fixes: [], jobs: {}, cycleVerificationPlan: [] }, ledger: [] });
 
     expect(result).toEqual(expect.objectContaining({ code: 2, error: expect.stringMatching(/invalid checklist/i) }));
+  });
+
+  test('lee el marker awm-docs-complete del plan', () => {
+    fs.writeFileSync(path.join(root, 'plan.md'), '# Plan\n<!-- awm-qa-complete: 2026-08-23 -->\n- [x] Task 1\n');
+    const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: completeJournal, ledger: [] });
+
+    expect(result.code).toBe(0);
+    // sin el marker de docs, el estado vivo seria docs_pending
+    expect(JSON.parse(fs.readFileSync(path.join(root, '.awm', 'evidence', 'cycles', result.stdout.trim() + '.json'), 'utf8')).plan.state).toBe('retro_pending');
+  });
+
+  test('no filtra docs_pending al registro durable de evidencia', () => {
+    fs.writeFileSync(path.join(root, 'plan.md'), '# Plan\n<!-- awm-qa-complete: 2026-08-23 -->\n- [x] Task 1\n');
+    const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: completeJournal, ledger: [] });
+
+    expect(result.code).toBe(0);
+    expect(PLAN_STATES).not.toContain('docs_pending');
+    const state = JSON.parse(fs.readFileSync(path.join(root, '.awm', 'evidence', 'cycles', result.stdout.trim() + '.json'), 'utf8')).plan.state;
+    expect(PLAN_STATES).toContain(state);
+  });
+
+  test('con docs y retro completos el estado sigue siendo executed', () => {
+    fs.writeFileSync(path.join(root, 'plan.md'), '# Plan\n<!-- awm-qa-complete: 2026-08-23 -->\n<!-- awm-docs-complete: 2026-08-23 -->\n<!-- awm-retro-complete: 2026-08-23 -->\n- [x] Task 1\n');
+    const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: completeJournal, ledger: [] });
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(fs.readFileSync(path.join(root, '.awm', 'evidence', 'cycles', result.stdout.trim() + '.json'), 'utf8')).plan.state).toBe('executed');
   });
 });

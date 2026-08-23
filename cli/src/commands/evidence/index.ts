@@ -8,6 +8,7 @@ import { readJournal } from '../../core/journal/store';
 import { detectBranch, listEntries } from '../../core/ledger/store';
 import type { JournalState } from '../../core/journal/types';
 import { classifyPlanState, type PlanState } from '../../core/dashboard/plan-state';
+import type { CycleEvidencePlanState } from '../../core/evidence/types';
 
 function assertRepoRelativePlan(value: unknown): string {
   if (typeof value !== 'string' || !value || value.startsWith('--') || path.isAbsolute(value)
@@ -25,15 +26,20 @@ function currentRelease(lines: readonly string[]): string | undefined {
   return releases.length > 1 ? releases.at(-1) : undefined;
 }
 
-function marker(lines: readonly string[], name: 'awm-qa-complete' | 'awm-retro-complete', release: string | undefined): boolean {
+function marker(lines: readonly string[], name: 'awm-qa-complete' | 'awm-docs-complete' | 'awm-retro-complete', release: string | undefined): boolean {
   const expression = new RegExp(`^\\s*<!--\\s*${name}(?:\\s*:\\s*[^\\r\\n]*?)?\\s*-->\\s*$`);
   if (release === undefined) return lines.some((line) => expression.test(line));
   const releaseExpression = new RegExp(`\\bRelease\\s+${release.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i');
   return lines.some((line) => expression.test(line) && releaseExpression.test(line));
 }
 
+/** `docs_pending` es un estado vivo del dashboard; el registro durable no lo conoce (schema 1). */
+function forEvidence(state: PlanState): CycleEvidencePlanState {
+  return state === 'docs_pending' ? 'retro_pending' : state;
+}
+
 /** Reads only structural lifecycle syntax; plan prose never crosses into evidence. */
-function planState(root: string, planPath: string, journal: JournalState): PlanState {
+function planState(root: string, planPath: string, journal: JournalState): CycleEvidencePlanState {
   const file = path.join(root, planPath);
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('--plan must reference a regular file');
@@ -59,11 +65,15 @@ function planState(root: string, planPath: string, journal: JournalState): PlanS
   const status = journal.cycle?.status;
   if (status !== 'IN_PROGRESS' && status !== 'COMPLETE' && status !== 'BLOCKED') throw new Error('journal cycle status is invalid');
   const release = currentRelease(visibleLines);
-  return classifyPlanState({
+  return forEvidence(classifyPlanState({
     ...(status === 'IN_PROGRESS' ? { journal: { state: 'active' } } : status === 'BLOCKED' ? { journal: { state: 'blocked' } } : {}),
-    markers: { qaComplete: marker(visibleLines, 'awm-qa-complete', release), retroComplete: marker(visibleLines, 'awm-retro-complete', release) },
+    markers: {
+      qaComplete: marker(visibleLines, 'awm-qa-complete', release),
+      docsComplete: marker(visibleLines, 'awm-docs-complete', release),
+      retroComplete: marker(visibleLines, 'awm-retro-complete', release),
+    },
     tasks: { total, completed },
-  });
+  }));
 }
 
 export function registerEvidenceCommand(program: Command): void {
