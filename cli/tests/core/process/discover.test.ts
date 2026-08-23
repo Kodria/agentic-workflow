@@ -91,4 +91,27 @@ describe('discoverProcessModels', () => {
     it('nunca lanza con un root inexistente', () => {                           // verifies R7.1
         expect(() => discoverProcessModels([path.join(tmp, 'no-existe')])).not.toThrow();
     });
+
+    it('un `skills` roto (archivo en vez de directorio) no impide seguir, y queda diagnosticado', () => {  // verifies R7.1
+        const root = path.join(tmp, 'r3');
+        fs.mkdirSync(root, { recursive: true });
+        fs.writeFileSync(path.join(root, 'skills'), 'no soy un directorio');
+        let r: ReturnType<typeof discoverProcessModels> | undefined;
+        expect(() => { r = discoverProcessModels([root]); }).not.toThrow();
+        expect(r!.models).toEqual([]);
+        expect(r!.diagnostics).toHaveLength(1);
+        expect(r!.diagnostics[0]).toContain(root);
+    });
+
+    it('un SKILL.md roto (directorio en vez de archivo) no impide seguir, y queda diagnosticado', () => {  // verifies R7.1
+        const root = path.join(tmp, 'r4');
+        const skillMd = path.join(root, 'skills', 'roto', 'SKILL.md');
+        fs.mkdirSync(skillMd, { recursive: true });
+        let r: ReturnType<typeof discoverProcessModels> | undefined;
+        expect(() => { r = discoverProcessModels([root]); }).not.toThrow();
+        expect(r!.models).toEqual([]);
+        expect(r!.diagnostics).toHaveLength(1);
+        expect(r!.diagnostics[0]).toContain(skillMd);
+        expect(r!.diagnostics[0]).toMatch(/cannot read/);
+    });
 });
