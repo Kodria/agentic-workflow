@@ -425,7 +425,7 @@ _Requirements: R1.5, R1.6, R1.7, R1.8_
 - Create: `cli/src/core/process/body.ts`
 - Test: `cli/tests/core/process/body.test.ts`
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 ```ts
 // cli/tests/core/process/body.test.ts
@@ -526,12 +526,12 @@ describe('parseProcessBody', () => {
 });
 ```
 
-- [ ] **Step 2: Correr el test y verificar que falla**
+- [x] **Step 2: Correr el test y verificar que falla**
 
 Run: `cd cli && npx jest tests/core/process/body.test.ts --runInBand`
 Expected: FAIL — módulo inexistente
 
-- [ ] **Step 3: Escribir el parser del cuerpo**
+- [x] **Step 3: Escribir el parser del cuerpo**
 
 ```ts
 // cli/src/core/process/body.ts
@@ -630,12 +630,12 @@ export function parseProcessBody(source: string, file: string): ProcessParseResu
 }
 ```
 
-- [ ] **Step 4: Correr el test y verificar que pasa**
+- [x] **Step 4: Correr el test y verificar que pasa**
 
 Run: `cd cli && npx jest tests/core/process/body.test.ts --runInBand`
 Expected: PASS — 11 tests
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cli/src/core/process/body.ts cli/tests/core/process/body.test.ts
