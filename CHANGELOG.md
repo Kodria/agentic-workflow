@@ -1,3 +1,8 @@
+## v9.0.2 - 2026-08-23
+
+### Fixes
+- **tests:** scope shell:true to npm on Windows in published-doctor-evidence
+
 ## v9.0.1 - 2026-08-23
 
 ### Fixes
