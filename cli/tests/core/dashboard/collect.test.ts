@@ -20,9 +20,10 @@ describe('collectDashboardSnapshot', () => {
         const project = jest.fn();
         const plans = jest.fn();
         const execution = jest.fn();
+        const processes = jest.fn();
         const snapshot = collectDashboardSnapshot({
             cwd: '/definitely-not-a-project', now: fixedNow,
-            adapters: { machine: () => ({ findings: [] }), project, plans, execution },
+            adapters: { machine: () => ({ findings: [] }), project, plans, execution, processes },
         });
         expect(snapshot.project).toEqual({ detected: false, label: 'No project detected' });
         expect(snapshot.sections.map((section) => section.id)).toEqual(['machine']);
@@ -30,16 +31,17 @@ describe('collectDashboardSnapshot', () => {
         expect(project).not.toHaveBeenCalled();
         expect(plans).not.toHaveBeenCalled();
         expect(execution).not.toHaveBeenCalled();
+        expect(processes).not.toHaveBeenCalled();
     });
 
     it('fails loudly for malformed central machine findings', () => {
-        expect(() => collectDashboardSnapshot({ cwd: '/definitely-not-a-project', now: fixedNow, adapters: { machine: () => ({ findings: [{ id: '', label: 'Preferences', state: 'ok' }] }), project: jest.fn(), plans: jest.fn(), execution: jest.fn() } })).toThrow(/finding/i);
+        expect(() => collectDashboardSnapshot({ cwd: '/definitely-not-a-project', now: fixedNow, adapters: { machine: () => ({ findings: [{ id: '', label: 'Preferences', state: 'ok' }] }), project: jest.fn(), plans: jest.fn(), execution: jest.fn(), processes: jest.fn() } })).toThrow(/finding/i);
     });
 
     it.each([undefined, null, {}, 'healthy'])('rejects a non-array central machine findings value: %p', (findings) => {
         expect(() => collectDashboardSnapshot({
             cwd: '/definitely-not-a-project', now: fixedNow,
-            adapters: { machine: () => ({ findings } as never), project: jest.fn(), plans: jest.fn(), execution: jest.fn() },
+            adapters: { machine: () => ({ findings } as never), project: jest.fn(), plans: jest.fn(), execution: jest.fn(), processes: jest.fn() },
         })).toThrow('Dashboard findings must be an array');
     });
 
@@ -51,6 +53,7 @@ describe('collectDashboardSnapshot', () => {
                 project: () => ({ label: 'Demo', findings: [{ id: 'project.profile.missing', label: 'Profile', state: 'missing' }] }),
                 plans: () => Array.from({ length: 2000 }, (_, index) => ({ id: `plan.${index}`, label: `Plan ${index}`, state: 'ok' as const })),
                 execution: () => ({}),
+                processes: () => [],
             },
         });
         expect(snapshot.sections.map((section) => section.id)).toEqual(   // verifies R6.3
@@ -62,12 +65,12 @@ describe('collectDashboardSnapshot', () => {
     });
 
     it('el snapshot declara schema 2', () => {                                    // verifies R6.3
-        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined } });
+        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined, processes: () => [] } });
         expect(snapshot.schema).toBe(2);
     });
 
-    it('processes queda declarada no aplicable hasta R1', () => {                 // verifies R5.3
-        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined } });
+    it('processes queda no aplicable cuando el adapter no declara modelos', () => {  // verifies R5.3
+        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined, processes: () => [] } });
         const processes = snapshot.sections.find((section) => section.id === 'processes');
         expect(processes).toEqual({ id: 'processes', availability: 'not_applicable', items: [] });
     });
@@ -78,7 +81,7 @@ describe('collectDashboardSnapshot', () => {
             adapters: {
                 machine: () => ({ findings: [{ id: 'unknown', label: 'Unknown', state: 'missing' }] }),
                 project: () => { throw new Error('corrupt project source'); },
-                plans: () => [], execution: () => undefined,
+                plans: () => [], execution: () => undefined, processes: () => [],
             },
         });
         expect(snapshot.sections.find((section) => section.id === 'machine')?.items).toEqual([]);
@@ -89,7 +92,7 @@ describe('collectDashboardSnapshot', () => {
     it('marks execution-derived sections unavailable when no read-only execution source exists', () => {
         const snapshot = collectDashboardSnapshot({
             cwd: process.cwd(), now: fixedNow,
-            adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined },
+            adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined, processes: () => [] },
         });
         for (const id of ['execution', 'qa', 'docs', 'retro']) {
             expect(snapshot.sections.find((section) => section.id === id)?.availability).toBe('unavailable');
@@ -99,25 +102,25 @@ describe('collectDashboardSnapshot', () => {
     it('isolates malformed optional source data to its owning section', () => {
         const snapshot = collectDashboardSnapshot({
             cwd: process.cwd(), now: fixedNow,
-            adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [{ id: 'bad', label: 'Profile', state: 'invented' as never }] }), plans: () => [], execution: () => undefined },
+            adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [{ id: 'bad', label: 'Profile', state: 'invented' as never }] }), plans: () => [], execution: () => undefined, processes: () => [] },
         });
         expect(snapshot.sections.find((section) => section.id === 'project')?.availability).toBe('unavailable');
         expect(snapshot.sections.find((section) => section.id === 'machine')?.availability).toBe('available');
     });
 
     it('isolates malformed post-sanitization plan findings', () => {
-        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [{ id: '', label: 'Profile', state: 'ok' }], execution: () => undefined } });
+        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [{ id: '', label: 'Profile', state: 'ok' }], execution: () => undefined, processes: () => [] } });
         expect(snapshot.sections.find((section) => section.id === 'planning')?.availability).toBe('unavailable');
     });
 
     it('isolates malformed project findings without dropping other sections', () => {
-        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [{ id: '', label: 'Profile', state: 'ok' }] }), plans: () => [], execution: () => undefined } });
+        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [{ id: '', label: 'Profile', state: 'ok' }] }), plans: () => [], execution: () => undefined, processes: () => [] } });
         expect(snapshot.sections.find((section) => section.id === 'project')?.availability).toBe('unavailable');
         expect(snapshot.sections.find((section) => section.id === 'planning')?.availability).toBe('available');
     });
 
     it.each(['execution', 'qa', 'docs', 'retro'] as const)('isolates malformed %s findings', (key) => {
-        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => ({ [key]: [{ id: '', label: 'Profile', state: 'ok' }] }) } });
+        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => ({ [key]: [{ id: '', label: 'Profile', state: 'ok' }] }), processes: () => [] } });
         expect(snapshot.sections.find((section) => section.id === key)?.availability).toBe('unavailable');
     });
 
@@ -125,7 +128,7 @@ describe('collectDashboardSnapshot', () => {
         const knownFailure = Object.assign(new Error('sensors unavailable'), { findingId: 'project.sensors.unavailable', remediationVerified: true });
         const snapshot = collectDashboardSnapshot({
             cwd: process.cwd(), now: fixedNow,
-            adapters: { machine: () => ({ findings: [] }), project: () => { throw knownFailure; }, plans: () => [], execution: () => undefined },
+            adapters: { machine: () => ({ findings: [] }), project: () => { throw knownFailure; }, plans: () => [], execution: () => undefined, processes: () => [] },
         });
         expect(snapshot.sections.find((section) => section.id === 'project')?.items).toEqual([
             expect.objectContaining({ id: 'project.sensors.unavailable', state: 'unavailable', remediation: 'awm sensors status' }),
@@ -143,6 +146,7 @@ describe('collectDashboardSnapshot', () => {
                 machine: () => ({ findings: [] }), project: () => ({ findings: [] }),
                 plans: () => { if (adapter === 'plans') throw failure; return []; },
                 execution: () => { if (adapter === 'execution') throw failure; return undefined; },
+                processes: () => [],
             },
         });
         expect(snapshot.sections.find((section) => section.id === sectionId)?.items[0]).toEqual(expect.objectContaining({ id: findingId, remediation }));
@@ -154,7 +158,7 @@ describe('collectDashboardSnapshot', () => {
             adapters: { machine: () => ({ findings: [
                 { id: 'machine.registries.stale', label: 'Registries', state: 'attention' },
                 { id: 'machine.preferences.missing', label: 'Preferences', state: 'missing' },
-            ] }), project: jest.fn(), plans: jest.fn(), execution: jest.fn() },
+            ] }), project: jest.fn(), plans: jest.fn(), execution: jest.fn(), processes: jest.fn() },
         });
         expect(snapshot.sections[0].items.map((item) => item.id)).toEqual(['machine.preferences.missing', 'machine.registries.stale']);
     });
@@ -166,14 +170,14 @@ describe('collectDashboardSnapshot', () => {
                     : expected === 'retro_pending' ? { markers: { qaComplete: true, docsComplete: true, retroComplete: false }, tasks: { total: 1, completed: 1 } }
                         : expected === 'qa_pending' ? { markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: { total: 1, completed: 1 } }
                             : { markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: { total: 0, completed: 0 } };
-        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [{ id: 'plan.lifecycle', label: 'Profile', state: 'ok', lifecycle }], execution: () => undefined } });
+        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [{ id: 'plan.lifecycle', label: 'Profile', state: 'ok', lifecycle }], execution: () => undefined, processes: () => [] } });
         expect(snapshot.sections.find((section) => section.id === 'planning')?.items[0].detail).toBe(expected);
     });
 
     it('degrades a machine-only dashboard for actionable machine findings', () => {
         const snapshot = collectDashboardSnapshot({
             cwd: '/definitely-not-a-project', now: fixedNow,
-            adapters: { machine: () => ({ findings: [{ id: 'machine.preferences.missing', label: 'Preferences', state: 'missing' }] }), project: jest.fn(), plans: jest.fn(), execution: jest.fn() },
+            adapters: { machine: () => ({ findings: [{ id: 'machine.preferences.missing', label: 'Preferences', state: 'missing' }] }), project: jest.fn(), plans: jest.fn(), execution: jest.fn(), processes: jest.fn() },
         });
         expect(snapshot.sections.map((section) => section.id)).toEqual(['machine']);
         expect(snapshot.overall).toBe('degraded');
@@ -183,7 +187,7 @@ describe('collectDashboardSnapshot', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-evidence-dashboard-'));
         fs.writeFileSync(path.join(root, 'package.json'), '{}');
         writeCycleEvidence(root, cycleEvidenceFixture());
-        const snapshot = collectDashboardSnapshot({ cwd: root, now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined } });
+        const snapshot = collectDashboardSnapshot({ cwd: root, now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined, processes: () => [] } });
         const history = snapshot.sections.find((section) => section.id === 'history');
         expect(snapshot.confidence).toBe('provisional');
         expect(history?.availability).toBe('available');
@@ -196,7 +200,7 @@ describe('collectDashboardSnapshot', () => {
         fs.writeFileSync(path.join(root, 'package.json'), '{}');
         writeCycleEvidence(root, { ...cycleEvidenceFixture(), cycleState: 'blocked', plan: { ref: 'docs/plans/current.md', state: 'blocked' } });
 
-        const snapshot = collectDashboardSnapshot({ cwd: root, now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined } });
+        const snapshot = collectDashboardSnapshot({ cwd: root, now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined, processes: () => [] } });
 
         expect(snapshot.sections.find((section) => section.id === 'history')?.items).toEqual([
             expect.objectContaining({ state: 'attention', remediation: 'awm preflight' }),
@@ -219,7 +223,7 @@ describe('collectDashboardSnapshot', () => {
             fs.mkdirSync(path.join(root, '.awm', 'evidence'), { recursive: true });
             fs.symlinkSync(external, path.join(root, '.awm', 'evidence', 'cycles'));
         }
-        const snapshot = collectDashboardSnapshot({ cwd: root, now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined } });
+        const snapshot = collectDashboardSnapshot({ cwd: root, now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined, processes: () => [] } });
         const history = snapshot.sections.find((section) => section.id === 'history');
         expect(history).toEqual(expect.objectContaining({ availability: 'unavailable', items: [] }));
         fs.rmSync(root, { recursive: true, force: true });
@@ -236,7 +240,7 @@ describe('collectDashboardSnapshot', () => {
         const directory = path.join(root, '.awm', 'evidence', 'cycles');
         fs.mkdirSync(directory, { recursive: true });
         fs.symlinkSync(externalFile, path.join(directory, `${cycleId}.json`));
-        const snapshot = collectDashboardSnapshot({ cwd: root, now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined } });
+        const snapshot = collectDashboardSnapshot({ cwd: root, now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined, processes: () => [] } });
         expect(snapshot.sections.find((section) => section.id === 'history')).toEqual(expect.objectContaining({ availability: 'unavailable', items: [] }));
         fs.rmSync(root, { recursive: true, force: true });
         fs.rmSync(external, { recursive: true, force: true });
@@ -250,7 +254,7 @@ describe('collectDashboardSnapshot', () => {
         const record = cycleEvidenceFixture();
         const filename = caseName === 'duplicate' ? `${'b'.repeat(64)}.json` : `${'b'.repeat(64)}.json`;
         fs.writeFileSync(path.join(directory, filename), JSON.stringify(caseName === 'duplicate' ? record : { ...record, cycleId: 'c'.repeat(64) }));
-        const snapshot = collectDashboardSnapshot({ cwd: root, now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined } });
+        const snapshot = collectDashboardSnapshot({ cwd: root, now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined, processes: () => [] } });
         expect(snapshot.sections.find((section) => section.id === 'history')).toEqual(expect.objectContaining({ availability: 'unavailable', items: [] }));
         fs.rmSync(root, { recursive: true, force: true });
     });

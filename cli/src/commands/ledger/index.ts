@@ -12,6 +12,16 @@ function archiveLabel(): string {
     return new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, '');
 }
 
+// R1a's own retro: across this session, reviewer subagents repeatedly verified
+// this command's flags by issuing a live `ledger add` with a placeholder
+// --desc ("test", "test-check", "test-x", ...) instead of reading --help,
+// polluting the real branch ledger at least six separate times despite
+// explicit prompt instructions not to. --help already documents every flag —
+// the missing piece was a structural backstop, since prompt text alone kept
+// failing to prevent it. This denylist catches the exact placeholder shapes
+// observed; it is not a general anti-test-data filter.
+const PLACEHOLDER_DESC = /^(test|test[-_]?\w{0,10}|placeholder|foo|bar|example|todo|tbd)$/i;
+
 export function registerLedgerCommand(program: Command): void {
     const ledger = program.command('ledger').description('persistent per-branch findings ledger (working memory for harness-retro)');
 
@@ -31,6 +41,12 @@ export function registerLedgerCommand(program: Command): void {
         .action((opts: AddOpts) => {
             if (opts.defectClass !== undefined && !DEFECT_CLASS.test(opts.defectClass)) {
                 throw new Error('--defect-class requires a lowercase kebab-case value');
+            }
+            if (PLACEHOLDER_DESC.test(opts.desc.trim())) {
+                throw new Error(
+                    `--desc "${opts.desc}" looks like a placeholder, not a real finding — ` +
+                    'run "awm ledger add --help" to check flag syntax instead of a live add.',
+                );
             }
             const cwd = process.cwd();
             const branch = opts.branch ?? detectBranch(cwd);

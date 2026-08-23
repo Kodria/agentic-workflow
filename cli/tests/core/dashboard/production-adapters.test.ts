@@ -9,6 +9,45 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+const PROCESS_MODEL_FIXTURE = `---
+awm: process-model
+schema: 1
+name: NAME
+status: STATUS
+entry_point: true
+terminates_to: none
+created: 2026-08-23
+updated: 2026-08-23
+---
+
+## Objetivo
+
+G — Objetivo.
+
+## Cuándo aplica
+
+Siempre.
+
+## Estructura
+
+- SG-1 — Uno
+  - OP-1.1 — Hacer
+
+## Ruteo
+
+| Cuándo | Estado requerido | Va a | Termina en |
+|---|---|---|---|
+| Al empezar | | OP-1.1 | SG-1 |
+
+## Terminación
+
+none
+
+## Sin verificar
+
+- Nada.
+`;
+
 function context(): HarnessContext {
     return {
         machine: {} as HarnessContext['machine'],
@@ -187,5 +226,23 @@ describe('productionDashboardAdapters', () => {
         }));
         expect(JSON.stringify(snapshot)).not.toMatch(/dashboard-journal-only|dashboard@example|Dashboard Test/i);
         fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    it('processes delegates to discoverProcessModels() and maps its models to {name, status}', () => {
+        const awmHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-dashboard-processes-home-'));
+        const originalAwmHome = process.env.AWM_HOME;
+        process.env.AWM_HOME = awmHome;
+        try {
+            fs.writeFileSync(path.join(awmHome, 'registries.json'), JSON.stringify([{ name: 'baseline', remote: 'https://example.test/baseline.git' }]));
+            const skillDir = path.join(awmHome, 'registries', 'baseline', 'skills', 'mi-proceso');
+            fs.mkdirSync(skillDir, { recursive: true });
+            fs.writeFileSync(path.join(skillDir, 'SKILL.md'), PROCESS_MODEL_FIXTURE.replace('NAME', 'mi-proceso').replace('STATUS', 'active'));
+
+            const adapters = productionDashboardAdapters(context());
+            expect(adapters.processes({ root: '/private/project' })).toEqual([{ name: 'mi-proceso', status: 'active' }]);
+        } finally {
+            if (originalAwmHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = originalAwmHome;
+            fs.rmSync(awmHome, { recursive: true, force: true });
+        }
     });
 });

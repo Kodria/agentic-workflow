@@ -53,6 +53,20 @@ describe('awm ledger CLI', () => {
         expect(listEntries(cwd, 'feat-x')).toEqual([]);
     });
 
+    test.each(['test', 'Test', 'test-check', 'test_x', 'placeholder', 'foo', 'bar', 'todo', 'tbd'])
+    ('add rejects a placeholder --desc %p before writing', (desc) => {
+        expect(() => run(['add', '--branch', 'feat-x', '--polarity', 'finding', '--class', 'logica',
+            '--signature', 'sig-1', '--severity', 'blocker', '--desc', desc], cwd))
+            .toThrow(/placeholder.*ledger add --help/i);
+        expect(listEntries(cwd, 'feat-x')).toEqual([]);
+    });
+
+    test('add accepts a real description that merely contains the word test', () => {
+        run(['add', '--branch', 'feat-x', '--polarity', 'finding', '--class', 'logica',
+             '--signature', 'sig-1', '--severity', 'blocker', '--desc', 'unit test for parseConfig throws on empty input'], cwd);
+        expect(listEntries(cwd, 'feat-x')).toHaveLength(1);
+    });
+
     test('list emits the branch entries as JSON', () => {
         run(['add', '--branch', 'feat-x', '--polarity', 'win', '--class', 'proceso',
              '--signature', 'good', '--severity', 'info', '--desc', 'nice'], cwd);

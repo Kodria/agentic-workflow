@@ -6,7 +6,8 @@ import { validateCycleEvidence } from '../evidence/types';
 import { detectBranch } from '../ledger/store';
 import { journalDir, statePath } from '../journal/paths';
 import { readJournal } from '../journal/store';
-import { sanitizeDashboardSource } from './sanitize';
+import { discoverProcessModels } from '../process/discover';
+import { sanitizeDashboardSource, sanitizeDashboardId, sanitizeDashboardLabel } from './sanitize';
 import { validateDashboardSnapshotV1 } from './validate';
 import { classifyPlanState, type PlanStateInput } from './plan-state';
 import type { DashboardItemState, DashboardItemV1, DashboardSectionV1, DashboardSnapshotV1 } from './types';
@@ -19,11 +20,14 @@ export interface PlanDashboardSource { id: string; label: string; state: Dashboa
 export interface ExecutionDashboardSource {
     execution?: DashboardFinding[]; qa?: DashboardFinding[]; docs?: DashboardFinding[]; retro?: DashboardFinding[]; history?: DashboardFinding[];
 }
+export interface ProcessDashboardSource { name: string; status: 'draft' | 'active' }
+
 export interface DashboardSourceAdapters {
     machine(input: { cwd: string }): MachineDashboardSource;
     project(input: { root: string }): ProjectDashboardSource;
     plans(input: { root: string }): PlanDashboardSource[];
     execution(input: { root: string }): ExecutionDashboardSource | undefined;
+    processes(input: { root: string }): ProcessDashboardSource[];
 }
 export interface CollectDashboardOptions { cwd: string; now: string; adapters?: DashboardSourceAdapters; }
 type OptionalFailure = { findingId?: string; remediationVerified?: boolean };
@@ -42,7 +46,7 @@ export const REMEDIATION_BY_FINDING_ID: Readonly<Record<string, string>> = {
 const BLOCKED_CYCLE_REMEDIATION = 'awm preflight';
 
 const EMPTY_ADAPTERS: DashboardSourceAdapters = {
-    machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined,
+    machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined, processes: () => [],
 };
 
 const SAFE_REMEDIATIONS = new Set(['awm init', 'awm update', 'awm sync', 'awm sensors status', 'awm preflight']);
@@ -136,6 +140,7 @@ export function productionDashboardAdapters(context: HarnessContext): DashboardS
                 retro: history.cycles.map((cycle) => cycleFinding('retro', 'Project context', cycle, cycle.plan.state !== 'executed')),
             };
         },
+        processes: () => discoverProcessModels().models.map((m) => ({ name: m.name, status: m.status })),
     };
 }
 
@@ -344,6 +349,29 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     const retroItems = isolatedFindings(execution?.retro);
     const evidenceResult = optional(() => evidenceHistoryItems(root));
     const executionUnavailable = !executionResult.failed && execution === undefined;
+    const processesResult = optional(() => sanitizeDashboardSource(adapters.processes({ root })) as ProcessDashboardSource[]);
+    // `id`/`label`/`detail` se construyen acá, en código de aplicación, DESPUÉS de
+    // la sanitización de source — igual que `planning` hace con `classifyPlanState`:
+    // el sanitizador descarta todo `detail` que venga del adapter (sanitize.ts), así
+    // que ponerlo antes sería escribirlo para que se borre en silencio. Y como estos
+    // tres campos nunca pasan por el recorrido recursivo de sanitizeDashboardSource
+    // de arriba, se los corre por las mismas ramas de sanitize() (sanitizeDashboardId/
+    // sanitizeDashboardLabel) para sostener la segunda barrera: un `p.name` que no es
+    // slug cae al id hasheado `item-*` en vez de colarse como `process.<bad-name>`.
+    // El estado `attention` es accionable (ver validate.ts): un modelo en draft no
+    // tiene un comando que lo "arregle" — el remediation apunta a inspeccionarlo, no
+    // a resolverlo automáticamente.
+    const processItems: DashboardItemV1[] = (processesResult.value ?? []).map((p) => ({
+        id: sanitizeDashboardId(`process.${p.name}`),
+        // El literal 'Process' ya está en CANONICAL_LABELS, así que el branch
+        // [redacted] de sanitizeDashboardLabel nunca se ejecuta desde este call
+        // site hoy — el wrapper queda por simetría con sanitizeDashboardId y como
+        // guardia ante un futuro label dinámico, no porque esta llamada pueda fallar.
+        label: sanitizeDashboardLabel('Process'),
+        state: p.status === 'active' ? 'ok' : 'attention',
+        detail: p.status,
+        ...(p.status === 'active' ? {} : { remediation: 'awm process list' }),
+    }));
     const sections = [
         machineSection,
         section('project', projectResult.failed || projectItemsResult.failed ? 'unavailable' : 'available', projectResult.failed
@@ -357,10 +385,11 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
         section('docs', executionResult.failed || executionUnavailable || docsItems.failed ? 'unavailable' : 'available', docsItems.value),
         section('retro', executionResult.failed || executionUnavailable || retroItems.failed ? 'unavailable' : 'available', retroItems.value),
         section('history', evidenceResult.failed ? 'unavailable' : 'available', evidenceResult.failed ? [] : evidenceResult.value!.items),
-        // `processes` is a reserved section id with no adapter yet: a later
-        // release (R1) populates it. `not_applicable` here means exactly
-        // "this section doesn't apply here", not dead code.
-        section('processes', 'not_applicable', []),
+        // R1a puebla `processes` desde su adapter. Sin modelos declarados la
+        // sección conserva `not_applicable` — el mismo valor que R0 dejó
+        // reservado — para que un proyecto sin procesos se vea igual que antes.
+        section('processes', processesResult.failed ? 'unavailable' : processItems.length === 0 ? 'not_applicable' : 'available',
+            processesResult.failed ? [] : processItems),
     ];
     const degraded = sections.some((entry) => entry.availability === 'unavailable' || entry.items.some((item) => item.state !== 'ok' && item.state !== 'not_applicable'));
     return validateDashboardSnapshotV1({ schema: 2, generatedAt: options.now, overall: degraded ? 'degraded' : 'healthy', project: { detected: true, label: projectSource?.label || 'Project detected' }, confidence: evidenceResult.failed ? 'none' : evidenceResult.value!.confidence, sections });
