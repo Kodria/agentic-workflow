@@ -157,7 +157,7 @@ _Requirements: R1.1, R1.2, R1.3, R1.4, R1.9, R1.10_
 - Create: `cli/src/core/process/model.ts`
 - Test: `cli/tests/core/process/model.test.ts`
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 ```ts
 // cli/tests/core/process/model.test.ts
@@ -233,12 +233,12 @@ describe('parseProcessFrontmatter', () => {
 });
 ```
 
-- [ ] **Step 2: Correr el test y verificar que falla**
+- [x] **Step 2: Correr el test y verificar que falla**
 
 Run: `cd cli && npx jest tests/core/process/model.test.ts --runInBand`
 Expected: FAIL — `Cannot find module '../../../src/core/process/model'`
 
-- [ ] **Step 3: Escribir los tipos**
+- [x] **Step 3: Escribir los tipos**
 
 ```ts
 // cli/src/core/process/types.ts
@@ -285,7 +285,7 @@ export interface ProcessModel extends ProcessModelFrontmatter {
 export interface ProcessParseResult<T> { model?: T; diagnostics: string[] }
 ```
 
-- [ ] **Step 4: Escribir el parser de frontmatter**
+- [x] **Step 4: Escribir el parser de frontmatter**
 
 ```ts
 // cli/src/core/process/model.ts
@@ -398,12 +398,12 @@ export function parseProcessFrontmatter(source: string, file: string): ProcessPa
 }
 ```
 
-- [ ] **Step 5: Correr el test y verificar que pasa**
+- [x] **Step 5: Correr el test y verificar que pasa**
 
 Run: `cd cli && npx jest tests/core/process/model.test.ts --runInBand`
 Expected: PASS — 9 tests
 
-- [ ] **Step 6: Sensores y commit**
+- [x] **Step 6: Sensores y commit**
 
 ```bash
 cd /home/user/agentic-workflow && node cli/dist/src/index.js sensors run
