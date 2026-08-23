@@ -67,4 +67,29 @@ describe('parseProcessFrontmatter', () => {
             expect(() => parseProcessFrontmatter(junk, 'p')).not.toThrow();
         }
     });
+
+    it.each(['si', 'True', '1', 'yes'])('rechaza un entry_point que no es true/false: %s', (bad) => {
+        const r = parseProcessFrontmatter(valid.replace('entry_point: true', `entry_point: ${bad}`), 'p');
+        expect(r.model).toBeUndefined();
+        expect(r.diagnostics.join(' ')).toMatch(/"entry_point" must be true or false/);
+    });
+
+    it.each(['../../etc/passwd', 'None', 'Foo-Bar', 'has spaces'])('rechaza un terminates_to que no es slug ni "none": %s', (bad) => {
+        const r = parseProcessFrontmatter(valid.replace('terminates_to: none', `terminates_to: ${bad}`), 'p');
+        expect(r.model).toBeUndefined();
+        expect(r.diagnostics.join(' ')).toMatch(/"terminates_to" must be a lowercase slug or "none"/);
+    });
+
+    it.each(['created', 'updated'] as const)('rechaza un %s con formato de fecha inválido', (field) => {
+        const r = parseProcessFrontmatter(valid.replace(`${field}: 2026-08-23`, `${field}: 23-08-2026`), 'p');
+        expect(r.model).toBeUndefined();
+        expect(r.diagnostics.join(' ')).toMatch(new RegExp(`${field}.*YYYY-MM-DD`));
+    });
+
+    it.each(['name', 'status', 'entry_point', 'terminates_to', 'created', 'updated'] as const)('rechaza si falta el campo requerido %s', (field) => {
+        const withoutField = valid.split('\n').filter((line) => !line.startsWith(`${field}:`)).join('\n');
+        const r = parseProcessFrontmatter(withoutField, 'p');
+        expect(r.model).toBeUndefined();
+        expect(r.diagnostics.join(' ')).toMatch(new RegExp(`"${field}" is required`));
+    });
 });
