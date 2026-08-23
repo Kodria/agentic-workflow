@@ -1148,7 +1148,7 @@ Agregar como primera línea después del `#` de este plan:
 <!-- awm-docs-complete: YYYY-MM-DD -->
 ```
 
-Es el primer uso real del marker, y sirve de verificación de punta a punta: `awm doctor --full` debe pasar este plan de `docs_pending` a `retro_pending`.
+Es el primer uso real del marker. **No** verifica un tránsito visible en `awm doctor --full`: la adapter `plans` de producción (`cli/src/core/dashboard/collect.ts:105`) solo lee `.awm/evidence/` y el journal activo, nunca reparsea planes en vivo, así que sin un ciclo capturado no hay fila que clasificar. La verificación real de esta task es la cobertura de unit test directa de la Task 5 sobre `classifyPlanState` — ver CA-0.1.
 
 - [ ] **Step 7: Commit**
 
