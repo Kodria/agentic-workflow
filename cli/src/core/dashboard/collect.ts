@@ -350,25 +350,26 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     const evidenceResult = optional(() => evidenceHistoryItems(root));
     const executionUnavailable = !executionResult.failed && execution === undefined;
     const processesResult = optional(() => sanitizeDashboardSource(adapters.processes({ root })) as ProcessDashboardSource[]);
-    // `detail` se computa DESPUÉS de la sanitización de source, igual que
-    // `planning` hace con `classifyPlanState`: el sanitizador descarta todo
-    // `detail` que venga del adapter (sanitize.ts), así que ponerlo antes sería
-    // escribirlo para que se borre en silencio.
-    // `id`/`label` are built here, in application code, rather than arriving
-    // pre-shaped inside an adapter's `findings` array — so they never pass
-    // through sanitizeDashboardSource's recursive walk above. Running the
-    // constructed values through the same sanitize() id/label branches
-    // (sanitizeDashboardId/sanitizeDashboardLabel) keeps the second-barrier
-    // guarantee real: a non-slug `p.name` falls back to the hashed `item-*`
-    // id instead of sailing through as `process.<bad-name>`.
+    // `id`/`label`/`detail` se construyen acá, en código de aplicación, DESPUÉS de
+    // la sanitización de source — igual que `planning` hace con `classifyPlanState`:
+    // el sanitizador descarta todo `detail` que venga del adapter (sanitize.ts), así
+    // que ponerlo antes sería escribirlo para que se borre en silencio. Y como estos
+    // tres campos nunca pasan por el recorrido recursivo de sanitizeDashboardSource
+    // de arriba, se los corre por las mismas ramas de sanitize() (sanitizeDashboardId/
+    // sanitizeDashboardLabel) para sostener la segunda barrera: un `p.name` que no es
+    // slug cae al id hasheado `item-*` en vez de colarse como `process.<bad-name>`.
+    // El estado `attention` es accionable (ver validate.ts): un modelo en draft no
+    // tiene un comando que lo "arregle" — el remediation apunta a inspeccionarlo, no
+    // a resolverlo automáticamente.
     const processItems: DashboardItemV1[] = (processesResult.value ?? []).map((p) => ({
         id: sanitizeDashboardId(`process.${p.name}`),
+        // El literal 'Process' ya está en CANONICAL_LABELS, así que el branch
+        // [redacted] de sanitizeDashboardLabel nunca se ejecuta desde este call
+        // site hoy — el wrapper queda por simetría con sanitizeDashboardId y como
+        // guardia ante un futuro label dinámico, no porque esta llamada pueda fallar.
         label: sanitizeDashboardLabel('Process'),
         state: p.status === 'active' ? 'ok' : 'attention',
         detail: p.status,
-        // `attention` es un estado accionable (ver validate.ts): un modelo en
-        // draft no tiene un comando que lo "arregle" — el remediation aquí
-        // apunta a inspeccionarlo, no a resolverlo automáticamente.
         ...(p.status === 'active' ? {} : { remediation: 'awm process list' }),
     }));
     const sections = [
