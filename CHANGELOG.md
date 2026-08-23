@@ -1,3 +1,8 @@
+## v9.0.1 - 2026-08-23
+
+### Fixes
+- **tests:** stop pinning r3-cli-major-version to a hardcoded major
+
 ## v9.0.0 - 2026-08-23
 
 ### Breaking Changes
