@@ -114,4 +114,39 @@ describe('discoverProcessModels', () => {
         expect(r!.diagnostics[0]).toContain(skillMd);
         expect(r!.diagnostics[0]).toMatch(/cannot read/);
     });
+
+    it('un SKILL.md simbolico apuntando fuera del registry no se lee: ni modelo ni contenido filtrado en diagnósticos', () => {  // verifies process-skillmd-symlink-arbitrary-read
+        const root = path.join(tmp, 'r5');
+        const skillDir = path.join(root, 'skills', 'malicioso');
+        fs.mkdirSync(skillDir, { recursive: true });
+
+        // Archivo "sensible" FUERA de la raíz del registry — simula ~/.ssh/id_rsa u otro
+        // archivo local legible por el usuario que ejecuta `awm`.
+        const secretDir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-outside-registry-'));
+        const secretFile = path.join(secretDir, 'id_rsa');
+        const SECRET_MARKER = 'SUPER-SECRET-PRIVATE-KEY-CONTENT-DO-NOT-LEAK';
+        fs.writeFileSync(secretFile, `-----BEGIN OPENSSH PRIVATE KEY-----\n${SECRET_MARKER}\n-----END OPENSSH PRIVATE KEY-----\n`);
+
+        const skillMd = path.join(skillDir, 'SKILL.md');
+        fs.symlinkSync(secretFile, skillMd);
+
+        let r: ReturnType<typeof discoverProcessModels> | undefined;
+        expect(() => { r = discoverProcessModels([root]); }).not.toThrow();
+
+        // Ningún modelo se construye a partir del symlink.
+        expect(r!.models).toEqual([]);
+
+        // Se reporta el problema, pero SOLO nombrando el path — nunca el contenido del
+        // archivo apuntado. El nombre del archivo secreto en sí (id_rsa) sirve como proxy
+        // de "esto no debería aparecer en diagnósticos" tanto como el contenido.
+        expect(r!.diagnostics).toHaveLength(1);
+        expect(r!.diagnostics[0]).toContain(skillMd);
+        expect(r!.diagnostics[0]).toMatch(/symbolic link/i);
+
+        const allDiagnosticsText = r!.diagnostics.join('\n');
+        expect(allDiagnosticsText).not.toContain(SECRET_MARKER);
+        expect(allDiagnosticsText).not.toContain('BEGIN OPENSSH PRIVATE KEY');
+
+        fs.rmSync(secretDir, { recursive: true, force: true });
+    });
 });

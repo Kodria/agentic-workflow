@@ -18,7 +18,7 @@
 // mismo criterio ("gana el primero en orden de roots").
 import fs from 'fs';
 import path from 'path';
-import { contentRoots } from '../registries';
+import { contentRoots, assertRegularRegistryFile } from '../registries';
 import { discoverSkills } from '../discovery';
 import { parseProcessFrontmatter } from './model';
 import { parseProcessBody } from './body';
@@ -45,6 +45,27 @@ export function discoverProcessModels(roots: string[] = contentRoots()): Discove
 
         for (const skill of skills) {
             const file = path.join(skill.path, 'SKILL.md');
+
+            // Same trust boundary as readDeclaredOrchestrators (orchestrators.ts):
+            // a registry is untrusted input, and SKILL.md is registry-declared content.
+            // assertRegularRegistryFile throws when the file is a symlink (or otherwise
+            // not a regular file), which would let a malicious/compromised registry point
+            // at an arbitrary local file and have its content read. This module's
+            // discipline is "never throws" — a broken/malicious skill must not block
+            // discovery of the others — so the rejection is caught here and turned into a
+            // diagnostic (naming only the path, never the symlink target's content).
+            let exists: boolean;
+            try {
+                exists = assertRegularRegistryFile(file);
+            } catch (e) {
+                diagnostics.push(`${file}: cannot read (${e instanceof Error ? e.message : String(e)})`);
+                continue;
+            }
+            if (!exists) {
+                diagnostics.push(`${file}: cannot read (ENOENT: no such file)`);
+                continue;
+            }
+
             let source: string;
             try {
                 source = fs.readFileSync(file, 'utf-8');
