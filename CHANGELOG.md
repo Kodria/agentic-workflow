@@ -1,3 +1,8 @@
+## v9.1.0 - 2026-08-23
+
+### Features
+- **process:** modelo durable de proceso y superficie CLI (R1a) (#124)
+
 ## v9.0.2 - 2026-08-23
 
 ### Fixes
