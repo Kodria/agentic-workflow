@@ -295,6 +295,11 @@ describe('sanitizeDashboardSource', () => {
         // Evidencia escrita antes de que existiera la fase: docs se considera hecho.
         expect(classifyPlanState(lifecycleForCycleFixture('retro_pending'))).toBe('retro_pending');
     });
+
+    it.each(['blocked', 'active', 'executed', 'qa_pending', 'legacy_unverifiable'] as const)(
+        'lifecycleForCycle reconstruye %s de forma que classifyPlanState lo re-deriva igual', (planState) => {  // verifies R6.3
+            expect(classifyPlanState(lifecycleForCycleFixture(planState))).toBe(planState);
+        });
 });
 
 test('exports canonical remediation commands', () => {

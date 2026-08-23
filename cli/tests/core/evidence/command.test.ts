@@ -115,4 +115,20 @@ describe('evidence capture CLI boundary', () => {
     expect(result.code).toBe(0);
     expect(JSON.parse(fs.readFileSync(path.join(root, '.awm', 'evidence', 'cycles', result.stdout.trim() + '.json'), 'utf8')).plan.state).toBe('executed');
   });
+
+  test('un marker sin cerrar y muy largo no cuelga el parseo (ReDoS)', () => {
+    // Regresion: el regex original tenia \s* adyacente al grupo lazo [^\r\n]*?,
+    // lo que producia backtracking catastrofico ante una linea larga sin "-->".
+    const unterminated = `<!-- awm-qa-complete: ${' '.repeat(200000)}`;
+    fs.writeFileSync(path.join(root, 'plan.md'), `# Plan\n${unterminated}\n- [x] Task 1\n`);
+    const start = Date.now();
+    const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: completeJournal, ledger: [] });
+    const elapsedMs = Date.now() - start;
+
+    expect(elapsedMs).toBeLessThan(1000);
+    expect(result.code).toBe(0);
+    // linea sin cerrar: el marker no matchea, y sin awm-qa-complete el plan
+    // no llega a docs_pending/retro_pending por conteo de tasks (1/1 completa).
+    expect(JSON.parse(fs.readFileSync(path.join(root, '.awm', 'evidence', 'cycles', result.stdout.trim() + '.json'), 'utf8')).plan.state).toBe('qa_pending');
+  });
 });

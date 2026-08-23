@@ -27,7 +27,10 @@ function currentRelease(lines: readonly string[]): string | undefined {
 }
 
 function marker(lines: readonly string[], name: 'awm-qa-complete' | 'awm-docs-complete' | 'awm-retro-complete', release: string | undefined): boolean {
-  const expression = new RegExp(`^\\s*<!--\\s*${name}(?:\\s*:\\s*[^\\r\\n]*?)?\\s*-->\\s*$`);
+  // Split into two non-overlapping alternatives (no-colon vs colon) so no `\s*`
+  // ever sits directly adjacent to the lazy `[^\r\n]*?` group — that adjacency
+  // is what turns a long unterminated marker line into catastrophic backtracking.
+  const expression = new RegExp(`^\\s*<!--\\s*${name}(?:\\s*-->\\s*$|\\s*:[^\\r\\n]*?-->\\s*$)`);
   if (release === undefined) return lines.some((line) => expression.test(line));
   const releaseExpression = new RegExp(`\\bRelease\\s+${release.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i');
   return lines.some((line) => expression.test(line) && releaseExpression.test(line));

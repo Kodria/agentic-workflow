@@ -113,6 +113,24 @@ describe('productionDashboardAdapters', () => {
         fs.rmSync(root, { recursive: true, force: true });
     });
 
+    it('flags the docs section as attention when a captured cycle has not documented yet', () => {  // verifies R6.3
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-dashboard-docs-attention-'));
+        fs.writeFileSync(path.join(root, 'package.json'), '{}');
+        writeCycleEvidence(root, {
+            ...cycleEvidenceFixture(),
+            plan: { ref: 'docs/plans/current.md', state: 'qa_pending' },
+        });
+
+        const snapshot = collectDashboardSnapshot({
+            cwd: root, now: '2026-08-22T00:00:00.000Z', adapters: productionDashboardAdapters(context()),
+        });
+
+        expect(snapshot.sections.find((section) => section.id === 'docs')?.items).toEqual([
+            expect.objectContaining({ state: 'attention' }),
+        ]);
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
     it.each([
         ['IN_PROGRESS', 'active', 'ok'],
         ['BLOCKED', 'blocked', 'attention'],

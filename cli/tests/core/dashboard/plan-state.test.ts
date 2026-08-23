@@ -69,4 +69,11 @@ describe('fase de documentacion', () => {
             tasks: { total: 1, completed: 1 },
         })).toThrow(/must be boolean/);
     });
+
+    it('docsComplete solo, sin qaComplete, ya alcanza retro_pending — el orden de la cadena no exige qaComplete primero', () => {  // verifies R6.3
+        expect(classifyPlanState({
+            markers: { qaComplete: false, docsComplete: true, retroComplete: false },
+            tasks: { total: 3, completed: 3 },
+        })).toBe('retro_pending');
+    });
 });
