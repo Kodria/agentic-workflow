@@ -1,6 +1,7 @@
 # Modelo durable de proceso y superficie CLI (R1a) Implementation Plan
 
 <!-- awm-qa-complete: 2026-08-23 -->
+<!-- awm-retro-complete: 2026-08-23 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
