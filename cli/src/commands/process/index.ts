@@ -14,8 +14,14 @@ function publicView(model: ProcessModel): Omit<ProcessModel, 'source'> {
     return rest;
 }
 
+/** Formatea los diagnósticos de descubrimiento como líneas `warning: ...\n`
+ *  listas para stderr. Compartido por list y show para no divergir el formato. */
+function diagnosticsToStderr(diagnostics: string[]): string {
+    return diagnostics.map((d) => `warning: ${d}\n`).join('');
+}
+
 export function runProcessList(discovered: DiscoveredProcessModels): CommandResult {
-    const stderr = discovered.diagnostics.map((d) => `warning: ${d}\n`).join('');
+    const stderr = diagnosticsToStderr(discovered.diagnostics);
     if (discovered.models.length === 0) {
         return { code: 0, stdout: 'No process models declared by the installed registries.\n', stderr };
     }
@@ -26,13 +32,16 @@ export function runProcessList(discovered: DiscoveredProcessModels): CommandResu
 }
 
 export function runProcessShow(discovered: DiscoveredProcessModels, name: string, json: boolean): CommandResult {
-    const stderr = discovered.diagnostics.map((d) => `warning: ${d}\n`).join('');
+    const stderr = diagnosticsToStderr(discovered.diagnostics);
     const found = discovered.models.find((m) => m.name === name);
     if (!found) {
         const available = discovered.models.map((m) => m.name).join(', ') || '(none)';
         return { code: 2, stdout: '', stderr: `${stderr}awm process show: no process named "${name}" — available: ${available}\n` };
     }
     if (!json) {
+        // Vista mínima deliberada: name/status/objective/structure. appliesWhen,
+        // routing, termination y unverified no se renderizan aquí — el detalle
+        // completo del body está disponible vía --json (ver Task 4 del plan R1A).
         const view = publicView(found);
         const structure = view.body.structure
             .map((sg) => [`${sg.id} — ${sg.text}`, ...sg.operations.map((op) => `  ${op.id} — ${op.text}`)].join('\n')).join('\n');
