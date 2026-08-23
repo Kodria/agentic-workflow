@@ -1217,7 +1217,7 @@ _Requirements: R5.2_
 
 **Por qué estructural y no una convención:** la lección `enum-de-N-puntos-sin-fuente-unica` de `AGENTS.md` dice que una regla que depende de que alguien la recuerde se rompe en el sitio N+1. R5.2 prohíbe que un consumidor implemente su propio parser; un test que prohíbe **la forma** lo detiene aunque quien lo escriba nunca haya leído el design doc.
 
-- [ ] **Step 1: Escribir el test**
+- [x] **Step 1: Escribir el test**
 
 ```ts
 // cli/tests/structural/process-model-single-parser.test.ts
@@ -1259,12 +1259,12 @@ describe('R5.2 — el CLI parsea el modelo una sola vez', () => {
 });
 ```
 
-- [ ] **Step 2: Correr el test y verificar que pasa**
+- [x] **Step 2: Correr el test y verificar que pasa**
 
 Run: `cd cli && npx jest tests/structural/process-model-single-parser.test.ts --runInBand`
 Expected: PASS — 2 tests
 
-- [ ] **Step 3: Verificar que el guard realmente dispara (sabotaje y revert)**
+- [x] **Step 3: Verificar que el guard realmente dispara (sabotaje y revert)**
 
 ```bash
 cd cli
@@ -1279,7 +1279,7 @@ npx jest tests/structural/process-model-single-parser.test.ts --runInBand
 ```
 Expected: PASS. Un guard que no se verifica por reversión es decorativo.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add cli/tests/structural/process-model-single-parser.test.ts
