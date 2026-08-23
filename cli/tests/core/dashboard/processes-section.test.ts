@@ -13,9 +13,12 @@ describe('sección processes del Dashboard', () => {
     beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-processes-section-')); fs.writeFileSync(path.join(root, 'package.json'), '{}'); });
     afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });
 
+    function snapshot(a: DashboardSourceAdapters) {
+        return collectDashboardSnapshot({ cwd: root, now: '2026-08-23T00:00:00.000Z', adapters: a });
+    }
+
     function section(a: DashboardSourceAdapters) {
-        return collectDashboardSnapshot({ cwd: root, now: '2026-08-23T00:00:00.000Z', adapters: a })
-            .sections.find((s) => s.id === 'processes')!;
+        return snapshot(a).sections.find((s) => s.id === 'processes')!;
     }
 
     it('puebla la sección desde el adapter', () => {                            // verifies R5.3
@@ -26,6 +29,13 @@ describe('sección processes del Dashboard', () => {
 
     it('un draft se reporta como attention, no como ok', () => {                // verifies R5.3
         expect(section(adapters(() => [{ name: 'x', status: 'draft' }])).items[0]).toEqual(expect.objectContaining({ state: 'attention', detail: 'draft' }));
+    });
+
+    it('un draft trae remediation "awm process list" y degrada el overall del snapshot', () => {  // verifies R5.3
+        const snap = snapshot(adapters(() => [{ name: 'x', status: 'draft' }]));
+        const s = snap.sections.find((sec) => sec.id === 'processes')!;
+        expect(s.items[0]).toEqual(expect.objectContaining({ state: 'attention', detail: 'draft', remediation: 'awm process list' }));
+        expect(snap.overall).toBe('degraded');
     });
 
     it('sin procesos la sección queda not_applicable, como antes de R1a', () => {  // verifies R5.3
