@@ -1,4 +1,5 @@
 # Fase de documentación (R0) Implementation Plan
+<!-- awm-qa-complete: 2026-08-23 -->
 <!-- awm-docs-complete: 2026-08-23 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
