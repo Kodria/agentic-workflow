@@ -47,4 +47,22 @@ describe('sección processes del Dashboard', () => {
         expect(serialized).not.toContain('<script>');
         expect(serialized).not.toContain('/etc/passwd');
     });
+
+    it('un nombre con forma de slug inválida no produce un id process.<bad-name>', () => {  // verifies R5.4
+        // 'mi proceso' (con espacio) no matchea DANGEROUS (no es un path, token,
+        // secreto ni markup), así que sanitizeDashboardSource lo deja pasar tal
+        // cual sobre el source crudo. La SEGUNDA barrera tiene que actuar sobre
+        // el id ya construido (`process.mi proceso`), no sobre el nombre crudo:
+        // PROCESS_FINDING_ID no matchea ese id, así que debe caer al fallback
+        // hasheado `item-<hash>` — igual que cualquier otro id malformado — y
+        // nunca renderizarse como `process.mi proceso`.
+        const s = section(adapters(() => [{ name: 'mi proceso', status: 'active' }]));
+        expect(s.items).toHaveLength(1);
+        const item = s.items[0];
+        expect(item.id).toMatch(/^item-[0-9a-f]{16}$/);
+        expect(item.id).not.toContain('process.mi proceso');
+        expect(item.label).toBe('Process');
+        expect(item.state).toBe('ok');
+        expect(item.detail).toBe('active');
+    });
 });

@@ -7,7 +7,7 @@ import { detectBranch } from '../ledger/store';
 import { journalDir, statePath } from '../journal/paths';
 import { readJournal } from '../journal/store';
 import { discoverProcessModels } from '../process/discover';
-import { sanitizeDashboardSource } from './sanitize';
+import { sanitizeDashboardSource, sanitizeDashboardId, sanitizeDashboardLabel } from './sanitize';
 import { validateDashboardSnapshotV1 } from './validate';
 import { classifyPlanState, type PlanStateInput } from './plan-state';
 import type { DashboardItemState, DashboardItemV1, DashboardSectionV1, DashboardSnapshotV1 } from './types';
@@ -354,9 +354,16 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     // `planning` hace con `classifyPlanState`: el sanitizador descarta todo
     // `detail` que venga del adapter (sanitize.ts), así que ponerlo antes sería
     // escribirlo para que se borre en silencio.
+    // `id`/`label` are built here, in application code, rather than arriving
+    // pre-shaped inside an adapter's `findings` array — so they never pass
+    // through sanitizeDashboardSource's recursive walk above. Running the
+    // constructed values through the same sanitize() id/label branches
+    // (sanitizeDashboardId/sanitizeDashboardLabel) keeps the second-barrier
+    // guarantee real: a non-slug `p.name` falls back to the hashed `item-*`
+    // id instead of sailing through as `process.<bad-name>`.
     const processItems: DashboardItemV1[] = (processesResult.value ?? []).map((p) => ({
-        id: `process.${p.name}`,
-        label: 'Process',
+        id: sanitizeDashboardId(`process.${p.name}`),
+        label: sanitizeDashboardLabel('Process'),
         state: p.status === 'active' ? 'ok' : 'attention',
         detail: p.status,
         // `attention` es un estado accionable (ver validate.ts): un modelo en

@@ -56,3 +56,21 @@ function sanitize(value: unknown, key?: string): unknown {
 export function sanitizeDashboardSource(value: unknown): unknown {
     return sanitize(value);
 }
+
+// Sections that build an item's `id`/`label` in application code (rather than
+// receiving them ready-made inside an adapter's `findings` array) never pass
+// through `sanitizeDashboardSource`'s recursive walk — there is no `findings`
+// array for it to walk. These wrappers let such call sites run the exact same
+// `id`/`label` branches sanitize() applies to every other section, so a
+// constructed value gets the same canonical-vocabulary / hashed-fallback
+// treatment instead of skipping validation entirely.
+
+/** Validates a dashboard item id against the canonical id vocabulary, falling back to a hashed id otherwise. */
+export function sanitizeDashboardId(value: string): string {
+    return sanitize(value, 'id') as string;
+}
+
+/** Validates a dashboard item label against the canonical label vocabulary, redacting it otherwise. */
+export function sanitizeDashboardLabel(value: string): string {
+    return sanitize(value, 'label') as string;
+}
