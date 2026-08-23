@@ -18,8 +18,8 @@ This is the process the `development-process` skill orchestrates. You don't have
 ## The phases
 
 ```
-brainstorming ──► [ui-design] ──► writing-plans ──► execution ──► post-implementation-qa ──► harness-retro ──► finishing
-   design doc      screens         plan file       code+tests       findings closed          lessons cured      merge/PR
+brainstorming ──► [ui-design] ──► writing-plans ──► execution ──► post-implementation-qa ──► post-implementation-docs ──► harness-retro ──► finishing
+   design doc      screens         plan file       code+tests       findings closed              docs verified            lessons cured      merge/PR
 ```
 
 | # | Phase | Skill | Produces |
@@ -29,10 +29,11 @@ brainstorming ──► [ui-design] ──► writing-plans ──► execution 
 | 2 | Planning | `writing-plans` | `docs/plans/YYYY-MM-DD-<topic>-plan.md` with numbered, checkable tasks |
 | 3 | Execution | `subagent-driven-development` (same session) or `executing-plans` (separate session) | Code committed per task, each reviewed |
 | 4 | QA | `post-implementation-qa` | Track A + Track B findings, all closed |
+| 4.2 | Docs | `post-implementation-docs` | User-facing documentation updated and verified against the real running binary; marker `awm-docs-complete` added to plan |
 | 4.5 | Retro | `harness-retro` | Recurring lessons cured into rules; ledger archived |
 | 5 | Completion | `finishing-a-development-branch` | Merge, PR, or clean branch handoff |
 
-**State lives in files, not in the conversation.** The orchestrator decides the next phase by looking at what exists on disk: is there a design doc? a plan? are its tasks checked? does the plan carry `<!-- awm-qa-complete -->`? `<!-- awm-retro-complete -->`? That's what makes the process survive a lost session, a compaction, or a different machine — you can hand the repo to someone else mid-flight and the state is legible.
+**State lives in files, not in the conversation.** The orchestrator decides the next phase by looking at what exists on disk: is there a design doc? a plan? are its tasks checked? does the plan carry `<!-- awm-qa-complete -->`? `<!-- awm-docs-complete -->`? `<!-- awm-retro-complete -->`? That's what makes the process survive a lost session, a compaction, or a different machine — you can hand the repo to someone else mid-flight and the state is legible.
 
 ---
 
@@ -77,6 +78,14 @@ Two tracks that answer different questions:
 
 Track B is a panel rather than one bigger pass on purpose: one critic has one blind spot, and copies of it share that blind spot. Different criteria catch different things.
 
+### 4.2 · Docs — `post-implementation-docs`
+
+Runs after QA closes and before the retro. Updates the user-facing documentation this cycle's changes made stale — guides, references, anything a reader relies on — and verifies every claim against the real running binary rather than against the plan's own prose or memory.
+
+> Comment narrative that survives spec-review and code-quality-review can still contain real factual errors, because nobody executed anything. Verifying against the binary is what catches that.
+
+Closes by writing `<!-- awm-docs-complete: YYYY-MM-DD -->` to the plan. `development-process` will not route to `harness-retro` or `finishing-a-development-branch` while `awm-qa-complete` is present and `awm-docs-complete` is absent.
+
 ### 4.5 · Retro — `harness-retro`
 
 Reads the branch ledger (`awm ledger list`) and turns **recurring** findings into durable rules: a sensor rule, a `CONSTITUTION.md` entry, or an `AGENTS.md` lesson.
@@ -98,9 +107,9 @@ Tests must pass first. Then merge locally, push and open a PR, keep the branch, 
 | `awm sensors run` | Real commands, real exit codes. No lens, review or claim overrides a red sensor. |
 | `awm preflight` | Verifies the harness can *actually* gate before you start — a green run on a project with no configured sensors is a lie, and preflight is what catches it. |
 | `verification-before-completion` | No "done/fixed/passing" claim without the command output that proves it. |
-| Plan markers | `awm-qa-complete` and `awm-retro-complete` must be present before finishing. |
+| Plan markers | `awm-qa-complete`, `awm-docs-complete`, and `awm-retro-complete` must be present before finishing, in that order. |
 
-The last one is worth dwelling on: the markers exist so that a *later* session — or a different person — can tell whether QA and the retro really ran, instead of trusting a summary.
+The last one is worth dwelling on: the markers exist so that a *later* session — or a different person — can tell whether QA, the docs pass, and the retro really ran, instead of trusting a summary.
 
 ---
 
@@ -113,6 +122,7 @@ In `config-managed`, `agents-md-managed` or `context-only` agents (OpenCode, Cur
 "Now use writing-plans on that design."
 "Execute the plan with subagent-driven-development."
 "Run post-implementation-qa on the branch."
+"Run post-implementation-docs."
 "Run harness-retro."
 "Finish the branch."
 ```

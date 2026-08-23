@@ -41,8 +41,10 @@ In a detected project, the complete view keeps this order:
 | Planning | State of the current cycle or most recently captured cycle. |
 | Execution | Whether work completed a cycle or became blocked. |
 | QA | Aggregated findings and fixes for a cycle, without exposing their text. |
+| Docs | Whether the cycle's user-facing documentation was updated and verified. |
 | Retro | Whether the cycle reached retrospective and harness learning. |
 | History | Eligible local cycles and the confidence of the observation. |
+| Processes | Reserved for a future process-lifecycle adapter; today it always reports "not applicable." |
 
 States are deliberately explicit:
 
@@ -50,7 +52,46 @@ States are deliberately explicit:
 - **Attention**, **missing**, or **unavailable** include a safe remedy, such as `awm sync`, `awm update`, `awm sensors status`, or `awm preflight`.
 - **Not applicable** and an empty history section do not mean failure. In particular, a new project has no trend or historical evidence yet.
 
+The **Processes** section is a deliberate placeholder, not a bug: `awm doctor --full` run from this repository's root currently prints
+
+```
+Processes
+  ⊘ source not applicable
+  No observations reported.
+```
+
+for every project, regardless of activity. No adapter feeds it yet — it exists in the section contract so the dashboard's shape doesn't have to change again when a process-lifecycle source lands. Seeing it empty is the correct, current state.
+
+Don't confuse that with QA, Docs, or Retro reporting **unavailable**: that's a different, activity-dependent reason — no development cycle has been captured yet for the current branch. Both look empty; only one of them is permanent. Captured from this repository's own root, with no cycle currently tracked:
+
+```
+QA
+  ⊘ source unavailable
+  No observations reported.
+
+Docs
+  ⊘ source unavailable
+  No observations reported.
+
+Retro
+  ⊘ source unavailable
+  No observations reported.
+```
+
 Follow the remedy shown beside an observation. To learn whether a project can execute its gates, also run `awm preflight`; to execute the real quality checks, run `awm sensors run`.
+
+## Plan lifecycle states
+
+The Planning row's detail is one of a fixed set of live plan states, driven entirely by task checkboxes and marker comments in the plan file itself, never by prose:
+
+`active` / `blocked` → `qa_pending` → `docs_pending` → `retro_pending` → `executed`
+
+- **`qa_pending`** — every task in the plan is checked, but `<!-- awm-qa-complete -->` is not yet on the plan.
+- **`docs_pending`** — `<!-- awm-qa-complete -->` is present, `<!-- awm-docs-complete -->` is not. The `post-implementation-docs` phase (phase 4.2 in [development process](development-process.md)) closes it by adding the marker.
+- **`retro_pending`** — `<!-- awm-docs-complete -->` is present, `<!-- awm-retro-complete -->` is not.
+- **`executed`** — all three markers are present. Terminal state; a later marker never un-sets an earlier one.
+
+A plan only reaches this classification once a journal or `awm evidence capture --plan <path>` gives the dashboard a cycle to read — an untracked plan file just doesn't produce a Planning row, which is exactly the `No observations reported.` case above.
 
 ## When impact evidence appears
 
