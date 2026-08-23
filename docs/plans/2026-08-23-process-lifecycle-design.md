@@ -218,6 +218,18 @@ Criterios de aceptación:
 - **CA-1.3** — el Dashboard muestra la sección `processes` poblada por el adapter, sin parser propio.
 - **CA-1.4 — demo de aceptación** — declarar el orquestador del proceso personal en [`Kodria/awm-personal-registry`](https://github.com/Kodria/awm-personal-registry), hoy 3 skills sueltas sin `awm-registry.json` ni declaración. Es el consumidor que motivó el proyecto entero.
 
+#### Enmienda 2026-08-23 — R1 se ejecuta en dos mitades (R1a entregada, R1b pendiente)
+
+R1 se partió por alcance, con acuerdo del owner. **R1a** entregó el contrato lector — `R1.*`, `R5.*`, `R7.*` — más CA-1.2 y CA-1.3 (PR #124, mergeado). **R1b** cubre el resto: `R2.*` (elicitación), `R3.*` (generación y verificación) y `R4.1` (modificar un modelo `active`), con CA-1.1, CA-4.1 y CA-1.4 pendientes.
+
+Tres decisiones que el diseño original dejaba implícitas, resueltas con el owner antes de planificar R1b:
+
+1. **Cómo cierra R3.5 la confirmación de composición.** El diseño exige llegar a "el orquestador aparece efectivamente compuesto", pero no decía por qué superficie. Verificado leyendo el código: `buildContext` solo es alcanzable escribiendo el skill materializado desde el hook de SessionStart — **no existe comando read-only que lo exponga**. Se descartó que el skill leyera `~/.claude/skills/using-awm/SKILL.md` (hardcodea una ruta específica del provider y parsea markdown instalado: la misma forma de segunda-fuente-de-verdad que motivó #111 y R5.2). **Resolución: el CLI expone la lista compuesta como comando read-only**, y el ciclo de verificación consume esa salida — misma regla que R5.1/R5.2 ya fijó para el modelo, ahora aplicada al payload de contexto.
+
+2. **`R4.1` entra en R1b, no en la release de extracción.** El modelo durable ya es parseable desde R1a, así que cargar → editar → regenerar reusa el generador de `R3.1` casi sin costo. Dejarlo afuera entregaría un ciclo de vida que crea procesos pero no deja mejorarlos, que es justo el caso de uso "mejora continua" del tracking.
+
+3. **`minCliVersion` del registry NO se bumpea por este skill.** El precedente (8.5.0 por `awm evidence capture`) aplicaba a `harness-retro`, un skill del spine que todos corren; `minCliVersion` es un bloqueo duro de `awm update` para **todo** el registry. Bloquear el registry entero a los usuarios con CLI viejo por un skill nuevo y opcional es desproporcionado — y contradice `R7.1`, que es requisito de este mismo diseño. **Resolución: el skill degrada honestamente** cuando el comando de verificación no está disponible (patrón "sucesor no instalado"), informa qué versión de CLI hace falta, y no promueve a `status: active` sin verificación — que es el resultado correcto, no una omisión.
+
 ### R2 — Extracción
 
 Cubre R4.2–R4.4. Desbloquea `development-process` y `product-process` como sujetos.
