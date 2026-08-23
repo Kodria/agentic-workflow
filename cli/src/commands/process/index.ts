@@ -20,6 +20,19 @@ function diagnosticsToStderr(diagnostics: string[]): string {
     return diagnostics.map((d) => `warning: ${d}\n`).join('');
 }
 
+/** Neutraliza bytes de control C0 (incluyendo ESC `\x1b`) de texto de body
+ *  proveniente de un registry no confiable antes de escribirlo a una terminal
+ *  humana. `\n` y `\t` se preservan porque son whitespace legítimo usado por
+ *  la vista de texto; el resto de la vista JSON no pasa por acá — `JSON.stringify`
+ *  ya escapa los caracteres de control como parte de producir JSON válido. Esto
+ *  es un problema distinto y más simple que `sanitizeDashboardSource` (Dashboard,
+ *  Task 5): ahí se canonicaliza ids/labels contra un vocabulario permitido; acá
+ *  solo se neutraliza ANSI/control crudo antes de escribir a stdout. */
+function stripControlChars(text: string): string {
+    // eslint-disable-next-line no-control-regex -- necesitamos matchear C0 deliberadamente
+    return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+}
+
 export function runProcessList(discovered: DiscoveredProcessModels): CommandResult {
     const stderr = diagnosticsToStderr(discovered.diagnostics);
     if (discovered.models.length === 0) {
@@ -44,8 +57,11 @@ export function runProcessShow(discovered: DiscoveredProcessModels, name: string
         // completo del body está disponible vía --json (ver Task 4 del plan R1A).
         const view = publicView(found);
         const structure = view.body.structure
-            .map((sg) => [`${sg.id} — ${sg.text}`, ...sg.operations.map((op) => `  ${op.id} — ${op.text}`)].join('\n')).join('\n');
-        return { code: 0, stdout: `${view.name} (${view.status})\n\n${view.body.objective}\n\n${structure}\n`, stderr };
+            .map((sg) => [
+                `${stripControlChars(sg.id)} — ${stripControlChars(sg.text)}`,
+                ...sg.operations.map((op) => `  ${stripControlChars(op.id)} — ${stripControlChars(op.text)}`),
+            ].join('\n')).join('\n');
+        return { code: 0, stdout: `${view.name} (${view.status})\n\n${stripControlChars(view.body.objective)}\n\n${structure}\n`, stderr };
     }
     return { code: 0, stdout: `${JSON.stringify(publicView(found), null, 2)}\n`, stderr };
 }

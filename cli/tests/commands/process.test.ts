@@ -58,3 +58,40 @@ describe('awm process show --json', () => {
         expect(r.stderr).toMatch(/no-existe/);
     });
 });
+
+describe('awm process show (texto)', () => {
+    it('renderiza name/status/objective/structure en modo texto', () => {          // verifies R5.1
+        const r = runProcessShow({ models: [model()], diagnostics: [] }, 'mi-proceso', false);
+        expect(r.code).toBe(0);
+        expect(r.stdout).toContain('mi-proceso (draft)');
+        expect(r.stdout).toContain('G — Objetivo.');
+        expect(r.stdout).toContain('SG-1 — Uno');
+        expect(r.stdout).toContain('OP-1.1 — Hacer');
+    });
+
+    it('un nombre inexistente en modo texto sale 2 y nombra lo disponible', () => { // verifies R7.1
+        const r = runProcessShow({ models: [model()], diagnostics: [] }, 'no-existe', false);
+        expect(r.code).toBe(2);
+        expect(r.stderr).toMatch(/no-existe/);
+        expect(r.stdout).toBe('');
+    });
+
+    it('sanea bytes de control/ANSI del body antes de escribir a stdout', () => {   // verifies process-show-ansi-terminal-injection
+        const hostile = model({
+            body: {
+                objective: 'G — Objetivo\x1b[31mmalicioso\x1b[0m.',
+                appliesWhen: 'Siempre.',
+                structure: [{ id: 'SG-1', text: 'Uno\x1b]0;pwned\x07', operations: [{ id: 'OP-1.1', text: 'Hacer\x1b[2Jcosas' }] }],
+                routing: [{ when: 'Al empezar', requiredState: '', goesTo: 'OP-1.1', endsAt: 'SG-1' }],
+                termination: 'none', unverified: ['Nada.'],
+            },
+        });
+        const r = runProcessShow({ models: [hostile], diagnostics: [] }, 'mi-proceso', false);
+        expect(r.code).toBe(0);
+        // eslint-disable-next-line no-control-regex -- necesitamos verificar la ausencia deliberada de C0
+        expect(r.stdout).not.toMatch(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/);
+        expect(r.stdout).toContain('Objetivo[31mmalicioso[0m.');
+        expect(r.stdout).toContain('Uno]0;pwned');
+        expect(r.stdout).toContain('Hacer[2Jcosas');
+    });
+});
