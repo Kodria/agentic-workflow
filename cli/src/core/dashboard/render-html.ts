@@ -3,7 +3,7 @@ import type { DashboardItemState, DashboardSectionV1, DashboardSnapshotV1 } from
 import { validateDashboardSnapshotV1 } from './validate';
 
 const CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
-const SECTION_TITLES: Record<DashboardSectionV1['id'], string> = { machine: 'Machine / install', project: 'Project readiness', planning: 'Design / planning', execution: 'Execution', qa: 'QA', retro: 'Retro', history: 'Final / history' };
+const SECTION_TITLES: Record<DashboardSectionV1['id'], string> = { machine: 'Machine / install', project: 'Project readiness', planning: 'Design / planning', execution: 'Execution', qa: 'QA', docs: 'Docs', retro: 'Retro', history: 'Final / history', processes: 'Processes' };
 const STATE_TEXT: Record<DashboardItemState, string> = { ok: 'OK', attention: 'Attention', missing: 'Missing', unavailable: 'Unavailable', not_applicable: 'Not applicable' };
 const STATE_GLYPH: Record<DashboardItemState, string> = { ok: '●', attention: '▲', missing: '×', unavailable: '⊘', not_applicable: '—' };
 
@@ -64,7 +64,7 @@ function projectEvidenceComposition(snapshot: DashboardSnapshotV1): string {
 }
 
 function projectComposition(snapshot: DashboardSnapshotV1): string {
-    const stageSections: DashboardSectionV1['id'][] = ['planning', 'execution', 'qa', 'retro', 'history'];
+    const stageSections: DashboardSectionV1['id'][] = ['planning', 'execution', 'qa', 'docs', 'retro', 'history'];
     const byId = new Map(snapshot.sections.map((section) => [section.id, section]));
     const stages = stageSections.map((id) => {
         const section = byId.get(id);

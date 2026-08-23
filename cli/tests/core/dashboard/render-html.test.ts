@@ -12,8 +12,10 @@ function snapshot(overrides: Partial<DashboardSnapshotV1> = {}): DashboardSnapsh
             { id: 'planning', availability: 'available', items: [] },
             { id: 'execution', availability: 'available', items: [] },
             { id: 'qa', availability: 'available', items: [] },
+            { id: 'docs', availability: 'available', items: [] },
             { id: 'retro', availability: 'available', items: [] },
             { id: 'history', availability: 'available', items: [] },
+            { id: 'processes', availability: 'not_applicable', items: [] },
         ],
         ...overrides,
     });
@@ -27,7 +29,9 @@ describe('renderDashboardHtml', () => {
                 { id: 'machine', availability: 'available', items: [{ id: 'hostile', label: '<script>alert(1)</script>', state: 'attention', detail: '"quoted"', remediation: 'awm sync && echo <unsafe>' }] },
                 { id: 'project', availability: 'not_applicable', items: [] }, { id: 'planning', availability: 'not_applicable', items: [] },
                 { id: 'execution', availability: 'not_applicable', items: [] }, { id: 'qa', availability: 'not_applicable', items: [] },
+                { id: 'docs', availability: 'not_applicable', items: [] },
                 { id: 'retro', availability: 'not_applicable', items: [] }, { id: 'history', availability: 'not_applicable', items: [] },
+                { id: 'processes', availability: 'not_applicable', items: [] },
             ],
         })));
         expect(html).toContain(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">`);
@@ -157,7 +161,7 @@ describe('renderDashboardHtml', () => {
 
     it('renders every canonical project section once and in lifecycle order', () => {
         const html = renderDashboardHtml(validateDashboardSnapshotV1(snapshot({ confidence: 'provisional' })));
-        const ids = ['machine', 'project', 'planning', 'execution', 'qa', 'retro', 'history'];
+        const ids = ['machine', 'project', 'planning', 'execution', 'qa', 'docs', 'retro', 'history', 'processes'];
         const positions = ids.map((id) => html.indexOf(`<section id="${id}"`));
         expect(positions.every((position) => position >= 0)).toBe(true);
         expect([...positions].sort((left, right) => left - right)).toEqual(positions);
@@ -166,7 +170,7 @@ describe('renderDashboardHtml', () => {
     });
 
     it('is deterministic and preserves every history and task observation without privacy leakage', () => {
-        const sections = ['machine', 'project', 'planning', 'execution', 'qa', 'retro', 'history'].map((id) => ({
+        const sections = ['machine', 'project', 'planning', 'execution', 'qa', 'docs', 'retro', 'history', 'processes'].map((id) => ({
             id: id as DashboardSnapshotV1['sections'][number]['id'], availability: 'available' as const,
             items: id === 'history' ? Array.from({ length: 500 }, (_, index) => ({ id: `history.${index}`, label: `Cycle ${index}`, state: 'ok' as const })) : id === 'execution' ? Array.from({ length: 2000 }, (_, index) => ({ id: `execution.${index}`, label: `Task ${index}`, state: 'ok' as const })) : [],
         }));
@@ -183,8 +187,9 @@ describe('renderDashboardHtml', () => {
             sections: [
                 { id: 'machine', availability: 'available', items: [] }, { id: 'project', availability: 'available', items: [] },
                 { id: 'planning', availability: 'available', items: [{ id: 'plan.alpha', label: 'Impact plan', state: 'ok', detail: 'executed' }] },
-                { id: 'execution', availability: 'available', items: [] }, { id: 'qa', availability: 'available', items: [] }, { id: 'retro', availability: 'available', items: [] },
+                { id: 'execution', availability: 'available', items: [] }, { id: 'qa', availability: 'available', items: [] }, { id: 'docs', availability: 'available', items: [] }, { id: 'retro', availability: 'available', items: [] },
                 { id: 'history', availability: 'available', items: [{ id: 'history.cycle.abc', label: 'Cycle abc', state: 'ok', detail: 'plan executed; tasks 3; retries 2; QA 2/2; first-pass yes; cures supported' }] },
+                { id: 'processes', availability: 'not_applicable', items: [] },
             ],
         })));
         expect(html).toContain('Confidence: supported');

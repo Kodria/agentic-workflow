@@ -17,7 +17,7 @@ export interface MachineDashboardSource { findings?: DashboardFinding[]; }
 export interface ProjectDashboardSource { label?: string; findings?: DashboardFinding[]; }
 export interface PlanDashboardSource { id: string; label: string; state: DashboardItemState; detail?: string; lifecycle?: PlanStateInput; }
 export interface ExecutionDashboardSource {
-    execution?: DashboardFinding[]; qa?: DashboardFinding[]; retro?: DashboardFinding[]; history?: DashboardFinding[];
+    execution?: DashboardFinding[]; qa?: DashboardFinding[]; docs?: DashboardFinding[]; retro?: DashboardFinding[]; history?: DashboardFinding[];
 }
 export interface DashboardSourceAdapters {
     machine(input: { cwd: string }): MachineDashboardSource;
@@ -132,6 +132,7 @@ export function productionDashboardAdapters(context: HarnessContext): DashboardS
             return {
                 execution: history.cycles.map((cycle) => cycleFinding('execution', 'Static preflight', cycle, cycle.cycleState === 'blocked')),
                 qa: history.cycles.map((cycle) => cycleFinding('qa', 'Sensors', cycle, cycle.qa.fixes < cycle.qa.findings)),
+                docs: history.cycles.map((cycle) => cycleFinding('docs', 'Documentation', cycle, !lifecycleForCycle(cycle).markers.docsComplete)),
                 retro: history.cycles.map((cycle) => cycleFinding('retro', 'Project context', cycle, cycle.plan.state !== 'executed')),
             };
         },
@@ -156,7 +157,7 @@ function journalExecutionFinding(overlay: JournalOverlay): ExecutionDashboardSou
             id: 'execution.current-journal', label: 'Static preflight', state: blocked ? 'attention' : 'ok',
             ...(blocked ? { remediation: BLOCKED_CYCLE_REMEDIATION, remediationVerified: true } : {}),
         }],
-        qa: [], retro: [],
+        qa: [], docs: [], retro: [],
     };
 }
 
@@ -181,7 +182,7 @@ export function lifecycleForCycle(cycle: ReturnType<typeof readEvidenceHistory>[
     return { markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: { total: 0, completed: 0 } };
 }
 
-function cycleFinding(section: 'execution' | 'qa' | 'retro', label: string, cycle: ReturnType<typeof readEvidenceHistory>['cycles'][number], actionable: boolean): DashboardFinding {
+function cycleFinding(section: 'execution' | 'qa' | 'docs' | 'retro', label: string, cycle: ReturnType<typeof readEvidenceHistory>['cycles'][number], actionable: boolean): DashboardFinding {
     return {
         id: `${section}.cycle.${cycle.cycleId}`,
         label,
@@ -323,7 +324,7 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
     const machineSection = section('machine', 'available', machineItems);
     if (!root) {
         const degraded = machineSection.items.some((item) => item.state !== 'ok' && item.state !== 'not_applicable');
-        return validateDashboardSnapshotV1({ schema: 1, generatedAt: options.now, overall: degraded ? 'degraded' : 'healthy', project: { detected: false, label: 'No project detected' }, confidence: 'none', sections: [machineSection] });
+        return validateDashboardSnapshotV1({ schema: 2, generatedAt: options.now, overall: degraded ? 'degraded' : 'healthy', project: { detected: false, label: 'No project detected' }, confidence: 'none', sections: [machineSection] });
     }
 
     const projectResult = optional(() => sanitizeDashboardSource(adapters.project({ root })) as ProjectDashboardSource);
@@ -339,6 +340,7 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
         ? { ...plan, detail: classifyPlanState(plan.lifecycle) } : plan))) : { value: [], failed: false, failure: {} };
     const executionItems = isolatedFindings(execution?.execution);
     const qaItems = isolatedFindings(execution?.qa);
+    const docsItems = isolatedFindings(execution?.docs);
     const retroItems = isolatedFindings(execution?.retro);
     const evidenceResult = optional(() => evidenceHistoryItems(root));
     const executionUnavailable = !executionResult.failed && execution === undefined;
@@ -349,12 +351,17 @@ export function collectDashboardSnapshot(options: CollectDashboardOptions): Dash
         section('planning', plansResult.failed || planItemsResult.failed ? 'unavailable' : 'available', plansResult.failed
             ? canonicalOptionalFailure(plansResult.failure) : planItemsResult.failed ? [] : planItemsResult.value),
         section('execution', executionResult.failed || executionUnavailable || executionItems.failed ? 'unavailable' : 'available', executionResult.failed ? canonicalOptionalFailure(executionResult.failure) : executionUnavailable ? canonicalOptionalFailure({ findingId: 'execution.source.unavailable', remediationVerified: true }) : executionItems.value),
-        // There is no read-only QA, retro, or history adapter in Release A. An
+        // There is no read-only QA, docs, retro, or history adapter in Release A. An
         // absent execution source is not evidence of a successful empty cycle.
         section('qa', executionResult.failed || executionUnavailable || qaItems.failed ? 'unavailable' : 'available', qaItems.value),
+        section('docs', executionResult.failed || executionUnavailable || docsItems.failed ? 'unavailable' : 'available', docsItems.value),
         section('retro', executionResult.failed || executionUnavailable || retroItems.failed ? 'unavailable' : 'available', retroItems.value),
         section('history', evidenceResult.failed ? 'unavailable' : 'available', evidenceResult.failed ? [] : evidenceResult.value!.items),
+        // `processes` is a reserved section id with no adapter yet: a later
+        // release (R1) populates it. `not_applicable` here means exactly
+        // "this section doesn't apply here", not dead code.
+        section('processes', 'not_applicable', []),
     ];
     const degraded = sections.some((entry) => entry.availability === 'unavailable' || entry.items.some((item) => item.state !== 'ok' && item.state !== 'not_applicable'));
-    return validateDashboardSnapshotV1({ schema: 1, generatedAt: options.now, overall: degraded ? 'degraded' : 'healthy', project: { detected: true, label: projectSource?.label || 'Project detected' }, confidence: evidenceResult.failed ? 'none' : evidenceResult.value!.confidence, sections });
+    return validateDashboardSnapshotV1({ schema: 2, generatedAt: options.now, overall: degraded ? 'degraded' : 'healthy', project: { detected: true, label: projectSource?.label || 'Project detected' }, confidence: evidenceResult.failed ? 'none' : evidenceResult.value!.confidence, sections });
 }

@@ -3,7 +3,7 @@ import { dashboardSnapshot, type DashboardSnapshotV1 } from '../../../src/core/d
 
 function snapshot(): DashboardSnapshotV1 {
     return {
-        schema: 1,
+        schema: 2,
         generatedAt: '2026-08-22T00:00:00.000Z',
         overall: 'healthy',
         project: { detected: true, label: 'Demo project' },
@@ -14,8 +14,10 @@ function snapshot(): DashboardSnapshotV1 {
             { id: 'planning', availability: 'not_applicable', items: [] },
             { id: 'execution', availability: 'not_applicable', items: [] },
             { id: 'qa', availability: 'not_applicable', items: [] },
+            { id: 'docs', availability: 'not_applicable', items: [] },
             { id: 'retro', availability: 'not_applicable', items: [] },
             { id: 'history', availability: 'not_applicable', items: [] },
+            { id: 'processes', availability: 'not_applicable', items: [] },
         ],
     };
 }
@@ -23,7 +25,7 @@ function snapshot(): DashboardSnapshotV1 {
 describe('validateDashboardSnapshotV1', () => {
     it('creates the safe deterministic dashboard snapshot default', () => {
         expect(dashboardSnapshot()).toEqual({
-            schema: 1,
+            schema: 2,
             generatedAt: '2026-08-22T00:00:00.000Z',
             overall: 'healthy',
             project: { detected: false, label: 'No project detected' },
@@ -38,7 +40,7 @@ describe('validateDashboardSnapshotV1', () => {
 
     it('builds a complete canonical section set when callers select a project', () => {
         const value = dashboardSnapshot({ project: { detected: true, label: 'Demo project' }, confidence: 'provisional' });
-        expect(validateDashboardSnapshotV1(value).sections.map((section) => section.id)).toEqual(['machine', 'project', 'planning', 'execution', 'qa', 'retro', 'history']);
+        expect(validateDashboardSnapshotV1(value).sections.map((section) => section.id)).toEqual(['machine', 'project', 'planning', 'execution', 'qa', 'docs', 'retro', 'history', 'processes']);
     });
 
     it('returns a valid V1 snapshot', () => {
@@ -59,7 +61,7 @@ describe('validateDashboardSnapshotV1', () => {
 
     it('rejects an invalid schema version', () => {
         const value = snapshot() as unknown as { schema: number };
-        value.schema = 2;
+        value.schema = 3;
         expect(() => validateDashboardSnapshotV1(value)).toThrow(DashboardValidationError);
     });
 

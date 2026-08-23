@@ -104,6 +104,9 @@ describe('productionDashboardAdapters', () => {
         expect(snapshot.sections.find((section) => section.id === 'qa')?.items).toEqual([
             expect.objectContaining({ state: 'ok' }),
         ]);
+        expect(snapshot.sections.find((section) => section.id === 'docs')?.items).toEqual([
+            expect.objectContaining({ state: 'ok' }),
+        ]);
         expect(snapshot.sections.find((section) => section.id === 'retro')?.items).toEqual([
             expect.objectContaining({ state: 'ok' }),
         ]);
