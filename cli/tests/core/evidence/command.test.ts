@@ -70,13 +70,32 @@ describe('evidence capture CLI boundary', () => {
     expect(result).toEqual(expect.objectContaining({ code: 2, error: expect.stringMatching(/invalid checklist/i) }));
   });
 
-  test('lee el marker awm-docs-complete del plan', () => {
+  test('sin el marker de docs, el estado vivo seria docs_pending — se remapea a retro_pending en la evidencia', () => {
     fs.writeFileSync(path.join(root, 'plan.md'), '# Plan\n<!-- awm-qa-complete: 2026-08-23 -->\n- [x] Task 1\n');
     const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: completeJournal, ledger: [] });
 
     expect(result.code).toBe(0);
-    // sin el marker de docs, el estado vivo seria docs_pending
     expect(JSON.parse(fs.readFileSync(path.join(root, '.awm', 'evidence', 'cycles', result.stdout.trim() + '.json'), 'utf8')).plan.state).toBe('retro_pending');
+  });
+
+  test('lee el marker awm-docs-complete del plan — sin awm-qa-complete, docsComplete solo alcanza para retro_pending', () => {
+    // Discrimina de verdad: si el parser NO leyera awm-docs-complete, este plan (sin qa-complete,
+    // sin retro-complete) clasificaria qa_pending por conteo de tasks. Si SI lo lee, va directo a
+    // retro_pending — la unica forma de que este resultado ocurra es que el marker se haya parseado.
+    fs.writeFileSync(path.join(root, 'plan.md'), '# Plan\n<!-- awm-docs-complete: 2026-08-23 -->\n- [x] Task 1\n');
+    const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: completeJournal, ledger: [] });
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(fs.readFileSync(path.join(root, '.awm', 'evidence', 'cycles', result.stdout.trim() + '.json'), 'utf8')).plan.state).toBe('retro_pending');
+  });
+
+  test('no deja que un awm-docs-complete de otro release clasifique el release actual', () => {
+    // Mismo patron que el test analogo de qa/retro: el marker debe respetar el scoping por release.
+    fs.writeFileSync(path.join(root, 'plan.md'), '# plan\n<!-- awm-docs-complete: Release A / #86 -->\n\n## Delivery order\n1. **Release A / #86:** dashboard\n2. **Release B / #87:** evidence\n\n- [x] Release B task\n');
+    const result = runEvidenceCapture(root, 'plan.md', { repositoryIdentity: 'git@example.test:team/repository.git', journal: { journalId: 'ignored', cycle: { status: 'COMPLETE', startedAt: '2026-08-22T10:00:00.000Z', completedAt: '2026-08-22T10:00:01.000Z' }, tasks: [], verdicts: [], fixes: [], jobs: {}, cycleVerificationPlan: [] }, ledger: [] });
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(fs.readFileSync(path.join(root, '.awm', 'evidence', 'cycles', result.stdout.trim() + '.json'), 'utf8')).plan.state).toBe('qa_pending');
   });
 
   test('no filtra docs_pending al registro durable de evidencia', () => {
