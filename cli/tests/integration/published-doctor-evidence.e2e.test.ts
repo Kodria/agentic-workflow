@@ -13,8 +13,15 @@ const registryRemote = process.env.AWM_PUBLISHED_REGISTRY_REMOTE ?? 'https://git
 const enabled = Boolean(cliVersion && registryTag);
 const acceptance = enabled ? describe : describe.skip;
 
+// Windows resolves `npm` to `npm.cmd`; spawnSync can't execute a .cmd file
+// directly without a shell — it fails to spawn (status: null) instead of
+// running. git.exe and node.exe are real binaries and don't need this, so
+// scope it narrowly: unconditional shell:true would also apply to the
+// `node -e <script>` call below, and on POSIX Node's shell:true joins args
+// with plain spaces (no escaping), which would corrupt that script argument.
 function command(cwd: string, executable: string, args: string[], env = process.env): SpawnSyncReturns<string> {
-    return spawnSync(executable, args, { cwd, encoding: 'utf8', env });
+    const needsShell = process.platform === 'win32' && executable === 'npm';
+    return spawnSync(executable, args, { cwd, encoding: 'utf8', env, shell: needsShell });
 }
 
 /** Published evidence accepts only exact versions and immutable git tags. */
