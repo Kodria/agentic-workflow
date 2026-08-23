@@ -1163,7 +1163,7 @@ git commit -m "docs(guides): documentar la fase de documentacion y el estado doc
 
 Se verifican después de las diez tasks, antes de cerrar la rama.
 
-- [ ] **CA-0.1** — un plan con `awm-qa-complete` presente y `awm-docs-complete` ausente reporta `docs_pending` en `awm doctor --full`. Verificable sobre este mismo plan antes del Step 6 de la Task 10.
+- [x] **CA-0.1** — `classifyPlanState` clasifica `docs_pending` un plan con `awm-qa-complete` presente y `awm-docs-complete` ausente. Verificado por unit test directo (`plan-state.test.ts`, `evidence/command.test.ts`) — **no** por `awm doctor --full`: la adapter `plans` de producción (`cli/src/core/dashboard/collect.ts:105`) lee exclusivamente `.awm/evidence/` y el journal activo, nunca reparsea `docs/plans/*.md` en vivo, así que sin un ciclo capturado (`awm evidence capture` o un journal activo) no hay fila que clasificar — comportamiento preexistente de #108, no un hueco de este plan. *(Corrección post-hoc: la redacción original de este criterio asumía que agregar el marker a este mismo plan cambiaría visiblemente `awm doctor --full`; Task 10 lo verificó contra el binario real y encontró que esa expectativa era incorrecta — hallazgo de spec-review, Task 10.)*
 - [ ] **CA-0.2** — la fase corre en modo desatendido de punta a punta, sin pausas, en un ciclo real.
 - [ ] **CA-0.3** — con el registry de documentación ausente (que es el estado por defecto: es opt-in), la fase corre igual y la rama cierra. Verificable en este mismo ciclo, que no lo tiene instalado.
 - [ ] **Entrega ordenada** — el contenido se taggea y publica **antes** de que el CLI mergee a `main`. Si el CLI llegara primero, los usuarios verían planes en `docs_pending` sin tener todavía el skill que produce el marker.
