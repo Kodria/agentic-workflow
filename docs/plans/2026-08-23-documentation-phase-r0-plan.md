@@ -8,7 +8,7 @@
 
 **Architecture:** Dos capas con frontera dura y **la de contenido va primero**. Las Tasks 1–4 viven enteramente en `awm-baseline-registry` (skills + bundle, entregados por tag + `awm update`); las Tasks 5–10 viven en `agentic-workflow` (CLI, publicado a npm por `release.yml`). El orden importa: si el CLI llegara primero, los usuarios verían planes clasificados `docs_pending` sin tener todavía el skill que produce el marker. Al revés la degradación es invisible — el dashboard simplemente reporta el estado anterior hasta que el CLI alcanza.
 
-**Tech Stack:** TypeScript (CLI, Vitest), Markdown (skills del registry), JSON (bundles/catálogo).
+**Tech Stack:** TypeScript (CLI, **Jest** — `npm test` corre `jest --runInBand`; no es Vitest), Markdown (skills del registry, tests con el runner nativo de Node `node tests/<x>.test.mjs`), JSON (bundles/catálogo).
 
 **Modo de ejecución:** interactivo
 
@@ -644,7 +644,7 @@ describe('fase de documentacion', () => {
 
 - [ ] **Step 2: Correr los tests y verificar que fallan**
 
-Run: `cd cli && npx vitest run tests/core/dashboard/plan-state.test.ts`
+Run: `cd cli && npx jest --runInBand tests/core/dashboard/plan-state.test.ts`
 Expected: FAIL — `expected 'retro_pending' to be 'docs_pending'` en el primero, y `Plan markers has unsupported fields` en los que pasan `docsComplete` (porque el allowlist todavía no lo admite)
 
 - [ ] **Step 3: Ampliar el tipo y el allowlist**
@@ -689,7 +689,7 @@ El orden es lo que hace que `retroComplete → executed` conserve su significado
 
 - [ ] **Step 5: Correr los tests y verificar que pasan**
 
-Run: `cd cli && npx vitest run tests/core/dashboard/plan-state.test.ts`
+Run: `cd cli && npx jest --runInBand tests/core/dashboard/plan-state.test.ts`
 Expected: PASS. **El typecheck del resto del proyecto va a estar rojo** — `docsComplete` es requerido y hay 7 sitios que todavía no lo pasan. Los arreglan las Tasks 6 y 7; no los arregles acá.
 
 - [ ] **Step 6: Commit**
@@ -748,7 +748,7 @@ it('con docs y retro completos el estado sigue siendo executed', () => {     // 
 
 - [ ] **Step 2: Correr los tests y verificar que fallan**
 
-Run: `cd cli && npx vitest run tests/commands/evidence`
+Run: `cd cli && npx jest --runInBand tests/commands/evidence`
 Expected: FAIL — `Plan markers has unsupported fields` o `Plan markers must be boolean`, porque `index.ts:64` todavía construye el objeto sin `docsComplete`
 
 - [ ] **Step 3: Angostar el contrato durable**
@@ -802,7 +802,7 @@ Agregar `CycleEvidencePlanState` al import de `../../core/evidence/types`.
 
 - [ ] **Step 5: Correr los tests y verificar que pasan**
 
-Run: `cd cli && npx vitest run tests/commands/evidence && npx tsc --noEmit`
+Run: `cd cli && npx jest --runInBand tests/commands/evidence && npm run typecheck`
 Expected: tests PASS. `tsc` todavía rojo en `collect.ts` — lo cierra la Task 7.
 
 - [ ] **Step 6: Commit**
@@ -847,7 +847,7 @@ it('un ciclo historico retro_pending no retrocede a docs_pending', () => {    //
 
 - [ ] **Step 2: Correr los tests y verificar que fallan**
 
-Run: `cd cli && npx vitest run tests/core/dashboard/collect.test.ts`
+Run: `cd cli && npx jest --runInBand tests/core/dashboard/collect.test.ts`
 Expected: FAIL — `expected undefined to be true` en el primero (la clave se descartó en silencio, que es justamente el modo de falla)
 
 - [ ] **Step 3: Agregar la clave al allowlist**
@@ -881,7 +881,7 @@ Líneas 169-174, reemplazar el bloque completo:
 
 - [ ] **Step 5: Correr toda la suite y el typecheck**
 
-Run: `cd cli && npx tsc --noEmit && npx vitest run`
+Run: `cd cli && npm run typecheck && npx jest --runInBand`
 Expected: `tsc` limpio y suite verde. Este es el punto donde el rojo de typecheck que arrastraban las Tasks 5 y 6 se cierra.
 
 - [ ] **Step 6: Commit**
@@ -932,7 +932,7 @@ En `cli/tests/core/dashboard/contracts.test.ts`, agregar al fixture las dos secc
 
 - [ ] **Step 2: Correr los tests y verificar que fallan**
 
-Run: `cd cli && npx vitest run tests/core/dashboard`
+Run: `cd cli && npx jest --runInBand tests/core/dashboard`
 Expected: FAIL — la lista de secciones no coincide y `schema must be version 1` desde el validador
 
 - [ ] **Step 3: Ampliar los tipos**
@@ -989,7 +989,7 @@ En `cli/src/core/dashboard/collect.ts`, donde se arma el array de secciones (alr
 
 - [ ] **Step 7: Correr toda la suite**
 
-Run: `cd cli && npx tsc --noEmit && npx vitest run`
+Run: `cd cli && npm run typecheck && npx jest --runInBand`
 Expected: verde. Si algún test de integración (`doctor-dashboard.e2e.test.ts`, `published-doctor-evidence.e2e.test.ts`) tiene un snapshot fijado con `schema: 1`, actualizalo — es el mismo bump, no un hallazgo nuevo.
 
 - [ ] **Step 8: Commit**
@@ -1048,7 +1048,7 @@ describe('la fase de documentacion esta mecanizada, no solo enunciada', () => {
 
 - [ ] **Step 2: Correr el test y verificar que falla**
 
-Run: `cd cli && npx vitest run tests/structural/documentation-phase-is-mechanized.test.ts`
+Run: `cd cli && npx jest --runInBand tests/structural/documentation-phase-is-mechanized.test.ts`
 Expected: FAIL en el primer test — `CONSTITUTION.md` todavía no menciona el marker. Los assertions del tercer test ya deberían pasar si las Tasks 5–7 están hechas; si fallan, la task correspondiente quedó incompleta.
 
 - [ ] **Step 3: Escribir la sección**
@@ -1071,7 +1071,7 @@ La fase es post-plan, o sea que corre del lado desatendido de la frontera descri
 
 - [ ] **Step 4: Correr el test y verificar que pasa**
 
-Run: `cd cli && npx vitest run tests/structural/documentation-phase-is-mechanized.test.ts`
+Run: `cd cli && npx jest --runInBand tests/structural/documentation-phase-is-mechanized.test.ts`
 Expected: PASS — 3 tests, 0 failures
 
 - [ ] **Step 5: Verificar el presupuesto de contexto**
