@@ -1,8 +1,8 @@
-export type PlanState = 'active' | 'blocked' | 'qa_pending' | 'retro_pending' | 'executed' | 'legacy_unverifiable';
+export type PlanState = 'active' | 'blocked' | 'qa_pending' | 'docs_pending' | 'retro_pending' | 'executed' | 'legacy_unverifiable';
 
 export interface PlanStateInput {
     journal?: { state: 'active' | 'blocked' };
-    markers: { qaComplete: boolean; retroComplete: boolean };
+    markers: { qaComplete: boolean; docsComplete: boolean; retroComplete: boolean };
     tasks: { total: number; completed: number };
 }
 
@@ -18,12 +18,12 @@ export function classifyPlanState(input: unknown): PlanState {
     assertRecord(input, 'state input');
     assertKeys(input, 'state input', ['journal', 'markers', 'tasks']);
     assertRecord(input.markers, 'markers');
-    assertKeys(input.markers, 'markers', ['qaComplete', 'retroComplete']);
+    assertKeys(input.markers, 'markers', ['qaComplete', 'docsComplete', 'retroComplete']);
     assertRecord(input.tasks, 'tasks');
     assertKeys(input.tasks, 'tasks', ['total', 'completed']);
     const markers = input.markers;
     const tasks = input.tasks;
-    if (typeof markers.qaComplete !== 'boolean' || typeof markers.retroComplete !== 'boolean') throw new Error('Plan markers must be boolean');
+    if (typeof markers.qaComplete !== 'boolean' || typeof markers.docsComplete !== 'boolean' || typeof markers.retroComplete !== 'boolean') throw new Error('Plan markers must be boolean');
     if (typeof tasks.total !== 'number' || typeof tasks.completed !== 'number' || !Number.isInteger(tasks.total) || !Number.isInteger(tasks.completed) || tasks.total < 0 || tasks.completed < 0 || tasks.completed > tasks.total) throw new Error('Plan task counts are invalid');
     let journalState: 'active' | 'blocked' | undefined;
     if (input.journal !== undefined) {
@@ -35,7 +35,8 @@ export function classifyPlanState(input: unknown): PlanState {
     if (journalState === 'blocked') return 'blocked';
     if (journalState === 'active') return 'active';
     if (markers.retroComplete) return 'executed';
-    if (markers.qaComplete) return 'retro_pending';
+    if (markers.docsComplete) return 'retro_pending';
+    if (markers.qaComplete) return 'docs_pending';
     if (tasks.total > 0 && tasks.completed === tasks.total) return 'qa_pending';
     return 'legacy_unverifiable';
 }
