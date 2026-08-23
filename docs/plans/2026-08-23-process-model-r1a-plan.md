@@ -652,7 +652,7 @@ _Requirements: R1.1, R7.1, R7.4_
 - Create: `cli/src/core/process/discover.ts`
 - Test: `cli/tests/core/process/discover.test.ts`
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 ```ts
 // cli/tests/core/process/discover.test.ts
@@ -751,12 +751,12 @@ describe('discoverProcessModels', () => {
 });
 ```
 
-- [ ] **Step 2: Correr el test y verificar que falla**
+- [x] **Step 2: Correr el test y verificar que falla**
 
 Run: `cd cli && npx jest tests/core/process/discover.test.ts --runInBand`
 Expected: FAIL — módulo inexistente
 
-- [ ] **Step 3: Escribir el descubridor**
+- [x] **Step 3: Escribir el descubridor**
 
 ```ts
 // cli/src/core/process/discover.ts
@@ -823,12 +823,12 @@ export function discoverProcessModels(roots: string[] = contentRoots()): Discove
 }
 ```
 
-- [ ] **Step 4: Correr el test y verificar que pasa**
+- [x] **Step 4: Correr el test y verificar que pasa**
 
 Run: `cd cli && npx jest tests/core/process/discover.test.ts --runInBand`
 Expected: PASS — 5 tests
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cli/src/core/process/discover.ts cli/tests/core/process/discover.test.ts
