@@ -1031,7 +1031,7 @@ _Requirements: R5.3, R5.4_
 
 **Contexto obligatorio antes de tocar nada** — leer la sección "Estado verificado del código" punto 5 de este plan. El sanitizador **descarta `detail` en la frontera de source** y **redacta todo `label` fuera de `CANONICAL_LABELS`**. El nombre del proceso solo puede viajar en el `id`, y solo porque `PROCESS_NAME` (Task 1) ya garantizó que es un slug.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 ```ts
 // cli/tests/core/dashboard/processes-section.test.ts
@@ -1087,12 +1087,12 @@ describe('sección processes del Dashboard', () => {
 });
 ```
 
-- [ ] **Step 2: Correr el test y verificar que falla**
+- [x] **Step 2: Correr el test y verificar que falla**
 
 Run: `cd cli && npx jest tests/core/dashboard/processes-section.test.ts --runInBand`
 Expected: FAIL — `processes` no existe en `DashboardSourceAdapters`
 
-- [ ] **Step 3: Extender el sanitizador (mínimamente)**
+- [x] **Step 3: Extender el sanitizador (mínimamente)**
 
 En `cli/src/core/dashboard/sanitize.ts`, agregar `'Process'` a `CANONICAL_LABELS`:
 
@@ -1127,7 +1127,7 @@ const PROCESS_FINDING_ID = /^process\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
         }
 ```
 
-- [ ] **Step 4: Agregar el adapter y poblar la sección**
+- [x] **Step 4: Agregar el adapter y poblar la sección**
 
 En `cli/src/core/dashboard/collect.ts`, extender la interfaz:
 
@@ -1189,17 +1189,17 @@ Y en el armado de `sections`, reemplazar la fila reservada por la real:
 
 *(Los ids `process.<slug>` se construyen después de sanitizar el source: el slug ya viene saneado, y `validateDashboardSnapshotV1` vuelve a validar la forma final.)*
 
-- [ ] **Step 5: Correr el test y verificar que pasa**
+- [x] **Step 5: Correr el test y verificar que pasa**
 
 Run: `cd cli && npx jest tests/core/dashboard/processes-section.test.ts --runInBand`
 Expected: PASS — 5 tests
 
-- [ ] **Step 6: Correr la suite del Dashboard completa**
+- [x] **Step 6: Correr la suite del Dashboard completa**
 
 Run: `cd cli && npx jest tests/core/dashboard --runInBand`
 Expected: PASS. Si `collect.test.ts` o `contracts.test.ts` fallan por la igualdad exacta de secciones, actualizarlos: la lista ordenada de nueve ids **no cambia** (R0 ya la fijó), solo cambia la `availability` de `processes` cuando hay modelos.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add cli/src/core/dashboard/sanitize.ts cli/src/core/dashboard/collect.ts cli/tests/core/dashboard/
