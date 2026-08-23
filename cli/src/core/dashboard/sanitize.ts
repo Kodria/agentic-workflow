@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 
 const STATES = new Set(['ok', 'attention', 'missing', 'unavailable', 'not_applicable', 'active', 'blocked']);
-const ALLOWED_KEYS = new Set(['findings', 'label', 'id', 'state', 'detail', 'remediation', 'remediationVerified', 'execution', 'qa', 'retro', 'history', 'lifecycle', 'journal', 'markers', 'tasks', 'total', 'completed', 'qaComplete', 'retroComplete']);
+const ALLOWED_KEYS = new Set(['findings', 'label', 'id', 'state', 'detail', 'remediation', 'remediationVerified', 'execution', 'qa', 'retro', 'history', 'lifecycle', 'journal', 'markers', 'tasks', 'total', 'completed', 'qaComplete', 'docsComplete', 'retroComplete']);
 const CANONICAL_LABELS = new Set([
     'Preferences', 'Registries', 'Profile', 'Sensors', 'Optional source unavailable',
     'Extensions', 'Registry pins', 'Active bundles', 'Project context', 'Constitution', 'Static preflight',

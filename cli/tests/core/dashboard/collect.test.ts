@@ -1,10 +1,17 @@
-import { collectDashboardSnapshot, REMEDIATION_BY_FINDING_ID } from '../../../src/core/dashboard/collect';
+import { collectDashboardSnapshot, lifecycleForCycle, REMEDIATION_BY_FINDING_ID } from '../../../src/core/dashboard/collect';
 import { sanitizeDashboardSource } from '../../../src/core/dashboard/sanitize';
+import { classifyPlanState } from '../../../src/core/dashboard/plan-state';
 import { writeCycleEvidence } from '../../../src/core/evidence/store';
 import { cycleEvidenceFixture } from '../../helpers/evidence-fixtures';
+import type { CycleEvidencePlanState } from '../../../src/core/evidence/types';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+
+function lifecycleForCycleFixture(planState: CycleEvidencePlanState) {
+    const cycle = { ...cycleEvidenceFixture(), schema: 1 as const, plan: { ref: 'plans/current.md', state: planState }, retries: 0, cureEfficacy: [] };
+    return lifecycleForCycle(cycle);
+}
 
 const fixedNow = '2026-08-22T00:00:00.000Z';
 
@@ -141,12 +148,12 @@ describe('collectDashboardSnapshot', () => {
     });
 
     it.each(['blocked', 'active', 'executed', 'retro_pending', 'qa_pending', 'legacy_unverifiable'] as const)('integrates lifecycle state %s into plan detail', (expected) => {
-        const lifecycle = expected === 'blocked' ? { journal: { state: 'blocked' as const }, markers: { qaComplete: false, retroComplete: false }, tasks: { total: 1, completed: 0 } }
-            : expected === 'active' ? { journal: { state: 'active' as const }, markers: { qaComplete: false, retroComplete: false }, tasks: { total: 1, completed: 0 } }
-                : expected === 'executed' ? { markers: { qaComplete: true, retroComplete: true }, tasks: { total: 1, completed: 1 } }
-                    : expected === 'retro_pending' ? { markers: { qaComplete: true, retroComplete: false }, tasks: { total: 1, completed: 1 } }
-                        : expected === 'qa_pending' ? { markers: { qaComplete: false, retroComplete: false }, tasks: { total: 1, completed: 1 } }
-                            : { markers: { qaComplete: false, retroComplete: false }, tasks: { total: 0, completed: 0 } };
+        const lifecycle = expected === 'blocked' ? { journal: { state: 'blocked' as const }, markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: { total: 1, completed: 0 } }
+            : expected === 'active' ? { journal: { state: 'active' as const }, markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: { total: 1, completed: 0 } }
+                : expected === 'executed' ? { markers: { qaComplete: true, docsComplete: true, retroComplete: true }, tasks: { total: 1, completed: 1 } }
+                    : expected === 'retro_pending' ? { markers: { qaComplete: true, docsComplete: true, retroComplete: false }, tasks: { total: 1, completed: 1 } }
+                        : expected === 'qa_pending' ? { markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: { total: 1, completed: 1 } }
+                            : { markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: { total: 0, completed: 0 } };
         const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [{ id: 'plan.lifecycle', label: 'Profile', state: 'ok', lifecycle }], execution: () => undefined } });
         expect(snapshot.sections.find((section) => section.id === 'planning')?.items[0].detail).toBe(expected);
     });
@@ -263,6 +270,18 @@ describe('sanitizeDashboardSource', () => {
         const safe = sanitizeDashboardSource({ findings: [{ id: 'machine.preferences.missing', label: 'Preferences', state: 'missing', detail: 'Error: ghp_secret at /tmp/private; TOKEN=value' }] });
         expect(JSON.stringify(safe)).not.toMatch(/Error|ghp_|\/tmp|TOKEN=/i);
         expect(JSON.stringify(safe)).not.toContain('detail');
+    });
+
+    it('sanitize conserva docsComplete', () => {                                  // verifies R6.3
+        const cleaned = sanitizeDashboardSource({
+            lifecycle: { markers: { qaComplete: true, docsComplete: true, retroComplete: false }, tasks: { total: 1, completed: 1 } },
+        });
+        expect((cleaned as any).lifecycle.markers.docsComplete).toBe(true);
+    });
+
+    it('un ciclo historico retro_pending no retrocede a docs_pending', () => {    // verifies R6.3
+        // Evidencia escrita antes de que existiera la fase: docs se considera hecho.
+        expect(classifyPlanState(lifecycleForCycleFixture('retro_pending'))).toBe('retro_pending');
     });
 });
 

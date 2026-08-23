@@ -161,17 +161,24 @@ function journalExecutionFinding(overlay: JournalOverlay): ExecutionDashboardSou
 }
 
 function lifecycleForJournal(overlay: JournalOverlay): PlanStateInput {
-    return { journal: { state: overlay.state }, markers: { qaComplete: false, retroComplete: false }, tasks: overlay.tasks };
+    return { journal: { state: overlay.state }, markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: overlay.tasks };
 }
 
-function lifecycleForCycle(cycle: ReturnType<typeof readEvidenceHistory>['cycles'][number]): PlanStateInput {
+/** Reconstructs a PlanStateInput (markers + tasks) from a stored historical
+ * evidence record's plan.state for display purposes — the inverse of the
+ * live→durable direction. `retro_pending` predates the docs phase: that
+ * evidence was written before `docsComplete` existed, so treating it as
+ * docs-done is the only non-regressive reading; reconstructing it as
+ * `docsComplete: false` would invent retroactive docs debt on every
+ * historical cycle. */
+export function lifecycleForCycle(cycle: ReturnType<typeof readEvidenceHistory>['cycles'][number]): PlanStateInput {
     const total = cycle.tasks.length;
-    if (cycle.plan.state === 'blocked' || cycle.cycleState === 'blocked') return { journal: { state: 'blocked' }, markers: { qaComplete: false, retroComplete: false }, tasks: { total, completed: 0 } };
-    if (cycle.plan.state === 'active') return { journal: { state: 'active' }, markers: { qaComplete: false, retroComplete: false }, tasks: { total, completed: 0 } };
-    if (cycle.plan.state === 'executed') return { markers: { qaComplete: true, retroComplete: true }, tasks: { total, completed: total } };
-    if (cycle.plan.state === 'retro_pending') return { markers: { qaComplete: true, retroComplete: false }, tasks: { total, completed: total } };
-    if (cycle.plan.state === 'qa_pending') return { markers: { qaComplete: false, retroComplete: false }, tasks: { total, completed: total } };
-    return { markers: { qaComplete: false, retroComplete: false }, tasks: { total: 0, completed: 0 } };
+    if (cycle.plan.state === 'blocked' || cycle.cycleState === 'blocked') return { journal: { state: 'blocked' }, markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: { total, completed: 0 } };
+    if (cycle.plan.state === 'active') return { journal: { state: 'active' }, markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: { total, completed: 0 } };
+    if (cycle.plan.state === 'executed') return { markers: { qaComplete: true, docsComplete: true, retroComplete: true }, tasks: { total, completed: total } };
+    if (cycle.plan.state === 'retro_pending') return { markers: { qaComplete: true, docsComplete: true, retroComplete: false }, tasks: { total, completed: total } };
+    if (cycle.plan.state === 'qa_pending') return { markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: { total, completed: total } };
+    return { markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: { total: 0, completed: 0 } };
 }
 
 function cycleFinding(section: 'execution' | 'qa' | 'retro', label: string, cycle: ReturnType<typeof readEvidenceHistory>['cycles'][number], actionable: boolean): DashboardFinding {
