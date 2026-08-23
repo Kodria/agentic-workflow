@@ -91,6 +91,18 @@ La misma forma de frontera aparece en cómo el CLI trata herramientas externas q
 
 Lo que SÍ cubre "desatendido" (mandato citado en el plan R7 y aplicado en R1–R6): ejecución completa sin pausas de check-in entre tareas ni entre fases; triage de hallazgos con criterio propio del agente (`harness-retro` descarta sin preguntar lo que no es valor real, recurrente o sistémico); corrección de TODOS los hallazgos de QA que surjan, no una selección manual; cierre de rama vía PR directo, sin presentar el menú de 4 opciones. Lo que "desatendido" **nunca** releva: los gates de contrato — versión, seguridad, permisos —, que van siempre ANTES de cualquier early-exit de conveniencia (ver "Implementación" arriba); ni la frontera de `~/.awm` descrita en este párrafo.
 
+## Fase de documentación — obligatoria y observable
+
+Todo ciclo de desarrollo termina con su documentación de usuario final al día. La fase corre entre `post-implementation-qa` y `harness-retro`, y cierra escribiendo `<!-- awm-docs-complete: YYYY-MM-DD -->` en el plan activo.
+
+**Esta regla no se sostiene por estar escrita acá.** Se sostiene porque hay mecanismo: `development-process` rutea a `post-implementation-docs` cuando `awm-qa-complete` está y `awm-docs-complete` falta, y no avanza a retro ni a `finishing-a-development-branch` sin el marker; `classifyPlanState` (`cli/src/core/dashboard/plan-state.ts`) clasifica ese estado como `docs_pending` y `awm doctor` lo muestra. El enunciado de esta sección explica **por qué**; lo que la hace cumplir es la cadena de markers.
+
+La razón de que esté acá y no solo en el código: la documentación de usuario final de AWM no deriva de golpe, deriva un cambio por vez, y cada cambio individual siempre parece demasiado chico como para justificar una pasada de documentación. `AGENTS.md` → "Patrones de documentación" tiene la evidencia de qué pasa cuando nadie paga ese costo en el momento: narrativa de comandos con errores factuales que sobrevivió spec-review y code-quality-review, porque la revisión leyó prosa en vez de ejecutar el binario.
+
+Por eso la fase tiene una obligación que no es negociable: **documentar contra el binario, nunca contra la prosa**. Una afirmación sobre un comando que no se ejecutó no se escribe.
+
+La fase es post-plan, o sea que corre del lado desatendido de la frontera descrita arriba. Está diseñada para ser resoluble por un agente solo, y su degradación es honesta: si el registry de documentación (opt-in) no está instalado, la fase corre igual con instrucciones genéricas y **nunca** bloquea el cierre de la rama.
+
 ## Decisión pendiente registrada — piso organizacional de sensores
 
 **Qué es:** un conjunto mínimo de reglas de sensor obligatorias en TODOS los proyectos de la organización, impuesto por AWM independientemente de lo que cada proyecto configure en su propio `.awm/sensors.json`. Hoy la configuración de sensores es 100% per-proyecto: cada repo declara su pack y sus reglas via `awm sensors init`, sin ningún piso corporativo que un equipo no pueda bajar o desactivar.

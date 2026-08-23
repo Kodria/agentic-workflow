@@ -1,6 +1,6 @@
 import type { DashboardItemState, DashboardSnapshotV1 } from './types';
 
-const SECTION_ORDER = ['machine', 'project', 'planning', 'execution', 'qa', 'retro', 'history'] as const;
+const SECTION_ORDER = ['machine', 'project', 'planning', 'execution', 'qa', 'docs', 'retro', 'history', 'processes'] as const;
 const ITEM_STATES = ['ok', 'attention', 'missing', 'unavailable', 'not_applicable'] as const;
 const AVAILABILITIES = ['available', 'unavailable', 'not_applicable'] as const;
 const OVERALLS = ['healthy', 'degraded'] as const;
@@ -44,7 +44,7 @@ function assertEnum<T extends string>(value: unknown, values: readonly T[], path
 export function validateDashboardSnapshotV1(value: unknown): DashboardSnapshotV1 {
     assertRecord(value, 'snapshot');
     assertOnlyKeys(value, ['schema', 'generatedAt', 'overall', 'project', 'confidence', 'sections'], 'snapshot');
-    if (value.schema !== 1) throw new DashboardValidationError('schema must be version 1');
+    if (value.schema !== 2) throw new DashboardValidationError('schema must be version 2');
     assertNonEmptyString(value.generatedAt, 'generatedAt');
     if (Number.isNaN(Date.parse(value.generatedAt))) throw new DashboardValidationError('generatedAt must be a valid date-time');
     assertEnum(value.overall, OVERALLS, 'overall');

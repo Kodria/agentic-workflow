@@ -9,13 +9,13 @@ export interface DashboardItemV1 {
 }
 
 export interface DashboardSectionV1 {
-    id: 'machine' | 'project' | 'planning' | 'execution' | 'qa' | 'retro' | 'history';
+    id: 'machine' | 'project' | 'planning' | 'execution' | 'qa' | 'docs' | 'retro' | 'history' | 'processes';
     availability: 'available' | 'unavailable' | 'not_applicable';
     items: DashboardItemV1[];
 }
 
 export interface DashboardSnapshotV1 {
-    schema: 1;
+    schema: 2;
     generatedAt: string;
     overall: 'healthy' | 'degraded';
     project: { detected: boolean; label: string };
@@ -23,7 +23,7 @@ export interface DashboardSnapshotV1 {
     sections: DashboardSectionV1[];
 }
 
-const PROJECT_SECTION_IDS: DashboardSectionV1['id'][] = ['machine', 'project', 'planning', 'execution', 'qa', 'retro', 'history'];
+const PROJECT_SECTION_IDS: DashboardSectionV1['id'][] = ['machine', 'project', 'planning', 'execution', 'qa', 'docs', 'retro', 'history', 'processes'];
 
 /** Safe, deterministic V1 fixture and renderer input. */
 export function dashboardSnapshot(
@@ -35,7 +35,7 @@ export function dashboardSnapshot(
         ? PROJECT_SECTION_IDS.map((id) => ({ id, availability: id === 'machine' ? 'available' as const : 'not_applicable' as const, items: [] }))
         : [{ id: 'machine' as const, availability: 'available' as const, items: [] }]);
     return {
-        schema: 1,
+        schema: 2,
         generatedAt: '2026-08-22T00:00:00.000Z',
         overall: 'healthy',
         project,

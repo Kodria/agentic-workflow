@@ -7,8 +7,10 @@ const SECTION_TITLES: Record<DashboardSectionV1['id'], string> = {
     planning: 'Design / planning',
     execution: 'Execution',
     qa: 'QA',
+    docs: 'Docs',
     retro: 'Retro',
     history: 'Final / history',
+    processes: 'Processes',
 };
 
 const STATE_PRESENTATION: Record<DashboardItemState, { glyph: string; text: string }> = {

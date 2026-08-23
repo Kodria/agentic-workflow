@@ -1,10 +1,17 @@
-import { collectDashboardSnapshot, REMEDIATION_BY_FINDING_ID } from '../../../src/core/dashboard/collect';
+import { collectDashboardSnapshot, lifecycleForCycle, REMEDIATION_BY_FINDING_ID } from '../../../src/core/dashboard/collect';
 import { sanitizeDashboardSource } from '../../../src/core/dashboard/sanitize';
+import { classifyPlanState } from '../../../src/core/dashboard/plan-state';
 import { writeCycleEvidence } from '../../../src/core/evidence/store';
 import { cycleEvidenceFixture } from '../../helpers/evidence-fixtures';
+import type { CycleEvidencePlanState } from '../../../src/core/evidence/types';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+
+function lifecycleForCycleFixture(planState: CycleEvidencePlanState) {
+    const cycle = { ...cycleEvidenceFixture(), schema: 1 as const, plan: { ref: 'plans/current.md', state: planState }, retries: 0, cureEfficacy: [] };
+    return lifecycleForCycle(cycle);
+}
 
 const fixedNow = '2026-08-22T00:00:00.000Z';
 
@@ -46,11 +53,23 @@ describe('collectDashboardSnapshot', () => {
                 execution: () => ({}),
             },
         });
-        expect(snapshot.sections.map((section) => section.id)).toEqual(['machine', 'project', 'planning', 'execution', 'qa', 'retro', 'history']);
+        expect(snapshot.sections.map((section) => section.id)).toEqual(   // verifies R6.3
+            ['machine', 'project', 'planning', 'execution', 'qa', 'docs', 'retro', 'history', 'processes']);
         expect(snapshot.sections.find((section) => section.id === 'machine')?.items[0].remediation).toBe('awm init');
         expect(snapshot.sections.find((section) => section.id === 'planning')?.items).toHaveLength(2000);
         expect(snapshot.sections.find((section) => section.id === 'history')?.items).toHaveLength(0);
         expect(JSON.stringify(snapshot)).not.toMatch(/score|ranking/i);
+    });
+
+    it('el snapshot declara schema 2', () => {                                    // verifies R6.3
+        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined } });
+        expect(snapshot.schema).toBe(2);
+    });
+
+    it('processes queda declarada no aplicable hasta R1', () => {                 // verifies R5.3
+        const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined } });
+        const processes = snapshot.sections.find((section) => section.id === 'processes');
+        expect(processes).toEqual({ id: 'processes', availability: 'not_applicable', items: [] });
     });
 
     it('isolates optional adapter failures and omits unverified remediation', () => {
@@ -72,7 +91,7 @@ describe('collectDashboardSnapshot', () => {
             cwd: process.cwd(), now: fixedNow,
             adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => undefined },
         });
-        for (const id of ['execution', 'qa', 'retro']) {
+        for (const id of ['execution', 'qa', 'docs', 'retro']) {
             expect(snapshot.sections.find((section) => section.id === id)?.availability).toBe('unavailable');
         }
     });
@@ -97,7 +116,7 @@ describe('collectDashboardSnapshot', () => {
         expect(snapshot.sections.find((section) => section.id === 'planning')?.availability).toBe('available');
     });
 
-    it.each(['execution', 'qa', 'retro'] as const)('isolates malformed %s findings', (key) => {
+    it.each(['execution', 'qa', 'docs', 'retro'] as const)('isolates malformed %s findings', (key) => {
         const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [], execution: () => ({ [key]: [{ id: '', label: 'Profile', state: 'ok' }] }) } });
         expect(snapshot.sections.find((section) => section.id === key)?.availability).toBe('unavailable');
     });
@@ -141,12 +160,12 @@ describe('collectDashboardSnapshot', () => {
     });
 
     it.each(['blocked', 'active', 'executed', 'retro_pending', 'qa_pending', 'legacy_unverifiable'] as const)('integrates lifecycle state %s into plan detail', (expected) => {
-        const lifecycle = expected === 'blocked' ? { journal: { state: 'blocked' as const }, markers: { qaComplete: false, retroComplete: false }, tasks: { total: 1, completed: 0 } }
-            : expected === 'active' ? { journal: { state: 'active' as const }, markers: { qaComplete: false, retroComplete: false }, tasks: { total: 1, completed: 0 } }
-                : expected === 'executed' ? { markers: { qaComplete: true, retroComplete: true }, tasks: { total: 1, completed: 1 } }
-                    : expected === 'retro_pending' ? { markers: { qaComplete: true, retroComplete: false }, tasks: { total: 1, completed: 1 } }
-                        : expected === 'qa_pending' ? { markers: { qaComplete: false, retroComplete: false }, tasks: { total: 1, completed: 1 } }
-                            : { markers: { qaComplete: false, retroComplete: false }, tasks: { total: 0, completed: 0 } };
+        const lifecycle = expected === 'blocked' ? { journal: { state: 'blocked' as const }, markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: { total: 1, completed: 0 } }
+            : expected === 'active' ? { journal: { state: 'active' as const }, markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: { total: 1, completed: 0 } }
+                : expected === 'executed' ? { markers: { qaComplete: true, docsComplete: true, retroComplete: true }, tasks: { total: 1, completed: 1 } }
+                    : expected === 'retro_pending' ? { markers: { qaComplete: true, docsComplete: true, retroComplete: false }, tasks: { total: 1, completed: 1 } }
+                        : expected === 'qa_pending' ? { markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: { total: 1, completed: 1 } }
+                            : { markers: { qaComplete: false, docsComplete: false, retroComplete: false }, tasks: { total: 0, completed: 0 } };
         const snapshot = collectDashboardSnapshot({ cwd: process.cwd(), now: fixedNow, adapters: { machine: () => ({ findings: [] }), project: () => ({ findings: [] }), plans: () => [{ id: 'plan.lifecycle', label: 'Profile', state: 'ok', lifecycle }], execution: () => undefined } });
         expect(snapshot.sections.find((section) => section.id === 'planning')?.items[0].detail).toBe(expected);
     });
@@ -264,6 +283,23 @@ describe('sanitizeDashboardSource', () => {
         expect(JSON.stringify(safe)).not.toMatch(/Error|ghp_|\/tmp|TOKEN=/i);
         expect(JSON.stringify(safe)).not.toContain('detail');
     });
+
+    it('sanitize conserva docsComplete', () => {                                  // verifies R6.3
+        const cleaned = sanitizeDashboardSource({
+            lifecycle: { markers: { qaComplete: true, docsComplete: true, retroComplete: false }, tasks: { total: 1, completed: 1 } },
+        });
+        expect((cleaned as any).lifecycle.markers.docsComplete).toBe(true);
+    });
+
+    it('un ciclo historico retro_pending no retrocede a docs_pending', () => {    // verifies R6.3
+        // Evidencia escrita antes de que existiera la fase: docs se considera hecho.
+        expect(classifyPlanState(lifecycleForCycleFixture('retro_pending'))).toBe('retro_pending');
+    });
+
+    it.each(['blocked', 'active', 'executed', 'qa_pending', 'legacy_unverifiable'] as const)(
+        'lifecycleForCycle reconstruye %s de forma que classifyPlanState lo re-deriva igual', (planState) => {  // verifies R6.3
+            expect(classifyPlanState(lifecycleForCycleFixture(planState))).toBe(planState);
+        });
 });
 
 test('exports canonical remediation commands', () => {

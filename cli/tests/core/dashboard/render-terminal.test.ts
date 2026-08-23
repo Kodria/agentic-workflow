@@ -13,8 +13,10 @@ function completeSnapshot(overrides: Partial<DashboardSnapshotV1> = {}): Dashboa
             { id: 'planning', availability: 'available', items: [{ id: 'planning.plan', label: 'Active plan', state: 'ok', detail: 'executing' }] },
             { id: 'execution', availability: 'unavailable', items: [{ id: 'execution.source', label: 'Execution source', state: 'unavailable', remediation: 'awm doctor --full' }] },
             { id: 'qa', availability: 'available', items: [{ id: 'qa.gate', label: 'Verification gate', state: 'missing', remediation: 'awm sensors' }] },
+            { id: 'docs', availability: 'available', items: [{ id: 'docs.marker', label: 'Documentation', state: 'not_applicable' }] },
             { id: 'retro', availability: 'available', items: [{ id: 'retro.cure', label: 'Cure observations', state: 'not_applicable' }] },
             { id: 'history', availability: 'available', items: [{ id: 'history.cycle', label: 'Eligible cycle', state: 'ok', detail: '5 minutes' }] },
+            { id: 'processes', availability: 'not_applicable', items: [] },
         ],
         ...overrides,
     });
@@ -23,7 +25,7 @@ function completeSnapshot(overrides: Partial<DashboardSnapshotV1> = {}): Dashboa
 describe('renderFullTerminal', () => {
     it('renders all lifecycle sections in canonical order with status and remediation', () => {
         const output = renderFullTerminal(validateDashboardSnapshotV1(completeSnapshot()));
-        const headings = ['Machine / install', 'Project readiness', 'Design / planning', 'Execution', 'QA', 'Retro', 'Final / history'];
+        const headings = ['Machine / install', 'Project readiness', 'Design / planning', 'Execution', 'QA', 'Docs', 'Retro', 'Final / history', 'Processes'];
         expect(headings.map((heading) => output.indexOf(heading))).toEqual([...headings.map((_, index) => expect.any(Number))].map((_, index) => expect.any(Number)));
         for (let index = 1; index < headings.length; index++) expect(output.indexOf(headings[index])).toBeGreaterThan(output.indexOf(headings[index - 1]));
         expect(output).toContain('⚠ Sensors [project.sensors] — 2 stale');
@@ -54,8 +56,10 @@ describe('renderFullTerminal', () => {
             { id: 'planning', availability: 'available', items: [] },
             { id: 'execution', availability: 'available', items: execution },
             { id: 'qa', availability: 'available', items: [] },
+            { id: 'docs', availability: 'available', items: [] },
             { id: 'retro', availability: 'available', items: [] },
             { id: 'history', availability: 'available', items: history },
+            { id: 'processes', availability: 'not_applicable', items: [] },
         ] }));
         const first = renderFullTerminal(snapshot);
         expect(renderFullTerminal(snapshot)).toBe(first);
