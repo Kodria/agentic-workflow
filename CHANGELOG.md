@@ -1,3 +1,8 @@
+## v9.0.0 - 2026-08-23
+
+### Breaking Changes
+- **dashboard:** mandatory documentation phase (R0) between QA and retro (#121)
+
 ## v8.5.2 - 2026-08-22
 
 ### Fixes
