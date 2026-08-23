@@ -846,7 +846,7 @@ _Requirements: R5.1, R7.1, R7.2_
 - Modify: `cli/src/index.ts`
 - Test: `cli/tests/commands/process.test.ts`
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 ```ts
 // cli/tests/commands/process.test.ts
@@ -911,12 +911,12 @@ describe('awm process show --json', () => {
 });
 ```
 
-- [ ] **Step 2: Correr el test y verificar que falla**
+- [x] **Step 2: Correr el test y verificar que falla**
 
 Run: `cd cli && npx jest tests/commands/process.test.ts --runInBand`
 Expected: FAIL — módulo inexistente
 
-- [ ] **Step 3: Escribir el comando**
+- [x] **Step 3: Escribir el comando**
 
 ```ts
 // cli/src/commands/process/index.ts
@@ -985,7 +985,7 @@ function emit(result: CommandResult): void {
 }
 ```
 
-- [ ] **Step 4: Registrar el comando**
+- [x] **Step 4: Registrar el comando**
 
 En `cli/src/index.ts`, junto a los demás imports de comandos (línea ~49):
 
@@ -999,19 +999,19 @@ y junto a las demás llamadas de registro (línea ~795):
 registerProcessCommand(program);
 ```
 
-- [ ] **Step 5: Correr el test y verificar que pasa**
+- [x] **Step 5: Correr el test y verificar que pasa**
 
 Run: `cd cli && npx jest tests/commands/process.test.ts --runInBand`
 Expected: PASS — 6 tests
 
-- [ ] **Step 6: Verificar contra el binario real**
+- [x] **Step 6: Verificar contra el binario real**
 
 ```bash
 cd cli && npm run build && node dist/src/index.js process list
 ```
 Expected: `No process models declared by the installed registries.` con exit 0 — R7.2 verificado contra el binario, no contra el test.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add cli/src/commands/process/index.ts cli/src/index.ts cli/tests/commands/process.test.ts
