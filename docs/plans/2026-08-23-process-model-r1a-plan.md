@@ -1295,7 +1295,7 @@ _Requirements: R7.1, R7.2, R7.3, R7.4_
 **Files:**
 - Test: `cli/tests/core/process/no-regression.test.ts`
 
-- [ ] **Step 1: Escribir el test**
+- [x] **Step 1: Escribir el test**
 
 ```ts
 // cli/tests/core/process/no-regression.test.ts
@@ -1346,24 +1346,24 @@ describe('R7 — ausencia de modelos y aislamiento', () => {
 });
 ```
 
-- [ ] **Step 2: Correr el test y verificar que pasa**
+- [x] **Step 2: Correr el test y verificar que pasa**
 
 Run: `cd cli && npx jest tests/core/process/no-regression.test.ts --runInBand`
 Expected: PASS — 3 tests
 
-- [ ] **Step 3: Suite completa**
+- [x] **Step 3: Suite completa**
 
 Run: `cd cli && npx jest --runInBand`
 Expected: 0 fallos. La línea base antes de este plan es **253 suites / 2941 tests** — el número debe crecer, nunca decrecer.
 
-- [ ] **Step 4: Gate de sensores**
+- [x] **Step 4: Gate de sensores**
 
 ```bash
 cd /home/user/agentic-workflow && cd cli && npm run build && cd .. && node cli/dist/src/index.js sensors run
 ```
 Expected: `"overall": "pass"`
 
-- [ ] **Step 5: Verificación end-to-end contra el binario real**
+- [x] **Step 5: Verificación end-to-end contra el binario real**
 
 ```bash
 cd /home/user/agentic-workflow
@@ -1373,7 +1373,7 @@ node cli/dist/src/index.js doctor --full 2>&1 | grep -i process
 ```
 Expected: list dice que no hay modelos (exit 0); show sale `exit=2` nombrando lo disponible; el Dashboard muestra `Processes` sin romper. **R7.2 se verifica acá, contra el binario — no por lectura del diff.**
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cli/tests/core/process/no-regression.test.ts
@@ -1386,9 +1386,9 @@ git commit -m "test(process): no regresion sin modelos y aislamiento de HOME"
 
 Se verifican después de las siete tasks, antes de cerrar la rama.
 
-- [ ] **CA-1.2** — `awm process list` reporta un proceso y `awm process show <name> --json` emite el modelo parseado. **Cómo:** crear un registry de prueba en un tmpdir con `AWM_HOME` sobreescrito, sembrar el fixture canónico de este plan, y correr ambos comandos contra el binario buildeado. No vale el test unitario: el criterio dice "reporta", y eso se prueba ejecutando.
-- [ ] **CA-1.3** — el Dashboard muestra la sección `processes` poblada por el adapter, sin parser propio. **Cómo:** `awm doctor --full` con ese mismo registry sembrado + el test estructural de la Task 6 en verde.
-- [ ] **Entrega sin dependencia de contenido** — R1a mergea solo. No hay nada que taggear en ningún registry: no existe todavía quien escriba modelos. R1b consume este contrato ya publicado.
+- [x] **CA-1.2** — `awm process list` reporta un proceso y `awm process show <name> --json` emite el modelo parseado. **Cómo:** crear un registry de prueba en un tmpdir con `AWM_HOME` sobreescrito, sembrar el fixture canónico de este plan, y correr ambos comandos contra el binario buildeado. No vale el test unitario: el criterio dice "reporta", y eso se prueba ejecutando.
+- [x] **CA-1.3** — el Dashboard muestra la sección `processes` poblada por el adapter, sin parser propio. **Cómo:** `awm doctor --full` con ese mismo registry sembrado + el test estructural de la Task 6 en verde.
+- [x] **Entrega sin dependencia de contenido** — R1a mergea solo. No hay nada que taggear en ningún registry: no existe todavía quien escriba modelos. R1b consume este contrato ya publicado.
 
 **Fuera de alcance de R1a, y es deliberado:** promover `status` a `active` (R3.6, es R1b), elicitar/generar (R2.\*/R3.\*, es R1b), extraer procesos existentes (R4.\*, es R2 del design doc). El contrato de R1a **admite y valida** `status: active`, pero nadie en R1a lo escribe — el escritor único llega en R1b, como exige R1.9.
 
