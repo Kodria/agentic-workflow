@@ -178,17 +178,17 @@ awm context-budget [--json] [--cwd <path>]
 
 ### `awm context orchestrators`
 
-Vista read-only de los orquestadores que los registries instalados declaran, **tal como quedan compuestos** en el contexto que recibe cada sesión de agente.
+Read-only view of the orchestrators the installed registries declare, **exactly as they are composed** into the context every agent session receives.
 
 ```bash
-awm context orchestrators              # listado legible
-awm context orchestrators --json       # lista compuesta como JSON
-awm context orchestrators --verify mi-proceso   # exit 0 si está compuesto, 2 si no
+awm context orchestrators              # human-readable listing
+awm context orchestrators --json       # composed list as JSON
+awm context orchestrators --verify my-process   # exit 0 if composed, 2 if not
 ```
 
-Emite solo los campos declarados (`name`, `appliesWhen`, `terminatesTo`), no el payload completo: ese incluye contenido crudo del registry. Las declaraciones inválidas se reportan como `warning:` en stderr sin impedir listar las sanas.
+Emits only the declared fields (`name`, `appliesWhen`, `terminatesTo`), not the full payload — that includes raw registry content. Invalid declarations are reported as `warning:` lines on stderr without blocking the healthy ones from being listed.
 
-`--verify` es lo que cierra el ciclo de verificación de `process-lifecycle`: confirma que un proceso recién generado aparece compuesto en una instalación real, no solo que el registry instaló.
+`--verify` is what closes `process-lifecycle`'s verification cycle: it confirms a freshly-generated process actually appears composed in a real installation, not just that the registry installed.
 
 ---
 
