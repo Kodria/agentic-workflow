@@ -92,7 +92,7 @@ _Requirements: R5.2, R5.4_
 - Modify: `cli/src/core/context/provider.ts:36-51`
 - Test: `cli/tests/core/context/provider.test.ts` (extender)
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 Agregar al final de `cli/tests/core/context/provider.test.ts`:
 
@@ -150,12 +150,12 @@ describe('stripControlChars', () => {
 });
 ```
 
-- [ ] **Step 2: Correr los tests y verificar que fallan**
+- [x] **Step 2: Correr los tests y verificar que fallan**
 
 Run: `cd cli && npx jest tests/core/text.test.ts tests/core/context/provider.test.ts --runInBand`
 Expected: FAIL — `Cannot find module '../../src/core/text'` y `composedOrchestrators is not a function`
 
-- [ ] **Step 3: Crear el módulo compartido**
+- [x] **Step 3: Crear el módulo compartido**
 
 ```ts
 // cli/src/core/text.ts
@@ -174,7 +174,7 @@ export function stripControlChars(text: string): string {
 }
 ```
 
-- [ ] **Step 4: Que `commands/process` consuma el compartido**
+- [x] **Step 4: Que `commands/process` consuma el compartido**
 
 En `cli/src/commands/process/index.ts`, borrar la función local `stripControlChars` (líneas 31-34 y su bloque de JSDoc `:22-30`) y agregar el import junto a los demás:
 
@@ -184,7 +184,7 @@ import { stripControlChars } from '../../core/text';
 
 El resto del archivo no cambia — las llamadas ya se llaman igual.
 
-- [ ] **Step 5: Exportar `composedOrchestrators` y que `renderDeclared` la consuma**
+- [x] **Step 5: Exportar `composedOrchestrators` y que `renderDeclared` la consuma**
 
 En `cli/src/core/context/provider.ts`, reemplazar `renderDeclared` (líneas 40-51) por:
 
@@ -216,12 +216,12 @@ function renderDeclared(list: DeclaredOrchestrator[]): string {
 }
 ```
 
-- [ ] **Step 6: Correr los tests y verificar que pasan**
+- [x] **Step 6: Correr los tests y verificar que pasan**
 
 Run: `cd cli && npx jest tests/core/text.test.ts tests/core/context/provider.test.ts tests/commands/process.test.ts --runInBand`
 Expected: PASS — incluidos los 3 tests de sanitización preexistentes de `provider.test.ts` y el de ANSI de `process.test.ts`, que prueban que el refactor no cambió comportamiento
 
-- [ ] **Step 7: Gate de sensores y commit**
+- [x] **Step 7: Gate de sensores y commit**
 
 ```bash
 cd cli && npm run build && cd .. && node cli/dist/src/index.js sensors run
