@@ -244,7 +244,7 @@ _Requirements: R3.5, R7.1, R7.2_
 - Modify: `cli/src/index.ts:50` (import), `cli/src/index.ts:805` (registro)
 - Test: `cli/tests/commands/context.test.ts`
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 ```ts
 // cli/tests/commands/context.test.ts
@@ -304,12 +304,12 @@ describe('awm context orchestrators', () => {
 });
 ```
 
-- [ ] **Step 2: Correr el test y verificar que falla**
+- [x] **Step 2: Correr el test y verificar que falla**
 
 Run: `cd cli && npx jest tests/commands/context.test.ts --runInBand`
 Expected: FAIL — módulo inexistente
 
-- [ ] **Step 3: Escribir el comando**
+- [x] **Step 3: Escribir el comando**
 
 ```ts
 // cli/src/commands/context/index.ts
@@ -390,7 +390,7 @@ function emit(result: CommandResult): void {
 }
 ```
 
-- [ ] **Step 4: Registrar el comando**
+- [x] **Step 4: Registrar el comando**
 
 En `cli/src/index.ts`, junto a los demás imports de comandos (después de la línea 50):
 
@@ -404,12 +404,12 @@ y junto a las demás llamadas de registro (después de la línea 805):
 registerContextCommand(program);
 ```
 
-- [ ] **Step 5: Correr el test y verificar que pasa**
+- [x] **Step 5: Correr el test y verificar que pasa**
 
 Run: `cd cli && npx jest tests/commands/context.test.ts --runInBand`
 Expected: PASS — 7 tests
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cli/src/commands/context/index.ts cli/src/index.ts cli/tests/commands/context.test.ts
