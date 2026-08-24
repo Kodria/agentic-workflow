@@ -22,7 +22,7 @@
         "reason": "range-and-probe",
         "variantId": "eslint-10-flat",
         "toolVersion": "10.8.1",
-        "runtimeVersion": "22.22.2",
+        "runtimeVersion": "24.19.0",
         "certifiedRange": "=10.8.1",
         "evidence": [
           {
@@ -46,7 +46,7 @@
           },
           {
             "kind": "runtime-version",
-            "status": "22.22.2"
+            "status": "24.19.0"
           },
           {
             "kind": "probe",
@@ -74,7 +74,7 @@
         "reason": "range-and-probe",
         "variantId": "typescript-native",
         "toolVersion": "5.9.3",
-        "runtimeVersion": "22.22.2",
+        "runtimeVersion": "24.19.0",
         "certifiedRange": "=5.9.3",
         "evidence": [
           {
@@ -98,7 +98,7 @@
           },
           {
             "kind": "runtime-version",
-            "status": "22.22.2"
+            "status": "24.19.0"
           },
           {
             "kind": "probe",
@@ -127,7 +127,7 @@
         "reason": "range-and-probe",
         "variantId": "dependency-cruiser-17",
         "toolVersion": "17.4.3",
-        "runtimeVersion": "22.22.2",
+        "runtimeVersion": "24.19.0",
         "certifiedRange": "=17.4.3",
         "evidence": [
           {
@@ -151,7 +151,7 @@
           },
           {
             "kind": "runtime-version",
-            "status": "22.22.2"
+            "status": "24.19.0"
           },
           {
             "kind": "probe",
@@ -166,6 +166,6 @@
     }
   },
   "packSelection": "explicit",
-  "registryRoot": "/root/.awm/registries/baseline",
+  "registryRoot": "/srv/agentmobile/.awm/registries/baseline",
   "packageRoot": "cli"
 }
