@@ -9,6 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 import { REGISTRY_MANIFEST_NAME, assertRegularRegistryFile, listRegistries } from './registries';
+import { sanitizeDeclaredField, stripControlChars } from './text';
 
 export interface DeclaredOrchestrator {
     name: string;
@@ -119,21 +120,41 @@ export function readDeclaredOrchestrators(root: string): DeclaredOrchestratorsRe
  * de emitir ambas filas al markdown compuesto, gana la primera en el orden de
  * listRegistries() (= orden de registries.json, ver registries.ts) y la duplicada se
  * descarta con un diagnostico — misma degradacion tolerante (reportar, no lanzar) que el
- * resto de este modulo (R1.2, R5.1).
+ * resto de este modulo (R1.2, R5.1). `orch.name` es contenido no confiable del registry:
+ * se pasa por `stripControlChars` (core/text.ts) antes de interpolarlo en el diagnostico,
+ * que termina crudo en stderr real via `command-result.ts`'s `diagnosticsToStderr`/`emit`.
+ *
+ * Ademas del dedupe por nombre CRUDO, dos orquestadores con nombres crudos distintos
+ * (p.ej. `foo_bar` y `foo*bar`) pueden colisionar DESPUES del saneo que aplica
+ * `composedOrchestrators` (core/context/provider.ts) — ambos renderizarian como el mismo
+ * `foobar` visible, sin explicacion. Como son declaraciones genuinamente distintas, no se
+ * descarta ninguna (eso perderia una declaracion real) — se emite un diagnostico
+ * accionable en su lugar. `sanitizeDeclaredField` vive en core/text.ts (no en provider.ts)
+ * precisamente para que este modulo -- que debe seguir siendo hoja y no puede importar
+ * context/provider.ts, el cual ya importa `DeclaredOrchestrator` DESDE este archivo -- pueda
+ * calcular el mismo nombre saneado sin duplicar el regex.
  */
 export function collectDeclaredOrchestrators(): { declared: DeclaredOrchestrator[]; diagnostics: string[] } {
     const declared: DeclaredOrchestrator[] = [];
     const diagnostics: string[] = [];
     const seenNames = new Set<string>();
+    const seenSanitizedNames = new Set<string>();
     for (const reg of listRegistries()) {
         const r = readDeclaredOrchestrators(reg.contentRoot);
         for (const orch of r.orchestrators) {
+            const file = path.join(reg.contentRoot, REGISTRY_MANIFEST_NAME);
             if (seenNames.has(orch.name)) {
-                const file = path.join(reg.contentRoot, REGISTRY_MANIFEST_NAME);
-                diagnostics.push(`${file}: orchestrator "${orch.name}" duplicates one already declared by an earlier registry — shadowed duplicate dropped`);
+                diagnostics.push(`${file}: orchestrator "${stripControlChars(orch.name)}" duplicates one already declared by an earlier registry — shadowed duplicate dropped`);
                 continue;
             }
             seenNames.add(orch.name);
+
+            const sanitizedName = sanitizeDeclaredField(orch.name);
+            if (seenSanitizedNames.has(sanitizedName)) {
+                diagnostics.push(`${file}: orchestrator "${stripControlChars(orch.name)}" sanitizes to the same composed name "${sanitizedName}" as an already declared orchestrator — both will render as indistinguishable duplicates in the composed context`);
+            } else {
+                seenSanitizedNames.add(sanitizedName);
+            }
             declared.push(orch);
         }
         diagnostics.push(...r.diagnostics);

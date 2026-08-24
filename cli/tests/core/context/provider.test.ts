@@ -2,7 +2,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { buildContext, sha256 } from '../../../src/core/context/provider';
+import { buildContext, composedOrchestrators, sha256 } from '../../../src/core/context/provider';
 
 function tmpRegistry(skillBody: string): string {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-reg-'));
@@ -193,3 +193,57 @@ describe('buildContext — declared orchestrators', () => {
 // NOTE: the 'generic robustness invariant' test that validated specific prose in the
 // using-awm SKILL.md has been removed — content now lives in awm-baseline-registry
 // (an external repo), not in this monorepo. Content-level tests belong there.
+
+describe('composedOrchestrators', () => {
+    it('devuelve los valores tal como entran al payload, ya saneados', () => {   // verifies R5.2
+        const out = composedOrchestrators([
+            { name: 'mi-proceso', appliesWhen: 'cuando *algo*', terminatesTo: 'development-process' },
+        ]);
+        expect(out).toEqual([
+            { name: 'mi-proceso', appliesWhen: 'cuando algo', terminatesTo: 'development-process' },
+        ]);
+    });
+
+    it('neutraliza saltos de linea y markdown estructural', () => {              // verifies R5.4
+        const out = composedOrchestrators([
+            { name: 'x', appliesWhen: 'a\n## Forjado', terminatesTo: '`b`' },
+        ]);
+        expect(out[0].appliesWhen).toBe('a  Forjado');
+        expect(out[0].terminatesTo).toBe('b');
+    });
+
+    it('neutraliza bytes de control C0 (p.ej. ESC) ademas del markdown', () => {  // verifies confirmed Finding 1
+        const out = composedOrchestrators([
+            { name: 'a\x1bx', appliesWhen: 'w\x07', terminatesTo: 't\x00' },
+        ]);
+        expect(out[0].name).toBe('ax');
+        // eslint-disable-next-line no-control-regex -- verificamos la ausencia deliberada de C0
+        const controlCharPattern = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
+        expect(out[0].name).not.toMatch(controlCharPattern);
+        expect(out[0].appliesWhen).not.toMatch(controlCharPattern);
+        expect(out[0].terminatesTo).not.toMatch(controlCharPattern);
+    });
+
+    it('el payload materializado (buildContext) tampoco contiene bytes de control de un orquestador declarado', () => {  // verifies confirmed Finding 1
+        const root = tmpRegistry('---\nname: using-awm\nversion: "1.0.0"\n---\nBODY');
+        const ctx = buildContext({
+            registryRoot: root,
+            profileExtensions: [],
+            declaredOrchestrators: [
+                { name: 'evil\x1b[31m', appliesWhen: 'w', terminatesTo: 't' },
+            ],
+        });
+        // eslint-disable-next-line no-control-regex -- verificamos la ausencia deliberada de C0
+        expect(ctx.markdown).not.toMatch(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/);
+    });
+
+    it('lo que renderiza el payload sale de esta misma funcion', () => {         // verifies R5.2
+        // Si renderDeclared dejara de consumirla, el comando y el payload
+        // podrian divergir en silencio — que es el modo de falla que R5.2 prohibe.
+        const declared = [{ name: 'p', appliesWhen: 'w', terminatesTo: 't' }];
+        const composed = composedOrchestrators(declared);
+        const reg = tmpRegistry('---\nname: using-awm\nversion: "1.0.0"\n---\nBODY');
+        const ctx = buildContext({ registryRoot: reg, profileExtensions: [], declaredOrchestrators: declared });
+        expect(ctx.markdown).toContain(`- **${composed[0].name}** — applies when: ${composed[0].appliesWhen}.`);
+    });
+});

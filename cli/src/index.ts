@@ -48,6 +48,7 @@ import { registerWatchCommand } from './commands/watch';
 import { registerTrackCommand } from './commands/track';
 import { registerEvidenceCommand } from './commands/evidence';
 import { registerProcessCommand } from './commands/process';
+import { registerContextCommand } from './commands/context';
 import { runAddBundleCore } from './commands/add';
 import { runSyncCore } from './commands/sync';
 import { runUpdateCore, updateOutro } from './commands/update';
@@ -803,6 +804,7 @@ registerWatchCommand(program);
 registerTrackCommand(program);
 registerEvidenceCommand(program);
 registerProcessCommand(program);
+registerContextCommand(program);
 
 // Commander only waits for async action handlers through parseAsync().  The CLI has
 // async commands (including `sensors coverage`), so returning its promise keeps the

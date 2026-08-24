@@ -3,8 +3,8 @@
 import { Command } from 'commander';
 import { discoverProcessModels, type DiscoveredProcessModels } from '../../core/process/discover';
 import type { ProcessModel } from '../../core/process/types';
-
-export interface CommandResult { code: 0 | 2; stdout: string; stderr: string }
+import { stripControlChars } from '../../core/text';
+import { type CommandResult, diagnosticsToStderr, emit } from '../../core/command-result';
 
 /** `source` es un path absoluto del filesystem local: identifica la máquina, no
  *  el proceso. Se usa internamente para diagnósticos, y se omite de toda salida
@@ -12,25 +12,6 @@ export interface CommandResult { code: 0 | 2; stdout: string; stderr: string }
 function publicView(model: ProcessModel): Omit<ProcessModel, 'source'> {
     const { source: _source, ...rest } = model;
     return rest;
-}
-
-/** Formatea los diagnósticos de descubrimiento como líneas `warning: ...\n`
- *  listas para stderr. Compartido por list y show para no divergir el formato. */
-function diagnosticsToStderr(diagnostics: string[]): string {
-    return diagnostics.map((d) => `warning: ${d}\n`).join('');
-}
-
-/** Neutraliza bytes de control C0 (incluyendo ESC `\x1b`) de texto de body
- *  proveniente de un registry no confiable antes de escribirlo a una terminal
- *  humana. `\n` y `\t` se preservan porque son whitespace legítimo usado por
- *  la vista de texto; el resto de la vista JSON no pasa por acá — `JSON.stringify`
- *  ya escapa los caracteres de control como parte de producir JSON válido. Esto
- *  es un problema distinto y más simple que `sanitizeDashboardSource` (Dashboard,
- *  Task 5): ahí se canonicaliza ids/labels contra un vocabulario permitido; acá
- *  solo se neutraliza ANSI/control crudo antes de escribir a stdout. */
-function stripControlChars(text: string): string {
-    // eslint-disable-next-line no-control-regex -- necesitamos matchear C0 deliberadamente
-    return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 }
 
 export function runProcessList(discovered: DiscoveredProcessModels): CommandResult {
@@ -79,10 +60,4 @@ export function registerProcessCommand(program: Command): void {
         .description('show one process model')
         .option('--json', 'emit the parsed model as JSON')
         .action((name: string, opts: { json?: boolean }) => emit(runProcessShow(discoverProcessModels(), name, opts.json === true)));
-}
-
-function emit(result: CommandResult): void {
-    if (result.stderr) process.stderr.write(result.stderr);
-    if (result.stdout) process.stdout.write(result.stdout);
-    if (result.code !== 0) process.exitCode = result.code;
 }

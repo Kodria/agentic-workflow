@@ -176,6 +176,20 @@ awm context-budget [--json] [--cwd <path>]
 
 `CONSTITUTION.md`, `AGENTS.md`, and the skills the harness re-anchors are paid for on **every** session, not once. This command makes that recurring cost visible before it starts crowding out the work.
 
+### `awm context orchestrators`
+
+Read-only view of the orchestrators the installed registries declare, **exactly as they are composed** into the context every agent session receives.
+
+```bash
+awm context orchestrators              # human-readable listing
+awm context orchestrators --json       # composed list as JSON
+awm context orchestrators --verify my-process   # exit 0 if composed, 2 if not
+```
+
+Emits only the declared fields (`name`, `appliesWhen`, `terminatesTo`), not the full payload — that includes raw registry content. Invalid declarations are reported as `warning:` lines on stderr without blocking the healthy ones from being listed.
+
+`--verify` is what closes `process-lifecycle`'s verification cycle: it confirms a freshly-generated process actually appears composed in a real installation, not just that the registry installed.
+
 ---
 
 ## Registry & artifacts

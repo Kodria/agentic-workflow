@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { AwmContext } from './types';
 import { DeclaredOrchestrator } from '../orchestrators';
+import { sanitizeDeclaredField } from '../text';
 
 export function sha256(input: string): string {
     return crypto.createHash('sha256').update(input, 'utf-8').digest('hex');
@@ -23,29 +24,36 @@ function parseVersion(skill: string): string {
 }
 
 /**
- * Neutraliza contenido no confiable proveniente de registries declarados
- * (name/appliesWhen/terminatesTo) antes de interpolarlo en markdown.
- * Sin esto, un registry malicioso/comprometido podria inyectar saltos de
- * linea, marcadores markdown (##, `, *, _) o pseudo-tags XML/HTML (<, >)
- * para forjar una seccion nueva o un bloque instruccional dentro del
- * payload de contexto que consume el proveedor de IA — un vector de
- * prompt-injection. `readDeclaredOrchestrators` solo valida que los
- * campos sean strings no vacios; el saneo pertenece a esta frontera de
- * render, no a la validacion de lectura.
+ * La lista de orquestadores declarados TAL COMO entra al payload de contexto:
+ * saneada campo por campo con `sanitizeDeclaredField` (core/text.ts) — que
+ * neutraliza tanto marcado markdown/saltos de linea (prompt-injection via
+ * `##`, `` ` ``, `*`, `_`, `<`, `>`) COMO bytes de control C0/DEL (ANSI
+ * escapes hacia una terminal real). `readDeclaredOrchestrators` solo valida
+ * que los campos sean strings no vacios; el saneo pertenece a esta frontera
+ * de render, no a la validacion de lectura.
+ *
+ * ESTA es la UNICA funcion que hace este saneo — es la que consume
+ * `renderDeclared` (el payload materializado en cada sesion de agente via
+ * `buildContext`) y la que consume `awm context orchestrators` (comando).
+ * Ningun consumidor necesita sanear de nuevo por su cuenta: si el comando
+ * aplicara su propio saneo, comando y payload podrian divergir en silencio
+ * — el modo de falla que R5.2 prohíbe para el modelo de proceso y que vale
+ * igual acá. Por la misma razon, cualquier comparacion contra un nombre
+ * declarado (p.ej. `--verify` en `commands/context/index.ts`) debe normalizar
+ * su lado tambien con `sanitizeDeclaredField`, no con una copia del regex.
  */
-function sanitizeForMarkdown(s: string): string {
-    return s.replace(/\r?\n/g, ' ').replace(/[`*_#<>]/g, '');
+export function composedOrchestrators(list: DeclaredOrchestrator[]): DeclaredOrchestrator[] {
+    return list.map(o => ({
+        name: sanitizeDeclaredField(o.name),
+        appliesWhen: sanitizeDeclaredField(o.appliesWhen),
+        terminatesTo: sanitizeDeclaredField(o.terminatesTo),
+    }));
 }
 
 function renderDeclared(list: DeclaredOrchestrator[]): string {
     if (list.length === 0) return '';
-    const rows = list
-        .map(o => {
-            const name = sanitizeForMarkdown(o.name);
-            const appliesWhen = sanitizeForMarkdown(o.appliesWhen);
-            const terminatesTo = sanitizeForMarkdown(o.terminatesTo);
-            return `- **${name}** — applies when: ${appliesWhen}. Terminates to: \`${terminatesTo}\`.`;
-        })
+    const rows = composedOrchestrators(list)
+        .map(o => `- **${o.name}** — applies when: ${o.appliesWhen}. Terminates to: \`${o.terminatesTo}\`.`)
         .join('\n');
     return `## Declared orchestrators\n\nConsider these before the built-in pair:\n\n${rows}\n\n`;
 }
