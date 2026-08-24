@@ -244,6 +244,8 @@ _Requirements: R3.5, R7.1, R7.2_
 - Modify: `cli/src/index.ts:50` (import), `cli/src/index.ts:805` (registro)
 - Test: `cli/tests/commands/context.test.ts`
 
+**Nota post-implementation-qa:** el code-quality review de esta task extrajo `cli/src/core/command-result.ts` (`CommandResult`/`diagnosticsToStderr`/`emit`) por duplicación byte-idéntica con `commands/process/index.ts`. No traza a un `R#` propio — es refactor de calidad dentro de una task ya revisada y aprobada, no scope creep: sin él, un tercer comando repetiría la misma copia por tercera vez.
+
 - [x] **Step 1: Escribir el test que falla**
 
 ```ts
@@ -981,9 +983,9 @@ CA-1.1 y CA-4.1 requieren una persona: se ejecutan **después** del merge, no de
 | R5.4 | T1, T2 | `neutraliza saltos de linea y markdown estructural`; `elimina ESC y demas bytes de control C0`; `sanea bytes de control antes de escribir a la terminal` |
 | R7.1 | T2, T4, T5 | `emite los diagnosticos sin dejar de listar los sanos`; `R7.1: sin el comando de verificacion degrada, no bloquea` |
 | R7.2 | T2, T6, T7 | `sin declarados sale 0 y lo dice, no falla`; `node scripts/validate-portability.mjs` en verde |
-| R7.3 | T7 | `sensor-pack-certification.yml` corre la matriz ubuntu/macos/windows sobre el registry; la suite del CLI corre en las tres plataformas en `ci.yml` |
+| R7.3 | T7 | la suite del CLI (incluida `awm context orchestrators`) corre en las tres plataformas en `ci.yml` |
 | R7.4 | T3 | `seedRegistry()` usa tmpdir con `HOME`/`AWM_HOME` sobreescritos; ningún test toca el `~/.awm` real |
 
-**Nota de precisión de la matriz.** `R7.3` es el único requisito cuya verificación **no** aporta este plan: la equivalencia entre plataformas la prueba la matriz de CI ya existente (`sensor-pack-certification.yml` sobre el registry, `ci.yml` sobre el CLI), no un test nuevo. Se declara explícitamente en vez de citar un marcador genérico como si fuera prueba propia.
+**Nota de precisión de la matriz (corregida en post-implementation-qa).** `R7.3` es el único requisito cuya verificación **no** aporta este plan: para el lado CLI, la equivalencia entre plataformas la prueba la matriz ya existente `ci.yml` (ubuntu/macos/windows), no un test nuevo. Para el lado registry, la afirmación original de esta nota — que `sensor-pack-certification.yml` corre la matriz de tres plataformas sobre el registry, cubriendo así `tests/r11-process-lifecycle-contract.test.mjs` y `scripts/validate-portability.mjs` — era **inexacta**: ese workflow corre una matriz de tres plataformas, pero solo sobre los tests de sensor-pack (ESLint/Python/Semgrep/ShellCheck), no sobre los tests Node de este plan. `validate.yml`/`auto-tag.yml` corren esos tests únicamente en `ubuntu-latest`. Riesgo residual aceptado: son scripts Node puros (`fs`/`JSON.parse`/regex, sin invocar herramientas de shell ni asumir separadores de ruta), con probabilidad baja de divergencia entre plataformas — pero **no verificada**, a diferencia de la suite del CLI. Se declara el hueco explícitamente en vez de repetir la cita errónea.
 
 `R3.1` sí tiene aserción propia desde el self-review de este plan: sin ella quedaba como *forward gap* — task sin test, que el Analyze Gate rechaza.
