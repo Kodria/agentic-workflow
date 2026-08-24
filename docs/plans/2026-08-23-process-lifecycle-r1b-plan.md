@@ -719,7 +719,7 @@ _Requirements: R2.1–R2.8, R3.1–R3.6, R4.1, R7.1_
 
 El contrato que este archivo debe satisfacer es el test de la Task 4, que ya está en verde-rojo. **Este archivo se escribe hasta que ese test pasa** — no hay margen de interpretación sobre qué debe contener.
 
-- [ ] **Step 1: Escribir el frontmatter exacto**
+- [x] **Step 1: Escribir el frontmatter exacto**
 
 ```yaml
 ---
@@ -732,7 +732,7 @@ description: Use when creating, modifying, or verifying an AWM process — elici
 
 `license: Apache-2.0` es obligatorio: `scripts/validate-portability.mjs:306-312` rechaza cualquier `SKILL.md` que no lo declare, porque es el campo que sobrevive a `awm export` donde el LICENSE del repo no viaja.
 
-- [ ] **Step 2: Escribir el cuerpo, con estas secciones**
+- [x] **Step 2: Escribir el cuerpo, con estas secciones**
 
 Estructura obligatoria (cada una existe porque el test de la Task 4 la exige, o porque el precedente `post-implementation-docs` la establece):
 
@@ -755,19 +755,19 @@ Estructura obligatoria (cada una existe porque el test de la Task 4 la exige, o 
 
 **Restricción de vocabulario, no negociable:** `scripts/validate-portability.mjs:53-65` rechaza el archivo si contiene `` `Task` tool ``, `` `Read` tool `` (y el resto de la lista), `TodoWrite`, `AskUserQuestion`, `Task("` o `superpowers:`. Escribir en términos agnósticos: "el mecanismo nativo de la plataforma para cargar un skill", nunca el nombre de una herramienta concreta.
 
-- [ ] **Step 3: Correr el contrato hasta verde**
+- [x] **Step 3: Correr el contrato hasta verde**
 
 Run: `cd /home/user/awm-baseline-registry && node tests/r11-process-lifecycle-contract.test.mjs`
 Expected: los 13 tests que leen `SKILL.md` en verde. Iterar el `SKILL.md` hasta lograrlo; el test es la especificación.
 
 *(El test 14 del archivo, el de empaque, sigue en rojo hasta la Task 6 — es esperado: lee `bundles/process/bundle.json`, que todavía no existe.)*
 
-- [ ] **Step 4: Correr el validador de portabilidad**
+- [x] **Step 4: Correr el validador de portabilidad**
 
 Run: `cd /home/user/awm-baseline-registry && node scripts/validate-portability.mjs`
 Expected: FAIL — `skills: expected exactly 38 immediate skill directories, found 39`. Es el gate de la Task 6, no un defecto de este paso.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/user/awm-baseline-registry
