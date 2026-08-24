@@ -785,7 +785,7 @@ _Requirements: R2.7, R7.2_
 - Create: `bundles/process/bundle.json`
 - Modify: `bundles/authoring/bundle.json`, `catalog.json`, `README.md:41-48`, `scripts/validate-portability.mjs:528-530`
 
-- [ ] **Step 1: Crear el bundle**
+- [x] **Step 1: Crear el bundle**
 
 ```json
 {
@@ -800,7 +800,7 @@ _Requirements: R2.7, R7.2_
 }
 ```
 
-- [ ] **Step 2: Mover `authoring` a baseline**
+- [x] **Step 2: Mover `authoring` a baseline**
 
 `bundles/authoring/bundle.json` completo tras el cambio (bump de `1.1.1` a `1.2.0` — es un cambio aditivo de alcance, minor por `CONSTITUTION.md`):
 
@@ -819,7 +819,7 @@ _Requirements: R2.7, R7.2_
 
 La nota *"enable only in the agentic-workflow repo"* se retira porque quedó stale: desde R1+R2 la autoría de registries es actividad de usuario final, y `process` declara `dependsOn: ["authoring"]` — si `authoring` siguiera en `project`, `baseline` entregaría un skill cuyo `REQUIRED SUB-SKILL` no está instalado.
 
-- [ ] **Step 3: Actualizar el catálogo**
+- [x] **Step 3: Actualizar el catálogo**
 
 `catalog.json` completo tras el cambio (respetar el alineado por columnas existente):
 
@@ -836,7 +836,7 @@ La nota *"enable only in the agentic-workflow repo"* se retira porque quedó sta
 }
 ```
 
-- [ ] **Step 4: Subir el conteo de skills**
+- [x] **Step 4: Subir el conteo de skills**
 
 En `scripts/validate-portability.mjs`, líneas 528-530:
 
@@ -846,7 +846,7 @@ En `scripts/validate-portability.mjs`, líneas 528-530:
   }
 ```
 
-- [ ] **Step 5: Actualizar la tabla del README**
+- [x] **Step 5: Actualizar la tabla del README**
 
 En `README.md`, la tabla de bundles (líneas 41-48) pasa a:
 
@@ -860,7 +860,7 @@ En `README.md`, la tabla de bundles (líneas 41-48) pasa a:
 | `frontend` | project | Frontend craft: design intake, component implementation, visual fidelity gate |
 ```
 
-- [ ] **Step 6: Correr los gates**
+- [x] **Step 6: Correr los gates**
 
 ```bash
 cd /home/user/awm-baseline-registry
@@ -870,7 +870,7 @@ node tests/r11-process-lifecycle-contract.test.mjs
 ```
 Expected: los tres en verde. El primero imprime `portable: 39 skills validated`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add bundles/process/bundle.json bundles/authoring/bundle.json catalog.json README.md scripts/validate-portability.mjs
