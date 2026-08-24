@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { AwmContext } from './types';
 import { DeclaredOrchestrator } from '../orchestrators';
+import { sanitizeDeclaredField } from '../text';
 
 export function sha256(input: string): string {
     return crypto.createHash('sha256').update(input, 'utf-8').digest('hex');
@@ -23,35 +24,29 @@ function parseVersion(skill: string): string {
 }
 
 /**
- * Neutraliza contenido no confiable proveniente de registries declarados
- * (name/appliesWhen/terminatesTo) antes de interpolarlo en markdown.
- * Sin esto, un registry malicioso/comprometido podria inyectar saltos de
- * linea, marcadores markdown (##, `, *, _) o pseudo-tags XML/HTML (<, >)
- * para forjar una seccion nueva o un bloque instruccional dentro del
- * payload de contexto que consume el proveedor de IA — un vector de
- * prompt-injection. `readDeclaredOrchestrators` solo valida que los
- * campos sean strings no vacios; el saneo pertenece a esta frontera de
- * render, no a la validacion de lectura.
- */
-function sanitizeForMarkdown(s: string): string {
-    return s.replace(/\r?\n/g, ' ').replace(/[`*_#<>]/g, '');
-}
-
-/**
  * La lista de orquestadores declarados TAL COMO entra al payload de contexto:
- * saneada campo por campo con `sanitizeForMarkdown`.
+ * saneada campo por campo con `sanitizeDeclaredField` (core/text.ts) — que
+ * neutraliza tanto marcado markdown/saltos de linea (prompt-injection via
+ * `##`, `` ` ``, `*`, `_`, `<`, `>`) COMO bytes de control C0/DEL (ANSI
+ * escapes hacia una terminal real). `readDeclaredOrchestrators` solo valida
+ * que los campos sean strings no vacios; el saneo pertenece a esta frontera
+ * de render, no a la validacion de lectura.
  *
- * Exportada porque `awm context orchestrators` debe poder mostrar exactamente
- * lo que el agente va a recibir, no una segunda derivación de los mismos datos.
- * Si el comando aplicara su propio saneo, comando y payload podrían divergir en
- * silencio — el modo de falla que R5.2 prohíbe para el modelo de proceso y que
- * vale igual acá.
+ * ESTA es la UNICA funcion que hace este saneo — es la que consume
+ * `renderDeclared` (el payload materializado en cada sesion de agente via
+ * `buildContext`) y la que consume `awm context orchestrators` (comando).
+ * Ningun consumidor necesita sanear de nuevo por su cuenta: si el comando
+ * aplicara su propio saneo, comando y payload podrian divergir en silencio
+ * — el modo de falla que R5.2 prohíbe para el modelo de proceso y que vale
+ * igual acá. Por la misma razon, cualquier comparacion contra un nombre
+ * declarado (p.ej. `--verify` en `commands/context/index.ts`) debe normalizar
+ * su lado tambien con `sanitizeDeclaredField`, no con una copia del regex.
  */
 export function composedOrchestrators(list: DeclaredOrchestrator[]): DeclaredOrchestrator[] {
     return list.map(o => ({
-        name: sanitizeForMarkdown(o.name),
-        appliesWhen: sanitizeForMarkdown(o.appliesWhen),
-        terminatesTo: sanitizeForMarkdown(o.terminatesTo),
+        name: sanitizeDeclaredField(o.name),
+        appliesWhen: sanitizeDeclaredField(o.appliesWhen),
+        terminatesTo: sanitizeDeclaredField(o.terminatesTo),
     }));
 }
 

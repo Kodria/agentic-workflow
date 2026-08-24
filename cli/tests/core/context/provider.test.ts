@@ -212,6 +212,31 @@ describe('composedOrchestrators', () => {
         expect(out[0].terminatesTo).toBe('b');
     });
 
+    it('neutraliza bytes de control C0 (p.ej. ESC) ademas del markdown', () => {  // verifies confirmed Finding 1
+        const out = composedOrchestrators([
+            { name: 'a\x1bx', appliesWhen: 'w\x07', terminatesTo: 't\x00' },
+        ]);
+        expect(out[0].name).toBe('ax');
+        // eslint-disable-next-line no-control-regex -- verificamos la ausencia deliberada de C0
+        const controlCharPattern = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
+        expect(out[0].name).not.toMatch(controlCharPattern);
+        expect(out[0].appliesWhen).not.toMatch(controlCharPattern);
+        expect(out[0].terminatesTo).not.toMatch(controlCharPattern);
+    });
+
+    it('el payload materializado (buildContext) tampoco contiene bytes de control de un orquestador declarado', () => {  // verifies confirmed Finding 1
+        const root = tmpRegistry('---\nname: using-awm\nversion: "1.0.0"\n---\nBODY');
+        const ctx = buildContext({
+            registryRoot: root,
+            profileExtensions: [],
+            declaredOrchestrators: [
+                { name: 'evil\x1b[31m', appliesWhen: 'w', terminatesTo: 't' },
+            ],
+        });
+        // eslint-disable-next-line no-control-regex -- verificamos la ausencia deliberada de C0
+        expect(ctx.markdown).not.toMatch(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/);
+    });
+
     it('lo que renderiza el payload sale de esta misma funcion', () => {         // verifies R5.2
         // Si renderDeclared dejara de consumirla, el comando y el payload
         // podrian divergir en silencio — que es el modo de falla que R5.2 prohibe.

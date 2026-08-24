@@ -45,6 +45,27 @@ describe('awm context orchestrators', () => {
         expect(r.stderr).toContain('mi-proceso');
     });
 
+    it('--verify sale 0 cuando el nombre declarado tiene caracteres que el saneo quita', () => {  // verifies confirmed Finding 2
+        // El nombre REAL declarado por el registry es 'task_capture' (con guion bajo).
+        // composed[].name sale saneado ('taskcapture'), pero el usuario tipea el nombre
+        // declarado EXACTO via --verify — eso debe seguir contando como compuesto.
+        const declarado = { name: 'task_capture', appliesWhen: 'x', terminatesTo: 'y' };
+        const r = runContextOrchestrators(collected([declarado]), { json: false, verify: 'task_capture' });
+        expect(r.code).toBe(0);
+        expect(r.stdout).toMatch(/composed/i);
+    });
+
+    it('--verify normaliza markdown-especiales del argumento antes de comparar', () => {  // verifies confirmed Finding 2
+        const declarado = { name: 'foo*bar#baz', appliesWhen: 'x', terminatesTo: 'y' };
+        const r = runContextOrchestrators(collected([declarado]), { json: false, verify: 'foo*bar#baz' });
+        expect(r.code).toBe(0);
+    });
+
+    it('--verify sigue saliendo 2 para un nombre genuinamente ausente', () => {   // verifies confirmed Finding 2 (no regression)
+        const r = runContextOrchestrators(collected([uno]), { json: false, verify: 'de-verdad-no-existe' });
+        expect(r.code).toBe(2);
+    });
+
     it('sanea bytes de control antes de escribir a la terminal', () => {         // verifies R5.4
         const hostil = { name: 'x\x1b[31m', appliesWhen: 'w\x07', terminatesTo: 't\x00' };
         const r = runContextOrchestrators(collected([hostil]), { json: false });

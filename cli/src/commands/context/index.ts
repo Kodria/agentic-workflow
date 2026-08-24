@@ -8,12 +8,16 @@
 //
 // Deliberadamente NO imprime `ctx.markdown`: ese string incluye el SKILL.md crudo
 // del registry (provider.ts:58-62), contenido externo sin filtro. Este comando
-// emite solo los campos estructurados de cada declaración, que ya pasaron por
-// `sanitizeForMarkdown` y acá además por `stripControlChars`.
+// emite solo los campos estructurados de cada declaración — y `composedOrchestrators`
+// (core/context/provider.ts) ya es, por si sola, la sanitización COMPLETA de esos
+// campos (markdown + bytes de control, vía `sanitizeDeclaredField` en core/text.ts).
+// Este comando no vuelve a sanear nada: consumir la salida de `composedOrchestrators`
+// tal cual es justamente lo que garantiza que lo que se ve acá sea lo que se compone
+// en el payload real (R5.2) — sanear de nuevo aquí sería una segunda fuente de verdad.
 import { Command } from 'commander';
 import { collectDeclaredOrchestrators } from '../../core/orchestrators';
 import { composedOrchestrators } from '../../core/context/provider';
-import { stripControlChars } from '../../core/text';
+import { sanitizeDeclaredField } from '../../core/text';
 import { type CommandResult, diagnosticsToStderr, emit } from '../../core/command-result';
 
 export type CollectedOrchestrators = ReturnType<typeof collectDeclaredOrchestrators>;
@@ -24,20 +28,23 @@ export function runContextOrchestrators(collected: CollectedOrchestrators, opts:
     const composed = composedOrchestrators(collected.declared);
 
     if (opts.verify !== undefined) {
-        const found = composed.some((o) => o.name === opts.verify);
+        // opts.verify es el argumento CRUDO tal como lo tipeo el usuario; composed[].name
+        // ya paso por sanitizeDeclaredField. Sin normalizar este lado con la MISMA funcion,
+        // un usuario que tipee el nombre declarado exacto (con un caracter que el saneo
+        // quita, p.ej. `_` o un byte de control) se lleva un falso "not composed" (R3.5/R3.6).
+        const verifyNormalized = sanitizeDeclaredField(opts.verify);
+        const found = composed.some((o) => o.name === verifyNormalized);
         if (!found) {
             const available = composed.map((o) => o.name).join(', ') || '(none)';
             return {
                 code: 2, stdout: '',
-                stderr: `${stderr}awm context orchestrators: "${stripControlChars(opts.verify)}" is not composed — available: ${stripControlChars(available)}\n`,
+                stderr: `${stderr}awm context orchestrators: "${verifyNormalized}" is not composed — available: ${available}\n`,
             };
         }
-        return { code: 0, stdout: `"${stripControlChars(opts.verify)}" is composed into the session context.\n`, stderr };
+        return { code: 0, stdout: `"${verifyNormalized}" is composed into the session context.\n`, stderr };
     }
 
     if (opts.json) {
-        // JSON.stringify ya escapa los caracteres de control como parte de
-        // producir JSON válido, así que esta rama no necesita stripControlChars.
         return { code: 0, stdout: `${JSON.stringify({ orchestrators: composed }, null, 2)}\n`, stderr };
     }
 
@@ -45,7 +52,7 @@ export function runContextOrchestrators(collected: CollectedOrchestrators, opts:
         return { code: 0, stdout: 'No declared orchestrators in the installed registries.\n', stderr };
     }
     const rows = composed
-        .map((o) => `${stripControlChars(o.name)}  applies when: ${stripControlChars(o.appliesWhen)}  -> ${stripControlChars(o.terminatesTo)}`)
+        .map((o) => `${o.name}  applies when: ${o.appliesWhen}  -> ${o.terminatesTo}`)
         .join('\n');
     return { code: 0, stdout: `${rows}\n`, stderr };
 }

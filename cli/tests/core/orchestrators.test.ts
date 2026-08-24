@@ -237,6 +237,50 @@ describe('collectDeclaredOrchestrators', () => {
         expect(diagnostics[0]).toMatch(/duplicate|shadow/i);
     });
 
+    it('sanea el nombre antes de interpolarlo en el diagnostico de duplicado', () => {  // verifies confirmed Finding 3
+        writeRegistriesConfig([
+            { name: 'first', remote: 'unused' },
+            { name: 'second', remote: 'unused' },
+        ]);
+        const nombreHostil = 'shared\x1b[31m';
+        writeManifest('first', {
+            orchestrator: { name: nombreHostil, appliesWhen: 'primero', terminatesTo: 'a' },
+        });
+        writeManifest('second', {
+            orchestrator: { name: nombreHostil, appliesWhen: 'segundo', terminatesTo: 'b' },
+        });
+
+        const { diagnostics } = collectDeclaredOrchestrators();
+
+        expect(diagnostics).toHaveLength(1);
+        // eslint-disable-next-line no-control-regex -- verificamos la ausencia deliberada de C0
+        expect(diagnostics[0]).not.toMatch(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/);
+        expect(diagnostics[0]).toContain('shared[31m');
+    });
+
+    it('emite un diagnostico de colision post-saneo entre nombres crudos distintos, sin descartar ninguno', () => {  // verifies confirmed Finding 4
+        writeRegistriesConfig([
+            { name: 'first', remote: 'unused' },
+            { name: 'second', remote: 'unused' },
+        ]);
+        writeManifest('first', {
+            orchestrator: { name: 'foo_bar', appliesWhen: 'x', terminatesTo: 'a' },
+        });
+        writeManifest('second', {
+            orchestrator: { name: 'foo*bar', appliesWhen: 'y', terminatesTo: 'b' },
+        });
+
+        const { declared, diagnostics } = collectDeclaredOrchestrators();
+
+        // Ambas declaraciones son genuinamente distintas (nombre crudo distinto) — ninguna se descarta.
+        expect(declared).toHaveLength(2);
+        expect(declared.map((d) => d.name).sort()).toEqual(['foo*bar', 'foo_bar']);
+        // Pero se advierte de la colision post-saneo (ambas renderizan como "foobar").
+        expect(diagnostics).toHaveLength(1);
+        expect(diagnostics[0]).toMatch(/foobar/);
+        expect(diagnostics[0]).toMatch(/collis|same composed name/i);
+    });
+
     it('no dedupea orquestadores con nombres distintos, ambos se conservan', () => {
         writeRegistriesConfig([
             { name: 'first', remote: 'unused' },
