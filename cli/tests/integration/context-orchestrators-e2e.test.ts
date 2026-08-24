@@ -25,7 +25,7 @@ function seedRegistry(): string {
 function run(home: string, ...args: string[]) {
     return spawnSync(process.execPath, [DIST, ...args], {
         cwd: CLI_ROOT, encoding: 'utf8',
-        env: { ...process.env, HOME: home, AWM_HOME: path.join(home, '.awm') },
+        env: { ...process.env, HOME: home, AWM_HOME: path.join(home, '.awm'), AWM_NO_UPDATE_CHECK: '1' },
     });
 }
 
