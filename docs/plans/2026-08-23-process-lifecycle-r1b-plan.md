@@ -540,7 +540,7 @@ _Requirements: R2.1, R2.2, R2.3, R2.5, R2.6, R2.7, R2.8, R3.2, R3.3, R3.4, R3.5,
 
 Se escribe **antes** que el skill, siguiendo el precedente exacto de `tests/r10-documentation-phase-contract.test.mjs`: en un artefacto de prosa, el test de contrato *es* la especificación, y es lo único que impide que el skill derive en silencio.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 ```javascript
 // tests/r11-process-lifecycle-contract.test.mjs
@@ -693,12 +693,12 @@ test('empaque: el bundle process depende de authoring y ambos son baseline', () 
 });
 ```
 
-- [ ] **Step 2: Correr el test y verificar que falla**
+- [x] **Step 2: Correr el test y verificar que falla**
 
 Run: `cd /home/user/awm-baseline-registry && node tests/r11-process-lifecycle-contract.test.mjs`
 Expected: FAIL — `ENOENT: skills/process-lifecycle/SKILL.md`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd /home/user/awm-baseline-registry
