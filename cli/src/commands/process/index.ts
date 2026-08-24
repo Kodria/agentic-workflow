@@ -4,8 +4,7 @@ import { Command } from 'commander';
 import { discoverProcessModels, type DiscoveredProcessModels } from '../../core/process/discover';
 import type { ProcessModel } from '../../core/process/types';
 import { stripControlChars } from '../../core/text';
-
-export interface CommandResult { code: 0 | 2; stdout: string; stderr: string }
+import { type CommandResult, diagnosticsToStderr, emit } from '../../core/command-result';
 
 /** `source` es un path absoluto del filesystem local: identifica la máquina, no
  *  el proceso. Se usa internamente para diagnósticos, y se omite de toda salida
@@ -13,12 +12,6 @@ export interface CommandResult { code: 0 | 2; stdout: string; stderr: string }
 function publicView(model: ProcessModel): Omit<ProcessModel, 'source'> {
     const { source: _source, ...rest } = model;
     return rest;
-}
-
-/** Formatea los diagnósticos de descubrimiento como líneas `warning: ...\n`
- *  listas para stderr. Compartido por list y show para no divergir el formato. */
-function diagnosticsToStderr(diagnostics: string[]): string {
-    return diagnostics.map((d) => `warning: ${d}\n`).join('');
 }
 
 export function runProcessList(discovered: DiscoveredProcessModels): CommandResult {
@@ -67,10 +60,4 @@ export function registerProcessCommand(program: Command): void {
         .description('show one process model')
         .option('--json', 'emit the parsed model as JSON')
         .action((name: string, opts: { json?: boolean }) => emit(runProcessShow(discoverProcessModels(), name, opts.json === true)));
-}
-
-function emit(result: CommandResult): void {
-    if (result.stderr) process.stderr.write(result.stderr);
-    if (result.stdout) process.stdout.write(result.stdout);
-    if (result.code !== 0) process.exitCode = result.code;
 }

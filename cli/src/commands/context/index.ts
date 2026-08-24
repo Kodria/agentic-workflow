@@ -11,17 +11,13 @@
 // emite solo los campos estructurados de cada declaración, que ya pasaron por
 // `sanitizeForMarkdown` y acá además por `stripControlChars`.
 import { Command } from 'commander';
-import { collectDeclaredOrchestrators, type DeclaredOrchestrator } from '../../core/orchestrators';
+import { collectDeclaredOrchestrators } from '../../core/orchestrators';
 import { composedOrchestrators } from '../../core/context/provider';
 import { stripControlChars } from '../../core/text';
+import { type CommandResult, diagnosticsToStderr, emit } from '../../core/command-result';
 
-export interface CommandResult { code: 0 | 2; stdout: string; stderr: string }
-export interface CollectedOrchestrators { declared: DeclaredOrchestrator[]; diagnostics: string[] }
+export type CollectedOrchestrators = ReturnType<typeof collectDeclaredOrchestrators>;
 export interface OrchestratorsOptions { json: boolean; verify?: string }
-
-function diagnosticsToStderr(diagnostics: string[]): string {
-    return diagnostics.map((d) => `warning: ${d}\n`).join('');
-}
 
 export function runContextOrchestrators(collected: CollectedOrchestrators, opts: OrchestratorsOptions): CommandResult {
     const stderr = diagnosticsToStderr(collected.diagnostics);
@@ -66,10 +62,4 @@ export function registerContextCommand(program: Command): void {
             collectDeclaredOrchestrators(),
             { json: opts.json === true, verify: opts.verify },
         )));
-}
-
-function emit(result: CommandResult): void {
-    if (result.stderr) process.stderr.write(result.stderr);
-    if (result.stdout) process.stdout.write(result.stdout);
-    if (result.code !== 0) process.exitCode = result.code;
 }
