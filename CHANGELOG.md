@@ -1,3 +1,8 @@
+## v9.2.0 - 2026-08-24
+
+### Features
+- **context:** awm context orchestrators — CLI surface for process-lifecycle verification (R1b) (#125)
+
 ## v9.1.0 - 2026-08-23
 
 ### Features
