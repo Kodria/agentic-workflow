@@ -37,15 +37,28 @@ function sanitizeForMarkdown(s: string): string {
     return s.replace(/\r?\n/g, ' ').replace(/[`*_#<>]/g, '');
 }
 
+/**
+ * La lista de orquestadores declarados TAL COMO entra al payload de contexto:
+ * saneada campo por campo con `sanitizeForMarkdown`.
+ *
+ * Exportada porque `awm context orchestrators` debe poder mostrar exactamente
+ * lo que el agente va a recibir, no una segunda derivación de los mismos datos.
+ * Si el comando aplicara su propio saneo, comando y payload podrían divergir en
+ * silencio — el modo de falla que R5.2 prohíbe para el modelo de proceso y que
+ * vale igual acá.
+ */
+export function composedOrchestrators(list: DeclaredOrchestrator[]): DeclaredOrchestrator[] {
+    return list.map(o => ({
+        name: sanitizeForMarkdown(o.name),
+        appliesWhen: sanitizeForMarkdown(o.appliesWhen),
+        terminatesTo: sanitizeForMarkdown(o.terminatesTo),
+    }));
+}
+
 function renderDeclared(list: DeclaredOrchestrator[]): string {
     if (list.length === 0) return '';
-    const rows = list
-        .map(o => {
-            const name = sanitizeForMarkdown(o.name);
-            const appliesWhen = sanitizeForMarkdown(o.appliesWhen);
-            const terminatesTo = sanitizeForMarkdown(o.terminatesTo);
-            return `- **${name}** — applies when: ${appliesWhen}. Terminates to: \`${terminatesTo}\`.`;
-        })
+    const rows = composedOrchestrators(list)
+        .map(o => `- **${o.name}** — applies when: ${o.appliesWhen}. Terminates to: \`${o.terminatesTo}\`.`)
         .join('\n');
     return `## Declared orchestrators\n\nConsider these before the built-in pair:\n\n${rows}\n\n`;
 }
