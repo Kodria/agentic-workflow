@@ -426,7 +426,7 @@ _Requirements: R3.5, R7.3, R7.4_
 - Test: `cli/tests/integration/context-orchestrators-e2e.test.ts`
 - Modify: `docs/cli-reference.md`
 
-- [ ] **Step 1: Escribir el test e2e contra el binario compilado**
+- [x] **Step 1: Escribir el test e2e contra el binario compilado**
 
 ```ts
 // cli/tests/integration/context-orchestrators-e2e.test.ts
@@ -487,12 +487,12 @@ describe('awm context orchestrators (binario real)', () => {
 });
 ```
 
-- [ ] **Step 2: Buildear y correr el e2e**
+- [x] **Step 2: Buildear y correr el e2e**
 
 Run: `cd cli && npm run build && npx jest tests/integration/context-orchestrators-e2e.test.ts --runInBand`
 Expected: PASS — 3 tests
 
-- [ ] **Step 3: Documentar el comando**
+- [x] **Step 3: Documentar el comando**
 
 En `docs/cli-reference.md`, agregar una sección con la misma forma que las vecinas (`### \`awm preflight\`` está en la línea 136, `### \`awm context-budget\`` en la 164), ubicada junto a ellas:
 
@@ -512,7 +512,7 @@ Emite solo los campos declarados (`name`, `appliesWhen`, `terminatesTo`), no el 
 `--verify` es lo que cierra el ciclo de verificación de `process-lifecycle`: confirma que un proceso recién generado aparece compuesto en una instalación real, no solo que el registry instaló.
 ```
 
-- [ ] **Step 4: Suite completa y sensores**
+- [x] **Step 4: Suite completa y sensores**
 
 Run: `cd cli && npx jest --runInBand`
 Expected: 0 fallos. La línea base antes de este plan es **263 suites**; debe crecer, nunca decrecer.
@@ -522,7 +522,7 @@ cd /home/user/agentic-workflow && node cli/dist/src/index.js sensors run
 ```
 Expected: `"overall": "pass"`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cli/tests/integration/context-orchestrators-e2e.test.ts docs/cli-reference.md
