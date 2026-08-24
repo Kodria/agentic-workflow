@@ -888,7 +888,7 @@ _Requirements: R7.2, R7.3_
 
 Un test que no está en las dos listas **no corre** — se enumeran a mano, no hay descubrimiento automático.
 
-- [ ] **Step 1: Agregar el test a `validate.yml`**
+- [x] **Step 1: Agregar el test a `validate.yml`**
 
 Inmediatamente después de la línea `- run: node tests/r10-documentation-phase-contract.test.mjs`:
 
@@ -896,7 +896,7 @@ Inmediatamente después de la línea `- run: node tests/r10-documentation-phase-
       - run: node tests/r11-process-lifecycle-contract.test.mjs
 ```
 
-- [ ] **Step 2: Agregar el test a `auto-tag.yml`**
+- [x] **Step 2: Agregar el test a `auto-tag.yml`**
 
 En el bloque `Verify registry before tagging`, inmediatamente después de `node tests/r10-documentation-phase-contract.test.mjs`:
 
@@ -904,7 +904,7 @@ En el bloque `Verify registry before tagging`, inmediatamente después de `node 
           node tests/r11-process-lifecycle-contract.test.mjs
 ```
 
-- [ ] **Step 3: Correr la lista completa de validación local**
+- [x] **Step 3: Correr la lista completa de validación local**
 
 ```bash
 cd /home/user/awm-baseline-registry
@@ -923,7 +923,7 @@ node tests/session-start.test.mjs
 ```
 Expected: todos en verde.
 
-- [ ] **Step 4: Correr el gate de version bumps**
+- [x] **Step 4: Correr el gate de version bumps**
 
 ```bash
 cd /home/user/awm-baseline-registry && ./scripts/check-skill-version-bumps.sh origin/main
@@ -932,7 +932,7 @@ Expected: `OK: every edited SKILL.md and affected bundle/catalog version advance
 
 **Este paso no es opcional ni un adelanto del gate — es el gate.** `AGENTS.md` de ese repo lo declara obligatorio antes de reportar una task terminada, tras haber reincidido dos veces.
 
-- [ ] **Step 5: Suite del CLI completa**
+- [x] **Step 5: Suite del CLI completa**
 
 ```bash
 cd /home/user/agentic-workflow/cli && npx jest --runInBand
@@ -940,7 +940,7 @@ cd /home/user/agentic-workflow && node cli/dist/src/index.js sensors run
 ```
 Expected: 0 fallos, `"overall": "pass"`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /home/user/awm-baseline-registry
