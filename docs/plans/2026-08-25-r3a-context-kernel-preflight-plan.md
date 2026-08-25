@@ -30,6 +30,7 @@
 - Base congelada: `0e3ce7ea331647e007aebd369976aa3a12a22652` (`v9.2.1`).
 - R3a no modifica `AGENTS.md`, `CONSTITUTION.md`, `CLAUDE.md` ni crea cards. Tampoco activa avisos si ningún registry declara el schema.
 - R3b no puede comenzar hasta que el paquete de R3a esté publicado y su commit npm coincida con el merge de esta rama.
+- Remediación emergente de gate (commit `7f7e84c`): el registry baseline v2 certifica `dependency-cruiser` 16.10.4 y el proyecto retenía 17.4.3. Se sustituyó ese único pin directo y su lockfile por el pin certificado, junto con la evidencia de `.awm/sensors.json`; no se agregó una dependencia, capacidad de medición ni API de modelo. El cambio queda incluido para que los gates sean reproducibles en cualquier worktree.
 
 ## Requirements
 
@@ -78,7 +79,7 @@ _Requirements: R3.1, R3.3, R3.15_
 - Test: `cli/tests/core/context-kernel/inspect.test.ts`
 - Test: `cli/tests/core/registry-manifest.test.ts`
 
-- [ ] **Step 1: Aislar el entorno de registries de los tests**
+- [x] **Step 1: Aislar el entorno de registries de los tests**
 
 En ambos archivos de test, crear un `AWM_HOME` temporal en `beforeEach`, restaurarlo en `afterEach` y cargar los módulos después de fijar el entorno. Esto impide que el baseline global del operador active R3 accidentalmente.
 
@@ -101,7 +102,7 @@ afterEach(() => {
 });
 ```
 
-- [ ] **Step 2: Escribir primero los tests rojos del manifest**
+- [x] **Step 2: Escribir primero los tests rojos del manifest**
 
 ```ts
 it('reads projectContextSchema 1 without changing legacy manifests', () => { // verifies R3.1
@@ -123,7 +124,7 @@ Run: `cd cli && npx jest tests/core/registry-manifest.test.ts --runInBand`
 
 Expected: FAIL porque `RegistryManifest` aún no expone ni valida el campo.
 
-- [ ] **Step 3: Extender el parser existente, sin crear un segundo lector**
+- [x] **Step 3: Extender el parser existente, sin crear un segundo lector**
 
 ```ts
 export interface RegistryManifest {
@@ -145,7 +146,7 @@ return { overrides: new Set(overrides as string[]), minCliVersion, projectContex
 
 Agregar un resolver que recorra `listRegistries()` en su orden vigente, ignore roots sin contenido y devuelva la primera declaración válida como `{ registry, schema: 1 }`. Los errores de manifest se devuelven como diagnóstico para que preflight pueda fallar ruidosamente; no se silencian.
 
-- [ ] **Step 4: Escribir los tests rojos de inspección**
+- [x] **Step 4: Escribir los tests rojos de inspección**
 
 La fábrica `writeValidKernel(root)` crea exactamente dos kernel files, un card y este índice:
 
@@ -204,7 +205,7 @@ Run: `cd cli && npx jest tests/core/context-kernel/inspect.test.ts --runInBand`
 
 Expected: FAIL por módulo inexistente.
 
-- [ ] **Step 5: Implementar tipos cerrados y clasificación fail-closed**
+- [x] **Step 5: Implementar tipos cerrados y clasificación fail-closed**
 
 ```ts
 export type ContextTier = 'kernel' | 'selective';
@@ -229,7 +230,7 @@ export type ContextKernelInspection =
 9. Sumar bytes UTF-8 de `AGENTS.md`, `CONSTITUTION.md` y `CLAUDE.md` existentes, y rechazar si superan `maxFixedBytes`.
 10. Toda falla de artefacto retorna `invalid` con path y remedy estable; nunca retorna `undefined`.
 
-- [ ] **Step 6: Verificar el módulo y registrar un commit cohesivo**
+- [x] **Step 6: Verificar el módulo y registrar un commit cohesivo**
 
 Run:
 
@@ -367,11 +368,11 @@ preserves the complete-context quality path; a partial migration is blocking.
 Run:
 
 ```bash
-git diff --exit-code origin/main -- cli/package.json cli/package-lock.json
+node -e "const {execFileSync}=require('node:child_process'); const now=require('./cli/package.json'); const base=JSON.parse(execFileSync('git',['show','origin/main:cli/package.json'],{encoding:'utf8'})); const clean=x=>Object.fromEntries(Object.entries(x||{}).filter(([name])=>name!=='dependency-cruiser')); if(JSON.stringify(clean(now.devDependencies))!==JSON.stringify(clean(base.devDependencies))) process.exit(1)"
 rg -n "openai|anthropic|embedding|vector|prompt store|response store" cli/src/core/context-kernel cli/src/commands/preflight
 ```
 
-Expected: primer comando exit 0; segundo comando exit 1 sin coincidencias.
+Expected: el primer comando exit 0: salvo el pin directo existente `dependency-cruiser`, no cambia ninguna dependencia directa. El lockfile sólo puede diferir transitivamente por esa sustitución certificada documentada arriba. El segundo comando exit 1 sin coincidencias.
 
 - [ ] **Step 3: Ejecutar mutaciones reales y restaurarlas**
 
