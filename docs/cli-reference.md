@@ -154,12 +154,29 @@ By default preflight is static and does not dispatch a sensor. Add
 sensor set, remains read-only, and accepts only an overall `pass`. Its failed
 `sensors-execution` check identifies each selected non-pass sensor with only
 bounded execution facts (timeout, source, elapsed time, and reason); it never
+
 relays arbitrary tool output. If no sensor execution is established — for
 example, `not_certified` with an empty sensor list — it reports that no sensor
 established an empirical pass and directs the operator to `awm sensors init`.
 It does not fabricate a sensor name, timeout, source, or elapsed time. This
 makes a timeout, an inconclusive result, or a missing configuration actionable
 before a human has gone away.
+
+#### Context Kernel v1 migration state
+
+When an active registry declares `projectContextSchema: 1`, preflight also
+reports the project-owned Context Kernel state:
+
+| Artifacts | Preflight result | Meaning |
+|---|---|---|
+| Valid v1 index and markers | pass / `ready` | selective eligible |
+| Absent | advisory / `ready` | legacy full context |
+| Partial or invalid | failure / `degraded` | repair before unattended handoff |
+
+`awm update` and `awm preflight` never rewrite project-owned `AGENTS.md`,
+`CONSTITUTION.md`, `CLAUDE.md`, `.awm/context/index.json`, or context cards.
+Migration is explicit and reviewed through `project-context-init`. A legacy advisory
+preserves the complete-context quality path; a partial migration is blocking.
 
 ### `awm context-budget`
 

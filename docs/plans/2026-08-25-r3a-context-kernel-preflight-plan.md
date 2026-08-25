@@ -352,7 +352,7 @@ _Requirements: R3.2, R3.3, R3.12, R3.15_
 - Test: `cli/tests/core/context-kernel/inspect.test.ts`
 - Test: `cli/tests/commands/preflight/preflight.test.ts`
 
-- [ ] **Step 1: Documentar el contrato operativo exacto**
+- [x] **Step 1: Documentar el contrato operativo exacto**
 
 Agregar una tabla de tres filas: valid/pass/selective eligible, absent/advisory/legacy full context, partial-invalid/failure/degraded. Debajo, escribir literalmente estas garantías:
 
@@ -363,7 +363,7 @@ Migration is explicit and reviewed through `project-context-init`. A legacy advi
 preserves the complete-context quality path; a partial migration is blocking.
 ```
 
-- [ ] **Step 2: Probar que no apareció infraestructura ni dependencia de medición**
+- [x] **Step 2: Probar que no apareció infraestructura ni dependencia de medición**
 
 Run:
 
@@ -374,7 +374,7 @@ rg -n "openai|anthropic|embedding|vector|prompt store|response store" cli/src/co
 
 Expected: el primer comando exit 0: salvo el pin directo existente `dependency-cruiser`, no cambia ninguna dependencia directa. El lockfile sólo puede diferir transitivamente por esa sustitución certificada documentada arriba. El segundo comando exit 1 sin coincidencias.
 
-- [ ] **Step 3: Ejecutar mutaciones reales y restaurarlas**
+- [x] **Step 3: Ejecutar mutaciones reales y restaurarlas**
 
 Mutación A: cambiar temporalmente el branch que rechaza `schema !== 1` para aceptar `2`; el test `future schema` debe FAIL con exit distinto de cero. Restaurar el archivo.
 
@@ -389,7 +389,7 @@ npx jest tests/core/context-kernel/inspect.test.ts tests/commands/preflight/pref
 
 Expected: ambas mutaciones demostraron rojo y la restauración queda PASS. Registrar comandos, mensajes y commit probado en el ledger de este plan.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/cli-reference.md docs/runbook.md cli/tests/core/context-kernel/inspect.test.ts cli/tests/commands/preflight/preflight.test.ts
@@ -482,3 +482,22 @@ Forward gaps: ninguno. Backward gaps: ninguno; cada task y test está anclado ar
 ## Release Evidence
 
 Esta sección se completa durante Task 4 con evidencia observada. Hasta entonces la única medición cerrada es R3 T0 = 67,481 bytes estructurales y provider usage = `unobservable`; no se formula ninguna afirmación de ahorro económico.
+
+### Task 3 execution evidence
+
+- No-infrastructure gate: passed. The direct dependency comparison excludes the
+  already-certified `dependency-cruiser` pin; no other direct dependency changed.
+  The Context Kernel and preflight sources returned no matches for
+  `openai|anthropic|embedding|vector|prompt store|response store` (expected
+  `rg` exit 1).
+- Mutation A: temporarily changed the schema guard to accept `2`.
+  `npx jest tests/core/context-kernel/inspect.test.ts --runInBand` exited 1;
+  the `future schema` case failed (along with fixtures intentionally rejected by
+  the mutation). Source restored before the green run.
+- Mutation B: temporarily treated advisory checks as blocking.
+  `npx jest tests/commands/preflight/preflight.test.ts --runInBand --testNamePattern='keeps legacy ready'`
+  exited 1 because expected `ready` became `degraded`. Source restored before
+  the green run.
+- Restored verification: 64 focused assertions passed, `npx tsc --noEmit`
+  passed, and root `awm sensors run` reported `overall: pass` (lint, typecheck,
+  depcheck; baseline 1, new findings 0).

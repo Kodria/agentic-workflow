@@ -139,6 +139,22 @@ awm sensors run        # all configured sensors: completion gate
 awm preflight          # configuration/readiness gate
 ```
 
+### Context Kernel v1 migration
+
+For registries that declare Context Kernel v1, interpret the `context-kernel`
+preflight row as follows:
+
+| Artifacts | Preflight result | Meaning |
+|---|---|---|
+| Valid v1 index and markers | pass / `ready` | selective eligible |
+| Absent | advisory / `ready` | legacy full context |
+| Partial or invalid | failure / `degraded` | repair before unattended handoff |
+
+`awm update` and `awm preflight` never rewrite project-owned `AGENTS.md`,
+`CONSTITUTION.md`, `CLAUDE.md`, `.awm/context/index.json`, or context cards.
+Migration is explicit and reviewed through `project-context-init`. A legacy advisory
+preserves the complete-context quality path; a partial migration is blocking.
+
 For an existing project, review a full initial run before accepting existing
 debt:
 
