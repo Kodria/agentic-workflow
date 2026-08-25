@@ -396,7 +396,7 @@ git add docs/cli-reference.md docs/runbook.md cli/tests/core/context-kernel/insp
 git commit -m "docs(preflight): explain context kernel migration states"
 ```
 
-### Task 4: Certificar R3a, publicar y cerrar T1
+### Task 4: Certificar R3a y preparar el handoff post-merge
 
 _Requirements: R3.3, R3.12, R3.15, R3.16_
 
@@ -405,7 +405,7 @@ _Requirements: R3.3, R3.12, R3.15, R3.16_
 - Verify: `.github/workflows/ci.yml`
 - Verify: `.github/workflows/release.yml`
 
-- [ ] **Step 1: Completar el ledger sin inventar telemetría**
+- [x] **Step 1: Completar el ledger sin inventar telemetría**
 
 Agregar bajo `## Release Evidence` una tabla con R2 T4, R3 T0 y R3 T1. Para cada fila registrar: commit, bytes fijos, dispatches reales, retrievals/fallbacks naturales, tests/sensors, defectos y correcciones, provider usage (`unobservable` salvo dato nativo), cuota owner sólo si fue entregada, PR y release. R2 T4 corresponde a esta primera corrida normal posterior a baseline v3.8.0; no se ejecuta benchmark sintético.
 
@@ -417,7 +417,7 @@ rg -n '^\| R2 T4 |^\| R3 T0 |^\| R3 T1 |unobservable|67,481|issue #126' docs/pla
 
 Expected: las tres filas y la semántica honesta están presentes. Esto verifica R3.16.
 
-- [ ] **Step 2: Ejecutar gates locales completos una sola vez**
+- [x] **Step 2: Ejecutar gates locales completos una sola vez**
 
 ```bash
 cd cli
@@ -431,7 +431,7 @@ git diff --check
 
 Expected: build/typecheck/tests/sensors PASS y diff limpio. No repetir la suite si el commit no cambia.
 
-- [ ] **Step 3: Verificar que cada requirement tiene prueba específica**
+- [x] **Step 3: Verificar que cada requirement tiene prueba específica**
 
 ```bash
 rg -n 'verifies R3\.(1|2|3|12|15|16)' cli/tests docs/plans/2026-08-25-r3a-context-kernel-preflight-plan.md
@@ -439,7 +439,7 @@ rg -n 'verifies R3\.(1|2|3|12|15|16)' cli/tests docs/plans/2026-08-25-r3a-contex
 
 Expected: aparece cada uno de los seis IDs; las aserciones correspondientes coinciden con la matriz inferior.
 
-- [ ] **Step 4: Commit de evidencia y handoff de branch**
+- [x] **Step 4: Commit de evidencia y handoff de branch**
 
 ```bash
 git add docs/plans/2026-08-25-r3a-context-kernel-preflight-plan.md
@@ -451,9 +451,10 @@ Expected: working tree limpio.
 
 El cierre normal usa `post-implementation-qa` → `post-implementation-docs` → `harness-retro` → `finishing-a-development-branch`. El PR debe titularse `feat(preflight): add context kernel v1 awareness` para que el release automático elija minor; nunca ejecutar `npm publish` manualmente.
 
-- [ ] **Step 5: Verificar CI, publicación y trazabilidad en GitHub**
+- [ ] **Step 5: Handoff post-merge para aceptación de release**
 
-Después del merge autorizado:
+Este paso no es requisito para que R3a quede lista para PR. Sólo inicia después del
+merge autorizado; entonces el responsable de release ejecuta:
 
 ```bash
 gh run list --repo Kodria/agentic-workflow --workflow ci.yml --limit 3
@@ -464,7 +465,7 @@ test "$R3A_MERGE_SHA" = "$R3A_NPM_SHA"
 npm view agentic-workflow-manager version
 ```
 
-Expected: CI y release success, SHAs idénticos y versión semver publicada. Publicar un comentario en issue #126 con PR, merge SHA, versión npm, T0/T1, gates y `R3b unblocked by published CLI`; verificarlo con `gh issue view 126 --repo Kodria/agentic-workflow --comments`.
+Expected: CI y release success, SHAs idénticos y versión semver publicada. Publicar un comentario en issue #126 con PR, merge SHA, versión npm, T0/T1, gates y `R3b unblocked by published CLI`; verificarlo con `gh issue view 126 --repo Kodria/agentic-workflow --comments`. Antes de merge esos campos permanecen explícitamente `pending`; no se reclama CI, publicación npm ni desbloqueo de R3b.
 
 ## Traceability Matrix
 
@@ -474,14 +475,24 @@ Expected: CI y release success, SHAs idénticos y versión semver publicada. Pub
 | R3.2 | T2, T3 | `legacy ready`, glyph `⚠`, remedy y documentación de tres estados |
 | R3.3 | T1, T2, T3, T4 | tabla de inputs inválidos, symlink/marker/anchor, partial degraded, mutation-red, suite completa |
 | R3.12 | T2, T3, T4 | ausencia de declaración y legacy conservan camino completo; regresión completa |
-| R3.15 | T1, T3, T4 | package/lock sin diff, búsqueda sin APIs/stores, gates locales |
-| R3.16 | T4 | filas R2 T4/T0/T1, evidencia de CI/npm y comentario verificable en issue #126 |
+| R3.15 | T1, T3, T4 | búsqueda sin APIs/stores, mutaciones y gates locales; el único diff de dependencia es el pin certificado de `dependency-cruiser` para el sensor existente, no una capacidad de modelo o store |
+| R3.16 | T4 | filas R2 T4/T0/T1; CI/npm/comentario quedan como aceptación post-merge verificable |
 
 Forward gaps: ninguno. Backward gaps: ninguno; cada task y test está anclado arriba. No hay UI ni tracks paralelos: los tres módulos comparten tipos, fixtures y estado de preflight, por lo que el plan es serial.
 
 ## Release Evidence
 
-Esta sección se completa durante Task 4 con evidencia observada. Hasta entonces la única medición cerrada es R3 T0 = 67,481 bytes estructurales y provider usage = `unobservable`; no se formula ninguna afirmación de ahorro económico.
+Esta sección registra sólo evidencia observada. Los bytes estructurales no equivalen a tokens facturados y provider usage/cost sigue siendo `unobservable`; no se formula ninguna afirmación de ahorro económico.
+
+| Checkpoint | Commit / alcance observado | Bytes fijos | Dispatches / retrievals | Tests, sensores, defectos y correcciones | Provider usage / cuota owner | PR / release |
+|---|---|---:|---|---|---|---|
+| R2 T4 | Ciclo normal posterior a baseline R2 `v3.8.0`; evidencia previa: agentic-workflow PR #128, merge `9a2dbfe` | 67,481 estructurales observados | Sin benchmark sintético; la telemetría de dispatch/retrieval del proveedor no fue capturada | Evidencia previa registró revisión independiente, regresiones focales, build, suite CLI y sensores pass | provider usage/cost: `unobservable`; cuota: no observada en ese checkpoint | PR #128 merged; release de R2 `v3.8.0` ya publicada |
+| R3 T0 | Snapshot congelado antes de la implementación R3a, plan `1c624c7` | 67,481 estructurales | No hubo llamada de medición ni retrieval artificial; no hay contador de dispatches del proveedor | Inventario/hash congelados en este plan; sin defecto ni corrección aplicable al snapshot | provider usage/cost: `unobservable`; cuota: no observada | PR/release: `pending` antes de creación/merge R3a |
+| R3 T1 | Ejecución real R3a en commits `84fec3b`…`f7d91c5` | 67,481 estructurales de referencia; no es medición de ahorro | Implementación y revisiones SDD reales de T1–T3; el agregado exacto de dispatches/retrievals no se instrumentó | Tests focales, TypeScript, mutaciones A/B y sensores raíz documentados abajo; correcciones incluyeron manifest inválido multi-registry, renderer bloqueante y contrato certificado del sensor | provider usage/cost: `unobservable`; cuota: observación del owner: 8% de cuota en los desarrollos de esta sesión, no atribuible ni convertible a ahorro R3a | PR: `pending` antes de creación; merge/npm release: `pending` |
+
+La aceptación de release de R3a queda en Step 5 post-merge: CI, merge SHA, npm
+`gitHead`, versión publicada, comentario en issue #126 y el desbloqueo de R3b no
+se anticipan en esta evidencia pre-PR.
 
 ### Task 3 execution evidence
 
