@@ -142,6 +142,21 @@ describe('preflight', () => {
         }));
     });
 
+    it('keeps an unconfigured legacy project not_configured while the context kernel remains advisory', async () => {
+        installRegistry({ projectContextSchema: 1 });
+
+        const report = await preflight(make());
+
+        expect(report.status).toBe('not_configured');
+        expect(check(report, 'manifest')).toMatchObject({ ok: false, detail: 'no .awm/sensors.json' });
+        expect(check(report, 'context-kernel')).toMatchObject({
+            ok: false,
+            advisory: true,
+            detail: expect.stringMatching(/legacy full context/),
+        });
+        expect(exitCodeFor(report)).toBe(1);
+    });
+
     it('passes a valid kernel', async () => {
         installRegistry({ projectContextSchema: 1 });
         const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
