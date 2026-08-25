@@ -61,7 +61,7 @@ describe('versioning core', () => {
             const clone = cloneOf(source, tmpWork, 'clone');
             const { resolveTargetRef } = require('../../src/core/versioning');
             const r = await resolveTargetRef(clone, { channel: 'stable' });
-            expect(r).toEqual({ kind: 'tag', ref: 'v1.10.0', version: '1.10.0' });
+            expect(r).toEqual({ kind: 'tag', ref: 'v1.10.0', version: '1.10.0', latestVersion: '1.10.0' });
         });
 
         it('pin exacto gana, con y sin prefijo v', async () => {
@@ -69,9 +69,9 @@ describe('versioning core', () => {
             const clone = cloneOf(source, tmpWork, 'clone');
             const { resolveTargetRef } = require('../../src/core/versioning');
             expect(await resolveTargetRef(clone, { pin: '1.0.0', channel: 'stable' }))
-                .toEqual({ kind: 'tag', ref: 'v1.0.0', version: '1.0.0' });
+                .toEqual({ kind: 'tag', ref: 'v1.0.0', version: '1.0.0', latestVersion: '1.1.0' });
             expect(await resolveTargetRef(clone, { pin: 'v1.0.0', channel: 'stable' }))
-                .toEqual({ kind: 'tag', ref: 'v1.0.0', version: '1.0.0' });
+                .toEqual({ kind: 'tag', ref: 'v1.0.0', version: '1.0.0', latestVersion: '1.1.0' });
         });
 
         it('pin inexistente → error que lista las versiones disponibles', async () => {
@@ -106,7 +106,7 @@ describe('versioning core', () => {
             const clone = cloneOf(source, tmpWork, 'clone');
             const { resolveTargetRef } = require('../../src/core/versioning');
             const r = await resolveTargetRef(clone, { channel: 'stable' });
-            expect(r).toEqual({ kind: 'tag', ref: 'v1.0.0', version: '1.0.0' });
+            expect(r).toEqual({ kind: 'tag', ref: 'v1.0.0', version: '1.0.0', latestVersion: '1.0.0' });
         });
 
         it('hace fetch: ve tags creados en el remote después del clone', async () => {
@@ -119,7 +119,7 @@ describe('versioning core', () => {
             GIT(source, 'tag v1.1.0');
             const { resolveTargetRef } = require('../../src/core/versioning');
             const r = await resolveTargetRef(clone, { channel: 'stable' });
-            expect(r).toEqual({ kind: 'tag', ref: 'v1.1.0', version: '1.1.0' });
+            expect(r).toEqual({ kind: 'tag', ref: 'v1.1.0', version: '1.1.0', latestVersion: '1.1.0' });
         });
     });
 

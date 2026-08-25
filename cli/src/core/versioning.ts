@@ -8,7 +8,7 @@ import { getPreferences } from '../utils/config';
 export type Channel = 'stable' | 'dev';
 
 export type ResolvedRef =
-    | { kind: 'tag'; ref: string; version: string }   // ref = "vX.Y.Z", version sin prefijo
+    | { kind: 'tag'; ref: string; version: string; latestVersion: string } // versiones sin prefijo
     | { kind: 'head'; ref: string }                    // canal dev — ref = default branch
     | { kind: 'head-fallback'; ref: string };          // stable sin tags — el caller avisa
 
@@ -74,7 +74,7 @@ export async function resolveTargetRef(
                 : 'the registry has no version tags';
             throw new Error(`Pinned version ${want} not found in ${repoDir} — ${available}`);
         }
-        return { kind: 'tag', ref: want, version: normalizePin(opts.pin) };
+        return { kind: 'tag', ref: want, version: normalizePin(opts.pin), latestVersion: tags[tags.length - 1].slice(1) };
     }
 
     const branch = await defaultBranch(git);
@@ -82,7 +82,7 @@ export async function resolveTargetRef(
     if (tags.length === 0) return { kind: 'head-fallback', ref: branch };
 
     const latest = tags[tags.length - 1];
-    return { kind: 'tag', ref: latest, version: latest.slice(1) };
+    return { kind: 'tag', ref: latest, version: latest.slice(1), latestVersion: latest.slice(1) };
 }
 
 /** Versión checkouteada actual ("X.Y.Z") si HEAD coincide exactamente con un tag semver; null si sigue un branch. */

@@ -82,7 +82,7 @@ describe('syncRegistries (git fixtures locales)', () => {
 
         const results = await m.syncRegistries();
 
-        expect(results).toEqual([{ name: 'personal', action: 'recloned', version: 'HEAD' }]);
+        expect(results).toEqual([{ name: 'personal', action: 'recloned', version: 'HEAD', disposition: 'installed' }]);
         expect(fs.existsSync(path.join(tmpHome, '.awm/registries/personal/skills/alpha/SKILL.md'))).toBe(true);
     });
 
@@ -102,7 +102,7 @@ describe('syncRegistries (git fixtures locales)', () => {
 
         const results = await m.syncRegistries();
 
-        expect(results[0]).toEqual({ name: 'personal', action: 'pulled', version: 'HEAD' });
+        expect(results[0]).toEqual({ name: 'personal', action: 'pulled', version: 'HEAD', disposition: 'resolved' });
         expect(results[1].name).toBe('broken');
         expect(results[1].action).toBe('error');
         const synced = fs.readFileSync(path.join(tmpHome, '.awm/registries/personal/skills/alpha/SKILL.md'), 'utf-8');
@@ -140,7 +140,7 @@ describe('syncRegistries (git fixtures locales)', () => {
 
         const results = await m.syncRegistries();
 
-        expect(results).toEqual([{ name: 'personal', action: 'recloned', version: 'v1.0.0' }]);
+        expect(results).toEqual([{ name: 'personal', action: 'recloned', version: 'v1.0.0', disposition: 'installed', availableVersion: 'v1.0.0' }]);
         const synced = fs.readFileSync(path.join(tmpHome, '.awm/registries/personal/skills/alpha/SKILL.md'), 'utf-8');
         expect(synced).toContain('test skill'); // contenido del tag, no del HEAD
     });
@@ -182,7 +182,9 @@ describe('syncRegistries (git fixtures locales)', () => {
 
         const results = await m.syncRegistries();
 
-        expect(results).toEqual([{ name: 'personal', action: 'recloned', version: 'v1.0.0' }]);
+        expect(results).toEqual([{
+            name: 'personal', action: 'recloned', version: 'v1.0.0', disposition: 'installed', pin: '1.0.0', availableVersion: 'v1.1.0',
+        }]);
     });
 
     it('baseline sembrado se sincroniza por el mismo loop que cualquier registry', async () => {
@@ -195,7 +197,7 @@ describe('syncRegistries (git fixtures locales)', () => {
 
         const results = await m.syncRegistries();
 
-        expect(results).toEqual([{ name: 'baseline', action: 'recloned', version: 'v1.0.0' }]);
+        expect(results).toEqual([{ name: 'baseline', action: 'recloned', version: 'v1.0.0', disposition: 'installed', availableVersion: 'v1.0.0' }]);
         expect(fs.existsSync(path.join(tmpHome, '.awm/registries/baseline/skills/alpha/SKILL.md'))).toBe(true);
     });
 
@@ -224,7 +226,7 @@ describe('syncRegistries (git fixtures locales)', () => {
         m.writeRegistriesConfig([{ name: 'personal', remote: source }]);
         // primera sync: queda en v1.0.0
         const r1 = await m.syncRegistries();
-        expect(r1).toEqual([{ name: 'personal', action: 'recloned', version: 'v1.0.0' }]);
+        expect(r1).toEqual([{ name: 'personal', action: 'recloned', version: 'v1.0.0', disposition: 'installed', availableVersion: 'v1.0.0' }]);
 
         // nueva release en el remote
         fs.writeFileSync(path.join(source, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\ndescription: v2\n---\n');
@@ -234,9 +236,16 @@ describe('syncRegistries (git fixtures locales)', () => {
 
         // segunda sync: avanza al nuevo tag
         const r2 = await m.syncRegistries();
-        expect(r2).toEqual([{ name: 'personal', action: 'pulled', version: 'v1.1.0' }]);
+        expect(r2).toEqual([{
+            name: 'personal', action: 'pulled', version: 'v1.1.0', disposition: 'advanced', previousVersion: 'v1.0.0', availableVersion: 'v1.1.0',
+        }]);
         const content = fs.readFileSync(path.join(tmpHome, '.awm/registries/personal/skills/alpha/SKILL.md'), 'utf-8');
         expect(content).toContain('v2');
+
+        const r3 = await m.syncRegistries();
+        expect(r3).toEqual([{
+            name: 'personal', action: 'pulled', version: 'v1.1.0', disposition: 'unchanged', previousVersion: 'v1.1.0', availableVersion: 'v1.1.0',
+        }]);
     });
 
     it('rollback tag→tag: clone en v1.1.0 retrocede a v1.0.0 al establecer pin', async () => {
@@ -251,7 +260,7 @@ describe('syncRegistries (git fixtures locales)', () => {
 
         // primera sync sin pin: queda en v1.1.0
         const r1 = await m.syncRegistries();
-        expect(r1).toEqual([{ name: 'personal', action: 'recloned', version: 'v1.1.0' }]);
+        expect(r1).toEqual([{ name: 'personal', action: 'recloned', version: 'v1.1.0', disposition: 'installed', availableVersion: 'v1.1.0' }]);
 
         // establece pin a la versión anterior
         const awmDir = path.join(tmpHome, '.awm');
@@ -262,7 +271,15 @@ describe('syncRegistries (git fixtures locales)', () => {
 
         // segunda sync con pin: retrocede a v1.0.0
         const r2 = await m.syncRegistries();
-        expect(r2).toEqual([{ name: 'personal', action: 'pulled', version: 'v1.0.0' }]);
+        expect(r2).toEqual([{
+            name: 'personal',
+            action: 'pulled',
+            version: 'v1.0.0',
+            disposition: 'regressed',
+            pin: '1.0.0',
+            previousVersion: 'v1.1.0',
+            availableVersion: 'v1.1.0',
+        }]);
         const content = fs.readFileSync(path.join(tmpHome, '.awm/registries/personal/skills/alpha/SKILL.md'), 'utf-8');
         expect(content).toContain('test skill'); // contenido original del tag v1.0.0
     });
@@ -281,7 +298,7 @@ describe('syncRegistries (git fixtures locales)', () => {
 
         // primera sync en canal dev: queda en HEAD (no en el tag)
         const r1 = await m.syncRegistries();
-        expect(r1).toEqual([{ name: 'personal', action: 'recloned', version: 'HEAD' }]);
+        expect(r1).toEqual([{ name: 'personal', action: 'recloned', version: 'HEAD', disposition: 'installed' }]);
 
         // nuevo commit en el remote (post-tag, no release)
         fs.writeFileSync(path.join(source, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\ndescription: head-2\n---\n');
@@ -290,7 +307,9 @@ describe('syncRegistries (git fixtures locales)', () => {
 
         // segunda sync: recibe el nuevo commit
         const r2 = await m.syncRegistries();
-        expect(r2).toEqual([{ name: 'personal', action: 'pulled', version: 'HEAD' }]);
+        expect(r2).toEqual([{
+            name: 'personal', action: 'pulled', version: 'HEAD', disposition: 'resolved', previousVersion: 'v1.0.0',
+        }]);
         const content = fs.readFileSync(path.join(tmpHome, '.awm/registries/personal/skills/alpha/SKILL.md'), 'utf-8');
         expect(content).toContain('head-2');
     });

@@ -15,6 +15,7 @@
 // by tests).
 import pc from 'picocolors';
 import { AgentTarget } from '../providers';
+import { normalizePin } from '../core/versioning';
 import { noteWindowsCaveat } from '../core/paths';
 import { getPreferences } from '../utils/config';
 import { resolveAgentTargetsOrError } from '../core/agent-targets';
@@ -134,7 +135,28 @@ export async function runUpdateCore(
     const registryResults = await d.syncRegistries();
     for (const r of registryResults) {
         if (r.action === 'error') console.warn(pc.yellow(`  ⚠  registry ${r.name}: ${r.error}`));
-        else console.log(pc.green(`  ✓ Registry ${r.name} ${r.action === 'pulled' ? 'updated' : 're-cloned'} @ ${r.version}`));
+        else if (r.disposition === 'regressed') {
+            const latest = r.availableVersion && r.availableVersion !== r.version
+                ? ` Latest available: ${r.availableVersion}.`
+                : '';
+            console.warn(pc.yellow(
+                `  ⚠ Registry ${r.name} regressed ${r.previousVersion ?? '(previous version)'} → ${r.version} `
+                + `because it is pinned to v${normalizePin(r.pin ?? '')}.${latest} Run \`awm unpin ${r.name}\` to move forward.`,
+            ));
+        } else if (r.pin && r.availableVersion !== r.version) {
+            console.log(pc.yellow(
+                `  ✓ Registry ${r.name} resolved @ ${r.version} (pinned to v${normalizePin(r.pin)}; `
+                + `latest available: ${r.availableVersion ?? 'unknown'}). Run \`awm unpin ${r.name}\` to move forward.`,
+            ));
+        } else if (r.disposition === 'unchanged') {
+            console.log(pc.dim(`  ✓ Registry ${r.name} already at ${r.version}`));
+        } else if (r.disposition === 'advanced') {
+            console.log(pc.green(`  ✓ Registry ${r.name} updated @ ${r.version}`));
+        } else if (r.disposition === 'installed') {
+            console.log(pc.green(`  ✓ Registry ${r.name} installed @ ${r.version}`));
+        } else {
+            console.log(pc.green(`  ✓ Registry ${r.name} resolved @ ${r.version}`));
+        }
     }
     const registries: RegistryOutcome = {
         configured: registryResults.length,

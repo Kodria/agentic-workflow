@@ -128,6 +128,41 @@ describe('awm update — honest outcome', () => {
         expect(updateOutro(result)).toBe('✅ 2 registries, skills and hooks updated.');
     });
 
+    it('una regresión causada por pin se advierte y explica cómo volver a avanzar', async () => {
+        const { runUpdateCore } = require('../../src/commands/update');
+        await runUpdateCore({}, deps({
+            syncRegistries: async () => [{
+                name: 'baseline',
+                action: 'pulled',
+                version: 'v1.0.0',
+                disposition: 'regressed',
+                pin: '1.0.0',
+                availableVersion: 'v1.1.0',
+            }],
+        }));
+
+        const output = [...logSpy.mock.calls, ...warnSpy.mock.calls].flat().join('\n');
+        expect(output).toMatch(/regress/i);
+        expect(output).toMatch(/v1\.0\.0/);
+        expect(output).toMatch(/v1\.1\.0/);
+        expect(output).toMatch(/awm unpin baseline/);
+        expect(output).not.toMatch(/Registry baseline updated/i);
+    });
+
+    it('un pin que ya coincide con el último release no recomienda unpin', async () => {
+        const { runUpdateCore } = require('../../src/commands/update');
+        await runUpdateCore({}, deps({
+            syncRegistries: async () => [{
+                name: 'baseline', action: 'pulled', version: 'v1.1.0', disposition: 'unchanged',
+                pin: 'v1.1.0', availableVersion: 'v1.1.0',
+            }],
+        }));
+
+        const output = [...logSpy.mock.calls, ...warnSpy.mock.calls].flat().join('\n');
+        expect(output).toMatch(/already at v1\.1\.0/i);
+        expect(output).not.toMatch(/awm unpin baseline/);
+    });
+
     it('un registry que falló y NO dejó contenido en disco falla cerrado', async () => {
         const { runUpdateCore } = require('../../src/commands/update');
         const result = await runUpdateCore({}, deps({
