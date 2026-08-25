@@ -119,6 +119,21 @@ describe('preflight', () => {
         expect(report.checks.map(c => c.id)).not.toContain('context-kernel');
     });
 
+    it('blocks preflight when an active registry declares an invalid context kernel schema', async () => {
+        installRegistry({ projectContextSchema: 2 });
+        const report = await preflight(make({
+            manifest: { pack: 'generic', sensors: { security: { enabled: false } } },
+        }));
+
+        expect(report.status).toBe('degraded');
+        expect(exitCodeFor(report)).toBe(1);
+        expect(check(report, 'context-kernel')).toMatchObject({
+            ok: false,
+            advisory: false,
+            detail: expect.stringMatching(/projectContextSchema.*exactly 1.*2/),
+        });
+    });
+
     it('keeps legacy ready but renders a persistent warning and remedy', async () => {
         installRegistry({ projectContextSchema: 1 });
         const report = await preflight(make({
