@@ -456,7 +456,9 @@ export async function preflight(cwd: string = process.cwd(), opts: PreflightOpti
     ];
 
     const blockingFailure = (check: PreflightCheck): boolean => !check.ok && check.advisory !== true;
-    const status = !manifestExists ? 'not_configured'
+    const invalidContextKernel = contextKernel !== null && blockingFailure(contextKernel);
+    const status = invalidContextKernel ? 'degraded'
+        : !manifestExists ? 'not_configured'
         : checks.some(blockingFailure) ? 'degraded'
         : 'ready';
 

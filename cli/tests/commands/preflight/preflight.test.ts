@@ -168,6 +168,19 @@ describe('preflight', () => {
         }));
     });
 
+    it('degrades an invalid kernel even when no sensor manifest exists', async () => {
+        installRegistry({ projectContextSchema: 1 });
+        const dir = make();
+        writePartialKernel(dir);
+
+        const report = await preflight(dir);
+
+        expect(report.status).toBe('degraded');
+        expect(check(report, 'manifest')).toMatchObject({ ok: false, detail: 'no .awm/sensors.json' });
+        expect(check(report, 'context-kernel')).toMatchObject({ ok: false, advisory: false });
+        expect(exitCodeFor(report)).toBe(1);
+    });
+
     it('keeps default preflight static and does not dispatch sensors', async () => {
         const dir = make({
             manifest: { pack: 'generic', sensors: { security: { enabled: false } } },
