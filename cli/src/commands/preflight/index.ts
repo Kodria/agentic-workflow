@@ -21,7 +21,7 @@ export function formatReport(report: PreflightReport): string {
     // chars, broke a hardcoded 9-char pad).
     const idWidth = Math.max(0, ...report.checks.map(c => c.id.length));
     const lines = report.checks.map(c =>
-        `  ${c.ok ? pc.green('✔') : pc.red('✘')}  ${c.id.padEnd(idWidth)} ${c.detail}`
+        `  ${c.advisory === true ? pc.yellow('⚠') : c.ok ? pc.green('✔') : pc.red('✘')}  ${c.id.padEnd(idWidth)} ${c.detail}`
         + (c.remedy ? `\n       ${pc.dim('→ ' + c.remedy)}` : ''),
     );
 
