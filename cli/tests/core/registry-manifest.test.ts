@@ -115,4 +115,36 @@ describe('registry manifest (awm-registry.json)', () => {
         const { readRegistryManifest } = load();
         expect(() => readRegistryManifest(tmpWork)).toThrow(/minCliVersion/);
     });
+
+    it('reads projectContextSchema 1 without changing legacy manifests', () => {
+        writeManifest({ minCliVersion: '9.2.1', projectContextSchema: 1 });
+        const { readRegistryManifest } = load();
+        expect(readRegistryManifest(tmpWork)).toEqual({
+            overrides: new Set(), minCliVersion: '9.2.1', projectContextSchema: 1,
+        });
+
+        writeManifest({ minCliVersion: '9.2.1' });
+        expect(readRegistryManifest(tmpWork).projectContextSchema).toBeUndefined();
+    });
+
+    it.each([0, 2, -1, 1.5, '1', null])('rejects unsupported project context schema %p', (value) => {
+        writeManifest({ projectContextSchema: value });
+        const { readRegistryManifest } = load();
+        expect(() => readRegistryManifest(tmpWork)).toThrow(/projectContextSchema.*exactly 1/);
+    });
+
+    it('resolves the first usable Context Kernel declaration and retains malformed manifest diagnostics', () => {
+        const { registriesDir, writeRegistriesConfig, resolveProjectContextSchema } = load();
+        writeRegistriesConfig([
+            { name: 'broken', remote: 'https://example.invalid/broken.git' },
+            { name: 'active', remote: 'https://example.invalid/active.git' },
+        ]);
+        for (const name of ['broken', 'active']) fs.mkdirSync(path.join(registriesDir(), name, 'skills'), { recursive: true });
+        fs.writeFileSync(path.join(registriesDir(), 'broken', 'awm-registry.json'), JSON.stringify({ projectContextSchema: 2 }));
+        fs.writeFileSync(path.join(registriesDir(), 'active', 'awm-registry.json'), JSON.stringify({ projectContextSchema: 1 }));
+
+        const result = resolveProjectContextSchema();
+        expect(result.declaration).toEqual(expect.objectContaining({ registry: expect.objectContaining({ name: 'active' }), schema: 1 }));
+        expect(result.diagnostics).toEqual([expect.stringMatching(/broken.*projectContextSchema.*exactly 1/)]);
+    });
 });

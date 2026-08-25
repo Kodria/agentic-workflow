@@ -346,6 +346,8 @@ export interface RegistryManifest {
     overrides: Set<string>;
     /** Versión mínima del CLI requerida por el contenido ("X.Y.Z", sin prefijo v). Opcional — WS-4. */
     minCliVersion?: string;
+    /** Optional Context Kernel compatibility declaration (R3). */
+    projectContextSchema?: 1;
 }
 
 export function readRegistryManifest(root: string): RegistryManifest {
@@ -376,7 +378,42 @@ export function readRegistryManifest(root: string): RegistryManifest {
         }
         minCliVersion = rawMin.replace(/^v/, '');
     }
-    return { overrides: new Set(overrides as string[]), minCliVersion };
+    const rawSchema = (raw as Record<string, unknown>)?.projectContextSchema;
+    let projectContextSchema: 1 | undefined;
+    if (rawSchema !== undefined) {
+        if (rawSchema !== 1) {
+            throw new Error(`Invalid registry manifest at ${file}: "projectContextSchema" must be exactly 1, got ${JSON.stringify(rawSchema)}`);
+        }
+        projectContextSchema = 1;
+    }
+    return { overrides: new Set(overrides as string[]), minCliVersion, projectContextSchema };
+}
+
+export interface ProjectContextSchemaDeclaration {
+    registry: RegistrySource;
+    schema: 1;
+}
+
+export interface ProjectContextSchemaResolution {
+    declaration?: ProjectContextSchemaDeclaration;
+    diagnostics: string[];
+}
+
+/** Finds the first usable registry that declares Context Kernel v1. Manifest errors
+ * are retained as diagnostics so consumers can fail loudly instead of hiding them. */
+export function resolveProjectContextSchema(): ProjectContextSchemaResolution {
+    const diagnostics: string[] = [];
+    for (const registry of listRegistries()) {
+        if (!validateRegistryLayout(registry.contentRoot)) continue;
+        try {
+            if (readRegistryManifest(registry.contentRoot).projectContextSchema === 1) {
+                return { declaration: { registry, schema: 1 }, diagnostics };
+            }
+        } catch (error) {
+            diagnostics.push(error instanceof Error ? error.message : String(error));
+        }
+    }
+    return { diagnostics };
 }
 
 /** Nombre del registry dueño de un path: el nombre del clone bajo registriesDir(),
