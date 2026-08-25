@@ -7,6 +7,8 @@ import { SensorManifest } from '../sensors/types';
 import { readBaseline } from '../sensors/baseline';
 import { runSensors } from '../sensors/run';
 import { resolveOnPath } from '../../core/paths';
+import { resolveProjectContextSchema } from '../../core/registries';
+import { inspectContextKernel } from '../../core/context-kernel/inspect';
 
 /**
  * Preflight: can this project be gated at all?
@@ -29,8 +31,10 @@ import { resolveOnPath } from '../../core/paths';
  */
 
 export type PreflightCheck = {
-    id: 'context' | 'manifest' | 'tools' | 'pack' | 'host' | 'sensors-baseline' | 'sensors-execution';
+    id: 'context' | 'context-kernel' | 'manifest' | 'tools' | 'pack' | 'host' | 'sensors-baseline' | 'sensors-execution';
     ok: boolean;
+    /** Informational warning: rendered prominently, but does not degrade the harness. */
+    advisory?: boolean;
     detail: string;
     /** What the operator should do. Absent when `ok`. */
     remedy?: string;
@@ -74,6 +78,45 @@ function checkContext(cwd: string): PreflightCheck {
         };
     }
     return { id: 'context', ok: true, detail: present.join(', ') };
+}
+
+function checkContextKernel(cwd: string): PreflightCheck | null {
+    const resolution = resolveProjectContextSchema();
+    if (resolution.diagnostics.length > 0) {
+        return {
+            id: 'context-kernel',
+            ok: false,
+            advisory: false,
+            detail: `Context Kernel registry declaration is invalid: ${resolution.diagnostics.join('; ')}`,
+            remedy: 'repair the registry manifest or use the safe full-context project files until the registry is valid',
+        };
+    }
+    if (!resolution.declaration) return null;
+
+    const inspection = inspectContextKernel(cwd);
+    if (inspection.state === 'legacy') {
+        return {
+            id: 'context-kernel',
+            ok: false,
+            advisory: true,
+            detail: 'legacy full context — Context Kernel v1 migration available',
+            remedy: 'run project-context-init and review the generated rule trace; awm update never rewrites project files',
+        };
+    }
+    if (inspection.state === 'valid') {
+        return {
+            id: 'context-kernel',
+            ok: true,
+            detail: `Context Kernel v${inspection.schema} valid (${inspection.fixedBytes} fixed bytes)`,
+        };
+    }
+    return {
+        id: 'context-kernel',
+        ok: false,
+        advisory: false,
+        detail: inspection.detail,
+        remedy: inspection.remedy,
+    };
 }
 
 function readManifest(cwd: string): SensorManifest | null {
@@ -395,8 +438,10 @@ export async function preflight(cwd: string = process.cwd(), opts: PreflightOpti
     const manifest = readManifest(cwd);
     const manifestExists = fs.existsSync(path.join(cwd, MANIFEST));
 
+    const contextKernel = checkContextKernel(cwd);
     const checks: PreflightCheck[] = [
         checkContext(cwd),
+        ...(contextKernel ? [contextKernel] : []),
         checkManifest(cwd, manifest),
         // Skipped when there is no manifest: reporting "tools broken" (or nudging toward
         // a baseline that has nothing to snapshot) on a repo that was never set up
@@ -410,9 +455,12 @@ export async function preflight(cwd: string = process.cwd(), opts: PreflightOpti
         checkHost(cwd),
     ];
 
-    const status = !manifestExists ? 'not_configured'
-        : checks.every(c => c.ok) ? 'ready'
-        : 'degraded';
+    const blockingFailure = (check: PreflightCheck): boolean => !check.ok && check.advisory !== true;
+    const invalidContextKernel = contextKernel !== null && blockingFailure(contextKernel);
+    const status = invalidContextKernel ? 'degraded'
+        : !manifestExists ? 'not_configured'
+        : checks.some(blockingFailure) ? 'degraded'
+        : 'ready';
 
     return { status, checks };
 }

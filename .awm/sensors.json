@@ -112,7 +112,7 @@
     },
     "depcheck": {
       "enabled": true,
-      "variantId": "dependency-cruiser-17",
+      "variantId": "dependency-cruiser",
       "command": {
         "executable": "depcruise",
         "resolution": "node-modules-bin",
@@ -125,10 +125,10 @@
       "initializedCompatibility": {
         "state": "certified",
         "reason": "range-and-probe",
-        "variantId": "dependency-cruiser-17",
-        "toolVersion": "17.4.3",
+        "variantId": "dependency-cruiser",
+        "toolVersion": "16.10.4",
         "runtimeVersion": "24.19.0",
-        "certifiedRange": "=17.4.3",
+        "certifiedRange": "=16.10.4",
         "evidence": [
           {
             "kind": "project-path",
@@ -147,7 +147,7 @@
           },
           {
             "kind": "tool-version",
-            "status": "17.4.3"
+            "status": "16.10.4"
           },
           {
             "kind": "runtime-version",

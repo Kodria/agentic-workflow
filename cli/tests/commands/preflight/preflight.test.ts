@@ -59,10 +59,178 @@ const dirs: string[] = [];
 const make = (o?: Parameters<typeof project>[0]) => { const d = project(o); dirs.push(d); return d; };
 afterAll(() => dirs.forEach(d => fs.rmSync(d, { recursive: true, force: true })));
 
+let previousAwmHome: string | undefined;
+const awmHomes: string[] = [];
+beforeEach(() => {
+    previousAwmHome = process.env.AWM_HOME;
+    const awmHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-preflight-home-'));
+    awmHomes.push(awmHome);
+    process.env.AWM_HOME = awmHome;
+});
+afterEach(() => {
+    if (previousAwmHome === undefined) delete process.env.AWM_HOME;
+    else process.env.AWM_HOME = previousAwmHome;
+});
+afterAll(() => awmHomes.forEach(dir => fs.rmSync(dir, { recursive: true, force: true })));
+
+function installRegistry(manifest: Record<string, unknown>, name = 'test-registry'): void {
+    const awmHome = process.env.AWM_HOME!;
+    const root = path.join(awmHome, 'registries', name);
+    fs.mkdirSync(path.join(root, 'skills'), { recursive: true });
+    const config = fs.existsSync(path.join(awmHome, 'registries.json'))
+        ? JSON.parse(fs.readFileSync(path.join(awmHome, 'registries.json'), 'utf8'))
+        : [];
+    config.push({ name, remote: `https://example.invalid/${name}.git` });
+    fs.writeFileSync(path.join(awmHome, 'registries.json'), JSON.stringify(config));
+    fs.writeFileSync(path.join(root, 'awm-registry.json'), JSON.stringify(manifest));
+}
+
+function writeValidKernel(dir: string): void {
+    fs.writeFileSync(path.join(dir, 'AGENTS.md'), '<!-- AWM:CONTEXT-KERNEL:START v1 -->\nagent rules\n<!-- AWM:CONTEXT-KERNEL:END v1 -->\n');
+    fs.writeFileSync(path.join(dir, 'CONSTITUTION.md'), '<!-- AWM:CONTEXT-KERNEL:START v1 -->\n<!-- awm-context:CTX-PROCESS-001 -->\nprocess rules\n<!-- AWM:CONTEXT-KERNEL:END v1 -->\n');
+    const card = path.join(dir, 'docs', 'awm', 'context', 'releases.md');
+    fs.mkdirSync(path.dirname(card), { recursive: true });
+    fs.writeFileSync(card, '<!-- awm-context:CTX-RELEASE-001 -->\nrelease rules\n');
+    fs.mkdirSync(path.join(dir, '.awm', 'context'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.awm', 'context', 'index.json'), JSON.stringify({
+        schema: 1,
+        kernelFiles: ['AGENTS.md', 'CONSTITUTION.md'],
+        maxFixedBytes: 33_740,
+        entries: [
+            { id: 'CTX-PROCESS-001', tier: 'kernel', path: 'CONSTITUTION.md', anchor: 'awm-context:CTX-PROCESS-001', when: 'always' },
+            { id: 'CTX-RELEASE-001', tier: 'selective', path: 'docs/awm/context/releases.md', anchor: 'awm-context:CTX-RELEASE-001', when: 'release automation' },
+        ],
+    }));
+}
+
+function writePartialKernel(dir: string): void {
+    fs.writeFileSync(path.join(dir, 'AGENTS.md'), '<!-- AWM:CONTEXT-KERNEL:START v1 -->\nagent rules\n');
+}
+
 const check = (r: Awaited<ReturnType<typeof preflight>>, id: string) => r.checks.find(c => c.id === id)!;
 
 describe('preflight', () => {
     afterEach(() => mockRunSensors.mockReset());
+
+    it('does not add a row when no registry declares the schema', async () => {
+        installRegistry({ minCliVersion: '9.2.1' });
+        const report = await preflight(make({
+            manifest: { pack: 'generic', sensors: { security: { enabled: false } } },
+        }));
+
+        expect(report.checks.map(c => c.id)).not.toContain('context-kernel');
+    });
+
+    it('blocks preflight when an active registry declares an invalid context kernel schema', async () => {
+        installRegistry({ projectContextSchema: 2 });
+        const report = await preflight(make({
+            manifest: { pack: 'generic', sensors: { security: { enabled: false } } },
+        }));
+
+        expect(report.status).toBe('degraded');
+        expect(exitCodeFor(report)).toBe(1);
+        expect(check(report, 'context-kernel')).toMatchObject({
+            ok: false,
+            advisory: false,
+            detail: expect.stringMatching(/projectContextSchema.*exactly 1.*2/),
+        });
+    });
+
+    it('fails closed when an earlier active registry manifest is malformed before a valid declaration', async () => {
+        installRegistry({ projectContextSchema: 2 }, 'malformed');
+        installRegistry({ projectContextSchema: 1 }, 'valid');
+
+        const report = await preflight(make({
+            manifest: { pack: 'generic', sensors: { security: { enabled: false } } },
+        }));
+
+        expect(report.status).toBe('degraded');
+        expect(exitCodeFor(report)).toBe(1);
+        expect(check(report, 'context-kernel')).toMatchObject({
+            ok: false,
+            advisory: false,
+            detail: expect.stringMatching(/malformed.*awm-registry\.json.*projectContextSchema.*exactly 1/i),
+        });
+    });
+
+    it('keeps legacy ready but renders a persistent warning and remedy', async () => {
+        installRegistry({ projectContextSchema: 1 });
+        const report = await preflight(make({
+            manifest: { pack: 'generic', sensors: { security: { enabled: false } } },
+        }));
+
+        expect(report.status).toBe('ready');
+        expect(report.checks).toContainEqual(expect.objectContaining({
+            id: 'context-kernel', ok: false, advisory: true,
+            detail: expect.stringMatching(/legacy full context/),
+            remedy: expect.stringMatching(/project-context-init/),
+        }));
+        expect(formatReport(report)).toMatch(/⚠.*context-kernel.*legacy full context/s);
+        expect(exitCodeFor(report)).toBe(0);
+        expect(JSON.parse(JSON.stringify(report))).toEqual(expect.objectContaining({
+            status: 'ready',
+            checks: expect.arrayContaining([expect.objectContaining({
+                id: 'context-kernel', ok: false, advisory: true,
+                detail: expect.any(String), remedy: expect.any(String),
+            })]),
+        }));
+    });
+
+    it('keeps an unconfigured legacy project not_configured while the context kernel remains advisory', async () => {
+        installRegistry({ projectContextSchema: 1 });
+
+        const report = await preflight(make());
+
+        expect(report.status).toBe('not_configured');
+        expect(check(report, 'manifest')).toMatchObject({ ok: false, detail: 'no .awm/sensors.json' });
+        expect(check(report, 'context-kernel')).toMatchObject({
+            ok: false,
+            advisory: true,
+            detail: expect.stringMatching(/legacy full context/),
+        });
+        expect(exitCodeFor(report)).toBe(1);
+    });
+
+    it('passes a valid kernel', async () => {
+        installRegistry({ projectContextSchema: 1 });
+        const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
+        writeValidKernel(dir);
+
+        const report = await preflight(dir);
+
+        expect(report).toEqual(expect.objectContaining({ status: 'ready' }));
+        expect(check(report, 'context-kernel')).toMatchObject({ ok: true });
+        expect(check(report, 'context-kernel')).not.toHaveProperty('advisory');
+    });
+
+    it('degrades partial or invalid migration', async () => {
+        installRegistry({ projectContextSchema: 1 });
+        const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
+        writePartialKernel(dir);
+
+        const report = await preflight(dir);
+
+        expect(report.status).toBe('degraded');
+        expect(exitCodeFor(report)).toBe(1);
+        expect(report.checks).toContainEqual(expect.objectContaining({
+            id: 'context-kernel', advisory: false, ok: false,
+        }));
+        expect(formatReport(report)).toMatch(/Harness degraded — it has blocking preflight failures\./);
+        expect(formatReport(report)).not.toMatch(/declares sensors it cannot run/);
+    });
+
+    it('degrades an invalid kernel even when no sensor manifest exists', async () => {
+        installRegistry({ projectContextSchema: 1 });
+        const dir = make();
+        writePartialKernel(dir);
+
+        const report = await preflight(dir);
+
+        expect(report.status).toBe('degraded');
+        expect(check(report, 'manifest')).toMatchObject({ ok: false, detail: 'no .awm/sensors.json' });
+        expect(check(report, 'context-kernel')).toMatchObject({ ok: false, advisory: false });
+        expect(exitCodeFor(report)).toBe(1);
+    });
 
     it('keeps default preflight static and does not dispatch sensors', async () => {
         const dir = make({
