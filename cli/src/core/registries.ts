@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import simpleGit from 'simple-git';
 import { resolveBaseRemote } from './registry';
-import { resolveTargetRef, machineVersionOpts, compareSemver } from './versioning';
+import { resolveTargetRef, machineVersionOpts, compareSemver, currentVersion, normalizePin } from './versioning';
 import { cliVersion } from './cli-version';
 import { awmHome } from './paths';
 
@@ -214,8 +214,22 @@ export function registriesNeedSync(): boolean {
     return listRegistries().some((registry) => !validateRegistryLayout(registry.contentRoot));
 }
 
+export type RegistrySyncDisposition = 'installed' | 'advanced' | 'unchanged' | 'regressed' | 'resolved';
+
 export type RegistrySyncResult =
-    | { name: string; action: 'pulled' | 'recloned'; version: string }  // version: 'vX.Y.Z' | 'HEAD'
+    | {
+        name: string;
+        action: 'pulled' | 'recloned';
+        version: string;
+        /** Dirección real del checkout. Ausente solo para implementaciones previas/injectadas. */
+        disposition?: RegistrySyncDisposition;
+        /** Pin de máquina que resolvió el target, si lo hubo. */
+        pin?: string;
+        /** Versión semver previa, para que el renderer pueda explicar un rollback. */
+        previousVersion?: string;
+        /** Último tag semver disponible al resolver, aun cuando un pin eligió otro. */
+        availableVersion?: string;
+    }  // version: 'vX.Y.Z' | 'HEAD'
     | { name: string; action: 'error'; error: string };
 
 /** Sincroniza cada registry configurado al ref resuelto (pin > último tag > HEAD);
@@ -240,9 +254,11 @@ export async function syncRegistries(): Promise<RegistrySyncResult[]> {
                 await simpleGit(reg.contentRoot).reset(['--hard']);
             }
             const git = simpleGit(reg.contentRoot);
+            const previousVersion = freshClone ? null : await currentVersion(reg.contentRoot);
+            const versionOpts = machineVersionOpts(reg.name);
             let resolved;
             try {
-                resolved = await resolveTargetRef(reg.contentRoot, machineVersionOpts(reg.name));
+                resolved = await resolveTargetRef(reg.contentRoot, versionOpts);
                 await git.checkout(resolved.ref);
                 if (resolved.kind !== 'tag') await git.pull('origin', resolved.ref);
                 if (!validateRegistryLayout(reg.contentRoot)) {
@@ -252,10 +268,22 @@ export async function syncRegistries(): Promise<RegistrySyncResult[]> {
                 if (freshClone) fs.rmSync(reg.contentRoot, { recursive: true, force: true });
                 throw e;
             }
+            const version = resolved.kind === 'tag' ? `v${resolved.version}` : 'HEAD';
+            let disposition: RegistrySyncDisposition;
+            if (freshClone) disposition = 'installed';
+            else if (resolved.kind !== 'tag' || previousVersion === null) disposition = 'resolved';
+            else {
+                const direction = compareSemver(resolved.version, previousVersion);
+                disposition = direction > 0 ? 'advanced' : direction < 0 ? 'regressed' : 'unchanged';
+            }
             results.push({
                 name: reg.name,
                 action: freshClone ? 'recloned' : 'pulled',
-                version: resolved.kind === 'tag' ? `v${resolved.version}` : 'HEAD',
+                version,
+                disposition,
+                ...(versionOpts.pin ? { pin: normalizePin(versionOpts.pin) } : {}),
+                ...(previousVersion ? { previousVersion: `v${previousVersion}` } : {}),
+                ...(resolved.kind === 'tag' ? { availableVersion: `v${resolved.latestVersion}` } : {}),
             });
         } catch (e) {
             results.push({ name: reg.name, action: 'error', error: e instanceof Error ? e.message : String(e) });
