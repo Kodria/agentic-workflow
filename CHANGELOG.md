@@ -1,3 +1,8 @@
+## v9.3.0 - 2026-08-25
+
+### Features
+- **preflight:** add context kernel v1 awareness (#130)
+
 ## v9.2.1 - 2026-08-25
 
 ### Fixes
