@@ -451,10 +451,11 @@ Expected: working tree limpio.
 
 El cierre normal usa `post-implementation-qa` → `post-implementation-docs` → `harness-retro` → `finishing-a-development-branch`. El PR debe titularse `feat(preflight): add context kernel v1 awareness` para que el release automático elija minor; nunca ejecutar `npm publish` manualmente.
 
-- [ ] **Step 5: Handoff post-merge para aceptación de release**
+- [x] **Step 5: Registrar handoff post-merge para aceptación de release**
 
-Este paso no es requisito para que R3a quede lista para PR. Sólo inicia después del
-merge autorizado; entonces el responsable de release ejecuta:
+El handoff queda registrado; la aceptación de release no es requisito para que R3a
+quede lista para PR. Sólo inicia después del merge autorizado; entonces el responsable
+de release ejecuta:
 
 ```bash
 gh run list --repo Kodria/agentic-workflow --workflow ci.yml --limit 3
