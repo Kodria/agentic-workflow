@@ -1,10 +1,12 @@
 # R1 Context Footprint Optimization with Embedded R0 — Design
 
-**Status:** Draft for written-spec review
+**Status:** Approved on 2026-08-25
 
 **Source brief:** `docs/plans/2026-08-25-performance-tokens-brief.md`
 
 **Trace:** [agentic-workflow#126](https://github.com/Kodria/agentic-workflow/issues/126)
+
+**Implementation plan:** [awm-baseline-registry `e6d059e`](https://github.com/Kodria/awm-baseline-registry/blob/e6d059e987d0c470c82900bd29a67e3dcd8091ef/docs/plans/2026-08-25-r1-context-footprint-plan.md)
 
 This design records the owner's decision to replace a standalone telemetry-first R0/R1 sequence with direct context optimization in R1. R0 survives as a zero-model-token measurement ledger embedded in the R1 implementation plan. This decision supersedes the source brief's standalone Release 0 and telemetry-first Release 1 sequencing; later product releases remain unchanged until evidence from this work justifies revisiting them.
 
