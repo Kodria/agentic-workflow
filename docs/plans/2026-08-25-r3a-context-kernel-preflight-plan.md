@@ -431,13 +431,13 @@ git diff --check
 
 Expected: build/typecheck/tests/sensors PASS y diff limpio. No repetir la suite si el commit no cambia.
 
-- [x] **Step 3: Verificar que cada requirement tiene prueba específica**
+- [x] **Step 3: Verificar trazabilidad específica de cada requirement**
 
 ```bash
 rg -n 'verifies R3\.(1|2|3|12|15|16)' cli/tests docs/plans/2026-08-25-r3a-context-kernel-preflight-plan.md
 ```
 
-Expected: aparece cada uno de los seis IDs; las aserciones correspondientes coinciden con la matriz inferior.
+Expected: aparecen los IDs trazables. R3.1/R3.2/R3.3/R3.12 se prueban con fixtures y aserciones; R3.15 se certifica por el gate de no-infraestructura, las mutaciones y gates locales; R3.16 por el ledger observado. Ningún requisito operativo se presenta falsamente como test unitario.
 
 - [x] **Step 4: Commit de evidencia y handoff de branch**
 
@@ -489,6 +489,10 @@ Esta sección registra sólo evidencia observada. Los bytes estructurales no equ
 | R2 T4 | Ciclo normal posterior a baseline R2 `v3.8.0`; evidencia previa: agentic-workflow PR #128, merge `9a2dbfe` | 67,481 estructurales observados | Sin benchmark sintético; la telemetría de dispatch/retrieval del proveedor no fue capturada | Evidencia previa registró revisión independiente, regresiones focales, build, suite CLI y sensores pass | provider usage/cost: `unobservable`; cuota: no observada en ese checkpoint | PR #128 merged; release de R2 `v3.8.0` ya publicada |
 | R3 T0 | Snapshot congelado antes de la implementación R3a, plan `1c624c7` | 67,481 estructurales | No hubo llamada de medición ni retrieval artificial; no hay contador de dispatches del proveedor | Inventario/hash congelados en este plan; sin defecto ni corrección aplicable al snapshot | provider usage/cost: `unobservable`; cuota: no observada | PR/release: `pending` antes de creación/merge R3a |
 | R3 T1 | Ejecución real R3a en commits `84fec3b`…`f7d91c5` | 67,481 estructurales de referencia; no es medición de ahorro | Implementación y revisiones SDD reales de T1–T3; el agregado exacto de dispatches/retrievals no se instrumentó | Tests focales, TypeScript, mutaciones A/B y sensores raíz documentados abajo; correcciones incluyeron manifest inválido multi-registry, renderer bloqueante y contrato certificado del sensor | provider usage/cost: `unobservable`; cuota: observación del owner: 8% de cuota en los desarrollos de esta sesión, no atribuible ni convertible a ahorro R3a | PR: `pending` antes de creación; merge/npm release: `pending` |
+
+Gates completos de certificación pre-PR: `npm run build` PASS, `npx tsc --noEmit`
+PASS, `npx jest --runInBand --silent` PASS, `awm sensors run` PASS (lint,
+typecheck, depcheck; baseline 1, hallazgos nuevos 0) y `git diff --check` PASS.
 
 La aceptación de release de R3a queda en Step 5 post-merge: CI, merge SHA, npm
 `gitHead`, versión publicada, comentario en issue #126 y el desbloqueo de R3b no
