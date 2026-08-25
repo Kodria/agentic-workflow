@@ -85,6 +85,15 @@ describe('Context Kernel v1 inspection', () => {
         }));
     });
 
+    it('rejects an orphaned context anchor when the Context Kernel index is missing', () => {
+        fs.writeFileSync(path.join(root, 'AGENTS.md'), '<!-- awm-context:CTX-PROCESS-001 -->\nagent rules\n');
+
+        expect(inspect()(root)).toEqual(expect.objectContaining({
+            state: 'invalid',
+            detail: expect.stringContaining('.awm/context/index.json is missing'),
+        }));
+    });
+
     it('accepts the canonical fixture', () => {
         writeValidKernel();
         expect(inspect()(root)).toEqual(expect.objectContaining({ state: 'valid', schema: 1 }));

@@ -6,6 +6,7 @@ const INDEX_PATH = ['.awm', 'context', 'index.json'];
 const ROOT_CONTEXT_FILES = ['AGENTS.md', 'CONSTITUTION.md', 'CLAUDE.md'];
 const START_MARKER = '<!-- AWM:CONTEXT-KERNEL:START v1 -->';
 const END_MARKER = '<!-- AWM:CONTEXT-KERNEL:END v1 -->';
+const ANCHOR_MARKER_PREFIX = '<!-- awm-context:';
 const TOP_LEVEL_FIELDS = ['schema', 'kernelFiles', 'maxFixedBytes', 'entries'];
 const ENTRY_FIELDS = ['id', 'tier', 'path', 'anchor', 'when'];
 const REMEDY = 'run project-context-init and review the Context Kernel v1 artifacts';
@@ -123,7 +124,9 @@ export function inspectContextKernel(cwd: string): ContextKernelInspection {
         for (const name of ROOT_CONTEXT_FILES) {
             const candidate = path.join(root, name);
             try {
-                if (fs.existsSync(candidate) && fs.statSync(candidate).isFile() && fs.readFileSync(candidate, 'utf8').includes('AWM:CONTEXT-KERNEL:')) {
+                if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+                    const contents = fs.readFileSync(candidate, 'utf8');
+                    if (!contents.includes('AWM:CONTEXT-KERNEL:') && !contents.includes(ANCHOR_MARKER_PREFIX)) continue;
                     return invalid(`${name} contains Context Kernel markers but ${INDEX_PATH.join('/')} is missing`);
                 }
             } catch (error) {
