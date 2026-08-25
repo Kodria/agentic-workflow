@@ -1,5 +1,6 @@
 # R3a Context Kernel Preflight Implementation Plan
 <!-- awm-qa-complete: 2026-08-25 -->
+<!-- awm-retro-complete: 2026-08-25 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps

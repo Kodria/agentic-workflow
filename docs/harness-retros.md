@@ -1,5 +1,27 @@
 # Harness Retros
 
+## 2026-08-25 — R3a Context Kernel preflight
+
+- **Clase:** lógica, proceso y structural; 7 hallazgos de implementación y 8
+  wins de revisión/QA.
+- **Curas materializadas:** las regresiones de marker sin índice, symlink externo,
+  anchor huérfano, manifest multi-registry malformado, kernel inválido sin sensors
+  y renderer bloqueante se implementaron y se verificaron antes del QA. El blocker
+  `sensor-registry-project-certification-drift` se curó en `7f7e84c` alineando el
+  pin existente de `dependency-cruiser` al contrato certificado del registry; los
+  sensores vuelven a ejecutar lint, typecheck y depcheck de forma reproducible.
+- **Regla nueva:** ninguna. Los defectos tenían causa y prueba de regresión
+  específica; añadir prosa a `AGENTS.md`/`CONSTITUTION.md` no amplía detección y
+  aumenta el contexto fijo.
+- **Cobertura:** `awm sensors coverage --json` quedó `inconclusive` porque esa
+  lectura estática no resuelve el `packageRoot: cli` desde el root del monorepo;
+  no se interpreta como fallo de los sensores ejecutados. `awm sensors run` desde
+  la raíz siguió en `overall: pass`.
+- **Descartes (modo desatendido):** los hallazgos ya corregidos se descartan como
+  instancias únicas con test; las wins de advisory, aislamiento `AWM_HOME` y parser
+  fail-closed se reconocen sin estructuralizar porque no son reglas nuevas ni
+  recurrentes accionables.
+
 Auditable log of recurring/structural harness gaps converted into rules. See the
 `harness-retro` skill for the process. Newest first.
 
