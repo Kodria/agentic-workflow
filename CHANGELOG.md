@@ -1,3 +1,8 @@
+## v9.2.1 - 2026-08-25
+
+### Fixes
+- **update:** report pin-capped registry resolution (#128)
+
 ## v9.2.0 - 2026-08-24
 
 ### Features
