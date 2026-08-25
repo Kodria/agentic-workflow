@@ -399,21 +399,25 @@ export interface ProjectContextSchemaResolution {
     diagnostics: string[];
 }
 
-/** Finds the first usable registry that declares Context Kernel v1. Manifest errors
- * are retained as diagnostics so consumers can fail loudly instead of hiding them. */
+/** Finds the first usable registry that declares Context Kernel v1. Every active
+ * registry is inspected even after a declaration is found, so a malformed manifest
+ * cannot be masked by a later valid declaration. */
 export function resolveProjectContextSchema(): ProjectContextSchemaResolution {
     const diagnostics: string[] = [];
+    let declaration: ProjectContextSchemaDeclaration | undefined;
     for (const registry of listRegistries()) {
         if (!validateRegistryLayout(registry.contentRoot)) continue;
         try {
-            if (readRegistryManifest(registry.contentRoot).projectContextSchema === 1) {
-                return { declaration: { registry, schema: 1 }, diagnostics };
+            if (!declaration && readRegistryManifest(registry.contentRoot).projectContextSchema === 1) {
+                declaration = { registry, schema: 1 };
             }
         } catch (error) {
-            diagnostics.push(error instanceof Error ? error.message : String(error));
+            diagnostics.push(
+                `Registry "${registry.name}" manifest is invalid: ${error instanceof Error ? error.message : String(error)}`,
+            );
         }
     }
-    return { diagnostics };
+    return declaration ? { declaration, diagnostics } : { diagnostics };
 }
 
 /** Nombre del registry dueño de un path: el nombre del clone bajo registriesDir(),

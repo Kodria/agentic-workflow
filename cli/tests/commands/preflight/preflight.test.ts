@@ -73,13 +73,15 @@ afterEach(() => {
 });
 afterAll(() => awmHomes.forEach(dir => fs.rmSync(dir, { recursive: true, force: true })));
 
-function installRegistry(manifest: Record<string, unknown>): void {
+function installRegistry(manifest: Record<string, unknown>, name = 'test-registry'): void {
     const awmHome = process.env.AWM_HOME!;
-    const root = path.join(awmHome, 'registries', 'test-registry');
+    const root = path.join(awmHome, 'registries', name);
     fs.mkdirSync(path.join(root, 'skills'), { recursive: true });
-    fs.writeFileSync(path.join(awmHome, 'registries.json'), JSON.stringify([
-        { name: 'test-registry', remote: 'https://example.invalid/test-registry.git' },
-    ]));
+    const config = fs.existsSync(path.join(awmHome, 'registries.json'))
+        ? JSON.parse(fs.readFileSync(path.join(awmHome, 'registries.json'), 'utf8'))
+        : [];
+    config.push({ name, remote: `https://example.invalid/${name}.git` });
+    fs.writeFileSync(path.join(awmHome, 'registries.json'), JSON.stringify(config));
     fs.writeFileSync(path.join(root, 'awm-registry.json'), JSON.stringify(manifest));
 }
 
@@ -131,6 +133,23 @@ describe('preflight', () => {
             ok: false,
             advisory: false,
             detail: expect.stringMatching(/projectContextSchema.*exactly 1.*2/),
+        });
+    });
+
+    it('fails closed when an earlier active registry manifest is malformed before a valid declaration', async () => {
+        installRegistry({ projectContextSchema: 2 }, 'malformed');
+        installRegistry({ projectContextSchema: 1 }, 'valid');
+
+        const report = await preflight(make({
+            manifest: { pack: 'generic', sensors: { security: { enabled: false } } },
+        }));
+
+        expect(report.status).toBe('degraded');
+        expect(exitCodeFor(report)).toBe(1);
+        expect(check(report, 'context-kernel')).toMatchObject({
+            ok: false,
+            advisory: false,
+            detail: expect.stringMatching(/malformed.*awm-registry\.json.*projectContextSchema.*exactly 1/i),
         });
     });
 

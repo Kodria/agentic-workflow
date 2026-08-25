@@ -82,8 +82,7 @@ function checkContext(cwd: string): PreflightCheck {
 
 function checkContextKernel(cwd: string): PreflightCheck | null {
     const resolution = resolveProjectContextSchema();
-    if (!resolution.declaration) {
-        if (resolution.diagnostics.length === 0) return null;
+    if (resolution.diagnostics.length > 0) {
         return {
             id: 'context-kernel',
             ok: false,
@@ -92,6 +91,7 @@ function checkContextKernel(cwd: string): PreflightCheck | null {
             remedy: 'repair the registry manifest or use the safe full-context project files until the registry is valid',
         };
     }
+    if (!resolution.declaration) return null;
 
     const inspection = inspectContextKernel(cwd);
     if (inspection.state === 'legacy') {
