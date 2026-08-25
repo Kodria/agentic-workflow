@@ -30,13 +30,12 @@ export function formatReport(report: PreflightReport): string {
     }
     const headline = report.status === 'not_configured'
         ? `${pc.red('✘')}  AWM is not configured in this project.`
-        : `${pc.red('✘')}  Harness degraded — it declares sensors it cannot run.`;
+        : `${pc.red('✘')}  Harness degraded — it has blocking preflight failures.`;
 
     return `${headline}\n${lines.join('\n')}\n\n`
         + `   ${pc.bold('Do not hand this off to an unattended run.')} Every quality phase downstream\n`
-        + `   (implementer, reviewers, post-qa) consumes \`awm sensors run\`. With the harness in\n`
-        + `   this state the gate reports on checks that never ran, and nobody finds out until a\n`
-        + `   bad change is already merged.\n`;
+        + `   (implementer, reviewers, post-qa) consumes these gates. Resolve every blocking\n`
+        + `   check before handoff, so a bad change is not merged.\n`;
 }
 
 export function registerPreflightCommand(program: Command): void {

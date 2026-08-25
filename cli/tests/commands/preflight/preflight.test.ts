@@ -215,6 +215,8 @@ describe('preflight', () => {
         expect(report.checks).toContainEqual(expect.objectContaining({
             id: 'context-kernel', advisory: false, ok: false,
         }));
+        expect(formatReport(report)).toMatch(/Harness degraded — it has blocking preflight failures\./);
+        expect(formatReport(report)).not.toMatch(/declares sensors it cannot run/);
     });
 
     it('degrades an invalid kernel even when no sensor manifest exists', async () => {
