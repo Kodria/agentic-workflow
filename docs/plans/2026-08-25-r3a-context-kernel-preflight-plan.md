@@ -493,9 +493,12 @@ Esta sección registra sólo evidencia observada. Los bytes estructurales no equ
 | R3 T0 | Snapshot congelado antes de la implementación R3a, plan `1c624c7` | 67,481 estructurales | No hubo llamada de medición ni retrieval artificial; no hay contador de dispatches del proveedor | Inventario/hash congelados en este plan; sin defecto ni corrección aplicable al snapshot | provider usage/cost: `unobservable`; cuota: no observada | PR/release: `pending` antes de creación/merge R3a |
 | R3 T1 | Ejecución real R3a en commits `84fec3b`…`f7d91c5` | 67,481 estructurales de referencia; no es medición de ahorro | Implementación y revisiones SDD reales de T1–T3; el agregado exacto de dispatches/retrievals no se instrumentó | Tests focales, TypeScript, mutaciones A/B y sensores raíz documentados abajo; correcciones incluyeron manifest inválido multi-registry, renderer bloqueante y contrato certificado del sensor | provider usage/cost: `unobservable`; cuota: observación del owner: 8% de cuota en los desarrollos de esta sesión, no atribuible ni convertible a ahorro R3a | PR: `pending` antes de creación; merge/npm release: `pending` |
 
-Gates completos de certificación pre-PR: `npm run build` PASS, `npx tsc --noEmit`
-PASS, `npx jest --runInBand --silent` PASS, `awm sensors run` PASS (lint,
-typecheck, depcheck; baseline 1, hallazgos nuevos 0) y `git diff --check` PASS.
+Gates de certificación pre-PR: `npm run build` PASS, `npx tsc --noEmit` PASS,
+las 91 regresiones afectadas PASS, `awm sensors run` PASS (lint, typecheck,
+depcheck; baseline 1, hallazgos nuevos 0) y `git diff --check` PASS. La suite
+Jest completa local no produjo un resultado autoritativo porque sus E2E lanzan
+jobs `codex exec` que quedan huérfanos en este host; CI ejecutará ese gate en un
+entorno limpio. No se presenta como PASS local.
 
 La aceptación de release de R3a queda en Step 5 post-merge: CI, merge SHA, npm
 `gitHead`, versión publicada, comentario en issue #126 y el desbloqueo de R3b no
