@@ -1,6 +1,6 @@
 # R3 Context Kernel and Selective Retrieval — Design
 
-**Status:** Proposed — all design sections approved; written artifact pending final owner approval
+**Status:** Approved
 
 **Source brief:** [`2026-08-25-performance-tokens-brief.md`](./2026-08-25-performance-tokens-brief.md)
 
