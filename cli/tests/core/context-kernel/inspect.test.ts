@@ -76,6 +76,15 @@ describe('Context Kernel v1 inspection', () => {
         expect(inspect()(root)).toEqual({ state: 'legacy' });
     });
 
+    it('rejects a root context marker when the Context Kernel index is missing', () => {
+        fs.writeFileSync(path.join(root, 'AGENTS.md'), '<!-- AWM:CONTEXT-KERNEL:START v1 -->\nagent rules\n');
+
+        expect(inspect()(root)).toEqual(expect.objectContaining({
+            state: 'invalid',
+            detail: expect.stringContaining('.awm/context/index.json is missing'),
+        }));
+    });
+
     it('accepts the canonical fixture', () => {
         writeValidKernel();
         expect(inspect()(root)).toEqual(expect.objectContaining({ state: 'valid', schema: 1 }));
@@ -97,14 +106,22 @@ describe('Context Kernel v1 inspection', () => {
         expect(inspect()(root)).toEqual(expect.objectContaining({ state: 'invalid' }));
     });
 
-    it('rejects an external dangling symlink', () => {
+    it('rejects a project path that resolves through a symlink to an external regular file', () => {
         const index = writeValidKernel();
         const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-outside-'));
         try {
             const card = path.join(root, index.entries[1].path);
+            const externalCard = path.join(outside, 'card.md');
+            fs.writeFileSync(externalCard, '<!-- awm-context:CTX-RELEASE-001 -->\nexternal release rules\n');
             fs.rmSync(card);
-            fs.symlinkSync(path.join(outside, 'card.md'), card);
-            expect(inspect()(root)).toEqual(expect.objectContaining({ state: 'invalid' }));
+            fs.symlinkSync(externalCard, card);
+
+            expect(fs.statSync(card).isFile()).toBe(true);
+            expect(fs.realpathSync(card)).toBe(externalCard);
+            expect(inspect()(root)).toEqual(expect.objectContaining({
+                state: 'invalid',
+                detail: expect.stringContaining('resolves outside the project root'),
+            }));
         } finally {
             fs.rmSync(outside, { recursive: true, force: true });
         }
