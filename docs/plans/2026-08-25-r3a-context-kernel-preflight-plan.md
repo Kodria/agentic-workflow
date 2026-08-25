@@ -256,7 +256,7 @@ _Requirements: R3.1, R3.2, R3.3, R3.12_
 - Modify: `cli/src/commands/preflight/index.ts`
 - Modify: `cli/tests/commands/preflight/preflight.test.ts`
 
-- [ ] **Step 1: Escribir cuatro escenarios integrados antes del código**
+- [x] **Step 1: Escribir cuatro escenarios integrados antes del código**
 
 ```ts
 it('does not add a row when no registry declares the schema', async () => {  // verifies R3.1, R3.12
@@ -298,7 +298,7 @@ Run: `cd cli && npx jest tests/commands/preflight/preflight.test.ts --runInBand`
 
 Expected: FAIL por id/severity desconocidos.
 
-- [ ] **Step 2: Implementar el reducer sin convertir advisory en éxito falso**
+- [x] **Step 2: Implementar el reducer sin convertir advisory en éxito falso**
 
 ```ts
 export type PreflightCheck = {
@@ -323,7 +323,7 @@ El nuevo `checkContextKernel(cwd)` sólo se agrega cuando el resolver del regist
 
 El renderer evalúa primero `advisory === true`, usa `pc.yellow('⚠')`, y luego conserva los branches `✔`/`✘` existentes.
 
-- [ ] **Step 3: Ejecutar regresión enfocada y suite del comando**
+- [x] **Step 3: Ejecutar regresión enfocada y suite del comando**
 
 Run:
 
@@ -335,7 +335,7 @@ npx tsc --noEmit
 
 Expected: PASS; un advisory legacy produce exit 0, una migración parcial exit 1.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add cli/src/commands/preflight cli/tests/commands/preflight/preflight.test.ts
