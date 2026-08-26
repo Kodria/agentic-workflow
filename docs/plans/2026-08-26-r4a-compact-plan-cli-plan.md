@@ -415,7 +415,7 @@ Each slice is a closed vertical change. The implementer receives this plan plus 
 - Do not reuse the passive update cache or writing preference helper even if it reduces implementation size.
 
 <a id="slice-s4"></a>
-### Slice S4: Gate strict preflight and close release evidence
+### Slice S4: Gate preflight and close R4a evidence
 
 #### Surfaces
 
