@@ -6,6 +6,7 @@ import { execFileSync, execSync } from 'child_process';
 import { preflight } from '../../../src/commands/preflight/checks';
 import { exitCodeFor, formatReport } from '../../../src/commands/preflight';
 import { runSensors } from '../../../src/commands/sensors/run';
+import { checkCurrentness } from '../../../src/core/currentness/check';
 
 // Only `execSync` (used by `resolveOnPath` to check for `gh`/`glab`) is mocked — `git
 // remote get-url origin` runs for real via `execFileSync` against real tmpdir git repos,
@@ -18,8 +19,12 @@ jest.mock('../../../src/commands/sensors/run', () => ({
     ...jest.requireActual('../../../src/commands/sensors/run'),
     runSensors: jest.fn(),
 }));
+jest.mock('../../../src/core/currentness/check', () => ({
+    checkCurrentness: jest.fn(),
+}));
 const mockExecSync = execSync as jest.MockedFunction<typeof execSync>;
 const mockRunSensors = runSensors as jest.MockedFunction<typeof runSensors>;
+const mockCheckCurrentness = checkCurrentness as jest.MockedFunction<typeof checkCurrentness>;
 
 /** Turn a tmpdir into a real git repo with (optionally) an `origin` remote. */
 function gitRepo(dir: string, remoteUrl?: string): void {
@@ -110,7 +115,23 @@ function writePartialKernel(dir: string): void {
 const check = (r: Awaited<ReturnType<typeof preflight>>, id: string) => r.checks.find(c => c.id === id)!;
 
 describe('preflight', () => {
-    afterEach(() => mockRunSensors.mockReset());
+    beforeEach(() => {
+        mockCheckCurrentness.mockResolvedValue({
+            checkedAt: '2026-08-26T00:00:00.000Z',
+            compatibility: { status: 'not-checked' },
+            components: [{
+                component: 'cli', installed: '9.3.0', latest: '9.3.0', channel: 'stable',
+                source: 'https://registry.npmjs.org/agentic-workflow-manager',
+                checkedAt: '2026-08-26T00:00:00.000Z', status: 'current',
+                detail: 'Installed version matches npm dist-tags.latest.', remedy: 'No action required.',
+            }],
+        });
+    });
+
+    afterEach(() => {
+        mockRunSensors.mockReset();
+        mockCheckCurrentness.mockReset();
+    });
 
     it('does not add a row when no registry declares the schema', async () => {
         installRegistry({ minCliVersion: '9.2.1' });
@@ -240,11 +261,76 @@ describe('preflight', () => {
         await preflight(dir);
 
         expect(mockRunSensors).not.toHaveBeenCalled();
+        expect(mockCheckCurrentness).not.toHaveBeenCalled();
+    });
+
+    it('adds authoritative currentness only when strict mode is explicitly requested', async () => {
+        const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
+
+        const report = await preflight(dir, { requireCurrent: true });
+
+        expect(mockCheckCurrentness).toHaveBeenCalledWith(dir);
+        expect(report).toMatchObject({
+            status: 'ready',
+            currentness: expect.objectContaining({
+                components: [expect.objectContaining({ component: 'cli', status: 'current' })],
+            }),
+        });
+        expect(report.checks).toContainEqual(expect.objectContaining({ id: 'currentness', ok: true }));
+        expect(formatReport(report)).toContain('Currentness: current');
+        expect(JSON.parse(JSON.stringify(report))).toHaveProperty('currentness.components');
+    });
+
+    it.each(['stale', 'pinned-behind', 'unverifiable'] as const)('fails strict preflight for a %s component with its exact remedy', async (status) => {
+        const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
+        mockCheckCurrentness.mockResolvedValue({
+            checkedAt: '2026-08-26T00:00:00.000Z', compatibility: { status: 'not-checked' },
+            components: [{
+                component: 'registry:baseline', installed: 'v1.0.0', latest: 'v1.1.0', channel: 'stable',
+                source: 'https://example.test/baseline.git', checkedAt: '2026-08-26T00:00:00.000Z', status,
+                detail: 'Authoritative currentness failed.',
+                remedy: status === 'pinned-behind' ? 'awm unpin baseline && awm update --yes' : 'awm update --yes',
+            }],
+        });
+
+        const report = await preflight(dir, { requireCurrent: true });
+
+        expect(report.status).toBe('degraded');
+        expect(exitCodeFor(report)).toBe(1);
+        expect(report.checks).toContainEqual(expect.objectContaining({ id: 'currentness', ok: false }));
+        expect(formatReport(report)).toContain(status === 'pinned-behind' ? 'awm unpin baseline && awm update --yes' : 'awm update --yes');
+    });
+
+    it('keeps compatibility failure distinct when authoritative currentness is current', async () => {
+        installRegistry({ minCliVersion: '999.0.0' }, 'requires-new-cli');
+        const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
+
+        const report = await preflight(dir, { requireCurrent: true });
+
+        expect(report.status).toBe('degraded');
+        expect(report.checks).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'compatibility', ok: false, detail: expect.stringContaining('requires-new-cli requires CLI >= 999.0.0') }),
+            expect.objectContaining({ id: 'currentness', ok: true }),
+        ]));
+    });
+
+    it('retains both empirical sensor and currentness verdicts when both gates are requested', async () => {
+        const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
+        mockRunSensors.mockResolvedValue({ overall: 'pass', sensors: [] });
+
+        const report = await preflight(dir, { verifySensors: true, requireCurrent: true });
+
+        expect(mockRunSensors).toHaveBeenCalledWith({ cwd: dir, all: true });
+        expect(mockCheckCurrentness).toHaveBeenCalledWith(dir);
+        expect(report.checks).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'sensors-execution', ok: true }),
+            expect.objectContaining({ id: 'currentness', ok: true }),
+        ]));
     });
 
     it('rejects an array passed as public preflight options before filesystem work', async () => {
         await expect(preflight(process.cwd(), [] as unknown as { verifySensors?: boolean }))
-            .rejects.toThrow('preflight options must contain an optional boolean verifySensors');
+            .rejects.toThrow('preflight options must contain optional boolean verifySensors and requireCurrent');
     });
 
     it('requires an empirical sensor pass when verification is requested', async () => {
