@@ -22,17 +22,41 @@ function isLauncher(program: string): boolean {
 
 function diagnostic(code: string, message: string, field?: string): PlanValidationReport { return { state: 'invalid', diagnostics: [{ code, message, ...(field ? { field } : {}) }] }; }
 function unsupported(schema: string): PlanValidationReport { return { state: 'unsupported', schema, diagnostics: [{ code: 'PLAN_UNSUPPORTED_SCHEMA', message: 'unsupported compact plan schema; update the CLI' }] }; }
-function markerlessSchemaClassification(text: string): PlanValidationReport | undefined {
-    let candidate: unknown;
-    try { candidate = parseJsonNoDuplicate(text.trim()); } catch { return undefined; }
+function schemaClassification(candidate: unknown): PlanValidationReport | undefined {
     if (!object(candidate) || !Object.prototype.hasOwnProperty.call(candidate, 'schema')) return undefined;
     if (typeof candidate.schema !== 'string') return diagnostic('PLAN_MARKERS', 'compact markers must occur once in order');
     if (Buffer.byteLength(candidate.schema, 'utf8') > MAX_STRING) return diagnostic('PLAN_LIMIT', 'schema exceeds maximum string size');
     if (candidate.schema.startsWith('compact-slices/') && candidate.schema !== 'compact-slices/v1') return unsupported(candidate.schema);
     return diagnostic('PLAN_MARKERS', 'compact markers must occur once in order');
 }
+function embeddedJsonObjects(text: string): string[] {
+    const objects: string[] = [];
+    for (let start = 0; start < text.length && objects.length < 64; start += 1) {
+        if (text[start] !== '{') continue;
+        let depth = 0; let quoted = false; let escaped = false; let end = start;
+        for (; end < text.length && end - start <= MAX_MANIFEST; end += 1) {
+            const character = text[end];
+            if (quoted) { if (escaped) escaped = false; else if (character === '\\') escaped = true; else if (character === '"') quoted = false; continue; }
+            if (character === '"') { quoted = true; continue; }
+            if (character === '{') depth += 1;
+            if (character === '}' && --depth === 0) { objects.push(text.slice(start, end + 1)); start = end; break; }
+        }
+    }
+    return objects;
+}
+function markerlessSchemaClassification(text: string): PlanValidationReport | undefined {
+    const candidates = [text.trim(), ...embeddedJsonObjects(text)];
+    for (const source of candidates) {
+        try { const classification = schemaClassification(parseJsonNoDuplicate(source)); if (classification) return classification; } catch { /* try the next bounded JSON object */ }
+    }
+    return undefined;
+}
 function count(text: string, token: string): number { return text.split(token).length - 1; }
 function object(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
+function compactSchemaSignal(text: string): boolean {
+    const decoded = text.replace(/\\u([0-9a-f]{4})/gi, (_match, code: string) => String.fromCharCode(Number.parseInt(code, 16)));
+    return /"schema"\s*:\s*"compact-slices\//.test(decoded);
+}
 function exact(value: unknown, fields: string[]): value is Record<string, unknown> {
     return object(value) && Object.keys(value).length === fields.length && fields.every((field) => Object.prototype.hasOwnProperty.call(value, field));
 }
@@ -57,7 +81,7 @@ function uniqueRefs(value: unknown, known: Set<string>): boolean { return refs(v
 function unsafeCommand(value: string): boolean { return /[\0\r\n]|[`$]|\$\(|\$\{|[;&|<>*?\[\]{}()]/.test(value); }
 function withoutFencedCode(text: string): string {
     let fence: { character: string; length: number } | undefined;
-    return text.split('\n').map((line) => {
+    return text.replace(/\r\n?/g, '\n').split('\n').map((line) => {
         const marker = /^(?: {0,3})(`{3,}|~{3,})/.exec(line)?.[1];
         if (marker && (!fence || (marker[0] === fence.character && marker.length >= fence.length))) {
             fence = fence ? undefined : { character: marker[0], length: marker.length };
@@ -108,9 +132,9 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     if (!planFile) return diagnostic('PLAN_PATH_UNSAFE', 'plan path must be a contained regular non-symlink file');
     let bytes: Buffer; try { if (fs.statSync(planFile).size > MAX_PLAN) return diagnostic('PLAN_LIMIT', 'plan exceeds maximum size'); bytes = fs.readFileSync(planFile); } catch { return diagnostic('PLAN_READ', 'plan cannot be read'); }
     let text: string; try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { return diagnostic('PLAN_ENCODING', 'plan must be valid UTF-8'); }
-    const starts = count(text, START); const ends = count(text, END); const signaled = starts > 0 || ends > 0 || /"schema"\s*:\s*"compact-slices(?:\/|\\u002[fF])/.test(text);
+    const starts = count(text, START); const ends = count(text, END); const signaled = starts > 0 || ends > 0 || compactSchemaSignal(text);
     if (!signaled) return markerlessSchemaClassification(text) ?? { state: 'legacy' };
-    if (starts === 0 && ends === 0) { try { const candidate = parseJsonNoDuplicate(text.trim()); if (object(candidate) && typeof candidate.schema === 'string' && Buffer.byteLength(candidate.schema, 'utf8') <= MAX_STRING && candidate.schema.startsWith('compact-slices/') && candidate.schema !== 'compact-slices/v1') return unsupported(candidate.schema); } catch { /* invalid below */ } return diagnostic('PLAN_MARKERS', 'compact markers must occur once in order'); }
+    if (starts === 0 && ends === 0) return markerlessSchemaClassification(text) ?? diagnostic('PLAN_MARKERS', 'compact markers must occur once in order');
     if (starts !== 1 || ends !== 1 || text.indexOf(START) > text.indexOf(END)) { const partial = starts === 1 ? text.slice(text.indexOf(START) + START.length, ends ? text.indexOf(END) : undefined).trim() : ''; try { const candidate = parseJsonNoDuplicate(partial); if (object(candidate) && typeof candidate.schema === 'string' && Buffer.byteLength(candidate.schema, 'utf8') <= MAX_STRING && candidate.schema.startsWith('compact-slices/') && candidate.schema !== 'compact-slices/v1') return unsupported(candidate.schema); } catch { /* invalid below */ } return diagnostic('PLAN_MARKERS', 'compact markers must occur once in order'); }
     const body = text.slice(text.indexOf(START) + START.length, text.indexOf(END)); if (Buffer.byteLength(body, 'utf8') > MAX_MANIFEST) return diagnostic('PLAN_LIMIT', 'manifest exceeds maximum size');
     let raw: unknown; try { raw = parseJsonNoDuplicate(body.trim()); } catch { return diagnostic('PLAN_JSON', 'manifest must be valid JSON without duplicate keys'); }
@@ -118,7 +142,8 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     if (typeof raw.schema === 'string' && Buffer.byteLength(raw.schema, 'utf8') > MAX_STRING) return diagnostic('PLAN_LIMIT', 'schema exceeds maximum string size');
     if (typeof raw.schema === 'string' && raw.schema.startsWith('compact-slices/') && raw.schema !== 'compact-slices/v1') return unsupported(raw.schema);
     if (!exact(raw, ['schema', 'planId', 'requirements', 'sources', 'commands', 'slices', 'closureCommands'])) return diagnostic(Object.keys(raw).some((key) => !['schema', 'planId', 'requirements', 'sources', 'commands', 'slices', 'closureCommands'].includes(key)) ? 'PLAN_UNKNOWN_FIELD' : 'PLAN_MISSING_FIELD', 'manifest fields must exactly match the contract');
-    if (!Array.isArray(raw.requirements) || raw.requirements.length > 256 || !Array.isArray(raw.sources) || raw.sources.length > 256 || !Array.isArray(raw.commands) || raw.commands.length > 512 || !Array.isArray(raw.slices) || raw.slices.length > 64) return diagnostic('PLAN_LIMIT', 'manifest exceeds collection limits');
+    if (!Array.isArray(raw.requirements) || !Array.isArray(raw.sources) || !Array.isArray(raw.commands) || !Array.isArray(raw.slices) || !Array.isArray(raw.closureCommands)) return diagnostic('PLAN_SHAPE', 'manifest collections are invalid');
+    if (raw.requirements.length > 256 || raw.sources.length > 256 || raw.commands.length > 512 || raw.slices.length > 64 || raw.closureCommands.length > 512) return diagnostic('PLAN_LIMIT', 'manifest exceeds collection limits');
     if (typeof raw.planId === 'string' && Buffer.byteLength(raw.planId, 'utf8') > MAX_STRING) return diagnostic('PLAN_LIMIT', 'plan id exceeds maximum string size');
     if (raw.schema !== 'compact-slices/v1' || typeof raw.planId !== 'string' || !PLAN_ID.test(raw.planId) || !allStrings(raw.requirements) || new Set(raw.requirements).size !== raw.requirements.length) return diagnostic('PLAN_SHAPE', 'manifest scalar fields are invalid');
     if ((raw.requirements as string[]).some((id) => !ID.test(id)) || !allStrings(raw.closureCommands) || new Set(raw.closureCommands as string[]).size !== (raw.closureCommands as string[]).length) return diagnostic('PLAN_SHAPE', 'manifest arrays or identifiers are invalid');
@@ -134,6 +159,7 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     for (const command of raw.commands as Array<Record<string, unknown>>) { const covers = command.covers as string[]; const references = slices.filter((slice) => slice.redCommands.includes(command.id as string) || slice.greenCommands.includes(command.id as string)); if (covers.length > 0 && !references.some((slice) => covers.some((requirement) => slice.requirements.includes(requirement)))) return diagnostic('PLAN_COMMAND_COVER', 'command coverage must relate to a referencing slice'); }
     for (const slice of slices) { for (const requirement of slice.requirements) { const covered = (raw.commands as Array<Record<string, unknown>>).some((command) => (command.covers as string[]).includes(requirement) && (slice.redCommands.includes(command.id as string) || slice.greenCommands.includes(command.id as string))); if (!covered) return diagnostic('PLAN_REQUIREMENT_COVER', 'each requirement must be covered by a command executed by its owning slice'); } }
     const usedSources = new Set(slices.flatMap((slice) => slice.sources)); const usedCommands = new Set([...slices.flatMap((slice) => [...slice.redCommands, ...slice.greenCommands]), ...(raw.closureCommands as string[])]); if (Array.from(sourceIds).some((id) => !usedSources.has(id)) || Array.from(commandIds).some((id) => !usedCommands.has(id)) || !refs(raw.closureCommands, commandIds)) return diagnostic('PLAN_ORPHAN', 'sources and commands must be referenced');
+    if (raw.requirements.length === 0 || raw.sources.length === 0 || raw.commands.length === 0 || raw.slices.length === 0 || raw.closureCommands.length === 0) return diagnostic('PLAN_SHAPE', 'manifest collections must be nonempty');
     const markdown = checkMarkdown(text, slices); if (markdown) return markdown;
     return { state: 'valid', schema: 'compact-slices/v1', manifest: raw as unknown as CompactPlanManifest };
 }

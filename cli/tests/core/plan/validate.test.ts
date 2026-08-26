@@ -219,6 +219,18 @@ describe('validatePlanFile', () => {
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
     });
 
+    test('does not classify an escaped future schema embedded in Markdown without markers as legacy', () => {
+        const plan = path.join(root, 'embedded-escaped-future.md');
+        fs.writeFileSync(plan, '# Plan notes\n\n```json\n{"\\u0073chema":"compact\\u002dslices\\u002fv2"}\n```\n');
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
+    });
+
+    test('rejects an unparseable escaped compact schema embedded in Markdown rather than treating it as legacy', () => {
+        const plan = path.join(root, 'embedded-escaped-malformed.md');
+        fs.writeFileSync(plan, '# Plan notes\n\n{"\\u0073chema":"compact\\u002dslices\\u002fv2"\n');
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
+    });
+
     test('rejects an escaped current schema without compact markers', () => {
         const plan = path.join(root, 'escaped-current-schema.md'); fs.writeFileSync(plan, '{"\\u0073chema":"compact\\u002dslices/v1"}');
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
@@ -388,6 +400,26 @@ describe('validatePlanFile', () => {
             m.closureCommands = [];
         }), root);
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_SHAPE' })] });
+    });
+
+    test.each(['requirements', 'sources', 'commands', 'slices', 'closureCommands'])('requires a nonempty v1 manifest %s collection', (field) => {
+        const report = validatePlanFile(fixture(root, (m) => { m[field] = []; }), root);
+        expect(report).toMatchObject({ state: 'invalid' });
+    });
+
+    test('recognizes a parseable future schema when only the END marker is broken', () => {
+        const plan = path.join(root, 'future-missing-end.md');
+        fs.writeFileSync(plan, `${START}\n{"schema":"compact-slices/v2"}\n`);
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
+    });
+
+    test('accepts CRLF Markdown with nested headings and fenced code in a required section', () => {
+        const plan = fixture(root);
+        const markdown = fs.readFileSync(plan, 'utf8')
+            .replace('One implementation.', 'Implementation prose.\n\n##### Nested detail\n\n```ts\n#### Not a real section\nconst value = true;\n```\n\nMore implementation prose.')
+            .replace(/\n/g, '\r\n');
+        fs.writeFileSync(plan, markdown);
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'valid', schema: 'compact-slices/v1' });
     });
 
     test('does not classify a malformed future schema behind one broken marker as unsupported', () => {
