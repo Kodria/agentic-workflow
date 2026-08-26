@@ -7,6 +7,9 @@ coverage
 .awm/*
 !.awm/sensors.json
 !.awm/sensors.baseline.json
+!.awm/context/
+.awm/context/*
+!.awm/context/index.json
 .agent
 .agents
 skills-lock.json
