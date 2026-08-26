@@ -217,6 +217,18 @@ describe('validatePlanFile', () => {
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKDOWN_SECTION' })] });
     });
 
+    test('ignores apparent slice delimiters and subsections inside fenced code blocks', () => {
+        const plan = fixture(root);
+        fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace('#### Fallback', '```markdown\n### Slice S99: Example only\n#### Surfaces\n#### Implementation\n#### Edge cases\n#### Evidence\n#### Fallback\n```\n\n#### Fallback'));
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'valid' });
+    });
+
+    test('rejects an additional slice heading that is not immediately anchored', () => {
+        const plan = fixture(root);
+        fs.appendFileSync(plan, '\n### Slice S1: Validate one thing\n');
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKDOWN_HEADING' })] });
+    });
+
     test.each(['TODO', 'TBD', 'placeholder', 'draft'])('rejects incomplete Markdown sentinel %s', (sentinel) => {
         const plan = fixture(root);
         fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace('One evidence item.', sentinel));
@@ -252,6 +264,17 @@ describe('validatePlanFile', () => {
 
     test.each(['bin/bash', 'tools/cmd.exe'])('rejects path-qualified interpreter launcher %s', (program) => {
         const report = validatePlanFile(fixture(root, (m) => { (m.commands as Record<string, unknown>[])[0].program = program; }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
+    });
+
+    test.each(['FiSh.ExE', 'tools/EnV.eXe'])('rejects case-insensitive launcher %s even with a safe relative path', (program) => {
+        const report = validatePlanFile(fixture(root, (m) => {
+            if (program.includes('/')) {
+                fs.mkdirSync(path.join(root, 'tools'), { recursive: true });
+                fs.writeFileSync(path.join(root, 'tools', 'EnV.eXe'), 'inert executable', { mode: 0o755 });
+            }
+            (m.commands as Record<string, unknown>[])[0].program = program;
+        }), root);
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
     });
 
@@ -304,6 +327,18 @@ describe('validatePlanFile', () => {
         });
         fs.appendFileSync(plan, '\n<a id="slice-s2"></a>\n### Slice S2: Validate two things\n\n#### Surfaces\n\nOne surface.\n\n#### Implementation\n\nOne implementation.\n\n#### Edge cases\n\nOne edge case.\n\n#### Evidence\n\nOne evidence item.\n\n#### Fallback\n\nOne fallback.\n');
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid' });
+    });
+
+    test('rejects requirement coverage executed only by a different slice', () => {
+        const plan = fixture(root, (m) => {
+            m.requirements = ['R4-VAL-2', 'R4-VAL-3'];
+            (m.commands as Record<string, unknown>[])[0].covers = ['R4-VAL-2', 'R4-VAL-3'];
+            (m.commands as Record<string, unknown>[]).push({ id: 'CMD-TWO', program: 'npm', args: ['run', 'lint'], covers: [] });
+            (m.slices as Record<string, unknown>[]).push({ id: 'S2', title: 'Validate two things', requirements: ['R4-VAL-3'], dependsOn: [], sectionAnchor: 'slice-s2', sources: ['SRC-ONE'], redCommands: ['CMD-TWO'], greenCommands: ['CMD-TWO'], reviewEvidence: ['specification', 'code-quality'], risk: 'bounded', fallback: ['Use a reviewed fallback'] });
+            m.closureCommands = ['CMD-ONE', 'CMD-TWO'];
+        });
+        fs.appendFileSync(plan, '\n<a id="slice-s2"></a>\n### Slice S2: Validate two things\n\n#### Surfaces\n\nOne surface.\n\n#### Implementation\n\nOne implementation.\n\n#### Edge cases\n\nOne edge case.\n\n#### Evidence\n\nOne evidence item.\n\n#### Fallback\n\nOne fallback.\n');
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_COVER' })] });
     });
 
     test('rejects a command with neither requirement coverage nor closure membership', () => {

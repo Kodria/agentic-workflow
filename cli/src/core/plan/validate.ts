@@ -16,8 +16,8 @@ const SHELL = new Set([
     'env', 'busybox', 'node', 'nodejs', 'deno', 'bun', 'python', 'python3', 'ruby', 'perl', 'php', 'lua',
 ]);
 function isLauncher(program: string): boolean {
-    const base = path.posix.basename(program);
-    return SHELL.has(base) || /^(?:node(?:js)?|py(?:thon(?:w)?\d*(?:\.\d+)?)?|deno|bun|ruby(?:\d+(?:\.\d+)*)?|perl(?:\d+(?:\.\d+)*)?|(?:a|ba|c|tc|z|da|k)?sh|busybox|cmd|powershell|pwsh|wscript|cscript)(?:\.exe)?(?:[-.][a-z0-9][a-z0-9.-]*)?$/i.test(base);
+    const base = path.posix.basename(program).toLowerCase();
+    return SHELL.has(base.replace(/\.exe$/, '')) || /^(?:node(?:js)?|py(?:thon(?:w)?\d*(?:\.\d+)?)?|deno|bun|ruby(?:\d+(?:\.\d+)*)?|perl(?:\d+(?:\.\d+)*)?|(?:a|ba|c|tc|z|da|k)?sh|busybox|cmd|powershell|pwsh|wscript|cscript)(?:\.exe)?(?:[-.][a-z0-9][a-z0-9.-]*)?$/i.test(base);
 }
 
 function diagnostic(code: string, message: string, field?: string): PlanValidationReport { return { state: 'invalid', diagnostics: [{ code, message, ...(field ? { field } : {}) }] }; }
@@ -45,21 +45,45 @@ function executableInside(root: string, relative: string): string | undefined {
 function refs(value: unknown, known: Set<string>): boolean { return allStrings(value) && value.every((id) => known.has(id)); }
 function uniqueRefs(value: unknown, known: Set<string>): boolean { return refs(value, known) && new Set(value as string[]).size === (value as string[]).length; }
 function unsafeCommand(value: string): boolean { return /[\0\r\n]|[`$]|\$\(|\$\{|[;&|<>*?\[\]{}()]/.test(value); }
-function checkMarkdown(text: string, slice: PlanSlice): PlanValidationReport | undefined {
+function withoutFencedCode(text: string): string {
+    let fence: { character: string; length: number } | undefined;
+    return text.split('\n').map((line) => {
+        const marker = /^(?: {0,3})(`{3,}|~{3,})/.exec(line)?.[1];
+        if (marker && (!fence || (marker[0] === fence.character && marker.length >= fence.length))) {
+            fence = fence ? undefined : { character: marker[0], length: marker.length };
+            return '';
+        }
+        return fence ? '' : line;
+    }).join('\n');
+}
+function checkMarkdown(text: string, slices: PlanSlice[]): PlanValidationReport | undefined {
+    const markdown = withoutFencedCode(text);
+    const headingOffsets = new Set<number>();
+    for (const slice of slices) {
     const anchor = `<a id="${slice.sectionAnchor}"></a>`;
-    if (count(text, anchor) !== 1) return diagnostic('PLAN_MARKDOWN_ANCHOR', 'slice anchor must occur exactly once');
-    const start = text.indexOf(anchor); const heading = `### Slice ${slice.id}: ${slice.title}`;
+        if (count(markdown, anchor) !== 1) return diagnostic('PLAN_MARKDOWN_ANCHOR', 'slice anchor must occur exactly once');
+        const start = markdown.indexOf(anchor); const heading = `### Slice ${slice.id}: ${slice.title}`;
     const expectedHeading = start + anchor.length + 1;
-    if (text[start + anchor.length] !== '\n') return diagnostic('PLAN_MARKDOWN_HEADING', 'slice heading must immediately follow anchor');
-    const headingEnd = text.indexOf('\n', expectedHeading);
-    if (text.slice(expectedHeading, headingEnd < 0 ? text.length : headingEnd) !== heading) return diagnostic('PLAN_MARKDOWN_HEADING', 'slice heading must exactly match manifest after anchor');
+        if (markdown[start + anchor.length] !== '\n') return diagnostic('PLAN_MARKDOWN_HEADING', 'slice heading must immediately follow anchor');
+        const headingEnd = markdown.indexOf('\n', expectedHeading);
+        if (markdown.slice(expectedHeading, headingEnd < 0 ? markdown.length : headingEnd) !== heading) return diagnostic('PLAN_MARKDOWN_HEADING', 'slice heading must exactly match manifest after anchor');
     const headingAt = expectedHeading;
-    const next = text.indexOf('\n### Slice ', headingAt + heading.length); const end = next < 0 ? text.length : next;
-    const section = text.slice(start, end);
+        headingOffsets.add(headingAt);
+    }
+    for (const match of markdown.matchAll(/^### Slice .*$/gm)) {
+        if (!headingOffsets.has(match.index ?? -1)) return diagnostic('PLAN_MARKDOWN_HEADING', 'slice headings must immediately follow declared anchors');
+    }
+    for (const slice of slices) {
+        const anchor = `<a id="${slice.sectionAnchor}"></a>`;
+        const start = markdown.indexOf(anchor); const heading = `### Slice ${slice.id}: ${slice.title}`;
+        const headingAt = start + anchor.length + 1;
+        const next = markdown.indexOf('\n### Slice ', headingAt + heading.length); const end = next < 0 ? markdown.length : next;
+        const section = markdown.slice(start, end);
     for (const name of ['Surfaces', 'Implementation', 'Edge cases', 'Evidence', 'Fallback']) {
         if ((section.match(new RegExp(`^#### ${name}\\s*$`, 'gm')) ?? []).length !== 1) return diagnostic('PLAN_MARKDOWN_SECTION', 'each required slice subsection must occur exactly once');
         const match = new RegExp(`^#### ${name}\\s*\\n\\s*([^#\\s][\\s\\S]*?)(?=\\n#### |$)`, 'm').exec(section);
         if (!match || /\b(?:TODO|TBD|placeholder|draft)\b/i.test(match[1])) return diagnostic('PLAN_MARKDOWN_SECTION', 'slice section must contain complete prose');
+    }
     }
     return undefined;
 }
@@ -97,8 +121,9 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     if ((raw.requirements as string[]).some((requirement) => owners.get(requirement) !== 1)) return diagnostic('PLAN_REQUIREMENT_OWNER', 'each requirement must have exactly one owner');
     const slices = raw.slices as PlanSlice[]; for (const slice of slices) { if (new Set(slice.dependsOn).size !== slice.dependsOn.length || slice.dependsOn.includes(slice.id) || !slice.dependsOn.every((id) => sliceIds.has(id))) return diagnostic('PLAN_DEPENDENCY', 'slice dependencies must resolve and be non-self unique'); }
     const visited = new Set<string>(); const visiting = new Set<string>(); const byId = new Map(slices.map((slice) => [slice.id, slice])); const cycle = (id: string): boolean => { if (visiting.has(id)) return true; if (visited.has(id)) return false; visiting.add(id); const found = byId.get(id)!.dependsOn.some(cycle); visiting.delete(id); visited.add(id); return found; }; if (slices.some((slice) => cycle(slice.id))) return diagnostic('PLAN_DEPENDENCY', 'slice dependencies must be acyclic');
-    for (const command of raw.commands as Array<Record<string, unknown>>) { const covers = command.covers as string[]; const references = slices.filter((slice) => slice.redCommands.includes(command.id as string) || slice.greenCommands.includes(command.id as string)); if (covers.length > 0 && !references.some((slice) => covers.some((requirement) => slice.requirements.includes(requirement)))) return diagnostic('PLAN_COMMAND_COVER', 'command coverage must relate to a referencing slice'); }
+    for (const command of raw.commands as Array<Record<string, unknown>>) { const covers = command.covers as string[]; const references = slices.filter((slice) => slice.redCommands.includes(command.id as string) || slice.greenCommands.includes(command.id as string)); if (covers.some((requirement) => !references.some((slice) => slice.requirements.includes(requirement)))) return diagnostic('PLAN_COMMAND_COVER', 'command coverage must relate to a referencing slice'); }
+    for (const slice of slices) { for (const requirement of slice.requirements) { const covered = (raw.commands as Array<Record<string, unknown>>).some((command) => (command.covers as string[]).includes(requirement) && (slice.redCommands.includes(command.id as string) || slice.greenCommands.includes(command.id as string))); if (!covered) return diagnostic('PLAN_REQUIREMENT_COVER', 'each requirement must be covered by a command executed by its owning slice'); } }
     const usedSources = new Set(slices.flatMap((slice) => slice.sources)); const usedCommands = new Set([...slices.flatMap((slice) => [...slice.redCommands, ...slice.greenCommands]), ...(raw.closureCommands as string[])]); if (Array.from(sourceIds).some((id) => !usedSources.has(id)) || Array.from(commandIds).some((id) => !usedCommands.has(id)) || !refs(raw.closureCommands, commandIds)) return diagnostic('PLAN_ORPHAN', 'sources and commands must be referenced');
-    for (const slice of slices) { const markdown = checkMarkdown(text, slice); if (markdown) return markdown; }
+    const markdown = checkMarkdown(text, slices); if (markdown) return markdown;
     return { state: 'valid', schema: 'compact-slices/v1', manifest: raw as unknown as CompactPlanManifest };
 }
