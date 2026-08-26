@@ -62,6 +62,7 @@ const program = new Command();
 program.name('awm').description('Agentic Workflow Manager').version(cliVersion());
 
 program.hook('postAction', (_command, actionCommand) => {
+    if (actionCommand.name() === 'preflight') return;
     if (actionCommand.parent?.name() === 'plan' && actionCommand.name() === 'validate' && actionCommand.opts().json === true) return;
     try { maybeNotifyUpdate(); } catch { /* el aviso nunca rompe un comando */ }
 });
