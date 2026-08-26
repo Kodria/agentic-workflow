@@ -88,7 +88,16 @@ function checkContext(cwd: string): PreflightCheck {
 }
 
 function checkContextKernel(cwd: string): PreflightCheck | null {
-    const resolution = resolveProjectContextSchema();
+    let resolution: ReturnType<typeof resolveProjectContextSchema>;
+    try {
+        resolution = resolveProjectContextSchema();
+    } catch {
+        return {
+            id: 'context-kernel', ok: false, advisory: false,
+            detail: 'configured registry inventory could not be read',
+            remedy: 'Repair the local registry inventory and rerun preflight.',
+        };
+    }
     if (resolution.diagnostics.length > 0) {
         return {
             id: 'context-kernel',
@@ -443,7 +452,16 @@ function bounded(value: string, limit = 512): string {
 }
 
 function checkCompatibility(): PreflightCheck {
-    const failures = verifyMinCliVersions();
+    let failures: ReturnType<typeof verifyMinCliVersions>;
+    try {
+        failures = verifyMinCliVersions();
+    } catch {
+        return {
+            id: 'compatibility', ok: false,
+            detail: 'configured registry inventory could not be read',
+            remedy: 'Repair the local registry inventory and rerun strict preflight.',
+        };
+    }
     if (failures.length === 0) return { id: 'compatibility', ok: true, detail: 'all configured registry minCliVersion requirements are satisfied' };
     return {
         id: 'compatibility', ok: false,

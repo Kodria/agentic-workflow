@@ -28,7 +28,11 @@ function bounded(value: string, limit = 512): string {
 function authoritativeSource(value: string): string | null {
     try {
         const url = new URL(value);
-        if (url.protocol === 'https:' && url.hostname) return bounded(`https://${url.host}${url.pathname}`);
+        // HTTPS userinfo is a credential-bearing transport URL. Reject it before
+        // constructing any Git argv, rather than merely redacting it for output.
+        if (url.protocol === 'https:' && url.hostname && !url.username && !url.password && !url.search && !url.hash) {
+            return bounded(`https://${url.host}${url.pathname}`);
+        }
         if (url.protocol === 'ssh:' && url.hostname && !url.password && !url.search && !url.hash) {
             return bounded(`ssh://${url.host}${url.pathname}`);
         }
@@ -181,8 +185,6 @@ export async function checkCurrentness(cwd: string, deps: CurrentnessDeps = {}):
     const fetchImpl = deps.fetch ?? fetch;
     const git = deps.git ?? defaultGit;
     const preferences = (deps.readPreferences ?? readPreferences)();
-    const registries = (deps.listRegistries ?? listRegistries)();
-    if (!Array.isArray(registries)) throw new Error('currentness registry inventory must be an array');
 
     const installedCli = getCliVersion();
     const latest = await latestCli(fetchImpl);
@@ -193,6 +195,17 @@ export async function checkCurrentness(cwd: string, deps: CurrentnessDeps = {}):
             : { component: 'cli', installed: installedCli, latest, channel: 'stable', source: NPM_SOURCE, checkedAt, status: 'stale', detail: 'Installed version is behind npm dist-tags.latest.', remedy: `npm i -g ${CLI_PACKAGE_NAME}@latest && rerun in a fresh process` };
 
     const components = [cli];
+    let registries: RegistrySource[];
+    try {
+        registries = (deps.listRegistries ?? listRegistries)();
+        if (!Array.isArray(registries)) throw new Error('currentness registry inventory must be an array');
+    } catch {
+        components.push({
+            ...unavailable('registry:inventory', '[configured registry inventory]', checkedAt, null),
+            remedy: 'Repair the local registry inventory and rerun strict preflight.',
+        });
+        return { checkedAt, components, compatibility: { status: 'not-checked' } };
+    }
     if (registries.length === 0) components.push(unavailable('registry:none', '[configured remote]', checkedAt, null));
     else for (const registry of registries) components.push(await registryComponent(registry, git, preferences, checkedAt));
     return { checkedAt, components, compatibility: { status: 'not-checked' } };

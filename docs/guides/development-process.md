@@ -105,7 +105,7 @@ Tests must pass first. Then merge locally, push and open a PR, keep the branch, 
 | Gate | What it does |
 |---|---|
 | `awm sensors run` | Real commands, real exit codes. No lens, review or claim overrides a red sensor. |
-| `awm preflight` | Verifies the harness can *actually* gate before you start — a green run on a project with no configured sensors is a lie, and preflight is what catches it. |
+| `awm preflight` | Verifies the harness can *actually* gate before you start — a green run on a project with no configured sensors is a lie, and preflight is what catches it. Use `--require-current` when the handoff also requires authoritative CLI and registry freshness. |
 | `verification-before-completion` | No "done/fixed/passing" claim without the command output that proves it. |
 | Plan markers | `awm-qa-complete`, `awm-docs-complete`, and `awm-retro-complete` must be present before finishing, in that order. |
 
@@ -131,11 +131,22 @@ And run the deterministic parts yourself at each boundary:
 
 ```bash
 awm preflight        # before starting
+awm preflight --require-current # before a freshness-enforced unattended handoff
+awm plan validate PLAN_PATH # validate a compact plan without executing its commands
 awm sensors run      # before claiming any task done
 awm ledger list      # before the retro
 ```
 
 Those work identically on every agent.
+
+Strict currentness is separate from local `minCliVersion` compatibility: either
+verdict blocks a freshness-enforced handoff. Follow the report's exact remedy:
+`awm update --yes` for a stale registry, or `awm unpin REGISTRY_NAME` followed
+by `awm update --yes` for a pinned-behind registry. In cacheable environments,
+run `npm exec --yes --package=agentic-workflow-manager@latest -- awm preflight
+--require-current`. This only protects a process that executes the fresh
+CLI/bootstrap; it cannot update a host or cached container that never runs new
+code.
 
 ---
 

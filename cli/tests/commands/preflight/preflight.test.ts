@@ -281,6 +281,27 @@ describe('preflight', () => {
         expect(JSON.parse(JSON.stringify(report))).toHaveProperty('currentness.components');
     });
 
+    it('returns a complete strict report instead of throwing for a malformed local registry inventory', async () => {
+        fs.writeFileSync(path.join(process.env.AWM_HOME!, 'registries.json'), '{not-json');
+        mockCheckCurrentness.mockResolvedValue({
+            checkedAt: '2026-08-26T00:00:00.000Z', compatibility: { status: 'not-checked' },
+            components: [{
+                component: 'registry:inventory', installed: null, latest: null, channel: 'stable',
+                source: '[configured registry inventory]', checkedAt: '2026-08-26T00:00:00.000Z', status: 'unverifiable',
+                detail: 'Authoritative currentness could not be verified.',
+                remedy: 'Repair the local registry inventory and rerun strict preflight.',
+            }],
+        });
+
+        const report = await preflight(make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } }), { requireCurrent: true });
+
+        expect(report.status).toBe('degraded');
+        expect(report.currentness?.components).toEqual(expect.arrayContaining([
+            expect.objectContaining({ component: 'registry:inventory', status: 'unverifiable', remedy: expect.stringMatching(/Repair the local registry inventory/) }),
+        ]));
+        expect(JSON.parse(JSON.stringify(report))).toHaveProperty('currentness.components');
+    });
+
     it.each(['stale', 'pinned-behind', 'unverifiable'] as const)('fails strict preflight for a %s component with its exact remedy', async (status) => {
         const dir = make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } });
         mockCheckCurrentness.mockResolvedValue({

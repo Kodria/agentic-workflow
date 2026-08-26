@@ -172,6 +172,9 @@ either can block unattended handoff. Stale CLI remediation is
 registries use `awm update --yes`, while pinned-behind registries require
 `awm unpin REGISTRY_NAME` followed by `awm update --yes`. Unverifiable authority
 requires restoring access and rerunning strict preflight.
+If the local registry inventory itself is malformed, strict JSON still emits an
+`unverifiable` `registry:inventory` component and its repair remedy; it does not
+fall back to an unstructured error.
 
 For cacheable containers, resolve the published CLI immediately before the strict
 gate:
