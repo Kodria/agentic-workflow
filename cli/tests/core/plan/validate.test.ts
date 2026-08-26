@@ -41,6 +41,15 @@ describe('validatePlanFile', () => {
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_ENCODING' })] });
     });
 
+    test('rejects a plan reached through a symlinked parent directory', () => {
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plan-outside-'));
+        try {
+            const plan = fixture(outside);
+            fs.symlinkSync(outside, path.join(root, 'linked-parent'));
+            expect(validatePlanFile(path.join('linked-parent', path.basename(plan)), root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_PATH_UNSAFE' })] });
+        } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+    });
+
     test('rejects partial markers and identifies a safely readable future schema', () => {
         const partial = path.join(root, 'partial.md'); fs.writeFileSync(partial, `${START}\n# incomplete`);
         expect(validatePlanFile(partial, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
