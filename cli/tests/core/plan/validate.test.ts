@@ -211,6 +211,19 @@ describe('validatePlanFile', () => {
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
     });
 
+    test.each([
+        ['escaped schema key', '{"\\u0073chema":"compact-slices/v2"}'],
+        ['escaped schema hyphen', '{"schema":"compact\\u002dslices/v2"}'],
+    ])('does not classify a future schema with an %s as legacy', (_name, manifest) => {
+        const plan = path.join(root, 'escaped-future-schema.md'); fs.writeFileSync(plan, manifest);
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
+    });
+
+    test('rejects an escaped current schema without compact markers', () => {
+        const plan = path.join(root, 'escaped-current-schema.md'); fs.writeFileSync(plan, '{"\\u0073chema":"compact\\u002dslices/v1"}');
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
+    });
+
     test('rejects duplicate trace references and an oversized plan id', () => {
         const duplicate = validatePlanFile(fixture(root, (m) => { (m.slices as Record<string, unknown>[])[0].sources = ['SRC-ONE', 'SRC-ONE']; }), root);
         expect(duplicate).toMatchObject({ state: 'invalid' });

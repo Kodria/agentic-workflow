@@ -22,6 +22,15 @@ function isLauncher(program: string): boolean {
 
 function diagnostic(code: string, message: string, field?: string): PlanValidationReport { return { state: 'invalid', diagnostics: [{ code, message, ...(field ? { field } : {}) }] }; }
 function unsupported(schema: string): PlanValidationReport { return { state: 'unsupported', schema, diagnostics: [{ code: 'PLAN_UNSUPPORTED_SCHEMA', message: 'unsupported compact plan schema; update the CLI' }] }; }
+function markerlessSchemaClassification(text: string): PlanValidationReport | undefined {
+    let candidate: unknown;
+    try { candidate = parseJsonNoDuplicate(text.trim()); } catch { return undefined; }
+    if (!object(candidate) || !Object.prototype.hasOwnProperty.call(candidate, 'schema')) return undefined;
+    if (typeof candidate.schema !== 'string') return diagnostic('PLAN_MARKERS', 'compact markers must occur once in order');
+    if (Buffer.byteLength(candidate.schema, 'utf8') > MAX_STRING) return diagnostic('PLAN_LIMIT', 'schema exceeds maximum string size');
+    if (candidate.schema.startsWith('compact-slices/') && candidate.schema !== 'compact-slices/v1') return unsupported(candidate.schema);
+    return diagnostic('PLAN_MARKERS', 'compact markers must occur once in order');
+}
 function count(text: string, token: string): number { return text.split(token).length - 1; }
 function object(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 function exact(value: unknown, fields: string[]): value is Record<string, unknown> {
@@ -100,7 +109,7 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     let bytes: Buffer; try { if (fs.statSync(planFile).size > MAX_PLAN) return diagnostic('PLAN_LIMIT', 'plan exceeds maximum size'); bytes = fs.readFileSync(planFile); } catch { return diagnostic('PLAN_READ', 'plan cannot be read'); }
     let text: string; try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { return diagnostic('PLAN_ENCODING', 'plan must be valid UTF-8'); }
     const starts = count(text, START); const ends = count(text, END); const signaled = starts > 0 || ends > 0 || /"schema"\s*:\s*"compact-slices(?:\/|\\u002[fF])/.test(text);
-    if (!signaled) return { state: 'legacy' };
+    if (!signaled) return markerlessSchemaClassification(text) ?? { state: 'legacy' };
     if (starts === 0 && ends === 0) { try { const candidate = parseJsonNoDuplicate(text.trim()); if (object(candidate) && typeof candidate.schema === 'string' && Buffer.byteLength(candidate.schema, 'utf8') <= MAX_STRING && candidate.schema.startsWith('compact-slices/') && candidate.schema !== 'compact-slices/v1') return unsupported(candidate.schema); } catch { /* invalid below */ } return diagnostic('PLAN_MARKERS', 'compact markers must occur once in order'); }
     if (starts !== 1 || ends !== 1 || text.indexOf(START) > text.indexOf(END)) { const partial = starts === 1 ? text.slice(text.indexOf(START) + START.length, ends ? text.indexOf(END) : undefined).trim() : ''; try { const candidate = parseJsonNoDuplicate(partial); if (object(candidate) && typeof candidate.schema === 'string' && Buffer.byteLength(candidate.schema, 'utf8') <= MAX_STRING && candidate.schema.startsWith('compact-slices/') && candidate.schema !== 'compact-slices/v1') return unsupported(candidate.schema); } catch { /* invalid below */ } return diagnostic('PLAN_MARKERS', 'compact markers must occur once in order'); }
     const body = text.slice(text.indexOf(START) + START.length, text.indexOf(END)); if (Buffer.byteLength(body, 'utf8') > MAX_MANIFEST) return diagnostic('PLAN_LIMIT', 'manifest exceeds maximum size');
