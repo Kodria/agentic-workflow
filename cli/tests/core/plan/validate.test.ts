@@ -1,11 +1,11 @@
 import fs from 'fs';
-import { execFileSync } from 'child_process';
+import { exec, execFileSync, execSync, spawn, spawnSync } from 'child_process';
 import os from 'os';
 import path from 'path';
 import { parseJsonNoDuplicate } from '../../../src/core/plan/json';
 import { validatePlanFile } from '../../../src/core/plan/validate';
 
-jest.mock('child_process', () => ({ execFileSync: jest.fn() }));
+jest.mock('child_process', () => ({ exec: jest.fn(), execFileSync: jest.fn(), execSync: jest.fn(), spawn: jest.fn(), spawnSync: jest.fn() }));
 
 const START = '<!-- AWM:COMPACT-SLICES:START v1 -->';
 const END = '<!-- AWM:COMPACT-SLICES:END v1 -->';
@@ -46,6 +46,10 @@ describe('validatePlanFile', () => {
             const report = validatePlanFile(plan, root);
             expect(report).toMatchObject({ state: 'valid', manifest: { slices: [expect.objectContaining({ id: 'S1', requirements: ['R4-VAL-2'] })] } });
             expect(execFileSync).not.toHaveBeenCalled();
+            expect(exec).not.toHaveBeenCalled();
+            expect(execSync).not.toHaveBeenCalled();
+            expect(spawn).not.toHaveBeenCalled();
+            expect(spawnSync).not.toHaveBeenCalled();
             expect(network).not.toHaveBeenCalled();
             expect(rewrite).not.toHaveBeenCalled();
             expect(fs.readFileSync(plan, 'utf8')).toBe(before);
@@ -72,6 +76,11 @@ describe('validatePlanFile', () => {
         expect(validatePlanFile(partial, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
         const future = path.join(root, 'future.md'); fs.writeFileSync(future, `${START}\n{"schema":"compact-slices/v2"}\n${END}`);
         expect(validatePlanFile(future, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
+    });
+
+    test('keeps a future schema behind partial markers invalid rather than unsupported', () => {
+        const plan = path.join(root, 'partial-future.md'); fs.writeFileSync(plan, `${START}\n{"schema":"compact-slices/v2"}`);
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
     });
 
     test('applies scalar limits before classifying a future schema as unsupported', () => {
@@ -121,9 +130,23 @@ describe('validatePlanFile', () => {
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SLICE_SHAPE' })] });
     });
 
+    test('rejects a slice requirement absent from the top-level requirements', () => {
+        const report = validatePlanFile(fixture(root, (m) => {
+            m.requirements = [];
+            (m.slices as Record<string, unknown>[])[0].requirements = ['R4-VAL-9'];
+            (m.commands as Record<string, unknown>[])[0].covers = [];
+        }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SLICE_SHAPE' })] });
+    });
+
     test('requires a non-whitespace fallback condition', () => {
         const report = validatePlanFile(fixture(root, (m) => { (m.slices as Record<string, unknown>[])[0].fallback = ['   ']; }), root);
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SLICE_SHAPE' })] });
+    });
+
+    test.each(['locator', 'fact'])('requires source %s to contain non-whitespace text', (field) => {
+        const report = validatePlanFile(fixture(root, (m) => { (m.sources as Record<string, unknown>[])[0][field] = ' '; }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SOURCE_SHAPE' })] });
     });
 
     test('bounds sectionAnchor as a scalar string', () => {
