@@ -185,6 +185,15 @@ describe('validatePlanFile', () => {
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
     });
 
+    test.each([
+        ['env wrapper', 'env', ['sh', '-c', 'echo safe']],
+        ['node interpreter', 'node', ['-e', 'process.exit()']],
+        ['busybox launcher', 'busybox', ['sh', '-c', 'echo safe']],
+    ])('rejects nested shell launcher %s', (_name, program, args) => {
+        const report = validatePlanFile(fixture(root, (m) => { (m.commands as Record<string, unknown>[])[0].program = program; (m.commands as Record<string, unknown>[])[0].args = args; }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
+    });
+
     test('rejects a command with neither requirement coverage nor closure membership', () => {
         const report = validatePlanFile(fixture(root, (m) => {
             (m.commands as Record<string, unknown>[])[0].covers = [];

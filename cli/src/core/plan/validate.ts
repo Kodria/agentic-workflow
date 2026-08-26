@@ -10,7 +10,10 @@ const MAX_MANIFEST = 256 * 1024;
 const MAX_STRING = 4096;
 const ID = /^[A-Z][A-Z0-9-]{0,63}$/;
 const PLAN_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const SHELL = new Set(['sh', 'bash', 'zsh', 'cmd', 'powershell', 'pwsh']);
+const SHELL = new Set([
+    'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'cmd', 'powershell', 'pwsh',
+    'env', 'busybox', 'node', 'nodejs', 'deno', 'bun', 'python', 'python3', 'ruby', 'perl', 'php', 'lua',
+]);
 
 function diagnostic(code: string, message: string, field?: string): PlanValidationReport { return { state: 'invalid', diagnostics: [{ code, message, ...(field ? { field } : {}) }] }; }
 function unsupported(schema: string): PlanValidationReport { return { state: 'unsupported', schema, diagnostics: [{ code: 'PLAN_UNSUPPORTED_SCHEMA', message: 'unsupported compact plan schema; update the CLI' }] }; }
