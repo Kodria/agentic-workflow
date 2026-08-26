@@ -68,6 +68,40 @@ describe('checkCurrentness', () => {
         }));
     });
 
+    it('marks an npm latest version above the max-safe numeric boundary as stale', async () => {
+        const { checkCurrentness } = require('../../../src/core/currentness/check');
+        const result = await checkCurrentness(root, deps({
+            cliVersion: () => '1.9007199254740992.0',
+            fetch: jest.fn().mockResolvedValue({
+                ok: true,
+                text: async () => JSON.stringify({ 'dist-tags': { latest: '1.9007199254740993.0' } }),
+            }),
+        }));
+
+        expect(result.components[0]).toEqual(expect.objectContaining({
+            installed: '1.9007199254740992.0',
+            latest: '1.9007199254740993.0',
+            status: 'stale',
+        }));
+    });
+
+    it('marks a registry tag above the max-safe numeric boundary as stale', async () => {
+        const installed = 'v1.9007199254740992.0';
+        const latest = 'v1.9007199254740993.0';
+        const { checkCurrentness } = require('../../../src/core/currentness/check');
+        const result = await checkCurrentness(root, deps({
+            git: jest.fn().mockImplementation(async (_cwd: string, args: string[]) => {
+                if (args[0] === 'ls-remote') return `${'b'.repeat(40)}\trefs/tags/${latest}\n${'a'.repeat(40)}\trefs/tags/${installed}\n`;
+                if (args[0] === 'remote') return 'https://token:secret@example.test/team/repo.git\n';
+                if (args[0] === 'rev-parse') return `${'a'.repeat(40)}\n`;
+                if (args[0] === 'describe') return `${installed}\n`;
+                throw new Error('unexpected');
+            }),
+        }));
+
+        expect(result.components[1]).toEqual(expect.objectContaining({ installed, latest, status: 'stale' }));
+    });
+
     it.each([
         ['branch provenance', async (_cwd: string, args: string[]) => args[0] === 'describe' ? Promise.reject(new Error('not a tag')) : args[0] === 'ls-remote' ? `${'a'.repeat(40)}\trefs/tags/v1.2.3\n` : args[0] === 'remote' ? 'https://example.test/team/repo.git\n' : `${'a'.repeat(40)}\n`],
         ['malformed npm semver', undefined],
@@ -146,8 +180,28 @@ describe('checkCurrentness', () => {
     });
 
     it.each([
-        ['http://username:password@example.test/team/repo.git', 'http://example.test/team/repo.git'],
+        'http://example.test/team/repo.git',
+        'ftp://example.test/team/repo.git',
+        'ssh://git:secret@example.test/team/repo.git',
+        'git@example.test:team/repo.git?token=secret',
+    ])('rejects non-authoritative transport %s before Git invocation', async (remote) => {
+        const git = jest.fn();
+        const { checkCurrentness } = require('../../../src/core/currentness/check');
+        const result = await checkCurrentness(root, deps({
+            listRegistries: () => [{ name: 'baseline', remote, contentRoot: '/registry' }],
+            git,
+        }));
+
+        expect(result.components[1]).toEqual(expect.objectContaining({
+            source: '[configured remote]',
+            status: 'unverifiable',
+        }));
+        expect(git).not.toHaveBeenCalled();
+    });
+
+    it.each([
         ['https://username:password@example.test/team/repo.git?token=secret#fragment', 'https://example.test/team/repo.git'],
+        ['ssh://username@example.test/team/repo.git', 'ssh://example.test/team/repo.git'],
         ['username@github.example:team/repo.git', 'github.example:team/repo.git'],
     ])('redacts credentials and userinfo from %s', async (remote, expectedSource) => {
         const { checkCurrentness } = require('../../../src/core/currentness/check');

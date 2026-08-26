@@ -25,11 +25,14 @@ function bounded(value: string, limit = 512): string {
     return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
 }
 
-function sanitizeSource(value: string): string {
+function authoritativeSource(value: string): string | null {
     try {
         const url = new URL(value);
-        if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname) return '[configured remote]';
-        return bounded(`${url.protocol}//${url.host}${url.pathname}`);
+        if (url.protocol === 'https:' && url.hostname) return bounded(`https://${url.host}${url.pathname}`);
+        if (url.protocol === 'ssh:' && url.hostname && !url.password && !url.search && !url.hash) {
+            return bounded(`ssh://${url.host}${url.pathname}`);
+        }
+        return null;
     } catch {
         // SCP-style Git remotes have no URL parser representation. Permit only an
         // intentionally narrow grammar and remove the optional userinfo; all other
@@ -37,21 +40,32 @@ function sanitizeSource(value: string): string {
         const match = /^(?:[A-Za-z0-9._-]+@)?([A-Za-z0-9.-]+):([A-Za-z0-9._/-]+)$/.exec(value);
         return match
             ? bounded(`${match[1]}:${match[2]}`)
-            : '[configured remote]';
+            : null;
     }
 }
 
-function parseVersion(value: string): [number, number, number] | null {
+function sanitizeSource(value: string): string {
+    return authoritativeSource(value) ?? '[configured remote]';
+}
+
+function parseVersion(value: string): [string, string, string] | null {
     const match = STRICT_SEMVER.exec(value.trim());
     if (!match) return null;
-    return [Number(match[1]), Number(match[2]), Number(match[3])];
+    return [match[1], match[2], match[3]];
+}
+
+function compareNumericIdentifier(a: string, b: string): number {
+    if (a.length !== b.length) return a.length < b.length ? -1 : 1;
+    return a < b ? -1 : a > b ? 1 : 0;
 }
 
 function compareStrict(a: string, b: string): number | null {
     const av = parseVersion(a);
     const bv = parseVersion(b);
     if (!av || !bv) return null;
-    return av[0] - bv[0] || av[1] - bv[1] || av[2] - bv[2];
+    return compareNumericIdentifier(av[0], bv[0])
+        || compareNumericIdentifier(av[1], bv[1])
+        || compareNumericIdentifier(av[2], bv[2]);
 }
 
 function iso(now: () => number): string {
@@ -118,8 +132,10 @@ function latestStableTag(output: string): { tag: string; sha: string } | null {
 }
 
 async function registryComponent(registry: RegistrySource, git: GitTransport, prefs: ReturnType<typeof readPreferences>, checkedAt: string): Promise<CurrentnessComponent> {
-    const source = sanitizeSource(registry.remote);
+    const authorizedSource = authoritativeSource(registry.remote);
+    const source = authorizedSource ?? '[configured remote]';
     const pin = prefs.pins?.[registry.name];
+    if (!authorizedSource) return unavailable(`registry:${registry.name}`, source, checkedAt, null, pin);
     let origin: string;
     let head: string;
     let exactTag: string;
