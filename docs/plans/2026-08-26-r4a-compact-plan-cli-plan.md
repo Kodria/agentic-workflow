@@ -128,8 +128,8 @@
     },
     {
       "id": "CMD-SELF-VALIDATE",
-      "program": "node",
-      "args": ["cli/dist/src/index.js", "plan", "validate", "docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md", "--json"],
+      "program": "npm",
+      "args": ["--prefix", "cli", "exec", "--no", "--", "awm", "plan", "validate", "docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md", "--json"],
       "covers": ["R4-VAL-1", "R4-EVID-1"]
     },
     {
