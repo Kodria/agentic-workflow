@@ -1,8 +1,11 @@
 import fs from 'fs';
+import { execFileSync } from 'child_process';
 import os from 'os';
 import path from 'path';
 import { parseJsonNoDuplicate } from '../../../src/core/plan/json';
 import { validatePlanFile } from '../../../src/core/plan/validate';
+
+jest.mock('child_process', () => ({ execFileSync: jest.fn() }));
 
 const START = '<!-- AWM:COMPACT-SLICES:START v1 -->';
 const END = '<!-- AWM:COMPACT-SLICES:END v1 -->';
@@ -35,6 +38,20 @@ describe('validatePlanFile', () => {
         expect(fs.readFileSync(plan, 'utf8')).toBe(before);
     });
 
+    test('performs no execution, network request, model work, grouping, or rewrite', () => {
+        const plan = fixture(root); const before = fs.readFileSync(plan, 'utf8');
+        const network = jest.spyOn(global, 'fetch');
+        const rewrite = jest.spyOn(fs, 'writeFileSync');
+        try {
+            const report = validatePlanFile(plan, root);
+            expect(report).toMatchObject({ state: 'valid', manifest: { slices: [expect.objectContaining({ id: 'S1', requirements: ['R4-VAL-2'] })] } });
+            expect(execFileSync).not.toHaveBeenCalled();
+            expect(network).not.toHaveBeenCalled();
+            expect(rewrite).not.toHaveBeenCalled();
+            expect(fs.readFileSync(plan, 'utf8')).toBe(before);
+        } finally { network.mockRestore(); rewrite.mockRestore(); }
+    });
+
     test('rejects invalid UTF-8 bytes before interpreting plan text', () => {
         const plan = path.join(root, 'invalid-utf8.md');
         fs.writeFileSync(plan, Buffer.concat([Buffer.from(`${START}\n`), Buffer.from([0x80]), Buffer.from(`\n${END}\n`)]));
@@ -55,6 +72,12 @@ describe('validatePlanFile', () => {
         expect(validatePlanFile(partial, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
         const future = path.join(root, 'future.md'); fs.writeFileSync(future, `${START}\n{"schema":"compact-slices/v2"}\n${END}`);
         expect(validatePlanFile(future, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
+    });
+
+    test('applies scalar limits before classifying a future schema as unsupported', () => {
+        const plan = path.join(root, 'future-too-large.md');
+        fs.writeFileSync(plan, `${START}\n{"schema":"compact-slices/${'v'.repeat(4097)}"}\n${END}`);
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_LIMIT' })] });
     });
 
     test('rejects a duplicate JSON key with a stable diagnostic', () => {
@@ -98,6 +121,11 @@ describe('validatePlanFile', () => {
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SLICE_SHAPE' })] });
     });
 
+    test('requires a non-whitespace fallback condition', () => {
+        const report = validatePlanFile(fixture(root, (m) => { (m.slices as Record<string, unknown>[])[0].fallback = ['   ']; }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SLICE_SHAPE' })] });
+    });
+
     test('bounds sectionAnchor as a scalar string', () => {
         const report = validatePlanFile(fixture(root, (m) => { (m.slices as Record<string, unknown>[])[0].sectionAnchor = 'a'.repeat(4097); }), root);
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SLICE_SHAPE' })] });
@@ -111,6 +139,12 @@ describe('validatePlanFile', () => {
     test('requires the slice heading immediately after its anchor', () => {
         const plan = fixture(root);
         fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace('<a id="slice-s1"></a>\n', '<a id="slice-s1"></a>\nintervening text\n'));
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKDOWN_HEADING' })] });
+    });
+
+    test('rejects a slice heading with a suffix beyond the manifest title', () => {
+        const plan = fixture(root);
+        fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace('### Slice S1: Validate one thing\n', '### Slice S1: Validate one thing extra\n'));
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKDOWN_HEADING' })] });
     });
 
