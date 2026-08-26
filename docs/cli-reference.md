@@ -138,13 +138,14 @@ Re-enable a provider through a normal `awm init --agent <provider>` run.
 Verify the project harness can actually gate **before** development starts.
 
 ```
-awm preflight [--json] [--verify-sensors] [--cwd <path>]
+awm preflight [--json] [--verify-sensors] [--require-current] [--cwd <path>]
 ```
 
 | Flag | Description |
 |---|---|
 | `--json` | Emit the report as JSON. Preserved on failure, so a red run is still machine-readable. |
 | `--verify-sensors` | Run the full, empirical sensor gate. This is the read-only handoff check for unattended execution. |
+| `--require-current` | Require fresh authoritative npm/Git currentness for the CLI and every configured registry. |
 | `--cwd <path>` | Project directory to check. Default: current directory. |
 
 Where `awm doctor` answers *"is AWM installed correctly?"*, preflight answers *"can this project stop bad work from landing?"* — the distinction matters when onboarding a repository, because an install can be perfect while the project has nothing enforceable behind it.
@@ -161,6 +162,41 @@ established an empirical pass and directs the operator to `awm sensors init`.
 It does not fabricate a sensor name, timeout, source, or elapsed time. This
 makes a timeout, an inconclusive result, or a missing configuration actionable
 before a human has gone away.
+
+`--require-current` is a separate strict, read-only gate. It checks the installed
+CLI against npm `dist-tags.latest` and each configured registry against its remote
+stable tag; it bypasses the passive update cache. The report keeps
+**currentness** separate from local registry **compatibility** (`minCliVersion`):
+either can block unattended handoff. Stale CLI remediation is
+`npm i -g agentic-workflow-manager@latest` followed by a fresh process; stale
+registries use `awm update --yes`, while pinned-behind registries require
+`awm unpin REGISTRY_NAME` followed by `awm update --yes`. Unverifiable authority
+requires restoring access and rerunning strict preflight.
+If the local registry inventory itself is malformed, strict JSON still emits an
+`unverifiable` `registry:inventory` component and its repair remedy; it does not
+fall back to an unstructured error.
+
+For cacheable containers, resolve the published CLI immediately before the strict
+gate:
+
+```bash
+npm exec --yes --package=agentic-workflow-manager@latest -- awm preflight --require-current
+```
+
+The enforceable boundary is deliberately narrow: this gate protects an environment
+that executes a fresh CLI/bootstrap; it cannot update a host or cached container that
+never runs new code. `minCliVersion` compatibility remains a separate local contract,
+not evidence that a CLI or registry is current.
+
+### `awm plan validate PLAN_PATH`
+
+Validate a `compact-slices/v1` plan without executing its commands, contacting the
+network, or rewriting the plan. A plan with no compact-plan marker retains the legacy
+full-quality path; unsupported or malformed compact declarations fail closed.
+
+```bash
+awm plan validate PLAN_PATH [--json] [--cwd <path>]
+```
 
 #### Context Kernel v1 migration state
 

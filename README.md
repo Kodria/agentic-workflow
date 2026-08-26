@@ -65,10 +65,17 @@ awm add                  # install a project bundle or artifact
 awm list                 # inspect available content
 awm sensors run          # run the project's quality gates
 awm preflight            # verify that the harness can gate work
+awm preflight --require-current # require authoritative CLI/registry currentness
+awm plan validate PLAN_PATH # validate a compact execution plan without running it
 awm update               # refresh registered content
 awm doctor               # inspect machine and project state
 awm track status         # inspect parallel execution tracks
 ```
+
+Use `awm preflight --require-current` before an unattended handoff when the
+installed CLI and configured registries must be current as well as compatible.
+See the [CLI reference](docs/cli-reference.md#awm-preflight) for remedies and
+the cache-resistant bootstrap command.
 
 The main workflows are [Product process](docs/guides/product-process.md), from
 a raw idea to a ready brief, and [Development process](docs/guides/development-process.md),

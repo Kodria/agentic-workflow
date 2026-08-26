@@ -52,6 +52,23 @@ non-interactive run. The explicit alternative remains:
 npm i -g agentic-workflow-manager@latest
 ```
 
+## Freshness gate for cacheable environments
+
+Before an unattended run that must prove the installed CLI and every configured
+registry are current, bootstrap the published CLI and run strict preflight in
+one command:
+
+```bash
+npm exec --yes --package=agentic-workflow-manager@latest -- awm preflight --require-current
+```
+
+This strict check is read-only. It reports separate compatibility
+(`minCliVersion`) and currentness verdicts. Update a stale registry with
+`awm update --yes`; first remove a pin with `awm unpin REGISTRY_NAME` when the
+report says `pinned-behind`. The gate can protect only an environment that
+executes a fresh CLI/bootstrap; it cannot update a host or cached container that
+never runs new code.
+
 ## Operating-system setup
 
 ### Linux

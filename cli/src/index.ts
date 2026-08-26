@@ -36,6 +36,7 @@ import { registerSensorsCommand } from './commands/sensors';
 import { registerLedgerCommand } from './commands/ledger';
 import { registerContextBudgetCommand } from './commands/context-budget';
 import { registerPreflightCommand } from './commands/preflight';
+import { registerPlanCommand } from './commands/plan';
 import { registerDoctorCommand } from './commands/doctor';
 import { registerBackupCommand } from './commands/backup';
 import { registerInitCommand } from './commands/init';
@@ -60,7 +61,9 @@ import { cliVersion } from './core/cli-version';
 const program = new Command();
 program.name('awm').description('Agentic Workflow Manager').version(cliVersion());
 
-program.hook('postAction', () => {
+program.hook('postAction', (_command, actionCommand) => {
+    if (actionCommand.name() === 'preflight') return;
+    if (actionCommand.parent?.name() === 'plan' && actionCommand.name() === 'validate' && actionCommand.opts().json === true) return;
     try { maybeNotifyUpdate(); } catch { /* el aviso nunca rompe un comando */ }
 });
 
@@ -792,6 +795,7 @@ registerSensorsCommand(program);
 registerLedgerCommand(program);
 registerContextBudgetCommand(program);
 registerPreflightCommand(program);
+registerPlanCommand(program);
 registerDoctorCommand(program);
 registerBackupCommand(program);
 registerInitCommand(program);

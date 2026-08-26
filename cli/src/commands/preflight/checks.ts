@@ -9,6 +9,9 @@ import { runSensors } from '../sensors/run';
 import { resolveOnPath } from '../../core/paths';
 import { resolveProjectContextSchema } from '../../core/registries';
 import { inspectContextKernel } from '../../core/context-kernel/inspect';
+import { verifyMinCliVersions } from '../../core/registries';
+import { checkCurrentness } from '../../core/currentness/check';
+import type { CurrentnessReport } from '../../core/currentness/types';
 
 /**
  * Preflight: can this project be gated at all?
@@ -31,7 +34,7 @@ import { inspectContextKernel } from '../../core/context-kernel/inspect';
  */
 
 export type PreflightCheck = {
-    id: 'context' | 'context-kernel' | 'manifest' | 'tools' | 'pack' | 'host' | 'sensors-baseline' | 'sensors-execution';
+    id: 'context' | 'context-kernel' | 'manifest' | 'tools' | 'pack' | 'host' | 'sensors-baseline' | 'sensors-execution' | 'compatibility' | 'currentness';
     ok: boolean;
     /** Informational warning: rendered prominently, but does not degrade the harness. */
     advisory?: boolean;
@@ -53,11 +56,15 @@ export type PreflightReport = {
      */
     status: 'ready' | 'degraded' | 'not_configured';
     checks: PreflightCheck[];
+    /** Present only for the explicit authoritative, remote currentness gate. */
+    currentness?: CurrentnessReport;
 };
 
 export type PreflightOptions = {
     /** Run the full sensor gate and require its empirical verdict to be `pass`. */
     verifySensors?: boolean;
+    /** Query authoritative npm/Git sources; default preflight remains fully local. */
+    requireCurrent?: boolean;
 };
 
 const MANIFEST = path.join('.awm', 'sensors.json');
@@ -81,7 +88,16 @@ function checkContext(cwd: string): PreflightCheck {
 }
 
 function checkContextKernel(cwd: string): PreflightCheck | null {
-    const resolution = resolveProjectContextSchema();
+    let resolution: ReturnType<typeof resolveProjectContextSchema>;
+    try {
+        resolution = resolveProjectContextSchema();
+    } catch {
+        return {
+            id: 'context-kernel', ok: false, advisory: false,
+            detail: 'configured registry inventory could not be read',
+            remedy: 'Repair the local registry inventory and rerun preflight.',
+        };
+    }
     if (resolution.diagnostics.length > 0) {
         return {
             id: 'context-kernel',
@@ -431,9 +447,49 @@ function checkHost(cwd: string): PreflightCheck {
     return { id: 'host', ok: true, detail: 'git host not recognized (github/gitlab) — PR/MR automation not applicable' };
 }
 
+function bounded(value: string, limit = 512): string {
+    return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
+}
+
+function checkCompatibility(): PreflightCheck {
+    let failures: ReturnType<typeof verifyMinCliVersions>;
+    try {
+        failures = verifyMinCliVersions();
+    } catch {
+        return {
+            id: 'compatibility', ok: false,
+            detail: 'configured registry inventory could not be read',
+            remedy: 'Repair the local registry inventory and rerun strict preflight.',
+        };
+    }
+    if (failures.length === 0) return { id: 'compatibility', ok: true, detail: 'all configured registry minCliVersion requirements are satisfied' };
+    return {
+        id: 'compatibility', ok: false,
+        detail: bounded(failures.map(failure => `${failure.name} requires CLI >= ${failure.min}`).join('; ')),
+        remedy: 'npm i -g agentic-workflow-manager@latest && rerun in a fresh process',
+    };
+}
+
+function checkAuthoritativeCurrentness(report: CurrentnessReport): PreflightCheck {
+    const failing = report.components.filter(component => component.status !== 'current');
+    const components = report.components.map(component => bounded(
+        `${component.component}: installed=${component.installed ?? 'unknown'} latest=${component.latest ?? 'unknown'} `
+        + `channel=${component.channel} source=${component.source}${component.pin ? ` pin=${component.pin}` : ''} `
+        + `checkedAt=${component.checkedAt} status=${component.status}`,
+    ));
+    return failing.length === 0
+        ? { id: 'currentness', ok: true, detail: `Currentness: current. ${components.join('; ')}` }
+        : {
+            id: 'currentness', ok: false, detail: `Currentness: ${failing.map(component => component.status).join(', ')}. ${components.join('; ')}`,
+            remedy: bounded(failing.map(component => component.remedy).join('; ')),
+        };
+}
+
 export async function preflight(cwd: string = process.cwd(), opts: PreflightOptions = {}): Promise<PreflightReport> {
-    if (!opts || typeof opts !== 'object' || Array.isArray(opts) || (opts.verifySensors !== undefined && typeof opts.verifySensors !== 'boolean')) {
-        throw new Error('preflight options must contain an optional boolean verifySensors');
+    if (!opts || typeof opts !== 'object' || Array.isArray(opts)
+        || (opts.verifySensors !== undefined && typeof opts.verifySensors !== 'boolean')
+        || (opts.requireCurrent !== undefined && typeof opts.requireCurrent !== 'boolean')) {
+        throw new Error('preflight options must contain optional boolean verifySensors and requireCurrent');
     }
     const manifest = readManifest(cwd);
     const manifestExists = fs.existsSync(path.join(cwd, MANIFEST));
@@ -450,6 +506,8 @@ export async function preflight(cwd: string = process.cwd(), opts: PreflightOpti
         // The empirical mode is intentionally opt-in: ordinary preflight remains a
         // quick static inspection and must not dispatch project software.
         ...(opts.verifySensors === true ? [await checkSensorExecution(cwd)] : []),
+        // Strict mode is the only path that contacts authoritative npm/Git sources.
+        ...(opts.requireCurrent === true ? [checkCompatibility()] : []),
         // Runs unconditionally — orthogonal to sensor configuration entirely, this is
         // about PR/MR tooling, not sensors.
         checkHost(cwd),
@@ -462,5 +520,15 @@ export async function preflight(cwd: string = process.cwd(), opts: PreflightOpti
         : checks.some(blockingFailure) ? 'degraded'
         : 'ready';
 
-    return { status, checks };
+    const currentness = opts.requireCurrent === true ? await checkCurrentness(cwd) : undefined;
+    if (currentness) {
+        checks.splice(checks.length - 1, 0, checkAuthoritativeCurrentness(currentness));
+    }
+    const strictFailure = checks.some(blockingFailure);
+    const strictStatus = invalidContextKernel ? 'degraded'
+        : !manifestExists ? 'not_configured'
+        : strictFailure ? 'degraded'
+        : 'ready';
+
+    return currentness ? { status: strictStatus, checks, currentness } : { status, checks };
 }

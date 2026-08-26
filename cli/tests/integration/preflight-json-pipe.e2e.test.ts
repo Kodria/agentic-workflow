@@ -7,6 +7,47 @@ import crypto from 'crypto';
 const cliRoot = path.resolve(__dirname, '../..');
 const bin = path.join(cliRoot, 'dist', 'src', 'index.js');
 
+function wait(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+test.each([
+    ['plain preflight', ['preflight']],
+    ['JSON preflight', ['preflight', '--json']],
+    ['JSON sensor-verification preflight', ['preflight', '--verify-sensors', '--json']],
+] as const)('%s never starts the passive update worker', async (_name, args) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-preflight-update-'));
+    const project = path.join(root, 'project');
+    const awmHome = path.join(root, 'awm-home');
+    const fetchStub = path.join(root, 'fetch-stub.cjs');
+    const updateCache = path.join(awmHome, 'update-check.json');
+    // The worker inherits NODE_OPTIONS. A deterministic immediate response makes a
+    // pre-fix worker write observable without relying on the network or a timeout.
+    fs.writeFileSync(fetchStub, "global.fetch = async () => ({ ok: true, json: async () => ({ version: '999.0.0' }) });\n");
+    fs.mkdirSync(project, { recursive: true });
+
+    try {
+        const result = spawnSync(process.execPath, [bin, ...args], {
+            cwd: project,
+            encoding: 'utf8',
+            env: {
+                ...process.env,
+                AWM_HOME: awmHome,
+                AWM_NO_UPDATE_CHECK: '',
+                NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --require=${fetchStub}`.trim(),
+            },
+        });
+
+        expect(result.status).toBe(1);
+        // A spawned worker using the deterministic response above writes well inside
+        // this window; the delay also verifies it was never merely deferred.
+        await wait(1_000);
+        expect(fs.existsSync(updateCache)).toBe(false);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test('preserves actionable no-manifest preflight JSON when verify-sensors is piped', () => {
     const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-preflight-pipe-'));
     try {

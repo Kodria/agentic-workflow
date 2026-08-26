@@ -44,9 +44,13 @@ export function registerPreflightCommand(program: Command): void {
         .description('verify the project harness can actually gate before development starts')
         .option('--json', 'emit the report as JSON')
         .option('--verify-sensors', 'run the complete sensor gate before unattended execution')
+        .option('--require-current', 'require authoritative CLI and registry currentness before unattended execution')
         .option('--cwd <path>', 'project directory to check (default: current)')
         .action(async (opts) => {
-            const report = await preflight(opts.cwd ?? process.cwd(), { verifySensors: opts.verifySensors === true });
+            const report = await preflight(opts.cwd ?? process.cwd(), {
+                verifySensors: opts.verifySensors === true,
+                requireCurrent: opts.requireCurrent === true,
+            });
             process.stdout.write(opts.json ? JSON.stringify(report, null, 2) + '\n' : formatReport(report));
             const code = exitCodeFor(report);
             // `process.exit()` may truncate the JSON written immediately above when
