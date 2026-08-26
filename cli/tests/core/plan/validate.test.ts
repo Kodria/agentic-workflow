@@ -104,6 +104,26 @@ describe('validatePlanFile', () => {
     });
 
     test.each([
+        ['requirement', (m: Record<string, unknown>) => { m.requirements = [['R4-VAL-2']]; }, 'PLAN_SHAPE'],
+        ['source', (m: Record<string, unknown>) => { (m.sources as Record<string, unknown>[])[0].id = ['SRC-ONE']; }, 'PLAN_SOURCE_SHAPE'],
+        ['command', (m: Record<string, unknown>) => { (m.commands as Record<string, unknown>[])[0].id = ['CMD-ONE']; }, 'PLAN_COMMAND_SHAPE'],
+        ['slice', (m: Record<string, unknown>) => { (m.slices as Record<string, unknown>[])[0].id = ['S1']; }, 'PLAN_SLICE_SHAPE'],
+    ])('rejects a non-string %s ID before applying ID syntax validation', (_name, mutate, code) => {
+        const report = validatePlanFile(fixture(root, mutate), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code })] });
+    });
+
+    test('rejects slices with IDs that are semantically duplicate after coercion', () => {
+        const plan = fixture(root, (m) => {
+            m.requirements = ['R4-VAL-2', 'R4-VAL-3'];
+            (m.commands as Record<string, unknown>[]).push({ id: 'CMD-TWO', program: 'npm', args: ['run', 'lint'], covers: ['R4-VAL-3'] });
+            (m.slices as Record<string, unknown>[]).push({ id: ['S1'], title: 'Validate one thing', requirements: ['R4-VAL-3'], dependsOn: [], sectionAnchor: 'slice-s1', sources: ['SRC-ONE'], redCommands: ['CMD-TWO'], greenCommands: ['CMD-TWO'], reviewEvidence: ['specification', 'code-quality'], risk: 'bounded', fallback: ['Use a reviewed fallback'] });
+            m.closureCommands = ['CMD-ONE', 'CMD-TWO'];
+        });
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SLICE_SHAPE' })] });
+    });
+
+    test.each([
         ['unknown field', (m: Record<string, unknown>) => { m.extra = true; }, 'PLAN_UNKNOWN_FIELD'],
         ['missing field', (m: Record<string, unknown>) => { delete m.planId; }, 'PLAN_MISSING_FIELD'],
         ['limit', (m: Record<string, unknown>) => { m.requirements = Array.from({ length: 257 }, (_, i) => `R${i}`); }, 'PLAN_LIMIT'],
