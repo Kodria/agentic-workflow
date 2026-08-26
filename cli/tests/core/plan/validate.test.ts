@@ -3,12 +3,23 @@ import { exec, execFileSync, execSync, spawn, spawnSync } from 'child_process';
 import os from 'os';
 import path from 'path';
 import { parseJsonNoDuplicate } from '../../../src/core/plan/json';
+import type { PlanValidationReport } from '../../../src/core/plan/types';
 import { validatePlanFile } from '../../../src/core/plan/validate';
 
 jest.mock('child_process', () => ({ exec: jest.fn(), execFileSync: jest.fn(), execSync: jest.fn(), spawn: jest.fn(), spawnSync: jest.fn() }));
 
 const START = '<!-- AWM:COMPACT-SLICES:START v1 -->';
 const END = '<!-- AWM:COMPACT-SLICES:END v1 -->';
+
+function expectApprovedPlanValid(report: PlanValidationReport): void {
+    if (report.state !== 'valid') {
+        const diagnostics = 'diagnostics' in report
+            ? report.diagnostics.map(({ code, message }) => `${code}: ${message}`).join('; ')
+            : 'none';
+        throw new Error(`approved compact plan validation failed: state=${report.state}; diagnostics=${diagnostics}`);
+    }
+    expect(report.schema).toBe('compact-slices/v1');
+}
 
 function fixture(root: string, mutate?: (manifest: Record<string, unknown>) => void): string {
     fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
@@ -46,7 +57,7 @@ describe('validatePlanFile', () => {
 
     test('accepts the approved plan with cross-cutting command coverage', () => {
         const repositoryRoot = path.resolve(__dirname, '../../../..');
-        expect(validatePlanFile('docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md', repositoryRoot)).toMatchObject({ state: 'valid', schema: 'compact-slices/v1' });
+        expectApprovedPlanValid(validatePlanFile('docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md', repositoryRoot));
     });
 
     test('performs no execution, network request, model work, grouping, or rewrite', () => {
