@@ -1,6 +1,10 @@
 import { Command } from 'commander';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { spawnSync } from 'child_process';
 import type { PlanValidationReport } from '../../../src/core/plan/types';
-import { exitCodeFor, registerPlanCommand } from '../../../src/commands/plan';
+import { exitCodeFor, formatReport, registerPlanCommand } from '../../../src/commands/plan';
 
 const stdoutWrite = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
@@ -102,6 +106,64 @@ describe('plan validate Commander wiring', () => {
         await expect(commandFor(valid, calls).parseAsync(['node', 'awm', 'plan', 'validate', 'one.md', 'two.md'])).rejects.toThrow();
         await expect(commandFor(valid, calls).parseAsync(['node', 'awm', 'plan', 'validate', 'one.md', '--cwd', '--json'])).rejects.toThrow();
         expect(calls).toEqual([]);
+    });
+
+    it.each(['plans/escape\u001b.md', 'plans/tab\t.md'])('rejects control characters in the public plan path %j', async (planPath) => {
+        const calls: Array<[string, string]> = [];
+
+        await expect(commandFor(valid, calls).parseAsync(['node', 'awm', 'plan', 'validate', planPath])).rejects.toThrow('plan path must be a non-empty path without control characters');
+        expect(calls).toEqual([]);
+    });
+
+    it.each(['fixture\u001b-root', 'fixture\troot'])('rejects control characters in the public --cwd value %j', async (cwd) => {
+        const calls: Array<[string, string]> = [];
+
+        await expect(commandFor(valid, calls).parseAsync(['node', 'awm', 'plan', 'validate', 'plans/r4.md', '--cwd', cwd])).rejects.toThrow('--cwd must be a non-empty path without control characters');
+        expect(calls).toEqual([]);
+    });
+
+    it('does not emit terminal control characters in unsupported human output', () => {
+        const report: PlanValidationReport = {
+            state: 'unsupported', schema: 'compact-slices/v2\u001b[2J',
+            diagnostics: [{ code: 'PLAN\tSCHEMA', message: 'unsafe\u001b[31m diagnostic', field: 'schema\r' }],
+        };
+
+        const output = formatReport(report, 'plans/unsafe\u001b.md');
+        expect(output.replace(/\n/g, '')).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+        expect(output).toContain('compact-slices/v2\\u001b[2J');
+    });
+
+    it('suppresses the passive update notification only for root-program JSON validation', () => {
+        const awmHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plan-update-'));
+        const repoRoot = path.resolve(__dirname, '../../../..');
+        const indexPath = path.join(repoRoot, 'cli', 'src', 'index.ts');
+        const registerPath = require.resolve('ts-node/register');
+        fs.writeFileSync(path.join(awmHome, 'update-check.json'), JSON.stringify({ lastCheck: Date.now(), latest: '999.0.0' }));
+
+        try {
+            const result = spawnSync(process.execPath, ['-r', registerPath, indexPath, 'plan', 'validate', 'docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md', '--cwd', repoRoot, '--json'], {
+                cwd: repoRoot,
+                encoding: 'utf8',
+                env: { ...process.env, AWM_HOME: awmHome, TS_NODE_PROJECT: path.join(repoRoot, 'cli', 'tsconfig.json') },
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
+
+            expect(result.status).toBe(0);
+            expect(() => JSON.parse(result.stdout)).not.toThrow();
+            expect(JSON.parse(result.stdout)).toMatchObject({ state: 'valid', path: 'docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md' });
+            expect(result.stderr).toBe('');
+
+            const humanResult = spawnSync(process.execPath, ['-r', registerPath, indexPath, 'plan', 'validate', 'docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md', '--cwd', repoRoot], {
+                cwd: repoRoot,
+                encoding: 'utf8',
+                env: { ...process.env, AWM_HOME: awmHome, TS_NODE_PROJECT: path.join(repoRoot, 'cli', 'tsconfig.json') },
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
+            expect(humanResult.status).toBe(0);
+            expect(humanResult.stderr).toContain('awm v999.0.0 available');
+        } finally {
+            fs.rmSync(awmHome, { recursive: true, force: true });
+        }
     });
 });
 

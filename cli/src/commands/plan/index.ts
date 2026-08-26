@@ -12,9 +12,13 @@ export interface PlanCommandDependencies {
 }
 
 function assertText(value: unknown, name: string): asserts value is string {
-    if (typeof value !== 'string' || value.length === 0 || value.length > MAX_PATH_LENGTH || value.startsWith('--') || /[\0\r\n]/.test(value)) {
+    if (typeof value !== 'string' || value.length === 0 || value.length > MAX_PATH_LENGTH || value.startsWith('--') || /[\u0000-\u001F\u007F-\u009F]/.test(value)) {
         throw new Error(`${name} must be a non-empty path without control characters`);
     }
+}
+
+function terminalSafe(value: string): string {
+    return value.replace(/[\u0000-\u001F\u007F-\u009F]/g, character => `\\u${character.codePointAt(0)!.toString(16).padStart(4, '0')}`);
 }
 
 function assertDependencies(deps: PlanCommandDependencies): void {
@@ -65,13 +69,13 @@ export function formatReport(report: PlanValidationReport, planPath: string): st
     const payload = reportPayload(report, planPath);
     switch (report.state) {
     case 'valid':
-        return `Plan validation: valid "${planPath}" (${report.schema}; ${payload.slices} slices; ${payload.requirements} requirements; complete ownership)\n`;
+        return `Plan validation: valid "${terminalSafe(planPath)}" (${terminalSafe(report.schema)}; ${payload.slices} slices; ${payload.requirements} requirements; complete ownership)\n`;
     case 'legacy':
-        return `Plan validation: legacy "${planPath}" — existing full-quality path applies; compact optimization was not requested.\n`;
+        return `Plan validation: legacy "${terminalSafe(planPath)}" — existing full-quality path applies; compact optimization was not requested.\n`;
     case 'invalid':
-        return `Plan validation: invalid "${planPath}"\n${(payload.diagnostics as PlanDiagnostic[]).map(diagnostic => `- ${diagnostic.code}: ${diagnostic.message}${diagnostic.field ? ` (${diagnostic.field})` : ''}`).join('\n')}\n`;
+        return `Plan validation: invalid "${terminalSafe(planPath)}"\n${(payload.diagnostics as PlanDiagnostic[]).map(diagnostic => `- ${terminalSafe(diagnostic.code)}: ${terminalSafe(diagnostic.message)}${diagnostic.field ? ` (${terminalSafe(diagnostic.field)})` : ''}`).join('\n')}\n`;
     case 'unsupported':
-        return `Plan validation: unsupported "${planPath}" (${report.schema}; supported: ${SUPPORTED_SCHEMA})\nUpdate AWM to support this compact plan schema.\n`;
+        return `Plan validation: unsupported "${terminalSafe(planPath)}" (${terminalSafe(report.schema)}; supported: ${SUPPORTED_SCHEMA})\nUpdate AWM to support this compact plan schema.\n`;
     default:
         throw new Error('plan validator returned an unknown report state');
     }
