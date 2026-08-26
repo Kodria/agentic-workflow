@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { parseJsonNoDuplicate } from '../../../src/core/plan/json';
 import { validatePlanFile } from '../../../src/core/plan/validate';
 
 const START = '<!-- AWM:COMPACT-SLICES:START v1 -->';
@@ -34,6 +35,12 @@ describe('validatePlanFile', () => {
         expect(fs.readFileSync(plan, 'utf8')).toBe(before);
     });
 
+    test('rejects invalid UTF-8 bytes before interpreting plan text', () => {
+        const plan = path.join(root, 'invalid-utf8.md');
+        fs.writeFileSync(plan, Buffer.concat([Buffer.from(`${START}\n`), Buffer.from([0x80]), Buffer.from(`\n${END}\n`)]));
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_ENCODING' })] });
+    });
+
     test('rejects partial markers and identifies a safely readable future schema', () => {
         const partial = path.join(root, 'partial.md'); fs.writeFileSync(partial, `${START}\n# incomplete`);
         expect(validatePlanFile(partial, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
@@ -44,6 +51,10 @@ describe('validatePlanFile', () => {
     test('rejects a duplicate JSON key with a stable diagnostic', () => {
         const plan = path.join(root, 'plan.md'); fs.writeFileSync(plan, `${START}\n{"schema":"compact-slices/v1","schema":"compact-slices/v1"}\n${END}`);
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_JSON' })] });
+    });
+
+    test('rejects JSON keys made equivalent by slash escaping', () => {
+        expect(() => parseJsonNoDuplicate('{"a/b":1,"a\\/b":2}')).toThrow('duplicate key');
     });
 
     test.each([
@@ -73,6 +84,16 @@ describe('validatePlanFile', () => {
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SOURCE_SHAPE' })] });
     });
 
+    test.each(['redCommands', 'greenCommands'])('requires a nonempty %s list', (field) => {
+        const report = validatePlanFile(fixture(root, (m) => { (m.slices as Record<string, unknown>[])[0][field] = []; }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SLICE_SHAPE' })] });
+    });
+
+    test('bounds sectionAnchor as a scalar string', () => {
+        const report = validatePlanFile(fixture(root, (m) => { (m.slices as Record<string, unknown>[])[0].sectionAnchor = 'a'.repeat(4097); }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SLICE_SHAPE' })] });
+    });
+
     test('treats a document without any optimized signal as legacy', () => {
         const plan = path.join(root, 'legacy.md'); fs.writeFileSync(plan, '# Legacy plan\n');
         expect(validatePlanFile(plan, root)).toEqual({ state: 'legacy' });
@@ -82,5 +103,27 @@ describe('validatePlanFile', () => {
         const plan = fixture(root);
         fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace('<a id="slice-s1"></a>\n', '<a id="slice-s1"></a>\nintervening text\n'));
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKDOWN_HEADING' })] });
+    });
+
+    test.each(['TODO', 'TBD', 'placeholder', 'draft'])('rejects incomplete Markdown sentinel %s', (sentinel) => {
+        const plan = fixture(root);
+        fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace('One evidence item.', sentinel));
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKDOWN_SECTION' })] });
+    });
+
+    test('rejects a contained command file without an executable mode', () => {
+        const report = validatePlanFile(fixture(root, (m) => {
+            fs.writeFileSync(path.join(root, 'docs', 'program'), 'echo inert\n', { mode: 0o644 });
+            (m.commands as Record<string, unknown>[])[0].program = 'docs/program';
+        }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
+    });
+
+    test('rejects a command with neither requirement coverage nor closure membership', () => {
+        const report = validatePlanFile(fixture(root, (m) => {
+            (m.commands as Record<string, unknown>[])[0].covers = [];
+            m.closureCommands = [];
+        }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_SHAPE' })] });
     });
 });

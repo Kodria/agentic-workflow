@@ -13,8 +13,11 @@ export function parseJsonNoDuplicate(text: string): unknown {
                 const escape = text[index++];
                 if (!escape) fail('unterminated escape');
                 if (escape === 'u') { const hex = text.slice(index, index + 4); if (!/^[0-9a-fA-F]{4}$/.test(hex)) fail('invalid unicode escape'); out += String.fromCharCode(Number.parseInt(hex, 16)); index += 4; }
-                else if ('"\\/bfnrt'.includes(escape)) out += `\\${escape}`;
-                else fail('invalid escape');
+                else {
+                    const decoded: Record<string, string> = { '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' };
+                    if (!(escape in decoded)) fail('invalid escape');
+                    out += decoded[escape];
+                }
             } else { if (char < ' ') fail('control character in string'); out += char; }
         }
         return fail('unterminated string');
