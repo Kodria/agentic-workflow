@@ -38,6 +38,12 @@ describe('validatePlanFile', () => {
         expect(fs.readFileSync(plan, 'utf8')).toBe(before);
     });
 
+    test('accepts a valid compact plan converted to CRLF', () => {
+        const plan = fixture(root);
+        fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace(/\n/g, '\r\n'));
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'valid', schema: 'compact-slices/v1' });
+    });
+
     test('accepts the approved plan with cross-cutting command coverage', () => {
         const repositoryRoot = path.resolve(__dirname, '../../../..');
         expect(validatePlanFile('docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md', repositoryRoot)).toMatchObject({ state: 'valid', schema: 'compact-slices/v1' });

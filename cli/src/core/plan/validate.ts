@@ -93,9 +93,10 @@ function executableInside(root: string, relative: string): string | undefined {
 function refs(value: unknown, known: Set<string>): boolean { return allStrings(value) && value.every((id) => known.has(id)); }
 function uniqueRefs(value: unknown, known: Set<string>): boolean { return refs(value, known) && new Set(value as string[]).size === (value as string[]).length; }
 function unsafeCommand(value: string): boolean { return /[\0\r\n]|[`$]|\$\(|\$\{|[;&|<>*?\[\]{}()]/.test(value); }
+function normalizeLineEndings(text: string): string { return text.replace(/\r\n?/g, '\n'); }
 function withoutFencedCode(text: string): string {
     let fence: { character: string; length: number } | undefined;
-    return text.replace(/\r\n?/g, '\n').split('\n').map((line) => {
+    return text.split('\n').map((line) => {
         const marker = /^(?: {0,3})(`{3,}|~{3,})/.exec(line)?.[1];
         if (marker && (!fence || (marker[0] === fence.character && marker.length >= fence.length))) {
             fence = fence ? undefined : { character: marker[0], length: marker.length };
@@ -145,7 +146,7 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     const relativePlan = path.relative(root, candidate); const planFile = regularInside(root, relativePlan);
     if (!planFile) return diagnostic('PLAN_PATH_UNSAFE', 'plan path must be a contained regular non-symlink file');
     let bytes: Buffer; try { if (fs.statSync(planFile).size > MAX_PLAN) return diagnostic('PLAN_LIMIT', 'plan exceeds maximum size'); bytes = fs.readFileSync(planFile); } catch { return diagnostic('PLAN_READ', 'plan cannot be read'); }
-    let text: string; try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { return diagnostic('PLAN_ENCODING', 'plan must be valid UTF-8'); }
+    let text: string; try { text = normalizeLineEndings(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { return diagnostic('PLAN_ENCODING', 'plan must be valid UTF-8'); }
     const starts = count(text, START); const ends = count(text, END); const signaled = starts > 0 || ends > 0 || compactSchemaSignal(text);
     if (!signaled) return markerlessSchemaClassification(text) ?? { state: 'legacy' };
     if (starts === 0 && ends === 0) return markerlessSchemaClassification(text) ?? diagnostic('PLAN_MARKERS', 'compact markers must occur once in order');
