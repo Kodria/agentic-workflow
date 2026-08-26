@@ -53,9 +53,23 @@ function markerlessSchemaClassification(text: string): PlanValidationReport | un
 }
 function count(text: string, token: string): number { return text.split(token).length - 1; }
 function object(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
+function jsonStringAt(text: string, start: number): { value: string; end: number } | undefined {
+    if (text[start] !== '"') return undefined;
+    for (let end = start + 1; end < text.length && end - start <= MAX_STRING; end += 1) {
+        if (text[end] === '\\') { end += 1; continue; }
+        if (text[end] !== '"') continue;
+        try { const value = JSON.parse(text.slice(start, end + 1)); return typeof value === 'string' ? { value, end: end + 1 } : undefined; } catch { return undefined; }
+    }
+    return undefined;
+}
 function compactSchemaSignal(text: string): boolean {
-    const decoded = text.replace(/\\u([0-9a-f]{4})/gi, (_match, code: string) => String.fromCharCode(Number.parseInt(code, 16)));
-    return /"schema"\s*:\s*"compact-slices\//.test(decoded);
+    for (let start = text.indexOf('"'); start >= 0; start = text.indexOf('"', start + 1)) {
+        const key = jsonStringAt(text, start); if (!key) continue;
+        if (key.value !== 'schema') { start = key.end - 1; continue; }
+        const colon = text.slice(key.end).match(/^\s*:/); if (!colon) continue;
+        const value = jsonStringAt(text, key.end + colon[0].length); if (value?.value.startsWith('compact-slices/')) return true;
+    }
+    return false;
 }
 function exact(value: unknown, fields: string[]): value is Record<string, unknown> {
     return object(value) && Object.keys(value).length === fields.length && fields.every((field) => Object.prototype.hasOwnProperty.call(value, field));

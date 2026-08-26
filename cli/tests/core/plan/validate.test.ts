@@ -231,6 +231,12 @@ describe('validatePlanFile', () => {
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
     });
 
+    test('rejects a markerless malformed compact schema with an escaped JSON slash', () => {
+        const plan = path.join(root, 'escaped-slash-malformed.md');
+        fs.writeFileSync(plan, '{"schema":"compact-slices\\/v2"');
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
+    });
+
     test('rejects an escaped current schema without compact markers', () => {
         const plan = path.join(root, 'escaped-current-schema.md'); fs.writeFileSync(plan, '{"\\u0073chema":"compact\\u002dslices/v1"}');
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
