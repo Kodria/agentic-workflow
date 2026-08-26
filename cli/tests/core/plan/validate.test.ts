@@ -131,6 +131,17 @@ describe('validatePlanFile', () => {
         } finally { read.mockRestore(); }
     });
 
+    test.each([
+        ['invalid UTF-8 source', (root: string) => fs.writeFileSync(path.join(root, 'docs', 'source.md'), Buffer.from([0x80])) , 'PLAN_SOURCE_ENCODING'],
+        ['multiline locator', (_root: string) => undefined, 'PLAN_SOURCE_SHAPE'],
+    ])('rejects %s', (_name, prepare, code) => {
+        const report = validatePlanFile(fixture(root, (m) => {
+            prepare(root);
+            if (code === 'PLAN_SOURCE_SHAPE') (m.sources as Record<string, unknown>[])[0].locator = 'Source\nKnown';
+        }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code })] });
+    });
+
     test.each(['', '.', '..', '/tmp/source.md', 'C:\\source.md', 'docs\\source.md', 'docs/../source.md'])('rejects adversarial source path %j', (sourcePath) => {
         const report = validatePlanFile(fixture(root, (m) => { (m.sources as Record<string, unknown>[])[0].path = sourcePath; }), root);
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SOURCE_SHAPE' })] });
@@ -176,6 +187,12 @@ describe('validatePlanFile', () => {
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKDOWN_HEADING' })] });
     });
 
+    test('rejects a blank line between the slice anchor and heading', () => {
+        const plan = fixture(root);
+        fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace('<a id="slice-s1"></a>\n', '<a id="slice-s1"></a>\n\n'));
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKDOWN_HEADING' })] });
+    });
+
     test('rejects a slice heading with a suffix beyond the manifest title', () => {
         const plan = fixture(root);
         fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace('### Slice S1: Validate one thing\n', '### Slice S1: Validate one thing extra\n'));
@@ -218,6 +235,11 @@ describe('validatePlanFile', () => {
 
     test.each(['cmd.exe', 'powershell.exe', 'pwsh.exe', 'wscript.exe', 'cscript.exe'])('rejects Windows launcher %s', (program) => {
         const report = validatePlanFile(fixture(root, (m) => { (m.commands as Record<string, unknown>[])[0].program = program; }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
+    });
+
+    test('rejects a Windows path-like program as a bare executable', () => {
+        const report = validatePlanFile(fixture(root, (m) => { (m.commands as Record<string, unknown>[])[0].program = 'C:\\tools\\safe.exe'; }), root);
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
     });
 
