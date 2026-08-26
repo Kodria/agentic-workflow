@@ -11,6 +11,16 @@ const MAX_OUTPUT_BYTES = 64 * 1024;
 const NPM_SOURCE = `https://registry.npmjs.org/${CLI_PACKAGE_NAME}`;
 const STRICT_SEMVER = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
+function deadline<T>(operation: Promise<T>, timeoutMs = TIMEOUT_MS): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('currentness transport timed out')), timeoutMs);
+    });
+    return Promise.race([operation, timeout]).finally(() => {
+        if (timer) clearTimeout(timer);
+    });
+}
+
 function bounded(value: string, limit = 512): string {
     return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
 }
@@ -18,13 +28,15 @@ function bounded(value: string, limit = 512): string {
 function sanitizeSource(value: string): string {
     try {
         const url = new URL(value);
-        if (url.protocol !== 'https:' || !url.hostname) return '[configured remote]';
-        return bounded(`https://${url.host}${url.pathname}`);
+        if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname) return '[configured remote]';
+        return bounded(`${url.protocol}//${url.host}${url.pathname}`);
     } catch {
         // SCP-style Git remotes have no URL parser representation. Permit only an
-        // intentionally narrow, credential-free grammar; all other schemes fail closed.
-        return /^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[A-Za-z0-9._/-]+$/.test(value)
-            ? bounded(value)
+        // intentionally narrow grammar and remove the optional userinfo; all other
+        // schemes fail closed.
+        const match = /^(?:[A-Za-z0-9._-]+@)?([A-Za-z0-9.-]+):([A-Za-z0-9._/-]+)$/.exec(value);
+        return match
+            ? bounded(`${match[1]}:${match[2]}`)
             : '[configured remote]';
     }
 }
@@ -70,9 +82,11 @@ async function latestCli(fetchImpl: typeof fetch): Promise<string | null> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
-        const response = await fetchImpl(NPM_SOURCE, { signal: controller.signal });
+        const response = await deadline(fetchImpl(NPM_SOURCE, { signal: controller.signal }));
         if (!response.ok) return null;
-        const body: unknown = await response.json();
+        const text = await deadline(response.text());
+        if (Buffer.byteLength(text, 'utf8') > MAX_OUTPUT_BYTES) return null;
+        const body: unknown = JSON.parse(text);
         if (!body || typeof body !== 'object') return null;
         const tags = (body as Record<string, unknown>)['dist-tags'];
         const latest = tags && typeof tags === 'object' ? (tags as Record<string, unknown>).latest : undefined;
@@ -86,11 +100,19 @@ async function latestCli(fetchImpl: typeof fetch): Promise<string | null> {
 
 function latestStableTag(output: string): { tag: string; sha: string } | null {
     if (Buffer.byteLength(output, 'utf8') > MAX_OUTPUT_BYTES) return null;
-    let latest: { tag: string; sha: string } | null = null;
+    const tags = new Map<string, { sha: string; peeled?: string }>();
     for (const line of output.split(/\r?\n/)) {
-        const match = /^([0-9a-fA-F]{40,64})\trefs\/tags\/(v\d+\.\d+\.\d+)$/.exec(line);
+        const match = /^([0-9a-fA-F]{40,64})\trefs\/tags\/(v\d+\.\d+\.\d+)(\^\{\})?$/.exec(line);
         if (!match) continue;
-        if (!latest || (compareStrict(match[2], latest.tag) ?? -1) > 0) latest = { sha: match[1], tag: match[2] };
+        const tag = tags.get(match[2]) ?? { sha: '' };
+        if (match[3]) tag.peeled = match[1];
+        else tag.sha = match[1];
+        tags.set(match[2], tag);
+    }
+    let latest: { tag: string; sha: string } | null = null;
+    for (const [tag, ref] of tags) {
+        if (!ref.sha) continue;
+        if (!latest || (compareStrict(tag, latest.tag) ?? -1) > 0) latest = { sha: ref.peeled ?? ref.sha, tag };
     }
     return latest;
 }
@@ -104,10 +126,10 @@ async function registryComponent(registry: RegistrySource, git: GitTransport, pr
     let remoteTags: string;
     try {
         [origin, head, exactTag, remoteTags] = await Promise.all([
-            git(registry.contentRoot, ['remote', 'get-url', 'origin'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES }),
-            git(registry.contentRoot, ['rev-parse', 'HEAD'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES }),
-            git(registry.contentRoot, ['describe', '--tags', '--exact-match', 'HEAD'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES }),
-            git(registry.contentRoot, ['ls-remote', '--tags', '--refs', registry.remote, 'v*'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES }),
+            deadline(git(registry.contentRoot, ['remote', 'get-url', 'origin'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
+            deadline(git(registry.contentRoot, ['rev-parse', 'HEAD'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
+            deadline(git(registry.contentRoot, ['describe', '--tags', '--exact-match', 'HEAD'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
+            deadline(git(registry.contentRoot, ['ls-remote', '--tags', registry.remote, 'v*'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
         ]);
     } catch {
         return unavailable(`registry:${registry.name}`, source, checkedAt, null, pin);
