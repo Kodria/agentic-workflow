@@ -55,6 +55,23 @@ describe('validatePlanFile', () => {
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'valid', schema: 'compact-slices/v1' });
     });
 
+    test('accepts a contained plan when path.relative returns Windows separators', () => {
+        const plan = fixture(root);
+        const nestedPlan = path.join(root, 'docs', 'plan.md');
+        fs.renameSync(plan, nestedPlan);
+        const nativeRelative = path.relative;
+        const relative = jest.spyOn(path, 'relative');
+        relative.mockImplementation((from, to) => {
+            const result = nativeRelative(from, to);
+            return from === root && to === nestedPlan ? result.replace(/\//g, '\\') : result;
+        });
+        try {
+            expect(validatePlanFile(nestedPlan, root)).toMatchObject({ state: 'valid', schema: 'compact-slices/v1' });
+        } finally {
+            relative.mockRestore();
+        }
+    });
+
     test('accepts the approved plan with cross-cutting command coverage', () => {
         const repositoryRoot = path.resolve(__dirname, '../../../..');
         expectApprovedPlanValid(validatePlanFile('docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md', repositoryRoot));

@@ -143,7 +143,7 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     if (typeof cwd !== 'string' || cwd.length === 0) throw new Error('cwd must be a non-empty directory path');
     let root: string; try { root = fs.realpathSync(cwd); if (!fs.statSync(root).isDirectory()) throw new Error(); } catch { throw new Error('cwd must resolve to an existing directory'); }
     const candidate = path.resolve(root, planPath); if (!inside(root, candidate)) return diagnostic('PLAN_PATH_UNSAFE', 'plan path must be inside cwd');
-    const relativePlan = path.relative(root, candidate); const planFile = regularInside(root, relativePlan);
+    const relativePlan = path.relative(root, candidate).replace(/\\/g, '/'); const planFile = regularInside(root, relativePlan);
     if (!planFile) return diagnostic('PLAN_PATH_UNSAFE', 'plan path must be a contained regular non-symlink file');
     let bytes: Buffer; try { if (fs.statSync(planFile).size > MAX_PLAN) return diagnostic('PLAN_LIMIT', 'plan exceeds maximum size'); bytes = fs.readFileSync(planFile); } catch { return diagnostic('PLAN_READ', 'plan cannot be read'); }
     let text: string; try { text = normalizeLineEndings(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { return diagnostic('PLAN_ENCODING', 'plan must be valid UTF-8'); }
