@@ -1,4 +1,7 @@
 # R4a Compact Plan CLI Implementation Plan
+<!-- awm-qa-complete: 2026-08-26 -->
+<!-- awm-docs-complete: 2026-08-26 -->
+<!-- awm-retro-complete: 2026-08-26 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan slice-by-slice. Steps
