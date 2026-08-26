@@ -1,3 +1,8 @@
+## v9.4.0 - 2026-08-26
+
+### Features
+- validate compact plans and require current AWM (#132)
+
 ## v9.3.0 - 2026-08-25
 
 ### Features
