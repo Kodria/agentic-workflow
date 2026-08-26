@@ -250,9 +250,60 @@ describe('validatePlanFile', () => {
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
     });
 
+    test.each(['bin/bash', 'tools/cmd.exe'])('rejects path-qualified interpreter launcher %s', (program) => {
+        const report = validatePlanFile(fixture(root, (m) => { (m.commands as Record<string, unknown>[])[0].program = program; }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
+    });
+
+    test.each(['py.exe', 'pythonw.exe', 'deno.exe', 'bun.exe', 'ruby3.3', 'perl5.38', 'ash', 'csh', 'tcsh'])('rejects interpreter family %s', (program) => {
+        const report = validatePlanFile(fixture(root, (m) => { (m.commands as Record<string, unknown>[])[0].program = program; }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
+    });
+
     test('rejects a Windows path-like program as a bare executable', () => {
         const report = validatePlanFile(fixture(root, (m) => { (m.commands as Record<string, unknown>[])[0].program = 'C:\\tools\\safe.exe'; }), root);
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
+    });
+
+    test('rejects a Windows drive-relative program', () => {
+        const report = validatePlanFile(fixture(root, (m) => { (m.commands as Record<string, unknown>[])[0].program = 'C:cmd.exe'; }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
+    });
+
+    test('applies Windows contained executable semantics and still denies symlinks', () => {
+        const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+        Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' });
+        try {
+            const executable = validatePlanFile(fixture(root, (m) => {
+                fs.writeFileSync(path.join(root, 'docs', 'safe.exe'), 'inert executable');
+                (m.commands as Record<string, unknown>[])[0].program = 'docs/safe.exe';
+            }), root);
+            expect(executable).toMatchObject({ state: 'valid' });
+
+            const symlink = validatePlanFile(fixture(root, (m) => {
+                fs.writeFileSync(path.join(root, 'docs', 'safe.exe'), 'inert executable');
+                fs.symlinkSync(path.join(root, 'docs', 'safe.exe'), path.join(root, 'docs', 'linked.exe'));
+                (m.commands as Record<string, unknown>[])[0].program = 'docs/linked.exe';
+            }), root);
+            expect(symlink).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
+        } finally {
+            if (platform) Object.defineProperty(process, 'platform', platform);
+        }
+    });
+
+    test('rejects duplicate command coverage', () => {
+        const report = validatePlanFile(fixture(root, (m) => { (m.commands as Record<string, unknown>[])[0].covers = ['R4-VAL-2', 'R4-VAL-2']; }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_SHAPE' })] });
+    });
+
+    test('rejects command coverage unrelated to every referencing slice', () => {
+        const plan = fixture(root, (m) => {
+            m.requirements = ['R4-VAL-2', 'R4-VAL-3'];
+            (m.commands as Record<string, unknown>[]).push({ id: 'CMD-TWO', program: 'npm', args: ['run', 'lint'], covers: ['R4-VAL-2'] });
+            (m.slices as Record<string, unknown>[]).push({ id: 'S2', title: 'Validate two things', requirements: ['R4-VAL-3'], dependsOn: [], sectionAnchor: 'slice-s2', sources: ['SRC-ONE'], redCommands: ['CMD-TWO'], greenCommands: ['CMD-TWO'], reviewEvidence: ['specification', 'code-quality'], risk: 'bounded', fallback: ['Use a reviewed fallback'] });
+        });
+        fs.appendFileSync(plan, '\n<a id="slice-s2"></a>\n### Slice S2: Validate two things\n\n#### Surfaces\n\nOne surface.\n\n#### Implementation\n\nOne implementation.\n\n#### Edge cases\n\nOne edge case.\n\n#### Evidence\n\nOne evidence item.\n\n#### Fallback\n\nOne fallback.\n');
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid' });
     });
 
     test('rejects a command with neither requirement coverage nor closure membership', () => {
@@ -261,5 +312,11 @@ describe('validatePlanFile', () => {
             m.closureCommands = [];
         }), root);
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_SHAPE' })] });
+    });
+
+    test('does not classify a malformed future schema behind one broken marker as unsupported', () => {
+        const plan = path.join(root, 'partial-future-malformed.md');
+        fs.writeFileSync(plan, `${START}\n{"schema":"compact-slices/v2"`);
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
     });
 });

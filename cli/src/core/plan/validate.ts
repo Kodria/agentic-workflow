@@ -17,7 +17,7 @@ const SHELL = new Set([
 ]);
 function isLauncher(program: string): boolean {
     const base = path.posix.basename(program);
-    return SHELL.has(base) || /^(?:node(?:js)?|py(?:thon(?:w)?\d*(?:\.\d+)?)?|deno|bun|ruby|perl|(?:a|ba|c|tc|z|da|k)?sh|busybox|cmd|powershell|pwsh|wscript|cscript)(?:\.exe)?(?:[-.][a-z0-9][a-z0-9.-]*)?$/i.test(base);
+    return SHELL.has(base) || /^(?:node(?:js)?|py(?:thon(?:w)?\d*(?:\.\d+)?)?|deno|bun|ruby(?:\d+(?:\.\d+)*)?|perl(?:\d+(?:\.\d+)*)?|(?:a|ba|c|tc|z|da|k)?sh|busybox|cmd|powershell|pwsh|wscript|cscript)(?:\.exe)?(?:[-.][a-z0-9][a-z0-9.-]*)?$/i.test(base);
 }
 
 function diagnostic(code: string, message: string, field?: string): PlanValidationReport { return { state: 'invalid', diagnostics: [{ code, message, ...(field ? { field } : {}) }] }; }
@@ -97,6 +97,7 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     if ((raw.requirements as string[]).some((requirement) => owners.get(requirement) !== 1)) return diagnostic('PLAN_REQUIREMENT_OWNER', 'each requirement must have exactly one owner');
     const slices = raw.slices as PlanSlice[]; for (const slice of slices) { if (new Set(slice.dependsOn).size !== slice.dependsOn.length || slice.dependsOn.includes(slice.id) || !slice.dependsOn.every((id) => sliceIds.has(id))) return diagnostic('PLAN_DEPENDENCY', 'slice dependencies must resolve and be non-self unique'); }
     const visited = new Set<string>(); const visiting = new Set<string>(); const byId = new Map(slices.map((slice) => [slice.id, slice])); const cycle = (id: string): boolean => { if (visiting.has(id)) return true; if (visited.has(id)) return false; visiting.add(id); const found = byId.get(id)!.dependsOn.some(cycle); visiting.delete(id); visited.add(id); return found; }; if (slices.some((slice) => cycle(slice.id))) return diagnostic('PLAN_DEPENDENCY', 'slice dependencies must be acyclic');
+    for (const command of raw.commands as Array<Record<string, unknown>>) { const covers = command.covers as string[]; const references = slices.filter((slice) => slice.redCommands.includes(command.id as string) || slice.greenCommands.includes(command.id as string)); if (covers.length > 0 && !references.some((slice) => covers.some((requirement) => slice.requirements.includes(requirement)))) return diagnostic('PLAN_COMMAND_COVER', 'command coverage must relate to a referencing slice'); }
     const usedSources = new Set(slices.flatMap((slice) => slice.sources)); const usedCommands = new Set([...slices.flatMap((slice) => [...slice.redCommands, ...slice.greenCommands]), ...(raw.closureCommands as string[])]); if (Array.from(sourceIds).some((id) => !usedSources.has(id)) || Array.from(commandIds).some((id) => !usedCommands.has(id)) || !refs(raw.closureCommands, commandIds)) return diagnostic('PLAN_ORPHAN', 'sources and commands must be referenced');
     for (const slice of slices) { const markdown = checkMarkdown(text, slice); if (markdown) return markdown; }
     return { state: 'valid', schema: 'compact-slices/v1', manifest: raw as unknown as CompactPlanManifest };
