@@ -1,0 +1,879 @@
+{
+  "schema": 1,
+  "kernelFiles": [
+    "AGENTS.md",
+    "CONSTITUTION.md",
+    "CLAUDE.md"
+  ],
+  "maxFixedBytes": 33740,
+  "entries": [
+    {
+      "id": "CTX-AGENTS-001",
+      "tier": "kernel",
+      "path": "AGENTS.md",
+      "anchor": "awm-context:CTX-AGENTS-001",
+      "when": "always: repository identity and context contract"
+    },
+    {
+      "id": "CTX-AGENTS-002",
+      "tier": "kernel",
+      "path": "AGENTS.md",
+      "anchor": "awm-context:CTX-AGENTS-002",
+      "when": "always: repository identity and context contract"
+    },
+    {
+      "id": "CTX-AGENTS-003",
+      "tier": "kernel",
+      "path": "AGENTS.md",
+      "anchor": "awm-context:CTX-AGENTS-003",
+      "when": "always: repository identity and context contract"
+    },
+    {
+      "id": "CTX-AGENTS-004",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/testing.md",
+      "anchor": "awm-context:CTX-AGENTS-004",
+      "when": "task changes tests, CI behavior, platform assumptions, fixtures, or verification strategy"
+    },
+    {
+      "id": "CTX-AGENTS-005",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/testing.md",
+      "anchor": "awm-context:CTX-AGENTS-005",
+      "when": "task changes tests, CI behavior, platform assumptions, fixtures, or verification strategy"
+    },
+    {
+      "id": "CTX-AGENTS-006",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/testing.md",
+      "anchor": "awm-context:CTX-AGENTS-006",
+      "when": "task changes tests, CI behavior, platform assumptions, fixtures, or verification strategy"
+    },
+    {
+      "id": "CTX-AGENTS-007",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/testing.md",
+      "anchor": "awm-context:CTX-AGENTS-007",
+      "when": "task changes tests, CI behavior, platform assumptions, fixtures, or verification strategy"
+    },
+    {
+      "id": "CTX-AGENTS-008",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/testing.md",
+      "anchor": "awm-context:CTX-AGENTS-008",
+      "when": "task changes tests, CI behavior, platform assumptions, fixtures, or verification strategy"
+    },
+    {
+      "id": "CTX-AGENTS-009",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/testing.md",
+      "anchor": "awm-context:CTX-AGENTS-009",
+      "when": "task changes tests, CI behavior, platform assumptions, fixtures, or verification strategy"
+    },
+    {
+      "id": "CTX-AGENTS-010",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/testing.md",
+      "anchor": "awm-context:CTX-AGENTS-010",
+      "when": "task changes tests, CI behavior, platform assumptions, fixtures, or verification strategy"
+    },
+    {
+      "id": "CTX-AGENTS-011",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/testing.md",
+      "anchor": "awm-context:CTX-AGENTS-011",
+      "when": "task changes tests, CI behavior, platform assumptions, fixtures, or verification strategy"
+    },
+    {
+      "id": "CTX-AGENTS-012",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/testing.md",
+      "anchor": "awm-context:CTX-AGENTS-012",
+      "when": "task changes tests, CI behavior, platform assumptions, fixtures, or verification strategy"
+    },
+    {
+      "id": "CTX-AGENTS-013",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/testing.md",
+      "anchor": "awm-context:CTX-AGENTS-013",
+      "when": "task changes tests, CI behavior, platform assumptions, fixtures, or verification strategy"
+    },
+    {
+      "id": "CTX-AGENTS-014",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/testing.md",
+      "anchor": "awm-context:CTX-AGENTS-014",
+      "when": "task changes tests, CI behavior, platform assumptions, fixtures, or verification strategy"
+    },
+    {
+      "id": "CTX-AGENTS-015",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/testing.md",
+      "anchor": "awm-context:CTX-AGENTS-015",
+      "when": "task changes tests, CI behavior, platform assumptions, fixtures, or verification strategy"
+    },
+    {
+      "id": "CTX-AGENTS-016",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/testing.md",
+      "anchor": "awm-context:CTX-AGENTS-016",
+      "when": "task changes tests, CI behavior, platform assumptions, fixtures, or verification strategy"
+    },
+    {
+      "id": "CTX-AGENTS-017",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/api-design.md",
+      "anchor": "awm-context:CTX-AGENTS-017",
+      "when": "task changes APIs, discovery, rendering, logging, or atomic directory operations"
+    },
+    {
+      "id": "CTX-AGENTS-018",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/api-design.md",
+      "anchor": "awm-context:CTX-AGENTS-018",
+      "when": "task changes APIs, discovery, rendering, logging, or atomic directory operations"
+    },
+    {
+      "id": "CTX-AGENTS-019",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/api-design.md",
+      "anchor": "awm-context:CTX-AGENTS-019",
+      "when": "task changes APIs, discovery, rendering, logging, or atomic directory operations"
+    },
+    {
+      "id": "CTX-AGENTS-020",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/api-design.md",
+      "anchor": "awm-context:CTX-AGENTS-020",
+      "when": "task changes APIs, discovery, rendering, logging, or atomic directory operations"
+    },
+    {
+      "id": "CTX-AGENTS-021",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/api-design.md",
+      "anchor": "awm-context:CTX-AGENTS-021",
+      "when": "task changes APIs, discovery, rendering, logging, or atomic directory operations"
+    },
+    {
+      "id": "CTX-AGENTS-022",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/api-design.md",
+      "anchor": "awm-context:CTX-AGENTS-022",
+      "when": "task changes APIs, discovery, rendering, logging, or atomic directory operations"
+    },
+    {
+      "id": "CTX-AGENTS-023",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/api-design.md",
+      "anchor": "awm-context:CTX-AGENTS-023",
+      "when": "task changes APIs, discovery, rendering, logging, or atomic directory operations"
+    },
+    {
+      "id": "CTX-AGENTS-024",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/api-design.md",
+      "anchor": "awm-context:CTX-AGENTS-024",
+      "when": "task changes APIs, discovery, rendering, logging, or atomic directory operations"
+    },
+    {
+      "id": "CTX-AGENTS-025",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/api-design.md",
+      "anchor": "awm-context:CTX-AGENTS-025",
+      "when": "task changes APIs, discovery, rendering, logging, or atomic directory operations"
+    },
+    {
+      "id": "CTX-AGENTS-026",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-026",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-027",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-027",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-028",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-028",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-029",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-029",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-030",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-030",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-031",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-031",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-032",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-032",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-033",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-033",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-034",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-034",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-035",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-035",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-036",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-036",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-037",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-037",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-038",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-038",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-039",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-039",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-040",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-040",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-041",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-041",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-042",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/implementation.md",
+      "anchor": "awm-context:CTX-AGENTS-042",
+      "when": "task changes implementation, parsing, subprocess execution, guards, enums, or regexes"
+    },
+    {
+      "id": "CTX-AGENTS-043",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/documentation.md",
+      "anchor": "awm-context:CTX-AGENTS-043",
+      "when": "task changes user or maintainer documentation"
+    },
+    {
+      "id": "CTX-AGENTS-044",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/documentation.md",
+      "anchor": "awm-context:CTX-AGENTS-044",
+      "when": "task changes user or maintainer documentation"
+    },
+    {
+      "id": "CTX-AGENTS-045",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/documentation.md",
+      "anchor": "awm-context:CTX-AGENTS-045",
+      "when": "task changes user or maintainer documentation"
+    },
+    {
+      "id": "CTX-AGENTS-046",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/documentation.md",
+      "anchor": "awm-context:CTX-AGENTS-046",
+      "when": "task changes user or maintainer documentation"
+    },
+    {
+      "id": "CTX-AGENTS-047",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/release.md",
+      "anchor": "awm-context:CTX-AGENTS-047",
+      "when": "task changes release automation, package publication, versions, or dogfooding"
+    },
+    {
+      "id": "CTX-AGENTS-048",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/release.md",
+      "anchor": "awm-context:CTX-AGENTS-048",
+      "when": "task changes release automation, package publication, versions, or dogfooding"
+    },
+    {
+      "id": "CTX-AGENTS-049",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/release.md",
+      "anchor": "awm-context:CTX-AGENTS-049",
+      "when": "task changes release automation, package publication, versions, or dogfooding"
+    },
+    {
+      "id": "CTX-AGENTS-050",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/release.md",
+      "anchor": "awm-context:CTX-AGENTS-050",
+      "when": "task changes release automation, package publication, versions, or dogfooding"
+    },
+    {
+      "id": "CTX-AGENTS-051",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/release.md",
+      "anchor": "awm-context:CTX-AGENTS-051",
+      "when": "task changes release automation, package publication, versions, or dogfooding"
+    },
+    {
+      "id": "CTX-AGENTS-052",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/concurrency.md",
+      "anchor": "awm-context:CTX-AGENTS-052",
+      "when": "task uses subagents, worktrees, parallel tracks, or concurrent git operations"
+    },
+    {
+      "id": "CTX-AGENTS-053",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/concurrency.md",
+      "anchor": "awm-context:CTX-AGENTS-053",
+      "when": "task spans multiple repositories or uses subagents, worktrees, parallel tracks, or concurrent git operations"
+    },
+    {
+      "id": "CTX-AGENTS-054",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/concurrency.md",
+      "anchor": "awm-context:CTX-AGENTS-054",
+      "when": "task uses subagents, worktrees, parallel tracks, or concurrent git operations"
+    },
+    {
+      "id": "CTX-AGENTS-055",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/ledger.md",
+      "anchor": "awm-context:CTX-AGENTS-055",
+      "when": "task records or consumes ledger, debugging, QA, or retro evidence"
+    },
+    {
+      "id": "CTX-AGENTS-056",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/ledger.md",
+      "anchor": "awm-context:CTX-AGENTS-056",
+      "when": "task records or consumes ledger, debugging, QA, or retro evidence"
+    },
+    {
+      "id": "CTX-AGENTS-057",
+      "tier": "selective",
+      "path": "docs/awm/context/agents/ledger.md",
+      "anchor": "awm-context:CTX-AGENTS-057",
+      "when": "task records or consumes ledger, debugging, QA, or retro evidence"
+    },
+    {
+      "id": "CTX-AGENTS-058",
+      "tier": "kernel",
+      "path": "AGENTS.md",
+      "anchor": "awm-context:CTX-AGENTS-058",
+      "when": "always: repository and installation ownership layout"
+    },
+    {
+      "id": "CTX-AGENTS-059",
+      "tier": "kernel",
+      "path": "AGENTS.md",
+      "anchor": "awm-context:CTX-AGENTS-059",
+      "when": "always: repository and installation ownership layout"
+    },
+    {
+      "id": "CTX-CONSTITUTION-001",
+      "tier": "kernel",
+      "path": "CONSTITUTION.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-001",
+      "when": "always: project process and security or robustness floor"
+    },
+    {
+      "id": "CTX-CONSTITUTION-002",
+      "tier": "kernel",
+      "path": "CONSTITUTION.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-002",
+      "when": "always: project process and security or robustness floor"
+    },
+    {
+      "id": "CTX-CONSTITUTION-003",
+      "tier": "kernel",
+      "path": "CONSTITUTION.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-003",
+      "when": "always: project process and security or robustness floor"
+    },
+    {
+      "id": "CTX-CONSTITUTION-004",
+      "tier": "kernel",
+      "path": "CONSTITUTION.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-004",
+      "when": "always: project process and security or robustness floor"
+    },
+    {
+      "id": "CTX-CONSTITUTION-005",
+      "tier": "kernel",
+      "path": "CONSTITUTION.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-005",
+      "when": "always: project process and security or robustness floor"
+    },
+    {
+      "id": "CTX-CONSTITUTION-006",
+      "tier": "kernel",
+      "path": "CONSTITUTION.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-006",
+      "when": "always: project process and security or robustness floor"
+    },
+    {
+      "id": "CTX-CONSTITUTION-007",
+      "tier": "kernel",
+      "path": "CONSTITUTION.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-007",
+      "when": "always: project process and security or robustness floor"
+    },
+    {
+      "id": "CTX-CONSTITUTION-008",
+      "tier": "kernel",
+      "path": "CONSTITUTION.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-008",
+      "when": "always: project process and security or robustness floor"
+    },
+    {
+      "id": "CTX-CONSTITUTION-009",
+      "tier": "kernel",
+      "path": "CONSTITUTION.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-009",
+      "when": "always: project process and security or robustness floor"
+    },
+    {
+      "id": "CTX-CONSTITUTION-010",
+      "tier": "kernel",
+      "path": "CONSTITUTION.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-010",
+      "when": "always: project process and security or robustness floor"
+    },
+    {
+      "id": "CTX-CONSTITUTION-011",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/release.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-011",
+      "when": "task changes CLI release or npm publication behavior"
+    },
+    {
+      "id": "CTX-CONSTITUTION-012",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/release.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-012",
+      "when": "task changes CLI release or npm publication behavior"
+    },
+    {
+      "id": "CTX-CONSTITUTION-013",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/implementation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-013",
+      "when": "task changes implementation, durable state, tests, gates, enums, conventions, sensors, or plan closure"
+    },
+    {
+      "id": "CTX-CONSTITUTION-014",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/implementation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-014",
+      "when": "task changes implementation, durable state, tests, gates, enums, conventions, sensors, or plan closure"
+    },
+    {
+      "id": "CTX-CONSTITUTION-015",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/implementation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-015",
+      "when": "task changes implementation, durable state, tests, gates, enums, conventions, sensors, or plan closure"
+    },
+    {
+      "id": "CTX-CONSTITUTION-016",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/implementation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-016",
+      "when": "task changes implementation, durable state, tests, gates, enums, conventions, sensors, or plan closure"
+    },
+    {
+      "id": "CTX-CONSTITUTION-017",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/implementation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-017",
+      "when": "task changes implementation, durable state, tests, gates, enums, conventions, sensors, or plan closure"
+    },
+    {
+      "id": "CTX-CONSTITUTION-018",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/implementation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-018",
+      "when": "task changes implementation, durable state, tests, gates, enums, conventions, sensors, or plan closure"
+    },
+    {
+      "id": "CTX-CONSTITUTION-019",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/implementation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-019",
+      "when": "task changes implementation, durable state, tests, gates, enums, conventions, sensors, or plan closure"
+    },
+    {
+      "id": "CTX-CONSTITUTION-020",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/implementation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-020",
+      "when": "task changes implementation, durable state, tests, gates, enums, conventions, sensors, or plan closure"
+    },
+    {
+      "id": "CTX-CONSTITUTION-021",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/implementation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-021",
+      "when": "task changes implementation, durable state, tests, gates, enums, conventions, sensors, or plan closure"
+    },
+    {
+      "id": "CTX-CONSTITUTION-022",
+      "tier": "kernel",
+      "path": "CONSTITUTION.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-022",
+      "when": "always: run AWM harness diagnostics from the repository root"
+    },
+    {
+      "id": "CTX-CONSTITUTION-023",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/implementation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-023",
+      "when": "task changes implementation, durable state, tests, gates, enums, conventions, sensors, or plan closure"
+    },
+    {
+      "id": "CTX-CONSTITUTION-024",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/support-matrix.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-024",
+      "when": "task changes supported stacks, providers, git hosts, operating systems, or support documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-025",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/support-matrix.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-025",
+      "when": "task changes supported stacks, providers, git hosts, operating systems, or support documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-026",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/support-matrix.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-026",
+      "when": "task changes supported stacks, providers, git hosts, operating systems, or support documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-027",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/support-matrix.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-027",
+      "when": "task changes supported stacks, providers, git hosts, operating systems, or support documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-028",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/support-matrix.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-028",
+      "when": "task changes supported stacks, providers, git hosts, operating systems, or support documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-029",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/support-matrix.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-029",
+      "when": "task changes supported stacks, providers, git hosts, operating systems, or support documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-030",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/support-matrix.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-030",
+      "when": "task changes supported stacks, providers, git hosts, operating systems, or support documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-031",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/support-matrix.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-031",
+      "when": "task changes supported stacks, providers, git hosts, operating systems, or support documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-032",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/support-matrix.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-032",
+      "when": "task changes supported stacks, providers, git hosts, operating systems, or support documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-033",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/support-matrix.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-033",
+      "when": "task changes supported stacks, providers, git hosts, operating systems, or support documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-034",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/support-matrix.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-034",
+      "when": "task changes supported stacks, providers, git hosts, operating systems, or support documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-035",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/execution-boundary.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-035",
+      "when": "task uses unattended execution, host automation, or crosses an ownership boundary"
+    },
+    {
+      "id": "CTX-CONSTITUTION-036",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/execution-boundary.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-036",
+      "when": "task uses unattended execution, host automation, or crosses an ownership boundary"
+    },
+    {
+      "id": "CTX-CONSTITUTION-037",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/execution-boundary.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-037",
+      "when": "task uses unattended execution, host automation, or crosses an ownership boundary"
+    },
+    {
+      "id": "CTX-CONSTITUTION-038",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/execution-boundary.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-038",
+      "when": "task uses unattended execution, host automation, or crosses an ownership boundary"
+    },
+    {
+      "id": "CTX-CONSTITUTION-039",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/execution-boundary.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-039",
+      "when": "task uses unattended execution, host automation, or crosses an ownership boundary"
+    },
+    {
+      "id": "CTX-CONSTITUTION-040",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/documentation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-040",
+      "when": "task implements or closes a development cycle with user-facing documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-041",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/documentation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-041",
+      "when": "task implements or closes a development cycle with user-facing documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-042",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/documentation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-042",
+      "when": "task implements or closes a development cycle with user-facing documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-043",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/documentation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-043",
+      "when": "task implements or closes a development cycle with user-facing documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-044",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/documentation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-044",
+      "when": "task implements or closes a development cycle with user-facing documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-045",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/documentation.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-045",
+      "when": "task implements or closes a development cycle with user-facing documentation"
+    },
+    {
+      "id": "CTX-CONSTITUTION-046",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/sensor-floor.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-046",
+      "when": "task changes organizational sensor policy or evaluates cross-project sensor drift"
+    },
+    {
+      "id": "CTX-CONSTITUTION-047",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/sensor-floor.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-047",
+      "when": "task changes organizational sensor policy or evaluates cross-project sensor drift"
+    },
+    {
+      "id": "CTX-CONSTITUTION-048",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/sensor-floor.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-048",
+      "when": "task changes organizational sensor policy or evaluates cross-project sensor drift"
+    },
+    {
+      "id": "CTX-CONSTITUTION-049",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/sensor-floor.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-049",
+      "when": "task changes organizational sensor policy or evaluates cross-project sensor drift"
+    },
+    {
+      "id": "CTX-CONSTITUTION-050",
+      "tier": "selective",
+      "path": "docs/awm/context/constitution/sensor-floor.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-050",
+      "when": "task changes organizational sensor policy or evaluates cross-project sensor drift"
+    },
+    {
+      "id": "CTX-CLAUDE-001",
+      "tier": "kernel",
+      "path": "CLAUDE.md",
+      "anchor": "awm-context:CTX-CLAUDE-001",
+      "when": "always: repository ownership, installation boundary, release path, and test isolation"
+    },
+    {
+      "id": "CTX-CLAUDE-002",
+      "tier": "kernel",
+      "path": "CLAUDE.md",
+      "anchor": "awm-context:CTX-CLAUDE-002",
+      "when": "always: repository ownership, installation boundary, release path, and test isolation"
+    },
+    {
+      "id": "CTX-CLAUDE-003",
+      "tier": "kernel",
+      "path": "CLAUDE.md",
+      "anchor": "awm-context:CTX-CLAUDE-003",
+      "when": "always: repository ownership, installation boundary, release path, and test isolation"
+    },
+    {
+      "id": "CTX-CLAUDE-004",
+      "tier": "kernel",
+      "path": "CLAUDE.md",
+      "anchor": "awm-context:CTX-CLAUDE-004",
+      "when": "always: repository ownership, installation boundary, release path, and test isolation"
+    },
+    {
+      "id": "CTX-CLAUDE-005",
+      "tier": "kernel",
+      "path": "CLAUDE.md",
+      "anchor": "awm-context:CTX-CLAUDE-005",
+      "when": "always: repository ownership, installation boundary, release path, and test isolation"
+    },
+    {
+      "id": "CTX-CLAUDE-006",
+      "tier": "kernel",
+      "path": "CLAUDE.md",
+      "anchor": "awm-context:CTX-CLAUDE-006",
+      "when": "always: repository ownership, installation boundary, release path, and test isolation"
+    },
+    {
+      "id": "CTX-CLAUDE-007",
+      "tier": "kernel",
+      "path": "CLAUDE.md",
+      "anchor": "awm-context:CTX-CLAUDE-007",
+      "when": "always: repository ownership, installation boundary, release path, and test isolation"
+    },
+    {
+      "id": "CTX-CLAUDE-008",
+      "tier": "kernel",
+      "path": "CLAUDE.md",
+      "anchor": "awm-context:CTX-CLAUDE-008",
+      "when": "always: repository ownership, installation boundary, release path, and test isolation"
+    },
+    {
+      "id": "CTX-CLAUDE-009",
+      "tier": "kernel",
+      "path": "CLAUDE.md",
+      "anchor": "awm-context:CTX-CLAUDE-009",
+      "when": "always: repository ownership, installation boundary, release path, and test isolation"
+    },
+    {
+      "id": "CTX-CLAUDE-010",
+      "tier": "selective",
+      "path": "docs/awm/context/claude/sensors.md",
+      "anchor": "awm-context:CTX-CLAUDE-010",
+      "when": "task changes sensor packs, project-specific sensor rules, or harness retro policy"
+    },
+    {
+      "id": "CTX-CLAUDE-011",
+      "tier": "selective",
+      "path": "docs/awm/context/claude/sensors.md",
+      "anchor": "awm-context:CTX-CLAUDE-011",
+      "when": "task changes sensor packs, project-specific sensor rules, or harness retro policy"
+    },
+    {
+      "id": "CTX-CLAUDE-012",
+      "tier": "selective",
+      "path": "docs/awm/context/claude/sensors.md",
+      "anchor": "awm-context:CTX-CLAUDE-012",
+      "when": "task changes sensor packs, project-specific sensor rules, or harness retro policy"
+    },
+    {
+      "id": "CTX-CLAUDE-013",
+      "tier": "selective",
+      "path": "docs/awm/context/claude/sensors.md",
+      "anchor": "awm-context:CTX-CLAUDE-013",
+      "when": "task changes sensor packs, project-specific sensor rules, or harness retro policy"
+    },
+    {
+      "id": "CTX-CLAUDE-014",
+      "tier": "selective",
+      "path": "docs/awm/context/claude/sensors.md",
+      "anchor": "awm-context:CTX-CLAUDE-014",
+      "when": "task changes sensor packs, project-specific sensor rules, or harness retro policy"
+    },
+    {
+      "id": "CTX-CLAUDE-015",
+      "tier": "selective",
+      "path": "docs/awm/context/claude/sensors.md",
+      "anchor": "awm-context:CTX-CLAUDE-015",
+      "when": "task changes sensor packs, project-specific sensor rules, or harness retro policy"
+    }
+  ]
+}

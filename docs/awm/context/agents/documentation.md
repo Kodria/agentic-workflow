@@ -1,0 +1,11 @@
+<!-- awm-context:CTX-AGENTS-043 -->
+## Patrones de documentación
+
+<!-- awm-context:CTX-AGENTS-044 -->
+- **verify-cmd-source-before-documenting:** al documentar un comando AWM (storage target, keywords, flags), verificar `cli/src/commands/<cmd>.ts` antes de escribir. La narrativa puede sobrevivir spec-review y code-quality-review sin que nadie chequee el código. *(`awm pin` documentado con keyword y storage location incorrectos, ambos pasaron dos rondas de review. Y en una guía nueva de ~140 líneas: CINCO errores distintos — un comando inventado (`awm registry status`, no existe), un `git init` faltante, un `git push origin` a un remote nunca configurado, un nombre de registry divergente de la sección anterior, y un paso de instalación de bundle nunca mencionado pese a ser necesario. Ninguno lo atrapó la revisión de la task que creó la guía: todos salieron en una QA que ejecutó los comandos reales contra un CLI aislado.)*
+
+<!-- awm-context:CTX-AGENTS-045 -->
+- **runbook-as-script:** para workstreams que combinan documentación + verificación manual, escribir el doc como hipótesis y ejecutarlo literalmente como test. Las divergencias se corrigen en el doc (no en el tool); el entregable es un doc verificado contra realidad. Escribir ejemplos de output de CLI sin verificar contra el binario real es la fuente de error más común en documentación de comandos.
+
+<!-- awm-context:CTX-AGENTS-046 -->
+- **corregir-la-cita-no-basta-si-la-creencia-vive-en-otro-lado:** cuando un reviewer encuentra que una afirmación es factualmente incorrecta (no un typo — una creencia equivocada sobre cómo funciona el sistema), el fix no es reescribir la línea citada: es grepear el documento completo por la creencia misma (palabras clave del concepto, no la cita exacta) y corregir cada lugar donde aparece, aunque nadie la haya señalado ahí. *(Un criterio de aceptación asumía que agregar un marker a un plan cambiaría la salida de `awm doctor --full` — falso, el adapter de producción solo lee evidencia ya capturada, nunca reparsea planes en vivo. El primer fix corrigió el criterio pero dejó intacta la MISMA afirmación 15 líneas antes, probable origen del error; un segundo reviewer la encontró.)* **Aplica a todo fix que responda a "esto está mal" en vez de "esto tiene un typo".**
