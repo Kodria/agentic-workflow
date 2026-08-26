@@ -38,6 +38,11 @@ describe('validatePlanFile', () => {
         expect(fs.readFileSync(plan, 'utf8')).toBe(before);
     });
 
+    test('accepts the approved plan with cross-cutting command coverage', () => {
+        const repositoryRoot = path.resolve(__dirname, '../../../..');
+        expect(validatePlanFile('docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md', repositoryRoot)).toMatchObject({ state: 'valid', schema: 'compact-slices/v1' });
+    });
+
     test('performs no execution, network request, model work, grouping, or rewrite', () => {
         const plan = fixture(root); const before = fs.readFileSync(plan, 'utf8');
         const network = jest.spyOn(global, 'fetch');
@@ -332,13 +337,16 @@ describe('validatePlanFile', () => {
     test('rejects requirement coverage executed only by a different slice', () => {
         const plan = fixture(root, (m) => {
             m.requirements = ['R4-VAL-2', 'R4-VAL-3'];
-            (m.commands as Record<string, unknown>[])[0].covers = ['R4-VAL-2', 'R4-VAL-3'];
-            (m.commands as Record<string, unknown>[]).push({ id: 'CMD-TWO', program: 'npm', args: ['run', 'lint'], covers: [] });
-            (m.slices as Record<string, unknown>[]).push({ id: 'S2', title: 'Validate two things', requirements: ['R4-VAL-3'], dependsOn: [], sectionAnchor: 'slice-s2', sources: ['SRC-ONE'], redCommands: ['CMD-TWO'], greenCommands: ['CMD-TWO'], reviewEvidence: ['specification', 'code-quality'], risk: 'bounded', fallback: ['Use a reviewed fallback'] });
-            m.closureCommands = ['CMD-ONE', 'CMD-TWO'];
+            (m.commands as Record<string, unknown>[])[0].covers = ['R4-VAL-2'];
+            (m.commands as Record<string, unknown>[]).push({ id: 'CMD-TWO', program: 'npm', args: ['run', 'lint'], covers: ['R4-VAL-2', 'R4-VAL-3'] });
+            (m.commands as Record<string, unknown>[]).push({ id: 'CMD-THREE', program: 'npm', args: ['run', 'build'], covers: [] });
+            ((m.slices as Record<string, unknown>[])[0].redCommands as string[]).push('CMD-TWO');
+            ((m.slices as Record<string, unknown>[])[0].greenCommands as string[]).push('CMD-TWO');
+            (m.slices as Record<string, unknown>[]).push({ id: 'S2', title: 'Validate two things', requirements: ['R4-VAL-3'], dependsOn: [], sectionAnchor: 'slice-s2', sources: ['SRC-ONE'], redCommands: ['CMD-THREE'], greenCommands: ['CMD-THREE'], reviewEvidence: ['specification', 'code-quality'], risk: 'bounded', fallback: ['Use a reviewed fallback'] });
+            m.closureCommands = ['CMD-ONE', 'CMD-TWO', 'CMD-THREE'];
         });
         fs.appendFileSync(plan, '\n<a id="slice-s2"></a>\n### Slice S2: Validate two things\n\n#### Surfaces\n\nOne surface.\n\n#### Implementation\n\nOne implementation.\n\n#### Edge cases\n\nOne edge case.\n\n#### Evidence\n\nOne evidence item.\n\n#### Fallback\n\nOne fallback.\n');
-        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_COVER' })] });
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_REQUIREMENT_COVER' })] });
     });
 
     test('rejects a command with neither requirement coverage nor closure membership', () => {
