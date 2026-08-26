@@ -120,6 +120,17 @@ describe('validatePlanFile', () => {
         expect(locator).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SOURCE_LOCATOR' })] });
     });
 
+    test('rejects an oversized source before reading its body', () => {
+        const plan = fixture(root);
+        const source = path.join(root, 'docs', 'source.md');
+        fs.writeFileSync(source, Buffer.alloc(1024 * 1024 + 1, 0x61));
+        const read = jest.spyOn(fs, 'readFileSync');
+        try {
+            expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SOURCE_LIMIT' })] });
+            expect(read.mock.calls.some(([file]) => file === source)).toBe(false);
+        } finally { read.mockRestore(); }
+    });
+
     test.each(['', '.', '..', '/tmp/source.md', 'C:\\source.md', 'docs\\source.md', 'docs/../source.md'])('rejects adversarial source path %j', (sourcePath) => {
         const report = validatePlanFile(fixture(root, (m) => { (m.sources as Record<string, unknown>[])[0].path = sourcePath; }), root);
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SOURCE_SHAPE' })] });
@@ -191,6 +202,11 @@ describe('validatePlanFile', () => {
         ['busybox launcher', 'busybox', ['sh', '-c', 'echo safe']],
     ])('rejects nested shell launcher %s', (_name, program, args) => {
         const report = validatePlanFile(fixture(root, (m) => { (m.commands as Record<string, unknown>[])[0].program = program; (m.commands as Record<string, unknown>[])[0].args = args; }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
+    });
+
+    test.each(['node-v22', 'nodejs-20', 'python3.12', 'bash-static', 'busybox-musl'])('rejects versioned launcher %s', (program) => {
+        const report = validatePlanFile(fixture(root, (m) => { (m.commands as Record<string, unknown>[])[0].program = program; }), root);
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
     });
 
