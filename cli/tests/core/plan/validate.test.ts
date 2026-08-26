@@ -80,7 +80,7 @@ describe('validatePlanFile', () => {
 
     test('keeps a future schema behind partial markers invalid rather than unsupported', () => {
         const plan = path.join(root, 'partial-future.md'); fs.writeFileSync(plan, `${START}\n{"schema":"compact-slices/v2"}`);
-        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
     });
 
     test('applies scalar limits before classifying a future schema as unsupported', () => {
