@@ -116,7 +116,7 @@ function latestStableTag(output: string): { tag: string; sha: string } | null {
     if (Buffer.byteLength(output, 'utf8') > MAX_OUTPUT_BYTES) return null;
     const tags = new Map<string, { sha: string; peeled?: string }>();
     for (const line of output.split(/\r?\n/)) {
-        const match = /^([0-9a-fA-F]{40,64})\trefs\/tags\/(v\d+\.\d+\.\d+)(\^\{\})?$/.exec(line);
+        const match = /^([0-9a-fA-F]{40,64})\trefs\/tags\/(v?\d+\.\d+\.\d+)(\^\{\})?$/.exec(line);
         if (!match) continue;
         const tag = tags.get(match[2]) ?? { sha: '' };
         if (match[3]) tag.peeled = match[1];
@@ -145,7 +145,7 @@ async function registryComponent(registry: RegistrySource, git: GitTransport, pr
             deadline(git(registry.contentRoot, ['remote', 'get-url', 'origin'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
             deadline(git(registry.contentRoot, ['rev-parse', 'HEAD'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
             deadline(git(registry.contentRoot, ['describe', '--tags', '--exact-match', 'HEAD'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
-            deadline(git(registry.contentRoot, ['ls-remote', '--tags', registry.remote, 'v*'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
+            deadline(git(registry.contentRoot, ['ls-remote', '--tags', registry.remote], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
         ]);
     } catch {
         return unavailable(`registry:${registry.name}`, source, checkedAt, null, pin);
@@ -153,15 +153,16 @@ async function registryComponent(registry: RegistrySource, git: GitTransport, pr
     const installed = exactTag.trim();
     const latest = latestStableTag(remoteTags);
     const localHead = head.trim();
-    if (!parseVersion(installed) || !latest || !/^[0-9a-fA-F]{40,64}$/.test(localHead) || origin.trim() !== registry.remote || localHead !== latest.sha && installed === latest.tag) {
-        return unavailable(`registry:${registry.name}`, source, checkedAt, parseVersion(installed) ? installed : null, pin);
+    const installedVersion = parseVersion(installed);
+    if (!installedVersion || !latest || !/^[0-9a-fA-F]{40,64}$/.test(localHead) || origin.trim() !== registry.remote) {
+        return unavailable(`registry:${registry.name}`, source, checkedAt, installedVersion ? installed : null, pin);
     }
     const relation = compareStrict(installed, latest.tag);
     if (relation === null) return unavailable(`registry:${registry.name}`, source, checkedAt, installed, pin);
     if (relation === 0 && localHead === latest.sha) {
         return { component: `registry:${registry.name}`, installed, latest: latest.tag, channel: 'stable', source, ...(pin ? { pin } : {}), checkedAt, status: 'current', detail: 'Exact stable tag and configured origin match the authoritative remote.', remedy: 'No action required.' };
     }
-    if (relation < 0 && localHead !== latest.sha) {
+    if (relation < 0) {
         return {
             component: `registry:${registry.name}`, installed, latest: latest.tag, channel: 'stable', source, ...(pin ? { pin } : {}), checkedAt,
             status: pin ? 'pinned-behind' : 'stale', detail: 'Installed stable tag is behind the authoritative remote.',

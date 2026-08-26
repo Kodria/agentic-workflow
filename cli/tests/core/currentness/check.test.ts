@@ -102,6 +102,41 @@ describe('checkCurrentness', () => {
         expect(result.components[1]).toEqual(expect.objectContaining({ installed, latest, status: 'stale' }));
     });
 
+    it('discovers an unprefixed stable SemVer tag while ignoring prereleases', async () => {
+        const { checkCurrentness } = require('../../../src/core/currentness/check');
+        const result = await checkCurrentness(root, deps({
+            git: jest.fn().mockImplementation(async (_cwd: string, args: string[]) => {
+                if (args[0] === 'ls-remote') return `${'a'.repeat(40)}\trefs/tags/1.2.4\n${'b'.repeat(40)}\trefs/tags/1.2.5-rc.1\n`;
+                if (args[0] === 'remote') return 'https://token:secret@example.test/team/repo.git\n';
+                if (args[0] === 'rev-parse') return `${'a'.repeat(40)}\n`;
+                if (args[0] === 'describe') return '1.2.4\n';
+                throw new Error('unexpected');
+            }),
+        }));
+
+        expect(result.components[1]).toEqual(expect.objectContaining({
+            installed: '1.2.4', latest: '1.2.4', status: 'current',
+        }));
+    });
+
+    it('marks a lower installed version stale even when it shares the latest tag SHA', async () => {
+        const sharedSha = 'a'.repeat(40);
+        const { checkCurrentness } = require('../../../src/core/currentness/check');
+        const result = await checkCurrentness(root, deps({
+            git: jest.fn().mockImplementation(async (_cwd: string, args: string[]) => {
+                if (args[0] === 'ls-remote') return `${sharedSha}\trefs/tags/v1.2.4\n`;
+                if (args[0] === 'remote') return 'https://token:secret@example.test/team/repo.git\n';
+                if (args[0] === 'rev-parse') return `${sharedSha}\n`;
+                if (args[0] === 'describe') return 'v1.2.3\n';
+                throw new Error('unexpected');
+            }),
+        }));
+
+        expect(result.components[1]).toEqual(expect.objectContaining({
+            installed: 'v1.2.3', latest: 'v1.2.4', status: 'stale', remedy: 'awm update --yes',
+        }));
+    });
+
     it.each([
         ['branch provenance', async (_cwd: string, args: string[]) => args[0] === 'describe' ? Promise.reject(new Error('not a tag')) : args[0] === 'ls-remote' ? `${'a'.repeat(40)}\trefs/tags/v1.2.3\n` : args[0] === 'remote' ? 'https://example.test/team/repo.git\n' : `${'a'.repeat(40)}\n`],
         ['malformed npm semver', undefined],
