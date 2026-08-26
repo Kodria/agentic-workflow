@@ -1,6 +1,6 @@
 # R4 Compact Plans and Cohesive Slices — Design
 
-**Status:** Final owner review
+**Status:** Approved
 
 **Source brief:** [`Performance y tokens`](https://github.com/Kodria/agentic-workflow/blob/c81aab088d1fdf1a679c353d3557545e9b50125e/docs/plans/2026-08-25-performance-tokens-brief.md)
 
