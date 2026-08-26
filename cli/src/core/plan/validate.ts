@@ -16,7 +16,7 @@ const SHELL = new Set([
     'env', 'busybox', 'node', 'nodejs', 'deno', 'bun', 'python', 'python3', 'ruby', 'perl', 'php', 'lua',
 ]);
 function isLauncher(program: string): boolean {
-    return SHELL.has(program) || /^(?:node(?:js)?|python(?:\d+)?|(?:ba|z|da|k)?sh|busybox)(?:[-.][a-z0-9][a-z0-9.-]*)?$/i.test(program);
+    return SHELL.has(program) || /^(?:node(?:js)?|python(?:\d+)?|(?:ba|z|da|k)?sh|busybox|cmd|powershell|pwsh|wscript|cscript)(?:\.exe)?(?:[-.][a-z0-9][a-z0-9.-]*)?$/i.test(program);
 }
 
 function diagnostic(code: string, message: string, field?: string): PlanValidationReport { return { state: 'invalid', diagnostics: [{ code, message, ...(field ? { field } : {}) }] }; }
@@ -54,6 +54,7 @@ function checkMarkdown(text: string, slice: PlanSlice): PlanValidationReport | u
     const next = text.indexOf('\n### Slice ', headingAt + heading.length); const end = next < 0 ? text.length : next;
     const section = text.slice(start, end);
     for (const name of ['Surfaces', 'Implementation', 'Edge cases', 'Evidence', 'Fallback']) {
+        if ((section.match(new RegExp(`^#### ${name}\\s*$`, 'gm')) ?? []).length !== 1) return diagnostic('PLAN_MARKDOWN_SECTION', 'each required slice subsection must occur exactly once');
         const match = new RegExp(`#### ${name}\\s*\\n\\s*([^#\\s][\\s\\S]*?)(?=\\n#### |$)`).exec(section);
         if (!match || /\b(?:TODO|TBD|placeholder|draft)\b/i.test(match[1])) return diagnostic('PLAN_MARKDOWN_SECTION', 'slice section must contain complete prose');
     }

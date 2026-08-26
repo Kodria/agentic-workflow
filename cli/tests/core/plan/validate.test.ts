@@ -182,6 +182,12 @@ describe('validatePlanFile', () => {
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKDOWN_HEADING' })] });
     });
 
+    test('rejects a repeated required Markdown subsection', () => {
+        const plan = fixture(root);
+        fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace('#### Fallback', '#### Evidence\n\nDuplicate evidence.\n\n#### Fallback'));
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKDOWN_SECTION' })] });
+    });
+
     test.each(['TODO', 'TBD', 'placeholder', 'draft'])('rejects incomplete Markdown sentinel %s', (sentinel) => {
         const plan = fixture(root);
         fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace('One evidence item.', sentinel));
@@ -206,6 +212,11 @@ describe('validatePlanFile', () => {
     });
 
     test.each(['node-v22', 'nodejs-20', 'python3.12', 'bash-static', 'busybox-musl'])('rejects versioned launcher %s', (program) => {
+        const report = validatePlanFile(fixture(root, (m) => { (m.commands as Record<string, unknown>[])[0].program = program; }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
+    });
+
+    test.each(['cmd.exe', 'powershell.exe', 'pwsh.exe', 'wscript.exe', 'cscript.exe'])('rejects Windows launcher %s', (program) => {
         const report = validatePlanFile(fixture(root, (m) => { (m.commands as Record<string, unknown>[])[0].program = program; }), root);
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_COMMAND_UNSAFE' })] });
     });
