@@ -181,6 +181,18 @@ describe('validatePlanFile', () => {
         expect(validatePlanFile(plan, root)).toEqual({ state: 'legacy' });
     });
 
+    test('does not classify an escaped future schema signal as legacy', () => {
+        const plan = path.join(root, 'escaped-future.md'); fs.writeFileSync(plan, '{"schema":"compact-slices\\u002fv2"}');
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
+    });
+
+    test('rejects duplicate trace references and an oversized plan id', () => {
+        const duplicate = validatePlanFile(fixture(root, (m) => { (m.slices as Record<string, unknown>[])[0].sources = ['SRC-ONE', 'SRC-ONE']; }), root);
+        expect(duplicate).toMatchObject({ state: 'invalid' });
+        const planId = validatePlanFile(fixture(root, (m) => { m.planId = 'a'.repeat(4097); }), root);
+        expect(planId).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_LIMIT' })] });
+    });
+
     test('requires the slice heading immediately after its anchor', () => {
         const plan = fixture(root);
         fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace('<a id="slice-s1"></a>\n', '<a id="slice-s1"></a>\nintervening text\n'));
