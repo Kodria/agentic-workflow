@@ -86,4 +86,31 @@ describe('resolvePackSource', () => {
             fs.rmSync(root, { recursive: true, force: true });
         }
     });
+
+    it('accepts a parent symlink replacement when it resolves to the inspected pack inode', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-same-inode-'));
+        const packDir = path.join(root, 'sensor-packs', 'js-ts');
+        const movedPackDir = path.join(root, 'sensor-packs', 'js-ts-original');
+        const packFile = path.join(packDir, 'pack.json');
+        const originalOpen = fs.openSync.bind(fs);
+        const open = jest.spyOn(fs, 'openSync');
+        let swapped = false;
+        try {
+            fs.mkdirSync(packDir, { recursive: true });
+            fs.writeFileSync(packFile, '{"from":"original"}');
+            open.mockImplementation(((file: fs.PathLike, flags: number, mode?: number) => {
+                if (!swapped && file === fs.realpathSync(packFile)) {
+                    swapped = true;
+                    fs.renameSync(packDir, movedPackDir);
+                    fs.symlinkSync(movedPackDir, packDir, 'dir');
+                }
+                return originalOpen(file, flags, mode);
+            }) as typeof fs.openSync);
+            expect(resolvePackSource('js-ts', { registries: [{ name: 'safe', remote: '', contentRoot: root }] }).content)
+                .toBe('{"from":"original"}');
+        } finally {
+            open.mockRestore();
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
 });
