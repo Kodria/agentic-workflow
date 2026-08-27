@@ -37,12 +37,13 @@ function inspectContainedPack(root: string, pack: string): { candidate: string; 
 
 /** Resolve only an exact, regular pack.json beneath the first configured registry.
  * Registry order is authority; an unsafe claimed source is a hard failure, not a fallback. */
-export function resolvePackSource(pack: unknown, options: { registries?: RegistrySource[] } = {}): PackSource {
+export function listPackSources(pack: unknown, options: { registries?: RegistrySource[] } = {}): PackSource[] {
     if (!validPackName(pack)) throw new Error('pack name must be a stable lowercase id');
     const registries = options.registries ?? listRegistries();
     if (!Array.isArray(registries)) throw new Error('registries must be an array');
+    const sources: PackSource[] = [];
     for (const registry of registries) {
-        if (!registry || typeof registry.contentRoot !== 'string' || registry.contentRoot.trim() === '') throw new Error('registry has an invalid content root');
+        if (!registry || typeof registry.name !== 'string' || !/^[a-z][a-z0-9-]*$/.test(registry.name) || typeof registry.contentRoot !== 'string' || registry.contentRoot.trim() === '') throw new Error('registry has an invalid identity or content root');
         const inspected = inspectContainedPack(registry.contentRoot, pack);
         if (!inspected) continue;
         const { candidate, stat } = inspected;
@@ -51,7 +52,14 @@ export function resolvePackSource(pack: unknown, options: { registries?: Registr
         let root: string; let real: string;
         try { root = fs.realpathSync(registry.contentRoot); real = fs.realpathSync(candidate); } catch { throw new Error(`cannot canonicalize pack source ${candidate}`); }
         if (!contained(root, real)) throw new Error(`pack source ${candidate} escapes its registry root`);
-        return { path: real, content: fs.readFileSync(real, 'utf8'), registry };
+        sources.push({ path: real, content: fs.readFileSync(real, 'utf8'), registry });
     }
+    return sources;
+}
+
+export function resolvePackSource(pack: unknown, options: { registries?: RegistrySource[] } = {}): PackSource {
+    const sources = listPackSources(pack, options);
+    const source = sources[0];
+    if (source) return source;
     throw new Error(`sensor pack "${pack}" was not found in configured registries`);
 }
