@@ -51,12 +51,30 @@ function atomicWrite(destination: string, content: string): void {
     const directory = path.dirname(destination);
     fs.mkdirSync(directory, { recursive: true });
     const temporary = path.join(directory, `.${path.basename(destination)}.${process.pid}.${Date.now()}.tmp`);
+    let ownsTemporary = false;
     try {
         fs.writeFileSync(temporary, content, { encoding: 'utf8', flag: 'wx' });
+        ownsTemporary = true;
         fs.renameSync(temporary, destination);
+        ownsTemporary = false;
     } finally {
-        try { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); } catch { /* best effort cleanup */ }
+        try { if (ownsTemporary && fs.existsSync(temporary)) fs.unlinkSync(temporary); } catch { /* best effort cleanup */ }
     }
+}
+
+function selectedRegistryAsset(packRoot: string, asset: string): string {
+    let current = packRoot;
+    for (const [index, component] of asset.split('/').entries()) {
+        let stat: fs.Stats;
+        try { stat = fs.lstatSync(current); } catch { throw new Error(`selected asset is missing from pack: ${asset}`); }
+        if (stat.isSymbolicLink()) throw new Error(`selected asset contains a symlink: ${asset}`);
+        if (index < asset.split('/').length - 1 && !stat.isDirectory()) throw new Error(`selected asset is missing from pack: ${asset}`);
+        current = path.join(current, component);
+    }
+    let stat: fs.Stats;
+    try { stat = fs.lstatSync(current); } catch { throw new Error(`selected asset is missing from pack: ${asset}`); }
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`selected asset must be a regular file: ${asset}`);
+    return current;
 }
 
 function priorAssets(projectRoot: string): string[] {
@@ -97,11 +115,8 @@ export function materializePortableSensors(input: PortableMaterializeInput): Por
     try {
         if (input.configure !== false) {
             for (const asset of selected) {
-                const source = path.join(packRoot, ...asset.split('/'));
+                const source = selectedRegistryAsset(packRoot, asset);
                 const destination = path.join(configRoot, ...asset.split('/'));
-                let stat: fs.Stats;
-                try { stat = fs.lstatSync(source); } catch { throw new Error(`selected asset is missing from pack: ${asset}`); }
-                if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`selected asset must be a regular file: ${asset}`);
                 if (fs.existsSync(destination)) { preserved.push(asset); continue; }
                 fs.mkdirSync(path.dirname(destination), { recursive: true });
                 atomicWrite(destination, fs.readFileSync(source, 'utf8'));
@@ -153,11 +168,8 @@ export function materializeResolvedSensors(input: MaterializeInput): Materialize
     try {
         if (input.configure !== false) {
             for (const asset of selected) {
-                const source = path.join(packRoot, ...asset.split('/'));
+                const source = selectedRegistryAsset(packRoot, asset);
                 const destination = path.join(configRoot, ...asset.split('/'));
-                let stat: fs.Stats;
-                try { stat = fs.lstatSync(source); } catch { throw new Error(`selected asset is missing from pack: ${asset}`); }
-                if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`selected asset must be a regular file: ${asset}`);
                 if (fs.existsSync(destination)) { preserved.push(asset); continue; }
                 fs.mkdirSync(path.dirname(destination), { recursive: true });
                 atomicWrite(destination, fs.readFileSync(source, 'utf8'));

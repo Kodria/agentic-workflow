@@ -76,6 +76,17 @@ describe('planV2Migration', () => {
         }
     });
 
+    it('accepts a uniquely rebound configured logical source but rejects physical manifest provenance', () => {
+        const rebound = { ...resolvedSource(), kind: 'legacy-rebound' as const };
+        expect(planV2Migration({ manifest: v2, source: rebound }).candidate.source).toEqual({ registry: 'baseline' });
+
+        const bound = { ...resolvedSource(), kind: 'legacy-bound' as const, source: {
+            ...resolvedSource().source,
+            registry: { ...resolvedSource().source.registry, name: 'manifest-provenance', remote: 'local' },
+        } };
+        expect(() => planV2Migration({ manifest: v2, source: bound })).toThrow('unique logical resolution');
+    });
+
     it('rejects a replacement when any persisted sensor semantic differs', () => {
         const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-'));
         const manifestPath = path.join(project, 'sensors.json');
@@ -153,6 +164,10 @@ describe('planV2Migration', () => {
             ['--cache="/tmp/x"'],
             ["--cache='C:\\temp\\x'"],
             ['--config="//server/share"'],
+            ['--cache:/tmp/x'],
+            ['--config:C:\\temp\\x'],
+            ['--cache:"/tmp/x"'],
+            ["--config:'C:\\temp\\x'"],
         ]) {
             const manifest = { ...v2, sensors: { lint: { ...sensor, command: { ...sensor.command, args } } } };
             expect(() => planV2Migration({ manifest, source: resolvedSource() })).toThrow('physical path');
@@ -213,6 +228,23 @@ describe('planV2Migration', () => {
             expect(() => replaceV2ManifestWithV3(manifestPath, candidate, sourceWithPack(pack => { ((((pack.sensors as Record<string, unknown>).lint as Record<string, unknown>).variants as Record<string, unknown>[])[0]).id = 'eslint-8'; }))).toThrow('compatible');
             expect(fs.readFileSync(manifestPath, 'utf8')).toBe(original);
         } finally {
+            fs.rmSync(project, { recursive: true, force: true });
+        }
+    });
+
+    it('preserves a pre-existing replacement temporary file when exclusive creation collides', () => {
+        const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-'));
+        const manifestPath = path.join(project, 'sensors.json');
+        const now = jest.spyOn(Date, 'now').mockReturnValue(12345);
+        const temporary = path.join(project, `.sensors.json.${process.pid}.12345.tmp`);
+        try {
+            fs.writeFileSync(manifestPath, JSON.stringify(v2));
+            fs.writeFileSync(temporary, 'not ours');
+            const candidate = planV2Migration({ manifest: v2, source: resolvedSource() }).candidate;
+            expect(() => replaceV2ManifestWithV3(manifestPath, candidate, resolvedSource())).toThrow();
+            expect(fs.readFileSync(temporary, 'utf8')).toBe('not ours');
+        } finally {
+            now.mockRestore();
             fs.rmSync(project, { recursive: true, force: true });
         }
     });

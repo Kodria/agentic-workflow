@@ -62,6 +62,21 @@ describe('materializeResolvedSensors', () => {
         expect(fs.readFileSync(path.join(projectRoot, 'eslint.config.awm.mjs'), 'utf8')).toBe('owner content');
     });
 
+    it('rejects a selected asset beneath a symlinked registry directory before copying it', () => {
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-materialize-outside-'));
+        try {
+            fs.mkdirSync(path.join(packRoot, 'configs'));
+            fs.writeFileSync(path.join(outside, 'eslint.config.awm.mjs'), 'outside content');
+            fs.symlinkSync(outside, path.join(packRoot, 'configs', 'linked'));
+            expect(() => materializeResolvedSensors({ projectRoot, packRoot, pack: 'js-ts', sensors: {
+                lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['configs/linked/eslint.config.awm.mjs'], initializedCompatibility: evidence },
+            } })).toThrow('symlink');
+            expect(fs.existsSync(path.join(projectRoot, 'configs', 'linked', 'eslint.config.awm.mjs'))).toBe(false);
+        } finally {
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
+
     it('revalidates a shared Semgrep policy reference without materializing the policy itself', () => {
         const sensorPacks = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-materialize-policy-'));
         const semgrepPack = path.join(sensorPacks, 'python');
@@ -92,5 +107,22 @@ describe('materializeResolvedSensors', () => {
         } });
         expect(result.orphaned).toEqual(['eslint.config.awm.cjs']);
         expect(fs.existsSync(path.join(projectRoot, 'eslint.config.awm.cjs'))).toBe(true);
+    });
+
+    it('preserves a pre-existing manifest temporary file when exclusive creation collides', () => {
+        const now = jest.spyOn(Date, 'now').mockReturnValue(12345);
+        const awm = path.join(projectRoot, '.awm');
+        const temporary = path.join(awm, `.sensors.json.${process.pid}.12345.tmp`);
+        try {
+            fs.mkdirSync(awm);
+            fs.writeFileSync(temporary, 'not ours');
+            expect(() => materializeResolvedSensors({ projectRoot, packRoot, pack: 'js-ts', sensors: {
+                lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['eslint.config.awm.mjs'], initializedCompatibility: evidence },
+            } })).toThrow();
+            expect(fs.readFileSync(temporary, 'utf8')).toBe('not ours');
+            expect(fs.existsSync(path.join(projectRoot, 'eslint.config.awm.mjs'))).toBe(false);
+        } finally {
+            now.mockRestore();
+        }
     });
 });

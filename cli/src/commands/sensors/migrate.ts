@@ -9,7 +9,7 @@ import type { SensorSourceResolution } from './compatibility/source';
  * Re-probing here would turn migration planning into an environment reader.
  */
 type SourceBearingSensorResolution = Extract<SensorSourceResolution, { source: unknown }>;
-export type V2MigrationSource = SourceBearingSensorResolution & { kind: 'logical' };
+export type V2MigrationSource = SourceBearingSensorResolution & { kind: 'logical' | 'legacy-rebound' };
 
 export type V2MigrationPlan = {
     candidate: SensorManifestV3ProjectSensors;
@@ -72,7 +72,7 @@ function exactLogicalSource(input: unknown, pack: string): V2MigrationSource['so
     if (!isRecord(input)) throw new Error('v2 migration source is required');
     if (input.kind === 'source-unavailable') throw new Error('v2 migration source is unavailable');
     if (input.kind === 'source-ambiguous') throw new Error('v2 migration source is ambiguous');
-    if (input.kind !== 'logical' || !isRecord(input.source)) throw new Error('v2 migration source must be a unique logical resolution');
+    if ((input.kind !== 'logical' && input.kind !== 'legacy-rebound') || !isRecord(input.source)) throw new Error('v2 migration source must be a unique logical resolution');
     const source = input.source;
     if (Object.keys(source).some(key => !['path', 'content', 'registry'].includes(key))
         || typeof source.path !== 'string' || typeof source.content !== 'string' || !isRecord(source.registry)) {
@@ -115,17 +115,19 @@ function hasPhysicalSensorPath(value: unknown, registryRoots: readonly (string |
         const roots = registryRoots
             .filter((root): root is string => typeof root === 'string' && root.length > 0)
             .map(root => path.posix.normalize(root.replace(/\\/g, '/')).toLowerCase());
-        const hasAbsolutePathToken = value.split(/[=\s]/).some(token => {
+        const hasAbsolutePathToken = value.split(/[=:\s]/).some(token => {
             const unquoted = token.replace(/^["']+|["']+$/g, '');
             return path.posix.isAbsolute(unquoted)
             || /^[A-Za-z]:[\\/]/.test(unquoted)
             || /^(?:\\\\|\/\/)/.test(unquoted);
         });
+        const hasAbsolutePathAfterOptionSeparator = /(?:^|[=:\s])["']?(?:\/|[A-Za-z]:[\\/]|\\\\|\/\/)/.test(value);
         return roots.some(root => normalized.includes(root))
             || path.posix.isAbsolute(value)
             || /^[A-Za-z]:[\\/]/.test(value)
             || /^(?:\\\\|\/\/)/.test(value)
-            || hasAbsolutePathToken;
+            || hasAbsolutePathToken
+            || hasAbsolutePathAfterOptionSeparator;
     }
     return Array.isArray(value) ? value.some(item => hasPhysicalSensorPath(item, registryRoots))
         : isRecord(value) && Object.values(value).some(item => hasPhysicalSensorPath(item, registryRoots));
@@ -184,10 +186,13 @@ export function replaceV2ManifestWithV3(manifestPath: unknown, candidate: unknow
     }
     const directory = path.dirname(manifestPath);
     const temporary = path.join(directory, `.${path.basename(manifestPath)}.${process.pid}.${Date.now()}.tmp`);
+    let ownsTemporary = false;
     try {
         fs.writeFileSync(temporary, serializeManifestV3(after.pack), { encoding: 'utf8', flag: 'wx' });
+        ownsTemporary = true;
         fs.renameSync(temporary, manifestPath);
+        ownsTemporary = false;
     } finally {
-        try { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); } catch { /* best effort cleanup */ }
+        try { if (ownsTemporary && fs.existsSync(temporary)) fs.unlinkSync(temporary); } catch { /* best effort cleanup */ }
     }
 }
