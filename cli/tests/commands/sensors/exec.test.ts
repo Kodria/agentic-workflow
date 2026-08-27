@@ -2,7 +2,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { runCommand, runStructuredCommand } from '../../../src/commands/sensors/exec';
-import { executePrepared } from '../../../src/commands/sensors/result';
+import { applyBaseline, executePrepared, interpretResult } from '../../../src/commands/sensors/result';
+import { fingerprint } from '../../../src/commands/sensors/baseline';
 import { expandFileInput } from '../../../src/commands/sensors/prepare';
 
 const sensor = (overrides: Record<string, unknown> = {}) => ({
@@ -18,6 +19,7 @@ const sensor = (overrides: Record<string, unknown> = {}) => ({
 
 const onPosix = process.platform !== 'win32' ? describe : describe.skip;
 const itPosix = process.platform !== 'win32' ? it : it.skip;
+const itLinux = process.platform === 'linux' ? it : it.skip;
 
 /** Poll until `fn()` is true or the budget runs out. Avoids fixed sleeps. */
 async function until(fn: () => boolean, budgetMs = 4000): Promise<boolean> {
@@ -56,6 +58,92 @@ describe('runCommand — exit codes and output', () => {
             fs.rmSync(dir, { recursive: true, force: true });
         }
     });
+
+    it('preserves a structured non-zero report for interpretation and baseline suppression', async () => {
+        const command = {
+            executable: 'node',
+            resolution: 'path' as const,
+            args: ['-e', "console.log('structured finding'); process.exit(1)"],
+        };
+        const raw = await runStructuredCommand(command, { timeout: 5_000, cwd: process.cwd() });
+
+        expect(raw).toMatchObject({ code: 1, stdout: 'structured finding\n', timedOut: false, overflowed: false });
+
+        const interpreted = interpretResult(sensor({ command: { kind: 'structured', value: command } }), raw);
+        expect(interpreted).toMatchObject({ status: 'fail', errors: [{ message: expect.stringContaining('structured finding') }] });
+
+        const suppressed = applyBaseline(interpreted, [fingerprint('lint', interpreted.errors[0])]);
+        expect(suppressed).toMatchObject({ status: 'pass', errors: [], baselineCount: 1 });
+    });
+
+    it('keeps an unrelated structured non-zero exit non-passing', async () => {
+        const raw = await runStructuredCommand({
+            executable: 'node',
+            resolution: 'path',
+            args: ['-e', 'process.exit(3)'],
+        }, { timeout: 5_000, cwd: process.cwd() });
+
+        const interpreted = interpretResult(sensor({ command: { kind: 'structured', value: { executable: 'node', resolution: 'path', args: ['-e', 'process.exit(3)'] } } }), raw);
+        expect(interpreted.status).not.toBe('pass');
+    });
+
+    itLinux('keeps structured stderr separate from exit-0 stdout findings', async () => {
+        const command = {
+            executable: 'perl',
+            resolution: 'path' as const,
+            args: ['-e', 'print STDERR "warning only\\n"'],
+        };
+        const raw = await runStructuredCommand(command, { timeout: 5_000, cwd: process.cwd() });
+
+        expect(raw).toMatchObject({ code: 0, stdout: '', stderr: 'warning only\n' });
+        expect(interpretResult(sensor({ command: { kind: 'structured', value: command } }), raw)).toMatchObject({ status: 'pass', errors: [] });
+    });
+
+    itLinux('never lets a structured capture file grow beyond maxBuffer', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-exec-cap-'));
+        const marker = path.join(dir, 'written');
+        const existing = new Set(fs.readdirSync(os.tmpdir()).filter(name => name.startsWith('awm-sensor-output-')));
+        try {
+            const result = runStructuredCommand({
+                executable: 'node',
+                resolution: 'path',
+                args: ['-e', `const fs = require('fs'); try { fs.writeSync(1, Buffer.alloc(8192, 'x')); } catch {} fs.writeFileSync(${JSON.stringify(marker)}, 'written'); setTimeout(() => {}, 1000);`],
+            }, { timeout: 5_000, cwd: dir, maxBuffer: 1_024 });
+
+            expect(await until(() => fs.existsSync(marker))).toBe(true);
+            const capture = fs.readdirSync(os.tmpdir()).find(name => name.startsWith('awm-sensor-output-') && !existing.has(name));
+            expect(capture).toBeDefined();
+            expect(fs.statSync(path.join(os.tmpdir(), capture!, 'stdout')).size).toBeLessThanOrEqual(1_024);
+            await expect(result).resolves.toMatchObject({ overflowed: true });
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    itLinux('bounds combined structured stdout and stderr by maxBuffer', async () => {
+        const result = await runStructuredCommand({
+            executable: 'node',
+            resolution: 'path',
+            args: ['-e', "process.stdout.write('o'.repeat(700)); process.stderr.write('e'.repeat(700)); setTimeout(() => {}, 1000);"],
+        }, { timeout: 5_000, cwd: process.cwd(), maxBuffer: 1_024 });
+
+        expect(result.overflowed).toBe(true);
+        expect(Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr)).toBeLessThanOrEqual(1_024);
+        expect(result.stdout).toMatch(/^o+$/);
+        expect(result.stderr).toMatch(/^e+$/);
+    });
+
+    itLinux('allows one structured stream to use the full global budget', async () => {
+        const result = await runStructuredCommand({
+            executable: 'perl',
+            resolution: 'path',
+            args: ['-e', "print 'o' x 700"],
+        }, { timeout: 5_000, cwd: process.cwd(), maxBuffer: 1_024 });
+
+        expect(result).toMatchObject({ code: 0, overflowed: false, stderr: '' });
+        expect(Buffer.byteLength(result.stdout)).toBe(700);
+    });
+
     it('returns stdout and code 0 for a clean command', async () => {
         const r = await runCommand('echo hello', { timeout: 5000, cwd: process.cwd() });
         expect(r.code).toBe(0);
@@ -108,6 +196,22 @@ onPosix('runCommand — output cap', () => {
         expect(r.stdout.length).toBeLessThanOrEqual(1024);
         // The point of the cap change: what was read is still usable, not discarded.
         expect(r.stdout).toMatch(/line-padding/);
+    });
+
+    it('counts multibyte UTF-8 output against maxBuffer in bytes', async () => {
+        const r = await runCommand("yes '€'", { timeout: 5_000, cwd: process.cwd(), maxBuffer: 1_024 });
+
+        expect(r.overflowed).toBe(true);
+        expect(Buffer.byteLength(r.stdout) + Buffer.byteLength(r.stderr)).toBeLessThanOrEqual(1_024);
+    });
+
+    it.each([
+        ["perl -e 'print chr(255) x 1024'", 'invalid bytes'],
+        ["perl -e 'print \"\\xE2\\x82\" x 512'", 'truncated UTF-8 sequences'],
+    ])('never expands %s beyond maxBuffer while decoding %s', async (command) => {
+        const r = await runCommand(command, { timeout: 5_000, cwd: process.cwd(), maxBuffer: 1_024 });
+
+        expect(Buffer.byteLength(r.stdout) + Buffer.byteLength(r.stderr)).toBeLessThanOrEqual(1_024);
     });
 });
 
