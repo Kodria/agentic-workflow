@@ -37,7 +37,7 @@ function stableId(value: unknown, label: string): string {
 }
 
 function containedAsset(value: unknown, label: string): string {
-    if (typeof value !== 'string' || value.length === 0 || value.includes('\\') || path.isAbsolute(value) || value.split('/').some(part => !part || part === '.' || part === '..')) throw new Error(`${label} must be a contained relative asset path`);
+    if (typeof value !== 'string' || value.length === 0 || value.includes('\\') || path.isAbsolute(value) || /^(?:[A-Za-z]:|[\\/])/.test(value) || value.split('/').some(part => !part || part === '.' || part === '..')) throw new Error(`${label} must be a contained relative asset path`);
     return value;
 }
 
@@ -78,6 +78,57 @@ function atomicWrite(destination: string, content: string): void {
         ownsTemporary = false;
     } finally {
         try { if (ownsTemporary && fs.existsSync(temporary)) fs.unlinkSync(temporary); } catch { /* best effort cleanup */ }
+    }
+}
+
+function preparedProjectDestination(configRoot: string, asset: string): { destination: string; exists: boolean } {
+    let rootStat: fs.Stats;
+    try { rootStat = fs.lstatSync(configRoot); } catch { throw new Error(`project destination root is unavailable: ${asset}`); }
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error(`project destination contains a symlink or non-directory root: ${asset}`);
+    let current = configRoot;
+    for (const component of asset.split('/').slice(0, -1)) {
+        const next = path.join(current, component);
+        try { fs.mkdirSync(next); }
+        catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        }
+        let stat: fs.Stats;
+        try { stat = fs.lstatSync(next); } catch { throw new Error(`project destination component is unavailable: ${asset}`); }
+        if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`project destination contains a symlink or non-directory component: ${asset}`);
+        current = next;
+    }
+    const destination = path.join(current, asset.split('/').at(-1)!);
+    try {
+        const stat = fs.lstatSync(destination);
+        if (stat.isSymbolicLink()) throw new Error(`project destination contains a symlink: ${asset}`);
+        return { destination, exists: true };
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { destination, exists: false };
+        throw error;
+    }
+}
+
+/** Publish a new asset without ever replacing an owner-created destination. */
+function atomicCreateAsset(configRoot: string, asset: string, content: string): boolean {
+    const initial = preparedProjectDestination(configRoot, asset);
+    if (initial.exists) return false;
+    const directory = path.dirname(initial.destination);
+    const temporary = path.join(directory, `.${path.basename(initial.destination)}.${process.pid}.${Date.now()}.tmp`);
+    let ownsTemporary = false;
+    try {
+        fs.writeFileSync(temporary, content, { encoding: 'utf8', flag: 'wx' });
+        ownsTemporary = true;
+        // Revalidate every project-controlled component after staging and before
+        // publication; link fails atomically if another writer claimed the leaf.
+        if (preparedProjectDestination(configRoot, asset).exists) return false;
+        try { fs.linkSync(temporary, initial.destination); }
+        catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+            throw error;
+        }
+        return true;
+    } finally {
+        try { if (ownsTemporary) fs.unlinkSync(temporary); } catch { /* best effort cleanup */ }
     }
 }
 
@@ -171,11 +222,11 @@ export function materializePortableSensors(input: PortableMaterializeInput): Por
         if (input.configure !== false) {
             for (const asset of selected) {
                 const selectedSource = selectedRegistryAsset(packRoot, asset);
-                const destination = path.join(configRoot, ...asset.split('/'));
-                if (fs.existsSync(destination)) { preserved.push(asset); continue; }
-                fs.mkdirSync(path.dirname(destination), { recursive: true });
-                atomicWrite(destination, readSelectedRegistryAsset(packRoot, selectedSource, asset));
-                created.push(destination); configured.push(asset);
+                const destination = preparedProjectDestination(configRoot, asset);
+                if (destination.exists) { preserved.push(asset); continue; }
+                if (atomicCreateAsset(configRoot, asset, readSelectedRegistryAsset(packRoot, selectedSource, asset))) {
+                    created.push(destination.destination); configured.push(asset);
+                } else preserved.push(asset);
             }
         }
         atomicWrite(path.join(projectRoot, '.awm', 'sensors.json'), serializeManifestV3(manifest));
@@ -224,12 +275,12 @@ export function materializeResolvedSensors(input: MaterializeInput): Materialize
         if (input.configure !== false) {
             for (const asset of selected) {
                 const selectedSource = selectedRegistryAsset(packRoot, asset);
-                const destination = path.join(configRoot, ...asset.split('/'));
-                if (fs.existsSync(destination)) { preserved.push(asset); continue; }
-                fs.mkdirSync(path.dirname(destination), { recursive: true });
-                atomicWrite(destination, readSelectedRegistryAsset(packRoot, selectedSource, asset));
-                created.push(destination);
-                configured.push(asset);
+                const destination = preparedProjectDestination(configRoot, asset);
+                if (destination.exists) { preserved.push(asset); continue; }
+                if (atomicCreateAsset(configRoot, asset, readSelectedRegistryAsset(packRoot, selectedSource, asset))) {
+                    created.push(destination.destination);
+                    configured.push(asset);
+                } else preserved.push(asset);
             }
         }
         atomicWrite(path.join(projectRoot, '.awm', 'sensors.json'), serializeManifestV2(manifest));

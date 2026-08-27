@@ -10,8 +10,11 @@ const sensor = {
     initializedCompatibility: { state: 'certified' as const, reason: 'range-and-probe', variantId: 'eslint-9', toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [{ kind: 'version', status: 'pass' }] },
 };
 const v2 = { schemaVersion: 2, pack: 'js-ts', packSelection: 'explicit' as const, registryRoot: '/home/alice/.awm/registries/baseline', packageRoot: 'cli', sensors: { lint: sensor }, concurrency: 2 };
+const sourceRegistryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-source-'));
 
-function resolvedSource(pack = 'js-ts', registry = 'baseline', contentRoot = `/home/alice/.awm/registries/${registry}`) {
+afterAll(() => fs.rmSync(sourceRegistryRoot, { recursive: true, force: true }));
+
+function resolvedSource(pack = 'js-ts', registry = 'baseline', contentRoot = sourceRegistryRoot) {
     return {
         kind: 'logical',
         source: {
@@ -115,6 +118,20 @@ describe('planV2Migration', () => {
         expect(() => planV2Migration({ manifest: v2, source: mismatched })).toThrow('exact resolved pack');
     });
 
+    it('canonicalizes a configured source root before comparing its exact selected pack', () => {
+        const registryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-registry-'));
+        const linkedRoot = path.join(path.dirname(registryRoot), `${path.basename(registryRoot)}-linked`);
+        try {
+            fs.symlinkSync(registryRoot, linkedRoot);
+            const source = resolvedSource('js-ts', 'baseline', linkedRoot);
+            source.source.path = path.join(registryRoot, 'sensor-packs', 'js-ts', 'pack.json');
+            expect(planV2Migration({ manifest: v2, source }).candidate.source).toEqual({ registry: 'baseline' });
+        } finally {
+            fs.rmSync(linkedRoot, { force: true });
+            fs.rmSync(registryRoot, { recursive: true, force: true });
+        }
+    });
+
     test.each([
         [{ manifest: { schemaVersion: 3, mode: 'native-gate', reason: 'CI' }, source: resolvedSource() }, 'v2'],
         [{ manifest: v2, source: { kind: 'source-unavailable' } }, 'unavailable'],
@@ -160,6 +177,8 @@ describe('planV2Migration', () => {
         for (const args of [
             ['--cache=/tmp/x'],
             ['--config=C:\\temp\\x'],
+            ['--config=C:temp\\x'],
+            ['--config=\\temp\\x'],
             ['--output=//server/share'],
             ['--cache="/tmp/x"'],
             ["--cache='C:\\temp\\x'"],
@@ -181,14 +200,23 @@ describe('planV2Migration', () => {
         }
     });
 
+    test.each(['C:package', 'C:/package'])('rejects a Windows drive-qualified packageRoot: %s', packageRoot => {
+        expect(() => planV2Migration({ manifest: { ...v2, packageRoot }, source: resolvedSource() })).toThrow(/physical path|contained relative asset path/);
+    });
+
     it('rejects a physical path under the resolved source root even when the v2 root differs', () => {
-        const source = resolvedSource('js-ts', 'baseline', path.join(path.sep, 'srv', 'resolved-registry'));
+        const resolvedRegistry = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-resolved-'));
+        const source = resolvedSource('js-ts', 'baseline', resolvedRegistry);
         const manifest = {
             ...v2,
             registryRoot: path.join(path.sep, 'opt', 'legacy-registry'),
-            sensors: { lint: { ...sensor, command: { ...sensor.command, args: ['--cache', path.join(path.sep, 'srv', 'resolved-registry', 'cache')] } } },
+            sensors: { lint: { ...sensor, command: { ...sensor.command, args: ['--cache', path.join(resolvedRegistry, 'cache')] } } },
         };
-        expect(() => planV2Migration({ manifest, source })).toThrow('physical path');
+        try {
+            expect(() => planV2Migration({ manifest, source })).toThrow('physical path');
+        } finally {
+            fs.rmSync(resolvedRegistry, { recursive: true, force: true });
+        }
     });
 
     it('validates before atomic replacement and leaves the v2 original intact on write failure', () => {

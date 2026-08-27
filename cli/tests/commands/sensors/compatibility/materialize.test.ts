@@ -117,6 +117,64 @@ describe('materializeResolvedSensors', () => {
         expect(fs.readFileSync(path.join(projectRoot, 'eslint.config.awm.mjs'), 'utf8')).toBe('owner content');
     });
 
+    it('rejects a symlinked project destination component before writing an asset', () => {
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-materialize-outside-'));
+        try {
+            fs.mkdirSync(path.join(packRoot, 'configs'));
+            fs.writeFileSync(path.join(packRoot, 'configs', 'eslint.config.awm.mjs'), 'registry content');
+            fs.symlinkSync(outside, path.join(projectRoot, 'configs'));
+            expect(() => materializeResolvedSensors({ projectRoot, packRoot, pack: 'js-ts', sensors: {
+                lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['configs/eslint.config.awm.mjs'], initializedCompatibility: evidence },
+            } })).toThrow(/symlink|destination/i);
+            expect(fs.existsSync(path.join(outside, 'eslint.config.awm.mjs'))).toBe(false);
+        } finally {
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects a symlinked packageRoot before writing an asset', () => {
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-materialize-outside-'));
+        try {
+            fs.symlinkSync(outside, path.join(projectRoot, 'package'));
+            expect(() => materializeResolvedSensors({ projectRoot, packRoot, pack: 'js-ts', packageRoot: 'package', sensors: {
+                lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['eslint.config.awm.mjs'], initializedCompatibility: evidence },
+            } })).toThrow(/symlink|destination/i);
+            expect(fs.existsSync(path.join(outside, 'eslint.config.awm.mjs'))).toBe(false);
+        } finally {
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
+
+    it('does not overwrite an asset concurrently published after destination observation', () => {
+        const destination = path.join(projectRoot, 'eslint.config.awm.mjs');
+        const originalLink = fs.linkSync.bind(fs);
+        const link = jest.spyOn(fs, 'linkSync');
+        let published = false;
+        try {
+            link.mockImplementation(((existingPath: fs.PathLike, newPath: fs.PathLike) => {
+                if (newPath === destination && !published) {
+                    published = true;
+                    fs.writeFileSync(destination, 'owner content', { flag: 'wx' });
+                }
+                return originalLink(existingPath, newPath);
+            }) as typeof fs.linkSync);
+            const result = materializeResolvedSensors({ projectRoot, packRoot, pack: 'js-ts', sensors: {
+                lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['eslint.config.awm.mjs'], initializedCompatibility: evidence },
+            } });
+            expect(result.configured).toEqual([]);
+            expect(result.preserved).toEqual(['eslint.config.awm.mjs']);
+            expect(fs.readFileSync(destination, 'utf8')).toBe('owner content');
+        } finally {
+            link.mockRestore();
+        }
+    });
+
+    test.each(['C:/sensor-assets/eslint.config.awm.mjs', 'C:sensor-assets/eslint.config.awm.mjs'])('rejects Windows-rooted or drive-qualified asset paths: %s', asset => {
+        expect(() => materializeResolvedSensors({ projectRoot, packRoot, pack: 'js-ts', sensors: {
+            lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: [asset], initializedCompatibility: evidence },
+        } })).toThrow(/contained relative asset path/i);
+    });
+
     it('rejects a selected asset beneath a symlinked registry directory before copying it', () => {
         const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-materialize-outside-'));
         try {
