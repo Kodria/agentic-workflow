@@ -50,16 +50,20 @@ function inspectContainedPack(root: string, pack: string, registryName: string):
 }
 
 function readContainedPack(real: string, inspected: fs.Stats, registryName: string): string {
-    if (typeof fs.constants.O_NOFOLLOW !== 'number') throw new Error(`registry "${registryName}" pack source no-follow open is unavailable`);
+    const noFollow = fs.constants.O_NOFOLLOW;
     let descriptor: number;
     try {
-        descriptor = fs.openSync(real, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+        descriptor = fs.openSync(real, fs.constants.O_RDONLY | (typeof noFollow === 'number' ? noFollow : 0));
     } catch {
         throw new Error(`registry "${registryName}" pack source cannot be safely opened`);
     }
     try {
         const stat = fs.fstatSync(descriptor);
         if (!stat.isFile()) throw new Error(`registry "${registryName}" pack source must be a contained regular file, never a symbolic link`);
+        if (!Number.isSafeInteger(inspected.dev) || !Number.isSafeInteger(inspected.ino)
+            || !Number.isSafeInteger(stat.dev) || !Number.isSafeInteger(stat.ino)) {
+            throw new Error(`registry "${registryName}" pack source identity is unavailable during safe open`);
+        }
         if (stat.dev !== inspected.dev || stat.ino !== inspected.ino) throw new Error(`registry "${registryName}" pack source changed identity during safe open`);
         if (stat.size !== inspected.size) throw new Error(`registry "${registryName}" pack source changed size during safe open`);
         if (stat.size > MAX_PACK_BYTES) throw new Error(`registry "${registryName}" pack source exceeds the 1 MiB limit`);

@@ -3,6 +3,21 @@ import os from 'os';
 import path from 'path';
 import { resolvePackSource } from '../../../../src/commands/sensors/compatibility/pack-source';
 
+function resolveWithoutNoFollow(...args: Parameters<typeof resolvePackSource>): ReturnType<typeof resolvePackSource> {
+    let resolve: typeof resolvePackSource | undefined;
+    jest.isolateModules(() => {
+        jest.doMock('fs', () => {
+            const actual = jest.requireActual<typeof fs>('fs');
+            const constants = { ...actual.constants, O_NOFOLLOW: undefined };
+            return { __esModule: true, default: { ...actual, constants }, ...actual, constants };
+        });
+        resolve = require('../../../../src/commands/sensors/compatibility/pack-source').resolvePackSource as typeof resolvePackSource;
+    });
+    jest.dontMock('fs');
+    if (!resolve) throw new Error('portable pack source resolver could not be loaded');
+    return resolve(...args);
+}
+
 describe('resolvePackSource', () => {
     it('uses the first registry containing the exact contained pack file', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-'));
@@ -70,6 +85,18 @@ describe('resolvePackSource', () => {
             open.mockRestore();
             fs.rmSync(root, { recursive: true, force: true });
         }
+    });
+
+    it('resolves an inspected regular pack when no-follow is unavailable', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-portable-open-'));
+        try {
+            const packFile = path.join(root, 'sensor-packs', 'js-ts', 'pack.json');
+            fs.mkdirSync(path.dirname(packFile), { recursive: true });
+            fs.writeFileSync(packFile, '{"from":"portable"}');
+
+            expect(resolveWithoutNoFollow('js-ts', { registries: [{ name: 'safe', remote: '', contentRoot: root }] }).content)
+                .toBe('{"from":"portable"}');
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
 
     it('rejects a parent-directory swap between inspection and no-follow open', () => {
@@ -143,7 +170,7 @@ describe('resolvePackSource', () => {
                 }
                 return originalOpen(file, flags, mode);
             }) as typeof fs.openSync);
-            expect(() => resolvePackSource('js-ts', { registries: [{ name: 'safe', remote: '', contentRoot: root }] }))
+            expect(() => resolveWithoutNoFollow('js-ts', { registries: [{ name: 'safe', remote: '', contentRoot: root }] }))
                 .toThrow(/changed|size|identity/i);
         } finally {
             open.mockRestore();
