@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { parseSensorPack } from './compatibility/contract';
 import { parseSensorManifest, serializeManifestV3, type SensorManifestV2, type SensorManifestV3ProjectSensors } from './compatibility/manifest';
+import { readInspectedBoundedFile, type SafeFileFailure } from './compatibility/safe-file';
 import type { SensorSourceResolution } from './compatibility/source';
 
 /**
@@ -123,6 +124,25 @@ function hasPhysicalSensorPath(value: unknown, registryRoots: readonly (string |
         : isRecord(value) && Object.values(value).some(item => hasPhysicalSensorPath(item, registryRoots));
 }
 
+type InspectedManifest = { stat: fs.BigIntStats; content: Buffer };
+
+function inspectManifest(manifestPath: string, failure: (reason: SafeFileFailure) => Error): InspectedManifest {
+    let stat: fs.BigIntStats;
+    try { stat = fs.lstatSync(manifestPath, { bigint: true }); }
+    catch { throw failure('open'); }
+    if (!stat.isFile() || stat.isSymbolicLink()) throw failure('regular');
+    return { stat, content: readInspectedBoundedFile(manifestPath, stat, 1024 * 1024, failure) };
+}
+
+function assertManifestUnchanged(manifestPath: string, original: InspectedManifest): void {
+    const changed = (): Error => new Error('v2 migration original manifest changed before commit');
+    const current = inspectManifest(manifestPath, () => changed());
+    if (current.stat.dev !== original.stat.dev || current.stat.ino !== original.stat.ino
+        || current.stat.size !== original.stat.size || !current.content.equals(original.content)) {
+        throw changed();
+    }
+}
+
 /** Build, but never persist, a portable v3 replacement for a validated v2 manifest. */
 export function planV2Migration(input: { manifest: unknown; source: unknown }): V2MigrationPlan {
     if (!input || typeof input !== 'object') throw new Error('v2 migration input is required');
@@ -155,8 +175,13 @@ export function replaceV2ManifestWithV3(manifestPath: unknown, candidate: unknow
     if (typeof manifestPath !== 'string' || !path.isAbsolute(manifestPath) || path.basename(manifestPath) !== 'sensors.json') {
         throw new Error('v2 migration manifest path must be an absolute sensors.json path');
     }
+    const originalFailure = (_reason: SafeFileFailure): Error => new Error('v2 migration original manifest must be readable JSON');
+    let inspected: InspectedManifest;
     let original: unknown;
-    try { original = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); }
+    try {
+        inspected = inspectManifest(manifestPath, originalFailure);
+        original = JSON.parse(inspected.content.toString('utf8'));
+    }
     catch { throw new Error('v2 migration original manifest must be readable JSON'); }
     const before = parseSensorManifest(original, manifestPath);
     const after = parseSensorManifest(candidate, 'v2 migration candidate');
@@ -180,6 +205,7 @@ export function replaceV2ManifestWithV3(manifestPath: unknown, candidate: unknow
     try {
         fs.writeFileSync(temporary, serializeManifestV3(after.pack), { encoding: 'utf8', flag: 'wx' });
         ownsTemporary = true;
+        assertManifestUnchanged(manifestPath, inspected);
         fs.renameSync(temporary, manifestPath);
         ownsTemporary = false;
     } finally {

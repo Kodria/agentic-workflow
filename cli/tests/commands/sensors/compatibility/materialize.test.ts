@@ -154,6 +154,33 @@ describe('materializeResolvedSensors', () => {
         }
     });
 
+    it('re-establishes parent containment immediately before safely opening an asset', () => {
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-materialize-outside-'));
+        const originalLstat = fs.lstatSync.bind(fs);
+        const lstat = jest.spyOn(fs, 'lstatSync');
+        const directory = path.join(packRoot, 'configs');
+        let inspections = 0;
+        try {
+            fs.mkdirSync(directory);
+            fs.writeFileSync(path.join(directory, 'eslint.config.awm.mjs'), 'registry content');
+            fs.writeFileSync(path.join(outside, 'eslint.config.awm.mjs'), 'outside content');
+            lstat.mockImplementation(((candidate: fs.PathLike, options?: fs.StatOptions) => {
+                if (candidate === directory && ++inspections === 2) {
+                    fs.renameSync(directory, `${directory}.original`);
+                    fs.symlinkSync(outside, directory);
+                }
+                return originalLstat(candidate, options);
+            }) as typeof fs.lstatSync);
+            expect(() => materializeResolvedSensors({ projectRoot, packRoot, pack: 'js-ts', sensors: {
+                lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['configs/eslint.config.awm.mjs'], initializedCompatibility: evidence },
+            } })).toThrow('symlink');
+            expect(fs.existsSync(path.join(projectRoot, 'configs', 'eslint.config.awm.mjs'))).toBe(false);
+        } finally {
+            lstat.mockRestore();
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
+
     it('rejects a pack root reached through a symlinked ancestor before copying registry content', () => {
         const registry = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-materialize-registry-'));
         const linkedRegistry = path.join(path.dirname(registry), `${path.basename(registry)}-linked`);

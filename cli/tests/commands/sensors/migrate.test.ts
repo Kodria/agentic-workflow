@@ -255,4 +255,27 @@ describe('planV2Migration', () => {
             fs.rmSync(project, { recursive: true, force: true });
         }
     });
+
+    it('refuses to replace a manifest whose bytes change after the original is read', () => {
+        const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-'));
+        const manifestPath = path.join(project, 'sensors.json');
+        const original = JSON.stringify(v2, null, 2) + '\n';
+        const replacement = JSON.stringify({ schemaVersion: 2, pack: 'js-ts', sensors: {} }) + '\n';
+        const originalLstat = fs.lstatSync.bind(fs);
+        const lstat = jest.spyOn(fs, 'lstatSync');
+        let inspections = 0;
+        try {
+            fs.writeFileSync(manifestPath, original);
+            const candidate = planV2Migration({ manifest: v2, source: resolvedSource() }).candidate;
+            lstat.mockImplementation(((candidatePath: fs.PathLike, options?: fs.StatOptions) => {
+                if (candidatePath === manifestPath && ++inspections === 2) fs.writeFileSync(manifestPath, replacement);
+                return originalLstat(candidatePath, options);
+            }) as typeof fs.lstatSync);
+            expect(() => replaceV2ManifestWithV3(manifestPath, candidate, resolvedSource())).toThrow(/changed|identity/i);
+            expect(fs.readFileSync(manifestPath, 'utf8')).toBe(replacement);
+        } finally {
+            lstat.mockRestore();
+            fs.rmSync(project, { recursive: true, force: true });
+        }
+    });
 });

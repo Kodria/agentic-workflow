@@ -97,7 +97,14 @@ function selectedRegistryAsset(packRoot: string, asset: string): { file: string;
     return { file: current, stat };
 }
 
-function readSelectedRegistryAsset(selected: { file: string; stat: fs.BigIntStats }, asset: string): string {
+function readSelectedRegistryAsset(packRoot: string, selected: { file: string; stat: fs.BigIntStats }, asset: string): string {
+    // Re-walk the bounded parent chain immediately before the leaf-safe-open.
+    // A replaced ancestor can otherwise redirect the same pathname outside the
+    // inspected registry between selection and the O_NOFOLLOW leaf open.
+    const current = selectedRegistryAsset(packRoot, asset);
+    if (current.stat.dev !== selected.stat.dev || current.stat.ino !== selected.stat.ino) {
+        throw new Error(`selected asset changed identity during safe open: ${asset}`);
+    }
     const failure = (reason: SafeFileFailure): Error => {
         if (reason === 'open') return new Error(`selected asset cannot be safely opened: ${asset}`);
         if (reason === 'regular') return new Error(`selected asset must be a regular file: ${asset}`);
@@ -167,7 +174,7 @@ export function materializePortableSensors(input: PortableMaterializeInput): Por
                 const destination = path.join(configRoot, ...asset.split('/'));
                 if (fs.existsSync(destination)) { preserved.push(asset); continue; }
                 fs.mkdirSync(path.dirname(destination), { recursive: true });
-                atomicWrite(destination, readSelectedRegistryAsset(selectedSource, asset));
+                atomicWrite(destination, readSelectedRegistryAsset(packRoot, selectedSource, asset));
                 created.push(destination); configured.push(asset);
             }
         }
@@ -220,7 +227,7 @@ export function materializeResolvedSensors(input: MaterializeInput): Materialize
                 const destination = path.join(configRoot, ...asset.split('/'));
                 if (fs.existsSync(destination)) { preserved.push(asset); continue; }
                 fs.mkdirSync(path.dirname(destination), { recursive: true });
-                atomicWrite(destination, readSelectedRegistryAsset(selectedSource, asset));
+                atomicWrite(destination, readSelectedRegistryAsset(packRoot, selectedSource, asset));
                 created.push(destination);
                 configured.push(asset);
             }
