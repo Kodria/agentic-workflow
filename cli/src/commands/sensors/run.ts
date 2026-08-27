@@ -164,6 +164,7 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     } catch {
         return { sensors: [], overall: 'not_certified' };
     }
+    if (parsed.kind === 'v3') return { sensors: [], overall: 'not_certified' };
 
     const baseline = opts.ignoreBaseline ? null : readBaseline(manifestDir);
     const changed = opts.changed ? changedFiles(manifestDir, opts.base ?? 'HEAD') : null;

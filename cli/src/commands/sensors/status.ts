@@ -145,6 +145,7 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
     try {
         const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
         const parsed = parseSensorManifest(raw, manifestPath);
+        if (parsed.kind === 'v3') return { overall: 'NOT_CONFIGURED', pack: null, checks: {} };
         if (parsed.kind === 'v2') {
             // Monorepo support (mirrors run.ts/init.ts): detection and structured-command
             // asset resolution both need to see the real package, not the (possibly

@@ -275,7 +275,8 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
         // materialized selection becomes the commit point.
         const parsed = parseSensorManifest(raw, manifestPath);
         if (parsed.kind === 'legacy') existing = parsed.pack;
-        else existingV2 = parsed.pack;
+        else if (parsed.kind === 'v2') existingV2 = parsed.pack;
+        else throw new Error('schemaVersion 3 sensor manifests require the project resolver');
     }
 
     // `detection` keeps saying what the tree IS; `pack` is what the registry can serve

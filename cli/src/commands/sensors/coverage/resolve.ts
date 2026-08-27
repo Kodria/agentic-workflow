@@ -9,10 +9,12 @@ import { parseSensorPack } from '../compatibility/contract';
 import { parseSensorManifest, type ParsedSensorManifest } from '../compatibility/manifest';
 import { resolvePackSource } from '../compatibility/pack-source';
 
+type CoverageManifest = Exclude<ParsedSensorManifest, { kind: 'v3' }>;
+
 export type CoverageInputs =
     | { kind: 'not_configured' }
-    | { kind: 'no_reference'; projectRoot: string; pack: string; registry: string; manifest: ParsedSensorManifest }
-    | { kind: 'ready'; projectRoot: string; pack: string; registry: string; manifest: ParsedSensorManifest; contract: CoverageContract };
+    | { kind: 'no_reference'; projectRoot: string; pack: string; registry: string; manifest: CoverageManifest }
+    | { kind: 'ready'; projectRoot: string; pack: string; registry: string; manifest: CoverageManifest; contract: CoverageContract };
 
 function readFailure(file: string, error: unknown): Error {
     return new Error(`Cannot read ${file}: ${error instanceof Error ? error.message : String(error)}`);
@@ -85,6 +87,7 @@ export function resolveCoverageInputs(cwd: unknown): CoverageInputs {
 
     const manifestPath = path.join(projectRoot, '.awm', 'sensors.json');
     const manifest = parseSensorManifest(readBoundedJson(manifestPath), manifestPath);
+    if (manifest.kind === 'v3') throw new Error('schemaVersion 3 sensor manifests require the project resolver');
     const source = manifest.kind === 'v2' && manifest.pack.registryRoot !== undefined
         ? resolvePackSource(manifest.pack.pack, { registries: [{ name: 'manifest-provenance', remote: 'local', contentRoot: manifest.pack.registryRoot }] })
         : resolvePackSource(manifest.pack.pack);
