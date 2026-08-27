@@ -114,6 +114,30 @@ describe('resolvePackSource', () => {
         }
     });
 
+    it('rejects same-inode content growth between inspection and open', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-size-race-'));
+        const packFile = path.join(root, 'sensor-packs', 'js-ts', 'pack.json');
+        const originalOpen = fs.openSync.bind(fs);
+        const open = jest.spyOn(fs, 'openSync');
+        let changed = false;
+        try {
+            fs.mkdirSync(path.dirname(packFile), { recursive: true });
+            fs.writeFileSync(packFile, '{"from":"original"}');
+            open.mockImplementation(((file: fs.PathLike, flags: number, mode?: number) => {
+                if (!changed && file === fs.realpathSync(packFile)) {
+                    changed = true;
+                    fs.appendFileSync(packFile, 'x');
+                }
+                return originalOpen(file, flags, mode);
+            }) as typeof fs.openSync);
+            expect(() => resolvePackSource('js-ts', { registries: [{ name: 'safe', remote: '', contentRoot: root }] }))
+                .toThrow(/changed|size|identity/i);
+        } finally {
+            open.mockRestore();
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
     it('bounds diagnostics when a long content root cannot be inspected', () => {
         const contentRoot = path.join(os.tmpdir(), `awm-${'x'.repeat(200_000)}`);
         let message = '';

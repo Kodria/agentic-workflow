@@ -54,6 +54,7 @@ function readContainedPack(real: string, inspected: fs.Stats, registryName: stri
         const stat = fs.fstatSync(descriptor);
         if (!stat.isFile()) throw new Error(`registry "${registryName}" pack source must be a contained regular file, never a symbolic link`);
         if (stat.dev !== inspected.dev || stat.ino !== inspected.ino) throw new Error(`registry "${registryName}" pack source changed identity during safe open`);
+        if (stat.size !== inspected.size) throw new Error(`registry "${registryName}" pack source changed size during safe open`);
         if (stat.size > MAX_PACK_BYTES) throw new Error(`registry "${registryName}" pack source exceeds the 1 MiB limit`);
         return fs.readFileSync(descriptor, 'utf8');
     } finally {
