@@ -35,7 +35,7 @@ function inspectContainedPack(root: string, pack: string): { candidate: string; 
     throw new Error('pack source component walk did not reach pack.json');
 }
 
-function readContainedPack(real: string): { content: string; stat: fs.Stats } {
+function readContainedPack(real: string, inspected: fs.Stats): string {
     if (typeof fs.constants.O_NOFOLLOW !== 'number') throw new Error('pack source no-follow open is unavailable');
     let descriptor: number;
     try {
@@ -46,8 +46,9 @@ function readContainedPack(real: string): { content: string; stat: fs.Stats } {
     try {
         const stat = fs.fstatSync(descriptor);
         if (!stat.isFile()) throw new Error(`pack source ${real} must be a contained regular file, never a symbolic link`);
+        if (stat.dev !== inspected.dev || stat.ino !== inspected.ino) throw new Error(`pack source ${real} changed identity during safe open`);
         if (stat.size > MAX_PACK_BYTES) throw new Error(`pack source ${real} exceeds the 1 MiB limit`);
-        return { content: fs.readFileSync(descriptor, 'utf8'), stat };
+        return fs.readFileSync(descriptor, 'utf8');
     } finally {
         fs.closeSync(descriptor);
     }
@@ -70,8 +71,8 @@ export function listPackSources(pack: unknown, options: { registries?: RegistryS
         let root: string; let real: string;
         try { root = fs.realpathSync(registry.contentRoot); real = fs.realpathSync(candidate); } catch { throw new Error(`cannot canonicalize pack source ${candidate}`); }
         if (!contained(root, real)) throw new Error(`pack source ${candidate} escapes its registry root`);
-        const opened = readContainedPack(real);
-        sources.push({ path: real, content: opened.content, registry });
+        const content = readContainedPack(real, stat);
+        sources.push({ path: real, content, registry });
     }
     return sources;
 }
