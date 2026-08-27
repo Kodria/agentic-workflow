@@ -143,6 +143,18 @@ function assertManifestUnchanged(manifestPath: string, original: InspectedManife
     }
 }
 
+function sameManifest(left: InspectedManifest, right: InspectedManifest): boolean {
+    return left.stat.dev === right.stat.dev && left.stat.ino === right.stat.ino
+        && left.stat.size === right.stat.size && left.content.equals(right.content);
+}
+
+function cleanupMigrationStaging(directory: string, files: readonly string[]): void {
+    for (const file of files) {
+        try { fs.unlinkSync(file); } catch { /* only remove names created in our private staging directory */ }
+    }
+    try { fs.rmdirSync(directory); } catch { /* best-effort cleanup of our empty staging directory */ }
+}
+
 /** Build, but never persist, a portable v3 replacement for a validated v2 manifest. */
 export function planV2Migration(input: { manifest: unknown; source: unknown }): V2MigrationPlan {
     if (!input || typeof input !== 'object') throw new Error('v2 migration input is required');
@@ -200,15 +212,43 @@ export function replaceV2ManifestWithV3(manifestPath: unknown, candidate: unknow
         throw new Error('v2 migration candidate semantic mismatch');
     }
     const directory = path.dirname(manifestPath);
-    const temporary = path.join(directory, `.${path.basename(manifestPath)}.${process.pid}.${Date.now()}.tmp`);
-    let ownsTemporary = false;
+    let staging: string | undefined;
+    let preserveStaging = false;
     try {
-        fs.writeFileSync(temporary, serializeManifestV3(after.pack), { encoding: 'utf8', flag: 'wx' });
-        ownsTemporary = true;
+        staging = fs.mkdtempSync(path.join(directory, `.${path.basename(manifestPath)}.migrate-`));
+        const replacement = path.join(staging, 'replacement');
+        const displaced = path.join(staging, 'displaced');
+        fs.writeFileSync(replacement, serializeManifestV3(after.pack), { encoding: 'utf8', flag: 'wx' });
         assertManifestUnchanged(manifestPath, inspected);
-        fs.renameSync(temporary, manifestPath);
-        ownsTemporary = false;
+        // `renameSync(replacement, manifestPath)` would overwrite a concurrent
+        // writer. Move the observed target aside, prove its identity, then link
+        // the fully staged replacement into an absent name: link is atomic and
+        // fails rather than clobbering a manifest another writer published.
+        fs.renameSync(manifestPath, displaced);
+        const moved = inspectManifest(displaced, () => new Error('v2 migration original manifest changed before commit'));
+        if (!sameManifest(moved, inspected)) {
+            try { fs.linkSync(displaced, manifestPath); }
+            catch {
+                preserveStaging = true;
+                throw new Error('v2 migration original manifest changed before commit and could not be restored without clobbering a concurrent update');
+            }
+            throw new Error('v2 migration original manifest changed before commit');
+        }
+        try {
+            fs.linkSync(replacement, manifestPath);
+        } catch (error) {
+            // A concurrent writer owns an occupied destination. If publication
+            // failed for another reason and the name remains absent, restore the
+            // exact original bytes through the same no-clobber primitive.
+            try { fs.linkSync(displaced, manifestPath); }
+            catch {
+                if (fs.existsSync(manifestPath)) throw error;
+                preserveStaging = true;
+                throw new Error('v2 migration could not restore the original manifest without clobbering a concurrent update');
+            }
+            throw error;
+        }
     } finally {
-        try { if (ownsTemporary && fs.existsSync(temporary)) fs.unlinkSync(temporary); } catch { /* best effort cleanup */ }
+        if (staging && !preserveStaging) cleanupMigrationStaging(staging, [path.join(staging, 'replacement'), path.join(staging, 'displaced')]);
     }
 }

@@ -239,7 +239,7 @@ describe('planV2Migration', () => {
         }
     });
 
-    it('preserves a pre-existing replacement temporary file when exclusive creation collides', () => {
+    it('preserves a pre-existing legacy-named temporary file while staging privately', () => {
         const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-'));
         const manifestPath = path.join(project, 'sensors.json');
         const now = jest.spyOn(Date, 'now').mockReturnValue(12345);
@@ -248,7 +248,7 @@ describe('planV2Migration', () => {
             fs.writeFileSync(manifestPath, JSON.stringify(v2));
             fs.writeFileSync(temporary, 'not ours');
             const candidate = planV2Migration({ manifest: v2, source: resolvedSource() }).candidate;
-            expect(() => replaceV2ManifestWithV3(manifestPath, candidate, resolvedSource())).toThrow();
+            expect(() => replaceV2ManifestWithV3(manifestPath, candidate, resolvedSource())).not.toThrow();
             expect(fs.readFileSync(temporary, 'utf8')).toBe('not ours');
         } finally {
             now.mockRestore();
@@ -275,6 +275,32 @@ describe('planV2Migration', () => {
             expect(fs.readFileSync(manifestPath, 'utf8')).toBe(replacement);
         } finally {
             lstat.mockRestore();
+            fs.rmSync(project, { recursive: true, force: true });
+        }
+    });
+
+    it('never overwrites a manifest installed during final no-clobber publication', () => {
+        const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-'));
+        const manifestPath = path.join(project, 'sensors.json');
+        const original = JSON.stringify(v2, null, 2) + '\n';
+        const replacement = JSON.stringify({ schemaVersion: 2, pack: 'js-ts', sensors: {} }) + '\n';
+        const originalLink = fs.linkSync.bind(fs);
+        const link = jest.spyOn(fs, 'linkSync');
+        let published = false;
+        try {
+            fs.writeFileSync(manifestPath, original);
+            const candidate = planV2Migration({ manifest: v2, source: resolvedSource() }).candidate;
+            link.mockImplementation(((existingPath: fs.PathLike, newPath: fs.PathLike) => {
+                if (newPath === manifestPath && !published) {
+                    published = true;
+                    fs.writeFileSync(manifestPath, replacement, { flag: 'wx' });
+                }
+                return originalLink(existingPath, newPath);
+            }) as typeof fs.linkSync);
+            expect(() => replaceV2ManifestWithV3(manifestPath, candidate, resolvedSource())).toThrow();
+            expect(fs.readFileSync(manifestPath, 'utf8')).toBe(replacement);
+        } finally {
+            link.mockRestore();
             fs.rmSync(project, { recursive: true, force: true });
         }
     });

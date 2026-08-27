@@ -85,6 +85,41 @@ describe('sensor pack v2 contract', () => {
         }
     });
 
+    it('rejects a Semgrep policy that changes between inspection and safe open', () => {
+        const sensorPacks = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-semgrep-policy-'));
+        const packDir = path.join(sensorPacks, 'python');
+        const policyPath = path.join(sensorPacks, 'shared', 'semgrep-policy.json');
+        const originalOpen = fs.openSync.bind(fs);
+        const open = jest.spyOn(fs, 'openSync');
+        let replaced = false;
+        try {
+            fs.mkdirSync(path.dirname(policyPath), { recursive: true });
+            fs.mkdirSync(packDir);
+            fs.writeFileSync(policyPath, JSON.stringify({
+                tool: 'semgrep', toolRange: '>=1.0.0', runtime: 'python', runtimeRange: '>=3.9.0', probe: 'semgrep-validate',
+            }));
+            const pack = validPack();
+            pack.sensors.lint.variants[0] = {
+                id: 'semgrep-python', priority: 10, certifiedRange: '>=1.0.0', policyRef: 'shared/semgrep-policy.json',
+                command: { executable: 'semgrep', resolution: 'path', args: ['--config', '.semgrep.awm.yml', '--json', '.'] },
+                assets: ['.semgrep.awm.yml'], formatter: 'semgrep',
+            } as any;
+            open.mockImplementation(((file: fs.PathLike, flags: string | number, mode?: fs.Mode) => {
+                if (file === policyPath && !replaced) {
+                    replaced = true;
+                    fs.writeFileSync(policyPath, JSON.stringify({
+                        tool: 'semgrep', toolRange: '>=2.0.0', runtime: 'python', runtimeRange: '>=3.10.0', probe: 'semgrep-validate',
+                    }));
+                }
+                return originalOpen(file, flags, mode);
+            }) as typeof fs.openSync);
+            expect(() => parseSensorPack(pack, path.join(packDir, 'pack.json'))).toThrow(/changed|identity|policyRef/i);
+        } finally {
+            open.mockRestore();
+            fs.rmSync(sensorPacks, { recursive: true, force: true });
+        }
+    });
+
     it('fails closed when a policy reference is not the AWM-owned shared Semgrep policy', () => {
         const pack = validPack();
         pack.sensors.lint.variants[0] = {
