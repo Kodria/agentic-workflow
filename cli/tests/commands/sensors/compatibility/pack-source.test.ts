@@ -95,7 +95,11 @@ describe('resolvePackSource', () => {
             resolvePackSource('js-ts', { registries: [{ name: 'safe', remote: '', contentRoot: root }] });
             const flags = open.mock.calls[0]?.[1];
             expect(typeof flags).toBe('number');
-            expect((flags as number) & fs.constants.O_NOFOLLOW).toBe(fs.constants.O_NOFOLLOW);
+            if (typeof fs.constants.O_NOFOLLOW === 'number') {
+                expect((flags as number) & fs.constants.O_NOFOLLOW).toBe(fs.constants.O_NOFOLLOW);
+            } else {
+                expect(flags).toBe(fs.constants.O_RDONLY);
+            }
         } finally {
             open.mockRestore();
             fs.rmSync(root, { recursive: true, force: true });
