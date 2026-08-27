@@ -58,8 +58,7 @@ export function listPackSources(pack: unknown, options: { registries?: RegistryS
 }
 
 export function resolvePackSource(pack: unknown, options: { registries?: RegistrySource[] } = {}): PackSource {
-    const sources = listPackSources(pack, options);
-    const source = sources[0];
+    const source = listPackSources(pack, options)[0];
     if (source) return source;
     throw new Error(`sensor pack "${pack}" was not found in configured registries`);
 }
