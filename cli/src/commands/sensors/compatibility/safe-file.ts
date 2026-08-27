@@ -36,6 +36,7 @@ export function readInspectedBoundedFile(
         const buffer = Buffer.allocUnsafe(maxBytes + 1);
         const count = fs.readSync(descriptor, buffer, 0, buffer.length, null);
         if (!Number.isSafeInteger(count) || count < 0 || count > maxBytes) throw failure('limit');
+        if (BigInt(count) !== opened.size) throw failure('size');
         return buffer.subarray(0, count);
     } finally {
         fs.closeSync(descriptor);

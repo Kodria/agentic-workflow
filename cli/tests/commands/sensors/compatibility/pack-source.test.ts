@@ -213,6 +213,30 @@ describe('resolvePackSource', () => {
         }
     });
 
+    it('rejects same-inode truncation after safe open before reading', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-truncate-race-'));
+        const packFile = path.join(root, 'sensor-packs', 'js-ts', 'pack.json');
+        const originalRead = fs.readSync.bind(fs);
+        const read = jest.spyOn(fs, 'readSync');
+        let truncated = false;
+        try {
+            fs.mkdirSync(path.dirname(packFile), { recursive: true });
+            fs.writeFileSync(packFile, '{"from":"original"}');
+            read.mockImplementation(((descriptor: number, buffer: Uint8Array, offset: number, length: number, position: number | null) => {
+                if (!truncated) {
+                    truncated = true;
+                    fs.truncateSync(packFile, 0);
+                }
+                return originalRead(descriptor, buffer, offset, length, position);
+            }) as typeof fs.readSync);
+            expect(() => resolveWithoutNoFollow('js-ts', { registries: [{ name: 'safe', remote: '', contentRoot: root }] }))
+                .toThrow(/changed|size|identity/i);
+        } finally {
+            read.mockRestore();
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
     it('bounds diagnostics when a long content root cannot be inspected', () => {
         const contentRoot = path.join(os.tmpdir(), `awm-${'x'.repeat(200_000)}`);
         let message = '';
