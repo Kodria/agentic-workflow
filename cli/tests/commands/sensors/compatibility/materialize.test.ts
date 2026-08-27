@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { materializeResolvedSensors } from '../../../../src/commands/sensors/compatibility/materialize';
+import { materializePortableSensors, materializeResolvedSensors } from '../../../../src/commands/sensors/compatibility/materialize';
 
 const evidence = { state: 'certified' as const, reason: 'range-and-probe', variantId: 'eslint-10', toolVersion: '10.0.0', runtimeVersion: '22.0.0', certifiedRange: '>=10 <11', evidence: [] };
 
@@ -27,6 +27,30 @@ describe('materializeResolvedSensors', () => {
         expect(fs.existsSync(path.join(projectRoot, 'tsconfig.awm.json'))).toBe(false);
         expect(JSON.parse(fs.readFileSync(path.join(projectRoot, '.awm', 'sensors.json'), 'utf8'))).toMatchObject({ schemaVersion: 2, sensors: { lint: { variantId: 'eslint-10' } } });
         expect(fs.readdirSync(path.join(projectRoot, '.awm'))).not.toContain('sensors.json.tmp');
+    });
+
+    it('writes a validated portable v3 manifest using the exact logical registry', () => {
+        const result = materializePortableSensors({ projectRoot, packRoot, pack: 'js-ts', registry: 'baseline', sensors: {
+            lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['eslint.config.awm.mjs'], initializedCompatibility: evidence },
+        } });
+        expect(result.manifest).toMatchObject({ schemaVersion: 3, mode: 'project-sensors', source: { registry: 'baseline' } });
+        const text = fs.readFileSync(path.join(projectRoot, '.awm', 'sensors.json'), 'utf8');
+        expect(text.endsWith('\n')).toBe(true);
+        expect(text).not.toContain(packRoot);
+        expect(JSON.parse(text)).toMatchObject({ source: { registry: 'baseline' } });
+    });
+
+    it('validates v3 input before writes and cleans copied assets when manifest replacement fails', () => {
+        fs.writeFileSync(path.join(projectRoot, '.awm'), 'not a directory');
+        expect(() => materializePortableSensors({ projectRoot, packRoot, pack: 'js-ts', registry: 'baseline', sensors: {
+            lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['eslint.config.awm.mjs'], initializedCompatibility: evidence },
+        } })).toThrow();
+        expect(fs.existsSync(path.join(projectRoot, 'eslint.config.awm.mjs'))).toBe(false);
+        expect(fs.readFileSync(path.join(projectRoot, '.awm'), 'utf8')).toBe('not a directory');
+        expect(() => materializePortableSensors({ projectRoot, packRoot, pack: 'js-ts', registry: 'Baseline', sensors: {
+            lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['eslint.config.awm.mjs'], initializedCompatibility: evidence },
+        } })).toThrow('registry');
+        expect(fs.existsSync(path.join(projectRoot, 'eslint.config.awm.mjs'))).toBe(false);
     });
 
     it('preserves a destination that already exists', () => {

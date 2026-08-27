@@ -266,5 +266,14 @@ export function parseSensorManifest(input: unknown, source: unknown): ParsedSens
 export function serializeManifestV2(input: unknown): string {
     const parsed = parseSensorManifest(input, 'manifest serialization');
     if (parsed.kind !== 'v2') throw new Error('Cannot serialize a legacy sensor manifest as v2');
-    return JSON.stringify(parsed.pack, null, 2);
+    return JSON.stringify(parsed.pack, null, 2) + '\n';
+}
+
+/** Serialize only a validated portable project-sensors declaration. */
+export function serializeManifestV3(input: unknown): string {
+    const parsed = parseSensorManifest(input, 'manifest serialization');
+    if (parsed.kind !== 'v3' || parsed.pack.mode !== 'project-sensors') {
+        throw new Error('Cannot serialize a non-project-sensors manifest as v3');
+    }
+    return JSON.stringify(parsed.pack, null, 2) + '\n';
 }
