@@ -35,6 +35,24 @@ function inspectContainedPack(root: string, pack: string): { candidate: string; 
     throw new Error('pack source component walk did not reach pack.json');
 }
 
+function readContainedPack(real: string): { content: string; stat: fs.Stats } {
+    if (typeof fs.constants.O_NOFOLLOW !== 'number') throw new Error('pack source no-follow open is unavailable');
+    let descriptor: number;
+    try {
+        descriptor = fs.openSync(real, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    } catch {
+        throw new Error(`cannot safely open pack source ${real}`);
+    }
+    try {
+        const stat = fs.fstatSync(descriptor);
+        if (!stat.isFile()) throw new Error(`pack source ${real} must be a contained regular file, never a symbolic link`);
+        if (stat.size > MAX_PACK_BYTES) throw new Error(`pack source ${real} exceeds the 1 MiB limit`);
+        return { content: fs.readFileSync(descriptor, 'utf8'), stat };
+    } finally {
+        fs.closeSync(descriptor);
+    }
+}
+
 /** Resolve only an exact, regular pack.json beneath the first configured registry.
  * Registry order is authority; an unsafe claimed source is a hard failure, not a fallback. */
 export function listPackSources(pack: unknown, options: { registries?: RegistrySource[] } = {}): PackSource[] {
@@ -52,7 +70,8 @@ export function listPackSources(pack: unknown, options: { registries?: RegistryS
         let root: string; let real: string;
         try { root = fs.realpathSync(registry.contentRoot); real = fs.realpathSync(candidate); } catch { throw new Error(`cannot canonicalize pack source ${candidate}`); }
         if (!contained(root, real)) throw new Error(`pack source ${candidate} escapes its registry root`);
-        sources.push({ path: real, content: fs.readFileSync(real, 'utf8'), registry });
+        const opened = readContainedPack(real);
+        sources.push({ path: real, content: opened.content, registry });
     }
     return sources;
 }

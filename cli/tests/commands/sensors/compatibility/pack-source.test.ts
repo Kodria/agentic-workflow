@@ -41,4 +41,21 @@ describe('resolvePackSource', () => {
                 .toThrow(/symbolic|symlink/i);
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
+
+    it('opens the resolved pack with no-follow semantics before reading it', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-nofollow-'));
+        const open = jest.spyOn(fs, 'openSync');
+        try {
+            const packFile = path.join(root, 'sensor-packs', 'js-ts', 'pack.json');
+            fs.mkdirSync(path.dirname(packFile), { recursive: true });
+            fs.writeFileSync(packFile, '{}');
+            resolvePackSource('js-ts', { registries: [{ name: 'safe', remote: '', contentRoot: root }] });
+            const flags = open.mock.calls[0]?.[1];
+            expect(typeof flags).toBe('number');
+            expect((flags as number) & fs.constants.O_NOFOLLOW).toBe(fs.constants.O_NOFOLLOW);
+        } finally {
+            open.mockRestore();
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
 });

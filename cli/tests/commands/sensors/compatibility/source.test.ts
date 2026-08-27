@@ -69,4 +69,10 @@ describe('resolveSensorSource', () => {
         expect(result).toMatchObject({ kind: 'source-ambiguous', candidates: ['first', 'second'] });
         expect(JSON.stringify(result)).not.toContain('secret');
     });
+
+    it('rejects a malformed v3 logical registry identity instead of classifying it as unavailable', () => {
+        expect(() => resolveSensorSource({
+            kind: 'v3', pack: { mode: 'project-sensors', pack: 'js-ts', source: { registry: '../escape' } },
+        } as never, { registries: [] })).toThrow(/registry.*stable|invalid.*registry/i);
+    });
 });
