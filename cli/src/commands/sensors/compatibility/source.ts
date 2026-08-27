@@ -12,6 +12,13 @@ export type SensorSourceResolution =
 type Dependencies = { registries: RegistrySource[] };
 type V3Manifest = { kind: 'v3'; pack: { mode: string; pack: string; source: { registry: string } } };
 const MAX_CANDIDATE_IDENTITIES = 32;
+const MAX_DIAGNOSTIC_IDENTITY_LENGTH = 128;
+
+function diagnosticRegistryName(name: string): string {
+    return name.length <= MAX_DIAGNOSTIC_IDENTITY_LENGTH
+        ? name
+        : `${name.slice(0, MAX_DIAGNOSTIC_IDENTITY_LENGTH - 3)}...`;
+}
 
 function unavailable(reason: 'registry-not-installed' | 'no-compatible-registry'): SensorSourceResolution {
     return { kind: 'source-unavailable', reason, remedy: 'install-registry-or-run-awm-update' };
@@ -64,5 +71,5 @@ export function resolveSensorSource(manifest: ParsedSensorManifest | V3Manifest,
     const candidates = listPackSources(manifest.pack.pack, { registries }).filter(source => compatible(source, manifest.pack));
     if (candidates.length === 0) return unavailable('no-compatible-registry');
     if (candidates.length === 1) return { kind: 'legacy-rebound', source: candidates[0] };
-    return { kind: 'source-ambiguous', candidates: candidates.map(candidate => candidate.registry.name).sort().slice(0, MAX_CANDIDATE_IDENTITIES), reason: 'multiple-compatible-registries', remedy: 'configure-one-logical-registry' };
+    return { kind: 'source-ambiguous', candidates: candidates.map(candidate => diagnosticRegistryName(candidate.registry.name)).sort().slice(0, MAX_CANDIDATE_IDENTITIES), reason: 'multiple-compatible-registries', remedy: 'configure-one-logical-registry' };
 }

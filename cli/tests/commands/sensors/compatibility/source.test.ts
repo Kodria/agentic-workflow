@@ -75,4 +75,21 @@ describe('resolveSensorSource', () => {
             kind: 'v3', pack: { mode: 'project-sensors', pack: 'js-ts', source: { registry: '../escape' } },
         } as never, { registries: [] })).toThrow(/registry.*stable|invalid.*registry/i);
     });
+
+    it('bounds ambiguity diagnostics for extremely long valid registry names', () => {
+        const first = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-source-long-first-')); roots.push(first);
+        const second = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-source-long-second-')); roots.push(second);
+        writePack(first); writePack(second);
+        const result = resolveSensorSource(manifest(path.join(os.tmpdir(), 'awm-source-long-missing')),
+            { registries: [
+                { name: `a${'x'.repeat(200_000)}`, remote: 'https://user:secret@example.invalid/first', contentRoot: first },
+                { name: `b${'x'.repeat(200_000)}`, remote: 'https://user:secret@example.invalid/second', contentRoot: second },
+            ] });
+        expect(result.kind).toBe('source-ambiguous');
+        if (result.kind === 'source-ambiguous') {
+            expect(result.candidates.every(candidate => candidate.length <= 128)).toBe(true);
+        }
+        expect(JSON.stringify(result).length).toBeLessThan(4096);
+        expect(JSON.stringify(result)).not.toContain('secret');
+    });
 });
