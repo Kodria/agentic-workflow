@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { runSensors } from '../../../src/commands/sensors/run';
+import { computeSensorStatus } from '../../../src/commands/sensors/status';
 import { reduceVerdict } from '../../../src/commands/sensors/verdict';
 
 function mkTmp(): string {
@@ -11,11 +12,20 @@ function mkTmp(): string {
 // Define stable mock before jest.mock hoisting
 const mockRunCommand = jest.fn();
 const mockRunStructuredCommand = jest.fn();
+const mockResolveSensorProject = jest.fn((startCwd: string) => {
+    const actual = jest.requireActual('../../../src/commands/sensors/project') as typeof import('../../../src/commands/sensors/project');
+    return actual.resolveSensorProject(startCwd);
+});
 
 jest.mock('../../../src/commands/sensors/exec', () => ({
     runCommand: (...args: any[]) => mockRunCommand(...args),
     runStructuredCommand: (...args: any[]) => mockRunStructuredCommand(...args),
 }));
+
+jest.mock('../../../src/commands/sensors/project', () => {
+    const actual = jest.requireActual('../../../src/commands/sensors/project');
+    return { ...actual, resolveSensorProject: (startCwd: string) => mockResolveSensorProject(startCwd) };
+});
 
 const { ok, exited, timedOut } = require('./exec-fixtures');
 
@@ -41,6 +51,7 @@ describe('runSensors', () => {
         fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify(MANIFEST));
         mockRunCommand.mockReset();
         mockRunStructuredCommand.mockReset();
+        mockResolveSensorProject.mockClear();
     });
     afterEach(() => { fs.rmSync(tmpDir, { recursive: true }); });
 
@@ -308,6 +319,25 @@ describe('runSensors v2 lifecycle contract', () => {
         expect(mockRunStructuredCommand).toHaveBeenCalledWith(expect.objectContaining({ executable: 'live-eslint' }), expect.any(Object));
     });
 
+    it('rebinds a missing v2 registryRoot through the unique configured source without mutation', async () => {
+        const manifestPath = path.join(project, '.awm', 'sensors.json');
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        delete manifest.registryRoot;
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+        const before = fs.readFileSync(manifestPath, 'utf8');
+        const inventoryPath = path.join(home, 'registries.json');
+        const inventoryBefore = fs.readFileSync(inventoryPath, 'utf8');
+
+        const { runSensors } = require('../../../src/commands/sensors/run');
+        const result = await runSensors({ cwd: project, fast: true });
+
+        expect(result).toMatchObject({ overall: 'pass', mode: 'project-sensors', reason: 'legacy-rebound' });
+        expect(result.source).toMatchObject({ kind: 'legacy-rebound', registry: 'baseline' });
+        expect(mockRunStructuredCommand).toHaveBeenCalledWith(expect.objectContaining({ executable: 'live-eslint' }), expect.any(Object));
+        expect(fs.readFileSync(manifestPath, 'utf8')).toBe(before);
+        expect(fs.readFileSync(inventoryPath, 'utf8')).toBe(inventoryBefore);
+    });
+
     it('scopes applicability detection and execution to packageRoot for a monorepo manifest', async () => {
         // Move the fixture project into a subdirectory ("cli") and point the
         // manifest at it via packageRoot — mirrors a monorepo where the
@@ -437,8 +467,22 @@ describe('runSensors — not_certified + auto-discovery', () => {
         expect(out.sensors).toEqual([]);
     });
 
-    it('discovers .awm/sensors.json in a parent directory (walk-up)', async () => {
+    it('uses the same stable schema-unsupported reason as status', async () => {
         tmpDir = mkTmp();
+        fs.mkdirSync(path.join(tmpDir, '.git'));
+        fs.mkdirSync(path.join(tmpDir, '.awm'));
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({ schemaVersion: 99 }));
+
+        const status = await computeSensorStatus(tmpDir);
+        const run = await runSensors({ cwd: tmpDir });
+
+        expect(status).toMatchObject({ mode: 'invalid', reason: 'schema-unsupported' });
+        expect(run).toMatchObject({ mode: 'invalid', reason: 'schema-unsupported' });
+    });
+
+    it('resolves the same legacy project and execution cwd from root and nested CWD', async () => {
+        tmpDir = mkTmp();
+        fs.mkdirSync(path.join(tmpDir, '.git'));
         fs.mkdirSync(path.join(tmpDir, '.awm'));
         fs.writeFileSync(
             path.join(tmpDir, '.awm', 'sensors.json'),
@@ -446,9 +490,78 @@ describe('runSensors — not_certified + auto-discovery', () => {
         );
         const nested = path.join(tmpDir, 'a', 'b');
         fs.mkdirSync(nested, { recursive: true });
-        const out = await runSensors({ cwd: nested });
-        expect(out.overall).toBe('not_certified');
-        expect(out.sensors.length).toBe(1);
+        const rootRun = await runSensors({ cwd: tmpDir });
+        const nestedRun = await runSensors({ cwd: nested });
+
+        expect(nestedRun).toEqual(rootRun);
+        expect(rootRun.overall).toBe('not_certified');
+        expect(rootRun.sensors).toHaveLength(1);
+        expect(mockResolveSensorProject).toHaveBeenCalledWith(tmpDir);
+        expect(mockResolveSensorProject).toHaveBeenCalledWith(nested);
+        expect(mockRunCommand).toHaveBeenNthCalledWith(1, 'echo ok', expect.objectContaining({ cwd: tmpDir }));
+        expect(mockRunCommand).toHaveBeenNthCalledWith(2, 'echo ok', expect.objectContaining({ cwd: tmpDir }));
+    });
+
+    it.each([
+        ['native-gate', 'Release-blocking CI is authoritative.'],
+        ['opt-out', 'This repository intentionally has no local gate.'],
+    ] as const)('does not dispatch v3 %s declarations', async (mode, declarationReason) => {
+        tmpDir = mkTmp();
+        fs.mkdirSync(path.join(tmpDir, '.git'));
+        fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({ schemaVersion: 3, mode, reason: declarationReason }));
+
+        const out = await runSensors({ cwd: tmpDir, all: true });
+
+        expect(out).toMatchObject({
+            overall: 'not_certified', mode, reason: `${mode}-declared`,
+            declarationReason,
+            projectRoot: tmpDir, manifestPath: path.join(tmpDir, '.awm', 'sensors.json'),
+        });
+        expect(out.sensors).toEqual([]);
+        expect(mockRunCommand).not.toHaveBeenCalled();
+        expect(mockRunStructuredCommand).not.toHaveBeenCalled();
+    });
+
+    it('reports bounded candidates and a remedy when v2 source resolution is ambiguous', async () => {
+        const previousHome = process.env.AWM_HOME;
+        const home = mkTmp();
+        try {
+            process.env.AWM_HOME = home;
+            const pack = {
+                schemaVersion: 2, name: 'js-ts', description: 'fixture', detects: ['package.json'],
+                coverage: { schemaVersion: 1, classes: { lint: { description: 'lint', detectors: [{ sensor: 'lint' }], remedy: { summary: 'fix', command: 'awm sensors init' } } } },
+                sensors: { lint: { applicability: { allFiles: ['package.json'] }, variants: [{
+                    id: 'eslint-10', priority: 1, certifiedRange: '>=10 <11',
+                    requirements: { tool: 'eslint', toolRange: '>=10 <11', runtime: 'node', runtimeRange: '>=0' },
+                    assets: [], formatter: 'generic', probe: { kind: 'package-script-present' },
+                    command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
+                }] } },
+            };
+            const registries = ['alpha', 'beta'];
+            fs.writeFileSync(path.join(home, 'registries.json'), JSON.stringify(registries.map(name => ({ name, remote: `https://example.test/${name}.git` }))));
+            for (const name of registries) {
+                const packDir = path.join(home, 'registries', name, 'sensor-packs', 'js-ts');
+                fs.mkdirSync(packDir, { recursive: true });
+                fs.writeFileSync(path.join(packDir, 'pack.json'), JSON.stringify(pack));
+            }
+            tmpDir = mkTmp();
+            fs.mkdirSync(path.join(tmpDir, '.git'));
+            fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({ schemaVersion: 2, pack: 'js-ts', sensors: {} }));
+
+            const out = await runSensors({ cwd: tmpDir });
+            expect(out).toMatchObject({
+                overall: 'not_certified', mode: 'source-ambiguous', reason: 'multiple-compatible-registries',
+                remedy: 'configure-one-logical-registry',
+                source: { kind: 'source-ambiguous', candidates: ['alpha', 'beta'] },
+            });
+            expect((out.source as { candidates: string[] }).candidates).toHaveLength(2);
+        } finally {
+            if (previousHome === undefined) delete process.env.AWM_HOME;
+            else process.env.AWM_HOME = previousHome;
+            fs.rmSync(home, { recursive: true, force: true });
+        }
     });
 });
 

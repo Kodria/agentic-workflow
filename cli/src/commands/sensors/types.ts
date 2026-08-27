@@ -152,11 +152,23 @@ export type RunOutput = {
      * full one just because it happened to come back green.
      */
     changedScope?: { files: number; error?: string };
-};
+} & Partial<SensorAuthority>;
 
 export type SensorCheck = {
     ok: boolean;
     detail: string;
+};
+
+export type SensorAuthority = {
+    mode: 'project-sensors' | 'legacy-v1' | 'native-gate' | 'opt-out' | 'missing' | 'invalid' | 'source-unavailable' | 'source-ambiguous';
+    reason: string;
+    projectRoot: string;
+    manifestPath: string;
+    remedy?: string;
+    packageRoot?: string;
+    source?: { kind: 'logical' | 'legacy-bound' | 'legacy-rebound' | 'source-unavailable' | 'source-ambiguous'; registry?: string; candidates?: string[] };
+    candidates?: string[];
+    declarationReason?: string;
 };
 
 export type SensorStatusResult = {
@@ -168,4 +180,4 @@ export type SensorStatusResult = {
     overall: 'READY' | 'DEGRADED' | 'NOT_CONFIGURED';
     pack: string | null;
     checks: Record<string, SensorCheck>;
-};
+} & Partial<SensorAuthority>;

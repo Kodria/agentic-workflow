@@ -13,12 +13,6 @@ const bin = path.join(cliDir, 'dist/src/index.js');
 const fixtureRoot = path.join(cliDir, 'tests/fixtures/sensor-compatibility');
 const projectFixture = path.join(fixtureRoot, 'project');
 const registryFixture = path.join(fixtureRoot, 'registry');
-const noFollowUnavailableOnNativeWindows = process.platform === 'win32'
-    && typeof fs.constants.O_NOFOLLOW !== 'number';
-// Other native platforms exercise coverage through testWithNoFollow; this
-// branch preserves the deliberate Windows fail-closed behavior instead.
-const testWithNoFollow = noFollowUnavailableOnNativeWindows ? test.skip : test;
-const testWithoutNoFollowOnNativeWindows = noFollowUnavailableOnNativeWindows ? test : test.skip;
 
 type Fixture = { root: string; project: string; awmHome: string; registryRoot: string };
 
@@ -97,7 +91,7 @@ test.each(['linux', 'darwin', 'win32'] as const)('keeps injected resolver semant
     }
 });
 
-testWithNoFollow('compiled binary dispatches coverage and emits parseable JSON on the native CI platform', () => {
+test('compiled binary dispatches coverage and emits parseable JSON on the native CI platform', () => {
     const fixture = createFixture();
     try {
         const report = json(runCli(fixture, 'coverage', '--json'));
@@ -107,7 +101,7 @@ testWithNoFollow('compiled binary dispatches coverage and emits parseable JSON o
     }
 });
 
-testWithNoFollow('compiled sensors run returns nonzero while preserving parseable not_certified JSON', () => {
+test('compiled sensors run returns nonzero while preserving parseable not_certified JSON', () => {
     const fixture = createFixture();
     try {
         fs.rmSync(path.join(fixture.project, '.awm', 'sensors.json'));
@@ -121,7 +115,7 @@ testWithNoFollow('compiled sensors run returns nonzero while preserving parseabl
     }
 });
 
-testWithNoFollow('compiled status reports static READY without writing or executing the project sensor (R6, R6.2)', () => {
+test('compiled status reports static READY without writing or executing the project sensor (R6, R6.2)', () => {
     const fixture = createFixture();
     try {
         const localBin = path.join(fixture.project, 'node_modules', '.bin', 'eslint');
@@ -146,7 +140,7 @@ testWithNoFollow('compiled status reports static READY without writing or execut
     }
 });
 
-testWithNoFollow('legacy coverage stays unverified, init migrates explicitly, and version drift is visible (R7.2, R7.8)', () => {
+test('legacy coverage stays unverified, init migrates explicitly, and version drift is visible (R7.2, R7.8)', () => {
     const fixture = createFixture();
     try {
         const before = [hashTree(fixture.project), hashTree(fixture.awmHome)];
@@ -172,17 +166,6 @@ testWithNoFollow('legacy coverage stays unverified, init migrates explicitly, an
         expect(drift).toMatchObject({ overall: 'inconclusive', static: { classes: [expect.objectContaining({
             id: 'lint-errors', status: 'unverifiable', detectors: expect.arrayContaining([expect.objectContaining({ compatibility: expect.objectContaining({ state: 'compatible-unverified' }) })]),
         })] } });
-    } finally {
-        fs.rmSync(fixture.root, { recursive: true, force: true });
-    }
-});
-
-testWithoutNoFollowOnNativeWindows('coverage fails closed when native Windows cannot prevent symlink dereference', () => {
-    const fixture = createFixture();
-    try {
-        const result = runCli(fixture, 'coverage', '--json');
-        expect(result.status).toBe(1);
-        expect(`${result.stdout ?? ''}${result.stderr ?? ''}`).toContain('platform cannot guarantee no symlink dereference');
     } finally {
         fs.rmSync(fixture.root, { recursive: true, force: true });
     }

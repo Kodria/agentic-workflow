@@ -8,9 +8,6 @@ const cliDir = path.resolve(__dirname, '../..');
 const bin = path.join(cliDir, 'dist/src/index.js');
 const fixture = path.join(cliDir, 'tests/fixtures/sensor-coverage/js-ts-gap');
 const registryFixture = path.join(cliDir, 'tests/fixtures/sensor-coverage/registry');
-const noFollowUnavailableOnNativeWindows = process.platform === 'win32'
-    && typeof fs.constants.O_NOFOLLOW !== 'number';
-const testWithNoFollow = noFollowUnavailableOnNativeWindows ? test.skip : test;
 
 const hashTree = (root: string): string => {
     const hash = crypto.createHash('sha256');
@@ -69,31 +66,26 @@ test('compiled CLI reports static and read-only empirical coverage without leaki
         const result = spawnSync(process.execPath, [bin, 'sensors', 'coverage', '--json'], {
             cwd: project, encoding: 'utf8', env: { ...process.env, AWM_HOME: awmHome, AWM_NO_UPDATE_CHECK: '1' },
         });
-        if (noFollowUnavailableOnNativeWindows) {
-            expect(result.status).toBe(1);
-            expect(`${result.stdout ?? ''}${result.stderr ?? ''}`).toContain('platform cannot guarantee no symlink dereference');
-        } else {
-            expect(result.status).toBe(0);
-            const report = JSON.parse(result.stdout ?? '');
-            expect(report.static.classes).toEqual(expect.arrayContaining([
-                expect.objectContaining({ id: 'formatting', status: 'unverifiable' }),
-                expect.objectContaining({ id: 'project-style-conventions', status: 'unverifiable' }),
-            ]));
-            expect(report).toMatchObject({ schemaVersion: 2, empirical: {
-                status: 'partial', classes: [expect.objectContaining({ defectClass: 'lint-errors', occurrences: 2, recurrent: true })],
-                unclassified: { occurrences: 1 },
-            } });
-            expect(result.stdout).not.toContain('fixture-secret-description');
-            expect(result.stdout).not.toContain('private-lint-signature');
-            expect(result.stdout).not.toContain('windows secret');
-        }
+        expect(result.status).toBe(0);
+        const report = JSON.parse(result.stdout ?? '');
+        expect(report.static.classes).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'formatting', status: 'unverifiable' }),
+            expect.objectContaining({ id: 'project-style-conventions', status: 'unverifiable' }),
+        ]));
+        expect(report).toMatchObject({ schemaVersion: 2, empirical: {
+            status: 'partial', classes: [expect.objectContaining({ defectClass: 'lint-errors', occurrences: 2, recurrent: true })],
+            unclassified: { occurrences: 1 },
+        } });
+        expect(result.stdout).not.toContain('fixture-secret-description');
+        expect(result.stdout).not.toContain('private-lint-signature');
+        expect(result.stdout).not.toContain('windows secret');
         expect([hashTree(project), hashTree(awmHome)]).toEqual(before);
     } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
     }
 });
 
-testWithNoFollow('compiled coverage keeps static verdict stable while --min changes only recurrence emphasis', () => {
+test('compiled coverage keeps static verdict stable while --min changes only recurrence emphasis', () => {
     const { tmp, project, awmHome } = runWithFixture();
     try {
         const before = [hashTree(project), hashTree(awmHome)];
@@ -112,7 +104,7 @@ testWithNoFollow('compiled coverage keeps static verdict stable while --min chan
     }
 });
 
-testWithNoFollow('informative states exit zero; malformed contract exits non-zero (R2.7, R2.9)', () => {
+test('informative states exit zero; malformed contract exits non-zero (R2.7, R2.9)', () => {
     const run = (mutatePack: (pack: Record<string, unknown>) => void) => {
         const { tmp, project, awmHome } = runWithFixture(mutatePack);
         try {

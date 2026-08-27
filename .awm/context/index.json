@@ -874,6 +874,20 @@
       "path": "docs/awm/context/claude/sensors.md",
       "anchor": "awm-context:CTX-CLAUDE-015",
       "when": "task changes sensor packs, project-specific sensor rules, or harness retro policy"
+    },
+    {
+      "id": "CTX-CONSTITUTION-051",
+      "tier": "kernel",
+      "path": "CONSTITUTION.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-051",
+      "when": "always: portable worktree preparation, environment boundaries, and baseline diagnosis"
+    },
+    {
+      "id": "CTX-CONSTITUTION-052",
+      "tier": "kernel",
+      "path": "CONSTITUTION.md",
+      "anchor": "awm-context:CTX-CONSTITUTION-052",
+      "when": "always: safe portable reads of individual semi-trusted registry files"
     }
   ]
 }

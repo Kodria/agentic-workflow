@@ -24,8 +24,26 @@ export type SensorManifestV2 = {
     concurrency?: number;
 };
 
+export type SensorManifestV3ProjectSensors = {
+    schemaVersion: 3;
+    mode: 'project-sensors';
+    pack: string;
+    packSelection?: 'explicit';
+    source: { registry: string };
+    packageRoot?: string;
+    sensors: SensorManifestV2['sensors'];
+    concurrency?: number;
+};
+
+export type SensorManifestV3NativeGate = { schemaVersion: 3; mode: 'native-gate'; reason: string };
+export type SensorManifestV3OptOut = { schemaVersion: 3; mode: 'opt-out'; reason: string };
+export type SensorManifestV3 = SensorManifestV3ProjectSensors | SensorManifestV3NativeGate | SensorManifestV3OptOut;
+
 export type LegacySensorManifest = SensorManifest & { compatibility: CompatibilityEvidence };
-export type ParsedSensorManifest = { kind: 'legacy'; pack: LegacySensorManifest } | { kind: 'v2'; pack: SensorManifestV2 };
+export type ParsedSensorManifest =
+    | { kind: 'legacy'; pack: LegacySensorManifest }
+    | { kind: 'v2'; pack: SensorManifestV2 }
+    | { kind: 'v3'; pack: SensorManifestV3 };
 
 function isRecord(value: unknown): value is UnknownRecord {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -203,9 +221,46 @@ function parseV2Manifest(value: UnknownRecord, source: unknown): SensorManifestV
     return manifest;
 }
 
+function parseV3ProjectManifest(value: UnknownRecord, source: unknown): SensorManifestV3ProjectSensors {
+    fields(value, ['schemaVersion', 'mode', 'pack', 'packSelection', 'source', 'packageRoot', 'sensors', 'concurrency'], source, 'root');
+    const sourceValue = record(value.source, source, 'source');
+    fields(sourceValue, ['registry'], source, 'source');
+    const sensorsInput = record(value.sensors, source, 'sensors');
+    const sensors: SensorManifestV3ProjectSensors['sensors'] = {};
+    for (const name of Object.keys(sensorsInput)) sensors[id(name, source, 'sensor id')] = parseV2Sensor(sensorsInput[name], source, `sensors.${name}`);
+    const manifest: SensorManifestV3ProjectSensors = {
+        schemaVersion: 3,
+        mode: 'project-sensors',
+        pack: id(value.pack, source, 'pack'),
+        source: { registry: id(sourceValue.registry, source, 'source.registry') },
+        sensors,
+    };
+    if ('packSelection' in value) {
+        if (value.packSelection !== 'explicit') invalid(source, 'packSelection must be "explicit" when present');
+        manifest.packSelection = 'explicit';
+    }
+    if ('packageRoot' in value) manifest.packageRoot = asset(value.packageRoot, source, 'packageRoot');
+    if ('concurrency' in value) {
+        if (typeof value.concurrency !== 'number' || !Number.isSafeInteger(value.concurrency) || value.concurrency <= 0) invalid(source, 'concurrency must be a positive safe integer');
+        manifest.concurrency = value.concurrency;
+    }
+    return manifest;
+}
+
+function parseV3Manifest(value: UnknownRecord, source: unknown): SensorManifestV3 {
+    if (value.schemaVersion !== 3) invalid(source, `unsupported manifest schemaVersion ${String(value.schemaVersion)}; supported: legacy, 2, 3; upgrade or migrate the manifest`);
+    if (value.mode === 'project-sensors') return parseV3ProjectManifest(value, source);
+    if (value.mode !== 'native-gate' && value.mode !== 'opt-out') invalid(source, 'schemaVersion 3 mode must be "project-sensors", "native-gate", or "opt-out"');
+    fields(value, ['schemaVersion', 'mode', 'reason'], source, 'root');
+    return { schemaVersion: 3, mode: value.mode, reason: text(value.reason, source, 'reason') };
+}
+
 export function parseSensorManifest(input: unknown, source: unknown): ParsedSensorManifest {
     const value = record(input, source, 'root');
-    return 'schemaVersion' in value ? { kind: 'v2', pack: parseV2Manifest(value, source) } : { kind: 'legacy', pack: parseLegacyManifest(value, source) };
+    if (!('schemaVersion' in value)) return { kind: 'legacy', pack: parseLegacyManifest(value, source) };
+    if (value.schemaVersion === 2) return { kind: 'v2', pack: parseV2Manifest(value, source) };
+    if (value.schemaVersion === 3) return { kind: 'v3', pack: parseV3Manifest(value, source) };
+    invalid(source, `unsupported manifest schemaVersion ${String(value.schemaVersion)}; supported: legacy, 2, 3; upgrade or migrate the manifest`);
 }
 
 export function serializeManifestV2(input: unknown): string {

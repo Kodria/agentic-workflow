@@ -38,6 +38,30 @@ describe('sensor manifest contract', () => {
         expect(JSON.parse(serializeManifestV2(manifest))).toEqual(manifest);
     });
 
+    it('parses the three exact v3 modes without physical registry provenance', () => {
+        const project = {
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            pack: 'js-ts',
+            source: { registry: 'baseline' },
+            packageRoot: 'cli',
+            sensors: validV2Manifest().sensors,
+        };
+        expect(parseSensorManifest(project, 'sensors.json')).toMatchObject({
+            kind: 'v3',
+            pack: { mode: 'project-sensors', source: { registry: 'baseline' }, packageRoot: 'cli' },
+        });
+        expect(parseSensorManifest({ schemaVersion: 3, mode: 'native-gate', reason: 'managed by platform' }, 'sensors.json')).toMatchObject({
+            kind: 'v3', pack: { mode: 'native-gate', reason: 'managed by platform' },
+        });
+        expect(parseSensorManifest({ schemaVersion: 3, mode: 'opt-out', reason: 'not applicable' }, 'sensors.json')).toMatchObject({
+            kind: 'v3', pack: { mode: 'opt-out', reason: 'not applicable' },
+        });
+        expect(() => parseSensorManifest({ ...project, source: { registry: 'Baseline' } }, 'sensors.json')).toThrow('registry');
+        expect(() => parseSensorManifest({ schemaVersion: 3, mode: 'native-gate' }, 'sensors.json')).toThrow('reason');
+        expect(() => parseSensorManifest({ ...project, registryRoot: '/machine/root' }, 'sensors.json')).toThrow('unknown field');
+    });
+
     it('accepts and serializes a positive v2 project timeout (R3)', () => {
         const manifest = validV2Manifest();
         (manifest.sensors.lint as Record<string, unknown>).timeout = 45_000;

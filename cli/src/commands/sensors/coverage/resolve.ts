@@ -8,11 +8,14 @@ import {
 import { parseSensorPack } from '../compatibility/contract';
 import { parseSensorManifest, type ParsedSensorManifest } from '../compatibility/manifest';
 import { resolvePackSource } from '../compatibility/pack-source';
+import { readInspectedBoundedFile, type SafeFileFailure } from '../compatibility/safe-file';
+
+type CoverageManifest = Exclude<ParsedSensorManifest, { kind: 'v3' }>;
 
 export type CoverageInputs =
     | { kind: 'not_configured' }
-    | { kind: 'no_reference'; projectRoot: string; pack: string; registry: string; manifest: ParsedSensorManifest }
-    | { kind: 'ready'; projectRoot: string; pack: string; registry: string; manifest: ParsedSensorManifest; contract: CoverageContract };
+    | { kind: 'no_reference'; projectRoot: string; pack: string; registry: string; manifest: CoverageManifest }
+    | { kind: 'ready'; projectRoot: string; pack: string; registry: string; manifest: CoverageManifest; contract: CoverageContract };
 
 function readFailure(file: string, error: unknown): Error {
     return new Error(`Cannot read ${file}: ${error instanceof Error ? error.message : String(error)}`);
@@ -22,36 +25,27 @@ function readFailure(file: string, error: unknown): Error {
 export function readBoundedJson(file: unknown): unknown {
     if (typeof file !== 'string' || file.trim().length === 0) throw new Error('readBoundedJson: file must be a non-empty string');
 
-    let listed: fs.Stats;
+    let listed: fs.BigIntStats;
     try {
-        listed = fs.lstatSync(file);
+        listed = fs.lstatSync(file, { bigint: true });
     } catch (error) {
         throw readFailure(file, error);
     }
     if (!listed.isFile() || listed.isSymbolicLink()) throw new Error(`Cannot read ${file}: expected a regular file`);
-    if (listed.size > MAX_COVERAGE_FILE_BYTES) throw new Error(`Cannot read ${file}: exceeds 1 MiB limit`);
+    if (listed.size > BigInt(MAX_COVERAGE_FILE_BYTES)) throw new Error(`Cannot read ${file}: exceeds 1 MiB limit`);
 
-    const noFollow = fs.constants.O_NOFOLLOW;
-    if (typeof noFollow !== 'number') throw new Error(`Cannot read ${file}: platform cannot guarantee no symlink dereference`);
-
-    let descriptor: number | undefined;
+    const failure = (reason: SafeFileFailure): Error => {
+        if (reason === 'open') return new Error('cannot be safely opened');
+        if (reason === 'regular') return new Error('expected a regular file');
+        if (reason === 'identity') return new Error('file changed identity during safe open');
+        if (reason === 'size') return new Error('file changed size during safe open');
+        return new Error('exceeds 1 MiB limit');
+    };
     let content: string;
     try {
-        descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
-        const opened = fs.fstatSync(descriptor);
-        if (!opened.isFile() || opened.size > MAX_COVERAGE_FILE_BYTES) {
-            throw new Error('expected a regular file within the 1 MiB limit');
-        }
-        const buffer = Buffer.allocUnsafe(MAX_COVERAGE_FILE_BYTES + 1);
-        const count = fs.readSync(descriptor, buffer, 0, buffer.length, null);
-        if (!Number.isSafeInteger(count) || count < 0 || count > MAX_COVERAGE_FILE_BYTES) {
-            throw new Error('exceeds 1 MiB limit');
-        }
-        content = buffer.subarray(0, count).toString('utf8');
+        content = readInspectedBoundedFile(file, listed, MAX_COVERAGE_FILE_BYTES, failure).toString('utf8');
     } catch (error) {
         throw readFailure(file, error);
-    } finally {
-        if (descriptor !== undefined) fs.closeSync(descriptor);
     }
 
     try {
@@ -85,6 +79,7 @@ export function resolveCoverageInputs(cwd: unknown): CoverageInputs {
 
     const manifestPath = path.join(projectRoot, '.awm', 'sensors.json');
     const manifest = parseSensorManifest(readBoundedJson(manifestPath), manifestPath);
+    if (manifest.kind === 'v3') throw new Error('schemaVersion 3 sensor manifests require the project resolver');
     const source = manifest.kind === 'v2' && manifest.pack.registryRoot !== undefined
         ? resolvePackSource(manifest.pack.pack, { registries: [{ name: 'manifest-provenance', remote: 'local', contentRoot: manifest.pack.registryRoot }] })
         : resolvePackSource(manifest.pack.pack);
