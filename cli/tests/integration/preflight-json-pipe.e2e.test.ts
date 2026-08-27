@@ -59,6 +59,11 @@ test('preserves actionable no-manifest preflight JSON when verify-sensors is pip
         expect(result.status).toBe(1);
         expect(JSON.parse(result.stdout)).toMatchObject({
             status: 'not_configured',
+            mode: 'missing',
+            reason: 'manifest-absent',
+            projectRoot: project,
+            manifestPath: path.join(project, '.awm', 'sensors.json'),
+            remedy: expect.any(String),
             checks: expect.arrayContaining([expect.objectContaining({
                 id: 'sensors-execution', ok: false,
                 detail: 'sensor verdict was not_certified; no sensor established an empirical pass',

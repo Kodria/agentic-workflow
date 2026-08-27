@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { computeSensorStatus } from '../sensors/status';
 import { detectStack } from '../sensors/init';
-import { SensorManifest } from '../sensors/types';
+import { SensorManifest, SensorStatusResult } from '../sensors/types';
 import { readBaseline } from '../sensors/baseline';
 import { runSensors } from '../sensors/run';
 import { resolveOnPath } from '../../core/paths';
@@ -54,7 +54,12 @@ export type PreflightReport = {
      * up and it broke"; the other means "you never set it up". Collapsing them is how an
      * absent check reads as a passing one.
      */
-    status: 'ready' | 'degraded' | 'not_configured';
+    status: 'ready' | 'degraded' | 'not_configured' | 'native_gate' | 'ungated';
+    mode?: NonNullable<SensorStatusResult['mode']>;
+    reason?: string;
+    projectRoot?: string;
+    manifestPath?: string;
+    remedy?: string;
     checks: PreflightCheck[];
     /** Present only for the explicit authoritative, remote currentness gate. */
     currentness?: CurrentnessReport;
@@ -135,12 +140,12 @@ function checkContextKernel(cwd: string): PreflightCheck | null {
     };
 }
 
-function readManifest(cwd: string): SensorManifest | null {
-    try {
-        return JSON.parse(fs.readFileSync(path.join(cwd, MANIFEST), 'utf-8'));
-    } catch {
-        return null;
-    }
+function manifestView(status: SensorStatusResult): SensorManifest | null {
+    if (!status.pack) return null;
+    const sensors = Object.fromEntries(Object.entries(status.checks).map(([name, check]) => [name, {
+        enabled: check.detail !== 'disabled',
+    }]));
+    return { pack: status.pack, sensors } as SensorManifest;
 }
 
 /**
@@ -164,8 +169,8 @@ function countEnabledSensors(manifest: SensorManifest): { total: number; enabled
  * `awm sensors init`" look identical from the outside, and on a team the second one is
  * the common case. Requiring the manifest turns the decision into a reviewable diff.
  */
-function checkManifest(cwd: string, manifest: SensorManifest | null): PreflightCheck {
-    if (!fs.existsSync(path.join(cwd, MANIFEST))) {
+function checkManifest(status: SensorStatusResult): PreflightCheck {
+    if (status.mode === 'missing') {
         return {
             id: 'manifest',
             ok: false,
@@ -174,14 +179,23 @@ function checkManifest(cwd: string, manifest: SensorManifest | null): PreflightC
                 + '`"enabled": false` — an unconfigured repo and a deliberate opt-out must not look alike)',
         };
     }
-    if (!manifest) {
+    if (status.mode === 'invalid') {
         return {
             id: 'manifest',
             ok: false,
-            detail: '.awm/sensors.json is not valid JSON',
+            detail: status.reason === 'schema-unsupported'
+                ? '.awm/sensors.json uses an unsupported schema'
+                : '.awm/sensors.json is not valid JSON',
             remedy: 'fix or regenerate it with `awm sensors init`',
         };
     }
+    if (status.mode === 'native-gate') return { id: 'manifest', ok: true, detail: 'native CI quality authority declared', remedy: 'verify the native CI gate before accepting this run' };
+    if (status.mode === 'opt-out') return { id: 'manifest', ok: true, detail: 'local quality gate deliberately disabled', remedy: 'remove the opt-out declaration or provide a quality gate' };
+    if (status.mode === 'source-unavailable' || status.mode === 'source-ambiguous') {
+        return { id: 'manifest', ok: false, detail: `sensor source ${status.mode}: ${status.reason}`, remedy: status.remedy };
+    }
+    const manifest = manifestView(status);
+    if (!manifest) return { id: 'manifest', ok: false, detail: 'sensor authority is unavailable', remedy: 'repair or regenerate the sensor manifest' };
     const { total, enabled } = countEnabledSensors(manifest);
     // total === 0 is NOT an opt-out: a deliberate opt-out lists every known sensor NAME
     // explicitly with `enabled: false` (total > 0, enabled === 0). Zero entries means
@@ -205,8 +219,7 @@ function checkManifest(cwd: string, manifest: SensorManifest | null): PreflightC
 }
 
 /** Every enabled sensor's command must resolve. This is the check nothing was calling. */
-async function checkTools(cwd: string): Promise<PreflightCheck> {
-    const status = await computeSensorStatus(cwd);
+async function checkTools(cwd: string, status: SensorStatusResult): Promise<PreflightCheck> {
     if (status.overall === 'NOT_CONFIGURED') {
         return { id: 'tools', ok: false, detail: 'no manifest to check', remedy: 'run `awm sensors init`' };
     }
@@ -243,7 +256,8 @@ async function checkTools(cwd: string): Promise<PreflightCheck> {
  * same drift (`packDrift`) but never rewrites the manifest, so this is the blocking
  * surface, and `awm sensors init` is the only thing that adopts the real pack.
  */
-function checkPack(cwd: string, manifest: SensorManifest | null): PreflightCheck {
+function checkPack(cwd: string, status: SensorStatusResult): PreflightCheck {
+    const manifest = manifestView(status);
     if (!manifest) return { id: 'pack', ok: true, detail: 'skipped (no manifest)' };
     const detection = detectStack(cwd);
     if (manifest.pack === 'generic' && detection.pack !== 'generic') {
@@ -286,7 +300,8 @@ function checkPack(cwd: string, manifest: SensorManifest | null): PreflightCheck
  * "baseline present" for that same case, reassuring the operator that debt is being
  * suppressed when it silently is not.
  */
-function checkSensorsBaseline(cwd: string, manifest: SensorManifest | null): PreflightCheck {
+function checkSensorsBaseline(cwd: string, status: SensorStatusResult): PreflightCheck {
+    const manifest = manifestView(status);
     const enabled = manifest ? countEnabledSensors(manifest).enabled : 0;
     if (enabled === 0) {
         return { id: 'sensors-baseline', ok: true, detail: 'no enabled sensors — nothing to baseline' };
@@ -491,18 +506,22 @@ export async function preflight(cwd: string = process.cwd(), opts: PreflightOpti
         || (opts.requireCurrent !== undefined && typeof opts.requireCurrent !== 'boolean')) {
         throw new Error('preflight options must contain optional boolean verifySensors and requireCurrent');
     }
-    const manifest = readManifest(cwd);
-    const manifestExists = fs.existsSync(path.join(cwd, MANIFEST));
+    const sensorStatus = await computeSensorStatus(cwd);
+    const manifestExists = sensorStatus.mode !== 'missing';
 
     const contextKernel = checkContextKernel(cwd);
     const checks: PreflightCheck[] = [
         checkContext(cwd),
         ...(contextKernel ? [contextKernel] : []),
-        checkManifest(cwd, manifest),
+        checkManifest(sensorStatus),
         // Skipped when there is no manifest: reporting "tools broken" (or nudging toward
         // a baseline that has nothing to snapshot) on a repo that was never set up
         // buries the one thing the operator needs to read.
-        ...(manifestExists ? [await checkTools(cwd), checkPack(cwd, manifest), checkSensorsBaseline(cwd, manifest)] : []),
+        ...(manifestExists && !['native-gate', 'opt-out', 'source-unavailable', 'source-ambiguous'].includes(sensorStatus.mode ?? '')
+            ? [
+                ...(sensorStatus.mode !== 'invalid' ? [await checkTools(cwd, sensorStatus), checkPack(cwd, sensorStatus)] : []),
+                checkSensorsBaseline(cwd, sensorStatus),
+            ] : []),
         // The empirical mode is intentionally opt-in: ordinary preflight remains a
         // quick static inspection and must not dispatch project software.
         ...(opts.verifySensors === true ? [await checkSensorExecution(cwd)] : []),
@@ -516,6 +535,8 @@ export async function preflight(cwd: string = process.cwd(), opts: PreflightOpti
     const blockingFailure = (check: PreflightCheck): boolean => !check.ok && check.advisory !== true;
     const invalidContextKernel = contextKernel !== null && blockingFailure(contextKernel);
     const status = invalidContextKernel ? 'degraded'
+        : sensorStatus.mode === 'native-gate' ? 'native_gate'
+        : sensorStatus.mode === 'opt-out' ? 'ungated'
         : !manifestExists ? 'not_configured'
         : checks.some(blockingFailure) ? 'degraded'
         : 'ready';
@@ -526,9 +547,21 @@ export async function preflight(cwd: string = process.cwd(), opts: PreflightOpti
     }
     const strictFailure = checks.some(blockingFailure);
     const strictStatus = invalidContextKernel ? 'degraded'
+        : sensorStatus.mode === 'native-gate' ? 'native_gate'
+        : sensorStatus.mode === 'opt-out' ? 'ungated'
         : !manifestExists ? 'not_configured'
         : strictFailure ? 'degraded'
         : 'ready';
 
-    return currentness ? { status: strictStatus, checks, currentness } : { status, checks };
+    const authorityRemedy = sensorStatus.remedy
+        ?? (sensorStatus.mode === 'native-gate' ? 'verify the declared native CI quality gate before accepting this run'
+            : sensorStatus.mode === 'opt-out' ? 'remove the opt-out declaration or provide a quality gate' : undefined);
+    const authority = {
+        mode: sensorStatus.mode ?? 'invalid',
+        reason: sensorStatus.reason ?? 'sensor-authority-unavailable',
+        projectRoot: sensorStatus.projectRoot ?? path.resolve(cwd),
+        manifestPath: sensorStatus.manifestPath ?? path.join(path.resolve(cwd), MANIFEST),
+        ...(authorityRemedy ? { remedy: authorityRemedy } : {}),
+    };
+    return currentness ? { status: strictStatus, checks, currentness, ...authority } : { status, checks, ...authority };
 }

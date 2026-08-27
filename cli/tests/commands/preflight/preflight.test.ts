@@ -867,4 +867,41 @@ describe('preflight', () => {
         // not the old hardcoded 9 — the shorter id's row must carry visible padding.
         expect(lines[0]).toMatch(/host {12,}@@marker/);
     });
+
+    it.each([
+        ['native-gate', 'CI is the authority.', 'native_gate', 'native-gate-declared'],
+        ['opt-out', 'No local gate is required.', 'ungated', 'opt-out-declared'],
+    ] as const)('exposes stable authority metadata for %s', async (mode, declarationReason, status, reason) => {
+        const dir = make({ manifest: { schemaVersion: 3, mode, reason: declarationReason } });
+
+        const report = await preflight(dir);
+
+        expect(report).toMatchObject({
+            status,
+            mode,
+            reason,
+            projectRoot: dir,
+            manifestPath: path.join(dir, '.awm', 'sensors.json'),
+            remedy: expect.any(String),
+        });
+        expect(exitCodeFor(report)).toBe(1);
+        expect(report.status).not.toBe('ready');
+    });
+
+    it('derives manifest and tools checks from the same shared authority result', async () => {
+        const dir = make({ manifest: '{not valid json' });
+
+        const report = await preflight(dir);
+
+        expect(report).toMatchObject({
+            status: 'degraded',
+            mode: 'invalid',
+            reason: 'manifest-malformed',
+            projectRoot: dir,
+            manifestPath: path.join(dir, '.awm', 'sensors.json'),
+            remedy: expect.any(String),
+        });
+        expect(check(report, 'manifest').detail).not.toContain('no .awm/sensors.json');
+        expect(check(report, 'tools')).toBeUndefined();
+    });
 });
