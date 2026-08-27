@@ -2,8 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import { parseSensorManifest, serializeManifestV2, serializeManifestV3, type SensorManifestV2, type SensorManifestV3ProjectSensors } from './manifest';
 import { resolveSemgrepPolicy } from './contract';
+import { readInspectedBoundedFile, type SafeFileFailure } from './safe-file';
+import type { PackSource } from './pack-source';
 
 type V2Sensor = SensorManifestV2['sensors'][string];
+const MAX_ASSET_BYTES = 1024 * 1024;
 export type MaterializeInput = {
     projectRoot: string;
     packRoot: string;
@@ -25,7 +28,7 @@ export type MaterializeResult = {
     preserved: string[];
     orphaned: string[];
 };
-export type PortableMaterializeInput = Omit<MaterializeInput, 'registryRoot'> & { registry: string };
+export type PortableMaterializeInput = Omit<MaterializeInput, 'registryRoot' | 'packRoot'> & { source: PackSource };
 export type PortableMaterializeResult = Omit<MaterializeResult, 'manifest'> & { manifest: SensorManifestV3ProjectSensors };
 
 function stableId(value: unknown, label: string): string {
@@ -78,19 +81,45 @@ function atomicWrite(destination: string, content: string): void {
     }
 }
 
-function selectedRegistryAsset(packRoot: string, asset: string): string {
+function selectedRegistryAsset(packRoot: string, asset: string): { file: string; stat: fs.BigIntStats } {
     let current = packRoot;
     for (const [index, component] of asset.split('/').entries()) {
-        let stat: fs.Stats;
-        try { stat = fs.lstatSync(current); } catch { throw new Error(`selected asset is missing from pack: ${asset}`); }
+        let stat: fs.BigIntStats;
+        try { stat = fs.lstatSync(current, { bigint: true }); } catch { throw new Error(`selected asset is missing from pack: ${asset}`); }
         if (stat.isSymbolicLink()) throw new Error(`selected asset contains a symlink: ${asset}`);
         if (index < asset.split('/').length - 1 && !stat.isDirectory()) throw new Error(`selected asset is missing from pack: ${asset}`);
         current = path.join(current, component);
     }
-    let stat: fs.Stats;
-    try { stat = fs.lstatSync(current); } catch { throw new Error(`selected asset is missing from pack: ${asset}`); }
+    let stat: fs.BigIntStats;
+    try { stat = fs.lstatSync(current, { bigint: true }); } catch { throw new Error(`selected asset is missing from pack: ${asset}`); }
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`selected asset must be a regular file: ${asset}`);
-    return current;
+    if (stat.size > BigInt(MAX_ASSET_BYTES)) throw new Error(`selected asset exceeds the 1 MiB limit: ${asset}`);
+    return { file: current, stat };
+}
+
+function readSelectedRegistryAsset(selected: { file: string; stat: fs.BigIntStats }, asset: string): string {
+    const failure = (reason: SafeFileFailure): Error => {
+        if (reason === 'open') return new Error(`selected asset cannot be safely opened: ${asset}`);
+        if (reason === 'regular') return new Error(`selected asset must be a regular file: ${asset}`);
+        if (reason === 'identity') return new Error(`selected asset changed identity during safe open: ${asset}`);
+        if (reason === 'size') return new Error(`selected asset changed size during safe open: ${asset}`);
+        return new Error(`selected asset exceeds the 1 MiB limit: ${asset}`);
+    };
+    return readInspectedBoundedFile(selected.file, selected.stat, MAX_ASSET_BYTES, failure).toString('utf8');
+}
+
+function portableSource(source: unknown, pack: string): { registry: string; packRoot: string } {
+    if (!source || typeof source !== 'object') throw new Error('portable source is required');
+    const candidate = source as Partial<PackSource>;
+    if (!candidate.registry || typeof candidate.registry !== 'object' || typeof candidate.registry.name !== 'string' || typeof candidate.registry.contentRoot !== 'string' || typeof candidate.path !== 'string') {
+        throw new Error('portable source must be a validated pack source');
+    }
+    const registry = stableId(candidate.registry.name, 'source.registry.name');
+    const contentRoot = root(candidate.registry.contentRoot, 'source.registry.contentRoot');
+    const packRoot = registryPackRoot(path.join(contentRoot, 'sensor-packs', pack));
+    const expectedPack = path.join(packRoot, 'pack.json');
+    if (path.resolve(candidate.path) !== expectedPack) throw new Error('portable source selected pack path does not match its registry');
+    return { registry, packRoot };
 }
 
 function priorAssets(projectRoot: string): string[] {
@@ -108,13 +137,14 @@ function priorAssets(projectRoot: string): string[] {
 export function materializePortableSensors(input: PortableMaterializeInput): PortableMaterializeResult {
     if (!input || typeof input !== 'object') throw new Error('materialization input is required');
     const projectRoot = root(input.projectRoot, 'projectRoot');
-    const packRoot = registryPackRoot(input.packRoot);
     const pack = stableId(input.pack, 'pack');
+    const source = portableSource(input.source, pack);
+    const packRoot = source.packRoot;
     if (!input.sensors || typeof input.sensors !== 'object' || Array.isArray(input.sensors)) throw new Error('sensors must be an object');
     const candidate = {
         schemaVersion: 3 as const, mode: 'project-sensors' as const, pack,
         ...(input.packSelection === 'explicit' ? { packSelection: 'explicit' as const } : {}),
-        source: { registry: input.registry },
+        source: { registry: source.registry },
         ...(input.packageRoot ? { packageRoot: containedAsset(input.packageRoot, 'packageRoot') } : {}),
         sensors: input.sensors,
     };
@@ -131,11 +161,11 @@ export function materializePortableSensors(input: PortableMaterializeInput): Por
     try {
         if (input.configure !== false) {
             for (const asset of selected) {
-                const source = selectedRegistryAsset(packRoot, asset);
+                const selectedSource = selectedRegistryAsset(packRoot, asset);
                 const destination = path.join(configRoot, ...asset.split('/'));
                 if (fs.existsSync(destination)) { preserved.push(asset); continue; }
                 fs.mkdirSync(path.dirname(destination), { recursive: true });
-                atomicWrite(destination, fs.readFileSync(source, 'utf8'));
+                atomicWrite(destination, readSelectedRegistryAsset(selectedSource, asset));
                 created.push(destination); configured.push(asset);
             }
         }
@@ -184,11 +214,11 @@ export function materializeResolvedSensors(input: MaterializeInput): Materialize
     try {
         if (input.configure !== false) {
             for (const asset of selected) {
-                const source = selectedRegistryAsset(packRoot, asset);
+                const selectedSource = selectedRegistryAsset(packRoot, asset);
                 const destination = path.join(configRoot, ...asset.split('/'));
                 if (fs.existsSync(destination)) { preserved.push(asset); continue; }
                 fs.mkdirSync(path.dirname(destination), { recursive: true });
-                atomicWrite(destination, fs.readFileSync(source, 'utf8'));
+                atomicWrite(destination, readSelectedRegistryAsset(selectedSource, asset));
                 created.push(destination);
                 configured.push(asset);
             }
