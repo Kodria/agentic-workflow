@@ -113,4 +113,18 @@ describe('resolvePackSource', () => {
             fs.rmSync(root, { recursive: true, force: true });
         }
     });
+
+    it('bounds diagnostics when a long content root cannot be inspected', () => {
+        const contentRoot = path.join(os.tmpdir(), `awm-${'x'.repeat(200_000)}`);
+        let message = '';
+        try {
+            resolvePackSource('js-ts', { registries: [{ name: 'safe', remote: 'https://user:secret@example.invalid/registry', contentRoot }] });
+        } catch (error) {
+            message = error instanceof Error ? error.message : String(error);
+        }
+        expect(message.length).toBeLessThan(4096);
+        expect(message).not.toContain(contentRoot);
+        expect(message).not.toContain('secret');
+        expect(message).toMatch(/inspect|source|registry/i);
+    });
 });
