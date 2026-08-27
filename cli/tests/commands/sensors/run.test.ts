@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { runSensors } from '../../../src/commands/sensors/run';
+import { computeSensorStatus } from '../../../src/commands/sensors/status';
 import { reduceVerdict } from '../../../src/commands/sensors/verdict';
 
 function mkTmp(): string {
@@ -461,6 +462,19 @@ describe('runSensors — not_certified + auto-discovery', () => {
         const out = await runSensors({ cwd: tmpDir });
         expect(out.overall).toBe('not_certified');
         expect(out.sensors).toEqual([]);
+    });
+
+    it('uses the same stable schema-unsupported reason as status', async () => {
+        tmpDir = mkTmp();
+        fs.mkdirSync(path.join(tmpDir, '.git'));
+        fs.mkdirSync(path.join(tmpDir, '.awm'));
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({ schemaVersion: 99 }));
+
+        const status = await computeSensorStatus(tmpDir);
+        const run = await runSensors({ cwd: tmpDir });
+
+        expect(status).toMatchObject({ mode: 'invalid', reason: 'schema-unsupported' });
+        expect(run).toMatchObject({ mode: 'invalid', reason: 'schema-unsupported' });
     });
 
     it('resolves the same legacy project and execution cwd from root and nested CWD', async () => {

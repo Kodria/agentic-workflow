@@ -154,7 +154,8 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         return { sensors: [], overall: 'not_certified', mode: 'missing', reason: 'manifest-absent', projectRoot: project.projectRoot, manifestPath: project.manifestPath, remedy: 'run-awm-sensors-bootstrap' };
     }
     if (project.state === 'invalid') {
-        return { sensors: [], overall: 'not_certified', mode: 'invalid', reason: 'manifest-malformed', projectRoot: project.projectRoot, manifestPath: project.manifestPath, remedy: 'repair-sensor-manifest' };
+        const reason = project.reason.includes('unsupported manifest schemaVersion') ? 'schema-unsupported' : 'manifest-malformed';
+        return { sensors: [], overall: 'not_certified', mode: 'invalid', reason, projectRoot: project.projectRoot, manifestPath: project.manifestPath, remedy: 'repair-sensor-manifest' };
     }
 
     const manifestDir = project.projectRoot;
