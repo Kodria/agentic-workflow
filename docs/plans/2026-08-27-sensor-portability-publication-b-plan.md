@@ -18,7 +18,7 @@
 {
   "schema": "compact-slices/v1",
   "planId": "issue-129-sensor-portability-publication-b",
-  "requirements": ["PORT-01", "BOOT-01", "BOOT-02", "BOOT-03", "BOOT-04", "BOOT-05", "BOOT-06", "BOOT-07", "BOOT-08"],
+  "requirements": ["GATE-01", "PORT-01", "BOOT-01", "BOOT-02", "BOOT-03", "BOOT-04", "BOOT-05", "BOOT-06", "BOOT-07", "BOOT-08"],
   "sources": [
     {
       "id": "SRC-DESIGN-B",
@@ -52,6 +52,12 @@
     }
   ],
   "commands": [
+    {
+      "id": "CMD-STRUCTURED-EXEC",
+      "program": "npm",
+      "args": ["--prefix", "cli", "test", "--", "tests/commands/sensors/exec.test.ts", "tests/commands/sensors/run.test.ts"],
+      "covers": ["GATE-01"]
+    },
     {
       "id": "CMD-MIGRATION-CORE",
       "program": "npm",
@@ -103,10 +109,23 @@
   ],
   "slices": [
     {
+      "id": "S0",
+      "title": "Preserve structured sensor output for baseline certification",
+      "requirements": ["GATE-01"],
+      "dependsOn": [],
+      "sectionAnchor": "slice-s0",
+      "sources": ["SRC-DESIGN-B"],
+      "redCommands": ["CMD-STRUCTURED-EXEC"],
+      "greenCommands": ["CMD-STRUCTURED-EXEC", "CMD-SENSORS-B"],
+      "reviewEvidence": ["specification", "code-quality"],
+      "risk": "full-context",
+      "fallback": ["the safe no-shell structured runner cannot preserve a non-zero tool report without weakening process-tree safety"]
+    },
+    {
       "id": "S1",
       "title": "Serialize v3 and prove semantic migration",
       "requirements": ["BOOT-07", "BOOT-08"],
-      "dependsOn": [],
+      "dependsOn": ["S0"],
       "sectionAnchor": "slice-s1",
       "sources": ["SRC-DESIGN-B", "SRC-PUB-A-GATE", "SRC-MATERIALIZE"],
       "redCommands": ["CMD-MIGRATION-CORE"],
@@ -142,7 +161,7 @@
       "fallback": ["atomic project write or exact second-run no-op cannot be proven on every supported platform"]
     }
   ],
-  "closureCommands": ["CMD-MIGRATION-CORE", "CMD-BOOTSTRAP-CORE", "CMD-BOOTSTRAP-CLI", "CMD-TYPECHECK-B", "CMD-BUILD-B", "CMD-FULL-JEST-B", "CMD-SENSORS-B", "CMD-DIFF-B"]
+  "closureCommands": ["CMD-STRUCTURED-EXEC", "CMD-MIGRATION-CORE", "CMD-BOOTSTRAP-CORE", "CMD-BOOTSTRAP-CLI", "CMD-TYPECHECK-B", "CMD-BUILD-B", "CMD-FULL-JEST-B", "CMD-SENSORS-B", "CMD-DIFF-B"]
 }
 <!-- AWM:COMPACT-SLICES:END v1 -->
 
@@ -197,6 +216,35 @@ Every slice uses RED, minimal implementation, GREEN, specification review, code-
 review, remediation, and one focused commit. No executor may enter this plan by
 reinterpreting simulated Publication A tests as the required packaged multi-environment
 evidence.
+
+<a id="slice-s0"></a>
+### Slice S0: Preserve structured sensor output for baseline certification
+
+#### Amendment rationale
+
+During S1 entry verification in the Codex worktree, `depcruise` produced its normal
+non-zero circular-dependency report when invoked directly, but the no-shell structured
+runner returned exit 1 with both streams empty. That made the generic formatter return
+no findings, prevented baseline suppression, and degraded the mandatory sensor gate to
+`not_certified`. Claude Code and macOS have a matching accepted baseline and pass. This
+is a runner portability defect, not an S1 semantic change; the owner authorized this
+amendment on 2026-08-27.
+
+#### Requirement
+
+- **GATE-01:** WHEN a structured local executable exits non-zero with a report, THE
+  SYSTEM SHALL preserve that report for formatter and baseline processing without
+  introducing a shell, leaking a child process, or treating an unknown failure as pass.
+
+#### Implementation and evidence
+
+- [ ] Add a RED regression reproducing a non-zero structured executable whose report
+  must reach `interpretResult` and baseline partitioning.
+- [ ] Identify and repair the no-shell execution/collection boundary while retaining
+  bounded output, timeout, and process-tree cleanup behavior on every platform.
+- [ ] Prove raw report retention, baseline suppression, and an unrelated non-zero
+  command that remains non-pass. Run `CMD-STRUCTURED-EXEC` and `CMD-SENSORS-B` to
+  GREEN, then commit the repair separately from S1.
 
 <a id="slice-s1"></a>
 ### Slice S1: Serialize v3 and prove semantic migration
