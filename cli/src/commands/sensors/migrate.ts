@@ -110,10 +110,14 @@ function hasPhysicalSensorPath(value: unknown, registryRoots: readonly (string |
         const roots = registryRoots
             .filter((root): root is string => typeof root === 'string' && root.length > 0)
             .map(root => path.posix.normalize(root.replace(/\\/g, '/')).toLowerCase());
+        const hasAbsolutePathToken = value.split(/[=\s]/).some(token => path.posix.isAbsolute(token)
+            || /^[A-Za-z]:[\\/]/.test(token)
+            || /^(?:\\\\|\/\/)/.test(token));
         return roots.some(root => normalized.includes(root))
             || path.posix.isAbsolute(value)
             || /^[A-Za-z]:[\\/]/.test(value)
-            || /^(?:\\\\|\/\/)/.test(value);
+            || /^(?:\\\\|\/\/)/.test(value)
+            || hasAbsolutePathToken;
     }
     return Array.isArray(value) ? value.some(item => hasPhysicalSensorPath(item, registryRoots))
         : isRecord(value) && Object.values(value).some(item => hasPhysicalSensorPath(item, registryRoots));
