@@ -2,9 +2,14 @@ import fs from 'fs';
 import path from 'path';
 import { parseSensorPack } from './compatibility/contract';
 import { parseSensorManifest, serializeManifestV3, type SensorManifestV2, type SensorManifestV3ProjectSensors } from './compatibility/manifest';
-import type { PackSource } from './compatibility/pack-source';
+import type { SensorSourceResolution } from './compatibility/source';
 
-export type V2MigrationSource = { kind: 'logical'; source: PackSource };
+/**
+ * `resolveSensorSource` establishes uniqueness before this pure planner runs.
+ * Re-probing here would turn migration planning into an environment reader.
+ */
+type SourceBearingSensorResolution = Extract<SensorSourceResolution, { source: unknown }>;
+export type V2MigrationSource = SourceBearingSensorResolution & { kind: 'logical' };
 
 export type V2MigrationPlan = {
     candidate: SensorManifestV3ProjectSensors;
@@ -110,9 +115,12 @@ function hasPhysicalSensorPath(value: unknown, registryRoots: readonly (string |
         const roots = registryRoots
             .filter((root): root is string => typeof root === 'string' && root.length > 0)
             .map(root => path.posix.normalize(root.replace(/\\/g, '/')).toLowerCase());
-        const hasAbsolutePathToken = value.split(/[=\s]/).some(token => path.posix.isAbsolute(token)
-            || /^[A-Za-z]:[\\/]/.test(token)
-            || /^(?:\\\\|\/\/)/.test(token));
+        const hasAbsolutePathToken = value.split(/[=\s]/).some(token => {
+            const unquoted = token.replace(/^["']+|["']+$/g, '');
+            return path.posix.isAbsolute(unquoted)
+            || /^[A-Za-z]:[\\/]/.test(unquoted)
+            || /^(?:\\\\|\/\/)/.test(unquoted);
+        });
         return roots.some(root => normalized.includes(root))
             || path.posix.isAbsolute(value)
             || /^[A-Za-z]:[\\/]/.test(value)
