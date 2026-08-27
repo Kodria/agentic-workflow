@@ -77,6 +77,24 @@ describe('materializeResolvedSensors', () => {
         }
     });
 
+    it('rejects a pack root reached through a symlinked ancestor before copying registry content', () => {
+        const registry = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-materialize-registry-'));
+        const linkedRegistry = path.join(path.dirname(registry), `${path.basename(registry)}-linked`);
+        const linkedPackRoot = path.join(linkedRegistry, 'sensor-packs', 'js-ts');
+        try {
+            fs.mkdirSync(path.join(registry, 'sensor-packs', 'js-ts'), { recursive: true });
+            fs.writeFileSync(path.join(registry, 'sensor-packs', 'js-ts', 'eslint.config.awm.mjs'), 'outside content');
+            fs.symlinkSync(registry, linkedRegistry);
+            expect(() => materializeResolvedSensors({ projectRoot, packRoot: linkedPackRoot, pack: 'js-ts', sensors: {
+                lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['eslint.config.awm.mjs'], initializedCompatibility: evidence },
+            } })).toThrow('symlink');
+            expect(fs.existsSync(path.join(projectRoot, 'eslint.config.awm.mjs'))).toBe(false);
+        } finally {
+            fs.rmSync(linkedRegistry, { force: true });
+            fs.rmSync(registry, { recursive: true, force: true });
+        }
+    });
+
     it('revalidates a shared Semgrep policy reference without materializing the policy itself', () => {
         const sensorPacks = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-materialize-policy-'));
         const semgrepPack = path.join(sensorPacks, 'python');

@@ -168,6 +168,9 @@ describe('planV2Migration', () => {
             ['--config:C:\\temp\\x'],
             ['--cache:"/tmp/x"'],
             ["--config:'C:\\temp\\x'"],
+            ['--cache;/tmp/x'],
+            ['--cache;"/tmp/x"'],
+            ["--config;'C:\\temp\\x'"],
         ]) {
             const manifest = { ...v2, sensors: { lint: { ...sensor, command: { ...sensor.command, args } } } };
             expect(() => planV2Migration({ manifest, source: resolvedSource() })).toThrow('physical path');

@@ -115,13 +115,13 @@ function hasPhysicalSensorPath(value: unknown, registryRoots: readonly (string |
         const roots = registryRoots
             .filter((root): root is string => typeof root === 'string' && root.length > 0)
             .map(root => path.posix.normalize(root.replace(/\\/g, '/')).toLowerCase());
-        const hasAbsolutePathToken = value.split(/[=:\s]/).some(token => {
+        const hasAbsolutePathToken = value.split(/[=;:\s]/).some(token => {
             const unquoted = token.replace(/^["']+|["']+$/g, '');
             return path.posix.isAbsolute(unquoted)
             || /^[A-Za-z]:[\\/]/.test(unquoted)
             || /^(?:\\\\|\/\/)/.test(unquoted);
         });
-        const hasAbsolutePathAfterOptionSeparator = /(?:^|[=:\s])["']?(?:\/|[A-Za-z]:[\\/]|\\\\|\/\/)/.test(value);
+        const hasAbsolutePathAfterOptionSeparator = /(?:^|[=;:\s])["']?(?:\/|[A-Za-z]:[\\/]|\\\\|\/\/)/.test(value);
         return roots.some(root => normalized.includes(root))
             || path.posix.isAbsolute(value)
             || /^[A-Za-z]:[\\/]/.test(value)

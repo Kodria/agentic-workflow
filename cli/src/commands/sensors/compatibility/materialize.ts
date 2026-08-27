@@ -47,6 +47,22 @@ function root(value: unknown, label: string): string {
     return resolved;
 }
 
+function registryPackRoot(value: unknown): string {
+    const resolved = root(value, 'packRoot');
+    const parsed = path.parse(resolved);
+    let current = parsed.root;
+    for (const component of path.relative(parsed.root, resolved).split(path.sep).filter(Boolean)) {
+        let stat: fs.Stats;
+        try { stat = fs.lstatSync(current); } catch { throw new Error('packRoot must be an existing directory'); }
+        if (stat.isSymbolicLink()) throw new Error('packRoot contains a symlink');
+        current = path.join(current, component);
+    }
+    let stat: fs.Stats;
+    try { stat = fs.lstatSync(current); } catch { throw new Error('packRoot must be an existing directory'); }
+    if (stat.isSymbolicLink()) throw new Error('packRoot contains a symlink');
+    return resolved;
+}
+
 function atomicWrite(destination: string, content: string): void {
     const directory = path.dirname(destination);
     fs.mkdirSync(directory, { recursive: true });
@@ -92,7 +108,7 @@ function priorAssets(projectRoot: string): string[] {
 export function materializePortableSensors(input: PortableMaterializeInput): PortableMaterializeResult {
     if (!input || typeof input !== 'object') throw new Error('materialization input is required');
     const projectRoot = root(input.projectRoot, 'projectRoot');
-    const packRoot = root(input.packRoot, 'packRoot');
+    const packRoot = registryPackRoot(input.packRoot);
     const pack = stableId(input.pack, 'pack');
     if (!input.sensors || typeof input.sensors !== 'object' || Array.isArray(input.sensors)) throw new Error('sensors must be an object');
     const candidate = {
@@ -138,7 +154,7 @@ export function materializePortableSensors(input: PortableMaterializeInput): Por
 export function materializeResolvedSensors(input: MaterializeInput): MaterializeResult {
     if (!input || typeof input !== 'object') throw new Error('materialization input is required');
     const projectRoot = root(input.projectRoot, 'projectRoot');
-    const packRoot = root(input.packRoot, 'packRoot');
+    const packRoot = registryPackRoot(input.packRoot);
     const pack = stableId(input.pack, 'pack');
     if (!input.sensors || typeof input.sensors !== 'object' || Array.isArray(input.sensors)) throw new Error('sensors must be an object');
     const sensors: Record<string, V2Sensor> = {};
