@@ -351,8 +351,10 @@ topology through a concurrent filesystem mutation. S2 therefore protects the
 authority that affects users: it must never read a different or escaping pack content
 after inspection. It walks observable components with `lstat`, rejects observable
 symlinks, validates canonical containment, opens the final `pack.json` with
-`O_NOFOLLOW`, and compares its `dev` + `ino`, regular-file type, and size to the
-inspected file before reading. A changed or unobservable identity fails closed. A
+`O_NOFOLLOW` where Node exposes it, and otherwise opens only the previously inspected
+final file before comparing its `dev` + `ino`, regular-file type, and size to the
+inspection. A changed or unobservable identity fails closed. This Windows fallback is
+the portable form of the same content-authority guarantee, not a relaxed symlink rule. A
 parent swapped to a symlink that still resolves to that same inspected inode has no
 content-authority impact and is accepted; this narrowly does not relax the explicit
 symlink rejection for copied or archived registry trees. Add a regression that proves
