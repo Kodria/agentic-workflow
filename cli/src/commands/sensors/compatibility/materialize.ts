@@ -115,7 +115,9 @@ function portableSource(source: unknown, pack: string): { registry: string; pack
         throw new Error('portable source must be a validated pack source');
     }
     const registry = stableId(candidate.registry.name, 'source.registry.name');
-    const contentRoot = root(candidate.registry.contentRoot, 'source.registry.contentRoot');
+    const configuredRoot = root(candidate.registry.contentRoot, 'source.registry.contentRoot');
+    let contentRoot: string;
+    try { contentRoot = fs.realpathSync(configuredRoot); } catch { throw new Error('source.registry.contentRoot must be canonicalizable'); }
     const packRoot = registryPackRoot(path.join(contentRoot, 'sensor-packs', pack));
     const expectedPack = path.join(packRoot, 'pack.json');
     if (path.resolve(candidate.path) !== expectedPack) throw new Error('portable source selected pack path does not match its registry');

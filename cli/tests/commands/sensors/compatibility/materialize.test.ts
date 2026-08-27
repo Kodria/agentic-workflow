@@ -55,6 +55,31 @@ describe('materializeResolvedSensors', () => {
         expect(JSON.parse(text)).toMatchObject({ source: { registry: 'baseline' } });
     });
 
+    it('materializes a canonical pack source from a configured root with a symlinked ancestor', () => {
+        const registryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-materialize-registry-'));
+        const linkedRegistryRoot = path.join(path.dirname(registryRoot), `${path.basename(registryRoot)}-linked`);
+        const contentRoot = path.join(registryRoot, 'content');
+        const linkedContentRoot = path.join(linkedRegistryRoot, 'content');
+        portableRegistryRoots.push(registryRoot);
+        try {
+            const selectedPackRoot = path.join(contentRoot, 'sensor-packs', 'js-ts');
+            fs.mkdirSync(selectedPackRoot, { recursive: true });
+            fs.writeFileSync(path.join(selectedPackRoot, 'pack.json'), '{}');
+            fs.writeFileSync(path.join(selectedPackRoot, 'eslint.config.awm.mjs'), 'export default [];');
+            fs.symlinkSync(registryRoot, linkedRegistryRoot);
+            const source = resolvePackSource('js-ts', { registries: [{ name: 'baseline', remote: '', contentRoot: linkedContentRoot }] });
+
+            const result = materializePortableSensors({ projectRoot, pack: 'js-ts', source, sensors: {
+                lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['eslint.config.awm.mjs'], initializedCompatibility: evidence },
+            } } as never);
+
+            expect(result.configured).toEqual(['eslint.config.awm.mjs']);
+            expect(fs.readFileSync(path.join(projectRoot, 'eslint.config.awm.mjs'), 'utf8')).toBe('export default [];');
+        } finally {
+            fs.rmSync(linkedRegistryRoot, { force: true });
+        }
+    });
+
     it('rejects a portable source whose selected pack path belongs to another registry', () => {
         const source = portableSource();
         const otherRegistry = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-materialize-other-registry-'));
