@@ -10,7 +10,7 @@
 
 **Tech Stack:** Node.js 22, TypeScript 5.9, Commander 14, Jest 30, Git worktree markers, local AWM registry inventory, Markdown and JSON. No runtime dependency is added.
 
-**Modo de ejecución:** interactivo
+**Modo de ejecución:** desatendido
 
 ---
 
@@ -344,6 +344,22 @@ registry inventory order to break ties. Disabled sensors remain part of semantic
 matching because their configured identity must survive migration. Bound candidate
 lists and strip machine paths and remotes containing credentials from diagnostics.
 
+#### Amendment A — content-identity race contract (owner approved 2026-08-27)
+
+The portable Node implementation cannot atomically retain every parent-directory
+topology through a concurrent filesystem mutation. S2 therefore protects the
+authority that affects users: it must never read a different or escaping pack content
+after inspection. It walks observable components with `lstat`, rejects observable
+symlinks, validates canonical containment, opens the final `pack.json` with
+`O_NOFOLLOW`, and compares its `dev` + `ino`, regular-file type, and size to the
+inspected file before reading. A changed or unobservable identity fails closed. A
+parent swapped to a symlink that still resolves to that same inspected inode has no
+content-authority impact and is accepted; this narrowly does not relax the explicit
+symlink rejection for copied or archived registry trees. Add a regression that proves
+the same-inode race retains only the inspected content, alongside the existing
+different-identity rejection. This is a recorded plan deviation for the S2 review
+finding; no runtime dependency or platform-specific native layer is introduced.
+
 #### Evidence
 
 CMD-SOURCE-RESOLUTION proves bound-path preservation, dual-home rebind, zero/multiple
@@ -516,4 +532,3 @@ issue #129:
 | PORT-07; DIAG-04..05; DIAG-08; BOOT-09; NFR-06..07 | S3 | `status.test.ts`, `run.test.ts`, `run-is-read-only.test.ts` |
 | DIAG-01; DIAG-06..07; DIAG-09 | S4 | `preflight.test.ts`, `preflight-json-pipe.e2e.test.ts` |
 | NFR-04..05 | S5 | `sensor-portability.e2e.test.ts`, `status-windows.test.ts`, `sensor-portability-contract.test.ts` |
-
