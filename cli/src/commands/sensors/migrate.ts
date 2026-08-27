@@ -19,6 +19,10 @@ export type V2MigrationEquivalenceReport = Readonly<{
     structuredCommands: boolean;
     assets: boolean;
     timeouts: boolean;
+    fast: boolean;
+    variants: boolean;
+    policies: boolean;
+    sensorIdentityAndOrder: boolean;
     concurrency: boolean;
     compatibilityEvidence: boolean;
     packageRoot: boolean;
@@ -44,6 +48,10 @@ function compareV2Semantics(v2: SensorManifestV2, v3: SensorManifestV3ProjectSen
         structuredCommands: sameSensorField(v2, v3, sensor => sensor.command),
         assets: sameSensorField(v2, v3, sensor => sensor.assets),
         timeouts: sameSensorField(v2, v3, sensor => sensor.timeout),
+        fast: sameSensorField(v2, v3, sensor => sensor.fast),
+        variants: sameSensorField(v2, v3, sensor => sensor.variantId),
+        policies: sameSensorField(v2, v3, sensor => sensor.policyRef),
+        sensorIdentityAndOrder: JSON.stringify(Object.keys(v2.sensors)) === JSON.stringify(Object.keys(v3.sensors)),
         concurrency: v2.concurrency === v3.concurrency,
         compatibilityEvidence: sameSensorField(v2, v3, sensor => sensor.initializedCompatibility),
         packageRoot: v2.packageRoot === v3.packageRoot,
@@ -61,14 +69,19 @@ function exactLogicalSource(input: unknown, pack: string): V2MigrationSource['so
     if (input.kind === 'source-ambiguous') throw new Error('v2 migration source is ambiguous');
     if (input.kind !== 'logical' || !isRecord(input.source)) throw new Error('v2 migration source must be a unique logical resolution');
     const source = input.source;
-    if (typeof source.path !== 'string' || source.path.length === 0 || typeof source.content !== 'string' || !isRecord(source.registry)) {
+    if (Object.keys(source).some(key => !['path', 'content', 'registry'].includes(key))
+        || typeof source.path !== 'string' || typeof source.content !== 'string' || !isRecord(source.registry)) {
         throw new Error('v2 migration source must contain an exact resolved pack');
     }
     const registry = source.registry;
-    if (typeof registry.name !== 'string' || !/^[a-z][a-z0-9-]*$/.test(registry.name)
-        || typeof registry.remote !== 'string' || typeof registry.contentRoot !== 'string' || registry.contentRoot.trim() === '') {
+    if (Object.keys(registry).some(key => !['name', 'remote', 'contentRoot'].includes(key))
+        || typeof registry.name !== 'string' || !/^[a-z][a-z0-9-]*$/.test(registry.name)
+        || typeof registry.remote !== 'string' || registry.remote.trim() === '' || /[\0\r\n]/.test(registry.remote)
+        || typeof registry.contentRoot !== 'string' || !path.isAbsolute(registry.contentRoot) || path.normalize(registry.contentRoot) !== registry.contentRoot) {
         throw new Error('v2 migration source registry must be a stable logical registry');
     }
+    const expectedPath = path.join(registry.contentRoot, 'sensor-packs', pack, 'pack.json');
+    if (source.path !== expectedPath) throw new Error('v2 migration source must contain an exact resolved pack');
     let parsedSource;
     try { parsedSource = parseSensorPack(JSON.parse(source.content), 'v2 migration resolved source'); }
     catch { throw new Error('v2 migration source exact v2 pack is invalid'); }
@@ -76,16 +89,18 @@ function exactLogicalSource(input: unknown, pack: string): V2MigrationSource['so
     return source as V2MigrationSource['source'];
 }
 
-function hasPhysicalSensorPath(value: unknown, registryRoot: string | undefined): boolean {
+function hasPhysicalSensorPath(value: unknown, registryRoots: readonly (string | undefined)[]): boolean {
     if (typeof value === 'string') {
-        const normalized = value.replace(/\\/g, '/').toLowerCase();
-        const root = registryRoot?.replace(/\\/g, '/').toLowerCase();
-        return (root !== undefined && normalized.includes(root))
+        const normalized = path.posix.normalize(value.replace(/\\/g, '/')).toLowerCase();
+        const roots = registryRoots
+            .filter((root): root is string => typeof root === 'string' && root.length > 0)
+            .map(root => path.posix.normalize(root.replace(/\\/g, '/')).toLowerCase());
+        return roots.some(root => normalized.includes(root))
             || /\/(?:home|users)\/[^/]+(?:\/|$)/.test(normalized)
             || /(?:^|[^a-z0-9])[a-z]:\/users\/[^/]+(?:\/|$)/.test(normalized);
     }
-    return Array.isArray(value) ? value.some(item => hasPhysicalSensorPath(item, registryRoot))
-        : isRecord(value) && Object.values(value).some(item => hasPhysicalSensorPath(item, registryRoot));
+    return Array.isArray(value) ? value.some(item => hasPhysicalSensorPath(item, registryRoots))
+        : isRecord(value) && Object.values(value).some(item => hasPhysicalSensorPath(item, registryRoots));
 }
 
 /** Build, but never persist, a portable v3 replacement for a validated v2 manifest. */
@@ -94,7 +109,7 @@ export function planV2Migration(input: { manifest: unknown; source: unknown }): 
     const parsed = parseSensorManifest(input.manifest, 'v2 migration manifest');
     if (parsed.kind !== 'v2') throw new Error('v2 migration requires a v2 project-sensors manifest');
     const source = exactLogicalSource(input.source, parsed.pack.pack);
-    if (hasPhysicalSensorPath(parsed.pack.sensors, parsed.pack.registryRoot)) throw new Error('v2 migration sensor semantics contain a physical path');
+    if (hasPhysicalSensorPath(parsed.pack.sensors, [parsed.pack.registryRoot, source.registry.contentRoot])) throw new Error('v2 migration sensor semantics contain a physical path');
     const candidate = {
         schemaVersion: 3 as const,
         mode: 'project-sensors' as const,
@@ -127,7 +142,7 @@ export function replaceV2ManifestWithV3(manifestPath: unknown, candidate: unknow
     if (before.kind !== 'v2' || after.kind !== 'v3' || after.pack.mode !== 'project-sensors') {
         throw new Error('v2 migration candidate semantic mismatch');
     }
-    if (hasPhysicalSensorPath(before.pack.sensors, before.pack.registryRoot) || hasPhysicalSensorPath(after.pack.sensors, before.pack.registryRoot)) {
+    if (hasPhysicalSensorPath(before.pack.sensors, [before.pack.registryRoot]) || hasPhysicalSensorPath(after.pack.sensors, [before.pack.registryRoot])) {
         throw new Error('v2 migration candidate contains a physical path');
     }
     if (!allEquivalent(compareV2Semantics(before.pack, after.pack, after.pack.source.registry))) {

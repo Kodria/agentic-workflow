@@ -11,11 +11,11 @@ const sensor = {
 };
 const v2 = { schemaVersion: 2, pack: 'js-ts', packSelection: 'explicit' as const, registryRoot: '/home/alice/.awm/registries/baseline', packageRoot: 'cli', sensors: { lint: sensor }, concurrency: 2 };
 
-function resolvedSource(pack = 'js-ts', registry = 'baseline') {
+function resolvedSource(pack = 'js-ts', registry = 'baseline', contentRoot = `/home/alice/.awm/registries/${registry}`) {
     return {
         kind: 'logical',
         source: {
-            path: `/home/alice/.awm/registries/${registry}/sensor-packs/${pack}/pack.json`,
+            path: path.join(contentRoot, 'sensor-packs', pack, 'pack.json'),
             content: JSON.stringify({
                 schemaVersion: 2, name: pack, description: 'fixture', detects: ['package.json'],
                 sensors: { lint: { applicability: { allFiles: ['package.json'] }, variants: [{
@@ -26,7 +26,7 @@ function resolvedSource(pack = 'js-ts', registry = 'baseline') {
                 }] } },
                 coverage: { schemaVersion: 1, classes: { linting: { description: 'fixture', detectors: [{ sensor: 'lint' }], remedy: { summary: 'fixture', command: 'npm test' } } } },
             }),
-            registry: { name: registry, remote: 'https://example.invalid/baseline', contentRoot: `/home/alice/.awm/registries/${registry}` },
+            registry: { name: registry, remote: 'https://example.invalid/baseline', contentRoot },
         },
     };
 }
@@ -41,6 +41,10 @@ describe('planV2Migration', () => {
             structuredCommands: true,
             assets: true,
             timeouts: true,
+            fast: true,
+            variants: true,
+            policies: true,
+            sensorIdentityAndOrder: true,
             concurrency: true,
             compatibilityEvidence: true,
             packageRoot: true,
@@ -53,12 +57,40 @@ describe('planV2Migration', () => {
         expect(JSON.stringify(plan.equivalence)).not.toContain('/home/alice');
     });
 
+    it('rejects a replacement when any persisted sensor semantic differs', () => {
+        const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-'));
+        const manifestPath = path.join(project, 'sensors.json');
+        const original = JSON.stringify(v2, null, 2) + '\n';
+        try {
+            fs.writeFileSync(manifestPath, original);
+            const candidate = planV2Migration({ manifest: v2, source: resolvedSource() }).candidate;
+            const withoutPolicy = { ...candidate.sensors.lint };
+            delete withoutPolicy.policyRef;
+            for (const changed of [
+                { ...candidate.sensors.lint, fast: false },
+                { ...candidate.sensors.lint, variantId: 'eslint-8', initializedCompatibility: { ...candidate.sensors.lint.initializedCompatibility, variantId: 'eslint-8', toolVersion: '8.0.0', certifiedRange: '>=8 <9' } },
+                withoutPolicy,
+            ]) {
+                expect(() => replaceV2ManifestWithV3(manifestPath, { ...candidate, sensors: { lint: changed } })).toThrow('semantic mismatch');
+                expect(fs.readFileSync(manifestPath, 'utf8')).toBe(original);
+            }
+        } finally {
+            fs.rmSync(project, { recursive: true, force: true });
+        }
+    });
+
+    it('requires source.path to be the canonical selected pack beneath its content root', () => {
+        const source = resolvedSource();
+        const mismatched = { ...source, source: { ...source.source, path: path.join(source.source.registry.contentRoot, 'sensor-packs', 'other', 'pack.json') } };
+        expect(() => planV2Migration({ manifest: v2, source: mismatched })).toThrow('exact resolved pack');
+    });
+
     test.each([
         [{ manifest: { schemaVersion: 3, mode: 'native-gate', reason: 'CI' }, source: resolvedSource() }, 'v2'],
         [{ manifest: v2, source: { kind: 'source-unavailable' } }, 'unavailable'],
         [{ manifest: v2, source: { kind: 'source-ambiguous' } }, 'ambiguous'],
         [{ manifest: v2, source: { ...resolvedSource(), source: { ...resolvedSource().source, registry: { ...resolvedSource().source.registry, name: 'Baseline' } } } }, 'registry'],
-        [{ manifest: v2, source: resolvedSource('python') }, 'exact v2 pack'],
+        [{ manifest: v2, source: { ...resolvedSource('python'), source: { ...resolvedSource('python').source, path: resolvedSource().source.path } } }, 'exact v2 pack'],
         [{ manifest: { pack: 'js-ts', sensors: { lint: 'npm run lint' } }, source: resolvedSource() }, 'v2'],
     ])('rejects unsafe migration input %#', (input, message) => {
         expect(() => planV2Migration(input)).toThrow(message);
@@ -82,6 +114,16 @@ describe('planV2Migration', () => {
             { ...v2, sensors: { lint: { ...sensor, initializedCompatibility: { ...sensor.initializedCompatibility, reason: 'source /home/alice/.awm/registries/baseline' } } } },
             { ...v2, sensors: { lint: { ...sensor, initializedCompatibility: { ...sensor.initializedCompatibility, evidence: [{ kind: 'file', status: 'pass', path: '/home/alice/report.json' }] } } } },
         ]) expect(() => planV2Migration({ manifest, source: resolvedSource() })).toThrow(/physical path|contained relative asset/);
+    });
+
+    it('rejects a physical path under the resolved source root even when the v2 root differs', () => {
+        const source = resolvedSource('js-ts', 'baseline', path.join(path.sep, 'srv', 'resolved-registry'));
+        const manifest = {
+            ...v2,
+            registryRoot: path.join(path.sep, 'opt', 'legacy-registry'),
+            sensors: { lint: { ...sensor, command: { ...sensor.command, args: ['--cache', path.join(path.sep, 'srv', 'resolved-registry', 'cache')] } } },
+        };
+        expect(() => planV2Migration({ manifest, source })).toThrow('physical path');
     });
 
     it('validates before atomic replacement and leaves the v2 original intact on write failure', () => {
