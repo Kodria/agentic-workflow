@@ -1,3 +1,8 @@
+## v9.5.0 - 2026-08-27
+
+### Features
+- **sensors:** publish portable status/run authority (#135)
+
 ## v9.4.1 - 2026-08-27
 
 ### Fixes
