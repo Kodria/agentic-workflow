@@ -10,7 +10,21 @@ export type V2MigrationSource =
 export type V2MigrationPlan = {
     candidate: SensorManifestV3ProjectSensors;
     equivalent: true;
+    equivalence: V2MigrationEquivalenceReport;
 };
+
+/** Portable, field-by-field evidence for the v2-to-v3 semantic guarantee. */
+export type V2MigrationEquivalenceReport = Readonly<{
+    pack: true;
+    enabledDisabled: true;
+    structuredCommands: true;
+    assets: true;
+    timeouts: true;
+    concurrency: true;
+    compatibilityEvidence: true;
+    packageRoot: true;
+    logicalSourceBinding: true;
+}>;
 
 function sameV2Semantics(v2: SensorManifestV2, v3: SensorManifestV3ProjectSensors): boolean {
     return v2.pack === v3.pack
@@ -46,7 +60,18 @@ export function planV2Migration(input: { manifest: unknown; source: unknown }): 
     if (validated.kind !== 'v3' || validated.pack.mode !== 'project-sensors' || !sameV2Semantics(parsed.pack, validated.pack)) {
         throw new Error('v2 migration candidate semantic mismatch');
     }
-    return { candidate: validated.pack, equivalent: true };
+    const equivalence: V2MigrationEquivalenceReport = Object.freeze({
+        pack: true,
+        enabledDisabled: true,
+        structuredCommands: true,
+        assets: true,
+        timeouts: true,
+        concurrency: true,
+        compatibilityEvidence: true,
+        packageRoot: true,
+        logicalSourceBinding: true,
+    });
+    return { candidate: validated.pack, equivalent: true, equivalence };
 }
 
 /** Validate the old and new durable contracts, then atomically replace only the manifest. */

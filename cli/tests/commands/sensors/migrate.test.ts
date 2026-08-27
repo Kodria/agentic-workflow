@@ -9,15 +9,28 @@ const sensor = {
     assets: ['eslint.config.awm.mjs'], policyRef: 'shared/semgrep-policy.json' as const,
     initializedCompatibility: { state: 'certified' as const, reason: 'range-and-probe', variantId: 'eslint-9', toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [{ kind: 'version', status: 'pass' }] },
 };
-const v2 = { schemaVersion: 2, pack: 'js-ts', packSelection: 'explicit' as const, registryRoot: '/physical/registry', packageRoot: 'cli', sensors: { lint: sensor }, concurrency: 2 };
+const v2 = { schemaVersion: 2, pack: 'js-ts', packSelection: 'explicit' as const, registryRoot: '/home/alice/.awm/registries/baseline', packageRoot: 'cli', sensors: { lint: sensor }, concurrency: 2 };
 
 describe('planV2Migration', () => {
     it('returns an equivalent portable v3 candidate bound to the exact logical source', () => {
         const plan = planV2Migration({ manifest: v2, source: { kind: 'logical', registry: 'baseline' } });
         expect(plan.equivalent).toBe(true);
+        expect(plan.equivalence).toEqual({
+            pack: true,
+            enabledDisabled: true,
+            structuredCommands: true,
+            assets: true,
+            timeouts: true,
+            concurrency: true,
+            compatibilityEvidence: true,
+            packageRoot: true,
+            logicalSourceBinding: true,
+        });
         expect(plan.candidate).toEqual({ schemaVersion: 3, mode: 'project-sensors', pack: 'js-ts', packSelection: 'explicit', source: { registry: 'baseline' }, packageRoot: 'cli', sensors: { lint: sensor }, concurrency: 2 });
         expect(JSON.stringify(plan.candidate)).not.toContain('registryRoot');
-        expect(JSON.stringify(plan.candidate)).not.toContain('/physical/registry');
+        expect(JSON.stringify(plan.candidate)).not.toContain('/home/alice');
+        expect(JSON.stringify(plan.equivalence)).not.toContain('registryRoot');
+        expect(JSON.stringify(plan.equivalence)).not.toContain('/home/alice');
     });
 
     test.each([
