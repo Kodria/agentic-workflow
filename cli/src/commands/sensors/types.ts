@@ -160,7 +160,7 @@ export type SensorCheck = {
 };
 
 export type SensorAuthority = {
-    mode: 'project-sensors' | 'legacy-v1' | 'native-gate' | 'opt-out' | 'invalid' | 'source-unavailable' | 'source-ambiguous';
+    mode: 'project-sensors' | 'legacy-v1' | 'native-gate' | 'opt-out' | 'missing' | 'invalid' | 'source-unavailable' | 'source-ambiguous';
     reason: string;
     projectRoot: string;
     manifestPath: string;

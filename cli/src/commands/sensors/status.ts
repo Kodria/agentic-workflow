@@ -1,8 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { resolveOnPath } from '../../core/paths';
-import { SensorCheck, SensorStatusResult, SensorManifest } from './types';
-import { parseSensorManifest } from './compatibility/manifest';
+import { SensorCheck, SensorStatusResult } from './types';
 import { parseSensorPack } from './compatibility/contract';
 import { discoverProjectEvidence } from './compatibility/discovery';
 import type { PackSource } from './compatibility/pack-source';
@@ -194,87 +193,55 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
         const reason = project.reason.includes('unsupported manifest schemaVersion') ? 'schema-unsupported' : 'manifest-malformed';
         return invalidStatus(project, pack, reason);
     }
-    const manifestPath = project.manifestPath;
     const packageRoot = project.packageRoot;
-    const base = { projectRoot: project.projectRoot, manifestPath };
-
-    let manifest: SensorManifest;
-    try {
-        const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-        const parsed = parseSensorManifest(raw, manifestPath);
-        if (parsed.kind === 'v3') {
-            if (parsed.pack.mode === 'native-gate' || parsed.pack.mode === 'opt-out') {
-                return { overall: 'NOT_CONFIGURED', pack: null, ...base, mode: parsed.pack.mode, reason: `${parsed.pack.mode}-declared`, checks: {} };
-            }
-            let source;
-            try { source = resolveSensorSource(parsed, { registries: listRegistries() }); }
-            catch (error) { return { overall: 'DEGRADED', pack: parsed.pack.pack, ...base, mode: 'source-unavailable', reason: error instanceof Error ? error.message : 'source-unavailable', remedy: 'install-registry-or-run-awm-update', checks: {} }; }
-            if (source.kind === 'source-unavailable' || source.kind === 'source-ambiguous') {
-                return { overall: 'DEGRADED', pack: parsed.pack.pack, ...base, mode: source.kind, reason: source.reason, remedy: source.remedy, checks: {} };
-            }
-            return { overall: 'DEGRADED', pack: parsed.pack.pack, ...base, mode: 'project-sensors', reason: source.kind, checks: {} };
-        }
-        if (parsed.kind === 'v2') {
-            // Monorepo support (mirrors run.ts/init.ts): detection and structured-command
-            // asset resolution both need to see the real package, not the (possibly
-            // unrelated) directory the manifest lives in.
-            const projectCwd = packageRoot;
-            const checks: Record<string, SensorCheck> = {};
-            let source: ReturnType<typeof resolveSensorSource>;
-            try { source = resolveSensorSource(parsed, { registries: listRegistries() }); }
-            catch (error) {
-                return { overall: 'DEGRADED', pack: parsed.pack.pack, ...base, mode: 'source-unavailable', reason: error instanceof Error ? error.message : 'source-unavailable', remedy: 'install-registry-or-run-awm-update', checks: {} };
-            }
-            if (source.kind === 'source-unavailable' || source.kind === 'source-ambiguous') {
-                return { overall: 'DEGRADED', pack: parsed.pack.pack, ...base, mode: source.kind, reason: source.reason, remedy: source.remedy, checks: {} };
-            }
-            let compatibility: Record<string, CompatibilityEvidence>;
-            try {
-                compatibility = resolveStaticV2Compatibility(projectCwd, parsed.pack, source.source);
-            } catch (error) {
-                const detail = error instanceof Error ? error.message : 'live compatibility unavailable';
-                for (const [name, sensor] of Object.entries(parsed.pack.sensors)) {
-                    checks[name] = sensor.enabled === false ? { ok: true, detail: 'disabled' } : { ok: false, detail };
-                }
-                return { overall: 'DEGRADED', pack: parsed.pack.pack, ...base, mode: 'project-sensors', reason: source.kind, checks };
-            }
-            for (const [name, sensor] of Object.entries(parsed.pack.sensors)) {
-                if (sensor.enabled === false) {
-                    checks[name] = { ok: true, detail: 'disabled' };
-                    continue;
-                }
-                checks[name] = staticCompatibilityCheck(sensor, compatibility[name])
-                    ?? checkStructuredCommand(sensor.command, projectCwd, sensor.assets);
-            }
-            return { overall: Object.keys(checks).length > 0 && Object.values(checks).every(check => check.ok) ? 'READY' : 'DEGRADED', pack: parsed.pack.pack, ...base, mode: 'project-sensors', reason: source.kind, checks };
-        }
-        manifest = parsed.pack;
-    } catch {
-        // Preserve the historic diagnostic path for a hand-edited legacy manifest:
-        // malformed v2 is fail-closed, while a legacy `sensors:null` is surfaced as
-        // degraded rather than crashing the status command.
-        try {
-            const raw: unknown = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-            if (raw && typeof raw === 'object' && !Array.isArray(raw) && !('schemaVersion' in raw) && typeof (raw as any).pack === 'string') {
-                return { overall: 'DEGRADED', pack: (raw as any).pack, ...base, mode: 'project-sensors', reason: 'legacy-v1', checks: {} };
-            }
-        } catch { /* malformed JSON is not configured */ }
-        return { overall: 'NOT_CONFIGURED', pack: null, checks: {} };
+    const parsed = project.manifest;
+    if (parsed.kind === 'v3' && parsed.pack.mode !== 'project-sensors') {
+        return {
+            overall: 'NOT_CONFIGURED', pack: null, checks: {},
+            ...projectMetadata(project, parsed.pack.mode, `${parsed.pack.mode}-declared`, { declarationReason: parsed.pack.reason }),
+        };
     }
 
+    if (parsed.kind === 'v2' || parsed.kind === 'v3') {
+        const parsedPack = parsed.pack as SensorManifestV2;
+        let resolution: SensorSourceResolution;
+        try {
+            resolution = resolveSensorSource(parsed, { registries: listRegistries() });
+        } catch {
+            return invalidStatus(project, parsedPack.pack, 'sensor-source-invalid', 'repair-or-run-awm-update');
+        }
+        if (!('source' in resolution)) return sourceFailure(project, parsedPack.pack, resolution);
+        const sourceMeta = resolvedSourceMetadata(resolution);
+        const manifest = parsedPack;
+        const checks: Record<string, SensorCheck> = {};
+        let compatibility: Record<string, CompatibilityEvidence>;
+        try {
+            compatibility = resolveStaticV2Compatibility(packageRoot, manifest, resolution.source);
+        } catch (error) {
+            const detail = error instanceof Error ? error.message : 'live compatibility unavailable';
+            for (const [name, sensor] of Object.entries(manifest.sensors)) checks[name] = sensor.enabled === false ? { ok: true, detail: 'disabled' } : { ok: false, detail };
+            return { overall: 'DEGRADED', pack: manifest.pack, checks, ...projectMetadata(project, 'project-sensors', sourceMeta.reason, { ...sourceMeta }) };
+        }
+        for (const [name, sensor] of Object.entries(manifest.sensors)) {
+            checks[name] = sensor.enabled === false ? { ok: true, detail: 'disabled' }
+                : staticCompatibilityCheck(sensor, compatibility[name]) ?? checkStructuredCommand(sensor.command, packageRoot, sensor.assets);
+        }
+        return {
+            overall: Object.keys(checks).length > 0 && Object.values(checks).every(check => check.ok) ? 'READY' : 'DEGRADED',
+            pack: manifest.pack, checks,
+            ...projectMetadata(project, 'project-sensors', sourceMeta.reason, { ...sourceMeta }),
+        };
+    }
+
+    const manifest = parsed.pack;
     const checks: Record<string, SensorCheck> = {};
     for (const [name, config] of Object.entries(manifest.sensors ?? {})) {
         if (config.enabled === false) { checks[name] = { ok: true, detail: 'disabled' }; continue; }
         if (!config.cmd) { checks[name] = { ok: false, detail: 'no cmd configured' }; continue; }
         checks[name] = checkCmd(config.cmd, packageRoot);
     }
-
-    // `Object.values({}).every(...)` is vacuously true — a manifest with zero sensor
-    // entries (the registry had no pack.json for this stack; see init.ts) must not read
-    // as READY just because there was nothing to fail. Same false-green `checkManifest`
-    // guards against in preflight.
-    if (Object.keys(manifest.sensors ?? {}).length === 0) {
-        return { overall: 'DEGRADED', pack: manifest.pack, checks };
-    }
-    return { overall: Object.values(checks).every(check => check.ok) ? 'READY' : 'DEGRADED', pack: manifest.pack, ...base, mode: 'project-sensors', reason: 'legacy-v1', checks };
+    return {
+        overall: Object.keys(manifest.sensors ?? {}).length > 0 && Object.values(checks).every(check => check.ok) ? 'READY' : 'DEGRADED',
+        pack: manifest.pack, checks, ...projectMetadata(project, 'project-sensors', 'legacy-v1'),
+    };
 }
