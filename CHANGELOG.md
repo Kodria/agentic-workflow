@@ -1,3 +1,8 @@
+## v9.4.1 - 2026-08-27
+
+### Fixes
+- **currentness:** query bounded npm latest metadata (#134)
+
 ## v9.4.0 - 2026-08-26
 
 ### Features
