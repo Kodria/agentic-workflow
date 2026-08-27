@@ -46,6 +46,28 @@ describe('computeSensorStatus', () => {
         expect(result.pack).toBeNull();
     });
 
+    it('resolves the Git-bounded project manifest from a nested CWD', async () => {
+        fs.mkdirSync(path.join(tmpDir, '.git'));
+        fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+        fs.mkdirSync(path.join(tmpDir, 'node_modules', '.bin'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, 'node_modules', '.bin', 'tsc'), '');
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+            pack: 'js-ts', sensors: { typecheck: { cmd: 'npx tsc --noEmit', fast: true } },
+        }));
+        const nestedCwd = path.join(tmpDir, 'packages', 'app');
+        fs.mkdirSync(nestedCwd, { recursive: true });
+
+        await expect(computeSensorStatus(nestedCwd)).resolves.toMatchObject({
+            overall: 'READY',
+            pack: 'js-ts',
+            mode: 'project-sensors',
+            reason: 'legacy-v1',
+            projectRoot: tmpDir,
+            manifestPath: path.join(tmpDir, '.awm', 'sensors.json'),
+            checks: { typecheck: { ok: true } },
+        });
+    });
+
     it.each([
         ['valid manifest', 'READY', () => {
             installLocalBin('eslint');
@@ -314,6 +336,45 @@ describe('computeSensorStatus', () => {
             expect(staticProbeFailure.checks.lint.detail).toMatch(/probe-not-matched|unverifiable/i);
             expect(runCommand).not.toHaveBeenCalled();
             expect(runStructuredCommand).not.toHaveBeenCalled();
+        } finally {
+            if (previousHome === undefined) delete process.env.AWM_HOME;
+            else process.env.AWM_HOME = previousHome;
+            fs.rmSync(home, { recursive: true, force: true });
+        }
+    });
+
+    it.each([
+        ['native-gate', 'Release-blocking CI is authoritative.', 'native-gate-declared'],
+        ['opt-out', 'This repository intentionally has no local gate.', 'opt-out-declared'],
+    ] as const)('reports v3 %s without dispatching sensors', async (mode, declarationReason, diagnosticReason) => {
+        fs.mkdirSync(path.join(tmpDir, '.git'));
+        fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({ schemaVersion: 3, mode, reason: declarationReason }));
+
+        await expect(computeSensorStatus(tmpDir)).resolves.toMatchObject({
+            overall: 'NOT_CONFIGURED', mode, reason: diagnosticReason,
+            projectRoot: tmpDir, manifestPath: path.join(tmpDir, '.awm', 'sensors.json'),
+        });
+        expect(runCommand).not.toHaveBeenCalled();
+        expect(runStructuredCommand).not.toHaveBeenCalled();
+    });
+
+    it('reports a v2 source-unavailable state instead of accepting a missing pack', async () => {
+        const previousHome = process.env.AWM_HOME;
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-missing-source-home-'));
+        try {
+            process.env.AWM_HOME = home;
+            fs.writeFileSync(path.join(home, 'registries.json'), JSON.stringify([]));
+            fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
+                schemaVersion: 2, pack: 'js-ts', registryRoot: path.join(home, 'gone'), sensors: {},
+            }));
+
+            await expect(computeSensorStatus(tmpDir)).resolves.toMatchObject({
+                overall: 'DEGRADED', pack: 'js-ts', mode: 'source-unavailable',
+                reason: 'no-compatible-registry', remedy: 'install-registry-or-run-awm-update',
+                projectRoot: tmpDir, manifestPath: path.join(tmpDir, '.awm', 'sensors.json'),
+            });
         } finally {
             if (previousHome === undefined) delete process.env.AWM_HOME;
             else process.env.AWM_HOME = previousHome;

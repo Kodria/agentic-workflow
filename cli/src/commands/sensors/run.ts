@@ -20,9 +20,14 @@ import { changedFiles, changedScopeError } from './changed';
 // verbo de lectura: no debe tener a mano ninguna funcion capaz de mutar el proyecto.
 import { detectStack } from './init';
 import { parseSensorManifest } from './compatibility/manifest';
-import { resolveLiveCompatibility } from './compatibility/live';
+import { resolveLiveCompatibility, resolveParsedPackCompatibility } from './compatibility/live';
+import { parseSensorPack } from './compatibility/contract';
+import { resolveSensorSource } from './compatibility/source';
+import type { PackSource } from './compatibility/pack-source';
+import { listRegistries } from '../../core/registries';
 import { prepareLegacySensor, prepareV2Sensor, validateRunOptions } from './prepare';
 import { reduceVerdict } from './verdict';
+import { resolveSensorProject } from './project';
 
 const MANIFEST_FILE = '.awm/sensors.json';
 const DEFAULT_FAST_TIMEOUT = 10_000;
@@ -55,6 +60,14 @@ async function resolveLiveV2(cwd: string, manifest: ReturnType<typeof parseSenso
     if (manifest.kind !== 'v2') return null;
     try {
         return await resolveLiveCompatibility(cwd, manifest.pack.pack, manifest.pack.registryRoot, { packSelection: manifest.pack.packSelection });
+    } catch { return null; }
+}
+
+async function resolveLiveFromSource(cwd: string, source: PackSource, packSelection?: 'explicit'): Promise<Awaited<ReturnType<typeof resolveLiveCompatibility>> | null> {
+    try {
+        const parsed = parseSensorPack(JSON.parse(source.content), source.path);
+        if (parsed.kind !== 'v2') return null;
+        return await resolveParsedPackCompatibility(cwd, parsed.pack, { packSelection });
     } catch { return null; }
 }
 
@@ -152,19 +165,26 @@ async function pooled<T>(tasks: Array<() => Promise<T>>, limit: number): Promise
  */
 export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     validateRunOptions(opts);
-    const manifestDir = findManifestDir(opts.cwd ?? process.cwd());
-    if (!manifestDir) return { sensors: [], overall: 'not_certified' };
+    let project: ReturnType<typeof resolveSensorProject>;
+    try { project = resolveSensorProject(opts.cwd ?? process.cwd()); }
+    catch { return { sensors: [], overall: 'not_certified' }; }
+    if (project.state !== 'configured') return { sensors: [], overall: 'not_certified' };
 
-    let parsed: ReturnType<typeof parseSensorManifest>;
-    try {
-        parsed = parseSensorManifest(
-            JSON.parse(fs.readFileSync(path.join(manifestDir, MANIFEST_FILE), 'utf8')),
-            path.join(manifestDir, MANIFEST_FILE),
-        );
-    } catch {
-        return { sensors: [], overall: 'not_certified' };
+    const manifestDir = project.projectRoot;
+    const parsed = project.manifest;
+    const authority = { projectRoot: project.projectRoot, manifestPath: project.manifestPath };
+    if (parsed.kind === 'v3' && (parsed.pack.mode === 'native-gate' || parsed.pack.mode === 'opt-out')) {
+        return { sensors: [], overall: 'not_certified', ...authority, mode: parsed.pack.mode, reason: `${parsed.pack.mode}-declared` };
     }
-    if (parsed.kind === 'v3') return { sensors: [], overall: 'not_certified' };
+    let resolvedSource: ReturnType<typeof resolveSensorSource> | undefined;
+    if (parsed.kind === 'v2' || parsed.kind === 'v3') {
+        try { resolvedSource = resolveSensorSource(parsed, { registries: listRegistries() }); }
+        catch (error) { return { sensors: [], overall: 'not_certified', ...authority, mode: 'source-unavailable', reason: error instanceof Error ? error.message : 'source-unavailable', remedy: 'install-registry-or-run-awm-update' }; }
+        if (resolvedSource.kind === 'source-unavailable' || resolvedSource.kind === 'source-ambiguous') {
+            return { sensors: [], overall: 'not_certified', ...authority, mode: resolvedSource.kind, reason: resolvedSource.reason, remedy: resolvedSource.remedy, source: { kind: resolvedSource.kind, candidates: resolvedSource.kind === 'source-ambiguous' ? resolvedSource.candidates : undefined } };
+        }
+    }
+    if (parsed.kind === 'v3') return { sensors: [], overall: 'not_certified', ...authority, mode: 'project-sensors', reason: resolvedSource?.kind ?? 'project-sensors' };
 
     const baseline = opts.ignoreBaseline ? null : readBaseline(manifestDir);
     const changed = opts.changed ? changedFiles(manifestDir, opts.base ?? 'HEAD') : null;
@@ -179,10 +199,10 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     // manifest itself stays discoverable at the repo root via findManifestDir.
     // Legacy manifests never carry this field — manifestDir is always correct
     // for them, unchanged.
-    const projectCwd = parsed.kind === 'v2' && parsed.pack.packageRoot
-        ? path.resolve(manifestDir, parsed.pack.packageRoot)
-        : manifestDir;
-    const live = parsed.kind === 'v2' ? await resolveLiveV2(projectCwd, parsed) : null;
+    const projectCwd = project.packageRoot;
+    const live = parsed.kind === 'v2' && resolvedSource && (resolvedSource.kind === 'logical' || resolvedSource.kind === 'legacy-bound' || resolvedSource.kind === 'legacy-rebound')
+        ? await resolveLiveFromSource(projectCwd, resolvedSource.source, parsed.pack.packSelection)
+        : null;
     const drift = parsed.kind === 'legacy' ? detectPackDrift(manifestDir, parsed.pack) : undefined;
     const requestedScope = opts.changed ? 'changed' as const : 'full' as const;
     const prepared: PreparedSensorExecution[] = [];
@@ -216,6 +236,11 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     return {
         sensors: results,
         overall,
+        ...authority,
+        mode: 'project-sensors',
+        reason: parsed.kind === 'v2' ? resolvedSource?.kind : 'legacy-v1',
+        ...(parsed.kind === 'v2' && resolvedSource && (resolvedSource.kind === 'logical' || resolvedSource.kind === 'legacy-bound' || resolvedSource.kind === 'legacy-rebound')
+            ? { source: { kind: resolvedSource.kind, registry: resolvedSource.source.registry.name } } : {}),
         ...(drift?.drift ? { packDrift: drift.drift } : {}),
         ...(changed ? { changedScope: { files: changed.files.length, ...(changed.error ? { error: changed.error } : {}) } } : {}),
     };
