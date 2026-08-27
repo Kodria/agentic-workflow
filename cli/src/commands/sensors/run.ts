@@ -69,7 +69,6 @@ export function findManifestDir(startCwd: string): string | null {
     } catch { return null; }
 }
 
-
 /**
  * Detect — and only detect — that the manifest's pack no longer describes the tree:
  * it sits on the `generic` fallback while real stack indicators (package.json,
