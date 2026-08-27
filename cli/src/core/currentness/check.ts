@@ -8,7 +8,7 @@ import type { CurrentnessComponent, CurrentnessDeps, CurrentnessReport, GitTrans
 const execFileAsync = promisify(execFile);
 const TIMEOUT_MS = 2_000;
 const MAX_OUTPUT_BYTES = 64 * 1024;
-const NPM_SOURCE = `https://registry.npmjs.org/${CLI_PACKAGE_NAME}`;
+const NPM_SOURCE = `https://registry.npmjs.org/${CLI_PACKAGE_NAME}/latest`;
 const STRICT_SEMVER = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 function deadline<T>(operation: Promise<T>, timeoutMs = TIMEOUT_MS): Promise<T> {
@@ -106,8 +106,7 @@ async function latestCli(fetchImpl: typeof fetch): Promise<string | null> {
         if (Buffer.byteLength(text, 'utf8') > MAX_OUTPUT_BYTES) return null;
         const body: unknown = JSON.parse(text);
         if (!body || typeof body !== 'object') return null;
-        const tags = (body as Record<string, unknown>)['dist-tags'];
-        const latest = tags && typeof tags === 'object' ? (tags as Record<string, unknown>).latest : undefined;
+        const latest = (body as Record<string, unknown>).version;
         return typeof latest === 'string' && parseVersion(latest) ? latest : null;
     } catch {
         return null;
@@ -191,8 +190,8 @@ export async function checkCurrentness(cwd: string, deps: CurrentnessDeps = {}):
     const cli: CurrentnessComponent = !parseVersion(installedCli) || !latest || compareStrict(installedCli, latest) === null
         ? unavailable('cli', NPM_SOURCE, checkedAt, parseVersion(installedCli) ? installedCli : null)
         : compareStrict(installedCli, latest) === 0
-            ? { component: 'cli', installed: installedCli, latest, channel: 'stable', source: NPM_SOURCE, checkedAt, status: 'current', detail: 'Installed version equals npm dist-tags.latest.', remedy: 'No action required.' }
-            : { component: 'cli', installed: installedCli, latest, channel: 'stable', source: NPM_SOURCE, checkedAt, status: 'stale', detail: 'Installed version is behind npm dist-tags.latest.', remedy: `npm i -g ${CLI_PACKAGE_NAME}@latest && rerun in a fresh process` };
+            ? { component: 'cli', installed: installedCli, latest, channel: 'stable', source: NPM_SOURCE, checkedAt, status: 'current', detail: 'Installed version equals the npm latest release.', remedy: 'No action required.' }
+            : { component: 'cli', installed: installedCli, latest, channel: 'stable', source: NPM_SOURCE, checkedAt, status: 'stale', detail: 'Installed version is behind the npm latest release.', remedy: `npm i -g ${CLI_PACKAGE_NAME}@latest && rerun in a fresh process` };
 
     const components = [cli];
     let registries: RegistrySource[];
