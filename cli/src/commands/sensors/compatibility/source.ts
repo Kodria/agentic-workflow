@@ -41,13 +41,14 @@ function compatible(source: PackSource, manifest: Extract<ParsedSensorManifest, 
 export function resolveSensorSource(manifest: ParsedSensorManifest | V3Manifest, deps: Dependencies): SensorSourceResolution {
     const registries = requireRegistries(deps);
     if (manifest.kind === 'v3') {
-        if (!manifest.pack || manifest.pack.mode !== 'project-sensors' || typeof manifest.pack.pack !== 'string'
-            || !manifest.pack.source || typeof manifest.pack.source.registry !== 'string') {
+        const v3 = manifest.pack;
+        if (!v3 || v3.mode !== 'project-sensors' || typeof v3.pack !== 'string'
+            || !v3.source || typeof v3.source.registry !== 'string') {
             throw new Error('sensor source resolution requires a valid project-sensors manifest');
         }
-        const matches = registries.filter(entry => entry?.name === manifest.pack.source.registry);
+        const matches = registries.filter(entry => entry?.name === v3.source.registry);
         if (matches.length !== 1) return unavailable('registry-not-installed');
-        const source = listPackSources(manifest.pack.pack, { registries: matches })[0];
+        const source = listPackSources(v3.pack, { registries: matches })[0];
         return source ? { kind: 'logical', source } : unavailable('no-compatible-registry');
     }
     if (manifest.kind !== 'v2') throw new Error('sensor source resolution requires a v2 or v3 project-sensors manifest');
