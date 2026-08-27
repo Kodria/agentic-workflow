@@ -152,10 +152,10 @@ describe('planV2Migration', () => {
     it('rejects absolute paths embedded in flag-value strings while retaining relative flag values', () => {
         const relative = {
             ...v2,
-            sensors: { lint: { ...sensor, command: { ...sensor.command, args: ['--cache=cache/eslint', '--config=config/eslint.json'] } } },
+            sensors: { lint: { ...sensor, command: { ...sensor.command, args: ['--cache=cache/eslint', '--config=config/eslint.json', '--inputs=(reports/lint.json,cache/eslint)'] } } },
         };
         expect(planV2Migration({ manifest: relative, source: resolvedSource() }).candidate.sensors.lint.command.args)
-            .toEqual(['--cache=cache/eslint', '--config=config/eslint.json']);
+            .toEqual(['--cache=cache/eslint', '--config=config/eslint.json', '--inputs=(reports/lint.json,cache/eslint)']);
 
         for (const args of [
             ['--cache=/tmp/x'],
@@ -169,6 +169,10 @@ describe('planV2Migration', () => {
             ['--cache:"/tmp/x"'],
             ["--config:'C:\\temp\\x'"],
             ['--cache;/tmp/x'],
+            ['--cache,/tmp/x'],
+            ['--config(C:\\\\temp\\\\x)'],
+            ['--output,\\\\\\\\server\\\\share'],
+            ['--config(//server/share)'],
             ['--cache;"/tmp/x"'],
             ["--config;'C:\\temp\\x'"],
         ]) {
