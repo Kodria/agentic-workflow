@@ -325,6 +325,8 @@ describe('runSensors v2 lifecycle contract', () => {
         delete manifest.registryRoot;
         fs.writeFileSync(manifestPath, JSON.stringify(manifest));
         const before = fs.readFileSync(manifestPath, 'utf8');
+        const inventoryPath = path.join(home, 'registries.json');
+        const inventoryBefore = fs.readFileSync(inventoryPath, 'utf8');
 
         const { runSensors } = require('../../../src/commands/sensors/run');
         const result = await runSensors({ cwd: project, fast: true });
@@ -333,6 +335,7 @@ describe('runSensors v2 lifecycle contract', () => {
         expect(result.source).toMatchObject({ kind: 'legacy-rebound', registry: 'baseline' });
         expect(mockRunStructuredCommand).toHaveBeenCalledWith(expect.objectContaining({ executable: 'live-eslint' }), expect.any(Object));
         expect(fs.readFileSync(manifestPath, 'utf8')).toBe(before);
+        expect(fs.readFileSync(inventoryPath, 'utf8')).toBe(inventoryBefore);
     });
 
     it('scopes applicability detection and execution to packageRoot for a monorepo manifest', async () => {
@@ -512,11 +515,53 @@ describe('runSensors — not_certified + auto-discovery', () => {
 
         expect(out).toMatchObject({
             overall: 'not_certified', mode, reason: `${mode}-declared`,
+            declarationReason,
             projectRoot: tmpDir, manifestPath: path.join(tmpDir, '.awm', 'sensors.json'),
         });
         expect(out.sensors).toEqual([]);
         expect(mockRunCommand).not.toHaveBeenCalled();
         expect(mockRunStructuredCommand).not.toHaveBeenCalled();
+    });
+
+    it('reports bounded candidates and a remedy when v2 source resolution is ambiguous', async () => {
+        const previousHome = process.env.AWM_HOME;
+        const home = mkTmp();
+        try {
+            process.env.AWM_HOME = home;
+            const pack = {
+                schemaVersion: 2, name: 'js-ts', description: 'fixture', detects: ['package.json'],
+                coverage: { schemaVersion: 1, classes: { lint: { description: 'lint', detectors: [{ sensor: 'lint' }], remedy: { summary: 'fix', command: 'awm sensors init' } } } },
+                sensors: { lint: { applicability: { allFiles: ['package.json'] }, variants: [{
+                    id: 'eslint-10', priority: 1, certifiedRange: '>=10 <11',
+                    requirements: { tool: 'eslint', toolRange: '>=10 <11', runtime: 'node', runtimeRange: '>=0' },
+                    assets: [], formatter: 'generic', probe: { kind: 'package-script-present' },
+                    command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
+                }] } },
+            };
+            const registries = ['alpha', 'beta'];
+            fs.writeFileSync(path.join(home, 'registries.json'), JSON.stringify(registries.map(name => ({ name, remote: `https://example.test/${name}.git` }))));
+            for (const name of registries) {
+                const packDir = path.join(home, 'registries', name, 'sensor-packs', 'js-ts');
+                fs.mkdirSync(packDir, { recursive: true });
+                fs.writeFileSync(path.join(packDir, 'pack.json'), JSON.stringify(pack));
+            }
+            tmpDir = mkTmp();
+            fs.mkdirSync(path.join(tmpDir, '.git'));
+            fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({ schemaVersion: 2, pack: 'js-ts', sensors: {} }));
+
+            const out = await runSensors({ cwd: tmpDir });
+            expect(out).toMatchObject({
+                overall: 'not_certified', mode: 'source-ambiguous', reason: 'multiple-compatible-registries',
+                remedy: 'configure-one-logical-registry',
+                source: { kind: 'source-ambiguous', candidates: ['alpha', 'beta'] },
+            });
+            expect((out.source as { candidates: string[] }).candidates).toHaveLength(2);
+        } finally {
+            if (previousHome === undefined) delete process.env.AWM_HOME;
+            else process.env.AWM_HOME = previousHome;
+            fs.rmSync(home, { recursive: true, force: true });
+        }
     });
 });
 

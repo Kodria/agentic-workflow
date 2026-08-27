@@ -257,18 +257,25 @@ describe('computeSensorStatus', () => {
             fs.writeFileSync(path.join(packageDir, 'eslint.config.awm.mjs'), 'export default []');
 
             fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
-            fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({
-                schemaVersion: 2, pack: 'js-ts', packageRoot: 'cli', registryRoot: registry,
+            const manifestPath = path.join(tmpDir, '.awm', 'sensors.json');
+            fs.writeFileSync(manifestPath, JSON.stringify({
+                schemaVersion: 2, pack: 'js-ts', packageRoot: 'cli',
                 sensors: { lint: {
                     enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.', '--config', 'eslint.config.awm.mjs'] },
                     assets: ['eslint.config.awm.mjs'],
                     initializedCompatibility: { state: 'certified', reason: 'range-and-probe', variantId: 'eslint-10', toolVersion: '10.4.1', runtimeVersion: process.versions.node, certifiedRange: '>=10.0.0 <11.0.0', evidence: [] },
                 } },
             }));
+            const manifestBefore = fs.readFileSync(manifestPath);
+            const inventoryPath = path.join(home, 'registries.json');
+            const inventoryBefore = fs.readFileSync(inventoryPath);
 
             const result = await computeSensorStatus(tmpDir);
             expect(result.checks.lint).toMatchObject({ ok: true });
             expect(result.overall).toBe('READY');
+            expect(result.source).toMatchObject({ kind: 'legacy-rebound', registry: 'baseline' });
+            expect(fs.readFileSync(manifestPath)).toEqual(manifestBefore);
+            expect(fs.readFileSync(inventoryPath)).toEqual(inventoryBefore);
             expect(runCommand).not.toHaveBeenCalled();
             expect(runStructuredCommand).not.toHaveBeenCalled();
         } finally {
@@ -353,6 +360,7 @@ describe('computeSensorStatus', () => {
 
         await expect(computeSensorStatus(tmpDir)).resolves.toMatchObject({
             overall: 'NOT_CONFIGURED', mode, reason: diagnosticReason,
+            declarationReason,
             projectRoot: tmpDir, manifestPath: path.join(tmpDir, '.awm', 'sensors.json'),
         });
         expect(runCommand).not.toHaveBeenCalled();
@@ -374,6 +382,43 @@ describe('computeSensorStatus', () => {
                 overall: 'DEGRADED', pack: 'js-ts', mode: 'source-unavailable',
                 reason: 'no-compatible-registry', remedy: 'install-registry-or-run-awm-update',
                 projectRoot: tmpDir, manifestPath: path.join(tmpDir, '.awm', 'sensors.json'),
+            });
+        } finally {
+            if (previousHome === undefined) delete process.env.AWM_HOME;
+            else process.env.AWM_HOME = previousHome;
+            fs.rmSync(home, { recursive: true, force: true });
+        }
+    });
+
+    it('reports bounded candidates and a remedy when v2 source resolution is ambiguous', async () => {
+        const previousHome = process.env.AWM_HOME;
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-ambiguous-home-'));
+        try {
+            process.env.AWM_HOME = home;
+            const pack = {
+                schemaVersion: 2, name: 'js-ts', description: 'fixture', detects: ['package.json'],
+                coverage: { schemaVersion: 1, classes: { lint: { description: 'lint', detectors: [{ sensor: 'lint' }], remedy: { summary: 'fix', command: 'awm sensors init' } } } },
+                sensors: { lint: { applicability: { allFiles: ['package.json'] }, variants: [{
+                    id: 'eslint-10', priority: 1, certifiedRange: '>=10 <11',
+                    requirements: { tool: 'eslint', toolRange: '>=10 <11', runtime: 'node', runtimeRange: '>=0' },
+                    assets: [], formatter: 'generic', probe: { kind: 'package-script-present' },
+                    command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
+                }] } },
+            };
+            const registries = ['alpha', 'beta'];
+            fs.writeFileSync(path.join(home, 'registries.json'), JSON.stringify(registries.map(name => ({ name, remote: `https://example.test/${name}.git` }))));
+            for (const name of registries) {
+                const packDir = path.join(home, 'registries', name, 'sensor-packs', 'js-ts');
+                fs.mkdirSync(packDir, { recursive: true });
+                fs.writeFileSync(path.join(packDir, 'pack.json'), JSON.stringify(pack));
+            }
+            fs.mkdirSync(path.join(tmpDir, '.git'));
+            fs.mkdirSync(path.join(tmpDir, '.awm'), { recursive: true });
+            fs.writeFileSync(path.join(tmpDir, '.awm', 'sensors.json'), JSON.stringify({ schemaVersion: 2, pack: 'js-ts', sensors: {} }));
+
+            await expect(computeSensorStatus(tmpDir)).resolves.toMatchObject({
+                overall: 'DEGRADED', mode: 'source-ambiguous', reason: 'multiple-compatible-registries',
+                remedy: 'configure-one-logical-registry', candidates: ['alpha', 'beta'],
             });
         } finally {
             if (previousHome === undefined) delete process.env.AWM_HOME;
