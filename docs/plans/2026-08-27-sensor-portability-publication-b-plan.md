@@ -10,7 +10,7 @@
 
 **Tech Stack:** Node.js 22, TypeScript 5.9, Commander 14, Jest 30, local filesystem atomic rename, existing AWM pack materialization, Markdown and JSON. No runtime dependency is added.
 
-**Modo de ejecución:** interactivo
+**Modo de ejecución:** desatendido
 
 ---
 
@@ -151,6 +151,16 @@
 Execution must first satisfy `SRC-PUB-A-GATE`. If Publication A is not merged,
 published, and verified in Codex, Claude Code, and one fixed machine, stop without
 starting S1. Base on the published dual-reader's merge commit.
+
+**Entry evidence (2026-08-27):** Publication A is published as `agentic-workflow`
+`v9.5.0` at commit `0ec83a3`; `awm-baseline-registry` `v3.10.0` is published.
+Direct Git tag verification confirmed both releases. Packaged AWM validation completed
+with current CLI/baseline, strict preflight ready, sensor status READY, and full sensor
+pass in Claude Code Remote (Ubuntu) and a fixed macOS 15.6 machine. Codex exercised
+the same worktree surfaces; its strict currentness lookup was temporarily unavailable
+because of provider egress, while the published tags were independently verified. The
+owner explicitly accepted that provider-network limitation as non-blocking on
+2026-08-27. This evidence satisfies `SRC-PUB-A-GATE` for Publication B.
 
 This plan changes project files only when the operator explicitly invokes bootstrap
 without `--dry-run`. It never edits machine registry inventory, installs npm/project
@@ -347,4 +357,3 @@ overwrite.
 | BOOT-07..08 | S1 | `manifest.test.ts`, `materialize.test.ts`, `migrate.test.ts` |
 | BOOT-01; BOOT-03; BOOT-05..06 | S2 | `bootstrap.test.ts` |
 | PORT-01; BOOT-02; BOOT-04 | S3 | `index.test.ts`, `init.test.ts`, `core/init/steps.test.ts`, `sensor-bootstrap.e2e.test.ts`, `sensor-portability-contract.test.ts` |
-
