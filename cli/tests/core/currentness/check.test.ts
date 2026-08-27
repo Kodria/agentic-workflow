@@ -21,7 +21,7 @@ describe('checkCurrentness', () => {
             now: () => 1_700_000_000_000,
             fetch: jest.fn().mockResolvedValue({
                 ok: true,
-                text: async () => JSON.stringify({ 'dist-tags': { latest: '1.2.3' } }),
+                text: async () => JSON.stringify({ version: '1.2.3' }),
             }),
             readPreferences: () => ({ pins: {} }),
             listRegistries: () => [{ name: 'baseline', remote: 'https://example.test/team/repo.git', contentRoot: '/registry' }],
@@ -46,6 +46,21 @@ describe('checkCurrentness', () => {
         ]);
         expect(JSON.stringify(result)).not.toContain('secret');
         expect(result.components[1].source).toBe('https://example.test/team/repo.git');
+    });
+
+    it('reads npm currentness from the bounded latest metadata endpoint', async () => {
+        const fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            text: async () => JSON.stringify({ version: '1.2.3' }),
+        });
+        const { checkCurrentness } = require('../../../src/core/currentness/check');
+        const result = await checkCurrentness(root, deps({ fetch }));
+
+        expect(fetch).toHaveBeenCalledWith(
+            'https://registry.npmjs.org/agentic-workflow-manager/latest',
+            expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        );
+        expect(result.components[0]).toEqual(expect.objectContaining({ status: 'current', latest: '1.2.3' }));
     });
 
     it('marks an older pinned registry as pinned-behind with the unpin remedy', async () => {
@@ -74,7 +89,7 @@ describe('checkCurrentness', () => {
             cliVersion: () => '1.9007199254740992.0',
             fetch: jest.fn().mockResolvedValue({
                 ok: true,
-                text: async () => JSON.stringify({ 'dist-tags': { latest: '1.9007199254740993.0' } }),
+                text: async () => JSON.stringify({ version: '1.9007199254740993.0' }),
             }),
         }));
 
@@ -143,7 +158,7 @@ describe('checkCurrentness', () => {
     ])('fails closed for %s', async (name, git) => {
         const { checkCurrentness } = require('../../../src/core/currentness/check');
         const result = await checkCurrentness(root, deps(name === 'malformed npm semver'
-            ? { fetch: jest.fn().mockResolvedValue({ ok: true, text: async () => JSON.stringify({ 'dist-tags': { latest: 'latest' } }) }) }
+            ? { fetch: jest.fn().mockResolvedValue({ ok: true, text: async () => JSON.stringify({ version: 'latest' }) }) }
             : { git }
         ));
 
