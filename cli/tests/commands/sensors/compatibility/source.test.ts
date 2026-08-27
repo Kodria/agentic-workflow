@@ -92,4 +92,23 @@ describe('resolveSensorSource', () => {
         expect(JSON.stringify(result).length).toBeLessThan(4096);
         expect(JSON.stringify(result)).not.toContain('secret');
     });
+
+    it('bounds malformed-pack diagnostics for an extremely long valid registry name', () => {
+        const registryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-source-malformed-long-')); roots.push(registryRoot);
+        writePack(registryRoot);
+        fs.writeFileSync(path.join(registryRoot, 'sensor-packs', 'js-ts', 'pack.json'), '{"schemaVersion":');
+        const name = `a${'x'.repeat(200_000)}`;
+        let message = '';
+        try {
+            resolveSensorSource(manifest(path.join(os.tmpdir(), 'awm-source-malformed-long-missing')), {
+                registries: [{ name, remote: 'https://user:secret@example.invalid/registry', contentRoot: registryRoot }],
+            });
+        } catch (error) {
+            message = error instanceof Error ? error.message : String(error);
+        }
+        expect(message).toMatch(/invalid sensor pack/);
+        expect(message.length).toBeLessThan(4096);
+        expect(message).not.toContain(name);
+        expect(message).not.toContain('secret');
+    });
 });

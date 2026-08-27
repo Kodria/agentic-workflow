@@ -37,7 +37,7 @@ function requireRegistries(deps: Dependencies): RegistrySource[] {
 
 function compatible(source: PackSource, manifest: Extract<ParsedSensorManifest, { kind: 'v2' }>['pack']): boolean {
     let parsed: ReturnType<typeof parseSensorPack>;
-    try { parsed = parseSensorPack(JSON.parse(source.content), source.path); } catch { throw new Error(`registry "${source.registry.name}" has an invalid sensor pack`); }
+    try { parsed = parseSensorPack(JSON.parse(source.content), source.path); } catch { throw new Error(`registry "${diagnosticRegistryName(source.registry.name)}" has an invalid sensor pack`); }
     if (parsed.kind !== 'v2' || parsed.pack.name !== manifest.pack) return false;
     return Object.entries(manifest.sensors).every(([name, sensor]) =>
         parsed.pack.sensors[name]?.variants.some(variant => variant.id === sensor.variantId) === true,
