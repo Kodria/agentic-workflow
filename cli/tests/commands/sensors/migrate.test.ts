@@ -31,6 +31,13 @@ function resolvedSource(pack = 'js-ts', registry = 'baseline', contentRoot = `/h
     };
 }
 
+function sourceWithPack(mutator: (pack: Record<string, unknown>) => void) {
+    const source = resolvedSource();
+    const pack = JSON.parse(source.source.content) as Record<string, unknown>;
+    mutator(pack);
+    return { ...source, source: { ...source.source, content: JSON.stringify(pack) } };
+}
+
 describe('planV2Migration', () => {
     it('returns an equivalent portable v3 candidate bound to the exact logical source', () => {
         const plan = planV2Migration({ manifest: v2, source: resolvedSource() });
@@ -57,6 +64,18 @@ describe('planV2Migration', () => {
         expect(JSON.stringify(plan.equivalence)).not.toContain('/home/alice');
     });
 
+    it('accepts an old bound registry root only when an explicitly supplied logical source contains every selected sensor variant', () => {
+        const legacyBound = { ...v2, registryRoot: '/opt/old-machine/registries/baseline' };
+        expect(planV2Migration({ manifest: legacyBound, source: resolvedSource() }).candidate.source).toEqual({ registry: 'baseline' });
+
+        for (const source of [
+            sourceWithPack(pack => { (pack.sensors as Record<string, unknown>).other = (pack.sensors as Record<string, unknown>).lint; delete (pack.sensors as Record<string, unknown>).lint; }),
+            sourceWithPack(pack => { ((((pack.sensors as Record<string, unknown>).lint as Record<string, unknown>).variants as Record<string, unknown>[])[0]).id = 'eslint-8'; }),
+        ]) {
+            expect(() => planV2Migration({ manifest: legacyBound, source })).toThrow('compatible');
+        }
+    });
+
     it('rejects a replacement when any persisted sensor semantic differs', () => {
         const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-'));
         const manifestPath = path.join(project, 'sensors.json');
@@ -71,7 +90,7 @@ describe('planV2Migration', () => {
                 { ...candidate.sensors.lint, variantId: 'eslint-8', initializedCompatibility: { ...candidate.sensors.lint.initializedCompatibility, variantId: 'eslint-8', toolVersion: '8.0.0', certifiedRange: '>=8 <9' } },
                 withoutPolicy,
             ]) {
-                expect(() => replaceV2ManifestWithV3(manifestPath, { ...candidate, sensors: { lint: changed } })).toThrow('semantic mismatch');
+                expect(() => replaceV2ManifestWithV3(manifestPath, { ...candidate, sensors: { lint: changed } }, resolvedSource())).toThrow('semantic mismatch');
                 expect(fs.readFileSync(manifestPath, 'utf8')).toBe(original);
             }
         } finally {
@@ -109,8 +128,11 @@ describe('planV2Migration', () => {
         });
 
         for (const manifest of [
-            { ...v2, sensors: { lint: { ...sensor, command: { ...sensor.command, args: ['--cache', '/Users/alice/.cache/eslint'] } } } },
-            { ...v2, sensors: { lint: { ...sensor, command: { ...sensor.command, args: ['--cache', 'C:\\Users\\alice\\AppData\\Local'] } } } },
+            { ...v2, sensors: { lint: { ...sensor, command: { ...sensor.command, args: ['--cache', '/tmp/eslint-cache'] } } } },
+            { ...v2, sensors: { lint: { ...sensor, command: { ...sensor.command, args: ['--cache', 'C:\\build-cache'] } } } },
+            { ...v2, sensors: { lint: { ...sensor, command: { ...sensor.command, args: ['--cache', '\\\\server\\share\\eslint-cache'] } } } },
+            { ...v2, sensors: { lint: { ...sensor, command: { ...sensor.command, args: ['--cache', '/home/alice/.awm/registries/baseline/cache'] } } } },
+            { ...v2, sensors: { lint: { ...sensor, command: { ...sensor.command, args: ['--cache', '/home/alice/.awm/registries/baseline/cache'] } } } },
             { ...v2, sensors: { lint: { ...sensor, initializedCompatibility: { ...sensor.initializedCompatibility, reason: 'source /home/alice/.awm/registries/baseline' } } } },
             { ...v2, sensors: { lint: { ...sensor, initializedCompatibility: { ...sensor.initializedCompatibility, evidence: [{ kind: 'file', status: 'pass', path: '/home/alice/report.json' }] } } } },
         ]) expect(() => planV2Migration({ manifest, source: resolvedSource() })).toThrow(/physical path|contained relative asset/);
@@ -134,7 +156,7 @@ describe('planV2Migration', () => {
             fs.writeFileSync(manifestPath, original);
             const plan = planV2Migration({ manifest: v2, source: resolvedSource() });
             fs.chmodSync(project, 0o500);
-            expect(() => replaceV2ManifestWithV3(manifestPath, plan.candidate)).toThrow();
+            expect(() => replaceV2ManifestWithV3(manifestPath, plan.candidate, resolvedSource())).toThrow();
             expect(fs.readFileSync(manifestPath, 'utf8')).toBe(original);
         } finally {
             fs.chmodSync(project, 0o700);
@@ -150,7 +172,24 @@ describe('planV2Migration', () => {
             fs.writeFileSync(manifestPath, original);
             const candidate = planV2Migration({ manifest: v2, source: resolvedSource() }).candidate;
             const unsafe = { ...candidate, sensors: { lint: { ...candidate.sensors.lint, command: { ...candidate.sensors.lint.command, args: ['/home/alice/.awm/cache'] } } } };
-            expect(() => replaceV2ManifestWithV3(manifestPath, unsafe)).toThrow('physical path');
+            expect(() => replaceV2ManifestWithV3(manifestPath, unsafe, resolvedSource())).toThrow('physical path');
+            expect(fs.readFileSync(manifestPath, 'utf8')).toBe(original);
+        } finally {
+            fs.rmSync(project, { recursive: true, force: true });
+        }
+    });
+
+    it('requires replacement to use the supplied logical source rather than candidate provenance', () => {
+        const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-'));
+        const manifestPath = path.join(project, 'sensors.json');
+        const original = JSON.stringify({ ...v2, registryRoot: '/opt/legacy-bound-registry' }, null, 2) + '\n';
+        try {
+            fs.writeFileSync(manifestPath, original);
+            const source = resolvedSource();
+            const candidate = planV2Migration({ manifest: JSON.parse(original), source }).candidate;
+            expect(() => replaceV2ManifestWithV3(manifestPath, { ...candidate, source: { registry: 'other' } }, source)).toThrow('semantic mismatch');
+            expect(() => replaceV2ManifestWithV3(manifestPath, candidate, resolvedSource('js-ts', 'rebound'))).toThrow('semantic mismatch');
+            expect(() => replaceV2ManifestWithV3(manifestPath, candidate, sourceWithPack(pack => { ((((pack.sensors as Record<string, unknown>).lint as Record<string, unknown>).variants as Record<string, unknown>[])[0]).id = 'eslint-8'; }))).toThrow('compatible');
             expect(fs.readFileSync(manifestPath, 'utf8')).toBe(original);
         } finally {
             fs.rmSync(project, { recursive: true, force: true });
