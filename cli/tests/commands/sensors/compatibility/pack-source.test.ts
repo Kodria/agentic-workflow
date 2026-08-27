@@ -18,6 +18,21 @@ function resolveWithoutNoFollow(...args: Parameters<typeof resolvePackSource>): 
     return resolve(...args);
 }
 
+function resolveWithoutNoFollowWithExactStats(...args: Parameters<typeof resolvePackSource>): ReturnType<typeof resolvePackSource> {
+    let resolve: typeof resolvePackSource | undefined;
+    jest.isolateModules(() => {
+        jest.doMock('fs', () => {
+            const actual = jest.requireActual<typeof fs>('fs');
+            const constants = { ...actual.constants, O_NOFOLLOW: undefined };
+            return { __esModule: true, default: { ...actual, constants }, ...actual, constants };
+        });
+        resolve = require('../../../../src/commands/sensors/compatibility/pack-source').resolvePackSource as typeof resolvePackSource;
+    });
+    jest.dontMock('fs');
+    if (!resolve) throw new Error('portable exact-stat pack source resolver could not be loaded');
+    return resolve(...args);
+}
+
 describe('resolvePackSource', () => {
     it('uses the first registry containing the exact contained pack file', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-'));
@@ -97,6 +112,26 @@ describe('resolvePackSource', () => {
             expect(resolveWithoutNoFollow('js-ts', { registries: [{ name: 'safe', remote: '', contentRoot: root }] }).content)
                 .toBe('{"from":"portable"}');
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
+    it('uses exact bigint file identities for the portable safe-open fallback', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-bigint-'));
+        const lstat = jest.spyOn(fs, 'lstatSync');
+        const fstat = jest.spyOn(fs, 'fstatSync');
+        try {
+            const packFile = path.join(root, 'sensor-packs', 'js-ts', 'pack.json');
+            fs.mkdirSync(path.dirname(packFile), { recursive: true });
+            fs.writeFileSync(packFile, '{"from":"bigint"}');
+
+            expect(resolveWithoutNoFollowWithExactStats('js-ts', { registries: [{ name: 'safe', remote: '', contentRoot: root }] }).content)
+                .toBe('{"from":"bigint"}');
+            expect(lstat).toHaveBeenCalledWith(expect.any(String), { bigint: true });
+            expect(fstat).toHaveBeenCalledWith(expect.any(Number), { bigint: true });
+        } finally {
+            lstat.mockRestore();
+            fstat.mockRestore();
+            fs.rmSync(root, { recursive: true, force: true });
+        }
     });
 
     it('rejects a parent-directory swap between inspection and no-follow open', () => {

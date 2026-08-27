@@ -3,6 +3,21 @@ import path from 'path';
 import { mkCanonicalTmpDir } from '../../../support/tmp';
 import { resolveCoverageInputs } from '../../../../src/commands/sensors/coverage/resolve';
 
+function resolveCoverageWithoutNoFollow(cwd: string): ReturnType<typeof resolveCoverageInputs> {
+    let resolve: typeof resolveCoverageInputs | undefined;
+    jest.isolateModules(() => {
+        jest.doMock('fs', () => {
+            const actual = jest.requireActual<typeof fs>('fs');
+            const constants = { ...actual.constants, O_NOFOLLOW: undefined };
+            return { __esModule: true, default: { ...actual, constants }, ...actual, constants };
+        });
+        resolve = require('../../../../src/commands/sensors/coverage/resolve').resolveCoverageInputs as typeof resolveCoverageInputs;
+    });
+    jest.dontMock('fs');
+    if (!resolve) throw new Error('portable coverage resolver could not be loaded');
+    return resolve(cwd);
+}
+
 let root: string;
 let awmHome: string;
 let project: string;
@@ -80,7 +95,7 @@ test('normal regular coverage inputs resolve regardless of no-follow availabilit
     configure(['baseline']);
     writePack('baseline', 'js-ts', { name: 'js-ts', sensors: {}, coverage });
 
-    expect(resolveCoverageInputs(project)).toMatchObject({ kind: 'ready' });
+    expect(resolveCoverageWithoutNoFollow(project)).toMatchObject({ kind: 'ready' });
 });
 
 test.each([

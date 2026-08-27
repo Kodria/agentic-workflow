@@ -30,6 +30,12 @@ pack, and fallback finite timeouts. On every platform, test changed scope for a
 supported sensor, an unsupported sensor, zero applicable files, and a Git
 error; record requested/effective scope and files/reason in the JSON.
 
+For every native platform, the compiled coverage matrix must also read a regular
+`.awm/sensors.json` and registry `pack.json` successfully. POSIX uses
+`O_NOFOLLOW` when exposed; Windows uses the portable `bigint` file-identity
+fallback. Symlinks, identity replacement, and bounded-size races remain explicit
+failure cases on every platform.
+
 For v2, assert shell-free dispatch: filenames containing spaces and shell
 metacharacters are separate literal argv entries and no command is routed
 through a shell. This is a native three-OS requirement, not a Linux simulation.

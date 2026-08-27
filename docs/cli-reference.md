@@ -455,7 +455,7 @@ sensor commands, marker values, or inspected file content.
 
 Coverage gaps, unverifiable custom configuration, a missing `.awm/sensors.json`, and packs without a coverage reference are informative and exit `0`. A missing manifest returns `inconclusive/not_configured` and recommends `awm sensors init`; a legacy pack returns the distinct `inconclusive/no_reference` state and is never reported as covered. Malformed or unreadable manifests, packs, and coverage contracts exit non-zero with an actionable error.
 
-On native Windows, when Node does not expose a safe no-follow file-open primitive, coverage inspection fails closed with an explicit non-zero safety error instead of inspecting the manifest, pack, or evidence files. Coverage results resume once that primitive is available.
+Coverage inspection is portable across native Windows, macOS, and Linux. It opens regular authority files with `O_NOFOLLOW` where Node exposes it; when that primitive is unavailable, it compares the exact `bigint` device/inode identity, regular-file type, and bounded size before reading. A link, replacement, unobservable identity, or size race still fails closed with an actionable non-zero error.
 
 ### `awm sensors run`
 

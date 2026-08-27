@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { listRegistries, type RegistrySource } from '../../../core/registries';
+import { readInspectedBoundedFile, type SafeFileFailure } from './safe-file';
 
 const MAX_PACK_BYTES = 1024 * 1024;
 const MAX_DIAGNOSTIC_IDENTITY_LENGTH = 128;
@@ -24,9 +25,9 @@ function contained(root: string, candidate: string): boolean {
 
 /** Walk each component under contentRoot with lstat: realpath alone would hide an
  * internal symlink whose target happens to remain inside the registry. */
-function inspectContainedPack(root: string, pack: string, registryName: string): { candidate: string; stat: fs.Stats } | undefined {
-    let rootStat: fs.Stats;
-    try { rootStat = fs.lstatSync(root); } catch (error) {
+function inspectContainedPack(root: string, pack: string, registryName: string): { candidate: string; stat: fs.BigIntStats } | undefined {
+    let rootStat: fs.BigIntStats;
+    try { rootStat = fs.lstatSync(root, { bigint: true }); } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
         throw new Error(`registry "${registryName}" pack source root cannot be inspected`);
     }
@@ -36,8 +37,8 @@ function inspectContainedPack(root: string, pack: string, registryName: string):
     let candidate = root;
     for (let index = 0; index < components.length; index++) {
         candidate = path.join(candidate, components[index]);
-        let stat: fs.Stats;
-        try { stat = fs.lstatSync(candidate); } catch (error) {
+        let stat: fs.BigIntStats;
+        try { stat = fs.lstatSync(candidate, { bigint: true }); } catch (error) {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
             if ((error as NodeJS.ErrnoException).code === 'ENOTDIR') throw new Error(`registry "${registryName}" pack source has a non-regular or symbolic parent`);
             throw new Error(`registry "${registryName}" pack source cannot be inspected`);
@@ -49,28 +50,15 @@ function inspectContainedPack(root: string, pack: string, registryName: string):
     throw new Error('pack source component walk did not reach pack.json');
 }
 
-function readContainedPack(real: string, inspected: fs.Stats, registryName: string): string {
-    const noFollow = fs.constants.O_NOFOLLOW;
-    let descriptor: number;
-    try {
-        descriptor = fs.openSync(real, fs.constants.O_RDONLY | (typeof noFollow === 'number' ? noFollow : 0));
-    } catch {
-        throw new Error(`registry "${registryName}" pack source cannot be safely opened`);
-    }
-    try {
-        const stat = fs.fstatSync(descriptor);
-        if (!stat.isFile()) throw new Error(`registry "${registryName}" pack source must be a contained regular file, never a symbolic link`);
-        if (!Number.isSafeInteger(inspected.dev) || !Number.isSafeInteger(inspected.ino)
-            || !Number.isSafeInteger(stat.dev) || !Number.isSafeInteger(stat.ino)) {
-            throw new Error(`registry "${registryName}" pack source identity is unavailable during safe open`);
-        }
-        if (stat.dev !== inspected.dev || stat.ino !== inspected.ino) throw new Error(`registry "${registryName}" pack source changed identity during safe open`);
-        if (stat.size !== inspected.size) throw new Error(`registry "${registryName}" pack source changed size during safe open`);
-        if (stat.size > MAX_PACK_BYTES) throw new Error(`registry "${registryName}" pack source exceeds the 1 MiB limit`);
-        return fs.readFileSync(descriptor, 'utf8');
-    } finally {
-        fs.closeSync(descriptor);
-    }
+function readContainedPack(real: string, inspected: fs.BigIntStats, registryName: string): string {
+    const failure = (reason: SafeFileFailure): Error => {
+        if (reason === 'open') return new Error(`registry "${registryName}" pack source cannot be safely opened`);
+        if (reason === 'regular') return new Error(`registry "${registryName}" pack source must be a contained regular file, never a symbolic link`);
+        if (reason === 'identity') return new Error(`registry "${registryName}" pack source changed identity during safe open`);
+        if (reason === 'size') return new Error(`registry "${registryName}" pack source changed size during safe open`);
+        return new Error(`registry "${registryName}" pack source exceeds the 1 MiB limit`);
+    };
+    return readInspectedBoundedFile(real, inspected, MAX_PACK_BYTES, failure).toString('utf8');
 }
 
 /** Resolve only an exact, regular pack.json beneath the first configured registry.
@@ -87,7 +75,7 @@ export function listPackSources(pack: unknown, options: { registries?: RegistryS
         if (!inspected) continue;
         const { candidate, stat } = inspected;
         if (!stat.isFile()) throw new Error(`registry "${registryName}" pack source must be a contained regular file, never a symbolic link`);
-        if (stat.size > MAX_PACK_BYTES) throw new Error(`registry "${registryName}" pack source exceeds the 1 MiB limit`);
+        if (stat.size > BigInt(MAX_PACK_BYTES)) throw new Error(`registry "${registryName}" pack source exceeds the 1 MiB limit`);
         let root: string; let real: string;
         try { root = fs.realpathSync(registry.contentRoot); real = fs.realpathSync(candidate); } catch { throw new Error(`registry "${registryName}" pack source cannot be canonicalized`); }
         if (!contained(root, real)) throw new Error(`registry "${registryName}" pack source escapes its registry root`);

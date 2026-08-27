@@ -352,7 +352,7 @@ authority that affects users: it must never read a different or escaping pack co
 after inspection. It walks observable components with `lstat`, rejects observable
 symlinks, validates canonical containment, opens the final `pack.json` with
 `O_NOFOLLOW` where Node exposes it, and otherwise opens only the previously inspected
-final file before comparing its `dev` + `ino`, regular-file type, and size to the
+final file before comparing its exact `bigint` `dev` + `ino`, regular-file type, and size to the
 inspection. A changed or unobservable identity fails closed. This Windows fallback is
 the portable form of the same content-authority guarantee, not a relaxed symlink rule. A
 parent swapped to a symlink that still resolves to that same inspected inode has no
