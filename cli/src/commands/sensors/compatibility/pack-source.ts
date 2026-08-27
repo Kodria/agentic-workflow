@@ -25,6 +25,13 @@ function contained(root: string, candidate: string): boolean {
 /** Walk each component under contentRoot with lstat: realpath alone would hide an
  * internal symlink whose target happens to remain inside the registry. */
 function inspectContainedPack(root: string, pack: string, registryName: string): { candidate: string; stat: fs.Stats } | undefined {
+    let rootStat: fs.Stats;
+    try { rootStat = fs.lstatSync(root); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+        throw new Error(`registry "${registryName}" pack source root cannot be inspected`);
+    }
+    if (rootStat.isSymbolicLink()) throw new Error(`registry "${registryName}" pack source root must not be a symbolic link`);
+    if (!rootStat.isDirectory()) throw new Error(`registry "${registryName}" pack source root must be a regular directory`);
     const components = ['sensor-packs', pack, 'pack.json'];
     let candidate = root;
     for (let index = 0; index < components.length; index++) {

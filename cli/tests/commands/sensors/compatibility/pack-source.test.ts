@@ -42,6 +42,19 @@ describe('resolvePackSource', () => {
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
 
+    it('rejects a symlinked registry content root', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-root-link-'));
+        const target = path.join(root, 'target');
+        const linked = path.join(root, 'linked');
+        try {
+            fs.mkdirSync(path.join(target, 'sensor-packs', 'js-ts'), { recursive: true });
+            fs.writeFileSync(path.join(target, 'sensor-packs', 'js-ts', 'pack.json'), '{}');
+            fs.symlinkSync(target, linked, 'dir');
+            expect(() => resolvePackSource('js-ts', { registries: [{ name: 'linked', remote: '', contentRoot: linked }] }))
+                .toThrow(/symbolic|symlink/i);
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
     it('opens the resolved pack with no-follow semantics before reading it', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-nofollow-'));
         const open = jest.spyOn(fs, 'openSync');
