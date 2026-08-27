@@ -11,9 +11,29 @@ const sensor = {
 };
 const v2 = { schemaVersion: 2, pack: 'js-ts', packSelection: 'explicit' as const, registryRoot: '/home/alice/.awm/registries/baseline', packageRoot: 'cli', sensors: { lint: sensor }, concurrency: 2 };
 
+function resolvedSource(pack = 'js-ts', registry = 'baseline') {
+    return {
+        kind: 'logical',
+        source: {
+            path: `/home/alice/.awm/registries/${registry}/sensor-packs/${pack}/pack.json`,
+            content: JSON.stringify({
+                schemaVersion: 2, name: pack, description: 'fixture', detects: ['package.json'],
+                sensors: { lint: { applicability: { allFiles: ['package.json'] }, variants: [{
+                    id: 'eslint-9', priority: 1,
+                    requirements: { tool: 'eslint', toolRange: '>=9 <10', runtime: 'node', runtimeRange: '>=20' },
+                    certifiedRange: '>=9 <10', assets: [], formatter: 'generic', probe: { kind: 'eslint-print-config' },
+                    command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
+                }] } },
+                coverage: { schemaVersion: 1, classes: { linting: { description: 'fixture', detectors: [{ sensor: 'lint' }], remedy: { summary: 'fixture', command: 'npm test' } } } },
+            }),
+            registry: { name: registry, remote: 'https://example.invalid/baseline', contentRoot: `/home/alice/.awm/registries/${registry}` },
+        },
+    };
+}
+
 describe('planV2Migration', () => {
     it('returns an equivalent portable v3 candidate bound to the exact logical source', () => {
-        const plan = planV2Migration({ manifest: v2, source: { kind: 'logical', registry: 'baseline' } });
+        const plan = planV2Migration({ manifest: v2, source: resolvedSource() });
         expect(plan.equivalent).toBe(true);
         expect(plan.equivalence).toEqual({
             pack: true,
@@ -34,14 +54,34 @@ describe('planV2Migration', () => {
     });
 
     test.each([
-        [{ manifest: { schemaVersion: 3, mode: 'native-gate', reason: 'CI' }, source: { kind: 'logical', registry: 'baseline' } }, 'v2'],
+        [{ manifest: { schemaVersion: 3, mode: 'native-gate', reason: 'CI' }, source: resolvedSource() }, 'v2'],
         [{ manifest: v2, source: { kind: 'source-unavailable' } }, 'unavailable'],
         [{ manifest: v2, source: { kind: 'source-ambiguous' } }, 'ambiguous'],
-        [{ manifest: v2, source: { kind: 'logical', registry: 'Baseline' } }, 'registry'],
-        [{ manifest: v2, source: { kind: 'logical', registry: 'baseline', pack: 'python' } }, 'mismatch'],
-        [{ manifest: { pack: 'js-ts', sensors: { lint: 'npm run lint' } }, source: { kind: 'logical', registry: 'baseline' } }, 'v2'],
+        [{ manifest: v2, source: { ...resolvedSource(), source: { ...resolvedSource().source, registry: { ...resolvedSource().source.registry, name: 'Baseline' } } } }, 'registry'],
+        [{ manifest: v2, source: resolvedSource('python') }, 'exact v2 pack'],
+        [{ manifest: { pack: 'js-ts', sensors: { lint: 'npm run lint' } }, source: resolvedSource() }, 'v2'],
     ])('rejects unsafe migration input %#', (input, message) => {
         expect(() => planV2Migration(input)).toThrow(message);
+    });
+
+    it('rejects physical home and registry paths in persisted sensor semantics while retaining relative evidence', () => {
+        const relative = {
+            ...v2,
+            sensors: { lint: { ...sensor, command: { ...sensor.command, args: ['--config', 'config/eslint.json'] }, initializedCompatibility: {
+                ...sensor.initializedCompatibility, reason: 'reports/eslint.json', evidence: [{ kind: 'file', status: 'pass', path: 'reports/eslint.json' }],
+            } } },
+        };
+        expect(planV2Migration({ manifest: relative, source: resolvedSource() }).candidate.sensors.lint).toMatchObject({
+            command: { args: ['--config', 'config/eslint.json'] },
+            initializedCompatibility: { reason: 'reports/eslint.json', evidence: [{ path: 'reports/eslint.json' }] },
+        });
+
+        for (const manifest of [
+            { ...v2, sensors: { lint: { ...sensor, command: { ...sensor.command, args: ['--cache', '/Users/alice/.cache/eslint'] } } } },
+            { ...v2, sensors: { lint: { ...sensor, command: { ...sensor.command, args: ['--cache', 'C:\\Users\\alice\\AppData\\Local'] } } } },
+            { ...v2, sensors: { lint: { ...sensor, initializedCompatibility: { ...sensor.initializedCompatibility, reason: 'source /home/alice/.awm/registries/baseline' } } } },
+            { ...v2, sensors: { lint: { ...sensor, initializedCompatibility: { ...sensor.initializedCompatibility, evidence: [{ kind: 'file', status: 'pass', path: '/home/alice/report.json' }] } } } },
+        ]) expect(() => planV2Migration({ manifest, source: resolvedSource() })).toThrow(/physical path|contained relative asset/);
     });
 
     it('validates before atomic replacement and leaves the v2 original intact on write failure', () => {
@@ -50,12 +90,27 @@ describe('planV2Migration', () => {
         const original = JSON.stringify(v2, null, 2) + '\n';
         try {
             fs.writeFileSync(manifestPath, original);
-            const plan = planV2Migration({ manifest: v2, source: { kind: 'logical', registry: 'baseline' } });
+            const plan = planV2Migration({ manifest: v2, source: resolvedSource() });
             fs.chmodSync(project, 0o500);
             expect(() => replaceV2ManifestWithV3(manifestPath, plan.candidate)).toThrow();
             expect(fs.readFileSync(manifestPath, 'utf8')).toBe(original);
         } finally {
             fs.chmodSync(project, 0o700);
+            fs.rmSync(project, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects a physical sensor path before replacement and preserves the v2 original', () => {
+        const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-'));
+        const manifestPath = path.join(project, 'sensors.json');
+        const original = JSON.stringify(v2, null, 2) + '\n';
+        try {
+            fs.writeFileSync(manifestPath, original);
+            const candidate = planV2Migration({ manifest: v2, source: resolvedSource() }).candidate;
+            const unsafe = { ...candidate, sensors: { lint: { ...candidate.sensors.lint, command: { ...candidate.sensors.lint.command, args: ['/home/alice/.awm/cache'] } } } };
+            expect(() => replaceV2ManifestWithV3(manifestPath, unsafe)).toThrow('physical path');
+            expect(fs.readFileSync(manifestPath, 'utf8')).toBe(original);
+        } finally {
             fs.rmSync(project, { recursive: true, force: true });
         }
     });
