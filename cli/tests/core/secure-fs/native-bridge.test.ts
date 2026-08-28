@@ -466,6 +466,10 @@ nativeOnly('native secure-fs identity fence fixtures', () => {
             failure = error as NodeJS.ErrnoException;
         }
 
+        if (process.platform === 'win32' && failure?.message.includes('could not stage transaction')) {
+            console.error(`::error title=secure-fs staging diagnostic::${failure.message}`);
+        }
+
         expect(failure).toBeDefined();
         expect(failure).toMatchObject({ code: 'AWM_SECURE_FS_DESTINATION_EXISTS' });
         expect(fs.readFileSync(target, 'utf8')).toBe('owner bytes');
