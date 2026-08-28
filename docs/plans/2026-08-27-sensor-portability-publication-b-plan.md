@@ -8,7 +8,7 @@
 
 **Architecture:** Reuse Publication A's parser, project resolver, and logical source binding to build a pure bootstrap planner and a narrow atomic applier. Migration preserves v2 sensor semantics, never mutates machine state, and writes no project bytes during dry-run or invalid/ambiguous cases.
 
-**Tech Stack:** Node.js 22, TypeScript 5.9, Commander 14, Jest 30, local filesystem atomic rename, existing AWM pack materialization, Markdown and JSON. No runtime dependency is added.
+**Tech Stack:** Node.js 22, TypeScript 5.9, Commander 14, Jest 30, Node-API native secure-fs bridge with precompiled Linux/macOS/Windows artifacts, existing AWM pack materialization, Markdown and JSON. The bridge is an internal packaged runtime component; it never compiles on a client machine.
 
 **Modo de ejecución:** desatendido
 
@@ -18,7 +18,7 @@
 {
   "schema": "compact-slices/v1",
   "planId": "issue-129-sensor-portability-publication-b",
-  "requirements": ["GATE-01", "PORT-01", "BOOT-01", "BOOT-02", "BOOT-03", "BOOT-04", "BOOT-05", "BOOT-06", "BOOT-07", "BOOT-08"],
+  "requirements": ["GATE-01", "PORT-01", "PORT-02", "BOOT-01", "BOOT-02", "BOOT-03", "BOOT-04", "BOOT-05", "BOOT-06", "BOOT-07", "BOOT-08"],
   "sources": [
     {
       "id": "SRC-DESIGN-B",
@@ -57,6 +57,12 @@
       "program": "npm",
       "args": ["--prefix", "cli", "test", "--", "tests/commands/sensors/exec.test.ts", "tests/commands/sensors/run.test.ts"],
       "covers": ["GATE-01"]
+    },
+    {
+      "id": "CMD-SECURE-FS-NATIVE",
+      "program": "npm",
+      "args": ["--prefix", "cli", "test", "--", "tests/core/secure-fs/native-bridge.test.ts", "tests/commands/sensors/compatibility/safe-file.test.ts"],
+      "covers": ["PORT-02"]
     },
     {
       "id": "CMD-MIGRATION-CORE",
@@ -109,6 +115,19 @@
   ],
   "slices": [
     {
+      "id": "N0",
+      "title": "Package a native cross-platform secure-fs bridge",
+      "requirements": ["PORT-02"],
+      "dependsOn": ["S0"],
+      "sectionAnchor": "slice-n0",
+      "sources": ["SRC-DESIGN-B", "SRC-MATERIALIZE"],
+      "redCommands": ["CMD-SECURE-FS-NATIVE"],
+      "greenCommands": ["CMD-SECURE-FS-NATIVE", "CMD-TYPECHECK-B"],
+      "reviewEvidence": ["specification", "code-quality"],
+      "risk": "full-context",
+      "fallback": ["a declared platform is missing its verified native artifact or cannot perform a descriptor/handle-bound no-replace publication"]
+    },
+    {
       "id": "S0",
       "title": "Preserve structured sensor output for baseline certification",
       "requirements": ["GATE-01"],
@@ -125,7 +144,7 @@
       "id": "S1",
       "title": "Serialize v3 and prove semantic migration",
       "requirements": ["BOOT-07", "BOOT-08"],
-      "dependsOn": ["S0"],
+      "dependsOn": ["N0"],
       "sectionAnchor": "slice-s1",
       "sources": ["SRC-DESIGN-B", "SRC-PUB-A-GATE", "SRC-MATERIALIZE"],
       "redCommands": ["CMD-MIGRATION-CORE"],
@@ -246,6 +265,74 @@ amendment on 2026-08-27.
   command that remains non-pass. Run `CMD-STRUCTURED-EXEC` and `CMD-SENSORS-B` to
   GREEN, then commit the repair separately from S1.
 
+<a id="slice-n0"></a>
+### Slice N0: Package a native cross-platform secure-fs bridge
+
+#### Amendment rationale
+
+Publication B must create and migrate a project from Linux, macOS, and Windows
+without treating a changed ancestor, reparse point, or concurrent manifest as a safe
+pathname operation. Node's portable filesystem API does not expose the Windows
+handle-relative/no-replace primitives needed for that contract. The owner approved a
+small internal Node-API bridge on 2026-08-28 rather than weakening the portability or
+integrity requirement.
+
+#### Requirement
+
+- **PORT-02:** WHEN bootstrap or migration writes a project declaration on a supported
+  platform, THE SYSTEM SHALL use a packaged platform-native handle/descriptor-bound
+  transaction that rejects reparse points/symlinks, verifies identity, and publishes
+  without replacing a concurrent target. Every published CLI archive SHALL include a
+  verified native artifact for Linux, macOS, and Windows, and SHALL fail clearly before
+  any project write when the artifact is absent or incompatible.
+
+#### Implementation
+
+- [ ] Add RED bridge-contract tests covering load selection by `process.platform` and
+  `process.arch`, missing/incompatible artifact before mutation, ancestor
+  symlink/reparse rejection, final-file identity fencing, and no-replace publication.
+- [ ] Create a narrow TypeScript boundary under `cli/src/core/secure-fs/` that accepts
+  validated absolute project paths and opaque byte payloads only. It exposes
+  `readRegularFile`, `writeProjectTransaction`, and an observable platform-artifact
+  status; it never accepts arbitrary shell commands or falls back to unchecked Node
+  pathname writes.
+- [ ] Add a Node-API implementation and build configuration that uses POSIX directory
+  descriptors plus `openat`/`renameat`-style no-follow operations on Linux/macOS, and
+  Windows directory/file handles with `FILE_FLAG_BACKUP_SEMANTICS`,
+  `FILE_FLAG_OPEN_REPARSE_POINT`, final-handle identity checks, and a fail-if-exists
+  rename operation. Package prebuilt artifacts for x64 and arm64 where the CLI
+  supports them; no `node-gyp` build runs during ordinary `npm install`.
+- [ ] Replace the temporary JS-only write path in `safe-file.ts`, `migrate.ts`, and
+  `materialize.ts` with this boundary. Preserve pure planning; only apply operations
+  invoke the bridge. Remove any platform fail-closed behavior that would make a
+  supported platform unable to bootstrap solely because the JS layer lacks `openat`.
+- [ ] Add CI matrix build and artifact verification for Linux, macOS, and Windows,
+  including package-contents assertions that the selected artifact ships in the npm
+  archive. Run `CMD-SECURE-FS-NATIVE` and `CMD-TYPECHECK-B` to GREEN, then commit the
+  bridge separately.
+
+#### Edge cases
+
+The loader validates platform/architecture names and artifact checksum before loading.
+An unsupported architecture is a bounded explicit error with no project mutation.
+Windows junctions and all reparse points are rejected, not followed. A concurrent
+target appears as an explicit conflict and preserves both project bytes and the
+caller's preexisting files. Native code has no network, registry, environment-update,
+or shell capability.
+
+#### Evidence
+
+The native contract tests use a fake bridge only to verify loader/error policy; native
+integration tests exercise real filesystem fixtures per CI OS. Package inspection
+proves the runtime binary is present. Reviewers reject a platform-specific no-op,
+runtime compilation, or a JS path fallback for a supported platform.
+
+#### Fallback
+
+Do not publish Publication B until every declared platform artifact is available and
+tested. An unsupported *new* architecture may return a pre-write explicit error, but
+Linux, macOS, and Windows are required release targets and cannot use the fallback.
+
 <a id="slice-s1"></a>
 ### Slice S1: Serialize v3 and prove semantic migration
 
@@ -280,6 +367,15 @@ Reject registry IDs with separators, control characters, or unstable casing. Pre
 disabled sensors and custom timeouts exactly. Never translate legacy string commands
 in this migration path. If candidate serialization parses differently from the input
 semantic model, fail before write. A failed rename leaves the original bytes intact.
+
+**Source-boundary clarification (2026-08-27):** A path-bound `legacy-bound` result
+is evidence of the old machine provenance, not a portable logical identity. It may be
+migrated only after the caller has resolved one configured logical registry and passes
+that selected pack source to the pure migration planner. A `legacy-rebound` result is
+eligible only when it denotes that unique configured logical source. The atomic applier
+receives the same validated logical source and rechecks the candidate binding; it never
+infers an inventory name from a physical root. This preserves fail-closed migration
+without persisting `manifest-provenance` or a machine path.
 
 #### Evidence
 
