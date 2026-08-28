@@ -86,10 +86,10 @@ function exactLogicalSource(input: unknown, pack: string): V2MigrationSource['so
         || typeof registry.contentRoot !== 'string' || !path.isAbsolute(registry.contentRoot) || path.normalize(registry.contentRoot) !== registry.contentRoot) {
         throw new Error('v2 migration source registry must be a stable logical registry');
     }
-    let canonicalContentRoot: string;
-    try { canonicalContentRoot = fs.realpathSync(registry.contentRoot); }
-    catch { throw new Error('v2 migration source registry root must be canonicalizable'); }
-    const expectedPath = path.join(canonicalContentRoot, 'sensor-packs', pack, 'pack.json');
+    // `resolveSensorSource` already selected and read this exact source. The
+    // migration planner consumes that immutable snapshot; re-canonicalizing its
+    // host directory would make a no-write plan depend on later filesystem state.
+    const expectedPath = path.join(registry.contentRoot, 'sensor-packs', pack, 'pack.json');
     if (source.path !== expectedPath) throw new Error('v2 migration source must contain an exact resolved pack');
     let parsedSource;
     try { parsedSource = parseSensorPack(JSON.parse(source.content), 'v2 migration resolved source'); }
@@ -116,10 +116,11 @@ function assertSourceCompatibleWithManifest(source: V2MigrationSource['source'],
 function hasPhysicalSensorPath(value: unknown, registryRoots: readonly (string | undefined)[]): boolean {
     if (typeof value === 'string') {
         const normalized = path.posix.normalize(value.replace(/\\/g, '/')).toLowerCase();
+        const withoutWebUrls = value.replace(/https?:\/\/[^\s"']+/gi, '');
         const roots = registryRoots
             .filter((root): root is string => typeof root === 'string' && root.length > 0)
             .map(root => path.posix.normalize(root.replace(/\\/g, '/')).toLowerCase());
-        const hasAbsolutePathAtTokenBoundary = /(?:^|[^A-Za-z0-9_.~\/\\-])["']?(?:\/|\\|[A-Za-z]:|\/\/)/.test(value);
+        const hasAbsolutePathAtTokenBoundary = /(?:^|[^A-Za-z0-9_.~\/\\-])["']?(?:\/|\\|[A-Za-z]:|\/\/)/.test(withoutWebUrls);
         return roots.some(root => normalized.includes(root))
             || hasAbsolutePathAtTokenBoundary;
     }

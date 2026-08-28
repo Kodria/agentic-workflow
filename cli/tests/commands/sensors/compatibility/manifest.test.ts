@@ -81,6 +81,57 @@ describe('sensor manifest contract', () => {
         expect(parseSensorManifest(JSON.parse(serialized), 'sensors.json')).toEqual({ kind: 'v3', pack: manifest });
     });
 
+    it('refuses to serialize a v3 declaration containing a nested physical path', () => {
+        const manifest = {
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            pack: 'js-ts',
+            source: { registry: 'baseline' },
+            sensors: {
+                lint: {
+                    ...validV2Manifest().sensors.lint,
+                    command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['--config=/home/operator/.config/eslint.config.mjs'] },
+                },
+            },
+        };
+
+        expect(() => serializeManifestV3(manifest)).toThrow('physical path');
+    });
+
+    it('serializes a portable URL in a structured command argument', () => {
+        const manifest = {
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            pack: 'js-ts',
+            source: { registry: 'baseline' },
+            sensors: {
+                lint: {
+                    ...validV2Manifest().sensors.lint,
+                    command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['--rules=https://example.invalid/rules.json'] },
+                },
+            },
+        };
+
+        expect(JSON.parse(serializeManifestV3(manifest)).sensors.lint.command.args).toEqual(['--rules=https://example.invalid/rules.json']);
+    });
+
+    it('retains a portable URL in a structured command argument', () => {
+        const manifest = {
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            pack: 'js-ts',
+            source: { registry: 'baseline' },
+            sensors: {
+                lint: {
+                    ...validV2Manifest().sensors.lint,
+                    command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['--rules-url=https://example.test/eslint/rules.json'] },
+                },
+            },
+        };
+
+        expect(() => serializeManifestV3(manifest)).not.toThrow();
+    });
+
     it('accepts and serializes a positive v2 project timeout (R3)', () => {
         const manifest = validV2Manifest();
         (manifest.sensors.lint as Record<string, unknown>).timeout = 45_000;

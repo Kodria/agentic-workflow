@@ -200,6 +200,23 @@ function provenanceRoot(value: unknown, source: unknown): string {
     return parsed;
 }
 
+/**
+ * A v3 declaration is copied between machines, so no nested string may retain
+ * a host path. Structured command arguments are intentionally free-form and
+ * are therefore the only remaining place an otherwise validated declaration
+ * could hide one.
+ */
+function containsPhysicalPath(value: unknown): boolean {
+    if (typeof value === 'string') {
+        // Web URLs are portable command values, not host filesystem paths.
+        const withoutWebUrls = value.replace(/https?:\/\/[^\s"']+/gi, '');
+        return /(?:^|[^A-Za-z0-9_.~\/\\-])["']?(?:\/|\\|[A-Za-z]:|\/\/)/.test(withoutWebUrls);
+    }
+    return Array.isArray(value)
+        ? value.some(containsPhysicalPath)
+        : isRecord(value) && Object.values(value).some(containsPhysicalPath);
+}
+
 function parseV2Manifest(value: UnknownRecord, source: unknown): SensorManifestV2 {
     fields(value, ['schemaVersion', 'pack', 'packSelection', 'registryRoot', 'packageRoot', 'sensors', 'concurrency'], source, 'root');
     if (value.schemaVersion !== 2) invalid(source, `unsupported manifest schemaVersion ${String(value.schemaVersion)}; supported: legacy, 2; upgrade or migrate the manifest`);
@@ -274,6 +291,9 @@ export function serializeManifestV3(input: unknown): string {
     const parsed = parseSensorManifest(input, 'manifest serialization');
     if (parsed.kind !== 'v3' || parsed.pack.mode !== 'project-sensors') {
         throw new Error('Cannot serialize a non-project-sensors manifest as v3');
+    }
+    if (containsPhysicalPath(parsed.pack)) {
+        throw new Error('Cannot serialize a v3 declaration containing a physical path');
     }
     return JSON.stringify(parsed.pack, null, 2) + '\n';
 }

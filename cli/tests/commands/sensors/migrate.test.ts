@@ -182,18 +182,11 @@ describe('planV2Migration', () => {
         expect(() => planV2Migration({ manifest: v2, source: mismatched })).toThrow('exact resolved pack');
     });
 
-    it('canonicalizes a configured source root before comparing its exact selected pack', () => {
-        const registryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-registry-'));
-        const linkedRoot = path.join(path.dirname(registryRoot), `${path.basename(registryRoot)}-linked`);
-        try {
-            fs.symlinkSync(registryRoot, linkedRoot);
-            const source = resolvedSource('js-ts', 'baseline', linkedRoot);
-            source.source.path = path.join(registryRoot, 'sensor-packs', 'js-ts', 'pack.json');
-            expect(planV2Migration({ manifest: v2, source }).candidate.source).toEqual({ registry: 'baseline' });
-        } finally {
-            fs.rmSync(linkedRoot, { force: true });
-            fs.rmSync(registryRoot, { recursive: true, force: true });
-        }
+    it('plans from the resolved source snapshot without probing its physical root', () => {
+        const unavailableRoot = path.join(os.tmpdir(), `awm-migrate-unavailable-${Date.now()}`);
+        const source = resolvedSource('js-ts', 'baseline', unavailableRoot);
+
+        expect(planV2Migration({ manifest: v2, source }).candidate.source).toEqual({ registry: 'baseline' });
     });
 
     test.each([
@@ -262,6 +255,21 @@ describe('planV2Migration', () => {
             const manifest = { ...v2, sensors: { lint: { ...sensor, command: { ...sensor.command, args } } } };
             expect(() => planV2Migration({ manifest, source: resolvedSource() })).toThrow('physical path');
         }
+    });
+
+    it('retains an HTTPS URL command argument as portable sensor semantics', () => {
+        const manifest = {
+            ...v2,
+            sensors: {
+                lint: {
+                    ...sensor,
+                    command: { ...sensor.command, args: ['--rules-url=https://example.test/eslint/rules.json'] },
+                },
+            },
+        };
+
+        expect(planV2Migration({ manifest, source: resolvedSource() }).candidate.sensors.lint.command.args)
+            .toEqual(['--rules-url=https://example.test/eslint/rules.json']);
     });
 
     test.each(['C:package', 'C:/package'])('rejects a Windows drive-qualified packageRoot: %s', packageRoot => {
