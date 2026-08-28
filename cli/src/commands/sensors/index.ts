@@ -2,7 +2,6 @@ import { Command } from 'commander';
 import pc from 'picocolors';
 import { log } from '@clack/prompts';
 import { runSensors, findManifestDir } from './run';
-import { initSensors } from './init';
 import { computeSensorStatus } from './status';
 import { installSensorHook } from './install';
 import { buildBaseline, writeBaseline } from './baseline';
@@ -68,19 +67,16 @@ export function registerSensorsCommand(program: Command): void {
         .action(async (opts) => {
             const registryRoot = opts.registryRoot ?? capabilityRoot('sensor-packs') ?? undefined;
             try {
-                const result = await initSensors({ configure: opts.configure, registryRoot, pack: opts.pack, packageRoot: opts.packageRoot });
-                log.success(`Detected: ${result.detection.pack} (${result.detection.indicators.join(', ') || 'fallback'})`);
+                const plan = await planSensorBootstrap(process.cwd(), { mode: 'project-sensors', registryRoot, configure: opts.configure, pack: opts.pack, packageRoot: opts.packageRoot });
+                if (plan.kind === 'blocked') throw new Error(`${plan.reason}: ${plan.remedy}`);
+                if (plan.kind === 'noop') { log.info('already-configured'); return; }
+                if (plan.kind === 'migrate') throw new Error('sensors init does not migrate an existing v2 manifest; run awm sensors bootstrap');
+                const result = applySensorBootstrap(plan);
+                const detected = plan.manifest.mode === 'project-sensors' ? plan.manifest.pack : 'none';
+                log.success(`Detected: ${detected}`);
                 // Said BEFORE "Wrote .awm/sensors.json": the manifest about to be
                 // reported as written is not the one the detection implied.
-                if (result.unavailablePack) {
-                    log.warn(
-                        `No '${result.unavailablePack}' sensor-pack in the registry — wrote the `
-                        + `'${result.manifest.pack}' pack instead (${Object.keys(result.manifest.sensors).length} sensors). `
-                        + 'Run `awm update`, or add a registry that ships it, then re-run `awm sensors init`.',
-                    );
-                }
-                log.success('Wrote .awm/sensors.json');
-                result.configured.forEach((f: string) => log.info(`  Installed ${f}`));
+                log.success(`${result} .awm/sensors.json`);
             } catch (e) {
                 log.error(e instanceof Error ? e.message : String(e));
                 process.exit(1);

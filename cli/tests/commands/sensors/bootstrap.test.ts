@@ -7,7 +7,7 @@ jest.mock('../../../src/commands/sensors/compatibility/live', () => ({ resolvePa
 jest.mock('../../../src/commands/sensors/compatibility/source', () => ({ resolveSensorSource: jest.fn() }));
 jest.mock('../../../src/commands/sensors/migrate', () => ({ planV2Migration: jest.fn(), replaceV2ManifestWithV3: jest.fn() }));
 jest.mock('../../../src/commands/sensors/compatibility/materialize', () => ({ materializePortableSensors: jest.fn() }));
-jest.mock('../../../src/commands/sensors/compatibility/safe-file', () => ({ writeProjectFile: jest.fn() }));
+jest.mock('../../../src/commands/sensors/compatibility/safe-file', () => ({ writeProjectFile: jest.fn(), withProjectLease: jest.fn((_root: string, operation: () => unknown) => operation()) }));
 
 import { applySensorBootstrap, planSensorBootstrap } from '../../../src/commands/sensors/bootstrap';
 import { resolveSensorProject } from '../../../src/commands/sensors/project';
@@ -19,7 +19,11 @@ import { resolveSensorSource } from '../../../src/commands/sensors/compatibility
 import { planV2Migration } from '../../../src/commands/sensors/migrate';
 import { replaceV2ManifestWithV3 } from '../../../src/commands/sensors/migrate';
 import { materializePortableSensors } from '../../../src/commands/sensors/compatibility/materialize';
-import { writeProjectFile } from '../../../src/commands/sensors/compatibility/safe-file';
+import { withProjectLease, writeProjectFile } from '../../../src/commands/sensors/compatibility/safe-file';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { createHash } from 'crypto';
 
 const root = '/project';
 const missing = { state: 'missing' as const, projectRoot: root, manifestPath: `${root}/.awm/sensors.json` };
@@ -43,7 +47,7 @@ describe('planSensorBootstrap', () => {
 
     it('plans a versioned native declaration without writing it', async () => {
         await expect(planSensorBootstrap(root, { mode: 'native-gate', reason: 'remote CI', dryRun: true })).resolves.toEqual({
-            kind: 'create', projectRoot: root, manifestPath: `${root}/.awm/sensors.json`, dryRun: true,
+            kind: 'create', projectRoot: root, manifestPath: `${root}/.awm/sensors.json`, dryRun: true, configure: true,
             changes: [{ path: '.awm/sensors.json', action: 'create' }],
             manifest: { schemaVersion: 3, mode: 'native-gate', reason: 'remote CI' },
         });
@@ -80,10 +84,15 @@ describe('planSensorBootstrap', () => {
         const v2 = { schemaVersion: 2, pack: 'js-ts', sensors: {} };
         const resolution = { kind: 'logical', source };
         const migration = { candidate: { schemaVersion: 3, mode: 'project-sensors', pack: 'js-ts', source: { registry: 'baseline' }, sensors: {} }, equivalent: true, equivalence: {} };
-        (resolveSensorProject as jest.Mock).mockReturnValue({ state: 'configured', projectRoot: root, manifestPath: `${root}/.awm/sensors.json`, packageRoot: root, manifest: { kind: 'v2', pack: v2 } });
-        (resolveSensorSource as jest.Mock).mockReturnValue(resolution);
-        (planV2Migration as jest.Mock).mockReturnValue(migration);
-        await expect(planSensorBootstrap(root)).resolves.toMatchObject({ kind: 'migrate', changes: [{ path: '.awm/sensors.json', action: 'replace' }], migration });
+        const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-bootstrap-plan-'));
+        const manifestPath = path.join(project, 'sensors.json');
+        try {
+            fs.writeFileSync(manifestPath, JSON.stringify(v2));
+            (resolveSensorProject as jest.Mock).mockReturnValue({ state: 'configured', projectRoot: project, manifestPath, packageRoot: project, manifest: { kind: 'v2', pack: v2 } });
+            (resolveSensorSource as jest.Mock).mockReturnValue(resolution);
+            (planV2Migration as jest.Mock).mockReturnValue(migration);
+            await expect(planSensorBootstrap(project)).resolves.toMatchObject({ kind: 'migrate', changes: [{ path: '.awm/sensors.json', action: 'replace' }], migration });
+        } finally { fs.rmSync(project, { recursive: true, force: true }); }
     });
 
     it('plans a concrete portable project-sensors declaration from one logical source', async () => {
@@ -125,6 +134,7 @@ describe('planSensorBootstrap', () => {
     it('publishes native declarations and project sensors through distinct native boundaries', () => {
         expect(applySensorBootstrap({ kind: 'create', projectRoot: root, manifestPath: `${root}/.awm/sensors.json`, dryRun: false, changes: [{ path: '.awm/sensors.json', action: 'create' }], manifest: { schemaVersion: 3, mode: 'native-gate', reason: 'CI' } })).toBe('created');
         expect(writeProjectFile).toHaveBeenCalledWith(root, '.awm/sensors.json', expect.any(Buffer), { mode: 'create', createParents: true });
+        expect(withProjectLease).toHaveBeenCalledWith(root, expect.any(Function));
         const manifest = { schemaVersion: 3 as const, mode: 'project-sensors' as const, pack: 'js-ts', source: { registry: 'baseline' }, sensors: {} };
         expect(applySensorBootstrap({ kind: 'create', projectRoot: root, manifestPath: `${root}/.awm/sensors.json`, dryRun: false, changes: [{ path: '.awm/sensors.json', action: 'create' }], manifest, source })).toBe('created');
         expect(materializePortableSensors).toHaveBeenCalledWith(expect.objectContaining({ projectRoot: root, pack: 'js-ts', source, sensors: {} }));
@@ -133,8 +143,25 @@ describe('planSensorBootstrap', () => {
     it('delegates a validated migration to the fenced replacement', () => {
         const candidate = { schemaVersion: 3, mode: 'project-sensors', pack: 'js-ts', source: { registry: 'baseline' }, sensors: {} };
         const migration = { candidate, equivalent: true, equivalence: {} } as never;
-        const plan = { kind: 'migrate' as const, projectRoot: root, manifestPath: `${root}/.awm/sensors.json`, dryRun: false, changes: [{ path: '.awm/sensors.json', action: 'replace' }] as [{ path: '.awm/sensors.json'; action: 'replace' }], migration, source };
-        expect(applySensorBootstrap(plan)).toBe('migrated');
-        expect(replaceV2ManifestWithV3).toHaveBeenCalledWith(plan.manifestPath, candidate, source);
+        const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-bootstrap-plan-'));
+        const manifestPath = path.join(project, 'sensors.json');
+        try {
+            const bytes = Buffer.from('{"schemaVersion":2}\n');
+            fs.writeFileSync(manifestPath, bytes);
+            const plan = { kind: 'migrate' as const, projectRoot: project, manifestPath, dryRun: false, changes: [{ path: '.awm/sensors.json', action: 'replace' }] as [{ path: '.awm/sensors.json'; action: 'replace' }], migration, source, originalDigest: createHash('sha256').update(bytes).digest('hex') };
+            expect(applySensorBootstrap(plan)).toBe('migrated');
+            expect(replaceV2ManifestWithV3).toHaveBeenCalledWith(plan.manifestPath, candidate, source);
+        } finally { fs.rmSync(project, { recursive: true, force: true }); }
+    });
+
+    it('rejects a migration plan whose manifest changed after planning', () => {
+        const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-bootstrap-stale-'));
+        const manifestPath = path.join(project, 'sensors.json');
+        try {
+            fs.writeFileSync(manifestPath, 'replacement');
+            const plan = { kind: 'migrate' as const, projectRoot: project, manifestPath, dryRun: false, changes: [{ path: '.awm/sensors.json', action: 'replace' }] as [{ path: '.awm/sensors.json'; action: 'replace' }], migration: { candidate: {}, equivalent: true, equivalence: {} } as never, source, originalDigest: createHash('sha256').update('original').digest('hex') };
+            expect(() => applySensorBootstrap(plan)).toThrow('stale');
+            expect(replaceV2ManifestWithV3).not.toHaveBeenCalled();
+        } finally { fs.rmSync(project, { recursive: true, force: true }); }
     });
 });
