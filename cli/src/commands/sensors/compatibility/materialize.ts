@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { parseSensorManifest, serializeManifestV2, serializeManifestV3, type SensorManifestV2, type SensorManifestV3ProjectSensors } from './manifest';
 import { resolveSemgrepPolicy } from './contract';
-import { readInspectedBoundedFile, type SafeFileFailure } from './safe-file';
+import { readInspectedBoundedFile, withNoFollowChildDirectory, withNoFollowDirectory, type SafeFileFailure } from './safe-file';
 import type { PackSource } from './pack-source';
 
 type V2Sensor = SensorManifestV2['sensors'][string];
@@ -66,70 +66,77 @@ function registryPackRoot(value: unknown): string {
     return resolved;
 }
 
-function atomicWrite(destination: string, content: string): void {
-    const directory = path.dirname(destination);
-    fs.mkdirSync(directory, { recursive: true });
-    const temporary = path.join(directory, `.${path.basename(destination)}.${process.pid}.${Date.now()}.tmp`);
-    let ownsTemporary = false;
-    try {
-        fs.writeFileSync(temporary, content, { encoding: 'utf8', flag: 'wx' });
-        ownsTemporary = true;
-        fs.renameSync(temporary, destination);
-        ownsTemporary = false;
-    } finally {
-        try { if (ownsTemporary && fs.existsSync(temporary)) fs.unlinkSync(temporary); } catch { /* best effort cleanup */ }
-    }
+function withSafeProjectDestination<T>(configRoot: string, asset: string, createParents: boolean, operation: (destination: string, directory: string) => T): T {
+    const failure = () => new Error(`project destination contains a symlink or unavailable component: ${asset}`);
+    const descend = (directory: string, components: string[]): T => {
+        const component = components.shift();
+        if (!component) return operation(path.join(directory, asset.split('/').at(-1)!), directory);
+        const next = path.join(directory, component);
+        if (createParents) {
+            try { fs.mkdirSync(next); }
+            catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+        }
+        return withNoFollowChildDirectory(directory, component, failure, bound => descend(bound, components));
+    };
+    return withNoFollowDirectory(configRoot, failure, rootDirectory => descend(rootDirectory, asset.split('/').slice(0, -1)));
 }
 
-function preparedProjectDestination(configRoot: string, asset: string): { destination: string; exists: boolean } {
-    let rootStat: fs.Stats;
-    try { rootStat = fs.lstatSync(configRoot); } catch { throw new Error(`project destination root is unavailable: ${asset}`); }
-    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error(`project destination contains a symlink or non-directory root: ${asset}`);
-    let current = configRoot;
-    for (const component of asset.split('/').slice(0, -1)) {
-        const next = path.join(current, component);
-        try { fs.mkdirSync(next); }
-        catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        }
-        let stat: fs.Stats;
-        try { stat = fs.lstatSync(next); } catch { throw new Error(`project destination component is unavailable: ${asset}`); }
-        if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`project destination contains a symlink or non-directory component: ${asset}`);
-        current = next;
-    }
-    const destination = path.join(current, asset.split('/').at(-1)!);
+function destinationExists(destination: string, asset: string): boolean {
     try {
         const stat = fs.lstatSync(destination);
         if (stat.isSymbolicLink()) throw new Error(`project destination contains a symlink: ${asset}`);
-        return { destination, exists: true };
+        return true;
     } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { destination, exists: false };
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
         throw error;
     }
 }
 
-/** Publish a new asset without ever replacing an owner-created destination. */
-function atomicCreateAsset(configRoot: string, asset: string, content: string): boolean {
-    const initial = preparedProjectDestination(configRoot, asset);
-    if (initial.exists) return false;
-    const directory = path.dirname(initial.destination);
-    const temporary = path.join(directory, `.${path.basename(initial.destination)}.${process.pid}.${Date.now()}.tmp`);
-    let ownsTemporary = false;
-    try {
-        fs.writeFileSync(temporary, content, { encoding: 'utf8', flag: 'wx' });
-        ownsTemporary = true;
-        // Revalidate every project-controlled component after staging and before
-        // publication; link fails atomically if another writer claimed the leaf.
-        if (preparedProjectDestination(configRoot, asset).exists) return false;
-        try { fs.linkSync(temporary, initial.destination); }
-        catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
-            throw error;
+function atomicWrite(configRoot: string, asset: string, content: string, noClobber = false): void {
+    withSafeProjectDestination(configRoot, asset, true, (destination, directory) => {
+        if (noClobber && destinationExists(destination, asset)) throw new Error(`project manifest already exists and will not be overwritten: ${asset}`);
+        const temporary = path.join(directory, `.${path.basename(destination)}.${process.pid}.${Date.now()}.tmp`);
+        let ownsTemporary = false;
+        try {
+            fs.writeFileSync(temporary, content, { encoding: 'utf8', flag: 'wx' });
+            ownsTemporary = true;
+            if (noClobber) fs.linkSync(temporary, destination);
+            else fs.renameSync(temporary, destination);
+            ownsTemporary = false;
+        } finally {
+            try { if (ownsTemporary) fs.unlinkSync(temporary); } catch { /* bound directory prevents redirected cleanup */ }
         }
-        return true;
-    } finally {
-        try { if (ownsTemporary) fs.unlinkSync(temporary); } catch { /* best effort cleanup */ }
-    }
+    });
+}
+
+/** Publish a new asset without ever replacing an owner-created destination. */
+function atomicCreateAsset(configRoot: string, asset: string, content: string): fs.BigIntStats | undefined {
+    return withSafeProjectDestination(configRoot, asset, true, (destination, directory) => {
+        if (destinationExists(destination, asset)) return undefined;
+        const temporary = path.join(directory, `.${path.basename(destination)}.${process.pid}.${Date.now()}.tmp`);
+        let ownsTemporary = false;
+        try {
+            fs.writeFileSync(temporary, content, { encoding: 'utf8', flag: 'wx' });
+            ownsTemporary = true;
+            try { fs.linkSync(temporary, destination); }
+            catch (error) {
+                if ((error as NodeJS.ErrnoException).code === 'EEXIST') return undefined;
+                throw error;
+            }
+            return fs.lstatSync(destination, { bigint: true });
+        } finally {
+            try { if (ownsTemporary) fs.unlinkSync(temporary); } catch { /* bound directory prevents redirected cleanup */ }
+        }
+    });
+}
+
+function removeCreatedAsset(configRoot: string, asset: string, created: fs.BigIntStats): void {
+    try {
+        withSafeProjectDestination(configRoot, asset, false, destination => {
+            const current = fs.lstatSync(destination, { bigint: true });
+            if (current.isFile() && !current.isSymbolicLink() && current.dev === created.dev && current.ino === created.ino) fs.unlinkSync(destination);
+        });
+    } catch { /* best effort rollback never follows a swapped project ancestor */ }
 }
 
 function selectedRegistryAsset(packRoot: string, asset: string): { file: string; stat: fs.BigIntStats } {
@@ -217,23 +224,20 @@ export function materializePortableSensors(input: PortableMaterializeInput): Por
     }
     const selected = [...new Set(Object.values(manifest.sensors).flatMap(sensor => sensor.assets ?? []))].map((asset, index) => containedAsset(asset, `assets[${index}]`)).sort();
     const prior = priorAssets(projectRoot);
-    const configured: string[] = []; const preserved: string[] = []; const created: string[] = [];
+    const configured: string[] = []; const preserved: string[] = []; const created: Array<{ asset: string; stat: fs.BigIntStats }> = [];
     try {
         if (input.configure !== false) {
             for (const asset of selected) {
                 const selectedSource = selectedRegistryAsset(packRoot, asset);
-                const destination = preparedProjectDestination(configRoot, asset);
-                if (destination.exists) { preserved.push(asset); continue; }
-                if (atomicCreateAsset(configRoot, asset, readSelectedRegistryAsset(packRoot, selectedSource, asset))) {
-                    created.push(destination.destination); configured.push(asset);
+                const createdAsset = atomicCreateAsset(configRoot, asset, readSelectedRegistryAsset(packRoot, selectedSource, asset));
+                if (createdAsset) {
+                    created.push({ asset, stat: createdAsset }); configured.push(asset);
                 } else preserved.push(asset);
             }
         }
-        atomicWrite(path.join(projectRoot, '.awm', 'sensors.json'), serializeManifestV3(manifest));
+        atomicWrite(projectRoot, '.awm/sensors.json', serializeManifestV3(manifest), true);
     } catch (error) {
-        for (const file of created.reverse()) {
-            try { fs.unlinkSync(file); } catch { /* best effort transaction rollback */ }
-        }
+        for (const file of created.reverse()) removeCreatedAsset(configRoot, file.asset, file.stat);
         throw error;
     }
     return { manifest, configured, preserved, orphaned: prior.filter(asset => !selected.includes(asset)).sort() };
@@ -270,24 +274,21 @@ export function materializeResolvedSensors(input: MaterializeInput): Materialize
     const prior = priorAssets(projectRoot);
     const configured: string[] = [];
     const preserved: string[] = [];
-    const created: string[] = [];
+    const created: Array<{ asset: string; stat: fs.BigIntStats }> = [];
     try {
         if (input.configure !== false) {
             for (const asset of selected) {
                 const selectedSource = selectedRegistryAsset(packRoot, asset);
-                const destination = preparedProjectDestination(configRoot, asset);
-                if (destination.exists) { preserved.push(asset); continue; }
-                if (atomicCreateAsset(configRoot, asset, readSelectedRegistryAsset(packRoot, selectedSource, asset))) {
-                    created.push(destination.destination);
+                const createdAsset = atomicCreateAsset(configRoot, asset, readSelectedRegistryAsset(packRoot, selectedSource, asset));
+                if (createdAsset) {
+                    created.push({ asset, stat: createdAsset });
                     configured.push(asset);
                 } else preserved.push(asset);
             }
         }
-        atomicWrite(path.join(projectRoot, '.awm', 'sensors.json'), serializeManifestV2(manifest));
+        atomicWrite(projectRoot, '.awm/sensors.json', serializeManifestV2(manifest));
     } catch (error) {
-        for (const file of created.reverse()) {
-            try { fs.unlinkSync(file); } catch { /* best effort transaction rollback */ }
-        }
+        for (const file of created.reverse()) removeCreatedAsset(configRoot, file.asset, file.stat);
         throw error;
     }
     return { manifest, configured, preserved, orphaned: prior.filter(asset => !selected.includes(asset)).sort() };

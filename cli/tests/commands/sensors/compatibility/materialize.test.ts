@@ -132,6 +132,74 @@ describe('materializeResolvedSensors', () => {
         }
     });
 
+    it('does not stage an asset through a destination ancestor swapped to a symlink', () => {
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-materialize-outside-'));
+        const directory = path.join(projectRoot, 'configs');
+        const originalWrite = fs.writeFileSync.bind(fs);
+        const write = jest.spyOn(fs, 'writeFileSync');
+        let swapped = false;
+        let stagedThroughSwappedAncestor = false;
+        try {
+            fs.mkdirSync(path.join(packRoot, 'configs'));
+            fs.writeFileSync(path.join(packRoot, 'configs', 'eslint.config.awm.mjs'), 'registry content');
+            write.mockImplementation(((file: fs.PathOrFileDescriptor, data: string | NodeJS.ArrayBufferView, options?: fs.WriteFileOptions) => {
+                if (!swapped && typeof file === 'string' && path.basename(file).startsWith('.eslint.config.awm.mjs.')) {
+                    swapped = true;
+                    fs.renameSync(directory, `${directory}.original`);
+                    fs.symlinkSync(outside, directory);
+                    stagedThroughSwappedAncestor = path.dirname(file) === directory;
+                }
+                return originalWrite(file, data, options);
+            }) as typeof fs.writeFileSync);
+            const result = materializeResolvedSensors({ projectRoot, packRoot, pack: 'js-ts', sensors: {
+                lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['configs/eslint.config.awm.mjs'], initializedCompatibility: evidence },
+            } });
+            expect(result.configured).toEqual(['configs/eslint.config.awm.mjs']);
+            expect(stagedThroughSwappedAncestor).toBe(false);
+            expect(fs.readdirSync(outside)).toEqual([]);
+        } finally {
+            write.mockRestore();
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects a symlinked .awm ancestor before publishing a portable v3 manifest', () => {
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-materialize-outside-'));
+        try {
+            fs.symlinkSync(outside, path.join(projectRoot, '.awm'));
+            expect(() => materializePortableSensors({ projectRoot, pack: 'js-ts', source: portableSource(), sensors: {
+                lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['eslint.config.awm.mjs'], initializedCompatibility: evidence },
+            } } as never)).toThrow(/symlink|destination|safe/i);
+            expect(fs.readdirSync(outside)).toEqual([]);
+        } finally {
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
+
+    it('does not overwrite a v3 manifest concurrently published after staging', () => {
+        const awm = path.join(projectRoot, '.awm');
+        const manifestPath = path.join(awm, 'sensors.json');
+        const originalWrite = fs.writeFileSync.bind(fs);
+        const write = jest.spyOn(fs, 'writeFileSync');
+        let published = false;
+        try {
+            write.mockImplementation(((file: fs.PathOrFileDescriptor, data: string | NodeJS.ArrayBufferView, options?: fs.WriteFileOptions) => {
+                if (!published && typeof file === 'string' && path.basename(file).startsWith('.sensors.json.') && path.basename(file).endsWith('.tmp')) {
+                    published = true;
+                    originalWrite(manifestPath, 'concurrent manifest', { flag: 'wx' });
+                }
+                return originalWrite(file, data, options);
+            }) as typeof fs.writeFileSync);
+            expect(() => materializePortableSensors({ projectRoot, pack: 'js-ts', source: portableSource(), sensors: {
+                lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['eslint.config.awm.mjs'], initializedCompatibility: evidence },
+            } } as never)).toThrow(/manifest|exist|concurrent|publish|destination/i);
+            expect(published).toBe(true);
+            expect(fs.readFileSync(manifestPath, 'utf8')).toBe('concurrent manifest');
+        } finally {
+            write.mockRestore();
+        }
+    });
+
     it('rejects a symlinked packageRoot before writing an asset', () => {
         const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-materialize-outside-'));
         try {
@@ -152,7 +220,7 @@ describe('materializeResolvedSensors', () => {
         let published = false;
         try {
             link.mockImplementation(((existingPath: fs.PathLike, newPath: fs.PathLike) => {
-                if (newPath === destination && !published) {
+                if (path.basename(newPath.toString()) === path.basename(destination) && !published) {
                     published = true;
                     fs.writeFileSync(destination, 'owner content', { flag: 'wx' });
                 }

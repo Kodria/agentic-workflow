@@ -1,6 +1,72 @@
 import fs from 'fs';
+import path from 'path';
 
 export type SafeFileFailure = 'open' | 'regular' | 'identity' | 'size' | 'limit';
+
+/**
+ * Bind an existing directory to a descriptor reached without following any
+ * component symlink. Calls receive a procfs descriptor path, so a later rename
+ * of a pathname ancestor cannot redirect a staging or publication write.
+ * Node has no openat API; fail closed where its Linux descriptor bridge is not
+ * available rather than silently falling back to racy string paths.
+ */
+function withOpenedNoFollowDirectory<T>(open: () => number, failure: () => Error, operation: (boundDirectory: string) => T): T {
+    let descriptor: number | undefined;
+    try {
+        descriptor = open();
+        const opened = fs.fstatSync(descriptor);
+        if (!opened.isDirectory()) throw failure();
+    } catch {
+        if (descriptor !== undefined) {
+            try { fs.closeSync(descriptor); } catch { /* best effort after failed validation */ }
+        }
+        throw failure();
+    }
+    try {
+        return operation(`/proc/self/fd/${descriptor}`);
+    } finally {
+        try { fs.closeSync(descriptor); } catch { /* best effort descriptor cleanup */ }
+    }
+}
+
+export function withNoFollowDirectory<T>(directory: string, failure: () => Error, operation: (boundDirectory: string) => T): T {
+    const noFollow = fs.constants.O_NOFOLLOW;
+    const directoryFlag = fs.constants.O_DIRECTORY;
+    if (!path.isAbsolute(directory) || typeof noFollow !== 'number' || typeof directoryFlag !== 'number') throw failure();
+    let descriptor: number | undefined;
+    try {
+        descriptor = fs.openSync(path.parse(directory).root, fs.constants.O_RDONLY | noFollow | directoryFlag);
+        const relative = path.relative(path.parse(directory).root, path.resolve(directory));
+        for (const component of relative.split(path.sep).filter(Boolean)) {
+            const next = fs.openSync(`/proc/self/fd/${descriptor}/${component}`, fs.constants.O_RDONLY | noFollow | directoryFlag);
+            fs.closeSync(descriptor);
+            descriptor = next;
+        }
+        const bound = `/proc/self/fd/${descriptor}`;
+        const finalDescriptor = descriptor;
+        descriptor = undefined;
+        return withOpenedNoFollowDirectory(() => finalDescriptor, failure, operation.bind(undefined, bound));
+    } catch {
+        throw failure();
+    } finally {
+        if (descriptor !== undefined) {
+            try { fs.closeSync(descriptor); } catch { /* already closed during a failed handoff */ }
+        }
+    }
+}
+
+/** Open one direct child from a previously bound directory without path re-resolution. */
+export function withNoFollowChildDirectory<T>(parentDirectory: string, component: string, failure: () => Error, operation: (boundDirectory: string) => T): T {
+    const noFollow = fs.constants.O_NOFOLLOW;
+    const directoryFlag = fs.constants.O_DIRECTORY;
+    if (!component || component === '.' || component === '..' || /[\\/]/.test(component)
+        || typeof noFollow !== 'number' || typeof directoryFlag !== 'number') throw failure();
+    return withOpenedNoFollowDirectory(
+        () => fs.openSync(path.join(parentDirectory, component), fs.constants.O_RDONLY | noFollow | directoryFlag),
+        failure,
+        operation,
+    );
+}
 
 /**
  * Read the exact regular file that was previously inspected. POSIX gets
