@@ -350,8 +350,18 @@ export async function stepSensors(d: InitDeps): Promise<StepResult> {
     const proj = d.ctx.project;
     if (!proj) return ok('project.sensors', 'project', 'skipped', 'no project');
     if (proj.sensors.present) return ok('project.sensors', 'project', 'skipped');
+    if (!d.sensorPacksRoot) return ok('project.sensors', 'project', 'skipped', 'no configured sensor-pack registry');
 
-    const res = await d.actions.initSensors({ cwd: proj.root, registryRoot: d.sensorPacksRoot, configure: true });
+    let res: Awaited<ReturnType<InitDeps['actions']['initSensors']>>;
+    try {
+        res = await d.actions.initSensors({ cwd: proj.root, registryRoot: d.sensorPacksRoot, configure: true });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/^(?:source-unavailable|source-unsupported|registry-root-not-configured|sensor-variant-unresolvable):/.test(message)) {
+            return ok('project.sensors', 'project', 'skipped', message);
+        }
+        throw error;
+    }
     // A registry without the detected pack yields a fallback (or empty) manifest. The
     // step still succeeded — a manifest was written — but reporting a bare 'applied'
     // would let `awm init` hand back a quality gate that measures less than the

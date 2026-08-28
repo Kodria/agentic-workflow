@@ -83,6 +83,18 @@ test('registry ordering chooses the earlier exact pack when both registries cont
     expect(resolveCoverageInputs(project)).toMatchObject({ kind: 'ready', registry: 'first' });
 });
 
+test('v3 project-sensors resolves coverage from its declared logical registry', () => {
+    writeManifest({ schemaVersion: 3, mode: 'project-sensors', pack: 'js-ts', source: { registry: 'second' }, sensors: {} });
+    configure(['first', 'second']);
+    writePack('first', 'js-ts', { name: 'js-ts', sensors: {} });
+    writePack('second', 'js-ts', { name: 'js-ts', sensors: {}, coverage });
+
+    expect(resolveCoverageInputs(project)).toMatchObject({
+        kind: 'ready', pack: 'js-ts', registry: 'second',
+        registryRoot: path.join(awmHome, 'registries', 'second'),
+    });
+});
+
 test('old pack without coverage is no_reference, not covered', () => {
     writeManifest({ pack: 'js-ts', sensors: {} });
     configure(['baseline']);

@@ -1,4 +1,6 @@
 # Sensor Portability Publication B Implementation Plan
+<!-- awm-qa-complete: 2026-08-28 -->
+<!-- awm-retro-complete: 2026-08-28 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan slice-by-slice. Steps

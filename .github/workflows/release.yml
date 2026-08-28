@@ -91,7 +91,8 @@ jobs:
 
       - name: Verify native build artifact
         working-directory: cli
-        run: node -e "const fs=require('fs'); const path=require('path'); const file=path.join('prebuilds', '${{ matrix.target }}', 'secure_fs.node'); if (!fs.existsSync(file)) throw new Error('native build artifact is missing: ' + file);"
+        run: >-
+          node -e "const fs=require('fs'); const path=require('path'); const file=path.join('prebuilds', '${{ matrix.target }}', 'secure_fs.node'); if (!fs.existsSync(file)) throw new Error('native build artifact is missing: ' + file);"
 
       - name: Upload native secure-fs artifact
         uses: actions/upload-artifact@v4

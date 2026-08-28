@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { resolvePackSource } from '../../../../src/commands/sensors/compatibility/pack-source';
+import { setPortableReadForTests } from '../../../../src/commands/sensors/compatibility/safe-file';
 
 function resolveWithoutNoFollow(...args: Parameters<typeof resolvePackSource>): ReturnType<typeof resolvePackSource> {
     let resolve: typeof resolvePackSource | undefined;
@@ -11,6 +12,7 @@ function resolveWithoutNoFollow(...args: Parameters<typeof resolvePackSource>): 
             const constants = { ...actual.constants, O_NOFOLLOW: undefined };
             return { __esModule: true, default: { ...actual, constants }, ...actual, constants };
         });
+        (require('../../../../src/commands/sensors/compatibility/safe-file') as typeof import('../../../../src/commands/sensors/compatibility/safe-file')).setPortableReadForTests(true);
         resolve = require('../../../../src/commands/sensors/compatibility/pack-source').resolvePackSource as typeof resolvePackSource;
     });
     jest.dontMock('fs');
@@ -26,6 +28,7 @@ function resolveWithoutNoFollowWithExactStats(...args: Parameters<typeof resolve
             const constants = { ...actual.constants, O_NOFOLLOW: undefined };
             return { __esModule: true, default: { ...actual, constants }, ...actual, constants };
         });
+        (require('../../../../src/commands/sensors/compatibility/safe-file') as typeof import('../../../../src/commands/sensors/compatibility/safe-file')).setPortableReadForTests(true);
         resolve = require('../../../../src/commands/sensors/compatibility/pack-source').resolvePackSource as typeof resolvePackSource;
     });
     jest.dontMock('fs');
@@ -34,6 +37,9 @@ function resolveWithoutNoFollowWithExactStats(...args: Parameters<typeof resolve
 }
 
 describe('resolvePackSource', () => {
+    beforeEach(() => setPortableReadForTests(true));
+    afterEach(() => setPortableReadForTests(false));
+
     it('uses the first registry containing the exact contained pack file', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-'));
         try {

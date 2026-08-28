@@ -3,6 +3,7 @@ import { positiveTimeout, resolveTimeout } from '../../../../src/commands/sensor
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { setPortableReadForTests } from '../../../../src/commands/sensors/compatibility/safe-file';
 
 const coverage = {
     schemaVersion: 1,
@@ -42,6 +43,9 @@ function validPack() {
 }
 
 describe('sensor pack v2 contract', () => {
+    beforeEach(() => setPortableReadForTests(true));
+    afterEach(() => setPortableReadForTests(false));
+
     it('exports bounded timeout validation and resolution (R3.1, R3.4)', () => {
         expect(positiveTimeout(1, 'sensor timeout')).toBe(1);
         expect(resolveTimeout({ project: 90_000, pack: 30_000, fast: true })).toEqual({ timeoutMs: 90_000, source: 'project' });

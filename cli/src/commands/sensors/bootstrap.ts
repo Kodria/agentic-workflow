@@ -64,7 +64,7 @@ async function projectSensors(projectRoot: string, registryRoot?: string, reques
     catch { return { reason: 'source-invalid', remedy: 'repair-or-run-awm-update' }; }
     if (parsed.kind !== 'v2') return { reason: 'source-unsupported', remedy: 'install-a-v2-sensor-pack' };
     let live;
-    try { live = await resolveParsedPackCompatibility(projectRoot, parsed.pack); }
+    try { live = await resolveParsedPackCompatibility(detectionRoot, parsed.pack); }
     catch { return { reason: 'compatibility-unresolvable', remedy: 'repair-project-tools-or-select-another-mode' }; }
     const sensors: SensorManifestV3ProjectSensors['sensors'] = {};
     for (const [name, packSensor] of Object.entries(live.pack.sensors)) {

@@ -9,10 +9,16 @@ type SecureFsTestBoundary = Omit<SecureFsBoundary, 'removeObservedProjectFile'>
     & Partial<Pick<SecureFsBoundary, 'removeObservedProjectFile'>>;
 
 let secureFsForTest: SecureFsTestBoundary | undefined;
+let portableReadForTests = false;
 
 /** Test-only seam for filesystem race fixtures. Production always uses the packaged bridge. */
 export function setSecureFsForTests(boundary: SecureFsTestBoundary | undefined): void {
     secureFsForTest = boundary;
+}
+
+/** Test-only opt-in for Node-level filesystem race fixtures. */
+export function setPortableReadForTests(enabled: boolean): void {
+    portableReadForTests = enabled;
 }
 
 function activeSecureFs(): SecureFsTestBoundary | SecureFsBoundary {
@@ -175,7 +181,10 @@ export function readInspectedBoundedFile(file: string, inspected: fs.BigIntStats
     // They are already descriptor-bound; the native loader correctly rejects the
     // procfs symlink representation, so retain this narrow internal path only.
     const descriptorBoundInternalPath = process.platform === 'linux' && file.startsWith('/proc/self/fd/');
-    if (!secureFsForTest && !descriptorBoundInternalPath) {
+    // The native boundary is mandatory in every shipped runtime. The
+    // filesystem race corpus opts into the portable path through a test-only
+    // seam; environment variables can never weaken production reads.
+    if (!secureFsForTest && !descriptorBoundInternalPath && !portableReadForTests) {
         return readInspectedBoundedFileWithIdentity(file, inspected, maxBytes, failure).content;
     }
     // Test adapters observe the same boundary, then deliberately exercise the

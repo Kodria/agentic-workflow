@@ -6,16 +6,18 @@ import {
     type CoverageContract,
 } from './contract';
 import { parseSensorPack } from '../compatibility/contract';
-import { parseSensorManifest, type ParsedSensorManifest } from '../compatibility/manifest';
+import { parseSensorManifest, type ParsedSensorManifest, type SensorManifestV3ProjectSensors } from '../compatibility/manifest';
 import { resolvePackSource } from '../compatibility/pack-source';
+import { resolveSensorSource } from '../compatibility/source';
 import { readInspectedBoundedFile, type SafeFileFailure } from '../compatibility/safe-file';
+import { listRegistries } from '../../../core/registries';
 
-type CoverageManifest = Exclude<ParsedSensorManifest, { kind: 'v3' }>;
+type CoverageManifest = Exclude<ParsedSensorManifest, { kind: 'v3' }> | { kind: 'v3'; pack: SensorManifestV3ProjectSensors };
 
 export type CoverageInputs =
     | { kind: 'not_configured' }
-    | { kind: 'no_reference'; projectRoot: string; pack: string; registry: string; manifest: CoverageManifest }
-    | { kind: 'ready'; projectRoot: string; pack: string; registry: string; manifest: CoverageManifest; contract: CoverageContract };
+    | { kind: 'no_reference'; projectRoot: string; pack: string; registry: string; registryRoot?: string; manifest: CoverageManifest }
+    | { kind: 'ready'; projectRoot: string; pack: string; registry: string; registryRoot?: string; manifest: CoverageManifest; contract: CoverageContract };
 
 function readFailure(file: string, error: unknown): Error {
     return new Error(`Cannot read ${file}: ${error instanceof Error ? error.message : String(error)}`);
@@ -79,22 +81,29 @@ export function resolveCoverageInputs(cwd: unknown): CoverageInputs {
 
     const manifestPath = path.join(projectRoot, '.awm', 'sensors.json');
     const manifest = parseSensorManifest(readBoundedJson(manifestPath), manifestPath);
-    if (manifest.kind === 'v3') throw new Error('schemaVersion 3 sensor manifests require the project resolver');
-    const source = manifest.kind === 'v2' && manifest.pack.registryRoot !== undefined
-        ? resolvePackSource(manifest.pack.pack, { registries: [{ name: 'manifest-provenance', remote: 'local', contentRoot: manifest.pack.registryRoot }] })
-        : resolvePackSource(manifest.pack.pack);
+    if (manifest.kind === 'v3' && manifest.pack.mode !== 'project-sensors') return { kind: 'not_configured' };
+    const coverageManifest = manifest as CoverageManifest;
+    const source = coverageManifest.kind === 'v3'
+        ? (() => {
+            const resolution = resolveSensorSource(coverageManifest, { registries: listRegistries() });
+            if (!('source' in resolution)) throw new Error(`${resolution.kind}: ${resolution.remedy}`);
+            return resolution.source;
+        })()
+        : coverageManifest.kind === 'v2' && coverageManifest.pack.registryRoot !== undefined
+            ? resolvePackSource(coverageManifest.pack.pack, { registries: [{ name: 'manifest-provenance', remote: 'local', contentRoot: coverageManifest.pack.registryRoot }] })
+            : resolvePackSource(coverageManifest.pack.pack);
     let sourceJson: unknown;
     try { sourceJson = JSON.parse(source.content) as unknown; } catch (error) {
         throw new Error(`Invalid JSON at ${source.path}: ${error instanceof Error ? error.message : String(error)}`);
     }
     const parsedPack = parseSensorPack(sourceJson, source.path);
-    if (parsedPack.pack.name !== manifest.pack.pack) {
-        throw new Error(`Invalid pack at ${source.path}: name must equal '${manifest.pack.pack}'`);
+    if (parsedPack.pack.name !== coverageManifest.pack.pack) {
+        throw new Error(`Invalid pack at ${source.path}: name must equal '${coverageManifest.pack.pack}'`);
     }
     const { coverage } = parsedPack.pack;
-    if (coverage === undefined) return { kind: 'no_reference', projectRoot, pack: manifest.pack.pack, registry: source.registry.name, manifest };
+    if (coverage === undefined) return { kind: 'no_reference', projectRoot, pack: coverageManifest.pack.pack, registry: source.registry.name, registryRoot: source.registry.contentRoot, manifest: coverageManifest };
     return {
-        kind: 'ready', projectRoot, pack: manifest.pack.pack, registry: source.registry.name,
-        manifest, contract: parseCoverageContract(coverage, source.path),
+        kind: 'ready', projectRoot, pack: coverageManifest.pack.pack, registry: source.registry.name,
+        registryRoot: source.registry.contentRoot, manifest: coverageManifest, contract: parseCoverageContract(coverage, source.path),
     };
 }

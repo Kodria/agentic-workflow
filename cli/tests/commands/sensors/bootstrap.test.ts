@@ -106,6 +106,18 @@ describe('planSensorBootstrap', () => {
         expect(JSON.stringify((plan as Extract<typeof plan, { kind: 'create' }>).manifest)).not.toContain('/registry');
     });
 
+    it('resolves compatibility from the selected package root', async () => {
+        const variant = { id: 'eslint-9', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: [] };
+        const pack = { schemaVersion: 2, name: 'js-ts', sensors: { lint: { variants: [variant] } } };
+        (listPackSources as jest.Mock).mockReturnValue([source]);
+        (parseSensorPack as jest.Mock).mockReturnValue({ kind: 'v2', pack });
+        (resolveParsedPackCompatibility as jest.Mock).mockResolvedValue({ pack, sensors: { lint: { state: 'certified', reason: 'ok', variantId: 'eslint-9', toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [] } } });
+
+        await planSensorBootstrap(root, { mode: 'project-sensors', packageRoot: 'packages/web' });
+
+        expect(resolveParsedPackCompatibility).toHaveBeenCalledWith(path.join(root, 'packages/web'), pack);
+    });
+
     it('blocks project-sensors when compatibility cannot select every declared sensor variant', async () => {
         const variant = { id: 'eslint-9', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: [] };
         (listPackSources as jest.Mock).mockReturnValue([source]);

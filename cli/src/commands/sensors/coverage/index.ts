@@ -64,8 +64,8 @@ export async function runCoverage(cwd: unknown, dependencies: Partial<Dependenci
     }
 
     let live: Record<string, CompatibilityEvidence>;
-    if (input.manifest.kind === 'v2') {
-        live = (await deps.resolveLive(input.projectRoot, input.pack, input.manifest.pack.registryRoot)).sensors;
+    if (input.manifest.kind !== 'legacy') {
+        live = (await deps.resolveLive(input.projectRoot, input.pack, input.registryRoot)).sensors;
     } else {
         live = Object.fromEntries(Object.keys(input.manifest.pack.sensors).map((name) => [name, legacyCompatibility('legacy manifest without schemaVersion')]));
     }
