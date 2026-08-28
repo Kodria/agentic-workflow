@@ -103,7 +103,10 @@ export function registerSensorsCommand(program: Command): void {
                 }
                 const summary = plan.changes.map(change => change.path).join(', ');
                 if (plan.dryRun) {
-                    log.info(`dry-run: ${plan.kind}; ${summary}`);
+                    const pack = plan.kind === 'create' && plan.manifest.mode === 'project-sensors'
+                        ? `; pack=${plan.manifest.pack}`
+                        : '';
+                    log.info(`dry-run: ${plan.kind}${pack}; ${summary}`);
                     return;
                 }
                 const result = applySensorBootstrap(plan);

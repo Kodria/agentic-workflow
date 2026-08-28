@@ -12,6 +12,7 @@ import { replaceV2ManifestWithV3 } from './migrate';
 import { withProjectLease, writeProjectFile } from './compatibility/safe-file';
 import fs from 'fs';
 import { createHash } from 'crypto';
+import path from 'path';
 
 export type BootstrapMode = 'project-sensors' | 'native-gate' | 'opt-out';
 export type BootstrapOptions = { mode?: BootstrapMode; reason?: string; dryRun?: boolean; registryRoot?: string; configure?: boolean; pack?: string; packageRoot?: string };
@@ -35,7 +36,7 @@ function options(input: unknown): Required<Pick<BootstrapOptions, 'dryRun'>> & B
     if (value.reason !== undefined && (typeof value.reason !== 'string' || value.reason.trim() === '' || value.reason.length > 512 || /[\0\r\n]/.test(value.reason))) throw new Error('bootstrap reason must be a nonempty bounded single-line string');
     if (value.dryRun !== undefined && typeof value.dryRun !== 'boolean') throw new Error('bootstrap dryRun must be a boolean');
     if (value.configure !== undefined && typeof value.configure !== 'boolean') throw new Error('bootstrap configure must be a boolean');
-    if (value.registryRoot !== undefined && (typeof value.registryRoot !== 'string' || !/^\//.test(value.registryRoot) || /[\0\r\n]/.test(value.registryRoot))) throw new Error('bootstrap registryRoot must be an absolute single-line path');
+    if (value.registryRoot !== undefined && (typeof value.registryRoot !== 'string' || (!path.isAbsolute(value.registryRoot) && !path.win32.isAbsolute(value.registryRoot)) || /[\0\r\n]/.test(value.registryRoot))) throw new Error('bootstrap registryRoot must be an absolute single-line path');
     if (value.pack !== undefined && (typeof value.pack !== 'string' || !/^[a-z][a-z0-9-]*$/.test(value.pack))) throw new Error('bootstrap pack must be a stable lowercase id');
     if (value.packageRoot !== undefined && (typeof value.packageRoot !== 'string' || value.packageRoot.length === 0 || value.packageRoot.includes('\\') || value.packageRoot.split('/').some(part => part === '' || part === '.' || part === '..'))) throw new Error('bootstrap packageRoot must be a contained relative path');
     return { mode: value.mode as BootstrapMode | undefined, reason: value.reason as string | undefined, dryRun: value.dryRun === true, registryRoot: value.registryRoot as string | undefined, configure: value.configure !== false, pack: value.pack as string | undefined, packageRoot: value.packageRoot as string | undefined };

@@ -439,9 +439,12 @@ awm sensors bootstrap [--mode project-sensors|native-gate|opt-out] [--reason <te
 
 `project-sensors` selects one logical registry and pack, then materializes its
 declared assets atomically. `native-gate` and `opt-out` require a non-empty
-reason. `--dry-run` reports the exact files that would change and never writes.
-Running bootstrap again over an equivalent v3 declaration is a no-op; migrating
-a v2 declaration preserves its sensor semantics and changes only the manifest.
+reason. `--dry-run` reports the selected pack (when applicable) and exact files
+that would change, and never writes. Running bootstrap again over an equivalent
+v3 declaration is a no-op; migrating a v2 declaration preserves its sensor
+semantics and changes only the manifest. Bootstrap is a one-time project action:
+entering Codex, Claude Code, a worktree, or a fixed machine must not rerun it;
+each environment updates its own AWM installation separately.
 
 | Flag | Description |
 |---|---|
@@ -449,11 +452,19 @@ a v2 declaration preserves its sensor semantics and changes only the manifest.
 | `--registry-root <path>` | Override the AWM registry root (defaults to the cache). |
 | `--pack <name>` | Explicitly select a pack when stack detection is not the intended contract. |
 
-New manifests use `schemaVersion: 2`. They materialize the selected variant,
-structured command, contained assets, provenance, and initialization
-compatibility evidence. Legacy manifests remain readable but are reported as
-`compatible-unverified`; run `awm sensors init` deliberately to migrate after
-reviewing the new manifest.
+New bootstrap declarations use `schemaVersion: 3` and retain the selected
+variant, structured command, contained assets, logical registry provenance, and
+initialization compatibility evidence without persisting a machine path. Legacy
+and v2 manifests remain readable; use `awm sensors bootstrap --dry-run` first,
+then rerun without `--dry-run` to perform the explicit v2 migration after review.
+
+```json
+{
+  "schemaVersion": 3,
+  "mode": "native-gate",
+  "reason": "the project uses its platform-native verification gate"
+}
+```
 
 ### `awm sensors coverage`
 

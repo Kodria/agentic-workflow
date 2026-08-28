@@ -39,7 +39,10 @@ describe('sensors bootstrap Commander wiring', () => {
     });
 
     it('renders dry-run without calling the applier', async () => {
-        (planSensorBootstrap as jest.Mock).mockResolvedValue({ kind: 'create', dryRun: true, changes: [{ path: '.awm/sensors.json', action: 'create' }] });
+        (planSensorBootstrap as jest.Mock).mockResolvedValue({
+            kind: 'create', dryRun: true, changes: [{ path: '.awm/sensors.json', action: 'create' }],
+            manifest: { schemaVersion: 3, mode: 'native-gate', reason: 'CI' },
+        });
         const program = new Command();
         program.exitOverride();
         registerSensorsCommand(program);
@@ -47,6 +50,19 @@ describe('sensors bootstrap Commander wiring', () => {
         expect(planSensorBootstrap).toHaveBeenCalledWith(process.cwd(), { mode: 'native-gate', reason: 'CI', dryRun: true });
         expect(applySensorBootstrap).not.toHaveBeenCalled();
         expect(log.info).toHaveBeenCalledWith(expect.stringContaining('dry-run'));
+    });
+
+    it('renders the chosen project-sensors pack in dry-run output', async () => {
+        (planSensorBootstrap as jest.Mock).mockResolvedValue({
+            kind: 'create', dryRun: true, changes: [{ path: '.awm/sensors.json', action: 'create' }],
+            manifest: { schemaVersion: 3, mode: 'project-sensors', pack: 'js-ts' },
+        });
+        const program = new Command();
+        program.exitOverride();
+        registerSensorsCommand(program);
+        await program.parseAsync(['node', 'awm', 'sensors', 'bootstrap', '--mode', 'project-sensors', '--dry-run']);
+        expect(log.info).toHaveBeenCalledWith(expect.stringContaining('pack=js-ts'));
+        expect(applySensorBootstrap).not.toHaveBeenCalled();
     });
 
     it('applies an executable plan and reports its result', async () => {

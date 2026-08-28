@@ -126,6 +126,12 @@ describe('planSensorBootstrap', () => {
         expect(listPackSources).not.toHaveBeenCalled();
     });
 
+    it('accepts a Windows absolute registry path without treating it as project state', async () => {
+        await expect(planSensorBootstrap(root, { mode: 'project-sensors', registryRoot: 'C:\\awm\\registries\\baseline' })).resolves.toMatchObject({
+            kind: 'blocked', reason: 'registry-root-not-configured', changes: [],
+        });
+    });
+
     it('rejects applying a dry-run plan before any publisher runs', () => {
         expect(() => applySensorBootstrap({ kind: 'create', projectRoot: root, manifestPath: `${root}/.awm/sensors.json`, dryRun: true, changes: [], manifest: { schemaVersion: 3, mode: 'native-gate', reason: 'CI' } })).toThrow('dry-run');
         expect(writeProjectFile).not.toHaveBeenCalled();
