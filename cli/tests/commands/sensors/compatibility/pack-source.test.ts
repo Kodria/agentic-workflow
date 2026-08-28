@@ -4,6 +4,8 @@ import path from 'path';
 import { resolvePackSource } from '../../../../src/commands/sensors/compatibility/pack-source';
 import { setPortableReadForTests } from '../../../../src/commands/sensors/compatibility/safe-file';
 
+const itLinux = process.platform === 'linux' ? it : it.skip;
+
 function resolveWithoutNoFollow(...args: Parameters<typeof resolvePackSource>): ReturnType<typeof resolvePackSource> {
     let resolve: typeof resolvePackSource | undefined;
     jest.isolateModules(() => {
@@ -172,7 +174,7 @@ describe('resolvePackSource', () => {
         }
     });
 
-    it('accepts a parent symlink replacement when it resolves to the inspected pack inode', () => {
+    itLinux('accepts a parent symlink replacement when Linux descriptor binding preserves the inspected pack inode', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-same-inode-'));
         const packDir = path.join(root, 'sensor-packs', 'js-ts');
         const movedPackDir = path.join(root, 'sensor-packs', 'js-ts-original');
