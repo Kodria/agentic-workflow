@@ -910,6 +910,7 @@ bool PathMatchesExpectedIdentity(int parent, const std::string& basename,
   return fstatat(parent, basename.c_str(), &statbuf, AT_SYMLINK_NOFOLLOW) == 0
       && S_ISREG(statbuf.st_mode) && MatchesExpectedPosixIdentity(statbuf, options);
 }
+
 #endif
 
 napi_value ReadRegularFile(napi_env env, napi_callback_info info) {
@@ -966,6 +967,114 @@ napi_value ReadRegularFile(napi_env env, napi_callback_info info) {
   if (!CreateReadResult(env, bytes, identity, &output)) { Throw(env, "secure-fs could not create read result"); return nullptr; }
   return output;
 #endif
+}
+
+// Delete through the same parent descriptor/handle used for publication, and
+// only after proving the leaf is the exact file identified by a prior native
+// read. This is intentionally not a general pathname deletion primitive.
+napi_value RemoveObservedProjectFile(napi_env env, napi_callback_info info) {
+  size_t argc = 3; napi_value args[3];
+  if (napi_get_cb_info(env, info, &argc, args, nullptr, nullptr) != napi_ok || argc != 3) {
+    Throw(env, "removeObservedProjectFile requires project root, destination, and identity");
+    return nullptr;
+  }
+  std::string project_root, destination;
+  void* identity_bytes = nullptr;
+  size_t identity_length = 0;
+  NativeIdentity expected {};
+  if (!StringArg(env, args[0], &project_root) || !StringArg(env, args[1], &destination)
+      || napi_get_buffer_info(env, args[2], &identity_bytes, &identity_length) != napi_ok
+#ifdef _WIN32
+      || !ParseIdentity(identity_bytes, identity_length, kWindowsIdentityKind, &expected)
+#else
+      || !ParseIdentity(identity_bytes, identity_length, kPosixIdentityKind, &expected)
+#endif
+      ) {
+    Throw(env, "invalid removeObservedProjectFile arguments");
+    return nullptr;
+  }
+  if (ContainsNul(project_root) || ContainsNul(destination)) {
+    Throw(env, "secure-fs path argument contains a NUL byte");
+    return nullptr;
+  }
+#ifdef _WIN32
+  if (!WindowsRelativeApiAvailable()) {
+    Throw(env, "secure-fs Windows handle-relative API is unavailable");
+    return nullptr;
+  }
+  WindowsParent parent;
+  if (!OpenWindowsParent(project_root, destination, &parent, false)) {
+    Throw(env, "secure-fs rejected path ancestor");
+    return nullptr;
+  }
+  HANDLE target = OpenRegularFileNoReparse(parent, 0);
+  CloseWindowsParent(&parent);
+  WindowsFileIdentity observed {};
+  const bool matched = target != INVALID_HANDLE_VALUE
+      && GetWindowsFileIdentity(target, &observed)
+      && WindowsNativeIdentity(observed).first == expected.first
+      && WindowsNativeIdentity(observed).second == expected.second;
+  if (!matched) {
+    if (target != INVALID_HANDLE_VALUE) CloseHandle(target);
+    Throw(env, "secure-fs original changed before identity-fenced removal");
+    return nullptr;
+  }
+  FILE_DISPOSITION_INFO disposition {};
+  disposition.DeleteFile = TRUE;
+  if (SetFileInformationByHandle(target, FileDispositionInfo, &disposition, sizeof(disposition)) == 0) {
+    CloseHandle(target);
+    Throw(env, "secure-fs identity-fenced removal failed");
+    return nullptr;
+  }
+  CloseHandle(target);
+#else
+  if (project_root.empty() || project_root[0] != '/' || destination.empty() || destination[0] == '/') {
+    Throw(env, "secure-fs rejected path ancestor");
+    return nullptr;
+  }
+  for (size_t cursor = 0; cursor < destination.size();) {
+    const size_t next = destination.find('/', cursor);
+    const std::string component = destination.substr(cursor, next == std::string::npos ? std::string::npos : next - cursor);
+    if (component.empty() || component == "." || component == ".." || component.find('\\') != std::string::npos) {
+      Throw(env, "secure-fs rejected path ancestor");
+      return nullptr;
+    }
+    if (next == std::string::npos) break;
+    cursor = next + 1;
+  }
+  const std::string file = project_root + "/" + destination;
+  std::string basename;
+  const int parent = OpenParent(file, &basename, false);
+  if (parent < 0) {
+    Throw(env, "secure-fs rejected path ancestor");
+    return nullptr;
+  }
+  const int target = openat(parent, basename.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+  struct stat statbuf {};
+  const bool matched = target >= 0 && fstat(target, &statbuf) == 0 && S_ISREG(statbuf.st_mode)
+      && PosixNativeIdentity(statbuf).first == expected.first
+      && PosixNativeIdentity(statbuf).second == expected.second;
+  if (!matched) {
+    if (target >= 0) close(target);
+    close(parent);
+    Throw(env, "secure-fs original changed before identity-fenced removal");
+    return nullptr;
+  }
+  // unlinkat is relative to the verified parent descriptor. The project lease
+  // serializes AWM writers for the small open-to-unlink interval.
+  const int unlink_result = unlinkat(parent, basename.c_str(), 0);
+  close(target);
+  if (unlink_result != 0) {
+    close(parent);
+    Throw(env, "secure-fs identity-fenced removal failed");
+    return nullptr;
+  }
+  fsync(parent);
+  close(parent);
+#endif
+  napi_value undefined;
+  if (napi_get_undefined(env, &undefined) != napi_ok) return nullptr;
+  return undefined;
 }
 
 napi_value WriteProjectTransaction(napi_env env, napi_callback_info info) {
@@ -1089,6 +1198,7 @@ napi_value WriteProjectTransaction(napi_env env, napi_callback_info info) {
   unlinkat(parent, temporary.c_str(), 0); fsync(parent); close(parent); napi_value undefined; napi_get_undefined(env, &undefined); return undefined;
 #endif
 }
+
 }  // namespace
 
 NAPI_MODULE_INIT() {
@@ -1097,6 +1207,7 @@ NAPI_MODULE_INIT() {
       {"releaseProjectLease", nullptr, ReleaseProjectLease, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"readRegularFile", nullptr, ReadRegularFile, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"writeProjectTransaction", nullptr, WriteProjectTransaction, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"removeObservedProjectFile", nullptr, RemoveObservedProjectFile, nullptr, nullptr, nullptr, napi_default, nullptr},
   };
   napi_define_properties(env, exports, sizeof(properties) / sizeof(properties[0]), properties);
   return exports;

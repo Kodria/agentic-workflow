@@ -6,6 +6,7 @@ export type NativeSecureFsBinding = Readonly<{
     releaseProjectLease(token: object): void;
     readRegularFile(file: string, maxBytes: number): NativeReadResult;
     writeProjectTransaction(projectRoot: string, destination: string, content: Buffer, options: NativeWriteOptions): void;
+    removeObservedProjectFile(projectRoot: string, destination: string, identity: Buffer): void;
 }>;
 
 export type NativeReadResult = Readonly<{
@@ -85,7 +86,8 @@ export function loadNativeSecureFsBridge(options: LoaderOptions): NativeSecureFs
         || typeof (loaded as Partial<NativeSecureFsBinding>).acquireProjectLease !== 'function'
         || typeof (loaded as Partial<NativeSecureFsBinding>).releaseProjectLease !== 'function'
         || typeof (loaded as Partial<NativeSecureFsBinding>).readRegularFile !== 'function'
-        || typeof (loaded as Partial<NativeSecureFsBinding>).writeProjectTransaction !== 'function') {
+        || typeof (loaded as Partial<NativeSecureFsBinding>).writeProjectTransaction !== 'function'
+        || typeof (loaded as Partial<NativeSecureFsBinding>).removeObservedProjectFile !== 'function') {
         throw new Error(`secure-fs native artifact is incompatible for ${status.platform}-${status.arch}`);
     }
     return loaded as NativeSecureFsBinding;
@@ -95,12 +97,13 @@ export type SecureFsBoundary = Readonly<{
     withProjectLease<T>(projectRoot: string, operation: () => T): T;
     readRegularFile(file: string, maxBytes: number): SecureFileRead;
     writeProjectTransaction(projectRoot: string, destination: string, content: Buffer, options: SecureWriteOptions): void;
+    removeObservedProjectFile(projectRoot: string, destination: string, identity: FileIdentityToken): void;
 }>;
 
 const IDENTITY_TOKEN_BYTES = 24;
 const NATIVE_DESTINATION_EXISTS_CODE = 'AWM_SECURE_FS_DESTINATION_EXISTS';
 export const PROJECT_DESTINATION_ALREADY_EXISTS_MESSAGE = 'project destination already exists';
-const identityObservations = new WeakMap<object, Readonly<{ bytes: Buffer; identity: Buffer }>>();
+const identityObservations = new WeakMap<object, Readonly<{ file: string; bytes: Buffer; identity: Buffer }>>();
 
 function absoluteFile(value: unknown, label: string): string {
     if (typeof value === 'string' && value.includes('\0')) throw new Error(`${label} must not contain a NUL byte`);
@@ -146,13 +149,13 @@ function nativeIdentity(value: unknown): Buffer {
     return Buffer.from(value);
 }
 
-function secureReadResult(value: unknown): SecureFileRead {
+function secureReadResult(file: string, value: unknown): SecureFileRead {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('secure-fs native bridge returned invalid read result');
     const candidate = value as Partial<NativeReadResult>;
     if (!Buffer.isBuffer(candidate.bytes)) throw new Error('secure-fs native bridge returned invalid read bytes');
     const bytes = Buffer.from(candidate.bytes);
     const token = Object.freeze({}) as FileIdentityToken;
-    identityObservations.set(token, { bytes: Buffer.from(bytes), identity: nativeIdentity(candidate.identity) });
+    identityObservations.set(token, { file, bytes: Buffer.from(bytes), identity: nativeIdentity(candidate.identity) });
     return Object.freeze({ bytes, identity: token });
 }
 
@@ -202,7 +205,7 @@ export function createSecureFsBoundary(load: () => NativeSecureFsBinding): Secur
             const validatedFile = absoluteFile(file, 'file');
             const validatedMaxBytes = positiveSafeInteger(maxBytes, 'maxBytes');
             const result = load().readRegularFile(validatedFile, validatedMaxBytes);
-            return secureReadResult(result);
+            return secureReadResult(validatedFile, result);
         },
         writeProjectTransaction(projectRoot: string, destination: string, content: Buffer, options: SecureWriteOptions): void {
             const validatedRoot = absoluteFile(projectRoot, 'projectRoot');
@@ -215,6 +218,16 @@ export function createSecureFsBoundary(load: () => NativeSecureFsBinding): Secur
                 if (isNativeDestinationExistsError(error)) throw new Error(PROJECT_DESTINATION_ALREADY_EXISTS_MESSAGE);
                 throw error;
             }
+        },
+        removeObservedProjectFile(projectRoot: string, destination: string, identity: FileIdentityToken): void {
+            const validatedRoot = absoluteFile(projectRoot, 'projectRoot');
+            const validatedDestination = projectDestination(destination);
+            if (!identity || typeof identity !== 'object') throw new Error('remove requires an opaque identity token from readRegularFile');
+            const observation = identityObservations.get(identity);
+            if (!observation) throw new Error('remove requires an opaque identity token from readRegularFile');
+            const observedDestination = path.join(validatedRoot, validatedDestination);
+            if (observation.file !== observedDestination) throw new Error('remove requires the exact observed destination');
+            load().removeObservedProjectFile(validatedRoot, validatedDestination, Buffer.from(observation.identity));
         },
     });
 }

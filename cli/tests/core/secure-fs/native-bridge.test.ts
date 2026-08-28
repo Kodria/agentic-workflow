@@ -70,6 +70,17 @@ describe('native secure-fs Windows source contract', () => {
         expect(source).toMatch(/LockFileEx\([^;]+LOCKFILE_EXCLUSIVE_LOCK\s*\|\s*LOCKFILE_FAIL_IMMEDIATELY/);
         expect(source).toMatch(/\bUnlockFileEx\b/);
     });
+
+    it('removes a verified observed target through its exclusive handle', () => {
+        const source = fs.readFileSync(path.resolve(__dirname, '../../../native/secure_fs.cc'), 'utf8');
+        const removalStart = source.indexOf('napi_value RemoveObservedProjectFile');
+        const removal = source.slice(removalStart, source.indexOf('napi_value WriteProjectTransaction', removalStart));
+
+        expect(removalStart).toBeGreaterThan(-1);
+        expect(removal).toContain('OpenRegularFileNoReparse(parent, 0)');
+        expect(removal).toContain('SetFileInformationByHandle(target, FileDispositionInfo');
+        expect(removal).not.toMatch(/\bDeleteFileW\b/);
+    });
 });
 
 describe('native secure-fs POSIX source contract', () => {
@@ -106,7 +117,7 @@ describe('native secure-fs bridge loader', () => {
         fs.writeFileSync(selected, 'test artifact');
         const binding: NativeProjectLeaseBinding = {
             acquireProjectLease: jest.fn(() => ({})), releaseProjectLease: jest.fn(),
-            readRegularFile: jest.fn(), writeProjectTransaction: jest.fn(),
+            readRegularFile: jest.fn(), writeProjectTransaction: jest.fn(), removeObservedProjectFile: jest.fn(),
         };
 
         expect(loadNativeSecureFsBridge({ root, platform: 'linux', arch: 'x64', load: candidate => {
@@ -174,6 +185,7 @@ describe('secure-fs TypeScript boundary', () => {
         releaseProjectLease: jest.fn(),
         readRegularFile: jest.fn(() => ({ bytes: Buffer.from('verified bytes'), identity: rawIdentity })),
         writeProjectTransaction: jest.fn(),
+        removeObservedProjectFile: jest.fn(),
     };
 
     beforeEach(() => { jest.clearAllMocks(); });
@@ -216,6 +228,21 @@ describe('secure-fs TypeScript boundary', () => {
         expect(() => bridge.writeProjectTransaction('relative', '.awm/sensors.json', payload, { mode: 'create', createParents: true })).toThrow('absolute');
         expect(() => bridge.writeProjectTransaction(projectRoot, '../sensors.json', payload, { mode: 'create', createParents: true })).toThrow('project-relative');
         expect(() => bridge.writeProjectTransaction(projectRoot, '.awm/sensors.json', 'not bytes' as never, { mode: 'create', createParents: true })).toThrow('Buffer');
+    });
+
+    it('permits compensation only for an opaque identity from the exact observed destination', () => {
+        const bridge = createSecureFsBoundary(() => binding);
+        const observed = bridge.readRegularFile(path.join(projectRoot, '.awm', 'created.json'), 1024);
+
+        bridge.removeObservedProjectFile(projectRoot, '.awm/created.json', observed.identity);
+
+        expect(binding.removeObservedProjectFile).toHaveBeenCalledWith(
+            projectRoot, path.join('.awm', 'created.json'), rawIdentity,
+        );
+        expect(() => bridge.removeObservedProjectFile(projectRoot, '.awm/other.json', observed.identity))
+            .toThrow(/exact observed destination/i);
+        expect(() => bridge.removeObservedProjectFile(projectRoot, '.awm/created.json', rawIdentity as never))
+            .toThrow(/opaque identity/i);
     });
 
     it('rejects NUL bytes in absolute paths before invoking the native binding', () => {
@@ -325,6 +352,7 @@ describe('secure-fs TypeScript boundary', () => {
             releaseProjectLease: jest.fn(),
             readRegularFile: jest.fn(() => invalid as never),
             writeProjectTransaction: jest.fn(),
+            removeObservedProjectFile: jest.fn(),
         }));
         expect(() => bridge.readRegularFile(path.join(projectRoot, 'sensors.json'), 1024)).toThrow(/invalid.*read|identity/i);
     });
@@ -448,6 +476,25 @@ nativeOnly('native secure-fs identity fence fixtures', () => {
         })).toThrow(/original changed|transaction failed/i);
         expect(fs.readFileSync(target, 'utf8')).toBe('observed bytes');
         expect(fs.readFileSync(original, 'utf8')).toBe('observed bytes');
+    });
+
+    it('removes the exact observed file but rejects a substituted same-byte destination', () => {
+        const target = path.join(root, 'created.json');
+        const original = path.join(root, 'original-created.json');
+        fs.writeFileSync(target, 'created bytes');
+        const observed = binding.readRegularFile(target, 1024);
+
+        binding.removeObservedProjectFile(root, 'created.json', observed.identity);
+        expect(fs.existsSync(target)).toBe(false);
+
+        fs.writeFileSync(target, 'created bytes');
+        const substituted = binding.readRegularFile(target, 1024);
+        fs.renameSync(target, original);
+        fs.writeFileSync(target, 'created bytes');
+        expect(() => binding.removeObservedProjectFile(root, 'created.json', substituted.identity))
+            .toThrow(/original changed|transaction failed|identity/i);
+        expect(fs.readFileSync(target, 'utf8')).toBe('created bytes');
+        expect(fs.readFileSync(original, 'utf8')).toBe('created bytes');
     });
 });
 

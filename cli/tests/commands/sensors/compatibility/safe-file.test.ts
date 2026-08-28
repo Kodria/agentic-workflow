@@ -4,6 +4,7 @@ import path from 'path';
 
 import {
     readInspectedBoundedFileWithIdentity,
+    removeObservedProjectFile,
     writeProjectFile,
 } from '../../../../src/commands/sensors/compatibility/safe-file';
 
@@ -38,6 +39,22 @@ describe('safe-file native replacement observation', () => {
         });
 
         expect(fs.readFileSync(target, 'utf8')).toBe('new bytes');
+    });
+
+    it('compensates only the exact project file observed after creation', () => {
+        const target = path.join(root, 'created.json');
+        fs.writeFileSync(target, 'created bytes');
+        const inspected = fs.lstatSync(target, { bigint: true });
+        const observed = readInspectedBoundedFileWithIdentity(
+            target,
+            inspected,
+            1024,
+            reason => new Error(`safe read failed: ${reason}`),
+        );
+
+        removeObservedProjectFile(root, 'created.json', observed.identity);
+
+        expect(fs.existsSync(target)).toBe(false);
     });
 
     it('rejects a nested claimant before callback mutation and releases after a thrown callback', () => {

@@ -5,14 +5,17 @@ import { secureFs, type FileIdentityToken, type SecureFsBoundary } from '../../.
 export type SafeFileFailure = 'open' | 'regular' | 'identity' | 'size' | 'limit';
 export type InspectedFileRead = Readonly<{ content: Buffer; identity: FileIdentityToken }>;
 
-let secureFsForTest: SecureFsBoundary | undefined;
+type SecureFsTestBoundary = Omit<SecureFsBoundary, 'removeObservedProjectFile'>
+    & Partial<Pick<SecureFsBoundary, 'removeObservedProjectFile'>>;
+
+let secureFsForTest: SecureFsTestBoundary | undefined;
 
 /** Test-only seam for filesystem race fixtures. Production always uses the packaged bridge. */
-export function setSecureFsForTests(boundary: SecureFsBoundary | undefined): void {
+export function setSecureFsForTests(boundary: SecureFsTestBoundary | undefined): void {
     secureFsForTest = boundary;
 }
 
-function activeSecureFs(): SecureFsBoundary {
+function activeSecureFs(): SecureFsTestBoundary | SecureFsBoundary {
     return secureFsForTest ?? secureFs;
 }
 
@@ -24,6 +27,16 @@ export function withProjectLease<T>(projectRoot: string, operation: () => T): T 
 /** Native-only project publication. Production never falls back to pathname writes. */
 export function writeProjectFile(projectRoot: string, destination: string, content: Buffer, options: Parameters<SecureFsBoundary['writeProjectTransaction']>[3]): void {
     try { activeSecureFs().writeProjectTransaction(projectRoot, destination, content, options); }
+    catch (error) { throw new Error(`project destination rejected by secure-fs: ${(error as Error).message}`); }
+}
+
+/** Compensate only a file that this transaction read and identity-fenced. */
+export function removeObservedProjectFile(projectRoot: string, destination: string, identity: FileIdentityToken): void {
+    try {
+        const remove = activeSecureFs().removeObservedProjectFile;
+        if (typeof remove !== 'function') throw new Error('secure-fs native bridge does not support identity-fenced removal');
+        remove(projectRoot, destination, identity);
+    }
     catch (error) { throw new Error(`project destination rejected by secure-fs: ${(error as Error).message}`); }
 }
 
