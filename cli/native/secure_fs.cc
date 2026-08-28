@@ -303,10 +303,13 @@ struct WindowsPath {
 
 using NtCreateFileFunction = NTSTATUS (NTAPI*)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES,
     PIO_STATUS_BLOCK, PLARGE_INTEGER, ULONG, ULONG, ULONG, ULONG, PVOID, ULONG);
+using NtSetInformationFileFunction = NTSTATUS (NTAPI*)(HANDLE, PIO_STATUS_BLOCK,
+    PVOID, ULONG, ULONG);
 using RtlNtStatusToDosErrorFunction = ULONG (NTAPI*)(NTSTATUS);
 
 struct WindowsNativeApi {
   NtCreateFileFunction nt_create_file = nullptr;
+  NtSetInformationFileFunction nt_set_information_file = nullptr;
   RtlNtStatusToDosErrorFunction rtl_nt_status_to_dos_error = nullptr;
 };
 
@@ -321,6 +324,7 @@ constexpr ULONG kFileCreate = 0x00000002;
 constexpr ULONG kFileOpenIf = 0x00000003;
 constexpr ULONG kFileRenameReplaceIfExists = 0x00000001;
 constexpr ULONG kFileRenamePosixSemantics = 0x00000002;
+constexpr ULONG kFileRenameInformationEx = 65;
 
 const WindowsNativeApi& GetWindowsNativeApi() {
   static const WindowsNativeApi api = [] {
@@ -328,6 +332,7 @@ const WindowsNativeApi& GetWindowsNativeApi() {
     HMODULE module = GetModuleHandleW(L"ntdll.dll");
     if (module == nullptr) return result;
     result.nt_create_file = reinterpret_cast<NtCreateFileFunction>(GetProcAddress(module, "NtCreateFile"));
+    result.nt_set_information_file = reinterpret_cast<NtSetInformationFileFunction>(GetProcAddress(module, "NtSetInformationFile"));
     result.rtl_nt_status_to_dos_error = reinterpret_cast<RtlNtStatusToDosErrorFunction>(GetProcAddress(module, "RtlNtStatusToDosError"));
     return result;
   }();
@@ -664,8 +669,13 @@ PublishResult PublishNoReplace(HANDLE staged, HANDLE parent, const std::wstring&
   rename->RootDirectory = parent;
   rename->FileNameLength = static_cast<DWORD>(basename.size() * sizeof(WCHAR));
   std::memcpy(rename->FileName, basename.data(), rename->FileNameLength);
-  if (SetFileInformationByHandle(staged, static_cast<FILE_INFO_BY_HANDLE_CLASS>(22), rename, static_cast<DWORD>(bytes)) != 0) return PublishResult::kPublished;
-  const DWORD error = GetLastError();
+  const WindowsNativeApi& api = GetWindowsNativeApi();
+  if (api.nt_set_information_file == nullptr || api.rtl_nt_status_to_dos_error == nullptr) return PublishResult::kApiUnavailable;
+  IO_STATUS_BLOCK io_status {};
+  const NTSTATUS status = api.nt_set_information_file(staged, &io_status, rename,
+      static_cast<ULONG>(bytes), kFileRenameInformationEx);
+  if (status >= 0) return PublishResult::kPublished;
+  const DWORD error = api.rtl_nt_status_to_dos_error(status);
   if (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS) return PublishResult::kConflict;
   if (error == ERROR_INVALID_PARAMETER || error == ERROR_NOT_SUPPORTED || error == ERROR_CALL_NOT_IMPLEMENTED) return PublishResult::kApiUnavailable;
   return PublishResult::kFailed;
@@ -710,8 +720,13 @@ PublishResult PublishReplace(HANDLE staged, HANDLE parent, const std::wstring& b
   rename->RootDirectory = parent;
   rename->FileNameLength = static_cast<DWORD>(basename.size() * sizeof(WCHAR));
   std::memcpy(rename->FileName, basename.data(), rename->FileNameLength);
-  if (SetFileInformationByHandle(staged, static_cast<FILE_INFO_BY_HANDLE_CLASS>(22), rename, static_cast<DWORD>(bytes)) != 0) return PublishResult::kPublished;
-  const DWORD error = GetLastError();
+  const WindowsNativeApi& api = GetWindowsNativeApi();
+  if (api.nt_set_information_file == nullptr || api.rtl_nt_status_to_dos_error == nullptr) return PublishResult::kApiUnavailable;
+  IO_STATUS_BLOCK io_status {};
+  const NTSTATUS status = api.nt_set_information_file(staged, &io_status, rename,
+      static_cast<ULONG>(bytes), kFileRenameInformationEx);
+  if (status >= 0) return PublishResult::kPublished;
+  const DWORD error = api.rtl_nt_status_to_dos_error(status);
   if (error == ERROR_FILE_NOT_FOUND || error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS || error == ERROR_SHARING_VIOLATION) return PublishResult::kConflict;
   if (error == ERROR_INVALID_PARAMETER || error == ERROR_NOT_SUPPORTED || error == ERROR_CALL_NOT_IMPLEMENTED) return PublishResult::kApiUnavailable;
   return PublishResult::kFailed;

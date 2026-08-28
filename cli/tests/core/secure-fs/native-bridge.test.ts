@@ -133,6 +133,21 @@ describe('native secure-fs Windows source contract', () => {
         }
     });
 
+    it('uses the native rename-information class required for POSIX publication', () => {
+        const source = windowsSource();
+
+        expect(source).toContain('NtSetInformationFileFunction nt_set_information_file');
+        expect(source).toContain('constexpr ULONG kFileRenameInformationEx = 65');
+        for (const functionName of ['PublishNoReplace', 'PublishReplace']) {
+            const start = source.indexOf(`PublishResult ${functionName}`);
+            const end = source.indexOf('\n}\n', start) + 2;
+            const rename = source.slice(start, end);
+
+            expect(rename).toContain('api.nt_set_information_file');
+            expect(rename).toContain('kFileRenameInformationEx');
+        }
+    });
+
     it('declares eval mode for the inline junction-race worker', () => {
         expect(fs.readFileSync(__filename, 'utf8'))
             .toMatch(/new Worker\([\s\S]*?`\s*, \{ eval: true, workerData:/);
