@@ -20,6 +20,7 @@ const CLI_ROOT = path.resolve(__dirname, '..', '..');
 const REPO_ROOT = path.resolve(CLI_ROOT, '..');
 const RELEASE_ENTRY = path.join(CLI_ROOT, 'src', 'release', 'index.ts');
 const RELEASE_WORKFLOW = path.join(REPO_ROOT, '.github', 'workflows', 'release.yml');
+const CI_WORKFLOW = path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml');
 
 // Flags deliberadamente NO expuestos a CI, con la razón por la que no lo están. Sacar uno
 // de acá sin exponerlo en el workflow rompe el test a propósito.
@@ -72,4 +73,14 @@ describe('flags del release: implementados <=> alcanzables desde CI', () => {
         expect(workflowSource).toMatch(/inputs\.bump != 'auto'/);
         expect(workflowSource).toMatch(/--force \{0\}/);
     });
+});
+
+describe('matriz de compilacion nativa Windows', () => {
+    for (const workflowPath of [CI_WORKFLOW, RELEASE_WORKFLOW]) {
+        it(`${path.basename(workflowPath)} fija x64 en Windows Server 2022 y conserva ARM64 nativo`, () => {
+            const source = fs.readFileSync(workflowPath, 'utf8');
+            expect(source).toMatch(/- os: windows-2022\s+target: win32-x64/);
+            expect(source).toMatch(/- os: windows-11-arm\s+target: win32-arm64/);
+        });
+    }
 });

@@ -99,7 +99,7 @@ An unsupported capability is an explicit provider limit; an absent configuration
 | System | Level | Evidence |
 |---|---|---|
 | **Linux** | ✅ Verified | Full suite in CI on every pull request and push to `main` (`ubuntu-latest`). |
-| **Windows (native)** | ✅ Verified | Full suite in CI on every pull request and push to `main` (`windows-latest`). |
+| **Windows (native)** | ✅ Verified | Full suite and native artifact build in CI on every pull request and push to `main` (`windows-2022` x64 and `windows-11-arm` ARM64). |
 | **macOS** | ✅ Verified | Full suite in CI on every pull request and push to `main` (`macos-latest`). |
 | **WSL** | ⚠ Unverified | WSL is Linux (`process.platform === 'linux'`), but requires the Linux filesystem and has no separate recorded run. See [os-matrix](testing/os-matrix.md). |
 
