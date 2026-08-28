@@ -80,3 +80,36 @@ describe('secure-fs TypeScript boundary', () => {
         expect(() => bridge.readRegularFile('/project/.awm/sensors.json', 0)).toThrow('positive safe integer');
     });
 });
+
+const windowsOnly = process.platform === 'win32' ? describe : describe.skip;
+
+windowsOnly('native secure-fs Windows handle fixtures', () => {
+    let root: string;
+    let binding: NativeSecureFsBinding;
+
+    beforeEach(() => {
+        root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-secure-fs-win-'));
+        // The CI build packages the current platform's artifact before Jest runs.
+        binding = require(path.join(__dirname, '../../../prebuilds', `win32-${process.arch}`, 'secure_fs.node')) as NativeSecureFsBinding;
+    });
+    afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });
+
+    it('rejects a junction ancestor without creating a file in its target', () => {
+        const outside = path.join(root, 'outside');
+        const junction = path.join(root, 'junction');
+        fs.mkdirSync(outside);
+        fs.symlinkSync(outside, junction, 'junction');
+        const target = path.join(junction, 'sensors.json');
+
+        expect(() => binding.writeProjectTransaction(target, Buffer.from('new bytes'))).toThrow(/rejected path ancestor/i);
+        expect(fs.existsSync(path.join(outside, 'sensors.json'))).toBe(false);
+    });
+
+    it('rejects an existing target without mutating its bytes', () => {
+        const target = path.join(root, 'sensors.json');
+        fs.writeFileSync(target, 'existing bytes');
+
+        expect(() => binding.writeProjectTransaction(target, Buffer.from('new bytes'))).toThrow(/target exists|transaction failed/i);
+        expect(fs.readFileSync(target, 'utf8')).toBe('existing bytes');
+    });
+});
