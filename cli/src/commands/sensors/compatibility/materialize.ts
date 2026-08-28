@@ -202,16 +202,21 @@ export function materializePortableSensors(input: PortableMaterializeInput): Por
         if (sensor.policyRef) resolveSemgrepPolicy(sensor.policyRef, path.join(packRoot, 'pack.json'), `sensors.${name}`);
     }
     const selected = [...new Set(Object.values(manifest.sensors).flatMap(sensor => sensor.assets ?? []))].map((asset, index) => containedAsset(asset, `assets[${index}]`)).sort();
+    // Establish every registry authority and read every selected byte before the
+    // first project mutation. A bad later asset must not strand an earlier one.
+    const publications = input.configure === false ? [] : selected.map(asset => {
+        const selectedSource = selectedRegistryAsset(packRoot, asset);
+        return { asset, content: readSelectedRegistryAsset(packRoot, selectedSource, asset) };
+    });
     return withProjectLease(projectRoot, () => {
         const configRoot = manifest.packageRoot ? containedPackageRoot(projectRoot, manifest.packageRoot) : projectRoot;
         const prior = priorAssets(projectRoot);
         const configured: string[] = []; const preserved: string[] = [];
         if (input.configure !== false) {
-            for (const asset of selected) {
-                const selectedSource = selectedRegistryAsset(packRoot, asset);
-                if (atomicCreateAsset(configRoot, asset, readSelectedRegistryAsset(packRoot, selectedSource, asset))) {
-                    configured.push(asset);
-                } else preserved.push(asset);
+            for (const publication of publications) {
+                if (atomicCreateAsset(configRoot, publication.asset, publication.content)) {
+                    configured.push(publication.asset);
+                } else preserved.push(publication.asset);
             }
         }
         atomicWrite(projectRoot, '.awm/sensors.json', serializeManifestV3(manifest), true);

@@ -207,6 +207,15 @@ describe('materializeResolvedSensors', () => {
         expect(fs.existsSync(path.join(projectRoot, 'eslint.config.awm.mjs'))).toBe(false);
     });
 
+    it('validates every selected portable asset before publishing the first one', () => {
+        const source = portableSource();
+        expect(() => materializePortableSensors({ projectRoot, pack: 'js-ts', source, sensors: {
+            lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['eslint.config.awm.mjs', 'missing.awm.mjs'], initializedCompatibility: evidence },
+        } } as never)).toThrow(/missing/i);
+        expect(fs.existsSync(path.join(projectRoot, 'eslint.config.awm.mjs'))).toBe(false);
+        expect(fs.existsSync(path.join(projectRoot, '.awm', 'sensors.json'))).toBe(false);
+    });
+
     it('contains no pathname-based deletion in production materialization', () => {
         const source = fs.readFileSync(path.resolve(__dirname, '../../../../src/commands/sensors/compatibility/materialize.ts'), 'utf8');
         expect(source).not.toMatch(/\b(?:unlink|rm)Sync\s*\(/);
