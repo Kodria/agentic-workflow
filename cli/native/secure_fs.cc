@@ -626,8 +626,7 @@ bool CreatePrivateStagingFile(const WindowsParent& parent, HANDLE* staged, DWORD
     HANDLE handle = INVALID_HANDLE_VALUE;
     if (CreateFileRelative(parent.handle, candidate,
         GENERIC_WRITE | DELETE | FILE_READ_ATTRIBUTES, 0, kFileCreate,
-        kFileNonDirectoryFile | kFileOpenReparsePoint | kFileSynchronousIoNonalert
-            | kFileOpenForBackupIntent,
+        kFileNonDirectoryFile | kFileOpenReparsePoint | kFileSynchronousIoNonalert,
         FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_TEMPORARY, &handle)) {
       *staged = handle;
       return true;

@@ -100,18 +100,6 @@ describe('native secure-fs Windows source contract', () => {
             .toMatch(/DWORD staging_error = ERROR_SUCCESS;[\s\S]*?CreatePrivateStagingFile\(parent, &staged, &staging_error\)/);
     });
 
-    it('opens an exclusive staging file with the compatible backup-intent option', () => {
-        const source = windowsSource();
-        const start = source.indexOf('bool CreatePrivateStagingFile');
-        const end = source.indexOf('\nbool DiscardStagingFile', start);
-        const staging = source.slice(start, end);
-
-        expect(start).toBeGreaterThan(-1);
-        expect(staging).toMatch(
-            /kFileNonDirectoryFile\s*\|\s*kFileOpenReparsePoint\s*\|\s*kFileSynchronousIoNonalert\s*\|\s*kFileOpenForBackupIntent/,
-        );
-    });
-
     it('declares eval mode for the inline junction-race worker', () => {
         expect(fs.readFileSync(__filename, 'utf8'))
             .toMatch(/new Worker\([\s\S]*?`\s*, \{ eval: true, workerData:/);
