@@ -121,6 +121,18 @@ describe('native secure-fs Windows source contract', () => {
         expect(staging).toContain('kFileSynchronousIoNonalert');
     });
 
+    it('supplies a NUL-terminated buffer for each Win32 rename target', () => {
+        const source = windowsSource();
+        for (const functionName of ['PublishNoReplace', 'PublishReplace']) {
+            const start = source.indexOf(`PublishResult ${functionName}`);
+            const end = source.indexOf('\n}\n', start) + 2;
+            const rename = source.slice(start, end);
+
+            expect(start).toBeGreaterThan(-1);
+            expect(rename).toContain('basename.size() * sizeof(WCHAR) + sizeof(WCHAR)');
+        }
+    });
+
     it('declares eval mode for the inline junction-race worker', () => {
         expect(fs.readFileSync(__filename, 'utf8'))
             .toMatch(/new Worker\([\s\S]*?`\s*, \{ eval: true, workerData:/);

@@ -656,7 +656,7 @@ PublishResult PublishNoReplace(HANDLE staged, HANDLE parent, const std::wstring&
     DWORD FileNameLength;
     WCHAR FileName[1];
   };
-  const size_t bytes = offsetof(RenameInfoEx, FileName) + basename.size() * sizeof(WCHAR);
+  const size_t bytes = offsetof(RenameInfoEx, FileName) + basename.size() * sizeof(WCHAR) + sizeof(WCHAR);
   if (bytes > MAXDWORD) return PublishResult::kFailed;
   std::vector<unsigned char> storage(bytes);
   auto* rename = reinterpret_cast<RenameInfoEx*>(storage.data());
@@ -698,7 +698,7 @@ PublishResult PublishReplace(HANDLE staged, HANDLE parent, const std::wstring& b
     DWORD FileNameLength;
     WCHAR FileName[1];
   };
-  const size_t bytes = offsetof(RenameInfoEx, FileName) + basename.size() * sizeof(WCHAR);
+  const size_t bytes = offsetof(RenameInfoEx, FileName) + basename.size() * sizeof(WCHAR) + sizeof(WCHAR);
   if (bytes > MAXDWORD) return PublishResult::kFailed;
   std::vector<unsigned char> storage(bytes);
   auto* rename = reinterpret_cast<RenameInfoEx*>(storage.data());
