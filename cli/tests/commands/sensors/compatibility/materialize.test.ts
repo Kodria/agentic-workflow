@@ -226,6 +226,25 @@ describe('materializeResolvedSensors', () => {
         expect(fs.existsSync(path.join(projectRoot, '.awm', 'sensors.json'))).toBe(false);
     });
 
+    it('compensates only assets it created when manifest publication fails', () => {
+        const source = portableSource();
+        setSecureFsForTests({
+            withProjectLease: secureFs.withProjectLease,
+            readRegularFile: secureFs.readRegularFile,
+            writeProjectTransaction: ((root: string, destination: string, content: Buffer, options: Parameters<typeof secureFs.writeProjectTransaction>[3]) => {
+                if (destination === '.awm/sensors.json') throw new Error('injected manifest publication failure');
+                secureFs.writeProjectTransaction(root, destination, content, options);
+            }) as typeof secureFs.writeProjectTransaction,
+            removeObservedProjectFile: secureFs.removeObservedProjectFile,
+        });
+        expect(() => materializePortableSensors({ projectRoot, pack: 'js-ts', source, sensors: {
+            lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['eslint.config.awm.mjs'], initializedCompatibility: evidence },
+        } } as never)).toThrow('injected manifest publication failure');
+        expect(fs.existsSync(path.join(projectRoot, 'eslint.config.awm.mjs'))).toBe(false);
+        expect(fs.existsSync(path.join(projectRoot, '.awm', 'sensors.json'))).toBe(false);
+        expect(fs.existsSync(path.join(projectRoot, '.awm', 'sensors.json.tmp'))).toBe(false);
+    });
+
     it('contains no pathname-based deletion in production materialization', () => {
         const source = fs.readFileSync(path.resolve(__dirname, '../../../../src/commands/sensors/compatibility/materialize.ts'), 'utf8');
         expect(source).not.toMatch(/\b(?:unlink|rm)Sync\s*\(/);

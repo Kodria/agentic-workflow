@@ -3,6 +3,10 @@ import { spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { materializePortableSensors } from '../../src/commands/sensors/compatibility/materialize';
+import { resolvePackSource } from '../../src/commands/sensors/compatibility/pack-source';
+import { setSecureFsForTests } from '../../src/commands/sensors/compatibility/safe-file';
+import { secureFs } from '../../src/core/secure-fs/native-bridge';
 
 const cliRoot = path.resolve(__dirname, '../..');
 const bin = path.join(cliRoot, 'dist/src/index.js');
@@ -98,6 +102,39 @@ test('compiled project-sensors bootstrap materializes only selected assets and t
         expect(hashTree(subject.project)).toBe(first);
         expect(hashTree(subject.awmHome)).toBe(machineBefore);
     } finally { fs.rmSync(subject.root, { recursive: true, force: true }); }
+});
+
+test('injected manifest publication failure compensates created assets without changing unrelated project or machine bytes', () => {
+    const subject = fixture();
+    try {
+        fs.rmSync(path.join(subject.project, '.awm'), { recursive: true, force: true });
+        const beforePackage = fs.readFileSync(path.join(subject.project, 'package.json'));
+        const beforeConfig = fs.readFileSync(path.join(subject.project, 'eslint.config.mjs'));
+        const beforeMachine = hashTree(subject.awmHome);
+        const source = resolvePackSource('js-ts', { registries: [{ name: 'baseline', remote: 'fixture', contentRoot: subject.registryRoot }] });
+        setSecureFsForTests({
+            withProjectLease: secureFs.withProjectLease,
+            readRegularFile: secureFs.readRegularFile,
+            writeProjectTransaction: ((root: string, destination: string, content: Buffer, options: Parameters<typeof secureFs.writeProjectTransaction>[3]) => {
+                if (destination === '.awm/sensors.json') throw new Error('injected rename failure');
+                secureFs.writeProjectTransaction(root, destination, content, options);
+            }) as typeof secureFs.writeProjectTransaction,
+            removeObservedProjectFile: secureFs.removeObservedProjectFile,
+        });
+        expect(() => materializePortableSensors({
+            projectRoot: subject.project, pack: 'js-ts', source,
+            sensors: { lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['eslint.fixture.mjs'], initializedCompatibility: { state: 'certified', reason: 'fixture', variantId: 'eslint-10', toolVersion: '10.4.1', runtimeVersion: '24.0.0', certifiedRange: '>=10 <11', evidence: [] } } },
+        })).toThrow('injected rename failure');
+        expect(fs.readFileSync(path.join(subject.project, 'package.json'))).toEqual(beforePackage);
+        expect(fs.readFileSync(path.join(subject.project, 'eslint.config.mjs'))).toEqual(beforeConfig);
+        expect(fs.existsSync(path.join(subject.project, 'eslint.fixture.mjs'))).toBe(false);
+        expect(fs.existsSync(path.join(subject.project, '.awm', 'sensors.json'))).toBe(false);
+        expect(hashTree(subject.awmHome)).toBe(beforeMachine);
+        expect(fs.existsSync(path.join(subject.project, '.awm', 'sensors.json.tmp'))).toBe(false);
+    } finally {
+        setSecureFsForTests(undefined);
+        fs.rmSync(subject.root, { recursive: true, force: true });
+    }
 });
 
 test('compiled bootstrap migrates v2 once, preserves all non-manifest project bytes, and then no-ops', () => {

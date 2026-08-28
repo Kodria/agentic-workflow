@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { parseSensorManifest, serializeManifestV2, serializeManifestV3, type SensorManifestV2, type SensorManifestV3ProjectSensors } from './manifest';
 import { resolveSemgrepPolicy } from './contract';
-import { readInspectedBoundedFile, readInspectedBoundedFileWithIdentity, withProjectLease, writeProjectFile, type InspectedFileRead, type SafeFileFailure } from './safe-file';
+import { readInspectedBoundedFile, readInspectedBoundedFileWithIdentity, removeObservedProjectFile, withProjectLease, writeProjectFile, type InspectedFileRead, type SafeFileFailure } from './safe-file';
 import { PROJECT_DESTINATION_ALREADY_EXISTS_MESSAGE } from '../../../core/secure-fs/native-bridge';
 import type { PackSource } from './pack-source';
 
@@ -216,14 +216,31 @@ export function materializePortableSensors(input: PortableMaterializeInput): Por
         const configRoot = manifest.packageRoot ? containedPackageRoot(projectRoot, manifest.packageRoot) : projectRoot;
         const prior = priorAssets(projectRoot);
         const configured: string[] = []; const preserved: string[] = [];
-        if (input.configure !== false) {
-            for (const publication of publications) {
-                if (atomicCreateAsset(configRoot, publication.asset, publication.content)) {
-                    configured.push(publication.asset);
-                } else preserved.push(publication.asset);
+        const created: Array<{ destination: string; identity: InspectedFileRead['identity'] }> = [];
+        try {
+            if (input.configure !== false) {
+                for (const publication of publications) {
+                    if (atomicCreateAsset(configRoot, publication.asset, publication.content)) {
+                        const destination = manifest.packageRoot ? `${manifest.packageRoot}/${publication.asset}` : publication.asset;
+                        const absolute = path.join(projectRoot, ...destination.split('/'));
+                        const stat = fs.lstatSync(absolute, { bigint: true });
+                        const observed = readInspectedBoundedFileWithIdentity(absolute, stat, MAX_ASSET_BYTES, () => new Error(`created asset cannot be safely observed: ${publication.asset}`));
+                        if (!observed.content.equals(Buffer.from(publication.content, 'utf8'))) {
+                            throw new Error(`created asset changed before manifest publication: ${publication.asset}`);
+                        }
+                        created.push({ destination, identity: observed.identity });
+                        configured.push(publication.asset);
+                    } else preserved.push(publication.asset);
+                }
             }
+            atomicWrite(projectRoot, '.awm/sensors.json', serializeManifestV3(manifest), true);
+        } catch (error) {
+            for (const entry of created.reverse()) {
+                try { removeObservedProjectFile(projectRoot, entry.destination, entry.identity); }
+                catch { /* Preserve a competing replacement; report the original publication failure. */ }
+            }
+            throw error;
         }
-        atomicWrite(projectRoot, '.awm/sensors.json', serializeManifestV3(manifest), true);
         return { manifest, configured, preserved, orphaned: prior.filter(asset => !selected.includes(asset)).sort() };
     });
 }
