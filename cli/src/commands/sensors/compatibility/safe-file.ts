@@ -103,6 +103,20 @@ export function withNoFollowDirectory<T>(directory: string, failure: () => Error
     }
 }
 
+/**
+ * Run a filesystem mutation only through a descriptor-bound directory path.
+ * Identity snapshots are sufficient for bounded reads, but cannot make a
+ * pathname write safe: a parent can be replaced after the snapshot and before
+ * `mkdtemp`, staging, or publication. Platforms without the Linux descriptor
+ * bridge therefore reject before the mutation callback begins.
+ */
+export function withDescriptorBoundWriteDirectory<T>(directory: string, failure: () => Error, operation: (boundDirectory: string) => T): T {
+    const noFollow = fs.constants.O_NOFOLLOW;
+    const directoryFlag = fs.constants.O_DIRECTORY;
+    if (typeof noFollow !== 'number' || typeof directoryFlag !== 'number' || !procfsDescriptorBridgeAvailable()) throw failure();
+    return withNoFollowDirectory(directory, failure, operation);
+}
+
 /** Open one direct child from a previously bound directory without path re-resolution. */
 export function withNoFollowChildDirectory<T>(parentDirectory: string, component: string, failure: () => Error, operation: (boundDirectory: string) => T): T {
     const noFollow = fs.constants.O_NOFOLLOW;

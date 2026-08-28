@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { parseSensorPack } from './compatibility/contract';
 import { parseSensorManifest, serializeManifestV3, type SensorManifestV2, type SensorManifestV3ProjectSensors } from './compatibility/manifest';
-import { readInspectedBoundedFile, withNoFollowChildDirectory, withNoFollowDirectory, type SafeFileFailure } from './compatibility/safe-file';
+import { readInspectedBoundedFile, withDescriptorBoundWriteDirectory, withNoFollowChildDirectory, type SafeFileFailure } from './compatibility/safe-file';
 import type { SensorSourceResolution } from './compatibility/source';
 
 /**
@@ -220,7 +220,7 @@ export function replaceV2ManifestWithV3(manifestPath: unknown, candidate: unknow
     const directory = path.dirname(manifestPath);
     const basename = path.basename(manifestPath);
     const parentFailure = () => new Error('v2 migration manifest parent changed or contains a symlink');
-    withNoFollowDirectory(directory, parentFailure, boundParent => {
+    withDescriptorBoundWriteDirectory(directory, parentFailure, boundParent => {
         const boundManifest = path.join(boundParent, basename);
         // Re-check through the bound parent before creating any staging file.
         // This also connects the initially inspected manifest identity to the

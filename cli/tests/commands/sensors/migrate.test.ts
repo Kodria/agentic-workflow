@@ -299,20 +299,38 @@ describe('planV2Migration', () => {
         }
     });
 
-    it('publishes through a fully validated portable parent when O_NOFOLLOW is unavailable', () => {
+    it('fails closed before staging when descriptor-bound publication is unavailable', () => {
         const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-portable-parent-'));
+        const movedProject = `${project}-original`;
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-portable-outside-'));
         const manifestPath = path.join(project, 'sensors.json');
+        const mkdtempSync = fs.mkdtempSync.bind(fs);
+        const mkdtemp = jest.spyOn(fs, 'mkdtempSync');
+        let parentSwapAttempted = false;
         try {
             fs.writeFileSync(manifestPath, JSON.stringify(v2));
             const candidate = planV2Migration({ manifest: v2, source: resolvedSource() }).candidate;
-            replaceWithoutNoFollow(manifestPath, candidate, resolvedSource());
-            expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8'))).toMatchObject({ schemaVersion: 3, source: { registry: 'baseline' } });
+            mkdtemp.mockImplementation(((prefix: string, options?: fs.EncodingOption) => {
+                if (prefix.startsWith(path.join(project, '.sensors.json.migrate-'))) {
+                    parentSwapAttempted = true;
+                    fs.renameSync(project, movedProject);
+                    fs.symlinkSync(outside, project, 'dir');
+                }
+                return mkdtempSync(prefix, options);
+            }) as typeof fs.mkdtempSync);
+            expect(() => replaceWithoutNoFollow(manifestPath, candidate, resolvedSource())).toThrow(/descriptor|safe|migration/i);
+            expect(parentSwapAttempted).toBe(false);
+            expect(fs.readdirSync(outside)).toEqual([]);
+            expect(fs.readFileSync(manifestPath, 'utf8')).toBe(JSON.stringify(v2));
         } finally {
+            mkdtemp.mockRestore();
             fs.rmSync(project, { recursive: true, force: true });
+            fs.rmSync(movedProject, { recursive: true, force: true });
+            fs.rmSync(outside, { recursive: true, force: true });
         }
     });
 
-    it('rejects a manifest-parent symlink swap before staging can be redirected', () => {
+    it('keeps descriptor-bound Linux publication inside the original parent after a swap', () => {
         const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-parent-swap-'));
         const movedProject = `${project}-original`;
         const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-parent-outside-'));
@@ -329,7 +347,7 @@ describe('planV2Migration', () => {
             fs.writeFileSync(path.join(outside, 'sensors.json'), original);
             const candidate = planV2Migration({ manifest: v2, source: resolvedSource() }).candidate;
             mkdtemp.mockImplementation(((prefix: string, options?: fs.EncodingOption) => {
-                if (!swapped && prefix.startsWith(path.join(project, '.sensors.json.migrate-'))) {
+                if (!swapped && path.basename(prefix).startsWith('.sensors.json.migrate-')) {
                     swapped = true;
                     fs.renameSync(project, movedProject);
                     fs.symlinkSync(outside, project, 'dir');
@@ -340,11 +358,11 @@ describe('planV2Migration', () => {
                 if (typeof file === 'string' && fs.realpathSync(path.dirname(file)).startsWith(outside + path.sep)) redirectedWrites.push(file);
                 return (writeFileSync as (...args: unknown[]) => void)(file, data, options);
             }) as typeof fs.writeFileSync);
-            expect(() => replaceWithoutNoFollow(manifestPath, candidate, resolvedSource())).toThrow(/symlink|changed|safe|migration/i);
+            expect(() => replaceV2ManifestWithV3(manifestPath, candidate, resolvedSource())).not.toThrow();
             expect(swapped).toBe(true);
             expect(redirectedWrites).toEqual([]);
             expect(fs.readFileSync(path.join(outside, 'sensors.json'), 'utf8')).toBe(original);
-            expect(fs.readFileSync(path.join(movedProject, 'sensors.json'), 'utf8')).toBe(original);
+            expect(JSON.parse(fs.readFileSync(path.join(movedProject, 'sensors.json'), 'utf8'))).toMatchObject({ schemaVersion: 3, source: { registry: 'baseline' } });
         } finally {
             mkdtemp.mockRestore();
             write.mockRestore();
