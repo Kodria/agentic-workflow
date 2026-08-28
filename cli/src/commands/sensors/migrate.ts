@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { parseSensorPack } from './compatibility/contract';
 import { parseSensorManifest, serializeManifestV3, type SensorManifestV2, type SensorManifestV3ProjectSensors } from './compatibility/manifest';
-import { readInspectedBoundedFile, withDescriptorBoundWriteDirectory, withNoFollowChildDirectory, type SafeFileFailure } from './compatibility/safe-file';
+import { readInspectedBoundedFileWithIdentity, withProjectLease, writeProjectFile, type InspectedFileRead, type SafeFileFailure } from './compatibility/safe-file';
 import type { SensorSourceResolution } from './compatibility/source';
 
 /**
@@ -127,14 +127,14 @@ function hasPhysicalSensorPath(value: unknown, registryRoots: readonly (string |
         : isRecord(value) && Object.values(value).some(item => hasPhysicalSensorPath(item, registryRoots));
 }
 
-type InspectedManifest = { stat: fs.BigIntStats; content: Buffer };
+type InspectedManifest = { stat: fs.BigIntStats } & InspectedFileRead;
 
 function inspectManifest(manifestPath: string, failure: (reason: SafeFileFailure) => Error): InspectedManifest {
     let stat: fs.BigIntStats;
     try { stat = fs.lstatSync(manifestPath, { bigint: true }); }
     catch { throw failure('open'); }
     if (!stat.isFile() || stat.isSymbolicLink()) throw failure('regular');
-    return { stat, content: readInspectedBoundedFile(manifestPath, stat, 1024 * 1024, failure) };
+    return { stat, ...readInspectedBoundedFileWithIdentity(manifestPath, stat, 1024 * 1024, failure) };
 }
 
 function assertManifestUnchanged(manifestPath: string, original: InspectedManifest): void {
@@ -144,18 +144,6 @@ function assertManifestUnchanged(manifestPath: string, original: InspectedManife
         || current.stat.size !== original.stat.size || !current.content.equals(original.content)) {
         throw changed();
     }
-}
-
-function sameManifest(left: InspectedManifest, right: InspectedManifest): boolean {
-    return left.stat.dev === right.stat.dev && left.stat.ino === right.stat.ino
-        && left.stat.size === right.stat.size && left.content.equals(right.content);
-}
-
-function cleanupMigrationStaging(directory: string, files: readonly string[]): void {
-    for (const file of files) {
-        try { fs.unlinkSync(file); } catch { /* only remove names created in our private staging directory */ }
-    }
-    try { fs.rmdirSync(directory); } catch { /* best-effort cleanup of our empty staging directory */ }
 }
 
 /** Build, but never persist, a portable v3 replacement for a validated v2 manifest. */
@@ -188,9 +176,15 @@ export function planV2Migration(input: { manifest: unknown; source: unknown }): 
 
 /** Validate the old and new durable contracts, then atomically replace only the manifest. */
 export function replaceV2ManifestWithV3(manifestPath: unknown, candidate: unknown, source: unknown): void {
-    if (typeof manifestPath !== 'string' || !path.isAbsolute(manifestPath) || path.basename(manifestPath) !== 'sensors.json') {
-        throw new Error('v2 migration manifest path must be an absolute sensors.json path');
+    if (typeof manifestPath !== 'string' || !path.isAbsolute(manifestPath) || path.normalize(manifestPath) !== manifestPath
+        || manifestPath.includes('\0') || path.basename(manifestPath) !== 'sensors.json'
+        || path.basename(path.dirname(manifestPath)) !== '.awm') {
+        throw new Error('v2 migration manifest path must be the canonical project manifest <project>/.awm/sensors.json');
     }
+    const manifestDirectory = path.dirname(manifestPath);
+    const projectRoot = path.dirname(manifestDirectory);
+    const destination = '.awm/sensors.json';
+    withProjectLease(projectRoot, () => {
     const originalFailure = (_reason: SafeFileFailure): Error => new Error('v2 migration original manifest must be readable JSON');
     let inspected: InspectedManifest;
     let original: unknown;
@@ -217,53 +211,12 @@ export function replaceV2ManifestWithV3(manifestPath: unknown, candidate: unknow
     if (!allEquivalent(compareV2Semantics(before.pack, after.pack, logicalSource.registry.name))) {
         throw new Error('v2 migration candidate semantic mismatch');
     }
-    const directory = path.dirname(manifestPath);
-    const basename = path.basename(manifestPath);
-    const parentFailure = () => new Error('v2 migration manifest parent changed or contains a symlink');
-    withDescriptorBoundWriteDirectory(directory, parentFailure, boundParent => {
-        const boundManifest = path.join(boundParent, basename);
-        // Re-check through the bound parent before creating any staging file.
-        // This also connects the initially inspected manifest identity to the
-        // authority used for all subsequent publication and cleanup paths.
-        assertManifestUnchanged(boundManifest, inspected);
-        const staging = fs.mkdtempSync(path.join(boundParent, `.${basename}.migrate-`));
-        const stagingName = path.basename(staging);
-        let preserveStaging = false;
-        try {
-            return withNoFollowChildDirectory(boundParent, stagingName, parentFailure, boundStaging => {
-                const replacement = path.join(boundStaging, 'replacement');
-                const displaced = path.join(boundStaging, 'displaced');
-                fs.writeFileSync(replacement, serializeManifestV3(after.pack), { encoding: 'utf8', flag: 'wx' });
-                assertManifestUnchanged(boundManifest, inspected);
-                // Move the observed target aside, prove its identity, then link
-                // the staged replacement into an absent name so concurrent work
-                // is never overwritten.
-                fs.renameSync(boundManifest, displaced);
-                const moved = inspectManifest(displaced, () => new Error('v2 migration original manifest changed before commit'));
-                if (!sameManifest(moved, inspected)) {
-                    try { fs.linkSync(displaced, boundManifest); }
-                    catch {
-                        preserveStaging = true;
-                        throw new Error('v2 migration original manifest changed before commit and could not be restored without clobbering a concurrent update');
-                    }
-                    throw new Error('v2 migration original manifest changed before commit');
-                }
-                try { fs.linkSync(replacement, boundManifest); }
-                catch (error) {
-                    try { fs.linkSync(displaced, boundManifest); }
-                    catch {
-                        if (fs.existsSync(boundManifest)) throw error;
-                        preserveStaging = true;
-                        throw new Error('v2 migration could not restore the original manifest without clobbering a concurrent update');
-                    }
-                    throw error;
-                }
-            });
-        } finally {
-            if (!preserveStaging) {
-                const cleanupRoot = path.join(boundParent, stagingName);
-                cleanupMigrationStaging(cleanupRoot, [path.join(cleanupRoot, 'replacement'), path.join(cleanupRoot, 'displaced')]);
-            }
-        }
+    // The native implementation reopens every ancestor without following links,
+    // verifies these exact bytes at the publication fence, and preserves a
+    // competing target instead of replacing it.
+    assertManifestUnchanged(manifestPath, inspected);
+    writeProjectFile(projectRoot, destination, Buffer.from(serializeManifestV3(after.pack), 'utf8'), {
+        mode: 'replace', expected: inspected.content, expectedIdentity: inspected.identity, createParents: false,
+    });
     });
 }

@@ -1,7 +1,31 @@
 import fs from 'fs';
 import path from 'path';
+import { secureFs, type FileIdentityToken, type SecureFsBoundary } from '../../../core/secure-fs/native-bridge';
 
 export type SafeFileFailure = 'open' | 'regular' | 'identity' | 'size' | 'limit';
+export type InspectedFileRead = Readonly<{ content: Buffer; identity: FileIdentityToken }>;
+
+let secureFsForTest: SecureFsBoundary | undefined;
+
+/** Test-only seam for filesystem race fixtures. Production always uses the packaged bridge. */
+export function setSecureFsForTests(boundary: SecureFsBoundary | undefined): void {
+    secureFsForTest = boundary;
+}
+
+function activeSecureFs(): SecureFsBoundary {
+    return secureFsForTest ?? secureFs;
+}
+
+/** Hold the native project lease for one complete sensor mutation callback. */
+export function withProjectLease<T>(projectRoot: string, operation: () => T): T {
+    return activeSecureFs().withProjectLease(projectRoot, operation);
+}
+
+/** Native-only project publication. Production never falls back to pathname writes. */
+export function writeProjectFile(projectRoot: string, destination: string, content: Buffer, options: Parameters<SecureFsBoundary['writeProjectTransaction']>[3]): void {
+    try { activeSecureFs().writeProjectTransaction(projectRoot, destination, content, options); }
+    catch (error) { throw new Error(`project destination rejected by secure-fs: ${(error as Error).message}`); }
+}
 
 type DirectorySnapshot = { name: string; stat: fs.BigIntStats };
 
@@ -134,6 +158,16 @@ export function withNoFollowChildDirectory<T>(parentDirectory: string, component
 
 /** Read the exact regular file that was previously inspected. */
 export function readInspectedBoundedFile(file: string, inspected: fs.BigIntStats, maxBytes: number, failure: (reason: SafeFileFailure) => Error): Buffer {
+    // The JS descriptor bridge passes /proc/self/fd paths internally on Linux.
+    // They are already descriptor-bound; the native loader correctly rejects the
+    // procfs symlink representation, so retain this narrow internal path only.
+    const descriptorBoundInternalPath = process.platform === 'linux' && file.startsWith('/proc/self/fd/');
+    if (!secureFsForTest && !descriptorBoundInternalPath) {
+        return readInspectedBoundedFileWithIdentity(file, inspected, maxBytes, failure).content;
+    }
+    // Test adapters observe the same boundary, then deliberately exercise the
+    // legacy race fixtures below. They are never selected by production code.
+    if (secureFsForTest) secureFsForTest.readRegularFile(file, maxBytes);
     const noFollow = fs.constants.O_NOFOLLOW;
     const directorySnapshots = typeof noFollow === 'number' && procfsDescriptorBridgeAvailable()
         ? undefined
@@ -160,4 +194,22 @@ export function readInspectedBoundedFile(file: string, inspected: fs.BigIntStats
         if (directorySnapshots) assertDirectoryChainUnchanged(directorySnapshots, () => failure('identity'));
         return buffer.subarray(0, count);
     } finally { fs.closeSync(descriptor); }
+}
+
+/**
+ * Preserve the opaque identity minted by the same native handle that supplied
+ * the bytes. Replacement callers must pass this observation back unchanged.
+ */
+export function readInspectedBoundedFileWithIdentity(
+    file: string,
+    inspected: fs.BigIntStats,
+    maxBytes: number,
+    failure: (reason: SafeFileFailure) => Error,
+): InspectedFileRead {
+    if (process.platform === 'linux' && file.startsWith('/proc/self/fd/')) throw failure('identity');
+    let observed: ReturnType<SecureFsBoundary['readRegularFile']>;
+    try { observed = activeSecureFs().readRegularFile(file, maxBytes); }
+    catch { throw failure('open'); }
+    if (BigInt(observed.bytes.length) !== inspected.size) throw failure('size');
+    return Object.freeze({ content: observed.bytes, identity: observed.identity });
 }

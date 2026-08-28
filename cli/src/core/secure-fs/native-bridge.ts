@@ -2,8 +2,48 @@ import fs from 'fs';
 import path from 'path';
 
 export type NativeSecureFsBinding = Readonly<{
-    readRegularFile(file: string, maxBytes: number): Buffer;
-    writeProjectTransaction(file: string, content: Buffer): void;
+    acquireProjectLease(projectRoot: string): object;
+    releaseProjectLease(token: object): void;
+    readRegularFile(file: string, maxBytes: number): NativeReadResult;
+    writeProjectTransaction(projectRoot: string, destination: string, content: Buffer, options: NativeWriteOptions): void;
+}>;
+
+export type NativeReadResult = Readonly<{
+    bytes: Buffer;
+    /** Fixed-format native identity token; never constructed from a pathname. */
+    identity: Buffer;
+}>;
+
+export type NativeWriteOptions = Readonly<{
+    mode: 'create';
+    createParents: boolean;
+    expected?: never;
+    expectedIdentity?: never;
+} | {
+    mode: 'replace';
+    createParents: boolean;
+    expected: Buffer;
+    expectedIdentity: Buffer;
+}>;
+
+declare const fileIdentityTokenBrand: unique symbol;
+export type FileIdentityToken = Readonly<{ [fileIdentityTokenBrand]: true }>;
+
+export type SecureFileRead = Readonly<{
+    bytes: Buffer;
+    identity: FileIdentityToken;
+}>;
+
+export type SecureWriteOptions = Readonly<{
+    mode: 'create';
+    createParents: boolean;
+    expected?: never;
+    expectedIdentity?: never;
+} | {
+    mode: 'replace';
+    createParents: boolean;
+    expected: Buffer;
+    expectedIdentity: FileIdentityToken;
 }>;
 
 export type NativeArtifactStatus = Readonly<{
@@ -42,6 +82,8 @@ export function loadNativeSecureFsBridge(options: LoaderOptions): NativeSecureFs
     try { loaded = options.load(status.path); }
     catch { throw new Error(`secure-fs native artifact is incompatible for ${status.platform}-${status.arch}`); }
     if (!loaded || typeof loaded !== 'object'
+        || typeof (loaded as Partial<NativeSecureFsBinding>).acquireProjectLease !== 'function'
+        || typeof (loaded as Partial<NativeSecureFsBinding>).releaseProjectLease !== 'function'
         || typeof (loaded as Partial<NativeSecureFsBinding>).readRegularFile !== 'function'
         || typeof (loaded as Partial<NativeSecureFsBinding>).writeProjectTransaction !== 'function') {
         throw new Error(`secure-fs native artifact is incompatible for ${status.platform}-${status.arch}`);
@@ -50,13 +92,25 @@ export function loadNativeSecureFsBridge(options: LoaderOptions): NativeSecureFs
 }
 
 export type SecureFsBoundary = Readonly<{
-    readRegularFile(file: string, maxBytes: number): Buffer;
-    writeProjectTransaction(file: string, content: Buffer): void;
+    withProjectLease<T>(projectRoot: string, operation: () => T): T;
+    readRegularFile(file: string, maxBytes: number): SecureFileRead;
+    writeProjectTransaction(projectRoot: string, destination: string, content: Buffer, options: SecureWriteOptions): void;
 }>;
 
+const IDENTITY_TOKEN_BYTES = 24;
+const NATIVE_DESTINATION_EXISTS_CODE = 'AWM_SECURE_FS_DESTINATION_EXISTS';
+export const PROJECT_DESTINATION_ALREADY_EXISTS_MESSAGE = 'project destination already exists';
+const identityObservations = new WeakMap<object, Readonly<{ bytes: Buffer; identity: Buffer }>>();
+
 function absoluteFile(value: unknown, label: string): string {
+    if (typeof value === 'string' && value.includes('\0')) throw new Error(`${label} must not contain a NUL byte`);
     if (typeof value !== 'string' || !path.isAbsolute(value) || path.normalize(value) !== value) throw new Error(`${label} must be an absolute normalized path`);
     return value;
+}
+
+function isNativeDestinationExistsError(error: unknown): boolean {
+    return !!error && typeof error === 'object'
+        && (error as { code?: unknown }).code === NATIVE_DESTINATION_EXISTS_CODE;
 }
 
 function boundedBytes(value: unknown, label: string): Buffer {
@@ -64,25 +118,115 @@ function boundedBytes(value: unknown, label: string): Buffer {
     return value;
 }
 
+function projectDestination(value: unknown): string {
+    if (typeof value !== 'string' || !value || value.includes('\\')
+        || path.posix.isAbsolute(value) || path.win32.isAbsolute(value) || /^[A-Za-z]:/.test(value)) {
+        throw new Error('destination must be a canonical project-relative path');
+    }
+    const components = value.split('/');
+    if (components.some(component => !component || component === '.' || component === '..' || component.includes(':') || component.includes('\0'))) {
+        throw new Error('destination must contain only safe project-relative components');
+    }
+    return components.join(path.sep);
+}
+
 function positiveSafeInteger(value: unknown, label: string): number {
     if (!Number.isSafeInteger(value) || (value as number) <= 0) throw new Error(`${label} must be a positive safe integer`);
     return value as number;
 }
 
+function nativeIdentity(value: unknown): Buffer {
+    if (!Buffer.isBuffer(value) || value.length !== IDENTITY_TOKEN_BYTES
+        || value.toString('ascii', 0, 4) !== 'SFSI' || value[4] !== 1
+        || (value[5] !== 1 && value[5] !== 2) || value[6] !== 0 || value[7] !== 0) {
+        throw new Error('secure-fs native bridge returned invalid read identity');
+    }
+    const expectedKind = process.platform === 'win32' ? 2 : 1;
+    if (value[5] !== expectedKind) throw new Error('secure-fs native bridge returned identity for the wrong platform');
+    return Buffer.from(value);
+}
+
+function secureReadResult(value: unknown): SecureFileRead {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('secure-fs native bridge returned invalid read result');
+    const candidate = value as Partial<NativeReadResult>;
+    if (!Buffer.isBuffer(candidate.bytes)) throw new Error('secure-fs native bridge returned invalid read bytes');
+    const bytes = Buffer.from(candidate.bytes);
+    const token = Object.freeze({}) as FileIdentityToken;
+    identityObservations.set(token, { bytes: Buffer.from(bytes), identity: nativeIdentity(candidate.identity) });
+    return Object.freeze({ bytes, identity: token });
+}
+
+function writeOptions(value: unknown): NativeWriteOptions {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('transaction options must be an object');
+    const candidate = value as Partial<SecureWriteOptions>;
+    if (candidate.mode !== 'create' && candidate.mode !== 'replace') throw new Error('transaction mode must be create or replace');
+    if (typeof candidate.createParents !== 'boolean') throw new Error('transaction createParents must be boolean');
+    if (candidate.mode === 'create') {
+        if (candidate.expected !== undefined || candidate.expectedIdentity !== undefined) throw new Error('create transaction cannot have replacement expectations');
+        return { mode: 'create', createParents: candidate.createParents };
+    }
+    if (!Buffer.isBuffer(candidate.expected)) throw new Error('replace transaction requires expected Buffer bytes');
+    if (!candidate.expectedIdentity || typeof candidate.expectedIdentity !== 'object') throw new Error('replace transaction requires expected identity token');
+    const observation = identityObservations.get(candidate.expectedIdentity);
+    if (!observation) throw new Error('replace transaction requires an opaque identity token from readRegularFile');
+    if (!candidate.expected.equals(observation.bytes)) throw new Error('replace expected bytes do not match the identity observation');
+    return {
+        mode: 'replace',
+        expected: Buffer.from(observation.bytes),
+        expectedIdentity: Buffer.from(observation.identity),
+        createParents: candidate.createParents,
+    };
+}
+
 export function createSecureFsBoundary(load: () => NativeSecureFsBinding): SecureFsBoundary {
     return Object.freeze({
-        readRegularFile(file: string, maxBytes: number): Buffer {
-            const result = load().readRegularFile(absoluteFile(file, 'file'), positiveSafeInteger(maxBytes, 'maxBytes'));
-            if (!Buffer.isBuffer(result)) throw new Error('secure-fs native bridge returned invalid read bytes');
-            return result;
+        withProjectLease<T>(projectRoot: string, operation: () => T): T {
+            const validatedRoot = absoluteFile(projectRoot, 'projectRoot');
+            if (typeof operation !== 'function') throw new Error('project lease operation must be a function');
+            const binding = load();
+            let token: object;
+            try { token = binding.acquireProjectLease(validatedRoot); }
+            catch (error) {
+                const message = String(error);
+                if (message.includes('project lease is already held')) throw new Error('project lease conflict');
+                if (message.includes('rejected path ancestor')) throw new Error('project destination is unsafe for lease');
+                throw new Error('project lease acquisition failed');
+            }
+            if (!token || typeof token !== 'object' || Array.isArray(token)) {
+                throw new Error('secure-fs native bridge returned invalid project lease token');
+            }
+            try { return operation(); }
+            finally { binding.releaseProjectLease(token); }
         },
-        writeProjectTransaction(file: string, content: Buffer): void {
-            load().writeProjectTransaction(absoluteFile(file, 'file'), boundedBytes(content, 'content'));
+        readRegularFile(file: string, maxBytes: number): SecureFileRead {
+            const validatedFile = absoluteFile(file, 'file');
+            const validatedMaxBytes = positiveSafeInteger(maxBytes, 'maxBytes');
+            const result = load().readRegularFile(validatedFile, validatedMaxBytes);
+            return secureReadResult(result);
+        },
+        writeProjectTransaction(projectRoot: string, destination: string, content: Buffer, options: SecureWriteOptions): void {
+            const validatedRoot = absoluteFile(projectRoot, 'projectRoot');
+            const validatedDestination = projectDestination(destination);
+            const validatedContent = boundedBytes(content, 'content');
+            const validatedOptions = writeOptions(options);
+            try {
+                load().writeProjectTransaction(validatedRoot, validatedDestination, validatedContent, validatedOptions);
+            } catch (error) {
+                if (isNativeDestinationExistsError(error)) throw new Error(PROJECT_DESTINATION_ALREADY_EXISTS_MESSAGE);
+                throw error;
+            }
         },
     });
 }
 
-const packageRoot = path.resolve(__dirname, '..', '..', '..');
+export function resolvePackageRoot(moduleDirectory: string): string {
+    const sourceLayout = path.resolve(moduleDirectory, '..', '..', '..');
+    return fs.existsSync(path.join(sourceLayout, 'package.json'))
+        ? sourceLayout
+        : path.resolve(sourceLayout, '..');
+}
+
+const packageRoot = resolvePackageRoot(__dirname);
 export const secureFs = createSecureFsBoundary(() => loadNativeSecureFsBridge({
     root: packageRoot,
     platform: process.platform,

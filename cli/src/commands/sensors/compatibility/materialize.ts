@@ -2,7 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { parseSensorManifest, serializeManifestV2, serializeManifestV3, type SensorManifestV2, type SensorManifestV3ProjectSensors } from './manifest';
 import { resolveSemgrepPolicy } from './contract';
-import { readInspectedBoundedFile, withNoFollowChildDirectory, withNoFollowDirectory, type SafeFileFailure } from './safe-file';
+import { readInspectedBoundedFile, readInspectedBoundedFileWithIdentity, withProjectLease, writeProjectFile, type InspectedFileRead, type SafeFileFailure } from './safe-file';
+import { PROJECT_DESTINATION_ALREADY_EXISTS_MESSAGE } from '../../../core/secure-fs/native-bridge';
 import type { PackSource } from './pack-source';
 
 type V2Sensor = SensorManifestV2['sensors'][string];
@@ -66,77 +67,31 @@ function registryPackRoot(value: unknown): string {
     return resolved;
 }
 
-function withSafeProjectDestination<T>(configRoot: string, asset: string, createParents: boolean, operation: (destination: string, directory: string) => T): T {
-    const failure = () => new Error(`project destination contains a symlink or unavailable component: ${asset}`);
-    const descend = (directory: string, components: string[]): T => {
-        const component = components.shift();
-        if (!component) return operation(path.join(directory, asset.split('/').at(-1)!), directory);
-        const next = path.join(directory, component);
-        if (createParents) {
-            try { fs.mkdirSync(next); }
-            catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
-        }
-        return withNoFollowChildDirectory(directory, component, failure, bound => descend(bound, components));
-    };
-    return withNoFollowDirectory(configRoot, failure, rootDirectory => descend(rootDirectory, asset.split('/').slice(0, -1)));
-}
-
-function destinationExists(destination: string, asset: string): boolean {
-    try {
-        const stat = fs.lstatSync(destination);
-        if (stat.isSymbolicLink()) throw new Error(`project destination contains a symlink: ${asset}`);
-        return true;
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
-        throw error;
-    }
-}
-
 function atomicWrite(configRoot: string, asset: string, content: string, noClobber = false): void {
-    withSafeProjectDestination(configRoot, asset, true, (destination, directory) => {
-        if (noClobber && destinationExists(destination, asset)) throw new Error(`project manifest already exists and will not be overwritten: ${asset}`);
-        const temporary = path.join(directory, `.${path.basename(destination)}.${process.pid}.${Date.now()}.tmp`);
-        let ownsTemporary = false;
-        try {
-            fs.writeFileSync(temporary, content, { encoding: 'utf8', flag: 'wx' });
-            ownsTemporary = true;
-            if (noClobber) fs.linkSync(temporary, destination);
-            else fs.renameSync(temporary, destination);
-            ownsTemporary = false;
-        } finally {
-            try { if (ownsTemporary) fs.unlinkSync(temporary); } catch { /* bound directory prevents redirected cleanup */ }
-        }
-    });
+    const destination = path.join(configRoot, ...asset.split('/'));
+    if (noClobber) {
+        writeProjectFile(configRoot, asset, Buffer.from(content, 'utf8'), { mode: 'create', createParents: true });
+        return;
+    }
+    let expected: InspectedFileRead | undefined;
+    try { expected = readInspectedBoundedFileWithIdentity(destination, fs.lstatSync(destination, { bigint: true }), MAX_ASSET_BYTES, () => new Error(`project destination cannot be safely read: ${asset}`)); }
+    catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    writeProjectFile(configRoot, asset, Buffer.from(content, 'utf8'), expected
+        ? { mode: 'replace', expected: expected.content, expectedIdentity: expected.identity, createParents: false }
+        : { mode: 'create', createParents: true });
 }
 
 /** Publish a new asset without ever replacing an owner-created destination. */
-function atomicCreateAsset(configRoot: string, asset: string, content: string): fs.BigIntStats | undefined {
-    return withSafeProjectDestination(configRoot, asset, true, (destination, directory) => {
-        if (destinationExists(destination, asset)) return undefined;
-        const temporary = path.join(directory, `.${path.basename(destination)}.${process.pid}.${Date.now()}.tmp`);
-        let ownsTemporary = false;
-        try {
-            fs.writeFileSync(temporary, content, { encoding: 'utf8', flag: 'wx' });
-            ownsTemporary = true;
-            try { fs.linkSync(temporary, destination); }
-            catch (error) {
-                if ((error as NodeJS.ErrnoException).code === 'EEXIST') return undefined;
-                throw error;
-            }
-            return fs.lstatSync(destination, { bigint: true });
-        } finally {
-            try { if (ownsTemporary) fs.unlinkSync(temporary); } catch { /* bound directory prevents redirected cleanup */ }
-        }
-    });
-}
-
-function removeCreatedAsset(configRoot: string, asset: string, created: fs.BigIntStats): void {
+function atomicCreateAsset(configRoot: string, asset: string, content: string): boolean {
     try {
-        withSafeProjectDestination(configRoot, asset, false, destination => {
-            const current = fs.lstatSync(destination, { bigint: true });
-            if (current.isFile() && !current.isSymbolicLink() && current.dev === created.dev && current.ino === created.ino) fs.unlinkSync(destination);
-        });
-    } catch { /* best effort rollback never follows a swapped project ancestor */ }
+        writeProjectFile(configRoot, asset, Buffer.from(content, 'utf8'), { mode: 'create', createParents: true });
+    } catch (error) {
+        if ((error as Error).message === `project destination rejected by secure-fs: ${PROJECT_DESTINATION_ALREADY_EXISTS_MESSAGE}`) return false;
+        throw error;
+    }
+    return true;
 }
 
 function selectedRegistryAsset(packRoot: string, asset: string): { file: string; stat: fs.BigIntStats } {
@@ -191,9 +146,17 @@ function portableSource(source: unknown, pack: string): { registry: string; pack
 
 function priorAssets(projectRoot: string): string[] {
     const manifest = path.join(projectRoot, '.awm', 'sensors.json');
-    if (!fs.existsSync(manifest)) return [];
+    let stat: fs.BigIntStats;
+    try { stat = fs.lstatSync(manifest, { bigint: true }); }
+    catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+        throw new Error(`cannot materialize over invalid sensor manifest ${manifest}`);
+    }
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`cannot materialize over invalid sensor manifest ${manifest}`);
     let parsed: unknown;
-    try { parsed = JSON.parse(fs.readFileSync(manifest, 'utf8')); } catch { throw new Error(`cannot materialize over invalid sensor manifest ${manifest}`); }
+    try {
+        parsed = JSON.parse(readInspectedBoundedFile(manifest, stat, MAX_ASSET_BYTES, () => new Error(`cannot materialize over invalid sensor manifest ${manifest}`)).toString('utf8'));
+    } catch { throw new Error(`cannot materialize over invalid sensor manifest ${manifest}`); }
     const parsedManifest = parseSensorManifest(parsed, manifest);
     if (parsedManifest.kind === 'v2') return Object.values(parsedManifest.pack.sensors).flatMap(sensor => sensor.assets ?? []);
     if (parsedManifest.kind === 'v3' && parsedManifest.pack.mode === 'project-sensors') return Object.values(parsedManifest.pack.sensors).flatMap(sensor => sensor.assets ?? []);
@@ -218,33 +181,30 @@ export function materializePortableSensors(input: PortableMaterializeInput): Por
     const parsed = parseSensorManifest(candidate, 'portable materialized manifest');
     if (parsed.kind !== 'v3' || parsed.pack.mode !== 'project-sensors') throw new Error('portable materialized manifest must be v3 project-sensors');
     const manifest = parsed.pack;
-    const configRoot = manifest.packageRoot ? root(path.join(projectRoot, manifest.packageRoot), 'packageRoot') : projectRoot;
     for (const [name, sensor] of Object.entries(manifest.sensors)) {
         if (sensor.policyRef) resolveSemgrepPolicy(sensor.policyRef, path.join(packRoot, 'pack.json'), `sensors.${name}`);
     }
     const selected = [...new Set(Object.values(manifest.sensors).flatMap(sensor => sensor.assets ?? []))].map((asset, index) => containedAsset(asset, `assets[${index}]`)).sort();
-    const prior = priorAssets(projectRoot);
-    const configured: string[] = []; const preserved: string[] = []; const created: Array<{ asset: string; stat: fs.BigIntStats }> = [];
-    try {
+    return withProjectLease(projectRoot, () => {
+        const configRoot = manifest.packageRoot ? root(path.join(projectRoot, manifest.packageRoot), 'packageRoot') : projectRoot;
+        const prior = priorAssets(projectRoot);
+        const configured: string[] = []; const preserved: string[] = [];
         if (input.configure !== false) {
             for (const asset of selected) {
                 const selectedSource = selectedRegistryAsset(packRoot, asset);
-                const createdAsset = atomicCreateAsset(configRoot, asset, readSelectedRegistryAsset(packRoot, selectedSource, asset));
-                if (createdAsset) {
-                    created.push({ asset, stat: createdAsset }); configured.push(asset);
+                if (atomicCreateAsset(configRoot, asset, readSelectedRegistryAsset(packRoot, selectedSource, asset))) {
+                    configured.push(asset);
                 } else preserved.push(asset);
             }
         }
         atomicWrite(projectRoot, '.awm/sensors.json', serializeManifestV3(manifest), true);
-    } catch (error) {
-        for (const file of created.reverse()) removeCreatedAsset(configRoot, file.asset, file.stat);
-        throw error;
-    }
-    return { manifest, configured, preserved, orphaned: prior.filter(asset => !selected.includes(asset)).sort() };
+        return { manifest, configured, preserved, orphaned: prior.filter(asset => !selected.includes(asset)).sort() };
+    });
 }
 
 /** Write a selected, v2-only sensor configuration without overwriting user files.
- * The manifest is the commit point: created assets are removed best-effort if writing it fails. */
+ * Assets published before a manifest failure are deliberately left in place: a
+ * pathname rollback cannot be made safe after a concurrent project-parent swap. */
 export function materializeResolvedSensors(input: MaterializeInput): MaterializeResult {
     if (!input || typeof input !== 'object') throw new Error('materialization input is required');
     const projectRoot = root(input.projectRoot, 'projectRoot');
@@ -263,7 +223,6 @@ export function materializeResolvedSensors(input: MaterializeInput): Materialize
     // Assets land where sensors will actually run — projectRoot by default, or
     // packageRoot underneath it for a monorepo. The manifest write below stays
     // pinned to projectRoot either way (see atomicWrite call at the end).
-    const configRoot = manifest.packageRoot ? root(path.join(projectRoot, manifest.packageRoot), 'packageRoot') : projectRoot;
     // A policy reference is deliberately not a materialized asset. Resolve it here
     // from the registry-owned sibling only, so a manifest cannot turn arbitrary
     // registry content into a project write through a cosmetic policy field.
@@ -271,25 +230,20 @@ export function materializeResolvedSensors(input: MaterializeInput): Materialize
         if (sensor.policyRef) resolveSemgrepPolicy(sensor.policyRef, path.join(packRoot, 'pack.json'), `sensors.${name}`);
     }
     const selected = [...new Set(Object.values(sensors).flatMap(sensor => sensor.assets ?? []))].map((asset, index) => containedAsset(asset, `assets[${index}]`)).sort();
-    const prior = priorAssets(projectRoot);
-    const configured: string[] = [];
-    const preserved: string[] = [];
-    const created: Array<{ asset: string; stat: fs.BigIntStats }> = [];
-    try {
+    return withProjectLease(projectRoot, () => {
+        const configRoot = manifest.packageRoot ? root(path.join(projectRoot, manifest.packageRoot), 'packageRoot') : projectRoot;
+        const prior = priorAssets(projectRoot);
+        const configured: string[] = [];
+        const preserved: string[] = [];
         if (input.configure !== false) {
             for (const asset of selected) {
                 const selectedSource = selectedRegistryAsset(packRoot, asset);
-                const createdAsset = atomicCreateAsset(configRoot, asset, readSelectedRegistryAsset(packRoot, selectedSource, asset));
-                if (createdAsset) {
-                    created.push({ asset, stat: createdAsset });
+                if (atomicCreateAsset(configRoot, asset, readSelectedRegistryAsset(packRoot, selectedSource, asset))) {
                     configured.push(asset);
                 } else preserved.push(asset);
             }
         }
         atomicWrite(projectRoot, '.awm/sensors.json', serializeManifestV2(manifest));
-    } catch (error) {
-        for (const file of created.reverse()) removeCreatedAsset(configRoot, file.asset, file.stat);
-        throw error;
-    }
-    return { manifest, configured, preserved, orphaned: prior.filter(asset => !selected.includes(asset)).sort() };
+        return { manifest, configured, preserved, orphaned: prior.filter(asset => !selected.includes(asset)).sort() };
+    });
 }
