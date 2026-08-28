@@ -26,6 +26,8 @@ For the lifecycle and provider choices, see [configuration](configuration.md).
 awm init [--agent <agent>] [--machine-only] [--yes] [--json]
 ```
 
+`awm sensors init` also accepts these compatibility-only options:
+
 | Flag | Description |
 |---|---|
 | `-a, --agent <agent>` | Target one provider for this run. Without this flag, init targets `claude-code`. |

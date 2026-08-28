@@ -110,7 +110,10 @@ export function registerSensorsCommand(program: Command): void {
                     return;
                 }
                 const result = applySensorBootstrap(plan);
-                log.success(`${result}: ${summary}`);
+                const pack = plan.kind === 'create' && plan.manifest.mode === 'project-sensors'
+                    ? `; pack=${plan.manifest.pack}`
+                    : '';
+                log.success(`${result}${pack}: ${summary}`);
             } catch (error) {
                 log.error(error instanceof Error ? error.message : String(error));
                 process.exitCode = 1;

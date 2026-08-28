@@ -49,7 +49,8 @@ function declaration(mode: Exclude<BootstrapMode, 'project-sensors'>, reason: st
 function digest(bytes: Buffer): string { return createHash('sha256').update(bytes).digest('hex'); }
 
 async function projectSensors(projectRoot: string, registryRoot?: string, requestedPack?: string, packageRoot?: string): Promise<{ manifest: SensorManifestV3ProjectSensors; source: PackSource; changes: BootstrapChange[] } | { reason: string; remedy: string; candidates?: string[] }> {
-    const detected = detectStack(projectRoot);
+    const detectionRoot = packageRoot ? path.resolve(projectRoot, packageRoot) : projectRoot;
+    const detected = detectStack(detectionRoot);
     const pack = requestedPack ?? detected.pack;
     const registries = listRegistries();
     const selected = registryRoot === undefined ? registries : registries.filter(registry => registry.contentRoot === registryRoot);
@@ -70,7 +71,7 @@ async function projectSensors(projectRoot: string, registryRoot?: string, reques
         const evidence = live.sensors[name];
         const variant = evidence.variantId === null ? undefined : packSensor.variants.find(item => item.id === evidence.variantId);
         if (!variant) return { reason: 'sensor-variant-unresolvable', remedy: 'repair-project-tools-or-select-another-mode' };
-        sensors[name] = { enabled: true, fast: packSensor.fast, ...(packSensor.timeout === undefined ? {} : { timeout: packSensor.timeout }), variantId: variant.id, command: variant.command, ...(variant.assets.length === 0 ? {} : { assets: variant.assets }), ...(variant.policyRef ? { policyRef: variant.policyRef } : {}), initializedCompatibility: evidence };
+        sensors[name] = { enabled: true, ...(packSensor.fast === undefined ? {} : { fast: packSensor.fast }), ...(packSensor.timeout === undefined ? {} : { timeout: packSensor.timeout }), variantId: variant.id, command: variant.command, ...(variant.assets.length === 0 ? {} : { assets: variant.assets }), ...(variant.policyRef ? { policyRef: variant.policyRef } : {}), initializedCompatibility: evidence };
     }
     const manifest = parseSensorManifest({ schemaVersion: 3, mode: 'project-sensors', pack, source: { registry: source.registry.name }, ...(packageRoot ? { packageRoot } : {}), sensors }, 'bootstrap candidate');
     if (manifest.kind !== 'v3' || manifest.pack.mode !== 'project-sensors') throw new Error('bootstrap project-sensors candidate is invalid');

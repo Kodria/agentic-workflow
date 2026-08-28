@@ -51,6 +51,23 @@ function root(value: unknown, label: string): string {
     return resolved;
 }
 
+/** Resolve a monorepo package only when it is a real directory below the project.
+ * A lexical `foo/bar` is not enough: a symlink must never turn an asset write
+ * into an authority outside the project transaction. */
+function containedPackageRoot(projectRoot: string, packageRoot: string): string {
+    const candidate = path.join(projectRoot, packageRoot);
+    let stat: fs.Stats;
+    try { stat = fs.lstatSync(candidate); } catch { throw new Error('packageRoot must be an existing contained directory'); }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('packageRoot must be a non-symbolic contained directory');
+    const realProject = fs.realpathSync(projectRoot);
+    const realPackage = fs.realpathSync(candidate);
+    const relative = path.relative(realProject, realPackage);
+    if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        throw new Error('packageRoot must be a contained directory');
+    }
+    return realPackage;
+}
+
 function registryPackRoot(value: unknown): string {
     const resolved = root(value, 'packRoot');
     const parsed = path.parse(resolved);
@@ -186,7 +203,7 @@ export function materializePortableSensors(input: PortableMaterializeInput): Por
     }
     const selected = [...new Set(Object.values(manifest.sensors).flatMap(sensor => sensor.assets ?? []))].map((asset, index) => containedAsset(asset, `assets[${index}]`)).sort();
     return withProjectLease(projectRoot, () => {
-        const configRoot = manifest.packageRoot ? root(path.join(projectRoot, manifest.packageRoot), 'packageRoot') : projectRoot;
+        const configRoot = manifest.packageRoot ? containedPackageRoot(projectRoot, manifest.packageRoot) : projectRoot;
         const prior = priorAssets(projectRoot);
         const configured: string[] = []; const preserved: string[] = [];
         if (input.configure !== false) {

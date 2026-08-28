@@ -30,6 +30,8 @@ function fixture(): Fixture {
     const awmHome = path.join(root, 'awm-home');
     const registryRoot = path.join(awmHome, 'registries', 'baseline');
     fs.cpSync(path.join(fixtureRoot, 'project'), project, { recursive: true });
+    fs.mkdirSync(path.join(project, 'node_modules', 'eslint'), { recursive: true });
+    fs.copyFileSync(path.join(project, 'eslint-tool-package.json'), path.join(project, 'node_modules', 'eslint', 'package.json'));
     fs.mkdirSync(path.dirname(registryRoot), { recursive: true });
     fs.cpSync(path.join(fixtureRoot, 'registry'), registryRoot, { recursive: true });
     fs.writeFileSync(path.join(awmHome, 'registries.json'), JSON.stringify([{ name: 'baseline', remote: 'fixture' }]));
@@ -77,6 +79,24 @@ test('compiled bootstrap creates once and the exact second invocation is a byte-
         expect(hashTree(subject.project)).toBe(first);
         expect(hashTree(subject.awmHome)).toBe(machineBefore);
         expect(JSON.parse(fs.readFileSync(path.join(subject.project, '.awm', 'sensors.json'), 'utf8'))).toEqual({ schemaVersion: 3, mode: 'native-gate', reason: 'fixture-gate' });
+    } finally { fs.rmSync(subject.root, { recursive: true, force: true }); }
+});
+
+test('compiled project-sensors bootstrap materializes only selected assets and then no-ops', () => {
+    const subject = fixture();
+    try {
+        fs.rmSync(path.join(subject.project, '.awm'), { recursive: true, force: true });
+        fs.copyFileSync(path.join(subject.registryRoot, 'sensor-packs', 'js-ts', 'eslint.fixture.mjs'), path.join(subject.project, 'eslint.fixture.mjs'));
+        const machineBefore = hashTree(subject.awmHome);
+        const result = run(subject, '--mode', 'project-sensors');
+        if (result.status !== 0) throw new Error(`project-sensors bootstrap failed: ${result.stdout}\n${result.stderr}`);
+        expect(`${result.stdout}${result.stderr}`).toContain('pack=js-ts');
+        expect(fs.existsSync(path.join(subject.project, 'eslint.fixture.mjs'))).toBe(true);
+        expect(fs.existsSync(path.join(subject.project, 'pack.json'))).toBe(false);
+        const first = hashTree(subject.project);
+        expect(run(subject, '--mode', 'project-sensors').status).toBe(0);
+        expect(hashTree(subject.project)).toBe(first);
+        expect(hashTree(subject.awmHome)).toBe(machineBefore);
     } finally { fs.rmSync(subject.root, { recursive: true, force: true }); }
 });
 
