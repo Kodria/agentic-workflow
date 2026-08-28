@@ -158,6 +158,10 @@ function portableSource(source: unknown, pack: string): { registry: string; pack
     const packRoot = registryPackRoot(path.join(contentRoot, 'sensor-packs', pack));
     const expectedPack = path.join(packRoot, 'pack.json');
     if (path.resolve(candidate.path) !== expectedPack) throw new Error('portable source selected pack path does not match its registry');
+    const inspectedPack = selectedRegistryAsset(packRoot, 'pack.json');
+    if (readSelectedRegistryAsset(packRoot, inspectedPack, 'pack.json') !== candidate.content) {
+        throw new Error('portable source changed after bootstrap planning');
+    }
     return { registry, packRoot };
 }
 

@@ -183,6 +183,16 @@ describe('materializeResolvedSensors', () => {
         }
     });
 
+    it('rejects a pack whose authoritative bytes changed after planning', () => {
+        const source = portableSource();
+        fs.writeFileSync(source.path, '{"changed":true}');
+        expect(() => materializePortableSensors({ projectRoot, pack: 'js-ts', source, sensors: {
+            lint: { enabled: true, variantId: 'eslint-10', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: ['eslint.config.awm.mjs'], initializedCompatibility: evidence },
+        } } as never)).toThrow('changed after bootstrap planning');
+        expect(fs.existsSync(path.join(projectRoot, 'eslint.config.awm.mjs'))).toBe(false);
+        expect(fs.existsSync(path.join(projectRoot, '.awm', 'sensors.json'))).toBe(false);
+    });
+
     it('fails lease acquisition before creating an asset when .awm cannot hold the lease', () => {
         const source = portableSource();
         fs.writeFileSync(path.join(projectRoot, '.awm'), 'not a directory');
