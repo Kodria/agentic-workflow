@@ -41,10 +41,24 @@ function identityFixture(seed = 1): Buffer {
 }
 
 describe('native secure-fs Windows source contract', () => {
-    const windowsSource = (): string => {
-        const source = fs.readFileSync(path.resolve(__dirname, '../../../native/secure_fs.cc'), 'utf8');
-        return source.slice(source.indexOf('#else\nstruct WindowsParent'), source.indexOf('#endif\n\nbool WriteOptionsArg'));
+    const windowsContractSource = (source: string): string => {
+        const normalized = source.replace(/\r\n/g, '\n');
+        return normalized.slice(
+            normalized.indexOf('#else\nstruct WindowsParent'),
+            normalized.indexOf('#endif\n\nbool WriteOptionsArg'),
+        );
     };
+
+    const windowsSource = (): string => windowsContractSource(
+        fs.readFileSync(path.resolve(__dirname, '../../../native/secure_fs.cc'), 'utf8'),
+    );
+
+    it('finds the Windows contract in a CRLF checkout', () => {
+        const source = fs.readFileSync(path.resolve(__dirname, '../../../native/secure_fs.cc'), 'utf8')
+            .replace(/\n/g, '\r\n');
+
+        expect(windowsContractSource(source)).toContain('NtCreateFile');
+    });
 
     it('uses a verified root handle for every descendant open, create, and cleanup', () => {
         const source = windowsSource();
