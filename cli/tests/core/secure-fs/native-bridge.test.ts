@@ -100,6 +100,17 @@ describe('native secure-fs Windows source contract', () => {
             .toMatch(/DWORD staging_error = ERROR_SUCCESS;[\s\S]*?CreatePrivateStagingFile\(parent, &staged, &staging_error\)/);
     });
 
+    it('uses the portable default attributes when creating an exclusive staging file', () => {
+        const source = windowsSource();
+        const start = source.indexOf('bool CreatePrivateStagingFile');
+        const end = source.indexOf('\nbool DiscardStagingFile', start);
+        const staging = source.slice(start, end);
+
+        expect(start).toBeGreaterThan(-1);
+        expect(staging).toContain('FILE_ATTRIBUTE_NORMAL, &handle');
+        expect(staging).not.toContain('FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_TEMPORARY');
+    });
+
     it('declares eval mode for the inline junction-race worker', () => {
         expect(fs.readFileSync(__filename, 'utf8'))
             .toMatch(/new Worker\([\s\S]*?`\s*, \{ eval: true, workerData:/);
@@ -464,10 +475,6 @@ nativeOnly('native secure-fs identity fence fixtures', () => {
             });
         } catch (error) {
             failure = error as NodeJS.ErrnoException;
-        }
-
-        if (process.platform === 'win32' && failure?.message.includes('could not stage transaction')) {
-            console.error(`::error title=secure-fs staging diagnostic::${failure.message}`);
         }
 
         expect(failure).toBeDefined();
