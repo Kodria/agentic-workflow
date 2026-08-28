@@ -55,6 +55,10 @@ describe('native secure-fs Windows source contract', () => {
         expect(source.match(/\bCreateFileW\s*\(/g)).toHaveLength(1);
     });
 
+    it('requests SYNCHRONIZE when opening a handle-relative directory', () => {
+        expect(windowsSource()).toMatch(/OpenRelativeDirectoryNoReparse\([\s\S]*?FILE_TRAVERSE\s*\|\s*FILE_READ_ATTRIBUTES\s*\|\s*SYNCHRONIZE/);
+    });
+
     it('keeps an exclusive verified target handle through an atomic POSIX-semantics replacement', () => {
         const source = windowsSource();
         const fenceStart = source.indexOf('HANDLE OpenRegularFileForReplacementFence');

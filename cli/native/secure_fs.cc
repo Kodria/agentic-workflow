@@ -469,7 +469,7 @@ bool CreateFileRelative(HANDLE root, const std::wstring& component, ACCESS_MASK 
 bool OpenRelativeDirectoryNoReparse(HANDLE root, const std::wstring& component,
     bool create, HANDLE* opened) {
   HANDLE handle = INVALID_HANDLE_VALUE;
-  if (!CreateFileRelative(root, component, FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
+  if (!CreateFileRelative(root, component, FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, create ? kFileOpenIf : kFileOpen,
       kFileDirectoryFile | kFileOpenReparsePoint, FILE_ATTRIBUTE_NORMAL, &handle)) return false;
   if (!HandleIsDirectoryNotReparse(handle)) {
