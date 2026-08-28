@@ -111,6 +111,16 @@ describe('native secure-fs Windows source contract', () => {
         expect(staging).not.toContain('FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_TEMPORARY');
     });
 
+    it('requests synchronous access for the synchronous staging handle', () => {
+        const source = windowsSource();
+        const start = source.indexOf('bool CreatePrivateStagingFile');
+        const end = source.indexOf('\nbool DiscardStagingFile', start);
+        const staging = source.slice(start, end);
+
+        expect(staging).toMatch(/GENERIC_WRITE \| DELETE \| FILE_READ_ATTRIBUTES \| SYNCHRONIZE/);
+        expect(staging).toContain('kFileSynchronousIoNonalert');
+    });
+
     it('declares eval mode for the inline junction-race worker', () => {
         expect(fs.readFileSync(__filename, 'utf8'))
             .toMatch(/new Worker\([\s\S]*?`\s*, \{ eval: true, workerData:/);

@@ -625,7 +625,7 @@ bool CreatePrivateStagingFile(const WindowsParent& parent, HANDLE* staged, DWORD
         + L"." + std::to_wstring(attempt);
     HANDLE handle = INVALID_HANDLE_VALUE;
     if (CreateFileRelative(parent.handle, candidate,
-        GENERIC_WRITE | DELETE | FILE_READ_ATTRIBUTES, 0, kFileCreate,
+        GENERIC_WRITE | DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, 0, kFileCreate,
         kFileNonDirectoryFile | kFileOpenReparsePoint | kFileSynchronousIoNonalert,
         FILE_ATTRIBUTE_NORMAL, &handle)) {
       *staged = handle;
