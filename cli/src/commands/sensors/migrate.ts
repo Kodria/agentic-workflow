@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { parseSensorPack } from './compatibility/contract';
 import { parseSensorManifest, serializeManifestV3, type SensorManifestV2, type SensorManifestV3ProjectSensors } from './compatibility/manifest';
-import { readInspectedBoundedFile, type SafeFileFailure } from './compatibility/safe-file';
+import { readInspectedBoundedFile, withNoFollowChildDirectory, withNoFollowDirectory, type SafeFileFailure } from './compatibility/safe-file';
 import type { SensorSourceResolution } from './compatibility/source';
 
 /**
@@ -218,43 +218,52 @@ export function replaceV2ManifestWithV3(manifestPath: unknown, candidate: unknow
         throw new Error('v2 migration candidate semantic mismatch');
     }
     const directory = path.dirname(manifestPath);
-    let staging: string | undefined;
-    let preserveStaging = false;
-    try {
-        staging = fs.mkdtempSync(path.join(directory, `.${path.basename(manifestPath)}.migrate-`));
-        const replacement = path.join(staging, 'replacement');
-        const displaced = path.join(staging, 'displaced');
-        fs.writeFileSync(replacement, serializeManifestV3(after.pack), { encoding: 'utf8', flag: 'wx' });
-        assertManifestUnchanged(manifestPath, inspected);
-        // `renameSync(replacement, manifestPath)` would overwrite a concurrent
-        // writer. Move the observed target aside, prove its identity, then link
-        // the fully staged replacement into an absent name: link is atomic and
-        // fails rather than clobbering a manifest another writer published.
-        fs.renameSync(manifestPath, displaced);
-        const moved = inspectManifest(displaced, () => new Error('v2 migration original manifest changed before commit'));
-        if (!sameManifest(moved, inspected)) {
-            try { fs.linkSync(displaced, manifestPath); }
-            catch {
-                preserveStaging = true;
-                throw new Error('v2 migration original manifest changed before commit and could not be restored without clobbering a concurrent update');
-            }
-            throw new Error('v2 migration original manifest changed before commit');
-        }
+    const basename = path.basename(manifestPath);
+    const parentFailure = () => new Error('v2 migration manifest parent changed or contains a symlink');
+    withNoFollowDirectory(directory, parentFailure, boundParent => {
+        const boundManifest = path.join(boundParent, basename);
+        // Re-check through the bound parent before creating any staging file.
+        // This also connects the initially inspected manifest identity to the
+        // authority used for all subsequent publication and cleanup paths.
+        assertManifestUnchanged(boundManifest, inspected);
+        const staging = fs.mkdtempSync(path.join(boundParent, `.${basename}.migrate-`));
+        const stagingName = path.basename(staging);
+        let preserveStaging = false;
         try {
-            fs.linkSync(replacement, manifestPath);
-        } catch (error) {
-            // A concurrent writer owns an occupied destination. If publication
-            // failed for another reason and the name remains absent, restore the
-            // exact original bytes through the same no-clobber primitive.
-            try { fs.linkSync(displaced, manifestPath); }
-            catch {
-                if (fs.existsSync(manifestPath)) throw error;
-                preserveStaging = true;
-                throw new Error('v2 migration could not restore the original manifest without clobbering a concurrent update');
+            return withNoFollowChildDirectory(boundParent, stagingName, parentFailure, boundStaging => {
+                const replacement = path.join(boundStaging, 'replacement');
+                const displaced = path.join(boundStaging, 'displaced');
+                fs.writeFileSync(replacement, serializeManifestV3(after.pack), { encoding: 'utf8', flag: 'wx' });
+                assertManifestUnchanged(boundManifest, inspected);
+                // Move the observed target aside, prove its identity, then link
+                // the staged replacement into an absent name so concurrent work
+                // is never overwritten.
+                fs.renameSync(boundManifest, displaced);
+                const moved = inspectManifest(displaced, () => new Error('v2 migration original manifest changed before commit'));
+                if (!sameManifest(moved, inspected)) {
+                    try { fs.linkSync(displaced, boundManifest); }
+                    catch {
+                        preserveStaging = true;
+                        throw new Error('v2 migration original manifest changed before commit and could not be restored without clobbering a concurrent update');
+                    }
+                    throw new Error('v2 migration original manifest changed before commit');
+                }
+                try { fs.linkSync(replacement, boundManifest); }
+                catch (error) {
+                    try { fs.linkSync(displaced, boundManifest); }
+                    catch {
+                        if (fs.existsSync(boundManifest)) throw error;
+                        preserveStaging = true;
+                        throw new Error('v2 migration could not restore the original manifest without clobbering a concurrent update');
+                    }
+                    throw error;
+                }
+            });
+        } finally {
+            if (!preserveStaging) {
+                const cleanupRoot = path.join(boundParent, stagingName);
+                cleanupMigrationStaging(cleanupRoot, [path.join(cleanupRoot, 'replacement'), path.join(cleanupRoot, 'displaced')]);
             }
-            throw error;
         }
-    } finally {
-        if (staging && !preserveStaging) cleanupMigrationStaging(staging, [path.join(staging, 'replacement'), path.join(staging, 'displaced')]);
-    }
+    });
 }

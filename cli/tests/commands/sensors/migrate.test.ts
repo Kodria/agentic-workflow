@@ -3,6 +3,21 @@ import os from 'os';
 import path from 'path';
 import { planV2Migration, replaceV2ManifestWithV3 } from '../../../src/commands/sensors/migrate';
 
+function replaceWithoutNoFollow(...args: Parameters<typeof replaceV2ManifestWithV3>): void {
+    let replace: typeof replaceV2ManifestWithV3 | undefined;
+    jest.isolateModules(() => {
+        jest.doMock('fs', () => {
+            const actual = jest.requireActual<typeof fs>('fs');
+            const constants = { ...actual.constants, O_NOFOLLOW: undefined };
+            return { __esModule: true, default: { ...actual, constants }, ...actual, constants };
+        });
+        replace = require('../../../src/commands/sensors/migrate').replaceV2ManifestWithV3 as typeof replaceV2ManifestWithV3;
+    });
+    jest.dontMock('fs');
+    if (!replace) throw new Error('portable migration replacement could not be loaded');
+    replace(...args);
+}
+
 const sensor = {
     enabled: false, fast: true, timeout: 45_000, variantId: 'eslint-9',
     command: { executable: 'eslint', resolution: 'node-modules-bin' as const, args: ['.', '--format', 'json'] },
@@ -284,6 +299,61 @@ describe('planV2Migration', () => {
         }
     });
 
+    it('publishes through a fully validated portable parent when O_NOFOLLOW is unavailable', () => {
+        const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-portable-parent-'));
+        const manifestPath = path.join(project, 'sensors.json');
+        try {
+            fs.writeFileSync(manifestPath, JSON.stringify(v2));
+            const candidate = planV2Migration({ manifest: v2, source: resolvedSource() }).candidate;
+            replaceWithoutNoFollow(manifestPath, candidate, resolvedSource());
+            expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8'))).toMatchObject({ schemaVersion: 3, source: { registry: 'baseline' } });
+        } finally {
+            fs.rmSync(project, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects a manifest-parent symlink swap before staging can be redirected', () => {
+        const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-parent-swap-'));
+        const movedProject = `${project}-original`;
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-parent-outside-'));
+        const manifestPath = path.join(project, 'sensors.json');
+        const original = JSON.stringify(v2, null, 2) + '\n';
+        const mkdtempSync = fs.mkdtempSync.bind(fs);
+        const mkdtemp = jest.spyOn(fs, 'mkdtempSync');
+        const writeFileSync = fs.writeFileSync.bind(fs);
+        const write = jest.spyOn(fs, 'writeFileSync');
+        let swapped = false;
+        const redirectedWrites: fs.PathLike[] = [];
+        try {
+            fs.writeFileSync(manifestPath, original);
+            fs.writeFileSync(path.join(outside, 'sensors.json'), original);
+            const candidate = planV2Migration({ manifest: v2, source: resolvedSource() }).candidate;
+            mkdtemp.mockImplementation(((prefix: string, options?: fs.EncodingOption) => {
+                if (!swapped && prefix.startsWith(path.join(project, '.sensors.json.migrate-'))) {
+                    swapped = true;
+                    fs.renameSync(project, movedProject);
+                    fs.symlinkSync(outside, project, 'dir');
+                }
+                return mkdtempSync(prefix, options);
+            }) as typeof fs.mkdtempSync);
+            write.mockImplementation(((file: fs.PathLike, data: string | NodeJS.ArrayBufferView, options?: fs.WriteFileOptions | string) => {
+                if (typeof file === 'string' && fs.realpathSync(path.dirname(file)).startsWith(outside + path.sep)) redirectedWrites.push(file);
+                return (writeFileSync as (...args: unknown[]) => void)(file, data, options);
+            }) as typeof fs.writeFileSync);
+            expect(() => replaceWithoutNoFollow(manifestPath, candidate, resolvedSource())).toThrow(/symlink|changed|safe|migration/i);
+            expect(swapped).toBe(true);
+            expect(redirectedWrites).toEqual([]);
+            expect(fs.readFileSync(path.join(outside, 'sensors.json'), 'utf8')).toBe(original);
+            expect(fs.readFileSync(path.join(movedProject, 'sensors.json'), 'utf8')).toBe(original);
+        } finally {
+            mkdtemp.mockRestore();
+            write.mockRestore();
+            fs.rmSync(project, { recursive: true, force: true });
+            fs.rmSync(movedProject, { recursive: true, force: true });
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
+
     it('refuses to replace a manifest whose bytes change after the original is read', () => {
         const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-'));
         const manifestPath = path.join(project, 'sensors.json');
@@ -296,7 +366,7 @@ describe('planV2Migration', () => {
             fs.writeFileSync(manifestPath, original);
             const candidate = planV2Migration({ manifest: v2, source: resolvedSource() }).candidate;
             lstat.mockImplementation(((candidatePath: fs.PathLike, options?: fs.StatOptions) => {
-                if (candidatePath === manifestPath && ++inspections === 2) fs.writeFileSync(manifestPath, replacement);
+                if (path.basename(String(candidatePath)) === 'sensors.json' && ++inspections === 2) fs.writeFileSync(manifestPath, replacement);
                 return originalLstat(candidatePath, options);
             }) as typeof fs.lstatSync);
             expect(() => replaceV2ManifestWithV3(manifestPath, candidate, resolvedSource())).toThrow(/changed|identity/i);
@@ -319,7 +389,7 @@ describe('planV2Migration', () => {
             fs.writeFileSync(manifestPath, original);
             const candidate = planV2Migration({ manifest: v2, source: resolvedSource() }).candidate;
             link.mockImplementation(((existingPath: fs.PathLike, newPath: fs.PathLike) => {
-                if (newPath === manifestPath && !published) {
+                if (path.basename(String(newPath)) === 'sensors.json' && !published) {
                     published = true;
                     fs.writeFileSync(manifestPath, replacement, { flag: 'wx' });
                 }

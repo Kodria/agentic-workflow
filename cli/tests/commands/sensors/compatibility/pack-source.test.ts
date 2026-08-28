@@ -193,6 +193,33 @@ describe('resolvePackSource', () => {
         }
     });
 
+    it('rejects an observable parent symlink replacement in the portable fallback', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-portable-parent-swap-'));
+        const packDir = path.join(root, 'sensor-packs', 'js-ts');
+        const movedPackDir = path.join(root, 'sensor-packs', 'js-ts-original');
+        const packFile = path.join(packDir, 'pack.json');
+        const originalOpen = fs.openSync.bind(fs);
+        const open = jest.spyOn(fs, 'openSync');
+        let swapped = false;
+        try {
+            fs.mkdirSync(packDir, { recursive: true });
+            fs.writeFileSync(packFile, '{"from":"original"}');
+            open.mockImplementation(((file: fs.PathLike, flags: number, mode?: number) => {
+                if (!swapped && file === fs.realpathSync(packFile)) {
+                    swapped = true;
+                    fs.renameSync(packDir, movedPackDir);
+                    fs.symlinkSync(movedPackDir, packDir, 'dir');
+                }
+                return originalOpen(file, flags, mode);
+            }) as typeof fs.openSync);
+            expect(() => resolveWithoutNoFollow('js-ts', { registries: [{ name: 'safe', remote: '', contentRoot: root }] }))
+                .toThrow(/changed|identity|safe|symlink/i);
+        } finally {
+            open.mockRestore();
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
     it('rejects same-inode content growth between inspection and open', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-size-race-'));
         const packFile = path.join(root, 'sensor-packs', 'js-ts', 'pack.json');
