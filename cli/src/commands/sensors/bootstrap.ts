@@ -4,9 +4,12 @@ import { parseSensorManifest, serializeManifestV3, type SensorManifestV3, type S
 import { listPackSources, type PackSource } from './compatibility/pack-source';
 import { resolveParsedPackCompatibility } from './compatibility/live';
 import { resolveSensorSource } from './compatibility/source';
-import { detectStack } from './init';
+import { detectStack } from './detection';
 import { planV2Migration, type V2MigrationPlan } from './migrate';
 import { resolveSensorProject } from './project';
+import { materializePortableSensors } from './compatibility/materialize';
+import { replaceV2ManifestWithV3 } from './migrate';
+import { writeProjectFile } from './compatibility/safe-file';
 
 export type BootstrapMode = 'project-sensors' | 'native-gate' | 'opt-out';
 export type BootstrapOptions = { mode?: BootstrapMode; reason?: string; dryRun?: boolean };
@@ -91,4 +94,24 @@ export async function planSensorBootstrap(cwd: string = process.cwd(), input: Bo
     const planned = await projectSensors(project.projectRoot);
     if ('reason' in planned) return blocked(project.projectRoot, project.manifestPath, opts.dryRun, planned.reason, planned.remedy, 'candidates' in planned ? planned.candidates : undefined);
     return { kind: 'create', projectRoot: project.projectRoot, manifestPath: project.manifestPath, changes: planned.changes, dryRun: opts.dryRun, manifest: planned.manifest, source: planned.source };
+}
+
+/** Apply only a validated, non-dry-run create or migration plan. */
+export function applySensorBootstrap(plan: BootstrapPlan): 'created' | 'migrated' {
+    if (!plan || typeof plan !== 'object') throw new Error('bootstrap plan is required');
+    if (plan.kind !== 'create' && plan.kind !== 'migrate') throw new Error('only a create or migrate bootstrap plan can be applied');
+    if (plan.dryRun) throw new Error('a dry-run bootstrap plan cannot be applied');
+    if (plan.kind === 'migrate') {
+        replaceV2ManifestWithV3(plan.manifestPath, plan.migration.candidate, plan.source);
+        return 'migrated';
+    }
+    if (plan.manifest.mode === 'project-sensors') {
+        if (!plan.source) throw new Error('project-sensors bootstrap plan requires its resolved source');
+        materializePortableSensors({ projectRoot: plan.projectRoot, pack: plan.manifest.pack, source: plan.source, sensors: plan.manifest.sensors, configure: true });
+        return 'created';
+    }
+    const parsed = parseSensorManifest(plan.manifest, 'bootstrap declaration');
+    if (parsed.kind !== 'v3' || parsed.pack.mode === 'project-sensors') throw new Error('bootstrap declaration plan is invalid');
+    writeProjectFile(plan.projectRoot, '.awm/sensors.json', Buffer.from(JSON.stringify(parsed.pack, null, 2) + '\n', 'utf8'), { mode: 'create', createParents: true });
+    return 'created';
 }

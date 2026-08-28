@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { computeSensorStatus } from '../sensors/status';
-import { detectStack } from '../sensors/init';
+import { detectStack } from '../sensors/detection';
 import { SensorManifest, SensorStatusResult } from '../sensors/types';
 import { readBaseline } from '../sensors/baseline';
 import { runSensors } from '../sensors/run';

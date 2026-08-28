@@ -10,6 +10,7 @@ import { runCoverage } from './coverage';
 import { renderCoverageHuman, renderCoverageJson } from './coverage/render';
 import { capabilityRoot } from '../../core/registries';
 import { exitCodeForVerdict } from './verdict';
+import { applySensorBootstrap, planSensorBootstrap, type BootstrapMode } from './bootstrap';
 
 /** Commander coercion for coverage recurrence emphasis. It deliberately runs
  * before the action, so an invalid value cannot trigger ledger I/O. */
@@ -83,6 +84,37 @@ export function registerSensorsCommand(program: Command): void {
             } catch (e) {
                 log.error(e instanceof Error ? e.message : String(e));
                 process.exit(1);
+            }
+        });
+
+    sensors
+        .command('bootstrap')
+        .description('explicitly create or migrate portable project sensor configuration')
+        .option('--mode <mode>', 'project-sensors, native-gate, or opt-out')
+        .option('--reason <text>', 'versioned reason required by native-gate and opt-out')
+        .option('--dry-run', 'report exact project changes without writing files')
+        .action(async (opts: { mode?: BootstrapMode; reason?: string; dryRun?: boolean }) => {
+            try {
+                const plan = await planSensorBootstrap(process.cwd(), { mode: opts.mode, reason: opts.reason, dryRun: opts.dryRun });
+                if (plan.kind === 'blocked') {
+                    log.error(`${plan.reason}: ${plan.remedy}`);
+                    process.exitCode = 1;
+                    return;
+                }
+                if (plan.kind === 'noop') {
+                    log.info('already-configured');
+                    return;
+                }
+                const summary = plan.changes.map(change => change.path).join(', ');
+                if (plan.dryRun) {
+                    log.info(`dry-run: ${plan.kind}; ${summary}`);
+                    return;
+                }
+                const result = applySensorBootstrap(plan);
+                log.success(`${result}: ${summary}`);
+            } catch (error) {
+                log.error(error instanceof Error ? error.message : String(error));
+                process.exitCode = 1;
             }
         });
 

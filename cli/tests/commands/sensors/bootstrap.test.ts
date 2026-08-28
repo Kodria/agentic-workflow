@@ -1,20 +1,25 @@
 jest.mock('../../../src/commands/sensors/project', () => ({ resolveSensorProject: jest.fn() }));
-jest.mock('../../../src/commands/sensors/init', () => ({ detectStack: jest.fn() }));
+jest.mock('../../../src/commands/sensors/detection', () => ({ detectStack: jest.fn() }));
 jest.mock('../../../src/core/registries', () => ({ listRegistries: jest.fn(() => []) }));
 jest.mock('../../../src/commands/sensors/compatibility/pack-source', () => ({ listPackSources: jest.fn() }));
 jest.mock('../../../src/commands/sensors/compatibility/contract', () => ({ ...jest.requireActual('../../../src/commands/sensors/compatibility/contract'), parseSensorPack: jest.fn() }));
 jest.mock('../../../src/commands/sensors/compatibility/live', () => ({ resolveParsedPackCompatibility: jest.fn() }));
 jest.mock('../../../src/commands/sensors/compatibility/source', () => ({ resolveSensorSource: jest.fn() }));
-jest.mock('../../../src/commands/sensors/migrate', () => ({ planV2Migration: jest.fn() }));
+jest.mock('../../../src/commands/sensors/migrate', () => ({ planV2Migration: jest.fn(), replaceV2ManifestWithV3: jest.fn() }));
+jest.mock('../../../src/commands/sensors/compatibility/materialize', () => ({ materializePortableSensors: jest.fn() }));
+jest.mock('../../../src/commands/sensors/compatibility/safe-file', () => ({ writeProjectFile: jest.fn() }));
 
-import { planSensorBootstrap } from '../../../src/commands/sensors/bootstrap';
+import { applySensorBootstrap, planSensorBootstrap } from '../../../src/commands/sensors/bootstrap';
 import { resolveSensorProject } from '../../../src/commands/sensors/project';
-import { detectStack } from '../../../src/commands/sensors/init';
+import { detectStack } from '../../../src/commands/sensors/detection';
 import { listPackSources } from '../../../src/commands/sensors/compatibility/pack-source';
 import { parseSensorPack } from '../../../src/commands/sensors/compatibility/contract';
 import { resolveParsedPackCompatibility } from '../../../src/commands/sensors/compatibility/live';
 import { resolveSensorSource } from '../../../src/commands/sensors/compatibility/source';
 import { planV2Migration } from '../../../src/commands/sensors/migrate';
+import { replaceV2ManifestWithV3 } from '../../../src/commands/sensors/migrate';
+import { materializePortableSensors } from '../../../src/commands/sensors/compatibility/materialize';
+import { writeProjectFile } from '../../../src/commands/sensors/compatibility/safe-file';
 
 const root = '/project';
 const missing = { state: 'missing' as const, projectRoot: root, manifestPath: `${root}/.awm/sensors.json` };
@@ -110,5 +115,26 @@ describe('planSensorBootstrap', () => {
     it.each([{ mode: 'invalid' }, { reason: 'line\nbreak' }, { dryRun: 'yes' }, { unknown: true }])('rejects invalid bootstrap options %j before planning', async input => {
         await expect(planSensorBootstrap(root, input as never)).rejects.toThrow(/bootstrap (mode|reason|dryRun|options)/);
         expect(listPackSources).not.toHaveBeenCalled();
+    });
+
+    it('rejects applying a dry-run plan before any publisher runs', () => {
+        expect(() => applySensorBootstrap({ kind: 'create', projectRoot: root, manifestPath: `${root}/.awm/sensors.json`, dryRun: true, changes: [], manifest: { schemaVersion: 3, mode: 'native-gate', reason: 'CI' } })).toThrow('dry-run');
+        expect(writeProjectFile).not.toHaveBeenCalled();
+    });
+
+    it('publishes native declarations and project sensors through distinct native boundaries', () => {
+        expect(applySensorBootstrap({ kind: 'create', projectRoot: root, manifestPath: `${root}/.awm/sensors.json`, dryRun: false, changes: [{ path: '.awm/sensors.json', action: 'create' }], manifest: { schemaVersion: 3, mode: 'native-gate', reason: 'CI' } })).toBe('created');
+        expect(writeProjectFile).toHaveBeenCalledWith(root, '.awm/sensors.json', expect.any(Buffer), { mode: 'create', createParents: true });
+        const manifest = { schemaVersion: 3 as const, mode: 'project-sensors' as const, pack: 'js-ts', source: { registry: 'baseline' }, sensors: {} };
+        expect(applySensorBootstrap({ kind: 'create', projectRoot: root, manifestPath: `${root}/.awm/sensors.json`, dryRun: false, changes: [{ path: '.awm/sensors.json', action: 'create' }], manifest, source })).toBe('created');
+        expect(materializePortableSensors).toHaveBeenCalledWith(expect.objectContaining({ projectRoot: root, pack: 'js-ts', source, sensors: {} }));
+    });
+
+    it('delegates a validated migration to the fenced replacement', () => {
+        const candidate = { schemaVersion: 3, mode: 'project-sensors', pack: 'js-ts', source: { registry: 'baseline' }, sensors: {} };
+        const migration = { candidate, equivalent: true, equivalence: {} } as never;
+        const plan = { kind: 'migrate' as const, projectRoot: root, manifestPath: `${root}/.awm/sensors.json`, dryRun: false, changes: [{ path: '.awm/sensors.json', action: 'replace' }] as [{ path: '.awm/sensors.json'; action: 'replace' }], migration, source };
+        expect(applySensorBootstrap(plan)).toBe('migrated');
+        expect(replaceV2ManifestWithV3).toHaveBeenCalledWith(plan.manifestPath, candidate, source);
     });
 });
