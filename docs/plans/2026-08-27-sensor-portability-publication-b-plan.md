@@ -18,7 +18,7 @@
 {
   "schema": "compact-slices/v1",
   "planId": "issue-129-sensor-portability-publication-b",
-  "requirements": ["GATE-01", "PORT-01", "PORT-02", "BOOT-01", "BOOT-02", "BOOT-03", "BOOT-04", "BOOT-05", "BOOT-06", "BOOT-07", "BOOT-08"],
+  "requirements": ["GATE-01", "PORT-01", "PORT-02", "PORT-03", "BOOT-01", "BOOT-02", "BOOT-03", "BOOT-04", "BOOT-05", "BOOT-06", "BOOT-07", "BOOT-08"],
   "sources": [
     {
       "id": "SRC-DESIGN-B",
@@ -62,7 +62,7 @@
       "id": "CMD-SECURE-FS-NATIVE",
       "program": "npm",
       "args": ["--prefix", "cli", "test", "--", "tests/core/secure-fs/native-bridge.test.ts", "tests/commands/sensors/compatibility/safe-file.test.ts"],
-      "covers": ["PORT-02"]
+      "covers": ["PORT-02", "PORT-03"]
     },
     {
       "id": "CMD-MIGRATION-CORE",
@@ -117,7 +117,7 @@
     {
       "id": "N0",
       "title": "Package a native cross-platform secure-fs bridge",
-      "requirements": ["PORT-02"],
+      "requirements": ["PORT-02", "PORT-03"],
       "dependsOn": ["S0"],
       "sectionAnchor": "slice-n0",
       "sources": ["SRC-DESIGN-B", "SRC-MATERIALIZE"],
@@ -281,19 +281,28 @@ integrity requirement.
 
 - **PORT-02:** WHEN bootstrap or migration writes a project declaration on a supported
   platform, THE SYSTEM SHALL use a packaged platform-native handle/descriptor-bound
-  transaction that rejects reparse points/symlinks, verifies identity, and publishes
-  without replacing a concurrent target. Every published CLI archive SHALL include a
+  transaction that rejects reparse points/symlinks and verifies the identity of every
+  file read. Every published CLI archive SHALL include a
   verified native artifact for Linux, macOS, and Windows, and SHALL fail clearly before
   any project write when the artifact is absent or incompatible.
+
+- **PORT-03:** WHEN two AWM instances attempt a project sensor mutation, THE SYSTEM
+  SHALL acquire one native OS-held project lease before inspecting any mutable target;
+  the losing instance SHALL return a bounded conflict without project mutation. The
+  lease spans all selected assets and the manifest commit, is released automatically on
+  process exit, and is never recovered through a time-to-live deletion. This is a
+  coordination contract between AWM instances, not a claim to restrain an unrelated
+  hostile process with write access to the project filesystem.
 
 #### Implementation
 
 - [ ] Add RED bridge-contract tests covering load selection by `process.platform` and
   `process.arch`, missing/incompatible artifact before mutation, ancestor
-  symlink/reparse rejection, final-file identity fencing, and no-replace publication.
+  symlink/reparse rejection, final-file identity fencing, no-replace publication, and
+  a second AWM lease claimant rejected without writing.
 - [ ] Create a narrow TypeScript boundary under `cli/src/core/secure-fs/` that accepts
   validated absolute project paths and opaque byte payloads only. It exposes
-  `readRegularFile`, `writeProjectTransaction`, and an observable platform-artifact
+  `readRegularFile`, `withProjectLease`, `writeProjectTransaction`, and an observable platform-artifact
   status; it never accepts arbitrary shell commands or falls back to unchecked Node
   pathname writes.
 - [ ] Add a Node-API implementation and build configuration that uses POSIX directory
@@ -304,8 +313,9 @@ integrity requirement.
   supports them; no `node-gyp` build runs during ordinary `npm install`.
 - [ ] Replace the temporary JS-only write path in `safe-file.ts`, `migrate.ts`, and
   `materialize.ts` with this boundary. Preserve pure planning; only apply operations
-  invoke the bridge. Remove any platform fail-closed behavior that would make a
-  supported platform unable to bootstrap solely because the JS layer lacks `openat`.
+  invoke the bridge while holding `withProjectLease` across the complete multi-file
+  publication. Remove any platform fail-closed behavior that would make a supported
+  platform unable to bootstrap solely because the JS layer lacks `openat`.
 - [ ] Add CI matrix build and artifact verification for Linux, macOS, and Windows,
   including package-contents assertions that the selected artifact ships in the npm
   archive. Run `CMD-SECURE-FS-NATIVE` and `CMD-TYPECHECK-B` to GREEN, then commit the
@@ -313,12 +323,13 @@ integrity requirement.
 
 #### Edge cases
 
-The loader validates platform/architecture names and artifact checksum before loading.
+The loader validates platform/architecture names and loadability before loading; the
+release job validates all artifact bytes in the packed archive, which is the meaningful
+package-integrity boundary (a local runtime checksum has no independent trust root).
 An unsupported architecture is a bounded explicit error with no project mutation.
-Windows junctions and all reparse points are rejected, not followed. A concurrent
-target appears as an explicit conflict and preserves both project bytes and the
-caller's preexisting files. Native code has no network, registry, environment-update,
-or shell capability.
+Windows junctions and all reparse points are rejected, not followed. A competing AWM
+lease appears as an explicit conflict and preserves project bytes and caller files.
+Native code has no network, registry, environment-update, or shell capability.
 
 #### Evidence
 
