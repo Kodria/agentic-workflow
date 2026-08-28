@@ -314,6 +314,7 @@ constexpr ULONG kObjectCaseInsensitive = 0x00000040;
 constexpr ULONG kFileDirectoryFile = 0x00000001;
 constexpr ULONG kFileSynchronousIoNonalert = 0x00000020;
 constexpr ULONG kFileNonDirectoryFile = 0x00000040;
+constexpr ULONG kFileOpenForBackupIntent = 0x00004000;
 constexpr ULONG kFileOpenReparsePoint = 0x00200000;
 constexpr ULONG kFileOpen = 0x00000001;
 constexpr ULONG kFileCreate = 0x00000002;
@@ -466,13 +467,33 @@ bool CreateFileRelative(HANDLE root, const std::wstring& component, ACCESS_MASK 
   return true;
 }
 
+bool VerifyDirectDirectoryIdentity(HANDLE root, const std::wstring& component,
+    HANDLE directory) {
+  HANDLE observed = INVALID_HANDLE_VALUE;
+  if (!CreateFileRelative(root, component, FILE_READ_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, kFileOpen,
+      kFileOpenReparsePoint, FILE_ATTRIBUTE_NORMAL, &observed)) return false;
+  BY_HANDLE_FILE_INFORMATION direct_info {};
+  BY_HANDLE_FILE_INFORMATION directory_info {};
+  const bool verified = HandleIsDirectoryNotReparse(observed)
+      && GetFileInformationByHandle(observed, &direct_info) != 0
+      && GetFileInformationByHandle(directory, &directory_info) != 0
+      && direct_info.dwVolumeSerialNumber == directory_info.dwVolumeSerialNumber
+      && direct_info.nFileIndexHigh == directory_info.nFileIndexHigh
+      && direct_info.nFileIndexLow == directory_info.nFileIndexLow;
+  CloseHandle(observed);
+  return verified;
+}
+
 bool OpenRelativeDirectoryNoReparse(HANDLE root, const std::wstring& component,
     bool create, HANDLE* opened) {
   HANDLE handle = INVALID_HANDLE_VALUE;
   if (!CreateFileRelative(root, component, FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, create ? kFileOpenIf : kFileOpen,
-      kFileDirectoryFile | kFileOpenReparsePoint, FILE_ATTRIBUTE_NORMAL, &handle)) return false;
-  if (!HandleIsDirectoryNotReparse(handle)) {
+      kFileDirectoryFile | kFileSynchronousIoNonalert | kFileOpenForBackupIntent,
+      FILE_ATTRIBUTE_NORMAL, &handle)) return false;
+  if (!HandleIsDirectoryNotReparse(handle)
+      || !VerifyDirectDirectoryIdentity(root, component, handle)) {
     CloseHandle(handle);
     SetLastError(ERROR_REPARSE_TAG_INVALID);
     return false;

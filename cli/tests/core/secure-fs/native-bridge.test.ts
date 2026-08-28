@@ -55,6 +55,7 @@ describe('native secure-fs Windows source contract', () => {
 
     it('finds the Windows contract in a CRLF checkout', () => {
         const source = fs.readFileSync(path.resolve(__dirname, '../../../native/secure_fs.cc'), 'utf8')
+            .replace(/\r\n/g, '\n')
             .replace(/\n/g, '\r\n');
 
         expect(windowsContractSource(source)).toContain('NtCreateFile');
@@ -71,6 +72,23 @@ describe('native secure-fs Windows source contract', () => {
 
     it('requests SYNCHRONIZE when opening a handle-relative directory', () => {
         expect(windowsSource()).toMatch(/OpenRelativeDirectoryNoReparse\([\s\S]*?FILE_TRAVERSE\s*\|\s*FILE_READ_ATTRIBUTES\s*\|\s*SYNCHRONIZE/);
+    });
+
+    it('does not combine directory opens with the incompatible reparse-point option', () => {
+        const source = windowsSource();
+        const start = source.indexOf('bool OpenRelativeDirectoryNoReparse');
+        const end = source.indexOf('\nbool OpenWindowsParent', start);
+        const opener = source.slice(start, end);
+
+        expect(start).toBeGreaterThan(-1);
+        expect(opener).toContain('kFileDirectoryFile | kFileSynchronousIoNonalert | kFileOpenForBackupIntent');
+        expect(opener).not.toMatch(/kFileDirectoryFile\s*\|[^;]*kFileOpenReparsePoint/);
+        expect(opener).toContain('VerifyDirectDirectoryIdentity');
+    });
+
+    it('declares eval mode for the inline junction-race worker', () => {
+        expect(fs.readFileSync(__filename, 'utf8'))
+            .toMatch(/new Worker\([\s\S]*?`\s*, \{ eval: true, workerData:/);
     });
 
     it('keeps an exclusive verified target handle through an atomic POSIX-semantics replacement', () => {
@@ -732,7 +750,7 @@ windowsOnly('native secure-fs Windows handle fixtures', () => {
             }
             restore();
             parentPort.postMessage('done');
-        `, { workerData: { shared, trusted, parked, outside } });
+            `, { eval: true, workerData: { shared, trusted, parked, outside } });
         const done = new Promise<void>((resolve, reject) => {
             worker.once('message', () => resolve());
             worker.once('error', reject);
