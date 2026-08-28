@@ -618,7 +618,7 @@ bool WriteAll(HANDLE handle, const void* bytes, size_t length) {
   return true;
 }
 
-bool CreatePrivateStagingFile(const WindowsParent& parent, HANDLE* staged) {
+bool CreatePrivateStagingFile(const WindowsParent& parent, HANDLE* staged, DWORD* last_error) {
   for (unsigned int attempt = 0; attempt < 128; ++attempt) {
     const std::wstring candidate = L"." + parent.basename + L".secure-fs."
         + std::to_wstring(GetCurrentProcessId()) + L"." + std::to_wstring(GetTickCount64())
@@ -631,8 +631,13 @@ bool CreatePrivateStagingFile(const WindowsParent& parent, HANDLE* staged) {
       *staged = handle;
       return true;
     }
-    if (GetLastError() != ERROR_FILE_EXISTS && GetLastError() != ERROR_ALREADY_EXISTS) return false;
+    const DWORD error = GetLastError();
+    if (error != ERROR_FILE_EXISTS && error != ERROR_ALREADY_EXISTS) {
+      *last_error = error;
+      return false;
+    }
   }
+  *last_error = ERROR_FILE_EXISTS;
   return false;
 }
 
@@ -1122,10 +1127,13 @@ napi_value WriteProjectTransaction(napi_env env, napi_callback_info info) {
     }
   }
   HANDLE staged = INVALID_HANDLE_VALUE;
-  if (!CreatePrivateStagingFile(parent, &staged)) {
+  DWORD staging_error = ERROR_SUCCESS;
+  if (!CreatePrivateStagingFile(parent, &staged, &staging_error)) {
     if (original != INVALID_HANDLE_VALUE) CloseHandle(original);
     CloseWindowsParent(&parent);
-    Throw(env, "secure-fs could not stage transaction");
+    const std::string message = "secure-fs could not stage transaction (win32="
+        + std::to_string(staging_error) + ")";
+    Throw(env, message.c_str());
     return nullptr;
   }
   const bool staged_ok = WriteAll(staged, bytes, length) && FlushFileBuffers(staged) != 0;
