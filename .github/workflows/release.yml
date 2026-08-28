@@ -76,6 +76,10 @@ jobs:
           npm ci
           npm run build
 
+      - name: Verify selected native package artifact
+        working-directory: cli
+        run: npm run native:package-check
+
       - name: Tests
         working-directory: cli
         run: npx jest --runInBand

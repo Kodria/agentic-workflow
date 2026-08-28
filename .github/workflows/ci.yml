@@ -48,6 +48,17 @@ jobs:
         working-directory: cli
         run: npm run build
 
+      - name: Verify selected native package artifact
+        working-directory: cli
+        run: npm run native:package-check
+
+      - name: Upload native secure-fs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: secure-fs-${{ matrix.os }}-${{ runner.arch }}
+          path: cli/prebuilds/
+          if-no-files-found: error
+
       - name: Typecheck
         working-directory: cli
         run: npx tsc --noEmit
