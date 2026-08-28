@@ -81,6 +81,11 @@ describe('sensor manifest contract', () => {
         expect(parseSensorManifest(JSON.parse(serialized), 'sensors.json')).toEqual({ kind: 'v3', pack: manifest });
     });
 
+    it.each(['native-gate', 'opt-out'] as const)('serializes a versioned %s declaration canonically', mode => {
+        const manifest = { schemaVersion: 3, mode, reason: 'declared by project policy' };
+        expect(serializeManifestV3(manifest)).toBe(JSON.stringify(manifest, null, 2) + '\n');
+    });
+
     it('refuses to serialize a v3 declaration containing a nested physical path', () => {
         const manifest = {
             schemaVersion: 3,

@@ -417,11 +417,31 @@ Sensors are deterministic checks (tsc, ESLint, Semgrep, depcheck, …) whose out
 
 ### `awm sensors init`
 
-Detect the stack and write `.awm/sensors.json`, copying the pack's config files into the project by default.
+Compatibility alias for creating a portable `project-sensors` declaration. It
+uses the same bootstrap transaction as the explicit command; it never stores a
+machine registry path in the committed manifest. Existing v2 declarations are
+not overwritten by this alias: inspect them with `awm sensors bootstrap`.
 
 ```
 awm sensors init [--no-configure] [--registry-root <path>] [--pack <name>]
 ```
+
+### `awm sensors bootstrap`
+
+Configure project quality exactly once, then commit `.awm/sensors.json` so the
+same declaration works in Codex, Claude Code, worktrees, and fixed machines.
+Machine registry installation (`awm update`) is separate and does not rewrite
+the project.
+
+```bash
+awm sensors bootstrap [--mode project-sensors|native-gate|opt-out] [--reason <text>] [--dry-run]
+```
+
+`project-sensors` selects one logical registry and pack, then materializes its
+declared assets atomically. `native-gate` and `opt-out` require a non-empty
+reason. `--dry-run` reports the exact files that would change and never writes.
+Running bootstrap again over an equivalent v3 declaration is a no-op; migrating
+a v2 declaration preserves its sensor semantics and changes only the manifest.
 
 | Flag | Description |
 |---|---|

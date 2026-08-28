@@ -286,13 +286,13 @@ export function serializeManifestV2(input: unknown): string {
     return JSON.stringify(parsed.pack, null, 2) + '\n';
 }
 
-/** Serialize only a validated portable project-sensors declaration. */
+/** Serialize a validated portable v3 declaration deterministically. */
 export function serializeManifestV3(input: unknown): string {
     const parsed = parseSensorManifest(input, 'manifest serialization');
-    if (parsed.kind !== 'v3' || parsed.pack.mode !== 'project-sensors') {
-        throw new Error('Cannot serialize a non-project-sensors manifest as v3');
+    if (parsed.kind !== 'v3') {
+        throw new Error('Cannot serialize a non-v3 sensor manifest as v3');
     }
-    if (containsPhysicalPath(parsed.pack)) {
+    if (parsed.pack.mode === 'project-sensors' && containsPhysicalPath(parsed.pack)) {
         throw new Error('Cannot serialize a v3 declaration containing a physical path');
     }
     return JSON.stringify(parsed.pack, null, 2) + '\n';

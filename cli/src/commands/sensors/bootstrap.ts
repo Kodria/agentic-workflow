@@ -130,7 +130,7 @@ export function applySensorBootstrap(plan: BootstrapPlan): 'created' | 'migrated
     const parsed = parseSensorManifest(plan.manifest, 'bootstrap declaration');
     if (parsed.kind !== 'v3' || parsed.pack.mode === 'project-sensors') throw new Error('bootstrap declaration plan is invalid');
     withProjectLease(plan.projectRoot, () => {
-        writeProjectFile(plan.projectRoot, '.awm/sensors.json', Buffer.from(JSON.stringify(parsed.pack, null, 2) + '\n', 'utf8'), { mode: 'create', createParents: true });
+        writeProjectFile(plan.projectRoot, '.awm/sensors.json', Buffer.from(serializeManifestV3(parsed.pack), 'utf8'), { mode: 'create', createParents: true });
     });
     return 'created';
 }
