@@ -133,7 +133,7 @@ describe('planV2Migration', () => {
     });
 
     it('accepts an old bound registry root only when an explicitly supplied logical source contains every selected sensor variant', () => {
-        const legacyBound = { ...v2, registryRoot: '/opt/old-machine/registries/baseline' };
+        const legacyBound = { ...v2, registryRoot: path.join(path.parse(process.cwd()).root, 'opt', 'old-machine', 'registries', 'baseline') };
         expect(planV2Migration({ manifest: legacyBound, source: resolvedSource() }).candidate.source).toEqual({ registry: 'baseline' });
 
         for (const source of [
@@ -295,16 +295,18 @@ describe('planV2Migration', () => {
     it('validates before atomic replacement and leaves the v2 original intact on write failure', () => {
         const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-'));
         const manifestPath = canonicalManifestPath(project);
-        const manifestDirectory = path.dirname(manifestPath);
         const original = JSON.stringify(v2, null, 2) + '\n';
         try {
             fs.writeFileSync(manifestPath, original);
             const plan = planV2Migration({ manifest: v2, source: resolvedSource() });
-            fs.chmodSync(manifestDirectory, 0o500);
-            expect(() => replaceV2ManifestWithV3(manifestPath, plan.candidate, resolvedSource())).toThrow();
+            setSecureFsForTests({
+                ...secureFs,
+                writeProjectTransaction: jest.fn(() => { throw new Error('injected write failure'); }),
+            });
+            expect(() => replaceV2ManifestWithV3(manifestPath, plan.candidate, resolvedSource())).toThrow('injected write failure');
             expect(fs.readFileSync(manifestPath, 'utf8')).toBe(original);
         } finally {
-            fs.chmodSync(manifestDirectory, 0o700);
+            setSecureFsForTests(undefined);
             fs.rmSync(project, { recursive: true, force: true });
         }
     });
@@ -316,7 +318,7 @@ describe('planV2Migration', () => {
         try {
             fs.writeFileSync(manifestPath, original);
             const candidate = planV2Migration({ manifest: v2, source: resolvedSource() }).candidate;
-            const unsafe = { ...candidate, sensors: { lint: { ...candidate.sensors.lint, command: { ...candidate.sensors.lint.command, args: ['/home/alice/.awm/cache'] } } } };
+            const unsafe = { ...candidate, sensors: { lint: { ...candidate.sensors.lint, command: { ...candidate.sensors.lint.command, args: [path.join(path.parse(process.cwd()).root, 'home', 'alice', '.awm', 'cache')] } } } };
             expect(() => replaceV2ManifestWithV3(manifestPath, unsafe, resolvedSource())).toThrow('physical path');
             expect(fs.readFileSync(manifestPath, 'utf8')).toBe(original);
         } finally {
@@ -327,7 +329,7 @@ describe('planV2Migration', () => {
     it('requires replacement to use the supplied logical source rather than candidate provenance', () => {
         const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-'));
         const manifestPath = canonicalManifestPath(project);
-        const original = JSON.stringify({ ...v2, registryRoot: '/opt/legacy-bound-registry' }, null, 2) + '\n';
+        const original = JSON.stringify({ ...v2, registryRoot: path.join(path.parse(process.cwd()).root, 'opt', 'legacy-bound-registry') }, null, 2) + '\n';
         try {
             fs.writeFileSync(manifestPath, original);
             const source = resolvedSource();

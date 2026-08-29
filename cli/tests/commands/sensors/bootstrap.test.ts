@@ -115,7 +115,7 @@ describe('planSensorBootstrap', () => {
 
         await planSensorBootstrap(root, { mode: 'project-sensors', packageRoot: 'packages/web' });
 
-        expect(resolveParsedPackCompatibility).toHaveBeenCalledWith(path.join(root, 'packages/web'), pack);
+        expect(resolveParsedPackCompatibility).toHaveBeenCalledWith(path.resolve(root, 'packages/web'), pack);
     });
 
     it('blocks project-sensors when compatibility cannot select every declared sensor variant', async () => {
