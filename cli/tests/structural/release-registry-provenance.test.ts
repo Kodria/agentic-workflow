@@ -16,4 +16,9 @@ describe('release registry provenance', () => {
             .toBeLessThan(workflow.indexOf('- name: Release'));
         expect(workflow).toMatch(/REGISTRY_TAG: v3\.4\.0[\s\S]*AWM_PUBLISHED_REGISTRY_TAG: v3\.4\.0/);
     });
+
+    it('normalizes npm pack JSON from both array and object output formats', () => {
+        expect(workflow).toContain('Array.isArray(packed) ? packed[0] : Object.values(packed)[0]');
+        expect(workflow).toContain('npm pack returned no tarball filename');
+    });
 });
