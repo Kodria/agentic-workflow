@@ -14,6 +14,7 @@ describe('native release artifacts', () => {
         }).trim();
 
         expect(gitignore).toContain('cli/prebuilds/');
+        expect(gitignore).toContain('cli/native-artifacts/');
         expect(tracked).toBe('');
     });
 });
