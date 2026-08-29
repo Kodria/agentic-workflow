@@ -182,7 +182,7 @@ describe('native secure-fs Windows source contract', () => {
         const replacementFence = source.slice(fenceStart, fenceEnd);
 
         expect(fenceStart).toBeGreaterThan(-1);
-        expect(replacementFence).toContain('OpenRegularFileNoReparse(parent, 0)');
+        expect(replacementFence).toContain('OpenRegularFileNoReparse(parent, FILE_READ_DATA, 0)');
         expect(source).toMatch(/kFileRenameReplaceIfExists\s*=\s*0x00000001/);
         expect(source).toMatch(/kFileRenamePosixSemantics\s*=\s*0x00000002/);
         expect(source).toMatch(/rename->Flags\s*=\s*kFileRenameReplaceIfExists\s*\|\s*kFileRenamePosixSemantics/);
@@ -191,13 +191,21 @@ describe('native secure-fs Windows source contract', () => {
         expect(source).toMatch(/\bUnlockFileEx\b/);
     });
 
-    it('removes a verified observed target through its exclusive handle', () => {
+    it('preserves the native replacement status separately from an identity-fence mismatch', () => {
+        const source = fs.readFileSync(path.resolve(__dirname, '../../../native/secure_fs.cc'), 'utf8');
+
+        expect(source).toContain('DWORD replacement_error = ERROR_SUCCESS;');
+        expect(source).toContain('PublishReplace(staged, parent.handle, parent.basename, &replacement_error)');
+        expect(source).toContain('secure-fs Windows replacement failed (win32=');
+    });
+
+    it('opens a verified observed target with delete access before removing it', () => {
         const source = fs.readFileSync(path.resolve(__dirname, '../../../native/secure_fs.cc'), 'utf8');
         const removalStart = source.indexOf('napi_value RemoveObservedProjectFile');
         const removal = source.slice(removalStart, source.indexOf('napi_value WriteProjectTransaction', removalStart));
 
         expect(removalStart).toBeGreaterThan(-1);
-        expect(removal).toContain('OpenRegularFileNoReparse(parent, 0)');
+        expect(removal).toContain('OpenRegularFileNoReparse(parent, DELETE, 0)');
         expect(removal).toContain('SetFileInformationByHandle(target, FileDispositionInfo');
         expect(removal).not.toMatch(/\bDeleteFileW\b/);
     });

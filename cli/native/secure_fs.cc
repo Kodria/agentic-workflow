@@ -590,10 +590,10 @@ bool SameWindowsFileIdentity(const WindowsFileIdentity& left, const WindowsFileI
       && left.file_index_low == right.file_index_low && left.size.QuadPart == right.size.QuadPart;
 }
 
-HANDLE OpenRegularFileNoReparse(const WindowsParent& parent, ULONG share) {
+HANDLE OpenRegularFileNoReparse(const WindowsParent& parent, ACCESS_MASK access, ULONG share) {
   HANDLE handle = INVALID_HANDLE_VALUE;
   if (!CreateFileRelative(parent.handle, parent.basename,
-      FILE_READ_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+      access | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
       share, kFileOpen,
       kFileNonDirectoryFile | kFileOpenReparsePoint | kFileSynchronousIoNonalert,
       FILE_ATTRIBUTE_NORMAL, &handle)) return INVALID_HANDLE_VALUE;
@@ -608,7 +608,7 @@ HANDLE OpenRegularFileNoReparse(const WindowsParent& parent, ULONG share) {
 }
 
 HANDLE OpenRegularFileForReplacementFence(const WindowsParent& parent) {
-  return OpenRegularFileNoReparse(parent, 0);
+  return OpenRegularFileNoReparse(parent, FILE_READ_DATA, 0);
 }
 
 bool WriteAll(HANDLE handle, const void* bytes, size_t length) {
@@ -701,7 +701,8 @@ bool EqualExpected(HANDLE handle, const WriteOptions& options) {
       && (options.expected_length == 0 || std::memcmp(observed.data(), options.expected, options.expected_length) == 0);
 }
 
-PublishResult PublishReplace(HANDLE staged, HANDLE parent, const std::wstring& basename) {
+PublishResult PublishReplace(HANDLE staged, HANDLE parent, const std::wstring& basename,
+    DWORD* failure_error) {
   struct RenameInfoEx {
     DWORD Flags;
     HANDLE RootDirectory;
@@ -709,7 +710,10 @@ PublishResult PublishReplace(HANDLE staged, HANDLE parent, const std::wstring& b
     WCHAR FileName[1];
   };
   const size_t bytes = offsetof(RenameInfoEx, FileName) + basename.size() * sizeof(WCHAR) + sizeof(WCHAR);
-  if (bytes > MAXDWORD) return PublishResult::kFailed;
+  if (bytes > MAXDWORD) {
+    *failure_error = ERROR_INVALID_PARAMETER;
+    return PublishResult::kFailed;
+  }
   std::vector<unsigned char> storage(bytes);
   auto* rename = reinterpret_cast<RenameInfoEx*>(storage.data());
   // The verified destination remains open with no sharing while this atomic
@@ -721,12 +725,16 @@ PublishResult PublishReplace(HANDLE staged, HANDLE parent, const std::wstring& b
   rename->FileNameLength = static_cast<DWORD>(basename.size() * sizeof(WCHAR));
   std::memcpy(rename->FileName, basename.data(), rename->FileNameLength);
   const WindowsNativeApi& api = GetWindowsNativeApi();
-  if (api.nt_set_information_file == nullptr || api.rtl_nt_status_to_dos_error == nullptr) return PublishResult::kApiUnavailable;
+  if (api.nt_set_information_file == nullptr || api.rtl_nt_status_to_dos_error == nullptr) {
+    *failure_error = ERROR_CALL_NOT_IMPLEMENTED;
+    return PublishResult::kApiUnavailable;
+  }
   IO_STATUS_BLOCK io_status {};
   const NTSTATUS status = api.nt_set_information_file(staged, &io_status, rename,
       static_cast<ULONG>(bytes), kFileRenameInformationEx);
   if (status >= 0) return PublishResult::kPublished;
   const DWORD error = api.rtl_nt_status_to_dos_error(status);
+  *failure_error = error;
   if (error == ERROR_FILE_NOT_FOUND || error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS || error == ERROR_SHARING_VIOLATION) return PublishResult::kConflict;
   if (error == ERROR_INVALID_PARAMETER || error == ERROR_NOT_SUPPORTED || error == ERROR_CALL_NOT_IMPLEMENTED) return PublishResult::kApiUnavailable;
   return PublishResult::kFailed;
@@ -987,7 +995,8 @@ napi_value ReadRegularFile(napi_env env, napi_callback_info info) {
       || !OpenWindowsParent(project_root, destination, &parent, false)) {
     Throw(env, "secure-fs rejected path ancestor"); return nullptr;
   }
-  HANDLE handle = OpenRegularFileNoReparse(parent, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+  HANDLE handle = OpenRegularFileNoReparse(parent, FILE_READ_DATA,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
   CloseWindowsParent(&parent);
   WindowsFileIdentity before {};
   if (handle == INVALID_HANDLE_VALUE || !GetWindowsFileIdentity(handle, &before) || before.size.QuadPart < 0 || before.size.QuadPart > limit || static_cast<unsigned long long>(before.size.QuadPart) > static_cast<unsigned long long>(SIZE_MAX)) {
@@ -1064,7 +1073,7 @@ napi_value RemoveObservedProjectFile(napi_env env, napi_callback_info info) {
     Throw(env, "secure-fs rejected path ancestor");
     return nullptr;
   }
-  HANDLE target = OpenRegularFileNoReparse(parent, 0);
+  HANDLE target = OpenRegularFileNoReparse(parent, DELETE, 0);
   CloseWindowsParent(&parent);
   WindowsFileIdentity observed {};
   const bool matched = target != INVALID_HANDLE_VALUE
@@ -1169,9 +1178,12 @@ napi_value WriteProjectTransaction(napi_env env, napi_callback_info info) {
   }
   const bool staged_ok = WriteAll(staged, bytes, length) && FlushFileBuffers(staged) != 0;
   PublishResult publish_result = PublishResult::kFailed;
+  DWORD replacement_error = ERROR_SUCCESS;
   if (staged_ok && options.replace) {
     const bool matched = EqualExpected(original, options);
-    publish_result = matched ? PublishReplace(staged, parent.handle, parent.basename) : PublishResult::kConflict;
+    publish_result = matched
+        ? PublishReplace(staged, parent.handle, parent.basename, &replacement_error)
+        : PublishResult::kConflict;
   } else if (staged_ok) {
     publish_result = PublishNoReplace(staged, parent.handle, parent.basename);
   }
@@ -1180,7 +1192,16 @@ napi_value WriteProjectTransaction(napi_env env, napi_callback_info info) {
   if (original != INVALID_HANDLE_VALUE) CloseHandle(original);
   CloseWindowsParent(&parent);
   if (publish_result == PublishResult::kApiUnavailable) { Throw(env, "secure-fs Windows FileRenameInfoEx is unavailable"); return nullptr; }
-  if (options.replace && publish_result != PublishResult::kPublished) { Throw(env, "secure-fs original changed before fenced replacement"); return nullptr; }
+  if (options.replace && publish_result != PublishResult::kPublished) {
+    if (replacement_error != ERROR_SUCCESS) {
+      const std::string message = "secure-fs Windows replacement failed (win32="
+          + std::to_string(replacement_error) + ")";
+      Throw(env, message.c_str());
+    } else {
+      Throw(env, "secure-fs original changed before fenced replacement");
+    }
+    return nullptr;
+  }
   if (publish_result == PublishResult::kConflict) { ThrowDestinationExists(env); return nullptr; }
   if (publish_result != PublishResult::kPublished) { Throw(env, "secure-fs transaction failed"); return nullptr; }
   napi_value undefined; napi_get_undefined(env, &undefined); return undefined;
