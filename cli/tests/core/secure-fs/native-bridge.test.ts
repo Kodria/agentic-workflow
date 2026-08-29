@@ -160,6 +160,16 @@ describe('native secure-fs Windows source contract', () => {
             .toMatch(/DWORD lease_error = ERROR_SUCCESS;[\s\S]*?AcquirePlatformProjectLease\(project_root, lease, &lease_error\)/);
     });
 
+    it('requests synchronous access for the synchronous Windows lease handle', () => {
+        const source = windowsSource();
+        const start = source.indexOf('LeaseAcquireResult AcquirePlatformProjectLease');
+        const end = source.indexOf('\nvoid ReleasePlatformProjectLease', start);
+        const lease = source.slice(start, end);
+
+        expect(lease).toMatch(/GENERIC_READ \| GENERIC_WRITE \| SYNCHRONIZE/);
+        expect(lease).toContain('kFileSynchronousIoNonalert');
+    });
+
     it('declares eval mode for the inline junction-race worker', () => {
         expect(fs.readFileSync(__filename, 'utf8'))
             .toMatch(/new Worker\([\s\S]*?`\s*, \{ eval: true, workerData:/);

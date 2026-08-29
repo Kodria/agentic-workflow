@@ -749,7 +749,7 @@ LeaseAcquireResult AcquirePlatformProjectLease(
 
   HANDLE handle = INVALID_HANDLE_VALUE;
   if (!CreateFileRelative(awm, L".secure-fs-lease",
-      GENERIC_READ | GENERIC_WRITE,
+      GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE,
       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, kFileOpenIf,
       kFileNonDirectoryFile | kFileOpenReparsePoint | kFileSynchronousIoNonalert,
       FILE_ATTRIBUTE_NORMAL, &handle)) {
