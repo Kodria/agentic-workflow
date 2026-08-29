@@ -31,7 +31,21 @@ jobs:
         # agregado, no porque hubiera algo que resolver — y `fail-fast: false`
         # arriba asegura que un fallo en uno no oculte el resultado de los demas,
         # que es como se descubre que un bug es de UNA plataforma y no del cambio.
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+          - os: macos-15-intel
+            target: darwin-x64
+          - os: macos-14
+            target: darwin-arm64
+          # `windows-latest` moved to the VS2026 image, which node-gyp 11.5
+          # cannot discover. Pin the x64 compiler image; ARM64 remains native.
+          - os: windows-2022
+            target: win32-x64
+          - os: windows-11-arm
+            target: win32-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -46,7 +60,19 @@ jobs:
 
       - name: Build
         working-directory: cli
-        run: npm run build
+        run: npm run native:build && npm run build
+
+      - name: Verify native build artifact
+        working-directory: cli
+        run: >-
+          node -e "const fs=require('fs'); const path=require('path'); const file=path.join('prebuilds', '${{ matrix.target }}', 'secure_fs.node'); if (!fs.existsSync(file)) throw new Error('native build artifact is missing: ' + file);"
+
+      - name: Upload native secure-fs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: secure-fs-${{ matrix.target }}
+          path: cli/prebuilds/${{ matrix.target }}/secure_fs.node
+          if-no-files-found: error
 
       - name: Typecheck
         working-directory: cli

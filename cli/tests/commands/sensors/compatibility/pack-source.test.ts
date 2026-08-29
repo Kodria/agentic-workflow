@@ -2,6 +2,9 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { resolvePackSource } from '../../../../src/commands/sensors/compatibility/pack-source';
+import { setPortableReadForTests } from '../../../../src/commands/sensors/compatibility/safe-file';
+
+const itLinux = process.platform === 'linux' ? it : it.skip;
 
 function resolveWithoutNoFollow(...args: Parameters<typeof resolvePackSource>): ReturnType<typeof resolvePackSource> {
     let resolve: typeof resolvePackSource | undefined;
@@ -11,6 +14,7 @@ function resolveWithoutNoFollow(...args: Parameters<typeof resolvePackSource>): 
             const constants = { ...actual.constants, O_NOFOLLOW: undefined };
             return { __esModule: true, default: { ...actual, constants }, ...actual, constants };
         });
+        (require('../../../../src/commands/sensors/compatibility/safe-file') as typeof import('../../../../src/commands/sensors/compatibility/safe-file')).setPortableReadForTests(true);
         resolve = require('../../../../src/commands/sensors/compatibility/pack-source').resolvePackSource as typeof resolvePackSource;
     });
     jest.dontMock('fs');
@@ -26,6 +30,7 @@ function resolveWithoutNoFollowWithExactStats(...args: Parameters<typeof resolve
             const constants = { ...actual.constants, O_NOFOLLOW: undefined };
             return { __esModule: true, default: { ...actual, constants }, ...actual, constants };
         });
+        (require('../../../../src/commands/sensors/compatibility/safe-file') as typeof import('../../../../src/commands/sensors/compatibility/safe-file')).setPortableReadForTests(true);
         resolve = require('../../../../src/commands/sensors/compatibility/pack-source').resolvePackSource as typeof resolvePackSource;
     });
     jest.dontMock('fs');
@@ -34,6 +39,9 @@ function resolveWithoutNoFollowWithExactStats(...args: Parameters<typeof resolve
 }
 
 describe('resolvePackSource', () => {
+    beforeEach(() => setPortableReadForTests(true));
+    afterEach(() => setPortableReadForTests(false));
+
     it('uses the first registry containing the exact contained pack file', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-'));
         try {
@@ -166,7 +174,7 @@ describe('resolvePackSource', () => {
         }
     });
 
-    it('accepts a parent symlink replacement when it resolves to the inspected pack inode', () => {
+    itLinux('accepts a parent symlink replacement when Linux descriptor binding preserves the inspected pack inode', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-same-inode-'));
         const packDir = path.join(root, 'sensor-packs', 'js-ts');
         const movedPackDir = path.join(root, 'sensor-packs', 'js-ts-original');
@@ -187,6 +195,33 @@ describe('resolvePackSource', () => {
             }) as typeof fs.openSync);
             expect(resolvePackSource('js-ts', { registries: [{ name: 'safe', remote: '', contentRoot: root }] }).content)
                 .toBe('{"from":"original"}');
+        } finally {
+            open.mockRestore();
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects an observable parent symlink replacement in the portable fallback', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pack-source-portable-parent-swap-'));
+        const packDir = path.join(root, 'sensor-packs', 'js-ts');
+        const movedPackDir = path.join(root, 'sensor-packs', 'js-ts-original');
+        const packFile = path.join(packDir, 'pack.json');
+        const originalOpen = fs.openSync.bind(fs);
+        const open = jest.spyOn(fs, 'openSync');
+        let swapped = false;
+        try {
+            fs.mkdirSync(packDir, { recursive: true });
+            fs.writeFileSync(packFile, '{"from":"original"}');
+            open.mockImplementation(((file: fs.PathLike, flags: number, mode?: number) => {
+                if (!swapped && file === fs.realpathSync(packFile)) {
+                    swapped = true;
+                    fs.renameSync(packDir, movedPackDir);
+                    fs.symlinkSync(movedPackDir, packDir, 'dir');
+                }
+                return originalOpen(file, flags, mode);
+            }) as typeof fs.openSync);
+            expect(() => resolveWithoutNoFollow('js-ts', { registries: [{ name: 'safe', remote: '', contentRoot: root }] }))
+                .toThrow(/changed|identity|safe|symlink/i);
         } finally {
             open.mockRestore();
             fs.rmSync(root, { recursive: true, force: true });

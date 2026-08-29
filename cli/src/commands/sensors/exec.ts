@@ -1,5 +1,6 @@
 import { spawn, execFile } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { isWindowsNative } from '../../core/paths';
 import type { StructuredCommand } from './compatibility/types';
@@ -35,6 +36,32 @@ const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
 const DEFAULT_KILL_GRACE_MS = 2_000;
 /** After SIGKILL, resolve regardless. A sensor must never hang the gate. */
 const POST_KILL_GRACE_MS = 1_000;
+const PRLIMIT_PATHS = ['/usr/bin/prlimit', '/bin/prlimit'];
+
+/** Decode a byte-bounded capture without allowing replacement characters to
+ * expand it. Invalid input bytes become one-byte `?` markers. */
+function decodeBoundedOutput(buffer: Buffer): string {
+    const decoded = Buffer.allocUnsafe(buffer.length);
+    let read = 0;
+    let written = 0;
+    const continuation = (index: number) => index < buffer.length && (buffer[index] & 0b1100_0000) === 0b1000_0000;
+    while (read < buffer.length) {
+        const first = buffer[read];
+        let length = 1;
+        if (first >= 0xc2 && first <= 0xdf && continuation(read + 1)) length = 2;
+        else if (first >= 0xe0 && first <= 0xef && continuation(read + 1) && continuation(read + 2)
+            && !(first === 0xe0 && buffer[read + 1] < 0xa0) && !(first === 0xed && buffer[read + 1] > 0x9f)) length = 3;
+        else if (first >= 0xf0 && first <= 0xf4 && continuation(read + 1) && continuation(read + 2) && continuation(read + 3)
+            && !(first === 0xf0 && buffer[read + 1] < 0x90) && !(first === 0xf4 && buffer[read + 1] > 0x8f)) length = 4;
+        else if (first >= 0x80) decoded[written++] = 0x3f;
+        if (length > 1 || first < 0x80) {
+            buffer.copy(decoded, written, read, read + length);
+            written += length;
+        }
+        read += length;
+    }
+    return decoded.subarray(0, written).toString('utf8');
+}
 
 /**
  * Kill an entire process tree, not just its root.
@@ -93,10 +120,51 @@ function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult>
         const startedAt = process.hrtime.bigint();
         let stdout = '';
         let stderr = '';
+        const stdoutChunks: Buffer[] = [];
+        const stderrChunks: Buffer[] = [];
+        let capturedBytes = 0;
         let timedOut = false;
         let overflowed = false;
         let settled = false;
         const timers: NodeJS.Timeout[] = [];
+
+        const prlimit = !input.shell && process.platform === 'linux'
+            ? PRLIMIT_PATHS.find(candidate => regularFile(candidate))
+            : undefined;
+        const streamMaxBuffer = maxBuffer;
+
+        // Some structured Node CLIs call process.exit() after writing their
+        // report. Node drops an asynchronous pipe write in that case, but a
+        // regular file descriptor is flushed before exit. Keep the report on
+        // disk only until settlement. Each channel is hard-capped at maxBuffer
+        // while a shared decode budget caps the returned combined output.
+        // Linux enforces the per-file cap before either child stream can grow
+        // unbounded; polling alone can only discover excess after it happens.
+        const captureDir = prlimit ? fs.mkdtempSync(path.join(os.tmpdir(), 'awm-sensor-output-')) : undefined;
+        const stdoutPath = captureDir ? path.join(captureDir, 'stdout') : undefined;
+        const stderrPath = captureDir ? path.join(captureDir, 'stderr') : undefined;
+        const stdoutFd = stdoutPath ? fs.openSync(stdoutPath, 'w') : undefined;
+        const stderrFd = stderrPath ? fs.openSync(stderrPath, 'w') : undefined;
+
+        const readCaptured = (file: string, fd: number, budget: number): { output: string; bytes: number } => {
+            fs.closeSync(fd);
+            const size = fs.statSync(file).size;
+            if (size >= streamMaxBuffer) overflowed = true;
+            if (size > budget) overflowed = true;
+            const bytes = Math.min(size, budget);
+            const buffer = Buffer.allocUnsafe(bytes);
+            if (buffer.length > 0) {
+                const readFd = fs.openSync(file, 'r');
+                try { fs.readSync(readFd, buffer, 0, buffer.length, 0); }
+                finally { fs.closeSync(readFd); }
+            }
+            return { output: decodeBoundedOutput(buffer), bytes };
+        };
+
+        const captureSize = (file: string | undefined): number => {
+            if (!file) return 0;
+            try { return fs.statSync(file).size; } catch { return 0; }
+        };
 
         const child = input.shell
             ? spawn(input.executable, {
@@ -105,14 +173,16 @@ function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult>
                 detached: !isWindowsNative(),
                 stdio: ['ignore', 'pipe', 'pipe'],
             })
-            : spawn(input.executable, input.args, {
+            : spawn(prlimit ?? input.executable, prlimit
+                ? [`--fsize=${streamMaxBuffer}`, '--', input.executable, ...input.args]
+                : input.args, {
                 shell: false,
                 cwd: opts.cwd,
                 detached: !isWindowsNative(),
                 ...(input.environment ? { env: { ...process.env, ...input.environment } } : {}),
             // stdin closed: a sensor must never block waiting for input, and the
             // EOF also tells watch-mode-capable tools (vitest, jest) to run once.
-            stdio: ['ignore', 'pipe', 'pipe'],
+            stdio: prlimit ? ['ignore', stdoutFd!, stderrFd!] : ['ignore', 'pipe', 'pipe'],
         });
 
         const later = (fn: () => void, ms: number) => {
@@ -126,6 +196,18 @@ function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult>
             if (settled) return;
             settled = true;
             timers.forEach(clearTimeout);
+            if (stdoutPath && stderrPath && stdoutFd !== undefined && stderrFd !== undefined) {
+                try {
+                    const capturedStdout = readCaptured(stdoutPath, stdoutFd, maxBuffer);
+                    stdout = capturedStdout.output;
+                    stderr = readCaptured(stderrPath, stderrFd, maxBuffer - capturedStdout.bytes).output;
+                } finally {
+                    fs.rmSync(captureDir!, { recursive: true, force: true });
+                }
+            } else {
+                stdout = decodeBoundedOutput(Buffer.concat(stdoutChunks));
+                stderr = decodeBoundedOutput(Buffer.concat(stderrChunks));
+            }
             const elapsedMs = Number((process.hrtime.bigint() - startedAt) / 1_000_000n);
             resolve({ stdout, stderr, code: null, signal: null, timedOut, overflowed, elapsedMs, ...extra });
         };
@@ -143,12 +225,12 @@ function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult>
 
         const collect = (into: 'out' | 'err') => (chunk: Buffer | string) => {
             if (settled || overflowed) return;
-            const text = String(chunk);
-            const current = into === 'out' ? stdout : stderr;
-            const room = maxBuffer - current.length;
-            const next = current + (text.length > room ? text.slice(0, room) : text);
-            if (into === 'out') stdout = next; else stderr = next;
-            if (next.length >= maxBuffer) {
+            const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            const room = maxBuffer - capturedBytes;
+            const kept = bytes.subarray(0, Math.max(0, room));
+            if (kept.length > 0) (into === 'out' ? stdoutChunks : stderrChunks).push(kept);
+            capturedBytes += kept.length;
+            if (bytes.length > kept.length || capturedBytes >= maxBuffer) {
                 overflowed = true;
                 cutShort();
             }
@@ -162,6 +244,18 @@ function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult>
         child.on('error', (err: NodeJS.ErrnoException) => finish({ spawnError: err }));
         child.on('close', (code, signal) => finish({ code, signal }));
 
+        if (stdoutPath || stderrPath) {
+            const outputWatch = setInterval(() => {
+                const stdoutSize = captureSize(stdoutPath);
+                const stderrSize = captureSize(stderrPath);
+                if (!overflowed && (stdoutSize >= streamMaxBuffer || stderrSize >= streamMaxBuffer || stdoutSize + stderrSize >= maxBuffer)) {
+                    overflowed = true;
+                    cutShort();
+                }
+            }, 25);
+            outputWatch.unref?.();
+            timers.push(outputWatch);
+        }
         later(() => { timedOut = true; cutShort(); }, opts.timeout);
     });
 }

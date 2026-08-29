@@ -1,4 +1,4 @@
-import { legacyCompatibility, parseSensorManifest, serializeManifestV2 } from '../../../../src/commands/sensors/compatibility/manifest';
+import { legacyCompatibility, parseSensorManifest, serializeManifestV2, serializeManifestV3 } from '../../../../src/commands/sensors/compatibility/manifest';
 import fs from 'fs';
 import path from 'path';
 
@@ -60,6 +60,81 @@ describe('sensor manifest contract', () => {
         expect(() => parseSensorManifest({ ...project, source: { registry: 'Baseline' } }, 'sensors.json')).toThrow('registry');
         expect(() => parseSensorManifest({ schemaVersion: 3, mode: 'native-gate' }, 'sensors.json')).toThrow('reason');
         expect(() => parseSensorManifest({ ...project, registryRoot: '/machine/root' }, 'sensors.json')).toThrow('unknown field');
+    });
+
+    it('serializes v3 deterministically with a newline and round-trips portable semantics', () => {
+        const manifest = {
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            pack: 'js-ts',
+            packSelection: 'explicit' as const,
+            source: { registry: 'baseline' },
+            packageRoot: 'cli',
+            sensors: { lint: { ...validV2Manifest().sensors.lint, enabled: false, fast: true, timeout: 45_000, assets: ['eslint.config.awm.mjs'], policyRef: 'shared/semgrep-policy.json' as const } },
+            concurrency: 2,
+        };
+        const serialized = serializeManifestV3(manifest);
+        expect(serialized).toBe(serializeManifestV3(manifest));
+        expect(serialized.endsWith('\n')).toBe(true);
+        expect(serialized).not.toContain('registryRoot');
+        expect(serialized).not.toContain('/home/');
+        expect(parseSensorManifest(JSON.parse(serialized), 'sensors.json')).toEqual({ kind: 'v3', pack: manifest });
+    });
+
+    it.each(['native-gate', 'opt-out'] as const)('serializes a versioned %s declaration canonically', mode => {
+        const manifest = { schemaVersion: 3, mode, reason: 'declared by project policy' };
+        expect(serializeManifestV3(manifest)).toBe(JSON.stringify(manifest, null, 2) + '\n');
+    });
+
+    it('refuses to serialize a v3 declaration containing a nested physical path', () => {
+        const manifest = {
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            pack: 'js-ts',
+            source: { registry: 'baseline' },
+            sensors: {
+                lint: {
+                    ...validV2Manifest().sensors.lint,
+                    command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['--config=/home/operator/.config/eslint.config.mjs'] },
+                },
+            },
+        };
+
+        expect(() => serializeManifestV3(manifest)).toThrow('physical path');
+    });
+
+    it('serializes a portable URL in a structured command argument', () => {
+        const manifest = {
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            pack: 'js-ts',
+            source: { registry: 'baseline' },
+            sensors: {
+                lint: {
+                    ...validV2Manifest().sensors.lint,
+                    command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['--rules=https://example.invalid/rules.json'] },
+                },
+            },
+        };
+
+        expect(JSON.parse(serializeManifestV3(manifest)).sensors.lint.command.args).toEqual(['--rules=https://example.invalid/rules.json']);
+    });
+
+    it('retains a portable URL in a structured command argument', () => {
+        const manifest = {
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            pack: 'js-ts',
+            source: { registry: 'baseline' },
+            sensors: {
+                lint: {
+                    ...validV2Manifest().sensors.lint,
+                    command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['--rules-url=https://example.test/eslint/rules.json'] },
+                },
+            },
+        };
+
+        expect(() => serializeManifestV3(manifest)).not.toThrow();
     });
 
     it('accepts and serializes a positive v2 project timeout (R3)', () => {

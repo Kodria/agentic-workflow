@@ -1,4 +1,5 @@
 import { runCoverage } from '../../../../src/commands/sensors/coverage';
+import type { CoverageInputs } from '../../../../src/commands/sensors/coverage/resolve';
 
 test('not configured is explicit, actionable and exit-0 data', async () => {
     await expect(runCoverage('/fixture', { resolve: () => ({ kind: 'not_configured' }), scan: () => ({
@@ -38,6 +39,29 @@ test('old pack is no_reference and preserves pack and registry', async () => {
         .resolves.toEqual({ schemaVersion: 2, pack: 'legacy', registry: 'baseline', overall: 'inconclusive',
             static: { status: 'inconclusive', reason: 'no_reference', classes: [] },
             empirical: expect.objectContaining({ status: 'evidence', classes: [expect.objectContaining({ outcome: 'coverage-unverifiable' })] }) });
+});
+
+test('v3 coverage probes the concrete registry selected by logical resolution', async () => {
+    const manifest: Extract<CoverageInputs, { kind: 'ready' }>['manifest'] = { kind: 'v3', pack: {
+        schemaVersion: 3 as const, mode: 'project-sensors' as const, pack: 'js-ts', source: { registry: 'baseline' }, sensors: {
+            lint: {
+                enabled: true, variantId: 'eslint-9', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
+                initializedCompatibility: { state: 'certified' as const, reason: 'ok', variantId: 'eslint-9', toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9', evidence: [] },
+            },
+        },
+    } };
+    const contract = { schemaVersion: 1 as const, classes: {
+        linting: { description: 'Linting', detectors: [{ sensor: 'lint' }], remedy: { summary: 'Add lint', command: 'npm i -D eslint' } },
+    } };
+    const resolveLive = jest.fn().mockResolvedValue({ sensors: {} });
+
+    await runCoverage('/fixture', {
+        resolve: () => ({ kind: 'ready', projectRoot: '/fixture', pack: 'js-ts', registry: 'baseline', registryRoot: '/registries/baseline', manifest, contract }),
+        resolveLive,
+        scan: () => ({ entries: [], sources: { activeFiles: 0, archivedFiles: 0, validEntries: 0, validFindings: 0, skippedFindings: 0, skippedByReason: {} }, omittedEvidenceRefs: 0 }),
+    });
+
+    expect(resolveLive).toHaveBeenCalledWith('/fixture', 'js-ts', '/registries/baseline');
 });
 
 test('ready input observes every declared detector and evaluates once', async () => {

@@ -12,7 +12,8 @@ import {
 } from '../registries';
 import { installHook as realInstallHook } from '../../commands/hooks/install';
 import { installBundle as realInstallBundle, syncProfile as realSyncProfile } from '../bundle-install';
-import { initSensors as realInitSensors } from '../../commands/sensors/init';
+import { applySensorBootstrap, planSensorBootstrap } from '../../commands/sensors/bootstrap';
+import { detectStack } from '../../commands/sensors/detection';
 import { addExtension as realAddExtension, ensureProfile as realEnsureProfile } from '../profile';
 import { gatherContext } from '../diagnostics/context';
 import { detectExtensions } from './detector';
@@ -64,15 +65,12 @@ export const defaultActions: InitActions = {
     }),
 
     initSensors: async (o) => {
-        const result = await realInitSensors({ cwd: o.cwd, registryRoot: o.registryRoot, configure: o.configure });
-        // `unavailablePack`/`manifest` viajan a proposito: `stepSensors` los reporta.
-        // Este wrapper proyectaba solo `detection`, asi que cualquier hallazgo nuevo de
-        // initSensors moria aca en silencio antes de llegar al step que lo muestra.
-        return {
-            detection: result.detection,
-            manifest: { pack: result.manifest.pack },
-            ...(result.unavailablePack ? { unavailablePack: result.unavailablePack } : {}),
-        };
+        const plan = await planSensorBootstrap(o.cwd, { mode: 'project-sensors', registryRoot: o.registryRoot, configure: o.configure });
+        if (plan.kind === 'blocked') throw new Error(`sensor bootstrap blocked: ${plan.reason}; ${plan.remedy}`);
+        if (plan.kind === 'migrate') throw new Error('sensor init does not migrate an existing v2 manifest; run awm sensors bootstrap');
+        if (plan.kind === 'create') applySensorBootstrap(plan);
+        const pack = plan.kind === 'create' && plan.manifest.mode === 'project-sensors' ? plan.manifest.pack : detectStack(o.cwd).pack;
+        return { detection: { pack }, manifest: { pack } };
     },
 
     addExtension: (root, name) => { realAddExtension(root, name); },
@@ -352,8 +350,18 @@ export async function stepSensors(d: InitDeps): Promise<StepResult> {
     const proj = d.ctx.project;
     if (!proj) return ok('project.sensors', 'project', 'skipped', 'no project');
     if (proj.sensors.present) return ok('project.sensors', 'project', 'skipped');
+    if (!d.sensorPacksRoot) return ok('project.sensors', 'project', 'skipped', 'no configured sensor-pack registry');
 
-    const res = await d.actions.initSensors({ cwd: proj.root, registryRoot: d.sensorPacksRoot, configure: true });
+    let res: Awaited<ReturnType<InitDeps['actions']['initSensors']>>;
+    try {
+        res = await d.actions.initSensors({ cwd: proj.root, registryRoot: d.sensorPacksRoot, configure: true });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/^(?:source-unavailable|source-unsupported|registry-root-not-configured|sensor-variant-unresolvable):/.test(message)) {
+            return ok('project.sensors', 'project', 'skipped', message);
+        }
+        throw error;
+    }
     // A registry without the detected pack yields a fallback (or empty) manifest. The
     // step still succeeded — a manifest was written — but reporting a bare 'applied'
     // would let `awm init` hand back a quality gate that measures less than the

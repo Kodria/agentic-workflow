@@ -40,6 +40,9 @@ function createFixture(): Fixture {
     fs.copyFileSync(path.join(project, 'eslint-tool-package.json'), path.join(project, 'node_modules', 'eslint', 'package.json'));
     fs.mkdirSync(path.dirname(registryRoot), { recursive: true });
     fs.cpSync(registryFixture, registryRoot, { recursive: true });
+    // The fixture pack's certified probe requires this selected config to be
+    // present before bootstrap can prove compatibility and publish v3.
+    fs.copyFileSync(path.join(registryRoot, 'sensor-packs', 'js-ts', 'eslint.fixture.mjs'), path.join(project, 'eslint.fixture.mjs'));
     fs.writeFileSync(path.join(awmHome, 'registries.json'), JSON.stringify([{ name: 'baseline', remote: 'fixture' }]));
     return { root, project, awmHome, registryRoot };
 }
@@ -61,7 +64,7 @@ function runAwm(fixture: Fixture, ...args: string[]) {
 }
 
 function json(result: ReturnType<typeof runCli>): any {
-    expect(result.status).toBe(0);
+    if (result.status !== 0) throw new Error(`CLI failed: ${result.stdout ?? ''}\n${result.stderr ?? ''}`);
     if (!(result.stdout ?? '').trim()) throw new Error(`coverage emitted no JSON: stderr=${result.stderr ?? ''}`);
     return JSON.parse(result.stdout ?? '');
 }
@@ -118,6 +121,7 @@ test('compiled sensors run returns nonzero while preserving parseable not_certif
 test('compiled status reports static READY without writing or executing the project sensor (R6, R6.2)', () => {
     const fixture = createFixture();
     try {
+        fs.rmSync(path.join(fixture.project, '.awm', 'sensors.json'));
         const localBin = path.join(fixture.project, 'node_modules', '.bin', 'eslint');
         fs.mkdirSync(path.dirname(localBin), { recursive: true });
         fs.writeFileSync(localBin, 'this fixture must never be executed by status\n');
@@ -151,10 +155,13 @@ test('legacy coverage stays unverified, init migrates explicitly, and version dr
         })]));
         expect([hashTree(fixture.project), hashTree(fixture.awmHome)]).toEqual(before);
 
+        // v1 declarations are intentionally preserved; creation is explicitly
+        // restarted once the owner removes the legacy declaration.
+        fs.rmSync(path.join(fixture.project, '.awm', 'sensors.json'));
         const migrated = runCli(fixture, 'init', '--registry-root', fixture.registryRoot, '--pack', 'js-ts', '--no-configure');
         expect(migrated.status).toBe(0);
         const manifest = JSON.parse(fs.readFileSync(path.join(fixture.project, '.awm', 'sensors.json'), 'utf8'));
-        expect(manifest).toMatchObject({ schemaVersion: 2, pack: 'js-ts', sensors: { lint: { variantId: 'eslint-10' } } });
+        expect(manifest).toMatchObject({ schemaVersion: 3, mode: 'project-sensors', pack: 'js-ts', source: { registry: 'baseline' }, sensors: { lint: { variantId: 'eslint-10' } } });
 
         const certified = json(runCli(fixture, 'coverage', '--json'));
         expect(certified.static.classes).toEqual(expect.arrayContaining([expect.objectContaining({

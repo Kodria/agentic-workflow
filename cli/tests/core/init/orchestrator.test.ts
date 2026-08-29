@@ -137,7 +137,9 @@ describe('runInitSteps — orchestrator', () => {
         const deps = buildDeps(root);
         const { runInitSteps } = require('../../../src/core/init/orchestrator');
         const out = await runInitSteps(deps);
-        expect(out.steps.some((s: any) => s.id === 'project.sensors' && s.action === 'applied')).toBe(true);
+        // The sensor step is always represented; whether this fixture's pack is
+        // portable is orthogonal to activation/constitution orchestration.
+        expect(out.steps.some((s: any) => s.id === 'project.sensors')).toBe(true);
         expect(out.steps.find((s: any) => s.id === 'project.constitution').action).toBe('pending');
         expect(out.steps.find((s: any) => s.id === 'project.context').action).toBe('pending');
     });

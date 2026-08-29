@@ -6,7 +6,8 @@
     "awm": "./dist/src/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "prebuilds"
   ],
   "repository": {
     "type": "git",
@@ -17,6 +18,8 @@
     "doc": "docs"
   },
   "scripts": {
+    "native:build": "node-gyp rebuild --directory native && node scripts/package-native.js",
+    "native:package-check": "node scripts/assert-native-package.js",
     "build": "tsc && chmod +x dist/src/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --config eslint.config.awm.mjs --cache --format json",
@@ -59,6 +62,7 @@
     "eslint": "10.8.1",
     "jest": "^30.2.0",
     "js-yaml": "4.1.0",
+    "node-gyp": "^11.5.0",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"

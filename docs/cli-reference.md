@@ -26,6 +26,8 @@ For the lifecycle and provider choices, see [configuration](configuration.md).
 awm init [--agent <agent>] [--machine-only] [--yes] [--json]
 ```
 
+`awm sensors init` also accepts these compatibility-only options:
+
 | Flag | Description |
 |---|---|
 | `-a, --agent <agent>` | Target one provider for this run. Without this flag, init targets `claude-code`. |
@@ -417,11 +419,34 @@ Sensors are deterministic checks (tsc, ESLint, Semgrep, depcheck, …) whose out
 
 ### `awm sensors init`
 
-Detect the stack and write `.awm/sensors.json`, copying the pack's config files into the project by default.
+Compatibility alias for creating a portable `project-sensors` declaration. It
+uses the same bootstrap transaction as the explicit command; it never stores a
+machine registry path in the committed manifest. Existing v2 declarations are
+not overwritten by this alias: inspect them with `awm sensors bootstrap`.
 
 ```
 awm sensors init [--no-configure] [--registry-root <path>] [--pack <name>]
 ```
+
+### `awm sensors bootstrap`
+
+Configure project quality exactly once, then commit `.awm/sensors.json` so the
+same declaration works in Codex, Claude Code, worktrees, and fixed machines.
+Machine registry installation (`awm update`) is separate and does not rewrite
+the project.
+
+```bash
+awm sensors bootstrap [--mode project-sensors|native-gate|opt-out] [--reason <text>] [--dry-run]
+```
+
+`project-sensors` selects one logical registry and pack, then materializes its
+declared assets atomically. `native-gate` and `opt-out` require a non-empty
+reason. `--dry-run` reports the selected pack (when applicable) and exact files
+that would change, and never writes. Running bootstrap again over an equivalent
+v3 declaration is a no-op; migrating a v2 declaration preserves its sensor
+semantics and changes only the manifest. Bootstrap is a one-time project action:
+entering Codex, Claude Code, a worktree, or a fixed machine must not rerun it;
+each environment updates its own AWM installation separately.
 
 | Flag | Description |
 |---|---|
@@ -429,11 +454,19 @@ awm sensors init [--no-configure] [--registry-root <path>] [--pack <name>]
 | `--registry-root <path>` | Override the AWM registry root (defaults to the cache). |
 | `--pack <name>` | Explicitly select a pack when stack detection is not the intended contract. |
 
-New manifests use `schemaVersion: 2`. They materialize the selected variant,
-structured command, contained assets, provenance, and initialization
-compatibility evidence. Legacy manifests remain readable but are reported as
-`compatible-unverified`; run `awm sensors init` deliberately to migrate after
-reviewing the new manifest.
+New bootstrap declarations use `schemaVersion: 3` and retain the selected
+variant, structured command, contained assets, logical registry provenance, and
+initialization compatibility evidence without persisting a machine path. Legacy
+and v2 manifests remain readable; use `awm sensors bootstrap --dry-run` first,
+then rerun without `--dry-run` to perform the explicit v2 migration after review.
+
+```json
+{
+  "schemaVersion": 3,
+  "mode": "native-gate",
+  "reason": "the project uses its platform-native verification gate"
+}
+```
 
 ### `awm sensors coverage`
 

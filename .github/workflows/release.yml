@@ -59,7 +59,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+          - os: macos-15-intel
+            target: darwin-x64
+          - os: macos-14
+            target: darwin-arm64
+          # Keep the release artifact compiler on VS2022: node-gyp 11.5 does
+          # not yet discover the VS2026 image behind windows-latest.
+          - os: windows-2022
+            target: win32-x64
+          - os: windows-11-arm
+            target: win32-arm64
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read      # este job no publica: no necesita write ni OIDC
@@ -74,7 +88,20 @@ jobs:
         working-directory: cli
         run: |
           npm ci
+          npm run native:build
           npm run build
+
+      - name: Verify native build artifact
+        working-directory: cli
+        run: >-
+          node -e "const fs=require('fs'); const path=require('path'); const file=path.join('prebuilds', '${{ matrix.target }}', 'secure_fs.node'); if (!fs.existsSync(file)) throw new Error('native build artifact is missing: ' + file);"
+
+      - name: Upload native secure-fs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: secure-fs-${{ matrix.target }}
+          path: cli/prebuilds/${{ matrix.target }}/secure_fs.node
+          if-no-files-found: error
 
       - name: Tests
         working-directory: cli
@@ -132,6 +159,28 @@ jobs:
         run: |
           npm ci
           npm run build
+
+      - name: Assemble native release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: secure-fs-*
+          path: cli/native-artifacts
+
+      - name: Copy native release artifacts into npm package
+        working-directory: cli
+        run: node scripts/assemble-native-artifacts.js "${{ github.workspace }}/cli/native-artifacts"
+
+      - name: Verify universal native npm package
+        working-directory: cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run native:package-check
+          TARBALL="$(npm pack --json | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => console.log(JSON.parse(input)[0].filename));')"
+          for target in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64; do
+            tar -tzf "$TARBALL" | grep -Fx "package/prebuilds/$target/secure_fs.node"
+          done
+          rm "$TARBALL"
 
       # Sin paso de tests aca: `needs: test` ya los corrio en las tres plataformas.
       # Repetirlos en ubuntu seria correr por cuarta vez lo que ya paso, y daria la

@@ -2,6 +2,7 @@ import semver from 'semver';
 import fs from 'fs';
 import path from 'path';
 import { parseCoverageContract } from '../coverage/contract';
+import { readInspectedBoundedFile, type SafeFileFailure } from './safe-file';
 import { positiveTimeout } from './timeout';
 import type {
     CompatibilityProbe,
@@ -116,15 +117,23 @@ export function resolveSemgrepPolicy(policyRef: unknown, source: unknown, locati
     const sensorPacksRoot = path.dirname(packRoot);
     const candidate = path.join(sensorPacksRoot, ...SEMGREP_POLICY_REF.split('/'));
     if (!contained(sensorPacksRoot, candidate)) invalid(source, `${location}.policyRef escapes sensor-packs root`);
-    let stat: fs.Stats;
-    try { stat = fs.lstatSync(candidate); } catch { invalid(source, `${location}.policyRef does not resolve to a regular policy file`); }
+    let stat: fs.BigIntStats;
+    try { stat = fs.lstatSync(candidate, { bigint: true }); } catch { invalid(source, `${location}.policyRef does not resolve to a regular policy file`); }
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_POLICY_BYTES) invalid(source, `${location}.policyRef must resolve to a bounded regular policy file`);
-    let realRoot: string; let realPolicy: string;
-    try { realRoot = fs.realpathSync(sensorPacksRoot); realPolicy = fs.realpathSync(candidate); } catch { invalid(source, `${location}.policyRef cannot be canonicalized`); }
-    if (!contained(realRoot, realPolicy)) invalid(source, `${location}.policyRef escapes sensor-packs root`);
+    const failure = (reason: SafeFileFailure): Error => {
+        if (reason === 'open') return new Error(`Invalid sensor pack${sourceSuffix(source)}: ${location}.policyRef cannot be safely opened`);
+        if (reason === 'regular') return new Error(`Invalid sensor pack${sourceSuffix(source)}: ${location}.policyRef must resolve to a bounded regular policy file`);
+        if (reason === 'identity') return new Error(`Invalid sensor pack${sourceSuffix(source)}: ${location}.policyRef changed identity during safe open`);
+        if (reason === 'size') return new Error(`Invalid sensor pack${sourceSuffix(source)}: ${location}.policyRef changed size during safe open`);
+        return new Error(`Invalid sensor pack${sourceSuffix(source)}: ${location}.policyRef must resolve to a bounded regular policy file`);
+    };
     let parsed: unknown;
-    try { parsed = JSON.parse(fs.readFileSync(realPolicy, 'utf8')); } catch { invalid(source, `${location}.policyRef must contain valid JSON`); }
-    return parseSemgrepPolicy(parsed, realPolicy);
+    try { parsed = JSON.parse(readInspectedBoundedFile(candidate, stat, MAX_POLICY_BYTES, failure).toString('utf8')); }
+    catch (error) {
+        if (error instanceof Error && error.message.startsWith('Invalid sensor pack')) throw error;
+        invalid(source, `${location}.policyRef must contain valid JSON`);
+    }
+    return parseSemgrepPolicy(parsed, candidate);
 }
 
 export function parseStructuredCommand(input: unknown, source: unknown): StructuredCommand {

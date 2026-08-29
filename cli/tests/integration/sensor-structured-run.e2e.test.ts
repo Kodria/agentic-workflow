@@ -114,8 +114,10 @@ test('compiled sensors run materializes a v2 registry command and passes its lit
         assertSuccessfulCli(initialized, 'init');
         const manifest = JSON.parse(fs.readFileSync(path.join(fixture.project, '.awm', 'sensors.json'), 'utf8'));
         expect(manifest).toMatchObject({
-            schemaVersion: 2,
+            schemaVersion: 3,
+            mode: 'project-sensors',
             pack: 'fixture',
+            source: { registry: 'baseline' },
             sensors: { structured: { variantId: 'fixture-v1', command: { executable: 'node', resolution: 'path', args: ['fixture-sensor.mjs', fixture.literal] } } },
         });
 

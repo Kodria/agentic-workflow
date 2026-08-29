@@ -1,4 +1,6 @@
 # Sensor Portability Publication B Implementation Plan
+<!-- awm-qa-complete: 2026-08-28 -->
+<!-- awm-retro-complete: 2026-08-28 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan slice-by-slice. Steps
@@ -8,9 +10,9 @@
 
 **Architecture:** Reuse Publication A's parser, project resolver, and logical source binding to build a pure bootstrap planner and a narrow atomic applier. Migration preserves v2 sensor semantics, never mutates machine state, and writes no project bytes during dry-run or invalid/ambiguous cases.
 
-**Tech Stack:** Node.js 22, TypeScript 5.9, Commander 14, Jest 30, local filesystem atomic rename, existing AWM pack materialization, Markdown and JSON. No runtime dependency is added.
+**Tech Stack:** Node.js 22, TypeScript 5.9, Commander 14, Jest 30, Node-API native secure-fs bridge with precompiled Linux/macOS/Windows artifacts, existing AWM pack materialization, Markdown and JSON. The bridge is an internal packaged runtime component; it never compiles on a client machine.
 
-**Modo de ejecución:** interactivo
+**Modo de ejecución:** desatendido
 
 ---
 
@@ -18,7 +20,7 @@
 {
   "schema": "compact-slices/v1",
   "planId": "issue-129-sensor-portability-publication-b",
-  "requirements": ["PORT-01", "BOOT-01", "BOOT-02", "BOOT-03", "BOOT-04", "BOOT-05", "BOOT-06", "BOOT-07", "BOOT-08"],
+  "requirements": ["GATE-01", "PORT-01", "PORT-02", "PORT-03", "BOOT-01", "BOOT-02", "BOOT-03", "BOOT-04", "BOOT-05", "BOOT-06", "BOOT-07", "BOOT-08"],
   "sources": [
     {
       "id": "SRC-DESIGN-B",
@@ -52,6 +54,18 @@
     }
   ],
   "commands": [
+    {
+      "id": "CMD-STRUCTURED-EXEC",
+      "program": "npm",
+      "args": ["--prefix", "cli", "test", "--", "tests/commands/sensors/exec.test.ts", "tests/commands/sensors/run.test.ts"],
+      "covers": ["GATE-01"]
+    },
+    {
+      "id": "CMD-SECURE-FS-NATIVE",
+      "program": "npm",
+      "args": ["--prefix", "cli", "test", "--", "tests/core/secure-fs/native-bridge.test.ts", "tests/commands/sensors/compatibility/safe-file.test.ts"],
+      "covers": ["PORT-02", "PORT-03"]
+    },
     {
       "id": "CMD-MIGRATION-CORE",
       "program": "npm",
@@ -103,10 +117,36 @@
   ],
   "slices": [
     {
+      "id": "N0",
+      "title": "Package a native cross-platform secure-fs bridge",
+      "requirements": ["PORT-02", "PORT-03"],
+      "dependsOn": ["S0"],
+      "sectionAnchor": "slice-n0",
+      "sources": ["SRC-DESIGN-B", "SRC-MATERIALIZE"],
+      "redCommands": ["CMD-SECURE-FS-NATIVE"],
+      "greenCommands": ["CMD-SECURE-FS-NATIVE", "CMD-TYPECHECK-B"],
+      "reviewEvidence": ["specification", "code-quality"],
+      "risk": "full-context",
+      "fallback": ["a declared platform is missing its verified native artifact or cannot perform a descriptor/handle-bound no-replace publication"]
+    },
+    {
+      "id": "S0",
+      "title": "Preserve structured sensor output for baseline certification",
+      "requirements": ["GATE-01"],
+      "dependsOn": [],
+      "sectionAnchor": "slice-s0",
+      "sources": ["SRC-DESIGN-B"],
+      "redCommands": ["CMD-STRUCTURED-EXEC"],
+      "greenCommands": ["CMD-STRUCTURED-EXEC", "CMD-SENSORS-B"],
+      "reviewEvidence": ["specification", "code-quality"],
+      "risk": "full-context",
+      "fallback": ["the safe no-shell structured runner cannot preserve a non-zero tool report without weakening process-tree safety"]
+    },
+    {
       "id": "S1",
       "title": "Serialize v3 and prove semantic migration",
       "requirements": ["BOOT-07", "BOOT-08"],
-      "dependsOn": [],
+      "dependsOn": ["N0"],
       "sectionAnchor": "slice-s1",
       "sources": ["SRC-DESIGN-B", "SRC-PUB-A-GATE", "SRC-MATERIALIZE"],
       "redCommands": ["CMD-MIGRATION-CORE"],
@@ -142,7 +182,7 @@
       "fallback": ["atomic project write or exact second-run no-op cannot be proven on every supported platform"]
     }
   ],
-  "closureCommands": ["CMD-MIGRATION-CORE", "CMD-BOOTSTRAP-CORE", "CMD-BOOTSTRAP-CLI", "CMD-TYPECHECK-B", "CMD-BUILD-B", "CMD-FULL-JEST-B", "CMD-SENSORS-B", "CMD-DIFF-B"]
+  "closureCommands": ["CMD-STRUCTURED-EXEC", "CMD-MIGRATION-CORE", "CMD-BOOTSTRAP-CORE", "CMD-BOOTSTRAP-CLI", "CMD-TYPECHECK-B", "CMD-BUILD-B", "CMD-FULL-JEST-B", "CMD-SENSORS-B", "CMD-DIFF-B"]
 }
 <!-- AWM:COMPACT-SLICES:END v1 -->
 
@@ -151,6 +191,16 @@
 Execution must first satisfy `SRC-PUB-A-GATE`. If Publication A is not merged,
 published, and verified in Codex, Claude Code, and one fixed machine, stop without
 starting S1. Base on the published dual-reader's merge commit.
+
+**Entry evidence (2026-08-27):** Publication A is published as `agentic-workflow`
+`v9.5.0` at commit `0ec83a3`; `awm-baseline-registry` `v3.10.0` is published.
+Direct Git tag verification confirmed both releases. Packaged AWM validation completed
+with current CLI/baseline, strict preflight ready, sensor status READY, and full sensor
+pass in Claude Code Remote (Ubuntu) and a fixed macOS 15.6 machine. Codex exercised
+the same worktree surfaces; its strict currentness lookup was temporarily unavailable
+because of provider egress, while the published tags were independently verified. The
+owner explicitly accepted that provider-network limitation as non-blocking on
+2026-08-27. This evidence satisfies `SRC-PUB-A-GATE` for Publication B.
 
 This plan changes project files only when the operator explicitly invokes bootstrap
 without `--dry-run`. It never edits machine registry inventory, installs npm/project
@@ -188,6 +238,114 @@ review, remediation, and one focused commit. No executor may enter this plan by
 reinterpreting simulated Publication A tests as the required packaged multi-environment
 evidence.
 
+<a id="slice-s0"></a>
+### Slice S0: Preserve structured sensor output for baseline certification
+
+#### Amendment rationale
+
+During S1 entry verification in the Codex worktree, `depcruise` produced its normal
+non-zero circular-dependency report when invoked directly, but the no-shell structured
+runner returned exit 1 with both streams empty. That made the generic formatter return
+no findings, prevented baseline suppression, and degraded the mandatory sensor gate to
+`not_certified`. Claude Code and macOS have a matching accepted baseline and pass. This
+is a runner portability defect, not an S1 semantic change; the owner authorized this
+amendment on 2026-08-27.
+
+#### Requirement
+
+- **GATE-01:** WHEN a structured local executable exits non-zero with a report, THE
+  SYSTEM SHALL preserve that report for formatter and baseline processing without
+  introducing a shell, leaking a child process, or treating an unknown failure as pass.
+
+#### Implementation and evidence
+
+- [ ] Add a RED regression reproducing a non-zero structured executable whose report
+  must reach `interpretResult` and baseline partitioning.
+- [ ] Identify and repair the no-shell execution/collection boundary while retaining
+  bounded output, timeout, and process-tree cleanup behavior on every platform.
+- [ ] Prove raw report retention, baseline suppression, and an unrelated non-zero
+  command that remains non-pass. Run `CMD-STRUCTURED-EXEC` and `CMD-SENSORS-B` to
+  GREEN, then commit the repair separately from S1.
+
+<a id="slice-n0"></a>
+### Slice N0: Package a native cross-platform secure-fs bridge
+
+#### Amendment rationale
+
+Publication B must create and migrate a project from Linux, macOS, and Windows
+without treating a changed ancestor, reparse point, or concurrent manifest as a safe
+pathname operation. Node's portable filesystem API does not expose the Windows
+handle-relative/no-replace primitives needed for that contract. The owner approved a
+small internal Node-API bridge on 2026-08-28 rather than weakening the portability or
+integrity requirement.
+
+#### Requirement
+
+- **PORT-02:** WHEN bootstrap or migration writes a project declaration on a supported
+  platform, THE SYSTEM SHALL use a packaged platform-native handle/descriptor-bound
+  transaction that rejects reparse points/symlinks and verifies the identity of every
+  file read. Every published CLI archive SHALL include a
+  verified native artifact for Linux, macOS, and Windows, and SHALL fail clearly before
+  any project write when the artifact is absent or incompatible.
+
+- **PORT-03:** WHEN two AWM instances attempt a project sensor mutation, THE SYSTEM
+  SHALL acquire one native OS-held project lease before inspecting any mutable target;
+  the losing instance SHALL return a bounded conflict without project mutation. The
+  lease spans all selected assets and the manifest commit, is released automatically on
+  process exit, and is never recovered through a time-to-live deletion. This is a
+  coordination contract between AWM instances, not a claim to restrain an unrelated
+  hostile process with write access to the project filesystem.
+
+#### Implementation
+
+- [ ] Add RED bridge-contract tests covering load selection by `process.platform` and
+  `process.arch`, missing/incompatible artifact before mutation, ancestor
+  symlink/reparse rejection, final-file identity fencing, no-replace publication, and
+  a second AWM lease claimant rejected without writing.
+- [ ] Create a narrow TypeScript boundary under `cli/src/core/secure-fs/` that accepts
+  validated absolute project paths and opaque byte payloads only. It exposes
+  `readRegularFile`, `withProjectLease`, `writeProjectTransaction`, and an observable platform-artifact
+  status; it never accepts arbitrary shell commands or falls back to unchecked Node
+  pathname writes.
+- [ ] Add a Node-API implementation and build configuration that uses POSIX directory
+  descriptors plus `openat`/`renameat`-style no-follow operations on Linux/macOS, and
+  Windows directory/file handles with `FILE_FLAG_BACKUP_SEMANTICS`,
+  `FILE_FLAG_OPEN_REPARSE_POINT`, final-handle identity checks, and a fail-if-exists
+  rename operation. Package prebuilt artifacts for x64 and arm64 where the CLI
+  supports them; no `node-gyp` build runs during ordinary `npm install`.
+- [ ] Replace the temporary JS-only write path in `safe-file.ts`, `migrate.ts`, and
+  `materialize.ts` with this boundary. Preserve pure planning; only apply operations
+  invoke the bridge while holding `withProjectLease` across the complete multi-file
+  publication. Remove any platform fail-closed behavior that would make a supported
+  platform unable to bootstrap solely because the JS layer lacks `openat`.
+- [ ] Add CI matrix build and artifact verification for Linux, macOS, and Windows,
+  including package-contents assertions that the selected artifact ships in the npm
+  archive. Run `CMD-SECURE-FS-NATIVE` and `CMD-TYPECHECK-B` to GREEN, then commit the
+  bridge separately.
+
+#### Edge cases
+
+The loader validates platform/architecture names and loadability before loading; the
+release job validates all artifact bytes in the packed archive, which is the meaningful
+package-integrity boundary (a local runtime checksum has no independent trust root).
+An unsupported architecture is a bounded explicit error with no project mutation.
+Windows junctions and all reparse points are rejected, not followed. A competing AWM
+lease appears as an explicit conflict and preserves project bytes and caller files.
+Native code has no network, registry, environment-update, or shell capability.
+
+#### Evidence
+
+The native contract tests use a fake bridge only to verify loader/error policy; native
+integration tests exercise real filesystem fixtures per CI OS. Package inspection
+proves the runtime binary is present. Reviewers reject a platform-specific no-op,
+runtime compilation, or a JS path fallback for a supported platform.
+
+#### Fallback
+
+Do not publish Publication B until every declared platform artifact is available and
+tested. An unsupported *new* architecture may return a pre-write explicit error, but
+Linux, macOS, and Windows are required release targets and cannot use the fallback.
+
 <a id="slice-s1"></a>
 ### Slice S1: Serialize v3 and prove semantic migration
 
@@ -222,6 +380,15 @@ Reject registry IDs with separators, control characters, or unstable casing. Pre
 disabled sensors and custom timeouts exactly. Never translate legacy string commands
 in this migration path. If candidate serialization parses differently from the input
 semantic model, fail before write. A failed rename leaves the original bytes intact.
+
+**Source-boundary clarification (2026-08-27):** A path-bound `legacy-bound` result
+is evidence of the old machine provenance, not a portable logical identity. It may be
+migrated only after the caller has resolved one configured logical registry and passes
+that selected pack source to the pure migration planner. A `legacy-rebound` result is
+eligible only when it denotes that unique configured logical source. The atomic applier
+receives the same validated logical source and rechecks the candidate binding; it never
+infers an inventory name from a physical root. This preserves fail-closed migration
+without persisting `manifest-provenance` or a machine path.
 
 #### Evidence
 
@@ -347,4 +514,3 @@ overwrite.
 | BOOT-07..08 | S1 | `manifest.test.ts`, `materialize.test.ts`, `migrate.test.ts` |
 | BOOT-01; BOOT-03; BOOT-05..06 | S2 | `bootstrap.test.ts` |
 | PORT-01; BOOT-02; BOOT-04 | S3 | `index.test.ts`, `init.test.ts`, `core/init/steps.test.ts`, `sensor-bootstrap.e2e.test.ts`, `sensor-portability-contract.test.ts` |
-

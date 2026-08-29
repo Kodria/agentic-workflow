@@ -8,6 +8,7 @@ jest.mock('../../../src/commands/sensors/baseline', () => ({ buildBaseline: jest
 jest.mock('../../../src/core/registries', () => ({ capabilityRoot: jest.fn(() => '/mock/registry') }));
 jest.mock('../../../src/commands/sensors/coverage', () => ({ runCoverage: jest.fn() }));
 jest.mock('../../../src/commands/sensors/coverage/render', () => ({ renderCoverageHuman: jest.fn(), renderCoverageJson: jest.fn() }));
+jest.mock('../../../src/commands/sensors/bootstrap', () => ({ planSensorBootstrap: jest.fn(), applySensorBootstrap: jest.fn() }));
 
 import { Command } from 'commander';
 import { log } from '@clack/prompts';
@@ -15,6 +16,7 @@ import { runCoverage } from '../../../src/commands/sensors/coverage';
 import { renderCoverageHuman, renderCoverageJson } from '../../../src/commands/sensors/coverage/render';
 import { parsePositiveSafeInteger, registerSensorsCommand } from '../../../src/commands/sensors/index';
 import { exitCodeForVerdict } from '../../../src/commands/sensors/verdict';
+import { planSensorBootstrap, applySensorBootstrap } from '../../../src/commands/sensors/bootstrap';
 
 const processExit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
 const stdoutWrite = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
@@ -27,6 +29,63 @@ describe('exitCodeForVerdict — sensor run verdict → exit code', () => {
         ['not_certified', 1],
     ] as const)('%s → %i', (overall, code) => {
         expect(exitCodeForVerdict(overall)).toBe(code);
+    });
+});
+
+describe('sensors bootstrap Commander wiring', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+        process.exitCode = undefined;
+    });
+
+    it('renders dry-run without calling the applier', async () => {
+        (planSensorBootstrap as jest.Mock).mockResolvedValue({
+            kind: 'create', dryRun: true, changes: [{ path: '.awm/sensors.json', action: 'create' }],
+            manifest: { schemaVersion: 3, mode: 'native-gate', reason: 'CI' },
+        });
+        const program = new Command();
+        program.exitOverride();
+        registerSensorsCommand(program);
+        await program.parseAsync(['node', 'awm', 'sensors', 'bootstrap', '--mode', 'native-gate', '--reason', 'CI', '--dry-run']);
+        expect(planSensorBootstrap).toHaveBeenCalledWith(process.cwd(), { mode: 'native-gate', reason: 'CI', dryRun: true });
+        expect(applySensorBootstrap).not.toHaveBeenCalled();
+        expect(log.info).toHaveBeenCalledWith(expect.stringContaining('dry-run'));
+    });
+
+    it('renders the chosen project-sensors pack in dry-run output', async () => {
+        (planSensorBootstrap as jest.Mock).mockResolvedValue({
+            kind: 'create', dryRun: true, changes: [{ path: '.awm/sensors.json', action: 'create' }],
+            manifest: { schemaVersion: 3, mode: 'project-sensors', pack: 'js-ts' },
+        });
+        const program = new Command();
+        program.exitOverride();
+        registerSensorsCommand(program);
+        await program.parseAsync(['node', 'awm', 'sensors', 'bootstrap', '--mode', 'project-sensors', '--dry-run']);
+        expect(log.info).toHaveBeenCalledWith(expect.stringContaining('pack=js-ts'));
+        expect(applySensorBootstrap).not.toHaveBeenCalled();
+    });
+
+    it('applies an executable plan and reports its result', async () => {
+        const plan = { kind: 'create', dryRun: false, changes: [{ path: '.awm/sensors.json', action: 'create' }], manifest: { schemaVersion: 3, mode: 'native-gate', reason: 'CI' } };
+        (planSensorBootstrap as jest.Mock).mockResolvedValue(plan);
+        (applySensorBootstrap as jest.Mock).mockReturnValue('created');
+        const program = new Command();
+        program.exitOverride();
+        registerSensorsCommand(program);
+        await program.parseAsync(['node', 'awm', 'sensors', 'bootstrap', '--mode', 'native-gate', '--reason', 'CI']);
+        expect(applySensorBootstrap).toHaveBeenCalledWith(plan);
+        expect(log.success).toHaveBeenCalledWith(expect.stringContaining('created'));
+    });
+
+    it('returns a non-zero semantic exit for a blocked plan', async () => {
+        (planSensorBootstrap as jest.Mock).mockResolvedValue({ kind: 'blocked', dryRun: false, reason: 'mode-required', remedy: 'choose-mode' });
+        const program = new Command();
+        program.exitOverride();
+        registerSensorsCommand(program);
+        await program.parseAsync(['node', 'awm', 'sensors', 'bootstrap']);
+        expect(process.exitCode).toBe(1);
+        expect(log.error).toHaveBeenCalledWith('mode-required: choose-mode');
+        expect(applySensorBootstrap).not.toHaveBeenCalled();
     });
 });
 

@@ -1,5 +1,12 @@
 # Harness Retros
 
+## 2026-08-28 — Publication B QA boundaries
+
+- **Clase:** seguridad, lógica y proceso; QA identificó y cerró el bypass de lectura nativa por variable de entorno y la resolución desde `packageRoot`.
+- **Regla aplicada:** el seam portable es una API de prueba explícita (`setPortableReadForTests`), nunca una variable de entorno heredable; las regresiones cubren tanto el seam como la raíz de paquete de monorepo.
+- **Cobertura:** `awm sensors coverage --json` quedó `inconclusive`/`partial` por detectores no aplicables del pack del repo; `awm sensors run` sí terminó `overall: pass`.
+- **Descartes (modo desatendido):** `v3-coverage-live-source-drift` se descartó: el código ya pasa `registryRoot` de la fuente lógica a `resolveLiveCompatibility`, y una regresión directa lo verifica. Las entradas duplicadas de `jest-env-bypasses-native-secure-fs` representan un único hallazgo ya corregido.
+
 ## 2026-08-25 — R3a Context Kernel preflight
 
 - **Clase:** lógica, proceso y structural; 7 hallazgos de implementación y 8

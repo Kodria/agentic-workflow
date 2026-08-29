@@ -18,7 +18,7 @@ export { applyBaseline };
 import { changedFiles, changedScopeError } from './changed';
 // Solo `detectStack` (puro, lee el arbol) — NO `initSensors`, que escribe. `run` es un
 // verbo de lectura: no debe tener a mano ninguna funcion capaz de mutar el proyecto.
-import { detectStack } from './init';
+import { detectStack } from './detection';
 import { resolveParsedPackCompatibility } from './compatibility/live';
 import { parseSensorPack } from './compatibility/contract';
 import type { SensorManifestV3ProjectSensors } from './compatibility/manifest';

@@ -3,6 +3,7 @@ import { positiveTimeout, resolveTimeout } from '../../../../src/commands/sensor
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { setPortableReadForTests } from '../../../../src/commands/sensors/compatibility/safe-file';
 
 const coverage = {
     schemaVersion: 1,
@@ -42,6 +43,9 @@ function validPack() {
 }
 
 describe('sensor pack v2 contract', () => {
+    beforeEach(() => setPortableReadForTests(true));
+    afterEach(() => setPortableReadForTests(false));
+
     it('exports bounded timeout validation and resolution (R3.1, R3.4)', () => {
         expect(positiveTimeout(1, 'sensor timeout')).toBe(1);
         expect(resolveTimeout({ project: 90_000, pack: 30_000, fast: true })).toEqual({ timeoutMs: 90_000, source: 'project' });
@@ -81,6 +85,41 @@ describe('sensor pack v2 contract', () => {
                 policyRef: 'shared/semgrep-policy.json', requirements: { tool: 'semgrep', runtime: 'python' }, probe: { kind: 'semgrep-validate' },
             }] } } } });
         } finally {
+            fs.rmSync(sensorPacks, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects a Semgrep policy that changes between inspection and safe open', () => {
+        const sensorPacks = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-semgrep-policy-'));
+        const packDir = path.join(sensorPacks, 'python');
+        const policyPath = path.join(sensorPacks, 'shared', 'semgrep-policy.json');
+        const originalOpen = fs.openSync.bind(fs);
+        const open = jest.spyOn(fs, 'openSync');
+        let replaced = false;
+        try {
+            fs.mkdirSync(path.dirname(policyPath), { recursive: true });
+            fs.mkdirSync(packDir);
+            fs.writeFileSync(policyPath, JSON.stringify({
+                tool: 'semgrep', toolRange: '>=1.0.0', runtime: 'python', runtimeRange: '>=3.9.0', probe: 'semgrep-validate',
+            }));
+            const pack = validPack();
+            pack.sensors.lint.variants[0] = {
+                id: 'semgrep-python', priority: 10, certifiedRange: '>=1.0.0', policyRef: 'shared/semgrep-policy.json',
+                command: { executable: 'semgrep', resolution: 'path', args: ['--config', '.semgrep.awm.yml', '--json', '.'] },
+                assets: ['.semgrep.awm.yml'], formatter: 'semgrep',
+            } as any;
+            open.mockImplementation(((file: fs.PathLike, flags: string | number, mode?: fs.Mode) => {
+                if (file === policyPath && !replaced) {
+                    replaced = true;
+                    fs.writeFileSync(policyPath, JSON.stringify({
+                        tool: 'semgrep', toolRange: '>=2.0.0', runtime: 'python', runtimeRange: '>=3.10.0', probe: 'semgrep-validate',
+                    }));
+                }
+                return originalOpen(file, flags, mode);
+            }) as typeof fs.openSync);
+            expect(() => parseSensorPack(pack, path.join(packDir, 'pack.json'))).toThrow(/changed|identity|policyRef/i);
+        } finally {
+            open.mockRestore();
             fs.rmSync(sensorPacks, { recursive: true, force: true });
         }
     });
