@@ -1,3 +1,56 @@
+## v9.6.0 - 2026-08-29
+
+### Features
+- **sensors:** complete portable bootstrap entrypoints
+- **sensors:** route public init through bootstrap
+- **sensors:** apply portable bootstrap plans
+- **sensors:** plan portable bootstrap states
+- **sensors:** add native secure-fs transaction bridge
+- **secure-fs:** implement Windows handle transaction
+- **secure-fs:** add native bridge packaging foundation
+- **sensors:** add portable v3 migration surfaces
+
+### Fixes
+- **release:** ignore native artifact staging
+- **release:** keep native prebuilds generated
+- **release:** accept npm 12 pack manifest
+- **secure-fs:** allow Windows fenced replacement
+- **secure-fs:** unblock Windows fenced deletion
+- **secure-fs:** request sync access for Windows leases
+- **secure-fs:** use native Windows POSIX rename
+- **secure-fs:** terminate Windows rename buffers
+- **secure-fs:** request sync access for Windows staging
+- **secure-fs:** use portable Windows staging attributes
+- **secure-fs:** use compatible Windows staging options
+- **secure-fs:** open Windows directories compatibly
+- **test:** normalize Windows source contract line endings
+- **secure-fs:** synchronize Windows directory handles
+- **ci:** pin x64 native build to Windows 2022
+- **sensors:** close portable bootstrap QA gaps
+- **sensors:** compensate portable bootstrap failures
+- **sensors:** fence rollback cleanup by file identity
+- **sensors:** fence bootstrap pack revisions
+- **sensors:** validate portable assets before publication
+- **sensors:** harden portable bootstrap publication
+- **sensors:** preserve portable migration declarations
+- fail closed sensor migration publication
+- harden portable sensor migration files
+- harden sensor materialization publication
+- harden sensor migration publication
+- close sensor migration publication races
+- harden sensor materialization races
+- **sensors:** canonicalize portable materializer root
+- **sensors:** bind portable materialization source
+- **sensors:** detect physical paths at token boundaries
+- **sensors:** reject unsafe portability paths
+- reject quoted physical migration paths
+- **sensors:** reject embedded migration paths
+- **sensors:** validate migration logical source
+- **sensors:** close migration portability gaps
+- **sensors:** harden v2 migration portability
+- **sensors:** expose migration equivalence report
+- **sensors:** preserve structured failure output
+
 ## v9.5.0 - 2026-08-27
 
 ### Features
