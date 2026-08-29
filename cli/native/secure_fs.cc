@@ -733,13 +733,15 @@ PublishResult PublishReplace(HANDLE staged, HANDLE parent, const std::wstring& b
 }
 
 LeaseAcquireResult AcquirePlatformProjectLease(
-    const std::string& project_root, ProjectLease* lease) {
+    const std::string& project_root, ProjectLease* lease, DWORD* last_error) {
   HANDLE root = INVALID_HANDLE_VALUE;
   if (!OpenWindowsProjectRoot(project_root, &root)) {
+    *last_error = GetLastError();
     return LeaseAcquireResult::kRejected;
   }
   HANDLE awm = INVALID_HANDLE_VALUE;
   if (!OpenRelativeDirectoryNoReparse(root, L".awm", true, &awm)) {
+    *last_error = GetLastError();
     CloseHandle(root);
     return LeaseAcquireResult::kRejected;
   }
@@ -751,6 +753,7 @@ LeaseAcquireResult AcquirePlatformProjectLease(
       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, kFileOpenIf,
       kFileNonDirectoryFile | kFileOpenReparsePoint | kFileSynchronousIoNonalert,
       FILE_ATTRIBUTE_NORMAL, &handle)) {
+    *last_error = GetLastError();
     CloseHandle(awm);
     return LeaseAcquireResult::kRejected;
   }
@@ -761,6 +764,7 @@ LeaseAcquireResult AcquirePlatformProjectLease(
       || (attributes.FileAttributes
           & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0
       || GetFileType(handle) != FILE_TYPE_DISK) {
+    *last_error = GetLastError();
     CloseHandle(handle);
     return LeaseAcquireResult::kRejected;
   }
@@ -855,14 +859,26 @@ napi_value AcquireProjectLease(napi_env env, napi_callback_info info) {
     Throw(env, "secure-fs could not allocate project lease");
     return nullptr;
   }
+#ifdef _WIN32
+  DWORD lease_error = ERROR_SUCCESS;
+  const LeaseAcquireResult acquire_result =
+      AcquirePlatformProjectLease(project_root, lease, &lease_error);
+#else
   const LeaseAcquireResult acquire_result =
       AcquirePlatformProjectLease(project_root, lease);
+#endif
   if (acquire_result != LeaseAcquireResult::kAcquired) {
     delete lease;
     if (acquire_result == LeaseAcquireResult::kAlreadyHeld) {
       Throw(env, "project lease is already held");
     } else if (acquire_result == LeaseAcquireResult::kRejected) {
+#ifdef _WIN32
+      const std::string message = "secure-fs rejected path ancestor for project lease (win32="
+          + std::to_string(lease_error) + ")";
+      Throw(env, message.c_str());
+#else
       Throw(env, "secure-fs rejected path ancestor for project lease");
+#endif
     } else {
       Throw(env, "secure-fs could not acquire project lease");
     }

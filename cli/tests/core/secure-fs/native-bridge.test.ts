@@ -148,6 +148,18 @@ describe('native secure-fs Windows source contract', () => {
         }
     });
 
+    it('preserves the terminal Win32 lease error for portable diagnostics', () => {
+        const source = windowsSource();
+        const start = source.indexOf('LeaseAcquireResult AcquirePlatformProjectLease');
+        const end = source.indexOf('\nvoid ReleasePlatformProjectLease', start);
+        const lease = source.slice(start, end);
+
+        expect(lease).toContain('DWORD* last_error');
+        expect(lease).toContain('*last_error = GetLastError()');
+        expect(fs.readFileSync(path.resolve(__dirname, '../../../native/secure_fs.cc'), 'utf8'))
+            .toMatch(/DWORD lease_error = ERROR_SUCCESS;[\s\S]*?AcquirePlatformProjectLease\(project_root, lease, &lease_error\)/);
+    });
+
     it('declares eval mode for the inline junction-race worker', () => {
         expect(fs.readFileSync(__filename, 'utf8'))
             .toMatch(/new Worker\([\s\S]*?`\s*, \{ eval: true, workerData:/);
