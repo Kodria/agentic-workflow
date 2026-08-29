@@ -28,7 +28,8 @@ const sensor = {
     assets: ['eslint.config.awm.mjs'], policyRef: 'shared/semgrep-policy.json' as const,
     initializedCompatibility: { state: 'certified' as const, reason: 'range-and-probe', variantId: 'eslint-9', toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [{ kind: 'version', status: 'pass' }] },
 };
-const v2 = { schemaVersion: 2, pack: 'js-ts', packSelection: 'explicit' as const, registryRoot: '/home/alice/.awm/registries/baseline', packageRoot: 'cli', sensors: { lint: sensor }, concurrency: 2 };
+const v2RegistryRoot = path.join(path.parse(process.cwd()).root, 'home', 'alice', '.awm', 'registries', 'baseline');
+const v2 = { schemaVersion: 2, pack: 'js-ts', packSelection: 'explicit' as const, registryRoot: v2RegistryRoot, packageRoot: 'cli', sensors: { lint: sensor }, concurrency: 2 };
 const sourceRegistryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migrate-source-'));
 
 afterAll(() => fs.rmSync(sourceRegistryRoot, { recursive: true, force: true }));
