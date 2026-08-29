@@ -175,14 +175,15 @@ describe('native secure-fs Windows source contract', () => {
             .toMatch(/new Worker\([\s\S]*?`\s*, \{ eval: true, workerData:/);
     });
 
-    it('keeps an exclusive verified target handle through an atomic POSIX-semantics replacement', () => {
+    it('keeps a verified target handle that shares only deletion for atomic POSIX replacement', () => {
         const source = windowsSource();
         const fenceStart = source.indexOf('HANDLE OpenRegularFileForReplacementFence');
         const fenceEnd = source.indexOf('\n}', fenceStart);
         const replacementFence = source.slice(fenceStart, fenceEnd);
 
         expect(fenceStart).toBeGreaterThan(-1);
-        expect(replacementFence).toContain('OpenRegularFileNoReparse(parent, FILE_READ_DATA, 0)');
+        expect(replacementFence).toContain('OpenRegularFileNoReparse(parent, FILE_READ_DATA, FILE_SHARE_DELETE)');
+        expect(replacementFence).not.toMatch(/FILE_SHARE_WRITE/);
         expect(source).toMatch(/kFileRenameReplaceIfExists\s*=\s*0x00000001/);
         expect(source).toMatch(/kFileRenamePosixSemantics\s*=\s*0x00000002/);
         expect(source).toMatch(/rename->Flags\s*=\s*kFileRenameReplaceIfExists\s*\|\s*kFileRenamePosixSemantics/);
@@ -757,7 +758,7 @@ windowsOnly('native secure-fs Windows handle fixtures', () => {
         const target = path.join(root, 'sensors.json');
         fs.writeFileSync(target, 'existing bytes');
 
-        expect(() => binding.writeProjectTransaction(root, 'sensors.json', Buffer.from('new bytes'), { mode: 'create', createParents: false })).toThrow(/target exists|transaction failed/i);
+        expect(() => binding.writeProjectTransaction(root, 'sensors.json', Buffer.from('new bytes'), { mode: 'create', createParents: false })).toThrow(/target exists|destination already exists|transaction failed/i);
         expect(fs.readFileSync(target, 'utf8')).toBe('existing bytes');
     });
 
@@ -859,7 +860,7 @@ windowsOnly('native secure-fs Windows handle fixtures', () => {
                     });
                     published += 1;
                 } catch (error) {
-                    expect(error).toEqual(expect.any(Error));
+                    expect(String((error as { message?: unknown }).message ?? error)).toMatch(/^secure-fs /);
                 }
             }
         } finally {

@@ -608,7 +608,7 @@ HANDLE OpenRegularFileNoReparse(const WindowsParent& parent, ACCESS_MASK access,
 }
 
 HANDLE OpenRegularFileForReplacementFence(const WindowsParent& parent) {
-  return OpenRegularFileNoReparse(parent, FILE_READ_DATA, 0);
+  return OpenRegularFileNoReparse(parent, FILE_READ_DATA, FILE_SHARE_DELETE);
 }
 
 bool WriteAll(HANDLE handle, const void* bytes, size_t length) {
