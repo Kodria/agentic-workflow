@@ -24,4 +24,7 @@ tmp/*
 .claude/agents/
 *.eslintcache
 cli/.npmrc
+# Los binarios nativos se compilan por plataforma en la matriz y se ensamblan
+# como artefactos efímeros antes de publicar; nunca son fuente versionada.
+cli/prebuilds/
 .worktrees/
