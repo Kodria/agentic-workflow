@@ -176,7 +176,7 @@ jobs:
         run: |
           set -euo pipefail
           npm run native:package-check
-          TARBALL="$(npm pack --json | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => console.log(JSON.parse(input)[0].filename));')"
+          TARBALL="$(npm pack --json | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => { const packed = JSON.parse(input); const item = Array.isArray(packed) ? packed[0] : Object.values(packed)[0]; if (!item || typeof item !== "object" || typeof item.filename !== "string") throw new Error("npm pack returned no tarball filename"); console.log(item.filename); });')"
           for target in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64; do
             tar -tzf "$TARBALL" | grep -Fx "package/prebuilds/$target/secure_fs.node"
           done
