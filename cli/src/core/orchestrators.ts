@@ -161,7 +161,7 @@ export function collectDeclaredOrchestrators(): { declared: DeclaredOrchestrator
         for (const orch of r.orchestrators) {
             const file = path.join(reg.contentRoot, REGISTRY_MANIFEST_NAME);
             if (!availableSkillNames.has(orch.name)) {
-                diagnostics.push(`${file}: orchestrator declaration dropped because skill "${stripControlChars(orch.name)}" is not discoverable in configured safe registries`);
+                diagnostics.push(`${stripControlChars(file)}: orchestrator declaration dropped because skill "${stripControlChars(orch.name)}" is not discoverable in configured safe registries`);
                 continue;
             }
             if (seenNames.has(orch.name)) {
