@@ -8,7 +8,8 @@
 // entre al framework (R1.3, R5.3).
 import fs from 'fs';
 import path from 'path';
-import { REGISTRY_MANIFEST_NAME, assertRegularRegistryFile, listRegistries } from './registries';
+import { REGISTRY_MANIFEST_NAME, assertRegularRegistryFile, contentRoots, listRegistries } from './registries';
+import { discoverSkills } from './discovery';
 import { sanitizeDeclaredField, stripControlChars } from './text';
 
 export interface DeclaredOrchestrator {
@@ -29,6 +30,22 @@ const ALLOWED_FIELDS = ['name', 'appliesWhen', 'terminatesTo'] as const;
 // untrusted input whose fields flow straight into the AI-provider context payload, so an
 // unbounded string here would let a crafted registry bloat/DoS that context.
 const MAX_FIELD_LENGTH = 500;
+
+function discoverDeclaredSkillNames(): { names: Set<string>; diagnostics: string[] } {
+    const names = new Set<string>();
+    const diagnostics: string[] = [];
+
+    for (const root of contentRoots()) {
+        try {
+            for (const skill of discoverSkills([root])) names.add(skill.name);
+        } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            diagnostics.push(`${stripControlChars(root)}: orchestrator skill discovery unavailable (${stripControlChars(message)})`);
+        }
+    }
+
+    return { names, diagnostics };
+}
 
 export function readDeclaredOrchestrators(root: string): DeclaredOrchestratorsResult {
     const file = path.join(root, REGISTRY_MANIFEST_NAME);
@@ -136,13 +153,17 @@ export function readDeclaredOrchestrators(root: string): DeclaredOrchestratorsRe
  */
 export function collectDeclaredOrchestrators(): { declared: DeclaredOrchestrator[]; diagnostics: string[] } {
     const declared: DeclaredOrchestrator[] = [];
-    const diagnostics: string[] = [];
+    const { names: availableSkillNames, diagnostics } = discoverDeclaredSkillNames();
     const seenNames = new Set<string>();
     const seenSanitizedNames = new Set<string>();
     for (const reg of listRegistries()) {
         const r = readDeclaredOrchestrators(reg.contentRoot);
         for (const orch of r.orchestrators) {
             const file = path.join(reg.contentRoot, REGISTRY_MANIFEST_NAME);
+            if (!availableSkillNames.has(orch.name)) {
+                diagnostics.push(`${file}: orchestrator declaration dropped because skill "${stripControlChars(orch.name)}" is not discoverable in configured safe registries`);
+                continue;
+            }
             if (seenNames.has(orch.name)) {
                 diagnostics.push(`${file}: orchestrator "${stripControlChars(orch.name)}" duplicates one already declared by an earlier registry — shadowed duplicate dropped`);
                 continue;

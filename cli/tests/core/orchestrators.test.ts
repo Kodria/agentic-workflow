@@ -216,6 +216,12 @@ describe('collectDeclaredOrchestrators', () => {
         fs.writeFileSync(path.join(root, 'awm-registry.json'), JSON.stringify(manifest));
     }
 
+    function writeSkill(registryName: string, skillName: string): void {
+        const skillDir = path.join(registryContentRoot(registryName), 'skills', skillName);
+        fs.mkdirSync(skillDir, { recursive: true });
+        fs.writeFileSync(path.join(skillDir, 'SKILL.md'), `---\nname: ${skillName}\n---\n\n# ${skillName}\n`);
+    }
+
     it('dedupea por nombre entre dos registries, conservando el primero por orden de registries.json', () => {  // verifies Finding 2
         writeRegistriesConfig([
             { name: 'first', remote: 'unused' },
@@ -227,6 +233,7 @@ describe('collectDeclaredOrchestrators', () => {
         writeManifest('second', {
             orchestrator: { name: 'shared', appliesWhen: 'segundo', terminatesTo: 'b' },
         });
+        writeSkill('first', 'shared');
 
         const { declared, diagnostics } = collectDeclaredOrchestrators();
 
@@ -249,6 +256,7 @@ describe('collectDeclaredOrchestrators', () => {
         writeManifest('second', {
             orchestrator: { name: nombreHostil, appliesWhen: 'segundo', terminatesTo: 'b' },
         });
+        writeSkill('first', nombreHostil);
 
         const { diagnostics } = collectDeclaredOrchestrators();
 
@@ -267,14 +275,16 @@ describe('collectDeclaredOrchestrators', () => {
             orchestrator: { name: 'foo_bar', appliesWhen: 'x', terminatesTo: 'a' },
         });
         writeManifest('second', {
-            orchestrator: { name: 'foo*bar', appliesWhen: 'y', terminatesTo: 'b' },
+            orchestrator: { name: 'foobar', appliesWhen: 'y', terminatesTo: 'b' },
         });
+        writeSkill('first', 'foo_bar');
+        writeSkill('second', 'foobar');
 
         const { declared, diagnostics } = collectDeclaredOrchestrators();
 
         // Ambas declaraciones son genuinamente distintas (nombre crudo distinto) — ninguna se descarta.
         expect(declared).toHaveLength(2);
-        expect(declared.map((d) => d.name).sort()).toEqual(['foo*bar', 'foo_bar']);
+        expect(declared.map((d) => d.name).sort()).toEqual(['foo_bar', 'foobar']);
         // Pero se advierte de la colision post-saneo (ambas renderizan como "foobar").
         expect(diagnostics).toHaveLength(1);
         expect(diagnostics[0]).toMatch(/foobar/);
@@ -292,11 +302,77 @@ describe('collectDeclaredOrchestrators', () => {
         writeManifest('second', {
             orchestrator: { name: 'dos', appliesWhen: 'y', terminatesTo: 'b' },
         });
+        writeSkill('first', 'uno');
+        writeSkill('second', 'dos');
 
         const { declared, diagnostics } = collectDeclaredOrchestrators();
 
         expect(declared).toHaveLength(2);
         expect(declared.map((d) => d.name).sort()).toEqual(['dos', 'uno']);
+        expect(diagnostics).toEqual([]);
+    });
+
+    it('omite una declaracion cuyo skill no existe y la diagnostica', () => {
+        writeRegistriesConfig([{ name: 'phantom', remote: 'unused' }]);
+        writeManifest('phantom', {
+            orchestrator: { name: 'phantom-process', appliesWhen: 'x', terminatesTo: 'none' },
+        });
+        writeSkill('phantom', 'real-skill');
+
+        const { declared, diagnostics } = collectDeclaredOrchestrators();
+
+        expect(declared).toEqual([]);
+        expect(diagnostics).toHaveLength(1);
+        expect(diagnostics[0]).toMatch(/phantom-process/);
+        expect(diagnostics[0]).toMatch(/declaration dropped|skill/i);
+    });
+
+    it('resuelve una declaracion contra un skill de otro registry configurado', () => {
+        writeRegistriesConfig([
+            { name: 'declarations', remote: 'unused' },
+            { name: 'skills', remote: 'unused' },
+        ]);
+        writeManifest('declarations', {
+            orchestrator: { name: 'cross-registry', appliesWhen: 'x', terminatesTo: 'none' },
+        });
+        writeSkill('skills', 'cross-registry');
+
+        const { declared, diagnostics } = collectDeclaredOrchestrators();
+
+        expect(declared).toEqual([{ name: 'cross-registry', appliesWhen: 'x', terminatesTo: 'none' }]);
+        expect(diagnostics).toEqual([]);
+    });
+
+    it('diagnostica un root cuyo discovery falla y conserva una declaracion sana', () => {
+        writeRegistriesConfig([
+            { name: 'broken', remote: 'unused' },
+            { name: 'healthy', remote: 'unused' },
+        ]);
+        writeManifest('broken', {
+            orchestrator: { name: 'broken-process', appliesWhen: 'x', terminatesTo: 'none' },
+        });
+        fs.writeFileSync(path.join(registryContentRoot('broken'), 'skills'), 'not a directory');
+        writeManifest('healthy', {
+            orchestrator: { name: 'healthy-process', appliesWhen: 'x', terminatesTo: 'none' },
+        });
+        writeSkill('healthy', 'healthy-process');
+
+        const { declared, diagnostics } = collectDeclaredOrchestrators();
+
+        expect(declared).toEqual([{ name: 'healthy-process', appliesWhen: 'x', terminatesTo: 'none' }]);
+        expect(diagnostics.join('\n')).toMatch(/broken.*discovery unavailable/i);
+    });
+
+    it('conserva terminatesTo aunque no corresponda a un skill descubierto', () => {
+        writeRegistriesConfig([{ name: 'registry', remote: 'unused' }]);
+        writeManifest('registry', {
+            orchestrator: { name: 'entry-process', appliesWhen: 'x', terminatesTo: 'missing-successor' },
+        });
+        writeSkill('registry', 'entry-process');
+
+        const { declared, diagnostics } = collectDeclaredOrchestrators();
+
+        expect(declared).toEqual([{ name: 'entry-process', appliesWhen: 'x', terminatesTo: 'missing-successor' }]);
         expect(diagnostics).toEqual([]);
     });
 });

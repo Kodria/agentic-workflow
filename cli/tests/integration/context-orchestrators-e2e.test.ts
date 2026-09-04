@@ -11,14 +11,14 @@ function seedRegistry(): string {
     const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-ctx-e2e-')));
     const awmHome = path.join(home, '.awm');
     const root = path.join(awmHome, 'registries', 'test-registry');
-    fs.mkdirSync(path.join(root, 'skills', 'using-awm'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'skills', 'ejemplo-proceso'), { recursive: true });
     fs.writeFileSync(path.join(awmHome, 'registries.json'),
         JSON.stringify([{ name: 'test-registry', remote: 'https://example.invalid/test.git' }]));
     fs.writeFileSync(path.join(root, 'awm-registry.json'), JSON.stringify({
         minCliVersion: '8.5.0',
         orchestrator: { name: 'ejemplo-proceso', appliesWhen: 'cuando hay una tarea sin plan', terminatesTo: 'development-process' },
     }));
-    fs.writeFileSync(path.join(root, 'skills', 'using-awm', 'SKILL.md'), '---\nname: using-awm\nversion: "1.0.0"\n---\n\n# using-awm\n');
+    fs.writeFileSync(path.join(root, 'skills', 'ejemplo-proceso', 'SKILL.md'), '---\nname: ejemplo-proceso\nversion: "1.0.0"\n---\n\n# ejemplo-proceso\n');
     return home;
 }
 
@@ -35,7 +35,7 @@ function seedRealisticRegistry(): string {
     const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-ctx-e2e-real-')));
     const awmHome = path.join(home, '.awm');
     const root = path.join(awmHome, 'registries', 'test-registry');
-    fs.mkdirSync(path.join(root, 'skills', 'using-awm'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'skills', 'task_capture_process'), { recursive: true });
     fs.writeFileSync(path.join(awmHome, 'registries.json'),
         JSON.stringify([{ name: 'test-registry', remote: 'https://example.invalid/test.git' }]));
     fs.writeFileSync(path.join(root, 'awm-registry.json'), JSON.stringify({
@@ -46,7 +46,7 @@ function seedRealisticRegistry(): string {
             terminatesTo: 'development-process',
         },
     }));
-    fs.writeFileSync(path.join(root, 'skills', 'using-awm', 'SKILL.md'), '---\nname: using-awm\nversion: "1.0.0"\n---\n\n# using-awm\n');
+    fs.writeFileSync(path.join(root, 'skills', 'task_capture_process', 'SKILL.md'), '---\nname: task_capture_process\nversion: "1.0.0"\n---\n\n# task_capture_process\n');
     return home;
 }
 
@@ -64,7 +64,7 @@ function seedMixedRegistries(): string {
     const awmHome = path.join(home, '.awm');
     const sanoRoot = path.join(awmHome, 'registries', 'sano-registry');
     const rotoRoot = path.join(awmHome, 'registries', 'roto-registry');
-    fs.mkdirSync(path.join(sanoRoot, 'skills', 'using-awm'), { recursive: true });
+    fs.mkdirSync(path.join(sanoRoot, 'skills', 'proceso-sano'), { recursive: true });
     fs.mkdirSync(path.join(rotoRoot, 'skills', 'using-awm'), { recursive: true });
     fs.writeFileSync(path.join(awmHome, 'registries.json'), JSON.stringify([
         { name: 'sano-registry', remote: 'https://example.invalid/sano.git' },
@@ -80,8 +80,22 @@ function seedMixedRegistries(): string {
         minCliVersion: '8.5.0',
         orchestrator: { name: 'proceso-roto', appliesWhen: 'cuando algo pasa' },
     }));
-    fs.writeFileSync(path.join(sanoRoot, 'skills', 'using-awm', 'SKILL.md'), '---\nname: using-awm\nversion: "1.0.0"\n---\n\n# using-awm\n');
-    fs.writeFileSync(path.join(rotoRoot, 'skills', 'using-awm', 'SKILL.md'), '---\nname: using-awm\nversion: "1.0.0"\n---\n\n# using-awm\n');
+    fs.writeFileSync(path.join(sanoRoot, 'skills', 'proceso-sano', 'SKILL.md'), '---\nname: proceso-sano\nversion: "1.0.0"\n---\n\n# proceso-sano\n');
+    return home;
+}
+
+function seedPhantomRegistry(): string {
+    const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-ctx-e2e-phantom-')));
+    const awmHome = path.join(home, '.awm');
+    const root = path.join(awmHome, 'registries', 'test-registry');
+    fs.mkdirSync(path.join(root, 'skills', 'real-skill'), { recursive: true });
+    fs.writeFileSync(path.join(awmHome, 'registries.json'),
+        JSON.stringify([{ name: 'test-registry', remote: 'https://example.invalid/test.git' }]));
+    fs.writeFileSync(path.join(root, 'awm-registry.json'), JSON.stringify({
+        minCliVersion: '8.5.0',
+        orchestrator: { name: 'phantom-process', appliesWhen: 'cuando hay una tarea sin plan', terminatesTo: 'development-process' },
+    }));
+    fs.writeFileSync(path.join(root, 'skills', 'real-skill', 'SKILL.md'), '---\nname: real-skill\nversion: "1.0.0"\n---\n\n# real-skill\n');
     return home;
 }
 
@@ -152,5 +166,18 @@ describe('awm context orchestrators -- diagnosticos + sanos mezclados (binario r
         expect(r.stderr).toContain('warning:');
         expect(r.stderr).toContain('roto-registry');
         expect(r.stderr).toContain('terminatesTo');
+    });
+});
+
+describe('awm context orchestrators -- declaracion phantom (binario real)', () => {
+    let home: string;
+    beforeAll(() => { home = seedPhantomRegistry(); });
+    afterAll(() => fs.rmSync(home, { recursive: true, force: true }));
+
+    it('--verify devuelve 2 y diagnostica una declaracion sin skill resoluble', () => {
+        const r = run(home, 'context', 'orchestrators', '--verify', 'phantom-process');
+        expect(r.status).toBe(2);
+        expect(r.stderr).toMatch(/phantom-process/);
+        expect(r.stderr).toMatch(/declaration dropped|skill/i);
     });
 });
