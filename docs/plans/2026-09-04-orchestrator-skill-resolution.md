@@ -77,3 +77,23 @@ _Requirements: R110-1, R110-2, R110-3, R110-4, R110-5, R110-6, R110-7_
 | R110-5 | T1-T3 | Unit successor inexistente preservado |
 | R110-6 | T1, T3 | E2E `--verify` 2 |
 | R110-7 | T1-T3 | Unit y E2E mixtos |
+
+## Amendment A1 — Fixtures de consumidores de contexto
+
+**Motivo:** La primera corrida de la suite completa reveló cuatro tests existentes
+que declaran `mi-proceso` o `proceso-valido` y afirman que llegan al contexto,
+pero crean solamente `skills/using-awm`. Bajo R110-1 esas fixtures representan
+declaraciones no resolubles y deben materializar el skill que afirman usar.
+
+**Alcance:**
+
+- `cli/tests/commands/hooks/install.test.ts`: crear `skills/mi-proceso/SKILL.md`
+  y `skills/proceso-valido/SKILL.md` en los dos fixtures de declaración válida.
+- `cli/tests/commands/hooks/resync.test.ts`: crear `skills/mi-proceso/SKILL.md`
+  en el fixture de resync materializado.
+- `cli/tests/core/context/orchestrator.test.ts`: crear
+  `skills/mi-proceso/SKILL.md` en la fixture que verifica estado inyectado.
+
+**Aceptación:** las cuatro aserciones existentes vuelven a pasar sin relajar
+R110-1; el test de nombre fantasma continúa demostrando que una declaración sin
+skill se descarta.

@@ -104,6 +104,8 @@ describe('resyncInstalledHooks', () => {
         fs.writeFileSync(path.join(regHooks, 'session-start'), '#!/usr/bin/env bash\necho "{}"', { mode: 0o755 });
         fs.writeFileSync(path.join(regHooks, 'run-hook.cmd'), '#!/usr/bin/env bash\nexec bash "$1"', { mode: 0o755 });
         fs.writeFileSync(path.join(regSkill, 'SKILL.md'), '---\nname: using-awm\n---\nMUST invoke skills.');
+        fs.mkdirSync(path.join(registryRoot, 'skills', 'mi-proceso'), { recursive: true });
+        fs.writeFileSync(path.join(registryRoot, 'skills', 'mi-proceso', 'SKILL.md'), '---\nname: mi-proceso\n---\n');
         fs.writeFileSync(
             path.join(registryRoot, 'awm-registry.json'),
             JSON.stringify({ orchestrator: { name: 'mi-proceso', appliesWhen: 'al arrancar', terminatesTo: 'development-process' } }),
