@@ -66,4 +66,11 @@ describe('discovery multi-root', () => {
         expect(discoverSkills([rootA, rootB]).length).toBe(1);
         expect(discoverAgents([rootA, rootB])).toEqual([]);
     });
+
+    it('rejects a real directory named SKILL.md as a nonregular artifact without blocking', () => {
+        fs.mkdirSync(path.join(rootA, 'skills', 'unsafe', 'SKILL.md'), { recursive: true });
+        const { discoverSkills } = require('../../src/core/discovery');
+
+        expect(() => discoverSkills([rootA])).toThrow(/SKILL\.md.*regular file/);
+    });
 });

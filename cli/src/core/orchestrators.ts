@@ -10,7 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { REGISTRY_MANIFEST_NAME, assertRegularRegistryFile, contentRoots, listRegistries } from './registries';
 import { discoverSkills } from './discovery';
-import { sanitizeDeclaredField, stripControlChars } from './text';
+import { sanitizeDeclaredField, sanitizeDiagnosticText, stripControlChars } from './text';
 
 export interface DeclaredOrchestrator {
     name: string;
@@ -32,15 +32,19 @@ const ALLOWED_FIELDS = ['name', 'appliesWhen', 'terminatesTo'] as const;
 const MAX_FIELD_LENGTH = 500;
 
 function discoverDeclaredSkillNames(): { names: Set<string>; diagnostics: string[] } {
-    const names = new Set<string>();
+    let names = new Set<string>();
     const diagnostics: string[] = [];
+    const acceptedRoots: string[] = [];
 
     for (const root of contentRoots()) {
         try {
-            for (const skill of discoverSkills([root])) names.add(skill.name);
+            // Admit the entire root only after global collision/override resolution succeeds.
+            const skills = discoverSkills([...acceptedRoots, root]);
+            names = new Set(skills.map((skill) => skill.name));
+            acceptedRoots.push(root);
         } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
-            diagnostics.push(`${stripControlChars(root)}: orchestrator skill discovery unavailable (${stripControlChars(message)})`);
+            diagnostics.push(`${sanitizeDiagnosticText(root)}: orchestrator skill discovery unavailable (${sanitizeDiagnosticText(message)})`);
         }
     }
 
@@ -151,8 +155,9 @@ export function readDeclaredOrchestrators(root: string): DeclaredOrchestratorsRe
  * context/provider.ts, el cual ya importa `DeclaredOrchestrator` DESDE este archivo -- pueda
  * calcular el mismo nombre saneado sin duplicar el regex.
  */
-export function collectDeclaredOrchestrators(): { declared: DeclaredOrchestrator[]; diagnostics: string[] } {
+export function collectDeclaredOrchestrators(): { declared: DeclaredOrchestrator[]; diagnostics: string[]; droppedNames: string[] } {
     const declared: DeclaredOrchestrator[] = [];
+    const droppedNames: string[] = [];
     const { names: availableSkillNames, diagnostics } = discoverDeclaredSkillNames();
     const seenNames = new Set<string>();
     const seenSanitizedNames = new Set<string>();
@@ -161,7 +166,8 @@ export function collectDeclaredOrchestrators(): { declared: DeclaredOrchestrator
         for (const orch of r.orchestrators) {
             const file = path.join(reg.contentRoot, REGISTRY_MANIFEST_NAME);
             if (!availableSkillNames.has(orch.name)) {
-                diagnostics.push(`${stripControlChars(file)}: orchestrator declaration dropped because skill "${stripControlChars(orch.name)}" is not discoverable in configured safe registries`);
+                droppedNames.push(orch.name);
+                diagnostics.push(`${sanitizeDiagnosticText(file)}: orchestrator declaration dropped because skill "${sanitizeDiagnosticText(orch.name)}" is not discoverable in configured safe registries`);
                 continue;
             }
             if (seenNames.has(orch.name)) {
@@ -180,7 +186,7 @@ export function collectDeclaredOrchestrators(): { declared: DeclaredOrchestrator
         }
         diagnostics.push(...r.diagnostics);
     }
-    return { declared, diagnostics };
+    return { declared, diagnostics, droppedNames };
 }
 
 /** Recolecta declarados y emite sus diagnosticos como warnings. Punto unico usado por

@@ -24,6 +24,10 @@ describe('Artifact Discovery', () => {
 
     describe('discoverSkills', () => {
         it('should return a list of skill directories that contain a SKILL.md', () => {
+            (fs.lstatSync as jest.Mock).mockImplementation((p: string) => {
+                if (p.endsWith('SKILL.md')) return { isFile: () => true, isSymbolicLink: () => false };
+                throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+            });
             (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
                 if (p === SKILLS_DIR) return true;
                 if (p.endsWith('SKILL.md')) return true;
@@ -49,6 +53,18 @@ describe('Artifact Discovery', () => {
             const skills = discoverSkills([SKILLS_ROOT]);
 
             expect(skills).toEqual([]);
+        });
+
+        it.each(['fifo', 'symlink'])('rejects a %s SKILL.md before attempting any read', (kind) => {
+            (fs.existsSync as jest.Mock).mockReturnValue(true);
+            (fs.readdirSync as jest.Mock).mockReturnValue([{ name: 'unsafe', isDirectory: () => true }]);
+            (fs.lstatSync as jest.Mock).mockImplementation((p: string) => {
+                if (p.endsWith('SKILL.md')) return { isFile: () => false, isSymbolicLink: () => kind === 'symlink' };
+                throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+            });
+
+            expect(() => discoverSkills([SKILLS_ROOT])).toThrow(/regular file|symbolic link/);
+            expect(fs.readFileSync).not.toHaveBeenCalled();
         });
 
         it('should skip skill directories without a SKILL.md', () => {

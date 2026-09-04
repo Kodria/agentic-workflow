@@ -181,3 +181,32 @@ describe('awm context orchestrators -- declaracion phantom (binario real)', () =
         expect(r.stderr).toMatch(/declaration dropped|skill/i);
     });
 });
+
+describe('awm context orchestrators -- dropped sanitized collision (real binary)', () => {
+    let home: string;
+    beforeAll(() => {
+        home = seedPhantomRegistry();
+        const awmHome = path.join(home, '.awm');
+        const phantomRoot = path.join(awmHome, 'registries', 'test-registry');
+        const retainedRoot = path.join(awmHome, 'registries', 'retained');
+        fs.writeFileSync(path.join(awmHome, 'registries.json'), JSON.stringify([
+            { name: 'test-registry', remote: 'unused' }, { name: 'retained', remote: 'unused' },
+        ]));
+        fs.writeFileSync(path.join(phantomRoot, 'awm-registry.json'), JSON.stringify({
+            orchestrator: { name: 'foo_bar', appliesWhen: 'x', terminatesTo: 'none' },
+        }));
+        fs.mkdirSync(path.join(retainedRoot, 'skills', 'foobar'), { recursive: true });
+        fs.writeFileSync(path.join(retainedRoot, 'skills', 'foobar', 'SKILL.md'), '# foobar\n');
+        fs.writeFileSync(path.join(retainedRoot, 'awm-registry.json'), JSON.stringify({
+            orchestrator: { name: 'foobar', appliesWhen: 'x', terminatesTo: 'none' },
+        }));
+    });
+    afterAll(() => fs.rmSync(home, { recursive: true, force: true }));
+
+    it('verifies the retained raw name and rejects the dropped raw name', () => {
+        expect(run(home, 'context', 'orchestrators', '--verify', 'foobar').status).toBe(0);
+        const dropped = run(home, 'context', 'orchestrators', '--verify', 'foo_bar');
+        expect(dropped.status).toBe(2);
+        expect(dropped.stderr).toContain('declaration dropped');
+    });
+});

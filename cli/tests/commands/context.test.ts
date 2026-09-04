@@ -1,7 +1,7 @@
 import { runContextOrchestrators } from '../../src/commands/context';
 
 const collected = (declared: { name: string; appliesWhen: string; terminatesTo: string }[], diagnostics: string[] = []) =>
-    ({ declared, diagnostics });
+    ({ declared, diagnostics, droppedNames: [] as string[] });
 
 const uno = { name: 'mi-proceso', appliesWhen: 'cuando hay una tarea', terminatesTo: 'development-process' };
 
@@ -64,6 +64,15 @@ describe('awm context orchestrators', () => {
     it('--verify sigue saliendo 2 para un nombre genuinamente ausente', () => {   // verifies confirmed Finding 2 (no regression)
         const r = runContextOrchestrators(collected([uno]), { json: false, verify: 'de-verdad-no-existe' });
         expect(r.code).toBe(2);
+    });
+
+    it('--verify rejects a dropped raw identity that sanitizes to a retained name', () => {
+        const input = {
+            ...collected([{ name: 'foobar', appliesWhen: 'x', terminatesTo: 'y' }]),
+            droppedNames: ['foo_bar'],
+        };
+        expect(runContextOrchestrators(input, { json: false, verify: 'foo_bar' }).code).toBe(2);
+        expect(runContextOrchestrators(input, { json: false, verify: 'foobar' }).code).toBe(0);
     });
 
     it('sanea bytes de control antes de escribir a la terminal', () => {         // verifies R5.4

@@ -244,26 +244,71 @@ describe('collectDeclaredOrchestrators', () => {
         expect(diagnostics[0]).toMatch(/duplicate|shadow/i);
     });
 
-    it('sanea el nombre antes de interpolarlo en el diagnostico de duplicado', () => {  // verifies confirmed Finding 3
-        writeRegistriesConfig([
-            { name: 'first', remote: 'unused' },
-            { name: 'second', remote: 'unused' },
-        ]);
-        const nombreHostil = 'shared\x1b[31m';
+    it('keeps missing-skill diagnostics single-line with hostile metadata and portable paths', () => {
+        writeRegistriesConfig([{ name: 'first', remote: 'unused' }]);
+        const nombreHostil = 'shared\r\nforged\t\x1b[31m\x00\x7f\x85\x9b\u2028\u2029';
         writeManifest('first', {
             orchestrator: { name: nombreHostil, appliesWhen: 'primero', terminatesTo: 'a' },
         });
-        writeManifest('second', {
-            orchestrator: { name: nombreHostil, appliesWhen: 'segundo', terminatesTo: 'b' },
-        });
-        writeSkill('first', nombreHostil);
+        writeSkill('first', 'real-skill');
 
         const { diagnostics } = collectDeclaredOrchestrators();
 
         expect(diagnostics).toHaveLength(1);
-        // eslint-disable-next-line no-control-regex -- verificamos la ausencia deliberada de C0
-        expect(diagnostics[0]).not.toMatch(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/);
-        expect(diagnostics[0]).toContain('shared[31m');
+        // eslint-disable-next-line no-control-regex -- diagnostic must contain no terminal controls or line separators
+        expect(diagnostics[0]).not.toMatch(/[\x00-\x1f\x7f-\x9f\u2028\u2029]/);
+        expect(diagnostics[0]).toContain('shared');
+        expect(diagnostics[0]).toContain('forged');
+        expect(diagnostics[0]).toContain('declaration dropped');
+    });
+
+    it('keeps discovery diagnostics single-line for hostile override metadata', () => {
+        writeRegistriesConfig([{ name: 'hostile', remote: 'unused' }]);
+        writeManifest('hostile', { overrides: ['../forged\r\nwarning:\t\x1b[31m\x85\u2028'] });
+        writeSkill('hostile', 'real-skill');
+
+        const { diagnostics } = collectDeclaredOrchestrators();
+
+        expect(diagnostics).toHaveLength(1);
+        expect(diagnostics[0]).toContain('discovery unavailable');
+        expect(diagnostics[0]).toContain('forged');
+        // eslint-disable-next-line no-control-regex -- diagnostic must contain no terminal controls or line separators
+        expect(diagnostics[0]).not.toMatch(/[\x00-\x1f\x7f-\x9f\u2028\u2029]/);
+    });
+
+    it('excludes a later colliding root without losing earlier or subsequent healthy roots', () => {
+        writeRegistriesConfig(['first', 'collision', 'last'].map((name) => ({ name, remote: 'unused' })));
+        for (const name of ['first', 'collision', 'last']) {
+            writeManifest(name, { orchestrator: { name: `${name}-process`, appliesWhen: 'x', terminatesTo: 'none' } });
+            writeSkill(name, `${name}-process`);
+        }
+        writeSkill('first', 'shared');
+        writeSkill('collision', 'shared');
+        // This name belongs only to the excluded root and must not poison later admission.
+        writeSkill('collision', 'last-process');
+
+        const { declared, diagnostics } = collectDeclaredOrchestrators();
+
+        expect(declared.map((d) => d.name)).toEqual(['first-process', 'last-process']);
+        expect(diagnostics).toHaveLength(2);
+        expect(diagnostics[0]).toMatch(/collision.*discovery unavailable.*Artifact name collision/);
+        expect(diagnostics[1]).toMatch(/collision-process.*not discoverable/);
+    });
+
+    it('admits a later root with a declared override', () => {
+        writeRegistriesConfig(['first', 'override'].map((name) => ({ name, remote: 'unused' })));
+        writeSkill('first', 'shared');
+        writeSkill('override', 'shared');
+        writeSkill('override', 'override-process');
+        writeManifest('override', {
+            overrides: ['shared'],
+            orchestrator: { name: 'override-process', appliesWhen: 'x', terminatesTo: 'none' },
+        });
+
+        const { declared, diagnostics } = collectDeclaredOrchestrators();
+
+        expect(declared.map((d) => d.name)).toEqual(['override-process']);
+        expect(diagnostics).toEqual([]);
     });
 
     it('emite un diagnostico de colision post-saneo entre nombres crudos distintos, sin descartar ninguno', () => {  // verifies confirmed Finding 4

@@ -1,7 +1,7 @@
 // src/core/discovery.ts
 import fs from 'fs';
 import path from 'path';
-import { contentRoots, readRegistryManifest } from './registries';
+import { assertRegularRegistryFile, contentRoots, readRegistryManifest } from './registries';
 
 export interface SkillArtifact {
     name: string;
@@ -81,7 +81,7 @@ function mergeEntry(
 
 /**
  * Scans skills directories across all provided content roots and returns all valid skills.
- * A valid skill is a directory that contains a SKILL.md file.
+ * A valid skill is a directory that contains a regular, non-symlink SKILL.md file.
  * Throws on name collision across roots unless the later root declares the name in its awm-registry.json overrides.
  */
 export function discoverSkills(roots: string[] = contentRoots()): SkillArtifact[] {
@@ -93,11 +93,16 @@ export function discoverSkills(roots: string[] = contentRoots()): SkillArtifact[
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
             if (!entry.isDirectory()) continue;
             const skillPath = path.join(dir, entry.name);
-            if (!fs.existsSync(path.join(skillPath, 'SKILL.md'))) continue;
+            const skillFile = path.join(skillPath, 'SKILL.md');
+            try {
+                if (!assertRegularRegistryFile(skillFile)) continue;
+            } catch (e) {
+                throw new Error(`${skillFile}: cannot read (${e instanceof Error ? e.message : String(e)})`);
+            }
             mergeEntry('skill', byName, {
                 name: entry.name,
                 path: skillPath,
-                description: readArtifactDescription(path.join(skillPath, 'SKILL.md')),
+                description: readArtifactDescription(skillFile),
             }, overrides);
         }
     }
@@ -153,4 +158,3 @@ export function discoverAgents(roots: string[] = contentRoots()): AgentArtifact[
     }
     return Array.from(byName.values());
 }
-
