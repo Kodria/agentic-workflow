@@ -1,4 +1,7 @@
 # Orchestrator Skill Resolution Implementation Plan
+<!-- awm-qa-complete: 2026-09-04 -->
+<!-- awm-docs-complete: 2026-09-04 -->
+<!-- awm-retro-complete: 2026-09-04 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
@@ -97,3 +100,56 @@ declaraciones no resolubles y deben materializar el skill que afirman usar.
 **Aceptación:** las cuatro aserciones existentes vuelven a pasar sin relajar
 R110-1; el test de nombre fantasma continúa demostrando que una declaración sin
 skill se descarta.
+
+## Amendment A2 — Correcciones encontradas por QA global
+
+**Motivo:** QA encontró cuatro casos que la implementación inicial no cubría:
+una identidad descartada podía coincidir con otra compuesta tras saneamiento;
+los diagnósticos nuevos aceptaban CR/LF; una fixture creaba un directorio con
+ESC inválido en Windows; y el discovery por root ocultaba colisiones globales
+de skills sin override. También se confirmó que `discoverSkills` aceptaba
+artefactos `SKILL.md` no regulares, lo cual puede bloquear la colección síncrona.
+
+**Alcance:**
+
+- Conservar las identidades crudas descartadas para que `--verify` rechace una
+  entrada descartada aun si su forma saneada coincide con una compuesta.
+- Saneamiento de una sola línea para todo texto no confiable que entre en los
+  diagnósticos de esta ruta.
+- Reemplazar la fixture de nombre hostil por metadata hostil sin nombre de
+  directorio no portable.
+- Descubrir incrementalmente los roots previamente aceptados más el root actual;
+  si aparece una colisión sin override, diagnosticar y excluir ese root sin
+  invalidar los anteriores.
+- Exigir que `SKILL.md` sea un archivo regular no enlazado antes de leerlo.
+
+**Aceptación:** regresiones RED/GREEN para los cuatro casos; suites focalizadas,
+sensores y verificación completa verdes; no se relajan R110-1 a R110-7.
+
+## Amendment A3 — Cierre de saneamiento y lectura segura
+
+**Motivo:** la re-lectura de QA comprobó que los diagnósticos estructurales del
+parser seguían reenviando U+2028/U+0085 y que el chequeo `lstat` de `SKILL.md`
+tenía una ventana TOCTOU antes de su lectura.
+
+**Alcance:**
+
+- Pasar todos los diagnósticos de `readDeclaredOrchestrators()` por el saneador
+  de una sola línea antes de que lleguen a `diagnosticsToStderr`.
+- Inspeccionar `SKILL.md`, abrirlo con `O_NOFOLLOW` cuando exista, comprobar en
+  el descriptor `dev`/`ino`, tipo regular y tamaño contra la inspección, y leer
+  desde ese descriptor; fallar cerrado si cambia o no es regular.
+
+**Aceptación:** regresiones RED/GREEN para clave de metadata Unicode y sustitución
+de `SKILL.md` tras `lstat`; las rutas inseguras no se leen ni bloquean el
+collector.
+
+## Amendment A4 — Sustitución concurrente de directorio padre
+
+**Motivo:** QA reprodujo que sustituir un directorio padre por un symlink antes
+de la inspección de la hoja podía autorizar un `SKILL.md` externo.
+
+**Alcance y aceptación:** inspeccionar los componentes observables del path de
+skill, rechazar symlinks y comprobar que la hoja abierta permanece bajo la
+cadena inspeccionada; una regresión de filesystem real debe demostrar que el
+reemplazo de padre no lee contenido externo.
