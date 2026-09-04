@@ -13,7 +13,7 @@ const inspected = {
     dev: 7n, ino: 9007199254740993n, size: BigInt(Buffer.byteLength(content)),
     isFile: () => true, isSymbolicLink: () => false, isDirectory: () => false,
 };
-const directory = { isFile: () => false, isSymbolicLink: () => false, isDirectory: () => true };
+const directory = { dev: 7n, ino: 8n, isFile: () => false, isSymbolicLink: () => false, isDirectory: () => true };
 
 describe.each([true, false])('skill descriptor safety (O_NOFOLLOW available: %s)', (noFollowAvailable) => {
     beforeEach(() => {
@@ -104,6 +104,17 @@ describe.each([true, false])('skill descriptor safety (O_NOFOLLOW available: %s)
         (fs.fstatSync as jest.Mock).mockReturnValue(unknown);
 
         expect(() => discoverSkills([root])).toThrow(/identity|size/i);
+        expect(fs.readFileSync).not.toHaveBeenCalled();
+    });
+
+    it.each(['dev', 'ino'])('fails closed when parent %s is unobservable', (field) => {
+        const lstat = (fs.lstatSync as jest.Mock).getMockImplementation()!;
+        (fs.lstatSync as jest.Mock).mockImplementation((file, options) => file === skillDir
+            ? { ...directory, [field]: undefined }
+            : lstat(file, options));
+
+        expect(() => discoverSkills([root])).toThrow(/directory identity/i);
+        expect(fs.openSync).not.toHaveBeenCalled();
         expect(fs.readFileSync).not.toHaveBeenCalled();
     });
 });
