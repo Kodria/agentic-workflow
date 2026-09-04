@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { diagnosticsToStderr } from '../../src/core/command-result';
 import { readDeclaredOrchestrators, collectDeclaredOrchestrators } from '../../src/core/orchestrators';
 import { writeRegistriesConfig, registryContentRoot } from '../../src/core/registries';
 
@@ -13,6 +14,7 @@ function registryWith(manifest: unknown): string {
 describe('readDeclaredOrchestrators', () => {
     const created: string[] = [];
     afterEach(() => {
+        jest.restoreAllMocks();
         for (const r of created.splice(0)) fs.rmSync(r, { recursive: true, force: true });
     });
 
@@ -189,6 +191,67 @@ describe('readDeclaredOrchestrators', () => {
         expect(diagnostics).toHaveLength(1);
         expect(diagnostics[0].split('\n')).toHaveLength(1);
         expect(diagnostics[0]).toContain(JSON.stringify('evil\nfake-warning: injected line'));
+    });
+
+    describe('single-line diagnostic boundary', () => {
+        const hostile = 'before\u2028\u2029\u0085\r\n\t'
+            + String.fromCharCode(...Array.from({ length: 32 }, (_, i) => i))
+            + String.fromCharCode(...Array.from({ length: 33 }, (_, i) => 127 + i)) + 'after';
+
+        it('sanitizes unknown metadata keys without accepting the declaration', () => {
+            const root = registryWith({
+                orchestrator: { name: 'x', appliesWhen: 'y', terminatesTo: 'none', [hostile]: true },
+            });
+            created.push(root);
+
+            const result = readDeclaredOrchestrators(root);
+
+            expect(result.orchestrators).toEqual([]);
+            expect(result.diagnostics).toHaveLength(1);
+            expect(result.diagnostics[0]).toContain('unknown field');
+            expect(result.diagnostics[0]).toContain('before');
+            expect(result.diagnostics[0]).toContain('after');
+            const stderrBoundary = jest.fn(diagnosticsToStderr);
+            stderrBoundary(result.diagnostics);
+            expect(stderrBoundary.mock.calls[0][0].join('')).not.toMatch(/[\u2028\u0085]/);
+            expect(stderrBoundary.mock.results[0].value).not.toMatch(/[\u2028\u0085]/);
+            // eslint-disable-next-line no-control-regex -- reject all terminal controls and line separators
+            expect(result.diagnostics[0]).not.toMatch(/[\x00-\x1f\x7f-\x9f\u2028\u2029]/);
+        });
+
+        it.each(['inspection', 'read', 'parse', 'shape', 'fields'])('sanitizes %s diagnostics, including paths and error text', (branch) => {
+            // Mock hostile paths instead of creating filenames that are invalid on Windows.
+            const root = path.join(os.tmpdir(), hostile);
+            const error = new Error(hostile);
+            jest.spyOn(fs, 'lstatSync').mockImplementation(() => {
+                if (branch === 'inspection') throw error;
+                return { isFile: () => true, isSymbolicLink: () => false } as fs.Stats;
+            });
+            jest.spyOn(fs, 'readFileSync').mockImplementation(() => {
+                if (branch === 'read') throw error;
+                if (branch === 'parse') return `{ ${hostile}`;
+                return JSON.stringify({ orchestrator: branch === 'shape' ? [] : {} });
+            });
+            if (branch === 'parse') jest.spyOn(JSON, 'parse').mockImplementationOnce(() => { throw new SyntaxError(hostile); });
+
+            const result = readDeclaredOrchestrators(root);
+
+            expect(result.orchestrators).toEqual([]);
+            expect(result.diagnostics).toHaveLength(1);
+            expect(result.diagnostics[0]).toContain('awm-registry.json');
+            expect(result.diagnostics[0]).toContain('before');
+            expect(result.diagnostics[0]).toContain('after');
+            // eslint-disable-next-line no-control-regex -- reject all terminal controls and line separators
+            expect(result.diagnostics[0]).not.toMatch(/[\x00-\x1f\x7f-\x9f\u2028\u2029]/);
+        });
+
+        it('preserves valid raw fields and structural parsing without skill discovery', () => {
+            const declaration = { name: hostile, appliesWhen: hostile, terminatesTo: hostile };
+            const root = registryWith({ orchestrator: declaration });
+            created.push(root);
+
+            expect(readDeclaredOrchestrators(root)).toEqual({ orchestrators: [declaration], diagnostics: [] });
+        });
     });
 });
 
