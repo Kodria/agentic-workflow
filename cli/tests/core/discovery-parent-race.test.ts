@@ -72,9 +72,24 @@ describe('real skill parent races', () => {
         const read = jest.spyOn(fs, 'readFileSync');
         const close = jest.spyOn(fs, 'closeSync');
 
-        expect(() => discoverSkills([root])).toThrow(/symbolic link/i);
+        let thrown: unknown;
+        try {
+            discoverSkills([root]);
+        } catch (error) {
+            thrown = error;
+        }
+        if (process.platform === 'win32') {
+            // Windows holds the opened file's parent directory handle, so the
+            // replacement itself is denied before a symlink can be introduced.
+            // This is the same security guarantee: outside bytes cannot be read.
+            expect(thrown).toBeInstanceOf(Error);
+            expect((thrown as Error).message).toMatch(/EPERM.*rename|rename.*EPERM/i);
+        } else {
+            expect(thrown).toBeInstanceOf(Error);
+            expect((thrown as Error).message).toMatch(/symbolic link/i);
+            expect(close).toHaveBeenCalledWith(descriptor);
+        }
         expect(read.mock.calls.filter(([file]) => typeof file === 'number'
             || String(file).startsWith(fixture + path.sep))).toEqual([]);
-        expect(close).toHaveBeenCalledWith(descriptor);
     });
 });
