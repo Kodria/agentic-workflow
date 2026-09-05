@@ -245,7 +245,16 @@ export function nextProtocolEffect(s: CohortProtocol): ProtocolEffect | null {
 
 export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObservation): CohortProtocol {
     const out = structuredClone(s);
-    if (observation.kind === 'prepare-failed') {
+    if (observation.kind === 'teardown-requested') {
+        const requested = out.tracks[observation.trackId];
+        if (requested === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
+        if (out.cohortPhase !== 'SERIAL' && out.cohortPhase !== 'COMPLETE'
+            && out.cohortPhase !== 'FALLBACK_PENDING') {
+            out.cohortPhase = 'FALLBACK_PENDING';
+            out.fallbackReason = `controller-requested:${observation.trackId}`;
+            markTeardownRequested(out.tracks);
+        }
+    } else if (observation.kind === 'prepare-failed') {
         out.cohortPhase = 'FALLBACK_PENDING';
         out.fallbackReason = `prepare-failed:${observation.trackId}`;
         markTeardownRequested(out.tracks);
@@ -378,7 +387,7 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
 
 export function observeProtocolEffect(s: CohortProtocol, effect: ProtocolEffect, observation: ProtocolObservation): CohortProtocol {
     if (observation.kind === 'effect-failed' || observation.kind === 'prepare-failed' || observation.kind === 'join-observation'
-        || observation.kind === 'freeze-observation' || observation.kind === 'join-requested'
+        || observation.kind === 'freeze-observation' || observation.kind === 'join-requested' || observation.kind === 'teardown-requested'
         || observation.kind === 'supervisor-observed' || observation.kind === 'worktree-observed'
         || observation.kind === 'teardown-observation'
         || observation.kind === 'global-qa-pass'
