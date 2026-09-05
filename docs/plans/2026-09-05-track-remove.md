@@ -305,7 +305,7 @@ _Requirements: TR-REQ-03, TR-REQ-04, TR-REQ-05, TR-REQ-07, TR-REQ-08, TR-REQ-09_
 
 **Skills:** test-driven-development
 
-- [ ] **Step 1: Create the integration test fixture and RED behavior tests**
+- [x] **Step 1: Create the integration test fixture and RED behavior tests**
 
 Create `track-remove-request.test.ts` using real temporary journals and the real request emitter. The runtime must throw for every external mutation so the first assertions prove that marker consumption itself performs no destructive effect:
 
@@ -421,7 +421,7 @@ describe('awm track remove -> fallback teardown', () => {
 });
 ```
 
-- [ ] **Step 2: Run the new suite and confirm RED**
+- [x] **Step 2: Run the new suite and confirm RED**
 
 Run:
 
@@ -432,7 +432,7 @@ npx jest tests/commands/watch/track-remove-request.test.ts --runInBand
 
 Expected: the first two tests fail because `reconcileTracks` does not consume `teardownRequested`; terminal tests fail because no moot event is emitted.
 
-- [ ] **Step 3: Implement marker reconciliation ahead of join handling**
+- [x] **Step 3: Implement marker reconciliation ahead of join handling**
 
 Insert this block before `pendingJoin` in `reconcileTracks`:
 
@@ -458,7 +458,7 @@ if (pendingTeardown !== undefined) {
 
 Do not call `runBeginTeardown` from this block. The following `nextProtocolEffect` iteration must select `begin-teardown`, preserving the existing one-authority path and crash boundaries.
 
-- [ ] **Step 4: Run reconciliation and existing teardown crash suites**
+- [x] **Step 4: Run reconciliation and existing teardown crash suites**
 
 Run:
 
@@ -469,7 +469,7 @@ npx jest tests/commands/watch/track-remove-request.test.ts tests/commands/watch/
 
 Expected: all suites pass. Existing crash tests prove the driver resumes every destructive boundary and blocks foreign ownership; the new suite proves the request reaches that existing path.
 
-- [ ] **Step 5: Commit the reconciler bridge**
+- [x] **Step 5: Commit the reconciler bridge**
 
 ```bash
 git add cli/src/commands/watch/tracks.ts cli/tests/commands/watch/track-remove-request.test.ts
@@ -490,7 +490,7 @@ _Requirements: TR-REQ-04, TR-REQ-05, TR-REQ-06, TR-REQ-07, TR-REQ-08, TR-REQ-09,
 
 **Skills:** test-driven-development
 
-- [ ] **Step 1: Add a RED help-contract assertion**
+- [x] **Step 1: Add a RED help-contract assertion**
 
 Add a focused test to `verbs.test.ts`:
 
@@ -503,7 +503,7 @@ test('remove se anuncia como cancelación request-only soportada (TR-REQ-10)', a
 });
 ```
 
-- [ ] **Step 2: Run the help test and confirm RED**
+- [x] **Step 2: Run the help test and confirm RED**
 
 Run:
 
@@ -514,7 +514,7 @@ npx jest tests/commands/track/verbs.test.ts --runInBand
 
 Expected: the new assertion fails because the command still advertises `NO IMPLEMENTADO`.
 
-- [ ] **Step 3: Update CLI help and operator documentation**
+- [x] **Step 3: Update CLI help and operator documentation**
 
 Replace the obsolete comment and description in `track/index.ts` with:
 
@@ -537,7 +537,7 @@ Update the public docs with these exact semantics:
 
 Add `awm track remove <id> --generation "$GEN"` to the guide workflow and state adjacent to it that cancellation applies to the complete cohort, preserves foreign or unprovable resources as `BLOCKED`, and is a request rather than a synchronous deletion. Add one sentence with the same contract to `cli/README.md`.
 
-- [ ] **Step 4: Run focused feature verification**
+- [x] **Step 4: Run focused feature verification**
 
 Run:
 
@@ -549,7 +549,7 @@ npm run typecheck
 
 Expected: all selected suites pass and TypeScript exits 0.
 
-- [ ] **Step 5: Run repository quality gates**
+- [x] **Step 5: Run repository quality gates**
 
 Run from `cli/`:
 
@@ -570,7 +570,7 @@ awm sensors run
 
 Expected: the configured sensor gate reports pass.
 
-- [ ] **Step 6: Check the diff for stale unsupported-contract language**
+- [x] **Step 6: Check the diff for stale unsupported-contract language**
 
 Run:
 
@@ -581,7 +581,7 @@ git diff --check
 
 Expected: `rg` returns no match and `git diff --check` returns no output.
 
-- [ ] **Step 7: Commit documentation and verified contract**
+- [x] **Step 7: Commit documentation and verified contract**
 
 ```bash
 git add cli/src/commands/track/index.ts cli/tests/commands/track/verbs.test.ts docs/cli-reference.md docs/guides/parallel-tracks.md cli/README.md docs/plans/2026-09-05-track-remove-design.md docs/plans/2026-09-05-track-remove.md
