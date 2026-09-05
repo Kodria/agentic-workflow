@@ -69,6 +69,15 @@ describe('parallel-track protocol model', () => {
         expect(nextProtocolEffect(out)).toBeNull();
     });
 
+    test('fallo de begin-teardown para track inexistente falla cerrado (TR-REQ-05)', () => {
+        const s = initialCohort('journal-1', ids);
+        s.cohortPhase = 'FALLBACK_PENDING';
+
+        expect(() => reconcileProtocol(s, {
+            kind: 'effect-failed', trackId: 'missing', effect: 'begin-teardown', detail: 'ownership indemostrable',
+        })).toThrow('track desconocido: missing');
+    });
+
     test('remove cancela toda la cohorte activa y conserva DECLARED/BLOCKED (TR-REQ-03, TR-REQ-05)', () => {
         const s = initialCohort('journal-1', ['active', 'declared', 'blocked']);
         s.cohortPhase = 'ACTIVE';

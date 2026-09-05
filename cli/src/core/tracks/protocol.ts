@@ -278,11 +278,10 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
             // `decideTeardown` documenta para BLOCKED: solo el operador lo
             // saca de acá.
             const t = out.tracks[observation.trackId];
-            if (t !== undefined) {
-                t.phase = 'BLOCKED';
-                t.blockedReason = observation.detail;
-                out.cohortPhase = 'BLOCKED';
-            }
+            if (t === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
+            t.phase = 'BLOCKED';
+            t.blockedReason = observation.detail;
+            out.cohortPhase = 'BLOCKED';
         }
         // effect-failed fuera de PREPARING/begin-teardown: sin transición definida todavía (no ejercitado por T1).
     } else if (observation.kind === 'worktree-observed') {
