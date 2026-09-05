@@ -698,7 +698,7 @@ Parallel tracks over worktrees: a request-only surface plus a read-only aggregat
 | `list` | List the `TrackRef`s declared in the plan journal (read-only). |
 | `status` | Read-only aggregate: each track's gate plus the cohort phase. |
 | `verify-independence` | Verify a track plan's declared independence. Exits non-zero on any violation, so it is usable as a gate. |
-| `remove <trackId>` | **Not implemented.** Emits a teardown request the supervisor does not yet know how to apply, and rejects it. |
+| `remove <trackId>` | Emit a teardown request. The supervisor cancels the complete cohort, removes only demonstrably owned resources, and returns to serial execution only after teardown finishes. |
 | `supervisor-wrapper` | **Internal process**, launched detached by the plan supervisor. Not for manual invocation. |
 
 > `add`, `join` and `finalize` only *request*. Nothing integrates because you ran them —
