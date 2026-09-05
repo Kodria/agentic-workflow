@@ -544,6 +544,7 @@ describe('aplicacion transaccional de requests', () => {
     });
 
     test.each([
+        ['ausente', {}],
         ['vacio', { trackId: '' }],
         ['malformado', { trackId: 42 }],
         ['desconocido', { trackId: 'no-existe' }],
