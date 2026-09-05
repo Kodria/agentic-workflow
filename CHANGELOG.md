@@ -1,3 +1,12 @@
+## v9.6.1 - 2026-09-05
+
+### Fixes
+- **discovery:** reject parent substitutions during skill inspection
+- sanitize orchestrator diagnostics and validate skill read identity
+- **orchestrators:** preserve resolution identity and discovery safety
+- **orchestrators:** sanitize dropped declaration paths
+- **orchestrators:** require declared skill resolution
+
 ## v9.6.0 - 2026-08-29
 
 ### Features
