@@ -24,13 +24,27 @@ mi-registry/
 
 ## 2. `awm-registry.json`
 
-Declara la versión mínima de CLI que tu contenido necesita:
+Declara la versión mínima de CLI que tu contenido necesita y el orquestador que querés aportar:
 
 ```json
 {
-  "minCliVersion": "8.1.5"
+  "minCliVersion": "8.1.5",
+  "orchestrator": {
+    "name": "mi-proceso",
+    "appliesWhen": "cuando una sesión debe seguir mi proceso propio",
+    "terminatesTo": "development-process"
+  }
 }
 ```
+
+El bloque `orchestrator` tiene contrato cerrado:
+
+- Debe tener exactamente tres campos: `name`, `appliesWhen` y `terminatesTo`. Cualquier campo extra se diagnostica y esa declaración se descarta.
+- Los tres valores deben ser strings no vacíos de hasta 500 caracteres cada uno.
+- `appliesWhen` no debe terminar con punto: el renderer agrega el punto cuando compone el contexto.
+- `name` debe coincidir con el nombre del directorio `skills/<name>/SKILL.md`. En este ejemplo, `name: "mi-proceso"` apunta a `skills/mi-proceso/SKILL.md`. El `name` del frontmatter de `SKILL.md` no controla discovery.
+
+Si el bloque `orchestrator` es inválido, AWM emite un diagnóstico y descarta solo esa declaración; no aborta la instalación del registry ni invalida sus otros contenidos.
 
 ## 3. `catalog.json`
 
@@ -107,9 +121,12 @@ Instalalo desde la ruta local, sin publicar nada. `--name` es el nombre del *reg
 ```bash
 awm registry add /ruta/a/mi-registry --name mi-proceso --install-all
 awm registry list
+awm context orchestrators --verify mi-proceso
 ```
 
 `awm registry list` confirma que instaló: imprime una línea por registry con nombre, remote, y el conteo de contenido descubierto (`N skills, M bundles, K workflows, L agents`).
+
+`awm context orchestrators --verify mi-proceso` confirma que el orquestador está compuesto en el contexto real de sesión. Sale `0` si está compuesto y `2` si no lo está; un `2` suele indicar que el `orchestrator.name` no coincide con un directorio discoverable bajo `skills/`, que la declaración fue inválida, o que el registry no quedó instalado.
 
 Si el layout está mal o hay colisión de nombres, el comando falla y revierte el clon. Para volver atrás:
 
