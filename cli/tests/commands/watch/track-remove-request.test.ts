@@ -1,0 +1,107 @@
+import fs from 'fs';
+import path from 'path';
+import { initRepo, commitFile } from '../../helpers/git-fixture';
+import { reconcileTracks, defaultTrackRuntime, type TrackRuntime } from '../../../src/commands/watch/tracks';
+import { consumePendingRequests } from '../../../src/commands/watch/apply';
+import { emitTrackRequest } from '../../../src/commands/track/emit';
+import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
+import { eventsPath } from '../../../src/core/journal/paths';
+import type { JournalState, TrackRef } from '../../../src/core/journal/types';
+import type { TrackPhase } from '../../../src/core/tracks/types';
+
+const BRANCH = 'main';
+
+describe('awm track remove -> fallback teardown', () => {
+    let planRoot: string;
+    let baseSha: string;
+
+    beforeEach(() => {
+        planRoot = initRepo();
+        commitFile(planRoot, '.gitignore', '.awm/\n');
+        baseSha = commitFile(planRoot, 'seed.txt', 'seed');
+        initJournal(planRoot, BRANCH);
+    });
+    afterEach(() => fs.rmSync(planRoot, { recursive: true, force: true }));
+
+    function declareCohort(cohortPhase: JournalState['cohortPhase'] = 'ACTIVE'): JournalState {
+        const state = readJournal(planRoot, BRANCH).state!;
+        state.cohortPhase = cohortPhase;
+        state.cohortBaseSha = baseSha;
+        state.tracks = ['a', 'b'].map((trackId): TrackRef => ({
+            trackId, worktreePath: path.join(planRoot, `../nope-${trackId}`),
+            branch: `awm-track/${trackId}`, ownership: [], sharedResources: [], dependsOn: [],
+            fencingToken: `fence-${trackId}`.padEnd(32, '0'), phase: 'ACTIVE' as TrackPhase,
+            readinessNonce: `ready-${trackId}`.padEnd(32, '0'),
+        }));
+        writeJournal(planRoot, BRANCH, state);
+        return readJournal(planRoot, BRANCH).state!;
+    }
+
+    function inertRuntime(): TrackRuntime {
+        const real = defaultTrackRuntime(planRoot, BRANCH);
+        return {
+            ...real,
+            addWorktree: () => { throw new Error('no external mutation expected'); },
+            initTrackJournal: () => { throw new Error('no external mutation expected'); },
+            spawnSupervisor: () => { throw new Error('no external mutation expected'); },
+            stopOwnSupervisor: () => { throw new Error('no external mutation expected'); },
+            removeOwnedWorktree: () => { throw new Error('no external mutation expected'); },
+            removeOwnedBranch: () => { throw new Error('no external mutation expected'); },
+        };
+    }
+
+    function events(): Array<Record<string, unknown>> {
+        if (!fs.existsSync(eventsPath(planRoot, BRANCH))) return [];
+        return fs.readFileSync(eventsPath(planRoot, BRANCH), 'utf8').trim().split('\n')
+            .filter(Boolean).map((line) => JSON.parse(line));
+    }
+
+    it('consume el marker antes que join y persiste fallback cohort-wide (TR-REQ-03, TR-REQ-04)', async () => {
+        const state = declareCohort();
+        state.tracks![0].joinRequested = true;
+        writeJournal(planRoot, BRANCH, state);
+        emitTrackRequest(planRoot, BRANCH, 'g1', 'track-teardown-request', 'b');
+        consumePendingRequests(planRoot, BRANCH, 'g1');
+
+        const out = await reconcileTracks(planRoot, BRANCH, readJournal(planRoot, BRANCH).state!, inertRuntime(), 2);
+        expect(out.state.cohortPhase).toBe('FALLBACK_PENDING');
+        expect(out.state.cohortFallbackReason).toBe('controller-requested:b');
+        expect(out.effectExecuted).toBe('begin-teardown');
+        expect(out.state.tracks!.map((track) => track.phase)).toEqual([
+            'TEARDOWN_INTENT', 'TEARDOWN_REQUESTED',
+        ]);
+        expect(out.state.tracks![0].joinRequested).toBe(true);
+        expect(out.state.tracks![1].teardownRequested).toBeUndefined();
+        expect(events()).toContainEqual(expect.objectContaining({
+            kind: 'track-teardown-observed', trackId: 'b',
+        }));
+    });
+
+    it('un marker sobreviviente a restart converge por el mismo reducer (TR-REQ-07)', async () => {
+        const state = declareCohort();
+        state.tracks![0].teardownRequested = true;
+        writeJournal(planRoot, BRANCH, state);
+        const out = await reconcileTracks(planRoot, BRANCH, readJournal(planRoot, BRANCH).state!, inertRuntime(), 2);
+        expect(out.state.cohortPhase).toBe('FALLBACK_PENDING');
+        expect(out.state.tracks![0].teardownRequested).toBeUndefined();
+    });
+
+    it.each(['SERIAL', 'COMPLETE'] as const)(
+        'consume remove tardío como moot en %s (TR-REQ-09)',
+        async (phase) => {
+            const state = declareCohort(phase);
+            for (const track of state.tracks!) {
+                track.phase = phase === 'SERIAL' ? 'REMOVED' : 'JOINED';
+                track.frozenHeadSha = phase === 'COMPLETE' ? baseSha : undefined;
+            }
+            state.tracks![0].teardownRequested = true;
+            writeJournal(planRoot, BRANCH, state);
+            const out = await reconcileTracks(planRoot, BRANCH, readJournal(planRoot, BRANCH).state!, inertRuntime(), 2);
+            expect(out.state.cohortPhase).toBe(phase);
+            expect(out.state.tracks![0].teardownRequested).toBeUndefined();
+            expect(events()).toContainEqual(expect.objectContaining({
+                kind: 'track-teardown-moot', trackId: 'a', phase,
+            }));
+        },
+    );
+});

@@ -942,9 +942,32 @@ export async function reconcileTracks(
     planRoot: string, branch: string, state: JournalState, runtime: TrackRuntime, maxParallel: number,
 ): Promise<ReconcileTracksResult> {
     let s = state;
+    // Tras observar un teardown, este tick debe llegar a la frontera durable de
+    // `begin-teardown` antes de volver a considerar joins. Así una cancelación
+    // durable gana ante un join concurrente sin que el reconciliador ejecute el
+    // driver directamente ni consuma una segunda intención en la misma llamada.
+    let teardownObserved = false;
     for (;;) {
         if (s.tracks === undefined || s.tracks.length < 2 || s.cohortPhase === undefined) {
             return { state: s, effectExecuted: null };
+        }
+        const pendingTeardown = (s.tracks ?? []).find((track) => track.teardownRequested === true);
+        if (pendingTeardown !== undefined) {
+            const terminal = s.cohortPhase === 'SERIAL' || s.cohortPhase === 'COMPLETE';
+            const protocolBefore = toProtocol(s, maxParallel);
+            const observed = reconcileProtocol(protocolBefore, {
+                kind: 'teardown-requested', trackId: pendingTeardown.trackId,
+            });
+            const next = applyProtocolToState(s, observed);
+            for (const track of next.tracks ?? []) {
+                if (track.trackId === pendingTeardown.trackId) track.teardownRequested = undefined;
+            }
+            s = persist(planRoot, branch, next);
+            appendEvent(planRoot, branch, terminal
+                ? { kind: 'track-teardown-moot', trackId: pendingTeardown.trackId, phase: s.cohortPhase }
+                : { kind: 'track-teardown-observed', trackId: pendingTeardown.trackId, phase: s.cohortPhase });
+            teardownObserved = true;
+            continue;
         }
         // El pedido de join del controller (`joinRequested`, marcado declarativamente al
         // consumir `track-join-request`) se convierte ACÁ en la observación que el reducer
@@ -961,7 +984,8 @@ export async function reconcileTracks(
         // Descartarlos ahí (que es lo que hacía la primera versión de este bloque) devuelve
         // el mismo modo de falla que este cambio vino a cerrar — un pedido que reporta éxito
         // y no pasa nada — y solo sobrevivía porque el controller scripteado los re-emite.
-        const pendingJoin = (s.tracks ?? []).find((t) => t.joinRequested === true && t.phase === 'ACTIVE');
+        const pendingJoin = teardownObserved ? undefined
+            : (s.tracks ?? []).find((t) => t.joinRequested === true && t.phase === 'ACTIVE');
         if (pendingJoin !== undefined) {
             const protocolBefore = toProtocol(s, maxParallel);
             const observed = reconcileProtocol(protocolBefore, { kind: 'join-requested', trackId: pendingJoin.trackId });
@@ -978,7 +1002,7 @@ export async function reconcileTracks(
         // o el relevo de un controller que re-emite) o quedó `BLOCKED`. Se limpia la marca
         // — dejarla prendida la haría reevaluar en cada tick sin progreso posible. Lo que NO
         // se limpia es el pedido de un track anterior a `ACTIVE`: ese sigue esperando.
-        const mootJoin = (s.tracks ?? []).find((t) => t.joinRequested === true
+        const mootJoin = teardownObserved ? undefined : (s.tracks ?? []).find((t) => t.joinRequested === true
             && !JOIN_PENDING_PHASES.includes(t.phase));
         if (mootJoin !== undefined) {
             const next = structuredClone(s);
