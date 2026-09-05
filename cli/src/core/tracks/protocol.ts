@@ -252,6 +252,13 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
             && out.cohortPhase !== 'FALLBACK_PENDING') {
             out.cohortPhase = 'FALLBACK_PENDING';
             out.fallbackReason = `controller-requested:${observation.trackId}`;
+            // La evidencia de QA/integración describe la ruta de finalización
+            // que acabamos de abandonar. Debe desaparecer ANTES de mover los
+            // tracks a teardown: de otro modo el invariante de integración
+            // final ve evidence viva junto a tracks no mergeados y rechaza la
+            // transición segura hacia fallback.
+            out.globalQaHeadSha = undefined;
+            out.finalIntegrationJobId = undefined;
             markTeardownRequested(out.tracks);
         }
     } else if (observation.kind === 'prepare-failed') {

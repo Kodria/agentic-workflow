@@ -227,11 +227,19 @@ export function applyProtocolToState(state: JournalState, protocol: CohortProtoc
     // `cohortBaseSha` (stale) y el segundo join de la cohorte usaría un
     // `expectedPlanHeadSha` incorrecto.
     if (protocol.planHeadSha !== undefined) next.cohortPlanHeadSha = protocol.planHeadSha;
-    // R7/C3 (Task 12): mismo criterio que `cohortPlanHeadSha` arriba — valores
-    // que solo avanzan (nunca retroceden a `undefined` una vez fijados por
-    // `reconcileProtocol`).
-    if (protocol.globalQaHeadSha !== undefined) next.globalQaHeadSha = protocol.globalQaHeadSha;
-    if (protocol.finalIntegrationJobId !== undefined) next.finalIntegrationJobId = protocol.finalIntegrationJobId;
+    // R7/C3 (Task 12): los valores finales normalmente solo avanzan, salvo
+    // que fallback abandone explícitamente esa ruta. En ese caso el reducer
+    // ya invalidó su evidencia y el mirror durable DEBE borrarla también;
+    // conservarla permitiría que un restart reconstruyera un protocolo que
+    // contradice los tracks en teardown.
+    if (protocol.cohortPhase === 'FALLBACK_PENDING') {
+        next.globalQaHeadSha = undefined;
+        next.finalIntegrationJobId = undefined;
+        next.qaFinalizeRequested = undefined;
+    } else {
+        if (protocol.globalQaHeadSha !== undefined) next.globalQaHeadSha = protocol.globalQaHeadSha;
+        if (protocol.finalIntegrationJobId !== undefined) next.finalIntegrationJobId = protocol.finalIntegrationJobId;
+    }
     if (protocol.fallbackReason !== undefined) next.cohortFallbackReason = protocol.fallbackReason;
     next.tracks = (next.tracks ?? []).map((ref) => {
         const t = protocol.tracks[ref.trackId];
@@ -942,11 +950,6 @@ export async function reconcileTracks(
     planRoot: string, branch: string, state: JournalState, runtime: TrackRuntime, maxParallel: number,
 ): Promise<ReconcileTracksResult> {
     let s = state;
-    // Tras observar un teardown, este tick debe llegar a la frontera durable de
-    // `begin-teardown` antes de volver a considerar joins. Así una cancelación
-    // durable gana ante un join concurrente sin que el reconciliador ejecute el
-    // driver directamente ni consuma una segunda intención en la misma llamada.
-    let teardownObserved = false;
     for (;;) {
         if (s.tracks === undefined || s.tracks.length < 2 || s.cohortPhase === undefined) {
             return { state: s, effectExecuted: null };
@@ -962,17 +965,24 @@ export async function reconcileTracks(
                 const next = structuredClone(s);
                 for (const track of next.tracks ?? []) if (track.trackId === pendingTeardown.trackId) track.teardownRequested = undefined;
                 s = persist(planRoot, branch, next);
-                appendEvent(planRoot, branch, { kind: 'track-teardown-moot', trackId: pendingTeardown.trackId, phase: s.cohortPhase });
-                continue;
+                appendEvent(planRoot, branch, {
+                    kind: 'track-teardown-moot', trackId: pendingTeardown.trackId, phase: pendingTeardown.phase,
+                });
+                return { state: s, effectExecuted: null };
             }
             const protocolBefore = toProtocol(s, maxParallel);
             const observed = reconcileProtocol(protocolBefore, { kind: 'teardown-requested', trackId: pendingTeardown.trackId });
             const next = applyProtocolToState(s, observed);
             for (const track of next.tracks ?? []) if (track.trackId === pendingTeardown.trackId) track.teardownRequested = undefined;
             s = persist(planRoot, branch, next);
-            appendEvent(planRoot, branch, { kind: 'track-teardown-observed', trackId: pendingTeardown.trackId, phase: s.cohortPhase });
-            teardownObserved = true;
-            continue;
+            appendEvent(planRoot, branch, {
+                kind: 'track-teardown-observed', trackId: pendingTeardown.trackId,
+                phase: s.tracks?.find((t) => t.trackId === pendingTeardown.trackId)?.phase,
+            });
+            // El marcador es una frontera durable por sí mismo. No se consume
+            // otro marcador ni se entra a begin-teardown hasta la siguiente
+            // llamada, para que un crash conserve el resto de las requests.
+            return { state: s, effectExecuted: null };
         }
         // El pedido de join del controller (`joinRequested`, marcado declarativamente al
         // consumir `track-join-request`) se convierte ACÁ en la observación que el reducer
@@ -989,8 +999,7 @@ export async function reconcileTracks(
         // Descartarlos ahí (que es lo que hacía la primera versión de este bloque) devuelve
         // el mismo modo de falla que este cambio vino a cerrar — un pedido que reporta éxito
         // y no pasa nada — y solo sobrevivía porque el controller scripteado los re-emite.
-        const pendingJoin = teardownObserved ? undefined
-            : (s.tracks ?? []).find((t) => t.joinRequested === true && t.phase === 'ACTIVE');
+        const pendingJoin = (s.tracks ?? []).find((t) => t.joinRequested === true && t.phase === 'ACTIVE');
         if (pendingJoin !== undefined) {
             const protocolBefore = toProtocol(s, maxParallel);
             const observed = reconcileProtocol(protocolBefore, { kind: 'join-requested', trackId: pendingJoin.trackId });

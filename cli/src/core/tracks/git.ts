@@ -116,12 +116,22 @@ export function ownedWorktreeExists(repo: string, worktreePath: string, branch: 
  *  worktree (contenido de filesystem que SÍ podría ser ajeno), una branch es
  *  solo un ref; nada más crea una con ese nombre exacto. */
 export function branchExists(repo: string, branch: string): boolean {
+    // `show-ref --quiet` puede devolver 1 tanto para una ref ausente como
+    // para un repositorio que ni siquiera pudo abrirse. Primero probamos que
+    // git puede identificar el repositorio; solo después status 1 significa
+    // honestamente "la branch no existe".
+    try {
+        git(repo, ['rev-parse', '--git-dir']);
+    } catch (error) {
+        throw new Error(`branchExists: repo de ${branch} indemostrable: ${(error as Error).message}`);
+    }
     try {
         git(repo, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`]);
-        return true;
-    } catch {
-        return false;
+    } catch (error) {
+        if ((error as { status?: unknown }).status === 1) return false;
+        throw new Error(`branchExists: existencia de ${branch} indemostrable: ${(error as Error).message}`);
     }
+    return true;
 }
 
 /** Task 9 (paso BRANCH_REMOVED, Task 13 endurece el guard — R4.10/C9): borra

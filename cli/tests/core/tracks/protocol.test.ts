@@ -94,6 +94,24 @@ describe('parallel-track protocol model', () => {
         expect(nextProtocolEffect(out)).toBeNull();
     });
 
+    test('remove durante FINAL_INTERLOCK invalida evidencia final antes de pedir teardown (issue #93)', () => {
+        const s = initialCohort('journal-1', ids);
+        s.cohortPhase = 'FINAL_INTERLOCK';
+        s.globalQaHeadSha = 'qa-head';
+        s.finalIntegrationJobId = 'integration-job';
+        for (const track of Object.values(s.tracks)) {
+            track.phase = 'MERGED_UNVERIFIED';
+            track.frozenHeadSha = `${track.trackId}-head`;
+        }
+
+        const out = reconcileProtocol(s, { kind: 'teardown-requested', trackId: 'cli' });
+
+        expect(out.cohortPhase).toBe('FALLBACK_PENDING');
+        expect(out.globalQaHeadSha).toBeUndefined();
+        expect(out.finalIntegrationJobId).toBeUndefined();
+        expect(Object.values(out.tracks).every((track) => track.phase === 'TEARDOWN_REQUESTED')).toBe(true);
+    });
+
     test('remove repetido no rebobina teardown ni reemplaza la causa (TR-REQ-08)', () => {
         const s = initialCohort('journal-1', ids);
         s.cohortPhase = 'FALLBACK_PENDING';

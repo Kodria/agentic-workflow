@@ -18,6 +18,8 @@ import { execFileSync, spawn } from 'child_process';
 import { initRepo, commitFile } from '../../helpers/git-fixture';
 import { reconcileTracks, defaultTrackRuntime, TrackRuntime } from '../../../src/commands/watch/tracks';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
+import { consumePendingRequests } from '../../../src/commands/watch/apply';
+import { emitTrackRequest } from '../../../src/commands/track/emit';
 import { addOwnedWorktree, removeOwnedWorktree as gitRemoveOwnedWorktree, removeOwnedBranch as gitRemoveOwnedBranch } from '../../../src/core/tracks/git';
 import { writeDescriptor } from '../../../src/core/tracks/descriptor';
 import type { JournalState, TrackRef, ProcessRef } from '../../../src/core/journal/types';
@@ -275,6 +277,35 @@ describe('reconcileTracks — crash/restart de teardown con git real (Task 13, R
         expect(fs.existsSync(lockPath)).toBe(false);
         expect(fs.existsSync(path.join(root, 'track-a'))).toBe(false);
         expect(branchListed(planRoot, 'awm-track/a')).toBe(false);
+    });
+
+    test('request bridge sobrevive crash tras el marcador y converge a SERIAL sin repetir remociones (issue #93)', async () => {
+        let s = declareCohort(planRoot, root, baseSha);
+        materializeTrackA(s);
+        s = readJournal(planRoot, BRANCH).state!;
+        s.cohortPhase = 'PREPARING';
+        s.tracks = s.tracks!.map((track) => track.trackId === 'a'
+            ? { ...track, phase: 'WORKTREE_CREATED', supervisorProcessRef: deadRef() }
+            : track);
+        writeJournal(planRoot, BRANCH, s);
+
+        emitTrackRequest(planRoot, BRANCH, 'g1', 'track-teardown-request', 'a');
+        expect(consumePendingRequests(planRoot, BRANCH, 'g1').applied).toBe(1);
+        // Crash immediately after the request marker becomes the durable
+        // protocol observation: no teardown effect has run yet.
+        s = (await reconcileTracks(planRoot, BRANCH, readJournal(planRoot, BRANCH).state!, buildRuntime(planRoot, []), 2)).state;
+        expect(trackA(s).phase).toBe('TEARDOWN_REQUESTED');
+
+        const effects: string[] = [];
+        const restarted = buildRuntime(planRoot, effects);
+        for (let i = 0; i < 20 && s.cohortPhase !== 'SERIAL'; i++) {
+            s = (await reconcileTracks(planRoot, BRANCH, s, restarted, 2)).state;
+        }
+
+        expect(s.cohortPhase).toBe('SERIAL');
+        expect(trackA(s).phase).toBe('REMOVED');
+        expect(effects.filter((effect) => effect === 'worktree-effect:a')).toHaveLength(1);
+        expect(effects.filter((effect) => effect === 'branch-effect:awm-track/a')).toHaveLength(1);
     });
 
     // R4.6/R4.10/C9: un worktree cuyo ownership es indemostrable (descriptor

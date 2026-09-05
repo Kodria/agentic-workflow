@@ -148,5 +148,14 @@ describe('git adapter', () => {
             execFileSync('git', ['branch', 'awm-track/x'], { cwd: repo });
             expect(branchExists(repo, 'awm-track/x')).toBe(true);
         });
+
+        test('branchExists falla cerrado cuando git no puede probar la ausencia', () => {
+            repo = initRepo();
+            commitFile(repo, 'a.txt', 'x');
+            const gitDir = path.join(repo, '.git');
+            fs.renameSync(gitDir, `${gitDir}.unavailable`);
+
+            expect(() => branchExists(repo, 'awm-track/nope')).toThrow(/indemostrable/);
+        });
     });
 });

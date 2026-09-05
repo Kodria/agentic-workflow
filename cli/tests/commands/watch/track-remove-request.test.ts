@@ -59,12 +59,14 @@ describe('awm track remove -> fallback teardown', () => {
         consumePendingRequests(planRoot, BRANCH, 'g1');
         const out = await reconcileTracks(planRoot, BRANCH, readJournal(planRoot, BRANCH).state!, inertRuntime(), 2);
         expect(out.state.cohortPhase).toBe('FALLBACK_PENDING');
+        // Consumir el marcador es su propia frontera durable: el teardown
+        // empieza recién en la siguiente llamada.
+        expect(out.effectExecuted).toBeNull();
         expect(out.state.cohortFallbackReason).toBe('controller-requested:b');
-        expect(out.effectExecuted).toBe('begin-teardown');
-        expect(out.state.tracks!.map((track) => track.phase)).toEqual(['TEARDOWN_INTENT', 'TEARDOWN_REQUESTED']);
-        expect(out.state.tracks![0].joinRequested).toBe(true);
-        expect(out.state.tracks![1].teardownRequested).toBeUndefined();
-        expect(events()).toContainEqual(expect.objectContaining({ kind: 'track-teardown-observed', trackId: 'b' }));
+        expect(out.state.tracks?.find((track) => track.trackId === 'b')?.teardownRequested)
+            .toBeUndefined();
+        expect(events().some((event) => event.kind === 'track-teardown-observed' && event.trackId === 'b'))
+            .toBe(true);
     });
     it('un marker sobreviviente a restart converge por el mismo reducer (TR-REQ-07)', async () => {
         const state = declareCohort();
@@ -90,5 +92,73 @@ describe('awm track remove -> fallback teardown', () => {
         const out = await reconcileTracks(planRoot, BRANCH, readJournal(planRoot, BRANCH).state!, inertRuntime(), 2);
         expect(out.effectExecuted).toBeNull(); expect(out.state.cohortPhase).toBe('BLOCKED'); expect(out.state.tracks![1].teardownRequested).toBeUndefined();
         expect(events()).toContainEqual(expect.objectContaining({ kind: 'track-teardown-moot', trackId: 'b', phase: 'BLOCKED' }));
+    });
+
+    it('consume exactamente un marcador de teardown por reconcile antes de begin-teardown (issue #93)', async () => {
+        const s = declareCohort('ACTIVE');
+        s.tracks!.forEach((track) => { track.teardownRequested = true; });
+        writeJournal(planRoot, BRANCH, s);
+
+        const first = await reconcileTracks(planRoot, BRANCH, readJournal(planRoot, BRANCH).state!, inertRuntime(), 2);
+        expect(first.effectExecuted).toBeNull();
+        expect(first.state.tracks?.find((track) => track.trackId === 'a')?.teardownRequested).toBeUndefined();
+        expect(first.state.tracks?.find((track) => track.trackId === 'b')?.teardownRequested).toBe(true);
+
+        const second = await reconcileTracks(planRoot, BRANCH, first.state, inertRuntime(), 2);
+        expect(second.effectExecuted).toBeNull();
+        expect(second.state.tracks?.every((track) => track.teardownRequested === undefined)).toBe(true);
+    });
+
+    it('una request repetida durante teardown no rebobina fases ni ejecuta trabajo destructivo (issue #93)', async () => {
+        declareCohort('ACTIVE');
+        emitTrackRequest(planRoot, BRANCH, 'g1', 'track-teardown-request', 'a');
+        consumePendingRequests(planRoot, BRANCH, 'g1');
+        const afterFirst = await reconcileTracks(planRoot, BRANCH, readJournal(planRoot, BRANCH).state!, inertRuntime(), 2);
+
+        emitTrackRequest(planRoot, BRANCH, 'g2', 'track-teardown-request', 'a');
+        consumePendingRequests(planRoot, BRANCH, 'g2');
+        const repeated = await reconcileTracks(planRoot, BRANCH, readJournal(planRoot, BRANCH).state!, inertRuntime(), 2);
+
+        expect(afterFirst.state.tracks?.find((track) => track.trackId === 'a')?.phase).toBe('TEARDOWN_REQUESTED');
+        expect(repeated.effectExecuted).toBeNull();
+        expect(repeated.state.tracks?.find((track) => track.trackId === 'a')?.phase).toBe('TEARDOWN_REQUESTED');
+        expect(repeated.state.cohortPhase).toBe('FALLBACK_PENDING');
+    });
+
+    it('request durante FINAL_INTERLOCK persiste fallback sin evidencia final stale (issue #93)', async () => {
+        const s = declareCohort('FINAL_INTERLOCK');
+        for (const track of s.tracks!) track.phase = 'MERGED_UNVERIFIED';
+        for (const track of s.tracks!) track.frozenHeadSha = `${track.trackId}-head`;
+        s.globalQaHeadSha = 'qa-head';
+        s.finalIntegrationJobId = 'integration-job';
+        s.qaFinalizeRequested = { headSha: 'qa-head', at: new Date().toISOString() };
+        writeJournal(planRoot, BRANCH, s);
+        emitTrackRequest(planRoot, BRANCH, 'g1', 'track-teardown-request', 'a');
+        consumePendingRequests(planRoot, BRANCH, 'g1');
+
+        const out = await reconcileTracks(planRoot, BRANCH, readJournal(planRoot, BRANCH).state!, inertRuntime(), 2);
+        const durable = readJournal(planRoot, BRANCH).state!;
+
+        expect(out.state.cohortPhase).toBe('FALLBACK_PENDING');
+        expect(durable.globalQaHeadSha).toBeUndefined();
+        expect(durable.finalIntegrationJobId).toBeUndefined();
+        expect(durable.qaFinalizeRequested).toBeUndefined();
+        expect(durable.tracks?.every((track) => track.phase === 'TEARDOWN_REQUESTED')).toBe(true);
+    });
+
+    it('un probe de branch indemostrable detiene teardown sin serializar (issue #93)', async () => {
+        const s = declareCohort('FALLBACK_PENDING');
+        s.tracks![0].phase = 'WORKTREE_REMOVED';
+        s.tracks![1].phase = 'REMOVED';
+        writeJournal(planRoot, BRANCH, s);
+        const gitDir = path.join(planRoot, '.git');
+        fs.renameSync(gitDir, `${gitDir}.unavailable`);
+
+        await expect(reconcileTracks(planRoot, BRANCH, s, defaultTrackRuntime(planRoot, BRANCH), 2)).rejects.toThrow(/indemostrable/);
+
+        fs.renameSync(`${gitDir}.unavailable`, gitDir);
+        const durable = readJournal(planRoot, BRANCH).state!;
+        expect(durable.cohortPhase).toBe('FALLBACK_PENDING');
+        expect(durable.tracks?.find((track) => track.trackId === 'a')?.phase).toBe('WORKTREE_REMOVED');
     });
 });
