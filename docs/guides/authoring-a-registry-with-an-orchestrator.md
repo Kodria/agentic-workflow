@@ -40,7 +40,7 @@ Declara la versión mínima de CLI que tu contenido necesita y el orquestador qu
 El bloque `orchestrator` tiene contrato cerrado:
 
 - Debe tener exactamente tres campos: `name`, `appliesWhen` y `terminatesTo`. Cualquier campo extra se diagnostica y esa declaración se descarta.
-- Los tres valores deben ser strings no vacíos de hasta 500 caracteres cada uno.
+- Los tres valores deben ser strings no vacíos de hasta 500 unidades UTF-16 cada uno, medidas por la CLI con `String.length`; por ejemplo, un emoji fuera del BMP cuenta como dos.
 - Como convención de autoría, escribí `appliesWhen` sin punto final para evitar puntuación duplicada: el renderer agrega el punto cuando compone el contexto. El parser no diagnostica un punto final.
 - `name` debe coincidir con el nombre del directorio `skills/<name>/SKILL.md`. En este ejemplo, `name: "mi-proceso"` apunta a `skills/mi-proceso/SKILL.md`. El `name` del frontmatter de `SKILL.md` no controla discovery.
 
