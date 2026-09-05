@@ -966,7 +966,7 @@ export async function reconcileTracks(
                 for (const track of next.tracks ?? []) if (track.trackId === pendingTeardown.trackId) track.teardownRequested = undefined;
                 s = persist(planRoot, branch, next);
                 appendEvent(planRoot, branch, {
-                    kind: 'track-teardown-moot', trackId: pendingTeardown.trackId, phase: pendingTeardown.phase,
+                    kind: 'track-teardown-moot', trackId: pendingTeardown.trackId, phase: s.cohortPhase,
                 });
                 return { state: s, effectExecuted: null };
             }
@@ -1016,7 +1016,7 @@ export async function reconcileTracks(
         // o el relevo de un controller que re-emite) o quedó `BLOCKED`. Se limpia la marca
         // — dejarla prendida la haría reevaluar en cada tick sin progreso posible. Lo que NO
         // se limpia es el pedido de un track anterior a `ACTIVE`: ese sigue esperando.
-        const mootJoin = teardownObserved ? undefined : (s.tracks ?? []).find((t) => t.joinRequested === true
+        const mootJoin = (s.tracks ?? []).find((t) => t.joinRequested === true
             && !JOIN_PENDING_PHASES.includes(t.phase));
         if (mootJoin !== undefined) {
             const next = structuredClone(s);
