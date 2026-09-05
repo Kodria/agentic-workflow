@@ -44,6 +44,31 @@ describe('parallel-track protocol model', () => {
             .toThrow(/SERIAL prohíbe recursos paralelos activos/);
     });
 
+    test.each([
+        {
+            name: 'observación de ownership ajeno',
+            observation: { kind: 'teardown-observation', trackId: 'cli', foreignWorktree: true } as const,
+        },
+        {
+            name: 'fallo de begin-teardown',
+            observation: {
+                kind: 'effect-failed', trackId: 'cli', effect: 'begin-teardown', detail: 'ownership indemostrable',
+            } as const,
+        },
+    ])('teardown indemostrable bloquea track y cohorte: $name (TR-REQ-05)', ({ observation }) => {
+        const s = initialCohort('journal-1', ids);
+        s.cohortPhase = 'FALLBACK_PENDING';
+        s.fallbackReason = 'controller-requested:cli';
+        s.tracks.cli.phase = 'TEARDOWN_REQUESTED';
+        s.tracks.docs.phase = 'REMOVED';
+
+        const out = reconcileProtocol(s, observation);
+
+        expect(out.tracks.cli.phase).toBe('BLOCKED');
+        expect(out.cohortPhase).toBe('BLOCKED');
+        expect(nextProtocolEffect(out)).toBeNull();
+    });
+
     test('remove cancela toda la cohorte activa y conserva DECLARED/BLOCKED (TR-REQ-03, TR-REQ-05)', () => {
         const s = initialCohort('journal-1', ['active', 'declared', 'blocked']);
         s.cohortPhase = 'ACTIVE';

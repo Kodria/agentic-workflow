@@ -281,6 +281,7 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
             if (t !== undefined) {
                 t.phase = 'BLOCKED';
                 t.blockedReason = observation.detail;
+                out.cohortPhase = 'BLOCKED';
             }
         }
         // effect-failed fuera de PREPARING/begin-teardown: sin transición definida todavía (no ejercitado por T1).
@@ -322,6 +323,7 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
         if (decision === 'block-foreign') {
             t.phase = 'BLOCKED';
             t.blockedReason = observation.foreignSupervisor ? 'identidad de supervisor ajena' : 'worktree preexistente ajeno';
+            out.cohortPhase = 'BLOCKED';
         } else if (decision === 'accept-supervisor-stopped') {
             t.phase = 'SUPERVISOR_STOPPED';
         } else if (decision === 'remove-owned-branch' && t.phase === 'SUPERVISOR_STOPPED') {
