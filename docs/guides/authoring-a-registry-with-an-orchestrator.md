@@ -28,7 +28,7 @@ Declara la versión mínima de CLI que tu contenido necesita y el orquestador qu
 
 ```json
 {
-  "minCliVersion": "8.1.5",
+  "minCliVersion": "9.2.0",
   "orchestrator": {
     "name": "mi-proceso",
     "appliesWhen": "cuando una sesión debe seguir mi proceso propio",
@@ -41,7 +41,7 @@ El bloque `orchestrator` tiene contrato cerrado:
 
 - Debe tener exactamente tres campos: `name`, `appliesWhen` y `terminatesTo`. Cualquier campo extra se diagnostica y esa declaración se descarta.
 - Los tres valores deben ser strings no vacíos de hasta 500 caracteres cada uno.
-- `appliesWhen` no debe terminar con punto: el renderer agrega el punto cuando compone el contexto.
+- Como convención de autoría, escribí `appliesWhen` sin punto final para evitar puntuación duplicada: el renderer agrega el punto cuando compone el contexto. El parser no diagnostica un punto final.
 - `name` debe coincidir con el nombre del directorio `skills/<name>/SKILL.md`. En este ejemplo, `name: "mi-proceso"` apunta a `skills/mi-proceso/SKILL.md`. El `name` del frontmatter de `SKILL.md` no controla discovery.
 
 Si el bloque `orchestrator` es inválido, AWM emite un diagnóstico y descarta solo esa declaración; no aborta la instalación del registry ni invalida sus otros contenidos.
