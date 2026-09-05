@@ -951,21 +951,26 @@ export async function reconcileTracks(
         if (s.tracks === undefined || s.tracks.length < 2 || s.cohortPhase === undefined) {
             return { state: s, effectExecuted: null };
         }
+        // La request de teardown se consume en dos pasos durables, igual que
+        // join: `apply.ts` solo deja el marcador y este reconciler traduce la
+        // intención al reducer. BLOCKED, SERIAL y COMPLETE no admiten nueva
+        // transición: limpiar únicamente el marcador preserva el estado seguro.
         const pendingTeardown = (s.tracks ?? []).find((track) => track.teardownRequested === true);
         if (pendingTeardown !== undefined) {
-            const terminal = s.cohortPhase === 'SERIAL' || s.cohortPhase === 'COMPLETE';
-            const protocolBefore = toProtocol(s, maxParallel);
-            const observed = reconcileProtocol(protocolBefore, {
-                kind: 'teardown-requested', trackId: pendingTeardown.trackId,
-            });
-            const next = applyProtocolToState(s, observed);
-            for (const track of next.tracks ?? []) {
-                if (track.trackId === pendingTeardown.trackId) track.teardownRequested = undefined;
+            const moot = ['BLOCKED', 'SERIAL', 'COMPLETE'].includes(s.cohortPhase);
+            if (moot) {
+                const next = structuredClone(s);
+                for (const track of next.tracks ?? []) if (track.trackId === pendingTeardown.trackId) track.teardownRequested = undefined;
+                s = persist(planRoot, branch, next);
+                appendEvent(planRoot, branch, { kind: 'track-teardown-moot', trackId: pendingTeardown.trackId, phase: s.cohortPhase });
+                continue;
             }
+            const protocolBefore = toProtocol(s, maxParallel);
+            const observed = reconcileProtocol(protocolBefore, { kind: 'teardown-requested', trackId: pendingTeardown.trackId });
+            const next = applyProtocolToState(s, observed);
+            for (const track of next.tracks ?? []) if (track.trackId === pendingTeardown.trackId) track.teardownRequested = undefined;
             s = persist(planRoot, branch, next);
-            appendEvent(planRoot, branch, terminal
-                ? { kind: 'track-teardown-moot', trackId: pendingTeardown.trackId, phase: s.cohortPhase }
-                : { kind: 'track-teardown-observed', trackId: pendingTeardown.trackId, phase: s.cohortPhase });
+            appendEvent(planRoot, branch, { kind: 'track-teardown-observed', trackId: pendingTeardown.trackId, phase: s.cohortPhase });
             teardownObserved = true;
             continue;
         }

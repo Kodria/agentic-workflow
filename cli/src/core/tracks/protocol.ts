@@ -248,7 +248,7 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
     if (observation.kind === 'teardown-requested') {
         const requested = out.tracks[observation.trackId];
         if (requested === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
-        if (out.cohortPhase !== 'SERIAL' && out.cohortPhase !== 'COMPLETE'
+        if (out.cohortPhase !== 'BLOCKED' && out.cohortPhase !== 'SERIAL' && out.cohortPhase !== 'COMPLETE'
             && out.cohortPhase !== 'FALLBACK_PENDING') {
             out.cohortPhase = 'FALLBACK_PENDING';
             out.fallbackReason = `controller-requested:${observation.trackId}`;

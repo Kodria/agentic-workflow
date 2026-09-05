@@ -120,6 +120,20 @@ describe('parallel-track protocol model', () => {
         },
     );
 
+    test('remove es no-op protocolar en cohorte BLOCKED y no reanuda teardown (TR-REQ-10)', () => {
+        const s = initialCohort('journal-1', ids);
+        s.cohortPhase = 'BLOCKED';
+        s.tracks.cli.phase = 'BLOCKED';
+        s.tracks.cli.blockedReason = 'ownership indemostrable';
+        s.tracks.docs.phase = 'REMOVED';
+
+        const out = reconcileProtocol(s, { kind: 'teardown-requested', trackId: 'docs' });
+
+        expect(out).toEqual(s);
+        expect(out.cohortPhase).toBe('BLOCKED');
+        expect(nextProtocolEffect(out)).toBeNull();
+    });
+
     test('remove converge a serial solo después de desmontar la cohorte (TR-REQ-06)', () => {
         let s = initialCohort('journal-1', ids);
         for (const track of Object.values(s.tracks)) track.phase = 'ACTIVE';
