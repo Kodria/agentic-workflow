@@ -105,6 +105,15 @@ jobs:
       # developer actually installs. The registry remains the immutable release
       # checked out above, never the mutable repository under test.
       - name: Install published R3 consumer
+        # This is the only CI boundary that fetches a package after the initial
+        # `npm ci`. Give transient registry reads a bounded retry budget; do
+        # not retry the acceptance test itself, whose failures are product
+        # evidence and must remain visible.
+        env:
+          NPM_CONFIG_FETCH_RETRIES: '4'
+          NPM_CONFIG_FETCH_RETRY_FACTOR: '2'
+          NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: '5000'
+          NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: '30000'
         run: npm install --prefix published-consumer --no-audit --no-fund agentic-workflow-manager@8.1.2
 
       - name: Accept published R3 consumer
