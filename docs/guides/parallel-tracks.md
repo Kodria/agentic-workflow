@@ -19,7 +19,7 @@ There is no ambiguity about what is verified and what is not:
 | Worktree isolation and declared/actual ownership | ✅ Verified | Real-git suite, including both ends of renames |
 | `join → COMPLETE` with a live supervisor and controller takeover | ✅ Verified | Certification with a supervisor and real processes (`provider-run.mjs --certify-scripted`): `COMPLETE`, two `JOINED` tracks, and **one** final integration job. Evidence: [`docs/research/r5/evidence/scripted-local.json`](../research/r5/evidence/scripted-local.json) |
 | A real LLM agent as controller | ⚠ Not verified | Optional; certified only with a deterministic controller |
-| `awm track remove` (controller-requested teardown) | ❌ **Not implemented** | The supervisor has no handler for `track-teardown-request`: the command emits the request and the supervisor visibly **rejects** it. The supported teardown is the automatic one used by serial fallback. |
+| `awm track remove` (controller-requested teardown) | ✅ Verified | Request-to-protocol tests plus the existing crash-recovery and ownership-proof teardown suites. |
 
 ## Mental model
 
@@ -76,12 +76,17 @@ The controller, with its token:
 ```bash
 awm track add <id>  --generation "$GEN"    # emits the preparation request
 awm track join <id> --generation "$GEN"    # requests integration of its track
+awm track remove <id> --generation "$GEN"  # cancels the complete cohort safely
 awm track finalize  --generation "$GEN"    # self-reports global QA for the merged HEAD
 ```
 
 Each track works in a sibling worktree (`<repo>.track-<id>`) and commits **only its assigned
 files**. No merge begins until the **entire** cohort is frozen, and the canonical command runs
 **once against the final HEAD** — not once per track.
+
+`awm track remove` is a request, not a synchronous deletion: it cancels the complete cohort.
+The supervisor removes only demonstrably owned resources. If ownership cannot be proven, the
+cohort stays `BLOCKED` and preserves the resource for operator evidence.
 
 ### Joins do not close the cohort
 

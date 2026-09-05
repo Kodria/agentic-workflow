@@ -98,6 +98,13 @@ describe('awm track — verbos mutantes son request-only (R6.1)', () => {
         expect(fs.readFileSync(statePath(repo, branch), 'utf8')).toBe(beforeState);
     });
 
+    test('remove se anuncia como cancelación request-only soportada (TR-REQ-10)', async () => {
+        const out = await runCli(repo, ['track', 'remove', '--help']);
+        expect(out.exitCode).toBe(0);
+        expect(out.out).toContain('cancela la cohorte');
+        expect(out.out).not.toContain('NO IMPLEMENTADO');
+    });
+
     // `finalize` es PLAN-scoped y sin <trackId>, así que no entra en las matrices de
     // add/join/remove — pero comparte con ellas la propiedad que define a la superficie:
     // emite una request y no toca Git ni state.json.

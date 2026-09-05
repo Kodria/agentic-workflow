@@ -227,11 +227,19 @@ export function applyProtocolToState(state: JournalState, protocol: CohortProtoc
     // `cohortBaseSha` (stale) y el segundo join de la cohorte usaría un
     // `expectedPlanHeadSha` incorrecto.
     if (protocol.planHeadSha !== undefined) next.cohortPlanHeadSha = protocol.planHeadSha;
-    // R7/C3 (Task 12): mismo criterio que `cohortPlanHeadSha` arriba — valores
-    // que solo avanzan (nunca retroceden a `undefined` una vez fijados por
-    // `reconcileProtocol`).
-    if (protocol.globalQaHeadSha !== undefined) next.globalQaHeadSha = protocol.globalQaHeadSha;
-    if (protocol.finalIntegrationJobId !== undefined) next.finalIntegrationJobId = protocol.finalIntegrationJobId;
+    // R7/C3 (Task 12): los valores finales normalmente solo avanzan, salvo
+    // que fallback abandone explícitamente esa ruta. En ese caso el reducer
+    // ya invalidó su evidencia y el mirror durable DEBE borrarla también;
+    // conservarla permitiría que un restart reconstruyera un protocolo que
+    // contradice los tracks en teardown.
+    if (protocol.cohortPhase === 'FALLBACK_PENDING') {
+        next.globalQaHeadSha = undefined;
+        next.finalIntegrationJobId = undefined;
+        next.qaFinalizeRequested = undefined;
+    } else {
+        if (protocol.globalQaHeadSha !== undefined) next.globalQaHeadSha = protocol.globalQaHeadSha;
+        if (protocol.finalIntegrationJobId !== undefined) next.finalIntegrationJobId = protocol.finalIntegrationJobId;
+    }
     if (protocol.fallbackReason !== undefined) next.cohortFallbackReason = protocol.fallbackReason;
     next.tracks = (next.tracks ?? []).map((ref) => {
         const t = protocol.tracks[ref.trackId];
@@ -944,6 +952,42 @@ export async function reconcileTracks(
     let s = state;
     for (;;) {
         if (s.tracks === undefined || s.tracks.length < 2 || s.cohortPhase === undefined) {
+            return { state: s, effectExecuted: null };
+        }
+        // La request de teardown se consume en dos pasos durables, igual que
+        // join: `apply.ts` solo deja el marcador y este reconciler traduce la
+        // intención al reducer. BLOCKED, SERIAL y COMPLETE no admiten nueva
+        // transición: limpiar únicamente el marcador preserva el estado seguro.
+        const pendingTeardown = (s.tracks ?? []).find((track) => track.teardownRequested === true);
+        if (pendingTeardown !== undefined) {
+            const moot = ['BLOCKED', 'SERIAL', 'COMPLETE'].includes(s.cohortPhase);
+            if (moot) {
+                const next = structuredClone(s);
+                for (const track of next.tracks ?? []) if (track.trackId === pendingTeardown.trackId) track.teardownRequested = undefined;
+                s = persist(planRoot, branch, next);
+                appendEvent(planRoot, branch, {
+                    kind: 'track-teardown-moot', trackId: pendingTeardown.trackId, phase: s.cohortPhase,
+                });
+                return { state: s, effectExecuted: null };
+            }
+            const protocolBefore = toProtocol(s, maxParallel);
+            const observed = reconcileProtocol(protocolBefore, { kind: 'teardown-requested', trackId: pendingTeardown.trackId });
+            const next = applyProtocolToState(s, observed);
+            for (const track of next.tracks ?? []) if (track.trackId === pendingTeardown.trackId) track.teardownRequested = undefined;
+            s = persist(planRoot, branch, next);
+            // El lock pertenece al proceso vivo que alcanzó la integración.
+            // Al abandonar FINAL_INTERLOCK debe soltarse en este mismo proceso;
+            // tras un crash el lease muerto se reclama por identidad al iniciar.
+            if (protocolBefore.cohortPhase === 'FINAL_INTERLOCK' && s.cohortPhase === 'FALLBACK_PENDING') {
+                runtime.releaseIntegrationLockIfHeld();
+            }
+            appendEvent(planRoot, branch, {
+                kind: 'track-teardown-observed', trackId: pendingTeardown.trackId,
+                phase: s.tracks?.find((t) => t.trackId === pendingTeardown.trackId)?.phase,
+            });
+            // El marcador es una frontera durable por sí mismo. No se consume
+            // otro marcador ni se entra a begin-teardown hasta la siguiente
+            // llamada, para que un crash conserve el resto de las requests.
             return { state: s, effectExecuted: null };
         }
         // El pedido de join del controller (`joinRequested`, marcado declarativamente al

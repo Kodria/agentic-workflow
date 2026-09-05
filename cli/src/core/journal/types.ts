@@ -100,6 +100,9 @@ export interface TrackRef {
      *  consumo transaccional de la request. Persistido para que el pedido sobreviva a un
      *  crash entre "request consumida" y "fase avanzada". */
     joinRequested?: boolean;
+    /** El controller pidió desmontar este track (`awm track remove`). El consumo de la
+     *  request solo persiste esta intención; la reconciliación decide sus efectos. */
+    teardownRequested?: boolean;
 }
 
 export interface NextAction {
@@ -482,6 +485,7 @@ function isWellFormedTrackRef(x: unknown): x is TrackRef {
         && (x.supervisorProcessRef === undefined || isWellFormedProcessRef(x.supervisorProcessRef))
         && (x.joinIntent === undefined || isWellFormedJoinIntent(x.joinIntent))
         && (x.teardownIntent === undefined || isWellFormedTeardownIntent(x.teardownIntent))
+        && (x.teardownRequested === undefined || typeof x.teardownRequested === 'boolean')
         && (x.joinedCommitSha === undefined || typeof x.joinedCommitSha === 'string')
         && (x.blockedReason === undefined || typeof x.blockedReason === 'string');
 }

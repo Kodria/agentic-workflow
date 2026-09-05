@@ -93,6 +93,7 @@ export type ProtocolObservation =
     | { kind: 'worktree-observed'; trackId: string; owned: boolean }
     | { kind: 'supervisor-observed'; trackId: string; identity: 'expected' | 'other' | 'absent'; readinessNonce?: string }
     | { kind: 'join-requested'; trackId: string }
+    | { kind: 'teardown-requested'; trackId: string }
     | { kind: 'freeze-observation'; trackId: string; frozenHeadSha: string }
     | { kind: 'join-observation'; trackId: string; mergeHead: string | null; planHead: string; trackIsAncestor?: boolean }
     // T13: reemplaza las observaciones gruesas `track-removed`/`teardown-

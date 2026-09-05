@@ -245,7 +245,23 @@ export function nextProtocolEffect(s: CohortProtocol): ProtocolEffect | null {
 
 export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObservation): CohortProtocol {
     const out = structuredClone(s);
-    if (observation.kind === 'prepare-failed') {
+    if (observation.kind === 'teardown-requested') {
+        const requested = out.tracks[observation.trackId];
+        if (requested === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
+        if (out.cohortPhase !== 'BLOCKED' && out.cohortPhase !== 'SERIAL' && out.cohortPhase !== 'COMPLETE'
+            && out.cohortPhase !== 'FALLBACK_PENDING') {
+            out.cohortPhase = 'FALLBACK_PENDING';
+            out.fallbackReason = `controller-requested:${observation.trackId}`;
+            // La evidencia de QA/integración describe la ruta de finalización
+            // que acabamos de abandonar. Debe desaparecer ANTES de mover los
+            // tracks a teardown: de otro modo el invariante de integración
+            // final ve evidence viva junto a tracks no mergeados y rechaza la
+            // transición segura hacia fallback.
+            out.globalQaHeadSha = undefined;
+            out.finalIntegrationJobId = undefined;
+            markTeardownRequested(out.tracks);
+        }
+    } else if (observation.kind === 'prepare-failed') {
         out.cohortPhase = 'FALLBACK_PENDING';
         out.fallbackReason = `prepare-failed:${observation.trackId}`;
         markTeardownRequested(out.tracks);
@@ -269,10 +285,10 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
             // `decideTeardown` documenta para BLOCKED: solo el operador lo
             // saca de acá.
             const t = out.tracks[observation.trackId];
-            if (t !== undefined) {
-                t.phase = 'BLOCKED';
-                t.blockedReason = observation.detail;
-            }
+            if (t === undefined) throw new Error(`track desconocido: ${observation.trackId}`);
+            t.phase = 'BLOCKED';
+            t.blockedReason = observation.detail;
+            out.cohortPhase = 'BLOCKED';
         }
         // effect-failed fuera de PREPARING/begin-teardown: sin transición definida todavía (no ejercitado por T1).
     } else if (observation.kind === 'worktree-observed') {
@@ -313,6 +329,7 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
         if (decision === 'block-foreign') {
             t.phase = 'BLOCKED';
             t.blockedReason = observation.foreignSupervisor ? 'identidad de supervisor ajena' : 'worktree preexistente ajeno';
+            out.cohortPhase = 'BLOCKED';
         } else if (decision === 'accept-supervisor-stopped') {
             t.phase = 'SUPERVISOR_STOPPED';
         } else if (decision === 'remove-owned-branch' && t.phase === 'SUPERVISOR_STOPPED') {
@@ -378,7 +395,7 @@ export function reconcileProtocol(s: CohortProtocol, observation: ProtocolObserv
 
 export function observeProtocolEffect(s: CohortProtocol, effect: ProtocolEffect, observation: ProtocolObservation): CohortProtocol {
     if (observation.kind === 'effect-failed' || observation.kind === 'prepare-failed' || observation.kind === 'join-observation'
-        || observation.kind === 'freeze-observation' || observation.kind === 'join-requested'
+        || observation.kind === 'freeze-observation' || observation.kind === 'join-requested' || observation.kind === 'teardown-requested'
         || observation.kind === 'supervisor-observed' || observation.kind === 'worktree-observed'
         || observation.kind === 'teardown-observation'
         || observation.kind === 'global-qa-pass'

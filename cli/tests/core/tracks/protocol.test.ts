@@ -44,6 +44,127 @@ describe('parallel-track protocol model', () => {
             .toThrow(/SERIAL prohíbe recursos paralelos activos/);
     });
 
+    test.each([
+        {
+            name: 'observación de ownership ajeno',
+            observation: { kind: 'teardown-observation', trackId: 'cli', foreignWorktree: true } as const,
+        },
+        {
+            name: 'fallo de begin-teardown',
+            observation: {
+                kind: 'effect-failed', trackId: 'cli', effect: 'begin-teardown', detail: 'ownership indemostrable',
+            } as const,
+        },
+    ])('teardown indemostrable bloquea track y cohorte: $name (TR-REQ-05)', ({ observation }) => {
+        const s = initialCohort('journal-1', ids);
+        s.cohortPhase = 'FALLBACK_PENDING';
+        s.fallbackReason = 'controller-requested:cli';
+        s.tracks.cli.phase = 'TEARDOWN_REQUESTED';
+        s.tracks.docs.phase = 'REMOVED';
+
+        const out = reconcileProtocol(s, observation);
+
+        expect(out.tracks.cli.phase).toBe('BLOCKED');
+        expect(out.cohortPhase).toBe('BLOCKED');
+        expect(nextProtocolEffect(out)).toBeNull();
+    });
+
+    test('fallo de begin-teardown para track inexistente falla cerrado (TR-REQ-05)', () => {
+        const s = initialCohort('journal-1', ids);
+        s.cohortPhase = 'FALLBACK_PENDING';
+
+        expect(() => reconcileProtocol(s, {
+            kind: 'effect-failed', trackId: 'missing', effect: 'begin-teardown', detail: 'ownership indemostrable',
+        })).toThrow('track desconocido: missing');
+    });
+
+    test('remove cancela toda la cohorte activa y conserva DECLARED/BLOCKED (TR-REQ-03, TR-REQ-05)', () => {
+        const s = initialCohort('journal-1', ['active', 'declared', 'blocked']);
+        s.cohortPhase = 'ACTIVE';
+        s.tracks.active.phase = 'ACTIVE';
+        s.tracks.declared.phase = 'DECLARED';
+        s.tracks.blocked.phase = 'BLOCKED';
+
+        const out = reconcileProtocol(s, { kind: 'teardown-requested', trackId: 'active' });
+        expect(out.cohortPhase).toBe('FALLBACK_PENDING');
+        expect(out.fallbackReason).toBe('controller-requested:active');
+        expect(out.tracks.active.phase).toBe('TEARDOWN_REQUESTED');
+        expect(out.tracks.declared.phase).toBe('DECLARED');
+        expect(out.tracks.blocked.phase).toBe('BLOCKED');
+        expect(nextProtocolEffect(out)).toBeNull();
+    });
+
+    test('remove durante FINAL_INTERLOCK invalida evidencia final antes de pedir teardown (issue #93)', () => {
+        const s = initialCohort('journal-1', ids);
+        s.cohortPhase = 'FINAL_INTERLOCK';
+        s.globalQaHeadSha = 'qa-head';
+        s.finalIntegrationJobId = 'integration-job';
+        for (const track of Object.values(s.tracks)) {
+            track.phase = 'MERGED_UNVERIFIED';
+            track.frozenHeadSha = `${track.trackId}-head`;
+        }
+
+        const out = reconcileProtocol(s, { kind: 'teardown-requested', trackId: 'cli' });
+
+        expect(out.cohortPhase).toBe('FALLBACK_PENDING');
+        expect(out.globalQaHeadSha).toBeUndefined();
+        expect(out.finalIntegrationJobId).toBeUndefined();
+        expect(Object.values(out.tracks).every((track) => track.phase === 'TEARDOWN_REQUESTED')).toBe(true);
+    });
+
+    test('remove repetido no rebobina teardown ni reemplaza la causa (TR-REQ-08)', () => {
+        const s = initialCohort('journal-1', ids);
+        s.cohortPhase = 'FALLBACK_PENDING';
+        s.fallbackReason = 'controller-requested:cli';
+        s.tracks.cli.phase = 'SUPERVISOR_STOPPED';
+        s.tracks.docs.phase = 'TEARDOWN_REQUESTED';
+
+        const out = reconcileProtocol(s, { kind: 'teardown-requested', trackId: 'docs' });
+        expect(out.fallbackReason).toBe('controller-requested:cli');
+        expect(out.tracks.cli.phase).toBe('SUPERVISOR_STOPPED');
+        expect(out.tracks.docs.phase).toBe('TEARDOWN_REQUESTED');
+    });
+
+    test.each(['SERIAL', 'COMPLETE'] as const)(
+        'remove es no-op protocolar en cohorte terminal %s (TR-REQ-09)',
+        (cohortPhase) => {
+            const s = initialCohort('journal-1', ids);
+            s.cohortPhase = cohortPhase;
+            for (const track of Object.values(s.tracks)) {
+                track.phase = cohortPhase === 'SERIAL' ? 'REMOVED' : 'JOINED';
+                if (cohortPhase === 'COMPLETE') track.frozenHeadSha = `${track.trackId}-head`;
+            }
+            expect(reconcileProtocol(s, { kind: 'teardown-requested', trackId: 'cli' })).toEqual(s);
+        },
+    );
+
+    test('remove es no-op protocolar en cohorte BLOCKED y no reanuda teardown (TR-REQ-10)', () => {
+        const s = initialCohort('journal-1', ids);
+        s.cohortPhase = 'BLOCKED';
+        s.tracks.cli.phase = 'BLOCKED';
+        s.tracks.cli.blockedReason = 'ownership indemostrable';
+        s.tracks.docs.phase = 'REMOVED';
+
+        const out = reconcileProtocol(s, { kind: 'teardown-requested', trackId: 'docs' });
+
+        expect(out).toEqual(s);
+        expect(out.cohortPhase).toBe('BLOCKED');
+        expect(nextProtocolEffect(out)).toBeNull();
+    });
+
+    test('remove converge a serial solo después de desmontar la cohorte (TR-REQ-06)', () => {
+        let s = initialCohort('journal-1', ids);
+        for (const track of Object.values(s.tracks)) track.phase = 'ACTIVE';
+        s.cohortPhase = 'ACTIVE';
+        s = reconcileProtocol(s, { kind: 'teardown-requested', trackId: 'cli' });
+        expect(nextProtocolEffect(s)).toEqual({ kind: 'begin-teardown', trackId: 'cli' });
+        s.tracks.cli.phase = 'REMOVED';
+        s.tracks.docs.phase = 'REMOVED';
+        expect(nextProtocolEffect(s)).toEqual({
+            kind: 'enter-serial', reason: 'controller-requested:cli',
+        });
+    });
+
     test('ningún merge empieza antes de que todos los tracks estén FROZEN (C3)', () => {
         const s = initialCohort('journal-1', ids);
         s.cohortPhase = 'JOINING';

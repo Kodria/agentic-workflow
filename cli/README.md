@@ -69,6 +69,8 @@ and one JSON argv integration command. Start or resume with `awm watch`; inspect
 `awm track status`. Track workers commit only their assigned files and request
 `awm track join`. The plan supervisor freezes and merges tracks, runs global QA once on the
 final HEAD, executes the canonical integration job once, then applies the interlock.
+`awm track remove` requests a safe cancellation of the complete cohort; only demonstrably
+owned resources are removed before returning to serial execution.
 
 Any missing declaration, overlap, global file class, unavailable worktree, or failed
 preparation degrades to serial with an event naming the cause. `BLOCKED` means ownership or
