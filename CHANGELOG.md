@@ -1,3 +1,18 @@
+## v9.7.0 - 2026-09-05
+
+### Features
+- **track:** reconcile requested cohort teardown
+- **track:** cancel cohort on teardown request
+- **track:** persist teardown request intent
+
+### Fixes
+- **tracks:** release integration lock on cancellation
+- **tracks:** preserve cohort moot event phase
+- harden track teardown reconciliation
+- **tracks:** keep blocked teardown requests moot
+- **cli:** reject unknown teardown failure tracks
+- **track:** block cohort on teardown failure
+
 ## v9.6.1 - 2026-09-05
 
 ### Fixes
