@@ -180,7 +180,7 @@ _Requirements: TR-REQ-03, TR-REQ-05, TR-REQ-06, TR-REQ-08, TR-REQ-09_
 
 **Skills:** test-driven-development
 
-- [ ] **Step 1: Add RED tests for cancellation, idempotence, terminal states, and blocking**
+- [x] **Step 1: Add RED tests for cancellation, idempotence, terminal states, and blocking**
 
 Add the following cases to `parallel-track protocol model`:
 
@@ -241,7 +241,7 @@ test('remove converge a serial solo después de desmontar la cohorte (TR-REQ-06)
 });
 ```
 
-- [ ] **Step 2: Run the protocol suite and confirm RED**
+- [x] **Step 2: Run the protocol suite and confirm RED**
 
 Run:
 
@@ -252,7 +252,7 @@ npx jest tests/core/tracks/protocol.test.ts --runInBand
 
 Expected: TypeScript/Jest fails because `teardown-requested` is not a member of `ProtocolObservation`.
 
-- [ ] **Step 3: Add the protocol observation and reducer branch**
+- [x] **Step 3: Add the protocol observation and reducer branch**
 
 Add this union member beside `join-requested`:
 
@@ -277,7 +277,7 @@ if (observation.kind === 'teardown-requested') {
 
 Do not call `markTeardownRequested` when already in `FALLBACK_PENDING`: doing so would rewind `TEARDOWN_INTENT`, `SUPERVISOR_STOPPED`, or later states and violate TR-REQ-08.
 
-- [ ] **Step 4: Run the protocol suite and confirm GREEN**
+- [x] **Step 4: Run the protocol suite and confirm GREEN**
 
 Run:
 
@@ -288,7 +288,7 @@ npx jest tests/core/tracks/protocol.test.ts --runInBand
 
 Expected: the suite passes, including the existing exhaustive state exploration and the four new cancellation cases.
 
-- [ ] **Step 5: Commit the protocol transition**
+- [x] **Step 5: Commit the protocol transition**
 
 ```bash
 git add cli/src/core/tracks/types.ts cli/src/core/tracks/protocol.ts cli/tests/core/tracks/protocol.test.ts
