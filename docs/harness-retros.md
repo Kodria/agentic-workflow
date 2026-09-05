@@ -1,5 +1,17 @@
 # Harness Retros
 
+## 2026-09-05 — Issue #111: contrato del orquestador en la guía de authoring
+
+- **Class:** process / structural documentation
+- **Occurrences (ledger count):** 5 findings válidos; el reporte de recurrencia agrupó un clúster convergente de 3 verificaciones de documentación contra el contrato real.
+- **Hallazgo raíz:** la guía se escribió inicialmente con una versión mínima de CLI incompatible con el comando documentado, presentó una convención editorial como validación del parser y no precisó que `String.length` cuenta unidades UTF-16. Todos fueron corregidos y revisados nuevamente.
+- **Rule:** se reutiliza `AGENTS.md` → `verify-cmd-source-before-documenting`; no se agrega una regla duplicada ni se amplía el alcance de esta issue documental.
+- **Sensor:** ninguno mecánico específico para drift documental; `awm sensors run` terminó en `overall: pass` (lint/typecheck/depcheck, 0 hallazgos nuevos). `awm sensors coverage --json` fue `inconclusive`/`partial` porque varios detectores no aplican o faltan en este proyecto.
+- **Wins:** las revisiones independientes y la ejecución contra el CLI detectaron y cerraron las divergencias antes del PR; no se duplica en `AGENTS.md`.
+- **Recomendaciones (sin aplicar):** evaluar un contrato estructural futuro para ejemplos JSON de guías; requiere alcance de mantenimiento separado y no pertenece a #111.
+- **Descartes (modo desatendido):** `guide-min-cli-version`, `guide-applies-when`, `plan-punctuation-validation-drift`, `orchestrator-length-counts-utf16` y `docs-units-match-cli-string-length` — todos corregidos en la rama; no queda una regla nueva autorizada que aplicar.
+- **Journal:** `.awm/journal/` no está inicializado; se omite `awm evidence capture` según el camino no journal-first y se archiva el ledger activo directamente.
+
 ## 2026-09-04 — Issue #110: resolución de skills de orquestador
 
 - **Hallazgos:** la resolución semántica inicial expuso casos de identidad saneada, diagnósticos de una línea y seguridad de lectura de `SKILL.md` (archivo, descriptor y directorios padre). Cada caso quedó cubierto por regresiones unitarias y E2E, incluida una sustitución real de directorio padre.
