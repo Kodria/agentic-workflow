@@ -14,7 +14,12 @@ const BRANCH = 'main';
 describe('awm track remove -> fallback teardown', () => {
     let planRoot: string;
     let baseSha: string;
-    beforeEach(() => { planRoot = initRepo(); commitFile(planRoot, '.gitignore', '.awm/\n'); baseSha = commitFile(planRoot, 'seed.txt', 'seed'); initJournal(planRoot, BRANCH); });
+    beforeEach(() => {
+        planRoot = initRepo();
+        commitFile(planRoot, '.gitignore', '.awm/\n');
+        baseSha = commitFile(planRoot, 'seed.txt', 'seed');
+        initJournal(planRoot, BRANCH);
+    });
     afterEach(() => fs.rmSync(planRoot, { recursive: true, force: true }));
 
     function declareCohort(cohortPhase: JournalState['cohortPhase'] = 'ACTIVE'): JournalState {
@@ -47,8 +52,11 @@ describe('awm track remove -> fallback teardown', () => {
     }
 
     it('consume el marker antes que join y persiste fallback cohort-wide (TR-REQ-03, TR-REQ-04)', async () => {
-        const state = declareCohort(); state.tracks![0].joinRequested = true; writeJournal(planRoot, BRANCH, state);
-        emitTrackRequest(planRoot, BRANCH, 'g1', 'track-teardown-request', 'b'); consumePendingRequests(planRoot, BRANCH, 'g1');
+        const state = declareCohort();
+        state.tracks![0].joinRequested = true;
+        writeJournal(planRoot, BRANCH, state);
+        emitTrackRequest(planRoot, BRANCH, 'g1', 'track-teardown-request', 'b');
+        consumePendingRequests(planRoot, BRANCH, 'g1');
         const out = await reconcileTracks(planRoot, BRANCH, readJournal(planRoot, BRANCH).state!, inertRuntime(), 2);
         expect(out.state.cohortPhase).toBe('FALLBACK_PENDING');
         expect(out.state.cohortFallbackReason).toBe('controller-requested:b');
@@ -59,7 +67,9 @@ describe('awm track remove -> fallback teardown', () => {
         expect(events()).toContainEqual(expect.objectContaining({ kind: 'track-teardown-observed', trackId: 'b' }));
     });
     it('un marker sobreviviente a restart converge por el mismo reducer (TR-REQ-07)', async () => {
-        const state = declareCohort(); state.tracks![0].teardownRequested = true; writeJournal(planRoot, BRANCH, state);
+        const state = declareCohort();
+        state.tracks![0].teardownRequested = true;
+        writeJournal(planRoot, BRANCH, state);
         const out = await reconcileTracks(planRoot, BRANCH, readJournal(planRoot, BRANCH).state!, inertRuntime(), 2);
         expect(out.state.cohortPhase).toBe('FALLBACK_PENDING'); expect(out.state.tracks![0].teardownRequested).toBeUndefined();
     });
@@ -72,7 +82,11 @@ describe('awm track remove -> fallback teardown', () => {
         expect(events()).toContainEqual(expect.objectContaining({ kind: 'track-teardown-moot', trackId: 'a', phase }));
     });
     it('una request en cohorte BLOCKED es moot y no reabre fallback', async () => {
-        const state = declareCohort('BLOCKED'); state.tracks![0].phase = 'BLOCKED'; state.tracks![1].phase = 'REMOVED'; state.tracks![1].teardownRequested = true; writeJournal(planRoot, BRANCH, state);
+        const state = declareCohort('BLOCKED');
+        state.tracks![0].phase = 'BLOCKED';
+        state.tracks![1].phase = 'REMOVED';
+        state.tracks![1].teardownRequested = true;
+        writeJournal(planRoot, BRANCH, state);
         const out = await reconcileTracks(planRoot, BRANCH, readJournal(planRoot, BRANCH).state!, inertRuntime(), 2);
         expect(out.effectExecuted).toBeNull(); expect(out.state.cohortPhase).toBe('BLOCKED'); expect(out.state.tracks![1].teardownRequested).toBeUndefined();
         expect(events()).toContainEqual(expect.objectContaining({ kind: 'track-teardown-moot', trackId: 'b', phase: 'BLOCKED' }));
