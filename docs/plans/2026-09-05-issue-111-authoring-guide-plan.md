@@ -30,7 +30,7 @@
 ## Task 1: Document the declaration contract and verify composition
 
 - [x] Replace the minimal `awm-registry.json` example with the complete three-field `orchestrator` object.
-- [x] State the exact validation constraints: three fields only, non-empty strings, maximum 500 characters, and no trailing period in `appliesWhen`.
+- [x] State the exact parser-validated constraints: three fields only, non-empty strings, and maximum 500 characters; separately document the authoring convention to omit a final period in `appliesWhen` so the renderer does not duplicate punctuation.
 - [x] Explain that `orchestrator.name` must match the `skills/<name>/SKILL.md` directory name; frontmatter `name` does not control discovery.
 - [x] Add `awm context orchestrators --verify mi-proceso` to the local validation flow and explain its exit behavior.
 - [x] Run `git diff --check`, validate the JSON example, build the CLI, and run the targeted context-orchestrator integration test.
