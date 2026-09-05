@@ -40,7 +40,7 @@ _Requirements: TR-REQ-01, TR-REQ-02, TR-REQ-07_
 
 **Skills:** test-driven-development
 
-- [ ] **Step 1: Add RED tests for the journal shape**
+- [x] **Step 1: Add RED tests for the journal shape**
 
 Extend the `TrackRef` validation test with a valid boolean and an invalid non-boolean value:
 
@@ -58,7 +58,7 @@ test('TrackRef valida teardownRequested como boolean opcional (TR-REQ-01, TR-REQ
 });
 ```
 
-- [ ] **Step 2: Add RED request-consumer tests**
+- [x] **Step 2: Add RED request-consumer tests**
 
 Replace the test that expects every `track-teardown-request` to be rejected with these focused cases. Reuse the local `TrackRef` construction style already used by the join tests.
 
@@ -103,7 +103,7 @@ test.each([
 });
 ```
 
-- [ ] **Step 3: Run the focused tests and confirm RED**
+- [x] **Step 3: Run the focused tests and confirm RED**
 
 Run:
 
@@ -114,7 +114,7 @@ npx jest tests/core/journal/types.test.ts tests/commands/watch/apply.test.ts --r
 
 Expected: the shape test accepts the invalid string because the guard lacks the field, and the valid request test reports `rejectedInvalid: 1` because no handler exists.
 
-- [ ] **Step 4: Add the durable field and runtime validation**
+- [x] **Step 4: Add the durable field and runtime validation**
 
 Add this property beside `joinRequested` in `TrackRef`:
 
@@ -131,7 +131,7 @@ Extend `isWellFormedTrackRef` with:
 && (x.teardownRequested === undefined || typeof x.teardownRequested === 'boolean')
 ```
 
-- [ ] **Step 5: Implement the request handler**
+- [x] **Step 5: Implement the request handler**
 
 Add this branch immediately after `track-join-request` in `applyRequestToState`:
 
@@ -151,7 +151,7 @@ if (env.kind === 'track-teardown-request') {
 }
 ```
 
-- [ ] **Step 6: Run the focused tests and confirm GREEN**
+- [x] **Step 6: Run the focused tests and confirm GREEN**
 
 Run:
 
@@ -162,7 +162,7 @@ npx jest tests/core/journal/types.test.ts tests/commands/watch/apply.test.ts --r
 
 Expected: both suites pass; the request is applied declaratively and invalid inputs remain visibly rejected.
 
-- [ ] **Step 7: Commit the durable request bridge**
+- [x] **Step 7: Commit the durable request bridge**
 
 ```bash
 git add cli/src/core/journal/types.ts cli/src/commands/watch/apply.ts cli/tests/core/journal/types.test.ts cli/tests/commands/watch/apply.test.ts
