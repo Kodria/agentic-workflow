@@ -101,7 +101,7 @@ describe('aplicacion transaccional de requests', () => {
     });
 
     test('register-entity CREA task con VerificationPlan y ReviewObligations; cycle-plan y dispatch (R1.4/R1.4b)', () => {  // verifies R1.4b
-        emitRequest(repo, 'rama', {
+        const request = emitRequest(repo, 'rama', {
             kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'e1',
             payload: {
                 entity: 'task', taskId: 'T1', title: 'implementar',
@@ -525,20 +525,44 @@ describe('aplicacion transaccional de requests', () => {
         expect(fs.existsSync(`${r.file}.rejected`)).toBe(true);
     });
 
-    test('un kind SIN handler falla cerrado: rechazo visible, no un `applied` que borra el archivo', () => {
-        // `track-teardown-request` es un kind real, emitido por `awm track remove`, que hoy
-        // no tiene handler en el supervisor. Antes de este cambio se contaba como aplicado y
-        // desaparecía sin dejar rastro; ahora queda registrado como problema y el archivo se
-        // conserva con sufijo `.rejected`, que es lo que permite darse cuenta.
-        const r = emitRequest(repo, 'rama', {
-            kind: 'track-teardown-request', generationToken: 'g1', idempotencyKey: 'teardown-1',
+    test('track-teardown-request persiste intención sin mover fase ni cohorte', () => {
+        const s0 = readJournal(repo, 'rama').state!;
+        s0.tracks = [{ ...trackRef('alpha'), phase: 'ACTIVE' }];
+        s0.cohortPhase = 'JOINING';
+        writeJournal(repo, 'rama', s0);
+
+        const request = emitRequest(repo, 'rama', {
+            kind: 'track-teardown-request', generationToken: 'g1', idempotencyKey: 'teardown-alpha',
             payload: { trackId: 'alpha' },
+        });
+        expect(consumePendingRequests(repo, 'rama', 'g1').applied).toBe(1);
+        const state = readJournal(repo, 'rama').state!;
+        expect(state.tracks![0].teardownRequested).toBe(true);
+        expect(state.tracks![0].phase).toBe('ACTIVE');
+        expect(state.cohortPhase).toBe('JOINING');
+        expect(state.appliedRequests[request.requestId]).toMatchObject({ outcome: 'applied', resultRef: 'alpha' });
+    });
+
+    test.each([
+        ['vacio', { trackId: '' }],
+        ['malformado', { trackId: 42 }],
+        ['desconocido', { trackId: 'no-existe' }],
+    ])('track-teardown-request %s se rechaza visiblemente sin mutar el track', (_case, payload) => {
+        const s0 = readJournal(repo, 'rama').state!;
+        s0.tracks = [{ ...trackRef('alpha'), phase: 'ACTIVE' }];
+        s0.cohortPhase = 'JOINING';
+        writeJournal(repo, 'rama', s0);
+        const r = emitRequest(repo, 'rama', {
+            kind: 'track-teardown-request', generationToken: 'g1', idempotencyKey: `teardown-${_case}`,
+            payload,
         });
         const out = consumePendingRequests(repo, 'rama', 'g1');
         expect(out.applied).toBe(0);
         expect(out.rejectedInvalid).toBe(1);
         expect(fs.existsSync(`${r.file}.rejected`)).toBe(true);
-        expect(readJournal(repo, 'rama').state!.requestProblems.some((p) => p.kind === 'rejected')).toBe(true);
+        const state = readJournal(repo, 'rama').state!;
+        expect(state.tracks).toEqual([{ ...trackRef('alpha'), phase: 'ACTIVE' }]);
+        expect(state.cohortPhase).toBe('JOINING');
     });
 
     test('track-finalize-request persiste el autoreporte del controller (qaFinalizeRequested) — puramente declarativo (R7.2)', () => {

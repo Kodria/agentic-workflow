@@ -163,6 +163,18 @@ describe('journal types', () => {
         expect(isWellFormedState(state)).toBe(false);
     });
 
+    test('TrackRef acepta teardownRequested booleano y rechaza otro runtime shape', () => {
+        const state = emptyState('main');
+        state.tracks = [{
+            trackId: 'cli', worktreePath: '/tmp/wt', branch: 'awm-track/cli', ownership: ['cli/'],
+            sharedResources: [], dependsOn: [], fencingToken: 'f'.repeat(32), phase: 'ACTIVE',
+            readinessNonce: 'r'.repeat(32), teardownRequested: true,
+        }];
+        expect(isWellFormedState(state)).toBe(true);
+        (state.tracks![0] as unknown as Record<string, unknown>).teardownRequested = 'true';
+        expect(isWellFormedState(state)).toBe(false);
+    });
+
     test('trackContext, cohortPhase y trackIntegration validan shape cuando presentes (R9.1, R9.3)', () => {
         const state = emptyState('main');
         state.trackContext = { trackId: 'cli', taskIds: ['t1'], planDigest: 'd', baseSha: 'abc', planJournalId: 'j-plan' };

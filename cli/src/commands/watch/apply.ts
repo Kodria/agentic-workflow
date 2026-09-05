@@ -241,6 +241,16 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
         applyOutcome(s, { ...base, outcome: 'applied', resultRef: trackId });
         return;
     }
+    if (env.kind === 'track-teardown-request') {
+        const p = env.payload;
+        if (typeof p.trackId !== 'string' || p.trackId.length === 0) throw new Error('track-teardown-request requiere trackId');
+        const trackId = p.trackId;
+        const ref = s.tracks?.find((t) => t.trackId === trackId);
+        if (ref === undefined) throw new Error(`track-teardown-request: track desconocido: ${trackId}`);
+        ref.teardownRequested = true;
+        applyOutcome(s, { ...base, outcome: 'applied', resultRef: trackId });
+        return;
+    }
     if (env.kind === 'track-freeze-request') {
         // R5.2/R6.3 (Task 10): request administrativa CROSS-JOURNAL — el
         // supervisor del PLAN la emite directamente al `requestsDir` de ESTE
