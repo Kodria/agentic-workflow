@@ -45,6 +45,65 @@ export function readArtifactDescription(filePath: string): string {
     }
 }
 
+function inspectSkillDirectory(parent: string, expected?: fs.BigIntStats): fs.BigIntStats {
+    const stat = fs.lstatSync(parent, { bigint: true });
+    if (stat.isSymbolicLink()) throw new Error(`${parent}: must not be a symbolic link`);
+    if (!stat.isDirectory()) throw new Error(`${parent}: must be a directory`);
+    if (typeof stat.dev !== 'bigint' || typeof stat.ino !== 'bigint' || stat.dev < 0n || stat.ino <= 0n) {
+        throw new Error(`${parent}: directory identity is unobservable`);
+    }
+    if (expected && (stat.dev !== expected.dev || stat.ino !== expected.ino)) {
+        throw new Error(`${parent}: directory identity changed after inspection`);
+    }
+    return stat;
+}
+
+/** CTX-CONSTITUTION-052: bind the inspected leaf to its observable parent chain. */
+function readSkillDescription(file: string): string | null {
+    const absolute = path.resolve(file);
+    const parents: string[] = [];
+    for (let parent = path.dirname(absolute); ; parent = path.dirname(parent)) {
+        parents.unshift(parent);
+        if (parent === path.dirname(parent)) break;
+    }
+    const inspectedParents = parents.map(parent => ({ path: parent, stat: inspectSkillDirectory(parent) }));
+    const validateParents = (): void => {
+        for (const parent of inspectedParents) inspectSkillDirectory(parent.path, parent.stat);
+    };
+    let inspected: fs.BigIntStats;
+    try {
+        inspected = fs.lstatSync(file, { bigint: true });
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
+        throw error;
+    }
+    // A parent swapped before leaf lstat must not establish a new trusted identity.
+    validateParents();
+    if (inspected.isSymbolicLink()) throw new Error('must not be a symbolic link');
+    if (!inspected.isFile()) throw new Error('must be a regular file');
+    if (typeof inspected.dev !== 'bigint' || typeof inspected.ino !== 'bigint'
+        || typeof inspected.size !== 'bigint' || inspected.dev < 0n
+        || inspected.ino <= 0n || inspected.size < 0n) {
+        throw new Error('file identity or size is unobservable');
+    }
+    const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0);
+    const fd = fs.openSync(file, flags);
+    try {
+        const opened = fs.fstatSync(fd, { bigint: true });
+        if (!opened.isFile()) throw new Error('must be a regular file');
+        if (opened.dev !== inspected.dev || opened.ino !== inspected.ino || opened.size !== inspected.size) {
+            throw new Error('file identity or size changed after inspection');
+        }
+        // Reject substitutions observable after open, while retaining descriptor authority.
+        validateParents();
+        const raw = fs.readFileSync(fd, 'utf-8');
+        const frontmatter = matchFrontmatterBlock(raw);
+        return frontmatter === null ? '' : readFrontmatterDescription(frontmatter);
+    } finally {
+        fs.closeSync(fd);
+    }
+}
+
 function collisionError(kind: string, name: string, first: string, second: string): Error {
     return new Error(
         `Artifact name collision: ${kind} "${name}" exists in both ${first} and ${second}. ` +
@@ -81,7 +140,7 @@ function mergeEntry(
 
 /**
  * Scans skills directories across all provided content roots and returns all valid skills.
- * A valid skill is a directory that contains a SKILL.md file.
+ * A valid skill is a directory that contains a regular, non-symlink SKILL.md file.
  * Throws on name collision across roots unless the later root declares the name in its awm-registry.json overrides.
  */
 export function discoverSkills(roots: string[] = contentRoots()): SkillArtifact[] {
@@ -93,11 +152,18 @@ export function discoverSkills(roots: string[] = contentRoots()): SkillArtifact[
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
             if (!entry.isDirectory()) continue;
             const skillPath = path.join(dir, entry.name);
-            if (!fs.existsSync(path.join(skillPath, 'SKILL.md'))) continue;
+            const skillFile = path.join(skillPath, 'SKILL.md');
+            let description: string | null;
+            try {
+                description = readSkillDescription(skillFile);
+                if (description === null) continue;
+            } catch (e) {
+                throw new Error(`${skillFile}: cannot read (${e instanceof Error ? e.message : String(e)})`);
+            }
             mergeEntry('skill', byName, {
                 name: entry.name,
                 path: skillPath,
-                description: readArtifactDescription(path.join(skillPath, 'SKILL.md')),
+                description,
             }, overrides);
         }
     }
@@ -153,4 +219,3 @@ export function discoverAgents(roots: string[] = contentRoots()): AgentArtifact[
     }
     return Array.from(byName.values());
 }
-

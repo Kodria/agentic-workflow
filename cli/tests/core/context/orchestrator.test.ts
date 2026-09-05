@@ -280,6 +280,8 @@ describe('InjectionOrchestrator (declared orchestrators from an installed regist
             path.join(registryRoot, 'skills/using-awm/SKILL.md'),
             '---\nversion: "1.0.0"\n---\nBODY',
         );
+        fs.mkdirSync(path.join(registryRoot, 'skills/mi-proceso'), { recursive: true });
+        fs.writeFileSync(path.join(registryRoot, 'skills/mi-proceso/SKILL.md'), '---\nname: mi-proceso\n---\n');
         fs.writeFileSync(
             path.join(registryRoot, 'awm-registry.json'),
             JSON.stringify({

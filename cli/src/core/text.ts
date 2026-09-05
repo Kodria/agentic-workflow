@@ -13,6 +13,13 @@ export function stripControlChars(text: string): string {
     return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 }
 
+/** Keeps an untrusted diagnostic field on one terminal line, without changing
+ * the whitespace policy for multiline public text or composed markdown. */
+export function sanitizeDiagnosticText(text: string): string {
+    // eslint-disable-next-line no-control-regex -- remove all C0/C1 controls, including terminal escape bytes
+    return text.replace(/\r\n|[\r\n\t\u2028\u2029]/g, ' ').replace(/[\x00-\x1f\x7f-\x9f]/g, '');
+}
+
 /**
  * Neutraliza marcado markdown (colapsa `\r?\n` a un espacio y quita
  * `` ` * _ # < > ``) de contenido no confiable antes de interpolarlo en un

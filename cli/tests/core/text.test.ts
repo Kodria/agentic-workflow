@@ -1,4 +1,15 @@
-import { stripControlChars, sanitizeDeclaredField } from '../../src/core/text';
+import { stripControlChars, sanitizeDeclaredField, sanitizeDiagnosticText } from '../../src/core/text';
+
+describe('sanitizeDiagnosticText', () => {
+    it.each([
+        ['a\r\nb\rc\nd\te', 'a b c d e'],
+        ['a\x00\x07\x1b[31m\x7f\x85\x9bz', 'a[31mz'],
+        ['a\u2028b\u2029c', 'a b c'],
+        ['plain *markdown* — café', 'plain *markdown* — café'],
+    ])('sanitizes a single diagnostic field: %j', (input, expected) => {
+        expect(sanitizeDiagnosticText(input)).toBe(expected);
+    });
+});
 
 describe('stripControlChars', () => {
     it('elimina ESC y demas bytes de control C0', () => {                        // verifies R5.4

@@ -12,18 +12,29 @@ const WORKFLOWS_ROOT = CONTENT_ROOT;
 // For backward-compat with mock expectations that check SKILLS_DIR-style paths:
 const SKILLS_DIR = path.join(CONTENT_ROOT, 'skills');
 const WORKFLOWS_DIR = path.join(CONTENT_ROOT, 'workflows');
+const directoryStat = { dev: 1n, ino: 3n, isDirectory: () => true, isSymbolicLink: () => false };
+const skillStat = { dev: 1n, ino: 2n, size: 0n, isFile: () => true, isSymbolicLink: () => false };
 
 describe('Artifact Discovery', () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        (fs.lstatSync as jest.Mock).mockImplementation(() => {
+        (fs.lstatSync as jest.Mock).mockImplementation((p: string) => {
+            if (!p.endsWith('.md') && !p.endsWith('.json')) return directoryStat;
             const error = Object.assign(new Error('missing'), { code: 'ENOENT' });
             throw error;
         });
+        (fs.openSync as jest.Mock).mockReturnValue(42);
+        (fs.fstatSync as jest.Mock).mockReturnValue(skillStat);
+        (fs.readFileSync as jest.Mock).mockReturnValue('');
     });
 
     describe('discoverSkills', () => {
         it('should return a list of skill directories that contain a SKILL.md', () => {
+            (fs.lstatSync as jest.Mock).mockImplementation((p: string) => {
+                if (p.endsWith('SKILL.md')) return skillStat;
+                if (!p.endsWith('.json')) return directoryStat;
+                throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+            });
             (fs.existsSync as jest.Mock).mockImplementation((p: string) => {
                 if (p === SKILLS_DIR) return true;
                 if (p.endsWith('SKILL.md')) return true;
@@ -49,6 +60,19 @@ describe('Artifact Discovery', () => {
             const skills = discoverSkills([SKILLS_ROOT]);
 
             expect(skills).toEqual([]);
+        });
+
+        it.each(['fifo', 'symlink'])('rejects a %s SKILL.md before attempting any read', (kind) => {
+            (fs.existsSync as jest.Mock).mockReturnValue(true);
+            (fs.readdirSync as jest.Mock).mockReturnValue([{ name: 'unsafe', isDirectory: () => true }]);
+            (fs.lstatSync as jest.Mock).mockImplementation((p: string) => {
+                if (p.endsWith('SKILL.md')) return { isFile: () => false, isSymbolicLink: () => kind === 'symlink' };
+                if (!p.endsWith('.json')) return directoryStat;
+                throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+            });
+
+            expect(() => discoverSkills([SKILLS_ROOT])).toThrow(/regular file|symbolic link/);
+            expect(fs.readFileSync).not.toHaveBeenCalled();
         });
 
         it('should skip skill directories without a SKILL.md', () => {

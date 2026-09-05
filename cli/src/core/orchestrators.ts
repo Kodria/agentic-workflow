@@ -8,8 +8,9 @@
 // entre al framework (R1.3, R5.3).
 import fs from 'fs';
 import path from 'path';
-import { REGISTRY_MANIFEST_NAME, assertRegularRegistryFile, listRegistries } from './registries';
-import { sanitizeDeclaredField, stripControlChars } from './text';
+import { REGISTRY_MANIFEST_NAME, assertRegularRegistryFile, contentRoots, listRegistries } from './registries';
+import { discoverSkills } from './discovery';
+import { sanitizeDeclaredField, sanitizeDiagnosticText, stripControlChars } from './text';
 
 export interface DeclaredOrchestrator {
     name: string;
@@ -30,6 +31,26 @@ const ALLOWED_FIELDS = ['name', 'appliesWhen', 'terminatesTo'] as const;
 // unbounded string here would let a crafted registry bloat/DoS that context.
 const MAX_FIELD_LENGTH = 500;
 
+function discoverDeclaredSkillNames(): { names: Set<string>; diagnostics: string[] } {
+    let names = new Set<string>();
+    const diagnostics: string[] = [];
+    const acceptedRoots: string[] = [];
+
+    for (const root of contentRoots()) {
+        try {
+            // Admit the entire root only after global collision/override resolution succeeds.
+            const skills = discoverSkills([...acceptedRoots, root]);
+            names = new Set(skills.map((skill) => skill.name));
+            acceptedRoots.push(root);
+        } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            diagnostics.push(`${sanitizeDiagnosticText(root)}: orchestrator skill discovery unavailable (${sanitizeDiagnosticText(message)})`);
+        }
+    }
+
+    return { names, diagnostics };
+}
+
 export function readDeclaredOrchestrators(root: string): DeclaredOrchestratorsResult {
     const file = path.join(root, REGISTRY_MANIFEST_NAME);
 
@@ -41,7 +62,7 @@ export function readDeclaredOrchestrators(root: string): DeclaredOrchestratorsRe
     try {
         exists = assertRegularRegistryFile(file);
     } catch (e) {
-        return { orchestrators: [], diagnostics: [`${file}: ${e instanceof Error ? e.message : String(e)}`] };
+        return { orchestrators: [], diagnostics: [sanitizeDiagnosticText(`${file}: ${e instanceof Error ? e.message : String(e)}`)] };
     }
     if (!exists) return { orchestrators: [], diagnostics: [] };
 
@@ -49,21 +70,21 @@ export function readDeclaredOrchestrators(root: string): DeclaredOrchestratorsRe
     try {
         contents = fs.readFileSync(file, 'utf-8');
     } catch (e) {
-        return { orchestrators: [], diagnostics: [`${file}: cannot read manifest (${e instanceof Error ? e.message : String(e)})`] };
+        return { orchestrators: [], diagnostics: [sanitizeDiagnosticText(`${file}: cannot read manifest (${e instanceof Error ? e.message : String(e)})`)] };
     }
 
     let raw: unknown;
     try {
         raw = JSON.parse(contents);
     } catch (e) {
-        return { orchestrators: [], diagnostics: [`${file}: manifest is not valid JSON (${e instanceof Error ? e.message : String(e)})`] };
+        return { orchestrators: [], diagnostics: [sanitizeDiagnosticText(`${file}: manifest is not valid JSON (${e instanceof Error ? e.message : String(e)})`)] };
     }
 
     const decl = (raw as Record<string, unknown>)?.orchestrator;
     if (decl === undefined) return { orchestrators: [], diagnostics: [] };
 
     if (typeof decl !== 'object' || decl === null || Array.isArray(decl)) {
-        return { orchestrators: [], diagnostics: [`${file}: "orchestrator" must be an object`] };
+        return { orchestrators: [], diagnostics: [sanitizeDiagnosticText(`${file}: "orchestrator" must be an object`)] };
     }
 
     const problems: string[] = [];
@@ -71,9 +92,8 @@ export function readDeclaredOrchestrators(root: string): DeclaredOrchestratorsRe
 
     for (const key of Object.keys(entries)) {
         if (!(ALLOWED_FIELDS as readonly string[]).includes(key)) {
-            // key comes straight from an untrusted registry's JSON — JSON.stringify keeps the
-            // diagnostic single-line and unambiguous even if the key contains newlines or other
-            // control characters, which would otherwise let a crafted key forge extra log lines.
+            // Quote keys unambiguously; sanitize the complete diagnostic below because
+            // JSON.stringify preserves Unicode line separators and C1 controls.
             problems.push(`unknown field ${JSON.stringify(key)} — the contract admits only ${ALLOWED_FIELDS.join(', ')}`);
         }
     }
@@ -87,7 +107,7 @@ export function readDeclaredOrchestrators(root: string): DeclaredOrchestratorsRe
     }
 
     if (problems.length > 0) {
-        return { orchestrators: [], diagnostics: [`${file}: invalid "orchestrator" declaration — ${problems.join('; ')}`] };
+        return { orchestrators: [], diagnostics: [sanitizeDiagnosticText(`${file}: invalid "orchestrator" declaration — ${problems.join('; ')}`)] };
     }
 
     return {
@@ -134,15 +154,21 @@ export function readDeclaredOrchestrators(root: string): DeclaredOrchestratorsRe
  * context/provider.ts, el cual ya importa `DeclaredOrchestrator` DESDE este archivo -- pueda
  * calcular el mismo nombre saneado sin duplicar el regex.
  */
-export function collectDeclaredOrchestrators(): { declared: DeclaredOrchestrator[]; diagnostics: string[] } {
+export function collectDeclaredOrchestrators(): { declared: DeclaredOrchestrator[]; diagnostics: string[]; droppedNames: string[] } {
     const declared: DeclaredOrchestrator[] = [];
-    const diagnostics: string[] = [];
+    const droppedNames: string[] = [];
+    const { names: availableSkillNames, diagnostics } = discoverDeclaredSkillNames();
     const seenNames = new Set<string>();
     const seenSanitizedNames = new Set<string>();
     for (const reg of listRegistries()) {
         const r = readDeclaredOrchestrators(reg.contentRoot);
         for (const orch of r.orchestrators) {
             const file = path.join(reg.contentRoot, REGISTRY_MANIFEST_NAME);
+            if (!availableSkillNames.has(orch.name)) {
+                droppedNames.push(orch.name);
+                diagnostics.push(`${sanitizeDiagnosticText(file)}: orchestrator declaration dropped because skill "${sanitizeDiagnosticText(orch.name)}" is not discoverable in configured safe registries`);
+                continue;
+            }
             if (seenNames.has(orch.name)) {
                 diagnostics.push(`${file}: orchestrator "${stripControlChars(orch.name)}" duplicates one already declared by an earlier registry — shadowed duplicate dropped`);
                 continue;
@@ -159,7 +185,7 @@ export function collectDeclaredOrchestrators(): { declared: DeclaredOrchestrator
         }
         diagnostics.push(...r.diagnostics);
     }
-    return { declared, diagnostics };
+    return { declared, diagnostics, droppedNames };
 }
 
 /** Recolecta declarados y emite sus diagnosticos como warnings. Punto unico usado por

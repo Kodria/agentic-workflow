@@ -1,5 +1,10 @@
 # Harness Retros
 
+## 2026-09-04 — Issue #110: resolución de skills de orquestador
+
+- **Hallazgos:** la resolución semántica inicial expuso casos de identidad saneada, diagnósticos de una línea y seguridad de lectura de `SKILL.md` (archivo, descriptor y directorios padre). Cada caso quedó cubierto por regresiones unitarias y E2E, incluida una sustitución real de directorio padre.
+- **Decisión desatendida:** no se añadió una regla de harness nueva. El contrato existente `CTX-CONSTITUTION-052` ya define la lectura segura de archivos de registry; el remedio fue aplicarlo correctamente y probarlo. Los wins repetidos de aislamiento y resolución cross-registry son evidencia del mismo patrón, no reglas independientes.
+
 ## 2026-08-28 — Publication B QA boundaries
 
 - **Clase:** seguridad, lógica y proceso; QA identificó y cerró el bypass de lectura nativa por variable de entorno y la resolución desde `packageRoot`.

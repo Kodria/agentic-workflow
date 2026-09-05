@@ -33,7 +33,9 @@ export function runContextOrchestrators(collected: CollectedOrchestrators, opts:
         // un usuario que tipee el nombre declarado exacto (con un caracter que el saneo
         // quita, p.ej. `_` o un byte de control) se lleva un falso "not composed" (R3.5/R3.6).
         const verifyNormalized = sanitizeDeclaredField(opts.verify);
-        const found = composed.some((o) => o.name === verifyNormalized);
+        // A dropped raw identity must not borrow a retained declaration's sanitized name.
+        const found = !collected.droppedNames.includes(opts.verify)
+            && composed.some((o) => o.name === verifyNormalized);
         if (!found) {
             const available = composed.map((o) => o.name).join(', ') || '(none)';
             return {
