@@ -136,7 +136,9 @@ describe('awm track remove -> fallback teardown', () => {
         emitTrackRequest(planRoot, BRANCH, 'g1', 'track-teardown-request', 'a');
         consumePendingRequests(planRoot, BRANCH, 'g1');
 
-        const out = await reconcileTracks(planRoot, BRANCH, readJournal(planRoot, BRANCH).state!, inertRuntime(), 2);
+        let releases = 0;
+        const runtime = { ...inertRuntime(), releaseIntegrationLockIfHeld: () => { releases += 1; } };
+        const out = await reconcileTracks(planRoot, BRANCH, readJournal(planRoot, BRANCH).state!, runtime, 2);
         const durable = readJournal(planRoot, BRANCH).state!;
 
         expect(out.state.cohortPhase).toBe('FALLBACK_PENDING');
@@ -144,6 +146,7 @@ describe('awm track remove -> fallback teardown', () => {
         expect(durable.finalIntegrationJobId).toBeUndefined();
         expect(durable.qaFinalizeRequested).toBeUndefined();
         expect(durable.tracks?.every((track) => track.phase === 'TEARDOWN_REQUESTED')).toBe(true);
+        expect(releases).toBe(1);
     });
 
     it('un probe de branch indemostrable detiene teardown sin serializar (issue #93)', async () => {

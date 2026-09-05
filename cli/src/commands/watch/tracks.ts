@@ -975,6 +975,12 @@ export async function reconcileTracks(
             const next = applyProtocolToState(s, observed);
             for (const track of next.tracks ?? []) if (track.trackId === pendingTeardown.trackId) track.teardownRequested = undefined;
             s = persist(planRoot, branch, next);
+            // El lock pertenece al proceso vivo que alcanzó la integración.
+            // Al abandonar FINAL_INTERLOCK debe soltarse en este mismo proceso;
+            // tras un crash el lease muerto se reclama por identidad al iniciar.
+            if (protocolBefore.cohortPhase === 'FINAL_INTERLOCK' && s.cohortPhase === 'FALLBACK_PENDING') {
+                runtime.releaseIntegrationLockIfHeld();
+            }
             appendEvent(planRoot, branch, {
                 kind: 'track-teardown-observed', trackId: pendingTeardown.trackId,
                 phase: s.tracks?.find((t) => t.trackId === pendingTeardown.trackId)?.phase,

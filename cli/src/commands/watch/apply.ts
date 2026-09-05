@@ -247,6 +247,9 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
         const trackId = p.trackId;
         const ref = s.tracks?.find((t) => t.trackId === trackId);
         if (ref === undefined) throw new Error(`track-teardown-request: track desconocido: ${trackId}`);
+        if (s.tracks === undefined || s.tracks.length < 2 || s.cohortPhase === undefined) {
+            throw new Error('track-teardown-request requiere una cohorte válida de al menos dos tracks');
+        }
         ref.teardownRequested = true;
         applyOutcome(s, { ...base, outcome: 'applied', resultRef: trackId });
         return;

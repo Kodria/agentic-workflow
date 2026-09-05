@@ -527,7 +527,7 @@ describe('aplicacion transaccional de requests', () => {
 
     test('track-teardown-request persiste intención sin mover fase ni cohorte', () => {
         const s0 = readJournal(repo, 'rama').state!;
-        s0.tracks = [{ ...trackRef('alpha'), phase: 'ACTIVE' }];
+        s0.tracks = [{ ...trackRef('alpha'), phase: 'ACTIVE' }, { ...trackRef('beta'), phase: 'ACTIVE' }];
         s0.cohortPhase = 'JOINING';
         writeJournal(repo, 'rama', s0);
 
@@ -550,7 +550,7 @@ describe('aplicacion transaccional de requests', () => {
         ['desconocido', { trackId: 'no-existe' }],
     ])('track-teardown-request %s se rechaza visiblemente sin mutar el track', (_case, payload) => {
         const s0 = readJournal(repo, 'rama').state!;
-        s0.tracks = [{ ...trackRef('alpha'), phase: 'ACTIVE' }];
+        s0.tracks = [{ ...trackRef('alpha'), phase: 'ACTIVE' }, { ...trackRef('beta'), phase: 'ACTIVE' }];
         s0.cohortPhase = 'JOINING';
         writeJournal(repo, 'rama', s0);
         const r = emitRequest(repo, 'rama', {
@@ -562,8 +562,25 @@ describe('aplicacion transaccional de requests', () => {
         expect(out.rejectedInvalid).toBe(1);
         expect(fs.existsSync(`${r.file}.rejected`)).toBe(true);
         const state = readJournal(repo, 'rama').state!;
-        expect(state.tracks).toEqual([{ ...trackRef('alpha'), phase: 'ACTIVE' }]);
+        expect(state.tracks).toEqual([{ ...trackRef('alpha'), phase: 'ACTIVE' }, { ...trackRef('beta'), phase: 'ACTIVE' }]);
         expect(state.cohortPhase).toBe('JOINING');
+    });
+
+    test('track-teardown-request se rechaza si la cohorte no puede reconciliarse', () => {
+        const s0 = readJournal(repo, 'rama').state!;
+        s0.tracks = [{ ...trackRef('alpha'), phase: 'ACTIVE' }];
+        s0.cohortPhase = 'JOINING';
+        writeJournal(repo, 'rama', s0);
+        const request = emitRequest(repo, 'rama', {
+            kind: 'track-teardown-request', generationToken: 'g1', idempotencyKey: 'teardown-invalid-cohort',
+            payload: { trackId: 'alpha' },
+        });
+
+        const out = consumePendingRequests(repo, 'rama', 'g1');
+
+        expect(out.rejectedInvalid).toBe(1);
+        expect(fs.existsSync(`${request.file}.rejected`)).toBe(true);
+        expect(readJournal(repo, 'rama').state!.tracks![0].teardownRequested).toBeUndefined();
     });
 
     test('track-finalize-request persiste el autoreporte del controller (qaFinalizeRequested) — puramente declarativo (R7.2)', () => {
