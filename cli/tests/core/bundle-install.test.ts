@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { createBundleDiagnosticReporter, discoverBundles } from '../../src/core/bundles';
-import { installBundle, addBundle, syncProfile, InstallSummary } from '../../src/core/bundle-install';
+import { expandBundleArtifacts, installBundle, addBundle, syncProfile, InstallSummary } from '../../src/core/bundle-install';
 import { AGENT_TARGETS } from '../../src/providers';
 import { readProfile, writeProfile } from '../../src/core/profile';
 import { installArtifact } from '../../src/core/executor';
@@ -113,21 +113,8 @@ function makeFixture() {
 describe('installBundle', () => {
     it('expands canonical and legacy manifests into byte-identical artifacts for every agent target', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-binstall-compat-'));
-        const makeRegistry = (name: string, legacy: boolean) => {
-            const content = path.join(root, name, 'registry');
-            for (const bundle of ['base', 'extension']) {
-                fs.mkdirSync(path.join(content, 'bundles', bundle), { recursive: true });
-            }
-            for (const skill of ['shared', 'base-only', 'extension-only']) {
-                fs.mkdirSync(path.join(content, 'skills', skill), { recursive: true });
-                fs.writeFileSync(path.join(content, 'skills', skill, 'SKILL.md'), `---\nname: ${skill}\n---\n${skill}\n`);
-            }
-            fs.writeFileSync(path.join(content, 'catalog.json'), JSON.stringify({
-                bundles: [
-                    { name: 'base', source: './bundles/base' },
-                    { name: 'extension', source: './bundles/extension' },
-                ],
-            }));
+        const content = path.join(root, 'registry');
+        const writeManifests = (legacy: boolean) => {
             const skills = (names: string[]) => legacy
                 ? names.map((name, index) => ({ name, onSignal: index % 2 === 0 }))
                 : names;
@@ -139,30 +126,22 @@ describe('installBundle', () => {
                 name: 'extension', scope: 'project', dependsOn: ['base'],
                 skills: skills(['shared', 'extension-only']), workflows: [], agents: [],
             }));
-            return content;
         };
-        const canonical = makeRegistry('canonical', false);
-        const legacy = makeRegistry('legacy', true);
+        for (const bundle of ['base', 'extension']) fs.mkdirSync(path.join(content, 'bundles', bundle), { recursive: true });
+        fs.writeFileSync(path.join(content, 'catalog.json'), JSON.stringify({ bundles: [{ name: 'base', source: './bundles/base' }, { name: 'extension', source: './bundles/extension' }] }));
+        writeManifests(false);
         const canonicalWarnings: string[] = [];
         const legacyWarnings: string[] = [];
         const canonicalReporter = createBundleDiagnosticReporter((message) => canonicalWarnings.push(message));
         const legacyReporter = createBundleDiagnosticReporter((message) => legacyWarnings.push(message));
-        const files = (dir: string): [string, Buffer][] => fs.readdirSync(dir, { withFileTypes: true })
-            .flatMap((entry) => {
-                const file = path.join(dir, entry.name);
-                return entry.isDirectory()
-                    ? files(file).map(([child, bytes]) => [path.join(entry.name, child), bytes] as [string, Buffer])
-                    : [[entry.name, fs.readFileSync(file)] as [string, Buffer]];
-            })
-            .sort(([a], [b]) => a.localeCompare(b));
+        const canonicalBundles = discoverBundles(content, canonicalReporter);
+        writeManifests(true);
+        const legacyBundles = discoverBundles(content, legacyReporter);
 
         for (const agent of AGENT_TARGETS) {
-            const canonicalProject = path.join(root, 'canonical', agent);
-            const legacyProject = path.join(root, 'legacy', agent);
-            installBundle({ bundleName: 'extension', bundles: discoverBundles(canonical, canonicalReporter), agents: [agent], method: 'copy', projectRoot: canonicalProject, contentDir: canonical, applyPlan: testApplyPlan });
-            installBundle({ bundleName: 'extension', bundles: discoverBundles(legacy, legacyReporter), agents: [agent], method: 'copy', projectRoot: legacyProject, contentDir: legacy, applyPlan: testApplyPlan });
-
-            expect(files(canonicalProject)).toEqual(files(legacyProject));
+            const canonicalArtifacts = expandBundleArtifacts({ bundleName: 'extension', bundles: canonicalBundles, agents: [agent], method: 'copy', projectRoot: root, contentDir: content });
+            const legacyArtifacts = expandBundleArtifacts({ bundleName: 'extension', bundles: legacyBundles, agents: [agent], method: 'copy', projectRoot: root, contentDir: content });
+            expect(Buffer.from(JSON.stringify(canonicalArtifacts))).toEqual(Buffer.from(JSON.stringify(legacyArtifacts)));
         }
         expect(canonicalWarnings).toEqual([]);
         expect(legacyWarnings).toHaveLength(2);
