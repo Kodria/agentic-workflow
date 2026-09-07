@@ -2,9 +2,11 @@
 
 Origen: [#113](https://github.com/Kodria/agentic-workflow/issues/113) (tracking), que a su vez arrastra **RF-4.1 / CA-4.1** del [brief de orquestadores declarados](2026-08-21-registry-declared-orchestrators-brief.md) como requisito heredado no satisfecho. Incorpora [#119](https://github.com/Kodria/agentic-workflow/issues/119) (fase de documentación) y [#120](https://github.com/Kodria/agentic-workflow/issues/120) (observabilidad desde el Dashboard) como alcance, no como trabajo paralelo.
 
-Metodología seleccionada en `technology-evaluator` (modo contextual): **HTA** (Annett & Duncan 1967) como espina, con **Workflow Patterns** acotado a **WCP16 Deferred Choice** y **WCP18 Milestone** como complemento obligatorio, y **SIPOC** (Inputs/Outputs/Customers) como calentamiento opcional de tres preguntas. Descartadas: BPMN, IDEF0, VSM, SOP/ISO 9001. **CTA** descartada para R1 pero marcada para R3.
+Metodología seleccionada en `technology-evaluator` (modo contextual): **HTA** (Annett & Duncan 1967) como espina, con **Workflow Patterns** acotado a **WCP16 Deferred Choice** y **WCP18 Milestone** como complemento obligatorio, y **SIPOC** (Inputs/Outputs/Customers) como calentamiento opcional de tres preguntas. Descartadas: BPMN, IDEF0, VSM, SOP/ISO 9001. La captura retrospectiva no adopta una metodología separada: desde la enmienda de 2026-09-07 es una fuente más del mismo flujo de incorporación de contexto.
 
 Forma y ubicación del artefacto decididas en `architecture-advisor` (modo contextual): **modelo embebido** — el `SKILL.md` *es* el modelo, bajo contrato de frontmatter. Descartado el sidecar (`process-model.yml` + `SKILL.md` generado) por crear dos fuentes de verdad.
+
+Enmienda 2026-09-07, specialist gate: `architecture-advisor` aplicó de forma significativa y confirmó la frontera host -> skill sin componentes nuevos; `technology-evaluator` no aplicó porque no existe una elección tecnológica; `nfr-checklist-generator` aplicó de forma significativa y derivó minimización de datos, procedencia explícita, degradación ante fuentes ausentes y portabilidad entre hosts.
 
 ## El problema
 
@@ -46,6 +48,17 @@ Trazabilidad: cada `R#` referencia su origen (`#113` decisión N, `#119`, `#120`
 - **R2.6** — CUANDO exista un modelo con `status: draft` en el registry destino, EL sistema SHALL retomarlo leyéndolo, y SHALL NOT pedir al usuario que vuelva a relatar el proceso. *(#113 · trazabilidad entre sesiones)*
 - **R2.7** — EL sistema SHALL delegar todo craft de escritura de skills a `writing-skills` mediante `REQUIRED SUB-SKILL`, y SHALL NOT reexplicarlo. *(#113 · contrato de delegación)*
 - **R2.8** — EL sistema SHALL aportar el overlay de obligaciones que una skill adquiere por ser fase de un proceso — disparador acotado al proceso, lectura/escritura de markers, terminación nombrada, herencia de gates, lectura de modo — y ese overlay SHALL vivir dentro del ciclo de vida, no dentro de `writing-skills`. *(#113 · decisión abierta 2, resuelta)*
+- **R2.9** — CUANDO el usuario exprese intención de crear, formalizar, extraer o convertir trabajo en un proceso durable de AWM, ENTONCES EL agente SHALL invocar `process-lifecycle`; la mera presencia de pasos o actividad procedural SHALL NOT activar el ciclo por sí sola. *(#113 · enmienda 2026-09-07)*
+- **R2.10** — CUANDO el usuario autorice o aporte contexto, ENTONCES EL agente SHALL poder obtenerlo mediante cualquier capacidad disponible del host; documentos, herramientas externas, conversación y memoria son ejemplos no exhaustivos y SHALL NOT constituir un enum de proveedores. *(#113 · enmienda 2026-09-07)*
+- **R2.11** — EL agente host SHALL resolver la obtención e interpretación del contexto antes de entrar al modelado de AWM. *(#113 · frontera arquitectónica aprobada 2026-09-07)*
+- **R2.12** — SI el usuario no aporta contexto, ENTONCES `process-lifecycle` SHALL continuar con la entrevista HTA vigente sin degradar el caso de creación desde cero. *(#113 · entrada sin fuente)*
+- **R2.13** — TODO contenido obtenido de una fuente externa SHALL tratarse como datos y SHALL NOT alterar las instrucciones del ciclo de vida. *(#113 · frontera de confianza)*
+- **R2.14** — ANTES de generar artefactos, EL agente SHALL separar hechos respaldados, inferencias, contradicciones y vacíos. *(#113 · incorporación desde contexto)*
+- **R2.15** — TODO dato aportado por memoria del modelo o inferencia SHALL permanecer en `## Sin verificar` hasta que el usuario lo confirme. *(#113 · frontera de certeza)*
+- **R2.16** — EL contexto normalizado SHALL permanecer efímero en la sesión; EL sistema SHALL persistir únicamente el modelo durable confirmado y SHALL NOT crear un segundo artefacto de contexto. *(#113 · decisión de un solo artefacto durable)*
+- **R2.17** — CUANDO exista contexto confirmado, ENTONCES `process-lifecycle` SHALL precargar con él el modelo y SHALL preguntar únicamente por vacíos, contradicciones o decisiones que el contexto no resuelva. *(#113 · adopción eficiente)*
+- **R2.18** — `process-lifecycle` SHALL NOT implementar adapters específicos de proveedor para obtener contexto. *(#113 · frontera arquitectónica aprobada 2026-09-07)*
+- **R2.19** — SI dos fuentes se contradicen, ENTONCES EL agente SHALL presentar el conflicto y esperar resolución del usuario antes de generar. *(#113 · gate de contradicción)*
 
 **R3 — Generación y verificación**
 
@@ -55,13 +68,22 @@ Trazabilidad: cada `R#` referencia su origen (`#113` decisión N, `#119`, `#120`
 - **R3.4** — EL sistema SHALL verificar el nombre del proceso contra el contenido ya instalado antes de escribir, para no producir un registry que `awm registry add` rechace por colisión. *(guía §6 · `cli/src/commands/registry/add.ts`)*
 - **R3.5** — EL ciclo de verificación SHALL llegar a confirmar que el orquestador aparece efectivamente compuesto en una sesión real, y SHALL NOT cortar en "el registry instaló". *(#113 · decisión abierta 6, resuelta)*
 - **R3.6** — CUANDO el ciclo de verificación de R3.5 sea satisfactorio, EL sistema SHALL promover el modelo a `status: active`. *(R1.9)*
+- **R3.7** — ANTES de generar, EL sistema SHALL inspeccionar la estructura, los bundles, el catálogo, la política de versionado y los validadores existentes del registry destino, y SHALL preservar sus convenciones verificadas. *(#113 · validación sobre registry real 2026-09-07)*
+- **R3.8** — CUANDO genere o modifique un proceso, EL sistema SHALL incluir el modelo y todas sus skills de fase en un bundle del registry y SHALL asegurar que ese bundle esté declarado en `catalog.json`. *(#113 · cierre estructural)*
+- **R3.9** — EL valor `version` de un bundle SHALL coincidir entre `catalog.json` y `bundle.json`. *(#113 · versionado del contenido)*
+- **R3.10** — ANTES de declarar el registry listo, EL sistema SHALL verificar que cada referencia de catálogo y bundle resuelva a un artefacto existente. *(#113 · cierre estructural)*
+- **R3.11** — EL sistema SHALL distinguir la versión del registry publicada por tag de las versiones de sus bundles, y SHALL NOT exigir que ambos contadores coincidan. *(evidencia `awm-personal-registry` v1.0.0 / bundle 1.2.0)*
+- **R3.12** — CUANDO el registry distribuya su canal estable mediante tags, EL sistema SHALL informar el mecanismo de publicación pendiente. *(#113 · frontera de publicación)*
+- **R3.13** — LOS bumps de skills y bundles SHALL seguir la política de versionado existente del registry destino. *(#113 · versionado del contenido)*
+- **R3.14** — ANTES de declarar el registry listo, EL sistema SHALL ejecutar los validadores ya provistos por el registry destino. *(#113 · validación del destino)*
+- **R3.15** — EL sistema SHALL NOT crear ni empujar un tag fuera del flujo de publicación autorizado del registry destino. *(#113 · frontera de publicación)*
 
-**R4 — Modificación y extracción**
+**R4 — Modificación e incorporación desde contexto**
 
 - **R4.1** — CUANDO exista un modelo con `status: active`, EL sistema SHALL permitir cargarlo, editarlo y regenerar los artefactos derivados. *(#113 · caso de uso "alterar entero" y "mejora continua")*
-- **R4.2** — EL sistema SHALL extraer un modelo desde un proceso ya existente que no fue creado por este ciclo de vida. *(#113 · R2 del tracking; precedente `architecture-extraction`)*
-- **R4.3** — CUANDO se extraiga `development-process` al modelo y se regenere, EL resultado SHALL ser equivalente al que está en producción; SI el modelo no puede expresarlo, ENTONCES esa insuficiencia SHALL reportarse como resultado antes de publicar. *(#113 · test de aceptación)*
-- **R4.4** — LA fase de documentación entregada en R6 SHALL servir como segundo caso de round-trip, con el mismo criterio de R4.3. *(#113 · decisión 7)*
+- **R4.2** — EL sistema SHALL construir o completar un modelo desde contexto existente que no haya sido producido por este ciclo de vida, independientemente de si proviene de skills, documentos, herramientas, conversación, memoria confirmada o una combinación. *(#113 · R2/R3 unificados)*
+- **R4.3** — CUANDO se extraiga `development-process` y se regenere, EL resultado SHALL conservar objetivo, aplicabilidad, jerarquía, ruteo, gates, terminación, modo de ejecución y obligaciones de fases; SI el modelo no puede expresar cualquiera de esas dimensiones, ENTONCES SHALL reportar la pérdida antes de publicar. *(#113 · round-trip funcional, no igualdad textual)*
+- **R4.4** — LA captura retrospectiva desde una conversación SHALL recorrer el mismo flujo R2.14–R2.17 y SHALL NOT usar un adaptador, artefacto durable ni release separado. *(#113 · compactación aprobada 2026-09-07)*
 
 **R5 — Superficie CLI y observabilidad**
 
@@ -119,6 +141,18 @@ updated: YYYY-MM-DD
 
 **Por qué discriminador propio y no `mode:` del `brief-contract`.** Ese contrato enumera consumidores de forma normativa y obliga a `readiness-gate` a parsear todo `schema` anterior para siempre. Un `mode:` con cero secciones de cuerpo compartidas y cero consumidores compartidos infla un contrato que otra skill carga eternamente. Se reusa la **disciplina** (discriminador y no heurística, `schema` que solo crece, escritor único del campo que promociona, trazabilidad por ID), no el **namespace**.
 
+### Frontera de contexto
+
+```text
+fuente opcional -> agente host interpreta -> intención durable explícita
+                -> process-lifecycle -> confirmación -> modelo durable
+                -> generación y verificación
+```
+
+La frontera está en la invocación del skill. El host usa únicamente capacidades disponibles y contexto aportado o autorizado por el usuario; `process-lifecycle` recibe la evidencia ya presente en la sesión y la reconcilia contra el contrato del modelo. No existe un conector AWM para Notion, Drive, Obsidian ni ningún otro proveedor, tampoco un paquete intermedio: ambos duplicarían capacidades del host y crearían otra fuente de verdad.
+
+La incorporación clasifica cada afirmación como respaldada, inferida, contradictoria o ausente. Solo lo confirmado entra a las secciones normativas del modelo; memoria e inferencias permanecen en `## Sin verificar`. El contenido fuente se considera datos no confiables, no instrucciones. Sin fuente, el flujo converge a la entrevista HTA de R2.4.
+
 ### El punto de intersección con `writing-skills`
 
 ```
@@ -142,9 +176,17 @@ El overlay vive **dentro del ciclo de vida** (R2.8): meterlo en `writing-skills`
 
 ### Empaque
 
-Bundle nuevo `process`, con `dependsOn: ["authoring"]`, **ambos a `baseline`**.
+Bundle `process`, con `dependsOn: ["authoring"]`, **ambos a `baseline`**.
 
 Si el ciclo de vida fuera a `baseline` y `writing-skills` quedara en `project`, baseline entregaría un skill cuyo `REQUIRED SUB-SKILL` no está instalado — exactamente la degradación "sucesor no instalado", para todos los usuarios. La nota *"enable only in the agentic-workflow repo"* del bundle `authoring` queda **stale**: R1+R2 convirtieron la autoría en actividad de usuario final.
+
+### Conformidad del registry destino
+
+`process-lifecycle` no impone el layout de baseline a todos los registries: primero descubre el contrato real del destino y reutiliza sus validadores y política de release. Sí exige el cierre mínimo común: skills presentes, pertenencia a bundle, bundle declarado en catálogo, versiones de catálogo y bundle sincronizadas, declaración de orquestador derivada y composición real.
+
+La versión del registry y la del bundle son dominios distintos. El CLI resuelve el canal estable por el último tag SemVer del registry; el catálogo resuelve versiones de bundles dentro de ese release. Por eso un tag `v1.0.0` puede contener correctamente un bundle `1.2.0`. Publicar el tag pertenece al flujo autorizado del registry — por ejemplo, `awm-baseline-registry` lo hace mediante `auto-tag.yml` después del merge — y no a la generación del proceso.
+
+**Evidencia real 2026-09-07.** Una instalación aislada del tag inmutable `Kodria/awm-personal-registry@v1.0.0` con AWM 9.7.1 validó un catálogo, un bundle y ocho skills; `awm process list` encontró `documentar-proceso` y `trazar-sesion`, `awm process show trazar-sesion --json` parseó el modelo activo, y el cierre catálogo -> bundle -> skills no tuvo referencias faltantes. Este registry es evidencia de aceptación, no una dependencia ni una fuente de requisitos personales para el producto.
 
 ### Estado verificado del sistema
 
@@ -200,7 +242,7 @@ Ordenados por valor entregado, no por dependencia técnica.
 
 **Valor productivo independiente:** desde el merge, toda tarea de AWM termina documentada y la documentación de usuario final deja de derivar en silencio. No requiere nada de R1–R3.
 
-Cubre R6.1–R6.7 y el bump de `schema` del snapshot. Se implementa a mano — el ciclo de vida todavía no existe — y por eso mismo **se convierte en el segundo caso de round-trip de R2** (R4.4): el constructor tendrá que poder reproducir un resultado que ya está en producción.
+Cubre R6.1–R6.7 y el bump de `schema` del snapshot. Se implementó a mano porque el ciclo de vida todavía no existía. Puede aportar contexto secundario durante la aceptación de R2, pero no constituye otro round-trip ni otro gate de release.
 
 Criterios de aceptación:
 - **CA-0.1** — un plan con QA completa y documentación pendiente reporta `docs_pending` en `awm doctor --full`.
@@ -209,18 +251,18 @@ Criterios de aceptación:
 
 ### R1 — Modelo durable, creación, generación y verificación
 
-Cubre R1.\*, R2.\*, R3.\*, R5.\*, R7.\*.
+Cubrió R1.\*, R2.1–R2.8, R3.1–R3.6, R4.1, R5.\* y R7.\*. Los requisitos agregados en la enmienda de 2026-09-07 pertenecen exclusivamente a R2.
 
 Criterios de aceptación:
-- **CA-1.1** *(heredado, nunca ejecutado)* — con un registry de prueba instalado, iniciar una sesión **real** y comprobar que el orquestador aparece entre los considerados.
+- **CA-1.1** *(entregado)* — con un registry de prueba instalado, iniciar una sesión **real** y comprobar que el orquestador aparece entre los considerados.
 - **CA-4.1** *(heredado, nunca ejecutado)* — una persona ajena al CLI sigue el método y produce un registry instalable. **Verificable con persona real, no simulación.**
 - **CA-1.2** — `awm process list` reporta el proceso; `awm process show --json` emite el modelo parseado.
 - **CA-1.3** — el Dashboard muestra la sección `processes` poblada por el adapter, sin parser propio.
-- **CA-1.4 — demo de aceptación** — declarar el orquestador del proceso personal en [`Kodria/awm-personal-registry`](https://github.com/Kodria/awm-personal-registry), hoy 3 skills sueltas sin `awm-registry.json` ni declaración. Es el consumidor que motivó el proyecto entero.
+- **CA-1.4 — demo de aceptación** *(entregada)* — declarar el orquestador del proceso personal en [`Kodria/awm-personal-registry`](https://github.com/Kodria/awm-personal-registry). Es el consumidor que motivó el proyecto entero y hoy contiene catálogo, bundle, declaración y dos modelos parseables.
 
-#### Enmienda 2026-08-23 — R1 se ejecuta en dos mitades (R1a entregada, R1b pendiente)
+#### Enmienda 2026-08-23 — R1 se ejecutó en dos mitades
 
-R1 se partió por alcance, con acuerdo del owner. **R1a** entregó el contrato lector — `R1.*`, `R5.*`, `R7.*` — más CA-1.2 y CA-1.3 (PR #124, mergeado). **R1b** cubre el resto: `R2.*` (elicitación), `R3.*` (generación y verificación) y `R4.1` (modificar un modelo `active`), con CA-1.1, CA-4.1 y CA-1.4 pendientes.
+R1 se partió por alcance, con acuerdo del owner. **R1a** entregó el contrato lector — `R1.*`, `R5.*`, `R7.*` — más CA-1.2 y CA-1.3 (PR #124, mergeado). **R1b** entregó `R2.1`–`R2.8` (elicitación), `R3.1`–`R3.6` (generación y verificación) y `R4.1` (modificar un modelo `active`) en `awm-baseline-registry#39` y el PR #125. CA-1.1 y CA-1.4 se verificaron posteriormente con el registry personal; CA-4.1 sigue pendiente porque requiere una persona real ajena al CLI.
 
 Tres decisiones que el diseño original dejaba implícitas, resueltas con el owner antes de planificar R1b:
 
@@ -230,23 +272,32 @@ Tres decisiones que el diseño original dejaba implícitas, resueltas con el own
 
 3. **`minCliVersion` del registry NO se bumpea por este skill.** El precedente (8.5.0 por `awm evidence capture`) aplicaba a `harness-retro`, un skill del spine que todos corren; `minCliVersion` es un bloqueo duro de `awm update` para **todo** el registry. Bloquear el registry entero a los usuarios con CLI viejo por un skill nuevo y opcional es desproporcionado — y contradice `R7.1`, que es requisito de este mismo diseño. **Resolución: el skill degrada honestamente** cuando el comando de verificación no está disponible (patrón "sucesor no instalado"), informa qué versión de CLI hace falta, y no promueve a `status: active` sin verificación — que es el resultado correcto, no una omisión.
 
-### R2 — Extracción
+### R2 — Incorporación agnóstica de contexto y conformidad del registry
 
-Cubre R4.2–R4.4. Desbloquea `development-process` y `product-process` como sujetos.
+Una sola entrega cubre R2.9–R2.19, R3.7–R3.15 y R4.2–R4.4. Crear desde cero, extraer skills existentes y capturar una conversación son entradas al mismo flujo, no releases diferentes. El cambio productivo vive en `process-lifecycle` y su contrato ejecutable dentro de `awm-baseline-registry`; `agentic-workflow` actualiza este diseño y el tracking. No se agrega superficie CLI salvo que una prueba contra la fuente demuestre una carencia.
 
-- **CA-2.1** — round-trip sobre `development-process`: extraer → modelo → regenerar → equivalencia con producción.
-- **CA-2.2** — round-trip sobre la fase de documentación de R0.
+Valor productivo independiente: un equipo puede convertir conocimiento disponible —o una idea todavía sin documentación— en un proceso durable, compartible y conforme al registry sin aprender formatos internos ni depender de un proveedor de contexto.
 
-### R3 — Captura retrospectiva
+Criterios de aceptación:
 
-Conversación → modelo (*"guardá lo que hicimos como proceso"*). Otro adaptador de entrada, mismo destino. Acá entra **CTA / Critical Decision Method**, descartada para R1 por capturar conocimiento tácito de expertos en vez de estructura de proceso — que es justamente lo que una captura retrospectiva necesita.
+- **CA-2.1** — sin contexto disponible, el ciclo conserva la entrevista HTA actual y produce un modelo verificable.
+- **CA-2.2** — con contexto aportado por una fuente disponible, el ciclo precarga lo respaldado y pregunta únicamente por vacíos, contradicciones y decisiones.
+- **CA-2.3** — una fuente inaccesible degrada a representación alternativa o entrevista sin bloquear.
+- **CA-2.4** — contenido contradictorio no llega a generación hasta que el usuario lo resuelve; memoria e inferencias permanecen sin verificar hasta confirmación.
+- **CA-2.5** — el round-trip de `development-process` conserva las dimensiones enumeradas en R4.3; cualquier pérdida se reporta antes de publicación.
+- **CA-2.6** — el registry resultante cierra catálogo, bundle y skills, mantiene versiones sincronizadas, pasa sus validadores, parsea el modelo y confirma composición.
+- **CA-2.7** — el contrato de `process-lifecycle` no contiene adapters específicos de proveedor ni requiere un artefacto durable adicional.
 
 ## Riesgos
 
 | Riesgo | Impacto | Mitigación |
 |---|---|---|
-| El round-trip prueba que el modelo es insuficiente | El contrato de R1 habría que revisarlo con documentos ya en circulación | R2 es release aparte: fallar el round-trip es un **resultado que se reporta** (R4.3), no un bloqueo de R0/R1. Y R1.3/R1.4 dejan la puerta del `schema` abierta desde el día uno |
+| El round-trip prueba que el modelo es insuficiente | El contrato de R1 habría que revisarlo con documentos ya en circulación | Fallar el round-trip es un **resultado que se reporta** antes de publicar (R4.3), no una equivalencia que se fuerza. R1.3/R1.4 preservan una evolución explícita de `schema` |
 | La descomposición HTA no tiene criterio natural de parada | Modelos infinitamente anidados, inusables | R2.5 — una operación deja de descomponerse cuando puede ser una skill invocable. Criterio de AWM, no de HTA, y verificable |
+| Prompt injection dentro de una fuente de contexto | El contenido fuente intenta alterar el ciclo de vida | R2.13 trata toda fuente como datos; las instrucciones del proceso conservan precedencia |
+| Contexto sensible copiado al modelo | El proceso durable filtra información innecesaria | R1.10 + R2.16: persistencia mínima, sin credenciales ni copia del contexto fuente |
+| Fuente o tool no disponible en el host | El flujo queda atado a un proveedor | R2.10–R2.12: capacidad abierta, representación alternativa o entrevista HTA |
+| El proceso compone pero el paquete queda fuera del bundle o con versiones divergentes | El registry funciona en la sesión autora pero no se distribuye correctamente | R3.7–R3.15: inspección del destino, cierre de referencias, sincronización de versiones, validadores y publicación explícita |
 | Inyección vía contenido de un registry externo | El modelo llega al contexto del agente y a superficies de render | R5.4 + el límite de sanitización que R2 de orquestadores ya estableció (`sanitizeForMarkdown`, incluidos `<>` tras el hallazgo de QA) |
 | Baseline entrega un skill cuyo `REQUIRED SUB-SKILL` no está instalado | Degradación para todos los usuarios | Bundle `process` con `dependsOn: ["authoring"]`, ambos `baseline` |
 | Tocar el contrato de secciones del Dashboard dos veces | Dos bumps de `schema`, dos rondas de actualización de siete puntos de enumeración | Un solo bump en R0, con `processes` en `not_applicable` hasta R1 |
@@ -256,5 +307,8 @@ Conversación → modelo (*"guardá lo que hicimos como proceso"*). Otro adaptad
 
 - **DA-4 del brief padre** (capa O1: predicado determinista evaluado por el framework en vez de juicio del agente sobre prosa). Abierta y **diferida a propósito**; aditiva por diseño. Vive en el brief, no acá.
 - **Runtime de sesión con estado y eventos, concurrencia entre sesiones, bandeja de captura.** Fuera de alcance del brief original por decisión explícita. Brief propio.
+- **Adapters o conectores AWM por fuente.** La obtención pertenece a las capacidades nativas del host; no se implementan integraciones específicas para Notion, NotionTracker, Obsidian, Drive ni equivalentes.
+- **Persistencia, indexación o métricas del contexto fuente.** El único artefacto durable es el modelo confirmado; esta entrega no crea un almacén de contexto ni un sistema de medición.
+- **Contenido del registry personal o reglas de NotionTracker.** `awm-personal-registry@v1.0.0` se usa solo como evidencia externa de conformidad; nada personal entra al producto baseline.
 - **Secciones del Dashboard derivadas del proceso activo** (opción B de #120). El snapshot dejaría de tener forma estable, rompiendo render, fixtures y comparabilidad entre proyectos.
 - **Migrar `docs/guides/authoring-a-registry-with-an-orchestrator.md` a `docs/`.** Se subordina como `references/` del skill y #111 se arregla ahí (decisión 4), pero el movimiento del archivo se ejecuta en R1, no se diseña acá.
