@@ -74,6 +74,10 @@ Enumera tus bundles. `scope` es `baseline` si querés que se instale por defecto
 }
 ```
 
+### Migración de referencias de skills
+
+La forma canónica es siempre `skills` como array de strings. Solo para migración, la CLI 9 también acepta el objeto legacy `{name, onSignal: true}`; ignora el booleano `onSignal` tanto si es `true` como si es `false`, y emite un warning para que lo reemplaces por el string canónico. La CLI 10 rechaza los objetos legacy: no habrá soporte de objetos de referencia de skills.
+
 La versión está **duplicada** a propósito entre `catalog.json` y `bundle.json`, y las dos deben avanzar juntas en cada release.
 
 ## 5. `skills/mi-proceso/SKILL.md`
