@@ -9,7 +9,7 @@ const okZip: ZipFn = (cwd, zipName) => {
     return { ok: true, missing: false };
 };
 
-function makeRoot(legacy = true): string {
+function makeRoot(legacy = false): string {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-cmd-root-'));
     fs.mkdirSync(path.join(root, 'bundles/dev'), { recursive: true });
     fs.writeFileSync(path.join(root, 'catalog.json'), JSON.stringify({
@@ -67,11 +67,16 @@ describe('runExportCommand (salida al usuario)', () => {
 
     it('reports one legacy warning and no canonical warning through the command reporter seam', () => {
         const legacyWarnings: string[] = [];
-        runExportCommand('dev', { target: 'claude-ai', out }, {
-            roots: [root], zip: okZip, log,
-            reporter: (message) => legacyWarnings.push(message),
-        });
-        expect(legacyWarnings).toHaveLength(1);
+        const legacy = makeRoot(true);
+        try {
+            runExportCommand('dev', { target: 'claude-ai', out }, {
+                roots: [legacy], zip: okZip, log,
+                reporter: (message) => legacyWarnings.push(message),
+            });
+            expect(legacyWarnings).toHaveLength(1);
+        } finally {
+            fs.rmSync(legacy, { recursive: true, force: true });
+        }
 
         const canonicalWarnings: string[] = [];
         const canonical = makeRoot(false);
