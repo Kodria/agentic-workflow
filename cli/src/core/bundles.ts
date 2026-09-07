@@ -2,14 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import { Scope } from '../providers';
 import { assertRegularRegistryFile, contentRoots, readRegistryManifest } from './registries';
+import { sanitizeDiagnosticText } from './text';
 
 export type BundleScope = 'baseline' | 'project' | 'ambient';
 export type BundleVisibility = 'public' | 'private';
-
-export interface BundleSkillRef {
-    name: string;
-    onSignal: boolean;
-}
 
 export interface BundleDefinition {
     name: string;
@@ -18,7 +14,7 @@ export interface BundleDefinition {
     scope: BundleScope;
     visibility: BundleVisibility;
     dependsOn: string[];
-    skills: BundleSkillRef[];
+    skills: string[];
     workflows: string[];
     agents: string[];
     /** Root de contenido donde se descubrió el bundle (multi-registry, WS-1). */
@@ -26,6 +22,13 @@ export interface BundleDefinition {
     /** Content root del bundle de un root anterior que este tapó (override declarado, WS-2). */
     overrode?: string;
 }
+
+export interface BundleDiscoveryResult {
+    bundles: BundleDefinition[];
+    diagnostics: string[];
+}
+
+export type BundleDiagnosticReporter = (diagnostic: string) => void;
 
 export interface CatalogEntry {
     name: string;
@@ -105,18 +108,55 @@ export function readCatalog(contentDir: string): CatalogEntry[] {
         entry !== null && typeof entry === 'object' && typeof (entry as CatalogEntry).source === 'string');
 }
 
-/** Tolera `skills` ausente o mal formado: lo que no sea un array se trata como
- *  vacio en vez de tirar `(raw ?? []).map is not a function`, y cada entrada se
- *  valida individualmente. */
-function normalizeSkillRefs(raw: unknown): BundleSkillRef[] {
-    if (!Array.isArray(raw)) return [];
-    return raw.flatMap((s) => {
-        if (typeof s === 'string') return [{ name: s, onSignal: false }];
-        if (s !== null && typeof s === 'object' && typeof (s as { name?: unknown }).name === 'string') {
-            return [{ name: (s as { name: string }).name, onSignal: (s as { onSignal?: unknown }).onSignal === true }];
+function safeManifestIdentity(manifestPath: string): string {
+    return sanitizeDiagnosticText(manifestPath).slice(0, 240);
+}
+
+function boundedDiagnostic(diagnostic: string): string {
+    return sanitizeDiagnosticText(diagnostic).slice(0, 512);
+}
+
+/** Normaliza la única forma de compatibilidad CLI 9 antes de que el manifest
+ * alcance consumidores operativos. Los objetos nunca salen de este límite. */
+function normalizeSkillRefs(raw: unknown, manifestPath: string): { skills: string[]; diagnostics: string[] } {
+    const identity = safeManifestIdentity(manifestPath);
+    if (!Array.isArray(raw)) {
+        throw new Error(`${identity}: "skills" must be an array.`);
+    }
+
+    const skills: string[] = [];
+    let legacyCount = 0;
+    raw.forEach((ref, index) => {
+        const location = `${identity}: skills[${index}]`;
+        if (typeof ref === 'string') {
+            if (ref === '') throw new Error(`${location} must be a non-empty string.`);
+            skills.push(ref);
+            return;
         }
-        return [];
+        if (ref === null || typeof ref !== 'object' || Array.isArray(ref)) {
+            throw new Error(`${location} must be a non-empty string or a supported legacy object.`);
+        }
+
+        const legacy = ref as Record<string, unknown>;
+        const keys = Object.keys(legacy);
+        if (!keys.every((key) => key === 'name' || key === 'onSignal')) {
+            throw new Error(`${location} legacy object may contain only "name" and optional "onSignal".`);
+        }
+        if (typeof legacy.name !== 'string' || legacy.name === '') {
+            throw new Error(`${location} legacy object "name" must be a non-empty string.`);
+        }
+        if (legacy.onSignal !== undefined && typeof legacy.onSignal !== 'boolean') {
+            throw new Error(`${location} legacy object "onSignal" must be a boolean.`);
+        }
+        skills.push(legacy.name);
+        legacyCount++;
     });
+
+    const diagnostics = legacyCount === 0 ? [] : [boundedDiagnostic(
+        `${identity}: ${legacyCount} legacy object skill reference(s) accepted for CLI 9; ` +
+        'replace with canonical skills: ["skill-name"]. Legacy object support is removed in v10.'
+    )];
+    return { skills, diagnostics };
 }
 
 /** Array de strings, o vacio. Cualquier otra forma en el contenido del registry
@@ -125,9 +165,10 @@ function stringArray(raw: unknown): string[] {
     return Array.isArray(raw) ? raw.filter((v): v is string => typeof v === 'string') : [];
 }
 
-export function discoverBundles(contentDir: string): BundleDefinition[] {
+export function inspectBundles(contentDir: string): BundleDiscoveryResult {
     const entries = readCatalog(contentDir);
     const bundles: BundleDefinition[] = [];
+    const diagnostics: string[] = [];
     for (const entry of entries) {
         const manifestPath = bundleManifestPath(contentDir, entry.source);
         if (!assertRegularRegistryFile(manifestPath)) continue;
@@ -146,6 +187,8 @@ export function discoverBundles(contentDir: string): BundleDefinition[] {
         if (typeof m.name !== 'string' || m.name === '') {
             throw new Error(`${manifestPath}: "name" must be a non-empty string.`);
         }
+        const normalizedSkills = normalizeSkillRefs(m.skills, manifestPath);
+        diagnostics.push(...normalizedSkills.diagnostics);
         bundles.push({
             name: m.name,
             description: typeof m.description === 'string' ? m.description : '',
@@ -153,13 +196,39 @@ export function discoverBundles(contentDir: string): BundleDefinition[] {
             scope: (m.scope as BundleDefinition['scope']) ?? 'project',
             visibility: (m.visibility as BundleDefinition['visibility']) ?? 'public',
             dependsOn: stringArray(m.dependsOn),
-            skills: normalizeSkillRefs(m.skills),
+            skills: normalizedSkills.skills,
             workflows: stringArray(m.workflows),
             agents: stringArray(m.agents),
             contentRoot: contentDir,
         });
     }
-    return bundles;
+    return { bundles, diagnostics };
+}
+
+/** Creates the command-scoped CLI reporter used by discovery facades. */
+export function createBundleDiagnosticReporter(
+    write: (message: string) => void = (message) => console.error(message)
+): BundleDiagnosticReporter {
+    const emitted = new Set<string>();
+    return (diagnostic) => {
+        if (emitted.has(diagnostic)) return;
+        emitted.add(diagnostic);
+        write(`warning: ${diagnostic}`);
+    };
+}
+
+const defaultBundleDiagnosticReporter = createBundleDiagnosticReporter();
+
+function reportDiagnostics(diagnostics: string[], reporter?: BundleDiagnosticReporter): void {
+    const emit = reporter ?? defaultBundleDiagnosticReporter;
+    for (const diagnostic of new Set(diagnostics)) emit(diagnostic);
+}
+
+/** Compatibility facade for callers that only need bundle definitions. */
+export function discoverBundles(contentDir: string, reporter?: BundleDiagnosticReporter): BundleDefinition[] {
+    const result = inspectBundles(contentDir);
+    reportDiagnostics(result.diagnostics, reporter);
+    return result.bundles;
 }
 
 export function resolveBundleSkills(bundleName: string, bundles: BundleDefinition[]): string[] {
@@ -172,7 +241,7 @@ export function resolveBundleSkills(bundleName: string, bundles: BundleDefinitio
         const b = byName.get(name);
         if (!b) return;
         for (const dep of b.dependsOn) visit(dep);
-        for (const s of b.skills) skills.add(s.name);
+        for (const s of b.skills) skills.add(s);
     };
     visit(bundleName);
     return Array.from(skills);
@@ -206,11 +275,14 @@ export function defaultScopeForBundle(scope: BundleScope): Scope {
 /** Descubre bundles de TODOS los roots (base + registries adicionales).
  *  Colisión de nombre entre roots: override declarado en awm-registry.json
  *  del root posterior → reemplaza; no declarado → error nombrando ambas fuentes. */
-export function discoverAllBundles(roots: string[] = contentRoots()): BundleDefinition[] {
+export function inspectAllBundles(roots: string[] = contentRoots()): BundleDiscoveryResult {
     const byName = new Map<string, BundleDefinition>();
+    const diagnostics: string[] = [];
     for (const root of roots) {
         const overrides = readRegistryManifest(root).overrides;
-        for (const b of discoverBundles(root)) {
+        const result = inspectBundles(root);
+        diagnostics.push(...result.diagnostics);
+        for (const b of result.bundles) {
             const prev = byName.get(b.name);
             if (!prev) {
                 byName.set(b.name, b);
@@ -226,7 +298,14 @@ export function discoverAllBundles(roots: string[] = contentRoots()): BundleDefi
             );
         }
     }
-    return Array.from(byName.values());
+    return { bundles: Array.from(byName.values()), diagnostics: Array.from(new Set(diagnostics)) };
+}
+
+/** Compatibility facade for callers that only need bundle definitions. */
+export function discoverAllBundles(roots: string[] = contentRoots(), reporter?: BundleDiagnosticReporter): BundleDefinition[] {
+    const result = inspectAllBundles(roots);
+    reportDiagnostics(result.diagnostics, reporter);
+    return result.bundles;
 }
 
 /**

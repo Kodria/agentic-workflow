@@ -2,10 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-function writeBundleRoot(root: string, bundleName: string, skillName: string) {
+function writeBundleRoot(root: string, bundleName: string, skillName: string | object) {
+    const canonicalSkillName = typeof skillName === 'string' ? skillName : (skillName as { name: string }).name;
     fs.mkdirSync(path.join(root, 'bundles', bundleName), { recursive: true });
-    fs.mkdirSync(path.join(root, 'skills', skillName), { recursive: true });
-    fs.writeFileSync(path.join(root, 'skills', skillName, 'SKILL.md'), `---\nname: ${skillName}\ndescription: d\n---\n`);
+    fs.mkdirSync(path.join(root, 'skills', canonicalSkillName), { recursive: true });
+    fs.writeFileSync(path.join(root, 'skills', canonicalSkillName, 'SKILL.md'), `---\nname: ${canonicalSkillName}\ndescription: d\n---\n`);
     fs.writeFileSync(
         path.join(root, 'bundles', bundleName, 'bundle.json'),
         JSON.stringify({ name: bundleName, version: '1.0.0', scope: 'ambient', skills: [skillName] })
@@ -36,14 +37,16 @@ describe('bundle override resolution', () => {
     });
 
     it('declared override: later root wins, contentRoot and overrode reflect it', () => {
-        writeBundleRoot(rootA, 'pack', 's1');
-        writeBundleRoot(rootB, 'pack', 's2');
+        writeBundleRoot(rootA, 'pack', { name: 's1', onSignal: true });
+        writeBundleRoot(rootB, 'pack', { name: 's2', onSignal: false });
         fs.writeFileSync(path.join(rootB, 'awm-registry.json'), JSON.stringify({ overrides: ['pack'] }));
-        const { discoverAllBundles } = require('../../src/core/bundles');
-        const out = discoverAllBundles([rootA, rootB]);
-        expect(out).toHaveLength(1);
-        expect(out[0].contentRoot).toBe(rootB);
-        expect(out[0].overrode).toBe(rootA);
+        const { inspectAllBundles } = require('../../src/core/bundles');
+        const result = inspectAllBundles([rootA, rootB]);
+        expect(result.bundles).toHaveLength(1);
+        expect(result.bundles[0].contentRoot).toBe(rootB);
+        expect(result.bundles[0].overrode).toBe(rootA);
+        expect(result.bundles[0].skills).toEqual(['s2']);
+        expect(result.diagnostics).toHaveLength(2);
     });
 
     it('undeclared collision still throws naming both sources', () => {
