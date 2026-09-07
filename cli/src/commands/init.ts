@@ -138,7 +138,13 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
     }
 
     const cwd = opts.cwd ?? process.cwd();
-    const reporter = opts.reporter ?? createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
+    const report = opts.reporter ?? createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
+    const reportedDiagnostics = new Set<string>();
+    const reporter: BundleDiagnosticReporter = (diagnostic) => {
+        if (reportedDiagnostics.has(diagnostic)) return;
+        reportedDiagnostics.add(diagnostic);
+        report(diagnostic);
+    };
     const agent: AgentTarget = opts.agent === undefined ? 'claude-code' : requireAgentTarget(opts.agent);
 
     // R2: gate BEFORE anything is read or written — an unsupported provider

@@ -19,7 +19,7 @@ function writeManifest(root: string, legacy: boolean): void {
         name: 'demo', description: 'Diagnostic fixture', version: '1.0.0', scope: 'baseline', dependsOn: [],
         skills: legacy ? [{ name: 'demo-skill', onSignal: true }] : ['demo-skill'], workflows: [], agents: [],
     }));
-    fs.writeFileSync(path.join(root, 'skills', 'demo-skill', 'SKILL.md'), '---\nname: demo-skill\ndescription: fixture\n---\n');
+    fs.writeFileSync(path.join(root, 'skills', 'demo-skill', 'SKILL.md'), '---\nname: demo-skill\nportable: true\ndescription: fixture\n---\n');
 }
 
 function git(cwd: string, args: string[]): void {
@@ -42,6 +42,9 @@ describe('S2 bundle compatibility diagnostic command routes', () => {
         process.env.AWM_HOME = path.join(home, '.awm');
         stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
         jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        jest.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+            throw new Error(`unexpected process.exit(${code ?? 0})`);
+        }) as never);
         jest.spyOn(console, 'log').mockImplementation(() => undefined);
         jest.spyOn(console, 'warn').mockImplementation(() => undefined);
         jest.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -75,7 +78,8 @@ describe('S2 bundle compatibility diagnostic command routes', () => {
     async function run(route: Route, legacy: boolean): Promise<{ warnings: string[] }> {
         fs.rmSync(work, { recursive: true, force: true });
         fs.mkdirSync(work, { recursive: true });
-        const root = configureRegistry(legacy);
+        if (route === 'registry-add') fs.rmSync(process.env.AWM_HOME as string, { recursive: true, force: true });
+        const root = route === 'registry-add' ? undefined : configureRegistry(legacy);
         const warnings: string[] = [];
         const reporter = (warning: string) => warnings.push(warning);
 
@@ -106,11 +110,14 @@ describe('S2 bundle compatibility diagnostic command routes', () => {
             expect(JSON.parse(stdoutText())).toHaveProperty('providers');
         } else if (route === 'export') {
             const { runExportCommand } = require('../../src/commands/export');
-            runExportCommand('demo', { target: 'claude-ai', out: path.join(work, 'export') }, { roots: [root], reporter, log: () => {}, zip: () => ({ ok: false, missing: true }) });
+            runExportCommand('demo', { target: 'claude-ai', out: path.join(work, 'export') }, { roots: [root!], reporter, log: () => {}, zip: () => ({ ok: false, missing: true }) });
         } else {
             jest.resetModules();
             const bundles = require('../../src/core/bundles');
-            jest.spyOn(bundles, 'createBundleDiagnosticReporter').mockReturnValue(reporter);
+            const createReporter = bundles.createBundleDiagnosticReporter;
+            jest.spyOn(bundles, 'createBundleDiagnosticReporter').mockImplementation(() =>
+                createReporter((warning: string) => warnings.push(warning)),
+            );
             const { registerRegistryCommand } = require('../../src/commands/registry');
             const program = new (require('commander').Command)() as Command;
             registerRegistryCommand(program);
