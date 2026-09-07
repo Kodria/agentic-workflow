@@ -1,4 +1,5 @@
 import fs from 'fs';
+import crypto from 'crypto';
 import path from 'path';
 import { Scope } from '../providers';
 import { assertRegularRegistryFile, contentRoots, readRegistryManifest } from './registries';
@@ -109,7 +110,10 @@ export function readCatalog(contentDir: string): CatalogEntry[] {
 }
 
 function safeManifestIdentity(manifestPath: string): string {
-    return sanitizeDiagnosticText(manifestPath).slice(0, 240);
+    const sanitized = sanitizeDiagnosticText(manifestPath);
+    if (sanitized.length <= 240) return sanitized;
+    const suffix = crypto.createHash('sha256').update(sanitized).digest('hex').slice(0, 16);
+    return `${sanitized.slice(0, 220)}…#${suffix}`;
 }
 
 function boundedDiagnostic(diagnostic: string): string {

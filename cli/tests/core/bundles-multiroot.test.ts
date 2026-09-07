@@ -58,6 +58,21 @@ describe('bundles multi-root', () => {
         expect(new Set(result.diagnostics).size).toBe(2);
     });
 
+    it('keeps diagnostics distinct when manifest identities share a truncated prefix', () => {
+        const sharedPrefix = path.join(tmp, ...Array.from({ length: 30 }, () => 'shared-prefix'));
+        const longRootA = path.join(sharedPrefix, 'registry-a');
+        const longRootB = path.join(sharedPrefix, 'registry-b');
+        writeBundleRoot(longRootA, 'legacy-a', { name: 'sa', onSignal: true });
+        writeBundleRoot(longRootB, 'legacy-b', { name: 'sb', onSignal: false });
+        const { inspectAllBundles } = require('../../src/core/bundles');
+
+        const result = inspectAllBundles([longRootA, longRootB]);
+
+        expect(result.diagnostics).toHaveLength(2);
+        expect(result.diagnostics.every((diagnostic: string) => diagnostic.length <= 512)).toBe(true);
+        expect(result.diagnostics[0]).not.toBe(result.diagnostics[1]);
+    });
+
     it('discoverAllBundles throws naming both sources on bundle name collision', () => {
         writeBundleRoot(rootA, 'dup', 's1');
         writeBundleRoot(rootB, 'dup', 's2');
