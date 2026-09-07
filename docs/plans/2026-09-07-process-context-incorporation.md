@@ -1,5 +1,9 @@
 # Process Context Incorporation Implementation Plan
 
+<!-- awm-qa-complete: 2026-09-07 -->
+<!-- awm-docs-complete: 2026-09-07 -->
+<!-- awm-retro-complete: 2026-09-07 -->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > (recommended) or `executing-plans` to implement this plan task-by-task. Steps
 > use checkbox (`- [ ]`) syntax for tracking.
