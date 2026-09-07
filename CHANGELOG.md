@@ -1,3 +1,11 @@
+## v9.7.1 - 2026-09-07
+
+### Fixes
+- deduplicate init bundle diagnostics
+- **bundles:** sanitize reporter diagnostics
+- **bundles:** preserve distinct legacy diagnostics
+- **bundles:** canonicalize legacy skill references (#112)
+
 ## v9.7.0 - 2026-09-05
 
 ### Features
