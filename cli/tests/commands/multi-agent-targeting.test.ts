@@ -58,7 +58,7 @@ describe('multi-agent targeting (add/remove/sync/update/doctor)', () => {
     function bundle(over: Partial<BundleDefinition> = {}): BundleDefinition {
         return {
             name: 'demo', description: '', version: '1.0.0', scope: 'baseline', visibility: 'public',
-            dependsOn: [], skills: [{ name: 'demo-skill', onSignal: false }], workflows: [], agents: [],
+            dependsOn: [], skills: ['demo-skill'], workflows: [], agents: [],
             ...over,
         };
     }

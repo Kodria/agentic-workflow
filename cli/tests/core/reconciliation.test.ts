@@ -21,7 +21,7 @@ function writeBundle(
         path.join(contentRoot, 'bundles', name, 'bundle.json'),
         JSON.stringify({
             name, version: '1.0.0', scope, dependsOn,
-            skills: skills.map((s) => ({ name: s })), workflows: [], agents: [],
+            skills, workflows: [], agents: [],
         }),
     );
     for (const skill of skills) {

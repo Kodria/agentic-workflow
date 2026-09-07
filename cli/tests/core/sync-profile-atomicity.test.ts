@@ -26,7 +26,7 @@ import type { BundleDefinition } from '../../src/core/bundles';
 function bundle(name: string, skills: string[], contentRoot: string): BundleDefinition {
     return {
         name, description: '', version: '1.0.0', scope: 'project', visibility: 'public',
-        dependsOn: [], skills: skills.map(n => ({ name: n })), workflows: [], agents: [],
+        dependsOn: [], skills, workflows: [], agents: [],
         source: `bundles/${name}`, contentRoot,
     } as unknown as BundleDefinition;
 }

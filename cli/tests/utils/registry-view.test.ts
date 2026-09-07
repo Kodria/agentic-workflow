@@ -17,10 +17,10 @@ const bundle = (over: Partial<BundleDefinition> & { name: string }): BundleDefin
 
 const processes: BundleDefinition[] = [
     bundle({ name: 'core-dev', description: 'Dev lifecycle', scope: 'baseline',
-        skills: [{ name: 'brainstorming', onSignal: false }, { name: 'shared', onSignal: false }],
+        skills: ['brainstorming', 'shared'],
         workflows: ['exec'], agents: ['plan'] }),
     bundle({ name: 'docs', description: 'Docs as code',
-        skills: [{ name: 'shared', onSignal: false }] }),
+        skills: ['shared'] }),
 ];
 
 describe('buildPackageView', () => {
@@ -138,7 +138,7 @@ describe('visibility', () => {
     it('marks a private bundle on its PackageView', () => {
         const priv: BundleDefinition[] = [
             bundle({ name: 'secret', description: 'private', visibility: 'private',
-                skills: [{ name: 'a', onSignal: false }] }),
+                skills: ['a'] }),
         ];
         const view = buildPackageView([skill('a')], [], [], priv);
         expect(view.find((p) => p.name === 'secret')!.visibility).toBe('private');
@@ -153,7 +153,7 @@ describe('visibility', () => {
 describe('packageSummaryLines width-awareness', () => {
   it('truncates the description column when a width is given', () => {
     const view = buildPackageView([skill('brainstorming', 'x'.repeat(200))], [], [], [
-      bundle({ name: 'core-dev', description: 'x'.repeat(200), skills: [{ name: 'brainstorming', onSignal: false }] }),
+      bundle({ name: 'core-dev', description: 'x'.repeat(200), skills: ['brainstorming'] }),
     ]);
     const lines = packageSummaryLines(view, 60);
     for (const l of lines) expect(l.length).toBeLessThanOrEqual(60);
@@ -161,7 +161,7 @@ describe('packageSummaryLines width-awareness', () => {
   });
   it('does not truncate when no width is given (piped output)', () => {
     const view = buildPackageView([skill('brainstorming', 'y'.repeat(200))], [], [], [
-      bundle({ name: 'core-dev', description: 'z'.repeat(200), skills: [{ name: 'brainstorming', onSignal: false }] }),
+      bundle({ name: 'core-dev', description: 'z'.repeat(200), skills: ['brainstorming'] }),
     ]);
     const lines = packageSummaryLines(view); // no width
     expect(lines.some((l) => l.includes('z'.repeat(200)))).toBe(true);
@@ -171,7 +171,7 @@ describe('packageSummaryLines width-awareness', () => {
 describe('artifactPickerItems', () => {
   it('prepends an "install entire package" sentinel item, then one per artifact', () => {
     const view = buildPackageView([skill('a', 'desc a'), skill('b', 'desc b')], [], [], [
-      bundle({ name: 'p', description: 'pkg', skills: [{ name: 'a', onSignal: false }, { name: 'b', onSignal: false }] }),
+      bundle({ name: 'p', description: 'pkg', skills: ['a', 'b'] }),
     ]);
     const items = artifactPickerItems(view.find((p) => p.name === 'p')!);
     expect(items[0].value).toBe(ALL_SENTINEL);
@@ -183,7 +183,7 @@ describe('artifactPickerItems', () => {
 describe('packagePickerItems', () => {
   it('builds one item per package with a count+description summary', () => {
     const view = buildPackageView([skill('a')], [], [], [
-      bundle({ name: 'p', description: 'pkg desc', skills: [{ name: 'a', onSignal: false }] }),
+      bundle({ name: 'p', description: 'pkg desc', skills: ['a'] }),
     ]);
     const items = packagePickerItems(view);
     expect(items[0].value).toBe('p');

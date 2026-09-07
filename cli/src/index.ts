@@ -21,7 +21,7 @@ import {
 } from './core/provider-artifacts';
 import { preflightLinkArtifactsForCli } from './ui/provider-preflight';
 import { discoverSkills, discoverWorkflows, discoverAgents } from './core/discovery';
-import { discoverAllBundles } from './core/bundles';
+import { createBundleDiagnosticReporter, discoverAllBundles } from './core/bundles';
 import { assertSyncedRegistriesUsable, syncRegistries } from './core/registries';
 import { planInstall } from './core/install-planner';
 import { applyInstallPlan } from './core/install-transaction';
@@ -123,6 +123,7 @@ program.command('add [name]')
   .option('--all', 'install all artifacts from all packages without prompting')
   .action(async (name: string | undefined, options: { agent?: string; scope?: string; method?: string; yes?: boolean; all?: boolean }) => {
       intro(pc.bgCyan(pc.black(' AWM - Agentic Workflow Manager ')));
+      const reporter = createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
 
       // 1. Sync the registry
       const s = spinner();
@@ -143,7 +144,7 @@ program.command('add [name]')
 
       // 1b. If `name` matches a bundle, run the bundle-activation flow and exit.
       if (name) {
-          const allBundles = discoverAllBundles();
+          const allBundles = discoverAllBundles(undefined, reporter);
           const prefs = getPreferences();
           const outcome = runAddBundleCore({ name, agent: options.agent, scope: options.scope, method: options.method }, prefs, allBundles);
           if (outcome.code !== 0) process.exit(outcome.code);
@@ -195,7 +196,7 @@ program.command('add [name]')
               skills,
               includeWorkflows ? workflows : [],
               includeAgents ? agents : [],
-              discoverAllBundles()
+              discoverAllBundles(undefined, reporter)
           );
 
           const allDedup = new Map<string, ArtifactView>();
@@ -325,7 +326,7 @@ program.command('add [name]')
           skills,
           includeWorkflows ? workflows : [],
           includeAgents ? agents : [],
-          discoverAllBundles()
+          discoverAllBundles(undefined, reporter)
       );
 
       if (view.length === 0) {
@@ -490,6 +491,7 @@ program.command('list [package]')
   .option('-a, --all', 'Expand every package')
   .action(async (packageName: string | undefined, options: { all?: boolean }) => {
       intro(pc.bgCyan(pc.black(' AWM - Registry Listing ')));
+      const reporter = createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
 
       const s = spinner();
       s.start('Syncing registries...');
@@ -506,7 +508,7 @@ program.command('list [package]')
           return;
       }
 
-      const fullView = buildPackageView(discoverSkills(), discoverWorkflows(), discoverAgents(), discoverAllBundles());
+      const fullView = buildPackageView(discoverSkills(), discoverWorkflows(), discoverAgents(), discoverAllBundles(undefined, reporter));
       const view = options.all ? fullView : fullView.filter((p) => p.visibility !== 'private');
 
       if (view.length === 0) {
@@ -571,6 +573,7 @@ program.command('remove [name]')
   .option('-y, --yes', 'Skip the confirmation prompt (requires a name)')
   .action(async (name: string | undefined, options: { agent?: string; scope?: string; yes?: boolean }) => {
       intro(pc.bgCyan(pc.black(' AWM - Remove Artifact ')));
+      const reporter = createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
 
       const prefs = getPreferences();
 
@@ -643,7 +646,7 @@ program.command('remove [name]')
           process.exit(0);
       }
 
-      const groupedOpts = buildGroupedOptions(installed, discoverAllBundles(),
+      const groupedOpts = buildGroupedOptions(installed, discoverAllBundles(undefined, reporter),
           (c) => {
               const hasSkill = c.artifacts.some(a => a.type === 'skill');
               const hasWf = c.artifacts.some(a => a.type === 'workflow');
@@ -662,14 +665,14 @@ program.command('remove [name]')
           // Los artefactos del bundle pedido que estan REALMENTE instalados en este
           // scope. Se cruza contra `installed`: lo que no esta instalado no se puede
           // remover, y decirlo es mejor que borrar un subconjunto en silencio.
-          const bundle = discoverAllBundles().find((b) => b.name === name);
+          const bundle = discoverAllBundles(undefined, reporter).find((b) => b.name === name);
           if (!bundle) {
               console.error(pc.red(`Bundle "${name}" not found in registry.`));
               console.error(pc.dim('Run `awm list` to see available packages.'));
               process.exit(1);
           }
           const owned = new Set<string>([
-              ...bundle.skills.map((sk) => sk.name),
+              ...bundle.skills,
               ...bundle.workflows,
               ...bundle.agents,
           ]);

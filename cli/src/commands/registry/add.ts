@@ -13,7 +13,7 @@ import {
     REGISTRY_DIR_NAMES,
 } from '../../core/registries';
 import { discoverSkills, discoverWorkflows, discoverAgents } from '../../core/discovery';
-import { discoverAllBundles } from '../../core/bundles';
+import { BundleDiagnosticReporter, discoverAllBundles } from '../../core/bundles';
 import { readDeclaredOrchestrators } from '../../core/orchestrators';
 
 export type AddRegistryResult =
@@ -34,7 +34,7 @@ export function deriveRegistryName(remote: string): string {
     return base.replace(/\.git$/, '');
 }
 
-export async function addRegistry(remote: string, nameOverride?: string): Promise<AddRegistryResult> {
+export async function addRegistry(remote: string, nameOverride?: string, reporter?: BundleDiagnosticReporter): Promise<AddRegistryResult> {
     const name = nameOverride ?? deriveRegistryName(remote);
     if (!name || name === '.' || name.includes('..') || /[/\\]/.test(name)) {
         return { ok: false, error: `Invalid registry name "${name}" — use --name <simple-dir-name>` };
@@ -71,7 +71,7 @@ export async function addRegistry(remote: string, nameOverride?: string): Promis
         discoverSkills(roots);
         discoverWorkflows(roots);
         discoverAgents(roots);
-        discoverAllBundles(roots);
+        discoverAllBundles(roots, reporter);
     } catch (e) {
         fs.rmSync(dest, { recursive: true, force: true });
         return { ok: false, name, error: e instanceof Error ? e.message : String(e) };

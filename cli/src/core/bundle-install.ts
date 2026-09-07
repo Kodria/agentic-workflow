@@ -46,8 +46,8 @@ function bundleArtifacts(b: BundleDefinition, contentDir: string): ArtifactInten
     // estructural sobre la ruta ya resuelta.
     const refs: ArtifactIntent[] = [];
     for (const s of b.skills) {
-        assertSafeArtifactName(s.name, 'skill');
-        refs.push({ name: s.name, type: 'skill', installName: s.name, sourcePath: path.join(contentDir, 'skills', s.name) });
+        assertSafeArtifactName(s, 'skill');
+        refs.push({ name: s, type: 'skill', installName: s, sourcePath: path.join(contentDir, 'skills', s) });
     }
     for (const w of b.workflows) {
         assertSafeArtifactName(w, 'workflow');

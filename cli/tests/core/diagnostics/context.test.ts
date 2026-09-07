@@ -6,7 +6,7 @@ import type { BundleDefinition } from '../../../src/core/bundles';
 function bundle(name: string, scope: BundleDefinition['scope'], skills: string[]): BundleDefinition {
     return {
         name, description: '', version: '1.0.0', scope, visibility: 'public',
-        dependsOn: [], skills: skills.map((s) => ({ name: s, onSignal: false })),
+        dependsOn: [], skills,
         workflows: [], agents: [],
     };
 }
@@ -86,7 +86,7 @@ describe('gatherContext', () => {
     it('machine: devCore surfaces a missing per-agent artifact even when the shared skill link is already present', () => {
         const bundleWithAgent = (): BundleDefinition => ({
             name: 'dev-core', description: '', version: '1.0.0', scope: 'baseline', visibility: 'public',
-            dependsOn: [], skills: [{ name: 'development-process', onSignal: false }],
+            dependsOn: [], skills: ['development-process'],
             workflows: [], agents: ['development-process'],
         });
         // Simulate OpenCode having already linked the shared ~/.agents/skills dir.

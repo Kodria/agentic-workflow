@@ -27,7 +27,7 @@ function seedRegistry(contentRoot: string) {
     fs.mkdirSync(path.join(contentRoot, 'bundles', 'dev'), { recursive: true });
     fs.writeFileSync(path.join(contentRoot, 'bundles', 'dev', 'bundle.json'), JSON.stringify({
         name: 'dev', version: '1.0.0', scope: 'baseline', dependsOn: [],
-        skills: [{ name: 'brainstorming' }, { name: 'using-awm' }], workflows: [], agents: [],
+        skills: ['brainstorming', 'using-awm'], workflows: [], agents: [],
     }));
 
     // Seed .git in the content root so gatherMachine.registryCache.present is true.

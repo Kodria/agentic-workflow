@@ -10,7 +10,7 @@ import { InjectionOrchestrator } from '../context/orchestrator';
 import { InjectionState } from '../context/types';
 import { computeHookStatus } from '../../commands/hooks/status';
 import { findProjectRoot, readProfile } from '../profile';
-import { discoverAllBundles, resolveBundleSkills, resolveBundleAgents, BundleDefinition } from '../bundles';
+import { discoverAllBundles, resolveBundleSkills, resolveBundleAgents, BundleDefinition, BundleDiagnosticReporter } from '../bundles';
 import { classifySkillLinks, managedLinkTargets } from '../skill-integrity';
 import { ManagedArtifactRecord, readArtifactState } from '../artifact-state';
 import { awmHome } from '../paths';
@@ -299,11 +299,12 @@ export interface GatherOptions {
     /** Injectable seam over the physical skills-dir scan (default: classifySkillLinks) —
      *  tests spy on this to assert a directory shared by two providers is scanned once. */
     scanSkills?: ScanSkills;
+    reporter?: BundleDiagnosticReporter;
 }
 
 export function gatherContext(opts: GatherOptions = {}): HarnessContext {
     const cwd = opts.cwd ?? process.cwd();
-    const bundles = opts.bundles ?? discoverAllBundles();
+    const bundles = opts.bundles ?? discoverAllBundles(undefined, opts.reporter);
     const agent = opts.agent ?? 'claude-code';
     const root = findProjectRoot(cwd);
     const agents = opts.agents ?? [agent];

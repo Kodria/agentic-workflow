@@ -8,10 +8,10 @@ const bundle = (over: Partial<BundleDefinition> & { name: string }): BundleDefin
 
 const processes: BundleDefinition[] = [
     bundle({ name: 'core-dev', description: 'Core development skills',
-        skills: [{ name: 'brainstorming', onSignal: false }, { name: 'shared-skill', onSignal: false }],
+        skills: ['brainstorming', 'shared-skill'],
         workflows: [], agents: [] }),
     bundle({ name: 'docs', description: 'Documentation skills',
-        skills: [{ name: 'docs-assistant', onSignal: false }, { name: 'shared-skill', onSignal: false }],
+        skills: ['docs-assistant', 'shared-skill'],
         workflows: [], agents: [] }),
 ];
 
