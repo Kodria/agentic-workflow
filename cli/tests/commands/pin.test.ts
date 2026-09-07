@@ -3,31 +3,31 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
+let tmpHome: string;
+let originalHome: string | undefined;
+let originalAwmHome: string | undefined;
+
+beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pin-home-'));
+    originalHome = process.env.HOME;
+    originalAwmHome = process.env.AWM_HOME;
+    process.env.HOME = tmpHome;
+    process.env.AWM_HOME = path.join(tmpHome, '.awm');
+    jest.resetModules();
+});
+
+afterEach(() => {
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    if (originalAwmHome === undefined) delete process.env.AWM_HOME;
+    else process.env.AWM_HOME = originalAwmHome;
+});
+
+const readPrefs = () =>
+    JSON.parse(fs.readFileSync(path.join(tmpHome, '.awm/preferences.json'), 'utf-8'));
+
 describe('pin/unpin (editores de preferences)', () => {
-    let tmpHome: string;
-    let originalHome: string | undefined;
-    let originalAwmHome: string | undefined;
-
-    beforeEach(() => {
-        tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pin-home-'));
-        originalHome = process.env.HOME;
-        originalAwmHome = process.env.AWM_HOME;
-        process.env.HOME = tmpHome;
-        process.env.AWM_HOME = path.join(tmpHome, '.awm');
-        jest.resetModules();
-    });
-
-    afterEach(() => {
-        fs.rmSync(tmpHome, { recursive: true, force: true });
-        if (originalHome === undefined) delete process.env.HOME;
-        else process.env.HOME = originalHome;
-        if (originalAwmHome === undefined) delete process.env.AWM_HOME;
-        else process.env.AWM_HOME = originalAwmHome;
-    });
-
-    const readPrefs = () =>
-        JSON.parse(fs.readFileSync(path.join(tmpHome, '.awm/preferences.json'), 'utf-8'));
-
     it('setPin escribe pins.base normalizado (acepta prefijo v)', () => {
         const { setPin } = require('../../src/commands/pin');
         setPin('base', 'v1.2.0');

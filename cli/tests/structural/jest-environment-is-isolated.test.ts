@@ -11,6 +11,10 @@ describe('Jest environment isolation', () => {
         expect(os.tmpdir()).toContain('awm-jest-');
     });
 
+    it('routes every unscoped AWM write into the suite-owned temporary directory', () => {
+        expect(process.env.AWM_HOME).toBe(path.join(process.env.AWM_JEST_TMPDIR!, 'awm-home'));
+    });
+
     it('falls back to the system temp directory when the home cache is read-only', async () => {
         const originalEnv = { ...process.env };
         const fallback = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-jest-fallback-'));

@@ -20,5 +20,9 @@ module.exports = async () => {
   process.env.TMPDIR = testTmp;
   process.env.TMP = testTmp;
   process.env.TEMP = testTmp;
+  // Fail-safe for every test, including a future test that forgets its own
+  // HOME/AWM_HOME fixture. No Jest worker may ever resolve AWM state from the
+  // operator's real ~/.awm directory.
+  process.env.AWM_HOME = path.join(testTmp, 'awm-home');
   delete process.env.CODEX_HOME;
 };
