@@ -68,9 +68,9 @@ Modify `cli/src/core/bundles.ts`. Add behavioral coverage to `cli/tests/core/bun
 
 #### Implementation
 
-- [ ] In `bundles.test.ts`, change the canonical expectation to `['brainstorming', 'architecture-advisor']`; add a legacy fixture that captures diagnostics and proves `{name, onSignal}` becomes only the name. Assert one diagnostic for multiple legacy references in one manifest, no control bytes or serialized object contents, a bounded length, canonical replacement syntax, and the `v10` removal boundary.
-- [ ] Add table-driven RED cases for an absent/non-array `skills`, empty strings, arrays, nulls, objects with empty/non-string `name`, non-boolean `onSignal`, and unknown object keys. Require an explicit error containing the safe manifest identity and `skills[index]`; never accept or silently drop an invalid entry.
-- [ ] Replace `BundleSkillRef` with `skills: string[]` and introduce the explicit result contract:
+- [x] In `bundles.test.ts`, change the canonical expectation to `['brainstorming', 'architecture-advisor']`; add a legacy fixture that captures diagnostics and proves `{name, onSignal}` becomes only the name. Assert one diagnostic for multiple legacy references in one manifest, no control bytes or serialized object contents, a bounded length, canonical replacement syntax, and the `v10` removal boundary.
+- [x] Add table-driven RED cases for an absent/non-array `skills`, empty strings, arrays, nulls, objects with empty/non-string `name`, non-boolean `onSignal`, and unknown object keys. Require an explicit error containing the safe manifest identity and `skills[index]`; never accept or silently drop an invalid entry.
+- [x] Replace `BundleSkillRef` with `skills: string[]` and introduce the explicit result contract:
 
 ```ts
 export interface BundleDiscoveryResult {
@@ -81,10 +81,10 @@ export interface BundleDiscoveryResult {
 export type BundleDiagnosticReporter = (diagnostic: string) => void;
 ```
 
-- [ ] Implement a strict `normalizeSkillRefs(raw, manifestPath)` returning `{ skills, diagnostics }`. Canonical entries are non-empty strings. Legacy objects may contain exactly `name` and optional boolean `onSignal`; increment a per-manifest count, return only `name`, and never echo the object. Sanitize the manifest identity with `sanitizeDiagnosticText`, cap it before interpolation, and emit exactly one migration diagnostic for the manifest.
-- [ ] Add result-returning `inspectBundles(contentDir)` and `inspectAllBundles(roots = contentRoots())` functions. Preserve the existing array-returning `discoverBundles` and `discoverAllBundles` facades for internal callers, but let them accept an injected reporter and forward each deduplicated diagnostic. The default reporter used by CLI execution must prefix `warning:` and suppress the same diagnostic for repeated discovery passes within one command; tests inject a collector instead of capturing global stderr.
-- [ ] Extend multi-root and override tests to prove diagnostics survive composition once, and that an overridden bundle contributes only its own canonical skills without reviving metadata from the shadowed definition.
-- [ ] Run `CMD-BUNDLES` and confirm the new tests fail before production edits, then pass afterward. Run `CMD-TYPECHECK` and commit:
+- [x] Implement a strict `normalizeSkillRefs(raw, manifestPath)` returning `{ skills, diagnostics }`. Canonical entries are non-empty strings. Legacy objects may contain exactly `name` and optional boolean `onSignal`; increment a per-manifest count, return only `name`, and never echo the object. Sanitize the manifest identity with `sanitizeDiagnosticText`, cap it before interpolation, and emit exactly one migration diagnostic for the manifest.
+- [x] Add result-returning `inspectBundles(contentDir)` and `inspectAllBundles(roots = contentRoots())` functions. Preserve the existing array-returning `discoverBundles` and `discoverAllBundles` facades for internal callers, but let them accept an injected reporter and forward each deduplicated diagnostic. The default reporter used by CLI execution must prefix `warning:` and suppress the same diagnostic for repeated discovery passes within one command; tests inject a collector instead of capturing global stderr.
+- [x] Extend multi-root and override tests to prove diagnostics survive composition once, and that an overridden bundle contributes only its own canonical skills without reviving metadata from the shadowed definition.
+- [x] Run `CMD-BUNDLES` and confirm the new tests fail before production edits, then pass afterward. Run `CMD-TYPECHECK` and commit:
 
 ```bash
 git add cli/src/core/bundles.ts cli/tests/core/bundles.test.ts cli/tests/core/bundles-multiroot.test.ts cli/tests/core/bundles-overrides.test.ts
