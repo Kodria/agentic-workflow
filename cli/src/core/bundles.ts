@@ -215,9 +215,10 @@ export function createBundleDiagnosticReporter(
 ): BundleDiagnosticReporter {
     const emitted = new Set<string>();
     return (diagnostic) => {
-        if (emitted.has(diagnostic)) return;
-        emitted.add(diagnostic);
-        write(`warning: ${diagnostic}`);
+        const safeDiagnostic = boundedDiagnostic(diagnostic);
+        if (emitted.has(safeDiagnostic)) return;
+        emitted.add(safeDiagnostic);
+        write(`warning: ${safeDiagnostic}`);
     };
 }
 

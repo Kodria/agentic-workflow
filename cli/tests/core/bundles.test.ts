@@ -115,6 +115,20 @@ describe('discoverBundles', () => {
         expect(warnings).toEqual(['warning: legacy warning']);
     });
 
+    it('sanitizes, bounds, and then deduplicates caller-provided diagnostics', () => {
+        const warnings: string[] = [];
+        const report = createBundleDiagnosticReporter((warning) => warnings.push(warning));
+        const payload = `legacy\x1b\n${'x'.repeat(600)}`;
+
+        report(payload);
+        report(`legacy ${'x'.repeat(600)}`);
+
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toMatch(/^warning: legacy /);
+        expect(warnings[0]).not.toMatch(/[\x00-\x1f\x7f-\x9f]/);
+        expect(warnings[0].length).toBeLessThanOrEqual('warning: '.length + 512);
+    });
+
     it.each([
         ['missing skills', undefined, /skills/],
         ['a non-array skills value', 'brainstorming', /skills/],
