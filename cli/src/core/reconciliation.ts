@@ -15,7 +15,7 @@
 // `awm init` time). Widening this is left to a follow-up if `update` needs to
 // also prune.
 import { AgentTarget } from '../providers';
-import { BundleDefinition, discoverAllBundles } from './bundles';
+import { BundleDefinition, BundleDiagnosticReporter, discoverAllBundles } from './bundles';
 import { ArtifactIntent, InstallPlan, planInstall } from './install-planner';
 import { expandBundleArtifacts } from './bundle-install';
 import { getPreferences } from '../utils/config';
@@ -27,6 +27,7 @@ export type PlanReconciliationParams = {
     bundles?: BundleDefinition[];
     /** Overridable for tests; defaults to the persisted preferences' enabledAgents. */
     enabledAgents?: AgentTarget[];
+    reporter?: BundleDiagnosticReporter;
 };
 
 function intentKey(intent: ArtifactIntent): string {
@@ -41,7 +42,7 @@ function intentKey(intent: ArtifactIntent): string {
  */
 export function planReconciliation(params: PlanReconciliationParams): InstallPlan {
     const { targets, roots } = params;
-    const bundles = params.bundles ?? discoverAllBundles(roots);
+    const bundles = params.bundles ?? discoverAllBundles(roots, params.reporter);
     const contentDir = roots[0] ?? '';
     const machineBundles = bundles.filter((b) => b.scope === 'baseline' || b.scope === 'ambient');
 

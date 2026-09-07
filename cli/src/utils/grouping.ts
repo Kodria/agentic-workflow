@@ -25,7 +25,7 @@ export function buildGroupedOptions<T extends GroupableArtifact>(
         const baseName = (a.type === 'workflow' || a.type === 'agent') ? a.name.replace(/\.md$/, '') : a.name;
 
         for (const p of bundles) {
-            const skillNames = p.skills.map((s) => s.name);
+            const skillNames = p.skills;
             if ((a.type === 'skill' && skillNames.includes(baseName)) ||
                 (a.type === 'workflow' && p.workflows.includes(baseName)) ||
                 (a.type === 'agent' && p.agents.includes(baseName))) {

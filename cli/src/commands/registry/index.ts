@@ -5,7 +5,7 @@ import { intro, outro, confirm, isCancel, spinner, multiselect, select } from '@
 import pc from 'picocolors';
 import { listRegistries, contentRoots } from '../../core/registries';
 import { discoverSkills, discoverWorkflows, discoverAgents } from '../../core/discovery';
-import { discoverAllBundles } from '../../core/bundles';
+import { createBundleDiagnosticReporter, discoverAllBundles } from '../../core/bundles';
 import { reconcileAllSkillLinks } from '../../core/skill-integrity';
 import { regenerateGlobalContext } from '../../core/context/regenerate';
 import { addRegistry } from './add';
@@ -25,10 +25,11 @@ export function registerRegistryCommand(program: Command): void {
         .option('--install-all', 'install every bundle from the new registry for the default agent')
         .option('--no-install', 'skip the bundle install offer')
         .action(async (remote: string, options: { name?: string; installAll?: boolean; install?: boolean }) => {
+            const reporter = createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
             intro(pc.bgCyan(pc.black(' AWM - Add Registry ')));
             const s = spinner();
             s.start('Cloning and validating registry...');
-            const result = await addRegistry(remote, options.name);
+            const result = await addRegistry(remote, options.name, reporter);
             if (!result.ok) {
                 s.stop('Failed.');
                 console.error(pc.red(result.error));
@@ -46,7 +47,7 @@ export function registerRegistryCommand(program: Command): void {
 
             // Bundle install offer — failure NEVER reverts the add.
             try {
-                const available = bundlesInRegistry(result.contentRoot);
+                const available = bundlesInRegistry(result.contentRoot, reporter);
                 if (available.length > 0) {
                     const prefs = getPreferences();
                     const projectRoot = findProjectRoot(process.cwd()) ?? process.cwd();
@@ -78,7 +79,7 @@ export function registerRegistryCommand(program: Command): void {
                     }
 
                     if (selection) {
-                        for (const r of installBundlesFromRegistry(result.contentRoot, selection, agents, projectRoot)) {
+                        for (const r of installBundlesFromRegistry(result.contentRoot, selection, agents, projectRoot, reporter)) {
                             for (const line of r.installed) console.log(pc.green(`  ✓ ${line}`));
                             for (const sk of r.skipped) console.log(pc.yellow(`  ⚠  Skipped: ${sk}`));
                         }
@@ -97,6 +98,7 @@ export function registerRegistryCommand(program: Command): void {
     reg.command('list')
         .description('list configured additional registries')
         .action(() => {
+            const reporter = createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
             const regs = listRegistries();
             if (regs.length === 0) {
                 console.log(pc.dim('No additional registries. Add one with `awm registry add <git-url>`.'));
@@ -119,12 +121,12 @@ export function registerRegistryCommand(program: Command): void {
                 try {
                     const counts = [
                         `${discoverSkills([r.contentRoot]).length} skills`,
-                        `${discoverAllBundles([r.contentRoot]).length} bundles`,
+                        `${discoverAllBundles([r.contentRoot], reporter).length} bundles`,
                         `${discoverWorkflows([r.contentRoot]).length} workflows`,
                         `${discoverAgents([r.contentRoot]).length} agents`,
                     ].join(', ');
                     console.log(`${pc.cyan(r.name)}  ${r.remote}  ${pc.dim(counts)}`);
-                    for (const o of overrideStatus(r.contentRoot, earlier)) {
+                    for (const o of overrideStatus(r.contentRoot, earlier, reporter)) {
                         console.log(
                             o.active
                                 ? pc.yellow(`    ↑ override active: ${o.name}`)

@@ -22,7 +22,7 @@ import { mkCanonicalTmpDir } from '../../support/tmp';
 function bundle(name: string, scope: BundleDefinition['scope'], skills: string[]): BundleDefinition {
     return {
         name, description: '', version: '1.0.0', scope, visibility: 'public',
-        dependsOn: [], skills: skills.map((s) => ({ name: s, onSignal: false })),
+        dependsOn: [], skills,
         workflows: [], agents: [],
     };
 }

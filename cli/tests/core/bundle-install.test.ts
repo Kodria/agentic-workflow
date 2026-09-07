@@ -1,8 +1,9 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { discoverBundles } from '../../src/core/bundles';
-import { installBundle, addBundle, syncProfile, InstallSummary } from '../../src/core/bundle-install';
+import { createBundleDiagnosticReporter, discoverBundles } from '../../src/core/bundles';
+import { expandBundleArtifacts, installBundle, addBundle, syncProfile, InstallSummary } from '../../src/core/bundle-install';
+import { AGENT_TARGETS } from '../../src/providers';
 import { readProfile, writeProfile } from '../../src/core/profile';
 import { installArtifact } from '../../src/core/executor';
 import * as executor from '../../src/core/executor';
@@ -110,6 +111,42 @@ function makeFixture() {
 }
 
 describe('installBundle', () => {
+    it('expands canonical and legacy manifests into byte-identical artifacts for every agent target', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-binstall-compat-'));
+        const content = path.join(root, 'registry');
+        const writeManifests = (legacy: boolean) => {
+            const skills = (names: string[]) => legacy
+                ? names.map((name, index) => ({ name, onSignal: index % 2 === 0 }))
+                : names;
+            fs.writeFileSync(path.join(content, 'bundles/base/bundle.json'), JSON.stringify({
+                name: 'base', scope: 'project', dependsOn: [],
+                skills: skills(['shared', 'base-only']), workflows: [], agents: [],
+            }));
+            fs.writeFileSync(path.join(content, 'bundles/extension/bundle.json'), JSON.stringify({
+                name: 'extension', scope: 'project', dependsOn: ['base'],
+                skills: skills(['shared', 'extension-only']), workflows: [], agents: [],
+            }));
+        };
+        for (const bundle of ['base', 'extension']) fs.mkdirSync(path.join(content, 'bundles', bundle), { recursive: true });
+        fs.writeFileSync(path.join(content, 'catalog.json'), JSON.stringify({ bundles: [{ name: 'base', source: './bundles/base' }, { name: 'extension', source: './bundles/extension' }] }));
+        writeManifests(false);
+        const canonicalWarnings: string[] = [];
+        const legacyWarnings: string[] = [];
+        const canonicalReporter = createBundleDiagnosticReporter((message) => canonicalWarnings.push(message));
+        const legacyReporter = createBundleDiagnosticReporter((message) => legacyWarnings.push(message));
+        const canonicalBundles = discoverBundles(content, canonicalReporter);
+        writeManifests(true);
+        const legacyBundles = discoverBundles(content, legacyReporter);
+
+        for (const agent of AGENT_TARGETS) {
+            const canonicalArtifacts = expandBundleArtifacts({ bundleName: 'extension', bundles: canonicalBundles, agents: [agent], method: 'copy', projectRoot: root, contentDir: content });
+            const legacyArtifacts = expandBundleArtifacts({ bundleName: 'extension', bundles: legacyBundles, agents: [agent], method: 'copy', projectRoot: root, contentDir: content });
+            expect(Buffer.from(JSON.stringify(canonicalArtifacts))).toEqual(Buffer.from(JSON.stringify(legacyArtifacts)));
+        }
+        expect(canonicalWarnings).toEqual([]);
+        expect(legacyWarnings).toHaveLength(2);
+    });
+
     it('materializes the bundle closure as local symlinks (deps + own skills)', () => {
         const { content, projectRoot, bundles } = makeFixture();
         const result = installBundle({

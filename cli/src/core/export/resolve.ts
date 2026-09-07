@@ -5,7 +5,7 @@
 // registry instalado — nunca de ~/.claude/skills.
 import fs from 'fs';
 import path from 'path';
-import { discoverAllBundles, resolveBundleSkills } from '../bundles';
+import { BundleDiagnosticReporter, discoverAllBundles, resolveBundleSkills } from '../bundles';
 import { discoverSkills, matchFrontmatterBlock } from '../discovery';
 import { ExportResolution, ResolvedSkill } from './types';
 
@@ -44,8 +44,8 @@ function assertOverrideConsistency(s: ResolvedSkill): void {
     }
 }
 
-export function resolveExport(requested: string, roots: string[]): ExportResolution {
-    const bundles = discoverAllBundles(roots);
+export function resolveExport(requested: string, roots: string[], reporter?: BundleDiagnosticReporter): ExportResolution {
+    const bundles = discoverAllBundles(roots, reporter);
 
     if (bundles.some((b) => b.name === requested)) {
         const skills: ResolvedSkill[] = [];

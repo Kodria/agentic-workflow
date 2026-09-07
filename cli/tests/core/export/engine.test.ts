@@ -19,7 +19,7 @@ function makeRoot(): string {
     }));
     fs.writeFileSync(path.join(root, 'bundles/dev/bundle.json'), JSON.stringify({
         name: 'dev', version: '1.0.0', scope: 'baseline', dependsOn: [],
-        skills: ['proc-skill', { name: 'mermaid', onSignal: true }, { name: 'ported', onSignal: true }],
+        skills: ['proc-skill', 'mermaid', 'ported'],
         workflows: [], agents: [],
     }));
     const mk = (name: string, fm: string[]) => {

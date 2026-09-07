@@ -16,7 +16,7 @@ import { findProjectRoot, readProfile } from '../core/profile';
 import {
     syncRegistries, readRegistriesConfig, verifyMinCliVersions, assertRegistryGates, assertSyncedRegistriesUsable, RegistrySyncResult,
 } from '../core/registries';
-import { discoverAllBundles } from '../core/bundles';
+import { BundleDiagnosticReporter, createBundleDiagnosticReporter, discoverAllBundles } from '../core/bundles';
 import { syncProfile as realSyncProfile, SyncResult } from '../core/bundle-install';
 import { verifyProjectPins, PinFailure } from '../core/profile-pins';
 import { getPreferences } from '../utils/config';
@@ -28,6 +28,7 @@ export type RunSyncOptions = {
     cwd?: string;
     agent?: string;
     method?: string;
+    reporter?: BundleDiagnosticReporter;
 };
 
 export type RunSyncDeps = {
@@ -74,6 +75,7 @@ export async function runSyncCore(
     noteWindowsCaveat((m) => console.log(pc.dim(`ℹ ${m}`)));
 
     const d: RunSyncDeps = { ...defaultDeps, ...deps };
+    const reporter = options.reporter ?? createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
     const cwd = options.cwd ?? process.cwd();
 
     const projectRoot = findProjectRoot(cwd);
@@ -157,7 +159,7 @@ export async function runSyncCore(
     const method = options.method === 'copy' ? 'copy' : 'symlink';
     let result: SyncResult;
     try {
-        result = d.syncProfile({ projectRoot, bundles: discoverAllBundles(), agents: selectedAgents, method });
+        result = d.syncProfile({ projectRoot, bundles: discoverAllBundles(undefined, reporter), agents: selectedAgents, method });
     } catch (e) {
         console.error(pc.red((e as Error).message));
         return { code: 1, selectedAgents };

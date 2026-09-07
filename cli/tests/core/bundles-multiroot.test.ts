@@ -3,10 +3,11 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-function writeBundleRoot(root: string, bundleName: string, skillName: string) {
+function writeBundleRoot(root: string, bundleName: string, skillName: string | object) {
+    const canonicalSkillName = typeof skillName === 'string' ? skillName : (skillName as { name: string }).name;
     fs.mkdirSync(path.join(root, 'bundles', bundleName), { recursive: true });
-    fs.mkdirSync(path.join(root, 'skills', skillName), { recursive: true });
-    fs.writeFileSync(path.join(root, 'skills', skillName, 'SKILL.md'), `---\nname: ${skillName}\ndescription: d\n---\n`);
+    fs.mkdirSync(path.join(root, 'skills', canonicalSkillName), { recursive: true });
+    fs.writeFileSync(path.join(root, 'skills', canonicalSkillName, 'SKILL.md'), `---\nname: ${canonicalSkillName}\ndescription: d\n---\n`);
     fs.writeFileSync(
         path.join(root, 'bundles', bundleName, 'bundle.json'),
         JSON.stringify({ name: bundleName, version: '1.0.0', scope: 'ambient', skills: [skillName] })
@@ -43,6 +44,33 @@ describe('bundles multi-root', () => {
         const all = discoverAllBundles([rootA, rootB]);
         expect(all.map((b: { name: string }) => b.name).sort()).toEqual(['dev-x', 'personal-x']);
         expect(all.find((b: { name: string }) => b.name === 'personal-x').contentRoot).toBe(rootB);
+    });
+
+    it('composes one legacy migration diagnostic for each affected manifest', () => {
+        writeBundleRoot(rootA, 'dev-x', { name: 'sx', onSignal: true });
+        writeBundleRoot(rootB, 'personal-x', { name: 'px', onSignal: false });
+        const { inspectAllBundles } = require('../../src/core/bundles');
+
+        const result = inspectAllBundles([rootA, rootB]);
+
+        expect(result.bundles.map((b: { skills: string[] }) => b.skills)).toEqual([['sx'], ['px']]);
+        expect(result.diagnostics).toHaveLength(2);
+        expect(new Set(result.diagnostics).size).toBe(2);
+    });
+
+    it('keeps diagnostics distinct when manifest identities share a truncated prefix', () => {
+        const sharedPrefix = path.join(tmp, ...Array.from({ length: 30 }, () => 'shared-prefix'));
+        const longRootA = path.join(sharedPrefix, 'registry-a');
+        const longRootB = path.join(sharedPrefix, 'registry-b');
+        writeBundleRoot(longRootA, 'legacy-a', { name: 'sa', onSignal: true });
+        writeBundleRoot(longRootB, 'legacy-b', { name: 'sb', onSignal: false });
+        const { inspectAllBundles } = require('../../src/core/bundles');
+
+        const result = inspectAllBundles([longRootA, longRootB]);
+
+        expect(result.diagnostics).toHaveLength(2);
+        expect(result.diagnostics.every((diagnostic: string) => diagnostic.length <= 512)).toBe(true);
+        expect(result.diagnostics[0]).not.toBe(result.diagnostics[1]);
     });
 
     it('discoverAllBundles throws naming both sources on bundle name collision', () => {

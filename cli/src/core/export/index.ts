@@ -9,6 +9,7 @@ import { resolveExport } from './resolve';
 import { claudeAiTransform } from './transform';
 import { packSkill } from './pack';
 import { ExportSummary, ZipFn } from './types';
+import { BundleDiagnosticReporter } from '../bundles';
 
 export const EXPORT_TARGETS = ['claude-ai'] as const;
 
@@ -21,6 +22,7 @@ export interface RunExportOptions {
     /** Default: contentRoots() del registry instalado (R1.4). Inyectable en tests. */
     roots?: string[];
     zip?: ZipFn;
+    reporter?: BundleDiagnosticReporter;
 }
 
 export function runExport(opts: RunExportOptions): ExportSummary {
@@ -30,7 +32,7 @@ export function runExport(opts: RunExportOptions): ExportSummary {
     }
     const roots = opts.roots ?? contentRoots();
     const outDir = path.join(opts.out ?? path.join(process.cwd(), 'awm-export'), target);
-    const resolution = resolveExport(opts.name, roots);
+    const resolution = resolveExport(opts.name, roots, opts.reporter);
 
     fs.mkdirSync(outDir, { recursive: true });
     const exported: ExportSummary['exported'] = [];

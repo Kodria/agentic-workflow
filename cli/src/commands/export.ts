@@ -8,6 +8,7 @@ import pc from 'picocolors';
 import path from 'path';
 import { runExport, RunExportOptions } from '../core/export';
 import { ZipFn } from '../core/export/types';
+import { BundleDiagnosticReporter, createBundleDiagnosticReporter } from '../core/bundles';
 
 interface CommandFlags {
     target?: string;
@@ -19,16 +20,19 @@ interface CommandDeps {
     roots?: string[];
     zip?: ZipFn;
     log?: (msg: string) => void;
+    reporter?: BundleDiagnosticReporter;
 }
 
 export function runExportCommand(name: string, flags: CommandFlags, deps: CommandDeps = {}): void {
     const log = deps.log ?? console.log;
+    const reporter = deps.reporter ?? createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
     const opts: RunExportOptions = {
         name,
         target: flags.target,
         out: flags.out,
         roots: deps.roots,
         zip: deps.zip,
+        reporter,
     };
     const summary = runExport(opts);
 

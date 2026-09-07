@@ -9,7 +9,7 @@ const okZip: ZipFn = (cwd, zipName) => {
     return { ok: true, missing: false };
 };
 
-function makeRoot(): string {
+function makeRoot(legacy = false): string {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-cmd-root-'));
     fs.mkdirSync(path.join(root, 'bundles/dev'), { recursive: true });
     fs.writeFileSync(path.join(root, 'catalog.json'), JSON.stringify({
@@ -18,7 +18,7 @@ function makeRoot(): string {
     }));
     fs.writeFileSync(path.join(root, 'bundles/dev/bundle.json'), JSON.stringify({
         name: 'dev', version: '1.0.0', scope: 'baseline', dependsOn: [],
-        skills: ['proc-skill', { name: 'mermaid', onSignal: true }], workflows: [], agents: [],
+        skills: legacy ? ['proc-skill', { name: 'mermaid', onSignal: true }] : ['proc-skill', 'mermaid'], workflows: [], agents: [],
     }));
     const mk = (name: string, fm: string[]) => {
         const dir = path.join(root, 'skills', name);
@@ -63,5 +63,31 @@ describe('runExportCommand (salida al usuario)', () => {
     it('propagates unknown-target errors (commander action will exit(1))', () => {  // verifies R1.3
         expect(() => runExportCommand('dev', { target: 'nope', out }, { roots: [root], zip: okZip, log }))
             .toThrow(/Valid targets/);
+    });
+
+    it('reports one legacy warning and no canonical warning through the command reporter seam', () => {
+        const legacyWarnings: string[] = [];
+        const legacy = makeRoot(true);
+        try {
+            runExportCommand('dev', { target: 'claude-ai', out }, {
+                roots: [legacy], zip: okZip, log,
+                reporter: (message) => legacyWarnings.push(message),
+            });
+            expect(legacyWarnings).toHaveLength(1);
+        } finally {
+            fs.rmSync(legacy, { recursive: true, force: true });
+        }
+
+        const canonicalWarnings: string[] = [];
+        const canonical = makeRoot(false);
+        try {
+            runExportCommand('dev', { target: 'claude-ai', out }, {
+                roots: [canonical], zip: okZip, log,
+                reporter: (message) => canonicalWarnings.push(message),
+            });
+            expect(canonicalWarnings).toEqual([]);
+        } finally {
+            fs.rmSync(canonical, { recursive: true, force: true });
+        }
     });
 });

@@ -13,6 +13,7 @@ import { collectDashboardSnapshot, productionDashboardAdapters } from '../core/d
 import { renderDashboardHtml } from '../core/dashboard/render-html';
 import { renderFullTerminal } from '../core/dashboard/render-terminal';
 import { resolveHtmlTarget, writeHtmlAtomically } from '../core/dashboard/write-html';
+import { BundleDiagnosticReporter, createBundleDiagnosticReporter } from '../core/bundles';
 
 function glyph(status: CheckResult['status']): string {
     if (status === 'ok') return pc.green('✔');
@@ -130,10 +131,12 @@ export interface RunDoctorOptions {
      *  to observe which targets `doctor` resolved. The resolved list drives which providers'
      *  `.providers[]` rows `gatherContext` builds (Task 9). */
     resolveTargets?: typeof resolveAgentTargets;
+    reporter?: BundleDiagnosticReporter;
 }
 
 export function runDoctor(opts: RunDoctorOptions = {}): number {
     const resolveTargets = opts.resolveTargets ?? resolveAgentTargets;
+    const reporter = opts.reporter ?? createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
     const invalid = (message: string): number => { process.stderr.write(`awm doctor: ${message}\n`); return 2; };
     const htmlRequested = opts.html !== undefined;
     if (opts.json && opts.full) return invalid('--json cannot be combined with --full');
@@ -146,7 +149,7 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
             const target = htmlRequested ? resolveHtmlTarget({ cwd, target: opts.html!, force: opts.force }) : undefined;
             const targets = resolveTargets({ prefs: readPreferences(), explicit: opts.agent });
             const collectSnapshot = opts.collectSnapshot ?? collectDashboardSnapshot;
-            const context = gatherContext({ cwd, agents: targets });
+            const context = gatherContext({ cwd, agents: targets, reporter });
             const snapshot = collectSnapshot({ cwd, now: new Date().toISOString(), adapters: {
                 ...productionDashboardAdapters(context),
             } });
@@ -174,7 +177,7 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
 
     let report: ProviderDiagnosticReport;
     try {
-        const ctx = gatherContext({ cwd: opts.cwd, agents: targets });
+        const ctx = gatherContext({ cwd: opts.cwd, agents: targets, reporter });
         const providers = ctx.providers ?? [];
         report = { providers, overall: computeProviderOverall(providers) };
     } catch (err) {

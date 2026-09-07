@@ -26,6 +26,7 @@ import {
 import { awmHome } from '../core/paths';
 import { regenerateGlobalContext, RegenResult } from '../core/context/regenerate';
 import { planReconciliation } from '../core/reconciliation';
+import { BundleDiagnosticReporter, createBundleDiagnosticReporter } from '../core/bundles';
 import { applyInstallPlan as realApplyInstallPlan, InstallSummary } from '../core/install-transaction';
 import { InstallPlan } from '../core/install-planner';
 import { resyncInstalledHooks, ResyncResult } from '../commands/hooks/resync';
@@ -40,13 +41,14 @@ export type RunUpdateOptions = {
     agent?: string;
     /** No interactivo con consentimiento explícito: no pregunta y SÍ hace el self-update. */
     yes?: boolean;
+    reporter?: BundleDiagnosticReporter;
 };
 
 export type RunUpdateDeps = {
     syncRegistries: () => Promise<RegistrySyncResult[]>;
     verifyMinCliVersions: () => ReturnType<typeof verifyMinCliVersions>;
     regenerateGlobalContext: (targets: AgentTarget[]) => RegenResult[];
-    planReconciliation: (params: { targets: AgentTarget[]; roots: string[] }) => InstallPlan;
+    planReconciliation: (params: { targets: AgentTarget[]; roots: string[]; reporter?: BundleDiagnosticReporter }) => InstallPlan;
     applyInstallPlan: (plan: InstallPlan) => InstallSummary;
     resyncInstalledHooks: (registryRoot: string, targets: AgentTarget[]) => ResyncResult[];
     offerSelfUpdate: (mode?: SelfUpdateMode) => Promise<void>;
@@ -123,6 +125,7 @@ export async function runUpdateCore(
     noteWindowsCaveat((m) => console.log(pc.dim(`ℹ ${m}`)));
 
     const d: RunUpdateDeps = { ...defaultDeps, ...deps };
+    const reporter = options.reporter ?? createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
     const prefs = getPreferences();
 
     const resolved = resolveAgentTargetsOrError({ prefs, explicit: options.agent });
@@ -200,7 +203,7 @@ export async function runUpdateCore(
 
     let artifactResult: InstallSummary;
     try {
-        const artifactPlan = d.planReconciliation({ targets: selectedAgents, roots: contentRoots() });
+        const artifactPlan = d.planReconciliation({ targets: selectedAgents, roots: contentRoots(), reporter });
         artifactResult = d.applyInstallPlan(artifactPlan);
     } catch (e) {
         console.error(pc.red(`Artifact reconciliation failed: ${(e as Error).message}`));

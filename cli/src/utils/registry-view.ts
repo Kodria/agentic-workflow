@@ -64,7 +64,7 @@ export function buildPackageView(
     const claimed = new Set<ArtifactView>();
 
     for (const b of bundles) {
-        const skillNames = b.skills.map((s) => s.name);
+        const skillNames = b.skills;
         const arts = all.filter((a) =>
             (a.type === 'skill' && skillNames.includes(a.name)) ||
             (a.type === 'workflow' && b.workflows.includes(a.name)) ||

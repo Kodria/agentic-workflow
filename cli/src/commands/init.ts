@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import pc from 'picocolors';
 import { renderReport } from './doctor';
 import { gatherContext } from '../core/diagnostics/context';
-import { discoverAllBundles } from '../core/bundles';
+import { BundleDiagnosticReporter, createBundleDiagnosticReporter, discoverAllBundles } from '../core/bundles';
 import {
     contentRoots, registriesNeedSync, seedBaselineRegistry, capabilityRoot,
     assertSyncedRegistriesUsable,
@@ -119,6 +119,7 @@ export interface RunInitOptions {
     actions?: Partial<InitActions>;
     /** Injectable seam over the real Codex-version gate (core/provider-version.ts). Tests override to avoid shelling out. */
     assertProviderSupported?: typeof assertProviderSupported;
+    reporter?: BundleDiagnosticReporter;
 }
 
 export async function runInit(opts: RunInitOptions = {}): Promise<number> {
@@ -137,6 +138,13 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
     }
 
     const cwd = opts.cwd ?? process.cwd();
+    const report = opts.reporter ?? createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
+    const reportedDiagnostics = new Set<string>();
+    const reporter: BundleDiagnosticReporter = (diagnostic) => {
+        if (reportedDiagnostics.has(diagnostic)) return;
+        reportedDiagnostics.add(diagnostic);
+        report(diagnostic);
+    };
     const agent: AgentTarget = opts.agent === undefined ? 'claude-code' : requireAgentTarget(opts.agent);
 
     // R2: gate BEFORE anything is read or written — an unsupported provider
@@ -194,7 +202,7 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
         // that exact run won't roll those specific artifacts back — every
         // other target (preferences, hook, injection, previously-installed
         // bundle content) is covered.
-        const preSyncBundles = discoverAllBundles();
+        const preSyncBundles = discoverAllBundles(undefined, reporter);
         const mutationTargets = planInitMutationTargets({
             cwd,
             agent,
@@ -214,7 +222,7 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
                 assertSyncedRegistriesUsable((await mergedActions.syncCache()) ?? []);
             }
 
-            const bundles = discoverAllBundles();
+            const bundles = discoverAllBundles(undefined, reporter);
             const ctx = gatherContext({ cwd, bundles, agent });
 
             // In machineOnly mode, null out the project context so project steps are skipped
