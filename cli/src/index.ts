@@ -58,7 +58,7 @@ import type { AwmPreferences } from './utils/config';
 import { maybeNotifyUpdate } from './core/update-check';
 import { cliVersion } from './core/cli-version';
 
-const program = new Command();
+export const program = new Command();
 program.name('awm').description('Agentic Workflow Manager').version(cliVersion());
 
 program.hook('postAction', (_command, actionCommand) => {
@@ -646,7 +646,8 @@ program.command('remove [name]')
           process.exit(0);
       }
 
-      const groupedOpts = buildGroupedOptions(installed, discoverAllBundles(undefined, reporter),
+      const bundles = discoverAllBundles(undefined, reporter);
+      const groupedOpts = buildGroupedOptions(installed, bundles,
           (c) => {
               const hasSkill = c.artifacts.some(a => a.type === 'skill');
               const hasWf = c.artifacts.some(a => a.type === 'workflow');
@@ -665,7 +666,7 @@ program.command('remove [name]')
           // Los artefactos del bundle pedido que estan REALMENTE instalados en este
           // scope. Se cruza contra `installed`: lo que no esta instalado no se puede
           // remover, y decirlo es mejor que borrar un subconjunto en silencio.
-          const bundle = discoverAllBundles(undefined, reporter).find((b) => b.name === name);
+          const bundle = bundles.find((b) => b.name === name);
           if (!bundle) {
               console.error(pc.red(`Bundle "${name}" not found in registry.`));
               console.error(pc.dim('Run `awm list` to see available packages.'));
@@ -816,7 +817,9 @@ registerContextCommand(program);
 // Commander only waits for async action handlers through parseAsync().  The CLI has
 // async commands (including `sensors coverage`), so returning its promise keeps the
 // process alive until their JSON/output contract has been completed.
-program.parseAsync().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-});
+if (require.main === module) {
+    program.parseAsync().catch((error: unknown) => {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+    });
+}
