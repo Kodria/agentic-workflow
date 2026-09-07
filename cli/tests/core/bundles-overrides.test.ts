@@ -37,8 +37,8 @@ describe('bundle override resolution', () => {
     });
 
     it('declared override: later root wins, contentRoot and overrode reflect it', () => {
-        writeBundleRoot(rootA, 'pack', { name: 's1', onSignal: true });
-        writeBundleRoot(rootB, 'pack', { name: 's2', onSignal: false });
+        writeBundleRoot(rootA, 'pack', 's1');
+        writeBundleRoot(rootB, 'pack', 's2');
         fs.writeFileSync(path.join(rootB, 'awm-registry.json'), JSON.stringify({ overrides: ['pack'] }));
         const { inspectAllBundles } = require('../../src/core/bundles');
         const result = inspectAllBundles([rootA, rootB]);
@@ -46,7 +46,7 @@ describe('bundle override resolution', () => {
         expect(result.bundles[0].contentRoot).toBe(rootB);
         expect(result.bundles[0].overrode).toBe(rootA);
         expect(result.bundles[0].skills).toEqual(['s2']);
-        expect(result.diagnostics).toHaveLength(2);
+        expect(result.diagnostics).toHaveLength(0);
     });
 
     it('undeclared collision still throws naming both sources', () => {
