@@ -145,11 +145,11 @@ Modify `docs/guides/authoring-a-registry-with-an-orchestrator.md`. Create `cli/t
 
 #### Implementation
 
-- [ ] Write the structural test first. It must assert that active source exports no `BundleSkillRef`, operational `BundleDefinition.skills` is `string[]`, active docs use string examples, and the guide states that CLI 9 accepts `{ "name": "skill", "onSignal": true }` only for migration and CLI 10 rejects it. Scope source assertions narrowly so unrelated signal-handler functions named `onSignal` remain valid.
-- [ ] Run `CMD-CONTRACT` and confirm RED against the missing contract.
-- [ ] Add a short compatibility note immediately after the guide's `bundle.json` example. State that strings are canonical, both legacy boolean values are ignored, CLI 9 emits a warning, and CLI 10 removes object support. Do not describe dynamic loading or reserved behavior.
-- [ ] Run `CMD-CONTRACT`, parse every JSON fence touched by the edit, and run `git diff --check`. Deliberately replace one canonical string example with a legacy object, confirm the structural test fails with its intended message, then restore it.
-- [ ] Commit:
+- [x] Write the structural test first. It must assert that active source exports no `BundleSkillRef`, operational `BundleDefinition.skills` is `string[]`, active docs use string examples, and the guide states that CLI 9 accepts `{ "name": "skill", "onSignal": true }` only for migration and CLI 10 rejects it. Scope source assertions narrowly so unrelated signal-handler functions named `onSignal` remain valid.
+- [x] Run `CMD-CONTRACT` and confirm RED against the missing contract.
+- [x] Add a short compatibility note immediately after the guide's `bundle.json` example. State that strings are canonical, both legacy boolean values are ignored, CLI 9 emits a warning, and CLI 10 removes object support. Do not describe dynamic loading or reserved behavior.
+- [x] Run `CMD-CONTRACT`, parse every JSON fence touched by the edit, and run `git diff --check`. Deliberately replace one canonical string example with a legacy object, confirm the structural test fails with its intended message, then restore it.
+- [x] Commit:
 
 ```bash
 git add docs/guides/authoring-a-registry-with-an-orchestrator.md cli/tests/structural/bundle-skill-reference-contract.test.ts
