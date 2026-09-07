@@ -16,7 +16,7 @@ import { findProjectRoot, readProfile } from '../core/profile';
 import {
     syncRegistries, readRegistriesConfig, verifyMinCliVersions, assertRegistryGates, assertSyncedRegistriesUsable, RegistrySyncResult,
 } from '../core/registries';
-import { createBundleDiagnosticReporter, discoverAllBundles } from '../core/bundles';
+import { BundleDiagnosticReporter, createBundleDiagnosticReporter, discoverAllBundles } from '../core/bundles';
 import { syncProfile as realSyncProfile, SyncResult } from '../core/bundle-install';
 import { verifyProjectPins, PinFailure } from '../core/profile-pins';
 import { getPreferences } from '../utils/config';
@@ -28,6 +28,7 @@ export type RunSyncOptions = {
     cwd?: string;
     agent?: string;
     method?: string;
+    reporter?: BundleDiagnosticReporter;
 };
 
 export type RunSyncDeps = {
@@ -74,7 +75,7 @@ export async function runSyncCore(
     noteWindowsCaveat((m) => console.log(pc.dim(`ℹ ${m}`)));
 
     const d: RunSyncDeps = { ...defaultDeps, ...deps };
-    const reporter = createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
+    const reporter = options.reporter ?? createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
     const cwd = options.cwd ?? process.cwd();
 
     const projectRoot = findProjectRoot(cwd);

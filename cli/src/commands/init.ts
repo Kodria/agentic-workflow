@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import pc from 'picocolors';
 import { renderReport } from './doctor';
 import { gatherContext } from '../core/diagnostics/context';
-import { createBundleDiagnosticReporter, discoverAllBundles } from '../core/bundles';
+import { BundleDiagnosticReporter, createBundleDiagnosticReporter, discoverAllBundles } from '../core/bundles';
 import {
     contentRoots, registriesNeedSync, seedBaselineRegistry, capabilityRoot,
     assertSyncedRegistriesUsable,
@@ -119,6 +119,7 @@ export interface RunInitOptions {
     actions?: Partial<InitActions>;
     /** Injectable seam over the real Codex-version gate (core/provider-version.ts). Tests override to avoid shelling out. */
     assertProviderSupported?: typeof assertProviderSupported;
+    reporter?: BundleDiagnosticReporter;
 }
 
 export async function runInit(opts: RunInitOptions = {}): Promise<number> {
@@ -137,7 +138,7 @@ export async function runInit(opts: RunInitOptions = {}): Promise<number> {
     }
 
     const cwd = opts.cwd ?? process.cwd();
-    const reporter = createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
+    const reporter = opts.reporter ?? createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
     const agent: AgentTarget = opts.agent === undefined ? 'claude-code' : requireAgentTarget(opts.agent);
 
     // R2: gate BEFORE anything is read or written — an unsupported provider

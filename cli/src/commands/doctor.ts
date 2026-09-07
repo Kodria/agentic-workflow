@@ -13,7 +13,7 @@ import { collectDashboardSnapshot, productionDashboardAdapters } from '../core/d
 import { renderDashboardHtml } from '../core/dashboard/render-html';
 import { renderFullTerminal } from '../core/dashboard/render-terminal';
 import { resolveHtmlTarget, writeHtmlAtomically } from '../core/dashboard/write-html';
-import { createBundleDiagnosticReporter } from '../core/bundles';
+import { BundleDiagnosticReporter, createBundleDiagnosticReporter } from '../core/bundles';
 
 function glyph(status: CheckResult['status']): string {
     if (status === 'ok') return pc.green('✔');
@@ -131,11 +131,12 @@ export interface RunDoctorOptions {
      *  to observe which targets `doctor` resolved. The resolved list drives which providers'
      *  `.providers[]` rows `gatherContext` builds (Task 9). */
     resolveTargets?: typeof resolveAgentTargets;
+    reporter?: BundleDiagnosticReporter;
 }
 
 export function runDoctor(opts: RunDoctorOptions = {}): number {
     const resolveTargets = opts.resolveTargets ?? resolveAgentTargets;
-    const reporter = createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
+    const reporter = opts.reporter ?? createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
     const invalid = (message: string): number => { process.stderr.write(`awm doctor: ${message}\n`); return 2; };
     const htmlRequested = opts.html !== undefined;
     if (opts.json && opts.full) return invalid('--json cannot be combined with --full');

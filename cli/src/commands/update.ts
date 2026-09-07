@@ -41,6 +41,7 @@ export type RunUpdateOptions = {
     agent?: string;
     /** No interactivo con consentimiento explícito: no pregunta y SÍ hace el self-update. */
     yes?: boolean;
+    reporter?: BundleDiagnosticReporter;
 };
 
 export type RunUpdateDeps = {
@@ -124,7 +125,7 @@ export async function runUpdateCore(
     noteWindowsCaveat((m) => console.log(pc.dim(`ℹ ${m}`)));
 
     const d: RunUpdateDeps = { ...defaultDeps, ...deps };
-    const reporter = createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
+    const reporter = options.reporter ?? createBundleDiagnosticReporter((message) => process.stderr.write(`${message}\n`));
     const prefs = getPreferences();
 
     const resolved = resolveAgentTargetsOrError({ prefs, explicit: options.agent });
