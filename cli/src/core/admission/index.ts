@@ -76,9 +76,45 @@ function currentness(report: CurrentnessReport, consumedRegistryComponents: read
 }
 function sensorVerdict(report: RunOutput): AdmissionReport['sensors'] { return report.overall === 'not_certified' ? 'not-certified' : report.overall === 'pass' ? 'pass' : 'fail'; }
 
+const PLAN_STATES = new Set<AdmissionReport['planState']>(['valid', 'migration-required', 'invalid', 'unsupported']);
+const JOURNALS = new Set<AdmissionReport['journal']>(['not-required', 'current', 'missing', 'corrupt', 'stale']);
+const CURRENTNESS = new Set<AdmissionReport['currentness']>(['current', 'stale', 'unverifiable', 'not-checked']);
+const SENSORS = new Set<AdmissionReport['sensors']>(['pass', 'fail', 'not-certified', 'not-required']);
+const CAPABILITY = new Set<CapabilityStatus>(['supported', 'unsupported', 'unverified']);
+function invalidAdmission(): never { throw new Error('admission returned an invalid report'); }
+function validCapabilities(value: unknown): value is ProviderExecutionCapabilities {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const record = value as Record<string, unknown>;
+    const keys: Array<keyof ProviderExecutionCapabilities> = ['artifactDelivery', 'interactiveExecution', 'unattendedController', 'nativeSubagents', 'modelOverride', 'effortOverride', 'observedModelEvidence', 'durableResume'];
+    return Object.keys(record).length === keys.length && keys.every(key => CAPABILITY.has(record[key] as CapabilityStatus));
+}
+function validForecast(value: unknown): value is DispatchForecast {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const record = value as Record<string, unknown>;
+    const roles = ['implementer', 'specification-reviewer', 'code-quality-reviewer', 'final-reviewer', 'track-a-qa', 'track-b-qa', 'documentation', 'retro', 'finishing'];
+    return record.kind === 'topology' && Number.isSafeInteger(record.slices) && (record.slices as number) >= 0 && Number.isSafeInteger(record.total) && (record.total as number) >= 0
+        && !!record.roles && typeof record.roles === 'object' && !Array.isArray(record.roles) && Object.keys(record.roles as object).length === roles.length
+        && roles.every(role => Number.isSafeInteger((record.roles as Record<string, unknown>)[role]) && ((record.roles as Record<string, unknown>)[role] as number) >= 0);
+}
+function validDiagnostics(value: unknown): value is PlanDiagnostic[] {
+    return Array.isArray(value) && value.every(item => item && typeof item === 'object' && typeof (item as PlanDiagnostic).code === 'string' && typeof (item as PlanDiagnostic).message === 'string' && ((item as PlanDiagnostic).field === undefined || typeof (item as PlanDiagnostic).field === 'string'));
+}
+
 /** Defensive public-output boundary for injected dependencies as well as core reports. */
-export function sanitizeAdmissionReport(report: AdmissionReport): AdmissionReport {
-    return { ...report, diagnostics: sanitizeDiagnostics(Array.isArray(report.diagnostics) ? report.diagnostics : []) };
+export function sanitizeAdmissionReport(report: unknown): AdmissionReport {
+    if (!report || typeof report !== 'object' || Array.isArray(report)) invalidAdmission();
+    const value = report as Record<string, unknown>;
+    if ((value.state !== 'admitted' && value.state !== 'blocked') || !PLAN_STATES.has(value.planState as AdmissionReport['planState']) || !JOURNALS.has(value.journal as AdmissionReport['journal']) || !CURRENTNESS.has(value.currentness as AdmissionReport['currentness']) || !SENSORS.has(value.sensors as AdmissionReport['sensors']) || !validDiagnostics(value.diagnostics)) invalidAdmission();
+    if (value.planDigest !== undefined && (typeof value.planDigest !== 'string' || !/^[a-f0-9]{64}$/.test(value.planDigest))) invalidAdmission();
+    if (value.executionMode !== undefined && value.executionMode !== 'interactivo' && value.executionMode !== 'desatendido') invalidAdmission();
+    if (value.provider !== undefined && !isAgentTarget(value.provider)) invalidAdmission();
+    if (value.capabilityResolution !== undefined) {
+        const resolution = value.capabilityResolution as Record<string, unknown>;
+        if (!resolution || typeof resolution !== 'object' || !['native', 'degraded', 'blocked'].includes(resolution.outcome as string) || !isAgentTarget(resolution.provider) || !validCapabilities(resolution.capabilities) || resolution.evidenceVersion !== 'r1-v1' || !validDiagnostics(resolution.diagnostics)) invalidAdmission();
+    }
+    if (value.forecast !== undefined && !validForecast(value.forecast)) invalidAdmission();
+    const capabilityResolution = value.capabilityResolution === undefined ? undefined : { ...(value.capabilityResolution as ProviderExecutionResolution), diagnostics: sanitizeDiagnostics((value.capabilityResolution as ProviderExecutionResolution).diagnostics) };
+    return { ...(value as AdmissionReport), ...(capabilityResolution ? { capabilityResolution } : {}), diagnostics: sanitizeDiagnostics(value.diagnostics as PlanDiagnostic[]) };
 }
 
 /** Pure, read-only composition. Callers own every I/O dependency and no dispatch API is exposed here. */
@@ -101,6 +137,7 @@ export async function admitPlan(input: AdmissionInput): Promise<AdmissionReport>
     // preserve the safe interactive default until S3 owns durable unattended binding.
     const manifestMode = (plan.manifest as unknown as { executionMode?: unknown }).executionMode;
     const mode = input.executionMode ?? (manifestMode === 'desatendido' ? 'desatendido' : 'interactivo');
+    if (mode !== 'interactivo' && mode !== 'desatendido') return blocked(input, [diagnostic('ADMISSION_EXECUTION_MODE_INVALID', 'Execution mode must be interactivo or desatendido.')], { planDigest: plan.planDigest, provider, executionMode: 'interactivo' });
     if (input.requireCurrent) {
         if (input.provenance !== 'proven') return blocked(input, [diagnostic('ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED', 'Consumed registry contracts cannot be proven from validated plan sources.')], { planDigest: plan.planDigest, provider, executionMode: mode, currentness: 'unverifiable' });
         if (!input.currentness) return blocked(input, [diagnostic('ADMISSION_CURRENTNESS_REQUIRED', 'Currentness evidence was required but not supplied.')], { planDigest: plan.planDigest, provider, executionMode: mode });

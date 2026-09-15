@@ -222,6 +222,14 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
                 return;
             }
             const currentness = options.requireCurrent ? await currentnessCheck(options.cwd) : undefined;
+            if (options.requireCurrent && options.verifySensors) {
+                const currentnessGate = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, requireCurrent: true, verifySensors: true, currentness, ...contractScope });
+                if (currentnessGate.currentness !== 'current') {
+                    process.stdout.write(admissionOutput(currentnessGate, options.json === true));
+                    process.exitCode = 2;
+                    return;
+                }
+            }
             const sensors = options.verifySensors ? await sensorRun({ cwd: options.cwd }) : undefined;
             const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true, currentness, sensors, ...contractScope });
             process.stdout.write(admissionOutput(report, options.json === true));

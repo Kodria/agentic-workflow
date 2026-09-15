@@ -41,6 +41,11 @@ describe('admitPlan', () => {
         expect(report).toMatchObject({ state: 'blocked', currentness: 'unverifiable' });
         expect(report.diagnostics[0].code).toBe('ADMISSION_CURRENTNESS_MISSING_COMPONENT');
     });
+    it('blocks a bogus execution mode instead of treating it as interactive', async () => {
+        const report = await admitPlan({ plan: valid, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], executionMode: 'background' as any });
+        expect(report).toMatchObject({ state: 'blocked', executionMode: 'interactivo' });
+        expect(report.diagnostics[0].code).toBe('ADMISSION_EXECUTION_MODE_INVALID');
+    });
     it('stops at an unmarked plan before checking any later boundary', async () => {
         const report = await admitPlan({ plan: { state: 'migration-required', reason: 'unmarked-plan' }, provider: 'codex', cwd: process.cwd() });
         expect(report).toMatchObject({ state: 'blocked', planState: 'migration-required', journal: 'not-required' });

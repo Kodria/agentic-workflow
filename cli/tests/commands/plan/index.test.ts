@@ -223,6 +223,42 @@ describe('plan validate Commander wiring', () => {
 });
 
 describe('plan admit Commander wiring', () => {
+    it('does not run sensors after currentness blocks', async () => {
+        const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const sensors = jest.fn();
+        const program = new Command();
+        program.exitOverride();
+        program.configureOutput({ writeErr: () => undefined });
+        registerPlanCommand(program, {
+            validatePlanFile: () => valid, listRegistries: () => [],
+            readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
+            checkCurrentness: async () => ({ checkedAt: 'x', compatibility: { status: 'not-checked' }, components: [{ component: 'cli', installed: '1.0.0', latest: '2.0.0', channel: 'stable', source: 'npm', checkedAt: 'x', status: 'stale', detail: 'stale', remedy: 'update' }] }),
+            runSensors: sensors,
+        });
+        try {
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', repositoryRoot, '--require-current', '--verify-sensors', '--json']);
+            expect(sensors).not.toHaveBeenCalled();
+            expect(JSON.parse(String(output.mock.calls[0][0]))).toMatchObject({ state: 'blocked', currentness: 'stale', sensors: 'not-required' });
+        } finally { output.mockRestore(); process.exitCode = undefined; }
+    });
+
+    it('rejects a forged admission report before output or exit status', async () => {
+        const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const program = new Command();
+        program.exitOverride();
+        program.configureOutput({ writeErr: () => undefined });
+        registerPlanCommand(program, {
+            validatePlanFile: () => valid,
+            readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
+            admitPlan: async () => ({ state: 'admitted', planState: 'valid', journal: 'not-required', currentness: 'current', sensors: 'pass', diagnostics: 'forged' } as any),
+        });
+        try {
+            await expect(program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', repositoryRoot, '--json'])).rejects.toThrow('admission returned an invalid report');
+            expect(output).not.toHaveBeenCalled();
+            expect(process.exitCode).toBeUndefined();
+        } finally { output.mockRestore(); process.exitCode = undefined; }
+    });
+
     it('does not prove registry irrelevance through a source symlink that escapes cwd', async () => {
         const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-admit-provenance-'));
         const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-admit-outside-'));
