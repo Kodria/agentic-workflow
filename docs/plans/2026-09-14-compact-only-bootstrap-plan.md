@@ -42,32 +42,32 @@ plans use the canonical IDs directly; there is no permanent translation layer.
     {
       "id": "SRC-VALIDATOR",
       "path": "cli/src/core/plan/validate.ts",
-      "locator": "const ID = /^[A-Z][A-Z0-9-]{0,63}$/;",
-      "fact": "One current identifier grammar is shared by requirements and internal manifest entities"
+      "locator": "export function validatePlanFile(planPath: string",
+      "fact": "Stable validator entry point for requirement and internal-entity grammar and plan classification"
     },
     {
       "id": "SRC-TYPES",
       "path": "cli/src/core/plan/types.ts",
-      "locator": "| { state: 'legacy' }",
-      "fact": "The public plan-validation union currently exposes an executable-looking legacy state"
+      "locator": "export type PlanValidationReport =",
+      "fact": "Stable public plan-validation union changed by the bootstrap migration state"
     },
     {
       "id": "SRC-COMMAND",
       "path": "cli/src/commands/plan/index.ts",
-      "locator": "export function exitCodeFor(report: PlanValidationReport): 0 | 2",
-      "fact": "The command currently maps legacy validation to exit 0 and renders full-quality-path guidance"
+      "locator": "export function exitCodeFor(report: PlanValidationReport)",
+      "fact": "Stable command boundary for semantic validation exit codes and report rendering"
     },
     {
       "id": "SRC-CORE-TEST",
       "path": "cli/tests/core/plan/validate.test.ts",
-      "locator": "treats a document without any optimized signal as legacy",
-      "fact": "Core regression coverage currently asserts the behavior that must fail closed"
+      "locator": "describe('validatePlanFile',",
+      "fact": "Core validator regression suite for grammar, classification, containment, and read-only behavior"
     },
     {
       "id": "SRC-COMMAND-TEST",
       "path": "cli/tests/commands/plan/index.test.ts",
-      "locator": "keeps a legacy plan on the existing full-quality path with exit 0",
-      "fact": "Command coverage currently fixes legacy human output and success status"
+      "locator": "describe('plan validate Commander wiring'",
+      "fact": "Command regression suite for human and JSON output, safety, and exit status"
     }
   ],
   "commands": [
@@ -275,3 +275,12 @@ canonical dotted IDs while rejecting unmarked input with exit 2.
 
 Do not publish a release from this bootstrap alone. Its verified CLI behavior unlocks the
 two canonical R1 plans; cross-repository publication remains governed by the approved design.
+
+## Planning amendment record
+
+Before the S1 dispatch, the controller found that five original manifest locators would be
+deleted by the required production and test edits. Source locators were reanchored to stable
+declarations/suite headings, and their facts were made valid across the before/after state.
+The exact pre-change behavior remains specified in S1 and its RED checks. This is a
+plan-validity correction only: no requirement, surface, role, command, or gate was removed.
+The controller must revalidate this amended plan before dispatch and after the slice.
