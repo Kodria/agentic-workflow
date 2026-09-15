@@ -31,19 +31,27 @@ function schemaClassification(candidate: unknown): PlanValidationReport | undefi
     return diagnostic('PLAN_MARKERS', 'compact markers must occur once in order');
 }
 function embeddedJsonObjects(text: string): string[] {
-    const objects: string[] = [];
-    for (let start = 0; start < text.length && objects.length < 64; start += 1) {
-        if (text[start] !== '{') continue;
-        let depth = 0; let quoted = false; let escaped = false; let end = start;
-        for (; end < text.length && end - start <= MAX_MANIFEST; end += 1) {
-            const character = text[end];
-            if (quoted) { if (escaped) escaped = false; else if (character === '\\') escaped = true; else if (character === '"') quoted = false; continue; }
-            if (character === '"') { quoted = true; continue; }
-            if (character === '{') depth += 1;
-            if (character === '}' && --depth === 0) { objects.push(text.slice(start, end + 1)); start = end; break; }
+    const outer: string[] = []; const nested: string[] = []; const starts: number[] = [];
+    let quoted = false; let escaped = false;
+    for (let index = 0; index < text.length; index += 1) {
+        const character = text[index];
+        if (starts.length === 0) { if (character === '{') starts.push(index); continue; }
+        if (quoted) {
+            if (character === '\n') { quoted = false; escaped = false; }
+            else if (escaped) escaped = false;
+            else if (character === '\\') escaped = true;
+            else if (character === '"') quoted = false;
+            continue;
         }
+        if (character === '"') { quoted = true; continue; }
+        if (character === '{') { starts.push(index); continue; }
+        if (character !== '}') continue;
+        const start = starts.pop();
+        if (start === undefined || index - start > MAX_MANIFEST) continue;
+        const found = starts.length === 0 ? outer : nested;
+        if (found.length < 64) found.push(text.slice(start, index + 1));
     }
-    return objects;
+    return [...outer, ...nested].slice(0, 64);
 }
 function markerlessSchemaClassification(text: string): PlanValidationReport | undefined {
     const candidates = [text.trim(), ...embeddedJsonObjects(text)];
@@ -84,15 +92,56 @@ function inside(root: string, candidate: string): boolean { const relative = pat
 function validRelative(value: unknown): value is string {
     return typeof value === 'string' && value.length > 0 && Buffer.byteLength(value, 'utf8') <= MAX_STRING && !path.isAbsolute(value) && !path.win32.isAbsolute(value) && !value.includes('\\') && value.split('/').every((part) => part !== '' && part !== '.' && part !== '..') && path.posix.normalize(value) === value;
 }
-function regularInside(root: string, relative: string): string | undefined {
+interface InspectedFile { path: string; stat: fs.Stats; }
+type InspectedRead = { state: 'ok'; bytes: Buffer } | { state: 'unsafe' } | { state: 'limit' } | { state: 'read' };
+function regularInside(root: string, relative: string): InspectedFile | undefined {
     if (!validRelative(relative)) return undefined;
     const candidate = path.join(root, relative); if (!inside(root, candidate)) return undefined;
-    const parts = relative.split('/'); let current = root;
-    try { for (const part of parts) { current = path.join(current, part); if (fs.lstatSync(current).isSymbolicLink()) return undefined; } if (!fs.lstatSync(candidate).isFile()) return undefined; const real = fs.realpathSync(candidate); return inside(root, real) ? real : undefined; } catch { return undefined; }
+    const parts = relative.split('/'); let current = root; let stat: fs.Stats | undefined;
+    try {
+        for (const part of parts) { current = path.join(current, part); stat = fs.lstatSync(current); if (stat.isSymbolicLink()) return undefined; }
+        if (!stat?.isFile()) return undefined;
+        const real = fs.realpathSync(candidate);
+        return inside(root, real) ? { path: real, stat } : undefined;
+    } catch { return undefined; }
+}
+function sameIdentity(inspected: fs.Stats, opened: fs.Stats): boolean {
+    return Number.isSafeInteger(inspected.dev) && Number.isSafeInteger(inspected.ino) && inspected.ino !== 0
+        && opened.isFile() && inspected.dev === opened.dev && inspected.ino === opened.ino;
+}
+function readInspected(file: InspectedFile, max: number): InspectedRead {
+    if (file.stat.size > max) return { state: 'limit' };
+    let descriptor: number | undefined;
+    try {
+        descriptor = fs.openSync(file.path, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+        const opened = fs.fstatSync(descriptor);
+        if (!sameIdentity(file.stat, opened)) return { state: 'unsafe' };
+        if (opened.size > max) return { state: 'limit' };
+        if (opened.size !== file.stat.size) return { state: 'unsafe' };
+        const bytes = Buffer.alloc(opened.size);
+        let offset = 0;
+        while (offset < bytes.length) {
+            const read = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+            if (read <= 0) return { state: 'read' };
+            offset += read;
+        }
+        const after = fs.fstatSync(descriptor);
+        if (!sameIdentity(file.stat, after)) return { state: 'unsafe' };
+        if (after.size > max || bytes.length > max) return { state: 'limit' };
+        if (after.size !== opened.size) return { state: 'unsafe' };
+        return { state: 'ok', bytes };
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        return { state: code === 'ELOOP' || code === 'ENOENT' || code === 'ENOTDIR' ? 'unsafe' : 'read' };
+    } finally {
+        if (descriptor !== undefined) {
+            try { fs.closeSync(descriptor); } catch { /* best-effort close after a failed inspected read */ }
+        }
+    }
 }
 function executableInside(root: string, relative: string): string | undefined {
     const file = regularInside(root, relative);
-    try { return file && (process.platform === 'win32' ? /\.(?:exe|cmd|bat)$/i.test(file) : (fs.statSync(file).mode & 0o111) !== 0) ? file : undefined; } catch { return undefined; }
+    return file && (process.platform === 'win32' ? /\.(?:exe|cmd|bat)$/i.test(file.path) : (file.stat.mode & 0o111) !== 0) ? file.path : undefined;
 }
 function refs(value: unknown, known: Set<string>): boolean { return allStrings(value) && value.every((id) => known.has(id)); }
 function uniqueRefs(value: unknown, known: Set<string>): boolean { return refs(value, known) && new Set(value as string[]).size === (value as string[]).length; }
@@ -149,7 +198,11 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     const candidate = path.resolve(root, planPath); if (!inside(root, candidate)) return diagnostic('PLAN_PATH_UNSAFE', 'plan path must be inside cwd');
     const relativePlan = path.relative(root, candidate).replace(/\\/g, '/'); const planFile = regularInside(root, relativePlan);
     if (!planFile) return diagnostic('PLAN_PATH_UNSAFE', 'plan path must be a contained regular non-symlink file');
-    let bytes: Buffer; try { if (fs.statSync(planFile).size > MAX_PLAN) return diagnostic('PLAN_LIMIT', 'plan exceeds maximum size'); bytes = fs.readFileSync(planFile); } catch { return diagnostic('PLAN_READ', 'plan cannot be read'); }
+    const planRead = readInspected(planFile, MAX_PLAN);
+    if (planRead.state === 'unsafe') return diagnostic('PLAN_PATH_UNSAFE', 'plan path changed after inspection');
+    if (planRead.state === 'limit') return diagnostic('PLAN_LIMIT', 'plan exceeds maximum size');
+    if (planRead.state === 'read') return diagnostic('PLAN_READ', 'plan cannot be read');
+    const bytes = planRead.bytes;
     let text: string; try { text = normalizeLineEndings(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { return diagnostic('PLAN_ENCODING', 'plan must be valid UTF-8'); }
     const starts = count(text, START); const ends = count(text, END); const signaled = starts > 0 || ends > 0 || compactSchemaSignal(text);
     if (!signaled) return markerlessSchemaClassification(text) ?? { state: 'migration-required', reason: 'unmarked-plan' };
@@ -167,7 +220,19 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     if (raw.schema !== 'compact-slices/v1' || typeof raw.planId !== 'string' || !PLAN_ID.test(raw.planId) || !allStrings(raw.requirements) || new Set(raw.requirements).size !== raw.requirements.length) return diagnostic('PLAN_SHAPE', 'manifest scalar fields are invalid');
     if ((raw.requirements as string[]).some((id) => !validRequirementId(id)) || !allStrings(raw.closureCommands) || new Set(raw.closureCommands as string[]).size !== (raw.closureCommands as string[]).length) return diagnostic('PLAN_SHAPE', 'manifest arrays or identifiers are invalid');
     const sourceIds = new Set<string>();
-    for (const source of raw.sources) { if (!exact(source, ['id', 'path', 'locator', 'fact']) || !validId(source.id) || sourceIds.has(source.id) || !validRelative(source.path) || typeof source.locator !== 'string' || source.locator.trim().length === 0 || /[\0\r\n]/.test(source.locator) || Buffer.byteLength(source.locator, 'utf8') > MAX_STRING || typeof source.fact !== 'string' || source.fact.trim().length === 0 || Buffer.byteLength(source.fact, 'utf8') > MAX_STRING) return diagnostic('PLAN_SOURCE_SHAPE', 'source fields are invalid'); sourceIds.add(source.id); const file = regularInside(root, source.path as string); if (!file) return diagnostic('PLAN_SOURCE_UNSAFE', 'source path must be a contained regular non-symlink file'); let bytes: Buffer; try { if (fs.statSync(file).size > MAX_SOURCE) return diagnostic('PLAN_SOURCE_LIMIT', 'source exceeds maximum size'); bytes = fs.readFileSync(file); } catch { return diagnostic('PLAN_SOURCE_UNSAFE', 'source cannot be read'); } let contents: string; try { contents = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { return diagnostic('PLAN_SOURCE_ENCODING', 'source must be valid UTF-8'); } if (!contents.includes(source.locator as string)) return diagnostic('PLAN_SOURCE_LOCATOR', 'source locator must occur in source file'); }
+    for (const source of raw.sources) {
+        if (!exact(source, ['id', 'path', 'locator', 'fact']) || !validId(source.id) || sourceIds.has(source.id) || !validRelative(source.path) || typeof source.locator !== 'string' || source.locator.trim().length === 0 || /[\0\r\n]/.test(source.locator) || Buffer.byteLength(source.locator, 'utf8') > MAX_STRING || typeof source.fact !== 'string' || source.fact.trim().length === 0 || Buffer.byteLength(source.fact, 'utf8') > MAX_STRING) return diagnostic('PLAN_SOURCE_SHAPE', 'source fields are invalid');
+        sourceIds.add(source.id);
+        const file = regularInside(root, source.path as string);
+        if (!file) return diagnostic('PLAN_SOURCE_UNSAFE', 'source path must be a contained regular non-symlink file');
+        const sourceRead = readInspected(file, MAX_SOURCE);
+        if (sourceRead.state === 'unsafe') return diagnostic('PLAN_SOURCE_UNSAFE', 'source path changed after inspection');
+        if (sourceRead.state === 'limit') return diagnostic('PLAN_SOURCE_LIMIT', 'source exceeds maximum size');
+        if (sourceRead.state === 'read') return diagnostic('PLAN_SOURCE_UNSAFE', 'source cannot be read');
+        let contents: string;
+        try { contents = new TextDecoder('utf-8', { fatal: true }).decode(sourceRead.bytes); } catch { return diagnostic('PLAN_SOURCE_ENCODING', 'source must be valid UTF-8'); }
+        if (!contents.includes(source.locator as string)) return diagnostic('PLAN_SOURCE_LOCATOR', 'source locator must occur in source file');
+    }
     const commandIds = new Set<string>(); const closureIds = new Set(raw.closureCommands as string[]);
     for (const command of raw.commands) { if (!exact(command, ['id', 'program', 'args', 'covers']) || !validId(command.id) || commandIds.has(command.id) || typeof command.program !== 'string' || command.program.length === 0 || Buffer.byteLength(command.program, 'utf8') > MAX_STRING || !allStrings(command.args) || command.args.length > 128 || !allStrings(command.covers) || new Set(command.covers as string[]).size !== (command.covers as string[]).length || ((command.covers as string[]).length === 0 && !closureIds.has(command.id)) || (command.covers as string[]).some((id) => !validRequirementId(id) || !(raw.requirements as string[]).includes(id))) return diagnostic('PLAN_COMMAND_SHAPE', 'command fields are invalid'); commandIds.add(command.id); const program = command.program as string; if (isLauncher(program) || unsafeCommand(program) || program.includes('\\') || /^[a-zA-Z]:/.test(program) || /\s/.test(program) || (program.includes('/') && !executableInside(root, program))) return diagnostic('PLAN_COMMAND_UNSAFE', 'command program is not inert and safe'); if ((command.args as string[]).some(unsafeCommand)) return diagnostic('PLAN_COMMAND_UNSAFE', 'command arguments contain shell syntax'); }
     const sliceIds = new Set<string>(); const owners = new Map<string, number>();

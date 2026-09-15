@@ -39,7 +39,37 @@ function boundedDiagnostics(diagnostics: PlanDiagnostic[]): PlanDiagnostic[] {
     });
 }
 
+function assertReport(report: PlanValidationReport): void {
+    if (!report || typeof report !== 'object' || Array.isArray(report)) throw new Error('plan validator returned an invalid report');
+    switch (report.state) {
+    case 'valid':
+        if (report.schema !== SUPPORTED_SCHEMA || !report.manifest || report.manifest.schema !== report.schema
+            || typeof report.manifest.planId !== 'string' || report.manifest.planId.length === 0
+            || !Array.isArray(report.manifest.requirements) || !Array.isArray(report.manifest.sources)
+            || !Array.isArray(report.manifest.commands) || !Array.isArray(report.manifest.slices)
+            || !Array.isArray(report.manifest.closureCommands)) {
+            throw new Error('plan validator returned an invalid valid report');
+        }
+        return;
+    case 'migration-required':
+        if (report.reason !== 'unmarked-plan') throw new Error('plan validator returned an invalid migration reason');
+        return;
+    case 'invalid':
+        boundedDiagnostics(report.diagnostics);
+        return;
+    case 'unsupported':
+        if (typeof report.schema !== 'string' || report.schema.length === 0 || report.schema.length > MAX_PATH_LENGTH) {
+            throw new Error('plan validator returned an invalid unsupported schema');
+        }
+        boundedDiagnostics(report.diagnostics);
+        return;
+    default:
+        throw new Error('plan validator returned an unknown report state');
+    }
+}
+
 function reportPayload(report: PlanValidationReport, planPath: string): Record<string, unknown> {
+    assertReport(report);
     switch (report.state) {
     case 'valid':
         return {
@@ -62,6 +92,7 @@ function reportPayload(report: PlanValidationReport, planPath: string): Record<s
 }
 
 export function exitCodeFor(report: PlanValidationReport): 0 | 2 {
+    assertReport(report);
     return report.state === 'valid' ? 0 : 2;
 }
 

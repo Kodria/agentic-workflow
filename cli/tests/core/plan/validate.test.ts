@@ -49,6 +49,105 @@ describe('validatePlanFile', () => {
         expect(fs.readFileSync(plan, 'utf8')).toBe(before);
     });
 
+    test('scans bounded markerless brace runs without quadratic retries', () => {
+        const plan = path.join(root, 'braces.md');
+        fs.writeFileSync(plan, '{'.repeat(32_000));
+        const started = Date.now();
+        const report = validatePlanFile(plan, root);
+        expect(report).toEqual({ state: 'migration-required', reason: 'unmarked-plan' });
+        expect(Date.now() - started).toBeLessThan(500);
+    });
+
+    test('retains markerless unsupported classification for nested JSON in an unclosed outer object', () => {
+        const plan = path.join(root, 'nested-future.md');
+        fs.writeFileSync(plan, '# Notes\n{"outer":\n{"\\u0073chema":"compact\\u002dslices\\/v2"}\n');
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
+    });
+
+    test('retains the manifest byte limit beneath the bounded plan-file limit', () => {
+        const plan = fixture(root);
+        const text = fs.readFileSync(plan, 'utf8');
+        fs.writeFileSync(plan, text.replace(END, `${' '.repeat(256 * 1024)}\n${END}`));
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_LIMIT' })] });
+    });
+
+    test.each([
+        ['plan', 'PLAN_LIMIT'],
+        ['source', 'PLAN_SOURCE_LIMIT'],
+    ] as const)('bounds %s bytes when the inspected file grows during descriptor read', (target, code) => {
+        const plan = fixture(root);
+        const targetPath = target === 'plan' ? plan : path.join(root, 'docs', 'source.md');
+        const targetInode = fs.statSync(targetPath).ino;
+        const nativeFstat = fs.fstatSync;
+        let grew = false;
+        const fstat = jest.spyOn(fs, 'fstatSync').mockImplementation((descriptor) => {
+            const observed = nativeFstat(descriptor);
+            if (!grew && observed.ino === targetInode) {
+                fs.appendFileSync(targetPath, Buffer.alloc(1024 * 1024));
+                grew = true;
+            }
+            return observed;
+        });
+        try {
+            expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code })] });
+            expect(grew).toBe(true);
+        } finally { fstat.mockRestore(); }
+    });
+
+    test.each([
+        ['plan', 'final', 'PLAN_PATH_UNSAFE'],
+        ['plan', 'ancestor', 'PLAN_PATH_UNSAFE'],
+        ['source', 'final', 'PLAN_SOURCE_UNSAFE'],
+        ['source', 'ancestor', 'PLAN_SOURCE_UNSAFE'],
+    ] as const)('rejects a %s %s symlink swap after inspection without reading outside', (target, swap, code) => {
+        let plan = fixture(root);
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plan-race-outside-'));
+        const targetDirectory = target === 'plan' ? path.join(root, 'plans') : path.join(root, 'docs');
+        if (target === 'plan') {
+            fs.mkdirSync(targetDirectory);
+            const nestedPlan = path.join(targetDirectory, 'plan.md');
+            fs.renameSync(plan, nestedPlan);
+            plan = nestedPlan;
+        }
+        const inspectedPath = target === 'plan' ? plan : path.join(root, 'docs', 'source.md');
+        const outsideFile = path.join(outside, path.basename(inspectedPath));
+        fs.copyFileSync(inspectedPath, outsideFile);
+        const outsideIdentity = fs.statSync(outsideFile);
+        const nativeRealpath = fs.realpathSync;
+        let swapped = false;
+        const realpath = jest.spyOn(fs, 'realpathSync').mockImplementation((file) => {
+            const resolved = nativeRealpath(file);
+            if (!swapped && file === inspectedPath) {
+                swapped = true;
+                if (swap === 'final') {
+                    fs.renameSync(inspectedPath, `${inspectedPath}-original`);
+                    fs.symlinkSync(outsideFile, inspectedPath, 'file');
+                } else {
+                    fs.renameSync(targetDirectory, `${targetDirectory}-original`);
+                    fs.symlinkSync(outside, targetDirectory, 'dir');
+                }
+            }
+            return resolved;
+        });
+        const reads = jest.spyOn(fs, 'readFileSync');
+        const nativeReadSync = fs.readSync;
+        let outsideDescriptorReads = 0;
+        const descriptorReads = jest.spyOn(fs, 'readSync').mockImplementation((...args: Parameters<typeof fs.readSync>) => {
+            const opened = fs.fstatSync(args[0]);
+            if (opened.dev === outsideIdentity.dev && opened.ino === outsideIdentity.ino) outsideDescriptorReads += 1;
+            return Reflect.apply(nativeReadSync, fs, args) as number;
+        });
+        try {
+            expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code })] });
+            expect(swapped).toBe(true);
+            expect(reads.mock.calls.some(([file]) => file === inspectedPath)).toBe(false);
+            expect(outsideDescriptorReads).toBe(0);
+        } finally {
+            descriptorReads.mockRestore(); reads.mockRestore(); realpath.mockRestore();
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
+
     test('accepts a valid compact plan converted to CRLF', () => {
         const plan = fixture(root);
         fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace(/\n/g, '\r\n'));

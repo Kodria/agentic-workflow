@@ -91,6 +91,45 @@ describe('plan validate Commander wiring', () => {
         expect(process.exitCode).toBe(2);
     });
 
+    it.each(['human', 'json'])('rejects a malformed injected migration report in %s mode before output', async (mode) => {
+        const malformed = { state: 'migration-required' } as unknown as PlanValidationReport;
+        const args = ['node', 'awm', 'plan', 'validate', 'unmarked.md', ...(mode === 'json' ? ['--json'] : [])];
+
+        await expect(commandFor(malformed).parseAsync(args)).rejects.toThrow('plan validator returned an invalid migration reason');
+        expect(stdoutWrite).not.toHaveBeenCalled();
+        expect(process.exitCode).toBeUndefined();
+    });
+
+    it('enforces migration-only output and exit 2 through the compiled CLI without mutating an unmarked plan', () => {
+        const repoRoot = path.resolve(__dirname, '../../../..');
+        const compiled = path.join(repoRoot, 'cli', 'dist', 'src', 'index.js');
+        const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plan-unmarked-e2e-'));
+        const plan = path.join(fixtureRoot, 'unmarked.md');
+        const isolatedHome = path.join(fixtureRoot, 'home');
+        fs.mkdirSync(isolatedHome);
+        fs.writeFileSync(plan, '# Unmarked plan\n');
+        const before = fs.readFileSync(plan);
+        const environment = { ...process.env, HOME: isolatedHome, AWM_HOME: path.join(isolatedHome, '.awm') };
+        try {
+            expect(fs.existsSync(compiled)).toBe(true);
+            const human = spawnSync(process.execPath, [compiled, 'plan', 'validate', 'unmarked.md', '--cwd', fixtureRoot], {
+                cwd: repoRoot, env: environment, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+            });
+            const json = spawnSync(process.execPath, [compiled, 'plan', 'validate', 'unmarked.md', '--cwd', fixtureRoot, '--json'], {
+                cwd: repoRoot, env: environment, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+            });
+
+            expect(human.status).toBe(2);
+            expect(human.stdout).toBe('Plan validation: migration-required "unmarked.md" (unmarked-plan)\nMigrate this plan to compact-slices/v1 before execution.\n');
+            expect(json.status).toBe(2);
+            expect(JSON.parse(json.stdout)).toEqual({ state: 'migration-required', path: 'unmarked.md', reason: 'unmarked-plan' });
+            expect(human.stdout + json.stdout).not.toMatch(/full-quality|alternate|legacy path/i);
+            expect(fs.readFileSync(plan).equals(before)).toBe(true);
+        } finally {
+            fs.rmSync(fixtureRoot, { recursive: true, force: true });
+        }
+    });
+
     it.each([
         ['invalid', invalid],
         ['unsupported', unsupported],
@@ -191,6 +230,22 @@ describe('plan validation public boundaries', () => {
         ['unsupported', { state: 'unsupported', schema: 'compact-slices/v2', diagnostics: [] } as PlanValidationReport, 2],
     ])('maps %s reports to exit %i', (_state, report, code) => {
         expect(exitCodeFor(report)).toBe(code);
+    });
+
+    it('fails loudly rather than returning exit 0 for an injected valid state without a manifest', () => {
+        const malformed = { state: 'valid' } as unknown as PlanValidationReport;
+        expect(() => exitCodeFor(malformed)).toThrow('plan validator returned an invalid valid report');
+        expect(() => formatReport(malformed, 'plan.md')).toThrow('plan validator returned an invalid valid report');
+    });
+
+    it('rejects a valid report missing the required closureCommands collection', () => {
+        const malformed = { ...valid, manifest: { ...valid.manifest, closureCommands: undefined } } as unknown as PlanValidationReport;
+        expect(() => exitCodeFor(malformed)).toThrow('plan validator returned an invalid valid report');
+    });
+
+    it('fails loudly for a migration state without its required reason at the public exit boundary', () => {
+        const malformed = { state: 'migration-required' } as unknown as PlanValidationReport;
+        expect(() => exitCodeFor(malformed)).toThrow('plan validator returned an invalid migration reason');
     });
 
     it('fails loudly for an invalid validator dependency', () => {
