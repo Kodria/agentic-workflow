@@ -29,7 +29,10 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
     if (plan.state !== 'migration-required' && plan.state !== 'valid') return { state: 'blocked', issueLinks: [...issueLinks], tasks: [], diagnostics: ['plan-not-migratable'], facts: [] };
     const issue126 = issueLinks.find(link => ISSUE_126.test(link))!;
     const facts: EvidenceRecord[] = [];
-    let commitShas: string[] = []; try { commitShas = execFileSync('git', ['log', '--format=%H', '-n', String(MAX), '--', planPath], { cwd: root, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).split(/\r?\n/).filter(x => /^[a-f0-9]{40}$/i.test(x)); } catch { /* absence is not success */ }
+    // Git can prove ancestry for a SHA only when the durable task obligation
+    // names that SHA. The current journal schema has no task commit field, so
+    // history is deliberately not borrowed across tasks.
+    try { execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }); } catch { /* no Git fact */ }
     let journal; try { journal = readJournal(root, detectBranch(root)); } catch { journal = { state: null, corrupt: true }; }
     const diagnostics: string[] = [];
     if (!journal.state || journal.corrupt) diagnostics.push('journal-missing-or-corrupt');
@@ -59,7 +62,7 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
         const spec = reviews.find(review => review.kind === 'spec'); const quality = reviews.find(review => review.kind === 'quality');
         const verdict = (review: typeof spec) => review?.verdictId && journal.state?.verdicts.find(item => item.id === review.verdictId)?.result === 'pass';
         const missing = [
-            ...(commitShas.length > 0 ? [] : ['commit']), ...(testCurrent ? [] : ['tests']), ...(sensorCurrent ? [] : ['sensors']),
+            'commit-provenance', ...(testCurrent ? [] : ['tests']), ...(sensorCurrent ? [] : ['sensors']),
             ...(verdict(spec) ? [] : ['specification-review']), ...(verdict(quality) ? [] : ['quality-review']),
         ];
         return missing.length === 0 && task.status === 'done' ? { id, state: 'completed' as const, missing } : { id, state: 'pending' as const, missing };
