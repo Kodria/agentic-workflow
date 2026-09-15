@@ -91,10 +91,11 @@ describe('validatePlanFile', () => {
         ];
         expect(marked.length).toBeGreaterThan(0);
         expect(previouslyValid.length).toBeGreaterThan(0);
+        const corpusCounts = `marked=${marked.length}; previouslyValid=${previouslyValid.length}; historicalInvalid=${marked.length - previouslyValid.length}`;
         for (const file of previouslyValid) {
-            expect(marked).toContain(file);
+            if (!marked.includes(file)) throw new Error(`previously valid compact-v1 plan is not tracked with a marker: ${file}; ${corpusCounts}`);
             const report = validatePlanFile(file, repositoryRoot);
-            if (report.state !== 'valid') throw new Error(`previously valid compact-v1 plan failed: ${file}; state=${report.state}`);
+            if (report.state !== 'valid') throw new Error(`previously valid compact-v1 plan failed: ${file}; state=${report.state}; ${corpusCounts}`);
         }
         expect(previouslyValid.length).toBe(4);
         expect(marked.length - previouslyValid.length).toBe(2);
