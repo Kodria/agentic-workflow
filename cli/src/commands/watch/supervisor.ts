@@ -196,6 +196,14 @@ export class Supervisor {
             const verificationItems = [...before0.state.cycleVerificationPlan, ...before0.state.tasks.flatMap(task => task.verificationPlan)];
             const tests = verificationItems.filter(item => item.kind === 'test');
             const sensorItems = verificationItems.filter(item => item.kind === 'sensors');
+            // `computeGate` is the single authority for every verification
+            // kind (review, QA and interlock included). Reuse its evidence
+            // semantics instead of maintaining a weaker recovery subset.
+            const evidenceGate = computeGate(before0.state, false, this.fingerprintNow);
+            const unresolvedVerification = evidenceGate.reasons.some(reason => [
+                'dangling-reference', 'unsatisfied-plan', 'adverse-verdict',
+                'stale-fingerprint', 'open-obligation', 'open-fix',
+            ].includes(reason.category));
             const hasStaleReview = before0.state.verdicts.some(verdict => verdict.fingerprint === '' || (verdict.argv.length > 0 && (() => {
                 try { return computeFingerprint(this.repoRoot, verdict.argv, verdict.paths, verdict.cwd).fingerprint !== verdict.fingerprint; } catch { return true; }
             })()));
@@ -218,7 +226,7 @@ export class Supervisor {
                 git: staleJob ? 'changed' : 'current', activeJobIds,
                 tests: tests.length === 0 || tests.every(item => passed(item.satisfiedBy)) ? 'pass' : 'missing',
                 sensors: sensorItems.length === 0 || sensorItems.every(item => passed(item.satisfiedBy)) ? 'pass' : 'missing',
-                verdicts: hasStaleReview ? 'stale' : openReviewOrFix ? 'missing' : 'current',
+                verdicts: hasStaleReview ? 'stale' : (openReviewOrFix || unresolvedVerification) ? 'missing' : 'current',
             });
             appendEvent(this.repoRoot, this.branch, { kind: 'unattended-recovery', nextAction: recovery.nextAction, activeJobIds: recovery.activeJobIds, diagnostics: recovery.diagnostics });
             if (recovery.state !== 'ready') return 'custody';
