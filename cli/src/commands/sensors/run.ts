@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { execFileSync } from 'child_process';
 import { runCommand, runStructuredCommand, ExecResult } from './exec';
 import { SensorResult, SensorError } from './types';
 import { parseTscOutput } from './formatters/tsc';
@@ -50,7 +51,20 @@ export type RunOptions = {
     changed?: boolean;
     /** Comparison point for `changed`. Defaults to `HEAD` (uncommitted work only). */
     base?: string;
+    /**
+     * Admission-only observation guard. Sensor commands remain external tools,
+     * so a changed worktree makes their result unusable as read-only evidence.
+     */
+    readOnly?: boolean;
 };
+
+function worktreeSnapshot(cwd: string): string | null {
+    try {
+        return execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+            cwd, encoding: 'utf8', stdio: 'pipe', maxBuffer: MAX_BUFFER,
+        });
+    } catch { return null; }
+}
 
 
 async function resolveLiveFromSource(cwd: string, source: PackSource, packSelection?: 'explicit'): Promise<Awaited<ReturnType<typeof resolveParsedPackCompatibility>> | null> {
@@ -159,6 +173,10 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     }
 
     const manifestDir = project.projectRoot;
+    const beforeReadOnly = opts.readOnly ? worktreeSnapshot(manifestDir) : undefined;
+    if (opts.readOnly && beforeReadOnly === null) {
+        return { sensors: [], overall: 'not_certified', projectRoot: project.projectRoot, manifestPath: project.manifestPath, mode: 'invalid', reason: 'read-only-observation-unavailable', remedy: 'run admission from a readable git worktree' };
+    }
     const parsed = project.manifest;
     const authority = { projectRoot: project.projectRoot, manifestPath: project.manifestPath };
     if (parsed.kind === 'v3' && (parsed.pack.mode === 'native-gate' || parsed.pack.mode === 'opt-out')) {
@@ -221,7 +239,7 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     if (parsed.kind === 'legacy' && overall === 'pass') overall = 'not_certified';
     if (overall === 'skipped' && drift && drift.detection.pack !== 'generic') overall = 'not_certified';
 
-    return {
+    const output: RunOutput = {
         sensors: results,
         overall,
         ...authority,
@@ -232,4 +250,8 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         ...(drift?.drift ? { packDrift: drift.drift } : {}),
         ...(changed ? { changedScope: { files: changed.files.length, ...(changed.error ? { error: changed.error } : {}) } } : {}),
     };
+    if (opts.readOnly && worktreeSnapshot(manifestDir) !== beforeReadOnly) {
+        return { ...output, overall: 'not_certified', reason: 'read-only-mutation-detected', remedy: 'sensor execution changed the worktree; repair it before using this evidence for admission' };
+    }
+    return output;
 }

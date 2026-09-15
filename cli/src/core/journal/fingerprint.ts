@@ -14,8 +14,21 @@ function sha(parts: string[]): string {
 // el stderr de git hacia el stderr DEL SUPERVISOR — si ese fd es un pipe roto, el
 // relay dispara un EPIPE no catcheable que crashea el proceso ENTERO (este helper
 // backea computeFingerprint, invocado en CADA tick via FingerprintNow/computeGate).
+/** Git's textual plumbing is hashed, never streamed to a terminal. Keep its
+ * memory bounded even for hostile repositories; an incomplete listing must
+ * fail recovery rather than certify a partial fingerprint. */
+const MAX_GIT_OUTPUT_BYTES = 16 * 1024 * 1024;
+
 function git(cwd: string, args: string[]): string {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: Infinity, stdio: EXEC_STDIO });
+    try {
+        return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: MAX_GIT_OUTPUT_BYTES, stdio: EXEC_STDIO });
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOBUFS' || (error as Error).message.includes('maxBuffer')) {
+            throw new Error(`git fingerprint output exceeded ${MAX_GIT_OUTPUT_BYTES} bytes`);
+        }
+        throw error;
+    }
 }
 
 export interface FingerprintResult {

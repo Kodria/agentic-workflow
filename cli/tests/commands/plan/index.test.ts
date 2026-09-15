@@ -366,6 +366,7 @@ describe('plan admit Commander wiring', () => {
             state: 'blocked', planState: 'valid', planDigest: valid.planDigest, provider: 'codex', executionMode: 'interactivo',
             journal: 'not-required', currentness: 'not-checked', sensors: 'not-required', diagnostics: [{ code: 'ADMISSION_CURRENTNESS_REQUIRED', message: 'required' }],
             });
+        const sensorRun = jest.fn().mockResolvedValue({ overall: 'pass', sensors: [] });
         const program = new Command();
         program.exitOverride();
         program.configureOutput({ writeErr: () => undefined });
@@ -373,13 +374,14 @@ describe('plan admit Commander wiring', () => {
             validatePlanFile: () => valid, admitPlan: admit,
             readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
             checkCurrentness: async () => ({ checkedAt: '2026-01-01T00:00:00.000Z', components: [], compatibility: { status: 'not-checked' } }),
-            runSensors: async () => ({ overall: 'pass', sensors: [] }),
+            runSensors: sensorRun,
             listRegistries: () => [],
         });
 
         try {
-            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plans/r4.md', '--provider', 'codex', '--cwd', repositoryRoot, '--require-current', '--verify-sensors', '--json']);
-            expect(admit).toHaveBeenLastCalledWith(expect.objectContaining({ provider: 'codex', cwd: repositoryRoot, requireCurrent: true, verifySensors: true, plan: valid, provenance: 'proven' }));
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plans/r4.md', '--provider', 'codex', '--cwd', repositoryRoot, '--verify-sensors', '--json']);
+            expect(sensorRun).toHaveBeenCalledWith({ cwd: repositoryRoot, all: true, readOnly: true });
+            expect(admit).toHaveBeenLastCalledWith(expect.objectContaining({ provider: 'codex', cwd: repositoryRoot, requireCurrent: false, verifySensors: true, plan: valid, provenance: 'proven' }));
             expect(JSON.parse(String(output.mock.calls[0][0]))).toMatchObject({ state: 'blocked', provider: 'codex' });
             expect(process.exitCode).toBe(2);
         } finally {

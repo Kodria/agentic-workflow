@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { execFileSync } from 'child_process';
 import { runSensors } from '../../../src/commands/sensors/run';
 import { computeSensorStatus } from '../../../src/commands/sensors/status';
 import { reduceVerdict } from '../../../src/commands/sensors/verdict';
@@ -87,6 +88,19 @@ describe('runSensors', () => {
         expect(mockRunCommand).toHaveBeenCalledTimes(2); // typecheck + lint (security disabled, mutation disabled)
         expect(result.sensors.some((s: any) => s.name === 'security')).toBe(false);
         expect(result.overall).toBe('not_certified');
+    });
+
+    it('marks sensor evidence non-certifying when a read-only admission run changes the worktree', async () => {
+        execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmpDir });
+        execFileSync('git', ['add', '.'], { cwd: tmpDir });
+        execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', 'commit', '-qm', 'initial'], { cwd: tmpDir });
+        mockRunCommand.mockImplementation(async () => {
+            fs.writeFileSync(path.join(tmpDir, 'sensor-side-effect.txt'), 'unexpected');
+            return ok();
+        });
+        const { runSensors } = load();
+        const result = await runSensors({ fast: true, cwd: tmpDir, readOnly: true });
+        expect(result).toMatchObject({ overall: 'not_certified', reason: 'read-only-mutation-detected' });
     });
 
     it('runs both fast and slow sensors when --fast and --slow are combined', async () => {

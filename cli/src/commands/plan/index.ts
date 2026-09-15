@@ -279,7 +279,9 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
                     return;
                 }
             }
-            const sensors = options.verifySensors ? await sensorRun({ cwd: options.cwd }) : undefined;
+            // Admission is observational. A sensor run that dirties the worktree
+            // is explicitly non-certifying rather than silently becoming a write.
+            const sensors = options.verifySensors ? await sensorRun({ cwd: options.cwd, all: true, readOnly: true }) : undefined;
             const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true, currentness, sensors, ...contractScope });
             process.stdout.write(admissionOutput(report, options.json === true));
             if (report.state !== 'admitted') process.exitCode = 2;

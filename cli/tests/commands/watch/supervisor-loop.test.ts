@@ -15,6 +15,7 @@ import { spawnStructured } from '../../../src/core/journal/process';
 import { computeFingerprint } from '../../../src/core/journal/fingerprint';
 import { reconcileTracks, defaultTrackRuntime, TrackRuntime, SupervisorObservation } from '../../../src/commands/watch/tracks';
 import type { TrackRef, ProcessRef } from '../../../src/core/journal/types';
+import type { AdmissionReport } from '../../../src/core/admission';
 
 jest.setTimeout(60000);
 
@@ -295,6 +296,21 @@ describe('supervisor loop', () => {
         git(repo, 'checkout', '-qb', 'otra');
         await expect(new Supervisor(repo, 'main', cfg, spy).tick()).rejects.toThrow(/rama|branch/i);
         expect(calls).toBe(0);
+    });
+
+    test('una admisión compacta bloqueada no lanza controlador ni wrappers', async () => {
+        initWatch(repo, 'main');
+        const state = readJournal(repo, 'main').state!;
+        state.schema = 2;
+        state.planBinding = { path: 'plans/exact.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1', executionMode: 'desatendido', boundAt: new Date().toISOString() };
+        writeJournal(repo, 'main', state);
+        requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.');
+        let spawns = 0;
+        const blocked = async (): Promise<AdmissionReport> => ({ state: 'blocked', planState: 'valid', journal: 'current', currentness: 'stale', sensors: 'not-required', diagnostics: [{ code: 'ADMISSION_CURRENTNESS_BLOCKED', message: 'stale' }] });
+        const outcome = await new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, () => { spawns++; }, undefined, blocked).tick();
+        expect(outcome).toBe('custody');
+        expect(spawns).toBe(0);
+        expect(readJournal(repo, 'main').state!.cycle.status).toBe('BLOCKED');
     });
 
     test('fallo de launch queda durable y entra en backoff sin tumbar el supervisor (R4.3)', async () => {

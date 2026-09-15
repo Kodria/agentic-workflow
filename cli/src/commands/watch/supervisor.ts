@@ -1,9 +1,16 @@
 // Loop foreground (R4.4/R4.5): tick = apply -> collect/spawn -> stall -> gate.
 // COMPLETE exige gate verde (que exige cero vivos): drenaje ANTES de declarar.
 // Custodia BLOCKED: el loop sigue, el lock NO se libera, nada se mata.
+import fs from 'fs';
+import path from 'path';
 import { readJournal, writeJournal, appendEvent } from '../../core/journal/store';
 import { computeFingerprint, reconcileUnattendedRecovery } from '../../core/journal/fingerprint';
 import { validatePlanFile } from '../../core/plan/validate';
+import { admitPlan, type AdmissionReport } from '../../core/admission';
+import { checkCurrentness } from '../../core/currentness/check';
+import { runSensors } from '../sensors/run';
+import { readPreferences } from '../../utils/config';
+import { listRegistries } from '../../core/registries';
 import { adapterFor } from '../../core/journal/adapter';
 import { groupIsGone, terminateGroupConfirmed } from '../../core/journal/process';
 import { computeGate, computeTrackGate, FingerprintNow } from '../job/gate';
@@ -15,6 +22,49 @@ import { reconcileTracks, reconcileOpenJoin, defaultTrackRuntime, TrackRuntime }
 import { decideStall, Backoff, beginGeneration, activeGeneration, ensureControllerGeneration, collectControllerGeneration, controllerGenerationHasUnresolvedClaim, resolveGeneration, enterCustody } from './generations';
 import type { JournalState } from '../../core/journal/types';
 import type { CohortPhase } from '../../core/tracks/types';
+
+/** The supervisor is only allowed to dispatch after this exact admission. */
+export type DispatchAdmission = () => Promise<AdmissionReport>;
+
+function defaultDispatchAdmission(repoRoot: string, branch: string, provider: string): DispatchAdmission {
+    return async () => {
+        const observed = readJournal(repoRoot, branch);
+        const binding = observed.state?.schema === 2 ? observed.state.planBinding : undefined;
+        if (!binding || binding.executionMode !== 'desatendido') {
+            return { state: 'blocked', planState: 'invalid', journal: observed.corrupt ? 'corrupt' : 'missing', currentness: 'not-checked', sensors: 'not-required', diagnostics: [{ code: 'ADMISSION_JOURNAL_BINDING_REQUIRED', message: 'Unattended dispatch requires an exact compact plan binding.' }] };
+        }
+        const plan = validatePlanFile(binding.path, repoRoot);
+        const preferences = readPreferences();
+        // Provenance is deliberately conservative here: a source outside the
+        // repository cannot be a consumed compact-plan contract.
+        const root = path.resolve(repoRoot);
+        const provenance = plan.state === 'valid' && plan.manifest.sources.every(source => {
+            const relative = path.relative(root, path.resolve(root, source.path));
+            return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+        }) ? 'proven' as const : 'unknown' as const;
+        const registryRoots = listRegistries().flatMap(registry => {
+            try { return [{ name: registry.name, root: fs.realpathSync.native(registry.contentRoot) }]; } catch { return []; }
+        });
+        const consumedRegistryComponents = plan.state !== 'valid' ? [] : [...new Set(plan.manifest.sources.flatMap(source => {
+            const sourcePath = path.resolve(root, source.path);
+            return registryRoots.filter(registry => {
+                const relative = path.relative(registry.root, sourcePath);
+                return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+            }).map(registry => `registry:${registry.name}`);
+        }))].sort();
+        const currentness = await checkCurrentness(repoRoot);
+        const input = { plan, provider, cwd: repoRoot, enabledAgents: preferences.enabledAgents,
+            executionMode: 'desatendido', requireCurrent: true, verifySensors: true,
+            currentness, provenance, consumedRegistryComponents,
+            journalState: observed.state, journalCorrupt: observed.corrupt, planPath: binding.path } as const;
+        // Preserve the public admission order: stale or unprovable contracts
+        // are rejected before invoking an empirical command in the worktree.
+        const currentnessGate = await admitPlan(input);
+        if (currentnessGate.currentness !== 'current') return currentnessGate;
+        const sensors = await runSensors({ cwd: repoRoot, all: true, readOnly: true });
+        return admitPlan({ ...input, sensors });
+    };
+}
 
 /** R7/C3/C4 (Task 12) + fix post-review #2 (re-derivado desde cero tras
  *  encontrar que la justificación original no probaba lo que decía — ver
@@ -143,6 +193,7 @@ export class Supervisor {
         private cfg: SupervisorConfig,
         private spawner: WrapperSpawner,
         trackRuntime?: TrackRuntime,
+        private dispatchAdmission: DispatchAdmission = defaultDispatchAdmission(repoRoot, branch, cfg.provider),
     ) {
         this.trackRuntime = trackRuntime ?? defaultTrackRuntime(repoRoot, branch, { termGraceMs: cfg.termGraceMs, killGraceMs: cfg.killGraceMs });
     }
@@ -179,6 +230,22 @@ export class Supervisor {
     async tick(): Promise<TickOutcome> {
         const before0 = readJournal(this.repoRoot, this.branch);
         if (before0.corrupt || before0.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
+        // A controller can create jobs and runnerTick can start them. Both are
+        // downstream of the same full compact unattended admission, so it must
+        // complete before any reconciliation path that could dispatch either.
+        if (before0.state.schema === 2 && before0.state.planBinding) {
+            let admission: AdmissionReport;
+            try { admission = await this.dispatchAdmission(); }
+            catch (error) {
+                enterCustody(this.repoRoot, this.branch, `admisión desatendida no verificable: ${(error as Error).message}`);
+                return 'custody';
+            }
+            if (admission.state !== 'admitted' || admission.executionMode !== 'desatendido'
+                || admission.currentness !== 'current' || admission.sensors !== 'pass' || admission.journal !== 'current') {
+                enterCustody(this.repoRoot, this.branch, 'admisión compacta desatendida bloqueada antes de dispatch');
+                return 'custody';
+            }
+        }
         let recoveryResumePrompt: string | undefined;
         // Schema-2 custody is reconciled before any controller launch.  This is
         // read-only: existing active jobs are reused, never re-requested.
