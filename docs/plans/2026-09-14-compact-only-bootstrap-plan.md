@@ -175,46 +175,46 @@ adapters, or any unrelated domain that also uses the word legacy.
 
 #### Implementation
 
-- [ ] In `cli/tests/core/plan/validate.test.ts`, first replace the unmarked-plan expectation
+- [x] In `cli/tests/core/plan/validate.test.ts`, first replace the unmarked-plan expectation
   with `{ state: 'migration-required', reason: 'unmarked-plan' }`. Add table-driven valid
   requirement cases for `RF-1.3`, `RNF-T.2`, and the existing `R4-VAL-2`; add invalid cases
   for leading/trailing/adjacent dots, lowercase, whitespace, path separators, non-ASCII,
   control bytes, and an ASCII ID longer than 64 bytes. Prove a dotted source, command, or
   slice ID remains invalid so the change cannot expand internal entity identifiers.
-- [ ] Add a regression that enumerates every tracked Markdown file under `docs/plans/`
+- [x] Add a regression that enumerates every tracked Markdown file under `docs/plans/`
   containing the `AWM:COMPACT-SLICES:START v1` marker and asserts that every plan which is
   valid before the production change remains valid afterward. Record the exact fixture
   count in the test failure message so accidentally testing zero plans fails loudly. Do not
   rewrite historical plans.
-- [ ] In `cli/tests/commands/plan/index.test.ts`, replace the legacy report fixture with
+- [x] In `cli/tests/commands/plan/index.test.ts`, replace the legacy report fixture with
   `{ state: 'migration-required', reason: 'unmarked-plan' }`. Assert deterministic human
   output, stable JSON containing `state`, `path`, and `reason`, exit 2, and the absence of
   any message that offers an executable alternative. Keep the existing write-before-exit
   ordering assertion and include the new state in the public exit-code table.
-- [ ] Run `CMD-FOCUSED` and capture RED failures for the dotted requirements, the core
+- [x] Run `CMD-FOCUSED` and capture RED failures for the dotted requirements, the core
   migration state, human/JSON command output, and exit status before changing production
   code. If any new assertion passes against the old behavior, tighten it before proceeding.
-- [ ] In `cli/src/core/plan/validate.ts`, retain the current internal entity grammar as
+- [x] In `cli/src/core/plan/validate.ts`, retain the current internal entity grammar as
   `ENTITY_ID`. Add a separate ASCII-only `REQUIREMENT_ID` capped at 64 total characters
   that accepts one or more non-empty dot-separated segments while retaining safe existing
   hyphenated IDs. Apply it only to top-level requirements and requirement references;
   `validId` must continue validating source, command, and slice IDs with `ENTITY_ID`.
-- [ ] In `cli/src/core/plan/types.ts`, replace `{ state: 'legacy' }` in
+- [x] In `cli/src/core/plan/types.ts`, replace `{ state: 'legacy' }` in
   `PlanValidationReport` with exactly
   `{ state: 'migration-required'; reason: 'unmarked-plan' }`. In
   `validatePlanFile`, return that state only when no compact marker/schema signal exists.
   Preserve byte-for-byte read-only behavior and all existing invalid/unsupported
   classifications.
-- [ ] In `cli/src/commands/plan/index.ts`, render `migration-required` in human and JSON
+- [x] In `cli/src/commands/plan/index.ts`, render `migration-required` in human and JSON
   modes with bounded terminal-safe fields and migration-only guidance. `exitCodeFor` returns
   0 only for `valid`; `migration-required`, `invalid`, and `unsupported` return 2. Remove
   only the plan validator's full-quality-path language.
-- [ ] Run `CMD-FOCUSED`, `CMD-TYPECHECK`, and `CMD-BUILD`. After the build, create one
+- [x] Run `CMD-FOCUSED`, `CMD-TYPECHECK`, and `CMD-BUILD`. After the build, create one
   temporary unmarked Markdown file inside the worktree, invoke
   `cli/dist/src/index.js plan validate` against it in human and JSON modes, and verify both
   commands exit 2, the JSON parses, neither output offers execution, and the input hash is
   unchanged. Remove only that temporary fixture after recording the evidence.
-- [ ] Run specification review against the five bootstrap mappings and the approved design,
+- [x] Run specification review against the five bootstrap mappings and the approved design,
   fix every finding, then run code-quality review over the complete slice diff and fix every
   finding. Repeat focused tests after each correction and commit the bounded implementation
   with `fix(plan): require compact migration (#126)`.
