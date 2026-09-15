@@ -20,6 +20,25 @@ function killGroup(pgid: number): void {
     try { process.kill(-pgid, 'SIGKILL'); } catch { /* ya muerto */ }
 }
 
+function groupAlive(pgid: number): boolean {
+    if (isWindowsNative()) return false; // taskkill above is synchronous enough for this fixture.
+    try { process.kill(-pgid, 0); return true; } catch { return false; }
+}
+
+async function terminateFixtureGroups(groups: Set<number>): Promise<void> {
+    for (const pgid of groups) killGroup(pgid);
+    await until(() => [...groups].every(pgid => !groupAlive(pgid)), 5_000, 'terminacion de grupos del fixture');
+}
+
+async function removeFixture(pathname: string): Promise<void> {
+    let last: unknown;
+    for (let attempt = 0; attempt < 20; attempt++) {
+        try { fs.rmSync(pathname, { recursive: true, force: true, maxRetries: 1, retryDelay: 25 }); return; }
+        catch (error) { last = error; await new Promise(resolve => setTimeout(resolve, 25)); }
+    }
+    throw last;
+}
+
 jest.setTimeout(180000);
 
 // R1.8 promete "el wrapper sobrevive incluso si el supervisor muere" — en
@@ -160,7 +179,7 @@ while true; do sleep 1; done
         if (admission.status !== 0) throw new Error(`fixture admission failed: ${admission.stdout}${admission.stderr}`);
     });
 
-    afterEach(() => {
+    afterEach(async () => {
         // higiene: terminar TODO grupo que hayamos originado (supervisores,
         // stubs de controlador, wrappers) — cero huerfanos entre tests
         const s = readState(repo);
@@ -174,11 +193,11 @@ while true; do sleep 1; done
                 if (j.processRef !== undefined) groups.add(j.processRef.processGroup);
             }
         }
-        for (const pgid of groups) killGroup(pgid);
+        await terminateFixtureGroups(groups);
         children.length = 0;
-        fs.rmSync(repo, { recursive: true, force: true });
-        fs.rmSync(stubBin, { recursive: true, force: true });
-        fs.rmSync(fixtureAwmHome, { recursive: true, force: true });
+        await removeFixture(repo);
+        await removeFixture(stubBin);
+        await removeFixture(fixtureAwmHome);
     });
 
     function startSupervisor(provider: string): ChildProcess {
