@@ -47,8 +47,8 @@ function reportPayload(report: PlanValidationReport, planPath: string): Record<s
             requirements: report.manifest.requirements.length, sources: report.manifest.sources.length,
             commands: report.manifest.commands.length, slices: report.manifest.slices.length, completeOwnership: true,
         };
-    case 'legacy':
-        return { state: report.state, path: planPath, message: 'existing full-quality path applies; compact optimization was not requested.' };
+    case 'migration-required':
+        return { state: report.state, path: planPath, reason: report.reason };
     case 'invalid':
         return { state: report.state, path: planPath, diagnostics: boundedDiagnostics(report.diagnostics) };
     case 'unsupported':
@@ -62,7 +62,7 @@ function reportPayload(report: PlanValidationReport, planPath: string): Record<s
 }
 
 export function exitCodeFor(report: PlanValidationReport): 0 | 2 {
-    return report.state === 'valid' || report.state === 'legacy' ? 0 : 2;
+    return report.state === 'valid' ? 0 : 2;
 }
 
 export function formatReport(report: PlanValidationReport, planPath: string): string {
@@ -70,8 +70,8 @@ export function formatReport(report: PlanValidationReport, planPath: string): st
     switch (report.state) {
     case 'valid':
         return `Plan validation: valid "${terminalSafe(planPath)}" (${terminalSafe(report.schema)}; ${payload.slices} slices; ${payload.requirements} requirements; complete ownership)\n`;
-    case 'legacy':
-        return `Plan validation: legacy "${terminalSafe(planPath)}" — existing full-quality path applies; compact optimization was not requested.\n`;
+    case 'migration-required':
+        return `Plan validation: migration-required "${terminalSafe(planPath)}" (${terminalSafe(report.reason)})\nMigrate this plan to compact-slices/v1 before execution.\n`;
     case 'invalid':
         return `Plan validation: invalid "${terminalSafe(planPath)}"\n${(payload.diagnostics as PlanDiagnostic[]).map(diagnostic => `- ${terminalSafe(diagnostic.code)}: ${terminalSafe(diagnostic.message)}${diagnostic.field ? ` (${terminalSafe(diagnostic.field)})` : ''}`).join('\n')}\n`;
     case 'unsupported':

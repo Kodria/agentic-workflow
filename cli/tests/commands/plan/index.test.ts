@@ -20,6 +20,7 @@ const invalid: Extract<PlanValidationReport, { state: 'invalid' }> = {
 const unsupported: Extract<PlanValidationReport, { state: 'unsupported' }> = {
     state: 'unsupported', schema: 'compact-slices/v2', diagnostics: [{ code: 'PLAN_UNSUPPORTED_SCHEMA', message: 'unsupported compact plan schema; update the CLI' }],
 };
+const migration: Extract<PlanValidationReport, { state: 'migration-required' }> = { state: 'migration-required', reason: 'unmarked-plan' };
 
 function commandFor(report: PlanValidationReport, calls: Array<[string, string]> = []): Command {
     const program = new Command();
@@ -66,13 +67,28 @@ describe('plan validate Commander wiring', () => {
         expect(String(stdoutWrite.mock.calls[0][0])).not.toContain('update');
     });
 
-    it('keeps a legacy plan on the existing full-quality path with exit 0', async () => {
-        await commandFor({ state: 'legacy' }).parseAsync(['node', 'awm', 'plan', 'validate', 'legacy.md']);
+    it('emits deterministic migration-only human guidance and exit 2', async () => {
+        await commandFor(migration).parseAsync(['node', 'awm', 'plan', 'validate', 'legacy.md']);
 
         expect(String(stdoutWrite.mock.calls[0][0])).toBe(
-            'Plan validation: legacy "legacy.md" — existing full-quality path applies; compact optimization was not requested.\n',
+            'Plan validation: migration-required "legacy.md" (unmarked-plan)\nMigrate this plan to compact-slices/v1 before execution.\n',
         );
-        expect(process.exitCode).toBe(0);
+        expect(String(stdoutWrite.mock.calls[0][0])).not.toMatch(/full-quality|alternate|legacy path/i);
+        expect(process.exitCode).toBe(2);
+    });
+
+    it('writes one stable migration JSON object before assigning exit 2', async () => {
+        const observedExitCodes: unknown[] = [];
+        stdoutWrite.mockImplementation(() => { observedExitCodes.push(process.exitCode); return true; });
+
+        await commandFor(migration).parseAsync(['node', 'awm', 'plan', 'validate', 'legacy.md', '--json']);
+
+        const output = String(stdoutWrite.mock.calls[0][0]);
+        expect(output).toBe('{"state":"migration-required","path":"legacy.md","reason":"unmarked-plan"}\n');
+        expect(JSON.parse(output)).toEqual({ state: 'migration-required', path: 'legacy.md', reason: 'unmarked-plan' });
+        expect(output).not.toMatch(/full-quality|alternate|legacy path/i);
+        expect(observedExitCodes).toEqual([undefined]);
+        expect(process.exitCode).toBe(2);
     });
 
     it.each([
@@ -170,7 +186,7 @@ describe('plan validate Commander wiring', () => {
 describe('plan validation public boundaries', () => {
     it.each([
         ['valid', valid, 0],
-        ['legacy', { state: 'legacy' } as PlanValidationReport, 0],
+        ['migration-required', migration, 2],
         ['invalid', { state: 'invalid', diagnostics: [] } as PlanValidationReport, 2],
         ['unsupported', { state: 'unsupported', schema: 'compact-slices/v2', diagnostics: [] } as PlanValidationReport, 2],
     ])('maps %s reports to exit %i', (_state, report, code) => {

@@ -77,6 +77,61 @@ describe('validatePlanFile', () => {
         expectApprovedPlanValid(validatePlanFile('docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md', repositoryRoot));
     });
 
+    test('preserves every previously valid tracked compact-v1 plan', () => {
+        const repositoryRoot = path.resolve(__dirname, '../../../..');
+        const tracked = (jest.requireActual('child_process') as typeof import('child_process'))
+            .execFileSync('git', ['ls-files', '--', 'docs/plans/*.md'], { cwd: repositoryRoot, encoding: 'utf8' })
+            .trim().split('\n').filter(Boolean);
+        const marked = tracked.filter((file) => fs.readFileSync(path.join(repositoryRoot, file), 'utf8').includes(START));
+        const previouslyValid = [
+            'docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md',
+            'docs/plans/2026-08-27-sensor-portability-publication-a-plan.md',
+            'docs/plans/2026-09-07-retire-onsignal.md',
+            'docs/plans/2026-09-14-compact-only-bootstrap-plan.md',
+        ];
+        expect(marked.length).toBeGreaterThan(0);
+        expect(previouslyValid.length).toBeGreaterThan(0);
+        for (const file of previouslyValid) {
+            expect(marked).toContain(file);
+            const report = validatePlanFile(file, repositoryRoot);
+            if (report.state !== 'valid') throw new Error(`previously valid compact-v1 plan failed: ${file}; state=${report.state}`);
+        }
+        expect(previouslyValid.length).toBe(4);
+        expect(marked.length - previouslyValid.length).toBe(2);
+    });
+
+    test.each(['RF-1.3', 'RNF-T.2', 'R4-VAL-2', 'A'.repeat(62) + '.1'])('accepts canonical bounded requirement ID %s in every requirement reference', (id) => {
+        const report = validatePlanFile(fixture(root, (manifest) => {
+            manifest.requirements = [id];
+            (manifest.commands as Record<string, unknown>[])[0].covers = [id];
+            (manifest.slices as Record<string, unknown>[])[0].requirements = [id];
+        }), root);
+        expect(report).toMatchObject({ state: 'valid', manifest: { requirements: [id] } });
+    });
+
+    test.each([
+        '.RF-1', 'RF-1.', 'RF..1', 'rf-1.3', 'RF-1.a', ' RF-1.3', 'RF-1.3 ',
+        'RF-1. 3', 'RF-1/3', 'RF-1\\3', 'RF-1.é', 'RF-1.\u0000', 'RF-1.\u007f',
+        'A'.repeat(63) + '.1',
+    ])('rejects malformed or oversized requirement ID %j', (id) => {
+        const report = validatePlanFile(fixture(root, (manifest) => {
+            manifest.requirements = [id];
+            (manifest.commands as Record<string, unknown>[])[0].covers = [id];
+            (manifest.slices as Record<string, unknown>[])[0].requirements = [id];
+        }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SHAPE' })] });
+    });
+
+    test.each([
+        ['source', (m: Record<string, unknown>) => { (m.sources as Record<string, unknown>[])[0].id = 'SRC.ONE'; }, 'PLAN_SOURCE_SHAPE'],
+        ['command', (m: Record<string, unknown>) => { (m.commands as Record<string, unknown>[])[0].id = 'CMD.ONE'; }, 'PLAN_COMMAND_SHAPE'],
+        ['slice', (m: Record<string, unknown>) => { (m.slices as Record<string, unknown>[])[0].id = 'S.1'; }, 'PLAN_SLICE_SHAPE'],
+    ])('keeps dotted %s entity IDs invalid', (_name, mutate, code) => {
+        expect(validatePlanFile(fixture(root, mutate), root)).toMatchObject({
+            state: 'invalid', diagnostics: [expect.objectContaining({ code })],
+        });
+    });
+
     test('performs no execution, network request, model work, grouping, or rewrite', () => {
         const plan = fixture(root); const before = fs.readFileSync(plan, 'utf8');
         const network = jest.spyOn(global, 'fetch');
@@ -235,12 +290,12 @@ describe('validatePlanFile', () => {
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SLICE_SHAPE' })] });
     });
 
-    test('treats a document without any optimized signal as legacy', () => {
+    test('requires migration for a document without any compact signal', () => {
         const plan = path.join(root, 'legacy.md'); fs.writeFileSync(plan, '# Legacy plan\n');
-        expect(validatePlanFile(plan, root)).toEqual({ state: 'legacy' });
+        expect(validatePlanFile(plan, root)).toEqual({ state: 'migration-required', reason: 'unmarked-plan' });
     });
 
-    test('does not classify an escaped future schema signal as legacy', () => {
+    test('does not classify an escaped future schema signal as migration-required', () => {
         const plan = path.join(root, 'escaped-future.md'); fs.writeFileSync(plan, '{"schema":"compact-slices\\u002fv2"}');
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
     });
@@ -248,18 +303,18 @@ describe('validatePlanFile', () => {
     test.each([
         ['escaped schema key', '{"\\u0073chema":"compact-slices/v2"}'],
         ['escaped schema hyphen', '{"schema":"compact\\u002dslices/v2"}'],
-    ])('does not classify a future schema with an %s as legacy', (_name, manifest) => {
+    ])('does not classify a future schema with an %s as migration-required', (_name, manifest) => {
         const plan = path.join(root, 'escaped-future-schema.md'); fs.writeFileSync(plan, manifest);
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
     });
 
-    test('does not classify an escaped future schema embedded in Markdown without markers as legacy', () => {
+    test('does not classify an escaped future schema embedded in Markdown without markers as migration-required', () => {
         const plan = path.join(root, 'embedded-escaped-future.md');
         fs.writeFileSync(plan, '# Plan notes\n\n```json\n{"\\u0073chema":"compact\\u002dslices\\u002fv2"}\n```\n');
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
     });
 
-    test('rejects an unparseable escaped compact schema embedded in Markdown rather than treating it as legacy', () => {
+    test('rejects an unparseable escaped compact schema embedded in Markdown rather than requiring migration', () => {
         const plan = path.join(root, 'embedded-escaped-malformed.md');
         fs.writeFileSync(plan, '# Plan notes\n\n{"\\u0073chema":"compact\\u002dslices\\u002fv2"\n');
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
