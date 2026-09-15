@@ -496,3 +496,22 @@ describe('plan validation public boundaries', () => {
         expect(() => registerPlanCommand(new Command(), {} as never)).toThrow('validatePlanFile must be a function');
     });
 });
+
+describe('plan migration-facts command', () => {
+    it('emits deterministic JSON through the injected read-only collector', async () => {
+        const write = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerPlanCommand(program, { validatePlanFile: () => valid, collectMigrationFacts: () => ({ state: 'planning-required', issueLinks: ['https://github.com/Kodria/agentic-workflow/issues/126'], tasks: [], diagnostics: ['missing'], facts: [] }) });
+        try {
+            await program.parseAsync(['node', 'awm', 'plan', 'migration-facts', 'old.md', '--issue', 'https://github.com/Kodria/agentic-workflow/issues/126', '--json']);
+            expect(JSON.parse(String(write.mock.calls.at(-1)?.[0]))).toMatchObject({ state: 'planning-required', diagnostics: ['missing'] });
+        } finally { write.mockRestore(); }
+    });
+
+    it('rejects missing issue input before invoking collection', async () => {
+        const collectMigrationFacts = jest.fn(); const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerPlanCommand(program, { validatePlanFile: () => valid, collectMigrationFacts });
+        await expect(program.parseAsync(['node', 'awm', 'plan', 'migration-facts', 'old.md'])).rejects.toThrow();
+        expect(collectMigrationFacts).not.toHaveBeenCalled();
+    });
+});
