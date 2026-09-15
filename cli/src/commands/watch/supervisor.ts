@@ -184,14 +184,32 @@ export class Supervisor {
         if (before0.state.schema === 2 && before0.state.planBinding) {
             const activeJobIds = Object.values(before0.state.jobs)
                 .filter(job => LIVE.includes(job.executionState)).map(job => job.id);
+            const staleJob = Object.values(before0.state.jobs).some(job => {
+                try { return computeFingerprint(this.repoRoot, job.argv, job.paths, job.cwd).fingerprint !== job.fingerprint; }
+                catch { return true; }
+            });
+            const passed = (id: string | undefined): boolean => {
+                if (!id) return false;
+                const job = before0.state!.jobs[id];
+                return job !== undefined && job.verdict === 'pass' && !staleJob;
+            };
+            const verificationItems = [...before0.state.cycleVerificationPlan, ...before0.state.tasks.flatMap(task => task.verificationPlan)];
+            const tests = verificationItems.filter(item => item.kind === 'test');
+            const sensorItems = verificationItems.filter(item => item.kind === 'sensors');
+            const hasStaleReview = before0.state.verdicts.some(verdict => verdict.fingerprint === '' || (verdict.argv.length > 0 && (() => {
+                try { return computeFingerprint(this.repoRoot, verdict.argv, verdict.paths, verdict.cwd).fingerprint !== verdict.fingerprint; } catch { return true; }
+            })()));
+            const openReviewOrFix = before0.state.tasks.some(task => task.reviewObligations.some(obligation => !obligation.verdictId))
+                || before0.state.fixes.some(fix => !fix.closed);
             const recovery = reconcileUnattendedRecovery({
                 journal: before0.state, journalCorrupt: false, plan: before0.state.planBinding,
-                git: 'current', activeJobIds,
-                tests: before0.state.requiredVerifiers.includes('test') ? 'missing' : 'pass',
-                sensors: before0.state.requiredVerifiers.includes('sensors') ? 'missing' : 'pass',
-                verdicts: before0.state.verdicts.some(verdict => verdict.fingerprint === '') ? 'stale' : 'current',
+                git: staleJob ? 'changed' : 'current', activeJobIds,
+                tests: tests.length === 0 || tests.every(item => passed(item.satisfiedBy)) ? 'pass' : 'missing',
+                sensors: sensorItems.length === 0 || sensorItems.every(item => passed(item.satisfiedBy)) ? 'pass' : 'missing',
+                verdicts: hasStaleReview ? 'stale' : openReviewOrFix ? 'missing' : 'current',
             });
             appendEvent(this.repoRoot, this.branch, { kind: 'unattended-recovery', nextAction: recovery.nextAction, activeJobIds: recovery.activeJobIds, diagnostics: recovery.diagnostics });
+            if (recovery.state !== 'ready') return 'custody';
             recoveryResumePrompt = recovery.nextAction === 'reconcile-active-jobs'
                 ? `reconciliá los jobs activos existentes: ${recovery.activeJobIds.join(', ')}`
                 : `reconciliá la custodia desatendida: ${recovery.nextAction}`;
