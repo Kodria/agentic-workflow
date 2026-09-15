@@ -17,8 +17,8 @@ import { worktreeOwnershipProven } from '../../core/tracks/teardown';
 import { appendEvent } from '../../core/journal/store';
 import type { CohortProtocol, ProtocolEffect, TeardownObservation } from '../../core/tracks/types';
 import type { JournalState, TrackRef } from '../../core/journal/types';
-import type { TrackRuntime, EffectRunResult } from './tracks';
-import { applyProtocolToState, persist, refOf, withRef } from './tracks';
+import { applyProtocolToState, persist, refOf, withRef } from './track-state';
+import type { EffectRunResult, TrackRuntime } from './track-state';
 
 /** Task 13 (R4.2/R4.3/R4.6/R4.10/C2/C9): gathering READ-ONLY del estado real
  *  de UN track en teardown — jamás cuenta como el side effect del tick
