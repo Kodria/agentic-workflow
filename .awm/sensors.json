@@ -1,6 +1,10 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
+  "mode": "project-sensors",
   "pack": "js-ts",
+  "source": {
+    "registry": "baseline"
+  },
   "sensors": {
     "lint": {
       "enabled": true,
@@ -166,6 +170,5 @@
     }
   },
   "packSelection": "explicit",
-  "registryRoot": "/srv/agentmobile/.awm/registries/baseline",
   "packageRoot": "cli"
 }
