@@ -9,6 +9,8 @@ import { isAgentTarget } from '../../providers';
 import { listRegistries, type RegistrySource } from '../../core/registries';
 import path from 'path';
 import fs from 'fs';
+import { execFileSync } from 'child_process';
+import { readJournal } from '../../core/journal/store';
 
 const SUPPORTED_SCHEMA = 'compact-slices/v1';
 const MAX_PATH_LENGTH = 4096;
@@ -22,6 +24,15 @@ export interface PlanCommandDependencies {
     runSensors?: typeof runSensors;
     readPreferences?: typeof readPreferences;
     listRegistries?: () => RegistrySource[];
+}
+
+function journalObservation(cwd: string): { journalState: ReturnType<typeof readJournal>['state']; journalCorrupt: boolean } {
+    try {
+        const branch = execFileSync('git', ['branch', '--show-current'], { cwd, encoding: 'utf8', stdio: 'pipe' }).trim();
+        if (!branch) return { journalState: null, journalCorrupt: true };
+        const journal = readJournal(cwd, branch);
+        return { journalState: journal.state, journalCorrupt: journal.corrupt };
+    } catch { return { journalState: null, journalCorrupt: true }; }
 }
 
 function assertText(value: unknown, name: string): asserts value is string {
@@ -188,10 +199,11 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
         .description('read-only fail-closed compact-plan admission')
         .requiredOption('--provider <target>', 'target provider')
         .requiredOption('--cwd <path>', 'repository root for plan containment and source resolution')
+        .option('--execution-mode <mode>', 'interactivo or desatendido', 'interactivo')
         .option('--require-current', 'require authoritative consumed-contract currentness')
         .option('--verify-sensors', 'require an empirical sensor pass')
         .option('--json', 'emit one stable JSON report')
-        .action(async (planPath: string, options: { provider: string; cwd: string; requireCurrent?: boolean; verifySensors?: boolean; json?: boolean }) => {
+        .action(async (planPath: string, options: { provider: string; cwd: string; executionMode?: string; requireCurrent?: boolean; verifySensors?: boolean; json?: boolean }) => {
             assertText(planPath, 'plan path');
             assertText(options.cwd, '--cwd');
             assertText(options.provider, '--provider');
@@ -201,13 +213,16 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
             const sensorRun = deps.runSensors ?? runSensors;
             const registryInventory = deps.listRegistries ?? listRegistries;
             const planReport = deps.validatePlanFile(planPath, options.cwd);
+            const executionMode = options.executionMode === 'desatendido' ? 'desatendido' : options.executionMode === 'interactivo' ? 'interactivo' : options.executionMode as any;
+            const journal = executionMode === 'desatendido' ? journalObservation(options.cwd) : {};
+            const normalizedPlanPath = path.relative(options.cwd, path.resolve(options.cwd, planPath)).replace(/\\/g, '/');
             const enabledAgents = preferences().enabledAgents;
             // The documented order is plan, provider, currentness, sensors, journal,
             // capabilities. Do not call the full composer early: that would resolve a
             // capability before empirical evidence gates have had their ordered turn.
             const earlyBoundary = planReport.state !== 'valid' || !isAgentTarget(options.provider) || !enabledAgents.includes(options.provider);
             if (earlyBoundary) {
-                const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents });
+                const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal });
                 process.stdout.write(admissionOutput(report, options.json === true));
                 process.exitCode = 2;
                 return;
@@ -216,14 +231,14 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
             try { contractScope = consumedRegistryContracts(planReport, options.cwd, registryInventory()); }
             catch { contractScope = { provenance: 'unknown', consumedRegistryComponents: [] }; }
             if (options.requireCurrent && contractScope.provenance !== 'proven') {
-                const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, requireCurrent: true, ...contractScope });
+                const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal, requireCurrent: true, ...contractScope });
                 process.stdout.write(admissionOutput(report, options.json === true));
                 process.exitCode = 2;
                 return;
             }
             const currentness = options.requireCurrent ? await currentnessCheck(options.cwd) : undefined;
             if (options.requireCurrent && options.verifySensors) {
-                const currentnessGate = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, requireCurrent: true, verifySensors: true, currentness, ...contractScope });
+                const currentnessGate = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal, requireCurrent: true, verifySensors: true, currentness, ...contractScope });
                 if (currentnessGate.currentness !== 'current') {
                     process.stdout.write(admissionOutput(currentnessGate, options.json === true));
                     process.exitCode = 2;
@@ -231,7 +246,7 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
                 }
             }
             const sensors = options.verifySensors ? await sensorRun({ cwd: options.cwd }) : undefined;
-            const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true, currentness, sensors, ...contractScope });
+            const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true, currentness, sensors, ...contractScope });
             process.stdout.write(admissionOutput(report, options.json === true));
             if (report.state !== 'admitted') process.exitCode = 2;
         });

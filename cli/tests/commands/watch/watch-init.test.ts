@@ -61,4 +61,10 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         expect(() => initWatch(repo, 'rama', { path: 'docs/plan.md', report: invalid })).toThrow(/válido/i);
         expect(readJournal(repo, 'rama').corrupt).toBe(true);
     });
+
+    test('watch --init --plan rechaza paths con caracteres de control antes de persistir', () => {
+        const report = { state: 'valid', schema: 'compact-slices/v1', planDigest: 'a'.repeat(64), manifest: {} } as PlanValidationReport;
+        expect(() => initWatch(repo, 'rama', { path: 'docs/plan\u0000.md', report })).toThrow(/path inválido/);
+        expect(readJournal(repo, 'rama').state).toBeNull();
+    });
 });

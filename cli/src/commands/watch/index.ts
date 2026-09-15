@@ -51,6 +51,11 @@ export function registerWatchCommand(program: Command): void {
                 process.exitCode = 1;
                 return;
             }
+            if (opts.plan !== undefined && (typeof opts.plan !== 'string' || opts.plan.length === 0 || opts.plan.length > 4096 || /[\u0000-\u001F\u007F-\u009F]/.test(opts.plan))) {
+                process.stderr.write('--plan requiere un path sin caracteres de control\n');
+                process.exitCode = 1;
+                return;
+            }
             if (opts.init) {
                 const report = opts.plan === undefined ? undefined : validatePlanFile(opts.plan, repo);
                 const plan = report === undefined ? undefined : { path: path.relative(repo, path.resolve(repo, opts.plan)).replace(/\\/g, '/'), report };

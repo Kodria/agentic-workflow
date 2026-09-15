@@ -7,6 +7,7 @@ import type { PlanValidationReport } from '../../../src/core/plan/types';
 import { validatePlanFile } from '../../../src/core/plan/validate';
 import { exitCodeFor, formatReport, registerPlanCommand } from '../../../src/commands/plan';
 import type { AdmissionReport } from '../../../src/core/admission';
+import { initWatch } from '../../../src/commands/watch/init';
 
 const stdoutWrite = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
@@ -223,6 +224,19 @@ describe('plan validate Commander wiring', () => {
 });
 
 describe('plan admit Commander wiring', () => {
+    it('passes the current branch schema-2 journal and normalized plan path to unattended admission', async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-admit-journal-'));
+        const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const admit = jest.fn<Promise<AdmissionReport>, [any]>().mockResolvedValue({ state: 'admitted', planState: 'valid', journal: 'current', currentness: 'not-checked', sensors: 'not-required', diagnostics: [] });
+        try {
+            spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+            initWatch(root, 'main', { path: 'plans/current.md', report: valid });
+            const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+            registerPlanCommand(program, { validatePlanFile: () => valid, admitPlan: admit, readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }) });
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plans/current.md', '--provider', 'codex', '--cwd', root, '--execution-mode', 'desatendido', '--json']);
+            expect(admit).toHaveBeenCalledWith(expect.objectContaining({ executionMode: 'desatendido', planPath: 'plans/current.md', journalCorrupt: false, journalState: expect.objectContaining({ schema: 2, planBinding: expect.objectContaining({ digest: valid.planDigest }) }) }));
+        } finally { output.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
+    });
     it('does not run sensors after currentness blocks', async () => {
         const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
         const sensors = jest.fn();

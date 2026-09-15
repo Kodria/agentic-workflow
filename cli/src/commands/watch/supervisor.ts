@@ -2,7 +2,7 @@
 // COMPLETE exige gate verde (que exige cero vivos): drenaje ANTES de declarar.
 // Custodia BLOCKED: el loop sigue, el lock NO se libera, nada se mata.
 import { readJournal, writeJournal, appendEvent } from '../../core/journal/store';
-import { computeFingerprint } from '../../core/journal/fingerprint';
+import { computeFingerprint, reconcileUnattendedRecovery } from '../../core/journal/fingerprint';
 import { adapterFor } from '../../core/journal/adapter';
 import { groupIsGone, terminateGroupConfirmed } from '../../core/journal/process';
 import { computeGate, computeTrackGate, FingerprintNow } from '../job/gate';
@@ -178,6 +178,24 @@ export class Supervisor {
     async tick(): Promise<TickOutcome> {
         const before0 = readJournal(this.repoRoot, this.branch);
         if (before0.corrupt || before0.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
+        let recoveryResumePrompt: string | undefined;
+        // Schema-2 custody is reconciled before any controller launch.  This is
+        // read-only: existing active jobs are reused, never re-requested.
+        if (before0.state.schema === 2 && before0.state.planBinding) {
+            const activeJobIds = Object.values(before0.state.jobs)
+                .filter(job => LIVE.includes(job.executionState)).map(job => job.id);
+            const recovery = reconcileUnattendedRecovery({
+                journal: before0.state, journalCorrupt: false, plan: before0.state.planBinding,
+                git: 'current', activeJobIds,
+                tests: before0.state.requiredVerifiers.includes('test') ? 'missing' : 'pass',
+                sensors: before0.state.requiredVerifiers.includes('sensors') ? 'missing' : 'pass',
+                verdicts: before0.state.verdicts.some(verdict => verdict.fingerprint === '') ? 'stale' : 'current',
+            });
+            appendEvent(this.repoRoot, this.branch, { kind: 'unattended-recovery', nextAction: recovery.nextAction, activeJobIds: recovery.activeJobIds, diagnostics: recovery.diagnostics });
+            recoveryResumePrompt = recovery.nextAction === 'reconcile-active-jobs'
+                ? `reconciliá los jobs activos existentes: ${recovery.activeJobIds.join(', ')}`
+                : `reconciliá la custodia desatendida: ${recovery.nextAction}`;
+        }
         // R6.2/R6.8/C7 (Task 11): reconciliar un `MERGE_HEAD` abierto por un
         // crash a mitad de un merge ANTES de cualquier guard general — hoy
         // ningún guard existente (`verifyBranchInvariant` incluido) rechaza
@@ -196,7 +214,7 @@ export class Supervisor {
         // mismo resultado terminal.
         if (before.frozen !== undefined) return 'frozen';
         const pending = before.cycle.nextAction;
-        const resumePrompt = pending !== undefined ? `el next_action ${pending.actionId} del journal` : 'el plan del ciclo desde el journal';
+        const resumePrompt = recoveryResumePrompt ?? (pending !== undefined ? `el next_action ${pending.actionId} del journal` : 'el plan del ciclo desde el journal');
         if (this.ensureController(resumePrompt) === 'custody') return 'custody';
         const r0 = readJournal(this.repoRoot, this.branch);
         if (r0.corrupt || r0.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
