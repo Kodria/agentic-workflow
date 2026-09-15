@@ -8,6 +8,7 @@ import { readPreferences } from '../../utils/config';
 import { isAgentTarget } from '../../providers';
 import { listRegistries, type RegistrySource } from '../../core/registries';
 import path from 'path';
+import fs from 'fs';
 
 const SUPPORTED_SCHEMA = 'compact-slices/v1';
 const MAX_PATH_LENGTH = 4096;
@@ -50,15 +51,29 @@ function within(root: string, candidate: string): boolean {
     return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
+function physicalWithin(root: string, candidate: string): boolean | null {
+    try {
+        const physicalRoot = fs.realpathSync.native(root);
+        const physicalCandidate = fs.realpathSync.native(candidate);
+        return within(physicalRoot, physicalCandidate);
+    } catch { return null; }
+}
+
 /** Maps only validated source paths to physical registry contracts; failures stay fail-closed. */
 function consumedRegistryContracts(report: PlanValidationReport, cwd: string, registries: RegistrySource[]): { provenance: 'proven' | 'unknown'; consumedRegistryComponents: string[] } {
     if (report.state !== 'valid') return { provenance: 'unknown', consumedRegistryComponents: [] };
     const root = path.resolve(cwd);
+    if (physicalWithin(root, root) !== true) return { provenance: 'unknown', consumedRegistryComponents: [] };
+    const physicalRegistries: Array<{ name: string; root: string }> = [];
+    for (const registry of registries) {
+        try { physicalRegistries.push({ name: registry.name, root: fs.realpathSync.native(registry.contentRoot) }); }
+        catch { return { provenance: 'unknown', consumedRegistryComponents: [] }; }
+    }
     const consumed = new Set<string>();
     for (const source of report.manifest.sources) {
         const candidate = path.resolve(root, source.path);
-        if (!within(root, candidate)) return { provenance: 'unknown', consumedRegistryComponents: [] };
-        for (const registry of registries) if (within(path.resolve(registry.contentRoot), candidate)) consumed.add(`registry:${registry.name}`);
+        if (physicalWithin(root, candidate) !== true) return { provenance: 'unknown', consumedRegistryComponents: [] };
+        for (const registry of physicalRegistries) if (physicalWithin(registry.root, candidate) === true) consumed.add(`registry:${registry.name}`);
     }
     return { provenance: 'proven', consumedRegistryComponents: [...consumed].sort() };
 }

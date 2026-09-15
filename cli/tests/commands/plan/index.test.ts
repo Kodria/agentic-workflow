@@ -223,6 +223,39 @@ describe('plan validate Commander wiring', () => {
 });
 
 describe('plan admit Commander wiring', () => {
+    it('does not prove registry irrelevance through a source symlink that escapes cwd', async () => {
+        const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-admit-provenance-'));
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-admit-outside-'));
+        const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const currentness = jest.fn();
+        const admit = jest.fn<Promise<AdmissionReport>, [any]>().mockResolvedValue({ state: 'blocked', planState: 'valid', journal: 'not-required', currentness: 'unverifiable', sensors: 'not-required', diagnostics: [] });
+        try {
+            fs.writeFileSync(path.join(outside, 'contract.md'), 'outside');
+            try { fs.symlinkSync(outside, path.join(fixtureRoot, 'linked'), 'dir'); }
+            catch (error) {
+                if ((error as NodeJS.ErrnoException).code === 'EPERM') return;
+                throw error;
+            }
+            const escaped = { ...valid, manifest: { ...valid.manifest, sources: [{ id: 'SRC', path: 'linked/contract.md', locator: 'x', fact: 'x' }] } };
+            const program = new Command();
+            program.exitOverride();
+            program.configureOutput({ writeErr: () => undefined });
+            registerPlanCommand(program, {
+                validatePlanFile: () => escaped, admitPlan: admit,
+                readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
+                listRegistries: () => [], checkCurrentness: currentness,
+            });
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', fixtureRoot, '--require-current', '--json']);
+            expect(currentness).not.toHaveBeenCalled();
+            expect(admit).toHaveBeenCalledWith(expect.objectContaining({ provenance: 'unknown', consumedRegistryComponents: [] }));
+        } finally {
+            output.mockRestore();
+            fs.rmSync(fixtureRoot, { recursive: true, force: true });
+            fs.rmSync(outside, { recursive: true, force: true });
+            process.exitCode = undefined;
+        }
+    });
+
     it('bounds and terminal-sanitizes adversarial admission diagnostics in JSON', async () => {
         const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
         const program = new Command();
@@ -258,11 +291,12 @@ describe('plan admit Commander wiring', () => {
             readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
             checkCurrentness: async () => ({ checkedAt: '2026-01-01T00:00:00.000Z', components: [], compatibility: { status: 'not-checked' } }),
             runSensors: async () => ({ overall: 'pass', sensors: [] }),
+            listRegistries: () => [],
         });
 
         try {
-            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plans/r4.md', '--provider', 'codex', '--cwd', 'fixture-root', '--require-current', '--verify-sensors', '--json']);
-            expect(admit).toHaveBeenLastCalledWith(expect.objectContaining({ provider: 'codex', cwd: 'fixture-root', requireCurrent: true, verifySensors: true, plan: valid }));
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plans/r4.md', '--provider', 'codex', '--cwd', repositoryRoot, '--require-current', '--verify-sensors', '--json']);
+            expect(admit).toHaveBeenLastCalledWith(expect.objectContaining({ provider: 'codex', cwd: repositoryRoot, requireCurrent: true, verifySensors: true, plan: valid, provenance: 'proven' }));
             expect(JSON.parse(String(output.mock.calls[0][0]))).toMatchObject({ state: 'blocked', provider: 'codex' });
             expect(process.exitCode).toBe(2);
         } finally {
