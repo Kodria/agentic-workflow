@@ -38,4 +38,12 @@ describe('collectMigrationFacts', () => {
         expect(reconcileTaskEvidence('1', records)).toMatchObject({ state: 'completed' });
         expect(reconcileTaskEvidence('2', records)).toMatchObject({ state: 'pending' });
     });
+
+    it.each([
+        ['missing tests', [{ taskId: '1', commitSha: 'a'.repeat(40), issue126: 'https://github.com/Kodria/agentic-workflow/issues/126' }]],
+        ['failed job', [{ taskId: '1', verificationItemId: 'test:1', result: 'fail' as const, issue126: 'https://github.com/Kodria/agentic-workflow/issues/126' }]],
+        ['inconclusive review', [{ taskId: '1', role: 'quality' as const, result: 'inconclusive' as const, issue126: 'https://github.com/Kodria/agentic-workflow/issues/126' }]],
+    ])('keeps adverse or incomplete %s pending', (_name, records) => {
+        expect(reconcileTaskEvidence('1', records)).toMatchObject({ state: 'pending' });
+    });
 });
