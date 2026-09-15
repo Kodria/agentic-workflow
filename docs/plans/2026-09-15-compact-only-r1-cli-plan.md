@@ -74,16 +74,16 @@ or excluded sections.
 
 #### Implementation
 
-- [ ] Write RED tests proving identical LF/CRLF plans get the same digest; changing any
+- [x] Write RED tests proving identical LF/CRLF plans get the same digest; changing any
   mode, source, command, requirement, or slice prose changes it; malformed UTF-8, oversized
   input, duplicate manifest keys, missing/duplicate five `####` sections, unmarked, and
   future-schema fixtures have distinct bounded non-success outcomes.
-- [ ] Make the validator return the digest only with a valid compact report, preserve the
+- [x] Make the validator return the digest only with a valid compact report, preserve the
   bootstrap dotted-ID grammar and five canonical v1 subsection names, and publish one
   versioned valid/adversarial corpus that later registry tests consume without transforms.
-- [ ] Remove every documented `awm plan analyze` instruction because no public command exists;
+- [x] Remove every documented `awm plan analyze` instruction because no public command exists;
   retain traceability as an author self-review, not a fictional CLI dependency.
-- [ ] Run CMD-PLAN-UNIT RED then GREEN, CMD-TYPECHECK, CMD-BUILD; specification review must
+- [x] Run CMD-PLAN-UNIT RED then GREEN, CMD-TYPECHECK, CMD-BUILD; specification review must
   compare every corpus verdict against this slice and code-quality review must examine byte,
   UTF-8, and path bounds. Commit `feat(plan): add canonical compact identity (#126)`.
 
