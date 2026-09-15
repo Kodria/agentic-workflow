@@ -11,6 +11,7 @@ import path from 'path';
 import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { readJournal } from '../../core/journal/store';
+import { collectMigrationFacts, type MigrationFactsReport } from '../../core/migration';
 
 const SUPPORTED_SCHEMA = 'compact-slices/v1';
 const MAX_PATH_LENGTH = 4096;
@@ -24,6 +25,7 @@ export interface PlanCommandDependencies {
     runSensors?: typeof runSensors;
     readPreferences?: typeof readPreferences;
     listRegistries?: () => RegistrySource[];
+    collectMigrationFacts?: (planPath: string, cwd: string, issueLinks: string[]) => MigrationFactsReport;
 }
 
 function journalObservation(cwd: string): { journalState: ReturnType<typeof readJournal>['state']; journalCorrupt: boolean } {
@@ -191,6 +193,17 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
     assertDependencies(deps);
 
     const plan = program.command('plan').description('inspect plan contracts');
+    plan.command('migration-facts <plan-path>')
+        .description('collect read-only durable migration facts')
+        .option('--cwd <path>')
+        .requiredOption('--issue <https-url...>', 'durable issue links, including #126')
+        .option('--json')
+        .action((planPath: string, options: { cwd?: string; issue: string[]; json?: boolean }) => {
+            assertText(planPath, 'plan path'); const cwd = options.cwd ?? process.cwd(); assertText(cwd, '--cwd');
+            const report = (deps.collectMigrationFacts ?? collectMigrationFacts)(planPath, cwd, options.issue);
+            process.stdout.write(options.json ? `${JSON.stringify(report)}\n` : `Migration facts: ${report.state}\n`);
+            process.exitCode = report.state === 'supported-completion' ? 0 : 2;
+        });
     plan
         .command('validate <plan-path>')
         .description('validate a compact plan without modifying it')
