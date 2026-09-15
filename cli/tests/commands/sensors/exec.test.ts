@@ -87,6 +87,20 @@ describe('runCommand — exit codes and output', () => {
         expect(interpreted.status).not.toBe('pass');
     });
 
+    it('treats generic stdout from a successful command as informational', () => {
+        const result = interpretResult(sensor(), {
+            code: 0,
+            stdout: 'depcruise: no violations found\n',
+            stderr: '',
+            elapsedMs: 1,
+            signal: null,
+            timedOut: false,
+            overflowed: false,
+        });
+
+        expect(result).toMatchObject({ status: 'pass', errors: [] });
+    });
+
     itLinux('keeps structured stderr separate from exit-0 stdout findings', async () => {
         const command = {
             executable: 'perl',
