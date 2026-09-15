@@ -61,6 +61,15 @@ describe('journal store', () => {
         expect(readJournal(repo, 'rama')).toMatchObject({ state: null, corrupt: true });
     });
 
+    test('initJournal rechaza un padre .awm symlink sin crear journal fuera del repo', () => {
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-store-outside-'));
+        try {
+            fs.symlinkSync(outside, path.join(repo, '.awm'));
+            expect(() => initJournal(repo, 'rama')).toThrow(/symlink/i);
+            expect(fs.existsSync(path.join(outside, 'journal'))).toBe(false);
+        } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+    });
+
     test('normaliza campos aditivos de snapshots schema 1 sin certificar evidencia legacy', () => {
         initJournal(repo, 'rama');
         const legacy = readJournal(repo, 'rama').state! as unknown as Record<string, unknown>;
@@ -84,6 +93,15 @@ describe('journal store', () => {
         expect(lines).toHaveLength(2);
         expect(JSON.parse(lines[0]).kind).toBe('generation-launched');
         expect(typeof JSON.parse(lines[0]).at).toBe('string');
+    });
+
+    test('appendEvent no sigue un events.jsonl symlink externo', () => {
+        initJournal(repo, 'rama');
+        const outside = path.join(repo, 'outside-events.jsonl');
+        fs.writeFileSync(outside, 'outside\n');
+        fs.symlinkSync(outside, eventsPath(repo, 'rama'));
+        appendEvent(repo, 'rama', { kind: 'must-not-escape' });
+        expect(fs.readFileSync(outside, 'utf8')).toBe('outside\n');
     });
 
     test('writeJournal rechaza un estado propuesto con forma invalida, nunca lo persiste (R1.6)', () => {  // verifies R1.6

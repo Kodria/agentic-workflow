@@ -40,8 +40,16 @@ function ids(text: string): string[] { const value = [...text.matchAll(TASK)].ma
 function taskFiles(text: string, taskId: string): string[] {
     const start = text.search(new RegExp(`^### Task ${taskId}:`, 'm')); if (start < 0) return [];
     const end = text.indexOf('\n### Task ', start + 1); const section = text.slice(start, end < 0 ? text.length : end);
-    const block = /(?:^|\n)(?:\*\*)?Files:?(?:\*\*)?\s*\r?\n([\s\S]*?)(?=\n\s*\n|\n\*\*|\n###|$)/mi.exec(section)?.[1] ?? '';
-    return [...block.matchAll(/^\s*[-*]\s*(?:(?:Create|Modify):\s*)?`?([^`\r\n]+?)`?\s*$/gmi)].map(match => match[1].trim()).filter(file => file && !file.includes('..') && !path.isAbsolute(file));
+    const lines = section.split(/\r?\n/);
+    const heading = lines.findIndex(line => /^\s*(?:\*\*)?Files:?(?:\*\*)?\s*$/i.test(line));
+    if (heading < 0) return [];
+    const files: string[] = [];
+    for (const line of lines.slice(heading + 1)) {
+        if (!line.trim() || /^\s*(?:#{1,6}\s|\*\*[^*]+\*\*)/.test(line)) break;
+        const match = /^\s*[-*]\s*(?:(?:Create|Modify):\s*)?`?([^`\r\n]+?)`?\s*$/.exec(line);
+        if (match) files.push(match[1].trim());
+    }
+    return files.filter(file => file && !file.includes('..') && !path.isAbsolute(file));
 }
 function declaredCommit(text: string, taskId: string, cwd: string): string | undefined {
     const start = text.search(new RegExp(`^### Task ${taskId}:`, 'm')); if (start < 0) return undefined;

@@ -65,15 +65,51 @@ function normalizeSchemaOne(value: unknown): unknown {
 }
 
 function initializeDirectories(repoRoot: string, branch: string): void {
-    for (const d of [journalDir(repoRoot, branch), requestsDir(repoRoot, branch), acksDir(repoRoot, branch), logsDir(repoRoot, branch), exportDir(repoRoot, branch)]) {
-        fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    for (const d of journalDirectories(repoRoot, branch)) {
+        assertControlledDirectory(d);
+        fs.mkdirSync(d, { recursive: false, mode: 0o700 });
+        assertControlledDirectory(d);
         fs.chmodSync(d, 0o700);   // mkdirSync mode es umask-dependiente: fijar explicito (R1.2)
+    }
+}
+
+/** Every journal segment is owned state.  Validate it centrally before any
+ * directory operation or journal file I/O so a hostile `.awm`/`journal`/branch
+ * link cannot redirect writes or reads outside the repository. */
+function journalDirectories(repoRoot: string, branch: string): string[] {
+    const root = path.join(repoRoot, '.awm');
+    const journal = path.join(root, 'journal');
+    return [root, journal, journalDir(repoRoot, branch), requestsDir(repoRoot, branch), acksDir(repoRoot, branch), logsDir(repoRoot, branch), exportDir(repoRoot, branch)];
+}
+
+function assertControlledDirectory(directory: string): void {
+    try {
+        const stat = fs.lstatSync(directory);
+        if (stat.isSymbolicLink()) throw new Error(`journal path rejects symlink: ${directory}`);
+        if (!stat.isDirectory()) throw new Error(`journal path is not a directory: ${directory}`);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+        throw error;
+    }
+}
+
+function assertJournalTree(repoRoot: string, branch: string): void {
+    for (const directory of journalDirectories(repoRoot, branch).slice(0, 3)) assertControlledDirectory(directory);
+}
+
+function assertJournalFileNotSymlink(file: string): void {
+    try {
+        if (fs.lstatSync(file).isSymbolicLink()) throw new Error(`journal file rejects symlink: ${file}`);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+        throw error;
     }
 }
 
 export function initJournal(repoRoot: string, branch: string): void {
     initializeDirectories(repoRoot, branch);
     const sp = statePath(repoRoot, branch);
+    assertJournalFileNotSymlink(sp);
     if (!fs.existsSync(sp)) {
         writeFileAtomicDurable(sp, JSON.stringify(emptyState(branch), null, 2) + '\n', 0o600);
     }
@@ -85,6 +121,7 @@ export function initJournal(repoRoot: string, branch: string): void {
 export function initBoundJournal(repoRoot: string, branch: string, binding: PlanBinding): void {
     initializeDirectories(repoRoot, branch);
     const sp = statePath(repoRoot, branch);
+    assertJournalFileNotSymlink(sp);
     const initial: JournalState = { ...emptyState(branch), schema: 2, planBinding: binding };
     if (!isWellFormedState(initial)) throw new Error('binding de plan invalido');
     const temporary = path.join(journalDir(repoRoot, branch), `.state.${process.pid}.${crypto.randomUUID()}.tmp`);
@@ -111,7 +148,8 @@ export function readJournal(repoRoot: string, branch: string): ReadResult {
     const sp = statePath(repoRoot, branch);
     let raw: string;
     try {
-        if (fs.lstatSync(sp).isSymbolicLink()) return { state: null, corrupt: true };
+        assertJournalTree(repoRoot, branch);
+        assertJournalFileNotSymlink(sp);
         raw = fs.readFileSync(sp, 'utf8');
     } catch { return { state: null, corrupt: true }; }
     let parsed: unknown;
@@ -131,6 +169,8 @@ export function writeJournal(repoRoot: string, branch: string, state: JournalSta
     }
     const next: JournalState = { ...state, revision: state.revision + 1 };
     if (!isWellFormedState(next)) throw new Error('writeJournal: estado propuesto con forma invalida, no se persiste (R1.6)');
+    assertJournalTree(repoRoot, branch);
+    assertJournalFileNotSymlink(statePath(repoRoot, branch));
     writeFileAtomicDurable(statePath(repoRoot, branch), JSON.stringify(next, null, 2) + '\n', 0o600);
 }
 
@@ -154,7 +194,10 @@ export function rebindJournalPlan(repoRoot: string, branch: string, binding: Pla
  *  fallo aqui jamas invalida el estado — state.json es la unica autoridad. */
 export function appendEvent(repoRoot: string, branch: string, event: Record<string, unknown>): void {
     try {
-        fs.appendFileSync(eventsPath(repoRoot, branch), JSON.stringify({ at: new Date().toISOString(), ...event }) + '\n', { mode: 0o600 });
+        assertJournalTree(repoRoot, branch);
+        const ep = eventsPath(repoRoot, branch);
+        assertJournalFileNotSymlink(ep);
+        fs.appendFileSync(ep, JSON.stringify({ at: new Date().toISOString(), ...event }) + '\n', { mode: 0o600 });
     } catch {
         // best-effort: un evento perdido no se reconstruye ni bloquea (R4.6)
     }

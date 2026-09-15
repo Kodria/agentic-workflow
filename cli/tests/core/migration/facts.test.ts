@@ -28,6 +28,35 @@ describe('collectMigrationFacts', () => {
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
 
+    it('uses every declared Files entry when authenticating a task commit', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migration-files-'));
+        try {
+            fs.mkdirSync(path.join(root, 'docs', 'plans'), { recursive: true });
+            fs.writeFileSync(path.join(root, 'first.txt'), 'first');
+            fs.writeFileSync(path.join(root, 'second.txt'), 'second');
+            execFileSync('git', ['init', '-q', '-b', 'master'], { cwd: root });
+            execFileSync('git', ['config', 'user.email', 't@e.invalid'], { cwd: root });
+            execFileSync('git', ['config', 'user.name', 'T'], { cwd: root });
+            execFileSync('git', ['add', '.'], { cwd: root });
+            execFileSync('git', ['commit', '-qm', 'first'], { cwd: root });
+            fs.writeFileSync(path.join(root, 'second.txt'), 'second changed');
+            execFileSync('git', ['add', 'second.txt'], { cwd: root });
+            execFileSync('git', ['commit', '-qm', 'second'], { cwd: root });
+            const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+            fs.writeFileSync(path.join(root, 'docs', 'plans', 'old.md'), `### Task 1: historical\nCommit: ${sha}\n**Files:**\n- Modify: \`first.txt\`\n- Modify: \`second.txt\`\n\n### Task 2: later\n`);
+            const planPath = 'docs/plans/old.md';
+            const digest = require('crypto').createHash('sha256').update(fs.readFileSync(path.join(root, planPath), 'utf8')).digest('hex');
+            initBoundJournal(root, 'master', { path: planPath, digest, schema: 'compact-slices/v1', executionMode: 'desatendido', boundAt: '2026-09-15T00:00:00.000Z' });
+            const state = readJournal(root, 'master').state!;
+            state.tasks = [{ id: '1', title: 't', status: 'done', attempts: 1, verificationPlan: [{ id: 'test:1', kind: 'test' }, { id: 'sensor:1', kind: 'sensors' }], reviewObligations: [{ id: 'spec:1', taskId: '1', kind: 'spec', verdictId: 'v1' }, { id: 'quality:1', taskId: '1', kind: 'quality', verdictId: 'v2' }] }];
+            const job = (id: string) => ({ id, fingerprint: 'f', commandDigest: 'd', argv: ['node'], cwd: '.', paths: ['second.txt'], expandedPaths: ['second.txt'], executionState: 'exited' as const, observationState: 'progressing' as const, verdict: 'pass' as const, phaseTimestamps: {}, satisfies: [id] });
+            state.jobs = { test: job('test:1'), sensor: job('sensor:1') };
+            state.verdicts = [{ id: 'v1', obligationId: 'spec:1', result: 'pass', detail: 'ok', receivedAt: '2026-09-15T01:00:00.000Z', fingerprint: 'f', argv: [], paths: [], cwd: '.' }, { id: 'v2', obligationId: 'quality:1', result: 'pass', detail: 'ok', receivedAt: '2026-09-15T01:00:00.000Z', fingerprint: 'f', argv: [], paths: [], cwd: '.' }];
+            writeJournal(root, 'master', state);
+            expect(collectMigrationFacts(planPath, root, ['https://github.com/Kodria/agentic-workflow/issues/126']).tasks[0]).toMatchObject({ state: 'completed' });
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
     it('rejects material facts without the durable #126 link', () => {
         expect(() => collectMigrationFacts('x.md', process.cwd(), ['https://github.com/Kodria/agentic-workflow/issues/148'])).toThrow('issue #126');
     });

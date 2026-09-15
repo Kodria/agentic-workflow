@@ -1,7 +1,7 @@
 # Compact-only unattended execution and provider routing
 
-**Issue:** #126  
-**Brief:** `docs/plans/2026-09-14-compact-only-unattended-execution-brief.md`  
+**Issue:** #126
+**Brief:** `docs/plans/2026-09-14-compact-only-unattended-execution-brief.md`
 **Repositories:** `agentic-workflow`, `awm-baseline-registry`
 
 ## Requirements
