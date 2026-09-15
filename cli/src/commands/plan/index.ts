@@ -1,6 +1,11 @@
 import { Command } from 'commander';
 import { assertVerifiedValidPlanReport, validatePlanFile } from '../../core/plan/validate';
 import type { PlanDiagnostic, PlanValidationReport } from '../../core/plan/types';
+import { admitPlan, type AdmissionInput, type AdmissionReport } from '../../core/admission';
+import { checkCurrentness } from '../../core/currentness/check';
+import { runSensors } from '../sensors/run';
+import { readPreferences } from '../../utils/config';
+import { isAgentTarget } from '../../providers';
 
 const SUPPORTED_SCHEMA = 'compact-slices/v1';
 const MAX_PATH_LENGTH = 4096;
@@ -9,6 +14,10 @@ const MAX_DIAGNOSTIC_LENGTH = 4096;
 
 export interface PlanCommandDependencies {
     validatePlanFile: (planPath: string, cwd: string) => PlanValidationReport;
+    admitPlan?: (input: AdmissionInput) => Promise<AdmissionReport>;
+    checkCurrentness?: typeof checkCurrentness;
+    runSensors?: typeof runSensors;
+    readPreferences?: typeof readPreferences;
 }
 
 function assertText(value: unknown, name: string): asserts value is string {
@@ -23,6 +32,13 @@ function terminalSafe(value: string): string {
 
 function assertDependencies(deps: PlanCommandDependencies): void {
     if (!deps || typeof deps.validatePlanFile !== 'function') throw new Error('validatePlanFile must be a function');
+    if (deps.admitPlan !== undefined && typeof deps.admitPlan !== 'function') throw new Error('admitPlan must be a function');
+}
+
+function admissionOutput(report: AdmissionReport, json: boolean): string {
+    if (json) return `${JSON.stringify(report)}\n`;
+    const diagnostic = report.diagnostics[0];
+    return `Plan admission: ${report.state}${report.provider ? ` (${terminalSafe(report.provider)})` : ''}${diagnostic ? `\n- ${terminalSafe(diagnostic.code)}: ${terminalSafe(diagnostic.message)}` : ''}\n`;
 }
 
 function boundedDiagnostics(diagnostics: PlanDiagnostic[]): PlanDiagnostic[] {
@@ -107,7 +123,7 @@ export function formatReport(report: PlanValidationReport, planPath: string): st
     }
 }
 
-export function registerPlanCommand(program: Command, deps: PlanCommandDependencies = { validatePlanFile }): void {
+export function registerPlanCommand(program: Command, deps: PlanCommandDependencies = { validatePlanFile, admitPlan }): void {
     if (!program || typeof program.command !== 'function') throw new Error('program must be a Commander command');
     assertDependencies(deps);
 
@@ -128,5 +144,40 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
             process.stdout.write(output);
             const code = exitCodeFor(report);
             process.exitCode = code;
+        });
+
+    plan
+        .command('admit <plan-path>')
+        .description('read-only fail-closed compact-plan admission')
+        .requiredOption('--provider <target>', 'target provider')
+        .requiredOption('--cwd <path>', 'repository root for plan containment and source resolution')
+        .option('--require-current', 'require authoritative consumed-contract currentness')
+        .option('--verify-sensors', 'require an empirical sensor pass')
+        .option('--json', 'emit one stable JSON report')
+        .action(async (planPath: string, options: { provider: string; cwd: string; requireCurrent?: boolean; verifySensors?: boolean; json?: boolean }) => {
+            assertText(planPath, 'plan path');
+            assertText(options.cwd, '--cwd');
+            assertText(options.provider, '--provider');
+            const admission = deps.admitPlan ?? admitPlan;
+            const preferences = deps.readPreferences ?? readPreferences;
+            const currentnessCheck = deps.checkCurrentness ?? checkCurrentness;
+            const sensorRun = deps.runSensors ?? runSensors;
+            const planReport = deps.validatePlanFile(planPath, options.cwd);
+            const enabledAgents = preferences().enabledAgents;
+            // The documented order is plan, provider, currentness, sensors, journal,
+            // capabilities. Do not call the full composer early: that would resolve a
+            // capability before empirical evidence gates have had their ordered turn.
+            const earlyBoundary = planReport.state !== 'valid' || !isAgentTarget(options.provider) || !enabledAgents.includes(options.provider);
+            if (earlyBoundary) {
+                const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents });
+                process.stdout.write(admissionOutput(report, options.json === true));
+                process.exitCode = 2;
+                return;
+            }
+            const currentness = options.requireCurrent ? await currentnessCheck(options.cwd) : undefined;
+            const sensors = options.verifySensors ? await sensorRun({ cwd: options.cwd }) : undefined;
+            const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true, currentness, sensors });
+            process.stdout.write(admissionOutput(report, options.json === true));
+            if (report.state !== 'admitted') process.exitCode = 2;
         });
 }

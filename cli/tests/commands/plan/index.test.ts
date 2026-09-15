@@ -6,6 +6,7 @@ import { spawnSync } from 'child_process';
 import type { PlanValidationReport } from '../../../src/core/plan/types';
 import { validatePlanFile } from '../../../src/core/plan/validate';
 import { exitCodeFor, formatReport, registerPlanCommand } from '../../../src/commands/plan';
+import type { AdmissionReport } from '../../../src/core/admission';
 
 const stdoutWrite = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
@@ -217,6 +218,37 @@ describe('plan validate Commander wiring', () => {
             expect(humanResult.stderr).toContain('awm v999.0.0 available');
         } finally {
             fs.rmSync(awmHome, { recursive: true, force: true });
+        }
+    });
+});
+
+describe('plan admit Commander wiring', () => {
+    it('uses the bounded admission surface and preserves JSON output', async () => {
+        const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        process.exitCode = undefined;
+        const admit = jest.fn<Promise<AdmissionReport>, [any]>()
+            .mockResolvedValue({
+            state: 'blocked', planState: 'valid', planDigest: valid.planDigest, provider: 'codex', executionMode: 'interactivo',
+            journal: 'not-required', diagnostics: [{ code: 'ADMISSION_CURRENTNESS_REQUIRED', message: 'required' }],
+            });
+        const program = new Command();
+        program.exitOverride();
+        program.configureOutput({ writeErr: () => undefined });
+        registerPlanCommand(program, {
+            validatePlanFile: () => valid, admitPlan: admit,
+            readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
+            checkCurrentness: async () => ({ checkedAt: '2026-01-01T00:00:00.000Z', components: [], compatibility: { status: 'not-checked' } }),
+            runSensors: async () => ({ overall: 'pass', sensors: [] }),
+        });
+
+        try {
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plans/r4.md', '--provider', 'codex', '--cwd', 'fixture-root', '--require-current', '--verify-sensors', '--json']);
+            expect(admit).toHaveBeenLastCalledWith(expect.objectContaining({ provider: 'codex', cwd: 'fixture-root', requireCurrent: true, verifySensors: true, plan: valid }));
+            expect(JSON.parse(String(output.mock.calls[0][0]))).toMatchObject({ state: 'blocked', provider: 'codex' });
+            expect(process.exitCode).toBe(2);
+        } finally {
+            output.mockRestore();
+            process.exitCode = undefined;
         }
     });
 });
