@@ -179,6 +179,18 @@ export type TickOutcome = 'continue' | 'custody' | 'complete' | 'frozen';
 
 const LIVE = ['received', 'spawn-intent', 'claimed', 'running', 'cancel-requested'];
 
+function recoveryWhitelistBlocker(state: JournalState): string | undefined {
+    if (state.cycle.status === 'BLOCKED') return 'el ciclo está bloqueado';
+    if (state.requestProblems.length > 0) return 'hay conflictos durables de requests';
+    if (state.tasks.some(task => task.status !== 'done')) return 'hay tasks pendientes';
+    const verificationItems = [...state.cycleVerificationPlan, ...state.tasks.flatMap(task => task.verificationPlan)];
+    for (const required of state.requiredVerifiers) {
+        const requiredItems = verificationItems.filter(item => item.kind === required);
+        if (requiredItems.length === 0 || requiredItems.some(item => item.satisfiedBy === undefined)) return `falta evidencia del verificador requerido: ${required}`;
+    }
+    return undefined;
+}
+
 export class Supervisor {
     private backoff = new Backoff();
     private relaunchNotBefore = 0;
@@ -255,6 +267,11 @@ export class Supervisor {
         // Schema-2 custody is reconciled before any controller launch.  This is
         // read-only: existing active jobs are reused, never re-requested.
         if (before0.state.schema === 2 && before0.state.planBinding) {
+            const whitelistBlocker = recoveryWhitelistBlocker(before0.state);
+            if (whitelistBlocker) {
+                enterCustody(this.repoRoot, this.branch, `recovery no autorizado: ${whitelistBlocker}`);
+                return 'custody';
+            }
             const activeJobIds = Object.values(before0.state.jobs)
                 .filter(job => LIVE.includes(job.executionState) || job.executionState === 'orphaned').map(job => job.id);
             const staleJob = Object.values(before0.state.jobs).filter(job => LIVE.includes(job.executionState) || job.executionState === 'orphaned').some(job => {
@@ -304,7 +321,10 @@ export class Supervisor {
                 verdicts: hasStaleReview ? 'stale' : (openReviewOrFix || unresolvedVerification) ? 'missing' : 'current',
             });
             appendEvent(this.repoRoot, this.branch, { kind: 'unattended-recovery', nextAction: recovery.nextAction, activeJobIds: recovery.activeJobIds, diagnostics: recovery.diagnostics });
-            if (recovery.state !== 'ready') return 'custody';
+            if (recovery.state !== 'ready') {
+                enterCustody(this.repoRoot, this.branch, `recovery no autorizado: ${recovery.diagnostics.join(', ')}`);
+                return 'custody';
+            }
             recoveryResumePrompt = recovery.nextAction === 'reconcile-active-jobs'
                 ? `reconciliá los jobs activos existentes: ${recovery.activeJobIds.join(', ')}`
                 : `reconciliá la custodia desatendida: ${recovery.nextAction}`;

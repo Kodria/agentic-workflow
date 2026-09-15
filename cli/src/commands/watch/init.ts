@@ -8,25 +8,36 @@ import type { PlanBinding, VerificationKind } from '../../core/journal/types';
 import type { PlanValidationReport } from '../../core/plan/types';
 import { acquireLock, releaseLock } from './lock';
 
+const MAX_VERIFIER_SCAN_DEPTH = 64;
+const MAX_VERIFIER_SCAN_ENTRIES = 10000;
+const MAX_PACKAGE_JSON_BYTES = 256 * 1024;
+
 export function detectRequiredVerifiers(repoRoot: string): VerificationKind[] {
     const kinds = new Set<VerificationKind>();
-    const visit = (dir: string): void => {
+    let visitedEntries = 0;
+    const visit = (dir: string, depth: number): void => {
+        if (depth > MAX_VERIFIER_SCAN_DEPTH) throw new Error('verifier scan depth limit exceeded');
         const sensors = path.join(dir, '.awm', 'sensors.json');
         if (fs.existsSync(sensors)) kinds.add('sensors');
         let entries: fs.Dirent[];
-        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+        catch (error) { throw new Error(`verifier scan cannot read ${dir}: ${(error as Error).message}`); }
         for (const entry of entries) {
+            if (++visitedEntries > MAX_VERIFIER_SCAN_ENTRIES) throw new Error('verifier scan entry limit exceeded');
             if (entry.isSymbolicLink()) continue;
             if (entry.isFile() && entry.name === 'package.json') {
                 try {
-                    const pkg = JSON.parse(fs.readFileSync(path.join(dir, entry.name), 'utf8'));
+                    const packagePath = path.join(dir, entry.name);
+                    const size = fs.statSync(packagePath).size;
+                    if (size > MAX_PACKAGE_JSON_BYTES) throw new Error('package.json byte limit exceeded');
+                    const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
                     if (typeof pkg === 'object' && pkg !== null && typeof pkg.scripts === 'object' && pkg.scripts !== null && typeof pkg.scripts.test === 'string') kinds.add('test');
-                } catch { /* package ilegible: no prueba disponibilidad */ }
+                } catch (error) { throw new Error(`verifier scan rejected package.json: ${(error as Error).message}`); }
             }
-            if (entry.isDirectory() && !['node_modules', '.git', '.awm'].includes(entry.name)) visit(path.join(dir, entry.name));
+            if (entry.isDirectory() && !['node_modules', '.git', '.awm'].includes(entry.name)) visit(path.join(dir, entry.name), depth + 1);
         }
     };
-    visit(repoRoot);
+    visit(repoRoot, 0);
     return (['test', 'sensors'] as VerificationKind[]).filter((kind) => kinds.has(kind));
 }
 

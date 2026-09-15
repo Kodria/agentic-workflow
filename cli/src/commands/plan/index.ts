@@ -72,21 +72,6 @@ function physicalWithin(root: string, candidate: string): boolean | null {
     } catch { return null; }
 }
 
-/** Header mode is metadata, not a second compact-plan parser. Invalid/absent values are interactive by contract. */
-function headerExecutionMode(planPath: string, cwd: string): 'interactivo' | 'desatendido' {
-    try {
-        const root = fs.realpathSync.native(cwd);
-        const candidate = path.resolve(root, planPath);
-        if (physicalWithin(root, candidate) !== true) return 'interactivo';
-        const bytes = fs.readFileSync(candidate);
-        if (bytes.length > 1024 * 1024) return 'interactivo';
-        const text = bytes.toString('utf8');
-        if (!Buffer.from(text, 'utf8').equals(bytes)) return 'interactivo';
-        const raw = /^\s*\*\*Modo de ejecución:\*\*\s*([^\r\n]+)\s*$/mi.exec(text)?.[1]?.trim().replace(/^`|`$/g, '');
-        return raw === 'desatendido' ? 'desatendido' : 'interactivo';
-    } catch { return 'interactivo'; }
-}
-
 /** Maps only validated source paths to physical registry contracts; failures stay fail-closed. */
 function consumedRegistryContracts(report: PlanValidationReport, cwd: string, registries: RegistrySource[]): { provenance: 'proven' | 'unknown'; consumedRegistryComponents: string[] } {
     if (report.state !== 'valid') return { provenance: 'unknown', consumedRegistryComponents: [] };
@@ -242,11 +227,10 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
             const sensorRun = deps.runSensors ?? runSensors;
             const registryInventory = deps.listRegistries ?? listRegistries;
             const planReport = deps.validatePlanFile(planPath, options.cwd);
-            // A supplied flag deliberately overrides the canonical plan header; only
-            // the two declared values are accepted by admission. Without a flag, the
-            // header is authoritative and malformed/absent metadata is interactive.
+            // The mode comes from the same authenticated bytes/digest that produced
+            // planReport. Never reopen the path to parse a mutable header.
             const executionMode = options.executionMode === undefined
-                ? headerExecutionMode(planPath, options.cwd)
+                ? planReport.state === 'valid' ? (planReport.executionMode ?? 'interactivo') : 'interactivo'
                 : options.executionMode === 'desatendido' ? 'desatendido' : options.executionMode === 'interactivo' ? 'interactivo' : options.executionMode as any;
             const journal = executionMode === 'desatendido' ? journalObservation(options.cwd) : {};
             const normalizedPlanPath = path.relative(options.cwd, path.resolve(options.cwd, planPath)).replace(/\\/g, '/');

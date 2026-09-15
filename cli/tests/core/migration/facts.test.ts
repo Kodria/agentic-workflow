@@ -2,10 +2,15 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { collectMigrationFacts, reconcileTaskEvidence } from '../../../src/core/migration';
+import { collectMigrationFacts } from '../../../src/core/migration';
 import { initBoundJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 
 describe('collectMigrationFacts', () => {
+    test('does not export a record-injection completion API', () => {
+        // The only public entrypoint derives evidence from the local journal.
+        expect(require('../../../src/core/migration').reconcileTaskEvidence).toBeUndefined();
+    });
+
     it('does not certify a task from a Git commit without durable test and review evidence', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migration-'));
         try {
@@ -31,33 +36,6 @@ describe('collectMigrationFacts', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migration-link-')); const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migration-outside-'));
         try { fs.writeFileSync(path.join(outside, 'plan.md'), '### Task 1: x\n'); fs.symlinkSync(outside, path.join(root, 'docs')); expect(() => collectMigrationFacts('docs/plan.md', root, ['https://github.com/Kodria/agentic-workflow/issues/126'])).toThrow(/contained bounded regular file/); } finally { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); }
     });
-
-    it('certifies only a complete evidence chain belonging to one task', () => {
-        const issue126 = 'https://github.com/Kodria/agentic-workflow/issues/126';
-        const records = [
-            { taskId: '1', commitSha: 'a'.repeat(40), issue126 },
-            { taskId: '1', verificationItemId: 'test:1', result: 'pass' as const, fingerprint: 'f', paths: ['x'], issue126 },
-            { taskId: '1', verificationItemId: 'sensor:1', result: 'pass' as const, fingerprint: 'f', paths: ['x'], issue126 },
-            { taskId: '1', role: 'spec' as const, result: 'pass' as const, verdictId: 'v1', obligationId: 'o1', at: '2026-09-15T00:00:00.000Z', issue126 },
-            { taskId: '1', role: 'quality' as const, result: 'pass' as const, verdictId: 'v2', obligationId: 'o2', at: '2026-09-15T00:00:00.000Z', issue126 },
-        ];
-        expect(reconcileTaskEvidence('1', records)).toMatchObject({ state: 'completed' });
-        expect(reconcileTaskEvidence('2', records)).toMatchObject({ state: 'pending' });
-    });
-
-    it.each([
-        ['missing tests', [{ taskId: '1', commitSha: 'a'.repeat(40), issue126: 'https://github.com/Kodria/agentic-workflow/issues/126' }]],
-        ['failed job', [{ taskId: '1', verificationItemId: 'test:1', result: 'fail' as const, issue126: 'https://github.com/Kodria/agentic-workflow/issues/126' }]],
-        ['inconclusive review', [{ taskId: '1', role: 'quality' as const, result: 'inconclusive' as const, issue126: 'https://github.com/Kodria/agentic-workflow/issues/126' }]],
-    ])('keeps adverse or incomplete %s pending', (_name, records) => {
-        expect(reconcileTaskEvidence('1', records)).toMatchObject({ state: 'pending' });
-    });
-
-    it.each([
-        ['checked-no-commit', []],
-        ['commit-no-tests', [{ taskId: '1', commitSha: 'a'.repeat(40), issue126: 'https://github.com/Kodria/agentic-workflow/issues/126' }]],
-        ['tests-no-review', [{ taskId: '1', commitSha: 'a'.repeat(40), issue126: 'https://github.com/Kodria/agentic-workflow/issues/126' }, { taskId: '1', verificationItemId: 'test:1', result: 'pass' as const, fingerprint: 'f', paths: ['x'], issue126: 'https://github.com/Kodria/agentic-workflow/issues/126' }, { taskId: '1', verificationItemId: 'sensor:1', result: 'pass' as const, fingerprint: 'f', paths: ['x'], issue126: 'https://github.com/Kodria/agentic-workflow/issues/126' }]],
-    ])('keeps legacy %s pending', (_name, records) => expect(reconcileTaskEvidence('1', records)).toMatchObject({ state: 'pending' }));
 
     it('collects a schema-2 journal fixture without borrowing evidence across tasks', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migration-journal-'));

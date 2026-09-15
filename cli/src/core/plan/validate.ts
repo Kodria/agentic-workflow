@@ -96,6 +96,10 @@ function compactSchemaSignal(text: string): boolean {
     }
     return false;
 }
+function executionModeFromValidatedText(text: string): 'interactivo' | 'desatendido' {
+    const raw = /^\s*\*\*Modo de ejecución:\*\*\s*([^\r\n]+)\s*$/mi.exec(text)?.[1]?.trim().replace(/^`|`$/g, '');
+    return raw === 'desatendido' ? 'desatendido' : 'interactivo';
+}
 function exact(value: unknown, fields: string[]): value is Record<string, unknown> {
     return object(value) && Object.keys(value).length === fields.length && fields.every((field) => Object.prototype.hasOwnProperty.call(value, field));
 }
@@ -271,7 +275,7 @@ function validatePlan(planPath: string, cwd: string, snapshot?: Buffer): PlanVal
     const report: PlanValidationReport = {
         state: 'valid', schema: 'compact-slices/v1',
         planDigest: crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
-        manifest: raw as unknown as CompactPlanManifest,
+        manifest: raw as unknown as CompactPlanManifest, executionMode: executionModeFromValidatedText(text),
     };
     freezeJson(report);
     verifiedValidReports.add(report);

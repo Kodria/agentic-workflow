@@ -19,7 +19,10 @@ const MAX = 128;
 
 /** Pure task-scoped gate. Callers cannot combine a test from one task with a
  * review from another: every required record carries the same task identity. */
-export function reconcileTaskEvidence(taskId: string, records: readonly EvidenceRecord[]): MigrationTask {
+/** Local-only reconciliation. Evidence is admitted exclusively by
+ * collectMigrationFacts from the schema-2 journal; callers cannot fabricate
+ * records through the public migration API. */
+function reconcileTaskEvidence(taskId: string, records: readonly EvidenceRecord[]): MigrationTask {
     const own = records.filter(record => record.taskId === taskId);
     if (own.some(record => !safeIssue(record.issue126) || !ISSUE_126.test(record.issue126))) return { id: taskId, state: 'pending', missing: ['issue126-provenance'] };
     if (own.some(record => record.result === 'fail' || record.result === 'inconclusive')) return { id: taskId, state: 'pending', missing: ['adverse-evidence'] };

@@ -40,6 +40,17 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         expect(detectRequiredVerifiers(repo)).toEqual([]);
     });
 
+    test('falla cerradamente ante un arbol de paquetes demasiado profundo o grande', () => {
+        let cursor = repo;
+        for (let depth = 0; depth < 65; depth++) { cursor = path.join(cursor, `d${depth}`); fs.mkdirSync(cursor); }
+        expect(() => detectRequiredVerifiers(repo)).toThrow(/límite|limit/i);
+    });
+
+    test('falla cerradamente ante package.json que excede el límite de lectura', () => {
+        fs.writeFileSync(path.join(repo, 'package.json'), '{"scripts":{"test":"x"},"padding":"' + 'x'.repeat(1024 * 1024) + '"}');
+        expect(() => detectRequiredVerifiers(repo)).toThrow(/package\.json.*límite|package\.json.*limit/i);
+    });
+
     test('initWatch persiste requiredVerifiers y gitignorea el journal (R1.1/R1.4b)', () => {  // verifies R1.4b
         fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ scripts: { test: 'jest' } }));
         const out = initWatch(repo, 'rama');

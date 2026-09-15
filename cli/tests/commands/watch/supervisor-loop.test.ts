@@ -374,6 +374,23 @@ describe('supervisor loop', () => {
         expect(readJournal(repo, 'main').state!.cycle.status).toBe('BLOCKED');
     });
 
+    test.each([
+        ['cycle BLOCKED', (s: ReturnType<typeof readJournal>['state']) => { s!.cycle.status = 'BLOCKED'; }],
+        ['request problem durable', (s: ReturnType<typeof readJournal>['state']) => { s!.requestProblems.push({ file: 'x.request.json', kind: 'rejected', detail: 'x', at: new Date().toISOString() }); }],
+        ['task pendiente', (s: ReturnType<typeof readJournal>['state']) => { s!.tasks.push({ id: 'T1', title: 'pendiente', status: 'pending', attempts: 0, verificationPlan: [], reviewObligations: [] }); }],
+        ['verificador requerido ausente', (s: ReturnType<typeof readJournal>['state']) => { s!.requiredVerifiers = ['test']; }],
+    ])('recovery fail-closed: %s entra en custodia sin controller ni dispatch', async (_name, mutate) => {
+        initUnattendedFixture(repo);
+        const state = readJournal(repo, 'main').state!;
+        mutate(state);
+        writeJournal(repo, 'main', state);
+        let spawns = 0;
+        const outcome = await new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, () => { spawns++; }, undefined, admitted).tick();
+        expect(outcome).toBe('custody');
+        expect(spawns).toBe(0);
+        expect(readJournal(repo, 'main').state!.cycle.status).toBe('BLOCKED');
+    });
+
     test('un journal schema-1 legacy no despacha controller ni jobs aunque contenga trabajo pendiente', async () => {
         initJournal(repo, 'main');
         const legacy = readJournal(repo, 'main').state!;
