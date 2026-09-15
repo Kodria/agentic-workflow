@@ -1,7 +1,8 @@
 import fs from 'fs';
 import crypto from 'crypto';
-import { writeFileAtomicDurable } from '../atomic-file';
-import { emptyState, isWellFormedState, JournalState } from './types';
+import path from 'path';
+import { fsyncDirSync, writeFileAtomicDurable } from '../atomic-file';
+import { emptyState, isWellFormedState, JournalState, PlanBinding } from './types';
 import { journalDir, statePath, requestsDir, acksDir, logsDir, exportDir, eventsPath } from './paths';
 
 export interface ReadResult { state: JournalState | null; corrupt: boolean; raw?: string; }
@@ -63,14 +64,44 @@ function normalizeSchemaOne(value: unknown): unknown {
     return parsed;
 }
 
-export function initJournal(repoRoot: string, branch: string): void {
+function initializeDirectories(repoRoot: string, branch: string): void {
     for (const d of [journalDir(repoRoot, branch), requestsDir(repoRoot, branch), acksDir(repoRoot, branch), logsDir(repoRoot, branch), exportDir(repoRoot, branch)]) {
         fs.mkdirSync(d, { recursive: true, mode: 0o700 });
         fs.chmodSync(d, 0o700);   // mkdirSync mode es umask-dependiente: fijar explicito (R1.2)
     }
+}
+
+export function initJournal(repoRoot: string, branch: string): void {
+    initializeDirectories(repoRoot, branch);
     const sp = statePath(repoRoot, branch);
     if (!fs.existsSync(sp)) {
         writeFileAtomicDurable(sp, JSON.stringify(emptyState(branch), null, 2) + '\n', 0o600);
+    }
+}
+
+/** Create, never replace, the schema-2 state.  The final hard-link is an
+ * exclusive atomic publication: another initializer wins cleanly and the
+ * completed prior journal is left untouched. */
+export function initBoundJournal(repoRoot: string, branch: string, binding: PlanBinding): void {
+    initializeDirectories(repoRoot, branch);
+    const sp = statePath(repoRoot, branch);
+    const initial: JournalState = { ...emptyState(branch), schema: 2, planBinding: binding };
+    if (!isWellFormedState(initial)) throw new Error('binding de plan invalido');
+    const temporary = path.join(journalDir(repoRoot, branch), `.state.${process.pid}.${crypto.randomUUID()}.tmp`);
+    let fd: number | undefined;
+    try {
+        fd = fs.openSync(temporary, 'wx', 0o600);
+        fs.writeFileSync(fd, JSON.stringify(initial, null, 2) + '\n', 'utf8');
+        fs.fsyncSync(fd);
+        fs.closeSync(fd); fd = undefined;
+        try { fs.linkSync(temporary, sp); fsyncDirSync(path.dirname(sp)); }
+        catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('refusing to overwrite existing journal');
+            throw error;
+        }
+    } finally {
+        if (fd !== undefined) try { fs.closeSync(fd); } catch { /* preserve primary error */ }
+        try { fs.rmSync(temporary, { force: true }); } catch { /* preserve primary error */ }
     }
 }
 

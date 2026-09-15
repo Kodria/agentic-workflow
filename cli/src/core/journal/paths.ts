@@ -53,3 +53,13 @@ export function eventsPath(repoRoot: string, branch: string): string {
 export function exportDir(repoRoot: string, branch: string): string {
     return path.join(journalDir(repoRoot, branch), 'export');
 }
+
+/** A persisted binding path is always a normalized repository-relative POSIX path. */
+export function bindingPlanPath(planPath: string): string {
+    if (typeof planPath !== 'string' || planPath.length === 0 || planPath.length > 4096) throw new Error('plan path inválido para binding');
+    const normalized = path.posix.normalize(planPath.replace(/\\/g, '/'));
+    if (path.posix.isAbsolute(normalized) || normalized === '..' || normalized.startsWith('../') || normalized === '.') {
+        throw new Error('plan path fuera del repositorio para binding');
+    }
+    return normalized;
+}

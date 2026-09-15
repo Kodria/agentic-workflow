@@ -3,6 +3,8 @@ import { AGENT_TARGETS, isAgentTarget } from '../../providers';
 import type { CurrentnessReport } from '../currentness/types';
 import type { PlanDiagnostic, PlanValidationReport } from '../plan/types';
 import type { RunOutput } from '../../commands/sensors/types';
+import type { JournalState } from '../journal/types';
+import { bindingPlanPath } from '../journal/paths';
 
 export type ExecutionMode = 'interactivo' | 'desatendido';
 export type CapabilityStatus = 'supported' | 'unsupported' | 'unverified';
@@ -33,6 +35,11 @@ export type AdmissionInput = {
     consumedRegistryComponents?: readonly string[];
     /** No registry may be ignored until source-to-contract provenance is complete. */
     provenance?: 'proven' | 'unknown';
+    /** Read-only journal observation supplied by the command boundary. */
+    journalState?: JournalState | null;
+    journalCorrupt?: boolean;
+    /** Repository-relative path used to make the binding identity exact. */
+    planPath?: string;
 };
 
 const UNKNOWN: ProviderExecutionCapabilities = {
@@ -75,6 +82,17 @@ function currentness(report: CurrentnessReport, consumedRegistryComponents: read
     return { status, diagnostics: [diagnostic('ADMISSION_CURRENTNESS_BLOCKED', `Consumed contract currentness is ${status}: ${names}.`)] };
 }
 function sensorVerdict(report: RunOutput): AdmissionReport['sensors'] { return report.overall === 'not_certified' ? 'not-certified' : report.overall === 'pass' ? 'pass' : 'fail'; }
+function journalStatus(input: AdmissionInput, plan: Extract<PlanValidationReport, { state: 'valid' }>): AdmissionReport['journal'] {
+    if (input.journalCorrupt) return 'corrupt';
+    const journal = input.journalState;
+    if (!journal) return 'missing';
+    if (journal.schema !== 2 || !journal.planBinding) return 'stale';
+    let planPath: string;
+    try { planPath = bindingPlanPath(input.planPath ?? ''); } catch { return 'stale'; }
+    const binding = journal.planBinding;
+    return binding.path === planPath && binding.digest === plan.planDigest && binding.schema === plan.schema && binding.executionMode === 'desatendido'
+        ? 'current' : 'stale';
+}
 
 const PLAN_STATES = new Set<AdmissionReport['planState']>(['valid', 'migration-required', 'invalid', 'unsupported']);
 const JOURNALS = new Set<AdmissionReport['journal']>(['not-required', 'current', 'missing', 'corrupt', 'stale']);
@@ -150,7 +168,12 @@ export async function admitPlan(input: AdmissionInput): Promise<AdmissionReport>
         if (sensors !== 'pass') return blocked(input, [diagnostic('ADMISSION_SENSORS_BLOCKED', `Sensor verdict is ${sensors}.`)], { planDigest: plan.planDigest, provider, executionMode: mode, currentness: input.requireCurrent ? 'current' : 'not-checked', sensors });
     }
     if (mode === 'desatendido') {
-        return blocked(input, [diagnostic('ADMISSION_JOURNAL_SCHEMA_2_REQUIRED', 'Schema-2 plan binding is not available until S3; run watch --init --plan after S3.')], { planDigest: plan.planDigest, provider, executionMode: mode, journal: 'missing', currentness: input.requireCurrent ? 'current' : 'not-checked', sensors: input.verifySensors ? 'pass' : 'not-required' });
+        const journal = journalStatus(input, plan);
+        if (journal !== 'current') return blocked(input, [diagnostic('ADMISSION_JOURNAL_BINDING_REQUIRED', 'Unattended execution requires a healthy schema-2 journal binding for this exact plan; run watch --init --plan.')], { planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', sensors: input.verifySensors ? 'pass' : 'not-required' });
+        const capabilities = PROVIDER_EXECUTION_CAPABILITIES[provider];
+        const resolution: ProviderExecutionResolution = { outcome: capabilities.unattendedController === 'supported' ? 'native' : 'blocked', provider, capabilities, evidenceVersion: 'r1-v1', diagnostics: [] };
+        if (resolution.outcome === 'blocked') return blocked(input, [diagnostic('ADMISSION_CAPABILITY_UNVERIFIED', `Provider ${provider} has no verified unattended execution capability.`)], { planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', sensors: input.verifySensors ? 'pass' : 'not-required', capabilityResolution: resolution });
+        return { state: 'admitted', planState: 'valid', planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', sensors: input.verifySensors ? 'pass' : 'not-required', capabilityResolution: resolution, forecast: forecast(plan.manifest.slices.length), diagnostics: [] };
     }
     const capabilities = PROVIDER_EXECUTION_CAPABILITIES[provider];
     const resolution: ProviderExecutionResolution = { outcome: capabilities.interactiveExecution === 'supported' ? 'native' : 'blocked', provider, capabilities, evidenceVersion: 'r1-v1', diagnostics: [] };

@@ -1,5 +1,6 @@
 import { admitPlan } from '../../../src/core/admission';
 import type { PlanValidationReport } from '../../../src/core/plan/types';
+import { emptyState } from '../../../src/core/journal/types';
 
 const valid: Extract<PlanValidationReport, { state: 'valid' }> = {
     state: 'valid', schema: 'compact-slices/v1', planDigest: 'a'.repeat(64),
@@ -71,7 +72,16 @@ describe('admitPlan', () => {
         const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as PlanValidationReport;
         const report = await admitPlan({ plan: unattended, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'] });
         expect(report).toMatchObject({ state: 'blocked', executionMode: 'desatendido', journal: 'missing' });
-        expect(report.diagnostics[0]).toMatchObject({ code: 'ADMISSION_JOURNAL_SCHEMA_2_REQUIRED' });
+        expect(report.diagnostics[0]).toMatchObject({ code: 'ADMISSION_JOURNAL_BINDING_REQUIRED' });
         expect(report.forecast).toBeUndefined();
+    });
+
+    it('admits unattended work only with an exact schema-2 plan binding', async () => {
+        const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as PlanValidationReport;
+        const journal = { ...emptyState('main'), schema: 2 as const, planBinding: { path: 'docs/plan.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1' as const, executionMode: 'desatendido' as const, boundAt: '2026-09-15T00:00:00.000Z' } };
+        const admitted = await admitPlan({ plan: unattended, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], journalState: journal, planPath: 'docs/plan.md' });
+        expect(admitted).toMatchObject({ state: 'admitted', journal: 'current', executionMode: 'desatendido' });
+        const stale = await admitPlan({ plan: unattended, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], journalState: { ...journal, planBinding: { ...journal.planBinding, digest: 'b'.repeat(64) } }, planPath: 'docs/plan.md' });
+        expect(stale).toMatchObject({ state: 'blocked', journal: 'stale' });
     });
 });

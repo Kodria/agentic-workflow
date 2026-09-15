@@ -2,8 +2,10 @@
 // bloqueador 5): la config real del repo determina los verificadores exigidos.
 import fs from 'fs';
 import path from 'path';
-import { initJournal, readJournal, writeJournal } from '../../core/journal/store';
-import type { VerificationKind } from '../../core/journal/types';
+import { initBoundJournal, initJournal, readJournal, writeJournal } from '../../core/journal/store';
+import { bindingPlanPath, statePath } from '../../core/journal/paths';
+import type { PlanBinding, VerificationKind } from '../../core/journal/types';
+import type { PlanValidationReport } from '../../core/plan/types';
 
 export function detectRequiredVerifiers(repoRoot: string): VerificationKind[] {
     const kinds = new Set<VerificationKind>();
@@ -37,9 +39,24 @@ export function ensureJournalGitignored(repoRoot: string): void {
     }
 }
 
-export function initWatch(repoRoot: string, branch: string): { requiredVerifiers: VerificationKind[] } {
+export type WatchPlanInit = { path: string; report: PlanValidationReport };
+
+export function initWatch(repoRoot: string, branch: string, plan?: WatchPlanInit): { requiredVerifiers: VerificationKind[]; planBinding?: PlanBinding } {
+    if (plan && plan.report.state !== 'valid') throw new Error('watch --init --plan requiere un plan compacto válido');
+    if (plan && fs.existsSync(statePath(repoRoot, branch))) {
+        throw new Error('refusing to overwrite existing journal');
+    }
     ensureJournalGitignored(repoRoot);
-    initJournal(repoRoot, branch);
+    let planBinding: PlanBinding | undefined;
+    if (plan) {
+        const report = plan.report as Extract<PlanValidationReport, { state: 'valid' }>;
+        planBinding = {
+            path: bindingPlanPath(plan.path), digest: report.planDigest, schema: report.schema,
+            executionMode: 'desatendido', boundAt: new Date().toISOString(),
+        };
+    }
+    if (planBinding) initBoundJournal(repoRoot, branch, planBinding);
+    else initJournal(repoRoot, branch);
     const required = detectRequiredVerifiers(repoRoot);
     const r = readJournal(repoRoot, branch);
     if (r.corrupt || r.state === null) throw new Error('journal corrupto tras init: no se continua (R1.6)');
@@ -48,5 +65,5 @@ export function initWatch(repoRoot: string, branch: string): { requiredVerifiers
         s.requiredVerifiers = required;
         writeJournal(repoRoot, branch, s);
     }
-    return { requiredVerifiers: required };
+    return { requiredVerifiers: required, ...(planBinding ? { planBinding } : {}) };
 }

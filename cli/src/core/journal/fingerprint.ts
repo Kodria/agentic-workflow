@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { EXEC_STDIO } from './process';
+import type { JournalState, PlanBinding } from './types';
 
 function sha(parts: string[]): string {
     return crypto.createHash('sha256').update(parts.join('\0')).digest('hex');
@@ -21,6 +22,40 @@ export interface FingerprintResult {
     fingerprint: string;
     commandDigest: string;
     expandedPaths: string[];
+}
+
+/** Read-only, deterministic recovery classification for an unattended cycle.
+ * Observers provide bounded status facts; this reducer never reads prompts or
+ * source bodies and never creates a duplicate durable obligation. */
+export type UnattendedRecoveryInput = Readonly<{
+    journal: JournalState | null;
+    journalCorrupt: boolean;
+    plan: PlanBinding;
+    git: 'current' | 'changed';
+    activeJobIds: readonly string[];
+    tests: 'pass' | 'fail' | 'missing';
+    sensors: 'pass' | 'fail' | 'missing';
+    verdicts: 'current' | 'stale' | 'missing';
+}>;
+export type UnattendedRecoveryResult = Readonly<{
+    state: 'ready' | 'blocked';
+    nextAction: 'reconcile-active-jobs' | 'repair-journal' | 'rebind-plan' | 'reconcile-git' | 'run-tests' | 'run-sensors' | 'repair-verdicts' | 'select-work';
+    activeJobIds: string[];
+    diagnostics: string[];
+}>;
+
+export function reconcileUnattendedRecovery(input: UnattendedRecoveryInput): UnattendedRecoveryResult {
+    const activeJobIds = [...new Set(input.activeJobIds)].sort();
+    const result = (state: UnattendedRecoveryResult['state'], nextAction: UnattendedRecoveryResult['nextAction'], diagnostics: string[]): UnattendedRecoveryResult => ({ state, nextAction, activeJobIds, diagnostics });
+    if (input.journalCorrupt || input.journal === null) return result('blocked', 'repair-journal', ['journal-corrupt-or-missing']);
+    const binding = input.journal.schema === 2 ? input.journal.planBinding : undefined;
+    if (!binding || binding.path !== input.plan.path || binding.digest !== input.plan.digest || binding.schema !== input.plan.schema || binding.executionMode !== 'desatendido') return result('blocked', 'rebind-plan', ['journal-plan-binding-stale']);
+    if (input.git !== 'current') return result('blocked', 'reconcile-git', ['git-fingerprint-changed']);
+    if (input.verdicts !== 'current') return result('blocked', 'repair-verdicts', [`verdicts-${input.verdicts}`]);
+    if (activeJobIds.length > 0) return result('ready', 'reconcile-active-jobs', []);
+    if (input.tests !== 'pass') return result('blocked', 'run-tests', [`tests-${input.tests}`]);
+    if (input.sensors !== 'pass') return result('blocked', 'run-sensors', [`sensors-${input.sensors}`]);
+    return result('ready', 'select-work', []);
 }
 
 export function resolveWorkingDirectory(repoRoot: string, cwdRel: string): { relative: string; absolute: string } {

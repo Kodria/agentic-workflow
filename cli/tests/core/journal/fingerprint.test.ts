@@ -2,7 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execFileSync, spawn } from 'child_process';
-import { computeFingerprint } from '../../../src/core/journal/fingerprint';
+import { computeFingerprint, reconcileUnattendedRecovery } from '../../../src/core/journal/fingerprint';
+import { emptyState } from '../../../src/core/journal/types';
 
 function git(cwd: string, ...args: string[]): void {
     execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], { cwd });
@@ -96,6 +97,15 @@ describe('computeFingerprint', () => {
     test('repos con muchos archivos no truncan la salida de git (R3.4)', () => {  // verifies R3.4
         for (let i = 0; i < 200; i++) fs.writeFileSync(path.join(repo, `f${i}.txt`), `contenido-${i}`);
         expect(() => computeFingerprint(repo, ['npm', 'test'], [], '.')).not.toThrow();
+    });
+});
+
+describe('reconcileUnattendedRecovery', () => {
+    test('is deterministic and reuses active obligations before selecting new work', () => {
+        const journal = { ...emptyState('main'), schema: 2 as const, planBinding: { path: 'docs/plan.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1' as const, executionMode: 'desatendido' as const, boundAt: '2026-09-15T00:00:00.000Z' } };
+        const input = { journal, journalCorrupt: false, plan: journal.planBinding, git: 'current' as const, activeJobIds: ['job-b', 'job-a', 'job-a'], tests: 'pass' as const, sensors: 'pass' as const, verdicts: 'current' as const };
+        expect(reconcileUnattendedRecovery(input)).toEqual({ state: 'ready', nextAction: 'reconcile-active-jobs', activeJobIds: ['job-a', 'job-b'], diagnostics: [] });
+        expect(reconcileUnattendedRecovery({ ...input, verdicts: 'stale' })).toMatchObject({ state: 'blocked', nextAction: 'repair-verdicts' });
     });
 });
 

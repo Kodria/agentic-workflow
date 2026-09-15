@@ -140,6 +140,17 @@ export interface FixObligation { id: string; verdictId: string; closed: boolean;
 export interface RequestProblem { file: string; kind: 'corrupt' | 'rejected'; detail: string; at: string; }
 export interface CustodyDecision { at: string; decision: 'resume'; reason: string; generationToken: string; }
 
+/** Minimal durable custody proof for a compact unattended cycle.  It deliberately
+ * contains identity metadata only: never plan bodies, prompts, credentials, or
+ * model output. */
+export interface PlanBinding {
+    path: string;
+    digest: string;
+    schema: 'compact-slices/v1' | 'compact-slices/v2';
+    executionMode: 'desatendido';
+    boundAt: string;
+}
+
 export interface TaskEntity {
     id: string;
     title: string;
@@ -205,10 +216,12 @@ export interface AppliedRequest {
 }
 
 export interface JournalState {
-    schema: 1;
+    schema: 1 | 2;
     revision: number;
     journalId: string;         // identidad estable del journal (R9.1); legacy la recibe determinista (R9.3)
     branch: string;
+    /** Required exactly for schema 2; schema 1 remains readable historical state. */
+    planBinding?: PlanBinding;
     cycle: { status: CycleStatus; startedAt: string; completedAt?: string; nextAction?: NextAction; blockedReason?: string };
     cycleVerificationPlan: VerificationItem[];   // QA + interlock a nivel ciclo (R1.4b)
     requiredVerifiers: VerificationKind[];       // detectados mecánicamente en watch --init (R1.4b)
@@ -298,7 +311,9 @@ function isObj(x: unknown): x is Record<string, unknown> {
 
 export function isWellFormedState(x: unknown): x is JournalState {
     if (!isObj(x)) return false;
-    if (x.schema !== 1) return false;
+    if (x.schema !== 1 && x.schema !== 2) return false;
+    if (x.schema === 2 && !isWellFormedPlanBinding(x.planBinding)) return false;
+    if (x.schema === 1 && x.planBinding !== undefined) return false;
     if (typeof x.revision !== 'number') return false;
     if (typeof x.journalId !== 'string' || x.journalId.length === 0) return false;
     if (typeof x.branch !== 'string') return false;
@@ -334,6 +349,15 @@ export function isWellFormedState(x: unknown): x is JournalState {
     if (x.qaFinalizeRequested !== undefined
         && !(isObj(x.qaFinalizeRequested) && typeof x.qaFinalizeRequested.headSha === 'string' && typeof x.qaFinalizeRequested.at === 'string')) return false;
     return true;
+}
+
+function isWellFormedPlanBinding(x: unknown): x is PlanBinding {
+    return isObj(x)
+        && typeof x.path === 'string' && x.path.length > 0 && x.path.length <= 4096
+        && typeof x.digest === 'string' && /^[a-f0-9]{64}$/.test(x.digest)
+        && (x.schema === 'compact-slices/v1' || x.schema === 'compact-slices/v2')
+        && x.executionMode === 'desatendido'
+        && typeof x.boundAt === 'string' && x.boundAt.length > 0;
 }
 
 function isWellFormedNextAction(x: unknown): x is NextAction {

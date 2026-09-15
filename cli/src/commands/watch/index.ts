@@ -6,6 +6,8 @@ import { EXEC_STDIO } from '../../core/journal/process';
 import { WATCH_PROVIDERS, isWatchProvider } from '../../core/journal/adapter';
 import { resolveCommandContext } from '../../core/tracks/context';
 import { parseMaxParallel, loadDefaultParallelism } from '../../core/tracks/concurrency';
+import { validatePlanFile } from '../../core/plan/validate';
+import path from 'path';
 
 function currentBranch(cwd: string): string {
     // stdio explicito (ver EXEC_STDIO en journal/process.ts): evita el relay
@@ -27,6 +29,7 @@ export function registerWatchCommand(program: Command): void {
         .command('watch')
         .description('supervisor durable: ejecuta jobs, releva controladores caidos, nunca mata trabajo vivo')
         .option('--init', 'bootstrap: crea el journal de la rama actual, detecta verificadores y sale')
+        .option('--plan <path>', 'plan compacto desatendido que se vincula al inicializar')
         .option('--provider <p>', WATCH_PROVIDERS.join(' | '), 'codex')
         .option('--heartbeat-timeout <min>', 'minutos de silencio de heartbeat', '5')
         .option('--activity-window <min>', 'minutos extra sin actividad de proceso', '10')
@@ -43,8 +46,15 @@ export function registerWatchCommand(program: Command): void {
                 process.stderr.write(`${(e as Error).message}\n`);
                 process.exit(1);
             }
+            if (opts.plan !== undefined && !opts.init) {
+                process.stderr.write('--plan requiere --init\n');
+                process.exitCode = 1;
+                return;
+            }
             if (opts.init) {
-                const out = initWatch(repo, branch);
+                const report = opts.plan === undefined ? undefined : validatePlanFile(opts.plan, repo);
+                const plan = report === undefined ? undefined : { path: path.relative(repo, path.resolve(repo, opts.plan)).replace(/\\/g, '/'), report };
+                const out = initWatch(repo, branch, plan);
                 process.stdout.write(`journal inicializado para ${branch}; verificadores requeridos: ${JSON.stringify(out.requiredVerifiers)}\n`);
                 return;
             }

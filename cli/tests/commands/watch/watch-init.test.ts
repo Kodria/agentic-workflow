@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { detectRequiredVerifiers, initWatch } from '../../../src/commands/watch/init';
 import { readJournal } from '../../../src/core/journal/store';
+import type { PlanValidationReport } from '../../../src/core/plan/types';
 
 describe('watch --init: plan-vs-repo mecanico', () => {
     let repo: string;
@@ -40,5 +41,24 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         expect(readJournal(repo, 'rama').state!.requiredVerifiers).toEqual(['test']);
         expect(fs.readFileSync(path.join(repo, '.gitignore'), 'utf8')).toContain('.awm/');
         expect(() => initWatch(repo, 'rama')).not.toThrow();   // idempotente
+    });
+
+    test('watch --init --plan crea una sola vinculacion schema-2 desatendida', () => {
+        const plan: Extract<PlanValidationReport, { state: 'valid' }> = {
+            state: 'valid', schema: 'compact-slices/v1', planDigest: 'a'.repeat(64),
+            manifest: { schema: 'compact-slices/v1', planId: 'fixture', requirements: [], sources: [], commands: [], slices: [], closureCommands: [] },
+        };
+        const out = initWatch(repo, 'rama', { path: 'docs/plan.md', report: plan });
+        expect(out.planBinding).toEqual(expect.objectContaining({ path: 'docs/plan.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1', executionMode: 'desatendido' }));
+        const state = readJournal(repo, 'rama').state!;
+        expect(state.schema).toBe(2);
+        expect(state.planBinding).toEqual(expect.objectContaining({ path: 'docs/plan.md', digest: 'a'.repeat(64) }));
+        expect(() => initWatch(repo, 'rama', { path: 'docs/plan.md', report: plan })).toThrow(/sobrescribir|overwrite/i);
+    });
+
+    test('watch --init --plan bloquea un plan no valido antes de crear journal', () => {
+        const invalid: PlanValidationReport = { state: 'invalid', diagnostics: [{ code: 'PLAN_SHAPE', message: 'bad' }] };
+        expect(() => initWatch(repo, 'rama', { path: 'docs/plan.md', report: invalid })).toThrow(/válido/i);
+        expect(readJournal(repo, 'rama').corrupt).toBe(true);
     });
 });
