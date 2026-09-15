@@ -72,3 +72,17 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
     const state: MigrationState = diagnostics.some(d => d.startsWith('adverse')) ? 'blocked' : diagnostics.length ? 'planning-required' : tasks.some(task => task.state === 'completed') ? 'supported-completion' : 'planning-required';
     return { state, ...(plan.state === 'valid' ? { planDigest: digest } : {}), issueLinks: [...issueLinks], tasks, diagnostics, facts };
 }
+
+/** Bounded #148 dry-run source. Historical roots are deliberately limited to a
+ * sibling worktree of this repository; arbitrary external directories are never
+ * treated as durable migration evidence. */
+export function collectIssue148HistoricalFacts(historicalRoot: string, issueLinks: string[]): MigrationFactsReport {
+    const root = fs.realpathSync(historicalRoot);
+    const expected = path.join(path.dirname(fs.realpathSync(process.cwd())), 'codex-issue-148-awm-facts');
+    if (root !== expected) throw new Error('historical root is not the admitted issue-148 sibling worktree');
+    const branch = execFileSync('git', ['branch', '--show-current'], { cwd: root, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).trim();
+    if (branch !== 'codex/issue-148-awm-facts') throw new Error('historical root is not the admitted issue-148 branch');
+    const ledger = path.join(root, '.awm', 'ledger', 'codex__issue-148-awm-facts.jsonl');
+    const report = collectMigrationFacts('docs/plans/2026-09-14-awm-facts-plan.md', root, issueLinks);
+    return fs.existsSync(ledger) ? { ...report, diagnostics: [...report.diagnostics, 'issue-148-ledger-observed; journal binding and per-task provenance still required'] } : report;
+}
