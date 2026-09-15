@@ -16,6 +16,21 @@ const SHELL = new Set([
     'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'cmd', 'powershell', 'pwsh',
     'env', 'busybox', 'node', 'nodejs', 'deno', 'bun', 'python', 'python3', 'ruby', 'perl', 'php', 'lua',
 ]);
+const verifiedValidReports = new WeakSet<object>();
+
+function freezeJson(value: unknown): void {
+    if (value === null || typeof value !== 'object') return;
+    for (const child of Object.values(value)) freezeJson(child);
+    Object.freeze(value);
+}
+
+/** Require a process-local, immutable report issued by successful core validation. */
+export function assertVerifiedValidPlanReport(report: PlanValidationReport): void {
+    if (!report || typeof report !== 'object' || report.state !== 'valid' || !verifiedValidReports.has(report)) {
+        throw new Error('plan validator returned an invalid valid report');
+    }
+}
+
 function isLauncher(program: string): boolean {
     const base = path.posix.basename(program).toLowerCase();
     return SHELL.has(base.replace(/\.exe$/, '')) || /^(?:node(?:js)?|py(?:thon(?:w)?\d*(?:\.\d+)?)?|deno|bun|ruby(?:\d+(?:\.\d+)*)?|perl(?:\d+(?:\.\d+)*)?|(?:a|ba|c|tc|z|da|k)?sh|busybox|cmd|powershell|pwsh|wscript|cscript)(?:\.exe)?(?:[-.][a-z0-9][a-z0-9.-]*)?$/i.test(base);
@@ -245,5 +260,8 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     const usedSources = new Set(slices.flatMap((slice) => slice.sources)); const usedCommands = new Set([...slices.flatMap((slice) => [...slice.redCommands, ...slice.greenCommands]), ...(raw.closureCommands as string[])]); if (Array.from(sourceIds).some((id) => !usedSources.has(id)) || Array.from(commandIds).some((id) => !usedCommands.has(id)) || !refs(raw.closureCommands, commandIds)) return diagnostic('PLAN_ORPHAN', 'sources and commands must be referenced');
     if (raw.requirements.length === 0 || raw.sources.length === 0 || raw.commands.length === 0 || raw.slices.length === 0 || raw.closureCommands.length === 0) return diagnostic('PLAN_SHAPE', 'manifest collections must be nonempty');
     const markdown = checkMarkdown(text, slices); if (markdown) return markdown;
-    return { state: 'valid', schema: 'compact-slices/v1', manifest: raw as unknown as CompactPlanManifest };
+    const report: PlanValidationReport = { state: 'valid', schema: 'compact-slices/v1', manifest: raw as unknown as CompactPlanManifest };
+    freezeJson(report);
+    verifiedValidReports.add(report);
+    return report;
 }

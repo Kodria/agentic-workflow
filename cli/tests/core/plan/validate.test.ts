@@ -49,6 +49,25 @@ describe('validatePlanFile', () => {
         expect(fs.readFileSync(plan, 'utf8')).toBe(before);
     });
 
+    test('makes an approved valid report and its nested manifest immutable after verification', () => {
+        const report = validatePlanFile(fixture(root), root);
+        expectApprovedPlanValid(report);
+        if (report.state !== 'valid') throw new Error('expected an approved compact plan');
+        const slice = report.manifest.slices[0];
+        expect(Object.isFrozen(report)).toBe(true);
+        expect(Object.isFrozen(report.manifest)).toBe(true);
+        expect(Object.isFrozen(report.manifest.slices)).toBe(true);
+        expect(Object.isFrozen(slice)).toBe(true);
+        expect(Object.isFrozen(slice.reviewEvidence)).toBe(true);
+        expect(Object.isFrozen(report.manifest.closureCommands)).toBe(true);
+        expect(Reflect.set(slice.reviewEvidence, '1', 'bogus')).toBe(false);
+        expect(Reflect.set(slice, 'risk', 'unbounded')).toBe(false);
+        expect(Reflect.set(report.manifest.closureCommands, '0', 'CMD-MISSING')).toBe(false);
+        expect(slice.reviewEvidence).toEqual(['specification', 'code-quality']);
+        expect(slice.risk).toBe('bounded');
+        expect(report.manifest.closureCommands).toEqual(['CMD-ONE']);
+    });
+
     test('scans bounded markerless brace runs without quadratic retries', () => {
         const plan = path.join(root, 'braces.md');
         fs.writeFileSync(plan, '{'.repeat(32_000));
