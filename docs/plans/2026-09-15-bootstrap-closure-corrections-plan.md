@@ -34,12 +34,12 @@ R1 plan is introduced.
   "planId": "issue-126-bootstrap-closure-corrections",
   "requirements": ["FIX-1.1", "FIX-1.2", "FIX-2.1", "FIX-3.1"],
   "sources": [
-    {"id":"SRC-JEST-SETUP","path":"cli/jest.global-setup.js","locator":"module.exports = async () =>","fact":"Current suite root is created under os.homedir()/.cache before AWM_HOME isolation."},
+    {"id":"SRC-JEST-SETUP","path":"cli/jest.global-setup.js","locator":"module.exports = async () =>","fact":"Suite root is created below the system temporary directory and HOME/AWM_HOME are suite-owned."},
     {"id":"SRC-JEST-TEST","path":"cli/tests/structural/jest-environment-is-isolated.test.ts","locator":"describe('Jest environment isolation'","fact":"Existing structural suite asserts the global setup's isolation contract."},
-    {"id":"SRC-WATCH-DRIVER","path":"cli/src/commands/watch/teardown-driver.ts","locator":"export async function runBeginTeardown(","fact":"Teardown driver imports four state helpers from tracks.ts, creating the reverse edge."},
-    {"id":"SRC-WATCH-TRACKS","path":"cli/src/commands/watch/tracks.ts","locator":"export function applyProtocolToState(","fact":"tracks.ts owns shared state helpers and imports runBeginTeardown, closing the circular dependency."},
+    {"id":"SRC-WATCH-DRIVER","path":"cli/src/commands/watch/teardown-driver.ts","locator":"export async function runBeginTeardown(","fact":"Teardown driver obtains shared state helpers from the neutral track-state module."},
+    {"id":"SRC-WATCH-TRACKS","path":"cli/src/commands/watch/tracks.ts","locator":"import { runBeginTeardown } from './teardown-driver';","fact":"tracks.ts retains the teardown-driver dependency while shared state lives in the neutral module."},
     {"id":"SRC-SENSOR-BOOTSTRAP","path":"cli/src/commands/sensors/bootstrap.ts","locator":"export async function planSensorBootstrap(","fact":"Existing bootstrap command safely plans and applies an equivalent v2-to-v3 logical-source migration."},
-    {"id":"SRC-SENSOR-MANIFEST","path":".awm/sensors.json","locator":"\"schemaVersion\": 2","fact":"Committed project manifest records a stale machine-specific registryRoot and must become v3 logical-source configuration."}
+    {"id":"SRC-SENSOR-MANIFEST","path":".awm/sensors.json","locator":"\"schemaVersion\": 3","fact":"Committed project manifest uses the portable logical baseline source without a machine-specific registryRoot."}
   ],
   "commands": [
     {"id":"CMD-JEST-RED","program":"npm","args":["--prefix","cli","test","--","--runInBand","tests/structural/jest-environment-is-isolated.test.ts"],"covers":["FIX-1.1","FIX-1.2"]},
