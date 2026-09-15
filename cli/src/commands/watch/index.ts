@@ -97,8 +97,13 @@ export function registerWatchCommand(program: Command): void {
     watch
         .command('rebind')
         .description('reconcilia intencionalmente el binding desatendido tras un cambio válido del ciclo del plan')
-        .requiredOption('--plan <path>', 'mismo plan compacto previamente vinculado; valida y conserva la historia antes de actualizar su digest')
-        .action((opts: { plan: unknown }) => {
+        // `watch` conserva su --plan histórico para `watch --init --plan`.
+        // Commander lo asocia al padre incluso después del subcomando, por lo
+        // que este option es documental y la acción toma el valor del padre
+        // cuando corresponde; marcarlo required acá rechazaría una invocación
+        // válida antes de llegar a esa reconciliación explícita.
+        .option('--plan <path>', 'mismo plan compacto previamente vinculado; valida y conserva la historia antes de actualizar su digest')
+        .action((opts: { plan?: unknown }, command: Command) => {
             const repo = process.cwd();
             const branch = currentBranch(repo);
             try {
@@ -108,13 +113,14 @@ export function registerWatchCommand(program: Command): void {
                 process.exitCode = 1;
                 return;
             }
-            if (!validPlanPath(opts.plan)) {
+            const plan = opts.plan ?? command.parent?.opts().plan;
+            if (!validPlanPath(plan)) {
                 process.stderr.write('--plan requiere un path sin caracteres de control\n');
                 process.exitCode = 1;
                 return;
             }
             try {
-                const binding = rebindWatchPlan(repo, branch, planForBinding(repo, opts.plan));
+                const binding = rebindWatchPlan(repo, branch, planForBinding(repo, plan));
                 process.stdout.write(`binding reconciliado para ${binding.path}; digest ${binding.digest}\n`);
             } catch (e) {
                 process.stderr.write(`${(e as Error).message}\n`);

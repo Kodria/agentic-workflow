@@ -1,12 +1,15 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { spawnSync } from 'child_process';
 import { Command } from 'commander';
 import { detectRequiredVerifiers, initWatch, rebindWatchPlan } from '../../../src/commands/watch/init';
 import { registerWatchCommand } from '../../../src/commands/watch';
 import { readJournal, writeJournal } from '../../../src/core/journal/store';
 import { supervisorLockPath } from '../../../src/core/journal/paths';
 import type { PlanValidationReport } from '../../../src/core/plan/types';
+import { validatePlanFile } from '../../../src/core/plan/validate';
+import { initRepo } from '../../helpers/git-fixture';
 
 describe('watch --init: plan-vs-repo mecanico', () => {
     let repo: string;
@@ -130,6 +133,27 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         expect(watch.helpInformation()).toContain('rebind');
         expect(watch.commands.find(command => command.name() === 'rebind')!.description()).toMatch(/reconcilia/i);
     });
+
+    test('CLI compilado acepta exactamente `watch rebind --plan` y reconcilia el digest', () => {
+        const cliRepo = initRepo();
+        try {
+            const planPath = path.join(cliRepo, 'docs', 'plan.md');
+            fs.mkdirSync(path.dirname(planPath), { recursive: true });
+            const plan = fs.readFileSync(path.join(__dirname, '../../core/plan/fixtures/compact-slices-v1/valid.md'), 'utf8');
+            fs.writeFileSync(planPath, plan);
+            fs.writeFileSync(path.join(cliRepo, 'source.md'), '## Canonical source\nfixture source\n');
+            initWatch(cliRepo, 'main', { path: 'docs/plan.md', report: validatePlan(cliRepo, 'docs/plan.md') });
+            fs.appendFileSync(planPath, '\nLifecycle checkbox completed.\n');
+
+            const result = spawnSync(process.execPath, [path.resolve(__dirname, '../../../dist/src/index.js'), 'watch', 'rebind', '--plan', 'docs/plan.md'], {
+                cwd: cliRepo, encoding: 'utf8', env: { ...process.env, AWM_NO_UPDATE_CHECK: '1' },
+            });
+
+            expect(result.status).toBe(0);
+            expect(result.stderr).not.toContain('required option');
+            expect(readJournal(cliRepo, 'main').state!.planBinding!.digest).toBe(validatePlan(cliRepo, 'docs/plan.md').planDigest);
+        } finally { fs.rmSync(cliRepo, { recursive: true, force: true }); }
+    });
 });
 
 function validPlan(digestCharacter: string): Extract<PlanValidationReport, { state: 'valid' }> {
@@ -137,4 +161,12 @@ function validPlan(digestCharacter: string): Extract<PlanValidationReport, { sta
         state: 'valid', schema: 'compact-slices/v1', planDigest: digestCharacter.repeat(64),
         manifest: { schema: 'compact-slices/v1', planId: 'fixture', requirements: [], sources: [], commands: [], slices: [], closureCommands: [] },
     };
+}
+
+function validatePlan(repo: string, relativePath: string): Extract<PlanValidationReport, { state: 'valid' }> {
+    // Keep the external process test tied to the real compact validator, not a
+    // hand-built report that could diverge from a lifecycle edit on disk.
+    const report = validatePlanFile(relativePath, repo);
+    if (report.state !== 'valid') throw new Error(`fixture plan unexpectedly invalid: ${JSON.stringify(report)}`);
+    return report;
 }
