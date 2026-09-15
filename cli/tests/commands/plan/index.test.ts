@@ -61,7 +61,7 @@ describe('plan validate Commander wiring', () => {
 
         expect(JSON.parse(String(stdoutWrite.mock.calls[0][0]))).toEqual({
             state: 'valid', path: 'plans/r4.md', schema: 'compact-slices/v1', planId: 'issue-126-compact-only-bootstrap',
-            requirements: 5, sources: 6, commands: 7, slices: 1, completeOwnership: true,
+            planDigest: valid.planDigest, requirements: 5, sources: 6, commands: 7, slices: 1, completeOwnership: true,
         });
         expect(String(stdoutWrite.mock.calls[0][0])).not.toContain('update');
     });

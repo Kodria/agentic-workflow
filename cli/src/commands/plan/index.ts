@@ -68,6 +68,7 @@ function reportPayload(report: PlanValidationReport, planPath: string): Record<s
     case 'valid':
         return {
             state: report.state, path: planPath, schema: report.schema, planId: report.manifest.planId,
+            planDigest: report.planDigest,
             requirements: report.manifest.requirements.length, sources: report.manifest.sources.length,
             commands: report.manifest.commands.length, slices: report.manifest.slices.length, completeOwnership: true,
         };

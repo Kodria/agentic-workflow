@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { parseJsonNoDuplicate } from './json';
 import type { CompactPlanManifest, PlanDiagnostic, PlanSlice, PlanValidationReport } from './types';
 
@@ -10,7 +11,7 @@ const MAX_MANIFEST = 256 * 1024;
 const MAX_SOURCE = 1024 * 1024;
 const MAX_STRING = 4096;
 const ENTITY_ID = /^[A-Z][A-Z0-9-]{0,63}$/;
-const REQUIREMENT_ID = /^[A-Z][A-Z0-9-]*(?:\.[A-Z0-9-]+)*$/;
+const REQUIREMENT_ID = /^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*(?:\.[A-Z0-9]+(?:-[A-Z0-9]+)*)*$/;
 const PLAN_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SHELL = new Set([
     'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'cmd', 'powershell', 'pwsh',
@@ -218,7 +219,7 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     if (planRead.state === 'limit') return diagnostic('PLAN_LIMIT', 'plan exceeds maximum size');
     if (planRead.state === 'read') return diagnostic('PLAN_READ', 'plan cannot be read');
     const bytes = planRead.bytes;
-    let text: string; try { text = normalizeLineEndings(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { return diagnostic('PLAN_ENCODING', 'plan must be valid UTF-8'); }
+    let text: string; try { text = normalizeLineEndings(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)); } catch { return diagnostic('PLAN_ENCODING', 'plan must be valid UTF-8'); }
     const starts = count(text, START); const ends = count(text, END); const signaled = starts > 0 || ends > 0 || compactSchemaSignal(text);
     if (!signaled) return markerlessSchemaClassification(text) ?? { state: 'migration-required', reason: 'unmarked-plan' };
     if (starts === 0 && ends === 0) return markerlessSchemaClassification(text) ?? diagnostic('PLAN_MARKERS', 'compact markers must occur once in order');
@@ -260,7 +261,11 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     const usedSources = new Set(slices.flatMap((slice) => slice.sources)); const usedCommands = new Set([...slices.flatMap((slice) => [...slice.redCommands, ...slice.greenCommands]), ...(raw.closureCommands as string[])]); if (Array.from(sourceIds).some((id) => !usedSources.has(id)) || Array.from(commandIds).some((id) => !usedCommands.has(id)) || !refs(raw.closureCommands, commandIds)) return diagnostic('PLAN_ORPHAN', 'sources and commands must be referenced');
     if (raw.requirements.length === 0 || raw.sources.length === 0 || raw.commands.length === 0 || raw.slices.length === 0 || raw.closureCommands.length === 0) return diagnostic('PLAN_SHAPE', 'manifest collections must be nonempty');
     const markdown = checkMarkdown(text, slices); if (markdown) return markdown;
-    const report: PlanValidationReport = { state: 'valid', schema: 'compact-slices/v1', manifest: raw as unknown as CompactPlanManifest };
+    const report: PlanValidationReport = {
+        state: 'valid', schema: 'compact-slices/v1',
+        planDigest: crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
+        manifest: raw as unknown as CompactPlanManifest,
+    };
     freezeJson(report);
     verifiedValidReports.add(report);
     return report;

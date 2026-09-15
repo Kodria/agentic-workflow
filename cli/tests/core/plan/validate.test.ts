@@ -2,6 +2,7 @@ import fs from 'fs';
 import { exec, execFileSync, execSync, spawn, spawnSync } from 'child_process';
 import os from 'os';
 import path from 'path';
+import crypto from 'crypto';
 import { parseJsonNoDuplicate } from '../../../src/core/plan/json';
 import type { PlanValidationReport } from '../../../src/core/plan/types';
 import { validatePlanFile } from '../../../src/core/plan/validate';
@@ -52,6 +53,16 @@ describe('validatePlanFile', () => {
     let root: string;
     beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plan-')); });
     afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });
+
+    test.each([
+        ['valid.md', 'valid'],
+        ['unmarked.md', 'migration-required'],
+        ['future-schema.md', 'unsupported'],
+        ['missing-section.md', 'invalid'],
+    ] as const)('classifies the versioned v1 corpus member %s as %s without transforms', (file, state) => {
+        const corpus = path.resolve(__dirname, 'fixtures', 'compact-slices-v1');
+        expect(validatePlanFile(file, corpus).state).toBe(state);
+    });
 
     test('accepts a valid compact plan without modifying it', () => {
         const plan = fixture(root); const before = fs.readFileSync(plan, 'utf8');
@@ -203,6 +214,36 @@ describe('validatePlanFile', () => {
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'valid', schema: 'compact-slices/v1' });
     });
 
+    test('returns the SHA-256 identity of the complete normalized valid plan', () => {
+        const plan = fixture(root);
+        const lf = fs.readFileSync(plan, 'utf8');
+        const expected = crypto.createHash('sha256').update(lf).digest('hex');
+        const lfReport = validatePlanFile(plan, root);
+        fs.writeFileSync(plan, lf.replace(/\n/g, '\r\n'));
+        const crlfReport = validatePlanFile(plan, root);
+
+        expect(lfReport).toMatchObject({ state: 'valid', planDigest: expected });
+        expect(crlfReport).toMatchObject({ state: 'valid', planDigest: expected });
+    });
+
+    test.each([
+        ['manifest requirement', (text: string) => text.replace(/R4-VAL-2/g, 'R4-VAL-3')],
+        ['source fact', (text: string) => text.replace('Known fact', 'Changed fact')],
+        ['command argv', (text: string) => text.replace('"test"', '"build"')],
+        ['slice prose', (text: string) => text.replace('One evidence item.', 'Changed evidence item.')],
+        ['execution-mode prose', (text: string) => `${text}\nModo de ejecución: desatendido\n`],
+    ])('changes the plan identity when %s changes', (_name, edit) => {
+        const plan = fixture(root);
+        const first = validatePlanFile(plan, root);
+        expect(first.state).toBe('valid');
+        if (first.state !== 'valid') throw new Error('expected valid fixture');
+        fs.writeFileSync(plan, edit(fs.readFileSync(plan, 'utf8')));
+        const amended = validatePlanFile(plan, root);
+        expect(amended.state).toBe('valid');
+        if (amended.state !== 'valid') throw new Error('expected valid amended fixture');
+        expect(amended.planDigest).not.toBe(first.planDigest);
+    });
+
     test('accepts a contained plan when path.relative returns Windows separators', () => {
         const plan = fixture(root);
         const nestedPlan = path.join(root, 'docs', 'plan.md');
@@ -258,7 +299,7 @@ describe('validatePlanFile', () => {
     });
 
     test.each([
-        '.RF-1', 'RF-1.', 'RF..1', 'rf-1.3', 'RF-1.a', ' RF-1.3', 'RF-1.3 ',
+        '.RF-1', 'RF-1.', 'RF..1', 'RF--1', 'RF-', 'rf-1.3', 'RF-1.a', ' RF-1.3', 'RF-1.3 ',
         'RF-1. 3', 'RF-1/3', 'RF-1\\3', 'RF-1.é', 'RF-1.\u0000', 'RF-1.\u007f',
         'A'.repeat(63) + '.1',
     ])('rejects malformed or oversized requirement ID %j', (id) => {
