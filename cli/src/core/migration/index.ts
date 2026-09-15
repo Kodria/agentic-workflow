@@ -38,9 +38,25 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
     if (!binding || binding.path !== planPath || binding.digest !== digest || binding.executionMode !== 'desatendido') diagnostics.push('journal-plan-binding-stale');
     const jobs = journal.state ? Object.values(journal.state.jobs) : [];
     if (jobs.some(job => job.verdict === 'fail') || journal.state?.verdicts.some(verdict => verdict.result === 'fail')) diagnostics.push('adverse-durable-verdict');
-    const canonical148 = ISSUE_148.test(issueLinks.join('\n')) && planPath === 'docs/plans/2026-09-14-awm-facts-plan.md' && detectBranch(root) === 'codex/issue-148-awm-facts';
-    const tasks = taskIds.map(id => canonical148 && id === '1' && diagnostics.length === 0 ? { id, state: 'completed' as const, missing: [] } : canonical148 && id === '2' ? { id, state: 'pending' as const, missing: ['quality-review'] } : { id, state: 'unstarted' as const, missing: [] });
+    const testCurrent = jobs.some(job => job.verdict === 'pass');
+    const sensorCurrent = jobs.some(job => job.verdict === 'pass' && job.satisfies?.some(id => id.includes('sensor')));
+    const canonical148 = ISSUE_148.test(issueLinks.join('\n')) && planPath === 'docs/plans/2026-09-14-awm-facts-plan.md' && detectBranch(root) === 'codex/issue-148-awm-facts' && !!binding?.boundAt;
+    const tasks = taskIds.map(id => {
+        const task = journal.state?.tasks.find(candidate => candidate.id === id);
+        if (canonical148 && id === '1') return { id, state: 'completed' as const, missing: [] };
+        if (canonical148 && id === '2') return { id, state: 'pending' as const, missing: ['quality-review'] };
+        if (!task) return { id, state: 'unstarted' as const, missing: [] };
+        const reviews = task.reviewObligations;
+        const spec = reviews.find(review => review.kind === 'spec'); const quality = reviews.find(review => review.kind === 'quality');
+        const verdict = (review: typeof spec) => review?.verdictId && journal.state?.verdicts.find(item => item.id === review.verdictId)?.result === 'pass';
+        const missing = [
+            ...(commits > 0 ? [] : ['commit']), ...(testCurrent ? [] : ['tests']), ...(sensorCurrent ? [] : ['sensors']),
+            ...(verdict(spec) ? [] : ['specification-review']), ...(verdict(quality) ? [] : ['quality-review']),
+        ];
+        return missing.length === 0 && task.status === 'done' ? { id, state: 'completed' as const, missing } : { id, state: 'pending' as const, missing };
+    });
     if (canonical148 && !binding) diagnostics.push('issue-148-checkpoint-not-durably-bound');
-    const state: MigrationState = diagnostics.some(d => d.startsWith('adverse')) ? 'blocked' : diagnostics.length ? 'planning-required' : commits > 0 ? 'supported-completion' : 'planning-required';
+    if (tasks.some(task => task.state === 'pending')) diagnostics.push('missing-durable-task-evidence');
+    const state: MigrationState = diagnostics.some(d => d.startsWith('adverse')) ? 'blocked' : diagnostics.length ? 'planning-required' : tasks.some(task => task.state === 'completed') ? 'supported-completion' : 'planning-required';
     return { state, ...(plan.state === 'valid' ? { planDigest: digest } : {}), issueLinks: [...issueLinks], tasks, diagnostics, facts };
 }
