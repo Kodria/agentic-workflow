@@ -18,7 +18,7 @@ describe('collectMigrationFacts', () => {
             const report = collectMigrationFacts('docs/plans/old.md', root, ['https://github.com/Kodria/agentic-workflow/issues/126']);
             expect(report.state).toBe('planning-required');
             expect(report.tasks).toEqual([{ id: '1', state: 'unstarted', missing: [] }]);
-            expect(report.facts.every(fact => /\/issues\/126$/.test(fact.issue))).toBe(true);
+            expect(report.facts.every(fact => /\/issues\/126$/.test(fact.issue126))).toBe(true);
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
 

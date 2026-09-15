@@ -8,7 +8,8 @@ import { readJournal } from '../journal/store';
 
 export type MigrationState = 'supported-completion' | 'planning-required' | 'blocked';
 export type MigrationTask = Readonly<{ id: string; state: 'completed' | 'pending' | 'unstarted'; missing: string[] }>;
-export type MigrationFactsReport = Readonly<{ state: MigrationState; planDigest?: string; issueLinks: string[]; tasks: MigrationTask[]; diagnostics: string[]; facts: ReadonlyArray<Readonly<{ kind: 'plan' | 'git' | 'journal' | 'tests' | 'sensors' | 'verdict'; issue: string }>> }>;
+export type EvidenceRecord = Readonly<{ taskId: string; commitSha?: string; verificationItemId?: string; jobId?: string; argv?: string[]; fingerprint?: string; paths?: string[]; verdictId?: string; obligationId?: string; role?: 'spec' | 'quality'; result?: 'pass' | 'fail' | 'inconclusive'; at?: string; issue126: string }>;
+export type MigrationFactsReport = Readonly<{ state: MigrationState; planDigest?: string; issueLinks: string[]; tasks: MigrationTask[]; diagnostics: string[]; facts: ReadonlyArray<EvidenceRecord> }>;
 
 const ISSUE_126 = /\/issues\/126\/?$/;
 const ISSUE_148 = /\/issues\/148\/?$/;
@@ -26,17 +27,23 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
     const root = fs.realpathSync(cwd); const text = readPlan(root, planPath); const taskIds = ids(text);
     const plan = validatePlanFile(planPath, root);
     if (plan.state !== 'migration-required' && plan.state !== 'valid') return { state: 'blocked', issueLinks: [...issueLinks], tasks: [], diagnostics: ['plan-not-migratable'], facts: [] };
-    const facts: Array<{ kind: 'plan' | 'git' | 'journal' | 'tests' | 'sensors' | 'verdict'; issue: string }> = [{ kind: 'plan', issue: issueLinks.find(link => ISSUE_126.test(link))! }];
-    let commits = 0; try { commits = execFileSync('git', ['log', '--format=%H', '-n', String(MAX), '--', planPath], { cwd: root, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).split(/\r?\n/).filter(x => /^[a-f0-9]{40}$/i.test(x)).length; } catch { /* absence is not success */ }
-    facts.push({ kind: 'git', issue: issueLinks.find(link => ISSUE_126.test(link))! });
+    const issue126 = issueLinks.find(link => ISSUE_126.test(link))!;
+    const facts: EvidenceRecord[] = [];
+    let commitShas: string[] = []; try { commitShas = execFileSync('git', ['log', '--format=%H', '-n', String(MAX), '--', planPath], { cwd: root, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).split(/\r?\n/).filter(x => /^[a-f0-9]{40}$/i.test(x)); } catch { /* absence is not success */ }
     let journal; try { journal = readJournal(root, detectBranch(root)); } catch { journal = { state: null, corrupt: true }; }
-    facts.push({ kind: 'journal', issue: issueLinks.find(link => ISSUE_126.test(link))! }, { kind: 'tests', issue: issueLinks.find(link => ISSUE_126.test(link))! }, { kind: 'sensors', issue: issueLinks.find(link => ISSUE_126.test(link))! }, { kind: 'verdict', issue: issueLinks.find(link => ISSUE_126.test(link))! });
     const diagnostics: string[] = [];
     if (!journal.state || journal.corrupt) diagnostics.push('journal-missing-or-corrupt');
     const binding = journal.state?.schema === 2 ? journal.state.planBinding : undefined;
     const digest = plan.state === 'valid' ? plan.planDigest : crypto.createHash('sha256').update(text.replace(/\r\n?/g, '\n'), 'utf8').digest('hex');
     if (!binding || binding.path !== planPath || binding.digest !== digest || binding.executionMode !== 'desatendido') diagnostics.push('journal-plan-binding-stale');
     const jobs = journal.state ? Object.values(journal.state.jobs) : [];
+    for (const task of journal.state?.tasks ?? []) {
+        for (const job of jobs) if (job.verdict && job.fingerprint && job.argv.length > 0 && job.paths.length > 0) facts.push({ taskId: task.id, verificationItemId: job.satisfies?.[0], jobId: job.id, argv: job.argv, fingerprint: job.fingerprint, paths: job.paths, result: job.verdict, issue126 });
+        for (const obligation of task.reviewObligations) {
+            const verdict = obligation.verdictId ? journal.state?.verdicts.find(item => item.id === obligation.verdictId) : undefined;
+            if (verdict) facts.push({ taskId: task.id, verdictId: verdict.id, obligationId: obligation.id, role: obligation.kind, result: verdict.result, fingerprint: verdict.fingerprint, at: verdict.receivedAt, issue126 });
+        }
+    }
     if (jobs.some(job => job.verdict === 'fail') || journal.state?.verdicts.some(verdict => verdict.result === 'fail')) diagnostics.push('adverse-durable-verdict');
     const testCurrent = jobs.some(job => job.verdict === 'pass');
     const sensorCurrent = jobs.some(job => job.verdict === 'pass' && job.satisfies?.some(id => id.includes('sensor')));
@@ -52,7 +59,7 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
         const spec = reviews.find(review => review.kind === 'spec'); const quality = reviews.find(review => review.kind === 'quality');
         const verdict = (review: typeof spec) => review?.verdictId && journal.state?.verdicts.find(item => item.id === review.verdictId)?.result === 'pass';
         const missing = [
-            ...(commits > 0 ? [] : ['commit']), ...(testCurrent ? [] : ['tests']), ...(sensorCurrent ? [] : ['sensors']),
+            ...(commitShas.length > 0 ? [] : ['commit']), ...(testCurrent ? [] : ['tests']), ...(sensorCurrent ? [] : ['sensors']),
             ...(verdict(spec) ? [] : ['specification-review']), ...(verdict(quality) ? [] : ['quality-review']),
         ];
         return missing.length === 0 && task.status === 'done' ? { id, state: 'completed' as const, missing } : { id, state: 'pending' as const, missing };
