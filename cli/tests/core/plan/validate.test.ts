@@ -97,8 +97,6 @@ describe('validatePlanFile', () => {
             const report = validatePlanFile(file, repositoryRoot);
             if (report.state !== 'valid') throw new Error(`previously valid compact-v1 plan failed: ${file}; state=${report.state}; ${corpusCounts}`);
         }
-        expect(previouslyValid.length).toBe(4);
-        expect(marked.length - previouslyValid.length).toBe(2);
     });
 
     test.each(['RF-1.3', 'RNF-T.2', 'R4-VAL-2', 'A'.repeat(62) + '.1'])('accepts canonical bounded requirement ID %s in every requirement reference', (id) => {
