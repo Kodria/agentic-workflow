@@ -182,7 +182,12 @@ const LIVE = ['received', 'spawn-intent', 'claimed', 'running', 'cancel-requeste
 function recoveryWhitelistBlocker(state: JournalState): string | undefined {
     if (state.cycle.status === 'BLOCKED') return 'el ciclo está bloqueado';
     if (state.requestProblems.length > 0) return 'hay conflictos durables de requests';
-    if (state.tasks.some(task => task.status !== 'done')) return 'hay tasks pendientes';
+    // Pending work is the normal reason to launch (or retry launching) the
+    // controller.  It is not recovery evidence and therefore cannot turn a
+    // transient launch failure into permanent custody.  Conversely, once a
+    // non-empty task set claims completion, missing required evidence is an
+    // unsafe recovery fact and must remain fail-closed.
+    if (state.tasks.length === 0 || state.tasks.some(task => task.status !== 'done')) return undefined;
     const verificationItems = [...state.cycleVerificationPlan, ...state.tasks.flatMap(task => task.verificationPlan)];
     for (const required of state.requiredVerifiers) {
         const requiredItems = verificationItems.filter(item => item.kind === required);
@@ -247,6 +252,10 @@ export class Supervisor {
         // request consumption, tracks, or runner reconciliation: each can cause
         // a dispatch directly or indirectly.
         if (before0.state.schema !== 2 || !before0.state.planBinding) return 'custody';
+        // COMPLETE is terminal, not a recovery attempt. It cannot dispatch and
+        // must retain its normal no-op result even if old work evidence is no
+        // longer reconstructible.
+        if (before0.state.cycle.status === 'COMPLETE') return 'complete';
         // A controller can create jobs and runnerTick can start them. Both are
         // downstream of the same full compact unattended admission, so it must
         // complete before any reconciliation path that could dispatch either.

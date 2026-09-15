@@ -51,6 +51,26 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         expect(() => detectRequiredVerifiers(repo)).toThrow(/package\.json.*límite|package\.json.*limit/i);
     });
 
+    test('falla cerradamente al superar el límite de entradas del escaneo', () => {
+        for (let index = 0; index <= 10000; index++) fs.writeFileSync(path.join(repo, `entry-${index}`), '');
+        expect(() => detectRequiredVerifiers(repo)).toThrow(/entry limit/i);
+    });
+
+    test('falla cerradamente ante un package.json ilegible o malformado', () => {
+        fs.writeFileSync(path.join(repo, 'package.json'), '{not json');
+        expect(() => detectRequiredVerifiers(repo)).toThrow(/rejected package\.json/i);
+    });
+
+    test('falla cerradamente cuando no puede leer un directorio durante el escaneo', () => {
+        const original = fs.readdirSync;
+        const readdir = jest.spyOn(fs, 'readdirSync').mockImplementation(((target: fs.PathLike, options?: any) => {
+            if (String(target) === repo) throw new Error('EACCES');
+            return original(target, options as any);
+        }) as typeof fs.readdirSync);
+        try { expect(() => detectRequiredVerifiers(repo)).toThrow(/cannot read/i); }
+        finally { readdir.mockRestore(); }
+    });
+
     test('initWatch persiste requiredVerifiers y gitignorea el journal (R1.1/R1.4b)', () => {  // verifies R1.4b
         fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ scripts: { test: 'jest' } }));
         const out = initWatch(repo, 'rama');

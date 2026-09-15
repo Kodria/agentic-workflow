@@ -84,12 +84,19 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
     if (!binding || binding.path !== planPath || binding.digest !== digest || binding.executionMode !== 'desatendido') diagnostics.push('journal-plan-binding-stale');
     const jobs = journal.state ? Object.values(journal.state.jobs) : [];
     const declared = new Map((journal.state?.tasks ?? []).map(task => [task.id, declaredCommit(text, task.id, root)]));
+    // A verifier identifier is an ownership boundary. If two tasks name the
+    // same ID, a job satisfying it cannot authenticate either task: accepting
+    // it for both would let Task 2 borrow Task 1's evidence.
+    const verificationOwners = new Map<string, number>();
+    for (const task of journal.state?.tasks ?? []) for (const item of task.verificationPlan) {
+        verificationOwners.set(item.id, (verificationOwners.get(item.id) ?? 0) + 1);
+    }
     const claimedCommits = new Set<string>();
     const duplicateCommits = new Set<string>();
     for (const sha of declared.values()) if (sha) { if (claimedCommits.has(sha)) duplicateCommits.add(sha); else claimedCommits.add(sha); }
     for (const task of journal.state?.tasks ?? []) {
         const commitSha = declared.get(task.id); if (commitSha && !duplicateCommits.has(commitSha)) facts.push({ taskId: task.id, commitSha, issue126 });
-        const verificationIds = new Set(task.verificationPlan.map(item => item.id));
+        const verificationIds = new Set(task.verificationPlan.map(item => item.id).filter(id => verificationOwners.get(id) === 1));
         for (const job of jobs) if (job.verdict && job.fingerprint && job.argv.length > 0 && job.paths.length > 0 && job.satisfies?.some(id => verificationIds.has(id))) facts.push({ taskId: task.id, verificationItemId: job.satisfies?.find(id => verificationIds.has(id)), jobId: job.id, argv: job.argv, fingerprint: job.fingerprint, paths: job.paths, result: job.verdict, issue126 });
         for (const obligation of task.reviewObligations) {
             const verdict = obligation.verdictId ? journal.state?.verdicts.find(item => item.id === obligation.verdictId) : undefined;

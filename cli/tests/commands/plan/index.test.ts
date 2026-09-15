@@ -244,6 +244,26 @@ describe('plan admit Commander wiring', () => {
         } finally { output.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
     });
 
+    it('uses executionMode from the validated snapshot when the plan file changes before admission', async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-admit-snapshot-mode-'));
+        const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const admittedSnapshot = { ...valid, executionMode: 'desatendido' as const };
+        const admit = jest.fn<Promise<AdmissionReport>, [any]>().mockResolvedValue({ state: 'admitted', planState: 'valid', journal: 'current', currentness: 'not-checked', sensors: 'not-required', diagnostics: [] });
+        try {
+            // This is deliberately the opposite header: a second read here would
+            // silently downgrade the authenticated unattended snapshot.
+            fs.writeFileSync(path.join(root, 'plan.md'), '**Modo de ejecución:** interactivo\n');
+            const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+            registerPlanCommand(program, {
+                validatePlanFile: () => admittedSnapshot,
+                admitPlan: admit,
+                readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
+            });
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', root, '--json']);
+            expect(admit).toHaveBeenCalledWith(expect.objectContaining({ executionMode: 'desatendido' }));
+        } finally { output.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
+    });
+
     it('uses an explicit validated execution-mode override over the canonical header', async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-admit-header-override-'));
         const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);

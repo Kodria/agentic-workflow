@@ -377,8 +377,10 @@ describe('supervisor loop', () => {
     test.each([
         ['cycle BLOCKED', (s: ReturnType<typeof readJournal>['state']) => { s!.cycle.status = 'BLOCKED'; }],
         ['request problem durable', (s: ReturnType<typeof readJournal>['state']) => { s!.requestProblems.push({ file: 'x.request.json', kind: 'rejected', detail: 'x', at: new Date().toISOString() }); }],
-        ['task pendiente', (s: ReturnType<typeof readJournal>['state']) => { s!.tasks.push({ id: 'T1', title: 'pendiente', status: 'pending', attempts: 0, verificationPlan: [], reviewObligations: [] }); }],
-        ['verificador requerido ausente', (s: ReturnType<typeof readJournal>['state']) => { s!.requiredVerifiers = ['test']; }],
+        ['verificador requerido ausente tras tasks completadas', (s: ReturnType<typeof readJournal>['state']) => {
+            s!.tasks.push({ id: 'T1', title: 'terminada', status: 'done', attempts: 1, verificationPlan: [], reviewObligations: [] });
+            s!.requiredVerifiers = ['test'];
+        }],
     ])('recovery fail-closed: %s entra en custodia sin controller ni dispatch', async (_name, mutate) => {
         initUnattendedFixture(repo);
         const state = readJournal(repo, 'main').state!;
