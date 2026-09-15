@@ -11,19 +11,49 @@ const valid: Extract<PlanValidationReport, { state: 'valid' }> = {
 };
 
 describe('admitPlan', () => {
+    it('preserves the distinct unsupported plan state and bounded validator diagnostic', async () => {
+        const report = await admitPlan({ plan: { state: 'unsupported', schema: 'compact-slices/v9', diagnostics: [{ code: 'PLAN_UNSUPPORTED_SCHEMA', message: `future\u001b${'x'.repeat(5000)}` }] }, provider: 'codex', cwd: process.cwd() });
+        expect(report).toMatchObject({ state: 'blocked', planState: 'unsupported', currentness: 'not-checked', sensors: 'not-required' });
+        expect(report.diagnostics.map(diagnostic => diagnostic.code)).toEqual(['ADMISSION_PLAN_UNSUPPORTED', 'PLAN_UNSUPPORTED_SCHEMA']);
+        expect(report.diagnostics[1].message).toHaveLength(4096);
+        expect(report.diagnostics[1].message).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+    });
+
+    it('does not block a private registry only when declared plan provenance proves it unconsumed', async () => {
+        const report = await admitPlan({
+            plan: valid, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], requireCurrent: true,
+            currentness: { checkedAt: '2026-01-01T00:00:00.000Z', compatibility: { status: 'not-checked' }, components: [
+                { component: 'cli', installed: '1.0.0', latest: '1.0.0', channel: 'stable', source: 'npm', checkedAt: '2026-01-01T00:00:00.000Z', status: 'current', detail: 'ok', remedy: 'none' },
+                { component: 'registry:private', installed: null, latest: null, channel: 'stable', source: 'private', checkedAt: '2026-01-01T00:00:00.000Z', status: 'unverifiable', detail: 'no', remedy: 'none' },
+            ] },
+            consumedRegistryComponents: [], provenance: 'proven',
+        } as any);
+        expect(report).toMatchObject({ state: 'admitted', currentness: 'current', sensors: 'not-required' });
+    });
+
+    it('blocks currentness when registry-contract provenance is not sufficient to prove irrelevance', async () => {
+        const report = await admitPlan({ plan: valid, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], requireCurrent: true, currentness: { checkedAt: 'x', compatibility: { status: 'not-checked' }, components: [] } } as any);
+        expect(report).toMatchObject({ state: 'blocked', currentness: 'unverifiable', sensors: 'not-required' });
+        expect(report.diagnostics[0].code).toBe('ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED');
+    });
+    it('blocks when a proven consumed registry has no currentness component', async () => {
+        const report = await admitPlan({ plan: valid, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], requireCurrent: true, provenance: 'proven', consumedRegistryComponents: ['registry:private'], currentness: { checkedAt: 'x', compatibility: { status: 'not-checked' }, components: [{ component: 'cli', installed: '1.0.0', latest: '1.0.0', channel: 'stable', source: 'npm', checkedAt: 'x', status: 'current', detail: 'ok', remedy: 'none' }] } });
+        expect(report).toMatchObject({ state: 'blocked', currentness: 'unverifiable' });
+        expect(report.diagnostics[0].code).toBe('ADMISSION_CURRENTNESS_MISSING_COMPONENT');
+    });
     it('stops at an unmarked plan before checking any later boundary', async () => {
         const report = await admitPlan({ plan: { state: 'migration-required', reason: 'unmarked-plan' }, provider: 'codex', cwd: process.cwd() });
         expect(report).toMatchObject({ state: 'blocked', planState: 'migration-required', journal: 'not-required' });
         expect(report.diagnostics[0].code).toBe('ADMISSION_PLAN_MIGRATION_REQUIRED');
-        expect(report.currentness).toBeUndefined();
-        expect(report.sensors).toBeUndefined();
+        expect(report.currentness).toBe('not-checked');
+        expect(report.sensors).toBe('not-required');
     });
 
     it('blocks a disabled provider before remote currentness or sensors', async () => {
         const report = await admitPlan({ plan: valid, provider: 'codex', cwd: process.cwd(), enabledAgents: ['claude-code'] });
         expect(report).toMatchObject({ state: 'blocked', planDigest: valid.planDigest, provider: 'codex' });
         expect(report.diagnostics[0].code).toBe('ADMISSION_PROVIDER_DISABLED');
-        expect(report.currentness).toBeUndefined();
+        expect(report.currentness).toBe('not-checked');
     });
 
     it('does not let an unverified execution capability admit interactive work', async () => {

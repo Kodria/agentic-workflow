@@ -1,11 +1,13 @@
 import { Command } from 'commander';
 import { assertVerifiedValidPlanReport, validatePlanFile } from '../../core/plan/validate';
 import type { PlanDiagnostic, PlanValidationReport } from '../../core/plan/types';
-import { admitPlan, type AdmissionInput, type AdmissionReport } from '../../core/admission';
+import { admitPlan, sanitizeAdmissionReport, type AdmissionInput, type AdmissionReport } from '../../core/admission';
 import { checkCurrentness } from '../../core/currentness/check';
 import { runSensors } from '../sensors/run';
 import { readPreferences } from '../../utils/config';
 import { isAgentTarget } from '../../providers';
+import { listRegistries, type RegistrySource } from '../../core/registries';
+import path from 'path';
 
 const SUPPORTED_SCHEMA = 'compact-slices/v1';
 const MAX_PATH_LENGTH = 4096;
@@ -18,6 +20,7 @@ export interface PlanCommandDependencies {
     checkCurrentness?: typeof checkCurrentness;
     runSensors?: typeof runSensors;
     readPreferences?: typeof readPreferences;
+    listRegistries?: () => RegistrySource[];
 }
 
 function assertText(value: unknown, name: string): asserts value is string {
@@ -36,9 +39,28 @@ function assertDependencies(deps: PlanCommandDependencies): void {
 }
 
 function admissionOutput(report: AdmissionReport, json: boolean): string {
+    report = sanitizeAdmissionReport(report);
     if (json) return `${JSON.stringify(report)}\n`;
     const diagnostic = report.diagnostics[0];
     return `Plan admission: ${report.state}${report.provider ? ` (${terminalSafe(report.provider)})` : ''}${diagnostic ? `\n- ${terminalSafe(diagnostic.code)}: ${terminalSafe(diagnostic.message)}` : ''}\n`;
+}
+
+function within(root: string, candidate: string): boolean {
+    const relative = path.relative(root, candidate);
+    return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+/** Maps only validated source paths to physical registry contracts; failures stay fail-closed. */
+function consumedRegistryContracts(report: PlanValidationReport, cwd: string, registries: RegistrySource[]): { provenance: 'proven' | 'unknown'; consumedRegistryComponents: string[] } {
+    if (report.state !== 'valid') return { provenance: 'unknown', consumedRegistryComponents: [] };
+    const root = path.resolve(cwd);
+    const consumed = new Set<string>();
+    for (const source of report.manifest.sources) {
+        const candidate = path.resolve(root, source.path);
+        if (!within(root, candidate)) return { provenance: 'unknown', consumedRegistryComponents: [] };
+        for (const registry of registries) if (within(path.resolve(registry.contentRoot), candidate)) consumed.add(`registry:${registry.name}`);
+    }
+    return { provenance: 'proven', consumedRegistryComponents: [...consumed].sort() };
 }
 
 function boundedDiagnostics(diagnostics: PlanDiagnostic[]): PlanDiagnostic[] {
@@ -162,6 +184,7 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
             const preferences = deps.readPreferences ?? readPreferences;
             const currentnessCheck = deps.checkCurrentness ?? checkCurrentness;
             const sensorRun = deps.runSensors ?? runSensors;
+            const registryInventory = deps.listRegistries ?? listRegistries;
             const planReport = deps.validatePlanFile(planPath, options.cwd);
             const enabledAgents = preferences().enabledAgents;
             // The documented order is plan, provider, currentness, sensors, journal,
@@ -174,9 +197,18 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
                 process.exitCode = 2;
                 return;
             }
+            let contractScope: { provenance: 'proven' | 'unknown'; consumedRegistryComponents: string[] };
+            try { contractScope = consumedRegistryContracts(planReport, options.cwd, registryInventory()); }
+            catch { contractScope = { provenance: 'unknown', consumedRegistryComponents: [] }; }
+            if (options.requireCurrent && contractScope.provenance !== 'proven') {
+                const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, requireCurrent: true, ...contractScope });
+                process.stdout.write(admissionOutput(report, options.json === true));
+                process.exitCode = 2;
+                return;
+            }
             const currentness = options.requireCurrent ? await currentnessCheck(options.cwd) : undefined;
             const sensors = options.verifySensors ? await sensorRun({ cwd: options.cwd }) : undefined;
-            const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true, currentness, sensors });
+            const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true, currentness, sensors, ...contractScope });
             process.stdout.write(admissionOutput(report, options.json === true));
             if (report.state !== 'admitted') process.exitCode = 2;
         });

@@ -223,13 +223,32 @@ describe('plan validate Commander wiring', () => {
 });
 
 describe('plan admit Commander wiring', () => {
+    it('bounds and terminal-sanitizes adversarial admission diagnostics in JSON', async () => {
+        const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const program = new Command();
+        program.exitOverride();
+        program.configureOutput({ writeErr: () => undefined });
+        registerPlanCommand(program, {
+            validatePlanFile: () => valid,
+            readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
+            admitPlan: async () => ({ state: 'blocked', planState: 'valid', journal: 'not-required', currentness: 'not-checked', sensors: 'not-required', diagnostics: [{ code: `X\u001b${'c'.repeat(5000)}`, message: `Y\u001b${'m'.repeat(5000)}` }] }),
+        });
+        try {
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plans/r4.md', '--provider', 'codex', '--cwd', 'fixture-root', '--json']);
+            const json = String(output.mock.calls[0][0]);
+            expect(json.trimEnd()).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+            expect(JSON.parse(json).diagnostics[0]).toEqual({ code: expect.stringMatching(/^X\\u001b/), message: expect.stringMatching(/^Y\\u001b/) });
+            expect(JSON.parse(json).diagnostics[0].message.length).toBeLessThanOrEqual(4096);
+        } finally { output.mockRestore(); process.exitCode = undefined; }
+    });
+
     it('uses the bounded admission surface and preserves JSON output', async () => {
         const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
         process.exitCode = undefined;
         const admit = jest.fn<Promise<AdmissionReport>, [any]>()
             .mockResolvedValue({
             state: 'blocked', planState: 'valid', planDigest: valid.planDigest, provider: 'codex', executionMode: 'interactivo',
-            journal: 'not-required', diagnostics: [{ code: 'ADMISSION_CURRENTNESS_REQUIRED', message: 'required' }],
+            journal: 'not-required', currentness: 'not-checked', sensors: 'not-required', diagnostics: [{ code: 'ADMISSION_CURRENTNESS_REQUIRED', message: 'required' }],
             });
         const program = new Command();
         program.exitOverride();
