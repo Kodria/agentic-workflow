@@ -5,6 +5,7 @@ import { execFileSync } from 'child_process';
 import { validatePlanFile } from '../plan/validate';
 import { detectBranch } from '../ledger/store';
 import { readJournal } from '../journal/store';
+import { secureFs } from '../secure-fs/native-bridge';
 
 export type MigrationState = 'supported-completion' | 'planning-required' | 'blocked';
 export type MigrationTask = Readonly<{ id: string; state: 'completed' | 'pending' | 'unstarted'; missing: string[] }>;
@@ -33,35 +34,28 @@ export function reconcileTaskEvidence(taskId: string, records: readonly Evidence
 
 function safeIssue(link: string): boolean { try { const u = new URL(link); return u.protocol === 'https:' && u.hostname === 'github.com' && /^\/Kodria\/agentic-workflow\/issues\/[1-9][0-9]*\/?$/.test(u.pathname); } catch { return false; } }
 function ids(text: string): string[] { const value = [...text.matchAll(TASK)].map(m => m[1]); if (value.length > MAX || new Set(value).size !== value.length) throw new Error('migration task ownership is ambiguous'); return value; }
+function taskFiles(text: string, taskId: string): string[] {
+    const start = text.search(new RegExp(`^### Task ${taskId}:`, 'm')); if (start < 0) return [];
+    const end = text.indexOf('\n### Task ', start + 1); const section = text.slice(start, end < 0 ? text.length : end);
+    const block = /(?:^|\n)(?:\*\*)?Files:?(?:\*\*)?\s*\r?\n([\s\S]*?)(?=\n\s*\n|\n\*\*|\n###|$)/mi.exec(section)?.[1] ?? '';
+    return [...block.matchAll(/^\s*[-*]\s*(?:(?:Create|Modify):\s*)?`?([^`\r\n]+?)`?\s*$/gmi)].map(match => match[1].trim()).filter(file => file && !file.includes('..') && !path.isAbsolute(file));
+}
 function declaredCommit(text: string, taskId: string, cwd: string): string | undefined {
     const start = text.search(new RegExp(`^### Task ${taskId}:`, 'm')); if (start < 0) return undefined;
     const end = text.indexOf('\n### Task ', start + 1); const section = text.slice(start, end < 0 ? text.length : end);
     const sha = /^Commit:\s*([a-f0-9]{7,40})\s*$/mi.exec(section)?.[1]; if (!sha) return undefined;
-    const files = /^Files:\s*\r?\n((?:\s*[-*]\s*[^\r\n]+\r?\n?)+)/mi.exec(section)?.[1]?.split(/\r?\n/).map(line => line.replace(/^\s*[-*]\s*/, '').trim()).filter(Boolean) ?? [];
-    try { const full = execFileSync('git', ['rev-parse', '--verify', `${sha}^{commit}`], { cwd, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).trim(); execFileSync('git', ['merge-base', '--is-ancestor', full, 'HEAD'], { cwd, stdio: 'pipe', timeout: 2000 }); const changed = execFileSync('git', ['diff-tree', '--root', '--no-commit-id', '--name-only', '-r', full], { cwd, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).split(/\r?\n/).filter(Boolean); return files.length > 0 && changed.some(file => files.includes(file)) ? full : undefined; } catch { return undefined; }
+    const files = taskFiles(text, taskId);
+    try { const full = execFileSync('git', ['rev-parse', '--verify', `${sha}^{commit}`], { cwd, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).trim(); execFileSync('git', ['merge-base', '--is-ancestor', full, 'HEAD'], { cwd, stdio: 'pipe', timeout: 2000 }); const changed = execFileSync('git', ['diff-tree', '--root', '--no-commit-id', '--name-only', '-r', full], { cwd, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).split(/\r?\n/).filter(Boolean); return files.length > 0 && changed.length > 0 && changed.every(file => files.includes(file)) ? full : undefined; } catch { return undefined; }
 }
 function readContainedRegularFile(root: string, relative: string, maximum: number, label: string): Buffer {
     if (path.isAbsolute(relative) || path.win32.isAbsolute(relative)) throw new Error(`${label} must be relative`);
     const file = path.resolve(root, relative);
     if (!file.startsWith(`${root}${path.sep}`)) throw new Error(`${label} escapes root`);
-    // Inspect every name before opening it. The descriptor identity check below
-    // detects a rename/symlink swap in the interval before open().
-    let cursor = root;
-    for (const part of relative.split('/')) {
-        cursor = path.join(cursor, part);
-        if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error(`${label} traverses symlink`);
-    }
-    const before = fs.lstatSync(file);
-    if (!before.isFile() || before.size > maximum) throw new Error(`${label} must be bounded regular file`);
-    const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-    try {
-        const opened = fs.fstatSync(fd);
-        if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) throw new Error(`${label} changed after inspection`);
-        const bytes = fs.readFileSync(fd);
-        const after = fs.fstatSync(fd);
-        if (after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size) throw new Error(`${label} changed during read`);
-        return bytes;
-    } finally { fs.closeSync(fd); }
+    // The native primitive walks parents through directory descriptors/handles,
+    // refuses every reparse point, and reads the leaf through that anchor. Do
+    // not emulate it with lstat/open: a parent can otherwise change in between.
+    try { return secureFs.readRegularFile(file, maximum).bytes; }
+    catch { throw new Error(`${label} must be a contained bounded regular file`); }
 }
 function readPlan(root: string, relative: string): string { return new TextDecoder('utf-8', { fatal: true }).decode(readContainedRegularFile(root, relative, 1024 * 1024, 'migration plan')); }
 
@@ -85,13 +79,18 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
     const digest = plan.state === 'valid' ? plan.planDigest : crypto.createHash('sha256').update(text.replace(/\r\n?/g, '\n'), 'utf8').digest('hex');
     if (!binding || binding.path !== planPath || binding.digest !== digest || binding.executionMode !== 'desatendido') diagnostics.push('journal-plan-binding-stale');
     const jobs = journal.state ? Object.values(journal.state.jobs) : [];
+    const declared = new Map((journal.state?.tasks ?? []).map(task => [task.id, declaredCommit(text, task.id, root)]));
+    const claimedCommits = new Set<string>();
+    const duplicateCommits = new Set<string>();
+    for (const sha of declared.values()) if (sha) { if (claimedCommits.has(sha)) duplicateCommits.add(sha); else claimedCommits.add(sha); }
     for (const task of journal.state?.tasks ?? []) {
-        const commitSha = declaredCommit(text, task.id, root); if (commitSha) facts.push({ taskId: task.id, commitSha, issue126 });
+        const commitSha = declared.get(task.id); if (commitSha && !duplicateCommits.has(commitSha)) facts.push({ taskId: task.id, commitSha, issue126 });
         const verificationIds = new Set(task.verificationPlan.map(item => item.id));
         for (const job of jobs) if (job.verdict && job.fingerprint && job.argv.length > 0 && job.paths.length > 0 && job.satisfies?.some(id => verificationIds.has(id))) facts.push({ taskId: task.id, verificationItemId: job.satisfies?.find(id => verificationIds.has(id)), jobId: job.id, argv: job.argv, fingerprint: job.fingerprint, paths: job.paths, result: job.verdict, issue126 });
         for (const obligation of task.reviewObligations) {
             const verdict = obligation.verdictId ? journal.state?.verdicts.find(item => item.id === obligation.verdictId) : undefined;
-            if (verdict) facts.push({ taskId: task.id, verdictId: verdict.id, obligationId: obligation.id, role: obligation.kind, result: verdict.result, fingerprint: verdict.fingerprint, at: verdict.receivedAt, issue126 });
+            const fingerprintBound = jobs.some(job => job.fingerprint === verdict?.fingerprint && job.paths.length > 0 && job.argv.length > 0 && job.satisfies?.some(id => verificationIds.has(id)));
+            if (verdict && verdict.obligationId === obligation.id && obligation.taskId === task.id && fingerprintBound) facts.push({ taskId: task.id, verdictId: verdict.id, obligationId: obligation.id, role: obligation.kind, result: verdict.result, fingerprint: verdict.fingerprint, paths: verdict.paths, at: verdict.receivedAt, issue126 });
         }
     }
     if (jobs.some(job => job.verdict === 'fail') || journal.state?.verdicts.some(verdict => verdict.result === 'fail')) diagnostics.push('adverse-durable-verdict');
@@ -123,7 +122,7 @@ export function collectIssue148HistoricalFacts(historicalRoot: string, issueLink
     const branch = execFileSync('git', ['branch', '--show-current'], { cwd: root, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).trim();
     if (branch !== 'codex/issue-148-awm-facts') throw new Error('historical root is not the admitted issue-148 branch');
     const issue126 = issueLinks.find(link => ISSUE_126.test(link));
-    if (!issue126 || !issueLinks.some(link => safeIssue(link) && ISSUE_148.test(link))) throw new Error('issue-148 migration requires durable #126 and #148 links');
+    if (!issue126 || !safeIssue(issue126) || !issueLinks.some(link => safeIssue(link) && ISSUE_148.test(link))) throw new Error('issue-148 migration requires durable #126 and #148 links');
     const planPath = 'docs/plans/2026-09-14-awm-facts-plan.md'; const text = readPlan(root, planPath);
     const digest = crypto.createHash('sha256').update(text, 'utf8').digest('hex');
     const ledgerPath = '.awm/ledger/codex__issue-148-awm-facts.jsonl';
@@ -137,8 +136,10 @@ export function collectIssue148HistoricalFacts(historicalRoot: string, issueLink
     } catch { ledgerEntries = []; }
     const ancestor = (() => { try { execFileSync('git', ['merge-base', '--is-ancestor', '81c008c', 'HEAD'], { cwd: root, stdio: 'pipe' }); return true; } catch { return false; } })();
     const taskOneChecked = /### Task 1:[\s\S]*?(?=\n### Task 2:)/.test(text) && /### Task 1:[\s\S]*?- \[x\]/.test(text);
-    const ledgerReviews = ledgerEntries.some(item => item.branch === branch && item.phase === 'review' && item.source_skill === 'specification-reviewer' && item.polarity === 'win')
-        && ledgerEntries.some(item => item.branch === branch && item.phase === 'review' && item.source_skill === 'requesting-code-review' && item.polarity === 'win' && item.signature === 'awm-facts-nested-yaml-boundary-reviewed');
+    const taskOneFiles = new Set(taskFiles(text, '1'));
+    const reviewForTaskOne = (item: typeof ledgerEntries[number]): boolean => taskOneFiles.has(item.ref.replace(/:\d+(?::\d+)?$/, ''));
+    const ledgerReviews = ledgerEntries.some(item => item.branch === branch && item.phase === 'review' && item.source_skill === 'specification-reviewer' && item.polarity === 'win' && reviewForTaskOne(item))
+        && ledgerEntries.some(item => item.branch === branch && item.phase === 'review' && item.source_skill === 'requesting-code-review' && item.polarity === 'win' && item.signature === 'awm-facts-nested-yaml-boundary-reviewed' && reviewForTaskOne(item));
     const taskIds = ids(text); const proven = digest === 'c11477dd59cb19094983c671cc0b760f1d1e51b9679e13dba90f1b0c2cba48e7' && ancestor && taskOneChecked && ledgerReviews;
     const tasks = taskIds.map(id => id === '1' && proven ? { id, state: 'completed' as const, missing: [] } : id === '2' ? { id, state: 'pending' as const, missing: ['quality-review'] } : { id, state: 'unstarted' as const, missing: [] });
     return { state: proven ? 'planning-required' : 'blocked', planDigest: digest, issueLinks: [...issueLinks], tasks, diagnostics: proven ? ['Task 2 quality re-review remains'] : ['issue-148 historical provenance is incomplete or inconsistent'], facts: [{ taskId: '1', issue126 }] };
