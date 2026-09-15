@@ -62,8 +62,6 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
         }
     }
     if (jobs.some(job => job.verdict === 'fail') || journal.state?.verdicts.some(verdict => verdict.result === 'fail')) diagnostics.push('adverse-durable-verdict');
-    const testCurrent = jobs.some(job => job.verdict === 'pass');
-    const sensorCurrent = jobs.some(job => job.verdict === 'pass' && job.satisfies?.some(id => id.includes('sensor')));
     const canonical148 = ISSUE_148.test(issueLinks.join('\n')) && planPath === 'docs/plans/2026-09-14-awm-facts-plan.md' && detectBranch(root) === 'codex/issue-148-awm-facts' && !!binding?.boundAt;
     const tasks = taskIds.map(id => {
         const task = journal.state?.tasks.find(candidate => candidate.id === id);
@@ -72,14 +70,9 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
         // lacks per-task commit provenance, so retain the conservative state.
         if (canonical148 && (id === '1' || id === '2')) return { id, state: 'pending' as const, missing: ['task-provenance-after-binding'] };
         if (!task) return { id, state: 'unstarted' as const, missing: [] };
-        const reviews = task.reviewObligations;
-        const spec = reviews.find(review => review.kind === 'spec'); const quality = reviews.find(review => review.kind === 'quality');
-        const verdict = (review: typeof spec) => review?.verdictId && journal.state?.verdicts.find(item => item.id === review.verdictId)?.result === 'pass';
-        const missing = [
-            'commit-provenance', ...(testCurrent ? [] : ['tests']), ...(sensorCurrent ? [] : ['sensors']),
-            ...(verdict(spec) ? [] : ['specification-review']), ...(verdict(quality) ? [] : ['quality-review']),
-        ];
-        return missing.length === 0 && task.status === 'done' ? { id, state: 'completed' as const, missing } : { id, state: 'pending' as const, missing };
+        const reconciled = reconcileTaskEvidence(id, facts);
+        return task.status === 'done' && reconciled.state === 'completed'
+            ? reconciled : { ...reconciled, state: 'pending' as const };
     });
     if (canonical148 && !binding) diagnostics.push('issue-148-checkpoint-not-durably-bound');
     if (tasks.some(task => task.state === 'pending')) diagnostics.push('missing-durable-task-evidence');
