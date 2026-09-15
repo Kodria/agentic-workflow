@@ -115,17 +115,17 @@ Create `cli/src/core/admission/` for pure report composition and add `plan admit
 
 #### Implementation
 
-- [ ] Write RED table tests for plan state, provider identity, relevant contract versions,
+- [x] Write RED table tests for plan state, provider identity, relevant contract versions,
   sensors, journal, capabilities, and forecast order. Assert first failure stops later work,
   admission performs no writes/dispatches, unrelated private registries do not block only
   when irrelevance is proven, and every one of six targets has explicit capability status.
-- [ ] Implement `awm plan admit <path> --provider <target> --cwd <root> --require-current
+- [x] Implement `awm plan admit <path> --provider <target> --cwd <root> --require-current
   --verify-sensors --json` as a bounded read-only report. It returns only `admitted` or
   `blocked`, includes digest/mode/diagnostics, and names incompatible CLI/registry contracts.
-- [ ] Derive a topology forecast from manifest slice count and mandatory implementer,
+- [x] Derive a topology forecast from manifest slice count and mandatory implementer,
   per-slice two-reviewer, final-review, Track A/Track B QA, docs, retro, and finish roles;
   label it topology, never price or quota savings.
-- [ ] Run CMD-ADMIT-UNIT RED then GREEN plus CMD-TYPECHECK/CMD-BUILD, clean reviews, and
+- [x] Run CMD-ADMIT-UNIT RED then GREEN plus CMD-TYPECHECK/CMD-BUILD, clean reviews, and
   commit `feat(plan): admit only current compact cycles (#126)`.
 
 #### Edge cases
