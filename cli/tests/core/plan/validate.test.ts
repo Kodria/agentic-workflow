@@ -21,6 +21,16 @@ function expectApprovedPlanValid(report: PlanValidationReport): void {
     expect(report.schema).toBe('compact-slices/v1');
 }
 
+function assertFrozenObjectGraph(value: unknown, location = 'report', visited = new WeakSet<object>()): void {
+    if (value === null || typeof value !== 'object' || visited.has(value)) return;
+    visited.add(value);
+    if (!Object.isFrozen(value)) throw new Error(`${location} is mutable`);
+    for (const key of Reflect.ownKeys(value)) {
+        const property = Object.getOwnPropertyDescriptor(value, key);
+        if (property && 'value' in property) assertFrozenObjectGraph(property.value, `${location}.${String(key)}`, visited);
+    }
+}
+
 function fixture(root: string, mutate?: (manifest: Record<string, unknown>) => void): string {
     fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
     fs.writeFileSync(path.join(root, 'docs', 'source.md'), '## Source\nKnown fact\n');
@@ -54,18 +64,38 @@ describe('validatePlanFile', () => {
         expectApprovedPlanValid(report);
         if (report.state !== 'valid') throw new Error('expected an approved compact plan');
         const slice = report.manifest.slices[0];
-        expect(Object.isFrozen(report)).toBe(true);
-        expect(Object.isFrozen(report.manifest)).toBe(true);
-        expect(Object.isFrozen(report.manifest.slices)).toBe(true);
-        expect(Object.isFrozen(slice)).toBe(true);
-        expect(Object.isFrozen(slice.reviewEvidence)).toBe(true);
-        expect(Object.isFrozen(report.manifest.closureCommands)).toBe(true);
+        assertFrozenObjectGraph(report);
+        expect(Reflect.set(report.manifest.requirements, '0', 'R4-FORGED')).toBe(false);
+        expect(Reflect.set(report.manifest.sources[0], 'fact', 'forged fact')).toBe(false);
+        expect(Reflect.set(report.manifest.commands[0].args, '0', 'forged-arg')).toBe(false);
+        expect(Reflect.set(slice.fallback, '0', 'forged fallback')).toBe(false);
         expect(Reflect.set(slice.reviewEvidence, '1', 'bogus')).toBe(false);
         expect(Reflect.set(slice, 'risk', 'unbounded')).toBe(false);
         expect(Reflect.set(report.manifest.closureCommands, '0', 'CMD-MISSING')).toBe(false);
+        expect(report.manifest.requirements).toEqual(['R4-VAL-2']);
+        expect(report.manifest.sources[0].fact).toBe('Known fact');
+        expect(report.manifest.commands[0].args).toEqual(['test']);
+        expect(slice.fallback).toEqual(['Use a reviewed fallback']);
         expect(slice.reviewEvidence).toEqual(['specification', 'code-quality']);
         expect(slice.risk).toBe('bounded');
         expect(report.manifest.closureCommands).toEqual(['CMD-ONE']);
+    });
+
+    test('detects a selectively thawed command-args node even when every ancestor is frozen', () => {
+        const report = validatePlanFile(fixture(root), root);
+        expectApprovedPlanValid(report);
+        const thawed = JSON.parse(JSON.stringify(report)) as Extract<PlanValidationReport, { state: 'valid' }>;
+        const mutableArgs = thawed.manifest.commands[0].args;
+        const freezeExceptArgs = (value: unknown): void => {
+            if (value === null || typeof value !== 'object' || value === mutableArgs) return;
+            for (const child of Object.values(value)) freezeExceptArgs(child);
+            Object.freeze(value);
+        };
+        freezeExceptArgs(thawed);
+        expect(Object.isFrozen(thawed.manifest.commands[0])).toBe(true);
+        expect(Object.isFrozen(mutableArgs)).toBe(false);
+        expect(Reflect.set(mutableArgs, '0', 'tampered')).toBe(true);
+        expect(() => assertFrozenObjectGraph(thawed)).toThrow('report.manifest.commands.0.args is mutable');
     });
 
     test('scans bounded markerless brace runs without quadratic retries', () => {
@@ -214,6 +244,7 @@ describe('validatePlanFile', () => {
             if (!marked.includes(file)) throw new Error(`previously valid compact-v1 plan is not tracked with a marker: ${file}; ${corpusCounts}`);
             const report = validatePlanFile(file, repositoryRoot);
             if (report.state !== 'valid') throw new Error(`previously valid compact-v1 plan failed: ${file}; state=${report.state}; ${corpusCounts}`);
+            assertFrozenObjectGraph(report, file);
         }
     });
 
