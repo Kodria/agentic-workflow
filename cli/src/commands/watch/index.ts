@@ -60,6 +60,11 @@ export function registerWatchCommand(program: Command): void {
                 process.exitCode = 1;
                 return;
             }
+            if (opts.init && opts.plan === undefined) {
+                process.stderr.write('watch --init requiere --plan con un plan compacto válido\n');
+                process.exitCode = 1;
+                return;
+            }
             if (opts.plan !== undefined && !validPlanPath(opts.plan)) {
                 process.stderr.write('--plan requiere un path sin caracteres de control\n');
                 process.exitCode = 1;

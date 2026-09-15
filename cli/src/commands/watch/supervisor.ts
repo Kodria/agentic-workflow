@@ -230,6 +230,11 @@ export class Supervisor {
     async tick(): Promise<TickOutcome> {
         const before0 = readJournal(this.repoRoot, this.branch);
         if (before0.corrupt || before0.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
+        // Historical/schema-1 journals are intentionally readable by migration
+        // commands, never executable.  Do this before controller recovery,
+        // request consumption, tracks, or runner reconciliation: each can cause
+        // a dispatch directly or indirectly.
+        if (before0.state.schema !== 2 || !before0.state.planBinding) return 'custody';
         // A controller can create jobs and runnerTick can start them. Both are
         // downstream of the same full compact unattended admission, so it must
         // complete before any reconciliation path that could dispatch either.
@@ -548,6 +553,9 @@ export async function runSupervisorLoop(
 ): Promise<void> {
     const r = readJournal(repoRoot, branch);
     if (r.corrupt || r.state === null) throw new Error('journal ausente o corrupto: corre `awm watch --init` primero');
+    if (r.state.schema !== 2 || !r.state.planBinding) {
+        throw new Error('journal legacy o sin binding compacto: `awm watch` no puede ejecutar ni despachar trabajo');
+    }
     verifyBranchInvariant(repoRoot, r.state.branch);
     if (r.state.cycle.status === 'COMPLETE') return;
     const handle = acquireLock(repoRoot);

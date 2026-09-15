@@ -167,6 +167,20 @@ describe('runSensors --changed', () => {
         expect(out.changedScope).toBeUndefined();
     });
 
+    it('does not certify read-only admission when a sensor changes an ignored .awm file', async () => {
+        dir = project({ lint: LINT });
+        fs.writeFileSync(path.join(dir, '.gitignore'), '.awm/transient\\n');
+        mockRunCommand.mockImplementation(async () => {
+            fs.writeFileSync(path.join(dir, '.awm', 'transient'), 'sensor side effect');
+            return ok('');
+        });
+
+        const out = await load().runSensors({ cwd: dir, readOnly: true });
+
+        expect(out.overall).toBe('not_certified');
+        expect(out.reason).toBe('read-only-mutation-detected');
+    });
+
     it('passes the requested base through to the scope resolver', async () => {
         dir = project({ lint: LINT });
         mockChangedFiles.mockReturnValue({ files: ['src/a.ts'] });

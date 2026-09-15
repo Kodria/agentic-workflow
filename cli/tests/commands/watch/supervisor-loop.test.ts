@@ -313,6 +313,24 @@ describe('supervisor loop', () => {
         expect(readJournal(repo, 'main').state!.cycle.status).toBe('BLOCKED');
     });
 
+    test('un journal schema-1 legacy no despacha controller ni jobs aunque contenga trabajo pendiente', async () => {
+        initJournal(repo, 'main');
+        const legacy = readJournal(repo, 'main').state!;
+        legacy.jobs.pending = {
+            id: 'pending', fingerprint: '', commandDigest: '', argv: ['node', '-e', 'process.exit(0)'], cwd: '.', paths: [], expandedPaths: [],
+            executionState: 'received', observationState: 'progressing', phaseTimestamps: {},
+        };
+        writeJournal(repo, 'main', legacy);
+        let spawns = 0;
+
+        const outcome = await new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, () => { spawns++; }).tick();
+
+        expect(outcome).toBe('custody');
+        expect(spawns).toBe(0);
+        expect(readJournal(repo, 'main').state!.generations).toEqual([]);
+        expect(readJournal(repo, 'main').state!.jobs.pending.executionState).toBe('received');
+    });
+
     test('fallo de launch queda durable y entra en backoff sin tumbar el supervisor (R4.3)', async () => {
         initWatch(repo, 'main');
         beginGeneration(repo, 'main');
