@@ -224,6 +224,39 @@ describe('plan validate Commander wiring', () => {
 });
 
 describe('plan admit Commander wiring', () => {
+    it('derives desatendido from the canonical plan header and requires a journal without a flag', async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-admit-header-'));
+        const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        try {
+            spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+            fs.writeFileSync(path.join(root, 'plan.md'), '**Modo de ejecución:** desatendido\n');
+            spawnSync('git', ['config', 'user.email', 'test@example.invalid'], { cwd: root });
+            spawnSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+            spawnSync('git', ['add', 'plan.md'], { cwd: root });
+            spawnSync('git', ['commit', '-qm', 'fixture'], { cwd: root });
+            const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+            registerPlanCommand(program, {
+                validatePlanFile: () => valid,
+                readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
+            });
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', root, '--json']);
+            expect(JSON.parse(String(output.mock.calls[0][0]))).toMatchObject({ state: 'blocked', executionMode: 'desatendido', journal: expect.stringMatching(/missing|corrupt/) });
+        } finally { output.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
+    });
+
+    it('uses an explicit validated execution-mode override over the canonical header', async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-admit-header-override-'));
+        const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const admit = jest.fn<Promise<AdmissionReport>, [any]>().mockResolvedValue({ state: 'admitted', planState: 'valid', journal: 'not-required', currentness: 'not-checked', sensors: 'not-required', diagnostics: [] });
+        try {
+            fs.writeFileSync(path.join(root, 'plan.md'), '**Modo de ejecución:** desatendido\n');
+            const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+            registerPlanCommand(program, { validatePlanFile: () => valid, admitPlan: admit, readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }) });
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', root, '--execution-mode', 'interactivo', '--json']);
+            expect(admit).toHaveBeenCalledWith(expect.objectContaining({ executionMode: 'interactivo' }));
+        } finally { output.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
+    });
+
     it('passes the current branch schema-2 journal and normalized plan path to unattended admission', async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-admit-journal-'));
         const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
