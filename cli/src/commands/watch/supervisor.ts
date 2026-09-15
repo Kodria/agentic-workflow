@@ -301,7 +301,8 @@ export class Supervisor {
             // kind (review, QA and interlock included). Reuse its evidence
             // semantics instead of maintaining a weaker recovery subset.
             const evidenceGate = computeGate(before0.state, false, this.fingerprintNow);
-            const unresolvedVerification = evidenceGate.reasons.some(reason => [
+            const terminalTaskClaims = before0.state.tasks.length > 0 && before0.state.tasks.every(task => task.status === 'done');
+            const unresolvedVerification = terminalTaskClaims && evidenceGate.reasons.some(reason => [
                 'dangling-reference', 'unsatisfied-plan', 'adverse-verdict',
                 'stale-fingerprint', 'open-obligation', 'open-fix',
             ].includes(reason.category));
@@ -325,8 +326,8 @@ export class Supervisor {
             const recovery = reconcileUnattendedRecovery({
                 journal: before0.state, journalCorrupt: false, plan: before0.state.planBinding,
                 git: staleJob || planChanged ? 'changed' : 'current', activeJobIds,
-                tests: tests.length === 0 || tests.every(item => passed(item.satisfiedBy)) ? 'pass' : 'missing',
-                sensors: sensorItems.length === 0 || sensorItems.every(item => passed(item.satisfiedBy)) ? 'pass' : 'missing',
+                tests: !terminalTaskClaims || tests.length === 0 || tests.every(item => passed(item.satisfiedBy)) ? 'pass' : 'missing',
+                sensors: !terminalTaskClaims || sensorItems.length === 0 || sensorItems.every(item => passed(item.satisfiedBy)) ? 'pass' : 'missing',
                 verdicts: hasStaleReview ? 'stale' : (openReviewOrFix || unresolvedVerification) ? 'missing' : 'current',
             });
             appendEvent(this.repoRoot, this.branch, { kind: 'unattended-recovery', nextAction: recovery.nextAction, activeJobIds: recovery.activeJobIds, diagnostics: recovery.diagnostics });

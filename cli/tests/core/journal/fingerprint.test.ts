@@ -114,11 +114,11 @@ describe('reconcileUnattendedRecovery', () => {
         const input = { journal, journalCorrupt: false, plan: journal.planBinding, git: 'current' as const, activeJobIds: [], tests: 'pass' as const, sensors: 'pass' as const, verdicts: 'current' as const, ...overrides } as any;
         expect(reconcileUnattendedRecovery(input).nextAction).toBe(nextAction);
     });
-    test('is deterministic and reuses active obligations before selecting new work', () => {
+    test('reuses active obligations before later verdict repair', () => {
         const journal = { ...emptyState('main'), schema: 2 as const, planBinding: { path: 'docs/plan.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1' as const, executionMode: 'desatendido' as const, boundAt: '2026-09-15T00:00:00.000Z' } };
         const input = { journal, journalCorrupt: false, plan: journal.planBinding, git: 'current' as const, activeJobIds: ['job-b', 'job-a', 'job-a'], tests: 'pass' as const, sensors: 'pass' as const, verdicts: 'current' as const };
         expect(reconcileUnattendedRecovery(input)).toEqual({ state: 'ready', nextAction: 'reconcile-active-jobs', activeJobIds: ['job-a', 'job-b'], diagnostics: [] });
-        expect(reconcileUnattendedRecovery({ ...input, verdicts: 'stale' })).toMatchObject({ state: 'blocked', nextAction: 'repair-verdicts' });
+        expect(reconcileUnattendedRecovery({ ...input, verdicts: 'missing' })).toEqual({ state: 'ready', nextAction: 'reconcile-active-jobs', activeJobIds: ['job-a', 'job-b'], diagnostics: [] });
     });
 });
 

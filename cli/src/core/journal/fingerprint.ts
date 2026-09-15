@@ -64,8 +64,8 @@ export function reconcileUnattendedRecovery(input: UnattendedRecoveryInput): Una
     const binding = input.journal.schema === 2 ? input.journal.planBinding : undefined;
     if (!binding || binding.path !== input.plan.path || binding.digest !== input.plan.digest || binding.schema !== input.plan.schema || binding.executionMode !== 'desatendido') return result('blocked', 'rebind-plan', ['journal-plan-binding-stale']);
     if (input.git !== 'current') return result('blocked', 'reconcile-git', ['git-fingerprint-changed']);
-    if (input.verdicts !== 'current') return result('blocked', 'repair-verdicts', [`verdicts-${input.verdicts}`]);
     if (activeJobIds.length > 0) return result('ready', 'reconcile-active-jobs', []);
+    if (input.verdicts !== 'current') return result('blocked', 'repair-verdicts', [`verdicts-${input.verdicts}`]);
     if (input.tests !== 'pass') return result('blocked', 'run-tests', [`tests-${input.tests}`]);
     if (input.sensors !== 'pass') return result('blocked', 'run-sensors', [`sensors-${input.sensors}`]);
     return result('ready', 'select-work', []);
