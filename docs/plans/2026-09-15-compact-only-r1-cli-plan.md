@@ -241,6 +241,9 @@ the #148 migration dry run uses the released compatible pair.
 `plan admit` is introduced by S2, so it cannot admit S1 without a circular dependency.
 S1 is therefore a bounded bootstrap over the already-valid compact v1 contract delivered by
 the issue-126 bootstrap: validate this exact digest, run strict currentness plus sensors, and
-retain every implementer/review/closure gate. Immediately after S2 exists, revalidate this
-plan and require its own successful admission before S3 or S4. No unmarked plan, legacy
-executor route, or later R1 slice is covered by this exception.
+retain every implementer/review/closure gate. S3 similarly creates schema-2 journal binding,
+which an unattended admission cannot require before it exists. S3 runs only after compact
+validation, strict currentness observation, and empirical sensors; its implementation must
+create the exact binding and cannot dispatch agents. Immediately after S3 exists, revalidate
+this plan, initialize its bound journal, and require a successful admission before S4. No
+unmarked plan, legacy executor route, or later R1 slice is covered by either exception.
