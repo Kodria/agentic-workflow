@@ -193,8 +193,10 @@ not evidence that a CLI or registry is current.
 ### `awm plan validate PLAN_PATH`
 
 Validate a `compact-slices/v1` plan without executing its commands, contacting the
-network, or rewriting the plan. A plan with no compact-plan marker retains the legacy
-full-quality path; unsupported or malformed compact declarations fail closed.
+network, or rewriting the plan. An unmarked plan is historical input that needs
+migration: validation reports `migration-required` with reason `unmarked-plan` and
+exits 2 in both human and JSON modes. Unsupported or malformed compact declarations
+also exit 2; only a valid `compact-slices/v1` plan exits 0.
 
 ```bash
 awm plan validate PLAN_PATH [--json] [--cwd <path>]
