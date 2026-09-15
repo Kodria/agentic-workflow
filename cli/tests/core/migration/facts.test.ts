@@ -48,6 +48,12 @@ describe('collectMigrationFacts', () => {
         expect(reconcileTaskEvidence('1', records)).toMatchObject({ state: 'pending' });
     });
 
+    it.each([
+        ['checked-no-commit', []],
+        ['commit-no-tests', [{ taskId: '1', commitSha: 'a'.repeat(40), issue126: 'https://github.com/Kodria/agentic-workflow/issues/126' }]],
+        ['tests-no-review', [{ taskId: '1', commitSha: 'a'.repeat(40), issue126: 'https://github.com/Kodria/agentic-workflow/issues/126' }, { taskId: '1', verificationItemId: 'test:1', result: 'pass' as const, fingerprint: 'f', paths: ['x'], issue126: 'https://github.com/Kodria/agentic-workflow/issues/126' }, { taskId: '1', verificationItemId: 'sensor:1', result: 'pass' as const, fingerprint: 'f', paths: ['x'], issue126: 'https://github.com/Kodria/agentic-workflow/issues/126' }]],
+    ])('keeps legacy %s pending', (_name, records) => expect(reconcileTaskEvidence('1', records)).toMatchObject({ state: 'pending' }));
+
     it('collects a schema-2 journal fixture without borrowing evidence across tasks', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migration-journal-'));
         try {
