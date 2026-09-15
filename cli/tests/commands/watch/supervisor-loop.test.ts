@@ -16,6 +16,7 @@ import { computeFingerprint } from '../../../src/core/journal/fingerprint';
 import { reconcileTracks, defaultTrackRuntime, TrackRuntime, SupervisorObservation } from '../../../src/commands/watch/tracks';
 import type { TrackRef, ProcessRef } from '../../../src/core/journal/types';
 import type { AdmissionReport } from '../../../src/core/admission';
+import { validatePlanFile } from '../../../src/core/plan/validate';
 
 jest.setTimeout(60000);
 
@@ -50,6 +51,29 @@ function setupRepo(): string {
     fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"' } }));
     fs.writeFileSync(path.join(repo, '.awm', 'sensors.json'), '{}');
     return repo;
+}
+
+const admitted = async (): Promise<AdmissionReport> => ({
+    state: 'admitted', planState: 'valid', executionMode: 'desatendido',
+    journal: 'current', currentness: 'current', sensors: 'pass', diagnostics: [],
+});
+
+/** Legacy fixtures predate compact-only admission; make their execution contract explicit. */
+function initUnattendedFixture(repo: string): void {
+    initWatch(repo, 'main');
+    const planPath = path.join(repo, 'plans', 'fixture.md');
+    fs.mkdirSync(path.dirname(planPath), { recursive: true });
+    fs.writeFileSync(planPath, fs.readFileSync(path.join(__dirname, '../../core/plan/fixtures/compact-slices-v1/valid.md'), 'utf8'));
+    fs.writeFileSync(path.join(repo, 'source.md'), '## Canonical source\nfixture source\n');
+    const plan = validatePlanFile('plans/fixture.md', repo);
+    if (plan.state !== 'valid') throw new Error('compact fixture must validate');
+    const state = readJournal(repo, 'main').state!;
+    state.schema = 2;
+    state.planBinding = {
+        path: 'plans/fixture.md', digest: plan.planDigest, schema: plan.schema,
+        executionMode: 'desatendido', boundAt: new Date().toISOString(),
+    };
+    writeJournal(repo, 'main', state);
 }
 
 function emitVerdict(repo: string, token: string, obligationId: string, verdictId: string): void {
@@ -173,9 +197,9 @@ describe('supervisor loop', () => {
     });
 
     test('ticks drenan y declaran COMPLETE solo con gate verde + cero vivos (R4.5)', async () => {  // verifies R4.5
-        initWatch(repo, 'main');    // sin package.json => requiredVerifiers []
+        initUnattendedFixture(repo);
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', tickMs: 50, reconcileGraceMs: 10000 };
-        const sup = new Supervisor(repo, 'main', cfg, fakeSpawner);
+        const sup = new Supervisor(repo, 'main', cfg, fakeSpawner, undefined, admitted);
         // el controlador (aqui: el test) registra plan de ciclo + task + jobs enlazados
         emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e1',
             payload: { entity: 'task', taskId: 'T1', title: 't', verificationPlan: [{ id: 'v1', kind: 'test' }, { id: 'v-sensors', kind: 'sensors' }], reviewObligations: [{ id: 'o-spec', kind: 'spec' }, { id: 'o-quality', kind: 'quality' }] } });
@@ -223,7 +247,7 @@ describe('supervisor loop', () => {
     // vivos) y confirma que `cycle.status` llega a COMPLETE por ese camino
     // generico, exactamente como lo haria un plan sin tracks en absoluto.
     test('una cohorte que cayo a fallback SERIAL via el reducer real no cuelga el ciclo: COMPLETE llega igual por el camino generico (regresion post-review R7, ronda 2)', async () => {  // verifies R7
-        initWatch(repo, 'main');
+        initUnattendedFixture(repo);
         const tracksRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-loop-tracks-'));
         try {
             const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
@@ -263,7 +287,7 @@ describe('supervisor loop', () => {
                 payload: { entity: 'task-status', taskId: 'T1', status: 'done' } });
 
             const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', tickMs: 50, reconcileGraceMs: 10000 };
-            const sup = new Supervisor(repo, 'main', cfg, fakeSpawner);
+            const sup = new Supervisor(repo, 'main', cfg, fakeSpawner, undefined, admitted);
             let outcome = 'continue';
             for (let i = 0; i < 400 && outcome !== 'complete'; i++) {
                 outcome = await sup.tick();
@@ -280,26 +304,26 @@ describe('supervisor loop', () => {
     });
 
     test('tick verifica branch antes del launch y un ciclo COMPLETE no lanza otro controller', async () => {
-        initWatch(repo, 'main');
+        initUnattendedFixture(repo);
         let calls = 0;
         const spy: WrapperSpawner = () => { calls++; };
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10 };
         const s = readJournal(repo, 'main').state!;
         s.cycle.status = 'COMPLETE';
         writeJournal(repo, 'main', s);
-        expect(await new Supervisor(repo, 'main', cfg, spy).tick()).toBe('complete');
+        expect(await new Supervisor(repo, 'main', cfg, spy, undefined, admitted).tick()).toBe('complete');
         expect(calls).toBe(0);
 
         const reset = readJournal(repo, 'main').state!;
         reset.cycle.status = 'IN_PROGRESS';
         writeJournal(repo, 'main', reset);
         git(repo, 'checkout', '-qb', 'otra');
-        await expect(new Supervisor(repo, 'main', cfg, spy).tick()).rejects.toThrow(/rama|branch/i);
+        await expect(new Supervisor(repo, 'main', cfg, spy, undefined, admitted).tick()).rejects.toThrow(/rama|branch/i);
         expect(calls).toBe(0);
     });
 
     test('una admisión compacta bloqueada no lanza controlador ni wrappers', async () => {
-        initWatch(repo, 'main');
+        initUnattendedFixture(repo);
         const state = readJournal(repo, 'main').state!;
         state.schema = 2;
         state.planBinding = { path: 'plans/exact.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1', executionMode: 'desatendido', boundAt: new Date().toISOString() };
@@ -332,11 +356,11 @@ describe('supervisor loop', () => {
     });
 
     test('fallo de launch queda durable y entra en backoff sin tumbar el supervisor (R4.3)', async () => {
-        initWatch(repo, 'main');
+        initUnattendedFixture(repo);
         beginGeneration(repo, 'main');
         let calls = 0;
         const failing: WrapperSpawner = () => { calls++; throw new Error('provider unavailable'); };
-        const sup = new Supervisor(repo, 'main', { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10 }, failing);
+        const sup = new Supervisor(repo, 'main', { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10 }, failing, undefined, admitted);
         await expect(sup.tick()).resolves.toBe('continue');
         expect(calls).toBe(1);
         const intent = activeGeneration(readJournal(repo, 'main').state!)!;
@@ -347,7 +371,7 @@ describe('supervisor loop', () => {
     });
 
     test('custodia: doble senial + indeterminate => tick custody, lock retenido, proceso intacto (R4.2b/R4.5)', async () => {  // verifies R4.2b
-        initJournal(repo, 'main');
+        initUnattendedFixture(repo);
         beginGeneration(repo, 'main');
         const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 20000)'], process.cwd(), 'nCtl');
         let s = readJournal(repo, 'main').state!;
@@ -357,7 +381,7 @@ describe('supervisor loop', () => {
         fs.mkdirSync(path.dirname(supervisorLockPath(repo)), { recursive: true });
         fs.writeFileSync(supervisorLockPath(repo), 'lock-del-loop');              // el loop lo tendria: NO debe borrarse
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', heartbeatTimeoutMs: 1, activityWindowMs: 50, tickMs: 20 };
-        const sup = new Supervisor(repo, 'main', cfg, fakeSpawner);
+        const sup = new Supervisor(repo, 'main', cfg, fakeSpawner, undefined, admitted);
         await sup.tick();                                       // primer tick: arranca el tracking de actividad
         await new Promise((r) => setTimeout(r, 150));           // actividad congelada > ventana
         const out = await sup.tick();
@@ -370,9 +394,9 @@ describe('supervisor loop', () => {
     });
 
     itPosix('runSupervisorLoop: bootstrap gen-1 con stub codex, COMPLETE => libera lock y termina su generacion (R4.1/R4.5/R2.4)', async () => {  // verifies R4.1
-        initWatch(repo, 'main');
+        initUnattendedFixture(repo);
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', tickMs: 50, termGraceMs: 300, killGraceMs: 300 };
-        const loop = runSupervisorLoop(repo, 'main', cfg, fakeSpawner);
+        const loop = runSupervisorLoop(repo, 'main', cfg, fakeSpawner, undefined, admitted);
         await until(() => {
             const r = readJournal(repo, 'main');
             return r.state !== null && activeGeneration(r.state) !== undefined && fs.existsSync(supervisorLockPath(repo));
@@ -395,11 +419,11 @@ describe('supervisor loop', () => {
     });
 
     itPosix('reinicio tras crash entre beginGeneration y spawn recupera la misma generacion sin quedar wedged', async () => {
-        initWatch(repo, 'main');
+        initUnattendedFixture(repo);
         const begun = beginGeneration(repo, 'main');               // crash simulado: intent durable, sin ProcessRef
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', tickMs: 25, reconcileGraceMs: 300,
             termGraceMs: 300, killGraceMs: 300 };
-        const loop = runSupervisorLoop(repo, 'main', cfg, fakeSpawner);
+        const loop = runSupervisorLoop(repo, 'main', cfg, fakeSpawner, undefined, admitted);
         let recovered = false;
         try {
             await until(() => {

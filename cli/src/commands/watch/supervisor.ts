@@ -550,6 +550,7 @@ export class Supervisor {
 export async function runSupervisorLoop(
     repoRoot: string, branch: string, cfg: SupervisorConfig,
     spawner: WrapperSpawner = defaultWrapperSpawner(), trackRuntime?: TrackRuntime,
+    dispatchAdmission?: DispatchAdmission,
 ): Promise<void> {
     const r = readJournal(repoRoot, branch);
     if (r.corrupt || r.state === null) throw new Error('journal ausente o corrupto: corre `awm watch --init` primero');
@@ -565,7 +566,7 @@ export async function runSupervisorLoop(
     const onSignal = () => { shutdownRequested = true; wakeSleep?.(); };
     process.on('SIGINT', onSignal);
     process.on('SIGTERM', onSignal);
-    const sup = new Supervisor(repoRoot, branch, cfg, spawner, trackRuntime);
+    const sup = new Supervisor(repoRoot, branch, cfg, spawner, trackRuntime, dispatchAdmission);
     try {
         const s0 = readJournal(repoRoot, branch).state!;
         if (activeGeneration(s0) === undefined) {
