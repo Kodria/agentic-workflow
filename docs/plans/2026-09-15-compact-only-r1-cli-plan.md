@@ -154,17 +154,17 @@ Modify `cli/src/core/journal/types.ts`, `store.ts`, `paths.ts`, `fingerprint.ts`
 
 #### Implementation
 
-- [ ] Write RED tests for `watch --init --plan <path>`: valid unattended plan creates one
+- [x] Write RED tests for `watch --init --plan <path>`: valid unattended plan creates one
   atomic schema-2 binding `{path,digest,schema,executionMode,boundAt}`; duplicate init,
   corrupt store, schema-1, stale digest, changed Git fingerprint, active job, and stale
   verdict each block deterministically without duplicate work.
-- [ ] Validate the plan before initialization, bind canonical digest only for desatendido,
+- [x] Validate the plan before initialization, bind canonical digest only for desatendido,
   retain schema-1 readability as historical, preserve CAS/fencing/redaction, and make
   admission require an exact current binding before any dispatch is allowed.
-- [ ] Implement a pure reconciliation result for journal, plan, Git, active jobs, tests,
+- [x] Implement a pure reconciliation result for journal, plan, Git, active jobs, tests,
   sensors, and verdict obligations. Identical recovery requests reuse/reconcile obligations,
   never duplicate them.
-- [ ] Run CMD-ADMIT-UNIT RED then GREEN and CMD-TYPECHECK; complete both reviews and commit
+- [x] Run CMD-ADMIT-UNIT RED then GREEN and CMD-TYPECHECK; complete both reviews and commit
   `feat(journal): bind unattended cycles to plans (#126)`.
 
 #### Edge cases
