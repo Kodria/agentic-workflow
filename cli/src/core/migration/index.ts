@@ -17,7 +17,7 @@ const MAX = 128;
 
 function safeIssue(link: string): boolean { try { const u = new URL(link); return u.protocol === 'https:' && /^\/[^?#]*\/issues\/[1-9][0-9]*\/?$/.test(u.pathname); } catch { return false; } }
 function ids(text: string): string[] { const value = [...text.matchAll(TASK)].map(m => m[1]); if (value.length > MAX || new Set(value).size !== value.length) throw new Error('migration task ownership is ambiguous'); return value; }
-function readPlan(root: string, relative: string): string { if (path.isAbsolute(relative) || path.win32.isAbsolute(relative)) throw new Error('migration plan must be relative'); const file = path.resolve(root, relative); if (!file.startsWith(`${root}${path.sep}`) || fs.lstatSync(file).isSymbolicLink() || !fs.statSync(file).isFile()) throw new Error('migration plan must be contained regular file'); const bytes = fs.readFileSync(file); if (bytes.length > 1024 * 1024) throw new Error('migration plan exceeds bound'); return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+function readPlan(root: string, relative: string): string { if (path.isAbsolute(relative) || path.win32.isAbsolute(relative)) throw new Error('migration plan must be relative'); const file = path.resolve(root, relative); const parent = path.dirname(file); if (fs.realpathSync(parent) !== root && !fs.realpathSync(parent).startsWith(`${root}${path.sep}`)) throw new Error('migration plan escapes root'); if (!file.startsWith(`${root}${path.sep}`) || fs.lstatSync(file).isSymbolicLink() || !fs.statSync(file).isFile()) throw new Error('migration plan must be contained regular file'); const bytes = fs.readFileSync(file); if (bytes.length > 1024 * 1024) throw new Error('migration plan exceeds bound'); return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
 
 /** Public collector accepts no completion claims. All facts are derived locally and
  * every material record carries the initiative's durable #126 reference. */
@@ -43,8 +43,10 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
     const canonical148 = ISSUE_148.test(issueLinks.join('\n')) && planPath === 'docs/plans/2026-09-14-awm-facts-plan.md' && detectBranch(root) === 'codex/issue-148-awm-facts' && !!binding?.boundAt;
     const tasks = taskIds.map(id => {
         const task = journal.state?.tasks.find(candidate => candidate.id === id);
-        if (canonical148 && id === '1') return { id, state: 'completed' as const, missing: [] };
-        if (canonical148 && id === '2') return { id, state: 'pending' as const, missing: ['quality-review'] };
+        // A binding alone is not task evidence. #148 only changes once a record
+        // linked to this task is newer than binding.boundAt; this journal schema
+        // lacks per-task commit provenance, so retain the conservative state.
+        if (canonical148 && (id === '1' || id === '2')) return { id, state: 'pending' as const, missing: ['task-provenance-after-binding'] };
         if (!task) return { id, state: 'unstarted' as const, missing: [] };
         const reviews = task.reviewObligations;
         const spec = reviews.find(review => review.kind === 'spec'); const quality = reviews.find(review => review.kind === 'quality');
