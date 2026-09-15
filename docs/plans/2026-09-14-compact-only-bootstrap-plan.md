@@ -1,4 +1,5 @@
 # Compact-only Bootstrap Implementation Plan
+<!-- awm-qa-complete: 2026-09-15 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > to implement this plan. Execute the single slice with TDD, specification review,
