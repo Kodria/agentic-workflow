@@ -84,23 +84,29 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
     if (!binding || binding.path !== planPath || binding.digest !== digest || binding.executionMode !== 'desatendido') diagnostics.push('journal-plan-binding-stale');
     const jobs = journal.state ? Object.values(journal.state.jobs) : [];
     const declared = new Map((journal.state?.tasks ?? []).map(task => [task.id, declaredCommit(text, task.id, root)]));
-    // A verifier identifier is an ownership boundary. If two tasks name the
-    // same ID, a job satisfying it cannot authenticate either task: accepting
-    // it for both would let Task 2 borrow Task 1's evidence.
-    const verificationOwners = new Map<string, number>();
+    // A verifier identifier is an ownership boundary. A job must resolve to
+    // exactly one task; otherwise it could lend the same execution evidence
+    // to multiple task completions.
+    const verificationOwners = new Map<string, string[]>();
     for (const task of journal.state?.tasks ?? []) for (const item of task.verificationPlan) {
-        verificationOwners.set(item.id, (verificationOwners.get(item.id) ?? 0) + 1);
+        verificationOwners.set(item.id, [...(verificationOwners.get(item.id) ?? []), task.id]);
     }
     const claimedCommits = new Set<string>();
     const duplicateCommits = new Set<string>();
     for (const sha of declared.values()) if (sha) { if (claimedCommits.has(sha)) duplicateCommits.add(sha); else claimedCommits.add(sha); }
     for (const task of journal.state?.tasks ?? []) {
         const commitSha = declared.get(task.id); if (commitSha && !duplicateCommits.has(commitSha)) facts.push({ taskId: task.id, commitSha, issue126 });
-        const verificationIds = new Set(task.verificationPlan.map(item => item.id).filter(id => verificationOwners.get(id) === 1));
-        for (const job of jobs) if (job.verdict && job.fingerprint && job.argv.length > 0 && job.paths.length > 0 && job.satisfies?.some(id => verificationIds.has(id))) facts.push({ taskId: task.id, verificationItemId: job.satisfies?.find(id => verificationIds.has(id)), jobId: job.id, argv: job.argv, fingerprint: job.fingerprint, paths: job.paths, result: job.verdict, issue126 });
+        const verificationIds = new Set(task.verificationPlan.map(item => item.id).filter(id => verificationOwners.get(id)?.length === 1));
+        const belongsToTask = (job: typeof jobs[number]): boolean => {
+            const jobOwners = new Set((job.satisfies ?? []).flatMap(id => verificationOwners.get(id) ?? []));
+            return jobOwners.size === 1 && jobOwners.has(task.id);
+        };
+        for (const job of jobs) {
+            if (job.verdict && job.fingerprint && job.argv.length > 0 && job.paths.length > 0 && belongsToTask(job) && job.satisfies?.some(id => verificationIds.has(id))) facts.push({ taskId: task.id, verificationItemId: job.satisfies?.find(id => verificationIds.has(id)), jobId: job.id, argv: job.argv, fingerprint: job.fingerprint, paths: job.paths, result: job.verdict, issue126 });
+        }
         for (const obligation of task.reviewObligations) {
             const verdict = obligation.verdictId ? journal.state?.verdicts.find(item => item.id === obligation.verdictId) : undefined;
-            const fingerprintBound = jobs.some(job => job.fingerprint === verdict?.fingerprint && job.paths.length > 0 && job.argv.length > 0 && job.satisfies?.some(id => verificationIds.has(id)));
+            const fingerprintBound = jobs.some(job => belongsToTask(job) && job.fingerprint === verdict?.fingerprint && job.paths.length > 0 && job.argv.length > 0 && job.satisfies?.some(id => verificationIds.has(id)));
             if (verdict && verdict.obligationId === obligation.id && obligation.taskId === task.id && fingerprintBound) facts.push({ taskId: task.id, verdictId: verdict.id, obligationId: obligation.id, role: obligation.kind, result: verdict.result, fingerprint: verdict.fingerprint, paths: verdict.paths, at: verdict.receivedAt, issue126 });
         }
     }

@@ -81,4 +81,34 @@ describe('collectMigrationFacts', () => {
             expect(report.tasks.find(taskState => taskState.id === '2')).toMatchObject({ state: 'pending' });
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
+
+    it('rejects a job that satisfies otherwise exclusive verifiers from two tasks', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migration-multi-satisfies-'));
+        try {
+            fs.mkdirSync(path.join(root, 'docs', 'plans'), { recursive: true });
+            fs.writeFileSync(path.join(root, 'docs', 'plans', 'old.md'), '### Task 1: first\nFiles:\n- docs/plans/old.md\n\n### Task 2: second\nFiles:\n- task-2.txt\n');
+            execFileSync('git', ['init'], { cwd: root }); execFileSync('git', ['config', 'user.email', 't@e.invalid'], { cwd: root }); execFileSync('git', ['config', 'user.name', 'T'], { cwd: root });
+            execFileSync('git', ['add', '.'], { cwd: root }); execFileSync('git', ['commit', '-m', 'task 1'], { cwd: root });
+            const taskOneCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+            fs.writeFileSync(path.join(root, 'task-2.txt'), 'task 2'); execFileSync('git', ['add', '.'], { cwd: root }); execFileSync('git', ['commit', '-m', 'task 2'], { cwd: root });
+            const taskTwoCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+            fs.writeFileSync(path.join(root, 'docs', 'plans', 'old.md'), `### Task 1: first\nCommit: ${taskOneCommit}\nFiles:\n- docs/plans/old.md\n\n### Task 2: second\nCommit: ${taskTwoCommit}\nFiles:\n- task-2.txt\n`);
+            execFileSync('git', ['add', '.'], { cwd: root }); execFileSync('git', ['commit', '-m', 'record obligations'], { cwd: root });
+            const planPath = 'docs/plans/old.md'; const digest = require('crypto').createHash('sha256').update(fs.readFileSync(path.join(root, planPath), 'utf8')).digest('hex');
+            initBoundJournal(root, 'master', { path: planPath, digest, schema: 'compact-slices/v1', executionMode: 'desatendido', boundAt: '2026-09-15T00:00:00.000Z' });
+            const state = readJournal(root, 'master').state!;
+            const task = (id: string) => ({ id, title: id, status: 'done' as const, attempts: 1, verificationPlan: [{ id: `test:${id}`, kind: 'test' as const }, { id: `sensor:${id}`, kind: 'sensors' as const }], reviewObligations: [{ id: `spec:${id}`, taskId: id, kind: 'spec' as const, verdictId: `v-spec-${id}` }, { id: `quality:${id}`, taskId: id, kind: 'quality' as const, verdictId: `v-quality-${id}` }] });
+            state.tasks = [task('1'), task('2')];
+            const job = (id: string, satisfies: string[]) => ({ id, fingerprint: 'f', commandDigest: 'd', argv: ['node'], cwd: '.', paths: ['x'], expandedPaths: ['x'], executionState: 'exited' as const, observationState: 'progressing' as const, verdict: 'pass' as const, phaseTimestamps: {}, satisfies });
+            state.jobs = { multi: job('multi', ['test:1', 'test:2']), sensorOne: job('sensorOne', ['sensor:1']), sensorTwo: job('sensorTwo', ['sensor:2']) };
+            state.verdicts = state.tasks.flatMap(taskState => taskState.reviewObligations.map(obligation => ({ id: obligation.verdictId!, obligationId: obligation.id, result: 'pass' as const, detail: 'ok', receivedAt: '2026-09-15T01:00:00.000Z', fingerprint: 'f', argv: [], paths: [], cwd: '.' })));
+            writeJournal(root, 'master', state);
+            const report = collectMigrationFacts(planPath, root, ['https://github.com/Kodria/agentic-workflow/issues/126']);
+            expect(report.tasks).toEqual([
+                { id: '1', state: 'pending', missing: ['tests'] },
+                { id: '2', state: 'pending', missing: ['tests'] },
+            ]);
+            expect(report.facts.filter(fact => fact.jobId === 'multi')).toEqual([]);
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
 });
