@@ -2,7 +2,16 @@ import os from 'os';
 import fs from 'fs';
 import path from 'path';
 
+function isWithin(parent: string, candidate: string, pathApi: Pick<typeof path, 'isAbsolute' | 'relative' | 'sep'> = path): boolean {
+    const relative = pathApi.relative(parent, candidate);
+    return relative === '' || (relative !== '..' && !relative.startsWith(`..${pathApi.sep}`) && !pathApi.isAbsolute(relative));
+}
+
 describe('Jest environment isolation', () => {
+    it('treats a path on another volume as outside the operator home', () => {
+        expect(isWithin('C:\\operator-home', 'D:\\suite-root', path.win32)).toBe(false);
+    });
+
     it('does not inherit the operator Codex home', () => {
         expect(process.env.CODEX_HOME).toBeUndefined();
     });
@@ -19,7 +28,7 @@ describe('Jest environment isolation', () => {
         const suiteRoot = process.env.AWM_JEST_TMPDIR!;
         const operatorHome = fs.realpathSync(os.userInfo().homedir);
 
-        expect(path.relative(operatorHome, suiteRoot).startsWith('..')).toBe(true);
+        expect(isWithin(operatorHome, suiteRoot)).toBe(false);
         expect(process.env.HOME).toBe(path.join(suiteRoot, 'home'));
         expect(process.env.AWM_HOME).toBe(path.join(suiteRoot, 'awm-home'));
     });
@@ -42,7 +51,7 @@ describe('Jest environment isolation', () => {
             await expect(setup()).resolves.toBeUndefined();
             const suiteRoot = process.env.AWM_JEST_TMPDIR!;
             expect(suiteRoot.startsWith(path.join(fs.realpathSync(systemTemp), 'awm-jest-'))).toBe(true);
-            expect(path.relative(operatorHome, suiteRoot).startsWith('..')).toBe(true);
+            expect(isWithin(operatorHome, suiteRoot)).toBe(false);
             expect(process.env.HOME).toBe(path.join(suiteRoot, 'home'));
             expect(process.env.AWM_HOME).toBe(path.join(suiteRoot, 'awm-home'));
         } finally {
