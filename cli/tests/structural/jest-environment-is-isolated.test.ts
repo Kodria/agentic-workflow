@@ -17,7 +17,7 @@ describe('Jest environment isolation', () => {
 
     it('keeps the suite root and both homes outside the operator home', () => {
         const suiteRoot = process.env.AWM_JEST_TMPDIR!;
-        const operatorHome = '/Users/cencosud';
+        const operatorHome = fs.realpathSync(os.userInfo().homedir);
 
         expect(path.relative(operatorHome, suiteRoot).startsWith('..')).toBe(true);
         expect(process.env.HOME).toBe(path.join(suiteRoot, 'home'));
