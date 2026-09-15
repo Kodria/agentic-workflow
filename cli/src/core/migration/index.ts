@@ -16,7 +16,7 @@ const ISSUE_148 = /\/issues\/148\/?$/;
 const TASK = /^### Task ([1-9][0-9]{0,3}):/gm;
 const MAX = 128;
 
-function safeIssue(link: string): boolean { try { const u = new URL(link); return u.protocol === 'https:' && /^\/[^?#]*\/issues\/[1-9][0-9]*\/?$/.test(u.pathname); } catch { return false; } }
+function safeIssue(link: string): boolean { try { const u = new URL(link); return u.protocol === 'https:' && u.hostname === 'github.com' && /^\/Kodria\/agentic-workflow\/issues\/[1-9][0-9]*\/?$/.test(u.pathname); } catch { return false; } }
 function ids(text: string): string[] { const value = [...text.matchAll(TASK)].map(m => m[1]); if (value.length > MAX || new Set(value).size !== value.length) throw new Error('migration task ownership is ambiguous'); return value; }
 function readPlan(root: string, relative: string): string { if (path.isAbsolute(relative) || path.win32.isAbsolute(relative)) throw new Error('migration plan must be relative'); const file = path.resolve(root, relative); const parent = path.dirname(file); if (fs.realpathSync(parent) !== root && !fs.realpathSync(parent).startsWith(`${root}${path.sep}`)) throw new Error('migration plan escapes root'); if (!file.startsWith(`${root}${path.sep}`) || fs.lstatSync(file).isSymbolicLink() || !fs.statSync(file).isFile()) throw new Error('migration plan must be contained regular file'); const bytes = fs.readFileSync(file); if (bytes.length > 1024 * 1024) throw new Error('migration plan exceeds bound'); return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
 
@@ -87,11 +87,20 @@ export function collectIssue148HistoricalFacts(historicalRoot: string, issueLink
     const planPath = 'docs/plans/2026-09-14-awm-facts-plan.md'; const text = readPlan(root, planPath);
     const digest = crypto.createHash('sha256').update(text, 'utf8').digest('hex');
     const ledger = path.join(root, '.awm', 'ledger', 'codex__issue-148-awm-facts.jsonl');
-    const ledgerText = fs.existsSync(ledger) ? fs.readFileSync(ledger, 'utf8') : '';
+    let ledgerEntries: Array<{ branch: string; phase: string; source_skill: string; polarity: string; signature: string; ref: string }> = [];
+    try {
+        const realLedger = fs.realpathSync(ledger); if (!realLedger.startsWith(`${root}${path.sep}`) || fs.lstatSync(ledger).isSymbolicLink() || fs.statSync(ledger).size > 256 * 1024) throw new Error();
+        ledgerEntries = fs.readFileSync(realLedger, 'utf8').trim().split('\n').filter(Boolean).map(line => {
+            const value: unknown = JSON.parse(line); if (!value || typeof value !== 'object') throw new Error();
+            const item = value as Record<string, unknown>; if (typeof item.branch !== 'string' || typeof item.phase !== 'string' || typeof item.source_skill !== 'string' || typeof item.polarity !== 'string' || typeof item.signature !== 'string' || typeof item.ref !== 'string') throw new Error();
+            return item as typeof ledgerEntries[number];
+        });
+    } catch { ledgerEntries = []; }
     const ancestor = (() => { try { execFileSync('git', ['merge-base', '--is-ancestor', '81c008c', 'HEAD'], { cwd: root, stdio: 'pipe' }); return true; } catch { return false; } })();
     const taskOneChecked = /### Task 1:[\s\S]*?(?=\n### Task 2:)/.test(text) && /### Task 1:[\s\S]*?- \[x\]/.test(text);
-    const ledgerReviews = ledgerText.includes('specification-reviewer') && ledgerText.includes('requesting-code-review') && ledgerText.includes('awm-facts-nested-yaml-boundary-reviewed');
+    const ledgerReviews = ledgerEntries.some(item => item.branch === branch && item.phase === 'review' && item.source_skill === 'specification-reviewer' && item.polarity === 'win')
+        && ledgerEntries.some(item => item.branch === branch && item.phase === 'review' && item.source_skill === 'requesting-code-review' && item.polarity === 'win' && item.signature === 'awm-facts-nested-yaml-boundary-reviewed');
     const taskIds = ids(text); const proven = digest === 'c11477dd59cb19094983c671cc0b760f1d1e51b9679e13dba90f1b0c2cba48e7' && ancestor && taskOneChecked && ledgerReviews;
     const tasks = taskIds.map(id => id === '1' && proven ? { id, state: 'completed' as const, missing: [] } : id === '2' ? { id, state: 'pending' as const, missing: ['quality-review'] } : { id, state: 'unstarted' as const, missing: [] });
-    return { state: proven ? 'planning-required' : 'blocked', planDigest: digest, issueLinks: [...issueLinks], tasks, diagnostics: proven ? ['Task 2 quality re-review remains'] : ['issue-148 historical provenance is incomplete or inconsistent'], facts: [{ taskId: '1', commitSha: '81c008c', issue126 }] };
+    return { state: proven ? 'planning-required' : 'blocked', planDigest: digest, issueLinks: [...issueLinks], tasks, diagnostics: proven ? ['Task 2 quality re-review remains'] : ['issue-148 historical provenance is incomplete or inconsistent'], facts: [{ taskId: '1', issue126 }] };
 }
