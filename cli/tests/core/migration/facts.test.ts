@@ -27,6 +27,11 @@ describe('collectMigrationFacts', () => {
         expect(() => collectMigrationFacts('x.md', process.cwd(), ['https://github.com/Kodria/agentic-workflow/issues/148'])).toThrow('issue #126');
     });
 
+    it('rejects a plan reached through a parent symlink', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migration-link-')); const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migration-outside-'));
+        try { fs.writeFileSync(path.join(outside, 'plan.md'), '### Task 1: x\n'); fs.symlinkSync(outside, path.join(root, 'docs')); expect(() => collectMigrationFacts('docs/plan.md', root, ['https://github.com/Kodria/agentic-workflow/issues/126'])).toThrow(/symlink|escapes/); } finally { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); }
+    });
+
     it('certifies only a complete evidence chain belonging to one task', () => {
         const issue126 = 'https://github.com/Kodria/agentic-workflow/issues/126';
         const records = [

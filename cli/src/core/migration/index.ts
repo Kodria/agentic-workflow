@@ -40,7 +40,30 @@ function declaredCommit(text: string, taskId: string, cwd: string): string | und
     const files = /^Files:\s*\r?\n((?:\s*[-*]\s*[^\r\n]+\r?\n?)+)/mi.exec(section)?.[1]?.split(/\r?\n/).map(line => line.replace(/^\s*[-*]\s*/, '').trim()).filter(Boolean) ?? [];
     try { const full = execFileSync('git', ['rev-parse', '--verify', `${sha}^{commit}`], { cwd, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).trim(); execFileSync('git', ['merge-base', '--is-ancestor', full, 'HEAD'], { cwd, stdio: 'pipe', timeout: 2000 }); const changed = execFileSync('git', ['diff-tree', '--root', '--no-commit-id', '--name-only', '-r', full], { cwd, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).split(/\r?\n/).filter(Boolean); return files.length > 0 && changed.some(file => files.includes(file)) ? full : undefined; } catch { return undefined; }
 }
-function readPlan(root: string, relative: string): string { if (path.isAbsolute(relative) || path.win32.isAbsolute(relative)) throw new Error('migration plan must be relative'); const file = path.resolve(root, relative); const parent = path.dirname(file); if (fs.realpathSync(parent) !== root && !fs.realpathSync(parent).startsWith(`${root}${path.sep}`)) throw new Error('migration plan escapes root'); if (!file.startsWith(`${root}${path.sep}`) || fs.lstatSync(file).isSymbolicLink() || !fs.statSync(file).isFile()) throw new Error('migration plan must be contained regular file'); const bytes = fs.readFileSync(file); if (bytes.length > 1024 * 1024) throw new Error('migration plan exceeds bound'); return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+function readContainedRegularFile(root: string, relative: string, maximum: number, label: string): Buffer {
+    if (path.isAbsolute(relative) || path.win32.isAbsolute(relative)) throw new Error(`${label} must be relative`);
+    const file = path.resolve(root, relative);
+    if (!file.startsWith(`${root}${path.sep}`)) throw new Error(`${label} escapes root`);
+    // Inspect every name before opening it. The descriptor identity check below
+    // detects a rename/symlink swap in the interval before open().
+    let cursor = root;
+    for (const part of relative.split('/')) {
+        cursor = path.join(cursor, part);
+        if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error(`${label} traverses symlink`);
+    }
+    const before = fs.lstatSync(file);
+    if (!before.isFile() || before.size > maximum) throw new Error(`${label} must be bounded regular file`);
+    const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try {
+        const opened = fs.fstatSync(fd);
+        if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) throw new Error(`${label} changed after inspection`);
+        const bytes = fs.readFileSync(fd);
+        const after = fs.fstatSync(fd);
+        if (after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size) throw new Error(`${label} changed during read`);
+        return bytes;
+    } finally { fs.closeSync(fd); }
+}
+function readPlan(root: string, relative: string): string { return new TextDecoder('utf-8', { fatal: true }).decode(readContainedRegularFile(root, relative, 1024 * 1024, 'migration plan')); }
 
 /** Public collector accepts no completion claims. All facts are derived locally and
  * every material record carries the initiative's durable #126 reference. */
@@ -103,11 +126,10 @@ export function collectIssue148HistoricalFacts(historicalRoot: string, issueLink
     if (!issue126 || !issueLinks.some(link => safeIssue(link) && ISSUE_148.test(link))) throw new Error('issue-148 migration requires durable #126 and #148 links');
     const planPath = 'docs/plans/2026-09-14-awm-facts-plan.md'; const text = readPlan(root, planPath);
     const digest = crypto.createHash('sha256').update(text, 'utf8').digest('hex');
-    const ledger = path.join(root, '.awm', 'ledger', 'codex__issue-148-awm-facts.jsonl');
+    const ledgerPath = '.awm/ledger/codex__issue-148-awm-facts.jsonl';
     let ledgerEntries: Array<{ branch: string; phase: string; source_skill: string; polarity: string; signature: string; ref: string }> = [];
     try {
-        const realLedger = fs.realpathSync(ledger); if (!realLedger.startsWith(`${root}${path.sep}`) || fs.lstatSync(ledger).isSymbolicLink() || fs.statSync(ledger).size > 256 * 1024) throw new Error();
-        ledgerEntries = fs.readFileSync(realLedger, 'utf8').trim().split('\n').filter(Boolean).map(line => {
+        ledgerEntries = readContainedRegularFile(root, ledgerPath, 256 * 1024, 'issue-148 ledger').toString('utf8').trim().split('\n').filter(Boolean).map(line => {
             const value: unknown = JSON.parse(line); if (!value || typeof value !== 'object') throw new Error();
             const item = value as Record<string, unknown>; if (typeof item.branch !== 'string' || typeof item.phase !== 'string' || typeof item.source_skill !== 'string' || typeof item.polarity !== 'string' || typeof item.signature !== 'string' || typeof item.ref !== 'string') throw new Error();
             return item as typeof ledgerEntries[number];
