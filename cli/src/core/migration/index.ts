@@ -16,6 +16,20 @@ const ISSUE_148 = /\/issues\/148\/?$/;
 const TASK = /^### Task ([1-9][0-9]{0,3}):/gm;
 const MAX = 128;
 
+/** Pure task-scoped gate. Callers cannot combine a test from one task with a
+ * review from another: every required record carries the same task identity. */
+export function reconcileTaskEvidence(taskId: string, records: readonly EvidenceRecord[]): MigrationTask {
+    const own = records.filter(record => record.taskId === taskId);
+    if (own.some(record => record.result === 'fail' || record.result === 'inconclusive')) return { id: taskId, state: 'pending', missing: ['adverse-evidence'] };
+    const commit = own.some(record => typeof record.commitSha === 'string' && /^[a-f0-9]{40}$/i.test(record.commitSha));
+    const test = own.some(record => record.verificationItemId?.startsWith('test') && record.result === 'pass' && !!record.fingerprint && (record.paths?.length ?? 0) > 0);
+    const sensor = own.some(record => record.verificationItemId?.startsWith('sensor') && record.result === 'pass' && !!record.fingerprint && (record.paths?.length ?? 0) > 0);
+    const spec = own.some(record => record.role === 'spec' && record.result === 'pass' && !!record.verdictId && !!record.obligationId && !!record.at);
+    const quality = own.some(record => record.role === 'quality' && record.result === 'pass' && !!record.verdictId && !!record.obligationId && !!record.at);
+    const missing = [...(commit ? [] : ['commit']), ...(test ? [] : ['tests']), ...(sensor ? [] : ['sensors']), ...(spec ? [] : ['specification-review']), ...(quality ? [] : ['quality-review'])];
+    return { id: taskId, state: missing.length === 0 ? 'completed' : 'pending', missing };
+}
+
 function safeIssue(link: string): boolean { try { const u = new URL(link); return u.protocol === 'https:' && u.hostname === 'github.com' && /^\/Kodria\/agentic-workflow\/issues\/[1-9][0-9]*\/?$/.test(u.pathname); } catch { return false; } }
 function ids(text: string): string[] { const value = [...text.matchAll(TASK)].map(m => m[1]); if (value.length > MAX || new Set(value).size !== value.length) throw new Error('migration task ownership is ambiguous'); return value; }
 function readPlan(root: string, relative: string): string { if (path.isAbsolute(relative) || path.win32.isAbsolute(relative)) throw new Error('migration plan must be relative'); const file = path.resolve(root, relative); const parent = path.dirname(file); if (fs.realpathSync(parent) !== root && !fs.realpathSync(parent).startsWith(`${root}${path.sep}`)) throw new Error('migration plan escapes root'); if (!file.startsWith(`${root}${path.sep}`) || fs.lstatSync(file).isSymbolicLink() || !fs.statSync(file).isFile()) throw new Error('migration plan must be contained regular file'); const bytes = fs.readFileSync(file); if (bytes.length > 1024 * 1024) throw new Error('migration plan exceeds bound'); return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }

@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { collectMigrationFacts } from '../../../src/core/migration';
+import { collectMigrationFacts, reconcileTaskEvidence } from '../../../src/core/migration';
 
 describe('collectMigrationFacts', () => {
     it('does not certify a task from a Git commit without durable test and review evidence', () => {
@@ -24,5 +24,18 @@ describe('collectMigrationFacts', () => {
 
     it('rejects material facts without the durable #126 link', () => {
         expect(() => collectMigrationFacts('x.md', process.cwd(), ['https://github.com/Kodria/agentic-workflow/issues/148'])).toThrow('issue #126');
+    });
+
+    it('certifies only a complete evidence chain belonging to one task', () => {
+        const issue126 = 'https://github.com/Kodria/agentic-workflow/issues/126';
+        const records = [
+            { taskId: '1', commitSha: 'a'.repeat(40), issue126 },
+            { taskId: '1', verificationItemId: 'test:1', result: 'pass' as const, fingerprint: 'f', paths: ['x'], issue126 },
+            { taskId: '1', verificationItemId: 'sensor:1', result: 'pass' as const, fingerprint: 'f', paths: ['x'], issue126 },
+            { taskId: '1', role: 'spec' as const, result: 'pass' as const, verdictId: 'v1', obligationId: 'o1', at: '2026-09-15T00:00:00.000Z', issue126 },
+            { taskId: '1', role: 'quality' as const, result: 'pass' as const, verdictId: 'v2', obligationId: 'o2', at: '2026-09-15T00:00:00.000Z', issue126 },
+        ];
+        expect(reconcileTaskEvidence('1', records)).toMatchObject({ state: 'completed' });
+        expect(reconcileTaskEvidence('2', records)).toMatchObject({ state: 'pending' });
     });
 });
