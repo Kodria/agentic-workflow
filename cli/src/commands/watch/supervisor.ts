@@ -199,8 +199,20 @@ export class Supervisor {
             const hasStaleReview = before0.state.verdicts.some(verdict => verdict.fingerprint === '' || (verdict.argv.length > 0 && (() => {
                 try { return computeFingerprint(this.repoRoot, verdict.argv, verdict.paths, verdict.cwd).fingerprint !== verdict.fingerprint; } catch { return true; }
             })()));
-            const openReviewOrFix = before0.state.tasks.some(task => task.reviewObligations.some(obligation => !obligation.verdictId))
-                || before0.state.fixes.some(fix => !fix.closed);
+            // Keep the same fail-closed review/fix semantics as job/gate.ts:
+            // missing required kinds, dangling verdict references, adverse
+            // verdicts, and an adverse verdict without a closed fix all stop
+            // recovery before a controller can create more work.
+            const verdictById = new Map(before0.state.verdicts.map(verdict => [verdict.id, verdict]));
+            const openReviewOrFix = before0.state.tasks.some(task => {
+                const obligations = task.reviewObligations;
+                return !(['spec', 'quality'] as const).every(kind => obligations.some(obligation => obligation.kind === kind))
+                    || obligations.some(obligation => {
+                        const verdict = obligation.verdictId === undefined ? undefined : verdictById.get(obligation.verdictId);
+                        return verdict === undefined || verdict.result !== 'pass';
+                    });
+            }) || before0.state.verdicts.some(verdict => verdict.result !== 'pass'
+                && !before0.state!.fixes.some(fix => fix.verdictId === verdict.id && fix.closed));
             const recovery = reconcileUnattendedRecovery({
                 journal: before0.state, journalCorrupt: false, plan: before0.state.planBinding,
                 git: staleJob ? 'changed' : 'current', activeJobIds,
