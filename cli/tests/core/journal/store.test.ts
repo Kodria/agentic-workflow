@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { initJournal, readJournal, writeJournal, appendEvent } from '../../../src/core/journal/store';
-import { statePath, journalDir, eventsPath } from '../../../src/core/journal/paths';
+import { statePath, journalDir, requestsDir, acksDir, logsDir, exportDir, eventsPath } from '../../../src/core/journal/paths';
 
 describe('journal store', () => {
     let repo: string;
@@ -23,6 +23,13 @@ describe('journal store', () => {
         const r = readJournal(repo, 'rama');
         expect(r.corrupt).toBe(false);
         expect(r.state!.revision).toBe(0);
+    });
+
+    test('initJournal es idempotente cuando el arbol de journal ya existe', () => {
+        initJournal(repo, 'rama');
+
+        expect(() => initJournal(repo, 'rama')).not.toThrow();
+        expect(readJournal(repo, 'rama')).toMatchObject({ corrupt: false, state: { revision: 0 } });
     });
 
     test('writeJournal incrementa revision y rechaza revision vieja (R1.2)', () => {  // verifies R1.2
@@ -67,6 +74,26 @@ describe('journal store', () => {
             fs.symlinkSync(outside, path.join(repo, '.awm'));
             expect(() => initJournal(repo, 'rama')).toThrow(/symlink/i);
             expect(fs.existsSync(path.join(outside, 'journal'))).toBe(false);
+        } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+    });
+
+    test.each([
+        ['.awm', (root: string) => path.join(root, '.awm')],
+        ['journal', (root: string) => path.join(root, '.awm', 'journal')],
+        ['branch', (root: string) => journalDir(root, 'rama')],
+        ['requests', (root: string) => requestsDir(root, 'rama')],
+        ['acks', (root: string) => acksDir(root, 'rama')],
+        ['logs', (root: string) => logsDir(root, 'rama')],
+        ['export', (root: string) => exportDir(root, 'rama')],
+    ])('initJournal rechaza el segmento symlink %s', (_name, segment) => {
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-store-outside-'));
+        const target = segment(repo);
+        try {
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            fs.symlinkSync(outside, target);
+
+            expect(() => initJournal(repo, 'rama')).toThrow(/symlink/i);
+            expect(fs.readdirSync(outside)).toEqual([]);
         } finally { fs.rmSync(outside, { recursive: true, force: true }); }
     });
 

@@ -67,7 +67,7 @@ function normalizeSchemaOne(value: unknown): unknown {
 function initializeDirectories(repoRoot: string, branch: string): void {
     for (const d of journalDirectories(repoRoot, branch)) {
         assertControlledDirectory(d);
-        fs.mkdirSync(d, { recursive: false, mode: 0o700 });
+        if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: false, mode: 0o700 });
         assertControlledDirectory(d);
         fs.chmodSync(d, 0o700);   // mkdirSync mode es umask-dependiente: fijar explicito (R1.2)
     }
