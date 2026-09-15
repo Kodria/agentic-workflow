@@ -10,7 +10,7 @@
 
 **Tech Stack:** Node.js 24 for local verification (package contract remains Node.js >=22), TypeScript 5.9, Commander 14, Jest 30.
 
-**Execution mode:** interactive
+**Modo de ejecución:** desatendido
 
 This is a one-time bootstrap plan. Its temporary hyphen-only requirement IDs exist because
 the pre-change CLI cannot validate the canonical dotted IDs that this slice enables. The
