@@ -5,7 +5,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { parseJsonNoDuplicate } from '../../../src/core/plan/json';
 import type { PlanValidationReport } from '../../../src/core/plan/types';
-import { validatePlanFile } from '../../../src/core/plan/validate';
+import { validatePlanFile, validatePlanSnapshot } from '../../../src/core/plan/validate';
 
 jest.mock('child_process', () => ({ exec: jest.fn(), execFileSync: jest.fn(), execSync: jest.fn(), spawn: jest.fn(), spawnSync: jest.fn() }));
 
@@ -50,6 +50,15 @@ function fixture(root: string, mutate?: (manifest: Record<string, unknown>) => v
 }
 
 describe('validatePlanFile', () => {
+    it('validates an authenticated snapshot without reopening a swapped plan parent', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plan-snapshot-')); const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plan-snapshot-outside-'));
+        try {
+            fs.mkdirSync(path.join(root, 'docs')); const snapshot = '### Task 1: anchored\n';
+            fs.writeFileSync(path.join(root, 'docs', 'plan.md'), snapshot);
+            fs.rmSync(path.join(root, 'docs'), { recursive: true }); fs.writeFileSync(path.join(outside, 'plan.md'), '<!-- attacker -->'); fs.symlinkSync(outside, path.join(root, 'docs'));
+            expect(validatePlanSnapshot('docs/plan.md', root, snapshot)).toMatchObject({ state: 'migration-required' });
+        } finally { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); }
+    });
     let root: string;
     beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plan-')); });
     afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });

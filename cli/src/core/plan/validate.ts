@@ -206,19 +206,26 @@ function checkMarkdown(text: string, slices: PlanSlice[]): PlanValidationReport 
     return undefined;
 }
 
-/** Read-only validator for a bounded compact-slices/v1 Markdown plan. */
-export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanValidationReport {
+/** Shared parser. A supplied snapshot is already descriptor-anchored by its caller. */
+function validatePlan(planPath: string, cwd: string, snapshot?: Buffer): PlanValidationReport {
     if (typeof planPath !== 'string' || planPath.length === 0) throw new Error('planPath must be a non-empty path');
     if (typeof cwd !== 'string' || cwd.length === 0) throw new Error('cwd must be a non-empty directory path');
     let root: string; try { root = fs.realpathSync(cwd); if (!fs.statSync(root).isDirectory()) throw new Error(); } catch { throw new Error('cwd must resolve to an existing directory'); }
     const candidate = path.resolve(root, planPath); if (!inside(root, candidate)) return diagnostic('PLAN_PATH_UNSAFE', 'plan path must be inside cwd');
-    const relativePlan = path.relative(root, candidate).replace(/\\/g, '/'); const planFile = regularInside(root, relativePlan);
-    if (!planFile) return diagnostic('PLAN_PATH_UNSAFE', 'plan path must be a contained regular non-symlink file');
-    const planRead = readInspected(planFile, MAX_PLAN);
-    if (planRead.state === 'unsafe') return diagnostic('PLAN_PATH_UNSAFE', 'plan path changed after inspection');
-    if (planRead.state === 'limit') return diagnostic('PLAN_LIMIT', 'plan exceeds maximum size');
-    if (planRead.state === 'read') return diagnostic('PLAN_READ', 'plan cannot be read');
-    const bytes = planRead.bytes;
+    const relativePlan = path.relative(root, candidate).replace(/\\/g, '/');
+    let bytes: Buffer;
+    if (snapshot) {
+        if (snapshot.length > MAX_PLAN) return diagnostic('PLAN_LIMIT', 'plan exceeds maximum size');
+        bytes = Buffer.from(snapshot);
+    } else {
+        const planFile = regularInside(root, relativePlan);
+        if (!planFile) return diagnostic('PLAN_PATH_UNSAFE', 'plan path must be a contained regular non-symlink file');
+        const planRead = readInspected(planFile, MAX_PLAN);
+        if (planRead.state === 'unsafe') return diagnostic('PLAN_PATH_UNSAFE', 'plan path changed after inspection');
+        if (planRead.state === 'limit') return diagnostic('PLAN_LIMIT', 'plan exceeds maximum size');
+        if (planRead.state === 'read') return diagnostic('PLAN_READ', 'plan cannot be read');
+        bytes = planRead.bytes;
+    }
     let text: string; try { text = normalizeLineEndings(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)); } catch { return diagnostic('PLAN_ENCODING', 'plan must be valid UTF-8'); }
     const starts = count(text, START); const ends = count(text, END); const signaled = starts > 0 || ends > 0 || compactSchemaSignal(text);
     if (!signaled) return markerlessSchemaClassification(text) ?? { state: 'migration-required', reason: 'unmarked-plan' };
@@ -269,4 +276,15 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     freezeJson(report);
     verifiedValidReports.add(report);
     return report;
+}
+
+/** Read-only validator for a bounded compact-slices/v1 Markdown plan. */
+export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanValidationReport {
+    return validatePlan(planPath, cwd);
+}
+
+/** Validate an already-authenticated plan snapshot without reopening planPath. */
+export function validatePlanSnapshot(planPath: string, cwd: string, text: string): PlanValidationReport {
+    if (typeof text !== 'string') throw new Error('plan snapshot must be text');
+    return validatePlan(planPath, cwd, Buffer.from(text, 'utf8'));
 }

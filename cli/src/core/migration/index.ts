@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { validatePlanFile } from '../plan/validate';
+import { validatePlanSnapshot } from '../plan/validate';
 import { detectBranch } from '../ledger/store';
 import { readJournal } from '../journal/store';
 import { secureFs } from '../secure-fs/native-bridge';
@@ -64,7 +64,8 @@ function readPlan(root: string, relative: string): string { return new TextDecod
 export function collectMigrationFacts(planPath: string, cwd: string, issueLinks: string[]): MigrationFactsReport {
     if (!Array.isArray(issueLinks) || issueLinks.length === 0 || issueLinks.some(link => typeof link !== 'string' || !safeIssue(link)) || !issueLinks.some(link => ISSUE_126.test(link))) throw new Error('migration material facts require durable issue #126 link');
     const root = fs.realpathSync(cwd); const text = readPlan(root, planPath); const taskIds = ids(text);
-    const plan = validatePlanFile(planPath, root);
+    // Validate the descriptor-anchored bytes above; never reopen planPath.
+    const plan = validatePlanSnapshot(planPath, root, text);
     if (plan.state !== 'migration-required' && plan.state !== 'valid') return { state: 'blocked', issueLinks: [...issueLinks], tasks: [], diagnostics: ['plan-not-migratable'], facts: [] };
     const issue126 = issueLinks.find(link => ISSUE_126.test(link))!;
     const facts: EvidenceRecord[] = [];
