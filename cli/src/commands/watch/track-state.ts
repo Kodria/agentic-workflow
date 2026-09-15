@@ -14,12 +14,22 @@ export interface TrackRuntime {
     initTrackJournal(ref: TrackRef, context: TrackContext): void;
     spawnSupervisor(ref: TrackRef): ProcessRef | void;
     observeSupervisor(ref: TrackRef): SupervisorObservation;
+    // Identity-verified: never kill a raw pid. `true` confirms that the
+    // owned supervisor group is absent now or was already absent.
     stopOwnSupervisor(ref: TrackRef): Promise<boolean>;
+    // `runBeginTeardown` proves ownership (intent, descriptor, and git
+    // worktree listing) before this call; implementations retain their own
+    // clean-worktree and checked-out-branch guards (`-d`, never `-D`).
     removeOwnedWorktree(repo: string, ref: TrackRef): void;
     removeOwnedBranch(repo: string, branch: string): void;
+    // Durable cross-worktree request consumed by the track's own supervisor;
+    // the plan supervisor never writes the track journal directly.
     emitFreezeRequest(ref: TrackRef, generationToken: string): void;
     mergeFrozenTrack(repo: string, intent: JoinIntent): void;
     abortOwnedMerge(repo: string, intent: JoinIntent): void;
+    // Acquires the integration lock after pausing the controller generation.
+    // It is idempotent per live process: callers distinguish real acquisition
+    // from the already-held no-op to preserve one mutable boundary per tick.
     ensureIntegrationLock(planJournalId: string, expectedPlanHeadSha: string): Promise<'acquired' | 'already-held'>;
     pauseControllerGeneration(): Promise<boolean>;
     releaseIntegrationLockIfHeld(): void;
