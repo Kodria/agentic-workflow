@@ -37,7 +37,8 @@ function declaredCommit(text: string, taskId: string, cwd: string): string | und
     const start = text.search(new RegExp(`^### Task ${taskId}:`, 'm')); if (start < 0) return undefined;
     const end = text.indexOf('\n### Task ', start + 1); const section = text.slice(start, end < 0 ? text.length : end);
     const sha = /^Commit:\s*([a-f0-9]{7,40})\s*$/mi.exec(section)?.[1]; if (!sha) return undefined;
-    try { const full = execFileSync('git', ['rev-parse', '--verify', `${sha}^{commit}`], { cwd, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).trim(); execFileSync('git', ['merge-base', '--is-ancestor', full, 'HEAD'], { cwd, stdio: 'pipe', timeout: 2000 }); return full; } catch { return undefined; }
+    const files = /^Files:\s*\r?\n((?:\s*[-*]\s*[^\r\n]+\r?\n?)+)/mi.exec(section)?.[1]?.split(/\r?\n/).map(line => line.replace(/^\s*[-*]\s*/, '').trim()).filter(Boolean) ?? [];
+    try { const full = execFileSync('git', ['rev-parse', '--verify', `${sha}^{commit}`], { cwd, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).trim(); execFileSync('git', ['merge-base', '--is-ancestor', full, 'HEAD'], { cwd, stdio: 'pipe', timeout: 2000 }); const changed = execFileSync('git', ['diff-tree', '--root', '--no-commit-id', '--name-only', '-r', full], { cwd, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).split(/\r?\n/).filter(Boolean); return files.length > 0 && changed.some(file => files.includes(file)) ? full : undefined; } catch { return undefined; }
 }
 function readPlan(root: string, relative: string): string { if (path.isAbsolute(relative) || path.win32.isAbsolute(relative)) throw new Error('migration plan must be relative'); const file = path.resolve(root, relative); const parent = path.dirname(file); if (fs.realpathSync(parent) !== root && !fs.realpathSync(parent).startsWith(`${root}${path.sep}`)) throw new Error('migration plan escapes root'); if (!file.startsWith(`${root}${path.sep}`) || fs.lstatSync(file).isSymbolicLink() || !fs.statSync(file).isFile()) throw new Error('migration plan must be contained regular file'); const bytes = fs.readFileSync(file); if (bytes.length > 1024 * 1024) throw new Error('migration plan exceeds bound'); return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
 
@@ -99,7 +100,7 @@ export function collectIssue148HistoricalFacts(historicalRoot: string, issueLink
     const branch = execFileSync('git', ['branch', '--show-current'], { cwd: root, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).trim();
     if (branch !== 'codex/issue-148-awm-facts') throw new Error('historical root is not the admitted issue-148 branch');
     const issue126 = issueLinks.find(link => ISSUE_126.test(link));
-    if (!issue126 || !issueLinks.some(link => ISSUE_148.test(link))) throw new Error('issue-148 migration requires durable #126 and #148 links');
+    if (!issue126 || !issueLinks.some(link => safeIssue(link) && ISSUE_148.test(link))) throw new Error('issue-148 migration requires durable #126 and #148 links');
     const planPath = 'docs/plans/2026-09-14-awm-facts-plan.md'; const text = readPlan(root, planPath);
     const digest = crypto.createHash('sha256').update(text, 'utf8').digest('hex');
     const ledger = path.join(root, '.awm', 'ledger', 'codex__issue-148-awm-facts.jsonl');
