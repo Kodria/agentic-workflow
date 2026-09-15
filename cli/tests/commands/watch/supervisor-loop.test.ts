@@ -13,6 +13,7 @@ import { initJournal, readJournal, writeJournal } from '../../../src/core/journa
 import { supervisorLockPath } from '../../../src/core/journal/paths';
 import { spawnStructured } from '../../../src/core/journal/process';
 import { computeFingerprint } from '../../../src/core/journal/fingerprint';
+import * as fingerprint from '../../../src/core/journal/fingerprint';
 import { reconcileTracks, defaultTrackRuntime, TrackRuntime, SupervisorObservation } from '../../../src/commands/watch/tracks';
 import type { TrackRef, ProcessRef } from '../../../src/core/journal/types';
 import type { AdmissionReport } from '../../../src/core/admission';
@@ -191,6 +192,7 @@ describe('supervisor loop', () => {
         process.env.PATH = `${stubBin}${path.delimiter}${process.env.PATH}`;
     });
     afterEach(() => {
+        jest.restoreAllMocks();
         process.env.PATH = oldPath;
         fs.rmSync(repo, { recursive: true, force: true });
         fs.rmSync(stubBin, { recursive: true, force: true });
@@ -199,35 +201,57 @@ describe('supervisor loop', () => {
     test('ticks drenan y declaran COMPLETE solo con gate verde + cero vivos (R4.5)', async () => {  // verifies R4.5
         initUnattendedFixture(repo);
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', tickMs: 50, reconcileGraceMs: 10000 };
-        const sup = new Supervisor(repo, 'main', cfg, fakeSpawner, undefined, admitted);
+        // Recovery classification has its own unit suite. This lifecycle test
+        // owns draining/COMPLETE, so pin the recovered schema-2 fixture green
+        // and do not leak the external controller stub merely to test wrappers.
+        const recovery = jest.spyOn(fingerprint, 'reconcileUnattendedRecovery').mockReturnValue({
+            state: 'ready', nextAction: 'select-work', activeJobIds: [], diagnostics: [],
+        });
+        let controllerSpawnAttempts = 0;
+        const lifecycleSpawner: WrapperSpawner = (job, nonce, logsRoot, repoRoot) => {
+            if (job.argv[0] === 'codex') { controllerSpawnAttempts++; return; }
+            fakeSpawner(job, nonce, logsRoot, repoRoot);
+        };
+        const sup = new Supervisor(repo, 'main', cfg, lifecycleSpawner, undefined, admitted);
+        // The schema-2 recovery path only consumes requests authorized by the
+        // active generation. Establish it before issuing the scenario facts;
+        // the legacy fixture's hard-coded `g0` was never consumed and left the
+        // fake controller running forever in `select-work`.
+        const generation = beginGeneration(repo, 'main');
         // el controlador (aqui: el test) registra plan de ciclo + task + jobs enlazados
-        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e1',
+        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: generation.token, idempotencyKey: 'e1',
             payload: { entity: 'task', taskId: 'T1', title: 't', verificationPlan: [{ id: 'v1', kind: 'test' }, { id: 'v-sensors', kind: 'sensors' }], reviewObligations: [{ id: 'o-spec', kind: 'spec' }, { id: 'o-quality', kind: 'quality' }] } });
-        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e2',
+        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: generation.token, idempotencyKey: 'e2',
             payload: { entity: 'cycle-plan', items: [{ id: 'cv1', kind: 'qa' }, { id: 'cv-interlock', kind: 'interlock' }] } });
-        requestJob(repo, 'main', 'g0', ['node', '-e', 'setTimeout(()=>process.exit(0), 400)'], [], '.', { satisfies: 'v1' });
-        requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v-sensors' });
-        requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv1' });
-        requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv-interlock' });
-        emitVerdict(repo, 'g0', 'o-spec', 'verd-spec');
-        emitVerdict(repo, 'g0', 'o-quality', 'verd-quality');
-        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e3',
+        requestJob(repo, 'main', generation.token, ['node', '-e', 'setTimeout(()=>process.exit(0), 400)'], [], '.', { satisfies: 'v1' });
+        requestJob(repo, 'main', generation.token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v-sensors' });
+        requestJob(repo, 'main', generation.token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv1' });
+        requestJob(repo, 'main', generation.token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv-interlock' });
+        emitVerdict(repo, generation.token, 'o-spec', 'verd-spec');
+        emitVerdict(repo, generation.token, 'o-quality', 'verd-quality');
+        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: generation.token, idempotencyKey: 'e3',
             payload: { entity: 'task-status', taskId: 'T1', status: 'done' } });
-        let sawContinueWithLiveJob = false;
-        let outcome = 'continue';
-        for (let i = 0; i < 400 && outcome !== 'complete'; i++) {
-            outcome = await sup.tick();
-            const s = readJournal(repo, 'main').state!;
-            const live = Object.values(s.jobs).some((j) => ['received', 'spawn-intent', 'claimed', 'running'].includes(j.executionState));
-            if (outcome === 'continue' && live) sawContinueWithLiveJob = true;   // drenaje ANTES de COMPLETE
-            await new Promise((r) => setTimeout(r, 50));
+        try {
+            let sawContinueWithLiveJob = false;
+            let outcome = 'continue';
+            for (let i = 0; i < 400 && outcome !== 'complete'; i++) {
+                outcome = await sup.tick();
+                const s = readJournal(repo, 'main').state!;
+                const live = Object.values(s.jobs).some((j) => ['received', 'spawn-intent', 'claimed', 'running'].includes(j.executionState));
+                if (outcome === 'continue' && live) sawContinueWithLiveJob = true;   // drenaje ANTES de COMPLETE
+                await new Promise((r) => setTimeout(r, 50));
+            }
+            expect(outcome).toBe('complete');
+            expect(sawContinueWithLiveJob).toBe(true);
+            const final = readJournal(repo, 'main').state!;
+            expect(final.cycle.status).toBe('COMPLETE');
+            expect(typeof final.cycle.completedAt).toBe('string');
+            expect(Object.values(final.jobs).every((j) => j.executionState === 'exited' && j.verdict === 'pass')).toBe(true);
+            expect(final.generations.every((entry) => entry.state === 'terminated' && entry.processRef === undefined)).toBe(true);
+            expect(controllerSpawnAttempts).toBeGreaterThan(0);
+        } finally {
+            recovery.mockRestore();
         }
-        expect(outcome).toBe('complete');
-        expect(sawContinueWithLiveJob).toBe(true);
-        const final = readJournal(repo, 'main').state!;
-        expect(final.cycle.status).toBe('COMPLETE');
-        expect(typeof final.cycle.completedAt).toBe('string');
-        expect(Object.values(final.jobs).every((j) => j.executionState === 'exited' && j.verdict === 'pass')).toBe(true);
     });
 
     // Regresion (post-review #2, Task 12/R7 — Finding 2 de la segunda ronda
@@ -273,21 +297,32 @@ describe('supervisor loop', () => {
             // --- Fase 2: sobre ESE MISMO journal, completar el ciclo por el
             // camino generico (task done + qa/interlock satisfechos + cero
             // jobs vivos) — la misma receta que la prueba R4.5 de arriba.
-            emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e1',
+            const generation = beginGeneration(repo, 'main');
+            emitRequest(repo, 'main', { kind: 'register-entity', generationToken: generation.token, idempotencyKey: 'e1',
                 payload: { entity: 'task', taskId: 'T1', title: 't', verificationPlan: [{ id: 'v1', kind: 'test' }, { id: 'v-sensors', kind: 'sensors' }], reviewObligations: [{ id: 'o-spec', kind: 'spec' }, { id: 'o-quality', kind: 'quality' }] } });
-            emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e2',
+            emitRequest(repo, 'main', { kind: 'register-entity', generationToken: generation.token, idempotencyKey: 'e2',
                 payload: { entity: 'cycle-plan', items: [{ id: 'cv1', kind: 'qa' }, { id: 'cv-interlock', kind: 'interlock' }] } });
-            requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v1' });
-            requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v-sensors' });
-            requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv1' });
-            requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv-interlock' });
-            emitVerdict(repo, 'g0', 'o-spec', 'verd-spec');
-            emitVerdict(repo, 'g0', 'o-quality', 'verd-quality');
-            emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e3',
+            requestJob(repo, 'main', generation.token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v1' });
+            requestJob(repo, 'main', generation.token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v-sensors' });
+            requestJob(repo, 'main', generation.token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv1' });
+            requestJob(repo, 'main', generation.token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv-interlock' });
+            emitVerdict(repo, generation.token, 'o-spec', 'verd-spec');
+            emitVerdict(repo, generation.token, 'o-quality', 'verd-quality');
+            emitRequest(repo, 'main', { kind: 'register-entity', generationToken: generation.token, idempotencyKey: 'e3',
                 payload: { entity: 'task-status', taskId: 'T1', status: 'done' } });
 
             const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', tickMs: 50, reconcileGraceMs: 10000 };
-            const sup = new Supervisor(repo, 'main', cfg, fakeSpawner, undefined, admitted);
+            // The compact recovery reducer is verified independently. This test
+            // exercises the fallback SERIAL completion path, so avoid an
+            // external controller process while keeping real job wrappers.
+            jest.spyOn(fingerprint, 'reconcileUnattendedRecovery').mockReturnValue({
+                state: 'ready', nextAction: 'select-work', activeJobIds: [], diagnostics: [],
+            });
+            const lifecycleSpawner: WrapperSpawner = (job, nonce, logsRoot, repoRoot) => {
+                if (job.argv[0] === 'codex') return;
+                fakeSpawner(job, nonce, logsRoot, repoRoot);
+            };
+            const sup = new Supervisor(repo, 'main', cfg, lifecycleSpawner, undefined, admitted);
             let outcome = 'continue';
             for (let i = 0; i < 400 && outcome !== 'complete'; i++) {
                 outcome = await sup.tick();
@@ -298,6 +333,8 @@ describe('supervisor loop', () => {
             expect(final.cycle.status).toBe('COMPLETE');
             expect(final.cohortPhase).toBe('SERIAL');   // nunca inventa una transicion SERIAL -> COMPLETE
             for (const t of final.tracks!) expect(['REMOVED', 'DECLARED']).toContain(t.phase);
+            const { refIsAlive } = require('../../../src/core/journal/process');
+            expect(final.generations.every((entry) => entry.state === 'terminated' && (entry.processRef === undefined || !refIsAlive(entry.processRef)))).toBe(true);
         } finally {
             fs.rmSync(tracksRoot, { recursive: true, force: true });
         }
@@ -395,6 +432,9 @@ describe('supervisor loop', () => {
 
     itPosix('runSupervisorLoop: bootstrap gen-1 con stub codex, COMPLETE => libera lock y termina su generacion (R4.1/R4.5/R2.4)', async () => {  // verifies R4.1
         initUnattendedFixture(repo);
+        jest.spyOn(fingerprint, 'reconcileUnattendedRecovery').mockReturnValue({
+            state: 'ready', nextAction: 'select-work', activeJobIds: [], diagnostics: [],
+        });
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', tickMs: 50, termGraceMs: 300, killGraceMs: 300 };
         const loop = runSupervisorLoop(repo, 'main', cfg, fakeSpawner, undefined, admitted);
         await until(() => {
@@ -416,10 +456,14 @@ describe('supervisor loop', () => {
         // generacion propia terminada: cero procesos codex huerfanos (R2.4)
         const { refIsAlive } = require('../../../src/core/journal/process');
         expect(gen.processRef === undefined || !refIsAlive(gen.processRef)).toBe(true);
+        expect(gen.state).toBe('terminated');
     });
 
     itPosix('reinicio tras crash entre beginGeneration y spawn recupera la misma generacion sin quedar wedged', async () => {
         initUnattendedFixture(repo);
+        jest.spyOn(fingerprint, 'reconcileUnattendedRecovery').mockReturnValue({
+            state: 'ready', nextAction: 'select-work', activeJobIds: [], diagnostics: [],
+        });
         const begun = beginGeneration(repo, 'main');               // crash simulado: intent durable, sin ProcessRef
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', tickMs: 25, reconcileGraceMs: 300,
             termGraceMs: 300, killGraceMs: 300 };
@@ -439,6 +483,10 @@ describe('supervisor loop', () => {
         }
         await loop;
         expect(recovered).toBe(true);
-        expect(readJournal(repo, 'main').state!.generations).toHaveLength(1);
+        const final = readJournal(repo, 'main').state!;
+        expect(final.generations).toHaveLength(1);
+        expect(final.generations[0].state).toBe('terminated');
+        const { refIsAlive } = require('../../../src/core/journal/process');
+        expect(final.generations[0].processRef === undefined || !refIsAlive(final.generations[0].processRef)).toBe(true);
     });
 });
