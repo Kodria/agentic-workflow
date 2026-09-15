@@ -56,7 +56,7 @@ Audience: AWM maintainers, workflow owners, and implementing agents · Methodolo
 - Risk fallback: full-context fallback is allowed only inside an admitted compact slice and changes context breadth, never roles, gates, or evidence requirements.
 - Unattended durability: unattended mode requires journal-first operation; absence, corruption, ambiguity, or stale plan identity blocks dispatch.
 - Provider neutrality: plans declare semantic profiles and required behavior, never hard-coded provider model names. Provider adapters or local policy resolve concrete model and effort.
-- Provider coverage: Codex and Claude Code are mandatory certification targets. Other providers may degrade visibly to full capability when they cannot select a model, without claiming savings.
+- Provider coverage: Antigravity, OpenCode, Claude Code, Codex, Cursor, and Copilot are mandatory capability-matrix targets. Compact admission applies to all six; unattended, subagent, model, and effort behavior is certified independently and may block or degrade only according to its declared capability.
 - Repository boundary: CLI behavior belongs to `agentic-workflow`; skill and reference behavior belongs to `awm-baseline-registry`. Release evidence must prove their installed versions agree.
 - Cost: no new paid infrastructure is introduced. AWM reports only provider usage and prices it can attribute honestly.
 - Privacy: journals and reports must not persist prompts, chain-of-thought, unrestricted source bodies, secrets, credentials, or unrestricted model responses.
@@ -78,7 +78,7 @@ This brief was built from read-only inspection of the current CLI, installed bas
 
 The following have **not** been verified and must be resolved by Release 0 before the affected implementation commitment:
 
-- The exact native model and reasoning-effort override surfaces, accepted identifiers, inheritance rules, and evidence exposed by each currently supported Codex and Claude Code runtime.
+- The exact interactive, unattended-controller, subagent, model, reasoning-effort, observed-identity, and durable-resume surfaces exposed by each of the six AWM targets.
 - Whether every other declared provider can select models per dispatch or must use a visible full-capability degradation.
 - The exact local configuration boundary for model-policy defaults and user overrides across providers.
 - The provider usage fields that can be attributed reliably to a slice, role, retry, cache operation, or full cycle.
@@ -147,7 +147,7 @@ flowchart TD
 - **RF-2.1** — WHEN `awm plan validate` reads a plan with no supported compact contract, THE CLI SHALL return `migration-required` with a non-zero exit and SHALL NOT describe another executable path.
   - **CA-2.1** — Run the compiled CLI against an unmarked historical plan in human and JSON modes; both report `migration-required`, exit non-zero, preserve the file byte-for-byte, and contain no success or legacy-execution language.
 - **RF-2.2** — WHEN any implementation executor starts, THE controller SHALL run the authoritative compact admission gate before its first subagent dispatch.
-  - **CA-2.2** — Instrument real Codex and Claude Code entry paths with an unmarked plan and verify zero implementation/review dispatches occur before the blocking verdict; repeat with a valid compact plan and verify execution proceeds.
+  - **CA-2.2** — Instrument every execution entry path exposed across the six AWM targets with an unmarked plan and verify zero implementation/review dispatches occur before the blocking verdict; repeat each supported path with a valid compact plan and verify execution proceeds.
 - **RF-2.3** — IF a plan signals an invalid or future unsupported compact schema, THEN THE CLI and executor SHALL block with a distinct bounded diagnostic and SHALL NOT reinterpret it as historical input.
   - **CA-2.3** — Exercise malformed current, unsupported future, oversized, duplicate-key, and partial-marker plans against compiled CLI and real entry paths; every case blocks without execution, mutation, path disclosure, or schema downgrade.
 - **RF-2.4** — IF a compact slice declares a security, robustness, root-configuration, public-contract, or uncertain cross-cutting trigger, THEN THE executor SHALL expand to full relevant context while retaining compact state, all reviewers, and all gates.
@@ -167,9 +167,9 @@ flowchart TD
   - **CA-3.5** — Seed each ambiguity class in migration fixtures and verify the unresolved item, affected requirements, and required decision are reported without source mutation or agent dispatch.
 
 - **RF-4.1** — WHEN a compact slice is authored, THE plan SHALL declare one provider-neutral implementer profile from a versioned semantic vocabulary and SHALL NOT embed a provider model name.
-  - **CA-4.1** — Validate fixtures for every supported profile and reject unknown profiles and concrete provider identifiers in the semantic field; valid plans remain portable unchanged between Codex and Claude Code.
+  - **CA-4.1** — Validate fixtures for every supported profile and reject unknown profiles and concrete provider identifiers in the semantic field; valid plans remain portable unchanged across all six AWM targets.
 - **RF-4.2** — WHEN dispatching an implementer, THE provider resolver SHALL map the slice profile to a currently available concrete model and reasoning effort according to validated local policy.
-  - **CA-4.2** — Run one real mechanical and one integration slice on Codex and Claude Code; durable evidence records the requested profile, resolved model, effort, policy version, provider, and actual observed identity where exposed.
+  - **CA-4.2** — On every provider R0 certifies for native routing, run one real mechanical and one integration slice; for every other target, verify the declared degraded or blocked result. Durable evidence records the requested profile, resolution, policy version, provider, and actual observed identity where exposed.
 - **RF-4.3** — WHEN dispatching specification review, code-quality review, final review, architecture judgment, or QA, THE workflow SHALL use the full-capability review profile independently of the implementer profile.
   - **CA-4.3** — Inspect a real cycle whose implementer uses the least-cost profile and verify every review/QA dispatch resolves to the configured full-capability profile with distinct role identity.
 - **RF-4.4** — IF a provider cannot select a model or effort per dispatch, THEN THE resolver SHALL use the provider's declared safe full-capability behavior, record a visible degradation, and suppress model-routing savings claims.
@@ -195,8 +195,8 @@ flowchart TD
 - **RF-6.2** — WHEN execution completes or blocks, THE cycle SHALL report planned versus actual dispatches by role, retries, full-context fallbacks, provider resolution, and current-plan identity.
   - **CA-6.2** — Reconcile a completed and a blocked real cycle against journal records; counts and identities agree exactly and unresolved provider fields are labeled unavailable.
 
-- **RNF-T.1** — THE compact-only workflow SHALL preserve equivalent required behavior across supported Codex and Claude Code paths, with provider differences represented as explicit capabilities rather than divergent quality semantics.
-  - **CA-T.1** — Run the same admission, migration, routing, interruption, review, and closure contract suite plus one real cycle on each mandatory provider and compare equivalent final obligations.
+- **RNF-T.1** — THE provider contract SHALL enumerate Antigravity, OpenCode, Claude Code, Codex, Cursor, and Copilot and SHALL represent each execution capability honestly instead of inferring it from artifact support or imposing divergent quality semantics.
+  - **CA-T.1** — Run the common contract suite across all six targets, execute real flows for every capability available in the environment, and verify unsupported or unverified capabilities produce their declared degraded or blocked result rather than a compatibility claim.
 - **RNF-T.2** — THE workflow SHALL validate all public inputs, bound reads and diagnostics, reject unsafe paths and commands, and fail loudly without partial writes.
   - **CA-T.2** — Run unit, integration, adversarial input, typecheck, dependency, sensor, and atomicity suites for every changed public surface and verify safe explicit failures.
 - **RNF-T.3** — THE journal, routing evidence, and usage reports SHALL be local, bounded, atomic, and redacted, excluding prompts, chain-of-thought, source bodies, secrets, and credentials.
@@ -221,7 +221,7 @@ flowchart TD
 | DA-3 | **RESUELTA 2026-09-14 (owner):** a provider without native model selection may degrade visibly to its safe full-capability default and cannot claim routing savings. | none | Cross-provider execution remains available without silent cost claims. |
 | DA-4 | **RESUELTA 2026-09-14 (owner):** issue #148 resumes through evidence-backed checkpoint migration and does not restart from zero. | none | Completed work is preserved only when durable evidence supports it. |
 | DA-5 | **RESUELTA 2026-09-14 (owner):** implementers may use lower-cost profiles; reviewers, architecture judgment, and QA remain on full capability. | none | Quality apparatus remains intact. |
-| DA-6 | Which concrete default model and reasoning-effort mapping should ship for each semantic profile on each mandatory provider after R0 capability verification? | Release 2 | Owner-observed starting point: Sol/high for product reasoning; evaluate a cheaper mechanical Codex profile than Terra/medium; keep integration escalation and full-capability reviewers. |
+| DA-6 | Which concrete default model and reasoning-effort mapping should ship for each semantic profile on each of the six targets after R0 capability verification? | Release 2 | Owner-approved process: R0 recommends the matrix, the owner approves it once before R2, and providers without native routing retain an explicit full-capability degradation or unattended block. |
 
 ## Out of Scope
 
@@ -257,7 +257,7 @@ No release starts before the prior release's acceptance criteria pass. A later o
 - **Value:** Removes the owner's need to switch models manually and reduces implementer cost while keeping reviewers and QA at full capability.
 - **Scope:** PR-4; RF-4.1 through RF-4.5; RF-5.2; RF-6.2; RNF-T.1 through RNF-T.7.
 - **Blocked by:** DA-6 and successful Release 1 acceptance.
-- **Acceptance:** CA-4.1 through CA-4.5; CA-5.2; CA-6.2; CA-T.1 through CA-T.7; one real routed compact cycle on Codex and Claude Code.
+- **Acceptance:** CA-4.1 through CA-4.5; CA-5.2; CA-6.2; CA-T.1 through CA-T.7; one real routed compact cycle on every target R0 certifies for native routing, with explicit degraded or blocked acceptance for the remaining targets.
 
 ### Release 3 — Evidence capsules and honest cost comparison
 
