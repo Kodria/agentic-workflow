@@ -194,14 +194,14 @@ bounded facts needed by the registry migration protocol.
 
 #### Implementation
 
-- [ ] Write RED fixtures for checked-without-commit, commit-without-tests, tests-without-review,
+- [x] Write RED fixtures for checked-without-commit, commit-without-tests, tests-without-review,
   fully-evidenced work, conflicting evidence, unsafe ownership, and the #148 checkpoint.
-- [ ] Implement read-only fact collection from plan, Git, journal, tests/sensors, verdicts,
+- [x] Implement read-only fact collection from plan, Git, journal, tests/sensors, verdicts,
   and issue links. The output classifies only supported completion; ambiguity returns
   planning-required or blocked and identifies missing evidence without source mutation.
-- [ ] Encode the #148 fixture invariant: Task 1 is antecedent, Task 2 remains pending its
+- [x] Encode the #148 fixture invariant: Task 1 is antecedent, Task 2 remains pending its
   quality re-review, and Tasks 3–14 unstarted unless newer durable evidence changes that fact.
-- [ ] Run CMD-MIGRATION RED then GREEN and CMD-TYPECHECK; clean reviews and commit
+- [x] Run CMD-MIGRATION RED then GREEN and CMD-TYPECHECK; clean reviews and commit
   `feat(plan): expose migration evidence (#126)`.
 
 #### Edge cases
