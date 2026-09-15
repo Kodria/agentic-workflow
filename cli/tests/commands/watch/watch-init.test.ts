@@ -1,8 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { detectRequiredVerifiers, initWatch } from '../../../src/commands/watch/init';
-import { readJournal } from '../../../src/core/journal/store';
+import { Command } from 'commander';
+import { detectRequiredVerifiers, initWatch, rebindWatchPlan } from '../../../src/commands/watch/init';
+import { registerWatchCommand } from '../../../src/commands/watch';
+import { readJournal, writeJournal } from '../../../src/core/journal/store';
+import { supervisorLockPath } from '../../../src/core/journal/paths';
 import type { PlanValidationReport } from '../../../src/core/plan/types';
 
 describe('watch --init: plan-vs-repo mecanico', () => {
@@ -67,4 +70,71 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         expect(() => initWatch(repo, 'rama', { path: 'docs/plan\u0000.md', report })).toThrow(/path inválido/);
         expect(readJournal(repo, 'rama').state).toBeNull();
     });
+
+    test('rebind reconcilia un digest obsoleto tras actualizar el ciclo y conserva el binding anterior', () => {
+        const original = validPlan('a');
+        initWatch(repo, 'rama', { path: 'docs/plan.md', report: original });
+
+        const rebound = rebindWatchPlan(repo, 'rama', { path: 'docs/plan.md', report: validPlan('b') });
+
+        expect(rebound.digest).toBe('b'.repeat(64));
+        const state = readJournal(repo, 'rama').state!;
+        expect(state.planBinding).toEqual(expect.objectContaining({ digest: 'b'.repeat(64), path: 'docs/plan.md' }));
+        expect(state.planBindingHistory).toEqual([expect.objectContaining({ digest: 'a'.repeat(64), path: 'docs/plan.md' })]);
+        expect(fs.existsSync(supervisorLockPath(repo))).toBe(false);
+    });
+
+    test('rebind rechaza una ruta canónica distinta y deja el journal byte-a-byte intacto', () => {
+        initWatch(repo, 'rama', { path: 'docs/plan.md', report: validPlan('a') });
+        const before = readJournal(repo, 'rama').raw!;
+
+        expect(() => rebindWatchPlan(repo, 'rama', { path: 'docs/other.md', report: validPlan('b') })).toThrow(/misma ruta/i);
+
+        expect(readJournal(repo, 'rama').raw).toBe(before);
+    });
+
+    test('rebind rechaza un binding ya vigente y no inventa historia duplicada', () => {
+        initWatch(repo, 'rama', { path: 'docs/plan.md', report: validPlan('a') });
+        const before = readJournal(repo, 'rama').raw!;
+
+        expect(() => rebindWatchPlan(repo, 'rama', { path: 'docs/plan.md', report: validPlan('a') })).toThrow(/ya está vigente/i);
+        expect(readJournal(repo, 'rama').raw).toBe(before);
+    });
+
+    test('rebind rechaza evidencia adversa durable y no reescribe el binding obsoleto', () => {
+        initWatch(repo, 'rama', { path: 'docs/plan.md', report: validPlan('a') });
+        const state = readJournal(repo, 'rama').state!;
+        state.verdicts.push({ id: 'v-1', obligationId: 'o-1', result: 'fail', detail: 'adverso', receivedAt: new Date().toISOString(), fingerprint: '', argv: [], paths: [], cwd: '.' });
+        writeJournal(repo, 'rama', state);
+
+        expect(() => rebindWatchPlan(repo, 'rama', { path: 'docs/plan.md', report: validPlan('b') })).toThrow(/evidencia adversa/i);
+        expect(readJournal(repo, 'rama').state!.planBinding!.digest).toBe('a'.repeat(64));
+    });
+
+    test('rebind rechaza jobs no terminales y conserva el estado recuperable', () => {
+        initWatch(repo, 'rama', { path: 'docs/plan.md', report: validPlan('a') });
+        const state = readJournal(repo, 'rama').state!;
+        state.jobs.pending = { id: 'pending', fingerprint: '', commandDigest: '', argv: [], cwd: '.', paths: [], expandedPaths: [], executionState: 'received', observationState: 'progressing', phaseTimestamps: {} };
+        writeJournal(repo, 'rama', state);
+        const before = readJournal(repo, 'rama').raw!;
+
+        expect(() => rebindWatchPlan(repo, 'rama', { path: 'docs/plan.md', report: validPlan('b') })).toThrow(/no terminales/i);
+        expect(readJournal(repo, 'rama').raw).toBe(before);
+        expect(fs.existsSync(supervisorLockPath(repo))).toBe(false);
+    });
+
+    test('help declara rebind como ruta intencional separada de --init', () => {
+        const program = new Command();
+        registerWatchCommand(program);
+        const watch = program.commands.find(command => command.name() === 'watch')!;
+        expect(watch.helpInformation()).toContain('rebind');
+        expect(watch.commands.find(command => command.name() === 'rebind')!.description()).toMatch(/reconcilia/i);
+    });
 });
+
+function validPlan(digestCharacter: string): Extract<PlanValidationReport, { state: 'valid' }> {
+    return {
+        state: 'valid', schema: 'compact-slices/v1', planDigest: digestCharacter.repeat(64),
+        manifest: { schema: 'compact-slices/v1', planId: 'fixture', requirements: [], sources: [], commands: [], slices: [], closureCommands: [] },
+    };
+}

@@ -223,6 +223,13 @@ export interface JournalState {
     branch: string;
     /** Required exactly for schema 2; schema 1 remains readable historical state. */
     planBinding?: PlanBinding;
+    /**
+     * Immutable prior bindings retained when an operator explicitly reconciles
+     * a completed plan lifecycle update.  The current binding is never
+     * silently replaced: the state transition records its predecessor in the
+     * same durable publication as the new binding.
+     */
+    planBindingHistory?: PlanBinding[];
     cycle: { status: CycleStatus; startedAt: string; completedAt?: string; nextAction?: NextAction; blockedReason?: string };
     cycleVerificationPlan: VerificationItem[];   // QA + interlock a nivel ciclo (R1.4b)
     requiredVerifiers: VerificationKind[];       // detectados mecánicamente en watch --init (R1.4b)
@@ -314,7 +321,8 @@ export function isWellFormedState(x: unknown): x is JournalState {
     if (!isObj(x)) return false;
     if (x.schema !== 1 && x.schema !== 2) return false;
     if (x.schema === 2 && !isWellFormedPlanBinding(x.planBinding)) return false;
-    if (x.schema === 1 && x.planBinding !== undefined) return false;
+    if (x.schema === 1 && (x.planBinding !== undefined || x.planBindingHistory !== undefined)) return false;
+    if (x.planBindingHistory !== undefined && (!Array.isArray(x.planBindingHistory) || !x.planBindingHistory.every(isWellFormedPlanBinding))) return false;
     if (typeof x.revision !== 'number') return false;
     if (typeof x.journalId !== 'string' || x.journalId.length === 0) return false;
     if (typeof x.branch !== 'string') return false;

@@ -131,6 +131,22 @@ export function writeJournal(repoRoot: string, branch: string, state: JournalSta
     writeFileAtomicDurable(statePath(repoRoot, branch), JSON.stringify(next, null, 2) + '\n', 0o600);
 }
 
+/** Explicit, guarded schema-2 binding transition.  It intentionally uses the
+ * normal journal write path: state and its audit history are published in one
+ * atomic durable replacement, while initBoundJournal remains create-only. */
+export function rebindJournalPlan(repoRoot: string, branch: string, binding: PlanBinding): JournalState {
+    const current = readJournal(repoRoot, branch);
+    if (current.corrupt || current.state === null) throw new Error('journal inexistente o corrupto: no se puede reconciliar binding');
+    if (current.state.schema !== 2 || !current.state.planBinding) throw new Error('journal no tiene un binding desatendido reconciliable');
+    const next: JournalState = {
+        ...current.state,
+        planBinding: binding,
+        planBindingHistory: [...(current.state.planBindingHistory ?? []), current.state.planBinding],
+    };
+    writeJournal(repoRoot, branch, next);
+    return { ...next, revision: next.revision + 1 };
+}
+
 /** Auditoria derivada best-effort (R4.6): la escribe SOLO el supervisor, un
  *  fallo aqui jamas invalida el estado — state.json es la unica autoridad. */
 export function appendEvent(repoRoot: string, branch: string, event: Record<string, unknown>): void {

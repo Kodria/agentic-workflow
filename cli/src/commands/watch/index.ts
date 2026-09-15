@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { execFileSync } from 'child_process';
-import { initWatch } from './init';
+import { initWatch, rebindWatchPlan } from './init';
 import { runSupervisorLoop, DEFAULT_SUPERVISOR_CONFIG } from './supervisor';
 import { EXEC_STDIO } from '../../core/journal/process';
 import { WATCH_PROVIDERS, isWatchProvider } from '../../core/journal/adapter';
@@ -24,8 +24,17 @@ function minutes(flag: string, raw: string): number {
     return n * 60000;
 }
 
+function validPlanPath(value: unknown): value is string {
+    return typeof value === 'string' && value.length > 0 && value.length <= 4096 && !/[\u0000-\u001F\u007F-\u009F]/.test(value);
+}
+
+function planForBinding(repo: string, rawPath: string) {
+    const report = validatePlanFile(rawPath, repo);
+    return { path: path.relative(repo, path.resolve(repo, rawPath)).replace(/\\/g, '/'), report };
+}
+
 export function registerWatchCommand(program: Command): void {
-    program
+    const watch = program
         .command('watch')
         .description('supervisor durable: ejecuta jobs, releva controladores caidos, nunca mata trabajo vivo')
         .option('--init', 'bootstrap: crea el journal de la rama actual, detecta verificadores y sale')
@@ -51,14 +60,13 @@ export function registerWatchCommand(program: Command): void {
                 process.exitCode = 1;
                 return;
             }
-            if (opts.plan !== undefined && (typeof opts.plan !== 'string' || opts.plan.length === 0 || opts.plan.length > 4096 || /[\u0000-\u001F\u007F-\u009F]/.test(opts.plan))) {
+            if (opts.plan !== undefined && !validPlanPath(opts.plan)) {
                 process.stderr.write('--plan requiere un path sin caracteres de control\n');
                 process.exitCode = 1;
                 return;
             }
             if (opts.init) {
-                const report = opts.plan === undefined ? undefined : validatePlanFile(opts.plan, repo);
-                const plan = report === undefined ? undefined : { path: path.relative(repo, path.resolve(repo, opts.plan)).replace(/\\/g, '/'), report };
+                const plan = opts.plan === undefined ? undefined : planForBinding(repo, opts.plan);
                 const out = initWatch(repo, branch, plan);
                 process.stdout.write(`journal inicializado para ${branch}; verificadores requeridos: ${JSON.stringify(out.requiredVerifiers)}\n`);
                 return;
@@ -84,5 +92,33 @@ export function registerWatchCommand(program: Command): void {
             process.stdout.write(`awm watch: supervisor activo (${cfg.provider}) — Ctrl-C para terminar\n`);
             await runSupervisorLoop(repo, branch, cfg);
             process.stdout.write('gate verde: ciclo COMPLETE — drenado, lock liberado, apagando\n');
+        });
+
+    watch
+        .command('rebind')
+        .description('reconcilia intencionalmente el binding desatendido tras un cambio válido del ciclo del plan')
+        .requiredOption('--plan <path>', 'mismo plan compacto previamente vinculado; valida y conserva la historia antes de actualizar su digest')
+        .action((opts: { plan: unknown }) => {
+            const repo = process.cwd();
+            const branch = currentBranch(repo);
+            try {
+                resolveCommandContext(repo, branch);
+            } catch (e) {
+                process.stderr.write(`${(e as Error).message}\n`);
+                process.exitCode = 1;
+                return;
+            }
+            if (!validPlanPath(opts.plan)) {
+                process.stderr.write('--plan requiere un path sin caracteres de control\n');
+                process.exitCode = 1;
+                return;
+            }
+            try {
+                const binding = rebindWatchPlan(repo, branch, planForBinding(repo, opts.plan));
+                process.stdout.write(`binding reconciliado para ${binding.path}; digest ${binding.digest}\n`);
+            } catch (e) {
+                process.stderr.write(`${(e as Error).message}\n`);
+                process.exitCode = 1;
+            }
         });
 }
