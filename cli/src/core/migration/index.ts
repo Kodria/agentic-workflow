@@ -82,7 +82,16 @@ export function collectIssue148HistoricalFacts(historicalRoot: string, issueLink
     if (root !== expected) throw new Error('historical root is not the admitted issue-148 sibling worktree');
     const branch = execFileSync('git', ['branch', '--show-current'], { cwd: root, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).trim();
     if (branch !== 'codex/issue-148-awm-facts') throw new Error('historical root is not the admitted issue-148 branch');
+    const issue126 = issueLinks.find(link => ISSUE_126.test(link));
+    if (!issue126 || !issueLinks.some(link => ISSUE_148.test(link))) throw new Error('issue-148 migration requires durable #126 and #148 links');
+    const planPath = 'docs/plans/2026-09-14-awm-facts-plan.md'; const text = readPlan(root, planPath);
+    const digest = crypto.createHash('sha256').update(text, 'utf8').digest('hex');
     const ledger = path.join(root, '.awm', 'ledger', 'codex__issue-148-awm-facts.jsonl');
-    const report = collectMigrationFacts('docs/plans/2026-09-14-awm-facts-plan.md', root, issueLinks);
-    return fs.existsSync(ledger) ? { ...report, diagnostics: [...report.diagnostics, 'issue-148-ledger-observed; journal binding and per-task provenance still required'] } : report;
+    const ledgerText = fs.existsSync(ledger) ? fs.readFileSync(ledger, 'utf8') : '';
+    const ancestor = (() => { try { execFileSync('git', ['merge-base', '--is-ancestor', '81c008c', 'HEAD'], { cwd: root, stdio: 'pipe' }); return true; } catch { return false; } })();
+    const taskOneChecked = /### Task 1:[\s\S]*?(?=\n### Task 2:)/.test(text) && /### Task 1:[\s\S]*?- \[x\]/.test(text);
+    const ledgerReviews = ledgerText.includes('specification-reviewer') && ledgerText.includes('requesting-code-review') && ledgerText.includes('awm-facts-nested-yaml-boundary-reviewed');
+    const taskIds = ids(text); const proven = digest === 'c11477dd59cb19094983c671cc0b760f1d1e51b9679e13dba90f1b0c2cba48e7' && ancestor && taskOneChecked && ledgerReviews;
+    const tasks = taskIds.map(id => id === '1' && proven ? { id, state: 'completed' as const, missing: [] } : id === '2' ? { id, state: 'pending' as const, missing: ['quality-review'] } : { id, state: 'unstarted' as const, missing: [] });
+    return { state: proven ? 'planning-required' : 'blocked', planDigest: digest, issueLinks: [...issueLinks], tasks, diagnostics: proven ? ['Task 2 quality re-review remains'] : ['issue-148 historical provenance is incomplete or inconsistent'], facts: [{ taskId: '1', commitSha: '81c008c', issue126 }] };
 }
