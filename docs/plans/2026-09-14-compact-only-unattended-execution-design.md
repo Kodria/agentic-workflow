@@ -71,12 +71,12 @@ must classify every other capability instead of inferring or inventing parity.
 - **D2 — Mechanical authority:** the CLI is the sole parser, validator, digester, admission authority, capability resolver, and provider-policy resolver. Skills consume these results rather than duplicating them.
 - **D3 — Native execution:** AWM returns a validated dispatch envelope; the provider's native mechanism performs the actual agent dispatch. AWM does not become a second agent runtime.
 - **D4 — Capability-aware providers:** all six targets are enumerated, but each capability is certified independently. Missing model override may degrade; missing unattended custody or resumption blocks unattended mode.
-- **D5 — Staged schemas:** corrected `compact-slices/v1` delivers R1. `compact-slices/v2` adds semantic model profiles in R2. A later schema may add safe parallel tracks.
+- **D5 — Staged schemas:** corrected `compact-slices/v1` delivers R1 without invalidating already-valid v1 plans: the validator's existing five subsection names remain canonical and the registry reference is aligned to them. `compact-slices/v2` adds semantic model profiles in R2. A later schema may add safe parallel tracks.
 - **D6 — Durable unattended mode:** unattended requires a journal bound to the current canonical plan digest. Interactive mode still requires a compact plan but does not require journal-first operation.
 - **D7 — Semantic migration:** the CLI reports the need and supplies verified facts; `writing-plans` makes slice decisions and writes a separate continuation plan. Ambiguity blocks.
 - **D8 — Full-quality review:** implementers may use lower-cost profiles after R2; review, architecture judgment, and QA remain full capability.
 - **D9 — Owner-approved defaults:** R0 produces a recommended provider matrix; the owner approves it once before R2. Plans remain portable and contain no concrete model names.
-- **D10 — Two coordinated plans:** R1 is implemented with one compact plan per repository because plan sources are contained within their active repository.
+- **D10 — Bootstrap plus two coordinated plans:** one current-v1-compatible CLI bootstrap slice first enables dotted requirement IDs and non-success `migration-required`; only then are the main CLI and registry R1 plans authored with canonical brief IDs. Plan sources remain contained within their active repository.
 
 ## Considered approaches
 
@@ -123,17 +123,20 @@ by zero or more `.` or `-` separated uppercase alphanumeric segments. This accep
 `RF-1.1`, `RNF-T.1`, and `R4-VAL-2`, while rejecting empty segments, control characters,
 whitespace, path syntax, and unbounded input.
 
-Each slice has exactly these `####` subsections beneath its canonical `### Slice` heading:
+Each v1 slice retains exactly these already-validated `####` subsections beneath its
+canonical `### Slice` heading:
 
-1. `Behavior and surfaces`
-2. `Interfaces and sequence`
-3. `Edge cases and evidence`
-4. `Commands`
-5. `Risks and fallback`
+1. `Surfaces`
+2. `Implementation`
+3. `Edge cases`
+4. `Evidence`
+5. `Fallback`
 
-The reference example is a fixture consumed by the compiled validator. There is no
-`awm plan analyze` command: the self-review coverage check remains a documented planning
-step, while the CLI validates only claims it can prove mechanically.
+These names remain stable so previously valid compact v1 plans do not become invalid under
+the same schema identifier. The registry reference is corrected to match them. Its example
+becomes a fixture consumed by the compiled validator. There is no `awm plan analyze`
+command: the self-review coverage check remains a documented planning step, while the CLI
+validates only claims it can prove mechanically.
 
 ### Canonical plan identity
 
@@ -340,6 +343,15 @@ no percentage saving; R3 evaluates the 50% billed-equivalent target with compara
 
 ## Repository decomposition
 
+### Bootstrap CLI plan — `agentic-workflow`
+
+One compact slice valid under the pre-change CLI owns only two enabling changes: expand
+the bounded requirement-ID grammar to accept canonical dotted IDs, and replace the
+unmarked-plan `legacy` success report with `migration-required` exit 2. Its temporary
+bootstrap requirement IDs use the pre-change safe grammar and map explicitly to RF-1.3
+and RF-2.1. This is a one-time self-hosting boundary, not a new permanent ID translation.
+After its clean reviews and gates, every subsequent plan uses the canonical brief IDs.
+
 ### R1 CLI plan — `agentic-workflow`
 
 Owns validation states and grammar, canonical digest, admission, scoped currentness,
@@ -358,13 +370,15 @@ cross-repository acceptance passes.
 
 ## Release and rollout
 
-1. Complete R0 evidence and freeze the contract corpus.
-2. Implement and validate both R1 branches without publication.
-3. Publish the compatible CLI.
-4. Publish the baseline registry immediately afterward with its new `minCliVersion`.
-5. Update an isolated installation and run real acceptance.
-6. Perform the #148 migration dry run.
-7. Only then declare R1 available and resume #148.
+1. Complete the bootstrap compact slice and validate that canonical dotted IDs now pass
+   while unmarked plans return `migration-required` with exit 2.
+2. Complete R0 evidence and freeze the contract corpus.
+3. Author, validate, implement, and review both main R1 plans without publication.
+4. Publish the compatible CLI.
+5. Publish the baseline registry immediately afterward with its new `minCliVersion`.
+6. Update an isolated installation and run real acceptance.
+7. Perform the #148 migration dry run.
+8. Only then declare R1 available and resume #148.
 
 CLI-first avoids breaking existing installed registries. The short interval before the
 registry publication is not considered completion because older skills still expose the
@@ -391,7 +405,7 @@ extension.
 
 TDD adds failing tests before production changes. R1 acceptance must cover:
 
-1. unit tests for plan states, ID grammar, headings, digest normalization, bounds, and diagnostics;
+1. unit tests for plan states, ID grammar, stable v1 headings, digest normalization, bounds, and diagnostics;
 2. Commander tests for stable human/JSON output and exit codes;
 3. one canonical valid/adversarial corpus consumed by CLI and registry contract tests;
 4. zero-dispatch negative controls through `development-process`, `executing-plans`, and SDD;
@@ -400,9 +414,10 @@ TDD adds failing tests before production changes. R1 acceptance must cover:
 7. capability reports that never infer execution from artifact rendering;
 8. compact valid, unmarked, malformed, and future-schema E2E cases against the compiled CLI;
 9. provider-real acceptance for every capability available in the test environment and explicit `unverified` evidence otherwise;
-10. #148 migration dry run selecting Task 2 quality re-review without repeating Task 1;
-11. complete typecheck, dependency, Jest, sensor, QA, documentation, retro, and finishing gates;
-12. installed CLI plus installed baseline-registry acceptance after ordered publication.
+10. regression validation proving every previously valid compact v1 plan remains valid;
+11. #148 migration dry run selecting Task 2 quality re-review without repeating Task 1;
+12. complete typecheck, dependency, Jest, sensor, QA, documentation, retro, and finishing gates;
+13. installed CLI plus installed baseline-registry acceptance after ordered publication.
 
 ## NFR timing
 
@@ -414,9 +429,10 @@ parallel isolation. Adaptive review or removal of quality roles is out of scope.
 
 ## Scope
 
-Included: the CLI plan/admission/journal/provider contracts; the baseline planning and
-lifecycle skills; all six provider targets; semantic migration; #148 recovery; dispatch
-forecasting; model-policy foundations; staged R1–R4 design; cross-repository acceptance.
+Included: the one-slice CLI bootstrap; the CLI plan/admission/journal/provider contracts;
+the baseline planning and lifecycle skills; all six provider targets; semantic migration;
+#148 recovery; dispatch forecasting; model-policy foundations; staged R1–R4 design; and
+cross-repository acceptance.
 
 Excluded: removal of legacy compatibility in unrelated domains, automatic semantic
 grouping, overwriting historical plans, a new agent runtime, reviewer downgrading,
