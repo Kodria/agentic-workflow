@@ -4,6 +4,7 @@
 import crypto from 'crypto';
 import { TRACK_PHASES, JOIN_STRATEGY_NO_FF } from '../tracks/types';
 import type { CohortPhase, TrackPhase, JoinStrategy } from '../tracks/types';
+import { bindingPlanPath } from './paths';
 
 export const EXECUTION_STATES = [
     'received', 'spawn-intent', 'claimed', 'running',
@@ -352,12 +353,13 @@ export function isWellFormedState(x: unknown): x is JournalState {
 }
 
 function isWellFormedPlanBinding(x: unknown): x is PlanBinding {
-    return isObj(x)
+    if (!(isObj(x)
         && typeof x.path === 'string' && x.path.length > 0 && x.path.length <= 4096
         && typeof x.digest === 'string' && /^[a-f0-9]{64}$/.test(x.digest)
         && (x.schema === 'compact-slices/v1' || x.schema === 'compact-slices/v2')
         && x.executionMode === 'desatendido'
-        && typeof x.boundAt === 'string' && x.boundAt.length > 0;
+        && typeof x.boundAt === 'string' && x.boundAt.length > 0)) return false;
+    try { return bindingPlanPath(x.path) === x.path; } catch { return false; }
 }
 
 function isWellFormedNextAction(x: unknown): x is NextAction {

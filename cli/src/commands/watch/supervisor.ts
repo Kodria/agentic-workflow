@@ -3,6 +3,7 @@
 // Custodia BLOCKED: el loop sigue, el lock NO se libera, nada se mata.
 import { readJournal, writeJournal, appendEvent } from '../../core/journal/store';
 import { computeFingerprint, reconcileUnattendedRecovery } from '../../core/journal/fingerprint';
+import { validatePlanFile } from '../../core/plan/validate';
 import { adapterFor } from '../../core/journal/adapter';
 import { groupIsGone, terminateGroupConfirmed } from '../../core/journal/process';
 import { computeGate, computeTrackGate, FingerprintNow } from '../job/gate';
@@ -183,11 +184,13 @@ export class Supervisor {
         // read-only: existing active jobs are reused, never re-requested.
         if (before0.state.schema === 2 && before0.state.planBinding) {
             const activeJobIds = Object.values(before0.state.jobs)
-                .filter(job => LIVE.includes(job.executionState)).map(job => job.id);
-            const staleJob = Object.values(before0.state.jobs).some(job => {
+                .filter(job => LIVE.includes(job.executionState) || job.executionState === 'orphaned').map(job => job.id);
+            const staleJob = Object.values(before0.state.jobs).filter(job => LIVE.includes(job.executionState) || job.executionState === 'orphaned').some(job => {
                 try { return computeFingerprint(this.repoRoot, job.argv, job.paths, job.cwd).fingerprint !== job.fingerprint; }
                 catch { return true; }
             });
+            const boundPlan = validatePlanFile(before0.state.planBinding.path, this.repoRoot);
+            const planChanged = boundPlan.state !== 'valid' || boundPlan.planDigest !== before0.state.planBinding.digest || boundPlan.schema !== before0.state.planBinding.schema;
             const passed = (id: string | undefined): boolean => {
                 if (!id) return false;
                 const job = before0.state!.jobs[id];
@@ -223,7 +226,7 @@ export class Supervisor {
                 && !before0.state!.fixes.some(fix => fix.verdictId === verdict.id && fix.closed));
             const recovery = reconcileUnattendedRecovery({
                 journal: before0.state, journalCorrupt: false, plan: before0.state.planBinding,
-                git: staleJob ? 'changed' : 'current', activeJobIds,
+                git: staleJob || planChanged ? 'changed' : 'current', activeJobIds,
                 tests: tests.length === 0 || tests.every(item => passed(item.satisfiedBy)) ? 'pass' : 'missing',
                 sensors: sensorItems.length === 0 || sensorItems.every(item => passed(item.satisfiedBy)) ? 'pass' : 'missing',
                 verdicts: hasStaleReview ? 'stale' : (openReviewOrFix || unresolvedVerification) ? 'missing' : 'current',
