@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { collectMigrationFacts, reconcileTaskEvidence } from '../../../src/core/migration';
+import { initBoundJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 
 describe('collectMigrationFacts', () => {
     it('does not certify a task from a Git commit without durable test and review evidence', () => {
@@ -45,5 +46,18 @@ describe('collectMigrationFacts', () => {
         ['inconclusive review', [{ taskId: '1', role: 'quality' as const, result: 'inconclusive' as const, issue126: 'https://github.com/Kodria/agentic-workflow/issues/126' }]],
     ])('keeps adverse or incomplete %s pending', (_name, records) => {
         expect(reconcileTaskEvidence('1', records)).toMatchObject({ state: 'pending' });
+    });
+
+    it('collects a schema-2 journal fixture without borrowing evidence across tasks', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migration-journal-'));
+        try {
+            fs.mkdirSync(path.join(root, 'docs', 'plans'), { recursive: true });
+            fs.writeFileSync(path.join(root, 'docs', 'plans', 'old.md'), `### Task 1: historical\nCommit: ${'a'.repeat(40)}\n`);
+            execFileSync('git', ['init'], { cwd: root }); execFileSync('git', ['config', 'user.email', 't@e.invalid'], { cwd: root }); execFileSync('git', ['config', 'user.name', 'T'], { cwd: root }); execFileSync('git', ['add', '.'], { cwd: root }); execFileSync('git', ['commit', '-m', 't'], { cwd: root });
+            const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(); fs.writeFileSync(path.join(root, 'docs', 'plans', 'old.md'), `### Task 1: historical\nCommit: ${sha}\n`);
+            initBoundJournal(root, 'master', { path: 'docs/plans/old.md', digest: require('crypto').createHash('sha256').update(fs.readFileSync(path.join(root, 'docs/plans/old.md'), 'utf8')).digest('hex'), schema: 'compact-slices/v1', executionMode: 'desatendido', boundAt: '2026-09-15T00:00:00.000Z' });
+            const state = readJournal(root, 'master').state!; state.tasks = [{ id: '1', title: 't', status: 'done', attempts: 1, verificationPlan: [], reviewObligations: [] }]; writeJournal(root, 'master', state);
+            expect(collectMigrationFacts('docs/plans/old.md', root, ['https://github.com/Kodria/agentic-workflow/issues/126']).tasks[0]).toMatchObject({ state: 'pending' });
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
 });
