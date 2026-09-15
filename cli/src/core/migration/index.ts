@@ -20,6 +20,7 @@ const MAX = 128;
  * review from another: every required record carries the same task identity. */
 export function reconcileTaskEvidence(taskId: string, records: readonly EvidenceRecord[]): MigrationTask {
     const own = records.filter(record => record.taskId === taskId);
+    if (own.some(record => !safeIssue(record.issue126) || !ISSUE_126.test(record.issue126))) return { id: taskId, state: 'pending', missing: ['issue126-provenance'] };
     if (own.some(record => record.result === 'fail' || record.result === 'inconclusive')) return { id: taskId, state: 'pending', missing: ['adverse-evidence'] };
     const commit = own.some(record => typeof record.commitSha === 'string' && /^[a-f0-9]{40}$/i.test(record.commitSha));
     const test = own.some(record => record.verificationItemId?.startsWith('test') && record.result === 'pass' && !!record.fingerprint && (record.paths?.length ?? 0) > 0);
