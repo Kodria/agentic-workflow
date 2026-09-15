@@ -1,4 +1,4 @@
-import { admitPlan } from '../../../src/core/admission';
+import { admitPlan, sanitizeAdmissionReport } from '../../../src/core/admission';
 import type { PlanValidationReport } from '../../../src/core/plan/types';
 import { emptyState } from '../../../src/core/journal/types';
 
@@ -12,6 +12,13 @@ const valid: Extract<PlanValidationReport, { state: 'valid' }> = {
 };
 
 describe('admitPlan', () => {
+    it('rejects a forecast whose total or role topology does not match its slices', () => {
+        const forecast = { kind: 'topology', slices: 2, roles: { implementer: 2, 'specification-reviewer': 2, 'code-quality-reviewer': 2, 'final-reviewer': 1, 'track-a-qa': 1, 'track-b-qa': 1, documentation: 1, retro: 1, finishing: 1 }, total: 99 };
+        expect(() => sanitizeAdmissionReport({ state: 'admitted', planState: 'valid', journal: 'not-required', currentness: 'not-checked', sensors: 'not-required', diagnostics: [], forecast })).toThrow(/invalid report/);
+        forecast.total = 12;
+        forecast.roles.implementer = 1;
+        expect(() => sanitizeAdmissionReport({ state: 'admitted', planState: 'valid', journal: 'not-required', currentness: 'not-checked', sensors: 'not-required', diagnostics: [], forecast })).toThrow(/invalid report/);
+    });
     it('preserves the distinct unsupported plan state and bounded validator diagnostic', async () => {
         const report = await admitPlan({ plan: { state: 'unsupported', schema: 'compact-slices/v9', diagnostics: [{ code: 'PLAN_UNSUPPORTED_SCHEMA', message: `future\u001b${'x'.repeat(5000)}` }] }, provider: 'codex', cwd: process.cwd() });
         expect(report).toMatchObject({ state: 'blocked', planState: 'unsupported', currentness: 'not-checked', sensors: 'not-required' });

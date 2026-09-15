@@ -110,9 +110,12 @@ function validForecast(value: unknown): value is DispatchForecast {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
     const record = value as Record<string, unknown>;
     const roles = ['implementer', 'specification-reviewer', 'code-quality-reviewer', 'final-reviewer', 'track-a-qa', 'track-b-qa', 'documentation', 'retro', 'finishing'];
-    return record.kind === 'topology' && Number.isSafeInteger(record.slices) && (record.slices as number) >= 0 && Number.isSafeInteger(record.total) && (record.total as number) >= 0
+    const slices = record.slices as number;
+    const topology = { implementer: slices, 'specification-reviewer': slices, 'code-quality-reviewer': slices, 'final-reviewer': 1, 'track-a-qa': 1, 'track-b-qa': 1, documentation: 1, retro: 1, finishing: 1 };
+    return record.kind === 'topology' && Number.isSafeInteger(slices) && slices >= 0 && Number.isSafeInteger(record.total) && (record.total as number) >= 0
         && !!record.roles && typeof record.roles === 'object' && !Array.isArray(record.roles) && Object.keys(record.roles as object).length === roles.length
-        && roles.every(role => Number.isSafeInteger((record.roles as Record<string, unknown>)[role]) && ((record.roles as Record<string, unknown>)[role] as number) >= 0);
+        && roles.every(role => (record.roles as Record<string, unknown>)[role] === topology[role as keyof typeof topology])
+        && record.total === Object.values(topology).reduce((sum, count) => sum + count, 0);
 }
 function validDiagnostics(value: unknown): value is PlanDiagnostic[] {
     return Array.isArray(value) && value.every(item => item && typeof item === 'object' && typeof (item as PlanDiagnostic).code === 'string' && typeof (item as PlanDiagnostic).message === 'string' && ((item as PlanDiagnostic).field === undefined || typeof (item as PlanDiagnostic).field === 'string'));

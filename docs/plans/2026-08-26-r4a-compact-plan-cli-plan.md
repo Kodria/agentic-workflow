@@ -481,15 +481,13 @@ awm sensors run --event pre-commit --format json
 git diff --check
 ```
 
-Before execution handoff, run the currently installed planning gates from the repository root:
+### Historical note — superseded planning-gate draft
 
-```bash
-awm plan analyze docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md --json
-awm preflight
-awm context-budget
-```
-
-`awm plan validate` and `awm preflight --require-current` are R4a deliverables and therefore are not claimed as available at T0. After S2/S4 they become mandatory self-validation and release gates. If `awm plan analyze` is unavailable in the installed CLI, record that exact limitation and do not substitute a fabricated result.
+This August 2026 plan is retained as historical context only; it is not an executable
+runbook. Its former reference to an analysis command was removed because that command
+is not part of the CLI contract. Use the active compact-only execution design and the
+installed CLI help to determine current validation gates; do not infer a command from
+this archived plan.
 
 ## Requirement traceability
 

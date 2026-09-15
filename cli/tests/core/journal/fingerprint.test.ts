@@ -101,6 +101,19 @@ describe('computeFingerprint', () => {
 });
 
 describe('reconcileUnattendedRecovery', () => {
+    test.each([
+        ['journal', { journal: null, journalCorrupt: true }, 'repair-journal'],
+        ['binding', { plan: { path: 'other.md' } }, 'rebind-plan'],
+        ['git', { git: 'changed' }, 'reconcile-git'],
+        ['verdicts', { verdicts: 'missing' }, 'repair-verdicts'],
+        ['tests', { tests: 'fail' }, 'run-tests'],
+        ['sensors', { sensors: 'missing' }, 'run-sensors'],
+        ['ready', {}, 'select-work'],
+    ])('covers recovery action %s', (_name, overrides, nextAction) => {
+        const journal = { ...emptyState('main'), schema: 2 as const, planBinding: { path: 'docs/plan.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1' as const, executionMode: 'desatendido' as const, boundAt: '2026-09-15T00:00:00.000Z' } };
+        const input = { journal, journalCorrupt: false, plan: journal.planBinding, git: 'current' as const, activeJobIds: [], tests: 'pass' as const, sensors: 'pass' as const, verdicts: 'current' as const, ...overrides } as any;
+        expect(reconcileUnattendedRecovery(input).nextAction).toBe(nextAction);
+    });
     test('is deterministic and reuses active obligations before selecting new work', () => {
         const journal = { ...emptyState('main'), schema: 2 as const, planBinding: { path: 'docs/plan.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1' as const, executionMode: 'desatendido' as const, boundAt: '2026-09-15T00:00:00.000Z' } };
         const input = { journal, journalCorrupt: false, plan: journal.planBinding, git: 'current' as const, activeJobIds: ['job-b', 'job-a', 'job-a'], tests: 'pass' as const, sensors: 'pass' as const, verdicts: 'current' as const };

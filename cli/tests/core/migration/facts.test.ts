@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { collectMigrationFacts } from '../../../src/core/migration';
+import { collectIssue148HistoricalFacts, collectMigrationFacts } from '../../../src/core/migration';
 import { initBoundJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 
 describe('collectMigrationFacts', () => {
@@ -110,5 +110,25 @@ describe('collectMigrationFacts', () => {
             ]);
             expect(report.facts.filter(fact => fact.jobId === 'multi')).toEqual([]);
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+});
+
+describe('collectIssue148HistoricalFacts', () => {
+    it('requires the admitted sibling, canonical branch, and rejects incomplete digest/ledger provenance', () => {
+        const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-historical-parent-'));
+        const current = path.join(parent, 'codex-issue-126-compact-only');
+        const historical = path.join(parent, 'codex-issue-148-awm-facts');
+        const cwd = jest.spyOn(process, 'cwd').mockReturnValue(current);
+        try {
+            fs.mkdirSync(current); fs.mkdirSync(path.join(historical, 'docs', 'plans'), { recursive: true });
+            fs.writeFileSync(path.join(historical, 'docs', 'plans', '2026-09-14-awm-facts-plan.md'), '### Task 1: facts\n- [x] reviewed\n\n### Task 2: quality\n');
+            execFileSync('git', ['init', '-q', '-b', 'codex/issue-148-awm-facts'], { cwd: historical });
+            execFileSync('git', ['-c', 'user.email=t@e.invalid', '-c', 'user.name=T', 'add', '.'], { cwd: historical });
+            execFileSync('git', ['-c', 'user.email=t@e.invalid', '-c', 'user.name=T', 'commit', '-qm', 'fixture'], { cwd: historical });
+            expect(() => collectIssue148HistoricalFacts(current, ['https://github.com/Kodria/agentic-workflow/issues/126', 'https://github.com/Kodria/agentic-workflow/issues/148'])).toThrow(/admitted issue-148 sibling/);
+            const report = collectIssue148HistoricalFacts(historical, ['https://github.com/Kodria/agentic-workflow/issues/126', 'https://github.com/Kodria/agentic-workflow/issues/148']);
+            expect(report).toMatchObject({ state: 'blocked', diagnostics: ['issue-148 historical provenance is incomplete or inconsistent'] });
+            expect(report.tasks).toEqual([{ id: '1', state: 'unstarted', missing: [] }, { id: '2', state: 'pending', missing: ['quality-review'] }]);
+        } finally { cwd.mockRestore(); fs.rmSync(parent, { recursive: true, force: true }); }
     });
 });

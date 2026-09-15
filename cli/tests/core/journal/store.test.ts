@@ -52,6 +52,15 @@ describe('journal store', () => {
         expect(readJournal(repo, 'rama').corrupt).toBe(true);
     });
 
+    test('rechaza un state.json symlink sin leer el destino externo', () => {
+        initJournal(repo, 'rama');
+        const outside = path.join(repo, 'outside.json');
+        fs.writeFileSync(outside, fs.readFileSync(statePath(repo, 'rama')));
+        fs.rmSync(statePath(repo, 'rama'));
+        fs.symlinkSync(outside, statePath(repo, 'rama'));
+        expect(readJournal(repo, 'rama')).toMatchObject({ state: null, corrupt: true });
+    });
+
     test('normaliza campos aditivos de snapshots schema 1 sin certificar evidencia legacy', () => {
         initJournal(repo, 'rama');
         const legacy = readJournal(repo, 'rama').state! as unknown as Record<string, unknown>;

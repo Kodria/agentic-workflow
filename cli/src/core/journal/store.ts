@@ -110,7 +110,10 @@ export function initBoundJournal(repoRoot: string, branch: string, binding: Plan
 export function readJournal(repoRoot: string, branch: string): ReadResult {
     const sp = statePath(repoRoot, branch);
     let raw: string;
-    try { raw = fs.readFileSync(sp, 'utf8'); } catch { return { state: null, corrupt: true }; }
+    try {
+        if (fs.lstatSync(sp).isSymbolicLink()) return { state: null, corrupt: true };
+        raw = fs.readFileSync(sp, 'utf8');
+    } catch { return { state: null, corrupt: true }; }
     let parsed: unknown;
     try { parsed = normalizeSchemaOne(JSON.parse(raw)); } catch { return { state: null, corrupt: true, raw }; }
     if (!isWellFormedState(parsed)) return { state: null, corrupt: true, raw };

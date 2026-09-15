@@ -80,6 +80,14 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         expect(() => initWatch(repo, 'rama')).not.toThrow();   // idempotente
     });
 
+    test('no escribe .gitignore cuando es un symlink', () => {
+        const outside = path.join(repo, 'outside-gitignore');
+        fs.writeFileSync(outside, 'outside\n');
+        fs.symlinkSync(outside, path.join(repo, '.gitignore'));
+        expect(() => initWatch(repo, 'rama')).toThrow(/gitignore.*symlink|symlink.*gitignore/i);
+        expect(fs.readFileSync(outside, 'utf8')).toBe('outside\n');
+    });
+
     test('watch --init --plan crea una sola vinculacion schema-2 desatendida', () => {
         const plan: Extract<PlanValidationReport, { state: 'valid' }> = {
             state: 'valid', schema: 'compact-slices/v1', planDigest: 'a'.repeat(64),

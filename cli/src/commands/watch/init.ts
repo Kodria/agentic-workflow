@@ -45,7 +45,12 @@ export function detectRequiredVerifiers(repoRoot: string): VerificationKind[] {
 export function ensureJournalGitignored(repoRoot: string): void {
     const gi = path.join(repoRoot, '.gitignore');
     let current = '';
-    try { current = fs.readFileSync(gi, 'utf8'); } catch { current = ''; }
+    try {
+        if (fs.lstatSync(gi).isSymbolicLink()) throw new Error('.gitignore must not be a symlink');
+        current = fs.readFileSync(gi, 'utf8');
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
     if (!current.split('\n').some((l) => l.trim() === '.awm/' || l.trim() === '.awm')) {
         fs.writeFileSync(gi, current.length > 0 && !current.endsWith('\n') ? `${current}\n.awm/\n` : `${current}.awm/\n`);
     }
