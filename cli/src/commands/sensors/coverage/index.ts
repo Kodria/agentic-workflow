@@ -7,6 +7,7 @@ import type { CompatibilityEvidence } from '../compatibility/types';
 import { scanProjectLedgers, type LedgerScanResult } from '../../../core/ledger/scan';
 import { evaluateEmpiricalCoverage, type EmpiricalCoverage, type EmpiricalStaticAvailability, type EmpiricalStaticState } from './empirical';
 import path from 'path';
+import { resolveSensorProject } from '../project';
 
 export type CoverageEnvelope = {
     schemaVersion: 2;
@@ -58,6 +59,13 @@ export async function runCoverage(cwd: unknown, dependencies: Partial<Dependenci
         return { schemaVersion: 2, pack: null, registry: null, overall: 'inconclusive', static: { status: 'inconclusive', reason: 'not_configured', classes: [] },
             empirical: empirical(deps, path.resolve(cwd), {}, min, 'unavailable') };
     }
+    const packageRoot = input.manifest.kind !== 'legacy' && input.manifest.pack.packageRoot
+        ? (() => {
+            const project = resolveSensorProject(input.projectRoot);
+            if (project.state !== 'configured') throw new Error(`runCoverage: packageRoot cannot be resolved: ${project.state === 'invalid' ? project.reason : 'manifest missing'}`);
+            return project.packageRoot;
+        })()
+        : input.projectRoot;
     if (input.kind === 'no_reference') {
         return { schemaVersion: 2, pack: input.pack, registry: input.registry, overall: 'inconclusive', static: { status: 'inconclusive', reason: 'no_reference', classes: [] },
             empirical: empirical(deps, input.projectRoot, {}, min, 'unavailable') };
@@ -65,7 +73,7 @@ export async function runCoverage(cwd: unknown, dependencies: Partial<Dependenci
 
     let live: Record<string, CompatibilityEvidence>;
     if (input.manifest.kind !== 'legacy') {
-        live = (await deps.resolveLive(input.projectRoot, input.pack, input.registryRoot)).sensors;
+        live = (await deps.resolveLive(packageRoot, input.pack, input.registryRoot)).sensors;
     } else {
         live = Object.fromEntries(Object.keys(input.manifest.pack.sensors).map((name) => [name, legacyCompatibility('legacy manifest without schemaVersion')]));
     }
@@ -74,7 +82,7 @@ export async function runCoverage(cwd: unknown, dependencies: Partial<Dependenci
     for (const [classId, coverageClass] of Object.entries(input.contract.classes)) {
         coverageClass.detectors.forEach((detector, detectorIndex) => {
             const observed = deps.observe(
-                input.projectRoot, classId, detectorIndex, detector, input.manifest.pack.sensors[detector.sensor],
+                packageRoot, classId, detectorIndex, detector, input.manifest.pack.sensors[detector.sensor],
             );
             observations.push({
                 ...observed,

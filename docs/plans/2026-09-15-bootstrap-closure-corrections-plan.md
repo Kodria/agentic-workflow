@@ -4,14 +4,15 @@
 > to execute one serial compact slice at a time with TDD, specification review,
 > code-quality review, and all declared closure gates.
 
-**Goal:** Repair the harness faults discovered by bootstrap S1 so its full Jest,
-dependency, sensor-coverage, and retro gates can be evaluated without touching R1.
+**Goal:** Repair the harness faults discovered by bootstrap S1 and the follow-up
+portability audit so its Jest, dependency, sensor-coverage, and retro gates can
+be evaluated from any checkout or worktree without touching R1.
 
 **Architecture:** Keep each correction isolated: relocate only Jest's suite root
 outside the operator home, extract shared watch state helpers into a dependency-neutral
-module, and migrate the committed v2 sensor declaration through the existing safe
-bootstrap command to its logical v3 source. No product behavior, registry content, or
-R1 plan is introduced.
+module, migrate the committed v2 sensor declaration through the existing safe
+bootstrap command to its logical v3 source, and make coverage obey `packageRoot`
+and the Git worktree boundary. No registry content or R1 plan is introduced.
 
 **Tech Stack:** Node.js 24, TypeScript 5.9, Jest 30, dependency-cruiser, AWM CLI 9.7.1.
 
@@ -32,14 +33,17 @@ R1 plan is introduced.
 {
   "schema": "compact-slices/v1",
   "planId": "issue-126-bootstrap-closure-corrections",
-  "requirements": ["FIX-1.1", "FIX-1.2", "FIX-2.1", "FIX-3.1"],
+  "requirements": ["FIX-1.1", "FIX-1.2", "FIX-2.1", "FIX-3.1", "FIX-4.1", "FIX-4.2"],
   "sources": [
     {"id":"SRC-JEST-SETUP","path":"cli/jest.global-setup.js","locator":"module.exports = async () =>","fact":"Suite root is created below the system temporary directory and HOME/AWM_HOME are suite-owned."},
     {"id":"SRC-JEST-TEST","path":"cli/tests/structural/jest-environment-is-isolated.test.ts","locator":"describe('Jest environment isolation'","fact":"Existing structural suite asserts the global setup's isolation contract."},
     {"id":"SRC-WATCH-DRIVER","path":"cli/src/commands/watch/teardown-driver.ts","locator":"export async function runBeginTeardown(","fact":"Teardown driver obtains shared state helpers from the neutral track-state module."},
     {"id":"SRC-WATCH-TRACKS","path":"cli/src/commands/watch/tracks.ts","locator":"import { runBeginTeardown } from './teardown-driver';","fact":"tracks.ts retains the teardown-driver dependency while shared state lives in the neutral module."},
     {"id":"SRC-SENSOR-BOOTSTRAP","path":"cli/src/commands/sensors/bootstrap.ts","locator":"export async function planSensorBootstrap(","fact":"Existing bootstrap command safely plans and applies an equivalent v2-to-v3 logical-source migration."},
-    {"id":"SRC-SENSOR-MANIFEST","path":".awm/sensors.json","locator":"\"schemaVersion\": 3","fact":"Committed project manifest uses the portable logical baseline source without a machine-specific registryRoot."}
+    {"id":"SRC-SENSOR-MANIFEST","path":".awm/sensors.json","locator":"\"schemaVersion\": 3","fact":"Committed project manifest uses the portable logical baseline source without a machine-specific registryRoot."},
+    {"id":"SRC-COVERAGE-INDEX","path":"cli/src/commands/sensors/coverage/index.ts","locator":"export async function runCoverage(","fact":"Coverage evaluates live compatibility and evidence from the declared packageRoot while scanning ledger entries from projectRoot."},
+    {"id":"SRC-COVERAGE-RESOLVE","path":"cli/src/commands/sensors/coverage/resolve.ts","locator":"function findManifestDirNoFollow(","fact":"Coverage manifest discovery stops at a Git checkout or worktree marker."},
+    {"id":"SRC-COVERAGE-TEST","path":"cli/tests/commands/sensors/coverage/resolve.test.ts","locator":"test('v3 monorepo coverage inspects evidence in its declared packageRoot'","fact":"Portable scratch fixtures prove packageRoot evidence and worktree manifest authority."}
   ],
   "commands": [
     {"id":"CMD-JEST-RED","program":"npm","args":["--prefix","cli","test","--","--runInBand","tests/structural/jest-environment-is-isolated.test.ts"],"covers":["FIX-1.1","FIX-1.2"]},
@@ -49,14 +53,16 @@ R1 plan is introduced.
     {"id":"CMD-SENSOR-COVERAGE","program":"awm","args":["sensors","coverage","--json"],"covers":["FIX-3.1"]},
     {"id":"CMD-FULL","program":"npm","args":["--prefix","cli","test","--","--runInBand"],"covers":[]},
     {"id":"CMD-SENSORS","program":"awm","args":["sensors","run"],"covers":[]},
-    {"id":"CMD-DIFF","program":"git","args":["diff","--check"],"covers":[]}
+    {"id":"CMD-DIFF","program":"git","args":["diff","--check"],"covers":[]},
+    {"id":"CMD-COVERAGE-TEST","program":"npm","args":["--prefix","cli","test","--","--runInBand","tests/commands/sensors/coverage/resolve.test.ts","tests/commands/sensors/coverage/index.test.ts","tests/integration/sensor-coverage.e2e.test.ts"],"covers":["FIX-4.1","FIX-4.2"]}
   ],
   "slices": [
     {"id":"S1","title":"Isolate Jest from operator home","requirements":["FIX-1.1","FIX-1.2"],"dependsOn":[],"sectionAnchor":"slice-s1","sources":["SRC-JEST-SETUP","SRC-JEST-TEST"],"redCommands":["CMD-JEST-RED"],"greenCommands":["CMD-JEST-RED"],"reviewEvidence":["specification","code-quality"],"risk":"full-context","fallback":["If Node temporary-root semantics are uncertain, request full context and preserve all HOME/AWM_HOME assertions."]},
     {"id":"S2","title":"Break the watch import cycle","requirements":["FIX-2.1"],"dependsOn":["S1"],"sectionAnchor":"slice-s2","sources":["SRC-WATCH-DRIVER","SRC-WATCH-TRACKS"],"redCommands":["CMD-DEPCHECK"],"greenCommands":["CMD-WATCH-TEST","CMD-DEPCHECK"],"reviewEvidence":["specification","code-quality"],"risk":"full-context","fallback":["If helper ownership cannot be extracted without behavior change, stop for amendment rather than suppressing no-circular."]},
-    {"id":"S3","title":"Migrate committed sensor provenance","requirements":["FIX-3.1"],"dependsOn":["S2"],"sectionAnchor":"slice-s3","sources":["SRC-SENSOR-BOOTSTRAP","SRC-SENSOR-MANIFEST"],"redCommands":["CMD-SENSOR-DRY"],"greenCommands":["CMD-SENSOR-COVERAGE"],"reviewEvidence":["specification","code-quality"],"risk":"full-context","fallback":["If the dry-run is not an equivalent v2-to-v3 migration, stop and retain the committed manifest unchanged."]}
+    {"id":"S3","title":"Migrate committed sensor provenance","requirements":["FIX-3.1"],"dependsOn":["S2"],"sectionAnchor":"slice-s3","sources":["SRC-SENSOR-BOOTSTRAP","SRC-SENSOR-MANIFEST"],"redCommands":["CMD-SENSOR-DRY"],"greenCommands":["CMD-SENSOR-COVERAGE"],"reviewEvidence":["specification","code-quality"],"risk":"full-context","fallback":["If the dry-run is not an equivalent v2-to-v3 migration, stop and retain the committed manifest unchanged."]},
+    {"id":"S4","title":"Keep coverage portable across packages and worktrees","requirements":["FIX-4.1","FIX-4.2"],"dependsOn":["S3"],"sectionAnchor":"slice-s4","sources":["SRC-COVERAGE-INDEX","SRC-COVERAGE-RESOLVE","SRC-COVERAGE-TEST"],"redCommands":["CMD-COVERAGE-TEST"],"greenCommands":["CMD-COVERAGE-TEST"],"reviewEvidence":["specification","code-quality"],"risk":"full-context","fallback":["If packageRoot or worktree authority is ambiguous, fail closed rather than inspecting an ancestor checkout."]}
   ],
-  "closureCommands": ["CMD-FULL", "CMD-DEPCHECK", "CMD-SENSORS", "CMD-SENSOR-COVERAGE", "CMD-DIFF"]
+  "closureCommands": ["CMD-FULL", "CMD-DEPCHECK", "CMD-SENSORS", "CMD-SENSOR-COVERAGE", "CMD-COVERAGE-TEST", "CMD-DIFF"]
 }
 <!-- AWM:COMPACT-SLICES:END v1 -->
 
@@ -143,6 +149,34 @@ manifest contains neither `registryRoot` nor a machine filesystem path.
 
 Keep the v2 file intact and stop if the CLI does not report a safe equivalent migration.
 
+<a id="slice-s4"></a>
+### Slice S4: Keep coverage portable across packages and worktrees
+
+#### Surfaces
+
+Modify `cli/src/commands/sensors/coverage/index.ts`, `cli/src/commands/sensors/coverage/resolve.ts`, and their focused coverage tests only.
+
+#### Implementation
+
+- [ ] RED: prove a v3 manifest with `packageRoot: cli` marks `cli/.dep-cruiser.awm.js` missing when coverage inspects the repo root.
+- [ ] GREEN: resolve the declared package through the existing contained project resolver; evaluate live compatibility and static file evidence there, while keeping ledger scans at the repo root.
+- [ ] RED: prove a nested worktree with a `.git` file and no local manifest inherits the parent checkout's manifest.
+- [ ] GREEN: stop manifest discovery at a `.git` file or directory; require each checkout/worktree to carry its own declaration.
+- [ ] RED/GREEN: prove a pack without coverage cannot hide a missing or escaping `packageRoot` behind `no_reference`; validate the package before that early result.
+- [ ] Run `CMD-COVERAGE-TEST` and inspect real `sensors coverage --json` evidence from the built local CLI.
+
+#### Edge cases
+
+Git worktrees use a `.git` file while normal checkouts use a `.git` directory. Package roots remain relative and contained; an escaping or invalid root must fail closed even when the pack has no coverage reference. Missing security or formatting coverage remains an honest `gaps` result, not a portability error.
+
+#### Evidence
+
+Both regressions fail on the pre-change CLI and pass after the correction. The real AWM checkout reports dependency-boundary, lint, and typecheck evidence from `cli` as covered and certified.
+
+#### Fallback
+
+If a package path cannot be resolved under its manifest directory, do not inspect the repo root or an ancestor checkout as a substitute.
+
 ## Traceability matrix
 
 | Requirement | Owner | Direct verification |
@@ -151,9 +185,11 @@ Keep the v2 file intact and stop if the CLI does not report a safe equivalent mi
 | `FIX-1.2` | S1 | HOME and AWM_HOME are suite-owned |
 | `FIX-2.1` | S2 | watch crash tests plus direct depcheck |
 | `FIX-3.1` | S3 | safe dry-run, v3 logical source, coverage JSON |
+| `FIX-4.1` | S4 | packageRoot coverage regression plus live coverage JSON |
+| `FIX-4.2` | S4 | nested worktree without manifest stays not_configured |
 
 Forward coverage: each requirement has one slice and behavioral verification. Backward coverage: every changed source, test, and configuration file belongs to a named correction; R1 is excluded.
 
 ## Closure gates
 
-After all three slices and their two reviews are clean, run every closure command. Then route through QA, docs, retro, and finishing only if the results are genuinely green. A pre-existing failure reproduced before its owning slice remains a blocker, never an accepted baseline for this plan.
+After all four slices and their two reviews are clean, run every closure command. Then route through QA, docs, retro, and finishing only if the results are genuinely green. A pre-existing failure reproduced before its owning slice remains a blocker, never an accepted baseline for this plan.

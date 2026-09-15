@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { mkCanonicalTmpDir } from '../../../support/tmp';
 import { resolveCoverageInputs } from '../../../../src/commands/sensors/coverage/resolve';
+import { runCoverage } from '../../../../src/commands/sensors/coverage';
 
 function resolveCoverageWithoutNoFollow(cwd: string): ReturnType<typeof resolveCoverageInputs> {
     let resolve: typeof resolveCoverageInputs | undefined;
@@ -67,6 +68,17 @@ test('no manifest returns not_configured without reading registries', () => {
     }
 });
 
+test('a worktree without its own manifest never inherits the parent checkout manifest', () => {
+    writeManifest({ pack: 'js-ts', sensors: {} });
+    configure(['baseline']);
+    writePack('baseline', 'js-ts', { name: 'js-ts', sensors: {}, coverage });
+    const worktree = path.join(project, '.worktrees', 'feature');
+    fs.mkdirSync(worktree, { recursive: true });
+    fs.writeFileSync(path.join(worktree, '.git'), 'gitdir: ../.git/worktrees/feature');
+
+    expect(resolveCoverageInputs(worktree)).toEqual({ kind: 'not_configured' });
+});
+
 test('selects the first configured registry containing the exact pack', () => {
     writeManifest({ pack: 'js-ts', sensors: {} });
     configure(['first', 'second']);
@@ -95,11 +107,56 @@ test('v3 project-sensors resolves coverage from its declared logical registry', 
     });
 });
 
+test('v3 monorepo coverage inspects evidence in its declared packageRoot', async () => {
+    const packageRoot = path.join(project, 'cli');
+    fs.mkdirSync(packageRoot);
+    fs.writeFileSync(path.join(packageRoot, '.dep-cruiser.awm.js'), 'no-circular');
+    writeManifest({
+        schemaVersion: 3, mode: 'project-sensors', pack: 'js-ts', source: { registry: 'baseline' }, packageRoot: 'cli',
+        sensors: { depcheck: {
+            enabled: true, variantId: 'dependency-cruiser',
+            command: { executable: 'depcruise', resolution: 'node-modules-bin', args: ['--config', '.dep-cruiser.awm.js', 'src'] },
+            initializedCompatibility: {
+                state: 'compatible-unverified', reason: 'fixture', variantId: 'dependency-cruiser',
+                toolVersion: null, runtimeVersion: null, certifiedRange: null, evidence: [],
+            },
+        } },
+    });
+    configure(['baseline']);
+    writePack('baseline', 'js-ts', { name: 'js-ts', sensors: {}, coverage: { schemaVersion: 1, classes: {
+        'dependency-boundaries': {
+            description: 'Dependency boundaries',
+            detectors: [{ sensor: 'depcheck', evidence: { commandIncludes: ['depcruise'], files: [{ path: '.dep-cruiser.awm.js', containsAll: ['no-circular'] }] } }],
+            remedy: { summary: 'Enable depcheck', command: 'npm run depcheck' },
+        },
+    } } });
+    const live = { state: 'certified', reason: 'fixture', variantId: 'dependency-cruiser',
+        toolVersion: '16.10.4', runtimeVersion: '24.0.0', certifiedRange: '=16.10.4', evidence: [] };
+
+    const report = await runCoverage(project, { resolveLive: jest.fn().mockResolvedValue({ sensors: { depcheck: live } }) });
+    expect(report.static.classes[0]).toMatchObject({ status: 'covered', detectors: [{
+        sensor: 'depcheck', status: 'covered', evidence: [
+            { kind: 'command', status: 'matched' },
+            { kind: 'file', path: '.dep-cruiser.awm.js', status: 'matched' },
+            { kind: 'marker', path: '.dep-cruiser.awm.js', ordinal: 1, status: 'matched' },
+        ],
+    }] });
+});
+
 test('old pack without coverage is no_reference, not covered', () => {
     writeManifest({ pack: 'js-ts', sensors: {} });
     configure(['baseline']);
     writePack('baseline', 'js-ts', { name: 'js-ts', sensors: {} });
     expect(resolveCoverageInputs(project)).toMatchObject({ kind: 'no_reference', pack: 'js-ts', registry: 'baseline' });
+});
+
+test('no_reference cannot conceal an invalid declared packageRoot', async () => {
+    writeManifest({ schemaVersion: 3, mode: 'project-sensors', pack: 'js-ts',
+        source: { registry: 'baseline' }, packageRoot: 'missing-package', sensors: {} });
+    configure(['baseline']);
+    writePack('baseline', 'js-ts', { name: 'js-ts', sensors: {} });
+
+    await expect(runCoverage(project)).rejects.toThrow(/packageRoot/);
 });
 
 test('normal regular coverage inputs resolve regardless of no-follow availability', () => {

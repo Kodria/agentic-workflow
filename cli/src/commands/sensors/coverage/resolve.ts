@@ -68,6 +68,13 @@ function findManifestDirNoFollow(startCwd: string): string | null {
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw readFailure(manifestPath, error);
         }
+        const gitMarker = path.join(dir, '.git');
+        try {
+            const marker = fs.lstatSync(gitMarker);
+            if (marker.isFile() || marker.isDirectory()) return null;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw readFailure(gitMarker, error);
+        }
         const parent = path.dirname(dir);
         if (parent === dir) return null;
         dir = parent;
