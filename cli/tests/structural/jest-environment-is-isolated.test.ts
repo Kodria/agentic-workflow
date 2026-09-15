@@ -15,47 +15,43 @@ describe('Jest environment isolation', () => {
         expect(process.env.AWM_HOME).toBe(path.join(process.env.AWM_JEST_TMPDIR!, 'awm-home'));
     });
 
-    it('falls back to the system temp directory when the home cache is read-only', async () => {
+    it('keeps the suite root and both homes outside the operator home', () => {
+        const suiteRoot = process.env.AWM_JEST_TMPDIR!;
+        const operatorHome = '/Users/cencosud';
+
+        expect(path.relative(operatorHome, suiteRoot).startsWith('..')).toBe(true);
+        expect(process.env.HOME).toBe(path.join(suiteRoot, 'home'));
+        expect(process.env.AWM_HOME).toBe(path.join(suiteRoot, 'awm-home'));
+    });
+
+    it('creates its physical root below the system temp directory, not the operator home', async () => {
         const originalEnv = { ...process.env };
-        const fallback = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-jest-fallback-'));
+        const systemTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-jest-system-'));
+        const operatorHome = path.join(systemTemp, 'operator-home');
 
         try {
+            fs.mkdirSync(operatorHome);
             jest.resetModules();
             jest.doMock('os', () => ({
                 ...jest.requireActual('os'),
-                homedir: () => '/readonly-home',
-                tmpdir: () => fallback,
-            }));
-
-            const actualFs = jest.requireActual<typeof fs>('fs');
-            jest.doMock('fs', () => ({
-                ...actualFs,
-                mkdirSync: jest.fn((target: fs.PathLike, ...args: unknown[]) => {
-                    if (String(target).includes('readonly-home')) {
-                        return undefined;
-                    }
-                    return (actualFs.mkdirSync as (...inner: unknown[]) => string | undefined)(target, ...args);
-                }),
-                mkdtempSync: jest.fn((prefix: string, ...args: unknown[]) => {
-                    if (prefix.includes('readonly-home')) {
-                        const error = new Error('read-only') as NodeJS.ErrnoException;
-                        error.code = 'EROFS';
-                        throw error;
-                    }
-                    return (actualFs.mkdtempSync as (...inner: unknown[]) => string)(prefix, ...args);
-                }),
+                homedir: () => operatorHome,
+                tmpdir: () => systemTemp,
             }));
 
             const setup = require('../../jest.global-setup.js') as () => Promise<void>;
             await expect(setup()).resolves.toBeUndefined();
-            expect(process.env.AWM_JEST_TMPDIR?.startsWith(path.join(fallback, 'awm-cache', 'awm-jest-'))).toBe(true);
+            const suiteRoot = process.env.AWM_JEST_TMPDIR!;
+            expect(suiteRoot.startsWith(path.join(fs.realpathSync(systemTemp), 'awm-jest-'))).toBe(true);
+            expect(path.relative(operatorHome, suiteRoot).startsWith('..')).toBe(true);
+            expect(process.env.HOME).toBe(path.join(suiteRoot, 'home'));
+            expect(process.env.AWM_HOME).toBe(path.join(suiteRoot, 'awm-home'));
         } finally {
             jest.dontMock('fs');
             jest.dontMock('os');
             jest.resetModules();
             for (const key of Object.keys(process.env)) delete process.env[key];
             Object.assign(process.env, originalEnv);
-            fs.rmSync(fallback, { recursive: true, force: true });
+            fs.rmSync(systemTemp, { recursive: true, force: true });
         }
     });
 });
