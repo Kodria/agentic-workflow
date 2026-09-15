@@ -11,7 +11,15 @@ const stdoutWrite = jest.spyOn(process.stdout, 'write').mockImplementation(() =>
 const valid: PlanValidationReport = {
     state: 'valid', schema: 'compact-slices/v1', manifest: {
         schema: 'compact-slices/v1', planId: 'r4-plan', requirements: ['R4-VAL-1', 'R4-VAL-4'],
-        sources: [], commands: [], slices: [], closureCommands: [],
+        sources: [{ id: 'SRC-1', path: 'AGENTS.md', locator: '# AGENTS.md', fact: 'maintenance context' }],
+        commands: [
+            { id: 'CMD-1', program: 'npm', args: ['test'], covers: ['R4-VAL-1', 'R4-VAL-4'] },
+            { id: 'CMD-2', program: 'npm', args: ['run', 'build'], covers: [] },
+        ], slices: [{
+            id: 'S1', title: 'Implement', requirements: ['R4-VAL-1', 'R4-VAL-4'], dependsOn: [],
+            sectionAnchor: '## S1', sources: ['SRC-1'], redCommands: ['CMD-1'], greenCommands: ['CMD-1'],
+            reviewEvidence: ['specification', 'code-quality'], risk: 'bounded', fallback: ['stop on failure'],
+        }], closureCommands: ['CMD-2'],
     },
 };
 const invalid: Extract<PlanValidationReport, { state: 'invalid' }> = {
@@ -52,7 +60,7 @@ describe('plan validate Commander wiring', () => {
         await commandFor(valid).parseAsync(['node', 'awm', 'plan', 'validate', 'plans/r4.md']);
 
         expect(String(stdoutWrite.mock.calls[0][0])).toBe(
-            'Plan validation: valid "plans/r4.md" (compact-slices/v1; 0 slices; 2 requirements; complete ownership)\n',
+            'Plan validation: valid "plans/r4.md" (compact-slices/v1; 1 slices; 2 requirements; complete ownership)\n',
         );
         expect(process.exitCode).toBe(0);
     });
@@ -62,7 +70,7 @@ describe('plan validate Commander wiring', () => {
 
         expect(JSON.parse(String(stdoutWrite.mock.calls[0][0]))).toEqual({
             state: 'valid', path: 'plans/r4.md', schema: 'compact-slices/v1', planId: 'r4-plan',
-            requirements: 2, sources: 0, commands: 0, slices: 0, completeOwnership: true,
+            requirements: 2, sources: 1, commands: 2, slices: 1, completeOwnership: true,
         });
         expect(String(stdoutWrite.mock.calls[0][0])).not.toContain('update');
     });
@@ -242,6 +250,52 @@ describe('plan validation public boundaries', () => {
         const malformed = { ...valid, manifest: { ...valid.manifest, closureCommands: undefined } } as unknown as PlanValidationReport;
         expect(() => exitCodeFor(malformed)).toThrow('plan validator returned an invalid valid report');
     });
+
+    it.each(['requirements', 'sources', 'commands', 'slices', 'closureCommands'] as const)(
+        'rejects a null %s entry before claiming complete ownership or exit 0', (collection) => {
+            const malformed = {
+                ...valid, manifest: { ...valid.manifest, [collection]: [null] },
+            } as unknown as PlanValidationReport;
+            expect(() => formatReport(malformed, 'plan.md')).toThrow('plan validator returned an invalid valid report');
+            expect(() => exitCodeFor(malformed)).toThrow('plan validator returned an invalid valid report');
+        },
+    );
+
+    it.each(['human', 'json'])('rejects a null manifest slice before %s output or exit 0', async (mode) => {
+        const malformed = {
+            ...valid, manifest: { ...valid.manifest, slices: [null] },
+        } as unknown as PlanValidationReport;
+        const args = ['node', 'awm', 'plan', 'validate', 'plan.md', ...(mode === 'json' ? ['--json'] : [])];
+        await expect(commandFor(malformed).parseAsync(args)).rejects.toThrow('plan validator returned an invalid valid report');
+        expect(stdoutWrite).not.toHaveBeenCalled();
+        expect(process.exitCode).toBeUndefined();
+    });
+
+    it('rejects an unowned requirement before claiming complete ownership or exit 0', () => {
+        const malformed = { ...valid, manifest: { ...valid.manifest, requirements: [...valid.manifest.requirements, 'R4-VAL-5'] } };
+        expect(() => formatReport(malformed, 'plan.md')).toThrow('plan validator returned an invalid valid report');
+        expect(() => exitCodeFor(malformed)).toThrow('plan validator returned an invalid valid report');
+    });
+
+    it('rejects a requirement owned by two slices', () => {
+        const malformed = {
+            ...valid, manifest: { ...valid.manifest, slices: [...valid.manifest.slices, {
+                ...valid.manifest.slices[0], id: 'S2', requirements: ['R4-VAL-1'],
+            }] },
+        };
+        expect(() => formatReport(malformed, 'plan.md')).toThrow('plan validator returned an invalid valid report');
+        expect(() => exitCodeFor(malformed)).toThrow('plan validator returned an invalid valid report');
+    });
+
+    it.each(['requirements', 'sources', 'commands', 'slices', 'closureCommands'] as const)(
+        'rejects an empty %s collection in an injected valid report', (collection) => {
+            const malformed = {
+                ...valid, manifest: { ...valid.manifest, [collection]: [] },
+            } as unknown as PlanValidationReport;
+            expect(() => formatReport(malformed, 'plan.md')).toThrow('plan validator returned an invalid valid report');
+            expect(() => exitCodeFor(malformed)).toThrow('plan validator returned an invalid valid report');
+        },
+    );
 
     it('fails loudly for a migration state without its required reason at the public exit boundary', () => {
         const malformed = { state: 'migration-required' } as unknown as PlanValidationReport;

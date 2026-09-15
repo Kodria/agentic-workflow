@@ -39,15 +39,60 @@ function boundedDiagnostics(diagnostics: PlanDiagnostic[]): PlanDiagnostic[] {
     });
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasText(value: unknown): value is string {
+    return typeof value === 'string' && value.length > 0;
+}
+
+function hasStringArray(value: unknown, nonempty = true): value is string[] {
+    if (!Array.isArray(value)) return false;
+    for (const entry of value) if (typeof entry !== 'string' || (nonempty && entry.length === 0)) return false;
+    return true;
+}
+
+function hasManifestEntries(manifest: Extract<PlanValidationReport, { state: 'valid' }>['manifest']): boolean {
+    if (!hasStringArray(manifest.requirements) || !hasStringArray(manifest.closureCommands)
+        || !Array.isArray(manifest.sources) || !Array.isArray(manifest.commands) || !Array.isArray(manifest.slices)) return false;
+    if (manifest.requirements.length === 0 || manifest.sources.length === 0 || manifest.commands.length === 0
+        || manifest.slices.length === 0 || manifest.closureCommands.length === 0) return false;
+    for (const source of manifest.sources) {
+        if (!isRecord(source) || !hasText(source.id) || !hasText(source.path)
+            || !hasText(source.locator) || !hasText(source.fact)) return false;
+    }
+    for (const command of manifest.commands) {
+        if (!isRecord(command) || !hasText(command.id) || !hasText(command.program)
+            || !hasStringArray(command.args, false) || !hasStringArray(command.covers)) return false;
+    }
+    const owners = new Map(manifest.requirements.map(requirement => [requirement, 0]));
+    if (owners.size !== manifest.requirements.length) return false;
+    const sliceIds = new Set<string>();
+    for (const slice of manifest.slices) {
+        if (!isRecord(slice) || !hasText(slice.id) || sliceIds.has(slice.id)
+            || !hasText(slice.title) || !hasText(slice.sectionAnchor)
+            || !hasStringArray(slice.requirements) || !hasStringArray(slice.dependsOn)
+            || !hasStringArray(slice.sources) || !hasStringArray(slice.redCommands)
+            || !hasStringArray(slice.greenCommands) || !hasStringArray(slice.reviewEvidence)
+            || !hasStringArray(slice.fallback) || !hasText(slice.risk)) return false;
+        sliceIds.add(slice.id);
+        for (const requirement of slice.requirements) {
+            const ownerCount = owners.get(requirement);
+            if (ownerCount === undefined || ownerCount !== 0) return false;
+            owners.set(requirement, 1);
+        }
+    }
+    return [...owners.values()].every(count => count === 1);
+}
+
 function assertReport(report: PlanValidationReport): void {
     if (!report || typeof report !== 'object' || Array.isArray(report)) throw new Error('plan validator returned an invalid report');
     switch (report.state) {
     case 'valid':
         if (report.schema !== SUPPORTED_SCHEMA || !report.manifest || report.manifest.schema !== report.schema
             || typeof report.manifest.planId !== 'string' || report.manifest.planId.length === 0
-            || !Array.isArray(report.manifest.requirements) || !Array.isArray(report.manifest.sources)
-            || !Array.isArray(report.manifest.commands) || !Array.isArray(report.manifest.slices)
-            || !Array.isArray(report.manifest.closureCommands)) {
+            || !hasManifestEntries(report.manifest)) {
             throw new Error('plan validator returned an invalid valid report');
         }
         return;
