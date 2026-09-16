@@ -368,7 +368,9 @@ describe('plan admit Commander wiring', () => {
             const output = JSON.parse(String(outputSpy.mock.calls.at(-1)![0]));
             expect(output.diagnostics[0].code).toBe('ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED');
             expect(output.state).toBe('blocked');
-            expect(output.diagnostics[0].message).toContain(fs.realpathSync(installedFile));
+            // Windows' JS realpath can preserve an 8.3 alias; admission uses the
+            // native physical path, so the expectation must use the same API.
+            expect(output.diagnostics[0].message).toContain(fs.realpathSync.native(installedFile));
             expect(sensors).not.toHaveBeenCalled();
         } finally { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; outputSpy.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
     });

@@ -727,3 +727,19 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
   recomendaciones pendientes de autorización. Las curas ya son ejecutables.
   Publicación y aceptación instalada se cierran con artefactos reales en #126;
   no se infieren ahorro de cuota ni paridad de ejecución entre proveedores.
+
+### Diagnóstico Windows y feedback temprano del CI
+
+Los logs reales de Windows x64 y ARM64 mostraron dos fallos de la misma
+aserción: `RUNNER~1` frente a `runneradmin`. La admisión usa
+`fs.realpathSync.native`; la expectativa usaba primero el texto original y
+después `fs.realpathSync`, cuya implementación JS puede preservar el alias 8.3.
+La corrección exige la misma API nativa en la expectativa y conserva código
+de diagnóstico, estado bloqueado y cero llamadas a sensores.
+
+CI y prepublicación verifican ahora esa superficie con un smoke Windows antes
+de la suite completa; `--bail` termina solo las ejecuciones fallidas. Se mantienen
+la cobertura completa cuando hay éxito, las seis plataformas, `needs: test` y
+`cancel-in-progress: false`. Un guard estructural exige esas garantías.
+RED del guard observado; GREEN focal: 93 pruebas y revisión independiente limpia.
+Esto no sustituye la comprobación real de Windows ni una publicación instalada.

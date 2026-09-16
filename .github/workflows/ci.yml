@@ -96,9 +96,14 @@ jobs:
       - name: Verify published sensor support matrix
         run: git diff --exit-code -- docs/support-matrix.md
 
+      - name: Windows admission smoke
+        if: runner.os == 'Windows'
+        working-directory: cli
+        run: npx jest tests/commands/plan/index.test.ts --runInBand --bail
+
       - name: Test
         working-directory: cli
-        run: npx jest --runInBand
+        run: npx jest --runInBand --bail
 
       # This is intentionally a second consumer boundary: the regular suite
       # executes this checkout, while this gate invokes the npm tarball that a
