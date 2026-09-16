@@ -1,7 +1,32 @@
 # R1 release evidence — source checkpoint
 
-Publication and installed-pair acceptance are pending. This document distinguishes
-source verification, native historical provenance, and actual release evidence.
+At this source checkpoint, publication and installed-pair acceptance are pending.
+Actual subsequent artifact versions, immutable commits and installed acceptance are
+tracked in [issue 126](https://github.com/Kodria/agentic-workflow/issues/126).
+This document distinguishes source verification, native historical provenance,
+and actual release evidence; source phase markers do not close R1 availability.
+
+## Final source verification and native closure — 2026-09-16
+
+- Immutable code/test candidate `c72b42bb6e754e8b40d898892131c9f147bc2ad0`:
+  289 Jest suites PASS, 2 skipped; 3,848 tests PASS, 21 skipped, zero failures.
+  Build and enabled CLI sensors PASS. Disabled sensors are not claimed as coverage.
+- Final specification/fidelity, code quality and applicable robustness, logic and
+  tests QA findings are reconciled against current regressions; no open source
+  findings remain. Native/manual review is not journal-driven execution.
+- The pristine, unused bootstrap was archived by the real
+  `awm watch archive-unused --plan docs/plans/2026-09-15-compact-only-r1-cli-plan.md`.
+  Its original IN_PROGRESS bytes retain SHA-256
+  `df09c2f511c3fc7d98db18911e7b43a5c1cdcc97a9aaf39fdb6e26af4e73f4ac`.
+  Archive directory: `.awm/journal-unused/codex_2Fissue-126-compact-only.7d668d1d-a064-4246-a036-92278cd21dbf`.
+  Current branch journal query is `missing`; cycle evidence capture was explicitly
+  skipped, never fabricated COMPLETE. Actual ledger archive succeeded and list is `[]`.
+- The CLI project has no registry manifest; none was invented. This approved
+  development bootstrap provides source/runtime evidence, not a published CLI
+  version or permission to bypass installed acceptance or unattended custody.
+- The public CLI reference reflects the real commands, identities and supplier
+  checks. Retro cures are executable regressions rather than extra context rules.
+  No measured token, price, quota savings or six-provider execution parity is claimed.
 
 ## Issue 148: recovered existing native T1 review provenance
 

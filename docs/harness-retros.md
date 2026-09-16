@@ -698,3 +698,32 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
 - **Documentación:** ningún contrato ni comando de usuario cambió; no hay documentación pública afectada.
 - **Lección de diagnóstico:** correlacionar el `mtime` del estado durable con un literal exacto de la suite identificó la causa antes de repetir otro `awm unpin` local.
 - **Descartes:** no se añadió una regla textual a `AGENTS.md` o `CONSTITUTION.md`; la barrera ejecutable cierra la clase con menos deriva.
+
+## 2026-09-16 — R1 compact-only: curas del harness, no reparaciones locales por proyecto
+
+- **Clase:** lógica, seguridad, proceso y aislamiento de pruebas. Los grupos de
+  migración, admisión y custodia convergieron dentro de este mismo ciclo de
+  revisión; no se presentan como recurrencias observadas en otros proyectos.
+- **Curas persistentes:** una autoridad compartida para los proveedores de
+  contratos instalados; comparación de identidad y hash acotado antes/después
+  de esperas; lectura nativa sin seguimiento de enlaces; validación de argv,
+  nonce y rutas antes de escribir; migración basada en cada obligación y su
+  tipo declarado, no prefijos ni evidencia prestada. Las suites de admission,
+  migration, journal y wrapper incluyen controles RED/GREEN para estas familias.
+- **Registry:** las recetas compact-only conservan todos los gates; la
+  aceptación observa artefactos de custodia reales, no un contador constante.
+  La clase de ledger para hallazgos de tests es `structural`, no el enum
+  inexistente `tests`. El archivo de bootstrap nombra el plan y no pide una
+  opción `--json` inexistente. Regresiones r16 prueban las mutaciones negativas.
+- **Verificación:** candidato inmutable `c72b42bb6e754e8b40d898892131c9f147bc2ad0`:
+  289 suites / 3.848 tests PASS; 2 suites / 21 tests omitidos; cero fallos.
+  Build y sensores habilitados PASS; los sensores deshabilitados no cuentan
+  como cobertura. QA y revisiones nativas están reconciliadas con el código.
+- **Captura y archivo:** bootstrap vacío archivado sin alterar sus bytes;
+  consulta de journal de rama `missing`; skip explícito de captura de ciclo
+  con evidencia manual/nativa durable en `docs/plans/2026-09-16-r1-release-evidence.md`.
+  Archivo real de ledger aprobado y lista activa `[]`. No se fabrica COMPLETE.
+- **Descartes:** no se añaden reglas a AGENTS/CONSTITUTION ni se aplican
+  recomendaciones pendientes de autorización. Las curas ya son ejecutables.
+  Publicación y aceptación instalada se cierran con artefactos reales en #126;
+  no se infieren ahorro de cuota ni paridad de ejecución entre proveedores.

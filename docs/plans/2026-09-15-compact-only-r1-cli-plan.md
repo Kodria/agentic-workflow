@@ -247,3 +247,22 @@ validation, strict currentness observation, and empirical sensors; its implement
 create the exact binding and cannot dispatch agents. Immediately after S3 exists, revalidate
 this plan, initialize its bound journal, and require a successful admission before S4. No
 unmarked plan, legacy executor route, or later R1 slice is covered by either exception.
+
+## Source phase closure — 2026-09-16
+
+S1–S4 implementation and source quality gates are complete. Final code/test
+candidate `c72b42bb6e754e8b40d898892131c9f147bc2ad0` passed 3,848 tests,
+with 21 skipped and zero failures, build, enabled sensors and reconciled native
+review/Track A/Track B QA. User-facing documentation and retro are recorded in
+`docs/plans/2026-09-16-r1-release-evidence.md` and `docs/harness-retros.md`.
+The unused bootstrap was recoverably archived unchanged; there is no current
+branch journal, no synthetic cycle capture and no claimed unattended execution.
+Actual ledger archive succeeded and the active list is empty.
+
+These markers close source phases only. They do not admit a new execution or
+close R1 availability. Published CLI/registry acceptance and released #148 dry-run
+evidence remain mandatory and are recorded in issue #126; #148 stays paused.
+
+<!-- awm-qa-complete: 2026-09-16 -->
+<!-- awm-docs-complete: 2026-09-16 -->
+<!-- awm-retro-complete: 2026-09-16 -->
