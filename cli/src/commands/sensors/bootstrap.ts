@@ -5,7 +5,7 @@ import { listPackSources, type PackSource } from './compatibility/pack-source';
 import { resolveParsedPackCompatibility } from './compatibility/live';
 import { resolveSensorSource } from './compatibility/source';
 import { detectStack } from './detection';
-import { planV2Migration, type V2MigrationPlan } from './migrate';
+import { planV2Migration, replaceLegacyManifestWithV3, type V2MigrationPlan } from './migrate';
 import { resolveSensorProject } from './project';
 import { materializePortableSensors } from './compatibility/materialize';
 import { replaceV2ManifestWithV3 } from './migrate';
@@ -17,11 +17,12 @@ import path from 'path';
 export type BootstrapMode = 'project-sensors' | 'native-gate' | 'opt-out';
 export type BootstrapOptions = { mode?: BootstrapMode; reason?: string; dryRun?: boolean; registryRoot?: string; configure?: boolean; pack?: string; packageRoot?: string };
 export type BootstrapChange = Readonly<{ path: '.awm/sensors.json' | string; action: 'create' | 'replace' }>;
+type LegacyMigrationPlan = Readonly<{ kind: 'legacy-v1'; manifest: SensorManifestV3ProjectSensors }>;
 export type BootstrapPlan =
     | Readonly<{ kind: 'noop'; projectRoot: string; manifestPath: string; changes: []; dryRun: boolean }>
     | Readonly<{ kind: 'blocked'; projectRoot: string; manifestPath: string; changes: []; dryRun: boolean; reason: string; remedy: string; candidates?: string[] }>
     | Readonly<{ kind: 'create'; projectRoot: string; manifestPath: string; changes: BootstrapChange[]; dryRun: boolean; manifest: SensorManifestV3; source?: PackSource; configure?: boolean }>
-    | Readonly<{ kind: 'migrate'; projectRoot: string; manifestPath: string; changes: [BootstrapChange]; dryRun: boolean; migration: V2MigrationPlan; source: unknown; originalDigest: string }>;
+    | Readonly<{ kind: 'migrate'; projectRoot: string; manifestPath: string; changes: [BootstrapChange]; dryRun: boolean; migration: V2MigrationPlan | LegacyMigrationPlan; source: unknown; originalDigest: string }>;
 
 function blocked(projectRoot: string, manifestPath: string, dryRun: boolean, reason: string, remedy: string, candidates?: string[]): BootstrapPlan {
     return { kind: 'blocked', projectRoot, manifestPath, changes: [], dryRun, reason, remedy, ...(candidates ? { candidates } : {}) };
@@ -92,7 +93,19 @@ export async function planSensorBootstrap(cwd: string = process.cwd(), input: Bo
             }
             return { kind: 'noop', projectRoot: project.projectRoot, manifestPath: project.manifestPath, changes: [], dryRun: opts.dryRun };
         }
-        if (project.manifest.kind === 'legacy') return blocked(project.projectRoot, project.manifestPath, opts.dryRun, 'legacy-v1-preserved', 'migrate-the-manifest-explicitly');
+        if (project.manifest.kind === 'legacy') {
+            const planned = await projectSensors(project.projectRoot, opts.registryRoot, project.manifest.pack.pack);
+            if ('reason' in planned) return blocked(project.projectRoot, project.manifestPath, opts.dryRun, planned.reason, planned.remedy, 'candidates' in planned ? planned.candidates : undefined);
+            try {
+                const original = fs.readFileSync(project.manifestPath);
+                return {
+                    kind: 'migrate', projectRoot: project.projectRoot, manifestPath: project.manifestPath,
+                    changes: planned.changes.map((change, index) => index === 0 ? { ...change, action: 'replace' as const } : change) as [BootstrapChange],
+                    dryRun: opts.dryRun, migration: { kind: 'legacy-v1', manifest: planned.manifest }, source: planned.source,
+                    originalDigest: digest(original),
+                };
+            } catch { return blocked(project.projectRoot, project.manifestPath, opts.dryRun, 'legacy-manifest-unreadable', 'repair-the-manifest-before-bootstrap'); }
+        }
         let source;
         try { source = resolveSensorSource(project.manifest, { registries: listRegistries() }); }
         catch { return blocked(project.projectRoot, project.manifestPath, opts.dryRun, 'source-invalid', 'repair-or-run-awm-update'); }
@@ -121,7 +134,8 @@ export function applySensorBootstrap(plan: BootstrapPlan): 'created' | 'migrated
     if (plan.kind === 'migrate') {
         const current = fs.readFileSync(plan.manifestPath);
         if (digest(current) !== plan.originalDigest) throw new Error('bootstrap migration plan is stale: manifest changed after planning');
-        replaceV2ManifestWithV3(plan.manifestPath, plan.migration.candidate, plan.source);
+        if ('kind' in plan.migration) replaceLegacyManifestWithV3(plan.manifestPath, plan.migration.manifest, plan.source);
+        else replaceV2ManifestWithV3(plan.manifestPath, plan.migration.candidate, plan.source);
         return 'migrated';
     }
     if (plan.manifest.mode === 'project-sensors') {
