@@ -5,6 +5,7 @@ module.exports = {
   globalSetup: '<rootDir>/jest.global-setup.js',
   globalTeardown: '<rootDir>/jest.global-teardown.js',
   setupFiles: ['<rootDir>/jest.setup.js'],
+  setupFilesAfterEnv: ['<rootDir>/jest.after-env.js'],
   // El default de jest son 5s, pensado para tests puros. Esta suite no lo es: 24
   // archivos clonan repos git de verdad, spawnean procesos y consultan si un pid sigue
   // vivo — y en Windows cada una de esas consultas spawnea `tasklist`, cientos de ms
