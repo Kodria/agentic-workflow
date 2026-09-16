@@ -158,7 +158,7 @@ test('compiled bootstrap migrates v2 once, preserves all non-manifest project by
     } finally { fs.rmSync(subject.root, { recursive: true, force: true }); }
 });
 
-test('compiled bootstrap explicitly migrates a legacy manifest through the current unique registry source', () => {
+test('compiled bootstrap requires explicit project-sensors mode before replacing a legacy manifest', () => {
     const subject = fixture();
     try {
         const manifest = path.join(subject.project, '.awm', 'sensors.json');
@@ -170,12 +170,16 @@ test('compiled bootstrap explicitly migrates a legacy manifest through the curre
         const before = fs.readFileSync(manifest);
         const machineBefore = hashTree(subject.awmHome);
 
-        const dryRun = run(subject, '--dry-run');
-        expect(dryRun.status).toBe(0);
-        expect(`${dryRun.stdout}${dryRun.stderr}`).not.toContain('legacy-v1-preserved');
+        const blocked = run(subject, '--dry-run');
+        expect(blocked.status).toBe(1);
+        expect(`${blocked.stdout}${blocked.stderr}`).toContain('legacy-replacement-requires-project-sensors-mode');
         expect(fs.readFileSync(manifest)).toEqual(before);
 
-        const migrated = run(subject);
+        const dryRun = run(subject, '--mode', 'project-sensors', '--dry-run');
+        expect(dryRun.status).toBe(0);
+        expect(fs.readFileSync(manifest)).toEqual(before);
+
+        const migrated = run(subject, '--mode', 'project-sensors');
         expect(migrated.status).toBe(0);
         expect(`${migrated.stdout}${migrated.stderr}`).toContain('migrated');
         expect(`${migrated.stdout}${migrated.stderr}`).not.toContain('legacy-v1-preserved');
