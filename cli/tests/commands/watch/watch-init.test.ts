@@ -91,6 +91,7 @@ describe('watch --init: plan-vs-repo mecanico', () => {
     test('watch --init --plan crea una sola vinculacion schema-2 desatendida', () => {
         const plan: Extract<PlanValidationReport, { state: 'valid' }> = {
             state: 'valid', schema: 'compact-slices/v1', planDigest: 'a'.repeat(64),
+            executionMode: 'desatendido',
             manifest: { schema: 'compact-slices/v1', planId: 'fixture', requirements: [], sources: [], commands: [], slices: [], closureCommands: [] },
         };
         const out = initWatch(repo, 'rama', { path: 'docs/plan.md', report: plan });
@@ -107,8 +108,14 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         expect(readJournal(repo, 'rama').corrupt).toBe(true);
     });
 
+    test('watch --init --plan rechaza un plan interactivo antes de crear un binding desatendido', () => {
+        const interactive = { ...validPlan('a'), executionMode: 'interactivo' as const };
+        expect(() => initWatch(repo, 'rama', { path: 'docs/plan.md', report: interactive })).toThrow(/desatendido/i);
+        expect(readJournal(repo, 'rama').state).toBeNull();
+    });
+
     test('watch --init --plan rechaza paths con caracteres de control antes de persistir', () => {
-        const report = { state: 'valid', schema: 'compact-slices/v1', planDigest: 'a'.repeat(64), manifest: {} } as PlanValidationReport;
+        const report = { state: 'valid', schema: 'compact-slices/v1', planDigest: 'a'.repeat(64), executionMode: 'desatendido', manifest: {} } as PlanValidationReport;
         expect(() => initWatch(repo, 'rama', { path: 'docs/plan\u0000.md', report })).toThrow(/path inválido/);
         expect(readJournal(repo, 'rama').state).toBeNull();
     });
@@ -116,6 +123,10 @@ describe('watch --init: plan-vs-repo mecanico', () => {
     test('rebind reconcilia un digest obsoleto tras actualizar el ciclo y conserva el binding anterior', () => {
         const original = validPlan('a');
         initWatch(repo, 'rama', { path: 'docs/plan.md', report: original });
+        const completed = readJournal(repo, 'rama').state!;
+        completed.cycle.status = 'COMPLETE';
+        delete completed.cycle.nextAction;
+        writeJournal(repo, 'rama', completed);
 
         const rebound = rebindWatchPlan(repo, 'rama', { path: 'docs/plan.md', report: validPlan('b') });
 
@@ -124,6 +135,14 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         expect(state.planBinding).toEqual(expect.objectContaining({ digest: 'b'.repeat(64), path: 'docs/plan.md' }));
         expect(state.planBindingHistory).toEqual([expect.objectContaining({ digest: 'a'.repeat(64), path: 'docs/plan.md' })]);
         expect(fs.existsSync(supervisorLockPath(repo))).toBe(false);
+    });
+
+    test('rebind rechaza un ciclo en curso y conserva toda su evidencia ligada al digest anterior', () => {
+        initWatch(repo, 'rama', { path: 'docs/plan.md', report: validPlan('a') });
+        const before = readJournal(repo, 'rama').raw!;
+
+        expect(() => rebindWatchPlan(repo, 'rama', { path: 'docs/plan.md', report: validPlan('b') })).toThrow(/ciclo.*curso/i);
+        expect(readJournal(repo, 'rama').raw).toBe(before);
     });
 
     test('rebind rechaza una ruta canónica distinta y deja el journal byte-a-byte intacto', () => {
@@ -178,10 +197,14 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         try {
             const planPath = path.join(cliRepo, 'docs', 'plan.md');
             fs.mkdirSync(path.dirname(planPath), { recursive: true });
-            const plan = fs.readFileSync(path.join(__dirname, '../../core/plan/fixtures/compact-slices-v1/valid.md'), 'utf8');
+            const plan = `**Modo de ejecución:** desatendido\n\n${fs.readFileSync(path.join(__dirname, '../../core/plan/fixtures/compact-slices-v1/valid.md'), 'utf8')}`;
             fs.writeFileSync(planPath, plan);
             fs.writeFileSync(path.join(cliRepo, 'source.md'), '## Canonical source\nfixture source\n');
             initWatch(cliRepo, 'main', { path: 'docs/plan.md', report: validatePlan(cliRepo, 'docs/plan.md') });
+            const completed = readJournal(cliRepo, 'main').state!;
+            completed.cycle.status = 'COMPLETE';
+            delete completed.cycle.nextAction;
+            writeJournal(cliRepo, 'main', completed);
             fs.appendFileSync(planPath, '\nLifecycle checkbox completed.\n');
 
             const result = spawnSync(process.execPath, [path.resolve(__dirname, '../../../dist/src/index.js'), 'watch', 'rebind', '--plan', 'docs/plan.md'], {
@@ -198,6 +221,7 @@ describe('watch --init: plan-vs-repo mecanico', () => {
 function validPlan(digestCharacter: string): Extract<PlanValidationReport, { state: 'valid' }> {
     return {
         state: 'valid', schema: 'compact-slices/v1', planDigest: digestCharacter.repeat(64),
+        executionMode: 'desatendido',
         manifest: { schema: 'compact-slices/v1', planId: 'fixture', requirements: [], sources: [], commands: [], slices: [], closureCommands: [] },
     };
 }

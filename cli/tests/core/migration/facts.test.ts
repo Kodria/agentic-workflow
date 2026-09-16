@@ -28,7 +28,7 @@ describe('collectMigrationFacts', () => {
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
 
-    it('uses every declared Files entry when authenticating a task commit', () => {
+    it('rejects a task commit that omits a declared Files entry', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migration-files-'));
         try {
             fs.mkdirSync(path.join(root, 'docs', 'plans'), { recursive: true });
@@ -53,7 +53,7 @@ describe('collectMigrationFacts', () => {
             state.jobs = { test: job('test:1'), sensor: job('sensor:1') };
             state.verdicts = [{ id: 'v1', obligationId: 'spec:1', result: 'pass', detail: 'ok', receivedAt: '2026-09-15T01:00:00.000Z', fingerprint: 'f', argv: [], paths: [], cwd: '.' }, { id: 'v2', obligationId: 'quality:1', result: 'pass', detail: 'ok', receivedAt: '2026-09-15T01:00:00.000Z', fingerprint: 'f', argv: [], paths: [], cwd: '.' }];
             writeJournal(root, 'master', state);
-            expect(collectMigrationFacts(planPath, root, ['https://github.com/Kodria/agentic-workflow/issues/126']).tasks[0]).toMatchObject({ state: 'completed' });
+            expect(collectMigrationFacts(planPath, root, ['https://github.com/Kodria/agentic-workflow/issues/126']).tasks[0]).toMatchObject({ state: 'pending', missing: expect.arrayContaining(['commit']) });
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
 
@@ -150,14 +150,18 @@ describe('collectIssue148HistoricalFacts', () => {
         const cwd = jest.spyOn(process, 'cwd').mockReturnValue(current);
         try {
             fs.mkdirSync(current); fs.mkdirSync(path.join(historical, 'docs', 'plans'), { recursive: true });
-            fs.writeFileSync(path.join(historical, 'docs', 'plans', '2026-09-14-awm-facts-plan.md'), '### Task 1: facts\n- [x] reviewed\n\n### Task 2: quality\n');
+            fs.writeFileSync(path.join(historical, 'docs', 'plans', '2026-09-14-awm-facts-plan.md'), `### Task 1: facts\n- [x] reviewed\n\n### Task 2: quality\n${Array.from({ length: 12 }, (_, index) => `\n### Task ${index + 3}: unstarted\n`).join('')}`);
             execFileSync('git', ['init', '-q', '-b', 'codex/issue-148-awm-facts'], { cwd: historical });
             execFileSync('git', ['-c', 'user.email=t@e.invalid', '-c', 'user.name=T', 'add', '.'], { cwd: historical });
             execFileSync('git', ['-c', 'user.email=t@e.invalid', '-c', 'user.name=T', 'commit', '-qm', 'fixture'], { cwd: historical });
             expect(() => collectIssue148HistoricalFacts(current, ['https://github.com/Kodria/agentic-workflow/issues/126', 'https://github.com/Kodria/agentic-workflow/issues/148'])).toThrow(/admitted issue-148 sibling/);
             const report = collectIssue148HistoricalFacts(historical, ['https://github.com/Kodria/agentic-workflow/issues/126', 'https://github.com/Kodria/agentic-workflow/issues/148']);
             expect(report).toMatchObject({ state: 'blocked', diagnostics: ['issue-148 historical provenance is incomplete or inconsistent'] });
-            expect(report.tasks).toEqual([{ id: '1', state: 'unstarted', missing: [] }, { id: '2', state: 'pending', missing: ['quality-review'] }]);
+            expect(report.tasks).toEqual([
+                { id: '1', state: 'unstarted', missing: [] },
+                { id: '2', state: 'pending', missing: ['quality-review'] },
+                ...Array.from({ length: 12 }, (_, index) => ({ id: String(index + 3), state: 'unstarted' as const, missing: [] })),
+            ]);
         } finally { cwd.mockRestore(); fs.rmSync(parent, { recursive: true, force: true }); }
     });
 });

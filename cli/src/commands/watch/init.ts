@@ -68,12 +68,16 @@ function rebindBlocker(state: ReturnType<typeof readJournal>['state']): string |
     if (state.verdicts.some(verdict => verdict.result !== 'pass')) return 'hay evidencia adversa durable';
     if (state.fixes.some(fix => !fix.closed)) return 'hay fixes abiertos';
     if (state.cycle.status === 'BLOCKED') return 'el ciclo está bloqueado';
+    if (state.cycle.status !== 'COMPLETE') return 'el ciclo sigue en curso';
     if (state.tracks?.some(track => track.phase !== 'REMOVED')) return 'hay tracks no terminales';
     return undefined;
 }
 
 export function initWatch(repoRoot: string, branch: string, plan?: WatchPlanInit): { requiredVerifiers: VerificationKind[]; planBinding?: PlanBinding } {
-    if (plan && plan.report.state !== 'valid') throw new Error('watch --init --plan requiere un plan compacto válido');
+    if (plan) {
+        if (plan.report.state !== 'valid') throw new Error('watch --init --plan requiere un plan compacto válido');
+        if (plan.report.executionMode !== 'desatendido') throw new Error('watch --init --plan requiere un plan compacto desatendido');
+    }
     if (plan && fs.existsSync(statePath(repoRoot, branch))) {
         throw new Error('refusing to overwrite existing journal');
     }
