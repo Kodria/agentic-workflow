@@ -403,7 +403,7 @@ describe('plan admit Commander wiring', () => {
         } finally { outputSpy.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
     });
 
-    it('rechecks actual runtime ownership after asynchronous currentness before compatibility or sensors', async () => {
+    it.each(['owner-currentness', 'inventory-currentness', 'owner-sensors', 'floor-sensors'] as const)('rechecks actual runtime contract %s after awaits before admitted', async scenario => {
         const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-supplier-drift-')));
         const oldHome = process.env.HOME;
         process.env.HOME = path.join(root, 'home');
@@ -418,22 +418,30 @@ describe('plan admit Commander wiring', () => {
         const artifact = path.join(installed, 'using-awm');
         fs.symlinkSync(owned, artifact, process.platform === 'win32' ? 'junction' : 'dir');
         const outputSpy = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
-        const sensors = jest.fn();
+        let inventoryChanged = false;
+        const replaceOwner = () => { fs.unlinkSync(artifact); fs.symlinkSync(unowned, artifact, process.platform === 'win32' ? 'junction' : 'dir'); };
+        const sensors = jest.fn().mockImplementation(async () => {
+            if (scenario === 'owner-sensors') replaceOwner();
+            if (scenario === 'floor-sensors') fs.writeFileSync(path.join(registryRoot, 'awm-registry.json'), '{"minCliVersion":"999.0.0"}');
+            return { overall: 'pass', sensors: [] };
+        });
         const program = new Command();
         registerPlanCommand(program, {
             validatePlanFile: () => ({ ...valid, manifest: { ...valid.manifest, sources: [{ id: 'source', path: 'source.md', locator: 'contract', fact: 'contract' }] } }),
-            listRegistries: () => [{ name: 'fixture', remote: 'https://example.invalid/fixture.git', contentRoot: registryRoot }],
+            listRegistries: () => [{ name: inventoryChanged ? 'replacement' : 'fixture', remote: 'https://example.invalid/fixture.git', contentRoot: registryRoot }],
             readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
             checkCurrentness: async () => {
-                fs.unlinkSync(artifact); fs.symlinkSync(unowned, artifact, process.platform === 'win32' ? 'junction' : 'dir');
+                if (scenario === 'owner-currentness') replaceOwner();
+                if (scenario === 'inventory-currentness') inventoryChanged = true;
                 return { checkedAt: 'x', compatibility: { status: 'not-checked' }, components: ['cli', 'registry:fixture'].map(component => ({ component, installed: '1.0.0', latest: '1.0.0', channel: 'stable', source: 'fixture', checkedAt: 'x', status: 'current', detail: 'ok', remedy: 'none' })) };
             }, runSensors: sensors,
         });
         try {
             await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', root, '--execution-mode', 'interactivo', '--require-current', '--verify-sensors', '--json']);
             const output = JSON.parse(String(outputSpy.mock.calls.at(-1)![0]));
-            expect(output.diagnostics[0].code).toBe('ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED');
-            expect(sensors).not.toHaveBeenCalled();
+            expect(output.state).toBe('blocked');
+            expect(output.diagnostics[0].code).toBe(scenario === 'floor-sensors' ? 'ADMISSION_REGISTRY_CLI_INCOMPATIBLE' : 'ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED');
+            expect(sensors).toHaveBeenCalledTimes(scenario.endsWith('sensors') ? 1 : 0);
         } finally { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; outputSpy.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
     });
 

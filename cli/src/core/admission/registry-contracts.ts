@@ -144,8 +144,23 @@ export async function admitRegistryPlan(input: AdmissionInput, dependencies: Reg
         || (input.executionMode !== undefined && input.executionMode !== 'interactivo' && input.executionMode !== 'desatendido')) return admission(input);
     let registries: RegistrySource[] = [];
     let scope: ContractScope;
-    try { registries = (dependencies.listRegistries ?? listRegistries)(); scope = consumedRegistryContracts(input.plan, input.cwd, registries, input.provider); }
+    const inventory = dependencies.listRegistries ?? listRegistries;
+    const target = input.provider;
+    try { registries = inventory(); scope = consumedRegistryContracts(input.plan, input.cwd, registries, target); }
     catch { scope = unknown('Registry inventory cannot be read.'); }
+    const refresh = (): boolean => {
+        try {
+            const refreshedRegistries = inventory();
+            const refreshed = consumedRegistryContracts(input.plan, input.cwd, refreshedRegistries, target);
+            const previousComponents = scope.consumedRegistryComponents.join('\0');
+            registries = refreshedRegistries;
+            scope = refreshed.provenance === 'unknown' ? refreshed
+                : refreshed.consumedRegistryComponents.join('\0') !== previousComponents
+                    ? unknown('Consumed registry ownership changed during an asynchronous admission observation. Re-run actual currentness and read-only plan admission.') : refreshed;
+            if (scope.provenanceDiagnostic) scope = { ...scope, provenanceDiagnostic: { ...scope.provenanceDiagnostic, message: `${scope.provenanceDiagnostic.message} Re-run actual currentness after repair.` } };
+        } catch { scope = unknown('Registry inventory changed or cannot be read after asynchronous admission. Re-run actual currentness.'); }
+        return scope.provenance === 'proven';
+    };
     const compose = async (fields: Partial<AdmissionInput>): Promise<AdmissionReport> => {
         const report = await admission({ ...input, provenance: scope.provenance, consumedRegistryComponents: scope.consumedRegistryComponents, ...fields });
         if (scope.provenanceDiagnostic && report.diagnostics.some(diagnostic => diagnostic.code === 'ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED')) {
@@ -158,19 +173,20 @@ export async function admitRegistryPlan(input: AdmissionInput, dependencies: Reg
     if (input.requireCurrent) {
         if (scope.provenance !== 'proven') return compose({});
         currentness = currentness ?? await (dependencies.checkCurrentness ?? checkCurrentness)(input.cwd);
+        if (!refresh()) return compose({ currentness });
         // A missing sensor input stages composition before capability resolution.
         const currentnessGate = await compose({ currentness, verifySensors: true, sensors: undefined });
         if (currentnessGate.currentness !== 'current') return currentnessGate;
-        const refreshed = consumedRegistryContracts(input.plan, input.cwd, registries, input.provider);
-        if (refreshed.provenance !== 'proven' || refreshed.consumedRegistryComponents.join('\0') !== scope.consumedRegistryComponents.join('\0')) {
-            scope = refreshed.provenance === 'unknown' ? refreshed : unknown('Consumed registry ownership changed during currentness observation. Re-run read-only plan admission.');
-            return compose({ currentness });
-        }
-        scope = refreshed;
         compatibilityDiagnostics = registryCompatibility(registries, scope.consumedRegistryComponents);
         const compatibilityGate = await compose({ currentness, compatibilityDiagnostics, verifySensors: true, sensors: undefined });
         if (compatibilityGate.currentness !== 'current') return compatibilityGate;
     }
     const sensors = input.verifySensors ? input.sensors ?? await (dependencies.runSensors ?? runSensors)({ cwd: input.cwd, all: true, readOnly: true }) : undefined;
+    if (input.requireCurrent && input.verifySensors) {
+        if (!refresh()) return compose({ currentness, sensors });
+        const currentnessGate = await compose({ currentness, verifySensors: true, sensors: undefined });
+        if (currentnessGate.currentness !== 'current') return currentnessGate;
+        compatibilityDiagnostics = registryCompatibility(registries, scope.consumedRegistryComponents);
+    }
     return compose({ currentness, compatibilityDiagnostics, sensors });
 }
