@@ -368,7 +368,7 @@ describe('plan admit Commander wiring', () => {
             const output = JSON.parse(String(outputSpy.mock.calls.at(-1)![0]));
             expect(output.diagnostics[0].code).toBe('ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED');
             expect(output.state).toBe('blocked');
-            expect(output.diagnostics[0].message).toContain(installedFile);
+            expect(output.diagnostics[0].message).toContain(fs.realpathSync(installedFile));
             expect(sensors).not.toHaveBeenCalled();
         } finally { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; outputSpy.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
     });
