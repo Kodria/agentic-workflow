@@ -48,7 +48,7 @@ describe('watch --init: plan-vs-repo mecanico', () => {
 
     test('falla cerradamente ante package.json que excede el límite de lectura', () => {
         fs.writeFileSync(path.join(repo, 'package.json'), '{"scripts":{"test":"x"},"padding":"' + 'x'.repeat(1024 * 1024) + '"}');
-        expect(() => detectRequiredVerifiers(repo)).toThrow(/package\.json.*límite|package\.json.*limit/i);
+        expect(() => detectRequiredVerifiers(repo)).toThrow(/package\.json.*(?:límite|limit|oversized)/i);
     });
 
     test('falla cerradamente al superar el límite de entradas del escaneo', () => {
@@ -59,6 +59,69 @@ describe('watch --init: plan-vs-repo mecanico', () => {
     test('falla cerradamente ante un package.json ilegible o malformado', () => {
         fs.writeFileSync(path.join(repo, 'package.json'), '{not json');
         expect(() => detectRequiredVerifiers(repo)).toThrow(/rejected package\.json/i);
+    });
+
+    test.each(['growth', 'leaf-swap', 'parent-swap'] as const)('rejects stale Dirent %s before journal or gitignore mutations', attack => {
+        const directory = attack === 'parent-swap' ? path.join(repo, 'child') : repo;
+        fs.mkdirSync(directory, { recursive: true });
+        const packageFile = path.join(directory, 'package.json');
+        fs.writeFileSync(packageFile, '{"scripts":{"test":"jest"}}');
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-init-outside-'));
+        fs.writeFileSync(path.join(outside, 'package.json'), '{"scripts":{"test":"outside-command"}}');
+        fs.writeFileSync(path.join(repo, '.gitignore'), 'existing-rule\n');
+        const nativeReaddir = fs.readdirSync;
+        const nativeStat = fs.statSync;
+        let attacked = false;
+        const stat = jest.spyOn(fs, 'statSync').mockImplementation(((...args: unknown[]) => {
+            if (String(args[0]) === packageFile && attack === 'growth') return { size: 2 };
+            return Reflect.apply(nativeStat, fs, args);
+        }) as typeof fs.statSync);
+        const readdir = jest.spyOn(fs, 'readdirSync').mockImplementation(((...args: unknown[]) => {
+            const entries = Reflect.apply(nativeReaddir, fs, args);
+            if (!attacked && String(args[0]) === directory) {
+                attacked = true;
+                if (attack === 'growth') fs.writeFileSync(packageFile, JSON.stringify({ scripts: { test: 'jest' }, padding: 'x'.repeat(256 * 1024) }));
+                else if (attack === 'leaf-swap') {
+                    fs.renameSync(packageFile, `${packageFile}.original`);
+                    fs.symlinkSync(path.join(outside, 'package.json'), packageFile, 'file');
+                } else {
+                    fs.renameSync(directory, `${directory}.original`);
+                    fs.symlinkSync(outside, directory, 'dir');
+                }
+            }
+            return entries;
+        }) as typeof fs.readdirSync);
+        try {
+            expect(() => initWatch(repo, 'rama')).toThrow(/package\.json|bounded|regular|unsafe/i);
+            expect(attacked).toBe(true);
+            expect(fs.readFileSync(path.join(repo, '.gitignore'), 'utf8')).toBe('existing-rule\n');
+            expect(readJournal(repo, 'rama').state).toBeNull();
+        } finally { stat.mockRestore(); readdir.mockRestore(); fs.rmSync(outside, { recursive: true, force: true }); }
+    });
+
+    test.each(['symlink', 'directory'] as const)('rejects an explicitly declared nonregular package.json %s rather than treating it as absence', kind => {
+        const packageFile = path.join(repo, 'package.json');
+        if (kind === 'directory') fs.mkdirSync(packageFile);
+        else { fs.writeFileSync(path.join(repo, 'outside-package'), '{}'); fs.symlinkSync(path.join(repo, 'outside-package'), packageFile, 'file'); }
+        fs.writeFileSync(path.join(repo, '.gitignore'), 'unchanged\n');
+        expect(() => initWatch(repo, 'rama')).toThrow(/package\.json|regular/i);
+        expect(fs.readFileSync(path.join(repo, '.gitignore'), 'utf8')).toBe('unchanged\n');
+        expect(readJournal(repo, 'rama').state).toBeNull();
+    });
+
+    test.each(['symlink', 'dangling-link', 'directory', 'oversized', 'malformed'] as const)('rejects unsafe sibling sensors.json %s before init mutations', fault => {
+        fs.mkdirSync(path.join(repo, '.awm'));
+        const sensors = path.join(repo, '.awm', 'sensors.json');
+        if (fault === 'directory') fs.mkdirSync(sensors);
+        else if (fault === 'symlink' || fault === 'dangling-link') {
+            const destination = path.join(repo, 'outside-sensors');
+            if (fault === 'symlink') fs.writeFileSync(destination, '{}');
+            fs.symlinkSync(destination, sensors, 'file');
+        } else fs.writeFileSync(sensors, fault === 'oversized' ? ' '.repeat(256 * 1024 + 1) : '{bad json');
+        fs.writeFileSync(path.join(repo, '.gitignore'), 'unchanged\n');
+        expect(() => initWatch(repo, 'rama')).toThrow(/sensors\.json/i);
+        expect(fs.readFileSync(path.join(repo, '.gitignore'), 'utf8')).toBe('unchanged\n');
+        expect(readJournal(repo, 'rama').state).toBeNull();
     });
 
     test('falla cerradamente cuando no puede leer un directorio durante el escaneo', () => {

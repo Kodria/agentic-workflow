@@ -6,9 +6,9 @@ import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import { captureSelfRef, captureRefFor, NONCE_ENV, terminatePreviouslyOwnedGroup, argvDigest } from '../../core/journal/process';
-import { readJournal } from '../../core/journal/store';
 import { logsDir } from '../../core/journal/paths';
 import { isWellFormedState, isControllerRecoveryAction } from '../../core/journal/types';
+import { secureFs } from '../../core/secure-fs/native-bridge';
 import { resolveWorkingDirectory } from '../../core/journal/fingerprint';
 import { redactText } from '../../core/journal/redact';
 import { writeFileAtomicDurable, fsyncDirSync } from '../../core/atomic-file';
@@ -50,13 +50,21 @@ const STDIO_GRACE_MS = 300;
 function isCommittedController(logsRoot: string, repoRoot: string, jobId: string, nonce: string, argv: string[]): boolean {
     if (!/^controller-gen-[1-9][0-9]*$/.test(jobId)) return false;
     try {
-        const metadata: unknown = JSON.parse(fs.readFileSync(path.resolve(logsRoot, '..', 'state.json'), 'utf8'));
-        if (!isWellFormedState(metadata) || fs.realpathSync(logsRoot) !== fs.realpathSync(logsDir(repoRoot, metadata.branch))) return false;
-        const state = readJournal(repoRoot, metadata.branch).state;
-        return state !== null && state.generations.some(gen => gen.controllerJobId === jobId && jobId === `controller-gen-${gen.n}`
+        const bytes = secureFs.readRegularFile(path.resolve(logsRoot, '..', 'state.json'), 1024 * 1024).bytes;
+        const state: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+        if (!isWellFormedState(state)) throw new Error('controller custody journal invalid');
+        const actual = fs.lstatSync(logsRoot, { bigint: true });
+        const expected = fs.lstatSync(logsDir(repoRoot, state.branch), { bigint: true });
+        if (!actual.isDirectory() || actual.isSymbolicLink() || !expected.isDirectory() || expected.isSymbolicLink()
+            || actual.ino === 0n || actual.dev !== expected.dev || actual.ino !== expected.ino) throw new Error('controller custody directory identity invalid');
+        const committed = state.generations.some(gen => gen.controllerJobId === jobId && jobId === `controller-gen-${gen.n}`
             && gen.spawnNonce === nonce && gen.resumePrompt === undefined && isControllerRecoveryAction(gen.resumeAction)
             && gen.launchArgvDigest === argvDigest(argv));
-    } catch { return false; }
+        if (committed) return true;
+        const ordinary = state.jobs[jobId];
+        if (ordinary?.spawnNonce === nonce && argvDigest(ordinary.argv) === argvDigest(argv)) return false;
+        throw new Error('controller custody launch identity unproven');
+    } catch { throw new Error('controller custody identity unavailable or unsafe: refusing launch before claim'); }
 }
 
 export async function runExecWrapper(opts: { logsRoot: string; jobId: string; nonce: string; argv: string[]; cwd: string; repoRoot?: string }): Promise<WrappedResult> {

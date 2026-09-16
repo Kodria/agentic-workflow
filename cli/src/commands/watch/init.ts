@@ -9,10 +9,12 @@ import type { PlanValidationReport } from '../../core/plan/types';
 import { acquireLock, releaseLock } from './lock';
 import { verifiedPlanSnapshot } from '../../core/plan/validate';
 import { EXECUTION_IDENTITY_SCHEMA } from '../../core/plan/identity';
+import { secureFs } from '../../core/secure-fs/native-bridge';
 
 const MAX_VERIFIER_SCAN_DEPTH = 64;
 const MAX_VERIFIER_SCAN_ENTRIES = 10000;
 const MAX_PACKAGE_JSON_BYTES = 256 * 1024;
+const MAX_SENSORS_JSON_BYTES = 256 * 1024;
 
 export function detectRequiredVerifiers(repoRoot: string): VerificationKind[] {
     const kinds = new Set<VerificationKind>();
@@ -20,22 +22,31 @@ export function detectRequiredVerifiers(repoRoot: string): VerificationKind[] {
     const visit = (dir: string, depth: number): void => {
         if (depth > MAX_VERIFIER_SCAN_DEPTH) throw new Error('verifier scan depth limit exceeded');
         const sensors = path.join(dir, '.awm', 'sensors.json');
-        if (fs.existsSync(sensors)) kinds.add('sensors');
+        let sensorsPresent = false;
+        try { fs.lstatSync(sensors); sensorsPresent = true; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('verifier scan rejected sensors.json: unreadable path'); }
+        if (sensorsPresent) {
+            try {
+                const bytes = secureFs.readRegularFile(path.resolve(sensors), MAX_SENSORS_JSON_BYTES).bytes;
+                const config = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+                if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('sensors config must be a JSON object');
+                kinds.add('sensors');
+            } catch (error) { throw new Error(`verifier scan rejected sensors.json: ${(error as Error).message}`); }
+        }
         let entries: fs.Dirent[];
         try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
         catch (error) { throw new Error(`verifier scan cannot read ${dir}: ${(error as Error).message}`); }
         for (const entry of entries) {
             if (++visitedEntries > MAX_VERIFIER_SCAN_ENTRIES) throw new Error('verifier scan entry limit exceeded');
-            if (entry.isSymbolicLink()) continue;
-            if (entry.isFile() && entry.name === 'package.json') {
+            if (entry.name === 'package.json') {
                 try {
                     const packagePath = path.join(dir, entry.name);
-                    const size = fs.statSync(packagePath).size;
-                    if (size > MAX_PACKAGE_JSON_BYTES) throw new Error('package.json byte limit exceeded');
-                    const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+                    const bytes = secureFs.readRegularFile(path.resolve(packagePath), MAX_PACKAGE_JSON_BYTES).bytes;
+                    const pkg = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
                     if (typeof pkg === 'object' && pkg !== null && typeof pkg.scripts === 'object' && pkg.scripts !== null && typeof pkg.scripts.test === 'string') kinds.add('test');
                 } catch (error) { throw new Error(`verifier scan rejected package.json: ${(error as Error).message}`); }
             }
+            if (entry.isSymbolicLink()) continue;
             if (entry.isDirectory() && !['node_modules', '.git', '.awm'].includes(entry.name)) visit(path.join(dir, entry.name), depth + 1);
         }
     };

@@ -167,10 +167,30 @@ describe('generaciones', () => {
 
     test('a user verifier named like a controller keeps ordinary bounded output without generation proof', async () => {
         const logsRoot = logsDir(repo, 'rama');
+        const argv = [process.execPath, '-e', "process.stdout.write('ordinary-verifier-output')"];
+        const state = readJournal(repo, 'rama').state!;
+        state.jobs['controller-gen-1'] = { id: 'controller-gen-1', argv, spawnNonce: 'normal-verifier', fingerprint: 'fixture', commandDigest: 'fixture',
+            cwd: '.', paths: [], expandedPaths: [], executionState: 'spawn-intent', observationState: 'progressing', phaseTimestamps: {} };
+        writeJournal(repo, 'rama', state);
         await runExecWrapper({ logsRoot, repoRoot: repo, jobId: 'controller-gen-1', nonce: 'normal-verifier', cwd: '.',
-            argv: [process.execPath, '-e', "process.stdout.write('ordinary-verifier-output')"] });
+            argv });
         const artifacts = fs.readdirSync(logsRoot).map(name => fs.readFileSync(path.join(logsRoot, name), 'utf8')).join('\n');
         expect(artifacts).toContain('ordinary-verifier-output');
+    });
+
+    test.each(['missing', 'corrupt', 'symlink', 'oversized', 'nonce-drift', 'argv-drift'] as const)('controller %s custody fails closed before claim or launch artifacts', async fault => {
+        beginGeneration(repo, 'rama');
+        let launched: { id: string; nonce: string; argv: string[] } | undefined;
+        launchControllerGeneration(repo, 'rama', 'codex', recovery, (job, nonce) => { launched = { id: job.id, nonce, argv: job.argv }; });
+        const stateFile = path.resolve(logsDir(repo, 'rama'), '..', 'state.json');
+        if (fault === 'missing') fs.unlinkSync(stateFile);
+        if (fault === 'corrupt') fs.writeFileSync(stateFile, '{bad json');
+        if (fault === 'oversized') fs.writeFileSync(stateFile, ' '.repeat(1024 * 1024 + 1));
+        if (fault === 'symlink') { fs.renameSync(stateFile, `${stateFile}.original`); fs.symlinkSync(`${stateFile}.original`, stateFile, 'file'); }
+        const argv = fault === 'argv-drift' ? [process.execPath, '-e', "process.stdout.write('source body')"] : launched!.argv;
+        const nonce = fault === 'nonce-drift' ? 'wrong-nonce' : launched!.nonce;
+        await expect(runExecWrapper({ logsRoot: logsDir(repo, 'rama'), repoRoot: repo, jobId: launched!.id, nonce, argv, cwd: '.' })).rejects.toThrow(/controller|custody|custodia|bounded|regular/i);
+        expect(fs.readdirSync(logsDir(repo, 'rama'))).toEqual([]);
     });
 
     test('resolveGeneration: muerte probada => proven-dead; vivo+indeterminate => custodia con estado BLOCKED (R4.2b)', async () => {  // verifies R4.2b
