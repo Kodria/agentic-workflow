@@ -730,16 +730,21 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
 
 ### Diagnóstico Windows y feedback temprano del CI
 
-Los logs reales de Windows x64 y ARM64 mostraron dos fallos de la misma
-aserción: `RUNNER~1` frente a `runneradmin`. La admisión usa
-`fs.realpathSync.native`; la expectativa usaba primero el texto original y
-después `fs.realpathSync`, cuya implementación JS puede preservar el alias 8.3.
-La corrección exige la misma API nativa en la expectativa y conserva código
-de diagnóstico, estado bloqueado y cero llamadas a sensores.
+Los logs reales de Windows x64 y ARM64 mostraron fallos de una aserción de
+presentación: `RUNNER~1` frente a `runneradmin`. La admisión inspecciona con
+`fs.realpathSync.native`, pero el diagnóstico global conserva la ruta declarada
+y el local puede usar la raíz física. Cambiar la expectativa solo a realpath
+común o nativo no cubre ambos scopes y exige un formato que el contrato no pide.
+La corrección extrae la ruta reportada y prueba que identifica el mismo archivo
+regular mediante `dev/ino` bigint, nunca igualdad textual. Conserva código de
+diagnóstico, estado bloqueado y cero llamadas a sensores.
 
 CI y prepublicación verifican ahora esa superficie con un smoke Windows antes
 de la suite completa; `--bail` termina solo las ejecuciones fallidas. Se mantienen
 la cobertura completa cuando hay éxito, las seis plataformas, `needs: test` y
 `cancel-in-progress: false`. Un guard estructural exige esas garantías.
-RED del guard observado; GREEN focal: 93 pruebas y revisión independiente limpia.
-Esto no sustituye la comprobación real de Windows ni una publicación instalada.
+RED del guard observado; GREEN inicial focal: 93 pruebas. El smoke real encontró
+el scope global en 20 segundos, antes del recorrido completo. La corrección de
+identidad pasa 85 pruebas focales locales; la integración siguiente exige ambos
+smokes Windows reales aprobados. Ningún resultado local sustituye Windows o
+la aceptación de una publicación instalada.
