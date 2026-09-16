@@ -14,16 +14,27 @@ import { redactText } from '../../core/journal/redact';
 import { writeFileAtomicDurable, fsyncDirSync } from '../../core/atomic-file';
 import type { ProcessRef } from '../../core/journal/types';
 
+function validateSidecarIdentity(logsRoot: string, jobId: string, nonce: string): void {
+    if (typeof logsRoot !== 'string' || logsRoot.length === 0 || logsRoot.length > 4096 || /[\u0000-\u001F\u007F]/.test(logsRoot)
+        || typeof jobId !== 'string' || !/^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,127}$/.test(jobId)
+        || typeof nonce !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(nonce)
+        || jobId.length + nonce.length > 230) throw new Error('unsafe or unbounded sidecar identity');
+}
+
 export function claimPath(logsRoot: string, jobId: string, nonce: string): string {
+    validateSidecarIdentity(logsRoot, jobId, nonce);
     return path.join(logsRoot, `${jobId}.${nonce}.claim`);
 }
 export function identityPath(logsRoot: string, jobId: string, nonce: string): string {
+    validateSidecarIdentity(logsRoot, jobId, nonce);
     return path.join(logsRoot, `${jobId}.${nonce}.identity.json`);
 }
 export function resultPath(logsRoot: string, jobId: string, nonce: string): string {
+    validateSidecarIdentity(logsRoot, jobId, nonce);
     return path.join(logsRoot, `${jobId}.${nonce}.result.json`);
 }
 export function logPath(logsRoot: string, jobId: string, nonce: string): string {
+    validateSidecarIdentity(logsRoot, jobId, nonce);
     return path.join(logsRoot, `${jobId}.${nonce}.log`);
 }
 
@@ -69,6 +80,7 @@ function isCommittedController(logsRoot: string, repoRoot: string, jobId: string
 
 export async function runExecWrapper(opts: { logsRoot: string; jobId: string; nonce: string; argv: string[]; cwd: string; repoRoot?: string }): Promise<WrappedResult> {
     const { logsRoot, jobId, nonce, argv, cwd } = opts;
+    validateSidecarIdentity(logsRoot, jobId, nonce);
     const repoRoot = opts.repoRoot ?? process.cwd();
     if (argv.length === 0) throw new Error('argv vacio');
     const omitControllerOutput = isCommittedController(logsRoot, repoRoot, jobId, nonce, argv);

@@ -211,6 +211,13 @@ sensors have an empirical PASS. It never initializes a journal or dispatches an
 agent. A blocked JSON report is the remediation boundary; it is not permission
 to run the plan.
 
+Consumed contracts include the configured registry supplying installed native
+planning/execution skills, even when the plan cites only project files. The
+provider's actual artifact paths and renderer determine which skills are present;
+an installed contract with unprovable ownership blocks currentness rather than
+silently excluding its registry. The supervisor uses the same admission scope
+and compatibility checks before native dispatch.
+
 ```bash
 awm plan admit PLAN_PATH --provider <target> --cwd <path> [--execution-mode interactivo|desatendido] [--require-current] [--verify-sensors] [--json]
 ```

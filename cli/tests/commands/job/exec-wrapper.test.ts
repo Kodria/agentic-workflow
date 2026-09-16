@@ -15,6 +15,15 @@ describe('exec-wrapper', () => {
     beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-wrap-')); });
     afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
 
+    test.each(['../escape', '..\\escape', '/escape', 'C:\\escape', '', '.', '..', 'sentinel\n', 'x'.repeat(129)])('rejects unsafe sidecar components before writes (%#)', async value => {
+        for (const helper of [claimPath, identityPath, resultPath, logPath, replayVerdict]) {
+            expect(() => helper(dir, value, 'nonce')).toThrow(/sidecar/);
+            expect(() => helper(dir, 'job', value)).toThrow(/sidecar/);
+        }
+        await expect(runExecWrapper({ logsRoot: path.join(dir, 'unused'), jobId: value, nonce: 'nonce', argv: ['node', '-e', 'process.exit(0)'], cwd: '.' })).rejects.toThrow(/sidecar/);
+        expect(fs.readdirSync(dir)).toEqual([]);
+    });
+
     test('claim + identity sidecar + resultado terminal atomico (R1.8)', async () => {  // verifies R1.8
         const out = await runExecWrapper({ logsRoot: dir, jobId: 'job1', nonce: 'nonceA', argv: ['node', '-e', 'setTimeout(()=>process.exit(0), 300)'], cwd: '.' });
         expect(out.exitCode).toBe(0);

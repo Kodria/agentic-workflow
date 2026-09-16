@@ -7,6 +7,20 @@ import { initBoundJournal, readJournal, writeJournal } from '../../../src/core/j
 import { computeFingerprint } from '../../../src/core/journal/fingerprint';
 
 describe('collectMigrationFacts', () => {
+    it.each([
+        ['https://sentinel-user:sentinel-password@github.com/Kodria/agentic-workflow/issues/126'],
+        ['https://github.com:443/Kodria/agentic-workflow/issues/126'],
+        ['https://github.com/Kodria/agentic-workflow/issues/126?secret=sentinel'],
+        ['https://github.com/Kodria/agentic-workflow/issues/126#sentinel'],
+        ['https://github.com/Kodria/agentic-workflow/issues/126\n'],
+        ['https://github.com/Kodria/agentic-workflow/issues/126', `https://github.com/Kodria/agentic-workflow/issues/${'1'.repeat(4096)}`],
+        Array(129).fill('https://github.com/Kodria/agentic-workflow/issues/126'),
+        ['https://github.com/Kodria/agentic-workflow/issues/126', 'https://github.com/Kodria/agentic-workflow/issues/148', 'https://sentinel:secret@github.com/Kodria/agentic-workflow/issues/149'],
+    ])('rejects unsafe or unbounded issue links before reading either collector root (%#)', (...links) => {
+        expect(() => collectMigrationFacts('x.md', '/nonexistent-migration-root', links)).toThrow(/issue #126/);
+        expect(() => collectIssue148HistoricalFacts('/nonexistent-migration-root', links)).toThrow(/issue #126/);
+    });
+
     test('does not export a record-injection completion API', () => {
         // The only public entrypoint derives evidence from the local journal.
         expect(require('../../../src/core/migration').reconcileTaskEvidence).toBeUndefined();

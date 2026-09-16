@@ -18,6 +18,7 @@ const ISSUE_126 = /\/issues\/126\/?$/;
 const ISSUE_148 = /\/issues\/148\/?$/;
 const TASK = /^### Task ([1-9][0-9]{0,3}):/gm;
 const MAX = 128;
+const MAX_ISSUE_LINK_BYTES = 2048;
 
 /** Pure task-scoped gate. Callers cannot combine a test from one task with a
  * review from another: every required record carries the same task identity. */
@@ -37,7 +38,20 @@ function reconcileTaskEvidence(taskId: string, records: readonly EvidenceRecord[
     return { id: taskId, state: missing.length === 0 ? 'completed' : 'pending', missing };
 }
 
-function safeIssue(link: string): boolean { try { const u = new URL(link); return u.protocol === 'https:' && u.hostname === 'github.com' && /^\/Kodria\/agentic-workflow\/issues\/[1-9][0-9]*\/?$/.test(u.pathname); } catch { return false; } }
+function safeIssue(link: unknown): link is string {
+    // A canonical public issue URL cannot contain credentials, custom ports,
+    // queries, fragments, encoded delimiters or controls. Never echo rejected
+    // input: even a diagnostic could otherwise disclose URL credentials.
+    return typeof link === 'string' && Buffer.byteLength(link, 'utf8') <= MAX_ISSUE_LINK_BYTES
+        && /^https:\/\/github\.com\/Kodria\/agentic-workflow\/issues\/[1-9][0-9]*\/?$/.test(link)
+        && !/[\u0000-\u001F\u007F-\u009F]/.test(link);
+}
+function validateIssueLinks(issueLinks: unknown): asserts issueLinks is string[] {
+    if (!Array.isArray(issueLinks) || issueLinks.length === 0 || issueLinks.length > MAX
+        || issueLinks.some(link => !safeIssue(link)) || !issueLinks.some(link => ISSUE_126.test(link))) {
+        throw new Error('migration material facts require bounded canonical durable issue #126 links');
+    }
+}
 function ids(text: string): string[] { const value = [...text.matchAll(TASK)].map(m => m[1]); if (value.length > MAX || new Set(value).size !== value.length) throw new Error('migration task ownership is ambiguous'); return value; }
 function taskFiles(text: string, taskId: string): string[] {
     const start = text.search(new RegExp(`^### Task ${taskId}:`, 'm')); if (start < 0) return [];
@@ -75,7 +89,7 @@ function readPlan(root: string, relative: string): string { return new TextDecod
 /** Public collector accepts no completion claims. All facts are derived locally and
  * every material record carries the initiative's durable #126 reference. */
 export function collectMigrationFacts(planPath: string, cwd: string, issueLinks: string[]): MigrationFactsReport {
-    if (!Array.isArray(issueLinks) || issueLinks.length === 0 || issueLinks.some(link => typeof link !== 'string' || !safeIssue(link)) || !issueLinks.some(link => ISSUE_126.test(link))) throw new Error('migration material facts require durable issue #126 link');
+    validateIssueLinks(issueLinks);
     const root = fs.realpathSync(cwd); const text = readPlan(root, planPath); const taskIds = ids(text);
     // Validate the descriptor-anchored bytes above; never reopen planPath.
     const plan = validatePlanSnapshot(planPath, root, text);
@@ -162,6 +176,8 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
  * sibling worktree of this repository; arbitrary external directories are never
  * treated as durable migration evidence. */
 export function collectIssue148HistoricalFacts(historicalRoot: string, issueLinks: string[]): MigrationFactsReport {
+    validateIssueLinks(issueLinks);
+    if (!issueLinks.some(link => ISSUE_148.test(link))) throw new Error('issue-148 migration requires durable #126 and #148 links');
     const root = fs.realpathSync(historicalRoot);
     const expected = path.join(path.dirname(fs.realpathSync(process.cwd())), 'codex-issue-148-awm-facts');
     if (root !== expected) throw new Error('historical root is not the admitted issue-148 sibling worktree');
