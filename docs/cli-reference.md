@@ -205,7 +205,8 @@ awm plan validate PLAN_PATH [--json] [--cwd <path>]
 ### `awm plan admit PLAN_PATH`
 
 Read-only fail-closed admission for a valid compact plan. It checks the selected
-provider and, when requested, that consumed contracts are current and project
+provider and, when requested, that consumed contracts are current, their declared
+`minCliVersion` is compatible with the installed CLI, and project
 sensors have an empirical PASS. It never initializes a journal or dispatches an
 agent. A blocked JSON report is the remediation boundary; it is not permission
 to run the plan.
@@ -215,9 +216,54 @@ awm plan admit PLAN_PATH --provider <target> --cwd <path> [--execution-mode inte
 ```
 
 For unattended work, initialize the matching valid unattended plan first with
-`awm watch --init --plan PLAN_PATH`; a later digest change requires a completed,
-quiescent cycle before `awm watch rebind --plan PLAN_PATH` can create a new
-binding. An interactive plan cannot be bound as unattended.
+`awm watch --init --plan PLAN_PATH`. Initialization binds the plan; it does not
+register tasks, review obligations, or a controller generation. Native dispatch
+requires that real runtime custody separately; an empty journal is not execution
+evidence. An interactive plan cannot be bound as unattended.
+
+`awm watch rebind --plan PLAN_PATH` may accept progress-only changes during a
+quiescent in-progress cycle when both bindings have a validated, hash-only
+`awm-plan-execution/v1` commitment. Only governed checkboxes and recognized
+standalone lifecycle markers are progress: requirements, source facts, commands,
+prose, fenced or malformed markers remain digest-sensitive. Legacy bindings
+without that commitment cannot be upgraded by rereading a new plan. Other changes
+require the existing completed, quiescent-cycle route. Rebind never rewrites job
+fingerprints or preserves a stale PASS; rerun affected verification jobs.
+
+### `awm watch journal-status`
+
+```bash
+awm watch journal-status [--json]
+```
+
+Read-only observation of the current branch: `missing`, `corrupt`, or `present`,
+with sanitized binding metadata and `bootstrapUnused`. It exports no plan,
+prompt, source body, or inferred completion evidence.
+
+### `awm watch archive-unused`
+
+```bash
+awm watch archive-unused --plan PLAN_PATH
+```
+
+Recoverably archive only a strictly unused matching bootstrap under the exclusive
+supervisor lock. Any runtime jobs, tasks, verdicts, generations, requests, or
+unrecognized artifacts block this route. The archived state remains
+`IN_PROGRESS`; the command neither declares `COMPLETE` nor certifies manually
+executed work. A real terminal cycle still requires its ordinary evidence capture.
+
+### `awm plan migration-facts PLAN_PATH`
+
+```bash
+awm plan migration-facts PLAN_PATH --cwd <path> --issue <https-url...> [--historical-root <path>] [--json]
+```
+
+Collect bounded, read-only historical facts into a report without rewriting the
+original plan or resuming its tasks. Completion requires task-owned, terminal,
+current file/command fingerprints and matching test, sensor, and review evidence.
+Missing or stale provenance preserves a pending antecedent; it never authorizes
+replaying checked work. The bounded `--historical-root` adapter admits only the
+issue-148 sibling worktree and requires links to both issues 126 and 148.
 
 #### Context Kernel v1 migration state
 
