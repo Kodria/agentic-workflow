@@ -4,6 +4,7 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 import { collectIssue148HistoricalFacts, collectMigrationFacts } from '../../../src/core/migration';
 import { initBoundJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
+import { computeFingerprint } from '../../../src/core/journal/fingerprint';
 
 describe('collectMigrationFacts', () => {
     test('does not export a record-injection completion API', () => {
@@ -66,21 +67,50 @@ describe('collectMigrationFacts', () => {
         try { fs.writeFileSync(path.join(outside, 'plan.md'), '### Task 1: x\n'); fs.symlinkSync(outside, path.join(root, 'docs')); expect(() => collectMigrationFacts('docs/plan.md', root, ['https://github.com/Kodria/agentic-workflow/issues/126'])).toThrow(/contained bounded regular file/); } finally { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); }
     });
 
-    it('collects a schema-2 journal fixture without borrowing evidence across tasks', () => {
+    it.each(['current', 'content', 'deleted', 'index', 'head', 'argv', 'cwd', 'paths', 'binding', 'review-argv', 'empty-expansion', 'live-job'])('requires current schema-2 evidence (%s)', (change) => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migration-journal-'));
         try {
             fs.mkdirSync(path.join(root, 'docs', 'plans'), { recursive: true });
             fs.writeFileSync(path.join(root, 'docs', 'plans', 'old.md'), `### Task 1: historical\nCommit: ${'a'.repeat(40)}\n`);
-            execFileSync('git', ['init'], { cwd: root }); execFileSync('git', ['config', 'user.email', 't@e.invalid'], { cwd: root }); execFileSync('git', ['config', 'user.name', 'T'], { cwd: root }); execFileSync('git', ['add', '.'], { cwd: root }); execFileSync('git', ['commit', '-m', 't'], { cwd: root });
-            const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(); fs.writeFileSync(path.join(root, 'docs', 'plans', 'old.md'), `### Task 1: historical\nCommit: ${sha}\nFiles:\n- docs/plans/old.md\n`);
+            fs.writeFileSync(path.join(root, 'task.txt'), 'verified source');
+            execFileSync('git', ['init', '-q', '-b', 'master'], { cwd: root }); execFileSync('git', ['config', 'user.email', 't@e.invalid'], { cwd: root }); execFileSync('git', ['config', 'user.name', 'T'], { cwd: root }); execFileSync('git', ['add', '.'], { cwd: root }); execFileSync('git', ['commit', '-m', 't'], { cwd: root });
+            const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(); fs.writeFileSync(path.join(root, 'docs', 'plans', 'old.md'), `### Task 1: historical\nCommit: ${sha}\nFiles:\n- task.txt\n`);
             initBoundJournal(root, 'master', { path: 'docs/plans/old.md', digest: require('crypto').createHash('sha256').update(fs.readFileSync(path.join(root, 'docs/plans/old.md'), 'utf8')).digest('hex'), schema: 'compact-slices/v1', executionMode: 'desatendido', boundAt: '2026-09-15T00:00:00.000Z' });
             const state = readJournal(root, 'master').state!; state.tasks = [{ id: '1', title: 't', status: 'done', attempts: 1, verificationPlan: [{ id: 'test:1', kind: 'test' }, { id: 'sensor:1', kind: 'sensors' }], reviewObligations: [{ id: 'spec:1', taskId: '1', kind: 'spec', verdictId: 'v1' }, { id: 'quality:1', taskId: '1', kind: 'quality', verdictId: 'v2' }] }];
-            const job = (id: string, satisfies: string[]) => ({ id, fingerprint: 'f', commandDigest: 'd', argv: ['node'], cwd: '.', paths: ['x'], expandedPaths: ['x'], executionState: 'exited' as const, observationState: 'progressing' as const, verdict: 'pass' as const, phaseTimestamps: {}, satisfies });
+            const argv = [process.execPath, '-e', 'process.exit(0)'];
+            const paths = ['task.txt'];
+            const observed = computeFingerprint(root, argv, paths, '.');
+            const job = (id: string, satisfies: string[]) => ({ id, ...observed, argv: [...argv], cwd: '.', paths: [...paths], executionState: 'exited' as const, observationState: 'progressing' as const, verdict: 'pass' as const, phaseTimestamps: {}, satisfies });
             state.jobs = { t: job('t', ['test:1']), s: job('s', ['sensor:1']) };
-            state.verdicts = [{ id: 'v1', obligationId: 'spec:1', result: 'pass', detail: 'ok', receivedAt: '2026-09-15T01:00:00.000Z', fingerprint: 'f', argv: [], paths: [], cwd: '.' }, { id: 'v2', obligationId: 'quality:1', result: 'pass', detail: 'ok', receivedAt: '2026-09-15T01:00:00.000Z', fingerprint: 'f', argv: [], paths: [], cwd: '.' }]; writeJournal(root, 'master', state);
+            state.verdicts = ['v1', 'v2'].map((id, index) => ({ id, obligationId: index === 0 ? 'spec:1' : 'quality:1', result: 'pass', detail: 'ok', receivedAt: '2026-09-15T01:00:00.000Z', fingerprint: observed.fingerprint, argv: [...argv], paths: [...paths], cwd: '.' }));
+            if (change === 'content') fs.writeFileSync(path.join(root, 'task.txt'), 'changed source');
+            if (change === 'deleted') fs.unlinkSync(path.join(root, 'task.txt'));
+            if (change === 'index') {
+                fs.writeFileSync(path.join(root, 'task.txt'), 'staged change');
+                execFileSync('git', ['add', 'task.txt'], { cwd: root });
+                fs.writeFileSync(path.join(root, 'task.txt'), 'verified source');
+            }
+            if (change === 'head') execFileSync('git', ['commit', '--allow-empty', '-qm', 'unrelated HEAD'], { cwd: root });
+            if (change === 'argv') state.jobs.t.argv.push('--changed');
+            if (change === 'cwd') { fs.mkdirSync(path.join(root, 'subdir')); state.jobs.t.cwd = 'subdir'; }
+            if (change === 'paths') state.jobs.t.paths = ['missing.txt'];
+            if (change === 'binding') state.planBinding!.digest = '0'.repeat(64);
+            if (change === 'review-argv') state.verdicts[1].argv.push('--changed');
+            if (change === 'empty-expansion') {
+                const empty = computeFingerprint(root, argv, ['missing.txt'], '.');
+                for (const entry of Object.values(state.jobs)) Object.assign(entry, empty, { paths: ['missing.txt'] });
+                for (const entry of state.verdicts) Object.assign(entry, { fingerprint: empty.fingerprint, paths: ['missing.txt'] });
+            }
+            if (change === 'live-job') state.jobs.t.executionState = 'running';
+            writeJournal(root, 'master', state);
             const report = collectMigrationFacts('docs/plans/old.md', root, ['https://github.com/Kodria/agentic-workflow/issues/126']);
-            expect(report).toMatchObject({ state: 'supported-completion' });
-            expect(report.tasks[0]).toMatchObject({ state: 'completed' });
+            if (change === 'current') {
+                expect(report).toMatchObject({ state: 'supported-completion' });
+                expect(report.tasks[0]).toMatchObject({ state: 'completed' });
+            } else {
+                expect(report.state).not.toBe('supported-completion');
+                expect(report.tasks[0]?.state).not.toBe('completed');
+            }
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
 
@@ -101,9 +131,11 @@ describe('collectMigrationFacts', () => {
             const state = readJournal(root, 'master').state!;
             const task = (id: string) => ({ id, title: id, status: 'done' as const, attempts: 1, verificationPlan: [{ id: 'test:shared', kind: 'test' as const }, { id: 'sensor:shared', kind: 'sensors' as const }], reviewObligations: [{ id: `spec:${id}`, taskId: id, kind: 'spec' as const, verdictId: `v-spec-${id}` }, { id: `quality:${id}`, taskId: id, kind: 'quality' as const, verdictId: `v-quality-${id}` }] });
             state.tasks = [task('1'), task('2')];
-            const job = (id: string, satisfies: string[]) => ({ id, fingerprint: 'f', commandDigest: 'd', argv: ['node'], cwd: '.', paths: ['x'], expandedPaths: ['x'], executionState: 'exited' as const, observationState: 'progressing' as const, verdict: 'pass' as const, phaseTimestamps: {}, satisfies });
+            const argv = ['node']; const paths = ['docs/plans/old.md', 'task-2.txt'];
+            const observed = computeFingerprint(root, argv, paths, '.');
+            const job = (id: string, satisfies: string[]) => ({ id, ...observed, argv: [...argv], cwd: '.', paths: [...paths], executionState: 'exited' as const, observationState: 'progressing' as const, verdict: 'pass' as const, phaseTimestamps: {}, satisfies });
             state.jobs = { test: job('test', ['test:shared']), sensor: job('sensor', ['sensor:shared']) };
-            state.verdicts = state.tasks.flatMap(taskState => taskState.reviewObligations.map(obligation => ({ id: obligation.verdictId!, obligationId: obligation.id, result: 'pass' as const, detail: 'ok', receivedAt: '2026-09-15T01:00:00.000Z', fingerprint: 'f', argv: [], paths: [], cwd: '.' })));
+            state.verdicts = state.tasks.flatMap(taskState => taskState.reviewObligations.map(obligation => ({ id: obligation.verdictId!, obligationId: obligation.id, result: 'pass' as const, detail: 'ok', receivedAt: '2026-09-15T01:00:00.000Z', fingerprint: observed.fingerprint, argv: [...argv], paths: [...paths], cwd: '.' })));
             writeJournal(root, 'master', state);
             const report = collectMigrationFacts(planPath, root, ['https://github.com/Kodria/agentic-workflow/issues/126']);
             expect(report.tasks.find(taskState => taskState.id === '1')).toMatchObject({ state: 'pending' });
@@ -128,9 +160,11 @@ describe('collectMigrationFacts', () => {
             const state = readJournal(root, 'master').state!;
             const task = (id: string) => ({ id, title: id, status: 'done' as const, attempts: 1, verificationPlan: [{ id: `test:${id}`, kind: 'test' as const }, { id: `sensor:${id}`, kind: 'sensors' as const }], reviewObligations: [{ id: `spec:${id}`, taskId: id, kind: 'spec' as const, verdictId: `v-spec-${id}` }, { id: `quality:${id}`, taskId: id, kind: 'quality' as const, verdictId: `v-quality-${id}` }] });
             state.tasks = [task('1'), task('2')];
-            const job = (id: string, satisfies: string[]) => ({ id, fingerprint: 'f', commandDigest: 'd', argv: ['node'], cwd: '.', paths: ['x'], expandedPaths: ['x'], executionState: 'exited' as const, observationState: 'progressing' as const, verdict: 'pass' as const, phaseTimestamps: {}, satisfies });
+            const argv = ['node']; const paths = ['docs/plans/old.md', 'task-2.txt'];
+            const observed = computeFingerprint(root, argv, paths, '.');
+            const job = (id: string, satisfies: string[]) => ({ id, ...observed, argv: [...argv], cwd: '.', paths: [...paths], executionState: 'exited' as const, observationState: 'progressing' as const, verdict: 'pass' as const, phaseTimestamps: {}, satisfies });
             state.jobs = { multi: job('multi', ['test:1', 'test:2']), sensorOne: job('sensorOne', ['sensor:1']), sensorTwo: job('sensorTwo', ['sensor:2']) };
-            state.verdicts = state.tasks.flatMap(taskState => taskState.reviewObligations.map(obligation => ({ id: obligation.verdictId!, obligationId: obligation.id, result: 'pass' as const, detail: 'ok', receivedAt: '2026-09-15T01:00:00.000Z', fingerprint: 'f', argv: [], paths: [], cwd: '.' })));
+            state.verdicts = state.tasks.flatMap(taskState => taskState.reviewObligations.map(obligation => ({ id: obligation.verdictId!, obligationId: obligation.id, result: 'pass' as const, detail: 'ok', receivedAt: '2026-09-15T01:00:00.000Z', fingerprint: observed.fingerprint, argv: [...argv], paths: [...paths], cwd: '.' })));
             writeJournal(root, 'master', state);
             const report = collectMigrationFacts(planPath, root, ['https://github.com/Kodria/agentic-workflow/issues/126']);
             expect(report.tasks).toEqual([

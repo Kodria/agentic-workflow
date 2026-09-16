@@ -5,6 +5,7 @@ import { execFileSync } from 'child_process';
 import { validatePlanSnapshot } from '../plan/validate';
 import { detectBranch } from '../ledger/store';
 import { readJournal } from '../journal/store';
+import { computeFingerprint, type FingerprintResult } from '../journal/fingerprint';
 import { secureFs } from '../secure-fs/native-bridge';
 
 export type MigrationState = 'supported-completion' | 'planning-required' | 'blocked';
@@ -89,8 +90,27 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
     if (!journal.state || journal.corrupt) diagnostics.push('journal-missing-or-corrupt');
     const binding = journal.state?.schema === 2 ? journal.state.planBinding : undefined;
     const digest = plan.state === 'valid' ? plan.planDigest : crypto.createHash('sha256').update(text.replace(/\r\n?/g, '\n'), 'utf8').digest('hex');
-    if (!binding || binding.path !== planPath || binding.digest !== digest || binding.executionMode !== 'desatendido') diagnostics.push('journal-plan-binding-stale');
+    const bindingCurrent = !!binding && binding.path === planPath && binding.digest === digest && binding.executionMode === 'desatendido';
+    if (!bindingCurrent) diagnostics.push('journal-plan-binding-stale');
     const jobs = journal.state ? Object.values(journal.state.jobs) : [];
+    const observed = new Map<string, FingerprintResult | null>();
+    const currentFingerprint = (record: { fingerprint: string; argv: string[]; paths: string[]; cwd: string }): FingerprintResult | null => {
+        if (!bindingCurrent || !record.argv.length || !record.paths.length) return null;
+        const key = JSON.stringify([record.argv, record.paths, record.cwd]);
+        if (!observed.has(key)) {
+            try { observed.set(key, computeFingerprint(root, record.argv, record.paths, record.cwd)); }
+            catch { observed.set(key, null); }
+        }
+        const current = observed.get(key);
+        return current && current.expandedPaths.length > 0 && current.fingerprint === record.fingerprint ? current : null;
+    };
+    const currentJobs = jobs.filter(job => {
+        const current = currentFingerprint(job);
+        return job.executionState === 'exited' && job.verdict === 'pass' && current !== null
+            && current.commandDigest === job.commandDigest
+            && JSON.stringify(current.expandedPaths) === JSON.stringify(job.expandedPaths);
+    });
+    if (currentJobs.length !== jobs.length) diagnostics.push('stale-or-nonterminal-durable-job-evidence');
     const declared = new Map((journal.state?.tasks ?? []).map(task => [task.id, declaredCommit(text, task.id, root)]));
     // A verifier identifier is an ownership boundary. A job must resolve to
     // exactly one task; otherwise it could lend the same execution evidence
@@ -109,12 +129,12 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
             const jobOwners = new Set((job.satisfies ?? []).flatMap(id => verificationOwners.get(id) ?? []));
             return jobOwners.size === 1 && jobOwners.has(task.id);
         };
-        for (const job of jobs) {
+        for (const job of currentJobs) {
             if (job.verdict && job.fingerprint && job.argv.length > 0 && job.paths.length > 0 && belongsToTask(job) && job.satisfies?.some(id => verificationIds.has(id))) facts.push({ taskId: task.id, verificationItemId: job.satisfies?.find(id => verificationIds.has(id)), jobId: job.id, argv: job.argv, fingerprint: job.fingerprint, paths: job.paths, result: job.verdict, issue126 });
         }
         for (const obligation of task.reviewObligations) {
             const verdict = obligation.verdictId ? journal.state?.verdicts.find(item => item.id === obligation.verdictId) : undefined;
-            const fingerprintBound = jobs.some(job => belongsToTask(job) && job.fingerprint === verdict?.fingerprint && job.paths.length > 0 && job.argv.length > 0 && job.satisfies?.some(id => verificationIds.has(id)));
+            const fingerprintBound = verdict && currentFingerprint(verdict) !== null && currentJobs.some(job => belongsToTask(job) && job.fingerprint === verdict.fingerprint && job.satisfies?.some(id => verificationIds.has(id)));
             if (verdict && verdict.obligationId === obligation.id && obligation.taskId === task.id && fingerprintBound) facts.push({ taskId: task.id, verdictId: verdict.id, obligationId: obligation.id, role: obligation.kind, result: verdict.result, fingerprint: verdict.fingerprint, paths: verdict.paths, at: verdict.receivedAt, issue126 });
         }
     }
@@ -165,10 +185,19 @@ export function collectIssue148HistoricalFacts(historicalRoot: string, issueLink
     const taskOneSection = taskOneStart < 0 ? '' : text.slice(taskOneStart, taskOneEnd < 0 ? text.length : taskOneEnd);
     const taskOneChecked = /^- \[x\]/m.test(taskOneSection);
     const taskOneFiles = new Set(taskFiles(text, '1'));
+    const currentTaskOneFiles = (() => {
+        if (taskOneFiles.size === 0) return false;
+        try {
+            const checkpointFiles = execFileSync('git', ['ls-tree', '--name-only', '-r', '81c008c', '--', ...taskOneFiles], { cwd: root, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).trim().split('\n');
+            if ([...taskOneFiles].some(file => !checkpointFiles.includes(file))) return false;
+            execFileSync('git', ['diff', '--quiet', '81c008c', '--', ...taskOneFiles], { cwd: root, stdio: 'pipe', timeout: 2000 });
+            return true;
+        } catch { return false; }
+    })();
     const reviewForTaskOne = (item: typeof ledgerEntries[number]): boolean => taskOneFiles.has(item.ref.replace(/:\d+(?::\d+)?$/, ''));
     const ledgerReviews = ledgerEntries.some(item => item.branch === branch && item.phase === 'review' && item.source_skill === 'specification-reviewer' && item.polarity === 'win' && reviewForTaskOne(item))
         && ledgerEntries.some(item => item.branch === branch && item.phase === 'review' && item.source_skill === 'requesting-code-review' && item.polarity === 'win' && item.signature === 'facts-contract-json-and-literal-validation' && reviewForTaskOne(item));
-    const taskIds = ids(text); const proven = digest === 'c11477dd59cb19094983c671cc0b760f1d1e51b9679e13dba90f1b0c2cba48e7' && ancestor && taskOneChecked && ledgerReviews;
+    const taskIds = ids(text); const proven = digest === 'c11477dd59cb19094983c671cc0b760f1d1e51b9679e13dba90f1b0c2cba48e7' && ancestor && currentTaskOneFiles && taskOneChecked && ledgerReviews;
     // A checked historical antecedent without sufficient provenance is not
     // unstarted. Preserve it for reconciliation; never imply permission to
     // replay its implementation or borrow another task's review.
