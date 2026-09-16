@@ -265,12 +265,16 @@ describe('sensor pack v2 contract', () => {
         expect(() => parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...variant, probe: { kind: 'version', extra: true } }] } } }, 'pack')).toThrow('unknown field');
     });
 
-    it('requires a named script for the package-script-present probe', () => {
+    it('preserves historical unnamed probes while validating explicit script names', () => {
         const variant = { ...validPack().sensors.lint.variants[0], probe: { kind: 'package-script-present', script: 'test' } };
         expect(parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [variant] } } }, 'pack'))
             .toMatchObject({ kind: 'v2', pack: { sensors: { lint: { variants: [{ probe: { kind: 'package-script-present', script: 'test' } }] } } } });
-        expect(() => parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...variant, probe: { kind: 'package-script-present' } }] } } }, 'pack'))
-            .toThrow('probe.script');
+        expect(parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...variant, probe: { kind: 'package-script-present' } }] } } }, 'pack'))
+            .toMatchObject({ kind: 'v2', pack: { sensors: { lint: { variants: [{ probe: { kind: 'package-script-present' } }] } } } });
+        for (const script of ['', null, 'test;echo unsafe', 'test\u0000']) {
+            expect(() => parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...variant, probe: { kind: 'package-script-present', script } }] } } }, 'pack'))
+                .toThrow('probe.script');
+        }
         expect(() => parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...variant, probe: { kind: 'version', script: 'test' } }] } } }, 'pack'))
             .toThrow('probe.script');
     });

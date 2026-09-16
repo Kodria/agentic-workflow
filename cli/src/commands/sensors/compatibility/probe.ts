@@ -48,6 +48,7 @@ export async function runCompatibilityProbe(probe: { kind: CompatibilityProbe; s
     if (!evidence || typeof evidence.cwd !== 'string' || evidence.cwd.trim() === '') throw new Error('probe evidence requires cwd');
     if (probe.kind === 'package-script-present') {
         const script = (probe as { script?: unknown }).script;
+        if (!Object.prototype.hasOwnProperty.call(probe, 'script')) return { status: 'unverifiable', reason: 'package-script-name-required' };
         if (typeof script !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9:_-]*$/.test(script)) throw new Error('package-script-present probe requires a named package script');
         return { status: evidence.scripts?.includes(script) ? 'matched' : 'not-matched', reason: 'package-script' };
     }

@@ -46,6 +46,24 @@ describe('runCompatibilityProbe', () => {
         expect(fakeExecutor).not.toHaveBeenCalled();
     });
 
+    it('never certifies a historical unnamed package-script probe', async () => {
+        await expect(runCompatibilityProbe(
+            { kind: 'package-script-present' },
+            { ...evidence, scripts: ['lint', 'test', 'test:unit'] },
+            fakeExecutor,
+        )).resolves.toEqual({ status: 'unverifiable', reason: 'package-script-name-required' });
+        expect(fakeExecutor).not.toHaveBeenCalled();
+    });
+
+    it.each(['', null, 'test;echo unsafe'])('rejects malformed explicit script %j', async (script) => {
+        await expect(runCompatibilityProbe(
+            { kind: 'package-script-present', script } as any,
+            evidence,
+            fakeExecutor,
+        )).rejects.toThrow('requires a named package script');
+        expect(fakeExecutor).not.toHaveBeenCalled();
+    });
+
     it('binds tool probes to the project node_modules executable instead of PATH', async () => {
         await runCompatibilityProbe({ kind: 'eslint-print-config' }, evidence, fakeExecutor);
 

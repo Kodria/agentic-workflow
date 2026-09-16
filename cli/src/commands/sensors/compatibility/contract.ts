@@ -204,10 +204,12 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
     if (probe) {
         fields(probe, ['kind', 'script'], source, `${location}.probe`);
         if (typeof probe.kind !== 'string' || !ALLOWED_PROBES.has(probe.kind as CompatibilityProbe)) invalid(source, `${location}.probe.kind must be an allowed probe`);
-        if (probe.kind === 'package-script-present') {
+        // Historical schema-v2 packs remain readable. An unnamed probe cannot
+        // certify compatibility; the probe runner rejects it as unverifiable.
+        if (probe.kind === 'package-script-present' && 'script' in probe) {
             probeScript = text(probe.script, source, `${location}.probe.script`);
             if (!/^[A-Za-z0-9][A-Za-z0-9:_-]*$/.test(probeScript)) invalid(source, `${location}.probe.script must be a package script name`);
-        } else if ('script' in probe) {
+        } else if (probe.kind !== 'package-script-present' && 'script' in probe) {
             invalid(source, `${location}.probe.script is only valid for package-script-present`);
         }
     }
