@@ -1,4 +1,7 @@
 # Compact-only R1 CLI Implementation Plan
+<!-- awm-retro-complete: 2026-09-16 -->
+<!-- awm-docs-complete: 2026-09-16 -->
+<!-- awm-qa-complete: 2026-09-16 -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development`
 > to implement this plan slice-by-slice. S1 is the one-time admission bootstrap:
