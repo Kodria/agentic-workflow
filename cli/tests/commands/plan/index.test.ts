@@ -368,9 +368,16 @@ describe('plan admit Commander wiring', () => {
             const output = JSON.parse(String(outputSpy.mock.calls.at(-1)![0]));
             expect(output.diagnostics[0].code).toBe('ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED');
             expect(output.state).toBe('blocked');
-            // Windows' JS realpath can preserve an 8.3 alias; admission uses the
-            // native physical path, so the expectation must use the same API.
-            expect(output.diagnostics[0].message).toContain(fs.realpathSync.native(installedFile));
+            // Global diagnostics may retain the declared path while local ones
+            // use a physical root. Windows 8.3/long names are equivalent: prove
+            // that the reported path names this exact file, not its spelling.
+            const reported = /^Runtime artifact (.+) has no unique physical registry owner/.exec(output.diagnostics[0].message);
+            expect(reported).not.toBeNull();
+            const reportedIdentity = fs.lstatSync(reported![1], { bigint: true });
+            const installedIdentity = fs.lstatSync(installedFile, { bigint: true });
+            expect(reportedIdentity.isFile()).toBe(true);
+            expect(reportedIdentity.ino).not.toBe(0n);
+            expect([reportedIdentity.dev, reportedIdentity.ino]).toEqual([installedIdentity.dev, installedIdentity.ino]);
             expect(sensors).not.toHaveBeenCalled();
         } finally { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; outputSpy.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
     });
