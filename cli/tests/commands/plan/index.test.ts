@@ -290,6 +290,40 @@ describe('plan admit Commander wiring', () => {
             expect(admit).toHaveBeenCalledWith(expect.objectContaining({ executionMode: 'desatendido', planPath: 'plans/current.md', journalCorrupt: false, journalState: expect.objectContaining({ schema: 2, planBinding: expect.objectContaining({ digest: valid.planDigest }) }) }));
         } finally { output.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
     });
+    it.each(['compatible', 'newer-cli-required', 'invalid-manifest', 'unconsumed'])('checks the consumed registry CLI floor before sensors (%s)', async (scenario) => {
+        const outputSpy = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pair-admission-')));
+        const registryRoot = path.join(root, 'registry');
+        fs.mkdirSync(registryRoot);
+        fs.writeFileSync(path.join(registryRoot, 'source.md'), 'contract');
+        fs.writeFileSync(path.join(root, 'source.md'), 'project source');
+        fs.writeFileSync(path.join(registryRoot, 'awm-registry.json'), scenario === 'invalid-manifest' ? '{bad' : JSON.stringify({ minCliVersion: scenario === 'compatible' ? '1.0.0' : '999.0.0' }));
+        const report = { ...valid, manifest: { ...valid.manifest, sources: [{ id: 'source', path: scenario === 'unconsumed' ? 'source.md' : 'registry/source.md', locator: 'contract', fact: 'contract' }] } };
+        const sensors = jest.fn().mockResolvedValue({ overall: 'pass', sensors: [] });
+        const program = new Command();
+        registerPlanCommand(program, {
+            validatePlanFile: () => report,
+            listRegistries: () => [{ name: 'fixture', remote: 'https://example.invalid/fixture.git', contentRoot: registryRoot }],
+            readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
+            checkCurrentness: async () => ({ checkedAt: 'x', compatibility: { status: 'not-checked' }, components: ['cli', 'registry:fixture'].map(component => ({ component, installed: '1.0.0', latest: '1.0.0', channel: 'stable', source: 'fixture', checkedAt: 'x', status: 'current' as const, detail: 'ok', remedy: 'none' as const })) }),
+            runSensors: sensors,
+        });
+        try {
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', root, '--execution-mode', 'interactivo', '--require-current', '--verify-sensors', '--json']);
+            const output = JSON.parse(String(outputSpy.mock.calls.at(-1)![0]));
+            if (scenario === 'compatible' || scenario === 'unconsumed') {
+                expect(output.state).toBe('admitted');
+                expect(sensors).toHaveBeenCalledTimes(1);
+            } else {
+                expect(output.state).toBe('blocked');
+                expect(output.diagnostics[0].code).toBe(scenario === 'invalid-manifest' ? 'ADMISSION_REGISTRY_COMPATIBILITY_UNVERIFIABLE' : 'ADMISSION_REGISTRY_CLI_INCOMPATIBLE');
+                expect(output.diagnostics[0].message).toContain('registry:fixture');
+                expect(sensors).not.toHaveBeenCalled();
+                expect(process.exitCode).toBe(2);
+            }
+        } finally { outputSpy.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
+    });
+
     it('does not run sensors after currentness blocks', async () => {
         const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
         const sensors = jest.fn();

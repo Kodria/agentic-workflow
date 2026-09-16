@@ -8,6 +8,9 @@ import { resolveCommandContext } from '../../core/tracks/context';
 import { parseMaxParallel, loadDefaultParallelism } from '../../core/tracks/concurrency';
 import { validatePlanFile } from '../../core/plan/validate';
 import path from 'path';
+import { archiveUnusedWatch, watchJournalStatus } from './archive-unused';
+import { readJournal } from '../../core/journal/store';
+import { computeFingerprint } from '../../core/journal/fingerprint';
 
 function currentBranch(cwd: string): string {
     // stdio explicito (ver EXEC_STDIO en journal/process.ts): evita el relay
@@ -127,9 +130,44 @@ export function registerWatchCommand(program: Command): void {
             try {
                 const binding = rebindWatchPlan(repo, branch, planForBinding(repo, plan));
                 process.stdout.write(`binding reconciliado para ${binding.path}; digest ${binding.digest}\n`);
+                const state = readJournal(repo, branch).state!;
+                const staleJobs = Object.values(state.jobs).filter(job => job.verdict === 'pass' && (() => {
+                    try { return computeFingerprint(repo, job.argv, job.paths, job.cwd).fingerprint !== job.fingerprint; }
+                    catch { return true; }
+                })()).map(job => job.id);
+                if (staleJobs.length > 0) {
+                    process.stdout.write(`stale-fingerprint: ${staleJobs.join(', ')}; el rebind no conserva PASS con fingerprint cambiado. Re-ejecutar las verificaciones afectadas mediante awm job request con generation, paths y satisfies originales; no repetir watch/rebind ni re-fingerprinting de evidencia anterior.\n`);
+                }
             } catch (e) {
                 process.stderr.write(`${(e as Error).message}\n`);
                 process.exitCode = 1;
             }
+        });
+
+    watch.command('archive-unused')
+        .description('archiva recuperablemente solo un bootstrap no utilizado; nunca declara COMPLETE ni crea evidencia de ejecución')
+        .option('--plan <path>', 'mismo plan vinculado al bootstrap; no adopta evidencia de trabajo manual')
+        .action((opts: { plan?: unknown }, command: Command) => {
+            const repo = process.cwd();
+            const branch = currentBranch(repo);
+            try {
+                resolveCommandContext(repo, branch);
+                const plan = opts.plan ?? command.parent?.opts().plan;
+                if (!validPlanPath(plan)) throw new Error('--plan requiere un path sin caracteres de control');
+                const relative = path.relative(repo, path.resolve(repo, plan)).replace(/\\/g, '/');
+                process.stdout.write(`${JSON.stringify(archiveUnusedWatch(repo, branch, relative))}\n`);
+            } catch (error) {
+                process.stderr.write(`${(error as Error).message}\n`);
+                process.exitCode = 1;
+            }
+        });
+
+    watch.command('journal-status')
+        .description('consulta read-only el journal de la rama actual: missing | corrupt | present; no exporta contenido')
+        .option('--json', 'estado estructural y metadata de binding, sin cuerpos ni evidencia inferida')
+        .action(() => {
+            const repo = process.cwd();
+            const branch = currentBranch(repo);
+            process.stdout.write(`${JSON.stringify(watchJournalStatus(repo, branch))}\n`);
         });
 }

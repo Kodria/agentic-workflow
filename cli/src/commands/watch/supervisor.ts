@@ -20,7 +20,7 @@ import { consumePendingRequests } from './apply';
 import { runnerTick, WrapperSpawner, defaultWrapperSpawner } from './runner';
 import { reconcileTracks, reconcileOpenJoin, defaultTrackRuntime, TrackRuntime } from './tracks';
 import { decideStall, Backoff, beginGeneration, activeGeneration, ensureControllerGeneration, collectControllerGeneration, controllerGenerationHasUnresolvedClaim, resolveGeneration, enterCustody } from './generations';
-import type { JournalState } from '../../core/journal/types';
+import type { JournalState, ControllerRecoveryAction } from '../../core/journal/types';
 import type { CohortPhase } from '../../core/tracks/types';
 
 /** The supervisor is only allowed to dispatch after this exact admission. */
@@ -220,14 +220,14 @@ export class Supervisor {
         catch { return null; }   // no recomputable => el gate NO certifica (fail-closed)
     };
 
-    private ensureController(resumePrompt: string): 'ok' | 'deferred' | 'custody' {
+    private ensureController(action: ControllerRecoveryAction): 'ok' | 'deferred' | 'custody' {
         if (Date.now() < this.relaunchNotBefore) return 'deferred';
         if (this.backoff.exhausted()) {
             enterCustody(this.repoRoot, this.branch, 'tope de intentos de launch/relaunch por hora alcanzado (R4.3)');
             return 'custody';
         }
         try {
-            ensureControllerGeneration(this.repoRoot, this.branch, this.cfg.provider, resumePrompt, this.spawner, this.cfg.reconcileGraceMs);
+            ensureControllerGeneration(this.repoRoot, this.branch, this.cfg.provider, action, this.spawner, this.cfg.reconcileGraceMs);
             return 'ok';
         } catch (error) {
             this.backoff.recordRelaunch();
@@ -278,7 +278,7 @@ export class Supervisor {
                 return 'custody';
             }
         }
-        let recoveryResumePrompt: string | undefined;
+        let recoveryResumeAction: ControllerRecoveryAction | undefined;
         // Schema-2 custody is reconciled before any controller launch.  This is
         // read-only: existing active jobs are reused, never re-requested.
         if (before0.state.schema === 2 && before0.state.planBinding) {
@@ -338,12 +338,14 @@ export class Supervisor {
             });
             appendEvent(this.repoRoot, this.branch, { kind: 'unattended-recovery', nextAction: recovery.nextAction, activeJobIds: recovery.activeJobIds, diagnostics: recovery.diagnostics });
             if (recovery.state !== 'ready') {
-                enterCustody(this.repoRoot, this.branch, `recovery no autorizado: ${recovery.diagnostics.join(', ')}`);
+                const staleReasons = terminalTaskClaims ? evidenceGate.reasons.filter(reason => reason.category === 'stale-fingerprint') : [];
+                const remedy = staleReasons.length > 0
+                    ? `; stale-fingerprint: ${staleReasons.map(reason => reason.detail).join('; ')}. Re-ejecutar verificaciones mediante awm job request con generation, paths y satisfies originales, y repetir reviews independientes cuando corresponda; no repetir watch/rebind ni actualizar fingerprints de PASS históricos`
+                    : '';
+                enterCustody(this.repoRoot, this.branch, `recovery no autorizado: ${recovery.diagnostics.join(', ')}${remedy}`);
                 return 'custody';
             }
-            recoveryResumePrompt = recovery.nextAction === 'reconcile-active-jobs'
-                ? `reconciliá los jobs activos existentes: ${recovery.activeJobIds.join(', ')}`
-                : `reconciliá la custodia desatendida: ${recovery.nextAction}`;
+            recoveryResumeAction = { schema: 'controller-recovery/v1', kind: recovery.nextAction === 'reconcile-active-jobs' ? 'reconcile-active-jobs' : 'resume-next-action' };
         }
         // R6.2/R6.8/C7 (Task 11): reconciliar un `MERGE_HEAD` abierto por un
         // crash a mitad de un merge ANTES de cualquier guard general — hoy
@@ -363,8 +365,8 @@ export class Supervisor {
         // mismo resultado terminal.
         if (before.frozen !== undefined) return 'frozen';
         const pending = before.cycle.nextAction;
-        const resumePrompt = recoveryResumePrompt ?? (pending !== undefined ? `el next_action ${pending.actionId} del journal` : 'el plan del ciclo desde el journal');
-        if (this.ensureController(resumePrompt) === 'custody') return 'custody';
+        const resumeAction: ControllerRecoveryAction = recoveryResumeAction ?? { schema: 'controller-recovery/v1', kind: pending !== undefined ? 'resume-next-action' : 'resume-cycle' };
+        if (this.ensureController(resumeAction) === 'custody') return 'custody';
         const r0 = readJournal(this.repoRoot, this.branch);
         if (r0.corrupt || r0.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
         const gen = activeGeneration(r0.state);
@@ -401,7 +403,7 @@ export class Supervisor {
         if (!finalizing && afterRequests.state !== null && activeGeneration(afterRequests.state) === undefined
             && afterRequests.state.generations.length > 0 && afterRequests.state.cycle.status === 'IN_PROGRESS') {
             beginGeneration(this.repoRoot, this.branch);
-            if (this.ensureController(resumePrompt) === 'custody') return 'custody';
+            if (this.ensureController(resumeAction) === 'custody') return 'custody';
         }
         // R5.2/R6.3 (Task 10): recién leído tras `consumePendingRequests` —
         // si el request `track-freeze-request` llegó en ESTE tick, `apply.ts`
@@ -569,8 +571,8 @@ export class Supervisor {
         if (Date.now() < this.relaunchNotBefore) return false;   // esperando backoff, auditando
         beginGeneration(this.repoRoot, this.branch);
         const nextAction = readJournal(this.repoRoot, this.branch).state!.cycle.nextAction;
-        const prompt = nextAction !== undefined ? `el next_action ${nextAction.actionId} del journal` : 'el plan del ciclo desde el journal';
-        const launched = this.ensureController(prompt);
+        const action: ControllerRecoveryAction = { schema: 'controller-recovery/v1', kind: nextAction !== undefined ? 'resume-next-action' : 'resume-cycle' };
+        const launched = this.ensureController(action);
         if (launched === 'custody') return true;
         if (launched === 'ok') {
             this.backoff.recordRelaunch();

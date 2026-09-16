@@ -35,6 +35,8 @@ export type AdmissionInput = {
     consumedRegistryComponents?: readonly string[];
     /** No registry may be ignored until source-to-contract provenance is complete. */
     provenance?: 'proven' | 'unknown';
+    /** Registry manifest compatibility is distinct from remote currentness. */
+    compatibilityDiagnostics?: PlanDiagnostic[];
     /** Read-only journal observation supplied by the command boundary. */
     journalState?: JournalState | null;
     journalCorrupt?: boolean;
@@ -164,6 +166,7 @@ export async function admitPlan(input: AdmissionInput): Promise<AdmissionReport>
         if (!input.currentness) return blocked(input, [diagnostic('ADMISSION_CURRENTNESS_REQUIRED', 'Currentness evidence was required but not supplied.')], { planDigest: plan.planDigest, provider, executionMode: mode });
         const gate = currentness(input.currentness, input.consumedRegistryComponents ?? []);
         if (gate.diagnostics.length) return blocked(input, gate.diagnostics, { planDigest: plan.planDigest, provider, executionMode: mode, currentness: gate.status });
+        if (input.compatibilityDiagnostics?.length) return blocked(input, input.compatibilityDiagnostics, { planDigest: plan.planDigest, provider, executionMode: mode, currentness: 'unverifiable' });
     }
     if (input.verifySensors) {
         if (!input.sensors) return blocked(input, [diagnostic('ADMISSION_SENSORS_REQUIRED', 'Sensor evidence was required but not supplied.')], { planDigest: plan.planDigest, provider, executionMode: mode, currentness: input.requireCurrent ? 'current' : 'not-checked' });

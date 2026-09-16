@@ -4,6 +4,9 @@ import path from 'path';
 import { fsyncDirSync, writeFileAtomicDurable } from '../atomic-file';
 import { emptyState, isWellFormedState, JournalState, PlanBinding } from './types';
 import { journalDir, statePath, requestsDir, acksDir, logsDir, exportDir, eventsPath } from './paths';
+import { EXECUTION_IDENTITY_SCHEMA, executionPlanDigest, fullPlanDigest } from '../plan/identity';
+import { verifiedPlanSnapshot } from '../plan/validate';
+import type { PlanValidationReport } from '../plan/types';
 
 export interface ReadResult { state: JournalState | null; corrupt: boolean; raw?: string; }
 
@@ -97,6 +100,12 @@ function assertJournalTree(repoRoot: string, branch: string): void {
     for (const directory of journalDirectories(repoRoot, branch).slice(0, 3)) assertControlledDirectory(directory);
 }
 
+/** Inspect every existing bootstrap segment before the caller writes anything. */
+export function assertJournalInitPaths(repoRoot: string, branch: string): void {
+    for (const directory of journalDirectories(repoRoot, branch)) assertControlledDirectory(directory);
+    assertJournalFileNotSymlink(statePath(repoRoot, branch));
+}
+
 function assertJournalFileNotSymlink(file: string): void {
     try {
         if (fs.lstatSync(file).isSymbolicLink()) throw new Error(`journal file rejects symlink: ${file}`);
@@ -118,7 +127,8 @@ export function initJournal(repoRoot: string, branch: string): void {
 /** Create, never replace, the schema-2 state.  The final hard-link is an
  * exclusive atomic publication: another initializer wins cleanly and the
  * completed prior journal is left untouched. */
-export function initBoundJournal(repoRoot: string, branch: string, binding: PlanBinding): void {
+export function initBoundJournal(repoRoot: string, branch: string, binding: PlanBinding, report?: PlanValidationReport): void {
+    if (binding.executionDigest !== undefined) assertBindingReport(binding, report);
     initializeDirectories(repoRoot, branch);
     const sp = statePath(repoRoot, branch);
     assertJournalFileNotSymlink(sp);
@@ -177,10 +187,17 @@ export function writeJournal(repoRoot: string, branch: string, state: JournalSta
 /** Explicit, guarded schema-2 binding transition.  It intentionally uses the
  * normal journal write path: state and its audit history are published in one
  * atomic durable replacement, while initBoundJournal remains create-only. */
-export function rebindJournalPlan(repoRoot: string, branch: string, binding: PlanBinding): JournalState {
+export function rebindJournalPlan(repoRoot: string, branch: string, binding: PlanBinding, report?: PlanValidationReport): JournalState {
     const current = readJournal(repoRoot, branch);
     if (current.corrupt || current.state === null) throw new Error('journal inexistente o corrupto: no se puede reconciliar binding');
     if (current.state.schema !== 2 || !current.state.planBinding) throw new Error('journal no tiene un binding desatendido reconciliable');
+    const previous = current.state.planBinding;
+    if (!previous.executionDigest || previous.executionDigest !== binding.executionDigest
+        || previous.executionIdentitySchema !== EXECUTION_IDENTITY_SCHEMA || binding.executionIdentitySchema !== EXECUTION_IDENTITY_SCHEMA
+        || previous.path !== binding.path || previous.schema !== binding.schema || previous.executionMode !== binding.executionMode) {
+        throw new Error('rebind requires proved unchanged execution identity');
+    }
+    assertBindingReport(binding, report);
     const next: JournalState = {
         ...current.state,
         planBinding: binding,
@@ -188,6 +205,18 @@ export function rebindJournalPlan(repoRoot: string, branch: string, binding: Pla
     };
     writeJournal(repoRoot, branch, next);
     return { ...next, revision: next.revision + 1 };
+}
+
+/** The old commitment was emitted at initialization/rebind from trusted core
+ * validation. Only a new immutable report can demonstrate the same execution
+ * identity. Snapshot bytes stay process-private and are never written/exported. */
+function assertBindingReport(binding: PlanBinding, report?: PlanValidationReport): void {
+    if (!report || report.state !== 'valid') throw new Error('binding execution identity requires a verified plan report');
+    const snapshot = verifiedPlanSnapshot(report);
+    if (binding.executionIdentitySchema !== EXECUTION_IDENTITY_SCHEMA || report.planDigest !== binding.digest
+        || report.executionDigest !== binding.executionDigest || report.schema !== binding.schema
+        || report.executionMode !== binding.executionMode || fullPlanDigest(snapshot) !== binding.digest
+        || executionPlanDigest(snapshot) !== binding.executionDigest) throw new Error('verified plan snapshot mismatches binding commitment');
 }
 
 /** Auditoria derivada best-effort (R4.6): la escribe SOLO el supervisor, un

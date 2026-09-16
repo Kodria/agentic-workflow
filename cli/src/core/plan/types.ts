@@ -16,7 +16,7 @@ export interface CompactPlanManifest {
     commands: PlanCommand[]; slices: PlanSlice[]; closureCommands: EntityId[];
 }
 export type PlanValidationReport =
-    | { state: 'valid'; schema: 'compact-slices/v1'; planDigest: string; manifest: CompactPlanManifest; /** Derived from the validated bytes, never a later reopen. */ executionMode?: 'interactivo' | 'desatendido' }
+    | { state: 'valid'; schema: 'compact-slices/v1'; planDigest: string; /** Versioned progress-independent identity, derived from the same validated bytes. */ executionDigest?: string; manifest: CompactPlanManifest; /** Derived from the validated bytes, never a later reopen. */ executionMode?: 'interactivo' | 'desatendido' }
     | { state: 'migration-required'; reason: 'unmarked-plan' }
     | { state: 'invalid'; diagnostics: PlanDiagnostic[] }
     | { state: 'unsupported'; schema: string; diagnostics: PlanDiagnostic[] };

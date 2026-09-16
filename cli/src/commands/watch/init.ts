@@ -2,11 +2,13 @@
 // bloqueador 5): la config real del repo determina los verificadores exigidos.
 import fs from 'fs';
 import path from 'path';
-import { initBoundJournal, initJournal, readJournal, rebindJournalPlan, writeJournal } from '../../core/journal/store';
+import { assertJournalInitPaths, initBoundJournal, initJournal, readJournal, rebindJournalPlan, writeJournal } from '../../core/journal/store';
 import { bindingPlanPath, statePath } from '../../core/journal/paths';
 import type { PlanBinding, VerificationKind } from '../../core/journal/types';
 import type { PlanValidationReport } from '../../core/plan/types';
 import { acquireLock, releaseLock } from './lock';
+import { verifiedPlanSnapshot } from '../../core/plan/validate';
+import { EXECUTION_IDENTITY_SCHEMA } from '../../core/plan/identity';
 
 const MAX_VERIFIER_SCAN_DEPTH = 64;
 const MAX_VERIFIER_SCAN_ENTRIES = 10000;
@@ -68,7 +70,6 @@ function rebindBlocker(state: ReturnType<typeof readJournal>['state']): string |
     if (state.verdicts.some(verdict => verdict.result !== 'pass')) return 'hay evidencia adversa durable';
     if (state.fixes.some(fix => !fix.closed)) return 'hay fixes abiertos';
     if (state.cycle.status === 'BLOCKED') return 'el ciclo está bloqueado';
-    if (state.cycle.status !== 'COMPLETE') return 'el ciclo sigue en curso';
     if (state.tracks?.some(track => track.phase !== 'REMOVED')) return 'hay tracks no terminales';
     return undefined;
 }
@@ -77,22 +78,25 @@ export function initWatch(repoRoot: string, branch: string, plan?: WatchPlanInit
     if (plan) {
         if (plan.report.state !== 'valid') throw new Error('watch --init --plan requiere un plan compacto válido');
         if (plan.report.executionMode !== 'desatendido') throw new Error('watch --init --plan requiere un plan compacto desatendido');
+        if (plan.report.executionDigest) verifiedPlanSnapshot(plan.report);
     }
     if (plan && fs.existsSync(statePath(repoRoot, branch))) {
         throw new Error('refusing to overwrite existing journal');
     }
-    ensureJournalGitignored(repoRoot);
     let planBinding: PlanBinding | undefined;
     if (plan) {
         const report = plan.report as Extract<PlanValidationReport, { state: 'valid' }>;
         planBinding = {
             path: bindingPlanPath(plan.path), digest: report.planDigest, schema: report.schema,
+            ...(report.executionDigest ? { executionDigest: report.executionDigest, executionIdentitySchema: EXECUTION_IDENTITY_SCHEMA } : {}),
             executionMode: 'desatendido', boundAt: new Date().toISOString(),
         };
     }
-    if (planBinding) initBoundJournal(repoRoot, branch, planBinding);
-    else initJournal(repoRoot, branch);
     const required = detectRequiredVerifiers(repoRoot);
+    assertJournalInitPaths(repoRoot, branch);
+    ensureJournalGitignored(repoRoot);
+    if (planBinding) initBoundJournal(repoRoot, branch, planBinding, plan!.report);
+    else initJournal(repoRoot, branch);
     const r = readJournal(repoRoot, branch);
     if (r.corrupt || r.state === null) throw new Error('journal corrupto tras init: no se continua (R1.6)');
     const s = r.state;
@@ -127,11 +131,16 @@ export function rebindWatchPlan(repoRoot: string, branch: string, plan: WatchPla
         const blocker = rebindBlocker(current.state);
         if (blocker) throw new Error(`rebind rechazado: ${blocker}`);
         const report = plan.report;
+        if (!existing.executionDigest || existing.executionIdentitySchema !== EXECUTION_IDENTITY_SCHEMA || !report.executionDigest) throw new Error('rebind rechazado: ciclo en curso o histórico sin prueba de identidad de ejecución');
+        verifiedPlanSnapshot(report);
+        if (report.executionDigest !== existing.executionDigest || report.executionMode !== existing.executionMode || report.schema !== existing.schema) throw new Error('rebind rechazado: cambiaron requisitos o contenido de ejecución; la evidencia anterior no se conserva');
         const binding: PlanBinding = {
             path: canonicalPath, digest: report.planDigest, schema: report.schema,
+            executionDigest: report.executionDigest,
+            executionIdentitySchema: EXECUTION_IDENTITY_SCHEMA,
             executionMode: 'desatendido', boundAt: new Date().toISOString(),
         };
-        rebindJournalPlan(repoRoot, branch, binding);
+        rebindJournalPlan(repoRoot, branch, binding, report);
         return binding;
     } finally {
         releaseLock(repoRoot, lock);

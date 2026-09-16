@@ -133,6 +133,19 @@ describe('validatePlanFile', () => {
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
     });
 
+    test('uses exact bigint filesystem identities for legitimate Windows-sized inode values', () => {
+        const plan = fixture(root);
+        const nativeLstat = fs.lstatSync;
+        const nativeFstat = fs.fstatSync;
+        const largeIdentity = (observed: fs.Stats | fs.BigIntStats) => Object.assign(Object.create(observed), {
+            ino: typeof observed.ino === 'bigint' ? 9007199254740993n : 9007199254740992,
+        });
+        const lstat = jest.spyOn(fs, 'lstatSync').mockImplementation(((...args: unknown[]) => largeIdentity(Reflect.apply(nativeLstat, fs, args))) as typeof fs.lstatSync);
+        const fstat = jest.spyOn(fs, 'fstatSync').mockImplementation(((...args: unknown[]) => largeIdentity(Reflect.apply(nativeFstat, fs, args))) as typeof fs.fstatSync);
+        try { expectApprovedPlanValid(validatePlanFile(plan, root)); }
+        finally { lstat.mockRestore(); fstat.mockRestore(); }
+    });
+
     test('retains the manifest byte limit beneath the bounded plan-file limit', () => {
         const plan = fixture(root);
         const text = fs.readFileSync(plan, 'utf8');
@@ -146,11 +159,11 @@ describe('validatePlanFile', () => {
     ] as const)('bounds %s bytes when the inspected file grows during descriptor read', (target, code) => {
         const plan = fixture(root);
         const targetPath = target === 'plan' ? plan : path.join(root, 'docs', 'source.md');
-        const targetInode = fs.statSync(targetPath).ino;
+        const targetInode = fs.statSync(targetPath, { bigint: true }).ino;
         const nativeFstat = fs.fstatSync;
         let grew = false;
         const fstat = jest.spyOn(fs, 'fstatSync').mockImplementation((descriptor) => {
-            const observed = nativeFstat(descriptor);
+            const observed = nativeFstat(descriptor, { bigint: true });
             if (!grew && observed.ino === targetInode) {
                 fs.appendFileSync(targetPath, Buffer.alloc(1024 * 1024));
                 grew = true;
@@ -251,6 +264,43 @@ describe('validatePlanFile', () => {
         expect(amended.state).toBe('valid');
         if (amended.state !== 'valid') throw new Error('expected valid amended fixture');
         expect(amended.planDigest).not.toBe(first.planDigest);
+    });
+
+    test('separates exact progress updates from the full normalized identity', () => {
+        const plan = fixture(root);
+        fs.appendFileSync(plan, '\n- [ ] Reviewed task.\n');
+        const before = validatePlanFile(plan, root) as { planDigest: string; executionDigest?: string };
+        fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace('- [ ] Reviewed task.', '- [x] Reviewed task.')
+            .replace('#### Evidence', '<!-- awm-qa-complete: 2026-09-16 -->\n<!-- awm-docs-complete: 2026-09-16 -->\n<!-- awm-retro-complete: Release R1 -->\n#### Evidence'));
+        const after = validatePlanFile(plan, root) as { planDigest: string; executionDigest?: string };
+        expect(before.executionDigest).toEqual(expect.any(String));
+        expect(after.planDigest).not.toBe(before.planDigest);
+        expect(after.executionDigest).toBe(before.executionDigest);
+    });
+
+    test.each([
+        ['task prose', '- [x] Changed task.\n'],
+        ['inline marker', 'prose <!-- awm-qa-complete: 2026-09-16 -->\n'],
+        ['unknown marker', '<!-- awm-qa-complete: arbitrary requirements -->\n'],
+        ['fenced task', '```md\n- [x] Reviewed task.\n```\n'],
+        ['fenced marker', '~~~~md\n<!-- awm-qa-complete: 2026-09-16 -->\n~~~~\n'],
+    ])('does not canonicalize %s away from execution identity', (_label, addition) => {
+        const plan = fixture(root);
+        const before = validatePlanFile(plan, root) as { executionDigest?: string };
+        fs.appendFileSync(plan, addition);
+        const after = validatePlanFile(plan, root) as { executionDigest?: string };
+        expect(before.executionDigest).toEqual(expect.any(String));
+        expect(after.executionDigest).not.toBe(before.executionDigest);
+    });
+
+    test('a false fence closer cannot make code checkboxes and markers into lifecycle progress', () => {
+        const plan = fixture(root);
+        fs.appendFileSync(plan, '\n~~~~md\n~~~~not-a-closer\n- [ ] Code task.\n<!-- awm-qa-complete: 2026-09-16 -->\n~~~~\n');
+        const before = validatePlanFile(plan, root) as { executionDigest?: string };
+        fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace('- [ ] Code task.', '- [x] Code task.')
+            .replace('<!-- awm-qa-complete: 2026-09-16 -->', '<!-- awm-docs-complete: 2026-09-16 -->'));
+        const after = validatePlanFile(plan, root) as { executionDigest?: string };
+        expect(after.executionDigest).not.toBe(before.executionDigest);
     });
 
     test('accepts a contained plan when path.relative returns Windows separators', () => {

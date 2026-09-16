@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { parseJsonNoDuplicate } from './json';
 import type { CompactPlanManifest, PlanDiagnostic, PlanSlice, PlanValidationReport } from './types';
+import { executionPlanDigest } from './identity';
 
 const START = '<!-- AWM:COMPACT-SLICES:START v1 -->';
 const END = '<!-- AWM:COMPACT-SLICES:END v1 -->';
@@ -18,6 +19,7 @@ const SHELL = new Set([
     'env', 'busybox', 'node', 'nodejs', 'deno', 'bun', 'python', 'python3', 'ruby', 'perl', 'php', 'lua',
 ]);
 const verifiedValidReports = new WeakSet<object>();
+const verifiedSnapshots = new WeakMap<object, string>();
 
 function freezeJson(value: unknown): void {
     if (value === null || typeof value !== 'object') return;
@@ -30,6 +32,14 @@ export function assertVerifiedValidPlanReport(report: PlanValidationReport): voi
     if (!report || typeof report !== 'object' || report.state !== 'valid' || !verifiedValidReports.has(report)) {
         throw new Error('plan validator returned an invalid valid report');
     }
+}
+
+/** The exact immutable validator snapshot, never a later reopen of the path. */
+export function verifiedPlanSnapshot(report: PlanValidationReport): string {
+    assertVerifiedValidPlanReport(report);
+    const snapshot = verifiedSnapshots.get(report);
+    if (snapshot === undefined) throw new Error('verified plan snapshot unavailable');
+    return snapshot;
 }
 
 function isLauncher(program: string): boolean {
@@ -112,42 +122,42 @@ function inside(root: string, candidate: string): boolean { const relative = pat
 function validRelative(value: unknown): value is string {
     return typeof value === 'string' && value.length > 0 && Buffer.byteLength(value, 'utf8') <= MAX_STRING && !path.isAbsolute(value) && !path.win32.isAbsolute(value) && !value.includes('\\') && value.split('/').every((part) => part !== '' && part !== '.' && part !== '..') && path.posix.normalize(value) === value;
 }
-interface InspectedFile { path: string; stat: fs.Stats; }
+interface InspectedFile { path: string; stat: fs.BigIntStats; }
 type InspectedRead = { state: 'ok'; bytes: Buffer } | { state: 'unsafe' } | { state: 'limit' } | { state: 'read' };
 function regularInside(root: string, relative: string): InspectedFile | undefined {
     if (!validRelative(relative)) return undefined;
     const candidate = path.join(root, relative); if (!inside(root, candidate)) return undefined;
-    const parts = relative.split('/'); let current = root; let stat: fs.Stats | undefined;
+    const parts = relative.split('/'); let current = root; let stat: fs.BigIntStats | undefined;
     try {
-        for (const part of parts) { current = path.join(current, part); stat = fs.lstatSync(current); if (stat.isSymbolicLink()) return undefined; }
+        for (const part of parts) { current = path.join(current, part); stat = fs.lstatSync(current, { bigint: true }); if (stat.isSymbolicLink()) return undefined; }
         if (!stat?.isFile()) return undefined;
         const real = fs.realpathSync(candidate);
         return inside(root, real) ? { path: real, stat } : undefined;
     } catch { return undefined; }
 }
-function sameIdentity(inspected: fs.Stats, opened: fs.Stats): boolean {
-    return Number.isSafeInteger(inspected.dev) && Number.isSafeInteger(inspected.ino) && inspected.ino !== 0
+function sameIdentity(inspected: fs.BigIntStats, opened: fs.BigIntStats): boolean {
+    return typeof inspected.dev === 'bigint' && typeof inspected.ino === 'bigint' && inspected.ino !== 0n
         && opened.isFile() && inspected.dev === opened.dev && inspected.ino === opened.ino;
 }
 function readInspected(file: InspectedFile, max: number): InspectedRead {
-    if (file.stat.size > max) return { state: 'limit' };
+    if (file.stat.size > BigInt(max)) return { state: 'limit' };
     let descriptor: number | undefined;
     try {
         descriptor = fs.openSync(file.path, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
-        const opened = fs.fstatSync(descriptor);
+        const opened = fs.fstatSync(descriptor, { bigint: true });
         if (!sameIdentity(file.stat, opened)) return { state: 'unsafe' };
-        if (opened.size > max) return { state: 'limit' };
+        if (opened.size > BigInt(max)) return { state: 'limit' };
         if (opened.size !== file.stat.size) return { state: 'unsafe' };
-        const bytes = Buffer.alloc(opened.size);
+        const bytes = Buffer.alloc(Number(opened.size));
         let offset = 0;
         while (offset < bytes.length) {
             const read = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
             if (read <= 0) return { state: 'read' };
             offset += read;
         }
-        const after = fs.fstatSync(descriptor);
+        const after = fs.fstatSync(descriptor, { bigint: true });
         if (!sameIdentity(file.stat, after)) return { state: 'unsafe' };
-        if (after.size > max || bytes.length > max) return { state: 'limit' };
+        if (after.size > BigInt(max) || bytes.length > max) return { state: 'limit' };
         if (after.size !== opened.size) return { state: 'unsafe' };
         return { state: 'ok', bytes };
     } catch (error) {
@@ -161,7 +171,7 @@ function readInspected(file: InspectedFile, max: number): InspectedRead {
 }
 function executableInside(root: string, relative: string): string | undefined {
     const file = regularInside(root, relative);
-    return file && (process.platform === 'win32' ? /\.(?:exe|cmd|bat)$/i.test(file.path) : (file.stat.mode & 0o111) !== 0) ? file.path : undefined;
+    return file && (process.platform === 'win32' ? /\.(?:exe|cmd|bat)$/i.test(file.path) : (file.stat.mode & 0o111n) !== 0n) ? file.path : undefined;
 }
 function refs(value: unknown, known: Set<string>): boolean { return allStrings(value) && value.every((id) => known.has(id)); }
 function uniqueRefs(value: unknown, known: Set<string>): boolean { return refs(value, known) && new Set(value as string[]).size === (value as string[]).length; }
@@ -275,10 +285,12 @@ function validatePlan(planPath: string, cwd: string, snapshot?: Buffer): PlanVal
     const report: PlanValidationReport = {
         state: 'valid', schema: 'compact-slices/v1',
         planDigest: crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
+        executionDigest: executionPlanDigest(text),
         manifest: raw as unknown as CompactPlanManifest, executionMode: executionModeFromValidatedText(text),
     };
     freezeJson(report);
     verifiedValidReports.add(report);
+    verifiedSnapshots.set(report, text);
     return report;
 }
 

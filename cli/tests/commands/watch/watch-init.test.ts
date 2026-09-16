@@ -120,7 +120,7 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         expect(readJournal(repo, 'rama').state).toBeNull();
     });
 
-    test('rebind reconcilia un digest obsoleto tras actualizar el ciclo y conserva el binding anterior', () => {
+    test('rebind no atribuye prueba nueva a un binding legacy aunque el ciclo diga COMPLETE', () => {
         const original = validPlan('a');
         initWatch(repo, 'rama', { path: 'docs/plan.md', report: original });
         const completed = readJournal(repo, 'rama').state!;
@@ -128,12 +128,9 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         delete completed.cycle.nextAction;
         writeJournal(repo, 'rama', completed);
 
-        const rebound = rebindWatchPlan(repo, 'rama', { path: 'docs/plan.md', report: validPlan('b') });
-
-        expect(rebound.digest).toBe('b'.repeat(64));
-        const state = readJournal(repo, 'rama').state!;
-        expect(state.planBinding).toEqual(expect.objectContaining({ digest: 'b'.repeat(64), path: 'docs/plan.md' }));
-        expect(state.planBindingHistory).toEqual([expect.objectContaining({ digest: 'a'.repeat(64), path: 'docs/plan.md' })]);
+        const before = readJournal(repo, 'rama').raw;
+        expect(() => rebindWatchPlan(repo, 'rama', { path: 'docs/plan.md', report: validPlan('b') })).toThrow(/sin prueba/i);
+        expect(readJournal(repo, 'rama').raw).toBe(before);
         expect(fs.existsSync(supervisorLockPath(repo))).toBe(false);
     });
 
@@ -201,11 +198,7 @@ describe('watch --init: plan-vs-repo mecanico', () => {
             fs.writeFileSync(planPath, plan);
             fs.writeFileSync(path.join(cliRepo, 'source.md'), '## Canonical source\nfixture source\n');
             initWatch(cliRepo, 'main', { path: 'docs/plan.md', report: validatePlan(cliRepo, 'docs/plan.md') });
-            const completed = readJournal(cliRepo, 'main').state!;
-            completed.cycle.status = 'COMPLETE';
-            delete completed.cycle.nextAction;
-            writeJournal(cliRepo, 'main', completed);
-            fs.appendFileSync(planPath, '\nLifecycle checkbox completed.\n');
+            fs.appendFileSync(planPath, '<!-- awm-qa-complete: 2026-09-16 -->\n');
 
             const result = spawnSync(process.execPath, [path.resolve(__dirname, '../../../dist/src/index.js'), 'watch', 'rebind', '--plan', 'docs/plan.md'], {
                 cwd: cliRepo, encoding: 'utf8', env: { ...process.env, AWM_NO_UPDATE_CHECK: '1' },
@@ -214,6 +207,7 @@ describe('watch --init: plan-vs-repo mecanico', () => {
             expect(result.status).toBe(0);
             expect(result.stderr).not.toContain('required option');
             expect(readJournal(cliRepo, 'main').state!.planBinding!.digest).toBe(validatePlan(cliRepo, 'docs/plan.md').planDigest);
+            expect(readJournal(cliRepo, 'main').state!.cycle.status).toBe('IN_PROGRESS');
         } finally { fs.rmSync(cliRepo, { recursive: true, force: true }); }
     });
 });

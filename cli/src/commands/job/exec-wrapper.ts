@@ -5,7 +5,10 @@
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
-import { captureSelfRef, captureRefFor, NONCE_ENV, terminatePreviouslyOwnedGroup } from '../../core/journal/process';
+import { captureSelfRef, captureRefFor, NONCE_ENV, terminatePreviouslyOwnedGroup, argvDigest } from '../../core/journal/process';
+import { readJournal } from '../../core/journal/store';
+import { logsDir } from '../../core/journal/paths';
+import { isWellFormedState, isControllerRecoveryAction } from '../../core/journal/types';
 import { resolveWorkingDirectory } from '../../core/journal/fingerprint';
 import { redactText } from '../../core/journal/redact';
 import { writeFileAtomicDurable, fsyncDirSync } from '../../core/atomic-file';
@@ -41,10 +44,26 @@ const MAX_LOG_BYTES = 1024 * 1024;   // retencion acotada (R2.5)
 // una espera perceptible si un descendiente hereda los fds y nunca cierra.
 const STDIO_GRACE_MS = 300;
 
+/** Only a committed generation intent may suppress controller output. A user
+ * job with the same name retains normal verifier logs. Never persist model
+ * output (which may include prompts/source bodies) in generation custody. */
+function isCommittedController(logsRoot: string, repoRoot: string, jobId: string, nonce: string, argv: string[]): boolean {
+    if (!/^controller-gen-[1-9][0-9]*$/.test(jobId)) return false;
+    try {
+        const metadata: unknown = JSON.parse(fs.readFileSync(path.resolve(logsRoot, '..', 'state.json'), 'utf8'));
+        if (!isWellFormedState(metadata) || fs.realpathSync(logsRoot) !== fs.realpathSync(logsDir(repoRoot, metadata.branch))) return false;
+        const state = readJournal(repoRoot, metadata.branch).state;
+        return state !== null && state.generations.some(gen => gen.controllerJobId === jobId && jobId === `controller-gen-${gen.n}`
+            && gen.spawnNonce === nonce && gen.resumePrompt === undefined && isControllerRecoveryAction(gen.resumeAction)
+            && gen.launchArgvDigest === argvDigest(argv));
+    } catch { return false; }
+}
+
 export async function runExecWrapper(opts: { logsRoot: string; jobId: string; nonce: string; argv: string[]; cwd: string; repoRoot?: string }): Promise<WrappedResult> {
     const { logsRoot, jobId, nonce, argv, cwd } = opts;
     const repoRoot = opts.repoRoot ?? process.cwd();
     if (argv.length === 0) throw new Error('argv vacio');
+    const omitControllerOutput = isCommittedController(logsRoot, repoRoot, jobId, nonce, argv);
     fs.mkdirSync(logsRoot, { recursive: true, mode: 0o700 });
     // (1) claim exclusivo DURABLE — wx + fsync de archivo y de directorio
     let fd: number;
@@ -99,6 +118,7 @@ export async function runExecWrapper(opts: { logsRoot: string; jobId: string; no
     const outputChunks: Buffer[] = [];
     const logFile = logPath(logsRoot, jobId, nonce);
     const capture = (chunk: Buffer) => {
+        if (omitControllerOutput) return;
         if (captured >= MAX_LOG_BYTES) return;
         const accepted = chunk.subarray(0, MAX_LOG_BYTES - captured);
         outputChunks.push(accepted);

@@ -147,6 +147,10 @@ export interface CustodyDecision { at: string; decision: 'resume'; reason: strin
 export interface PlanBinding {
     path: string;
     digest: string;
+    /** Commitment issued from a verified plan snapshot. No body is persisted.
+     * Legacy journals omit both fields and cannot reconcile changed plans. */
+    executionDigest?: string;
+    executionIdentitySchema?: 'awm-plan-execution/v1';
     schema: 'compact-slices/v1' | 'compact-slices/v2';
     executionMode: 'desatendido';
     boundAt: string;
@@ -194,6 +198,18 @@ export interface Job {
     attemptOf?: string;     // job-id del attempt anterior (re-claim = attempt nuevo, R1.7)
 }
 
+export interface ControllerRecoveryAction {
+    schema: 'controller-recovery/v1';
+    kind: 'resume-cycle' | 'resume-next-action' | 'reconcile-active-jobs';
+}
+
+export function isControllerRecoveryAction(x: unknown): x is ControllerRecoveryAction {
+    return isObj(x) && Object.keys(x).length === 2
+        && x.schema === 'controller-recovery/v1'
+        && typeof x.kind === 'string'
+        && ['resume-cycle', 'resume-next-action', 'reconcile-active-jobs'].includes(x.kind);
+}
+
 export interface Generation {
     n: number;
     token: string;
@@ -201,7 +217,9 @@ export interface Generation {
     controllerJobId?: string; // intent durable del wrapper que lanza al controller
     spawnNonce?: string;
     provider?: string;
-    resumePrompt?: string;
+    resumePrompt?: string; // historical readability only; new launches reject legacy prompt custody
+    resumeAction?: ControllerRecoveryAction;
+    launchArgvDigest?: string;
     processRef?: ProcessRef;
     wrapperRef?: ProcessRef;
     launchedAt: string;
@@ -362,8 +380,11 @@ export function isWellFormedState(x: unknown): x is JournalState {
 
 function isWellFormedPlanBinding(x: unknown): x is PlanBinding {
     if (!(isObj(x)
+        && Object.keys(x).every(key => ['path', 'digest', 'schema', 'executionMode', 'boundAt', 'executionDigest', 'executionIdentitySchema'].includes(key))
         && typeof x.path === 'string' && x.path.length > 0 && x.path.length <= 4096
         && typeof x.digest === 'string' && /^[a-f0-9]{64}$/.test(x.digest)
+        && (x.executionDigest === undefined || (typeof x.executionDigest === 'string' && /^[a-f0-9]{64}$/.test(x.executionDigest)))
+        && (x.executionDigest === undefined ? x.executionIdentitySchema === undefined : x.executionIdentitySchema === 'awm-plan-execution/v1')
         && (x.schema === 'compact-slices/v1' || x.schema === 'compact-slices/v2')
         && x.executionMode === 'desatendido'
         && typeof x.boundAt === 'string' && x.boundAt.length > 0)) return false;
@@ -412,6 +433,8 @@ function isWellFormedGeneration(x: unknown): x is Generation {
         && (x.spawnNonce === undefined || typeof x.spawnNonce === 'string')
         && (x.provider === undefined || typeof x.provider === 'string')
         && (x.resumePrompt === undefined || typeof x.resumePrompt === 'string')
+        && (x.resumeAction === undefined || isControllerRecoveryAction(x.resumeAction))
+        && (x.launchArgvDigest === undefined || (typeof x.launchArgvDigest === 'string' && /^[a-f0-9]{16}$/.test(x.launchArgvDigest)))
         && (x.processRef === undefined || isWellFormedProcessRef(x.processRef))
         && (x.wrapperRef === undefined || isWellFormedProcessRef(x.wrapperRef));
 }

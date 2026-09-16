@@ -6,7 +6,9 @@ import { checkCurrentness } from '../../core/currentness/check';
 import { runSensors } from '../sensors/run';
 import { readPreferences } from '../../utils/config';
 import { isAgentTarget } from '../../providers';
-import { listRegistries, type RegistrySource } from '../../core/registries';
+import { listRegistries, readRegistryManifest, type RegistrySource } from '../../core/registries';
+import { cliVersion } from '../../core/cli-version';
+import { compareSemver } from '../../core/versioning';
 import path from 'path';
 import fs from 'fs';
 import { execFileSync } from 'child_process';
@@ -89,6 +91,22 @@ function consumedRegistryContracts(report: PlanValidationReport, cwd: string, re
         for (const registry of physicalRegistries) if (physicalWithin(registry.root, candidate) === true) consumed.add(`registry:${registry.name}`);
     }
     return { provenance: 'proven', consumedRegistryComponents: [...consumed].sort() };
+}
+
+function registryCompatibility(registries: RegistrySource[], consumed: string[]): PlanDiagnostic[] {
+    const diagnostics: PlanDiagnostic[] = [];
+    const current = cliVersion();
+    for (const registry of registries) {
+        const component = `registry:${registry.name}`;
+        if (!consumed.includes(component)) continue;
+        try {
+            const min = readRegistryManifest(registry.contentRoot).minCliVersion;
+            if (min && compareSemver(current, min) < 0) diagnostics.push({ code: 'ADMISSION_REGISTRY_CLI_INCOMPATIBLE', message: `${component} requires CLI >= ${min}; installed CLI is ${current}. Update the CLI before dispatch.` });
+        } catch {
+            diagnostics.push({ code: 'ADMISSION_REGISTRY_COMPATIBILITY_UNVERIFIABLE', message: `${component} manifest compatibility could not be verified. Repair the registry before dispatch.` });
+        }
+    }
+    return diagnostics;
 }
 
 function boundedDiagnostics(diagnostics: PlanDiagnostic[]): PlanDiagnostic[] {
@@ -245,8 +263,12 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
                 process.exitCode = 2;
                 return;
             }
-            let contractScope: { provenance: 'proven' | 'unknown'; consumedRegistryComponents: string[] };
-            try { contractScope = consumedRegistryContracts(planReport, options.cwd, registryInventory()); }
+            let contractScope: { provenance: 'proven' | 'unknown'; consumedRegistryComponents: string[]; compatibilityDiagnostics?: PlanDiagnostic[] };
+            try {
+                const registries = registryInventory();
+                contractScope = consumedRegistryContracts(planReport, options.cwd, registries);
+                if (options.requireCurrent && contractScope.provenance === 'proven') contractScope.compatibilityDiagnostics = registryCompatibility(registries, contractScope.consumedRegistryComponents);
+            }
             catch { contractScope = { provenance: 'unknown', consumedRegistryComponents: [] }; }
             if (options.requireCurrent && contractScope.provenance !== 'proven') {
                 const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal, requireCurrent: true, ...contractScope });

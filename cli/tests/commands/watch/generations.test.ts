@@ -6,7 +6,9 @@ import { adapterFor } from '../../../src/core/journal/adapter';
 import { spawnStructured } from '../../../src/core/journal/process';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { logsDir } from '../../../src/core/journal/paths';
-import { claimPath, resultPath } from '../../../src/commands/job/exec-wrapper';
+import { claimPath, resultPath, runExecWrapper } from '../../../src/commands/job/exec-wrapper';
+
+const recovery = { schema: 'controller-recovery/v1', kind: 'resume-cycle' };
 
 describe('generaciones', () => {
     let repo: string;
@@ -56,7 +58,7 @@ describe('generaciones', () => {
         const begun = beginGeneration(repo, 'rama');
         let captured: { argv: string[]; nonce: string } | undefined;
         const wrapperRef = { pid: 42, startTime: 't', spawnNonce: 'wrapper-nonce', argvDigest: 'a', processGroup: 42, psArgsDigest: 'p' };
-        launchControllerGeneration(repo, 'rama', 'codex', 'continua el ciclo', (job, nonce) => {
+        launchControllerGeneration(repo, 'rama', 'codex', recovery, (job, nonce) => {
             const duringSpawn = activeGeneration(readJournal(repo, 'rama').state!)!;
             expect(duringSpawn.controllerJobId).toBe(job.id);       // persistido ANTES del spawn
             expect(duringSpawn.spawnNonce).toBe(nonce);
@@ -68,9 +70,45 @@ describe('generaciones', () => {
         expect(activeGeneration(readJournal(repo, 'rama').state!)!.wrapperRef).toEqual(wrapperRef);
     });
 
+    test('an arbitrary prompt is rejected before durable launch intent or dispatch', () => {
+        beginGeneration(repo, 'rama');
+        const before = readJournal(repo, 'rama').raw;
+        let dispatched = false;
+        expect(() => launchControllerGeneration(repo, 'rama', 'codex', 'private source body and password=sentinel', () => { dispatched = true; })).toThrow(/recovery|intent|acción/i);
+        expect(dispatched).toBe(false);
+        expect(readJournal(repo, 'rama').raw).toBe(before);
+        expect(() => launchControllerGeneration(repo, 'rama', 'codex', { ...recovery, prompt: 'private body' }, () => {})).toThrow(/recovery/);
+        expect(readJournal(repo, 'rama').raw).toBe(before);
+    });
+
+    test('legacy prompt custody remains readable but cannot launch or replay', () => {
+        beginGeneration(repo, 'rama');
+        const state = readJournal(repo, 'rama').state!;
+        state.generations[0].resumePrompt = 'historical legacy body';
+        writeJournal(repo, 'rama', state);
+        const before = readJournal(repo, 'rama').raw;
+        expect(() => launchControllerGeneration(repo, 'rama', 'codex', recovery, () => {})).toThrow(/legacy/);
+        expect(() => ensureControllerGeneration(repo, 'rama', 'codex', recovery, () => {}, 10000)).toThrow(/legacy/);
+        expect(readJournal(repo, 'rama').raw).toBe(before);
+    });
+
+    test('closed recovery intent launches deterministically and persists no prompt body', () => {
+        beginGeneration(repo, 'rama');
+        const action = { schema: 'controller-recovery/v1', kind: 'resume-cycle' };
+        const attempts: string[][] = [];
+        launchControllerGeneration(repo, 'rama', 'codex', action, job => { attempts.push(job.argv); });
+        const state = readJournal(repo, 'rama').state!;
+        expect(state.generations[0]).toMatchObject({ resumeAction: action });
+        expect(state.generations[0].resumePrompt).toBeUndefined();
+        expect(JSON.stringify(state)).not.toContain('Sos el orquestador');
+        ensureControllerGeneration(repo, 'rama', 'codex', { schema: 'controller-recovery/v1', kind: 'reconcile-active-jobs' }, job => { attempts.push(job.argv); }, 10000);
+        expect(attempts).toHaveLength(2);
+        expect(attempts[1]).toEqual(attempts[0]);
+    });
+
     test('claim sin identidad/resultado conserva ownership ambiguo; usa la edad del claim, no la de begin', () => {
         beginGeneration(repo, 'rama');
-        launchControllerGeneration(repo, 'rama', 'codex', 'continua', () => {});
+        launchControllerGeneration(repo, 'rama', 'codex', recovery, () => {});
         let s = readJournal(repo, 'rama').state!;
         const gen = activeGeneration(s)!;
         gen.launchedAt = new Date(Date.now() - 3600000).toISOString();
@@ -78,14 +116,61 @@ describe('generaciones', () => {
         fs.mkdirSync(logsDir(repo, 'rama'), { recursive: true });
         fs.writeFileSync(claimPath(logsDir(repo, 'rama'), gen.controllerJobId!, gen.spawnNonce!), '{}');
         expect(controllerGenerationHasUnresolvedClaim(repo, 'rama', gen)).toBe(true);
-        ensureControllerGeneration(repo, 'rama', 'codex', 'continua', () => {}, 10000);
+        ensureControllerGeneration(repo, 'rama', 'codex', recovery, () => {}, 10000);
         expect(readJournal(repo, 'rama').state!.cycle.status).toBe('IN_PROGRESS'); // claim recien creado: aun dentro de gracia
         const old = new Date(Date.now() - 20000);
         fs.utimesSync(claimPath(logsDir(repo, 'rama'), gen.controllerJobId!, gen.spawnNonce!), old, old);
-        ensureControllerGeneration(repo, 'rama', 'codex', 'continua', () => {}, 10000);
+        ensureControllerGeneration(repo, 'rama', 'codex', recovery, () => {}, 10000);
         expect(readJournal(repo, 'rama').state!.cycle.status).toBe('BLOCKED');
         fs.writeFileSync(resultPath(logsDir(repo, 'rama'), gen.controllerJobId!, gen.spawnNonce!), JSON.stringify({ exitCode: 1 }));
         expect(controllerGenerationHasUnresolvedClaim(repo, 'rama', gen)).toBe(false);
+    });
+
+    test('replay preserves exact argv commitment and rejects environment command drift without mutation', () => {
+        beginGeneration(repo, 'rama');
+        launchControllerGeneration(repo, 'rama', 'codex', recovery, () => {});
+        const before = readJournal(repo, 'rama').raw;
+        const previous = process.env.AWM_CONTROLLER_ARGV;
+        process.env.AWM_CONTROLLER_ARGV = JSON.stringify(['different-controller']);
+        try {
+            expect(() => ensureControllerGeneration(repo, 'rama', 'codex', recovery, () => {}, 10000)).toThrow(/argv cambio/);
+            expect(readJournal(repo, 'rama').raw).toBe(before);
+        } finally {
+            if (previous === undefined) delete process.env.AWM_CONTROLLER_ARGV;
+            else process.env.AWM_CONTROLLER_ARGV = previous;
+        }
+    });
+
+    test('a real launched controller generation retains metadata but no prompt or source output', async () => {
+        beginGeneration(repo, 'rama');
+        const body = 'SOURCE_BODY_SENTINEL_private_controller_text';
+        const previous = process.env.AWM_CONTROLLER_ARGV;
+        process.env.AWM_CONTROLLER_ARGV = JSON.stringify([process.execPath, '-e', `process.stdout.write('${body}')`]);
+        let execution: Promise<unknown> | undefined;
+        try {
+            launchControllerGeneration(repo, 'rama', 'codex', recovery, (job, nonce, logsRoot, repoRoot) => {
+                execution = runExecWrapper({ logsRoot, jobId: job.id, nonce, argv: job.argv, cwd: job.cwd, repoRoot });
+            });
+            await execution;
+            const state = readJournal(repo, 'rama').state!;
+            expect(state.generations[0].launchArgvDigest).toMatch(/^[a-f0-9]{16}$/);
+            const artifacts = fs.readdirSync(logsDir(repo, 'rama')).map(name => fs.readFileSync(path.join(logsDir(repo, 'rama'), name), 'utf8')).join('\n');
+            expect(artifacts).toContain('argvDigest');
+            expect(artifacts).toContain('exitCode');
+            expect(artifacts + JSON.stringify(state)).not.toContain(body);
+            expect(artifacts + JSON.stringify(state)).not.toContain('Retoma el plan');
+        } finally {
+            if (previous === undefined) delete process.env.AWM_CONTROLLER_ARGV;
+            else process.env.AWM_CONTROLLER_ARGV = previous;
+        }
+    });
+
+    test('a user verifier named like a controller keeps ordinary bounded output without generation proof', async () => {
+        const logsRoot = logsDir(repo, 'rama');
+        await runExecWrapper({ logsRoot, repoRoot: repo, jobId: 'controller-gen-1', nonce: 'normal-verifier', cwd: '.',
+            argv: [process.execPath, '-e', "process.stdout.write('ordinary-verifier-output')"] });
+        const artifacts = fs.readdirSync(logsRoot).map(name => fs.readFileSync(path.join(logsRoot, name), 'utf8')).join('\n');
+        expect(artifacts).toContain('ordinary-verifier-output');
     });
 
     test('resolveGeneration: muerte probada => proven-dead; vivo+indeterminate => custodia con estado BLOCKED (R4.2b)', async () => {  // verifies R4.2b
