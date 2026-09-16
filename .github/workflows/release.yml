@@ -232,6 +232,12 @@ jobs:
       - name: Install test runner
         working-directory: cli
         run: npm ci
+      - name: Verify publication visibility guard
+        run: node --test .github/scripts/wait-npm-publication.test.cjs
+      - name: Wait for exact npm artifact visibility
+        env:
+          AWM_PUBLISHED_CLI_VERSION: ${{ needs.release.outputs.version }}
+        run: node .github/scripts/wait-npm-publication.cjs
       - name: Accept published dashboard and evidence artifacts
         working-directory: cli
         env:
