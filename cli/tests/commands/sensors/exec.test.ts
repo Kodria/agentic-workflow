@@ -32,6 +32,30 @@ async function until(fn: () => boolean, budgetMs = 4000): Promise<boolean> {
 }
 
 describe('runCommand — exit codes and output', () => {
+    itPosix('prefers the CLI runtime Node directory over an inherited conflicting PATH entry', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-exec-runtime-path-'));
+        const shadowBin = path.join(dir, 'bin');
+        const runtimeBin = path.join(dir, 'runtime-bin');
+        const originalPath = process.env.PATH;
+        const execPathDescriptor = Object.getOwnPropertyDescriptor(process, 'execPath');
+        try {
+            fs.mkdirSync(shadowBin);
+            fs.mkdirSync(runtimeBin);
+            fs.writeFileSync(path.join(shadowBin, 'node'), "#!/bin/sh\nprintf '%s\\n' shadow-node\n", { mode: 0o755 });
+            fs.writeFileSync(path.join(runtimeBin, 'node'), "#!/bin/sh\nprintf '%s\\n' runtime-node\n", { mode: 0o755 });
+            process.env.PATH = `${shadowBin}${path.delimiter}${originalPath ?? ''}`;
+            Object.defineProperty(process, 'execPath', { value: path.join(runtimeBin, 'node'), configurable: true });
+
+            const result = await runCommand("node -e \"process.stdout.write(process.execPath)\"", { timeout: 5_000, cwd: dir });
+
+            expect(result).toMatchObject({ code: 0, stdout: 'runtime-node\n' });
+        } finally {
+            process.env.PATH = originalPath;
+            Object.defineProperty(process, 'execPath', execPathDescriptor!);
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     it('records bounded execution evidence on timeout (R3.2,R3.4,R7.1)', async () => {
         const result = await executePrepared(sensor({ timeoutMs: 25, timeoutSource: 'project' }));
 
