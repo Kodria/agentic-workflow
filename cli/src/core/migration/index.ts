@@ -7,6 +7,7 @@ import { detectBranch } from '../ledger/store';
 import { readJournal } from '../journal/store';
 import { computeFingerprint, type FingerprintResult } from '../journal/fingerprint';
 import { secureFs } from '../secure-fs/native-bridge';
+import { hasIssue148ReviewProvenance, type HistoricalReviewRecord } from './historical-provenance';
 
 export type MigrationState = 'supported-completion' | 'planning-required' | 'blocked';
 export type MigrationTask = Readonly<{ id: string; state: 'completed' | 'pending' | 'unstarted'; missing: string[] }>;
@@ -171,15 +172,20 @@ export function collectIssue148HistoricalFacts(historicalRoot: string, issueLink
     const planPath = 'docs/plans/2026-09-14-awm-facts-plan.md'; const text = readPlan(root, planPath);
     const digest = crypto.createHash('sha256').update(text, 'utf8').digest('hex');
     const ledgerPath = '.awm/ledger/codex__issue-148-awm-facts.jsonl';
-    let ledgerEntries: Array<{ branch: string; phase: string; source_skill: string; polarity: string; signature: string; ref: string }> = [];
+    let ledgerEntries: HistoricalReviewRecord[] = [];
     try {
         ledgerEntries = readContainedRegularFile(root, ledgerPath, 256 * 1024, 'issue-148 ledger').toString('utf8').trim().split('\n').filter(Boolean).map(line => {
             const value: unknown = JSON.parse(line); if (!value || typeof value !== 'object') throw new Error();
             const item = value as Record<string, unknown>; if (typeof item.branch !== 'string' || typeof item.phase !== 'string' || typeof item.source_skill !== 'string' || typeof item.polarity !== 'string' || typeof item.signature !== 'string' || typeof item.ref !== 'string') throw new Error();
-            return item as typeof ledgerEntries[number];
+            if (item.ts !== undefined && typeof item.ts !== 'string') throw new Error();
+            return { branch: item.branch, phase: item.phase, source_skill: item.source_skill, polarity: item.polarity, signature: item.signature, ref: item.ref, ...(typeof item.ts === 'string' ? { ts: item.ts } : {}) };
         });
     } catch { ledgerEntries = []; }
-    const ancestor = (() => { try { execFileSync('git', ['merge-base', '--is-ancestor', '81c008c', 'HEAD'], { cwd: root, stdio: 'pipe' }); return true; } catch { return false; } })();
+    const checkpoint = '81c008c5f681e6ecfe30a3fc73bf7b79d094c094';
+    const ancestor = (() => { try {
+        for (const commit of ['91047f5041a447b85243ea25b91652aef41151bd', '1207e61c5b206ad8693f5c5d6b9ab5ab19cd8a6f', checkpoint]) execFileSync('git', ['merge-base', '--is-ancestor', commit, 'HEAD'], { cwd: root, stdio: 'pipe', timeout: 2000 });
+        return true;
+    } catch { return false; } })();
     const taskOneStart = text.search(/^### Task 1:/m);
     const taskOneEnd = text.indexOf('\n### Task ', taskOneStart + 1);
     const taskOneSection = taskOneStart < 0 ? '' : text.slice(taskOneStart, taskOneEnd < 0 ? text.length : taskOneEnd);
@@ -188,15 +194,14 @@ export function collectIssue148HistoricalFacts(historicalRoot: string, issueLink
     const currentTaskOneFiles = (() => {
         if (taskOneFiles.size === 0) return false;
         try {
-            const checkpointFiles = execFileSync('git', ['ls-tree', '--name-only', '-r', '81c008c', '--', ...taskOneFiles], { cwd: root, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).trim().split('\n');
+            const checkpointFiles = execFileSync('git', ['ls-tree', '--name-only', '-r', checkpoint, '--', ...taskOneFiles], { cwd: root, encoding: 'utf8', stdio: 'pipe', timeout: 2000 }).trim().split('\n');
             if ([...taskOneFiles].some(file => !checkpointFiles.includes(file))) return false;
-            execFileSync('git', ['diff', '--quiet', '81c008c', '--', ...taskOneFiles], { cwd: root, stdio: 'pipe', timeout: 2000 });
+            execFileSync('git', ['diff', '--quiet', checkpoint, '--', ...taskOneFiles], { cwd: root, stdio: 'pipe', timeout: 2000 });
+            execFileSync('git', ['diff', '--cached', '--quiet', checkpoint, '--', ...taskOneFiles], { cwd: root, stdio: 'pipe', timeout: 2000 });
             return true;
         } catch { return false; }
     })();
-    const reviewForTaskOne = (item: typeof ledgerEntries[number]): boolean => taskOneFiles.has(item.ref.replace(/:\d+(?::\d+)?$/, ''));
-    const ledgerReviews = ledgerEntries.some(item => item.branch === branch && item.phase === 'review' && item.source_skill === 'specification-reviewer' && item.polarity === 'win' && reviewForTaskOne(item))
-        && ledgerEntries.some(item => item.branch === branch && item.phase === 'review' && item.source_skill === 'requesting-code-review' && item.polarity === 'win' && item.signature === 'facts-contract-json-and-literal-validation' && reviewForTaskOne(item));
+    const ledgerReviews = (() => { try { return hasIssue148ReviewProvenance(ledgerEntries); } catch { return false; } })();
     const taskIds = ids(text); const proven = digest === 'c11477dd59cb19094983c671cc0b760f1d1e51b9679e13dba90f1b0c2cba48e7' && ancestor && currentTaskOneFiles && taskOneChecked && ledgerReviews;
     // A checked historical antecedent without sufficient provenance is not
     // unstarted. Preserve it for reconciliation; never imply permission to
