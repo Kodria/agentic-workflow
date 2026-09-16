@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import * as platformPaths from '../../../src/core/paths';
 import { runCommand, runStructuredCommand } from '../../../src/commands/sensors/exec';
 import { applyBaseline, executePrepared, interpretResult } from '../../../src/commands/sensors/result';
 import { fingerprint } from '../../../src/commands/sensors/baseline';
@@ -32,6 +33,30 @@ async function until(fn: () => boolean, budgetMs = 4000): Promise<boolean> {
 }
 
 describe('runCommand — exit codes and output', () => {
+    itPosix('prefers the CLI runtime Node directory over an inherited conflicting PATH entry', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-exec-runtime-path-'));
+        const shadowBin = path.join(dir, 'bin');
+        const runtimeBin = path.join(dir, 'runtime-bin');
+        const originalPath = process.env.PATH;
+        const execPathDescriptor = Object.getOwnPropertyDescriptor(process, 'execPath');
+        try {
+            fs.mkdirSync(shadowBin);
+            fs.mkdirSync(runtimeBin);
+            fs.writeFileSync(path.join(shadowBin, 'node'), "#!/bin/sh\nprintf '%s\\n' shadow-node\n", { mode: 0o755 });
+            fs.writeFileSync(path.join(runtimeBin, 'node'), "#!/bin/sh\nprintf '%s\\n' runtime-node\n", { mode: 0o755 });
+            process.env.PATH = `${shadowBin}${path.delimiter}${originalPath ?? ''}`;
+            Object.defineProperty(process, 'execPath', { value: path.join(runtimeBin, 'node'), configurable: true });
+
+            const result = await runCommand("node -e \"process.stdout.write(process.execPath)\"", { timeout: 5_000, cwd: dir });
+
+            expect(result).toMatchObject({ code: 0, stdout: 'runtime-node\n' });
+        } finally {
+            process.env.PATH = originalPath;
+            Object.defineProperty(process, 'execPath', execPathDescriptor!);
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     it('records bounded execution evidence on timeout (R3.2,R3.4,R7.1)', async () => {
         const result = await executePrepared(sensor({ timeoutMs: 25, timeoutSource: 'project' }));
 
@@ -85,6 +110,20 @@ describe('runCommand — exit codes and output', () => {
 
         const interpreted = interpretResult(sensor({ command: { kind: 'structured', value: { executable: 'node', resolution: 'path', args: ['-e', 'process.exit(3)'] } } }), raw);
         expect(interpreted.status).not.toBe('pass');
+    });
+
+    it('treats generic stdout from a successful command as informational', () => {
+        const result = interpretResult(sensor(), {
+            code: 0,
+            stdout: 'depcruise: no violations found\n',
+            stderr: '',
+            elapsedMs: 1,
+            signal: null,
+            timedOut: false,
+            overflowed: false,
+        });
+
+        expect(result).toMatchObject({ status: 'pass', errors: [] });
     });
 
     itLinux('keeps structured stderr separate from exit-0 stdout findings', async () => {
@@ -338,6 +377,48 @@ onPosix('runStructuredCommand — local node_modules binaries', () => {
         } finally {
             fs.rmSync(dir, { recursive: true, force: true });
         }
+    });
+});
+
+describe('runStructuredCommand — Windows local native binaries', () => {
+    let dir: string;
+    let windows: jest.SpyInstance;
+    let savedPathExt: string | undefined;
+    beforeEach(() => {
+        dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-windows-local-bin-')));
+        fs.mkdirSync(path.join(dir, 'node_modules', '.bin'), { recursive: true });
+        windows = jest.spyOn(platformPaths, 'isWindowsNative').mockReturnValue(true);
+        savedPathExt = process.env.PATHEXT;
+        process.env.PATHEXT = '.EXE;.CMD';
+    });
+    afterEach(() => {
+        windows.mockRestore();
+        if (savedPathExt === undefined) delete process.env.PATHEXT; else process.env.PATHEXT = savedPathExt;
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+    it('executes a contained native executable with literal shell-sensitive argv', async () => {
+        const executable = path.join(dir, 'node_modules', '.bin', 'fixture.exe');
+        fs.copyFileSync(process.execPath, executable);
+        fs.chmodSync(executable, 0o755);
+        const literal = '&echo injected|more';
+        await expect(runStructuredCommand({ executable: 'fixture', resolution: 'node-modules-bin',
+            args: ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', '--', literal] }, { cwd: dir, timeout: 5000 }))
+            .resolves.toMatchObject({ code: 0, stdout: JSON.stringify([literal]) });
+    });
+    it.each(['fixture', 'fixture.cmd'] as const)('rejects non-native wrapper %s without executing it', executable => {
+        fs.writeFileSync(path.join(dir, 'node_modules', '.bin', executable), 'echo injected');
+        expect(() => runStructuredCommand({ executable, resolution: 'node-modules-bin', args: ['--version'] }, { cwd: dir, timeout: 5000 }))
+            .toThrow(/contained local file|command wrappers/);
+    });
+    it('rejects a native executable escaping through a linked .bin ancestor', () => {
+        const outside = path.join(dir, 'outside-bin');
+        fs.mkdirSync(outside);
+        fs.copyFileSync(process.execPath, path.join(outside, 'fixture.exe'));
+        const bin = path.join(dir, 'node_modules', '.bin');
+        fs.rmdirSync(bin);
+        fs.symlinkSync(outside, bin, process.platform === 'win32' ? 'junction' : 'dir');
+        expect(() => runStructuredCommand({ executable: 'fixture', resolution: 'node-modules-bin', args: ['--version'] }, { cwd: dir, timeout: 5000 }))
+            .toThrow('node_modules executable is not a contained local file');
     });
 });
 

@@ -241,7 +241,7 @@ describe('computeSensorStatus', () => {
                     variants: [{
                         id: 'eslint-10', priority: 10, certifiedRange: '>=10.0.0 <11.0.0',
                         requirements: { tool: 'eslint', toolRange: '>=10.0.0 <11.0.0', runtime: 'node', runtimeRange: '>=0.0.0' },
-                        assets: ['eslint.config.awm.mjs'], formatter: 'eslint-llm', probe: { kind: 'package-script-present' },
+                        assets: ['eslint.config.awm.mjs'], formatter: 'eslint-llm', probe: { kind: 'package-script-present', script: 'lint' },
                         command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.', '--config', 'eslint.config.awm.mjs'] },
                     }],
                 } },
@@ -310,7 +310,7 @@ describe('computeSensorStatus', () => {
             const variant = (id: string, range: string) => ({
                 id, priority: 10, certifiedRange: range,
                 requirements: { tool: 'eslint', toolRange: range, runtime: 'node', runtimeRange: '>=0.0.0' },
-                assets: ['eslint.config.awm.mjs'], formatter: 'eslint-llm', probe: { kind: 'package-script-present' },
+                assets: ['eslint.config.awm.mjs'], formatter: 'eslint-llm', probe: { kind: 'package-script-present', script: 'lint' },
                 command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
             });
             fs.writeFileSync(path.join(registry, 'sensor-packs', 'js-ts', 'pack.json'), JSON.stringify({
@@ -401,7 +401,7 @@ describe('computeSensorStatus', () => {
                 sensors: { lint: { applicability: { allFiles: ['package.json'] }, variants: [{
                     id: 'eslint-10', priority: 1, certifiedRange: '>=10 <11',
                     requirements: { tool: 'eslint', toolRange: '>=10 <11', runtime: 'node', runtimeRange: '>=0' },
-                    assets: [], formatter: 'generic', probe: { kind: 'package-script-present' },
+                    assets: [], formatter: 'generic', probe: { kind: 'package-script-present', script: 'lint' },
                     command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
                 }] } },
             };

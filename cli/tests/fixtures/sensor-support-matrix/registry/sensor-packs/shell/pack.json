@@ -5,7 +5,7 @@
   "detects": ["scripts"],
   "sensors": {
     "lint": {
-      "applicability": { "kind": "shell" },
+      "applicability": { "allFiles": ["README.md"] },
       "variants": [{
         "id": "shellcheck-0", "priority": 1, "certifiedRange": ">=0.9 <1",
         "requirements": { "tool": "shellcheck", "toolRange": ">=0.9 <1", "runtime": "node", "runtimeRange": ">=22 <23" },

@@ -12,6 +12,7 @@ export type PrepareRunOptions = {
     changed?: boolean;
     ignoreBaseline?: boolean;
     base?: string;
+    readOnly?: boolean;
 };
 
 type RequestedScope = PreparedSensorExecution['requestedScope'];
@@ -50,6 +51,7 @@ export function validateRunOptions(opts: PrepareRunOptions): void {
     if (opts.changed !== undefined && typeof opts.changed !== 'boolean') throw new Error('run option changed must be a boolean');
     if (opts.ignoreBaseline !== undefined && typeof opts.ignoreBaseline !== 'boolean') throw new Error('run option ignoreBaseline must be a boolean');
     if (opts.base !== undefined && (typeof opts.base !== 'string' || opts.base.trim() === '')) throw new Error('run option base must be a nonempty string');
+    if (opts.readOnly !== undefined && typeof opts.readOnly !== 'boolean') throw new Error('run option readOnly must be a boolean');
     if (opts.changed && opts.ignoreBaseline) {
         throw new Error('refusing to combine --changed with a baseline capture: a partial run cannot define the accepted set');
     }

@@ -19,7 +19,7 @@ describe('runCompatibilityProbe', () => {
 
     test.each(['eslint-print-config', 'typescript-show-config', 'semgrep-validate', 'version', 'package-script-present', 'config-present'] as const)
         ('runs the closed probe %s with sanitized output', async (kind) => {
-            const result = await runCompatibilityProbe({ kind }, evidence, fakeExecutor);
+            const result = await runCompatibilityProbe(kind === 'package-script-present' ? { kind, script: 'lint' } : { kind }, evidence, fakeExecutor);
             expect(['matched', 'unverifiable']).toContain(result.status);
             expect(JSON.stringify(result)).not.toContain('SECRET_VALUE');
         });
@@ -29,6 +29,39 @@ describe('runCompatibilityProbe', () => {
         await expect(runCompatibilityProbe({ kind: 'version' }, evidence, fakeExecutor)).resolves.toMatchObject({ status: 'unverifiable' });
         fakeExecutor.mockResolvedValueOnce(execResult({ overflowed: true, stdout: 'ok' }));
         await expect(runCompatibilityProbe({ kind: 'version' }, evidence, fakeExecutor)).resolves.toMatchObject({ status: 'unverifiable' });
+    });
+
+    it('matches only the registry-declared package script', async () => {
+        await expect(runCompatibilityProbe(
+            { kind: 'package-script-present', script: 'test' } as any,
+            { ...evidence, scripts: ['lint', 'test:unit'] },
+            fakeExecutor,
+        )).resolves.toMatchObject({ status: 'not-matched', reason: 'package-script' });
+
+        await expect(runCompatibilityProbe(
+            { kind: 'package-script-present', script: 'test' } as any,
+            { ...evidence, scripts: ['lint', 'test'] },
+            fakeExecutor,
+        )).resolves.toMatchObject({ status: 'matched', reason: 'package-script' });
+        expect(fakeExecutor).not.toHaveBeenCalled();
+    });
+
+    it('never certifies a historical unnamed package-script probe', async () => {
+        await expect(runCompatibilityProbe(
+            { kind: 'package-script-present' },
+            { ...evidence, scripts: ['lint', 'test', 'test:unit'] },
+            fakeExecutor,
+        )).resolves.toEqual({ status: 'unverifiable', reason: 'package-script-name-required' });
+        expect(fakeExecutor).not.toHaveBeenCalled();
+    });
+
+    it.each(['', null, 'test;echo unsafe'])('rejects malformed explicit script %j', async (script) => {
+        await expect(runCompatibilityProbe(
+            { kind: 'package-script-present', script } as any,
+            evidence,
+            fakeExecutor,
+        )).rejects.toThrow('requires a named package script');
+        expect(fakeExecutor).not.toHaveBeenCalled();
     });
 
     it('binds tool probes to the project node_modules executable instead of PATH', async () => {

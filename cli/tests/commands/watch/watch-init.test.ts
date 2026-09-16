@@ -1,8 +1,15 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { detectRequiredVerifiers, initWatch } from '../../../src/commands/watch/init';
-import { readJournal } from '../../../src/core/journal/store';
+import { spawnSync } from 'child_process';
+import { Command } from 'commander';
+import { detectRequiredVerifiers, initWatch, rebindWatchPlan } from '../../../src/commands/watch/init';
+import { registerWatchCommand } from '../../../src/commands/watch';
+import { readJournal, writeJournal } from '../../../src/core/journal/store';
+import { supervisorLockPath } from '../../../src/core/journal/paths';
+import type { PlanValidationReport } from '../../../src/core/plan/types';
+import { validatePlanFile } from '../../../src/core/plan/validate';
+import { initRepo } from '../../helpers/git-fixture';
 
 describe('watch --init: plan-vs-repo mecanico', () => {
     let repo: string;
@@ -33,6 +40,100 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         expect(detectRequiredVerifiers(repo)).toEqual([]);
     });
 
+    test('falla cerradamente ante un arbol de paquetes demasiado profundo o grande', () => {
+        let cursor = repo;
+        for (let depth = 0; depth < 65; depth++) { cursor = path.join(cursor, `d${depth}`); fs.mkdirSync(cursor); }
+        expect(() => detectRequiredVerifiers(repo)).toThrow(/límite|limit/i);
+    });
+
+    test('falla cerradamente ante package.json que excede el límite de lectura', () => {
+        fs.writeFileSync(path.join(repo, 'package.json'), '{"scripts":{"test":"x"},"padding":"' + 'x'.repeat(1024 * 1024) + '"}');
+        expect(() => detectRequiredVerifiers(repo)).toThrow(/package\.json.*(?:límite|limit|oversized)/i);
+    });
+
+    test('falla cerradamente al superar el límite de entradas del escaneo', () => {
+        for (let index = 0; index <= 10000; index++) fs.writeFileSync(path.join(repo, `entry-${index}`), '');
+        expect(() => detectRequiredVerifiers(repo)).toThrow(/entry limit/i);
+    });
+
+    test('falla cerradamente ante un package.json ilegible o malformado', () => {
+        fs.writeFileSync(path.join(repo, 'package.json'), '{not json');
+        expect(() => detectRequiredVerifiers(repo)).toThrow(/rejected package\.json/i);
+    });
+
+    test.each(['growth', 'leaf-swap', 'parent-swap'] as const)('rejects stale Dirent %s before journal or gitignore mutations', attack => {
+        const directory = attack === 'parent-swap' ? path.join(repo, 'child') : repo;
+        fs.mkdirSync(directory, { recursive: true });
+        const packageFile = path.join(directory, 'package.json');
+        fs.writeFileSync(packageFile, '{"scripts":{"test":"jest"}}');
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-init-outside-'));
+        fs.writeFileSync(path.join(outside, 'package.json'), '{"scripts":{"test":"outside-command"}}');
+        fs.writeFileSync(path.join(repo, '.gitignore'), 'existing-rule\n');
+        const nativeReaddir = fs.readdirSync;
+        const nativeStat = fs.statSync;
+        let attacked = false;
+        const stat = jest.spyOn(fs, 'statSync').mockImplementation(((...args: unknown[]) => {
+            if (String(args[0]) === packageFile && attack === 'growth') return { size: 2 };
+            return Reflect.apply(nativeStat, fs, args);
+        }) as typeof fs.statSync);
+        const readdir = jest.spyOn(fs, 'readdirSync').mockImplementation(((...args: unknown[]) => {
+            const entries = Reflect.apply(nativeReaddir, fs, args);
+            if (!attacked && String(args[0]) === directory) {
+                attacked = true;
+                if (attack === 'growth') fs.writeFileSync(packageFile, JSON.stringify({ scripts: { test: 'jest' }, padding: 'x'.repeat(256 * 1024) }));
+                else if (attack === 'leaf-swap') {
+                    fs.renameSync(packageFile, `${packageFile}.original`);
+                    fs.symlinkSync(path.join(outside, 'package.json'), packageFile, 'file');
+                } else {
+                    fs.renameSync(directory, `${directory}.original`);
+                    fs.symlinkSync(outside, directory, 'dir');
+                }
+            }
+            return entries;
+        }) as typeof fs.readdirSync);
+        try {
+            expect(() => initWatch(repo, 'rama')).toThrow(/package\.json|bounded|regular|unsafe/i);
+            expect(attacked).toBe(true);
+            expect(fs.readFileSync(path.join(repo, '.gitignore'), 'utf8')).toBe('existing-rule\n');
+            expect(readJournal(repo, 'rama').state).toBeNull();
+        } finally { stat.mockRestore(); readdir.mockRestore(); fs.rmSync(outside, { recursive: true, force: true }); }
+    });
+
+    test.each(['symlink', 'directory'] as const)('rejects an explicitly declared nonregular package.json %s rather than treating it as absence', kind => {
+        const packageFile = path.join(repo, 'package.json');
+        if (kind === 'directory') fs.mkdirSync(packageFile);
+        else { fs.writeFileSync(path.join(repo, 'outside-package'), '{}'); fs.symlinkSync(path.join(repo, 'outside-package'), packageFile, 'file'); }
+        fs.writeFileSync(path.join(repo, '.gitignore'), 'unchanged\n');
+        expect(() => initWatch(repo, 'rama')).toThrow(/package\.json|regular/i);
+        expect(fs.readFileSync(path.join(repo, '.gitignore'), 'utf8')).toBe('unchanged\n');
+        expect(readJournal(repo, 'rama').state).toBeNull();
+    });
+
+    test.each(['symlink', 'dangling-link', 'directory', 'oversized', 'malformed'] as const)('rejects unsafe sibling sensors.json %s before init mutations', fault => {
+        fs.mkdirSync(path.join(repo, '.awm'));
+        const sensors = path.join(repo, '.awm', 'sensors.json');
+        if (fault === 'directory') fs.mkdirSync(sensors);
+        else if (fault === 'symlink' || fault === 'dangling-link') {
+            const destination = path.join(repo, 'outside-sensors');
+            if (fault === 'symlink') fs.writeFileSync(destination, '{}');
+            fs.symlinkSync(destination, sensors, 'file');
+        } else fs.writeFileSync(sensors, fault === 'oversized' ? ' '.repeat(256 * 1024 + 1) : '{bad json');
+        fs.writeFileSync(path.join(repo, '.gitignore'), 'unchanged\n');
+        expect(() => initWatch(repo, 'rama')).toThrow(/sensors\.json/i);
+        expect(fs.readFileSync(path.join(repo, '.gitignore'), 'utf8')).toBe('unchanged\n');
+        expect(readJournal(repo, 'rama').state).toBeNull();
+    });
+
+    test('falla cerradamente cuando no puede leer un directorio durante el escaneo', () => {
+        const original = fs.readdirSync;
+        const readdir = jest.spyOn(fs, 'readdirSync').mockImplementation(((target: fs.PathLike, options?: any) => {
+            if (String(target) === repo) throw new Error('EACCES');
+            return original(target, options as any);
+        }) as typeof fs.readdirSync);
+        try { expect(() => detectRequiredVerifiers(repo)).toThrow(/cannot read/i); }
+        finally { readdir.mockRestore(); }
+    });
+
     test('initWatch persiste requiredVerifiers y gitignorea el journal (R1.1/R1.4b)', () => {  // verifies R1.4b
         fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ scripts: { test: 'jest' } }));
         const out = initWatch(repo, 'rama');
@@ -41,4 +142,151 @@ describe('watch --init: plan-vs-repo mecanico', () => {
         expect(fs.readFileSync(path.join(repo, '.gitignore'), 'utf8')).toContain('.awm/');
         expect(() => initWatch(repo, 'rama')).not.toThrow();   // idempotente
     });
+
+    test('no escribe .gitignore cuando es un symlink', () => {
+        const outside = path.join(repo, 'outside-gitignore');
+        fs.writeFileSync(outside, 'outside\n');
+        fs.symlinkSync(outside, path.join(repo, '.gitignore'));
+        expect(() => initWatch(repo, 'rama')).toThrow(/gitignore.*symlink|symlink.*gitignore/i);
+        expect(fs.readFileSync(outside, 'utf8')).toBe('outside\n');
+    });
+
+    test('watch --init --plan crea una sola vinculacion schema-2 desatendida', () => {
+        const plan: Extract<PlanValidationReport, { state: 'valid' }> = {
+            state: 'valid', schema: 'compact-slices/v1', planDigest: 'a'.repeat(64),
+            executionMode: 'desatendido',
+            manifest: { schema: 'compact-slices/v1', planId: 'fixture', requirements: [], sources: [], commands: [], slices: [], closureCommands: [] },
+        };
+        const out = initWatch(repo, 'rama', { path: 'docs/plan.md', report: plan });
+        expect(out.planBinding).toEqual(expect.objectContaining({ path: 'docs/plan.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1', executionMode: 'desatendido' }));
+        const state = readJournal(repo, 'rama').state!;
+        expect(state.schema).toBe(2);
+        expect(state.planBinding).toEqual(expect.objectContaining({ path: 'docs/plan.md', digest: 'a'.repeat(64) }));
+        expect(() => initWatch(repo, 'rama', { path: 'docs/plan.md', report: plan })).toThrow(/sobrescribir|overwrite/i);
+    });
+
+    test('watch --init --plan bloquea un plan no valido antes de crear journal', () => {
+        const invalid: PlanValidationReport = { state: 'invalid', diagnostics: [{ code: 'PLAN_SHAPE', message: 'bad' }] };
+        expect(() => initWatch(repo, 'rama', { path: 'docs/plan.md', report: invalid })).toThrow(/válido/i);
+        expect(readJournal(repo, 'rama').corrupt).toBe(true);
+    });
+
+    test('watch --init --plan rechaza un plan interactivo antes de crear un binding desatendido', () => {
+        const interactive = { ...validPlan('a'), executionMode: 'interactivo' as const };
+        expect(() => initWatch(repo, 'rama', { path: 'docs/plan.md', report: interactive })).toThrow(/desatendido/i);
+        expect(readJournal(repo, 'rama').state).toBeNull();
+    });
+
+    test('watch --init --plan rechaza paths con caracteres de control antes de persistir', () => {
+        const report = { state: 'valid', schema: 'compact-slices/v1', planDigest: 'a'.repeat(64), executionMode: 'desatendido', manifest: {} } as PlanValidationReport;
+        expect(() => initWatch(repo, 'rama', { path: 'docs/plan\u0000.md', report })).toThrow(/path inválido/);
+        expect(readJournal(repo, 'rama').state).toBeNull();
+    });
+
+    test('rebind no atribuye prueba nueva a un binding legacy aunque el ciclo diga COMPLETE', () => {
+        const original = validPlan('a');
+        initWatch(repo, 'rama', { path: 'docs/plan.md', report: original });
+        const completed = readJournal(repo, 'rama').state!;
+        completed.cycle.status = 'COMPLETE';
+        delete completed.cycle.nextAction;
+        writeJournal(repo, 'rama', completed);
+
+        const before = readJournal(repo, 'rama').raw;
+        expect(() => rebindWatchPlan(repo, 'rama', { path: 'docs/plan.md', report: validPlan('b') })).toThrow(/sin prueba/i);
+        expect(readJournal(repo, 'rama').raw).toBe(before);
+        expect(fs.existsSync(supervisorLockPath(repo))).toBe(false);
+    });
+
+    test('rebind rechaza un ciclo en curso y conserva toda su evidencia ligada al digest anterior', () => {
+        initWatch(repo, 'rama', { path: 'docs/plan.md', report: validPlan('a') });
+        const before = readJournal(repo, 'rama').raw!;
+
+        expect(() => rebindWatchPlan(repo, 'rama', { path: 'docs/plan.md', report: validPlan('b') })).toThrow(/ciclo.*curso/i);
+        expect(readJournal(repo, 'rama').raw).toBe(before);
+    });
+
+    test('rebind rechaza una ruta canónica distinta y deja el journal byte-a-byte intacto', () => {
+        initWatch(repo, 'rama', { path: 'docs/plan.md', report: validPlan('a') });
+        const before = readJournal(repo, 'rama').raw!;
+
+        expect(() => rebindWatchPlan(repo, 'rama', { path: 'docs/other.md', report: validPlan('b') })).toThrow(/misma ruta/i);
+
+        expect(readJournal(repo, 'rama').raw).toBe(before);
+    });
+
+    test('rebind rechaza un binding ya vigente y no inventa historia duplicada', () => {
+        initWatch(repo, 'rama', { path: 'docs/plan.md', report: validPlan('a') });
+        const before = readJournal(repo, 'rama').raw!;
+
+        expect(() => rebindWatchPlan(repo, 'rama', { path: 'docs/plan.md', report: validPlan('a') })).toThrow(/ya está vigente/i);
+        expect(readJournal(repo, 'rama').raw).toBe(before);
+    });
+
+    test('rebind rechaza evidencia adversa durable y no reescribe el binding obsoleto', () => {
+        initWatch(repo, 'rama', { path: 'docs/plan.md', report: validPlan('a') });
+        const state = readJournal(repo, 'rama').state!;
+        state.verdicts.push({ id: 'v-1', obligationId: 'o-1', result: 'fail', detail: 'adverso', receivedAt: new Date().toISOString(), fingerprint: '', argv: [], paths: [], cwd: '.' });
+        writeJournal(repo, 'rama', state);
+
+        expect(() => rebindWatchPlan(repo, 'rama', { path: 'docs/plan.md', report: validPlan('b') })).toThrow(/evidencia adversa/i);
+        expect(readJournal(repo, 'rama').state!.planBinding!.digest).toBe('a'.repeat(64));
+    });
+
+    test('rebind rechaza jobs no terminales y conserva el estado recuperable', () => {
+        initWatch(repo, 'rama', { path: 'docs/plan.md', report: validPlan('a') });
+        const state = readJournal(repo, 'rama').state!;
+        state.jobs.pending = { id: 'pending', fingerprint: '', commandDigest: '', argv: [], cwd: '.', paths: [], expandedPaths: [], executionState: 'received', observationState: 'progressing', phaseTimestamps: {} };
+        writeJournal(repo, 'rama', state);
+        const before = readJournal(repo, 'rama').raw!;
+
+        expect(() => rebindWatchPlan(repo, 'rama', { path: 'docs/plan.md', report: validPlan('b') })).toThrow(/no terminales/i);
+        expect(readJournal(repo, 'rama').raw).toBe(before);
+        expect(fs.existsSync(supervisorLockPath(repo))).toBe(false);
+    });
+
+    test('help declara rebind como ruta intencional separada de --init', () => {
+        const program = new Command();
+        registerWatchCommand(program);
+        const watch = program.commands.find(command => command.name() === 'watch')!;
+        expect(watch.helpInformation()).toContain('rebind');
+        expect(watch.commands.find(command => command.name() === 'rebind')!.description()).toMatch(/reconcilia/i);
+    });
+
+    test('CLI compilado acepta exactamente `watch rebind --plan` y reconcilia el digest', () => {
+        const cliRepo = initRepo();
+        try {
+            const planPath = path.join(cliRepo, 'docs', 'plan.md');
+            fs.mkdirSync(path.dirname(planPath), { recursive: true });
+            const plan = `**Modo de ejecución:** desatendido\n\n${fs.readFileSync(path.join(__dirname, '../../core/plan/fixtures/compact-slices-v1/valid.md'), 'utf8')}`;
+            fs.writeFileSync(planPath, plan);
+            fs.writeFileSync(path.join(cliRepo, 'source.md'), '## Canonical source\nfixture source\n');
+            initWatch(cliRepo, 'main', { path: 'docs/plan.md', report: validatePlan(cliRepo, 'docs/plan.md') });
+            fs.appendFileSync(planPath, '<!-- awm-qa-complete: 2026-09-16 -->\n');
+
+            const result = spawnSync(process.execPath, [path.resolve(__dirname, '../../../dist/src/index.js'), 'watch', 'rebind', '--plan', 'docs/plan.md'], {
+                cwd: cliRepo, encoding: 'utf8', env: { ...process.env, AWM_NO_UPDATE_CHECK: '1' },
+            });
+
+            expect(result.status).toBe(0);
+            expect(result.stderr).not.toContain('required option');
+            expect(readJournal(cliRepo, 'main').state!.planBinding!.digest).toBe(validatePlan(cliRepo, 'docs/plan.md').planDigest);
+            expect(readJournal(cliRepo, 'main').state!.cycle.status).toBe('IN_PROGRESS');
+        } finally { fs.rmSync(cliRepo, { recursive: true, force: true }); }
+    });
 });
+
+function validPlan(digestCharacter: string): Extract<PlanValidationReport, { state: 'valid' }> {
+    return {
+        state: 'valid', schema: 'compact-slices/v1', planDigest: digestCharacter.repeat(64),
+        executionMode: 'desatendido',
+        manifest: { schema: 'compact-slices/v1', planId: 'fixture', requirements: [], sources: [], commands: [], slices: [], closureCommands: [] },
+    };
+}
+
+function validatePlan(repo: string, relativePath: string): Extract<PlanValidationReport, { state: 'valid' }> {
+    // Keep the external process test tied to the real compact validator, not a
+    // hand-built report that could diverge from a lifecycle edit on disk.
+    const report = validatePlanFile(relativePath, repo);
+    if (report.state !== 'valid') throw new Error(`fixture plan unexpectedly invalid: ${JSON.stringify(report)}`);
+    return report;
+}

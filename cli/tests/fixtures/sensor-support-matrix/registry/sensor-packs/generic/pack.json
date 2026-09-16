@@ -5,7 +5,7 @@
   "detects": ["README.md"],
   "sensors": {
     "security": {
-      "applicability": { "kind": "repository" },
+      "applicability": { "allFiles": ["README.md"] },
       "variants": [{
         "id": "semgrep-1", "priority": 1, "certifiedRange": ">=1 <2",
         "requirements": { "tool": "semgrep", "toolRange": ">=1 <2", "runtime": "node", "runtimeRange": ">=22 <23" },

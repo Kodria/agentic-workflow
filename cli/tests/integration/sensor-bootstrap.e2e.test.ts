@@ -10,6 +10,7 @@ import { secureFs } from '../../src/core/secure-fs/native-bridge';
 
 const cliRoot = path.resolve(__dirname, '../..');
 const bin = path.join(cliRoot, 'dist/src/index.js');
+const nativeArtifact = path.join(cliRoot, 'prebuilds', `${process.platform}-${process.arch}`, 'secure_fs.node');
 const fixtureRoot = path.join(cliRoot, 'tests/fixtures/sensor-compatibility');
 
 type Fixture = { root: string; project: string; awmHome: string; registryRoot: string };
@@ -70,6 +71,7 @@ function v2Manifest(): object {
 
 beforeAll(() => {
     if (!fs.existsSync(bin)) throw new Error(`Sensor bootstrap E2E requires the compiled CLI at ${bin}; run npm run build before this test.`);
+    if (!fs.existsSync(nativeArtifact)) throw new Error(`Sensor bootstrap E2E requires the host secure-fs artifact at ${nativeArtifact}; run npm run native:build before this test.`);
 });
 
 test('compiled bootstrap creates once and the exact second invocation is a byte-stable no-op', () => {
@@ -152,6 +154,41 @@ test('compiled bootstrap migrates v2 once, preserves all non-manifest project by
         expect(fs.readFileSync(path.join(subject.project, 'eslint.config.mjs'))).toEqual(assetBefore);
         expect(run(subject).status).toBe(0);
         expect(hashTree(subject.project)).toBe(first);
+        expect(hashTree(subject.awmHome)).toBe(machineBefore);
+    } finally { fs.rmSync(subject.root, { recursive: true, force: true }); }
+});
+
+test('compiled bootstrap requires explicit project-sensors mode before replacing a legacy manifest', () => {
+    const subject = fixture();
+    try {
+        const manifest = path.join(subject.project, '.awm', 'sensors.json');
+        const legacy = {
+            pack: 'js-ts',
+            sensors: { lint: { cmd: 'npx eslint .' } },
+        };
+        fs.writeFileSync(manifest, JSON.stringify(legacy, null, 2) + '\n');
+        const before = fs.readFileSync(manifest);
+        const machineBefore = hashTree(subject.awmHome);
+
+        const blocked = run(subject, '--dry-run');
+        expect(blocked.status).toBe(1);
+        expect(`${blocked.stdout}${blocked.stderr}`).toContain('legacy-replacement-requires-project-sensors-mode');
+        expect(fs.readFileSync(manifest)).toEqual(before);
+
+        const dryRun = run(subject, '--mode', 'project-sensors', '--dry-run');
+        expect(dryRun.status).toBe(0);
+        expect(fs.readFileSync(manifest)).toEqual(before);
+
+        const migrated = run(subject, '--mode', 'project-sensors');
+        expect(migrated.status).toBe(0);
+        expect(`${migrated.stdout}${migrated.stderr}`).toContain('migrated');
+        expect(`${migrated.stdout}${migrated.stderr}`).not.toContain('legacy-v1-preserved');
+        expect(JSON.parse(fs.readFileSync(manifest, 'utf8'))).toMatchObject({
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            pack: 'js-ts',
+            source: { registry: 'baseline' },
+        });
         expect(hashTree(subject.awmHome)).toBe(machineBefore);
     } finally { fs.rmSync(subject.root, { recursive: true, force: true }); }
 });

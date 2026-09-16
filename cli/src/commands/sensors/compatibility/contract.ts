@@ -200,9 +200,18 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
     const runtimeRange = policy?.runtimeRange ?? text(requirements!.runtimeRange, source, `${location}.requirements.runtimeRange`);
     if (semver.validRange(toolRange) === null || semver.validRange(runtimeRange) === null) invalid(source, `${location}.requirements ranges must be valid semver ranges`);
     const probe = policy ? undefined : record(value.probe, source, `${location}.probe`);
+    let probeScript: string | undefined;
     if (probe) {
-        fields(probe, ['kind'], source, `${location}.probe`);
+        fields(probe, ['kind', 'script'], source, `${location}.probe`);
         if (typeof probe.kind !== 'string' || !ALLOWED_PROBES.has(probe.kind as CompatibilityProbe)) invalid(source, `${location}.probe.kind must be an allowed probe`);
+        // Historical schema-v2 packs remain readable. An unnamed probe cannot
+        // certify compatibility; the probe runner rejects it as unverifiable.
+        if (probe.kind === 'package-script-present' && 'script' in probe) {
+            probeScript = text(probe.script, source, `${location}.probe.script`);
+            if (!/^[A-Za-z0-9][A-Za-z0-9:_-]*$/.test(probeScript)) invalid(source, `${location}.probe.script must be a package script name`);
+        } else if (probe.kind !== 'package-script-present' && 'script' in probe) {
+            invalid(source, `${location}.probe.script is only valid for package-script-present`);
+        }
     }
     const changedCommand = 'changedCommand' in value ? parseStructuredCommand(value.changedCommand, source) : undefined;
     if (changedCommand && !changedCommand.fileInput) invalid(source, `${location}.changedCommand must declare fileInput`);
@@ -215,7 +224,7 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
             : { tool: text(requirements!.tool, source, `${location}.requirements.tool`), toolRange, runtime: text(requirements!.runtime, source, `${location}.requirements.runtime`), runtimeRange, ...('configFiles' in requirements! ? { configFiles: stringArray(requirements!.configFiles, source, `${location}.requirements.configFiles`).map((file, index) => asset(file, source, `${location}.requirements.configFiles[${index}]`)) } : {}), ...('packageJsonFields' in requirements! ? { packageJsonFields: stringArray(requirements!.packageJsonFields, source, `${location}.requirements.packageJsonFields`).map((field, index) => { if (!/^[A-Za-z][A-Za-z0-9]*$/.test(field)) invalid(source, `${location}.requirements.packageJsonFields[${index}] must be a stable package.json field`); return field; }) } : {}) },
         assets: assetArray(value.assets, source, `${location}.assets`, true),
         formatter: text(value.formatter, source, `${location}.formatter`),
-        probe: { kind: policy?.probe ?? probe!.kind as CompatibilityProbe },
+        probe: { kind: policy?.probe ?? probe!.kind as CompatibilityProbe, ...(probeScript ? { script: probeScript } : {}) },
         ...(policy ? { policyRef: SEMGREP_POLICY_REF } : {}),
         command: parseStructuredCommand(value.command, source),
         ...(changedCommand ? { changedCommand } : {}),
@@ -273,7 +282,11 @@ function parseSensor(input: unknown, source: unknown, location: string, variantI
     const applicability: SensorPackSensor['applicability'] = {};
     if ('allFiles' in applicabilityInput) applicability.allFiles = stringArray(applicabilityInput.allFiles, source, `${location}.applicability.allFiles`).map((file, index) => asset(file, source, `${location}.applicability.allFiles[${index}]`));
     if ('anyFiles' in applicabilityInput) applicability.anyFiles = stringArray(applicabilityInput.anyFiles, source, `${location}.applicability.anyFiles`).map((file, index) => asset(file, source, `${location}.applicability.anyFiles[${index}]`));
-    if ('kind' in applicabilityInput) applicability.kind = text(applicabilityInput.kind, source, `${location}.applicability.kind`);
+    if ('kind' in applicabilityInput) {
+        const kind = text(applicabilityInput.kind, source, `${location}.applicability.kind`);
+        if (kind !== 'explicit-or-supported-language' && kind !== 'explicit-opt-in') invalid(source, `${location}.applicability.kind must be a supported applicability kind`);
+        applicability.kind = kind;
+    }
     if (Object.keys(applicability).length === 0) invalid(source, `${location}.applicability must declare a condition`);
     if ('fast' in value && typeof value.fast !== 'boolean') invalid(source, `${location}.fast must be a boolean`);
     let timeout: number | undefined;

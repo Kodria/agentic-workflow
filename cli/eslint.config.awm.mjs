@@ -11,7 +11,9 @@ try {
 }
 
 export default [
-  { ignores: ['dist/**'] },
+  // The portable Semgrep fallback lives in a project-local virtualenv. It is
+  // runtime tooling, not source owned by this repository.
+  { ignores: ['dist/**', '.venv/**', 'venv/**'] },
   {
     languageOptions: {
       globals: {
@@ -27,6 +29,7 @@ export default [
         clearTimeout: 'readonly',
         setInterval: 'readonly',
         clearInterval: 'readonly',
+        afterEach: 'readonly',
       },
     },
   },

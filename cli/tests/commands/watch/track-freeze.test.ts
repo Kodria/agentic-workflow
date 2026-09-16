@@ -21,12 +21,30 @@ import { Supervisor, DEFAULT_SUPERVISOR_CONFIG } from '../../../src/commands/wat
 import { WrapperSpawner } from '../../../src/commands/watch/runner';
 import { runExecWrapper } from '../../../src/commands/job/exec-wrapper';
 import { initWatch } from '../../../src/commands/watch/init';
+import { validatePlanFile } from '../../../src/core/plan/validate';
+import type { AdmissionReport } from '../../../src/core/admission';
 import { requestJob } from '../../../src/commands/job/request';
 import { emitRequest, listPendingRequests } from '../../../src/core/journal/requests';
 import { computeFingerprint } from '../../../src/core/journal/fingerprint';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { eventsPath } from '../../../src/core/journal/paths';
 import type { JournalState, TrackRef } from '../../../src/core/journal/types';
+
+const admitted = async (): Promise<AdmissionReport> => ({
+    state: 'admitted', planState: 'valid', executionMode: 'desatendido',
+    journal: 'current', currentness: 'current', sensors: 'pass', diagnostics: [],
+});
+
+function initCompactWatch(repoRoot: string, branch: string): void {
+    const planPath = path.join(repoRoot, 'plans', 'fixture.md');
+    fs.mkdirSync(path.dirname(planPath), { recursive: true });
+    fs.writeFileSync(planPath, fs.readFileSync(path.join(__dirname, '../../core/plan/fixtures/compact-slices-v1/valid.md'), 'utf8'));
+    fs.writeFileSync(path.join(repoRoot, 'source.md'), '## Canonical source\nfixture source\n');
+    git(repoRoot, 'add', 'plans/fixture.md', 'source.md'); git(repoRoot, 'commit', '-qm', 'compact plan fixture');
+    const report = validatePlanFile('plans/fixture.md', repoRoot);
+    if (report.state !== 'valid') throw new Error(`compact fixture must validate: ${JSON.stringify(report)}`);
+    initWatch(repoRoot, branch, { path: 'plans/fixture.md', report });
+}
 
 function git(cwd: string, ...args: string[]): void {
     execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], { cwd, stdio: 'pipe' });
@@ -301,7 +319,7 @@ describe('Supervisor.tick() — freeze de un track individual (R5.2/R6.3)', () =
     }
 
     function setUpGreenTrack(): void {
-        initWatch(repo, BRANCH);
+        initCompactWatch(repo, BRANCH);
         // `initWatch` ESCRIBE `.gitignore` (`.awm/`) pero no lo commitea — un
         // `.gitignore` sin trackear es en sí mismo un path "untracked" para
         // `git status --porcelain` (R6.4's chequeo de limpieza no distingue
@@ -347,7 +365,7 @@ describe('Supervisor.tick() — freeze de un track individual (R5.2/R6.3)', () =
     test('freeze completo: drena jobs vivos, exige gate local + worktree limpio, termina la generación propia, persiste frozen (R5.2/R6.3)', async () => {
         setUpGreenTrack();   // sin freeze todavía: el track hace su trabajo real primero, como en el mundo real
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10, provider: 'codex' };
-        const sup = new Supervisor(repo, BRANCH, cfg, fakeSpawner);
+        const sup = new Supervisor(repo, BRANCH, cfg, fakeSpawner, undefined, admitted);
 
         // Drenar el trabajo real (2 jobs) ANTES de que el plan pida el
         // freeze — mismo orden que el mundo real (freeze llega cuando el
@@ -359,7 +377,6 @@ describe('Supervisor.tick() — freeze de un track individual (R5.2/R6.3)', () =
 
         requestFreeze();
         const outcome = await tickUntil(sup, () => readJournal(repo, BRANCH).state!.frozen !== undefined);
-
         expect(outcome).toBe('frozen');
         const final = readJournal(repo, BRANCH).state!;
         expect(final.freezeRequested).toBe(true);
@@ -375,7 +392,7 @@ describe('Supervisor.tick() — freeze de un track individual (R5.2/R6.3)', () =
     test('job varado en spawn-intent con refs muertas justo al pedirse el freeze SI se reintenta y drena — el freeze converge en vez de quedar en `continue` para siempre (regresión R6.3: `dispatch:false` no debe suprimir retry-same-intent)', async () => {
         setUpGreenTrack();
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10, provider: 'codex' };
-        const sup = new Supervisor(repo, BRANCH, cfg, fakeSpawner);
+        const sup = new Supervisor(repo, BRANCH, cfg, fakeSpawner, undefined, admitted);
         await tickUntil(sup, () => {
             const s = readJournal(repo, BRANCH).state!;
             return Object.values(s.jobs).length === 2 && Object.values(s.jobs).every((j) => j.executionState === 'exited' && j.verdict === 'pass');
@@ -390,10 +407,11 @@ describe('Supervisor.tick() — freeze de un track individual (R5.2/R6.3)', () =
         // `setUpGreenTrack`) — lo unico que debe bloquear la convergencia
         // del freeze es que siga contando como LIVE en `attemptFreeze`.
         const dead = { pid: 999999, startTime: 'gone', spawnNonce: 'stuck-nonce', argvDigest: 'd', processGroup: 999999, psArgsDigest: 'x' };
+        const fingerprint = computeFingerprint(repo, ['node', '-e', 'process.exit(0)'], [], '.');
         const s1 = readJournal(repo, BRANCH).state!;
         s1.jobs['stuck-job'] = {
-            id: 'stuck-job', fingerprint: 'fp', commandDigest: 'cd', argv: ['node', '-e', 'process.exit(0)'], cwd: '.',
-            paths: [], expandedPaths: [], executionState: 'spawn-intent', observationState: 'progressing',
+            id: 'stuck-job', fingerprint: fingerprint.fingerprint, commandDigest: fingerprint.commandDigest, argv: ['node', '-e', 'process.exit(0)'], cwd: '.',
+            paths: [], expandedPaths: fingerprint.expandedPaths, executionState: 'spawn-intent', observationState: 'progressing',
             spawnNonce: 'stuck-nonce', processRef: dead, wrapperRef: dead,
             phaseTimestamps: { received: new Date(Date.now() - 120000).toISOString(), 'spawn-intent': new Date(Date.now() - 120000).toISOString() },
         };
@@ -418,7 +436,7 @@ describe('Supervisor.tick() — freeze de un track individual (R5.2/R6.3)', () =
     });
 
     test('deja de despachar trabajo NUEVO mientras el freeze está pendiente: un job-request llega pero no se spawnea (paso 1)', async () => {
-        initWatch(repo, BRANCH);
+        initCompactWatch(repo, BRANCH);
         const s = readJournal(repo, BRANCH).state!;
         s.trackContext = { trackId: 'a', taskIds: [], planDigest: '', baseSha: 'seed', planJournalId: 'j-plan' };
         writeJournal(repo, BRANCH, s);
@@ -427,7 +445,7 @@ describe('Supervisor.tick() — freeze de un track individual (R5.2/R6.3)', () =
         let spawnCalls = 0;
         const countingSpawner: WrapperSpawner = () => { spawnCalls++; };
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10, provider: 'codex' };
-        const sup = new Supervisor(repo, BRANCH, cfg, countingSpawner);
+        const sup = new Supervisor(repo, BRANCH, cfg, countingSpawner, undefined, admitted);
         await sup.tick();   // consume el freeze-request => freezeRequested:true
         requestJob(repo, BRANCH, 'g0', ['node', '-e', 'process.exit(0)'], [], '.');
         await sup.tick();
@@ -438,38 +456,33 @@ describe('Supervisor.tick() — freeze de un track individual (R5.2/R6.3)', () =
         expect(Object.values(after.jobs)[0].executionState).toBe('received');   // nunca avanzó a spawn-intent
     });
 
-    test('worktree sucio bloquea la finalización del freeze hasta que se commitea (paso 4)', async () => {
+    test('worktree sucio observado en modo compacto entra en custodia y no congela evidencia potencialmente stale', async () => {
         setUpGreenTrack();
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10, provider: 'codex' };
-        const sup = new Supervisor(repo, BRANCH, cfg, fakeSpawner);
+        const sup = new Supervisor(repo, BRANCH, cfg, fakeSpawner, undefined, admitted);
         await tickUntil(sup, () => {
             const s = readJournal(repo, BRANCH).state!;
             return Object.values(s.jobs).length === 2 && Object.values(s.jobs).every((j) => j.executionState === 'exited' && j.verdict === 'pass');
         });
 
         requestFreeze();
+        // Los jobs ya terminados no participan del guard de árbol de recovery.
+        // Este intento vivo, fuera del plan de verificación, aísla el hecho
+        // relevante: el cambio posterior invalida SU fingerprint y debe
+        // bloquear antes de intentar congelar.
+        const fingerprint = computeFingerprint(repo, ['node', '-e', 'process.exit(0)'], [], '.');
+        const state = readJournal(repo, BRANCH).state!;
+        state.jobs['fingerprint-sentinel'] = {
+            id: 'fingerprint-sentinel', fingerprint: fingerprint.fingerprint, commandDigest: fingerprint.commandDigest,
+            argv: ['node', '-e', 'process.exit(0)'], cwd: '.', paths: [], expandedPaths: fingerprint.expandedPaths,
+            executionState: 'spawn-intent', observationState: 'progressing', phaseTimestamps: { received: new Date().toISOString(), 'spawn-intent': new Date().toISOString() },
+        };
+        writeJournal(repo, BRANCH, state);
         fs.writeFileSync(path.join(repo, 'dirty.txt'), 'sin commitear');   // untracked: worktree sucio
 
-        let sawFrozenWhileDirty = false;
-        for (let i = 0; i < 20; i++) {
-            const outcome = await sup.tick();
-            if (outcome === 'frozen') sawFrozenWhileDirty = true;
-            await new Promise((r) => setTimeout(r, 15));
-        }
-        expect(sawFrozenWhileDirty).toBe(false);
+        expect(await sup.tick()).toBe('custody');
         expect(readJournal(repo, BRANCH).state!.frozen).toBeUndefined();
-
-        // Se resuelve lo pendiente QUITANDO el archivo sin commitear (en vez
-        // de commitearlo): commitear un archivo NUEVO cambia el árbol que
-        // las evidencias ya persistidas (`v1`/`v-sensors`) fingerprintearon,
-        // invalidándolas de verdad (`stale-fingerprint`) — comportamiento
-        // CORRECTO del gate, pero un concern DISTINTO al que este test
-        // ejercita (paso 4, limpieza — no re-vigencia de evidencia, ya
-        // cubierta en `gate.test.ts`). Quitar el archivo deja el árbol
-        // BYTE A BYTE igual al que las evidencias ya certificaron.
-        fs.rmSync(path.join(repo, 'dirty.txt'));
-        const outcome = await tickUntil(sup, () => readJournal(repo, BRANCH).state!.frozen !== undefined);
-        expect(outcome).toBe('frozen');
+        expect(readJournal(repo, BRANCH).state!.cycle.blockedReason).toContain('git-fingerprint-changed');
     });
 });
 
@@ -549,7 +562,7 @@ describe('loop end-to-end: plan (reconcileTracks) + track (Supervisor.tick) cier
 
     test('reconcileTracks real (plan) + Supervisor.tick real (track), en loop contra dos worktrees reales, cierran request -> drenaje -> persist -> observación -> FROZEN', async () => {
         // --- lado TRACK: registrar el trabajo y drenarlo con un Supervisor REAL ---
-        initWatch(trackWorktree, TRACK_BRANCH);
+        initCompactWatch(trackWorktree, TRACK_BRANCH);
         const ts0 = readJournal(trackWorktree, TRACK_BRANCH).state!;
         ts0.trackContext = { trackId: 'a', taskIds: ['T1'], planDigest: '', baseSha, planJournalId: 'j-plan' };
         writeJournal(trackWorktree, TRACK_BRANCH, ts0);
@@ -563,7 +576,7 @@ describe('loop end-to-end: plan (reconcileTracks) + track (Supervisor.tick) cier
             payload: { entity: 'task-status', taskId: 'T1', status: 'done' } });
 
         const trackCfg = { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10, provider: 'codex' };
-        const trackSup = new Supervisor(trackWorktree, TRACK_BRANCH, trackCfg, fakeSpawner);
+        const trackSup = new Supervisor(trackWorktree, TRACK_BRANCH, trackCfg, fakeSpawner, undefined, admitted);
         for (let i = 0; i < 400; i++) {
             const s = readJournal(trackWorktree, TRACK_BRANCH).state!;
             if (Object.values(s.jobs).length === 2 && Object.values(s.jobs).every((j) => j.executionState === 'exited' && j.verdict === 'pass')) break;

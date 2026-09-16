@@ -25,6 +25,14 @@ describe('journal types', () => {
         expect(s.dispatches).toEqual([]);
     });
 
+    test('binding metadata rejects persisted plan bodies and unversioned execution commitments', () => {
+        const state = { ...emptyState('main'), schema: 2, planBinding: { path: 'docs/plan.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1', executionMode: 'desatendido', boundAt: '2026-09-16' } };
+        expect(isWellFormedState(state)).toBe(true);
+        expect(isWellFormedState({ ...state, planBinding: { ...state.planBinding, snapshot: 'private source body' } })).toBe(false);
+        expect(isWellFormedState({ ...state, planBinding: { ...state.planBinding, executionDigest: 'b'.repeat(64) } })).toBe(false);
+        expect(isWellFormedState({ ...state, planBinding: { ...state.planBinding, executionDigest: 'b'.repeat(64), executionIdentitySchema: 'awm-plan-execution/v1' } })).toBe(true);
+    });
+
     test('isWellFormedState rechaza no-objetos y shapes rotos (R1.6)', () => {  // verifies R1.6
         expect(isWellFormedState(null)).toBe(false);
         expect(isWellFormedState(42)).toBe(false);

@@ -1,31 +1,282 @@
 {
+  "schemaVersion": 3,
+  "mode": "project-sensors",
   "pack": "js-ts",
+  "source": {
+    "registry": "baseline"
+  },
   "sensors": {
-    "typecheck": {
-      "cmd": "npx tsc --noEmit",
-      "fast": true
-    },
     "lint": {
-      "cmd": "npx eslint . --config eslint.config.awm.mjs --cache --format json",
-      "fast": true
+      "enabled": true,
+      "variantId": "eslint-10-flat",
+      "command": {
+        "executable": "eslint",
+        "resolution": "node-modules-bin",
+        "args": [
+          ".",
+          "--config",
+          "eslint.config.awm.mjs",
+          "--cache",
+          "--format",
+          "json"
+        ]
+      },
+      "initializedCompatibility": {
+        "state": "certified",
+        "reason": "range-and-probe",
+        "variantId": "eslint-10-flat",
+        "toolVersion": "10.8.1",
+        "runtimeVersion": "24.18.0",
+        "certifiedRange": "=10.8.1",
+        "evidence": [
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "package-lock.json"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "package.json"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "tsconfig.json"
+          },
+          {
+            "kind": "tool-version",
+            "status": "10.8.1"
+          },
+          {
+            "kind": "runtime-version",
+            "status": "24.18.0"
+          },
+          {
+            "kind": "probe",
+            "status": "matched"
+          }
+        ]
+      },
+      "assets": [
+        "eslint.config.awm.mjs"
+      ],
+      "fast": true,
+      "timeout": 30000
+    },
+    "typecheck": {
+      "enabled": true,
+      "variantId": "typescript-native",
+      "command": {
+        "executable": "tsc",
+        "resolution": "node-modules-bin",
+        "args": [
+          "--noEmit"
+        ]
+      },
+      "initializedCompatibility": {
+        "state": "certified",
+        "reason": "range-and-probe",
+        "variantId": "typescript-native",
+        "toolVersion": "5.9.3",
+        "runtimeVersion": "24.18.0",
+        "certifiedRange": "=5.9.3",
+        "evidence": [
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "package-lock.json"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "package.json"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "tsconfig.json"
+          },
+          {
+            "kind": "tool-version",
+            "status": "5.9.3"
+          },
+          {
+            "kind": "runtime-version",
+            "status": "24.18.0"
+          },
+          {
+            "kind": "probe",
+            "status": "matched"
+          }
+        ]
+      },
+      "fast": true,
+      "timeout": 120000
     },
     "security": {
-      "cmd": "semgrep --config .semgrep.awm.yml --json .",
-      "fast": false
+      "enabled": true,
+      "variantId": "semgrep-js-ts",
+      "command": {
+        "executable": "semgrep",
+        "resolution": "python-environment",
+        "args": [
+          "--config",
+          ".semgrep.awm.yml",
+          "--json",
+          "."
+        ],
+        "pythonEnvironmentRoot": ".venv"
+      },
+      "initializedCompatibility": {
+        "state": "compatible-unverified",
+        "reason": "operational-range-and-probe",
+        "variantId": "semgrep-js-ts",
+        "toolVersion": "1.177.0",
+        "runtimeVersion": "3.14.6",
+        "certifiedRange": "=1.173.0",
+        "evidence": [
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "package-lock.json"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "package.json"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "tsconfig.json"
+          },
+          {
+            "kind": "tool-version",
+            "status": "1.177.0"
+          },
+          {
+            "kind": "runtime-version",
+            "status": "3.14.6"
+          },
+          {
+            "kind": "probe",
+            "status": "matched"
+          }
+        ]
+      },
+      "assets": [
+        ".semgrep.awm.yml"
+      ],
+      "policyRef": "shared/semgrep-policy.json",
+      "fast": false,
+      "timeout": 120000
     },
     "depcheck": {
-      "cmd": "npx depcruise --config .dep-cruiser.awm.js src",
-      "fast": false
+      "enabled": true,
+      "variantId": "dependency-cruiser",
+      "command": {
+        "executable": "depcruise",
+        "resolution": "node-modules-bin",
+        "args": [
+          "--config",
+          ".dep-cruiser.awm.js",
+          "src"
+        ]
+      },
+      "initializedCompatibility": {
+        "state": "certified",
+        "reason": "range-and-probe",
+        "variantId": "dependency-cruiser",
+        "toolVersion": "16.10.4",
+        "runtimeVersion": "24.18.0",
+        "certifiedRange": "=16.10.4",
+        "evidence": [
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "package-lock.json"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "package.json"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "tsconfig.json"
+          },
+          {
+            "kind": "tool-version",
+            "status": "16.10.4"
+          },
+          {
+            "kind": "runtime-version",
+            "status": "24.18.0"
+          },
+          {
+            "kind": "probe",
+            "status": "matched"
+          }
+        ]
+      },
+      "assets": [
+        ".dep-cruiser.awm.js"
+      ],
+      "fast": false,
+      "timeout": 120000
     },
     "test": {
-      "cmd": "npm test --silent",
+      "enabled": true,
+      "variantId": "npm-script",
+      "command": {
+        "executable": "npm",
+        "resolution": "path",
+        "args": [
+          "test"
+        ],
+        "packageManager": "npm"
+      },
+      "initializedCompatibility": {
+        "state": "certified",
+        "reason": "range-and-probe",
+        "variantId": "npm-script",
+        "toolVersion": "10.8.3",
+        "runtimeVersion": "24.18.0",
+        "certifiedRange": "=10.8.3",
+        "evidence": [
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "package-lock.json"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "package.json"
+          },
+          {
+            "kind": "project-path",
+            "status": "present",
+            "path": "tsconfig.json"
+          },
+          {
+            "kind": "tool-version",
+            "status": "10.8.3"
+          },
+          {
+            "kind": "runtime-version",
+            "status": "24.18.0"
+          },
+          {
+            "kind": "probe",
+            "status": "matched"
+          }
+        ]
+      },
       "fast": false,
-      "timeout": 300000
-    },
-    "mutation": {
-      "cmd": "npx stryker run",
-      "fast": false,
-      "enabled": false
+      "timeout": 600000
     }
   }
 }

@@ -1,5 +1,15 @@
 # Harness Retros
 
+## 2026-09-15 — Issue #126: bootstrap compact-only, QA y cierre de entorno
+
+- **Clase:** robustez, seguridad de lectura, testing y proceso. El ledger activo registra 62 entradas: 13 hallazgos y 49 wins. Los grupos de recurrencia son convergentes dentro de este ciclo, no 47 defectos independientes ni evidencia de repetición entre releases.
+- **Remedio aplicado en el alcance aprobado:** el validador ahora admite IDs canónicos punteados de requisitos, obliga a migrar planes sin marcador y conserva compact-v1 válido. QA cerró el escaneo cuadrático de JSON, las sustituciones de symlink en lectura de plan/fuentes, la validación profunda y atestación de reportes válidos y las brechas de pruebas con TDD y regresiones. No se agregó una regla de harness duplicada: la lectura segura ya está exigida por `CTX-CONSTITUTION-052`, y las otras fallas tienen checks ejecutables en el propio CLI.
+- **Cobertura empírica:** `awm sensors run` quedó PASS con `newCount: 0` y un ciclo de imports de `watch` en baseline; el `npm --prefix cli run depcheck` directo sigue FAIL. `awm sensors coverage --json` se ejecutó una vez y terminó FAIL (`sensor pack was not found in configured registries`): el `.awm/sensors.json` del worktree apunta a `/srv/agentmobile/.awm/registries/baseline`, inexistente en esta máquina. No se interpreta como cobertura PASS.
+- **Bloqueadores fuera de S1:** la suite completa Jest con Node 24 sigue FAIL (15 suites, 25 tests) por aislamiento de fixtures y otros fallos preexistentes; durante ella nacieron `/Users/cencosud/.awm/profile.json` y `/Users/cencosud/.awm/sensors.json` al ascender un fixture hasta el HOME del operador. Se conservaron sin borrarlos ni volver a lanzar la suite insegura. El ciclo `watch/teardown-driver.ts` ↔ `watch/tracks.ts` reproduce el depcheck directo FAIL también en `main`. El preflight de currentness degradó en SSH frío por timeout de 2 s y luego pasó con multiplexación temporal, sin cambiar registries. El runtime Node 22 del `npm` invocado por shebang no coincide con el Node 24 usado para la validación enfocada.
+- **Recomendaciones no aplicadas:** abrir mantenimiento acotado para aislar fixtures fuera del HOME y reparar el ciclo de imports de `watch`; investigar el puntero de registry de sensores dependiente de máquina, el timeout SSH y la selección de runtime sin ocultar gates. La eliminación de los dos archivos del operador requiere decisión explícita sobre su procedencia y recuperación. Ninguna de estas reparaciones se infiere autorizada por el bootstrap S1.
+- **Descartes (modo desatendido):** `migration-report-missing-reason`, `valid-report-shallow-guard` y `valid-report-nested-contract-bypass` convergen en el reporte válido atestado y congelado, ya verificado; `plan-source-read-toctou` y `markerless-json-quadratic-scan` tienen regresiones y fix estructural; `missing-unmarked-cli-e2e`, `incomplete-nested-freeze-test`, `v1-regression-count` y `tracked-plan-count-brittle` tienen pruebas corregidas, sin nueva regla. `jest-fixture-operator-home-write`, `baseline-watch-depcheck-cycle`, `preflight-currentness-ssh-timeout` y `npm-env-node-selection` quedan recomendados, no descartados como PASS.
+- **Estado del retro:** log y triage realizados; no se archiva el ledger ni se marca `awm-retro-complete` hasta pasar cobertura/compatibilidad/captura según la skill. Este checkout no contiene `awm-registry.json` en su raíz para la comprobación `minCliVersion`; no se sustituye silenciosamente por el de una instalación externa.
+
 ## 2026-09-05 — Issue #111: contrato del orquestador en la guía de authoring
 
 - **Class:** process / structural documentation
@@ -688,3 +698,32 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
 - **Documentación:** ningún contrato ni comando de usuario cambió; no hay documentación pública afectada.
 - **Lección de diagnóstico:** correlacionar el `mtime` del estado durable con un literal exacto de la suite identificó la causa antes de repetir otro `awm unpin` local.
 - **Descartes:** no se añadió una regla textual a `AGENTS.md` o `CONSTITUTION.md`; la barrera ejecutable cierra la clase con menos deriva.
+
+## 2026-09-16 — R1 compact-only: curas del harness, no reparaciones locales por proyecto
+
+- **Clase:** lógica, seguridad, proceso y aislamiento de pruebas. Los grupos de
+  migración, admisión y custodia convergieron dentro de este mismo ciclo de
+  revisión; no se presentan como recurrencias observadas en otros proyectos.
+- **Curas persistentes:** una autoridad compartida para los proveedores de
+  contratos instalados; comparación de identidad y hash acotado antes/después
+  de esperas; lectura nativa sin seguimiento de enlaces; validación de argv,
+  nonce y rutas antes de escribir; migración basada en cada obligación y su
+  tipo declarado, no prefijos ni evidencia prestada. Las suites de admission,
+  migration, journal y wrapper incluyen controles RED/GREEN para estas familias.
+- **Registry:** las recetas compact-only conservan todos los gates; la
+  aceptación observa artefactos de custodia reales, no un contador constante.
+  La clase de ledger para hallazgos de tests es `structural`, no el enum
+  inexistente `tests`. El archivo de bootstrap nombra el plan y no pide una
+  opción `--json` inexistente. Regresiones r16 prueban las mutaciones negativas.
+- **Verificación:** candidato inmutable `c72b42bb6e754e8b40d898892131c9f147bc2ad0`:
+  289 suites / 3.848 tests PASS; 2 suites / 21 tests omitidos; cero fallos.
+  Build y sensores habilitados PASS; los sensores deshabilitados no cuentan
+  como cobertura. QA y revisiones nativas están reconciliadas con el código.
+- **Captura y archivo:** bootstrap vacío archivado sin alterar sus bytes;
+  consulta de journal de rama `missing`; skip explícito de captura de ciclo
+  con evidencia manual/nativa durable en `docs/plans/2026-09-16-r1-release-evidence.md`.
+  Archivo real de ledger aprobado y lista activa `[]`. No se fabrica COMPLETE.
+- **Descartes:** no se añaden reglas a AGENTS/CONSTITUTION ni se aplican
+  recomendaciones pendientes de autorización. Las curas ya son ejecutables.
+  Publicación y aceptación instalada se cierran con artefactos reales en #126;
+  no se infieren ahorro de cuota ni paridad de ejecución entre proveedores.

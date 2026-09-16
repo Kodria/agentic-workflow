@@ -44,7 +44,7 @@ export type SensorVariant = {
     requirements: { tool: string; toolRange: string; runtime: string; runtimeRange: string; configFiles?: string[]; packageJsonFields?: string[] };
     assets: string[];
     formatter: string;
-    probe: { kind: CompatibilityProbe };
+    probe: { kind: CompatibilityProbe; script?: string };
     /** A registry-owned policy whose compatibility requirements are authoritative. */
     policyRef?: 'shared/semgrep-policy.json';
     command: StructuredCommand;
@@ -67,7 +67,7 @@ export type SemgrepPolicy = {
 export type SensorPackHardening = Record<string, { assets: string[] }>;
 
 export type SensorPackSensor = {
-    applicability: { allFiles?: string[]; anyFiles?: string[]; kind?: string };
+    applicability: { allFiles?: string[]; anyFiles?: string[]; kind?: 'explicit-or-supported-language' | 'explicit-opt-in' };
     variants: SensorVariant[];
     fast?: boolean;
     timeout?: number;

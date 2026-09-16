@@ -5,22 +5,36 @@
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
-import { captureSelfRef, captureRefFor, NONCE_ENV, terminatePreviouslyOwnedGroup } from '../../core/journal/process';
+import { captureSelfRef, captureRefFor, NONCE_ENV, terminatePreviouslyOwnedGroup, argvDigest } from '../../core/journal/process';
+import { logsDir } from '../../core/journal/paths';
+import { isWellFormedState, isControllerRecoveryAction } from '../../core/journal/types';
+import { secureFs } from '../../core/secure-fs/native-bridge';
 import { resolveWorkingDirectory } from '../../core/journal/fingerprint';
 import { redactText } from '../../core/journal/redact';
 import { writeFileAtomicDurable, fsyncDirSync } from '../../core/atomic-file';
 import type { ProcessRef } from '../../core/journal/types';
 
+function validateSidecarIdentity(logsRoot: string, jobId: string, nonce: string): void {
+    if (typeof logsRoot !== 'string' || logsRoot.length === 0 || logsRoot.length > 4096 || /[\u0000-\u001F\u007F]/.test(logsRoot)
+        || typeof jobId !== 'string' || !/^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,127}$/.test(jobId)
+        || typeof nonce !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(nonce)
+        || jobId.length + nonce.length > 230) throw new Error('unsafe or unbounded sidecar identity');
+}
+
 export function claimPath(logsRoot: string, jobId: string, nonce: string): string {
+    validateSidecarIdentity(logsRoot, jobId, nonce);
     return path.join(logsRoot, `${jobId}.${nonce}.claim`);
 }
 export function identityPath(logsRoot: string, jobId: string, nonce: string): string {
+    validateSidecarIdentity(logsRoot, jobId, nonce);
     return path.join(logsRoot, `${jobId}.${nonce}.identity.json`);
 }
 export function resultPath(logsRoot: string, jobId: string, nonce: string): string {
+    validateSidecarIdentity(logsRoot, jobId, nonce);
     return path.join(logsRoot, `${jobId}.${nonce}.result.json`);
 }
 export function logPath(logsRoot: string, jobId: string, nonce: string): string {
+    validateSidecarIdentity(logsRoot, jobId, nonce);
     return path.join(logsRoot, `${jobId}.${nonce}.log`);
 }
 
@@ -41,10 +55,38 @@ const MAX_LOG_BYTES = 1024 * 1024;   // retencion acotada (R2.5)
 // una espera perceptible si un descendiente hereda los fds y nunca cierra.
 const STDIO_GRACE_MS = 300;
 
+/** Only a committed generation intent may suppress controller output. A user
+ * job with the same name retains normal verifier logs. Never persist model
+ * output (which may include prompts/source bodies) in generation custody. */
+function isCommittedController(logsRoot: string, repoRoot: string, jobId: string, nonce: string, argv: string[]): boolean {
+    if (!/^controller-gen-[1-9][0-9]*$/.test(jobId)) return false;
+    try {
+        const bytes = secureFs.readRegularFile(path.resolve(logsRoot, '..', 'state.json'), 1024 * 1024).bytes;
+        const state: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+        if (!isWellFormedState(state)) throw new Error('controller custody journal invalid');
+        const actual = fs.lstatSync(logsRoot, { bigint: true });
+        const expected = fs.lstatSync(logsDir(repoRoot, state.branch), { bigint: true });
+        if (!actual.isDirectory() || actual.isSymbolicLink() || !expected.isDirectory() || expected.isSymbolicLink()
+            || actual.ino === 0n || actual.dev !== expected.dev || actual.ino !== expected.ino) throw new Error('controller custody directory identity invalid');
+        const committed = state.generations.some(gen => gen.controllerJobId === jobId && jobId === `controller-gen-${gen.n}`
+            && gen.spawnNonce === nonce && gen.resumePrompt === undefined && isControllerRecoveryAction(gen.resumeAction)
+            && gen.launchArgvDigest === argvDigest(argv));
+        if (committed) return true;
+        const ordinary = state.jobs[jobId];
+        if (ordinary?.spawnNonce === nonce && argvDigest(ordinary.argv) === argvDigest(argv)) return false;
+        throw new Error('controller custody launch identity unproven');
+    } catch { throw new Error('controller custody identity unavailable or unsafe: refusing launch before claim'); }
+}
+
 export async function runExecWrapper(opts: { logsRoot: string; jobId: string; nonce: string; argv: string[]; cwd: string; repoRoot?: string }): Promise<WrappedResult> {
     const { logsRoot, jobId, nonce, argv, cwd } = opts;
+    validateSidecarIdentity(logsRoot, jobId, nonce);
     const repoRoot = opts.repoRoot ?? process.cwd();
-    if (argv.length === 0) throw new Error('argv vacio');
+    if (!Array.isArray(argv) || argv.length === 0 || argv.length > 256
+        || argv.some(argument => typeof argument !== 'string' || argument.length > 65536 || argument.includes('\0'))
+        || argv[0].length === 0 || argv.reduce((bytes, argument) => bytes + Buffer.byteLength(argument, 'utf8'), 0) > 1024 * 1024) throw new Error('argv invalid or unbounded');
+    const safeCwd = resolveWorkingDirectory(repoRoot, cwd).absolute;
+    const omitControllerOutput = isCommittedController(logsRoot, repoRoot, jobId, nonce, argv);
     fs.mkdirSync(logsRoot, { recursive: true, mode: 0o700 });
     // (1) claim exclusivo DURABLE — wx + fsync de archivo y de directorio
     let fd: number;
@@ -70,7 +112,6 @@ export async function runExecWrapper(opts: { logsRoot: string; jobId: string; no
     // process group por job, independiente del supervisor (R4.7: shell:false,
     // argv como array, secretos solo por referencia de entorno).
     const [exe, ...args] = argv;
-    const safeCwd = resolveWorkingDirectory(repoRoot, cwd).absolute;
     const child = spawn(exe, args, {
         cwd: safeCwd, shell: false, detached: true,
         env: { ...process.env, [NONCE_ENV]: nonce },
@@ -99,6 +140,7 @@ export async function runExecWrapper(opts: { logsRoot: string; jobId: string; no
     const outputChunks: Buffer[] = [];
     const logFile = logPath(logsRoot, jobId, nonce);
     const capture = (chunk: Buffer) => {
+        if (omitControllerOutput) return;
         if (captured >= MAX_LOG_BYTES) return;
         const accepted = chunk.subarray(0, MAX_LOG_BYTES - captured);
         outputChunks.push(accepted);

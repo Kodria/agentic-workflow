@@ -10,8 +10,8 @@ import { logsDir } from '../../core/journal/paths';
 import { claimPath, identityPath, resultPath } from '../job/exec-wrapper';
 import { defaultWrapperSpawner, WrapperSpawner } from './runner';
 import type { ControllerAdapter, SafeToReplace } from '../../core/journal/adapter';
-import { isWellFormedProcessRef } from '../../core/journal/types';
-import type { Generation, Job, JournalState } from '../../core/journal/types';
+import { isWellFormedProcessRef, isControllerRecoveryAction } from '../../core/journal/types';
+import type { Generation, Job, JournalState, ControllerRecoveryAction } from '../../core/journal/types';
 
 /** Lectura obligatoria del journal (patron repetido en todo este archivo):
  *  el supervisor jamas opera sobre corrupcion (R1.6) — falla ruidoso, nunca
@@ -80,7 +80,18 @@ export function beginGeneration(repoRoot: string, branch: string): Generation {
 }
 
 function promptForGeneration(gen: Generation): string {
-    return `${gen.resumePrompt}\nGeneracion activa: ${gen.token}. Incluye --generation ${gen.token} en cada comando awm job.`;
+    if (!isControllerRecoveryAction(gen.resumeAction) || !/^[a-f0-9]{16}$/.test(gen.token)) throw new Error('recovery action invalida: no se persisten prompts libres');
+    const instructions: Record<ControllerRecoveryAction['kind'], string> = {
+        'resume-cycle': 'Retoma el plan del ciclo desde el journal.',
+        'resume-next-action': 'Retoma el next_action vigente del journal.',
+        'reconcile-active-jobs': 'Reconcilia los jobs activos existentes del journal sin duplicarlos.',
+    };
+    return `${instructions[gen.resumeAction.kind]}\nGeneracion activa: ${gen.token}. Incluye --generation ${gen.token} en cada comando awm job.`;
+}
+
+function recoveryAction(action: unknown): ControllerRecoveryAction {
+    if (!isControllerRecoveryAction(action)) throw new Error('recovery action invalida: no se persisten prompts libres');
+    return { schema: action.schema, kind: action.kind };
 }
 
 /** Persiste el intent completo ANTES de delegarlo al wrapper. El wrapper usa
@@ -90,18 +101,24 @@ export function launchControllerGeneration(
     repoRoot: string,
     branch: string,
     provider: string,
-    resumePrompt: string,
+    action: unknown,
     spawner: WrapperSpawner = defaultWrapperSpawner(),
 ): void {
+    const requestedAction = recoveryAction(action);
     const s = requireState(repoRoot, branch);
     const gen = activeGeneration(s);
     if (gen === undefined) throw new Error('no hay generacion activa para lanzar');
+    if (gen.resumePrompt !== undefined) throw new Error('generacion legacy con prompt: decision explicita requerida; no se reemite');
+    const adapter = adapterFor(gen.provider ?? provider);
     gen.controllerJobId = gen.controllerJobId ?? `controller-gen-${gen.n}`;
     gen.spawnNonce = gen.spawnNonce ?? crypto.randomBytes(8).toString('hex');
     gen.provider = gen.provider ?? provider;
-    gen.resumePrompt = gen.resumePrompt ?? resumePrompt;
+    gen.resumeAction = gen.resumeAction ?? requestedAction;
+    const argv = adapter.launchArgv(promptForGeneration(gen));
+    const digest = argvDigest(argv);
+    if (gen.launchArgvDigest !== undefined && gen.launchArgvDigest !== digest) throw new Error('controller argv cambio: no se reemite el mismo nonce con otro comando');
+    gen.launchArgvDigest = digest;
     writeJournal(repoRoot, branch, s);
-    const argv = adapterFor(gen.provider).launchArgv(promptForGeneration(gen));
     const job: Job = {
         id: gen.controllerJobId, fingerprint: `generation:${gen.token}`, commandDigest: `generation:${gen.token}`,
         argv, cwd: '.', paths: [], expandedPaths: [], executionState: 'spawn-intent',
@@ -132,8 +149,8 @@ export function collectControllerGeneration(repoRoot: string, branch: string): b
     if (identity.jobId !== gen.controllerJobId || identity.nonce !== gen.spawnNonce
         || !isWellFormedProcessRef(identity.wrapper) || !isWellFormedProcessRef(identity.command)
         || identity.wrapper.spawnNonce !== gen.spawnNonce || identity.command.spawnNonce !== gen.spawnNonce
-        || gen.provider === undefined || gen.resumePrompt === undefined
-        || identity.command.argvDigest !== argvDigest(adapterFor(gen.provider).launchArgv(promptForGeneration(gen)))) return false;
+        || gen.provider === undefined || gen.resumePrompt !== undefined || !isControllerRecoveryAction(gen.resumeAction)
+        || gen.launchArgvDigest === undefined || identity.command.argvDigest !== gen.launchArgvDigest) return false;
     const changed = gen.wrapperRef?.pid !== identity.wrapper.pid || gen.processRef?.pid !== identity.command.pid;
     gen.wrapperRef = identity.wrapper;
     gen.processRef = identity.command;
@@ -158,16 +175,18 @@ export function ensureControllerGeneration(
     repoRoot: string,
     branch: string,
     provider: string,
-    resumePrompt: string,
+    action: unknown,
     spawner: WrapperSpawner,
     ambiguityGraceMs: number,
 ): void {
+    const requestedAction = recoveryAction(action);
     if (collectControllerGeneration(repoRoot, branch)) return;
     let gen = activeGeneration(requireState(repoRoot, branch));
     if (gen === undefined) return;
+    if (gen.resumePrompt !== undefined) throw new Error('generacion legacy con prompt: decision explicita requerida; no se reemite');
     if (gen.processRef !== undefined || gen.wrapperRef !== undefined) return;
     if (gen.controllerJobId === undefined || gen.spawnNonce === undefined) {
-        launchControllerGeneration(repoRoot, branch, provider, resumePrompt, spawner);
+        launchControllerGeneration(repoRoot, branch, provider, requestedAction, spawner);
         return;
     }
     const logs = logsDir(repoRoot, branch);
@@ -187,7 +206,7 @@ export function ensureControllerGeneration(
     // El intent ya estaba durable pero el spawn no ocurrio: es seguro reemitir
     // exactamente el mismo nonce. Si el wrapper original solo estaba demorado,
     // su claim wx arbitra cual de ambos ejecuta.
-    launchControllerGeneration(repoRoot, branch, gen.provider ?? provider, gen.resumePrompt ?? resumePrompt, spawner);
+    launchControllerGeneration(repoRoot, branch, gen.provider ?? provider, gen.resumeAction ?? requestedAction, spawner);
 }
 
 /** Custodia (R4.5): ciclo BLOCKED con razon auditada. QUIEN NO HACE NADA:

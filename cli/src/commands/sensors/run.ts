@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import crypto from 'crypto';
 import { runCommand, runStructuredCommand, ExecResult } from './exec';
 import { SensorResult, SensorError } from './types';
 import { parseTscOutput } from './formatters/tsc';
@@ -50,7 +51,58 @@ export type RunOptions = {
     changed?: boolean;
     /** Comparison point for `changed`. Defaults to `HEAD` (uncommitted work only). */
     base?: string;
+    /**
+     * Admission-only observation guard. Sensor commands remain external tools,
+     * so a changed worktree makes their result unusable as read-only evidence.
+     */
+    readOnly?: boolean;
 };
+
+const READ_ONLY_MAX_ENTRIES = 250_000;
+const READ_ONLY_MAX_BYTES = 1024 * 1024 * 1024;
+
+/**
+ * A git status only sees tracked and non-ignored paths, while a sensor can
+ * mutate ignored runtime files (notably `.awm/`) just as easily. Hash the
+ * actual project tree instead. The scan is deliberately bounded: inability to
+ * observe the whole declared project means no admission certificate.
+ */
+function filesystemSnapshot(root: string): string | null {
+    try {
+        const digest = crypto.createHash('sha256');
+        let entriesSeen = 0;
+        let bytesSeen = 0;
+        const visit = (directory: string, relative: string): void => {
+            const entries = fs.readdirSync(directory, { withFileTypes: true })
+                .sort((left, right) => left.name.localeCompare(right.name));
+            for (const entry of entries) {
+                // Git's internal bookkeeping changes as a consequence of normal
+                // observation, not project sensor execution. Everything else,
+                // including ignored/untracked `.awm`, is evidence-relevant.
+                if (relative === '' && entry.name === '.git') continue;
+                if (++entriesSeen > READ_ONLY_MAX_ENTRIES) throw new Error('snapshot-entry-limit');
+                const child = path.join(directory, entry.name);
+                const childRelative = relative === '' ? entry.name : `${relative}/${entry.name}`;
+                const stat = fs.lstatSync(child);
+                digest.update(`${childRelative}\0${stat.mode}\0${stat.size}\0`);
+                if (stat.isDirectory()) {
+                    digest.update('directory\0');
+                    visit(child, childRelative);
+                } else if (stat.isFile()) {
+                    if ((bytesSeen += stat.size) > READ_ONLY_MAX_BYTES) throw new Error('snapshot-byte-limit');
+                    digest.update('file\0');
+                    digest.update(fs.readFileSync(child));
+                } else if (stat.isSymbolicLink()) {
+                    digest.update(`symlink\0${fs.readlinkSync(child)}\0`);
+                } else {
+                    digest.update(`special\0${stat.rdev}\0`);
+                }
+            }
+        };
+        visit(root, '');
+        return digest.digest('hex');
+    } catch { return null; }
+}
 
 
 async function resolveLiveFromSource(cwd: string, source: PackSource, packSelection?: 'explicit'): Promise<Awaited<ReturnType<typeof resolveParsedPackCompatibility>> | null> {
@@ -159,6 +211,10 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     }
 
     const manifestDir = project.projectRoot;
+    const beforeReadOnly = opts.readOnly ? filesystemSnapshot(manifestDir) : undefined;
+    if (opts.readOnly && beforeReadOnly === null) {
+        return { sensors: [], overall: 'not_certified', projectRoot: project.projectRoot, manifestPath: project.manifestPath, mode: 'invalid', reason: 'read-only-observation-unavailable', remedy: 'run admission from a readable git worktree' };
+    }
     const parsed = project.manifest;
     const authority = { projectRoot: project.projectRoot, manifestPath: project.manifestPath };
     if (parsed.kind === 'v3' && (parsed.pack.mode === 'native-gate' || parsed.pack.mode === 'opt-out')) {
@@ -221,7 +277,7 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
     if (parsed.kind === 'legacy' && overall === 'pass') overall = 'not_certified';
     if (overall === 'skipped' && drift && drift.detection.pack !== 'generic') overall = 'not_certified';
 
-    return {
+    const output: RunOutput = {
         sensors: results,
         overall,
         ...authority,
@@ -232,4 +288,8 @@ export async function runSensors(opts: RunOptions = {}): Promise<RunOutput> {
         ...(drift?.drift ? { packDrift: drift.drift } : {}),
         ...(changed ? { changedScope: { files: changed.files.length, ...(changed.error ? { error: changed.error } : {}) } } : {}),
     };
+    if (opts.readOnly && filesystemSnapshot(manifestDir) !== beforeReadOnly) {
+        return { ...output, overall: 'not_certified', reason: 'read-only-mutation-detected', remedy: 'sensor execution changed the worktree; repair it before using this evidence for admission' };
+    }
+    return output;
 }

@@ -1,8 +1,14 @@
 // Loop foreground (R4.4/R4.5): tick = apply -> collect/spawn -> stall -> gate.
 // COMPLETE exige gate verde (que exige cero vivos): drenaje ANTES de declarar.
 // Custodia BLOCKED: el loop sigue, el lock NO se libera, nada se mata.
+import fs from 'fs';
+import path from 'path';
 import { readJournal, writeJournal, appendEvent } from '../../core/journal/store';
-import { computeFingerprint } from '../../core/journal/fingerprint';
+import { computeFingerprint, reconcileUnattendedRecovery } from '../../core/journal/fingerprint';
+import { validatePlanFile } from '../../core/plan/validate';
+import { type AdmissionReport } from '../../core/admission';
+import { admitRegistryPlan } from '../../core/admission/registry-contracts';
+import { readPreferences } from '../../utils/config';
 import { adapterFor } from '../../core/journal/adapter';
 import { groupIsGone, terminateGroupConfirmed } from '../../core/journal/process';
 import { computeGate, computeTrackGate, FingerprintNow } from '../job/gate';
@@ -12,8 +18,26 @@ import { consumePendingRequests } from './apply';
 import { runnerTick, WrapperSpawner, defaultWrapperSpawner } from './runner';
 import { reconcileTracks, reconcileOpenJoin, defaultTrackRuntime, TrackRuntime } from './tracks';
 import { decideStall, Backoff, beginGeneration, activeGeneration, ensureControllerGeneration, collectControllerGeneration, controllerGenerationHasUnresolvedClaim, resolveGeneration, enterCustody } from './generations';
-import type { JournalState } from '../../core/journal/types';
+import type { JournalState, ControllerRecoveryAction } from '../../core/journal/types';
 import type { CohortPhase } from '../../core/tracks/types';
+
+/** The supervisor is only allowed to dispatch after this exact admission. */
+export type DispatchAdmission = () => Promise<AdmissionReport>;
+
+function defaultDispatchAdmission(repoRoot: string, branch: string, provider: string): DispatchAdmission {
+    return async () => {
+        const observed = readJournal(repoRoot, branch);
+        const binding = observed.state?.schema === 2 ? observed.state.planBinding : undefined;
+        if (!binding || binding.executionMode !== 'desatendido') {
+            return { state: 'blocked', planState: 'invalid', journal: observed.corrupt ? 'corrupt' : 'missing', currentness: 'not-checked', sensors: 'not-required', diagnostics: [{ code: 'ADMISSION_JOURNAL_BINDING_REQUIRED', message: 'Unattended dispatch requires an exact compact plan binding.' }] };
+        }
+        const plan = validatePlanFile(binding.path, repoRoot);
+        const preferences = readPreferences();
+        return admitRegistryPlan({ plan, provider, cwd: repoRoot, enabledAgents: preferences.enabledAgents,
+            executionMode: 'desatendido', requireCurrent: true, verifySensors: true,
+            journalState: observed.state, journalCorrupt: observed.corrupt, planPath: binding.path });
+    };
+}
 
 /** R7/C3/C4 (Task 12) + fix post-review #2 (re-derivado desde cero tras
  *  encontrar que la justificación original no probaba lo que decía — ver
@@ -128,6 +152,23 @@ export type TickOutcome = 'continue' | 'custody' | 'complete' | 'frozen';
 
 const LIVE = ['received', 'spawn-intent', 'claimed', 'running', 'cancel-requested'];
 
+function recoveryWhitelistBlocker(state: JournalState): string | undefined {
+    if (state.cycle.status === 'BLOCKED') return 'el ciclo está bloqueado';
+    if (state.requestProblems.length > 0) return 'hay conflictos durables de requests';
+    // Pending work is the normal reason to launch (or retry launching) the
+    // controller.  It is not recovery evidence and therefore cannot turn a
+    // transient launch failure into permanent custody.  Conversely, once a
+    // non-empty task set claims completion, missing required evidence is an
+    // unsafe recovery fact and must remain fail-closed.
+    if (state.tasks.length === 0 || state.tasks.some(task => task.status !== 'done')) return undefined;
+    const verificationItems = [...state.cycleVerificationPlan, ...state.tasks.flatMap(task => task.verificationPlan)];
+    for (const required of state.requiredVerifiers) {
+        const requiredItems = verificationItems.filter(item => item.kind === required);
+        if (requiredItems.length === 0 || requiredItems.some(item => item.satisfiedBy === undefined)) return `falta evidencia del verificador requerido: ${required}`;
+    }
+    return undefined;
+}
+
 export class Supervisor {
     private backoff = new Backoff();
     private relaunchNotBefore = 0;
@@ -142,6 +183,7 @@ export class Supervisor {
         private cfg: SupervisorConfig,
         private spawner: WrapperSpawner,
         trackRuntime?: TrackRuntime,
+        private dispatchAdmission: DispatchAdmission = defaultDispatchAdmission(repoRoot, branch, cfg.provider),
     ) {
         this.trackRuntime = trackRuntime ?? defaultTrackRuntime(repoRoot, branch, { termGraceMs: cfg.termGraceMs, killGraceMs: cfg.killGraceMs });
     }
@@ -151,14 +193,14 @@ export class Supervisor {
         catch { return null; }   // no recomputable => el gate NO certifica (fail-closed)
     };
 
-    private ensureController(resumePrompt: string): 'ok' | 'deferred' | 'custody' {
+    private ensureController(action: ControllerRecoveryAction): 'ok' | 'deferred' | 'custody' {
         if (Date.now() < this.relaunchNotBefore) return 'deferred';
         if (this.backoff.exhausted()) {
             enterCustody(this.repoRoot, this.branch, 'tope de intentos de launch/relaunch por hora alcanzado (R4.3)');
             return 'custody';
         }
         try {
-            ensureControllerGeneration(this.repoRoot, this.branch, this.cfg.provider, resumePrompt, this.spawner, this.cfg.reconcileGraceMs);
+            ensureControllerGeneration(this.repoRoot, this.branch, this.cfg.provider, action, this.spawner, this.cfg.reconcileGraceMs);
             return 'ok';
         } catch (error) {
             this.backoff.recordRelaunch();
@@ -178,6 +220,106 @@ export class Supervisor {
     async tick(): Promise<TickOutcome> {
         const before0 = readJournal(this.repoRoot, this.branch);
         if (before0.corrupt || before0.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
+        // Historical/schema-1 journals are intentionally readable by migration
+        // commands, never executable.  Do this before controller recovery,
+        // request consumption, tracks, or runner reconciliation: each can cause
+        // a dispatch directly or indirectly.
+        if (before0.state.schema !== 2 || !before0.state.planBinding) return 'custody';
+        // COMPLETE is terminal, not a recovery attempt. It cannot dispatch and
+        // must retain its normal no-op result even if old work evidence is no
+        // longer reconstructible.
+        if (before0.state.cycle.status === 'COMPLETE') return 'complete';
+        // A controller can create jobs and runnerTick can start them. Both are
+        // downstream of the same full compact unattended admission, so it must
+        // complete before any reconciliation path that could dispatch either.
+        if (before0.state.schema === 2 && before0.state.planBinding) {
+            let admission: AdmissionReport;
+            try { admission = await this.dispatchAdmission(); }
+            catch (error) {
+                enterCustody(this.repoRoot, this.branch, `admisión desatendida no verificable: ${(error as Error).message}`);
+                return 'custody';
+            }
+            if (admission.state !== 'admitted' || admission.executionMode !== 'desatendido'
+                || admission.currentness !== 'current' || admission.sensors !== 'pass' || admission.journal !== 'current') {
+                // A first empirical sensor observation can be inconclusive while
+                // the already-started controller is still settling. It never
+                // authorizes dispatch; retry the read-only admission next tick
+                // instead of permanently custodying a healthy cycle.
+                if (admission.planState === 'valid' && admission.currentness === 'current'
+                    && admission.sensors === 'not-certified' && admission.journal === 'not-required') return 'continue';
+                enterCustody(this.repoRoot, this.branch, `admisión compacta desatendida bloqueada antes de dispatch: ${admission.diagnostics.map(diagnostic => `${diagnostic.code}: ${diagnostic.message}`).join('; ')}`);
+                return 'custody';
+            }
+        }
+        let recoveryResumeAction: ControllerRecoveryAction | undefined;
+        // Schema-2 custody is reconciled before any controller launch.  This is
+        // read-only: existing active jobs are reused, never re-requested.
+        if (before0.state.schema === 2 && before0.state.planBinding) {
+            const whitelistBlocker = recoveryWhitelistBlocker(before0.state);
+            if (whitelistBlocker) {
+                enterCustody(this.repoRoot, this.branch, `recovery no autorizado: ${whitelistBlocker}`);
+                return 'custody';
+            }
+            const activeJobIds = Object.values(before0.state.jobs)
+                .filter(job => LIVE.includes(job.executionState) || job.executionState === 'orphaned').map(job => job.id);
+            const staleJob = Object.values(before0.state.jobs).filter(job => LIVE.includes(job.executionState) || job.executionState === 'orphaned').some(job => {
+                try { return computeFingerprint(this.repoRoot, job.argv, job.paths, job.cwd).fingerprint !== job.fingerprint; }
+                catch { return true; }
+            });
+            const boundPlan = validatePlanFile(before0.state.planBinding.path, this.repoRoot);
+            const planChanged = boundPlan.state !== 'valid' || boundPlan.planDigest !== before0.state.planBinding.digest || boundPlan.schema !== before0.state.planBinding.schema;
+            const passed = (id: string | undefined): boolean => {
+                if (!id) return false;
+                const job = before0.state!.jobs[id];
+                return job !== undefined && job.verdict === 'pass' && !staleJob;
+            };
+            const verificationItems = [...before0.state.cycleVerificationPlan, ...before0.state.tasks.flatMap(task => task.verificationPlan)];
+            const tests = verificationItems.filter(item => item.kind === 'test');
+            const sensorItems = verificationItems.filter(item => item.kind === 'sensors');
+            // `computeGate` is the single authority for every verification
+            // kind (review, QA and interlock included). Reuse its evidence
+            // semantics instead of maintaining a weaker recovery subset.
+            const evidenceGate = computeGate(before0.state, false, this.fingerprintNow);
+            const terminalTaskClaims = before0.state.tasks.length > 0 && before0.state.tasks.every(task => task.status === 'done');
+            const unresolvedVerification = terminalTaskClaims && evidenceGate.reasons.some(reason => [
+                'dangling-reference', 'unsatisfied-plan', 'adverse-verdict',
+                'stale-fingerprint', 'open-obligation', 'open-fix',
+            ].includes(reason.category));
+            const hasStaleReview = before0.state.verdicts.some(verdict => verdict.fingerprint === '' || (verdict.argv.length > 0 && (() => {
+                try { return computeFingerprint(this.repoRoot, verdict.argv, verdict.paths, verdict.cwd).fingerprint !== verdict.fingerprint; } catch { return true; }
+            })()));
+            // Keep the same fail-closed review/fix semantics as job/gate.ts:
+            // missing required kinds, dangling verdict references, adverse
+            // verdicts, and an adverse verdict without a closed fix all stop
+            // recovery before a controller can create more work.
+            const verdictById = new Map(before0.state.verdicts.map(verdict => [verdict.id, verdict]));
+            const openReviewOrFix = before0.state.tasks.some(task => {
+                const obligations = task.reviewObligations;
+                return !(['spec', 'quality'] as const).every(kind => obligations.some(obligation => obligation.kind === kind))
+                    || obligations.some(obligation => {
+                        const verdict = obligation.verdictId === undefined ? undefined : verdictById.get(obligation.verdictId);
+                        return verdict === undefined || verdict.result !== 'pass';
+                    });
+            }) || before0.state.verdicts.some(verdict => verdict.result !== 'pass'
+                && !before0.state!.fixes.some(fix => fix.verdictId === verdict.id && fix.closed));
+            const recovery = reconcileUnattendedRecovery({
+                journal: before0.state, journalCorrupt: false, plan: before0.state.planBinding,
+                git: staleJob || planChanged ? 'changed' : 'current', activeJobIds,
+                tests: !terminalTaskClaims || tests.length === 0 || tests.every(item => passed(item.satisfiedBy)) ? 'pass' : 'missing',
+                sensors: !terminalTaskClaims || sensorItems.length === 0 || sensorItems.every(item => passed(item.satisfiedBy)) ? 'pass' : 'missing',
+                verdicts: hasStaleReview ? 'stale' : (openReviewOrFix || unresolvedVerification) ? 'missing' : 'current',
+            });
+            appendEvent(this.repoRoot, this.branch, { kind: 'unattended-recovery', nextAction: recovery.nextAction, activeJobIds: recovery.activeJobIds, diagnostics: recovery.diagnostics });
+            if (recovery.state !== 'ready') {
+                const staleReasons = terminalTaskClaims ? evidenceGate.reasons.filter(reason => reason.category === 'stale-fingerprint') : [];
+                const remedy = staleReasons.length > 0
+                    ? `; stale-fingerprint: ${staleReasons.map(reason => reason.detail).join('; ')}. Re-ejecutar verificaciones mediante awm job request con generation, paths y satisfies originales, y repetir reviews independientes cuando corresponda; no repetir watch/rebind ni actualizar fingerprints de PASS históricos`
+                    : '';
+                enterCustody(this.repoRoot, this.branch, `recovery no autorizado: ${recovery.diagnostics.join(', ')}${remedy}`);
+                return 'custody';
+            }
+            recoveryResumeAction = { schema: 'controller-recovery/v1', kind: recovery.nextAction === 'reconcile-active-jobs' ? 'reconcile-active-jobs' : 'resume-next-action' };
+        }
         // R6.2/R6.8/C7 (Task 11): reconciliar un `MERGE_HEAD` abierto por un
         // crash a mitad de un merge ANTES de cualquier guard general — hoy
         // ningún guard existente (`verifyBranchInvariant` incluido) rechaza
@@ -196,8 +338,8 @@ export class Supervisor {
         // mismo resultado terminal.
         if (before.frozen !== undefined) return 'frozen';
         const pending = before.cycle.nextAction;
-        const resumePrompt = pending !== undefined ? `el next_action ${pending.actionId} del journal` : 'el plan del ciclo desde el journal';
-        if (this.ensureController(resumePrompt) === 'custody') return 'custody';
+        const resumeAction: ControllerRecoveryAction = recoveryResumeAction ?? { schema: 'controller-recovery/v1', kind: pending !== undefined ? 'resume-next-action' : 'resume-cycle' };
+        if (this.ensureController(resumeAction) === 'custody') return 'custody';
         const r0 = readJournal(this.repoRoot, this.branch);
         if (r0.corrupt || r0.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
         const gen = activeGeneration(r0.state);
@@ -234,7 +376,7 @@ export class Supervisor {
         if (!finalizing && afterRequests.state !== null && activeGeneration(afterRequests.state) === undefined
             && afterRequests.state.generations.length > 0 && afterRequests.state.cycle.status === 'IN_PROGRESS') {
             beginGeneration(this.repoRoot, this.branch);
-            if (this.ensureController(resumePrompt) === 'custody') return 'custody';
+            if (this.ensureController(resumeAction) === 'custody') return 'custody';
         }
         // R5.2/R6.3 (Task 10): recién leído tras `consumePendingRequests` —
         // si el request `track-freeze-request` llegó en ESTE tick, `apply.ts`
@@ -402,8 +544,8 @@ export class Supervisor {
         if (Date.now() < this.relaunchNotBefore) return false;   // esperando backoff, auditando
         beginGeneration(this.repoRoot, this.branch);
         const nextAction = readJournal(this.repoRoot, this.branch).state!.cycle.nextAction;
-        const prompt = nextAction !== undefined ? `el next_action ${nextAction.actionId} del journal` : 'el plan del ciclo desde el journal';
-        const launched = this.ensureController(prompt);
+        const action: ControllerRecoveryAction = { schema: 'controller-recovery/v1', kind: nextAction !== undefined ? 'resume-next-action' : 'resume-cycle' };
+        const launched = this.ensureController(action);
         if (launched === 'custody') return true;
         if (launched === 'ok') {
             this.backoff.recordRelaunch();
@@ -419,9 +561,13 @@ export class Supervisor {
 export async function runSupervisorLoop(
     repoRoot: string, branch: string, cfg: SupervisorConfig,
     spawner: WrapperSpawner = defaultWrapperSpawner(), trackRuntime?: TrackRuntime,
+    dispatchAdmission?: DispatchAdmission,
 ): Promise<void> {
     const r = readJournal(repoRoot, branch);
     if (r.corrupt || r.state === null) throw new Error('journal ausente o corrupto: corre `awm watch --init` primero');
+    if (r.state.schema !== 2 || !r.state.planBinding) {
+        throw new Error('journal legacy o sin binding compacto: `awm watch` no puede ejecutar ni despachar trabajo');
+    }
     verifyBranchInvariant(repoRoot, r.state.branch);
     if (r.state.cycle.status === 'COMPLETE') return;
     const handle = acquireLock(repoRoot);
@@ -431,7 +577,7 @@ export async function runSupervisorLoop(
     const onSignal = () => { shutdownRequested = true; wakeSleep?.(); };
     process.on('SIGINT', onSignal);
     process.on('SIGTERM', onSignal);
-    const sup = new Supervisor(repoRoot, branch, cfg, spawner, trackRuntime);
+    const sup = new Supervisor(repoRoot, branch, cfg, spawner, trackRuntime, dispatchAdmission);
     try {
         const s0 = readJournal(repoRoot, branch).state!;
         if (activeGeneration(s0) === undefined) {

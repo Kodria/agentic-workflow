@@ -1,11 +1,16 @@
 import { Command } from 'commander';
 import { execFileSync } from 'child_process';
-import { initWatch } from './init';
+import { initWatch, rebindWatchPlan } from './init';
 import { runSupervisorLoop, DEFAULT_SUPERVISOR_CONFIG } from './supervisor';
 import { EXEC_STDIO } from '../../core/journal/process';
 import { WATCH_PROVIDERS, isWatchProvider } from '../../core/journal/adapter';
 import { resolveCommandContext } from '../../core/tracks/context';
 import { parseMaxParallel, loadDefaultParallelism } from '../../core/tracks/concurrency';
+import { validatePlanFile } from '../../core/plan/validate';
+import path from 'path';
+import { archiveUnusedWatch, watchJournalStatus } from './archive-unused';
+import { readJournal } from '../../core/journal/store';
+import { computeFingerprint } from '../../core/journal/fingerprint';
 
 function currentBranch(cwd: string): string {
     // stdio explicito (ver EXEC_STDIO en journal/process.ts): evita el relay
@@ -22,11 +27,21 @@ function minutes(flag: string, raw: string): number {
     return n * 60000;
 }
 
+function validPlanPath(value: unknown): value is string {
+    return typeof value === 'string' && value.length > 0 && value.length <= 4096 && !/[\u0000-\u001F\u007F-\u009F]/.test(value);
+}
+
+function planForBinding(repo: string, rawPath: string) {
+    const report = validatePlanFile(rawPath, repo);
+    return { path: path.relative(repo, path.resolve(repo, rawPath)).replace(/\\/g, '/'), report };
+}
+
 export function registerWatchCommand(program: Command): void {
-    program
+    const watch = program
         .command('watch')
         .description('supervisor durable: ejecuta jobs, releva controladores caidos, nunca mata trabajo vivo')
         .option('--init', 'bootstrap: crea el journal de la rama actual, detecta verificadores y sale')
+        .option('--plan <path>', 'plan compacto desatendido que se vincula al inicializar')
         .option('--provider <p>', WATCH_PROVIDERS.join(' | '), 'codex')
         .option('--heartbeat-timeout <min>', 'minutos de silencio de heartbeat', '5')
         .option('--activity-window <min>', 'minutos extra sin actividad de proceso', '10')
@@ -43,8 +58,24 @@ export function registerWatchCommand(program: Command): void {
                 process.stderr.write(`${(e as Error).message}\n`);
                 process.exit(1);
             }
+            if (opts.plan !== undefined && !opts.init) {
+                process.stderr.write('--plan requiere --init\n');
+                process.exitCode = 1;
+                return;
+            }
+            if (opts.init && opts.plan === undefined) {
+                process.stderr.write('watch --init requiere --plan con un plan compacto válido\n');
+                process.exitCode = 1;
+                return;
+            }
+            if (opts.plan !== undefined && !validPlanPath(opts.plan)) {
+                process.stderr.write('--plan requiere un path sin caracteres de control\n');
+                process.exitCode = 1;
+                return;
+            }
             if (opts.init) {
-                const out = initWatch(repo, branch);
+                const plan = opts.plan === undefined ? undefined : planForBinding(repo, opts.plan);
+                const out = initWatch(repo, branch, plan);
                 process.stdout.write(`journal inicializado para ${branch}; verificadores requeridos: ${JSON.stringify(out.requiredVerifiers)}\n`);
                 return;
             }
@@ -69,5 +100,74 @@ export function registerWatchCommand(program: Command): void {
             process.stdout.write(`awm watch: supervisor activo (${cfg.provider}) — Ctrl-C para terminar\n`);
             await runSupervisorLoop(repo, branch, cfg);
             process.stdout.write('gate verde: ciclo COMPLETE — drenado, lock liberado, apagando\n');
+        });
+
+    watch
+        .command('rebind')
+        .description('reconcilia intencionalmente el binding desatendido tras un cambio válido del ciclo del plan')
+        // `watch` conserva su --plan histórico para `watch --init --plan`.
+        // Commander lo asocia al padre incluso después del subcomando, por lo
+        // que este option es documental y la acción toma el valor del padre
+        // cuando corresponde; marcarlo required acá rechazaría una invocación
+        // válida antes de llegar a esa reconciliación explícita.
+        .option('--plan <path>', 'mismo plan compacto previamente vinculado; valida y conserva la historia antes de actualizar su digest')
+        .action((opts: { plan?: unknown }, command: Command) => {
+            const repo = process.cwd();
+            const branch = currentBranch(repo);
+            try {
+                resolveCommandContext(repo, branch);
+            } catch (e) {
+                process.stderr.write(`${(e as Error).message}\n`);
+                process.exitCode = 1;
+                return;
+            }
+            const plan = opts.plan ?? command.parent?.opts().plan;
+            if (!validPlanPath(plan)) {
+                process.stderr.write('--plan requiere un path sin caracteres de control\n');
+                process.exitCode = 1;
+                return;
+            }
+            try {
+                const binding = rebindWatchPlan(repo, branch, planForBinding(repo, plan));
+                process.stdout.write(`binding reconciliado para ${binding.path}; digest ${binding.digest}\n`);
+                const state = readJournal(repo, branch).state!;
+                const staleJobs = Object.values(state.jobs).filter(job => job.verdict === 'pass' && (() => {
+                    try { return computeFingerprint(repo, job.argv, job.paths, job.cwd).fingerprint !== job.fingerprint; }
+                    catch { return true; }
+                })()).map(job => job.id);
+                if (staleJobs.length > 0) {
+                    process.stdout.write(`stale-fingerprint: ${staleJobs.join(', ')}; el rebind no conserva PASS con fingerprint cambiado. Re-ejecutar las verificaciones afectadas mediante awm job request con generation, paths y satisfies originales; no repetir watch/rebind ni re-fingerprinting de evidencia anterior.\n`);
+                }
+            } catch (e) {
+                process.stderr.write(`${(e as Error).message}\n`);
+                process.exitCode = 1;
+            }
+        });
+
+    watch.command('archive-unused')
+        .description('archiva recuperablemente solo un bootstrap no utilizado; nunca declara COMPLETE ni crea evidencia de ejecución')
+        .option('--plan <path>', 'mismo plan vinculado al bootstrap; no adopta evidencia de trabajo manual')
+        .action((opts: { plan?: unknown }, command: Command) => {
+            const repo = process.cwd();
+            const branch = currentBranch(repo);
+            try {
+                resolveCommandContext(repo, branch);
+                const plan = opts.plan ?? command.parent?.opts().plan;
+                if (!validPlanPath(plan)) throw new Error('--plan requiere un path sin caracteres de control');
+                const relative = path.relative(repo, path.resolve(repo, plan)).replace(/\\/g, '/');
+                process.stdout.write(`${JSON.stringify(archiveUnusedWatch(repo, branch, relative))}\n`);
+            } catch (error) {
+                process.stderr.write(`${(error as Error).message}\n`);
+                process.exitCode = 1;
+            }
+        });
+
+    watch.command('journal-status')
+        .description('consulta read-only el journal de la rama actual: missing | corrupt | present; no exporta contenido')
+        .option('--json', 'estado estructural y metadata de binding, sin cuerpos ni evidencia inferida')
+        .action(() => {
+            const repo = process.cwd();
+            const branch = currentBranch(repo);
+            process.stdout.write(`${JSON.stringify(watchJournalStatus(repo, branch))}\n`);
         });
 }

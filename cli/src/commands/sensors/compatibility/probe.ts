@@ -43,10 +43,15 @@ function configFlag(variantArgs?: string[]): string[] {
 }
 
 /** Executes only the closed probe enum. Raw output is intentionally discarded. */
-export async function runCompatibilityProbe(probe: { kind: CompatibilityProbe }, evidence: ProbeEvidence, executor: ProbeExecutor = runStructuredCommand): Promise<ProbeResult> {
+export async function runCompatibilityProbe(probe: { kind: CompatibilityProbe; script?: string }, evidence: ProbeEvidence, executor: ProbeExecutor = runStructuredCommand): Promise<ProbeResult> {
     if (!probe || typeof probe !== 'object' || !KINDS.has(probe.kind)) throw new Error('compatibility probe kind must be allowed');
     if (!evidence || typeof evidence.cwd !== 'string' || evidence.cwd.trim() === '') throw new Error('probe evidence requires cwd');
-    if (probe.kind === 'package-script-present') return { status: (evidence.scripts?.length ?? 0) > 0 ? 'matched' : 'not-matched', reason: 'package-script' };
+    if (probe.kind === 'package-script-present') {
+        const script = (probe as { script?: unknown }).script;
+        if (!Object.prototype.hasOwnProperty.call(probe, 'script')) return { status: 'unverifiable', reason: 'package-script-name-required' };
+        if (typeof script !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9:_-]*$/.test(script)) throw new Error('package-script-present probe requires a named package script');
+        return { status: evidence.scripts?.includes(script) ? 'matched' : 'not-matched', reason: 'package-script' };
+    }
     if (probe.kind === 'config-present') return { status: (evidence.configFiles?.length ?? 0) > 0 ? 'matched' : 'not-matched', reason: 'config-file' };
     try {
         const result = await executor(commandFor(probe.kind, evidence)!, { cwd: evidence.cwd, timeout: 5_000, maxBuffer: 64 * 1024 });

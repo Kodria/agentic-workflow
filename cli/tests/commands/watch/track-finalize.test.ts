@@ -22,6 +22,8 @@ import { canCompleteCohort, reconcileTracks, defaultTrackRuntime, TrackRuntime }
 import { WrapperSpawner } from '../../../src/commands/watch/runner';
 import { runExecWrapper } from '../../../src/commands/job/exec-wrapper';
 import { initWatch } from '../../../src/commands/watch/init';
+import { validatePlanFile } from '../../../src/core/plan/validate';
+import type { AdmissionReport } from '../../../src/core/admission';
 import { emitRequest, listPendingRequests } from '../../../src/core/journal/requests';
 import { registerTrackIntegrationItems, consumePendingRequests } from '../../../src/commands/watch/apply';
 import { activeGeneration } from '../../../src/commands/watch/generations';
@@ -32,6 +34,22 @@ import { integrationLockPath, eventsPath } from '../../../src/core/journal/paths
 import { emptyState } from '../../../src/core/journal/types';
 import { initRepo, commitFile } from '../../helpers/git-fixture';
 import type { Job, JournalState, TrackRef } from '../../../src/core/journal/types';
+
+const admitted = async (): Promise<AdmissionReport> => ({
+    state: 'admitted', planState: 'valid', executionMode: 'desatendido',
+    journal: 'current', currentness: 'current', sensors: 'pass', diagnostics: [],
+});
+
+function initCompactWatch(repoRoot: string, branch: string): void {
+    const planPath = path.join(repoRoot, 'plans', 'fixture.md');
+    fs.mkdirSync(path.dirname(planPath), { recursive: true });
+    fs.writeFileSync(planPath, fs.readFileSync(path.join(__dirname, '../../core/plan/fixtures/compact-slices-v1/valid.md'), 'utf8'));
+    fs.writeFileSync(path.join(repoRoot, 'source.md'), '## Canonical source\nfixture source\n');
+    git(repoRoot, 'add', 'plans/fixture.md', 'source.md'); git(repoRoot, 'commit', '-qm', 'compact plan fixture');
+    const report = validatePlanFile('plans/fixture.md', repoRoot);
+    if (report.state !== 'valid') throw new Error(`compact fixture must validate: ${JSON.stringify(report)}`);
+    initWatch(repoRoot, branch, { path: 'plans/fixture.md', report });
+}
 
 function git(cwd: string, ...args: string[]): void {
     execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], { cwd, stdio: 'pipe' });
@@ -279,7 +297,7 @@ function finalizerHarness(trackIds: string[]): Harness {
     git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'seed');
     fs.mkdirSync(path.join(repo, '.awm'), { recursive: true });
     fs.writeFileSync(path.join(repo, '.awm', 'sensors.json'), '{}');
-    initWatch(repo, 'main');   // gitignora .awm, detecta requiredVerifiers (test+sensors, R3.6)
+    initCompactWatch(repo, 'main');   // gitignora .awm, detecta requiredVerifiers (test+sensors, R3.6)
     git(repo, 'add', '.gitignore'); git(repo, 'commit', '-qm', 'gitignore .awm');
     const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
 
@@ -321,7 +339,7 @@ function finalizerHarness(trackIds: string[]): Harness {
     });
 
     const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10, provider: 'codex' };
-    let sup = new Supervisor(repo, 'main', cfg, spawner);
+    let sup = new Supervisor(repo, 'main', cfg, spawner, undefined, admitted);
 
     const realFingerprintNow = (argv: string[], paths: string[], cwd: string): string | null => {
         try { return computeFingerprint(repo, argv, paths, cwd).fingerprint; } catch { return null; }
@@ -394,7 +412,7 @@ function finalizerHarness(trackIds: string[]): Harness {
                 .map((j) => ({ argv: j.argv, paths: j.paths, cwd: j.cwd, satisfies: [...(j.satisfies ?? [])].sort() }));
         },
         integrationWrapperCalls() { return integrationCalls; },
-        crashAndRestart() { sup = new Supervisor(repo, 'main', cfg, spawner); },
+        crashAndRestart() { sup = new Supervisor(repo, 'main', cfg, spawner, undefined, admitted); },
         interlock() {
             const s = readJournal(repo, 'main').state!;
             return computeGate(s, false, realFingerprintNow);

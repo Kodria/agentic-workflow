@@ -13,8 +13,16 @@ import { initJournal, readJournal, writeJournal } from '../../../src/core/journa
 import { supervisorLockPath } from '../../../src/core/journal/paths';
 import { spawnStructured } from '../../../src/core/journal/process';
 import { computeFingerprint } from '../../../src/core/journal/fingerprint';
+import * as fingerprint from '../../../src/core/journal/fingerprint';
 import { reconcileTracks, defaultTrackRuntime, TrackRuntime, SupervisorObservation } from '../../../src/commands/watch/tracks';
 import type { TrackRef, ProcessRef } from '../../../src/core/journal/types';
+import type { AdmissionReport } from '../../../src/core/admission';
+import { validatePlanFile } from '../../../src/core/plan/validate';
+import * as registryInventory from '../../../src/core/registries';
+import * as currentnessCheck from '../../../src/core/currentness/check';
+import * as sensorCommands from '../../../src/commands/sensors/run';
+import * as preferencesConfig from '../../../src/utils/config';
+import { providerFor } from '../../../src/providers';
 
 jest.setTimeout(60000);
 
@@ -49,6 +57,29 @@ function setupRepo(): string {
     fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"' } }));
     fs.writeFileSync(path.join(repo, '.awm', 'sensors.json'), '{}');
     return repo;
+}
+
+const admitted = async (): Promise<AdmissionReport> => ({
+    state: 'admitted', planState: 'valid', executionMode: 'desatendido',
+    journal: 'current', currentness: 'current', sensors: 'pass', diagnostics: [],
+});
+
+/** Legacy fixtures predate compact-only admission; make their execution contract explicit. */
+function initUnattendedFixture(repo: string): void {
+    initWatch(repo, 'main');
+    const planPath = path.join(repo, 'plans', 'fixture.md');
+    fs.mkdirSync(path.dirname(planPath), { recursive: true });
+    fs.writeFileSync(planPath, fs.readFileSync(path.join(__dirname, '../../core/plan/fixtures/compact-slices-v1/valid.md'), 'utf8'));
+    fs.writeFileSync(path.join(repo, 'source.md'), '## Canonical source\nfixture source\n');
+    const plan = validatePlanFile('plans/fixture.md', repo);
+    if (plan.state !== 'valid') throw new Error('compact fixture must validate');
+    const state = readJournal(repo, 'main').state!;
+    state.schema = 2;
+    state.planBinding = {
+        path: 'plans/fixture.md', digest: plan.planDigest, schema: plan.schema,
+        executionMode: 'desatendido', boundAt: new Date().toISOString(),
+    };
+    writeJournal(repo, 'main', state);
 }
 
 function emitVerdict(repo: string, token: string, obligationId: string, verdictId: string): void {
@@ -166,43 +197,66 @@ describe('supervisor loop', () => {
         process.env.PATH = `${stubBin}${path.delimiter}${process.env.PATH}`;
     });
     afterEach(() => {
+        jest.restoreAllMocks();
         process.env.PATH = oldPath;
         fs.rmSync(repo, { recursive: true, force: true });
         fs.rmSync(stubBin, { recursive: true, force: true });
     });
 
     test('ticks drenan y declaran COMPLETE solo con gate verde + cero vivos (R4.5)', async () => {  // verifies R4.5
-        initWatch(repo, 'main');    // sin package.json => requiredVerifiers []
+        initUnattendedFixture(repo);
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', tickMs: 50, reconcileGraceMs: 10000 };
-        const sup = new Supervisor(repo, 'main', cfg, fakeSpawner);
+        // Recovery classification has its own unit suite. This lifecycle test
+        // owns draining/COMPLETE, so pin the recovered schema-2 fixture green
+        // and do not leak the external controller stub merely to test wrappers.
+        const recovery = jest.spyOn(fingerprint, 'reconcileUnattendedRecovery').mockReturnValue({
+            state: 'ready', nextAction: 'select-work', activeJobIds: [], diagnostics: [],
+        });
+        let controllerSpawnAttempts = 0;
+        const lifecycleSpawner: WrapperSpawner = (job, nonce, logsRoot, repoRoot) => {
+            if (job.argv[0] === 'codex') { controllerSpawnAttempts++; return; }
+            fakeSpawner(job, nonce, logsRoot, repoRoot);
+        };
+        const sup = new Supervisor(repo, 'main', cfg, lifecycleSpawner, undefined, admitted);
+        // The schema-2 recovery path only consumes requests authorized by the
+        // active generation. Establish it before issuing the scenario facts;
+        // the legacy fixture's hard-coded `g0` was never consumed and left the
+        // fake controller running forever in `select-work`.
+        const generation = beginGeneration(repo, 'main');
         // el controlador (aqui: el test) registra plan de ciclo + task + jobs enlazados
-        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e1',
+        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: generation.token, idempotencyKey: 'e1',
             payload: { entity: 'task', taskId: 'T1', title: 't', verificationPlan: [{ id: 'v1', kind: 'test' }, { id: 'v-sensors', kind: 'sensors' }], reviewObligations: [{ id: 'o-spec', kind: 'spec' }, { id: 'o-quality', kind: 'quality' }] } });
-        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e2',
+        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: generation.token, idempotencyKey: 'e2',
             payload: { entity: 'cycle-plan', items: [{ id: 'cv1', kind: 'qa' }, { id: 'cv-interlock', kind: 'interlock' }] } });
-        requestJob(repo, 'main', 'g0', ['node', '-e', 'setTimeout(()=>process.exit(0), 400)'], [], '.', { satisfies: 'v1' });
-        requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v-sensors' });
-        requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv1' });
-        requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv-interlock' });
-        emitVerdict(repo, 'g0', 'o-spec', 'verd-spec');
-        emitVerdict(repo, 'g0', 'o-quality', 'verd-quality');
-        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e3',
+        requestJob(repo, 'main', generation.token, ['node', '-e', 'setTimeout(()=>process.exit(0), 400)'], [], '.', { satisfies: 'v1' });
+        requestJob(repo, 'main', generation.token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v-sensors' });
+        requestJob(repo, 'main', generation.token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv1' });
+        requestJob(repo, 'main', generation.token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv-interlock' });
+        emitVerdict(repo, generation.token, 'o-spec', 'verd-spec');
+        emitVerdict(repo, generation.token, 'o-quality', 'verd-quality');
+        emitRequest(repo, 'main', { kind: 'register-entity', generationToken: generation.token, idempotencyKey: 'e3',
             payload: { entity: 'task-status', taskId: 'T1', status: 'done' } });
-        let sawContinueWithLiveJob = false;
-        let outcome = 'continue';
-        for (let i = 0; i < 400 && outcome !== 'complete'; i++) {
-            outcome = await sup.tick();
-            const s = readJournal(repo, 'main').state!;
-            const live = Object.values(s.jobs).some((j) => ['received', 'spawn-intent', 'claimed', 'running'].includes(j.executionState));
-            if (outcome === 'continue' && live) sawContinueWithLiveJob = true;   // drenaje ANTES de COMPLETE
-            await new Promise((r) => setTimeout(r, 50));
+        try {
+            let sawContinueWithLiveJob = false;
+            let outcome = 'continue';
+            for (let i = 0; i < 400 && outcome !== 'complete'; i++) {
+                outcome = await sup.tick();
+                const s = readJournal(repo, 'main').state!;
+                const live = Object.values(s.jobs).some((j) => ['received', 'spawn-intent', 'claimed', 'running'].includes(j.executionState));
+                if (outcome === 'continue' && live) sawContinueWithLiveJob = true;   // drenaje ANTES de COMPLETE
+                await new Promise((r) => setTimeout(r, 50));
+            }
+            expect(outcome).toBe('complete');
+            expect(sawContinueWithLiveJob).toBe(true);
+            const final = readJournal(repo, 'main').state!;
+            expect(final.cycle.status).toBe('COMPLETE');
+            expect(typeof final.cycle.completedAt).toBe('string');
+            expect(Object.values(final.jobs).every((j) => j.executionState === 'exited' && j.verdict === 'pass')).toBe(true);
+            expect(final.generations.every((entry) => entry.state === 'terminated' && entry.processRef === undefined)).toBe(true);
+            expect(controllerSpawnAttempts).toBeGreaterThan(0);
+        } finally {
+            recovery.mockRestore();
         }
-        expect(outcome).toBe('complete');
-        expect(sawContinueWithLiveJob).toBe(true);
-        const final = readJournal(repo, 'main').state!;
-        expect(final.cycle.status).toBe('COMPLETE');
-        expect(typeof final.cycle.completedAt).toBe('string');
-        expect(Object.values(final.jobs).every((j) => j.executionState === 'exited' && j.verdict === 'pass')).toBe(true);
     });
 
     // Regresion (post-review #2, Task 12/R7 — Finding 2 de la segunda ronda
@@ -222,7 +276,7 @@ describe('supervisor loop', () => {
     // vivos) y confirma que `cycle.status` llega a COMPLETE por ese camino
     // generico, exactamente como lo haria un plan sin tracks en absoluto.
     test('una cohorte que cayo a fallback SERIAL via el reducer real no cuelga el ciclo: COMPLETE llega igual por el camino generico (regresion post-review R7, ronda 2)', async () => {  // verifies R7
-        initWatch(repo, 'main');
+        initUnattendedFixture(repo);
         const tracksRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-loop-tracks-'));
         try {
             const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
@@ -248,21 +302,32 @@ describe('supervisor loop', () => {
             // --- Fase 2: sobre ESE MISMO journal, completar el ciclo por el
             // camino generico (task done + qa/interlock satisfechos + cero
             // jobs vivos) — la misma receta que la prueba R4.5 de arriba.
-            emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e1',
+            const generation = beginGeneration(repo, 'main');
+            emitRequest(repo, 'main', { kind: 'register-entity', generationToken: generation.token, idempotencyKey: 'e1',
                 payload: { entity: 'task', taskId: 'T1', title: 't', verificationPlan: [{ id: 'v1', kind: 'test' }, { id: 'v-sensors', kind: 'sensors' }], reviewObligations: [{ id: 'o-spec', kind: 'spec' }, { id: 'o-quality', kind: 'quality' }] } });
-            emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e2',
+            emitRequest(repo, 'main', { kind: 'register-entity', generationToken: generation.token, idempotencyKey: 'e2',
                 payload: { entity: 'cycle-plan', items: [{ id: 'cv1', kind: 'qa' }, { id: 'cv-interlock', kind: 'interlock' }] } });
-            requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v1' });
-            requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v-sensors' });
-            requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv1' });
-            requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv-interlock' });
-            emitVerdict(repo, 'g0', 'o-spec', 'verd-spec');
-            emitVerdict(repo, 'g0', 'o-quality', 'verd-quality');
-            emitRequest(repo, 'main', { kind: 'register-entity', generationToken: 'g0', idempotencyKey: 'e3',
+            requestJob(repo, 'main', generation.token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v1' });
+            requestJob(repo, 'main', generation.token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'v-sensors' });
+            requestJob(repo, 'main', generation.token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv1' });
+            requestJob(repo, 'main', generation.token, ['node', '-e', 'process.exit(0)'], [], '.', { satisfies: 'cv-interlock' });
+            emitVerdict(repo, generation.token, 'o-spec', 'verd-spec');
+            emitVerdict(repo, generation.token, 'o-quality', 'verd-quality');
+            emitRequest(repo, 'main', { kind: 'register-entity', generationToken: generation.token, idempotencyKey: 'e3',
                 payload: { entity: 'task-status', taskId: 'T1', status: 'done' } });
 
             const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', tickMs: 50, reconcileGraceMs: 10000 };
-            const sup = new Supervisor(repo, 'main', cfg, fakeSpawner);
+            // The compact recovery reducer is verified independently. This test
+            // exercises the fallback SERIAL completion path, so avoid an
+            // external controller process while keeping real job wrappers.
+            jest.spyOn(fingerprint, 'reconcileUnattendedRecovery').mockReturnValue({
+                state: 'ready', nextAction: 'select-work', activeJobIds: [], diagnostics: [],
+            });
+            const lifecycleSpawner: WrapperSpawner = (job, nonce, logsRoot, repoRoot) => {
+                if (job.argv[0] === 'codex') return;
+                fakeSpawner(job, nonce, logsRoot, repoRoot);
+            };
+            const sup = new Supervisor(repo, 'main', cfg, lifecycleSpawner, undefined, admitted);
             let outcome = 'continue';
             for (let i = 0; i < 400 && outcome !== 'complete'; i++) {
                 outcome = await sup.tick();
@@ -273,36 +338,118 @@ describe('supervisor loop', () => {
             expect(final.cycle.status).toBe('COMPLETE');
             expect(final.cohortPhase).toBe('SERIAL');   // nunca inventa una transicion SERIAL -> COMPLETE
             for (const t of final.tracks!) expect(['REMOVED', 'DECLARED']).toContain(t.phase);
+            const { refIsAlive } = require('../../../src/core/journal/process');
+            expect(final.generations.every((entry) => entry.state === 'terminated' && (entry.processRef === undefined || !refIsAlive(entry.processRef)))).toBe(true);
         } finally {
             fs.rmSync(tracksRoot, { recursive: true, force: true });
         }
     });
 
     test('tick verifica branch antes del launch y un ciclo COMPLETE no lanza otro controller', async () => {
-        initWatch(repo, 'main');
+        initUnattendedFixture(repo);
         let calls = 0;
         const spy: WrapperSpawner = () => { calls++; };
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10 };
         const s = readJournal(repo, 'main').state!;
         s.cycle.status = 'COMPLETE';
         writeJournal(repo, 'main', s);
-        expect(await new Supervisor(repo, 'main', cfg, spy).tick()).toBe('complete');
+        expect(await new Supervisor(repo, 'main', cfg, spy, undefined, admitted).tick()).toBe('complete');
         expect(calls).toBe(0);
 
         const reset = readJournal(repo, 'main').state!;
         reset.cycle.status = 'IN_PROGRESS';
         writeJournal(repo, 'main', reset);
         git(repo, 'checkout', '-qb', 'otra');
-        await expect(new Supervisor(repo, 'main', cfg, spy).tick()).rejects.toThrow(/rama|branch/i);
+        await expect(new Supervisor(repo, 'main', cfg, spy, undefined, admitted).tick()).rejects.toThrow(/rama|branch/i);
         expect(calls).toBe(0);
     });
 
+    test('una admisión compacta bloqueada no lanza controlador ni wrappers', async () => {
+        initUnattendedFixture(repo);
+        const state = readJournal(repo, 'main').state!;
+        state.schema = 2;
+        state.planBinding = { path: 'plans/exact.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1', executionMode: 'desatendido', boundAt: new Date().toISOString() };
+        writeJournal(repo, 'main', state);
+        requestJob(repo, 'main', 'g0', ['node', '-e', 'process.exit(0)'], [], '.');
+        let spawns = 0;
+        const blocked = async (): Promise<AdmissionReport> => ({ state: 'blocked', planState: 'valid', journal: 'current', currentness: 'stale', sensors: 'not-required', diagnostics: [{ code: 'ADMISSION_CURRENTNESS_BLOCKED', message: 'stale' }] });
+        const outcome = await new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, () => { spawns++; }, undefined, blocked).tick();
+        expect(outcome).toBe('custody');
+        expect(spawns).toBe(0);
+        expect(readJournal(repo, 'main').state!.cycle.status).toBe('BLOCKED');
+    });
+
+    test('native default admission blocks an actual incompatible runtime supplier on a project-only plan before sensors or dispatch', async () => {
+        initUnattendedFixture(repo);
+        const oldHome = process.env.HOME;
+        process.env.HOME = path.join(repo, 'isolated-home');
+        const registryRoot = path.join(repo, 'supplier-registry');
+        const skillSource = path.join(registryRoot, 'skills', 'using-awm');
+        fs.mkdirSync(skillSource, { recursive: true });
+        fs.writeFileSync(path.join(skillSource, 'SKILL.md'), 'runtime contract');
+        fs.writeFileSync(path.join(registryRoot, 'awm-registry.json'), '{"minCliVersion":"999.0.0"}');
+        const installed = providerFor('codex').skill.global!;
+        fs.mkdirSync(installed, { recursive: true });
+        fs.symlinkSync(skillSource, path.join(installed, 'using-awm'), process.platform === 'win32' ? 'junction' : 'dir');
+        const inventory = jest.spyOn(registryInventory, 'listRegistries').mockReturnValue([{ name: 'supplier', remote: 'https://example.invalid/supplier.git', contentRoot: registryRoot }]);
+        const preferences = jest.spyOn(preferencesConfig, 'readPreferences').mockReturnValue({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' });
+        const currentness = jest.spyOn(currentnessCheck, 'checkCurrentness').mockResolvedValue({ checkedAt: 'x', compatibility: { status: 'not-checked' }, components: ['cli', 'registry:supplier'].map(component => ({ component, installed: '1.0.0', latest: '1.0.0', channel: 'stable', source: 'fixture', checkedAt: 'x', status: 'current' as const, detail: 'ok', remedy: 'none' as const })) });
+        const sensors = jest.spyOn(sensorCommands, 'runSensors').mockResolvedValue({ overall: 'pass', sensors: [] });
+        let dispatches = 0;
+        try {
+            const outcome = await new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, () => { dispatches++; }).tick();
+            expect(outcome).toBe('custody');
+            expect(sensors).not.toHaveBeenCalled();
+            expect(dispatches).toBe(0);
+            expect(readJournal(repo, 'main').state!.cycle.status).toBe('BLOCKED');
+            expect(readJournal(repo, 'main').state!.cycle.blockedReason).toContain('ADMISSION_REGISTRY_CLI_INCOMPATIBLE');
+            expect(readJournal(repo, 'main').state!.cycle.blockedReason).toContain('999.0.0');
+        } finally { inventory.mockRestore(); preferences.mockRestore(); currentness.mockRestore(); sensors.mockRestore(); if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; }
+    });
+
+    test.each([
+        ['cycle BLOCKED', (s: ReturnType<typeof readJournal>['state']) => { s!.cycle.status = 'BLOCKED'; }],
+        ['request problem durable', (s: ReturnType<typeof readJournal>['state']) => { s!.requestProblems.push({ file: 'x.request.json', kind: 'rejected', detail: 'x', at: new Date().toISOString() }); }],
+        ['verificador requerido ausente tras tasks completadas', (s: ReturnType<typeof readJournal>['state']) => {
+            s!.tasks.push({ id: 'T1', title: 'terminada', status: 'done', attempts: 1, verificationPlan: [], reviewObligations: [] });
+            s!.requiredVerifiers = ['test'];
+        }],
+    ])('recovery fail-closed: %s entra en custodia sin controller ni dispatch', async (_name, mutate) => {
+        initUnattendedFixture(repo);
+        const state = readJournal(repo, 'main').state!;
+        mutate(state);
+        writeJournal(repo, 'main', state);
+        let spawns = 0;
+        const outcome = await new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, () => { spawns++; }, undefined, admitted).tick();
+        expect(outcome).toBe('custody');
+        expect(spawns).toBe(0);
+        expect(readJournal(repo, 'main').state!.cycle.status).toBe('BLOCKED');
+    });
+
+    test('un journal schema-1 legacy no despacha controller ni jobs aunque contenga trabajo pendiente', async () => {
+        initJournal(repo, 'main');
+        const legacy = readJournal(repo, 'main').state!;
+        legacy.jobs.pending = {
+            id: 'pending', fingerprint: '', commandDigest: '', argv: ['node', '-e', 'process.exit(0)'], cwd: '.', paths: [], expandedPaths: [],
+            executionState: 'received', observationState: 'progressing', phaseTimestamps: {},
+        };
+        writeJournal(repo, 'main', legacy);
+        let spawns = 0;
+
+        const outcome = await new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, () => { spawns++; }).tick();
+
+        expect(outcome).toBe('custody');
+        expect(spawns).toBe(0);
+        expect(readJournal(repo, 'main').state!.generations).toEqual([]);
+        expect(readJournal(repo, 'main').state!.jobs.pending.executionState).toBe('received');
+    });
+
     test('fallo de launch queda durable y entra en backoff sin tumbar el supervisor (R4.3)', async () => {
-        initWatch(repo, 'main');
+        initUnattendedFixture(repo);
         beginGeneration(repo, 'main');
         let calls = 0;
         const failing: WrapperSpawner = () => { calls++; throw new Error('provider unavailable'); };
-        const sup = new Supervisor(repo, 'main', { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10 }, failing);
+        const sup = new Supervisor(repo, 'main', { ...DEFAULT_SUPERVISOR_CONFIG, tickMs: 10 }, failing, undefined, admitted);
         await expect(sup.tick()).resolves.toBe('continue');
         expect(calls).toBe(1);
         const intent = activeGeneration(readJournal(repo, 'main').state!)!;
@@ -313,7 +460,7 @@ describe('supervisor loop', () => {
     });
 
     test('custodia: doble senial + indeterminate => tick custody, lock retenido, proceso intacto (R4.2b/R4.5)', async () => {  // verifies R4.2b
-        initJournal(repo, 'main');
+        initUnattendedFixture(repo);
         beginGeneration(repo, 'main');
         const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 20000)'], process.cwd(), 'nCtl');
         let s = readJournal(repo, 'main').state!;
@@ -323,7 +470,7 @@ describe('supervisor loop', () => {
         fs.mkdirSync(path.dirname(supervisorLockPath(repo)), { recursive: true });
         fs.writeFileSync(supervisorLockPath(repo), 'lock-del-loop');              // el loop lo tendria: NO debe borrarse
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', heartbeatTimeoutMs: 1, activityWindowMs: 50, tickMs: 20 };
-        const sup = new Supervisor(repo, 'main', cfg, fakeSpawner);
+        const sup = new Supervisor(repo, 'main', cfg, fakeSpawner, undefined, admitted);
         await sup.tick();                                       // primer tick: arranca el tracking de actividad
         await new Promise((r) => setTimeout(r, 150));           // actividad congelada > ventana
         const out = await sup.tick();
@@ -336,9 +483,12 @@ describe('supervisor loop', () => {
     });
 
     itPosix('runSupervisorLoop: bootstrap gen-1 con stub codex, COMPLETE => libera lock y termina su generacion (R4.1/R4.5/R2.4)', async () => {  // verifies R4.1
-        initWatch(repo, 'main');
+        initUnattendedFixture(repo);
+        jest.spyOn(fingerprint, 'reconcileUnattendedRecovery').mockReturnValue({
+            state: 'ready', nextAction: 'select-work', activeJobIds: [], diagnostics: [],
+        });
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', tickMs: 50, termGraceMs: 300, killGraceMs: 300 };
-        const loop = runSupervisorLoop(repo, 'main', cfg, fakeSpawner);
+        const loop = runSupervisorLoop(repo, 'main', cfg, fakeSpawner, undefined, admitted);
         await until(() => {
             const r = readJournal(repo, 'main');
             return r.state !== null && activeGeneration(r.state) !== undefined && fs.existsSync(supervisorLockPath(repo));
@@ -358,14 +508,18 @@ describe('supervisor loop', () => {
         // generacion propia terminada: cero procesos codex huerfanos (R2.4)
         const { refIsAlive } = require('../../../src/core/journal/process');
         expect(gen.processRef === undefined || !refIsAlive(gen.processRef)).toBe(true);
+        expect(gen.state).toBe('terminated');
     });
 
     itPosix('reinicio tras crash entre beginGeneration y spawn recupera la misma generacion sin quedar wedged', async () => {
-        initWatch(repo, 'main');
+        initUnattendedFixture(repo);
+        jest.spyOn(fingerprint, 'reconcileUnattendedRecovery').mockReturnValue({
+            state: 'ready', nextAction: 'select-work', activeJobIds: [], diagnostics: [],
+        });
         const begun = beginGeneration(repo, 'main');               // crash simulado: intent durable, sin ProcessRef
         const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', tickMs: 25, reconcileGraceMs: 300,
             termGraceMs: 300, killGraceMs: 300 };
-        const loop = runSupervisorLoop(repo, 'main', cfg, fakeSpawner);
+        const loop = runSupervisorLoop(repo, 'main', cfg, fakeSpawner, undefined, admitted);
         let recovered = false;
         try {
             await until(() => {
@@ -381,6 +535,10 @@ describe('supervisor loop', () => {
         }
         await loop;
         expect(recovered).toBe(true);
-        expect(readJournal(repo, 'main').state!.generations).toHaveLength(1);
+        const final = readJournal(repo, 'main').state!;
+        expect(final.generations).toHaveLength(1);
+        expect(final.generations[0].state).toBe('terminated');
+        const { refIsAlive } = require('../../../src/core/journal/process');
+        expect(final.generations[0].processRef === undefined || !refIsAlive(final.generations[0].processRef)).toBe(true);
     });
 });

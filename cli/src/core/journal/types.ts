@@ -4,6 +4,7 @@
 import crypto from 'crypto';
 import { TRACK_PHASES, JOIN_STRATEGY_NO_FF } from '../tracks/types';
 import type { CohortPhase, TrackPhase, JoinStrategy } from '../tracks/types';
+import { bindingPlanPath } from './paths';
 
 export const EXECUTION_STATES = [
     'received', 'spawn-intent', 'claimed', 'running',
@@ -140,6 +141,21 @@ export interface FixObligation { id: string; verdictId: string; closed: boolean;
 export interface RequestProblem { file: string; kind: 'corrupt' | 'rejected'; detail: string; at: string; }
 export interface CustodyDecision { at: string; decision: 'resume'; reason: string; generationToken: string; }
 
+/** Minimal durable custody proof for a compact unattended cycle.  It deliberately
+ * contains identity metadata only: never plan bodies, prompts, credentials, or
+ * model output. */
+export interface PlanBinding {
+    path: string;
+    digest: string;
+    /** Commitment issued from a verified plan snapshot. No body is persisted.
+     * Legacy journals omit both fields and cannot reconcile changed plans. */
+    executionDigest?: string;
+    executionIdentitySchema?: 'awm-plan-execution/v1';
+    schema: 'compact-slices/v1' | 'compact-slices/v2';
+    executionMode: 'desatendido';
+    boundAt: string;
+}
+
 export interface TaskEntity {
     id: string;
     title: string;
@@ -182,6 +198,18 @@ export interface Job {
     attemptOf?: string;     // job-id del attempt anterior (re-claim = attempt nuevo, R1.7)
 }
 
+export interface ControllerRecoveryAction {
+    schema: 'controller-recovery/v1';
+    kind: 'resume-cycle' | 'resume-next-action' | 'reconcile-active-jobs';
+}
+
+export function isControllerRecoveryAction(x: unknown): x is ControllerRecoveryAction {
+    return isObj(x) && Object.keys(x).length === 2
+        && x.schema === 'controller-recovery/v1'
+        && typeof x.kind === 'string'
+        && ['resume-cycle', 'resume-next-action', 'reconcile-active-jobs'].includes(x.kind);
+}
+
 export interface Generation {
     n: number;
     token: string;
@@ -189,7 +217,9 @@ export interface Generation {
     controllerJobId?: string; // intent durable del wrapper que lanza al controller
     spawnNonce?: string;
     provider?: string;
-    resumePrompt?: string;
+    resumePrompt?: string; // historical readability only; new launches reject legacy prompt custody
+    resumeAction?: ControllerRecoveryAction;
+    launchArgvDigest?: string;
     processRef?: ProcessRef;
     wrapperRef?: ProcessRef;
     launchedAt: string;
@@ -205,10 +235,19 @@ export interface AppliedRequest {
 }
 
 export interface JournalState {
-    schema: 1;
+    schema: 1 | 2;
     revision: number;
     journalId: string;         // identidad estable del journal (R9.1); legacy la recibe determinista (R9.3)
     branch: string;
+    /** Required exactly for schema 2; schema 1 remains readable historical state. */
+    planBinding?: PlanBinding;
+    /**
+     * Immutable prior bindings retained when an operator explicitly reconciles
+     * a completed plan lifecycle update.  The current binding is never
+     * silently replaced: the state transition records its predecessor in the
+     * same durable publication as the new binding.
+     */
+    planBindingHistory?: PlanBinding[];
     cycle: { status: CycleStatus; startedAt: string; completedAt?: string; nextAction?: NextAction; blockedReason?: string };
     cycleVerificationPlan: VerificationItem[];   // QA + interlock a nivel ciclo (R1.4b)
     requiredVerifiers: VerificationKind[];       // detectados mecánicamente en watch --init (R1.4b)
@@ -298,7 +337,10 @@ function isObj(x: unknown): x is Record<string, unknown> {
 
 export function isWellFormedState(x: unknown): x is JournalState {
     if (!isObj(x)) return false;
-    if (x.schema !== 1) return false;
+    if (x.schema !== 1 && x.schema !== 2) return false;
+    if (x.schema === 2 && !isWellFormedPlanBinding(x.planBinding)) return false;
+    if (x.schema === 1 && (x.planBinding !== undefined || x.planBindingHistory !== undefined)) return false;
+    if (x.planBindingHistory !== undefined && (!Array.isArray(x.planBindingHistory) || !x.planBindingHistory.every(isWellFormedPlanBinding))) return false;
     if (typeof x.revision !== 'number') return false;
     if (typeof x.journalId !== 'string' || x.journalId.length === 0) return false;
     if (typeof x.branch !== 'string') return false;
@@ -334,6 +376,19 @@ export function isWellFormedState(x: unknown): x is JournalState {
     if (x.qaFinalizeRequested !== undefined
         && !(isObj(x.qaFinalizeRequested) && typeof x.qaFinalizeRequested.headSha === 'string' && typeof x.qaFinalizeRequested.at === 'string')) return false;
     return true;
+}
+
+function isWellFormedPlanBinding(x: unknown): x is PlanBinding {
+    if (!(isObj(x)
+        && Object.keys(x).every(key => ['path', 'digest', 'schema', 'executionMode', 'boundAt', 'executionDigest', 'executionIdentitySchema'].includes(key))
+        && typeof x.path === 'string' && x.path.length > 0 && x.path.length <= 4096
+        && typeof x.digest === 'string' && /^[a-f0-9]{64}$/.test(x.digest)
+        && (x.executionDigest === undefined || (typeof x.executionDigest === 'string' && /^[a-f0-9]{64}$/.test(x.executionDigest)))
+        && (x.executionDigest === undefined ? x.executionIdentitySchema === undefined : x.executionIdentitySchema === 'awm-plan-execution/v1')
+        && (x.schema === 'compact-slices/v1' || x.schema === 'compact-slices/v2')
+        && x.executionMode === 'desatendido'
+        && typeof x.boundAt === 'string' && x.boundAt.length > 0)) return false;
+    try { return bindingPlanPath(x.path) === x.path; } catch { return false; }
 }
 
 function isWellFormedNextAction(x: unknown): x is NextAction {
@@ -378,6 +433,8 @@ function isWellFormedGeneration(x: unknown): x is Generation {
         && (x.spawnNonce === undefined || typeof x.spawnNonce === 'string')
         && (x.provider === undefined || typeof x.provider === 'string')
         && (x.resumePrompt === undefined || typeof x.resumePrompt === 'string')
+        && (x.resumeAction === undefined || isControllerRecoveryAction(x.resumeAction))
+        && (x.launchArgvDigest === undefined || (typeof x.launchArgvDigest === 'string' && /^[a-f0-9]{16}$/.test(x.launchArgvDigest)))
         && (x.processRef === undefined || isWellFormedProcessRef(x.processRef))
         && (x.wrapperRef === undefined || isWellFormedProcessRef(x.wrapperRef));
 }

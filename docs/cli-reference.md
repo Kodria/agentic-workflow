@@ -193,12 +193,84 @@ not evidence that a CLI or registry is current.
 ### `awm plan validate PLAN_PATH`
 
 Validate a `compact-slices/v1` plan without executing its commands, contacting the
-network, or rewriting the plan. A plan with no compact-plan marker retains the legacy
-full-quality path; unsupported or malformed compact declarations fail closed.
+network, or rewriting the plan. An unmarked plan is historical input that needs
+migration: validation reports `migration-required` with reason `unmarked-plan` and
+exits 2 in both human and JSON modes. Unsupported or malformed compact declarations
+also exit 2; only a valid `compact-slices/v1` plan exits 0.
 
 ```bash
 awm plan validate PLAN_PATH [--json] [--cwd <path>]
 ```
+
+### `awm plan admit PLAN_PATH`
+
+Read-only fail-closed admission for a valid compact plan. It checks the selected
+provider and, when requested, that consumed contracts are current, their declared
+`minCliVersion` is compatible with the installed CLI, and project
+sensors have an empirical PASS. It never initializes a journal or dispatches an
+agent. A blocked JSON report is the remediation boundary; it is not permission
+to run the plan.
+
+Consumed contracts include the configured registry supplying installed native
+planning/execution skills, even when the plan cites only project files. The
+provider's actual artifact paths and renderer determine which skills are present;
+an installed contract with unprovable ownership blocks currentness rather than
+silently excluding its registry. The supervisor uses the same admission scope
+and compatibility checks before native dispatch.
+
+```bash
+awm plan admit PLAN_PATH --provider <target> --cwd <path> [--execution-mode interactivo|desatendido] [--require-current] [--verify-sensors] [--json]
+```
+
+For unattended work, initialize the matching valid unattended plan first with
+`awm watch --init --plan PLAN_PATH`. Initialization binds the plan; it does not
+register tasks, review obligations, or a controller generation. Native dispatch
+requires that real runtime custody separately; an empty journal is not execution
+evidence. An interactive plan cannot be bound as unattended.
+
+`awm watch rebind --plan PLAN_PATH` may accept progress-only changes during a
+quiescent in-progress cycle when both bindings have a validated, hash-only
+`awm-plan-execution/v1` commitment. Only governed checkboxes and recognized
+standalone lifecycle markers are progress: requirements, source facts, commands,
+prose, fenced or malformed markers remain digest-sensitive. Legacy bindings
+without that commitment cannot be upgraded by rereading a new plan. Other changes
+require the existing completed, quiescent-cycle route. Rebind never rewrites job
+fingerprints or preserves a stale PASS; rerun affected verification jobs.
+
+### `awm watch journal-status`
+
+```bash
+awm watch journal-status [--json]
+```
+
+Read-only observation of the current branch: `missing`, `corrupt`, or `present`,
+with sanitized binding metadata and `bootstrapUnused`. It exports no plan,
+prompt, source body, or inferred completion evidence.
+
+### `awm watch archive-unused`
+
+```bash
+awm watch archive-unused --plan PLAN_PATH
+```
+
+Recoverably archive only a strictly unused matching bootstrap under the exclusive
+supervisor lock. Any runtime jobs, tasks, verdicts, generations, requests, or
+unrecognized artifacts block this route. The archived state remains
+`IN_PROGRESS`; the command neither declares `COMPLETE` nor certifies manually
+executed work. A real terminal cycle still requires its ordinary evidence capture.
+
+### `awm plan migration-facts PLAN_PATH`
+
+```bash
+awm plan migration-facts PLAN_PATH --cwd <path> --issue <https-url...> [--historical-root <path>] [--json]
+```
+
+Collect bounded, read-only historical facts into a report without rewriting the
+original plan or resuming its tasks. Completion requires task-owned, terminal,
+current file/command fingerprints and matching test, sensor, and review evidence.
+Missing or stale provenance preserves a pending antecedent; it never authorizes
+replaying checked work. The bounded `--historical-root` adapter admits only the
+issue-148 sibling worktree and requires links to both issues 126 and 148.
 
 #### Context Kernel v1 migration state
 
@@ -457,8 +529,10 @@ each environment updates its own AWM installation separately.
 New bootstrap declarations use `schemaVersion: 3` and retain the selected
 variant, structured command, contained assets, logical registry provenance, and
 initialization compatibility evidence without persisting a machine path. Legacy
-and v2 manifests remain readable; use `awm sensors bootstrap --dry-run` first,
-then rerun without `--dry-run` to perform the explicit v2 migration after review.
+and v2 manifests remain readable. A v2 migration preserves equivalent semantics;
+a legacy replacement cannot prove custom command equivalence and therefore
+requires the explicit `--mode project-sensors` selection. Use `--dry-run` first,
+then rerun with that mode only after reviewing the replacement.
 
 ```json
 {

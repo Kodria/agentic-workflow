@@ -5,7 +5,7 @@ jest.mock('../../../src/commands/sensors/compatibility/pack-source', () => ({ li
 jest.mock('../../../src/commands/sensors/compatibility/contract', () => ({ ...jest.requireActual('../../../src/commands/sensors/compatibility/contract'), parseSensorPack: jest.fn() }));
 jest.mock('../../../src/commands/sensors/compatibility/live', () => ({ resolveParsedPackCompatibility: jest.fn() }));
 jest.mock('../../../src/commands/sensors/compatibility/source', () => ({ resolveSensorSource: jest.fn() }));
-jest.mock('../../../src/commands/sensors/migrate', () => ({ planV2Migration: jest.fn(), replaceV2ManifestWithV3: jest.fn() }));
+jest.mock('../../../src/commands/sensors/migrate', () => ({ planV2Migration: jest.fn(), replaceV2ManifestWithV3: jest.fn(), replaceLegacyManifestWithV3: jest.fn() }));
 jest.mock('../../../src/commands/sensors/compatibility/materialize', () => ({ materializePortableSensors: jest.fn() }));
 jest.mock('../../../src/commands/sensors/compatibility/safe-file', () => ({ writeProjectFile: jest.fn(), withProjectLease: jest.fn((_root: string, operation: () => unknown) => operation()) }));
 
@@ -18,6 +18,7 @@ import { resolveParsedPackCompatibility } from '../../../src/commands/sensors/co
 import { resolveSensorSource } from '../../../src/commands/sensors/compatibility/source';
 import { planV2Migration } from '../../../src/commands/sensors/migrate';
 import { replaceV2ManifestWithV3 } from '../../../src/commands/sensors/migrate';
+import { replaceLegacyManifestWithV3 } from '../../../src/commands/sensors/migrate';
 import { materializePortableSensors } from '../../../src/commands/sensors/compatibility/materialize';
 import { withProjectLease, writeProjectFile } from '../../../src/commands/sensors/compatibility/safe-file';
 import fs from 'fs';
@@ -71,9 +72,26 @@ describe('planSensorBootstrap', () => {
         expect(planV2Migration).not.toHaveBeenCalled();
     });
 
-    it('preserves a legacy v1 manifest and blocks an ambiguous v2 source without writes', async () => {
-        (resolveSensorProject as jest.Mock).mockReturnValueOnce({ state: 'configured', projectRoot: root, manifestPath: `${root}/.awm/sensors.json`, packageRoot: root, manifest: { kind: 'legacy', pack: { pack: 'js-ts', sensors: {}, compatibility: {} } } });
-        await expect(planSensorBootstrap(root)).resolves.toMatchObject({ kind: 'blocked', reason: 'legacy-v1-preserved', changes: [] });
+    it('requires explicit project-sensors mode before replacing a legacy v1 manifest', async () => {
+        const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-bootstrap-legacy-'));
+        const manifestPath = path.join(project, '.awm', 'sensors.json');
+        const variant = { id: 'eslint-9', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: [] };
+        const pack = { schemaVersion: 2, name: 'js-ts', sensors: { lint: { variants: [variant] } } };
+        try {
+            fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+            fs.writeFileSync(manifestPath, JSON.stringify({ pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .' } } }));
+            (resolveSensorProject as jest.Mock).mockReturnValue({ state: 'configured', projectRoot: project, manifestPath, packageRoot: project, manifest: { kind: 'legacy', pack: { pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .' } }, compatibility: {} } } });
+            (listPackSources as jest.Mock).mockReturnValue([source]);
+            (parseSensorPack as jest.Mock).mockReturnValue({ kind: 'v2', pack });
+            (resolveParsedPackCompatibility as jest.Mock).mockResolvedValue({ pack, sensors: { lint: { state: 'certified', reason: 'ok', variantId: 'eslint-9', toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [] } } });
+
+            await expect(planSensorBootstrap(project)).resolves.toMatchObject({ kind: 'blocked', reason: 'legacy-replacement-requires-project-sensors-mode', changes: [] });
+            await expect(planSensorBootstrap(project, { mode: 'project-sensors' })).resolves.toMatchObject({ kind: 'migrate', changes: [{ path: '.awm/sensors.json', action: 'replace' }], migration: { kind: 'legacy-v1' }, source });
+            // A legacy manifest identifies the old pack; it is not an explicit
+            // opt-in to every optional sensor in that pack.
+            expect(resolveParsedPackCompatibility).toHaveBeenCalledWith(project, pack);
+        } finally { fs.rmSync(project, { recursive: true, force: true }); }
+
         (resolveSensorProject as jest.Mock).mockReturnValueOnce({ state: 'configured', projectRoot: root, manifestPath: `${root}/.awm/sensors.json`, packageRoot: root, manifest: { kind: 'v2', pack: { schemaVersion: 2, pack: 'js-ts', sensors: {} } } });
         (resolveSensorSource as jest.Mock).mockReturnValue({ kind: 'source-ambiguous', reason: 'multiple-compatible-registries', remedy: 'configure-one-logical-registry', candidates: ['a', 'b'] });
         await expect(planSensorBootstrap(root)).resolves.toMatchObject({ kind: 'blocked', reason: 'multiple-compatible-registries', changes: [] });
@@ -126,6 +144,27 @@ describe('planSensorBootstrap', () => {
         await expect(planSensorBootstrap(root, { mode: 'project-sensors' })).resolves.toMatchObject({ kind: 'blocked', reason: 'sensor-variant-unresolvable', changes: [] });
     });
 
+    it('omits explicit-opt-in sensors that are not applicable while retaining mandatory gates', async () => {
+        const variant = { id: 'main', command: { executable: 'tool', resolution: 'path', args: ['run'] }, assets: [] };
+        const pack = { schemaVersion: 2, name: 'js-ts', sensors: {
+            security: { variants: [variant] }, test: { variants: [variant] },
+            format: { applicability: { kind: 'explicit-opt-in' }, variants: [variant] },
+            mutation: { applicability: { kind: 'explicit-opt-in' }, variants: [variant] },
+        } };
+        (listPackSources as jest.Mock).mockReturnValue([source]);
+        (parseSensorPack as jest.Mock).mockReturnValue({ kind: 'v2', pack });
+        (resolveParsedPackCompatibility as jest.Mock).mockResolvedValue({ pack, sensors: {
+            security: { state: 'certified', reason: 'range-and-probe', variantId: 'main', toolVersion: '1.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=1', evidence: [] },
+            test: { state: 'certified', reason: 'range-and-probe', variantId: 'main', toolVersion: '1.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=1', evidence: [] },
+            format: { state: 'not-applicable', reason: 'applicability-not-met', variantId: null, toolVersion: null, runtimeVersion: null, certifiedRange: null, evidence: [] },
+            mutation: { state: 'not-applicable', reason: 'applicability-not-met', variantId: null, toolVersion: null, runtimeVersion: null, certifiedRange: null, evidence: [] },
+        } });
+
+        const plan = await planSensorBootstrap(root, { mode: 'project-sensors' });
+        expect(plan).toMatchObject({ kind: 'create', manifest: { sensors: { security: expect.any(Object), test: expect.any(Object) } } });
+        expect(Object.keys((plan as any).manifest.sensors)).toEqual(['security', 'test']);
+    });
+
     it('converts a compatibility probe failure into a stable blocked plan', async () => {
         (listPackSources as jest.Mock).mockReturnValue([source]);
         (parseSensorPack as jest.Mock).mockReturnValue({ kind: 'v2', pack: { schemaVersion: 2, name: 'js-ts', sensors: {} } });
@@ -169,6 +208,19 @@ describe('planSensorBootstrap', () => {
             const plan = { kind: 'migrate' as const, projectRoot: project, manifestPath, dryRun: false, changes: [{ path: '.awm/sensors.json', action: 'replace' }] as [{ path: '.awm/sensors.json'; action: 'replace' }], migration, source, originalDigest: createHash('sha256').update(bytes).digest('hex') };
             expect(applySensorBootstrap(plan)).toBe('migrated');
             expect(replaceV2ManifestWithV3).toHaveBeenCalledWith(plan.manifestPath, candidate, source);
+        } finally { fs.rmSync(project, { recursive: true, force: true }); }
+    });
+
+    it('delegates a legacy migration to its fenced CAS replacement', () => {
+        const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-bootstrap-legacy-'));
+        const manifestPath = path.join(project, 'sensors.json');
+        try {
+            const bytes = Buffer.from('{"pack":"js-ts","sensors":{}}\n');
+            fs.writeFileSync(manifestPath, bytes);
+            const manifest = { schemaVersion: 3 as const, mode: 'project-sensors' as const, pack: 'js-ts', source: { registry: 'baseline' }, sensors: {} };
+            const plan = { kind: 'migrate' as const, projectRoot: project, manifestPath, dryRun: false, changes: [{ path: '.awm/sensors.json', action: 'replace' }] as [{ path: '.awm/sensors.json'; action: 'replace' }], migration: { kind: 'legacy-v1' as const, manifest }, source, originalDigest: createHash('sha256').update(bytes).digest('hex') };
+            expect(applySensorBootstrap(plan)).toBe('migrated');
+            expect(replaceLegacyManifestWithV3).toHaveBeenCalledWith(plan.manifestPath, manifest, source);
         } finally { fs.rmSync(project, { recursive: true, force: true }); }
     });
 

@@ -81,6 +81,7 @@ export function interpretResult(prepared: PreparedSensorExecution, raw: ExecResu
         return withEvidence({ name: prepared.name, status: 'inconclusive', errors: [], skipReason: reason });
     }
     if (raw.code === 0) {
+        if (format === parseGenericOutput) return withEvidence({ name: prepared.name, status: 'pass', errors: [] });
         const errors = format(raw.stdout);
         return withEvidence({ name: prepared.name, status: errors.length ? 'fail' : 'pass', errors });
     }

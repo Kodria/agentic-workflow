@@ -138,6 +138,14 @@ describe('sensor pack v2 contract', () => {
         expect(parseSensorPack(validPack(), 'pack.json')).toMatchObject({ kind: 'v2', pack: validPack() });
     });
 
+    it('accepts the bounded explicit-opt-in applicability contract', () => {
+        const pack = validPack();
+        (pack.sensors.lint as Record<string, unknown>).applicability = { kind: 'explicit-opt-in' };
+        expect(parseSensorPack(pack, 'pack.json')).toMatchObject({
+            kind: 'v2', pack: { sensors: { lint: { applicability: { kind: 'explicit-opt-in' } } } },
+        });
+    });
+
     it('accepts one standalone files placeholder in changedCommand (R4)', () => {
         const pack = validPack();
         (pack.sensors.lint.variants[0] as Record<string, unknown>).changedCommand = {
@@ -253,7 +261,22 @@ describe('sensor pack v2 contract', () => {
     it('rejects malformed applicability and probe extensions', () => {
         const variant = validPack().sensors.lint.variants[0];
         expect(() => parseSensorPack({ ...validPack(), sensors: { lint: { applicability: { allFiles: [3] }, variants: [variant] } } }, 'pack')).toThrow('allFiles[0]');
+        expect(() => parseSensorPack({ ...validPack(), sensors: { lint: { applicability: { kind: 'invented' }, variants: [variant] } } }, 'pack')).toThrow('applicability.kind');
         expect(() => parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...variant, probe: { kind: 'version', extra: true } }] } } }, 'pack')).toThrow('unknown field');
+    });
+
+    it('preserves historical unnamed probes while validating explicit script names', () => {
+        const variant = { ...validPack().sensors.lint.variants[0], probe: { kind: 'package-script-present', script: 'test' } };
+        expect(parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [variant] } } }, 'pack'))
+            .toMatchObject({ kind: 'v2', pack: { sensors: { lint: { variants: [{ probe: { kind: 'package-script-present', script: 'test' } }] } } } });
+        expect(parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...variant, probe: { kind: 'package-script-present' } }] } } }, 'pack'))
+            .toMatchObject({ kind: 'v2', pack: { sensors: { lint: { variants: [{ probe: { kind: 'package-script-present' } }] } } } });
+        for (const script of ['', null, 'test;echo unsafe', 'test\u0000']) {
+            expect(() => parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...variant, probe: { kind: 'package-script-present', script } }] } } }, 'pack'))
+                .toThrow('probe.script');
+        }
+        expect(() => parseSensorPack({ ...validPack(), sensors: { lint: { ...validPack().sensors.lint, variants: [{ ...variant, probe: { kind: 'version', script: 'test' } }] } } }, 'pack'))
+            .toThrow('probe.script');
     });
 
     it('preserves config selectors and validates package.json field names', () => {

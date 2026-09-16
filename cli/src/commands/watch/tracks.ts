@@ -25,6 +25,10 @@ import { assessActualOwnership } from '../../core/tracks/ownership';
 import { writeDescriptor } from '../../core/tracks/descriptor';
 import { acquireIntegrationLock, releaseIntegrationLock, stopControllerGenerationConfirmed } from '../../core/tracks/join';
 import { runBeginTeardown } from './teardown-driver';
+import { applyProtocolToState, persist, refOf, withRef } from './track-state';
+export { applyProtocolToState, persist, refOf, withRef } from './track-state';
+export type { EffectRunResult, SupervisorObservation, TrackRuntime } from './track-state';
+import type { EffectRunResult, SupervisorObservation, TrackRuntime } from './track-state';
 import { requestJob } from '../job/request';
 import { computeGate, FingerprintNow } from '../job/gate';
 import { spawnStructured, groupIsGone, terminatePreviouslyOwnedGroup } from '../../core/journal/process';
@@ -58,97 +62,6 @@ export function canCompleteCohort(state: JournalState): { complete: boolean; pen
         .filter((t) => t.phase !== 'MERGED_UNVERIFIED' && t.phase !== 'JOINED')
         .map((t) => t.trackId).sort();
     return { complete: tracks.length >= 2 && pendingTracks.length === 0, pendingTracks };
-}
-
-/** Contrato más rico que el `'absent'|'claimed'|'ready'|'foreign'` puramente
- *  ilustrativo del plan: `ready` necesita cargar el readinessNonce
- *  efectivamente observado para que C8 (comparación de nonce) se pueda
- *  decidir en `protocol.ts`, la única autoridad — sin esto, `reconcileTracks`
- *  tendría que inventar la comparación acá mismo. */
-export type SupervisorObservation =
-    | { kind: 'absent' }
-    | { kind: 'claimed' }
-    | { kind: 'ready'; readinessNonce: string }
-    | { kind: 'foreign' };
-
-export interface TrackRuntime {
-    addWorktree(planRoot: string, ref: TrackRef, baseSha: string): void;
-    initTrackJournal(ref: TrackRef, context: TrackContext): void;
-    spawnSupervisor(ref: TrackRef): ProcessRef | void;
-    observeSupervisor(ref: TrackRef): SupervisorObservation;
-    // Task 13 (R4.2/R4.3/R4.6/R4.10/C2/C9): reemplaza el `teardownOwned(ref,
-    // step)` TEMPORAL de Task 9 por tres primitivos separados, uno por
-    // EFECTO real distinto — mismo criterio que `mergeFrozenTrack`/
-    // `abortOwnedMerge` (Task 11): la decisión de CUÁL llamar (o de no llamar
-    // ninguno) vive siempre en `decideTeardown`/`runBeginTeardown`, nunca acá.
-    // Identity-verified: jamás un `kill(pid)` crudo — `true` <=> el grupo del
-    // supervisor propio quedó confirmado ausente (recién ahora, o ya lo
-    // estaba: misma dualidad que el resto de esta interfaz, ej.
-    // `accept-worktree`/`accept-readiness`).
-    stopOwnSupervisor(ref: TrackRef): Promise<boolean>;
-    // El caller (`runBeginTeardown`) ya probó ownership completo
-    // (`worktreeOwnershipProven`: `teardownIntent` + `.awm/track.json` +
-    // `git worktree list`) ANTES de llamar esto — acá solo falta el efecto
-    // real (`git.ts`'s `removeOwnedWorktree` ya aplica el guard de limpieza,
-    // bloqueando si está sucio, y jamás usa `--force`).
-    removeOwnedWorktree(repo: string, ref: TrackRef): void;
-    // `git.ts`'s `removeOwnedBranch` ya verifica que no siga checked out y
-    // usa SIEMPRE `-d` (nunca `-D`, R4.10).
-    removeOwnedBranch(repo: string, branch: string): void;
-    // R5.2/R6.3 (Task 10): único touch REAL de `freeze-track` — escribe
-    // `track-freeze-request` al `requestsDir` PROPIO del track (cross-
-    // worktree, mismo primitivo durable `emitRequest` que cualquier otra
-    // request — ver el comentario grande sobre el patrón de freeze en
-    // `apply.ts`). El supervisor del PLAN JAMÁS escribe el journal del track
-    // directamente; esto es lo más cerca que llega — un ARCHIVO en su
-    // requestsDir, consumido transaccionalmente por el propio
-    // `Supervisor.tick()` del track en su próximo tick.
-    emitFreezeRequest(ref: TrackRef, generationToken: string): void;
-    // R6.2/R6.3/R6.6-R6.9/C7 (Task 11): únicos touches REALES de `merge-track`
-    // — modelados 1:1 sobre `core/tracks/git.ts` (mismo criterio que
-    // `addWorktree`/`initTrackJournal` arriba: la decisión de CUÁL de las dos
-    // llamar sigue siendo de `decideJoinReconciliation`/`protocol.ts`, nunca
-    // de esta interfaz — acá solo se declara la frontera fakeable).
-    mergeFrozenTrack(repo: string, intent: JoinIntent): void;
-    abortOwnedMerge(repo: string, intent: JoinIntent): void;
-    // C7 (Task 11): "antes de mutar la rama del plan, el supervisor pausa su
-    // controller generation y adquiere `integration.lock`" — se llama, en
-    // efecto, una única vez por PROCESO vivo (la implementación de
-    // producción memoiza el handle en un closure; llamadas subsiguientes,
-    // mientras el mismo proceso siga vivo, son no-op). La liberación queda
-    // para Task 12, tras el interlock final — este runtime nunca libera lo
-    // que adquiere.
-    //
-    // Post-review fix (Finding 1, revisión de Task 11): el valor de retorno
-    // distingue "esta llamada hizo trabajo real" (`'acquired'` — pausó la
-    // generación del plan Y escribió `integration.lock` en disco, ambos
-    // touches genuinos) de "ya estaba adquirido por este proceso, no-op"
-    // (`'already-held'`). `runMergeTrack` usa esto para separar la
-    // adquisición del lock del intento de merge en dos fronteras
-    // `reconcileTracks()` distintas — antes, un `'acquired'` seguido en el
-    // MISMO call de un `mergeFrozenTrack`/`abortOwnedMerge` colapsaba dos
-    // mutaciones reales en una sola invocación (exactamente la clase de bug
-    // que Task 8 encontró y arregló tres veces).
-    ensureIntegrationLock(planJournalId: string, expectedPlanHeadSha: string): Promise<'acquired' | 'already-held'>;
-    // R7/C3 (Task 12): pausa ADMINISTRATIVA del controller del plan antes del
-    // job canónico de integración final — distinta de `ensureIntegrationLock`
-    // (que solo pausa la PRIMERA vez, antes del primer merge, y memoiza el
-    // lock por el resto de la vida del proceso). Acá el controller puede
-    // haber sido relanzado desde entonces (ej. entre merges, o para correr
-    // `post-implementation-qa`), así que esto se llama de nuevo,
-    // incondicionalmente, cada vez que el driver de `request-final-
-    // integration` necesita asegurarse de que nadie mute el árbol mientras
-    // corre el job. Devuelve `true` <=> hizo trabajo real (había una
-    // generación activa que se tuvo que terminar) — el driver lo trata como
-    // SU único touch de este tick, igual criterio que `ensureIntegrationLock`
-    // distingue `'acquired'` de `'already-held'`.
-    pauseControllerGeneration(): Promise<boolean>;
-    // R7.5 (Task 12): libera, si está retenido POR ESTE PROCESO, el
-    // `integration.lock` adquirido por `ensureIntegrationLock` — el
-    // complemento que Task 11 dejó explícitamente diferido ("este runtime
-    // nunca libera lo que adquiere"). No-op si nunca se adquirió o si ya se
-    // liberó (mismo criterio idempotente que el resto de esta interfaz).
-    releaseIntegrationLockIfHeld(): void;
 }
 
 export interface ReconcileTracksResult { state: JournalState; effectExecuted: string | null; }
@@ -212,75 +125,10 @@ function toProtocol(state: JournalState, maxParallel: number): CohortProtocol {
     };
 }
 
-/** Vuelca las decisiones de `protocol.ts` de regreso al `TrackRef[]` real —
- *  nunca al revés: esta función jamás decide, solo transcribe. Exportada
- *  (junto con `persist`/`refOf`/`withRef`/`EffectRunResult` más abajo) para
- *  que `./teardown-driver` — que ejecuta el mismo patrón "gather -> decide ->
- *  tocar el mundo real como mucho una vez -> persistir -> stop" que todo
- *  `run*` de este archivo — reutilice estos helpers sin duplicarlos. */
-export function applyProtocolToState(state: JournalState, protocol: CohortProtocol): JournalState {
-    const next = structuredClone(state);
-    next.cohortPhase = protocol.cohortPhase;
-    // R6.2/R6.3/C7 (Task 11): persistir el HEAD del plan avanzado por
-    // `reconcileProtocol`'s `accept-merge` (`out.planHeadSha = decision.
-    // joinedCommitSha`) — sin esto, el siguiente `toProtocol` volvería a leer
-    // `cohortBaseSha` (stale) y el segundo join de la cohorte usaría un
-    // `expectedPlanHeadSha` incorrecto.
-    if (protocol.planHeadSha !== undefined) next.cohortPlanHeadSha = protocol.planHeadSha;
-    // R7/C3 (Task 12): los valores finales normalmente solo avanzan, salvo
-    // que fallback abandone explícitamente esa ruta. En ese caso el reducer
-    // ya invalidó su evidencia y el mirror durable DEBE borrarla también;
-    // conservarla permitiría que un restart reconstruyera un protocolo que
-    // contradice los tracks en teardown.
-    if (protocol.cohortPhase === 'FALLBACK_PENDING') {
-        next.globalQaHeadSha = undefined;
-        next.finalIntegrationJobId = undefined;
-        next.qaFinalizeRequested = undefined;
-    } else {
-        if (protocol.globalQaHeadSha !== undefined) next.globalQaHeadSha = protocol.globalQaHeadSha;
-        if (protocol.finalIntegrationJobId !== undefined) next.finalIntegrationJobId = protocol.finalIntegrationJobId;
-    }
-    if (protocol.fallbackReason !== undefined) next.cohortFallbackReason = protocol.fallbackReason;
-    next.tracks = (next.tracks ?? []).map((ref) => {
-        const t = protocol.tracks[ref.trackId];
-        if (t === undefined) return ref;
-        return {
-            ...ref,
-            phase: t.phase,
-            frozenHeadSha: t.frozenHeadSha,
-            blockedReason: t.blockedReason,
-            joinedCommitSha: t.joinedCommitSha,
-            joinIntent: t.expectedPlanHeadSha !== undefined && t.expectedTrackHeadSha !== undefined
-                ? { expectedPlanHeadSha: t.expectedPlanHeadSha, expectedTrackHeadSha: t.expectedTrackHeadSha, strategy: JOIN_STRATEGY_NO_FF }
-                : ref.joinIntent,
-        };
-    });
-    return next;
-}
-
-export function persist(planRoot: string, branch: string, s: JournalState): JournalState {
-    writeJournal(planRoot, branch, s);
-    const r = readJournal(planRoot, branch);
-    if (r.corrupt || r.state === null) throw new Error('journal corrupto tras persistir tracks (R1.6)');
-    return r.state;
-}
-
-export function refOf(s: JournalState, trackId: string): TrackRef {
-    const ref = s.tracks?.find((t) => t.trackId === trackId);
-    if (ref === undefined) throw new Error(`invariante rota: TrackRef ausente para ${trackId}`);
-    return ref;
-}
-
-export function withRef(s: JournalState, trackId: string, patch: Partial<TrackRef>): JournalState {
-    return { ...s, tracks: (s.tracks ?? []).map((t) => (t.trackId === trackId ? { ...t, ...patch } : t)) };
-}
-
 function mustBaseSha(s: JournalState): string {
     if (s.cohortBaseSha === undefined) throw new Error('invariante rota: cohortBaseSha ausente para una cohorte en PREPARING/ACTIVE');
     return s.cohortBaseSha;
 }
-
-export interface EffectRunResult { state: JournalState; stop: boolean; executed: string | null; }
 
 function runCreateWorktree(
     planRoot: string, branch: string, s: JournalState, protocol: CohortProtocol,

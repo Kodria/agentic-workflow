@@ -8,6 +8,8 @@ import { reconcileJobs, materializeRetry } from '../../../src/commands/job/recon
 import { planReap, executeReap } from '../../../src/commands/job/reap';
 import { registerJobCommand } from '../../../src/commands/job';
 import { registerWatchCommand } from '../../../src/commands/watch';
+import { initWatch } from '../../../src/commands/watch/init';
+import { validatePlanFile } from '../../../src/core/plan/validate';
 import { emptyState, Job, JournalState, TrackRef } from '../../../src/core/journal/types';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { writeDescriptor, TrackDescriptor } from '../../../src/core/tracks/descriptor';
@@ -539,6 +541,16 @@ function descriptorFixture(overrides: Partial<TrackDescriptor>, planRoot: string
     return { schema: 1, planRoot, planBranch: 'main', trackId: 'cli', planJournalId: 'j-1', fencingToken: 'f'.repeat(32), ...overrides };
 }
 
+function initCompactJournal(repo: string, branch: string): void {
+    const planPath = path.join(repo, 'plans', 'fixture.md');
+    fs.mkdirSync(path.dirname(planPath), { recursive: true });
+    fs.writeFileSync(planPath, fs.readFileSync(path.join(__dirname, '../../core/plan/fixtures/compact-slices-v1/valid.md'), 'utf8'));
+    fs.writeFileSync(path.join(repo, 'source.md'), '## Canonical source\nfixture source\n');
+    const report = validatePlanFile('plans/fixture.md', repo);
+    if (report.state !== 'valid') throw new Error(`compact fixture must validate: ${JSON.stringify(report)}`);
+    initWatch(repo, branch, { path: 'plans/fixture.md', report });
+}
+
 async function runCommand(register: (prog: Command) => void, argv: string[], cwd: string): Promise<{ out: string; err: string; exitCode: number | null }> {
     const prog = new Command();
     prog.exitOverride();
@@ -582,13 +594,13 @@ describe('guard de contexto en awm job / awm watch (R9.4)', () => {
         gitInitAt(trackRoot, 'track/cli');
         gitInitAt(otherRoot, 'track/cli');
 
-        initJournal(planRoot, 'main');
+        initCompactJournal(planRoot, 'main');
         const planState = readJournal(planRoot, 'main').state!;
         planState.journalId = 'j-1';
         planState.tracks = [trackRefFixture({ fencingToken: 'f'.repeat(32) }, trackRoot)];
         writeJournal(planRoot, 'main', planState);
 
-        initJournal(trackRoot, 'track/cli');
+        initCompactJournal(trackRoot, 'track/cli');
         const trackState = readJournal(trackRoot, 'track/cli').state!;
         trackState.trackContext = { trackId: 'cli', taskIds: [], planDigest: 'x', baseSha: 'y', planJournalId: 'j-1' };
         writeJournal(trackRoot, 'track/cli', trackState);
@@ -597,7 +609,7 @@ describe('guard de contexto en awm job / awm watch (R9.4)', () => {
         // otherRoot: mismo descriptor (mismo plan/trackId/fencing) pero NO es
         // el worktree que el TrackRef del plan declara — su realpath jamas
         // puede autenticar (R9.4), aunque el resto del descriptor "calce".
-        initJournal(otherRoot, 'track/cli');
+        initCompactJournal(otherRoot, 'track/cli');
         const otherState = readJournal(otherRoot, 'track/cli').state!;
         otherState.trackContext = { trackId: 'cli', taskIds: [], planDigest: 'x', baseSha: 'y', planJournalId: 'j-1' };
         writeJournal(otherRoot, 'track/cli', otherState);
@@ -624,24 +636,26 @@ describe('guard de contexto en awm job / awm watch (R9.4)', () => {
         expect(JSON.parse(out).pass).toBe(false);
     });
 
-    test('`watch --init` desde un cwd SIN descriptor (repo comun, sin tracks) procede exactamente como antes de esta task', async () => {
+    test('`watch --init --plan` desde un cwd SIN descriptor crea un binding compacto', async () => {
         const plainRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-guard-plain-'));
         try {
             gitInitAt(plainRepo, 'main');
-            const { out, err, exitCode } = await runWatch(['--init'], plainRepo);
+            const planPath = path.join(plainRepo, 'plans', 'fixture.md');
+            fs.mkdirSync(path.dirname(planPath), { recursive: true });
+            fs.writeFileSync(planPath, fs.readFileSync(path.join(__dirname, '../../core/plan/fixtures/compact-slices-v1/valid.md'), 'utf8'));
+            fs.writeFileSync(path.join(plainRepo, 'source.md'), '## Canonical source\nfixture source\n');
+            const { out, err, exitCode } = await runWatch(['--init', '--plan', 'plans/fixture.md'], plainRepo);
             expect(exitCode).toBeNull();
             expect(err).toBe('');
             expect(out).toContain('journal inicializado');
+            expect(readJournal(plainRepo, 'main').state).toMatchObject({ schema: 2, planBinding: { path: 'plans/fixture.md', executionMode: 'desatendido' } });
         } finally {
             fs.rmSync(plainRepo, { recursive: true, force: true });
         }
     });
 
-    test('`watch --init` desde el cwd autenticado (trackRoot) procede con normalidad', async () => {
-        const { out, err, exitCode } = await runWatch(['--init'], trackRoot);
-        expect(err).not.toContain('cwd no autenticado');
-        expect(exitCode).toBeNull();
-        expect(out).toContain('journal inicializado');
+    test('`watch --init --plan` desde el cwd autenticado alcanza la guarda de lifecycle y rechaza sobrescribir el binding', async () => {
+        await expect(runWatch(['--init', '--plan', 'plans/fixture.md'], trackRoot)).rejects.toThrow(/overwrite|sobrescribir/i);
     });
 
     test('`watch --init` desde un cwd cuyo descriptor no autentica rechaza con "cwd no autenticado"', async () => {

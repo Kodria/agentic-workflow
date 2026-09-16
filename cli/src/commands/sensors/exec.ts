@@ -111,6 +111,21 @@ function validateOptions(opts: ExecOptions): void {
     if (opts.killGraceMs !== undefined && (!Number.isSafeInteger(opts.killGraceMs) || opts.killGraceMs < 0)) throw new Error('exec options killGraceMs must be a non-negative safe integer');
 }
 
+/** Run sensor commands with the same Node runtime that launched AWM. Package
+ * manager wrappers resolve `node` through PATH, so an older inherited Node can
+ * otherwise run a sensor even when the CLI itself is running on a supported
+ * runtime. Keep every inherited entry after the runtime directory: tools and
+ * project-local shims remain available to the child. */
+function sensorEnvironment(inputEnvironment?: SpawnInput['environment']): NodeJS.ProcessEnv {
+    const runtimeDir = path.dirname(process.execPath);
+    const inheritedPath = process.env.PATH;
+    return {
+        ...process.env,
+        PATH: inheritedPath ? `${runtimeDir}${path.delimiter}${inheritedPath}` : runtimeDir,
+        ...inputEnvironment,
+    };
+}
+
 function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult> {
     validateOptions(opts);
     const maxBuffer = opts.maxBuffer ?? DEFAULT_MAX_BUFFER;
@@ -171,6 +186,7 @@ function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult>
                 shell: true,
                 cwd: opts.cwd,
                 detached: !isWindowsNative(),
+                env: sensorEnvironment(input.environment),
                 stdio: ['ignore', 'pipe', 'pipe'],
             })
             : spawn(prlimit ?? input.executable, prlimit
@@ -179,7 +195,7 @@ function collectSpawn(input: SpawnInput, opts: ExecOptions): Promise<ExecResult>
                 shell: false,
                 cwd: opts.cwd,
                 detached: !isWindowsNative(),
-                ...(input.environment ? { env: { ...process.env, ...input.environment } } : {}),
+                env: sensorEnvironment(input.environment),
             // stdin closed: a sensor must never block waiting for input, and the
             // EOF also tells watch-mode-capable tools (vitest, jest) to run once.
             stdio: prlimit ? ['ignore', stdoutFd!, stderrFd!] : ['ignore', 'pipe', 'pipe'],

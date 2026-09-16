@@ -15,6 +15,8 @@ export type ProjectEvidence = {
     declaredToolRanges: Record<string, string>;
     /** Exact versions inspected from contained local node_modules package metadata. */
     toolVersions: Record<string, string | null>;
+    /** The bounded resolver that produced each tool version. */
+    toolProvenance: Record<string, 'node-modules-bin' | 'python-environment' | 'path' | null>;
     packageManager: string | null;
     packageManagerConflict: boolean;
     scripts: string[];
@@ -137,7 +139,7 @@ function installedPackageVersion(root: string, tool: string): string | null {
 }
 
 /** Read bounded project metadata only; it never shells out, downloads, or mutates. */
-export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependencies: { platform?: () => NodeJS.Platform } = {}): ProjectEvidence {
+export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependencies: { platform?: () => NodeJS.Platform; pathToolVersion?: (tool: string) => string | null } = {}): ProjectEvidence {
     if (typeof cwd !== 'string' || cwd.trim() === '') throw new Error('cwd must be a non-empty path');
     let root: string; try { root = fs.realpathSync(cwd); if (!fs.statSync(root).isDirectory()) throw new Error(); } catch { throw new Error(`cwd is not a readable project directory: ${cwd}`); }
     if (!pack || typeof pack !== 'object' || typeof pack.name !== 'string') throw new Error('pack must be a parsed sensor pack');
@@ -147,6 +149,7 @@ export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependen
     const lockManagers = new Set(locks.map(file => LOCKFILES[file]));
     const declaredManager = typeof pkg?.packageManager === 'string' ? pkg.packageManager.split('@')[0] : null;
     if (declaredManager) lockManagers.add(declaredManager);
+    const packageManager = declaredManager ?? (lockManagers.size === 1 ? [...lockManagers][0] : null);
     const configCandidates = new Set(COMMON_CONFIGS);
     if ('schemaVersion' in pack) {
         for (const marker of pack.detects) configCandidates.add(marker);
@@ -160,13 +163,31 @@ export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependen
     const packageJsonFields = Object.keys(pkg ?? {}).filter(field => /^[A-Za-z][A-Za-z0-9]*$/.test(field)).sort();
     const declaredToolRanges = { ...stringMap(pkg?.dependencies), ...stringMap(pkg?.devDependencies), ...stringMap(pkg?.peerDependencies) };
     const tools = new Set<string>();
-    if ('schemaVersion' in pack) for (const sensor of Object.values(pack.sensors)) for (const variant of sensor.variants) tools.add(variant.requirements.tool);
+    const pathTools = new Set<string>();
+    if ('schemaVersion' in pack) for (const sensor of Object.values(pack.sensors)) for (const variant of sensor.variants) {
+        tools.add(variant.requirements.tool);
+        if (variant.command?.resolution === 'path' && variant.command.packageManager === variant.requirements.tool) pathTools.add(variant.requirements.tool);
+    }
     const environment = pythonEnvironment(root);
     const sitePackages = environment ? pythonSitePackages(root, environment.rootParts, targetPlatform) : [];
-    const toolVersions = Object.fromEntries([...tools].sort().map(tool => [tool, pythonToolVersion(root, sitePackages, tool) ?? installedPackageVersion(root, tool)]));
+    const toolVersions: Record<string, string | null> = {};
+    const toolProvenance: ProjectEvidence['toolProvenance'] = {};
+    for (const tool of [...tools].sort()) {
+        if (pathTools.has(tool) && packageManager === tool) {
+            // Discovery/status is read-only. A PATH executable is not inspected or
+            // executed here; callers that already possess trusted runtime evidence
+            // may inject it explicitly for an execution-time compatibility check.
+            toolVersions[tool] = exactVersion(dependencies.pathToolVersion?.(tool) ?? null);
+            toolProvenance[tool] = toolVersions[tool] === null ? null : 'path';
+        } else {
+            const pythonVersion = pythonToolVersion(root, sitePackages, tool);
+            toolVersions[tool] = pythonVersion ?? installedPackageVersion(root, tool);
+            toolProvenance[tool] = pythonVersion ? 'python-environment' : toolVersions[tool] ? 'node-modules-bin' : null;
+        }
+    }
     return {
         cwd: root, os: targetPlatform, runtimeVersions: { node: process.versions.node ?? null, ...(environment ? { python: environment.runtimeVersion } : {}) }, pythonEnvironmentRoot: environment?.rootParts[0] ?? null, declaredToolRanges, toolVersions,
-        packageManager: declaredManager ?? (lockManagers.size === 1 ? [...lockManagers][0] : null), packageManagerConflict: lockManagers.size > 1,
+        toolProvenance, packageManager, packageManagerConflict: lockManagers.size > 1,
         scripts, configFiles, packageJsonFields, paths: [...new Set([...(safeFile(root, 'package.json') ? ['package.json'] : []), ...locks, ...configFiles])].sort(),
     };
 }

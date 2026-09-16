@@ -2,9 +2,10 @@ import fs from 'fs';
 import { exec, execFileSync, execSync, spawn, spawnSync } from 'child_process';
 import os from 'os';
 import path from 'path';
+import crypto from 'crypto';
 import { parseJsonNoDuplicate } from '../../../src/core/plan/json';
 import type { PlanValidationReport } from '../../../src/core/plan/types';
-import { validatePlanFile } from '../../../src/core/plan/validate';
+import { validatePlanFile, validatePlanSnapshot } from '../../../src/core/plan/validate';
 
 jest.mock('child_process', () => ({ exec: jest.fn(), execFileSync: jest.fn(), execSync: jest.fn(), spawn: jest.fn(), spawnSync: jest.fn() }));
 
@@ -19,6 +20,16 @@ function expectApprovedPlanValid(report: PlanValidationReport): void {
         throw new Error(`approved compact plan validation failed: state=${report.state}; diagnostics=${diagnostics}`);
     }
     expect(report.schema).toBe('compact-slices/v1');
+}
+
+function assertFrozenObjectGraph(value: unknown, location = 'report', visited = new WeakSet<object>()): void {
+    if (value === null || typeof value !== 'object' || visited.has(value)) return;
+    visited.add(value);
+    if (!Object.isFrozen(value)) throw new Error(`${location} is mutable`);
+    for (const key of Reflect.ownKeys(value)) {
+        const property = Object.getOwnPropertyDescriptor(value, key);
+        if (property && 'value' in property) assertFrozenObjectGraph(property.value, `${location}.${String(key)}`, visited);
+    }
 }
 
 function fixture(root: string, mutate?: (manifest: Record<string, unknown>) => void): string {
@@ -39,9 +50,28 @@ function fixture(root: string, mutate?: (manifest: Record<string, unknown>) => v
 }
 
 describe('validatePlanFile', () => {
+    it('validates an authenticated snapshot without reopening a swapped plan parent', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plan-snapshot-')); const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plan-snapshot-outside-'));
+        try {
+            fs.mkdirSync(path.join(root, 'docs')); const snapshot = '### Task 1: anchored\n';
+            fs.writeFileSync(path.join(root, 'docs', 'plan.md'), snapshot);
+            fs.rmSync(path.join(root, 'docs'), { recursive: true }); fs.writeFileSync(path.join(outside, 'plan.md'), '<!-- attacker -->'); fs.symlinkSync(outside, path.join(root, 'docs'));
+            expect(validatePlanSnapshot('docs/plan.md', root, snapshot)).toMatchObject({ state: 'migration-required' });
+        } finally { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); }
+    });
     let root: string;
     beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plan-')); });
     afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });
+
+    test.each([
+        ['valid.md', 'valid'],
+        ['unmarked.md', 'migration-required'],
+        ['future-schema.md', 'unsupported'],
+        ['missing-section.md', 'invalid'],
+    ] as const)('classifies the versioned v1 corpus member %s as %s without transforms', (file, state) => {
+        const corpus = path.resolve(__dirname, 'fixtures', 'compact-slices-v1');
+        expect(validatePlanFile(file, corpus).state).toBe(state);
+    });
 
     test('accepts a valid compact plan without modifying it', () => {
         const plan = fixture(root); const before = fs.readFileSync(plan, 'utf8');
@@ -49,10 +79,228 @@ describe('validatePlanFile', () => {
         expect(fs.readFileSync(plan, 'utf8')).toBe(before);
     });
 
+    test('makes an approved valid report and its nested manifest immutable after verification', () => {
+        const report = validatePlanFile(fixture(root), root);
+        expectApprovedPlanValid(report);
+        if (report.state !== 'valid') throw new Error('expected an approved compact plan');
+        const slice = report.manifest.slices[0];
+        assertFrozenObjectGraph(report);
+        expect(Reflect.set(report.manifest.requirements, '0', 'R4-FORGED')).toBe(false);
+        expect(Reflect.set(report.manifest.sources[0], 'fact', 'forged fact')).toBe(false);
+        expect(Reflect.set(report.manifest.commands[0].args, '0', 'forged-arg')).toBe(false);
+        expect(Reflect.set(slice.fallback, '0', 'forged fallback')).toBe(false);
+        expect(Reflect.set(slice.reviewEvidence, '1', 'bogus')).toBe(false);
+        expect(Reflect.set(slice, 'risk', 'unbounded')).toBe(false);
+        expect(Reflect.set(report.manifest.closureCommands, '0', 'CMD-MISSING')).toBe(false);
+        expect(report.manifest.requirements).toEqual(['R4-VAL-2']);
+        expect(report.manifest.sources[0].fact).toBe('Known fact');
+        expect(report.manifest.commands[0].args).toEqual(['test']);
+        expect(slice.fallback).toEqual(['Use a reviewed fallback']);
+        expect(slice.reviewEvidence).toEqual(['specification', 'code-quality']);
+        expect(slice.risk).toBe('bounded');
+        expect(report.manifest.closureCommands).toEqual(['CMD-ONE']);
+    });
+
+    test('detects a selectively thawed command-args node even when every ancestor is frozen', () => {
+        const report = validatePlanFile(fixture(root), root);
+        expectApprovedPlanValid(report);
+        const thawed = JSON.parse(JSON.stringify(report)) as Extract<PlanValidationReport, { state: 'valid' }>;
+        const mutableArgs = thawed.manifest.commands[0].args;
+        const freezeExceptArgs = (value: unknown): void => {
+            if (value === null || typeof value !== 'object' || value === mutableArgs) return;
+            for (const child of Object.values(value)) freezeExceptArgs(child);
+            Object.freeze(value);
+        };
+        freezeExceptArgs(thawed);
+        expect(Object.isFrozen(thawed.manifest.commands[0])).toBe(true);
+        expect(Object.isFrozen(mutableArgs)).toBe(false);
+        expect(Reflect.set(mutableArgs, '0', 'tampered')).toBe(true);
+        expect(() => assertFrozenObjectGraph(thawed)).toThrow('report.manifest.commands.0.args is mutable');
+    });
+
+    test('scans bounded markerless brace runs without quadratic retries', () => {
+        const plan = path.join(root, 'braces.md');
+        fs.writeFileSync(plan, '{'.repeat(32_000));
+        const started = Date.now();
+        const report = validatePlanFile(plan, root);
+        expect(report).toEqual({ state: 'migration-required', reason: 'unmarked-plan' });
+        expect(Date.now() - started).toBeLessThan(500);
+    });
+
+    test('retains markerless unsupported classification for nested JSON in an unclosed outer object', () => {
+        const plan = path.join(root, 'nested-future.md');
+        fs.writeFileSync(plan, '# Notes\n{"outer":\n{"\\u0073chema":"compact\\u002dslices\\/v2"}\n');
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
+    });
+
+    test('uses exact bigint filesystem identities for legitimate Windows-sized inode values', () => {
+        const plan = fixture(root);
+        const nativeLstat = fs.lstatSync;
+        const nativeFstat = fs.fstatSync;
+        const largeIdentity = (observed: fs.Stats | fs.BigIntStats) => Object.assign(Object.create(observed), {
+            ino: typeof observed.ino === 'bigint' ? 9007199254740993n : 9007199254740992,
+        });
+        const lstat = jest.spyOn(fs, 'lstatSync').mockImplementation(((...args: unknown[]) => largeIdentity(Reflect.apply(nativeLstat, fs, args))) as typeof fs.lstatSync);
+        const fstat = jest.spyOn(fs, 'fstatSync').mockImplementation(((...args: unknown[]) => largeIdentity(Reflect.apply(nativeFstat, fs, args))) as typeof fs.fstatSync);
+        try { expectApprovedPlanValid(validatePlanFile(plan, root)); }
+        finally { lstat.mockRestore(); fstat.mockRestore(); }
+    });
+
+    test('retains the manifest byte limit beneath the bounded plan-file limit', () => {
+        const plan = fixture(root);
+        const text = fs.readFileSync(plan, 'utf8');
+        fs.writeFileSync(plan, text.replace(END, `${' '.repeat(256 * 1024)}\n${END}`));
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_LIMIT' })] });
+    });
+
+    test.each([
+        ['plan', 'PLAN_LIMIT'],
+        ['source', 'PLAN_SOURCE_LIMIT'],
+    ] as const)('bounds %s bytes when the inspected file grows during descriptor read', (target, code) => {
+        const plan = fixture(root);
+        const targetPath = target === 'plan' ? plan : path.join(root, 'docs', 'source.md');
+        const targetInode = fs.statSync(targetPath, { bigint: true }).ino;
+        const nativeFstat = fs.fstatSync;
+        let grew = false;
+        const fstat = jest.spyOn(fs, 'fstatSync').mockImplementation((descriptor) => {
+            const observed = nativeFstat(descriptor, { bigint: true });
+            if (!grew && observed.ino === targetInode) {
+                fs.appendFileSync(targetPath, Buffer.alloc(1024 * 1024));
+                grew = true;
+            }
+            return observed;
+        });
+        try {
+            expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code })] });
+            expect(grew).toBe(true);
+        } finally { fstat.mockRestore(); }
+    });
+
+    test.each([
+        ['plan', 'final', 'PLAN_PATH_UNSAFE'],
+        ['plan', 'ancestor', 'PLAN_PATH_UNSAFE'],
+        ['source', 'final', 'PLAN_SOURCE_UNSAFE'],
+        ['source', 'ancestor', 'PLAN_SOURCE_UNSAFE'],
+    ] as const)('rejects a %s %s symlink swap after inspection without reading outside', (target, swap, code) => {
+        let plan = fixture(root);
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plan-race-outside-'));
+        const targetDirectory = target === 'plan' ? path.join(root, 'plans') : path.join(root, 'docs');
+        if (target === 'plan') {
+            fs.mkdirSync(targetDirectory);
+            const nestedPlan = path.join(targetDirectory, 'plan.md');
+            fs.renameSync(plan, nestedPlan);
+            plan = nestedPlan;
+        }
+        const inspectedPath = target === 'plan' ? plan : path.join(root, 'docs', 'source.md');
+        const outsideFile = path.join(outside, path.basename(inspectedPath));
+        fs.copyFileSync(inspectedPath, outsideFile);
+        const outsideIdentity = fs.statSync(outsideFile);
+        const nativeRealpath = fs.realpathSync;
+        let swapped = false;
+        const realpath = jest.spyOn(fs, 'realpathSync').mockImplementation((file) => {
+            const resolved = nativeRealpath(file);
+            if (!swapped && file === inspectedPath) {
+                swapped = true;
+                if (swap === 'final') {
+                    fs.renameSync(inspectedPath, `${inspectedPath}-original`);
+                    fs.symlinkSync(outsideFile, inspectedPath, 'file');
+                } else {
+                    fs.renameSync(targetDirectory, `${targetDirectory}-original`);
+                    fs.symlinkSync(outside, targetDirectory, 'dir');
+                }
+            }
+            return resolved;
+        });
+        const reads = jest.spyOn(fs, 'readFileSync');
+        const nativeReadSync = fs.readSync;
+        let outsideDescriptorReads = 0;
+        const descriptorReads = jest.spyOn(fs, 'readSync').mockImplementation((...args: Parameters<typeof fs.readSync>) => {
+            const opened = fs.fstatSync(args[0]);
+            if (opened.dev === outsideIdentity.dev && opened.ino === outsideIdentity.ino) outsideDescriptorReads += 1;
+            return Reflect.apply(nativeReadSync, fs, args) as number;
+        });
+        try {
+            expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code })] });
+            expect(swapped).toBe(true);
+            expect(reads.mock.calls.some(([file]) => file === inspectedPath)).toBe(false);
+            expect(outsideDescriptorReads).toBe(0);
+        } finally {
+            descriptorReads.mockRestore(); reads.mockRestore(); realpath.mockRestore();
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
+
     test('accepts a valid compact plan converted to CRLF', () => {
         const plan = fixture(root);
         fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace(/\n/g, '\r\n'));
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'valid', schema: 'compact-slices/v1' });
+    });
+
+    test('returns the SHA-256 identity of the complete normalized valid plan', () => {
+        const plan = fixture(root);
+        const lf = fs.readFileSync(plan, 'utf8');
+        const expected = crypto.createHash('sha256').update(lf).digest('hex');
+        const lfReport = validatePlanFile(plan, root);
+        fs.writeFileSync(plan, lf.replace(/\n/g, '\r\n'));
+        const crlfReport = validatePlanFile(plan, root);
+
+        expect(lfReport).toMatchObject({ state: 'valid', planDigest: expected });
+        expect(crlfReport).toMatchObject({ state: 'valid', planDigest: expected });
+    });
+
+    test.each([
+        ['manifest requirement', (text: string) => text.replace(/R4-VAL-2/g, 'R4-VAL-3')],
+        ['source fact', (text: string) => text.replace('Known fact', 'Changed fact')],
+        ['command argv', (text: string) => text.replace('"test"', '"build"')],
+        ['slice prose', (text: string) => text.replace('One evidence item.', 'Changed evidence item.')],
+        ['execution-mode prose', (text: string) => `${text}\nModo de ejecución: desatendido\n`],
+    ])('changes the plan identity when %s changes', (_name, edit) => {
+        const plan = fixture(root);
+        const first = validatePlanFile(plan, root);
+        expect(first.state).toBe('valid');
+        if (first.state !== 'valid') throw new Error('expected valid fixture');
+        fs.writeFileSync(plan, edit(fs.readFileSync(plan, 'utf8')));
+        const amended = validatePlanFile(plan, root);
+        expect(amended.state).toBe('valid');
+        if (amended.state !== 'valid') throw new Error('expected valid amended fixture');
+        expect(amended.planDigest).not.toBe(first.planDigest);
+    });
+
+    test('separates exact progress updates from the full normalized identity', () => {
+        const plan = fixture(root);
+        fs.appendFileSync(plan, '\n- [ ] Reviewed task.\n');
+        const before = validatePlanFile(plan, root) as { planDigest: string; executionDigest?: string };
+        fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace('- [ ] Reviewed task.', '- [x] Reviewed task.')
+            .replace('#### Evidence', '<!-- awm-qa-complete: 2026-09-16 -->\n<!-- awm-docs-complete: 2026-09-16 -->\n<!-- awm-retro-complete: Release R1 -->\n#### Evidence'));
+        const after = validatePlanFile(plan, root) as { planDigest: string; executionDigest?: string };
+        expect(before.executionDigest).toEqual(expect.any(String));
+        expect(after.planDigest).not.toBe(before.planDigest);
+        expect(after.executionDigest).toBe(before.executionDigest);
+    });
+
+    test.each([
+        ['task prose', '- [x] Changed task.\n'],
+        ['inline marker', 'prose <!-- awm-qa-complete: 2026-09-16 -->\n'],
+        ['unknown marker', '<!-- awm-qa-complete: arbitrary requirements -->\n'],
+        ['fenced task', '```md\n- [x] Reviewed task.\n```\n'],
+        ['fenced marker', '~~~~md\n<!-- awm-qa-complete: 2026-09-16 -->\n~~~~\n'],
+    ])('does not canonicalize %s away from execution identity', (_label, addition) => {
+        const plan = fixture(root);
+        const before = validatePlanFile(plan, root) as { executionDigest?: string };
+        fs.appendFileSync(plan, addition);
+        const after = validatePlanFile(plan, root) as { executionDigest?: string };
+        expect(before.executionDigest).toEqual(expect.any(String));
+        expect(after.executionDigest).not.toBe(before.executionDigest);
+    });
+
+    test('a false fence closer cannot make code checkboxes and markers into lifecycle progress', () => {
+        const plan = fixture(root);
+        fs.appendFileSync(plan, '\n~~~~md\n~~~~not-a-closer\n- [ ] Code task.\n<!-- awm-qa-complete: 2026-09-16 -->\n~~~~\n');
+        const before = validatePlanFile(plan, root) as { executionDigest?: string };
+        fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace('- [ ] Code task.', '- [x] Code task.')
+            .replace('<!-- awm-qa-complete: 2026-09-16 -->', '<!-- awm-docs-complete: 2026-09-16 -->'));
+        const after = validatePlanFile(plan, root) as { executionDigest?: string };
+        expect(after.executionDigest).not.toBe(before.executionDigest);
     });
 
     test('accepts a contained plan when path.relative returns Windows separators', () => {
@@ -75,6 +323,61 @@ describe('validatePlanFile', () => {
     test('accepts the approved plan with cross-cutting command coverage', () => {
         const repositoryRoot = path.resolve(__dirname, '../../../..');
         expectApprovedPlanValid(validatePlanFile('docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md', repositoryRoot));
+    });
+
+    test('preserves every previously valid tracked compact-v1 plan', () => {
+        const repositoryRoot = path.resolve(__dirname, '../../../..');
+        const tracked = (jest.requireActual('child_process') as typeof import('child_process'))
+            .execFileSync('git', ['ls-files', '--', 'docs/plans/*.md'], { cwd: repositoryRoot, encoding: 'utf8' })
+            .trim().split('\n').filter(Boolean);
+        const marked = tracked.filter((file) => fs.readFileSync(path.join(repositoryRoot, file), 'utf8').includes(START));
+        const previouslyValid = [
+            'docs/plans/2026-08-26-r4a-compact-plan-cli-plan.md',
+            'docs/plans/2026-08-27-sensor-portability-publication-a-plan.md',
+            'docs/plans/2026-09-07-retire-onsignal.md',
+            'docs/plans/2026-09-14-compact-only-bootstrap-plan.md',
+        ];
+        expect(marked.length).toBeGreaterThan(0);
+        expect(previouslyValid.length).toBeGreaterThan(0);
+        const corpusCounts = `marked=${marked.length}; previouslyValid=${previouslyValid.length}; historicalInvalid=${marked.length - previouslyValid.length}`;
+        for (const file of previouslyValid) {
+            if (!marked.includes(file)) throw new Error(`previously valid compact-v1 plan is not tracked with a marker: ${file}; ${corpusCounts}`);
+            const report = validatePlanFile(file, repositoryRoot);
+            if (report.state !== 'valid') throw new Error(`previously valid compact-v1 plan failed: ${file}; state=${report.state}; ${corpusCounts}`);
+            assertFrozenObjectGraph(report, file);
+        }
+    });
+
+    test.each(['RF-1.3', 'RNF-T.2', 'R4-VAL-2', 'A'.repeat(62) + '.1'])('accepts canonical bounded requirement ID %s in every requirement reference', (id) => {
+        const report = validatePlanFile(fixture(root, (manifest) => {
+            manifest.requirements = [id];
+            (manifest.commands as Record<string, unknown>[])[0].covers = [id];
+            (manifest.slices as Record<string, unknown>[])[0].requirements = [id];
+        }), root);
+        expect(report).toMatchObject({ state: 'valid', manifest: { requirements: [id] } });
+    });
+
+    test.each([
+        '.RF-1', 'RF-1.', 'RF..1', 'RF--1', 'RF-', 'rf-1.3', 'RF-1.a', ' RF-1.3', 'RF-1.3 ',
+        'RF-1. 3', 'RF-1/3', 'RF-1\\3', 'RF-1.é', 'RF-1.\u0000', 'RF-1.\u007f',
+        'A'.repeat(63) + '.1',
+    ])('rejects malformed or oversized requirement ID %j', (id) => {
+        const report = validatePlanFile(fixture(root, (manifest) => {
+            manifest.requirements = [id];
+            (manifest.commands as Record<string, unknown>[])[0].covers = [id];
+            (manifest.slices as Record<string, unknown>[])[0].requirements = [id];
+        }), root);
+        expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SHAPE' })] });
+    });
+
+    test.each([
+        ['source', (m: Record<string, unknown>) => { (m.sources as Record<string, unknown>[])[0].id = 'SRC.ONE'; }, 'PLAN_SOURCE_SHAPE'],
+        ['command', (m: Record<string, unknown>) => { (m.commands as Record<string, unknown>[])[0].id = 'CMD.ONE'; }, 'PLAN_COMMAND_SHAPE'],
+        ['slice', (m: Record<string, unknown>) => { (m.slices as Record<string, unknown>[])[0].id = 'S.1'; }, 'PLAN_SLICE_SHAPE'],
+    ])('keeps dotted %s entity IDs invalid', (_name, mutate, code) => {
+        expect(validatePlanFile(fixture(root, mutate), root)).toMatchObject({
+            state: 'invalid', diagnostics: [expect.objectContaining({ code })],
+        });
     });
 
     test('performs no execution, network request, model work, grouping, or rewrite', () => {
@@ -235,12 +538,12 @@ describe('validatePlanFile', () => {
         expect(report).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_SLICE_SHAPE' })] });
     });
 
-    test('treats a document without any optimized signal as legacy', () => {
+    test('requires migration for a document without any compact signal', () => {
         const plan = path.join(root, 'legacy.md'); fs.writeFileSync(plan, '# Legacy plan\n');
-        expect(validatePlanFile(plan, root)).toEqual({ state: 'legacy' });
+        expect(validatePlanFile(plan, root)).toEqual({ state: 'migration-required', reason: 'unmarked-plan' });
     });
 
-    test('does not classify an escaped future schema signal as legacy', () => {
+    test('does not classify an escaped future schema signal as migration-required', () => {
         const plan = path.join(root, 'escaped-future.md'); fs.writeFileSync(plan, '{"schema":"compact-slices\\u002fv2"}');
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
     });
@@ -248,18 +551,18 @@ describe('validatePlanFile', () => {
     test.each([
         ['escaped schema key', '{"\\u0073chema":"compact-slices/v2"}'],
         ['escaped schema hyphen', '{"schema":"compact\\u002dslices/v2"}'],
-    ])('does not classify a future schema with an %s as legacy', (_name, manifest) => {
+    ])('does not classify a future schema with an %s as migration-required', (_name, manifest) => {
         const plan = path.join(root, 'escaped-future-schema.md'); fs.writeFileSync(plan, manifest);
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
     });
 
-    test('does not classify an escaped future schema embedded in Markdown without markers as legacy', () => {
+    test('does not classify an escaped future schema embedded in Markdown without markers as migration-required', () => {
         const plan = path.join(root, 'embedded-escaped-future.md');
         fs.writeFileSync(plan, '# Plan notes\n\n```json\n{"\\u0073chema":"compact\\u002dslices\\u002fv2"}\n```\n');
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
     });
 
-    test('rejects an unparseable escaped compact schema embedded in Markdown rather than treating it as legacy', () => {
+    test('rejects an unparseable escaped compact schema embedded in Markdown rather than requiring migration', () => {
         const plan = path.join(root, 'embedded-escaped-malformed.md');
         fs.writeFileSync(plan, '# Plan notes\n\n{"\\u0073chema":"compact\\u002dslices\\u002fv2"\n');
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });

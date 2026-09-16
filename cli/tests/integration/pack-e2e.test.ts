@@ -40,7 +40,10 @@ it('el tarball empaquetado corre awm update sin el monorepo', () => {
         fs.writeFileSync(path.join(awmHome, 'registries.json'),
             JSON.stringify([{ name: 'baseline', remote: source }]));
 
-        execSync(`node "${path.join(pkgDir, 'dist/src/index.js')}" update`, {
+        // El artefacto se debe ejecutar con el mismo runtime que corre la prueba:
+        // usar `node` desde PATH podría probar accidentalmente otra versión. En
+        // particular, esto cubre Node 22, declarado como compatible por package.json.
+        execSync(`"${process.execPath}" "${path.join(pkgDir, 'dist/src/index.js')}" update`, {
             env: { ...process.env, HOME: home, AWM_HOME: awmHome, AWM_NO_UPDATE_CHECK: '1' },
             stdio: 'pipe',
         });

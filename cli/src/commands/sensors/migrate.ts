@@ -92,7 +92,7 @@ function exactLogicalSource(input: unknown, pack: string): V2MigrationSource['so
     const expectedPath = path.join(registry.contentRoot, 'sensor-packs', pack, 'pack.json');
     if (source.path !== expectedPath) throw new Error('v2 migration source must contain an exact resolved pack');
     let parsedSource;
-    try { parsedSource = parseSensorPack(JSON.parse(source.content), 'v2 migration resolved source'); }
+    try { parsedSource = parseSensorPack(JSON.parse(source.content), source.path); }
     catch { throw new Error('v2 migration source exact v2 pack is invalid'); }
     if (parsedSource.kind !== 'v2' || parsedSource.pack.name !== pack) throw new Error('v2 migration source must contain the exact v2 pack');
     return source as V2MigrationSource['source'];
@@ -100,7 +100,7 @@ function exactLogicalSource(input: unknown, pack: string): V2MigrationSource['so
 
 function assertSourceCompatibleWithManifest(source: V2MigrationSource['source'], manifest: SensorManifestV2): void {
     let parsedSource;
-    try { parsedSource = parseSensorPack(JSON.parse(source.content), 'v2 migration resolved source'); }
+    try { parsedSource = parseSensorPack(JSON.parse(source.content), source.path); }
     catch { throw new Error('v2 migration source exact v2 pack is invalid'); }
     if (parsedSource.kind !== 'v2' || parsedSource.pack.name !== manifest.pack) {
         throw new Error('v2 migration source must contain the exact v2 pack');
@@ -109,6 +109,20 @@ function assertSourceCompatibleWithManifest(source: V2MigrationSource['source'],
         const selected = parsedSource.pack.sensors[name];
         if (!selected || !selected.variants.some(variant => variant.id === sensor.variantId)) {
             throw new Error('v2 migration source is not compatible with selected manifest sensors');
+        }
+    }
+}
+
+function assertSourceCompatibleWithCandidate(source: V2MigrationSource['source'], candidate: SensorManifestV3ProjectSensors): void {
+    let parsedSource;
+    try { parsedSource = parseSensorPack(JSON.parse(source.content), source.path); }
+    catch { throw new Error('legacy migration source exact v2 pack is invalid'); }
+    if (parsedSource.kind !== 'v2' || parsedSource.pack.name !== candidate.pack) {
+        throw new Error('legacy migration source must contain the exact v2 pack');
+    }
+    for (const [name, sensor] of Object.entries(candidate.sensors)) {
+        if (!parsedSource.pack.sensors[name]?.variants.some(variant => variant.id === sensor.variantId)) {
+            throw new Error('legacy migration source is not compatible with selected manifest sensors');
         }
     }
 }
@@ -219,5 +233,45 @@ export function replaceV2ManifestWithV3(manifestPath: unknown, candidate: unknow
     writeProjectFile(projectRoot, destination, Buffer.from(serializeManifestV3(after.pack), 'utf8'), {
         mode: 'replace', expected: inspected.content, expectedIdentity: inspected.identity, createParents: false,
     });
+    });
+}
+
+/**
+ * Replace an explicitly bootstrapped legacy manifest with the v3 declaration
+ * selected from one current logical pack. Legacy commands have no structured
+ * variant identity, so equivalence cannot be asserted; the caller must have
+ * re-probed every selected v3 sensor before this fenced publication.
+ */
+export function replaceLegacyManifestWithV3(manifestPath: unknown, candidate: unknown, source: unknown): void {
+    if (typeof manifestPath !== 'string' || !path.isAbsolute(manifestPath) || path.normalize(manifestPath) !== manifestPath
+        || manifestPath.includes('\0') || path.basename(manifestPath) !== 'sensors.json'
+        || path.basename(path.dirname(manifestPath)) !== '.awm') {
+        throw new Error('legacy migration manifest path must be the canonical project manifest <project>/.awm/sensors.json');
+    }
+    const manifestDirectory = path.dirname(manifestPath);
+    const projectRoot = path.dirname(manifestDirectory);
+    withProjectLease(projectRoot, () => {
+        const originalFailure = (_reason: SafeFileFailure): Error => new Error('legacy migration original manifest must be readable JSON');
+        let inspected: InspectedManifest;
+        let original: unknown;
+        try {
+            inspected = inspectManifest(manifestPath, originalFailure);
+            original = JSON.parse(inspected.content.toString('utf8'));
+        } catch { throw new Error('legacy migration original manifest must be readable JSON'); }
+        const before = parseSensorManifest(original, manifestPath);
+        const after = parseSensorManifest(candidate, 'legacy migration candidate');
+        if (before.kind !== 'legacy' || after.kind !== 'v3' || after.pack.mode !== 'project-sensors') {
+            throw new Error('legacy migration candidate semantic mismatch');
+        }
+        const logicalSource = exactLogicalSource({ kind: 'logical', source }, after.pack.pack);
+        assertSourceCompatibleWithCandidate(logicalSource, after.pack);
+        if (after.pack.source.registry !== logicalSource.registry.name || hasPhysicalSensorPath(after.pack.sensors, [logicalSource.registry.contentRoot])
+            || hasPhysicalSensorPath(after.pack.packageRoot, [])) {
+            throw new Error('legacy migration candidate contains an unsafe source or physical path');
+        }
+        assertManifestUnchanged(manifestPath, inspected);
+        writeProjectFile(projectRoot, '.awm/sensors.json', Buffer.from(serializeManifestV3(after.pack), 'utf8'), {
+            mode: 'replace', expected: inspected.content, expectedIdentity: inspected.identity, createParents: false,
+        });
     });
 }

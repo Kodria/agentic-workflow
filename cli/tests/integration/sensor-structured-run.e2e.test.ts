@@ -6,7 +6,7 @@ import path from 'path';
 const cliDir = path.resolve(__dirname, '../..');
 const bin = path.join(cliDir, 'dist/src/index.js');
 
-type Fixture = { root: string; project: string; awmHome: string; registryRoot: string; literal: string };
+type Fixture = { root: string; project: string; awmHome: string; registryRoot: string; literal: string; args: string[] };
 
 function writeJson(file: string, value: unknown): void {
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -27,6 +27,7 @@ function createFixture(): Fixture {
     const awmHome = path.join(root, 'awm-home');
     const registryRoot = path.join(awmHome, 'registries', 'baseline');
     const literal = shellSensitiveLiteral;
+    const args = ['-e', "require('fs').writeFileSync('structured-argv.json', JSON.stringify(process.argv.slice(1)));", '--', literal];
 
     writeJson(path.join(project, 'package.json'), { name: 'structured-run-fixture', private: true });
     // Local metadata is the compatibility evidence. It is not a tool found in a
@@ -35,10 +36,12 @@ function createFixture(): Fixture {
         name: 'fixture-sensor', version: '1.0.0',
     });
     fs.writeFileSync(path.join(project, 'fixture-sensor.config.mjs'), 'export default {};\n');
-    fs.writeFileSync(path.join(project, 'fixture-sensor.mjs'), [
-        "import fs from 'fs';",
-        "fs.writeFileSync('structured-argv.json', JSON.stringify(process.argv.slice(2)));",
-    ].join('\n'));
+    const fixtureBin = path.join(project, 'node_modules', '.bin', process.platform === 'win32' ? 'fixture-sensor.exe' : 'fixture-sensor');
+    fs.mkdirSync(path.dirname(fixtureBin), { recursive: true });
+    // A real local native executable works on Windows too; shebang scripts do
+    // not. The controlled program and adversarial literal remain separate argv.
+    fs.copyFileSync(process.execPath, fixtureBin);
+    fs.chmodSync(fixtureBin, 0o755);
 
     writeJson(path.join(registryRoot, 'sensor-packs', 'fixture', 'pack.json'), {
         schemaVersion: 2,
@@ -56,10 +59,9 @@ function createFixture(): Fixture {
                         runtime: 'node', runtimeRange: '>=20', configFiles: ['fixture-sensor.config.mjs'],
                     },
                     certifiedRange: '>=1 <2',
-                    // `node` is resolved from the process environment, but the actual
-                    // executable payload is the fixture-local script. Keeping the
-                    // literal as one argv element proves no shell parses it.
-                    command: { executable: 'node', resolution: 'path', args: ['fixture-sensor.mjs', literal] },
+                    // The fixture executable is project-local. Keeping the literal
+                    // as one argv element proves no shell parses it.
+                    command: { executable: 'fixture-sensor', resolution: 'node-modules-bin', args },
                     assets: ['fixture-sensor.config.mjs'], formatter: 'generic', probe: { kind: 'config-present' },
                 }],
             },
@@ -75,7 +77,7 @@ function createFixture(): Fixture {
         },
     });
     writeJson(path.join(awmHome, 'registries.json'), [{ name: 'baseline', remote: 'fixture' }]);
-    return { root, project, awmHome, registryRoot, literal };
+    return { root, project, awmHome, registryRoot, literal, args };
 }
 
 function runCli(fixture: Fixture, ...args: string[]) {
@@ -118,7 +120,7 @@ test('compiled sensors run materializes a v2 registry command and passes its lit
             mode: 'project-sensors',
             pack: 'fixture',
             source: { registry: 'baseline' },
-            sensors: { structured: { variantId: 'fixture-v1', command: { executable: 'node', resolution: 'path', args: ['fixture-sensor.mjs', fixture.literal] } } },
+            sensors: { structured: { variantId: 'fixture-v1', command: { executable: 'fixture-sensor', resolution: 'node-modules-bin', args: fixture.args } } },
         });
 
         const result = runCli(fixture, 'run', '--fast');

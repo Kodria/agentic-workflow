@@ -1,7 +1,9 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { parseJsonNoDuplicate } from './json';
 import type { CompactPlanManifest, PlanDiagnostic, PlanSlice, PlanValidationReport } from './types';
+import { executionPlanDigest } from './identity';
 
 const START = '<!-- AWM:COMPACT-SLICES:START v1 -->';
 const END = '<!-- AWM:COMPACT-SLICES:END v1 -->';
@@ -9,12 +11,37 @@ const MAX_PLAN = 1024 * 1024;
 const MAX_MANIFEST = 256 * 1024;
 const MAX_SOURCE = 1024 * 1024;
 const MAX_STRING = 4096;
-const ID = /^[A-Z][A-Z0-9-]{0,63}$/;
+const ENTITY_ID = /^[A-Z][A-Z0-9-]{0,63}$/;
+const REQUIREMENT_ID = /^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*(?:\.[A-Z0-9]+(?:-[A-Z0-9]+)*)*$/;
 const PLAN_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SHELL = new Set([
     'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'cmd', 'powershell', 'pwsh',
     'env', 'busybox', 'node', 'nodejs', 'deno', 'bun', 'python', 'python3', 'ruby', 'perl', 'php', 'lua',
 ]);
+const verifiedValidReports = new WeakSet<object>();
+const verifiedSnapshots = new WeakMap<object, string>();
+
+function freezeJson(value: unknown): void {
+    if (value === null || typeof value !== 'object') return;
+    for (const child of Object.values(value)) freezeJson(child);
+    Object.freeze(value);
+}
+
+/** Require a process-local, immutable report issued by successful core validation. */
+export function assertVerifiedValidPlanReport(report: PlanValidationReport): void {
+    if (!report || typeof report !== 'object' || report.state !== 'valid' || !verifiedValidReports.has(report)) {
+        throw new Error('plan validator returned an invalid valid report');
+    }
+}
+
+/** The exact immutable validator snapshot, never a later reopen of the path. */
+export function verifiedPlanSnapshot(report: PlanValidationReport): string {
+    assertVerifiedValidPlanReport(report);
+    const snapshot = verifiedSnapshots.get(report);
+    if (snapshot === undefined) throw new Error('verified plan snapshot unavailable');
+    return snapshot;
+}
+
 function isLauncher(program: string): boolean {
     const base = path.posix.basename(program).toLowerCase();
     return SHELL.has(base.replace(/\.exe$/, '')) || /^(?:node(?:js)?|py(?:thon(?:w)?\d*(?:\.\d+)?)?|deno|bun|ruby(?:\d+(?:\.\d+)*)?|perl(?:\d+(?:\.\d+)*)?|(?:a|ba|c|tc|z|da|k)?sh|busybox|cmd|powershell|pwsh|wscript|cscript)(?:\.exe)?(?:[-.][a-z0-9][a-z0-9.-]*)?$/i.test(base);
@@ -30,19 +57,27 @@ function schemaClassification(candidate: unknown): PlanValidationReport | undefi
     return diagnostic('PLAN_MARKERS', 'compact markers must occur once in order');
 }
 function embeddedJsonObjects(text: string): string[] {
-    const objects: string[] = [];
-    for (let start = 0; start < text.length && objects.length < 64; start += 1) {
-        if (text[start] !== '{') continue;
-        let depth = 0; let quoted = false; let escaped = false; let end = start;
-        for (; end < text.length && end - start <= MAX_MANIFEST; end += 1) {
-            const character = text[end];
-            if (quoted) { if (escaped) escaped = false; else if (character === '\\') escaped = true; else if (character === '"') quoted = false; continue; }
-            if (character === '"') { quoted = true; continue; }
-            if (character === '{') depth += 1;
-            if (character === '}' && --depth === 0) { objects.push(text.slice(start, end + 1)); start = end; break; }
+    const outer: string[] = []; const nested: string[] = []; const starts: number[] = [];
+    let quoted = false; let escaped = false;
+    for (let index = 0; index < text.length; index += 1) {
+        const character = text[index];
+        if (starts.length === 0) { if (character === '{') starts.push(index); continue; }
+        if (quoted) {
+            if (character === '\n') { quoted = false; escaped = false; }
+            else if (escaped) escaped = false;
+            else if (character === '\\') escaped = true;
+            else if (character === '"') quoted = false;
+            continue;
         }
+        if (character === '"') { quoted = true; continue; }
+        if (character === '{') { starts.push(index); continue; }
+        if (character !== '}') continue;
+        const start = starts.pop();
+        if (start === undefined || index - start > MAX_MANIFEST) continue;
+        const found = starts.length === 0 ? outer : nested;
+        if (found.length < 64) found.push(text.slice(start, index + 1));
     }
-    return objects;
+    return [...outer, ...nested].slice(0, 64);
 }
 function markerlessSchemaClassification(text: string): PlanValidationReport | undefined {
     const candidates = [text.trim(), ...embeddedJsonObjects(text)];
@@ -71,24 +106,72 @@ function compactSchemaSignal(text: string): boolean {
     }
     return false;
 }
+function executionModeFromValidatedText(text: string): 'interactivo' | 'desatendido' {
+    const raw = /^\s*\*\*Modo de ejecución:\*\*\s*([^\r\n]+)\s*$/mi.exec(text)?.[1]?.trim().replace(/^`|`$/g, '');
+    return raw === 'desatendido' ? 'desatendido' : 'interactivo';
+}
 function exact(value: unknown, fields: string[]): value is Record<string, unknown> {
     return object(value) && Object.keys(value).length === fields.length && fields.every((field) => Object.prototype.hasOwnProperty.call(value, field));
 }
 function allStrings(value: unknown, max = MAX_STRING): value is string[] { return Array.isArray(value) && value.every((item) => typeof item === 'string' && Buffer.byteLength(item, 'utf8') <= max); }
-function validId(value: unknown): value is string { return typeof value === 'string' && ID.test(value); }
+function validId(value: unknown): value is string { return typeof value === 'string' && ENTITY_ID.test(value); }
+function validRequirementId(value: unknown): value is string {
+    return typeof value === 'string' && Buffer.byteLength(value, 'utf8') <= 64 && REQUIREMENT_ID.test(value);
+}
 function inside(root: string, candidate: string): boolean { const relative = path.relative(root, candidate); return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)); }
 function validRelative(value: unknown): value is string {
     return typeof value === 'string' && value.length > 0 && Buffer.byteLength(value, 'utf8') <= MAX_STRING && !path.isAbsolute(value) && !path.win32.isAbsolute(value) && !value.includes('\\') && value.split('/').every((part) => part !== '' && part !== '.' && part !== '..') && path.posix.normalize(value) === value;
 }
-function regularInside(root: string, relative: string): string | undefined {
+interface InspectedFile { path: string; stat: fs.BigIntStats; }
+type InspectedRead = { state: 'ok'; bytes: Buffer } | { state: 'unsafe' } | { state: 'limit' } | { state: 'read' };
+function regularInside(root: string, relative: string): InspectedFile | undefined {
     if (!validRelative(relative)) return undefined;
     const candidate = path.join(root, relative); if (!inside(root, candidate)) return undefined;
-    const parts = relative.split('/'); let current = root;
-    try { for (const part of parts) { current = path.join(current, part); if (fs.lstatSync(current).isSymbolicLink()) return undefined; } if (!fs.lstatSync(candidate).isFile()) return undefined; const real = fs.realpathSync(candidate); return inside(root, real) ? real : undefined; } catch { return undefined; }
+    const parts = relative.split('/'); let current = root; let stat: fs.BigIntStats | undefined;
+    try {
+        for (const part of parts) { current = path.join(current, part); stat = fs.lstatSync(current, { bigint: true }); if (stat.isSymbolicLink()) return undefined; }
+        if (!stat?.isFile()) return undefined;
+        const real = fs.realpathSync(candidate);
+        return inside(root, real) ? { path: real, stat } : undefined;
+    } catch { return undefined; }
+}
+function sameIdentity(inspected: fs.BigIntStats, opened: fs.BigIntStats): boolean {
+    return typeof inspected.dev === 'bigint' && typeof inspected.ino === 'bigint' && inspected.ino !== 0n
+        && opened.isFile() && inspected.dev === opened.dev && inspected.ino === opened.ino;
+}
+function readInspected(file: InspectedFile, max: number): InspectedRead {
+    if (file.stat.size > BigInt(max)) return { state: 'limit' };
+    let descriptor: number | undefined;
+    try {
+        descriptor = fs.openSync(file.path, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+        const opened = fs.fstatSync(descriptor, { bigint: true });
+        if (!sameIdentity(file.stat, opened)) return { state: 'unsafe' };
+        if (opened.size > BigInt(max)) return { state: 'limit' };
+        if (opened.size !== file.stat.size) return { state: 'unsafe' };
+        const bytes = Buffer.alloc(Number(opened.size));
+        let offset = 0;
+        while (offset < bytes.length) {
+            const read = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+            if (read <= 0) return { state: 'read' };
+            offset += read;
+        }
+        const after = fs.fstatSync(descriptor, { bigint: true });
+        if (!sameIdentity(file.stat, after)) return { state: 'unsafe' };
+        if (after.size > BigInt(max) || bytes.length > max) return { state: 'limit' };
+        if (after.size !== opened.size) return { state: 'unsafe' };
+        return { state: 'ok', bytes };
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        return { state: code === 'ELOOP' || code === 'ENOENT' || code === 'ENOTDIR' ? 'unsafe' : 'read' };
+    } finally {
+        if (descriptor !== undefined) {
+            try { fs.closeSync(descriptor); } catch { /* best-effort close after a failed inspected read */ }
+        }
+    }
 }
 function executableInside(root: string, relative: string): string | undefined {
     const file = regularInside(root, relative);
-    try { return file && (process.platform === 'win32' ? /\.(?:exe|cmd|bat)$/i.test(file) : (fs.statSync(file).mode & 0o111) !== 0) ? file : undefined; } catch { return undefined; }
+    return file && (process.platform === 'win32' ? /\.(?:exe|cmd|bat)$/i.test(file.path) : (file.stat.mode & 0o111n) !== 0n) ? file.path : undefined;
 }
 function refs(value: unknown, known: Set<string>): boolean { return allStrings(value) && value.every((id) => known.has(id)); }
 function uniqueRefs(value: unknown, known: Set<string>): boolean { return refs(value, known) && new Set(value as string[]).size === (value as string[]).length; }
@@ -137,18 +220,29 @@ function checkMarkdown(text: string, slices: PlanSlice[]): PlanValidationReport 
     return undefined;
 }
 
-/** Read-only validator for a bounded compact-slices/v1 Markdown plan. */
-export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanValidationReport {
+/** Shared parser. A supplied snapshot is already descriptor-anchored by its caller. */
+function validatePlan(planPath: string, cwd: string, snapshot?: Buffer): PlanValidationReport {
     if (typeof planPath !== 'string' || planPath.length === 0) throw new Error('planPath must be a non-empty path');
     if (typeof cwd !== 'string' || cwd.length === 0) throw new Error('cwd must be a non-empty directory path');
     let root: string; try { root = fs.realpathSync(cwd); if (!fs.statSync(root).isDirectory()) throw new Error(); } catch { throw new Error('cwd must resolve to an existing directory'); }
     const candidate = path.resolve(root, planPath); if (!inside(root, candidate)) return diagnostic('PLAN_PATH_UNSAFE', 'plan path must be inside cwd');
-    const relativePlan = path.relative(root, candidate).replace(/\\/g, '/'); const planFile = regularInside(root, relativePlan);
-    if (!planFile) return diagnostic('PLAN_PATH_UNSAFE', 'plan path must be a contained regular non-symlink file');
-    let bytes: Buffer; try { if (fs.statSync(planFile).size > MAX_PLAN) return diagnostic('PLAN_LIMIT', 'plan exceeds maximum size'); bytes = fs.readFileSync(planFile); } catch { return diagnostic('PLAN_READ', 'plan cannot be read'); }
-    let text: string; try { text = normalizeLineEndings(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { return diagnostic('PLAN_ENCODING', 'plan must be valid UTF-8'); }
+    const relativePlan = path.relative(root, candidate).replace(/\\/g, '/');
+    let bytes: Buffer;
+    if (snapshot) {
+        if (snapshot.length > MAX_PLAN) return diagnostic('PLAN_LIMIT', 'plan exceeds maximum size');
+        bytes = Buffer.from(snapshot);
+    } else {
+        const planFile = regularInside(root, relativePlan);
+        if (!planFile) return diagnostic('PLAN_PATH_UNSAFE', 'plan path must be a contained regular non-symlink file');
+        const planRead = readInspected(planFile, MAX_PLAN);
+        if (planRead.state === 'unsafe') return diagnostic('PLAN_PATH_UNSAFE', 'plan path changed after inspection');
+        if (planRead.state === 'limit') return diagnostic('PLAN_LIMIT', 'plan exceeds maximum size');
+        if (planRead.state === 'read') return diagnostic('PLAN_READ', 'plan cannot be read');
+        bytes = planRead.bytes;
+    }
+    let text: string; try { text = normalizeLineEndings(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)); } catch { return diagnostic('PLAN_ENCODING', 'plan must be valid UTF-8'); }
     const starts = count(text, START); const ends = count(text, END); const signaled = starts > 0 || ends > 0 || compactSchemaSignal(text);
-    if (!signaled) return markerlessSchemaClassification(text) ?? { state: 'legacy' };
+    if (!signaled) return markerlessSchemaClassification(text) ?? { state: 'migration-required', reason: 'unmarked-plan' };
     if (starts === 0 && ends === 0) return markerlessSchemaClassification(text) ?? diagnostic('PLAN_MARKERS', 'compact markers must occur once in order');
     if (starts !== 1 || ends !== 1 || text.indexOf(START) > text.indexOf(END)) { const partial = starts === 1 ? text.slice(text.indexOf(START) + START.length, ends ? text.indexOf(END) : undefined).trim() : ''; try { const candidate = parseJsonNoDuplicate(partial); if (object(candidate) && typeof candidate.schema === 'string' && Buffer.byteLength(candidate.schema, 'utf8') <= MAX_STRING && candidate.schema.startsWith('compact-slices/') && candidate.schema !== 'compact-slices/v1') return unsupported(candidate.schema); } catch { /* invalid below */ } return diagnostic('PLAN_MARKERS', 'compact markers must occur once in order'); }
     const body = text.slice(text.indexOf(START) + START.length, text.indexOf(END)); if (Buffer.byteLength(body, 'utf8') > MAX_MANIFEST) return diagnostic('PLAN_LIMIT', 'manifest exceeds maximum size');
@@ -161,13 +255,25 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     if (raw.requirements.length > 256 || raw.sources.length > 256 || raw.commands.length > 512 || raw.slices.length > 64 || raw.closureCommands.length > 512) return diagnostic('PLAN_LIMIT', 'manifest exceeds collection limits');
     if (typeof raw.planId === 'string' && Buffer.byteLength(raw.planId, 'utf8') > MAX_STRING) return diagnostic('PLAN_LIMIT', 'plan id exceeds maximum string size');
     if (raw.schema !== 'compact-slices/v1' || typeof raw.planId !== 'string' || !PLAN_ID.test(raw.planId) || !allStrings(raw.requirements) || new Set(raw.requirements).size !== raw.requirements.length) return diagnostic('PLAN_SHAPE', 'manifest scalar fields are invalid');
-    if ((raw.requirements as string[]).some((id) => !ID.test(id)) || !allStrings(raw.closureCommands) || new Set(raw.closureCommands as string[]).size !== (raw.closureCommands as string[]).length) return diagnostic('PLAN_SHAPE', 'manifest arrays or identifiers are invalid');
+    if ((raw.requirements as string[]).some((id) => !validRequirementId(id)) || !allStrings(raw.closureCommands) || new Set(raw.closureCommands as string[]).size !== (raw.closureCommands as string[]).length) return diagnostic('PLAN_SHAPE', 'manifest arrays or identifiers are invalid');
     const sourceIds = new Set<string>();
-    for (const source of raw.sources) { if (!exact(source, ['id', 'path', 'locator', 'fact']) || !validId(source.id) || sourceIds.has(source.id) || !validRelative(source.path) || typeof source.locator !== 'string' || source.locator.trim().length === 0 || /[\0\r\n]/.test(source.locator) || Buffer.byteLength(source.locator, 'utf8') > MAX_STRING || typeof source.fact !== 'string' || source.fact.trim().length === 0 || Buffer.byteLength(source.fact, 'utf8') > MAX_STRING) return diagnostic('PLAN_SOURCE_SHAPE', 'source fields are invalid'); sourceIds.add(source.id); const file = regularInside(root, source.path as string); if (!file) return diagnostic('PLAN_SOURCE_UNSAFE', 'source path must be a contained regular non-symlink file'); let bytes: Buffer; try { if (fs.statSync(file).size > MAX_SOURCE) return diagnostic('PLAN_SOURCE_LIMIT', 'source exceeds maximum size'); bytes = fs.readFileSync(file); } catch { return diagnostic('PLAN_SOURCE_UNSAFE', 'source cannot be read'); } let contents: string; try { contents = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { return diagnostic('PLAN_SOURCE_ENCODING', 'source must be valid UTF-8'); } if (!contents.includes(source.locator as string)) return diagnostic('PLAN_SOURCE_LOCATOR', 'source locator must occur in source file'); }
+    for (const source of raw.sources) {
+        if (!exact(source, ['id', 'path', 'locator', 'fact']) || !validId(source.id) || sourceIds.has(source.id) || !validRelative(source.path) || typeof source.locator !== 'string' || source.locator.trim().length === 0 || /[\0\r\n]/.test(source.locator) || Buffer.byteLength(source.locator, 'utf8') > MAX_STRING || typeof source.fact !== 'string' || source.fact.trim().length === 0 || Buffer.byteLength(source.fact, 'utf8') > MAX_STRING) return diagnostic('PLAN_SOURCE_SHAPE', 'source fields are invalid');
+        sourceIds.add(source.id);
+        const file = regularInside(root, source.path as string);
+        if (!file) return diagnostic('PLAN_SOURCE_UNSAFE', 'source path must be a contained regular non-symlink file');
+        const sourceRead = readInspected(file, MAX_SOURCE);
+        if (sourceRead.state === 'unsafe') return diagnostic('PLAN_SOURCE_UNSAFE', 'source path changed after inspection');
+        if (sourceRead.state === 'limit') return diagnostic('PLAN_SOURCE_LIMIT', 'source exceeds maximum size');
+        if (sourceRead.state === 'read') return diagnostic('PLAN_SOURCE_UNSAFE', 'source cannot be read');
+        let contents: string;
+        try { contents = new TextDecoder('utf-8', { fatal: true }).decode(sourceRead.bytes); } catch { return diagnostic('PLAN_SOURCE_ENCODING', 'source must be valid UTF-8'); }
+        if (!contents.includes(source.locator as string)) return diagnostic('PLAN_SOURCE_LOCATOR', 'source locator must occur in source file');
+    }
     const commandIds = new Set<string>(); const closureIds = new Set(raw.closureCommands as string[]);
-    for (const command of raw.commands) { if (!exact(command, ['id', 'program', 'args', 'covers']) || !validId(command.id) || commandIds.has(command.id) || typeof command.program !== 'string' || command.program.length === 0 || Buffer.byteLength(command.program, 'utf8') > MAX_STRING || !allStrings(command.args) || command.args.length > 128 || !allStrings(command.covers) || new Set(command.covers as string[]).size !== (command.covers as string[]).length || ((command.covers as string[]).length === 0 && !closureIds.has(command.id)) || (command.covers as string[]).some((id) => !(raw.requirements as string[]).includes(id))) return diagnostic('PLAN_COMMAND_SHAPE', 'command fields are invalid'); commandIds.add(command.id); const program = command.program as string; if (isLauncher(program) || unsafeCommand(program) || program.includes('\\') || /^[a-zA-Z]:/.test(program) || /\s/.test(program) || (program.includes('/') && !executableInside(root, program))) return diagnostic('PLAN_COMMAND_UNSAFE', 'command program is not inert and safe'); if ((command.args as string[]).some(unsafeCommand)) return diagnostic('PLAN_COMMAND_UNSAFE', 'command arguments contain shell syntax'); }
+    for (const command of raw.commands) { if (!exact(command, ['id', 'program', 'args', 'covers']) || !validId(command.id) || commandIds.has(command.id) || typeof command.program !== 'string' || command.program.length === 0 || Buffer.byteLength(command.program, 'utf8') > MAX_STRING || !allStrings(command.args) || command.args.length > 128 || !allStrings(command.covers) || new Set(command.covers as string[]).size !== (command.covers as string[]).length || ((command.covers as string[]).length === 0 && !closureIds.has(command.id)) || (command.covers as string[]).some((id) => !validRequirementId(id) || !(raw.requirements as string[]).includes(id))) return diagnostic('PLAN_COMMAND_SHAPE', 'command fields are invalid'); commandIds.add(command.id); const program = command.program as string; if (isLauncher(program) || unsafeCommand(program) || program.includes('\\') || /^[a-zA-Z]:/.test(program) || /\s/.test(program) || (program.includes('/') && !executableInside(root, program))) return diagnostic('PLAN_COMMAND_UNSAFE', 'command program is not inert and safe'); if ((command.args as string[]).some(unsafeCommand)) return diagnostic('PLAN_COMMAND_UNSAFE', 'command arguments contain shell syntax'); }
     const sliceIds = new Set<string>(); const owners = new Map<string, number>();
-    for (const slice of raw.slices) { if (!exact(slice, ['id', 'title', 'requirements', 'dependsOn', 'sectionAnchor', 'sources', 'redCommands', 'greenCommands', 'reviewEvidence', 'risk', 'fallback']) || !validId(slice.id) || sliceIds.has(slice.id) || typeof slice.title !== 'string' || slice.title.length === 0 || Buffer.byteLength(slice.title, 'utf8') > MAX_STRING || !allStrings(slice.requirements) || (slice.requirements as string[]).length === 0 || (slice.requirements as string[]).some((id) => !(raw.requirements as string[]).includes(id)) || !allStrings(slice.dependsOn) || typeof slice.sectionAnchor !== 'string' || slice.sectionAnchor.length === 0 || Buffer.byteLength(slice.sectionAnchor, 'utf8') > MAX_STRING || !uniqueRefs(slice.sources, sourceIds) || !uniqueRefs(slice.redCommands, commandIds) || (slice.redCommands as string[]).length === 0 || !uniqueRefs(slice.greenCommands, commandIds) || (slice.greenCommands as string[]).length === 0 || !allStrings(slice.fallback) || (slice.fallback as string[]).length === 0 || (slice.fallback as string[]).some((item) => item.trim().length === 0) || slice.risk !== 'bounded' && slice.risk !== 'full-context') return diagnostic('PLAN_SLICE_SHAPE', 'slice fields are invalid'); sliceIds.add(slice.id); if (!Array.isArray(slice.reviewEvidence) || slice.reviewEvidence.length !== 2 || new Set(slice.reviewEvidence).size !== 2 || !slice.reviewEvidence.includes('specification') || !slice.reviewEvidence.includes('code-quality')) return diagnostic('PLAN_REVIEW_EVIDENCE', 'review evidence must be specification and code-quality'); for (const requirement of slice.requirements as string[]) owners.set(requirement, (owners.get(requirement) ?? 0) + 1); }
+    for (const slice of raw.slices) { if (!exact(slice, ['id', 'title', 'requirements', 'dependsOn', 'sectionAnchor', 'sources', 'redCommands', 'greenCommands', 'reviewEvidence', 'risk', 'fallback']) || !validId(slice.id) || sliceIds.has(slice.id) || typeof slice.title !== 'string' || slice.title.length === 0 || Buffer.byteLength(slice.title, 'utf8') > MAX_STRING || !allStrings(slice.requirements) || (slice.requirements as string[]).length === 0 || (slice.requirements as string[]).some((id) => !validRequirementId(id) || !(raw.requirements as string[]).includes(id)) || !allStrings(slice.dependsOn) || typeof slice.sectionAnchor !== 'string' || slice.sectionAnchor.length === 0 || Buffer.byteLength(slice.sectionAnchor, 'utf8') > MAX_STRING || !uniqueRefs(slice.sources, sourceIds) || !uniqueRefs(slice.redCommands, commandIds) || (slice.redCommands as string[]).length === 0 || !uniqueRefs(slice.greenCommands, commandIds) || (slice.greenCommands as string[]).length === 0 || !allStrings(slice.fallback) || (slice.fallback as string[]).length === 0 || (slice.fallback as string[]).some((item) => item.trim().length === 0) || slice.risk !== 'bounded' && slice.risk !== 'full-context') return diagnostic('PLAN_SLICE_SHAPE', 'slice fields are invalid'); sliceIds.add(slice.id); if (!Array.isArray(slice.reviewEvidence) || slice.reviewEvidence.length !== 2 || new Set(slice.reviewEvidence).size !== 2 || !slice.reviewEvidence.includes('specification') || !slice.reviewEvidence.includes('code-quality')) return diagnostic('PLAN_REVIEW_EVIDENCE', 'review evidence must be specification and code-quality'); for (const requirement of slice.requirements as string[]) owners.set(requirement, (owners.get(requirement) ?? 0) + 1); }
     if ((raw.requirements as string[]).some((requirement) => owners.get(requirement) !== 1)) return diagnostic('PLAN_REQUIREMENT_OWNER', 'each requirement must have exactly one owner');
     const slices = raw.slices as PlanSlice[]; for (const slice of slices) { if (new Set(slice.dependsOn).size !== slice.dependsOn.length || slice.dependsOn.includes(slice.id) || !slice.dependsOn.every((id) => sliceIds.has(id))) return diagnostic('PLAN_DEPENDENCY', 'slice dependencies must resolve and be non-self unique'); }
     const visited = new Set<string>(); const visiting = new Set<string>(); const byId = new Map(slices.map((slice) => [slice.id, slice])); const cycle = (id: string): boolean => { if (visiting.has(id)) return true; if (visited.has(id)) return false; visiting.add(id); const found = byId.get(id)!.dependsOn.some(cycle); visiting.delete(id); visited.add(id); return found; }; if (slices.some((slice) => cycle(slice.id))) return diagnostic('PLAN_DEPENDENCY', 'slice dependencies must be acyclic');
@@ -176,5 +282,25 @@ export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanVal
     const usedSources = new Set(slices.flatMap((slice) => slice.sources)); const usedCommands = new Set([...slices.flatMap((slice) => [...slice.redCommands, ...slice.greenCommands]), ...(raw.closureCommands as string[])]); if (Array.from(sourceIds).some((id) => !usedSources.has(id)) || Array.from(commandIds).some((id) => !usedCommands.has(id)) || !refs(raw.closureCommands, commandIds)) return diagnostic('PLAN_ORPHAN', 'sources and commands must be referenced');
     if (raw.requirements.length === 0 || raw.sources.length === 0 || raw.commands.length === 0 || raw.slices.length === 0 || raw.closureCommands.length === 0) return diagnostic('PLAN_SHAPE', 'manifest collections must be nonempty');
     const markdown = checkMarkdown(text, slices); if (markdown) return markdown;
-    return { state: 'valid', schema: 'compact-slices/v1', manifest: raw as unknown as CompactPlanManifest };
+    const report: PlanValidationReport = {
+        state: 'valid', schema: 'compact-slices/v1',
+        planDigest: crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
+        executionDigest: executionPlanDigest(text),
+        manifest: raw as unknown as CompactPlanManifest, executionMode: executionModeFromValidatedText(text),
+    };
+    freezeJson(report);
+    verifiedValidReports.add(report);
+    verifiedSnapshots.set(report, text);
+    return report;
+}
+
+/** Read-only validator for a bounded compact-slices/v1 Markdown plan. */
+export function validatePlanFile(planPath: string, cwd = process.cwd()): PlanValidationReport {
+    return validatePlan(planPath, cwd);
+}
+
+/** Validate an already-authenticated plan snapshot without reopening planPath. */
+export function validatePlanSnapshot(planPath: string, cwd: string, text: string): PlanValidationReport {
+    if (typeof text !== 'string') throw new Error('plan snapshot must be text');
+    return validatePlan(planPath, cwd, Buffer.from(text, 'utf8'));
 }

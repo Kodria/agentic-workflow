@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { EXEC_STDIO } from './process';
+import type { JournalState, PlanBinding } from './types';
 
 function sha(parts: string[]): string {
     return crypto.createHash('sha256').update(parts.join('\0')).digest('hex');
@@ -13,14 +14,61 @@ function sha(parts: string[]): string {
 // el stderr de git hacia el stderr DEL SUPERVISOR — si ese fd es un pipe roto, el
 // relay dispara un EPIPE no catcheable que crashea el proceso ENTERO (este helper
 // backea computeFingerprint, invocado en CADA tick via FingerprintNow/computeGate).
+/** Git's textual plumbing is hashed, never streamed to a terminal. Keep its
+ * memory bounded even for hostile repositories; an incomplete listing must
+ * fail recovery rather than certify a partial fingerprint. */
+const MAX_GIT_OUTPUT_BYTES = 16 * 1024 * 1024;
+
 function git(cwd: string, args: string[]): string {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: Infinity, stdio: EXEC_STDIO });
+    try {
+        return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: MAX_GIT_OUTPUT_BYTES, stdio: EXEC_STDIO });
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOBUFS' || (error as Error).message.includes('maxBuffer')) {
+            throw new Error(`git fingerprint output exceeded ${MAX_GIT_OUTPUT_BYTES} bytes`);
+        }
+        throw error;
+    }
 }
 
 export interface FingerprintResult {
     fingerprint: string;
     commandDigest: string;
     expandedPaths: string[];
+}
+
+/** Read-only, deterministic recovery classification for an unattended cycle.
+ * Observers provide bounded status facts; this reducer never reads prompts or
+ * source bodies and never creates a duplicate durable obligation. */
+export type UnattendedRecoveryInput = Readonly<{
+    journal: JournalState | null;
+    journalCorrupt: boolean;
+    plan: PlanBinding;
+    git: 'current' | 'changed';
+    activeJobIds: readonly string[];
+    tests: 'pass' | 'fail' | 'missing';
+    sensors: 'pass' | 'fail' | 'missing';
+    verdicts: 'current' | 'stale' | 'missing';
+}>;
+export type UnattendedRecoveryResult = Readonly<{
+    state: 'ready' | 'blocked';
+    nextAction: 'reconcile-active-jobs' | 'repair-journal' | 'rebind-plan' | 'reconcile-git' | 'run-tests' | 'run-sensors' | 'repair-verdicts' | 'select-work';
+    activeJobIds: string[];
+    diagnostics: string[];
+}>;
+
+export function reconcileUnattendedRecovery(input: UnattendedRecoveryInput): UnattendedRecoveryResult {
+    const activeJobIds = [...new Set(input.activeJobIds)].sort();
+    const result = (state: UnattendedRecoveryResult['state'], nextAction: UnattendedRecoveryResult['nextAction'], diagnostics: string[]): UnattendedRecoveryResult => ({ state, nextAction, activeJobIds, diagnostics });
+    if (input.journalCorrupt || input.journal === null) return result('blocked', 'repair-journal', ['journal-corrupt-or-missing']);
+    const binding = input.journal.schema === 2 ? input.journal.planBinding : undefined;
+    if (!binding || binding.path !== input.plan.path || binding.digest !== input.plan.digest || binding.schema !== input.plan.schema || binding.executionMode !== 'desatendido') return result('blocked', 'rebind-plan', ['journal-plan-binding-stale']);
+    if (input.git !== 'current') return result('blocked', 'reconcile-git', ['git-fingerprint-changed']);
+    if (activeJobIds.length > 0) return result('ready', 'reconcile-active-jobs', []);
+    if (input.verdicts !== 'current') return result('blocked', 'repair-verdicts', [`verdicts-${input.verdicts}`]);
+    if (input.tests !== 'pass') return result('blocked', 'run-tests', [`tests-${input.tests}`]);
+    if (input.sensors !== 'pass') return result('blocked', 'run-sensors', [`sensors-${input.sensors}`]);
+    return result('ready', 'select-work', []);
 }
 
 export function resolveWorkingDirectory(repoRoot: string, cwdRel: string): { relative: string; absolute: string } {

@@ -1,9 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { spawn, execFileSync, ChildProcess } from 'child_process';
+import { spawn, spawnSync, execFileSync, ChildProcess } from 'child_process';
 import { refIsAlive } from '../../../src/core/journal/process';
 import { isWindowsNative } from '../../../src/core/paths';
+import { runSensors } from '../../../src/commands/sensors/run';
+import { resolveLiveCompatibility } from '../../../src/commands/sensors/compatibility/live';
 
 /** win32 has no POSIX process groups / negative-pid kill convention -- mirrors
  *  killTreeWindows's taskkill pattern already established and tested in
@@ -16,6 +18,25 @@ function killGroup(pgid: number): void {
         return;
     }
     try { process.kill(-pgid, 'SIGKILL'); } catch { /* ya muerto */ }
+}
+
+function groupAlive(pgid: number): boolean {
+    if (isWindowsNative()) return false; // taskkill above is synchronous enough for this fixture.
+    try { process.kill(-pgid, 0); return true; } catch { return false; }
+}
+
+async function terminateFixtureGroups(groups: Set<number>): Promise<void> {
+    for (const pgid of groups) killGroup(pgid);
+    await until(() => [...groups].every(pgid => !groupAlive(pgid)), 5_000, 'terminacion de grupos del fixture');
+}
+
+async function removeFixture(pathname: string): Promise<void> {
+    let last: unknown;
+    for (let attempt = 0; attempt < 20; attempt++) {
+        try { fs.rmSync(pathname, { recursive: true, force: true, maxRetries: 1, retryDelay: 25 }); return; }
+        catch (error) { last = error; await new Promise(resolve => setTimeout(resolve, 25)); }
+    }
+    throw last;
 }
 
 jest.setTimeout(180000);
@@ -43,6 +64,38 @@ function readState(repo: string): Record<string, unknown> | null {
     catch { return null; }
 }
 
+/** A physical capability-only registry is intentional: sensor pack resolution
+ * rejects a linked registry root, because a link could later escape its
+ * configured authority.  Keep the v3 logical source name and the registry
+ * configuration aligned so this fixture exercises the real resolver. */
+function writeFixtureBaselineRegistry(awmHome: string): void {
+    const packDir = path.join(awmHome, 'registries', 'baseline', 'sensor-packs', 'js-ts');
+    fs.mkdirSync(packDir, { recursive: true });
+    fs.writeFileSync(path.join(packDir, 'pack.json'), JSON.stringify({
+        schemaVersion: 2,
+        name: 'js-ts',
+        description: 'E2E compact admission sensor fixture',
+        detects: ['package.json'],
+        sensors: {
+            test: {
+                applicability: { allFiles: ['package.json'] },
+                fast: false,
+                timeout: 30_000,
+                variants: [{
+                    id: 'npm-script', priority: 1,
+                    requirements: { tool: 'npm', toolRange: '>=1.0.0', runtime: 'node', runtimeRange: '>=20.0.0' },
+                    certifiedRange: '>=1.0.0',
+                    command: { executable: 'npm', resolution: 'path', args: ['test', '--', '--silent'], packageManager: 'npm' },
+                    assets: [], formatter: 'test', probe: { kind: 'package-script-present', script: 'test' },
+                }],
+            },
+        },
+        coverage: { schemaVersion: 1, classes: {
+            tests: { description: 'Fixture test execution', detectors: [{ sensor: 'test' }], remedy: { summary: 'Run fixture tests', command: 'npm test' } },
+        } },
+    }, null, 2) + '\n');
+}
+
 async function until(fn: () => boolean, ms = 60000, label = 'condicion'): Promise<void> {
     const t0 = Date.now();
     while (!fn()) {
@@ -54,6 +107,7 @@ async function until(fn: () => boolean, ms = 60000, label = 'condicion'): Promis
 describe('E2E real: crash/restart del supervisor', () => {
     let repo: string;
     let stubBin: string;
+    let fixtureAwmHome: string;
     let env: NodeJS.ProcessEnv;
     const children: ChildProcess[] = [];
 
@@ -61,12 +115,32 @@ describe('E2E real: crash/restart del supervisor', () => {
         if (!fs.existsSync(CLI)) throw new Error('dist ausente: corre `cd cli && npm run build` antes de esta suite (Task 20 Step 1)');
     });
 
-    beforeEach(() => {
+    beforeEach(async () => {
         repo = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-e2e-'));
         git(repo, 'init', '-q', '-b', 'main');
-        fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'fixture', scripts: { test: 'node -e "process.exit(0)"' } }));
+        const npmVersion = execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim();
+        fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'fixture', packageManager: `npm@${npmVersion}`, scripts: { test: 'node -e "process.exit(0)" --' } }));
+        // The package manager is deliberately selected in package metadata.
+        // Discovery must certify the same bounded PATH npm that the sensor runs,
+        // rather than accept a shadow package under this fixture's node_modules.
+        fs.mkdirSync(path.join(repo, 'plans'), { recursive: true });
+        fs.writeFileSync(path.join(repo, 'plans', 'fixture.md'), fs.readFileSync(path.join(__dirname, '../../core/plan/fixtures/compact-slices-v1/valid.md'), 'utf8'));
+        fs.writeFileSync(path.join(repo, 'source.md'), '## Canonical source\nfixture source\n');
+        fs.mkdirSync(path.join(repo, '.awm'), { recursive: true });
+        fs.writeFileSync(path.join(repo, '.awm', 'sensors.json'), JSON.stringify({
+            schemaVersion: 3, mode: 'project-sensors', pack: 'js-ts', source: { registry: 'baseline' },
+            sensors: { test: {
+                enabled: true, variantId: 'npm-script',
+                command: { executable: 'npm', resolution: 'path', args: ['test', '--', '--silent'], packageManager: 'npm' },
+                initializedCompatibility: { state: 'certified', reason: 'fixture', variantId: 'npm-script', toolVersion: npmVersion, runtimeVersion: process.versions.node, certifiedRange: '>=8.0.0', evidence: [] },
+            } },
+        }));
         git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'c');
         stubBin = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-e2e-bin-'));
+        fixtureAwmHome = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-e2e-home-'));
+        writeFixtureBaselineRegistry(fixtureAwmHome);
+        fs.writeFileSync(path.join(fixtureAwmHome, 'registries.json'), JSON.stringify([{ name: 'baseline', remote: 'fixture://baseline' }]));
+        fs.writeFileSync(path.join(fixtureAwmHome, 'preferences.json'), JSON.stringify({ defaultAgent: 'codex', enabledAgents: ['codex', 'claude-code'], installMethod: 'symlink', defaultScope: 'local' }));
         // A bare extensionless #!/bin/sh script only runs via POSIX kernel shebang
         // interpretation -- Windows CreateProcess has none, so spawnStructured
         // (shell:false, matching production) would silently fail to launch this stub
@@ -74,14 +148,37 @@ describe('E2E real: crash/restart del supervisor', () => {
         // on both platforms (Node's spawn on win32 resolves via PATHEXT and transparently
         // re-invokes a found .cmd through cmd.exe) without touching production code.
         for (const name of ['codex', 'claude']) {
-            fs.writeFileSync(path.join(stubBin, name), '#!/bin/sh\nwhile true; do sleep 1; done\n', { mode: 0o755 });
+            fs.writeFileSync(path.join(stubBin, name), `#!/bin/sh
+# The supervisor invokes Codex as \`codex exec <prompt>\`; retain a distinct
+# path for that real adapter contract instead of accidentally treating it as
+# a bare binary invocation.  Both controller forms deliberately stay alive:
+# the test's requested \`node -e\` job is the process that must complete and
+# leave its sidecar while the supervisor is killed.
+if [ "$1" = "exec" ]; then shift; fi
+while true; do sleep 1; done
+`, { mode: 0o755 });
             fs.writeFileSync(path.join(stubBin, `${name}.cmd`), '@echo off\r\n:loop\r\ntimeout /t 1 /nobreak >nul\r\ngoto loop\r\n');
         }
-        env = { ...process.env, PATH: `${stubBin}${path.delimiter}${process.env.PATH}` };
-        execFileSync(process.execPath, [CLI, 'watch', '--init'], { cwd: repo, env });
+        env = { ...process.env, AWM_HOME: fixtureAwmHome, PATH: `${stubBin}${path.delimiter}${process.env.PATH}` };
+        execFileSync(process.execPath, [CLI, 'watch', '--init', '--plan', 'plans/fixture.md'], { cwd: repo, env });
+        const priorAwmHome = process.env.AWM_HOME;
+        process.env.AWM_HOME = fixtureAwmHome;
+        const sensorReport = await runSensors({ cwd: repo, all: true, readOnly: true });
+        if (priorAwmHome === undefined) delete process.env.AWM_HOME;
+        else process.env.AWM_HOME = priorAwmHome;
+        if (sensorReport.overall !== 'pass') {
+            process.env.AWM_HOME = fixtureAwmHome;
+            const live = await resolveLiveCompatibility(repo, 'js-ts');
+            if (priorAwmHome === undefined) delete process.env.AWM_HOME;
+            else process.env.AWM_HOME = priorAwmHome;
+            throw new Error(`fixture runSensors failed: ${JSON.stringify({ sensorReport, live })}`);
+        }
+        expect(sensorReport).toMatchObject({ source: { kind: 'logical', registry: 'baseline' } });
+        const admission = spawnSync(process.execPath, [CLI, 'plan', 'admit', 'plans/fixture.md', '--provider', 'codex', '--cwd', '.', '--execution-mode', 'desatendido', '--require-current', '--verify-sensors', '--json'], { cwd: repo, env, encoding: 'utf8' });
+        if (admission.status !== 0) throw new Error(`fixture admission failed: ${admission.stdout}${admission.stderr}`);
     });
 
-    afterEach(() => {
+    afterEach(async () => {
         // higiene: terminar TODO grupo que hayamos originado (supervisores,
         // stubs de controlador, wrappers) — cero huerfanos entre tests
         const s = readState(repo);
@@ -95,14 +192,18 @@ describe('E2E real: crash/restart del supervisor', () => {
                 if (j.processRef !== undefined) groups.add(j.processRef.processGroup);
             }
         }
-        for (const pgid of groups) killGroup(pgid);
+        await terminateFixtureGroups(groups);
         children.length = 0;
-        fs.rmSync(repo, { recursive: true, force: true });
-        fs.rmSync(stubBin, { recursive: true, force: true });
+        await removeFixture(repo);
+        await removeFixture(stubBin);
+        await removeFixture(fixtureAwmHome);
     });
 
     function startSupervisor(provider: string): ChildProcess {
-        const out = fs.openSync(path.join(repo, `sup-${children.length}.log`), 'a');
+        // Supervisor stdout is test harness output, not project evidence.  An
+        // in-repo log would make the real currentness/admission gate reject
+        // the next tick before it can collect an exited job sidecar.
+        const out = fs.openSync(path.join(stubBin, `sup-${children.length}.log`), 'a');
         const child = spawn(process.execPath, [CLI, 'watch', '--provider', provider], {
             cwd: repo, env, detached: true, stdio: ['ignore', out, out],
         });
