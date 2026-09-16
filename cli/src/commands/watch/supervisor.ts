@@ -6,11 +6,9 @@ import path from 'path';
 import { readJournal, writeJournal, appendEvent } from '../../core/journal/store';
 import { computeFingerprint, reconcileUnattendedRecovery } from '../../core/journal/fingerprint';
 import { validatePlanFile } from '../../core/plan/validate';
-import { admitPlan, type AdmissionReport } from '../../core/admission';
-import { checkCurrentness } from '../../core/currentness/check';
-import { runSensors } from '../sensors/run';
+import { type AdmissionReport } from '../../core/admission';
+import { admitRegistryPlan } from '../../core/admission/registry-contracts';
 import { readPreferences } from '../../utils/config';
-import { listRegistries } from '../../core/registries';
 import { adapterFor } from '../../core/journal/adapter';
 import { groupIsGone, terminateGroupConfirmed } from '../../core/journal/process';
 import { computeGate, computeTrackGate, FingerprintNow } from '../job/gate';
@@ -35,34 +33,9 @@ function defaultDispatchAdmission(repoRoot: string, branch: string, provider: st
         }
         const plan = validatePlanFile(binding.path, repoRoot);
         const preferences = readPreferences();
-        // Provenance is deliberately conservative here: a source outside the
-        // repository cannot be a consumed compact-plan contract.
-        const root = path.resolve(repoRoot);
-        const provenance = plan.state === 'valid' && plan.manifest.sources.every(source => {
-            const relative = path.relative(root, path.resolve(root, source.path));
-            return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
-        }) ? 'proven' as const : 'unknown' as const;
-        const registryRoots = listRegistries().flatMap(registry => {
-            try { return [{ name: registry.name, root: fs.realpathSync.native(registry.contentRoot) }]; } catch { return []; }
-        });
-        const consumedRegistryComponents = plan.state !== 'valid' ? [] : [...new Set(plan.manifest.sources.flatMap(source => {
-            const sourcePath = path.resolve(root, source.path);
-            return registryRoots.filter(registry => {
-                const relative = path.relative(registry.root, sourcePath);
-                return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
-            }).map(registry => `registry:${registry.name}`);
-        }))].sort();
-        const currentness = await checkCurrentness(repoRoot);
-        const input = { plan, provider, cwd: repoRoot, enabledAgents: preferences.enabledAgents,
+        return admitRegistryPlan({ plan, provider, cwd: repoRoot, enabledAgents: preferences.enabledAgents,
             executionMode: 'desatendido', requireCurrent: true, verifySensors: true,
-            currentness, provenance, consumedRegistryComponents,
-            journalState: observed.state, journalCorrupt: observed.corrupt, planPath: binding.path } as const;
-        // Preserve the public admission order: stale or unprovable contracts
-        // are rejected before invoking an empirical command in the worktree.
-        const currentnessGate = await admitPlan(input);
-        if (currentnessGate.currentness !== 'current') return currentnessGate;
-        const sensors = await runSensors({ cwd: repoRoot, all: true, readOnly: true });
-        return admitPlan({ ...input, sensors });
+            journalState: observed.state, journalCorrupt: observed.corrupt, planPath: binding.path });
     };
 }
 
@@ -274,7 +247,7 @@ export class Supervisor {
                 // instead of permanently custodying a healthy cycle.
                 if (admission.planState === 'valid' && admission.currentness === 'current'
                     && admission.sensors === 'not-certified' && admission.journal === 'not-required') return 'continue';
-                enterCustody(this.repoRoot, this.branch, 'admisión compacta desatendida bloqueada antes de dispatch');
+                enterCustody(this.repoRoot, this.branch, `admisión compacta desatendida bloqueada antes de dispatch: ${admission.diagnostics.map(diagnostic => `${diagnostic.code}: ${diagnostic.message}`).join('; ')}`);
                 return 'custody';
             }
         }

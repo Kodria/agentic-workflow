@@ -1,0 +1,176 @@
+import fs from 'fs';
+import path from 'path';
+import { isAgentTarget, providerFor, type AgentTarget } from '../../providers';
+import { renderedFilename } from '../renderers/registry';
+import { listRegistries, REGISTRY_MANIFEST_NAME, type RegistrySource } from '../registries';
+import { secureFs } from '../secure-fs/native-bridge';
+import { parseJsonNoDuplicate } from '../plan/json';
+import type { PlanDiagnostic, PlanValidationReport } from '../plan/types';
+import { cliVersion } from '../cli-version';
+import { compareSemver } from '../versioning';
+import { checkCurrentness } from '../currentness/check';
+import { runSensors } from '../../commands/sensors/run';
+import { admitPlan, type AdmissionInput, type AdmissionReport } from './index';
+
+const FRAMEWORK_CONTRACTS = ['using-awm', 'writing-plans', 'development-process', 'subagent-driven-development', 'executing-plans', 'post-implementation-qa', 'post-implementation-docs', 'harness-retro', 'finishing-a-development-branch'] as const;
+const MAX_CONTRACT_BYTES = 1024 * 1024;
+const MAX_MANIFEST_BYTES = 256 * 1024;
+const MAX_DIRECTORY_ENTRIES = 10000;
+type ContractScope = { provenance: 'proven' | 'unknown'; consumedRegistryComponents: string[]; provenanceDiagnostic?: PlanDiagnostic };
+
+function unknown(message: string): ContractScope {
+    return { provenance: 'unknown', consumedRegistryComponents: [], provenanceDiagnostic: { code: 'ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED', message: `${message} Repair the installed runtime artifact or registry provenance before dispatch.` } };
+}
+function within(root: string, candidate: string): boolean {
+    const relative = path.relative(root, candidate);
+    return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+function physicalDirectory(directory: string): string {
+    const physical = fs.realpathSync.native(directory);
+    if (!fs.lstatSync(physical).isDirectory()) throw new Error('path is not a directory');
+    const handle = fs.opendirSync(physical);
+    try {
+        let entries = 0;
+        while (handle.readSync() !== null) if (++entries > MAX_DIRECTORY_ENTRIES) throw new Error('directory entry limit exceeded');
+    } finally { handle.closeSync(); }
+    return physical;
+}
+/** ENOENT proves absence only when the nearest existing parent is readable.
+ * A dangling/replaced ancestor never certifies an empty provider install. */
+function directoryExists(directory: string): boolean {
+    let current = directory;
+    while (true) {
+        try {
+            fs.lstatSync(current);
+            physicalDirectory(current);
+            return current === directory;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+            const parent = path.dirname(current);
+            if (parent === current) throw error;
+            // An existing dangling symlink causes realpath ENOENT; do not
+            // continue above it as though the requested install were absent.
+            try { if (fs.lstatSync(current).isSymbolicLink()) throw new Error('dangling directory ancestor'); }
+            catch (inspection) { if ((inspection as NodeJS.ErrnoException).code !== 'ENOENT') throw inspection; }
+            current = parent;
+        }
+    }
+}
+
+/** Physical sources AND actual provider artifacts define consumption. Copied
+ * rendered artifacts have no owner proof; a basename is never provenance. */
+export function consumedRegistryContracts(report: PlanValidationReport, cwd: string, registries: RegistrySource[], target: AgentTarget): ContractScope {
+    if (report.state !== 'valid') return unknown('A validated compact plan is required.');
+    if (!Array.isArray(registries) || registries.length > 256) return unknown('Registry inventory is invalid or unbounded.');
+    let root: string;
+    try { root = physicalDirectory(path.resolve(cwd)); } catch { return unknown('Project root provenance is unavailable.'); }
+    const physicalRegistries: Array<{ name: string; root: string }> = [];
+    for (const registry of registries) {
+        try {
+            if (!registry || typeof registry.name !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/.test(registry.name)
+                || typeof registry.contentRoot !== 'string' || registry.contentRoot.length > 4096) throw new Error('invalid registry identity');
+            physicalRegistries.push({ name: registry.name, root: physicalDirectory(registry.contentRoot) });
+        } catch {
+            const name = typeof registry?.name === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/.test(registry.name) ? registry.name : 'unknown';
+            return unknown(`Registry ${name} root cannot be inspected.`);
+        }
+    }
+    const consumed = new Set<string>();
+    for (const source of report.manifest.sources) {
+        try {
+            const file = fs.realpathSync.native(path.resolve(root, source.path));
+            if (!within(root, file)) return unknown(`Plan source ${source.path} escapes its physical project root.`);
+            secureFs.readRegularFile(file, MAX_CONTRACT_BYTES);
+            for (const registry of physicalRegistries) if (within(registry.root, file)) consumed.add(`registry:${registry.name}`);
+        } catch { return unknown(`Plan source ${source.path} cannot be inspected as a bounded regular file.`); }
+    }
+    const provider = providerFor(target);
+    const directories = [provider.skill.global, path.resolve(root, provider.skill.local)].filter((directory): directory is string => directory !== null);
+    for (const directory of directories) {
+        try { if (!directoryExists(directory)) continue; } catch { return unknown(`Provider ${target} install directory ${directory} is unsafe or unreadable.`); }
+        for (const contract of FRAMEWORK_CONTRACTS) {
+            const artifact = path.join(directory, renderedFilename(contract, provider.skill.renderer));
+            try { fs.lstatSync(artifact); }
+            catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; return unknown(`Runtime artifact ${artifact} cannot be inspected.`); }
+            const declaredFile = provider.skill.renderer === 'link' ? path.join(artifact, 'SKILL.md') : artifact;
+            try {
+                const file = fs.realpathSync.native(declaredFile);
+                secureFs.readRegularFile(file, MAX_CONTRACT_BYTES);
+                const owners = physicalRegistries.filter(registry => within(registry.root, file));
+                if (owners.length !== 1) return unknown(`Runtime artifact ${artifact} has no unique physical registry owner (copied/rendered content is not ownership proof).`);
+                consumed.add(`registry:${owners[0].name}`);
+            } catch { return unknown(`Runtime artifact ${artifact} is dangling, nonregular, unreadable or unbounded.`); }
+        }
+    }
+    return { provenance: 'proven', consumedRegistryComponents: [...consumed].sort() };
+}
+
+/** Only the declared CLI floor is consumed here, not a new registry catalog.
+ * The native bounded/no-follow read prevents stat/read races and body leaks. */
+export function registryCompatibility(registries: RegistrySource[], consumed: readonly string[]): PlanDiagnostic[] {
+    const diagnostics: PlanDiagnostic[] = [];
+    const current = cliVersion();
+    for (const registry of registries) {
+        const component = `registry:${registry.name}`;
+        if (!consumed.includes(component)) continue;
+        try {
+            const physicalRoot = physicalDirectory(registry.contentRoot);
+            const manifest = path.join(physicalRoot, REGISTRY_MANIFEST_NAME);
+            try { fs.lstatSync(manifest); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
+            const bytes = secureFs.readRegularFile(manifest, MAX_MANIFEST_BYTES).bytes;
+            const raw = parseJsonNoDuplicate(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('manifest must be a JSON object');
+            const min = (raw as Record<string, unknown>).minCliVersion;
+            if (min !== undefined && (typeof min !== 'string' || !/^v?\d+\.\d+\.\d+$/.test(min)
+                || min.replace(/^v/, '').split('.').some(part => !Number.isSafeInteger(Number(part))))) throw new Error('invalid CLI floor');
+            if (typeof min === 'string' && compareSemver(current, min) < 0) diagnostics.push({ code: 'ADMISSION_REGISTRY_CLI_INCOMPATIBLE', message: `${component} requires CLI >= ${min}; installed CLI is ${current}. Update the CLI before dispatch.` });
+        } catch { diagnostics.push({ code: 'ADMISSION_REGISTRY_COMPATIBILITY_UNVERIFIABLE', message: `${component} manifest compatibility could not be verified as bounded regular JSON. Repair the registry before dispatch.` }); }
+    }
+    return diagnostics;
+}
+
+export type RegistryAdmissionDependencies = {
+    listRegistries?: () => RegistrySource[];
+    checkCurrentness?: typeof checkCurrentness;
+    runSensors?: typeof runSensors;
+    admitPlan?: typeof admitPlan;
+};
+
+/** One admission authority for the public command AND actual watch dispatch.
+ * No empirical execution occurs before provenance/currentness/CLI-floor gates. */
+export async function admitRegistryPlan(input: AdmissionInput, dependencies: RegistryAdmissionDependencies = {}): Promise<AdmissionReport> {
+    const admission = dependencies.admitPlan ?? admitPlan;
+    if (input.plan.state !== 'valid' || !isAgentTarget(input.provider) || (input.enabledAgents && !input.enabledAgents.includes(input.provider))
+        || (input.executionMode !== undefined && input.executionMode !== 'interactivo' && input.executionMode !== 'desatendido')) return admission(input);
+    let registries: RegistrySource[] = [];
+    let scope: ContractScope;
+    try { registries = (dependencies.listRegistries ?? listRegistries)(); scope = consumedRegistryContracts(input.plan, input.cwd, registries, input.provider); }
+    catch { scope = unknown('Registry inventory cannot be read.'); }
+    const compose = async (fields: Partial<AdmissionInput>): Promise<AdmissionReport> => {
+        const report = await admission({ ...input, provenance: scope.provenance, consumedRegistryComponents: scope.consumedRegistryComponents, ...fields });
+        if (scope.provenanceDiagnostic && report.diagnostics.some(diagnostic => diagnostic.code === 'ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED')) {
+            return { ...report, diagnostics: report.diagnostics.map(diagnostic => diagnostic.code === 'ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED' ? scope.provenanceDiagnostic! : diagnostic) };
+        }
+        return report;
+    };
+    let currentness = input.currentness;
+    let compatibilityDiagnostics: PlanDiagnostic[] | undefined;
+    if (input.requireCurrent) {
+        if (scope.provenance !== 'proven') return compose({});
+        currentness = currentness ?? await (dependencies.checkCurrentness ?? checkCurrentness)(input.cwd);
+        // A missing sensor input stages composition before capability resolution.
+        const currentnessGate = await compose({ currentness, verifySensors: true, sensors: undefined });
+        if (currentnessGate.currentness !== 'current') return currentnessGate;
+        const refreshed = consumedRegistryContracts(input.plan, input.cwd, registries, input.provider);
+        if (refreshed.provenance !== 'proven' || refreshed.consumedRegistryComponents.join('\0') !== scope.consumedRegistryComponents.join('\0')) {
+            scope = refreshed.provenance === 'unknown' ? refreshed : unknown('Consumed registry ownership changed during currentness observation. Re-run read-only plan admission.');
+            return compose({ currentness });
+        }
+        scope = refreshed;
+        compatibilityDiagnostics = registryCompatibility(registries, scope.consumedRegistryComponents);
+        const compatibilityGate = await compose({ currentness, compatibilityDiagnostics, verifySensors: true, sensors: undefined });
+        if (compatibilityGate.currentness !== 'current') return compatibilityGate;
+    }
+    const sensors = input.verifySensors ? input.sensors ?? await (dependencies.runSensors ?? runSensors)({ cwd: input.cwd, all: true, readOnly: true }) : undefined;
+    return compose({ currentness, compatibilityDiagnostics, sensors });
+}

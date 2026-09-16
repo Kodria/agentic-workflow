@@ -18,6 +18,11 @@ import { reconcileTracks, defaultTrackRuntime, TrackRuntime, SupervisorObservati
 import type { TrackRef, ProcessRef } from '../../../src/core/journal/types';
 import type { AdmissionReport } from '../../../src/core/admission';
 import { validatePlanFile } from '../../../src/core/plan/validate';
+import * as registryInventory from '../../../src/core/registries';
+import * as currentnessCheck from '../../../src/core/currentness/check';
+import * as sensorCommands from '../../../src/commands/sensors/run';
+import * as preferencesConfig from '../../../src/utils/config';
+import { providerFor } from '../../../src/providers';
 
 jest.setTimeout(60000);
 
@@ -372,6 +377,34 @@ describe('supervisor loop', () => {
         expect(outcome).toBe('custody');
         expect(spawns).toBe(0);
         expect(readJournal(repo, 'main').state!.cycle.status).toBe('BLOCKED');
+    });
+
+    test('native default admission blocks an actual incompatible runtime supplier on a project-only plan before sensors or dispatch', async () => {
+        initUnattendedFixture(repo);
+        const oldHome = process.env.HOME;
+        process.env.HOME = path.join(repo, 'isolated-home');
+        const registryRoot = path.join(repo, 'supplier-registry');
+        const skillSource = path.join(registryRoot, 'skills', 'using-awm');
+        fs.mkdirSync(skillSource, { recursive: true });
+        fs.writeFileSync(path.join(skillSource, 'SKILL.md'), 'runtime contract');
+        fs.writeFileSync(path.join(registryRoot, 'awm-registry.json'), '{"minCliVersion":"999.0.0"}');
+        const installed = providerFor('codex').skill.global!;
+        fs.mkdirSync(installed, { recursive: true });
+        fs.symlinkSync(skillSource, path.join(installed, 'using-awm'), process.platform === 'win32' ? 'junction' : 'dir');
+        const inventory = jest.spyOn(registryInventory, 'listRegistries').mockReturnValue([{ name: 'supplier', remote: 'https://example.invalid/supplier.git', contentRoot: registryRoot }]);
+        const preferences = jest.spyOn(preferencesConfig, 'readPreferences').mockReturnValue({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' });
+        const currentness = jest.spyOn(currentnessCheck, 'checkCurrentness').mockResolvedValue({ checkedAt: 'x', compatibility: { status: 'not-checked' }, components: ['cli', 'registry:supplier'].map(component => ({ component, installed: '1.0.0', latest: '1.0.0', channel: 'stable', source: 'fixture', checkedAt: 'x', status: 'current' as const, detail: 'ok', remedy: 'none' as const })) });
+        const sensors = jest.spyOn(sensorCommands, 'runSensors').mockResolvedValue({ overall: 'pass', sensors: [] });
+        let dispatches = 0;
+        try {
+            const outcome = await new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, () => { dispatches++; }).tick();
+            expect(outcome).toBe('custody');
+            expect(sensors).not.toHaveBeenCalled();
+            expect(dispatches).toBe(0);
+            expect(readJournal(repo, 'main').state!.cycle.status).toBe('BLOCKED');
+            expect(readJournal(repo, 'main').state!.cycle.blockedReason).toContain('ADMISSION_REGISTRY_CLI_INCOMPATIBLE');
+            expect(readJournal(repo, 'main').state!.cycle.blockedReason).toContain('999.0.0');
+        } finally { inventory.mockRestore(); preferences.mockRestore(); currentness.mockRestore(); sensors.mockRestore(); if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; }
     });
 
     test.each([

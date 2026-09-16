@@ -6,11 +6,9 @@ import { checkCurrentness } from '../../core/currentness/check';
 import { runSensors } from '../sensors/run';
 import { readPreferences } from '../../utils/config';
 import { isAgentTarget } from '../../providers';
-import { listRegistries, readRegistryManifest, type RegistrySource } from '../../core/registries';
-import { cliVersion } from '../../core/cli-version';
-import { compareSemver } from '../../core/versioning';
+import { listRegistries, type RegistrySource } from '../../core/registries';
+import { admitRegistryPlan } from '../../core/admission/registry-contracts';
 import path from 'path';
-import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { readJournal } from '../../core/journal/store';
 import { collectIssue148HistoricalFacts, collectMigrationFacts, type MigrationFactsReport } from '../../core/migration';
@@ -59,54 +57,6 @@ function admissionOutput(report: AdmissionReport, json: boolean): string {
     if (json) return `${JSON.stringify(report)}\n`;
     const diagnostic = report.diagnostics[0];
     return `Plan admission: ${report.state}${report.provider ? ` (${terminalSafe(report.provider)})` : ''}${diagnostic ? `\n- ${terminalSafe(diagnostic.code)}: ${terminalSafe(diagnostic.message)}` : ''}\n`;
-}
-
-function within(root: string, candidate: string): boolean {
-    const relative = path.relative(root, candidate);
-    return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
-}
-
-function physicalWithin(root: string, candidate: string): boolean | null {
-    try {
-        const physicalRoot = fs.realpathSync.native(root);
-        const physicalCandidate = fs.realpathSync.native(candidate);
-        return within(physicalRoot, physicalCandidate);
-    } catch { return null; }
-}
-
-/** Maps only validated source paths to physical registry contracts; failures stay fail-closed. */
-function consumedRegistryContracts(report: PlanValidationReport, cwd: string, registries: RegistrySource[]): { provenance: 'proven' | 'unknown'; consumedRegistryComponents: string[] } {
-    if (report.state !== 'valid') return { provenance: 'unknown', consumedRegistryComponents: [] };
-    const root = path.resolve(cwd);
-    if (physicalWithin(root, root) !== true) return { provenance: 'unknown', consumedRegistryComponents: [] };
-    const physicalRegistries: Array<{ name: string; root: string }> = [];
-    for (const registry of registries) {
-        try { physicalRegistries.push({ name: registry.name, root: fs.realpathSync.native(registry.contentRoot) }); }
-        catch { return { provenance: 'unknown', consumedRegistryComponents: [] }; }
-    }
-    const consumed = new Set<string>();
-    for (const source of report.manifest.sources) {
-        const candidate = path.resolve(root, source.path);
-        if (physicalWithin(root, candidate) !== true) return { provenance: 'unknown', consumedRegistryComponents: [] };
-        for (const registry of physicalRegistries) if (physicalWithin(registry.root, candidate) === true) consumed.add(`registry:${registry.name}`);
-    }
-    return { provenance: 'proven', consumedRegistryComponents: [...consumed].sort() };
-}
-
-function registryCompatibility(registries: RegistrySource[], consumed: string[]): PlanDiagnostic[] {
-    const diagnostics: PlanDiagnostic[] = [];
-    const current = cliVersion();
-    for (const registry of registries) {
-        const component = `registry:${registry.name}`;
-        if (!consumed.includes(component)) continue;
-        try {
-            const min = readRegistryManifest(registry.contentRoot).minCliVersion;
-            if (min && compareSemver(current, min) < 0) diagnostics.push({ code: 'ADMISSION_REGISTRY_CLI_INCOMPATIBLE', message: `${component} requires CLI >= ${min}; installed CLI is ${current}. Update the CLI before dispatch.` });
-        } catch {
-            diagnostics.push({ code: 'ADMISSION_REGISTRY_COMPATIBILITY_UNVERIFIABLE', message: `${component} manifest compatibility could not be verified. Repair the registry before dispatch.` });
-        }
-    }
-    return diagnostics;
 }
 
 function boundedDiagnostics(diagnostics: PlanDiagnostic[]): PlanDiagnostic[] {
@@ -263,32 +213,8 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
                 process.exitCode = 2;
                 return;
             }
-            let contractScope: { provenance: 'proven' | 'unknown'; consumedRegistryComponents: string[]; compatibilityDiagnostics?: PlanDiagnostic[] };
-            try {
-                const registries = registryInventory();
-                contractScope = consumedRegistryContracts(planReport, options.cwd, registries);
-                if (options.requireCurrent && contractScope.provenance === 'proven') contractScope.compatibilityDiagnostics = registryCompatibility(registries, contractScope.consumedRegistryComponents);
-            }
-            catch { contractScope = { provenance: 'unknown', consumedRegistryComponents: [] }; }
-            if (options.requireCurrent && contractScope.provenance !== 'proven') {
-                const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal, requireCurrent: true, ...contractScope });
-                process.stdout.write(admissionOutput(report, options.json === true));
-                process.exitCode = 2;
-                return;
-            }
-            const currentness = options.requireCurrent ? await currentnessCheck(options.cwd) : undefined;
-            if (options.requireCurrent && options.verifySensors) {
-                const currentnessGate = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal, requireCurrent: true, verifySensors: true, currentness, ...contractScope });
-                if (currentnessGate.currentness !== 'current') {
-                    process.stdout.write(admissionOutput(currentnessGate, options.json === true));
-                    process.exitCode = 2;
-                    return;
-                }
-            }
-            // Admission is observational. A sensor run that dirties the worktree
-            // is explicitly non-certifying rather than silently becoming a write.
-            const sensors = options.verifySensors ? await sensorRun({ cwd: options.cwd, all: true, readOnly: true }) : undefined;
-            const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true, currentness, sensors, ...contractScope });
+            const report = await admitRegistryPlan({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true },
+                { admitPlan: admission, listRegistries: registryInventory, checkCurrentness: currentnessCheck, runSensors: sensorRun });
             process.stdout.write(admissionOutput(report, options.json === true));
             if (report.state !== 'admitted') process.exitCode = 2;
         });

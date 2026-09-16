@@ -8,6 +8,8 @@ import { validatePlanFile } from '../../../src/core/plan/validate';
 import { exitCodeFor, formatReport, registerPlanCommand } from '../../../src/commands/plan';
 import type { AdmissionReport } from '../../../src/core/admission';
 import { initWatch } from '../../../src/commands/watch/init';
+import { providerFor } from '../../../src/providers';
+import { renderArtifact, renderedFilename } from '../../../src/core/renderers/registry';
 
 const stdoutWrite = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
@@ -290,15 +292,26 @@ describe('plan admit Commander wiring', () => {
             expect(admit).toHaveBeenCalledWith(expect.objectContaining({ executionMode: 'desatendido', planPath: 'plans/current.md', journalCorrupt: false, journalState: expect.objectContaining({ schema: 2, planBinding: expect.objectContaining({ digest: valid.planDigest }) }) }));
         } finally { output.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
     });
-    it.each(['compatible', 'newer-cli-required', 'invalid-manifest', 'unconsumed'])('checks the consumed registry CLI floor before sensors (%s)', async (scenario) => {
+    it.each(['compatible', 'newer-cli-required', 'invalid-manifest', 'unconsumed', 'runtime-supplier', 'runtime-unowned', 'runtime-dangling', 'runtime-directory'])('checks the consumed registry CLI floor before sensors (%s)', async (scenario) => {
         const outputSpy = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const oldHome = process.env.HOME;
         const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-pair-admission-')));
         const registryRoot = path.join(root, 'registry');
         fs.mkdirSync(registryRoot);
         fs.writeFileSync(path.join(registryRoot, 'source.md'), 'contract');
         fs.writeFileSync(path.join(root, 'source.md'), 'project source');
+        if (scenario.startsWith('runtime-')) {
+            process.env.HOME = path.join(root, 'home');
+            const installed = path.join(process.env.HOME, '.agents', 'skills');
+            const source = path.join(scenario === 'runtime-unowned' ? root : registryRoot, 'skills', 'using-awm');
+            fs.mkdirSync(installed, { recursive: true });
+            fs.mkdirSync(source, { recursive: true });
+            if (scenario === 'runtime-directory') fs.mkdirSync(path.join(source, 'SKILL.md'));
+            else if (scenario !== 'runtime-dangling') fs.writeFileSync(path.join(source, 'SKILL.md'), 'runtime contract');
+            fs.symlinkSync(source, path.join(installed, 'using-awm'), process.platform === 'win32' ? 'junction' : 'dir');
+        }
         fs.writeFileSync(path.join(registryRoot, 'awm-registry.json'), scenario === 'invalid-manifest' ? '{bad' : JSON.stringify({ minCliVersion: scenario === 'compatible' ? '1.0.0' : '999.0.0' }));
-        const report = { ...valid, manifest: { ...valid.manifest, sources: [{ id: 'source', path: scenario === 'unconsumed' ? 'source.md' : 'registry/source.md', locator: 'contract', fact: 'contract' }] } };
+        const report = { ...valid, manifest: { ...valid.manifest, sources: [{ id: 'source', path: scenario === 'unconsumed' || scenario.startsWith('runtime-') ? 'source.md' : 'registry/source.md', locator: 'contract', fact: 'contract' }] } };
         const sensors = jest.fn().mockResolvedValue({ overall: 'pass', sensors: [] });
         const program = new Command();
         registerPlanCommand(program, {
@@ -316,11 +329,132 @@ describe('plan admit Commander wiring', () => {
                 expect(sensors).toHaveBeenCalledTimes(1);
             } else {
                 expect(output.state).toBe('blocked');
-                expect(output.diagnostics[0].code).toBe(scenario === 'invalid-manifest' ? 'ADMISSION_REGISTRY_COMPATIBILITY_UNVERIFIABLE' : 'ADMISSION_REGISTRY_CLI_INCOMPATIBLE');
-                expect(output.diagnostics[0].message).toContain('registry:fixture');
+                const unknownSupplier = ['runtime-unowned', 'runtime-dangling', 'runtime-directory'].includes(scenario);
+                expect(output.diagnostics[0].code).toBe(unknownSupplier ? 'ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED' : scenario === 'invalid-manifest' ? 'ADMISSION_REGISTRY_COMPATIBILITY_UNVERIFIABLE' : 'ADMISSION_REGISTRY_CLI_INCOMPATIBLE');
+                if (!unknownSupplier) expect(output.diagnostics[0].message).toContain('registry:fixture');
                 expect(sensors).not.toHaveBeenCalled();
                 expect(process.exitCode).toBe(2);
             }
+        } finally { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; outputSpy.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
+    });
+
+    it.each([['cursor', 'global'], ['cursor', 'local'], ['copilot', 'local']] as const)('does not prove absence for actual unowned rendered %s %s runtime contracts', async (target, scope) => {
+        const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-rendered-admission-')));
+        const oldHome = process.env.HOME;
+        process.env.HOME = path.join(root, 'home');
+        const outputSpy = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const registryRoot = path.join(root, 'registry');
+        const skillSource = path.join(registryRoot, 'skills', 'using-awm');
+        fs.mkdirSync(skillSource, { recursive: true });
+        fs.writeFileSync(path.join(skillSource, 'SKILL.md'), '---\nname: using-awm\ndescription: contract\n---\nRuntime contract.\n');
+        fs.writeFileSync(path.join(registryRoot, 'awm-registry.json'), JSON.stringify({ minCliVersion: '1.0.0' }));
+        fs.writeFileSync(path.join(root, 'source.md'), 'project source');
+        const provider = providerFor(target);
+        const directory = scope === 'global' ? provider.skill.global! : path.resolve(root, provider.skill.local);
+        fs.mkdirSync(directory, { recursive: true });
+        const installedFile = path.join(directory, renderedFilename('using-awm', provider.skill.renderer));
+        fs.writeFileSync(installedFile, renderArtifact(provider.skill.renderer, skillSource)!);
+        const sensors = jest.fn();
+        const program = new Command();
+        registerPlanCommand(program, {
+            validatePlanFile: () => ({ ...valid, manifest: { ...valid.manifest, sources: [{ id: 'source', path: 'source.md', locator: 'contract', fact: 'contract' }] } }),
+            listRegistries: () => [{ name: 'fixture', remote: 'https://example.invalid/fixture.git', contentRoot: registryRoot }],
+            readPreferences: () => ({ defaultAgent: target, enabledAgents: [target], installMethod: 'symlink', defaultScope: 'local' }),
+            checkCurrentness: async () => ({ checkedAt: 'x', compatibility: { status: 'not-checked' }, components: [{ component: 'cli', installed: '1.0.0', latest: '1.0.0', channel: 'stable', source: 'fixture', checkedAt: 'x', status: 'current', detail: 'ok', remedy: 'none' }] }),
+            runSensors: sensors,
+        });
+        try {
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', target, '--cwd', root, '--execution-mode', 'interactivo', '--require-current', '--verify-sensors', '--json']);
+            const output = JSON.parse(String(outputSpy.mock.calls.at(-1)![0]));
+            expect(output.diagnostics[0].code).toBe('ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED');
+            expect(output.state).toBe('blocked');
+            expect(output.diagnostics[0].message).toContain(installedFile);
+            expect(sensors).not.toHaveBeenCalled();
+        } finally { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; outputSpy.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
+    });
+
+    it.each(['symlink', 'directory', 'oversized', 'duplicate-floor', 'unsafe-floor', 'stale-before-compatibility'] as const)('keeps registry manifest %s noncertifying before sensors', async scenario => {
+        const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-manifest-admission-')));
+        const registryRoot = path.join(root, 'registry');
+        fs.mkdirSync(registryRoot);
+        fs.writeFileSync(path.join(registryRoot, 'source.md'), 'registry source');
+        const manifest = path.join(registryRoot, 'awm-registry.json');
+        if (scenario === 'symlink') { fs.writeFileSync(path.join(root, 'outside-manifest'), '{}'); fs.symlinkSync(path.join(root, 'outside-manifest'), manifest, 'file'); }
+        else if (scenario === 'directory') fs.mkdirSync(manifest);
+        else fs.writeFileSync(manifest, scenario === 'oversized' ? ' '.repeat(256 * 1024 + 1)
+            : scenario === 'duplicate-floor' ? '{"minCliVersion":"999.0.0","minCliVersion":"1.0.0"}'
+            : scenario === 'unsafe-floor' ? '{"minCliVersion":"' + '9'.repeat(1024) + '.0.0"}' : '{bad json');
+        const outputSpy = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const sensors = jest.fn();
+        const program = new Command();
+        registerPlanCommand(program, {
+            validatePlanFile: () => ({ ...valid, manifest: { ...valid.manifest, sources: [{ id: 'source', path: 'registry/source.md', locator: 'contract', fact: 'contract' }] } }),
+            listRegistries: () => [{ name: 'fixture', remote: 'https://example.invalid/fixture.git', contentRoot: registryRoot }],
+            readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
+            checkCurrentness: async () => ({ checkedAt: 'x', compatibility: { status: 'not-checked' }, components: ['cli', 'registry:fixture'].map(component => ({ component, installed: '1.0.0', latest: '1.0.0', channel: 'stable', source: 'fixture', checkedAt: 'x', status: scenario === 'stale-before-compatibility' ? 'stale' : 'current', detail: 'observed', remedy: 'none' })) }),
+            runSensors: sensors,
+        });
+        try {
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', root, '--execution-mode', 'interactivo', '--require-current', '--verify-sensors', '--json']);
+            const output = JSON.parse(String(outputSpy.mock.calls.at(-1)![0]));
+            expect(output.state).toBe('blocked');
+            expect(output.diagnostics[0].code).toBe(scenario === 'stale-before-compatibility' ? 'ADMISSION_CURRENTNESS_BLOCKED' : 'ADMISSION_REGISTRY_COMPATIBILITY_UNVERIFIABLE');
+            expect(sensors).not.toHaveBeenCalled();
+        } finally { outputSpy.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
+    });
+
+    it('rechecks actual runtime ownership after asynchronous currentness before compatibility or sensors', async () => {
+        const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-supplier-drift-')));
+        const oldHome = process.env.HOME;
+        process.env.HOME = path.join(root, 'home');
+        const registryRoot = path.join(root, 'registry');
+        const owned = path.join(registryRoot, 'skills', 'using-awm');
+        const unowned = path.join(root, 'unowned', 'using-awm');
+        for (const directory of [owned, unowned]) { fs.mkdirSync(directory, { recursive: true }); fs.writeFileSync(path.join(directory, 'SKILL.md'), 'contract'); }
+        fs.writeFileSync(path.join(registryRoot, 'awm-registry.json'), '{}');
+        fs.writeFileSync(path.join(root, 'source.md'), 'project source');
+        const installed = providerFor('codex').skill.global!;
+        fs.mkdirSync(installed, { recursive: true });
+        const artifact = path.join(installed, 'using-awm');
+        fs.symlinkSync(owned, artifact, process.platform === 'win32' ? 'junction' : 'dir');
+        const outputSpy = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const sensors = jest.fn();
+        const program = new Command();
+        registerPlanCommand(program, {
+            validatePlanFile: () => ({ ...valid, manifest: { ...valid.manifest, sources: [{ id: 'source', path: 'source.md', locator: 'contract', fact: 'contract' }] } }),
+            listRegistries: () => [{ name: 'fixture', remote: 'https://example.invalid/fixture.git', contentRoot: registryRoot }],
+            readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
+            checkCurrentness: async () => {
+                fs.unlinkSync(artifact); fs.symlinkSync(unowned, artifact, process.platform === 'win32' ? 'junction' : 'dir');
+                return { checkedAt: 'x', compatibility: { status: 'not-checked' }, components: ['cli', 'registry:fixture'].map(component => ({ component, installed: '1.0.0', latest: '1.0.0', channel: 'stable', source: 'fixture', checkedAt: 'x', status: 'current', detail: 'ok', remedy: 'none' })) };
+            }, runSensors: sensors,
+        });
+        try {
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', root, '--execution-mode', 'interactivo', '--require-current', '--verify-sensors', '--json']);
+            const output = JSON.parse(String(outputSpy.mock.calls.at(-1)![0]));
+            expect(output.diagnostics[0].code).toBe('ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED');
+            expect(sensors).not.toHaveBeenCalled();
+        } finally { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; outputSpy.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
+    });
+
+    it('keeps an unreadable inventory root actionable instead of silently proving it unconsumed', async () => {
+        const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-root-admission-')));
+        fs.writeFileSync(path.join(root, 'source.md'), 'project source');
+        const outputSpy = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const sensors = jest.fn(); const currentness = jest.fn();
+        const program = new Command();
+        registerPlanCommand(program, {
+            validatePlanFile: () => ({ ...valid, manifest: { ...valid.manifest, sources: [{ id: 'source', path: 'source.md', locator: 'contract', fact: 'contract' }] } }),
+            listRegistries: () => [{ name: 'unavailable-supplier', remote: 'https://example.invalid/fixture.git', contentRoot: path.join(root, 'missing-registry') }],
+            readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
+            checkCurrentness: currentness, runSensors: sensors,
+        });
+        try {
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', root, '--require-current', '--verify-sensors', '--json']);
+            const output = JSON.parse(String(outputSpy.mock.calls.at(-1)![0]));
+            expect(output.diagnostics[0].code).toBe('ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED');
+            expect(output.diagnostics[0].message).toContain('unavailable-supplier');
+            expect(currentness).not.toHaveBeenCalled(); expect(sensors).not.toHaveBeenCalled();
         } finally { outputSpy.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
     });
 
@@ -368,11 +502,7 @@ describe('plan admit Commander wiring', () => {
         const admit = jest.fn<Promise<AdmissionReport>, [any]>().mockResolvedValue({ state: 'blocked', planState: 'valid', journal: 'not-required', currentness: 'unverifiable', sensors: 'not-required', diagnostics: [] });
         try {
             fs.writeFileSync(path.join(outside, 'contract.md'), 'outside');
-            try { fs.symlinkSync(outside, path.join(fixtureRoot, 'linked'), 'dir'); }
-            catch (error) {
-                if ((error as NodeJS.ErrnoException).code === 'EPERM') return;
-                throw error;
-            }
+            fs.symlinkSync(outside, path.join(fixtureRoot, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
             const escaped = { ...valid, manifest: { ...valid.manifest, sources: [{ id: 'SRC', path: 'linked/contract.md', locator: 'x', fact: 'x' }] } };
             const program = new Command();
             program.exitOverride();
