@@ -149,7 +149,7 @@ function pathPackageManagerVersion(tool: string): string | null {
     try {
         const result = spawnSync(tool, ['--version'], {
             cwd: process.cwd(), shell: false, encoding: 'utf8', timeout: 5_000,
-            maxBuffer: 1024, windowsHide: true,
+            maxBuffer: 1024, windowsHide: true, stdio: 'pipe',
         });
         if (result.error || result.status !== 0 || result.signal || typeof result.stdout !== 'string' || result.stdout.length > 256) return null;
         return exactVersion(result.stdout.trim());

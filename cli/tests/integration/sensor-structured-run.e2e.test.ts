@@ -35,10 +35,12 @@ function createFixture(): Fixture {
         name: 'fixture-sensor', version: '1.0.0',
     });
     fs.writeFileSync(path.join(project, 'fixture-sensor.config.mjs'), 'export default {};\n');
-    fs.writeFileSync(path.join(project, 'fixture-sensor.mjs'), [
-        "import fs from 'fs';",
-        "fs.writeFileSync('structured-argv.json', JSON.stringify(process.argv.slice(2)));",
-    ].join('\n'));
+    const fixtureBin = path.join(project, 'node_modules', '.bin', 'fixture-sensor');
+    fs.mkdirSync(path.dirname(fixtureBin), { recursive: true });
+    fs.writeFileSync(fixtureBin, [
+        '#!/usr/bin/env node',
+        "require('fs').writeFileSync('structured-argv.json', JSON.stringify(process.argv.slice(2)));",
+    ].join('\n'), { mode: 0o755 });
 
     writeJson(path.join(registryRoot, 'sensor-packs', 'fixture', 'pack.json'), {
         schemaVersion: 2,
@@ -56,10 +58,9 @@ function createFixture(): Fixture {
                         runtime: 'node', runtimeRange: '>=20', configFiles: ['fixture-sensor.config.mjs'],
                     },
                     certifiedRange: '>=1 <2',
-                    // `node` is resolved from the process environment, but the actual
-                    // executable payload is the fixture-local script. Keeping the
-                    // literal as one argv element proves no shell parses it.
-                    command: { executable: 'node', resolution: 'path', args: ['fixture-sensor.mjs', literal] },
+                    // The fixture executable is project-local. Keeping the literal
+                    // as one argv element proves no shell parses it.
+                    command: { executable: 'fixture-sensor', resolution: 'node-modules-bin', args: [literal] },
                     assets: ['fixture-sensor.config.mjs'], formatter: 'generic', probe: { kind: 'config-present' },
                 }],
             },
@@ -118,7 +119,7 @@ test('compiled sensors run materializes a v2 registry command and passes its lit
             mode: 'project-sensors',
             pack: 'fixture',
             source: { registry: 'baseline' },
-            sensors: { structured: { variantId: 'fixture-v1', command: { executable: 'node', resolution: 'path', args: ['fixture-sensor.mjs', fixture.literal] } } },
+            sensors: { structured: { variantId: 'fixture-v1', command: { executable: 'fixture-sensor', resolution: 'node-modules-bin', args: [fixture.literal] } } },
         });
 
         const result = runCli(fixture, 'run', '--fast');

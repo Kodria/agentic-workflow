@@ -105,13 +105,15 @@ test('verify-sensors degrades parseably for a v2 sensor that exits 2 without fin
         writeJson(path.join(project, 'package.json'), { name: 'preflight-verify-fixture', private: true });
         writeJson(path.join(project, 'node_modules', 'fixture-sensor', 'package.json'), { name: 'fixture-sensor', version: '1.0.0' });
         fs.writeFileSync(path.join(project, 'fixture-sensor.config.mjs'), 'export default {};\n');
-        fs.writeFileSync(path.join(project, 'fixture-sensor.mjs'), 'process.exit(2);\n');
+        const fixtureBin = path.join(project, 'node_modules', '.bin', 'fixture-sensor');
+        fs.mkdirSync(path.dirname(fixtureBin), { recursive: true });
+        fs.writeFileSync(fixtureBin, '#!/usr/bin/env node\nprocess.exit(2);\n', { mode: 0o755 });
         writeJson(path.join(registry, 'sensor-packs', 'fixture', 'pack.json'), {
             schemaVersion: 2, name: 'fixture', description: 'preflight exit-2 fixture', detects: ['package.json'],
             sensors: { lint: { applicability: { allFiles: ['package.json'] }, variants: [{
                 id: 'fixture-v1', priority: 100,
                 requirements: { tool: 'fixture-sensor', toolRange: '>=1 <2', runtime: 'node', runtimeRange: '>=20', configFiles: ['fixture-sensor.config.mjs'] },
-                certifiedRange: '>=1 <2', command: { executable: 'node', resolution: 'path', args: ['fixture-sensor.mjs'] },
+                certifiedRange: '>=1 <2', command: { executable: 'fixture-sensor', resolution: 'node-modules-bin', args: ['--fixture'] },
                 assets: ['fixture-sensor.config.mjs'], formatter: 'generic', probe: { kind: 'config-present' },
             }] } },
             coverage: { schemaVersion: 1, classes: {
@@ -124,7 +126,7 @@ test('verify-sensors degrades parseably for a v2 sensor that exits 2 without fin
         writeJson(path.join(awmHome, 'registries.json'), [{ name: 'baseline', remote: 'fixture' }]);
         writeJson(path.join(project, '.awm', 'sensors.json'), {
             schemaVersion: 2, pack: 'fixture', packSelection: 'explicit', sensors: { lint: {
-                enabled: true, fast: true, variantId: 'fixture-v1', command: { executable: 'node', resolution: 'path', args: ['fixture-sensor.mjs'] }, assets: ['fixture-sensor.config.mjs'],
+                enabled: true, fast: true, variantId: 'fixture-v1', command: { executable: 'fixture-sensor', resolution: 'node-modules-bin', args: ['--fixture'] }, assets: ['fixture-sensor.config.mjs'],
                 initializedCompatibility: { state: 'certified', reason: 'fixture', variantId: 'fixture-v1', toolVersion: '1.0.0', runtimeVersion: process.versions.node, certifiedRange: '>=1 <2', evidence: [] },
             } },
         });
