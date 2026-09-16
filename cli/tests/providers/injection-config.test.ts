@@ -1,6 +1,7 @@
 import os from 'os';
 import path from 'path';
 import { getInjection } from '../../src/providers';
+import { homeDir } from '../../src/core/paths';
 
 describe('getInjection', () => {
     it('returns cc-settings-merge for claude-code', () => {
@@ -9,12 +10,16 @@ describe('getInjection', () => {
     });
 
     it('returns config-instructions for opencode pointing at the global opencode.json', () => {
-        const inj = getInjection('opencode');
-        expect(inj).toEqual({
-            type: 'config-instructions',
-            configPath: path.join(os.homedir(), '.config/opencode/opencode.json'),
-            field: 'instructions',
-        });
+        // Windows os.homedir() uses USERPROFILE while the CLI honors HOME.
+        const systemHome = jest.spyOn(os, 'homedir').mockReturnValue(path.resolve('different-system-profile'));
+        try {
+            const inj = getInjection('opencode');
+            expect(inj).toEqual({
+                type: 'config-instructions',
+                configPath: path.join(homeDir(), '.config/opencode/opencode.json'),
+                field: 'instructions',
+            });
+        } finally { systemHome.mockRestore(); }
     });
 
     it('returns undefined for antigravity (no injection mechanism wired yet)', () => {

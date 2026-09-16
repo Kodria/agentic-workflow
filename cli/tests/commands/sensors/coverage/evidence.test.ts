@@ -25,11 +25,50 @@ const detector: CoverageDetectorContract = {
     },
 };
 
-const noFollowUnavailableOnNativeWindows = process.platform === 'win32'
-    && typeof fs.constants.O_NOFOLLOW !== 'number';
+function observeWithoutNoFollow(io?: Parameters<typeof observeDetector>[5], project = root): ReturnType<typeof observeDetector> {
+    let result: ReturnType<typeof observeDetector> | undefined;
+    try {
+        jest.isolateModules(() => {
+            jest.doMock('fs', () => {
+                const actual = jest.requireActual<typeof fs>('fs');
+                const constants = { ...actual.constants, O_NOFOLLOW: undefined };
+                return { __esModule: true, default: { ...actual, constants }, ...actual, constants };
+            });
+            const observe = require('../../../../src/commands/sensors/coverage/evidence').observeDetector as typeof observeDetector;
+            result = observe(project, 'style', 0, detector, { cmd: 'eslint --config eslint.config.js' }, io);
+        });
+    } finally { jest.dontMock('fs'); }
+    if (!result) throw new Error('portable evidence observer did not return a result');
+    return result;
+}
 
-const regularFileStatus = (posixStatus: 'covered' | 'ineffective') =>
-    noFollowUnavailableOnNativeWindows ? 'unverifiable' : posixStatus;
+test('native anchored evidence remains readable without O_NOFOLLOW', () => {
+    fs.writeFileSync(path.join(root, 'eslint.config.js'), 'no-unreachable');
+    expect(observeWithoutNoFollow()).toMatchObject({ status: 'covered' });
+});
+
+test('missing O_NOFOLLOW never lends native trust to injected IO', () => {
+    fs.writeFileSync(path.join(root, 'eslint.config.js'), 'no-unreachable');
+    expect(observeWithoutNoFollow({ lstatSync: fs.lstatSync })).toMatchObject({ status: 'unverifiable' });
+});
+
+test.each(['linked-leaf', 'oversize', 'missing-marker'] as const)('native evidence without O_NOFOLLOW rejects %s', kind => {
+    const file = path.join(root, 'eslint.config.js');
+    if (kind === 'linked-leaf') {
+        const target = path.join(root, 'target.js');
+        fs.writeFileSync(target, 'no-unreachable');
+        fs.symlinkSync(target, file);
+    } else fs.writeFileSync(file, kind === 'oversize' ? Buffer.alloc(MAX_COVERAGE_FILE_BYTES + 1) : 'different-rule');
+    expect(observeWithoutNoFollow().status).toBe(kind === 'missing-marker' ? 'ineffective' : 'unverifiable');
+});
+
+test('native evidence without O_NOFOLLOW rejects linked ancestors', () => {
+    externalRoot = mkCanonicalTmpDir('awm-coverage-linked-parent-');
+    fs.writeFileSync(path.join(externalRoot, 'eslint.config.js'), 'no-unreachable');
+    const project = path.join(root, 'linked-project');
+    fs.symlinkSync(externalRoot, project, process.platform === 'win32' ? 'junction' : 'dir');
+    expect(observeWithoutNoFollow(undefined, project)).toMatchObject({ status: 'unverifiable' });
+});
 
 test('active matching sensor with all AND evidence is covered (R2.2)', () => {
     fs.writeFileSync(path.join(root, 'eslint.config.js'), "rules: { 'no-unreachable': 'error' }");
@@ -38,13 +77,6 @@ test('active matching sensor with all AND evidence is covered (R2.2)', () => {
         cmd: 'npx eslint . --config eslint.config.js', enabled: true,
     });
 
-    if (noFollowUnavailableOnNativeWindows) {
-        expect(observed).toMatchObject({
-            status: 'unverifiable',
-            evidence: expect.arrayContaining([{ kind: 'file', path: 'eslint.config.js', status: 'unverifiable' }]),
-        });
-        return;
-    }
     expect(observed).toEqual({
         classId: 'style',
         detectorIndex: 0,
@@ -66,7 +98,7 @@ test('structured v2 commands supply structural coverage evidence without exposin
         command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.', '--config', 'eslint.config.js'] },
     });
 
-    expect(observed.status).toBe(regularFileStatus('covered'));
+    expect(observed.status).toBe('covered');
     expect(JSON.stringify(observed)).not.toContain('--config');
 });
 
@@ -106,26 +138,16 @@ test('recognized command plus missing literal marker is ineffective (R2.4)', () 
     fs.writeFileSync(path.join(root, 'eslint.config.js'), 'export default []');
     const out = observeDetector(root, 'style', 0, detector, { cmd: 'eslint --config eslint.config.js' });
 
-    expect(out.status).toBe(regularFileStatus('ineffective'));
-    if (noFollowUnavailableOnNativeWindows) {
-        expect(out.evidence).toContainEqual({ kind: 'file', path: 'eslint.config.js', status: 'unverifiable' });
-    } else {
-        expect(out.evidence).toContainEqual({ kind: 'marker', path: 'eslint.config.js', ordinal: 1, status: 'missing' });
-    }
+    expect(out.status).toBe('ineffective');
+    expect(out.evidence).toContainEqual({ kind: 'marker', path: 'eslint.config.js', ordinal: 1, status: 'missing' });
 });
 
-test('native Windows without no-follow support never certifies regular evidence from its contents', () => {
+test('native platform securely observes regular evidence from its contents', () => {
     fs.writeFileSync(path.join(root, 'eslint.config.js'), 'no-unreachable');
 
     const observed = observeDetector(root, 'style', 0, detector, { cmd: 'eslint --config eslint.config.js' });
 
-    if (noFollowUnavailableOnNativeWindows) {
-        expect(observed.status).toBe('unverifiable');
-        expect(observed.status).not.toBe('covered');
-        expect(observed.status).not.toBe('ineffective');
-    } else {
-        expect(observed.status).toBe('covered');
-    }
+    expect(observed.status).toBe('covered');
 });
 
 test('unverifiable file evidence dominates missing evidence in the detector result (R2.5a)', () => {

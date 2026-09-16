@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { secureFs } from '../../../core/secure-fs/native-bridge';
 import type { SensorConfig } from '../types';
 import type { StructuredCommand } from '../compatibility/types';
 import { MAX_COVERAGE_FILE_BYTES, type CoverageDetectorContract } from './contract';
@@ -55,24 +56,31 @@ function inspectFile(root: string, relative: string, markers: string[], io: Evid
     }
 
     const noFollow = fs.constants.O_NOFOLLOW;
-    if (typeof noFollow !== 'number') {
+    if (typeof noFollow !== 'number' && io !== realIo) {
         return { status: 'unverifiable', evidence: [{ kind: 'file', path: relative, status: 'unverifiable' }] };
     }
 
     let fd: number | undefined;
     let content: string;
     try {
-        fd = (io.openSync ?? realIo.openSync!)(absolute, fs.constants.O_RDONLY | noFollow);
-        const opened = (io.fstatSync ?? realIo.fstatSync!)(fd);
-        if (!opened.isFile() || opened.size > MAX_COVERAGE_FILE_BYTES) {
-            return { status: 'unverifiable', evidence: [{ kind: 'file', path: relative, status: 'unverifiable' }] };
+        if (typeof noFollow !== 'number') {
+            // Windows has no O_NOFOLLOW. Its native descriptor-anchored read
+            // rejects reparse points in every ancestor and preserves identity.
+            // Never replace an injected IO boundary with this native trust.
+            content = secureFs.readRegularFile(absolute, MAX_COVERAGE_FILE_BYTES).bytes.toString('utf8');
+        } else {
+            fd = (io.openSync ?? realIo.openSync!)(absolute, fs.constants.O_RDONLY | noFollow);
+            const opened = (io.fstatSync ?? realIo.fstatSync!)(fd);
+            if (!opened.isFile() || opened.size > MAX_COVERAGE_FILE_BYTES) {
+                return { status: 'unverifiable', evidence: [{ kind: 'file', path: relative, status: 'unverifiable' }] };
+            }
+            const buffer = Buffer.allocUnsafe(MAX_COVERAGE_FILE_BYTES + 1);
+            const bytesRead = (io.readSync ?? realIo.readSync!)(fd, buffer, 0, buffer.length, null);
+            if (!Number.isSafeInteger(bytesRead) || bytesRead < 0 || bytesRead > MAX_COVERAGE_FILE_BYTES) {
+                return { status: 'unverifiable', evidence: [{ kind: 'file', path: relative, status: 'unverifiable' }] };
+            }
+            content = buffer.subarray(0, bytesRead).toString('utf8');
         }
-        const buffer = Buffer.allocUnsafe(MAX_COVERAGE_FILE_BYTES + 1);
-        const bytesRead = (io.readSync ?? realIo.readSync!)(fd, buffer, 0, buffer.length, null);
-        if (!Number.isSafeInteger(bytesRead) || bytesRead < 0 || bytesRead > MAX_COVERAGE_FILE_BYTES) {
-            return { status: 'unverifiable', evidence: [{ kind: 'file', path: relative, status: 'unverifiable' }] };
-        }
-        content = buffer.subarray(0, bytesRead).toString('utf8');
     } catch {
         return { status: 'unverifiable', evidence: [{ kind: 'file', path: relative, status: 'unverifiable' }] };
     } finally {

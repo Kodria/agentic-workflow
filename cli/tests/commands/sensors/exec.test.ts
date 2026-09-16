@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import * as platformPaths from '../../../src/core/paths';
 import { runCommand, runStructuredCommand } from '../../../src/commands/sensors/exec';
 import { applyBaseline, executePrepared, interpretResult } from '../../../src/commands/sensors/result';
 import { fingerprint } from '../../../src/commands/sensors/baseline';
@@ -376,6 +377,48 @@ onPosix('runStructuredCommand — local node_modules binaries', () => {
         } finally {
             fs.rmSync(dir, { recursive: true, force: true });
         }
+    });
+});
+
+describe('runStructuredCommand — Windows local native binaries', () => {
+    let dir: string;
+    let windows: jest.SpyInstance;
+    let savedPathExt: string | undefined;
+    beforeEach(() => {
+        dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-windows-local-bin-')));
+        fs.mkdirSync(path.join(dir, 'node_modules', '.bin'), { recursive: true });
+        windows = jest.spyOn(platformPaths, 'isWindowsNative').mockReturnValue(true);
+        savedPathExt = process.env.PATHEXT;
+        process.env.PATHEXT = '.EXE;.CMD';
+    });
+    afterEach(() => {
+        windows.mockRestore();
+        if (savedPathExt === undefined) delete process.env.PATHEXT; else process.env.PATHEXT = savedPathExt;
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+    it('executes a contained native executable with literal shell-sensitive argv', async () => {
+        const executable = path.join(dir, 'node_modules', '.bin', 'fixture.exe');
+        fs.copyFileSync(process.execPath, executable);
+        fs.chmodSync(executable, 0o755);
+        const literal = '&echo injected|more';
+        await expect(runStructuredCommand({ executable: 'fixture', resolution: 'node-modules-bin',
+            args: ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', '--', literal] }, { cwd: dir, timeout: 5000 }))
+            .resolves.toMatchObject({ code: 0, stdout: JSON.stringify([literal]) });
+    });
+    it.each(['fixture', 'fixture.cmd'] as const)('rejects non-native wrapper %s without executing it', executable => {
+        fs.writeFileSync(path.join(dir, 'node_modules', '.bin', executable), 'echo injected');
+        expect(() => runStructuredCommand({ executable, resolution: 'node-modules-bin', args: ['--version'] }, { cwd: dir, timeout: 5000 }))
+            .toThrow(/contained local file|command wrappers/);
+    });
+    it('rejects a native executable escaping through a linked .bin ancestor', () => {
+        const outside = path.join(dir, 'outside-bin');
+        fs.mkdirSync(outside);
+        fs.copyFileSync(process.execPath, path.join(outside, 'fixture.exe'));
+        const bin = path.join(dir, 'node_modules', '.bin');
+        fs.rmdirSync(bin);
+        fs.symlinkSync(outside, bin, process.platform === 'win32' ? 'junction' : 'dir');
+        expect(() => runStructuredCommand({ executable: 'fixture', resolution: 'node-modules-bin', args: ['--version'] }, { cwd: dir, timeout: 5000 }))
+            .toThrow('node_modules executable is not a contained local file');
     });
 });
 
