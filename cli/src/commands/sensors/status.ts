@@ -4,6 +4,7 @@ import { resolveOnPath } from '../../core/paths';
 import { SensorCheck, SensorStatusResult } from './types';
 import { parseSensorPack } from './compatibility/contract';
 import { discoverProjectEvidence } from './compatibility/discovery';
+import { bindContainedRuntimeCommands } from './compatibility/live';
 import type { PackSource } from './compatibility/pack-source';
 import { resolveProjectCompatibility, resolveSensorCompatibility } from './compatibility/resolve';
 import { resolveSensorProject } from './project';
@@ -100,12 +101,13 @@ function resolveStaticV2Compatibility(cwd: string, manifest: SensorManifestV2, s
     const parsed = parseSensorPack(JSON.parse(source.content), source.path);
     if (parsed.kind !== 'v2') throw new Error(`sensor pack "${manifest.pack}" does not provide a v2 compatibility contract`);
     const evidence = discoverProjectEvidence(cwd, parsed.pack);
+    const executionPack = bindContainedRuntimeCommands(parsed.pack, evidence.pythonEnvironmentRoot);
     const resolutionEvidence = {
         ...evidence,
         ...(manifest.packSelection === 'explicit' ? { packSelection: 'explicit' as const } : {}),
     };
-    const initial = resolveProjectCompatibility(parsed.pack, resolutionEvidence).sensors;
-    return Object.fromEntries(Object.entries(parsed.pack.sensors).map(([name, sensor]) => {
+    const initial = resolveProjectCompatibility(executionPack, resolutionEvidence).sensors;
+    return Object.fromEntries(Object.entries(executionPack.sensors).map(([name, sensor]) => {
         const variant = initial[name]?.variantId === null
             ? null
             : sensor.variants.find(candidate => candidate.id === initial[name]?.variantId) ?? null;
@@ -119,7 +121,7 @@ function resolveStaticV2Compatibility(cwd: string, manifest: SensorManifestV2, s
                 : undefined;
         return [name, probeStatus === undefined
             ? initial[name]
-            : resolveSensorCompatibility(sensor, { ...resolutionEvidence, probe: { status: probeStatus } }, { pack: parsed.pack.name, sensor: name })];
+            : resolveSensorCompatibility(sensor, { ...resolutionEvidence, probe: { status: probeStatus } }, { pack: executionPack.name, sensor: name })];
     }));
 }
 

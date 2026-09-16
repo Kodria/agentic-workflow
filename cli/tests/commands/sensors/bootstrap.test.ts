@@ -86,6 +86,9 @@ describe('planSensorBootstrap', () => {
             (resolveParsedPackCompatibility as jest.Mock).mockResolvedValue({ pack, sensors: { lint: { state: 'certified', reason: 'ok', variantId: 'eslint-9', toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [] } } });
 
             await expect(planSensorBootstrap(project)).resolves.toMatchObject({ kind: 'migrate', changes: [{ path: '.awm/sensors.json', action: 'replace' }], migration: { kind: 'legacy-v1' }, source });
+            // A legacy manifest identifies the old pack; it is not an explicit
+            // opt-in to every optional sensor in that pack.
+            expect(resolveParsedPackCompatibility).toHaveBeenCalledWith(project, pack);
         } finally { fs.rmSync(project, { recursive: true, force: true }); }
 
         (resolveSensorProject as jest.Mock).mockReturnValueOnce({ state: 'configured', projectRoot: root, manifestPath: `${root}/.awm/sensors.json`, packageRoot: root, manifest: { kind: 'v2', pack: { schemaVersion: 2, pack: 'js-ts', sensors: {} } } });

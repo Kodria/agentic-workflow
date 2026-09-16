@@ -32,7 +32,7 @@ function containedRuntimeCommand(variant: SensorVariant, pythonEnvironmentRoot: 
     };
 }
 
-function bindContainedRuntimeCommands(pack: SensorPackV2, pythonEnvironmentRoot: '.venv' | 'venv' | null): SensorPackV2 {
+export function bindContainedRuntimeCommands(pack: SensorPackV2, pythonEnvironmentRoot: '.venv' | 'venv' | null): SensorPackV2 {
     return {
         ...pack,
         sensors: Object.fromEntries(Object.entries(pack.sensors).map(([name, sensor]) => [

@@ -92,7 +92,7 @@ function exactLogicalSource(input: unknown, pack: string): V2MigrationSource['so
     const expectedPath = path.join(registry.contentRoot, 'sensor-packs', pack, 'pack.json');
     if (source.path !== expectedPath) throw new Error('v2 migration source must contain an exact resolved pack');
     let parsedSource;
-    try { parsedSource = parseSensorPack(JSON.parse(source.content), 'v2 migration resolved source'); }
+    try { parsedSource = parseSensorPack(JSON.parse(source.content), source.path); }
     catch { throw new Error('v2 migration source exact v2 pack is invalid'); }
     if (parsedSource.kind !== 'v2' || parsedSource.pack.name !== pack) throw new Error('v2 migration source must contain the exact v2 pack');
     return source as V2MigrationSource['source'];
@@ -100,7 +100,7 @@ function exactLogicalSource(input: unknown, pack: string): V2MigrationSource['so
 
 function assertSourceCompatibleWithManifest(source: V2MigrationSource['source'], manifest: SensorManifestV2): void {
     let parsedSource;
-    try { parsedSource = parseSensorPack(JSON.parse(source.content), 'v2 migration resolved source'); }
+    try { parsedSource = parseSensorPack(JSON.parse(source.content), source.path); }
     catch { throw new Error('v2 migration source exact v2 pack is invalid'); }
     if (parsedSource.kind !== 'v2' || parsedSource.pack.name !== manifest.pack) {
         throw new Error('v2 migration source must contain the exact v2 pack');
@@ -115,7 +115,7 @@ function assertSourceCompatibleWithManifest(source: V2MigrationSource['source'],
 
 function assertSourceCompatibleWithCandidate(source: V2MigrationSource['source'], candidate: SensorManifestV3ProjectSensors): void {
     let parsedSource;
-    try { parsedSource = parseSensorPack(JSON.parse(source.content), 'legacy migration resolved source'); }
+    try { parsedSource = parseSensorPack(JSON.parse(source.content), source.path); }
     catch { throw new Error('legacy migration source exact v2 pack is invalid'); }
     if (parsedSource.kind !== 'v2' || parsedSource.pack.name !== candidate.pack) {
         throw new Error('legacy migration source must contain the exact v2 pack');

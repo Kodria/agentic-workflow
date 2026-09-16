@@ -49,7 +49,7 @@ function declaration(mode: Exclude<BootstrapMode, 'project-sensors'>, reason: st
 
 function digest(bytes: Buffer): string { return createHash('sha256').update(bytes).digest('hex'); }
 
-async function projectSensors(projectRoot: string, registryRoot?: string, requestedPack?: string, packageRoot?: string): Promise<{ manifest: SensorManifestV3ProjectSensors; source: PackSource; changes: BootstrapChange[] } | { reason: string; remedy: string; candidates?: string[] }> {
+async function projectSensors(projectRoot: string, registryRoot?: string, requestedPack?: string, packageRoot?: string, explicitPackSelection = requestedPack !== undefined): Promise<{ manifest: SensorManifestV3ProjectSensors; source: PackSource; changes: BootstrapChange[] } | { reason: string; remedy: string; candidates?: string[] }> {
     const detectionRoot = packageRoot ? path.resolve(projectRoot, packageRoot) : projectRoot;
     const detected = detectStack(detectionRoot);
     const pack = requestedPack ?? detected.pack;
@@ -66,7 +66,7 @@ async function projectSensors(projectRoot: string, registryRoot?: string, reques
     if (parsed.kind !== 'v2') return { reason: 'source-unsupported', remedy: 'install-a-v2-sensor-pack' };
     let live;
     try {
-        live = requestedPack
+        live = explicitPackSelection
             ? await resolveParsedPackCompatibility(detectionRoot, parsed.pack, { packSelection: 'explicit' })
             : await resolveParsedPackCompatibility(detectionRoot, parsed.pack);
     }
@@ -99,7 +99,9 @@ export async function planSensorBootstrap(cwd: string = process.cwd(), input: Bo
             return { kind: 'noop', projectRoot: project.projectRoot, manifestPath: project.manifestPath, changes: [], dryRun: opts.dryRun };
         }
         if (project.manifest.kind === 'legacy') {
-            const planned = await projectSensors(project.projectRoot, opts.registryRoot, project.manifest.pack.pack);
+            // The legacy pack name identifies the source to migrate, but must not
+            // activate v2 sensors which require an explicit project opt-in.
+            const planned = await projectSensors(project.projectRoot, opts.registryRoot, project.manifest.pack.pack, undefined, false);
             if ('reason' in planned) return blocked(project.projectRoot, project.manifestPath, opts.dryRun, planned.reason, planned.remedy, 'candidates' in planned ? planned.candidates : undefined);
             try {
                 const original = fs.readFileSync(project.manifestPath);
