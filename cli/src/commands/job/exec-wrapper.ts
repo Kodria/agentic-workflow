@@ -82,7 +82,10 @@ export async function runExecWrapper(opts: { logsRoot: string; jobId: string; no
     const { logsRoot, jobId, nonce, argv, cwd } = opts;
     validateSidecarIdentity(logsRoot, jobId, nonce);
     const repoRoot = opts.repoRoot ?? process.cwd();
-    if (argv.length === 0) throw new Error('argv vacio');
+    if (!Array.isArray(argv) || argv.length === 0 || argv.length > 256
+        || argv.some(argument => typeof argument !== 'string' || argument.length > 65536 || argument.includes('\0'))
+        || argv[0].length === 0 || argv.reduce((bytes, argument) => bytes + Buffer.byteLength(argument, 'utf8'), 0) > 1024 * 1024) throw new Error('argv invalid or unbounded');
+    const safeCwd = resolveWorkingDirectory(repoRoot, cwd).absolute;
     const omitControllerOutput = isCommittedController(logsRoot, repoRoot, jobId, nonce, argv);
     fs.mkdirSync(logsRoot, { recursive: true, mode: 0o700 });
     // (1) claim exclusivo DURABLE — wx + fsync de archivo y de directorio
@@ -109,7 +112,6 @@ export async function runExecWrapper(opts: { logsRoot: string; jobId: string; no
     // process group por job, independiente del supervisor (R4.7: shell:false,
     // argv como array, secretos solo por referencia de entorno).
     const [exe, ...args] = argv;
-    const safeCwd = resolveWorkingDirectory(repoRoot, cwd).absolute;
     const child = spawn(exe, args, {
         cwd: safeCwd, shell: false, detached: true,
         env: { ...process.env, [NONCE_ENV]: nonce },

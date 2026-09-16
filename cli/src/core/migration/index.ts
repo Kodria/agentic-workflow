@@ -8,10 +8,11 @@ import { readJournal } from '../journal/store';
 import { computeFingerprint, type FingerprintResult } from '../journal/fingerprint';
 import { secureFs } from '../secure-fs/native-bridge';
 import { hasIssue148ReviewProvenance, type HistoricalReviewRecord } from './historical-provenance';
+import type { VerificationItem } from '../journal/types';
 
 export type MigrationState = 'supported-completion' | 'planning-required' | 'blocked';
 export type MigrationTask = Readonly<{ id: string; state: 'completed' | 'pending' | 'unstarted'; missing: string[] }>;
-export type EvidenceRecord = Readonly<{ taskId: string; commitSha?: string; verificationItemId?: string; jobId?: string; argv?: string[]; fingerprint?: string; paths?: string[]; verdictId?: string; obligationId?: string; role?: 'spec' | 'quality'; result?: 'pass' | 'fail' | 'inconclusive'; at?: string; issue126: string }>;
+export type EvidenceRecord = Readonly<{ taskId: string; commitSha?: string; verificationItemId?: string; verificationKind?: VerificationItem['kind']; jobId?: string; argv?: string[]; fingerprint?: string; paths?: string[]; verdictId?: string; obligationId?: string; role?: 'spec' | 'quality'; result?: 'pass' | 'fail' | 'inconclusive'; at?: string; issue126: string }>;
 export type MigrationFactsReport = Readonly<{ state: MigrationState; planDigest?: string; issueLinks: string[]; tasks: MigrationTask[]; diagnostics: string[]; facts: ReadonlyArray<EvidenceRecord> }>;
 
 const ISSUE_126 = /\/issues\/126\/?$/;
@@ -30,8 +31,8 @@ function reconcileTaskEvidence(taskId: string, records: readonly EvidenceRecord[
     if (own.some(record => !safeIssue(record.issue126) || !ISSUE_126.test(record.issue126))) return { id: taskId, state: 'pending', missing: ['issue126-provenance'] };
     if (own.some(record => record.result === 'fail' || record.result === 'inconclusive')) return { id: taskId, state: 'pending', missing: ['adverse-evidence'] };
     const commit = own.some(record => typeof record.commitSha === 'string' && /^[a-f0-9]{40}$/i.test(record.commitSha));
-    const test = own.some(record => record.verificationItemId?.startsWith('test') && record.result === 'pass' && !!record.fingerprint && (record.paths?.length ?? 0) > 0);
-    const sensor = own.some(record => record.verificationItemId?.startsWith('sensor') && record.result === 'pass' && !!record.fingerprint && (record.paths?.length ?? 0) > 0);
+    const test = own.some(record => record.verificationKind === 'test' && record.result === 'pass' && !!record.fingerprint && (record.paths?.length ?? 0) > 0);
+    const sensor = own.some(record => record.verificationKind === 'sensors' && record.result === 'pass' && !!record.fingerprint && (record.paths?.length ?? 0) > 0);
     const spec = own.some(record => record.role === 'spec' && record.result === 'pass' && !!record.verdictId && !!record.obligationId && !!record.at);
     const quality = own.some(record => record.role === 'quality' && record.result === 'pass' && !!record.verdictId && !!record.obligationId && !!record.at);
     const missing = [...(commit ? [] : ['commit']), ...(test ? [] : ['tests']), ...(sensor ? [] : ['sensors']), ...(spec ? [] : ['specification-review']), ...(quality ? [] : ['quality-review'])];
@@ -145,7 +146,10 @@ export function collectMigrationFacts(planPath: string, cwd: string, issueLinks:
             return jobOwners.size === 1 && jobOwners.has(task.id);
         };
         for (const job of currentJobs) {
-            if (job.verdict && job.fingerprint && job.argv.length > 0 && job.paths.length > 0 && belongsToTask(job) && job.satisfies?.some(id => verificationIds.has(id))) facts.push({ taskId: task.id, verificationItemId: job.satisfies?.find(id => verificationIds.has(id)), jobId: job.id, argv: job.argv, fingerprint: job.fingerprint, paths: job.paths, result: job.verdict, issue126 });
+            if (!belongsToTask(job)) continue;
+            for (const item of task.verificationPlan) {
+                if (verificationIds.has(item.id) && job.satisfies?.includes(item.id)) facts.push({ taskId: task.id, verificationItemId: item.id, verificationKind: item.kind, jobId: job.id, argv: job.argv, fingerprint: job.fingerprint, paths: job.paths, result: job.verdict, issue126 });
+            }
         }
         for (const obligation of task.reviewObligations) {
             const verdict = obligation.verdictId ? journal.state?.verdicts.find(item => item.id === obligation.verdictId) : undefined;

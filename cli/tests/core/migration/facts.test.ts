@@ -81,7 +81,7 @@ describe('collectMigrationFacts', () => {
         try { fs.writeFileSync(path.join(outside, 'plan.md'), '### Task 1: x\n'); fs.symlinkSync(outside, path.join(root, 'docs')); expect(() => collectMigrationFacts('docs/plan.md', root, ['https://github.com/Kodria/agentic-workflow/issues/126'])).toThrow(/contained bounded regular file/); } finally { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); }
     });
 
-    it.each(['current', 'content', 'deleted', 'index', 'head', 'argv', 'cwd', 'paths', 'binding', 'review-argv', 'empty-expansion', 'live-job'])('requires current schema-2 evidence (%s)', (change) => {
+    it.each(['current', 'combined-job', 'semantic-kind', 'spoofed-kind', 'content', 'deleted', 'index', 'head', 'argv', 'cwd', 'paths', 'binding', 'review-argv', 'empty-expansion', 'live-job'])('requires current schema-2 evidence (%s)', (change) => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-migration-journal-'));
         try {
             fs.mkdirSync(path.join(root, 'docs', 'plans'), { recursive: true });
@@ -96,6 +96,13 @@ describe('collectMigrationFacts', () => {
             const observed = computeFingerprint(root, argv, paths, '.');
             const job = (id: string, satisfies: string[]) => ({ id, ...observed, argv: [...argv], cwd: '.', paths: [...paths], executionState: 'exited' as const, observationState: 'progressing' as const, verdict: 'pass' as const, phaseTimestamps: {}, satisfies });
             state.jobs = { t: job('t', ['test:1']), s: job('s', ['sensor:1']) };
+            if (change === 'combined-job') state.jobs = { t: job('t', ['test:1', 'sensor:1']) };
+            if (change === 'semantic-kind') {
+                state.tasks[0].verificationPlan[0].id = 'unit';
+                state.tasks[0].verificationPlan[1].id = 'quality-gate';
+                state.jobs.t.satisfies = ['unit']; state.jobs.s.satisfies = ['quality-gate'];
+            }
+            if (change === 'spoofed-kind') for (const item of state.tasks[0].verificationPlan) item.kind = 'lint';
             state.verdicts = ['v1', 'v2'].map((id, index) => ({ id, obligationId: index === 0 ? 'spec:1' : 'quality:1', result: 'pass', detail: 'ok', receivedAt: '2026-09-15T01:00:00.000Z', fingerprint: observed.fingerprint, argv: [...argv], paths: [...paths], cwd: '.' }));
             if (change === 'content') fs.writeFileSync(path.join(root, 'task.txt'), 'changed source');
             if (change === 'deleted') fs.unlinkSync(path.join(root, 'task.txt'));
@@ -118,7 +125,7 @@ describe('collectMigrationFacts', () => {
             if (change === 'live-job') state.jobs.t.executionState = 'running';
             writeJournal(root, 'master', state);
             const report = collectMigrationFacts('docs/plans/old.md', root, ['https://github.com/Kodria/agentic-workflow/issues/126']);
-            if (change === 'current') {
+            if (['current', 'combined-job', 'semantic-kind'].includes(change)) {
                 expect(report).toMatchObject({ state: 'supported-completion' });
                 expect(report.tasks[0]).toMatchObject({ state: 'completed' });
             } else {
