@@ -202,6 +202,23 @@ also exit 2; only a valid `compact-slices/v1` plan exits 0.
 awm plan validate PLAN_PATH [--json] [--cwd <path>]
 ```
 
+### `awm plan admit PLAN_PATH`
+
+Read-only fail-closed admission for a valid compact plan. It checks the selected
+provider and, when requested, that consumed contracts are current and project
+sensors have an empirical PASS. It never initializes a journal or dispatches an
+agent. A blocked JSON report is the remediation boundary; it is not permission
+to run the plan.
+
+```bash
+awm plan admit PLAN_PATH --provider <target> --cwd <path> [--execution-mode interactivo|desatendido] [--require-current] [--verify-sensors] [--json]
+```
+
+For unattended work, initialize the matching valid unattended plan first with
+`awm watch --init --plan PLAN_PATH`; a later digest change requires a completed,
+quiescent cycle before `awm watch rebind --plan PLAN_PATH` can create a new
+binding. An interactive plan cannot be bound as unattended.
+
 #### Context Kernel v1 migration state
 
 When an active registry declares `projectContextSchema: 1`, preflight also
@@ -459,8 +476,10 @@ each environment updates its own AWM installation separately.
 New bootstrap declarations use `schemaVersion: 3` and retain the selected
 variant, structured command, contained assets, logical registry provenance, and
 initialization compatibility evidence without persisting a machine path. Legacy
-and v2 manifests remain readable; use `awm sensors bootstrap --dry-run` first,
-then rerun without `--dry-run` to perform the explicit v2 migration after review.
+and v2 manifests remain readable. A v2 migration preserves equivalent semantics;
+a legacy replacement cannot prove custom command equivalence and therefore
+requires the explicit `--mode project-sensors` selection. Use `--dry-run` first,
+then rerun with that mode only after reviewing the replacement.
 
 ```json
 {

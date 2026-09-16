@@ -1,3 +1,5 @@
+**Modo de ejecución:** desatendido
+
 <!-- AWM:COMPACT-SLICES:START v1 -->
 {
   "schema": "compact-slices/v1",

@@ -5,12 +5,24 @@ import { resolveProjectCompatibility } from './resolve';
 import { runCompatibilityProbe } from './probe';
 import type { CompatibilityEvidence, SensorPackV2, SensorVariant } from './types';
 import path from 'path';
+import { spawnSync } from 'child_process';
+import semver from 'semver';
 
 export type LiveCompatibility = {
     pack: SensorPackV2;
     sensors: Record<string, CompatibilityEvidence>;
 };
 export type LiveCompatibilityOptions = { packSelection?: 'explicit' };
+
+/** Execution-time evidence only. Status/discovery never invokes this resolver. */
+function pathPackageManagerVersion(tool: string): string | null {
+    if (!['npm', 'pnpm', 'yarn', 'bun'].includes(tool)) return null;
+    try {
+        const result = spawnSync(tool, ['--version'], { cwd: process.cwd(), shell: false, encoding: 'utf8', timeout: 5_000, maxBuffer: 1024, windowsHide: true, stdio: 'pipe' });
+        if (result.error || result.status !== 0 || result.signal || typeof result.stdout !== 'string' || result.stdout.length > 256) return null;
+        return semver.valid(result.stdout.trim());
+    } catch { return null; }
+}
 
 /**
  * Python package metadata is evidence only for a contained virtual environment.
@@ -66,7 +78,7 @@ export async function resolveLiveCompatibility(cwd: string, packName: string, re
 export async function resolveParsedPackCompatibility(cwd: string, pack: SensorPackV2, options: LiveCompatibilityOptions = {}): Promise<LiveCompatibility> {
     if (typeof cwd !== 'string' || cwd.trim() === '') throw new Error('cwd must be a non-empty path');
     if (!pack || typeof pack !== 'object' || pack.schemaVersion !== 2) throw new Error('pack must be a parsed v2 sensor pack');
-    const evidence = discoverProjectEvidence(cwd, pack);
+    const evidence = discoverProjectEvidence(cwd, pack, { pathToolVersion: pathPackageManagerVersion });
     const executionPack = bindContainedRuntimeCommands(pack, evidence.pythonEnvironmentRoot);
     const resolutionEvidence = { ...evidence, ...(options.packSelection === 'explicit' ? { packSelection: 'explicit' as const } : {}) };
     const initial = resolveProjectCompatibility(executionPack, resolutionEvidence).sensors;
