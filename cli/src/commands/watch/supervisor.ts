@@ -268,6 +268,12 @@ export class Supervisor {
             }
             if (admission.state !== 'admitted' || admission.executionMode !== 'desatendido'
                 || admission.currentness !== 'current' || admission.sensors !== 'pass' || admission.journal !== 'current') {
+                // A first empirical sensor observation can be inconclusive while
+                // the already-started controller is still settling. It never
+                // authorizes dispatch; retry the read-only admission next tick
+                // instead of permanently custodying a healthy cycle.
+                if (admission.planState === 'valid' && admission.currentness === 'current'
+                    && admission.sensors === 'not-certified' && admission.journal === 'not-required') return 'continue';
                 enterCustody(this.repoRoot, this.branch, 'admisión compacta desatendida bloqueada antes de dispatch');
                 return 'custody';
             }
