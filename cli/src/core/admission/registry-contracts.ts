@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { isAgentTarget, providerFor, type AgentTarget } from '../../providers';
 import { renderedFilename } from '../renderers/registry';
 import { listRegistries, REGISTRY_MANIFEST_NAME, type RegistrySource } from '../registries';
@@ -16,7 +17,7 @@ const FRAMEWORK_CONTRACTS = ['using-awm', 'writing-plans', 'development-process'
 const MAX_CONTRACT_BYTES = 1024 * 1024;
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_DIRECTORY_ENTRIES = 10000;
-type ContractScope = { provenance: 'proven' | 'unknown'; consumedRegistryComponents: string[]; provenanceDiagnostic?: PlanDiagnostic };
+type ContractScope = { provenance: 'proven' | 'unknown'; consumedRegistryComponents: string[]; identityDigest?: string; provenanceDiagnostic?: PlanDiagnostic };
 
 function unknown(message: string): ContractScope {
     return { provenance: 'unknown', consumedRegistryComponents: [], provenanceDiagnostic: { code: 'ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED', message: `${message} Repair the installed runtime artifact or registry provenance before dispatch.` } };
@@ -34,6 +35,22 @@ function physicalDirectory(directory: string): string {
         while (handle.readSync() !== null) if (++entries > MAX_DIRECTORY_ENTRIES) throw new Error('directory entry limit exceeded');
     } finally { handle.closeSync(); }
     return physical;
+}
+function filesystemIdentity(file: string): string {
+    const stat = fs.lstatSync(file, { bigint: true });
+    if (stat.isSymbolicLink() || stat.ino === 0n) throw new Error('filesystem identity is unavailable');
+    return `${stat.dev.toString()}:${stat.ino.toString()}`;
+}
+/** Native descriptor bytes plus exact bigint leaf identity are observed only
+ * in memory. No source body or new journal snapshot is persisted. */
+function contractFileIdentity(file: string): string {
+    const before = fs.lstatSync(file, { bigint: true });
+    if (!before.isFile() || before.isSymbolicLink() || before.ino === 0n) throw new Error('contract identity is unavailable');
+    const bytes = secureFs.readRegularFile(file, MAX_CONTRACT_BYTES).bytes;
+    const after = fs.lstatSync(file, { bigint: true });
+    if (!after.isFile() || after.isSymbolicLink() || before.dev !== after.dev || before.ino !== after.ino
+        || before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) throw new Error('contract identity changed during inspection');
+    return crypto.createHash('sha256').update(`${before.dev.toString()}:${before.ino.toString()}\0`).update(bytes).digest('hex');
 }
 /** ENOENT proves absence only when the nearest existing parent is readable.
  * A dangling/replaced ancestor never certifies an empty provider install. */
@@ -64,23 +81,26 @@ export function consumedRegistryContracts(report: PlanValidationReport, cwd: str
     if (!Array.isArray(registries) || registries.length > 256) return unknown('Registry inventory is invalid or unbounded.');
     let root: string;
     try { root = physicalDirectory(path.resolve(cwd)); } catch { return unknown('Project root provenance is unavailable.'); }
-    const physicalRegistries: Array<{ name: string; root: string }> = [];
+    const physicalRegistries: Array<{ name: string; root: string; identity: string; remote: string }> = [];
     for (const registry of registries) {
         try {
             if (!registry || typeof registry.name !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/.test(registry.name)
-                || typeof registry.contentRoot !== 'string' || registry.contentRoot.length > 4096) throw new Error('invalid registry identity');
-            physicalRegistries.push({ name: registry.name, root: physicalDirectory(registry.contentRoot) });
+                || typeof registry.contentRoot !== 'string' || registry.contentRoot.length > 4096
+                || typeof registry.remote !== 'string' || registry.remote.length > 4096) throw new Error('invalid registry identity');
+            const physicalRoot = physicalDirectory(registry.contentRoot);
+            physicalRegistries.push({ name: registry.name, root: physicalRoot, identity: filesystemIdentity(physicalRoot), remote: registry.remote });
         } catch {
             const name = typeof registry?.name === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/.test(registry.name) ? registry.name : 'unknown';
             return unknown(`Registry ${name} root cannot be inspected.`);
         }
     }
     const consumed = new Set<string>();
+    const identities: string[] = [];
     for (const source of report.manifest.sources) {
         try {
             const file = fs.realpathSync.native(path.resolve(root, source.path));
             if (!within(root, file)) return unknown(`Plan source ${source.path} escapes its physical project root.`);
-            secureFs.readRegularFile(file, MAX_CONTRACT_BYTES);
+            identities.push(JSON.stringify(['source', source.id, contractFileIdentity(file)]));
             for (const registry of physicalRegistries) if (within(registry.root, file)) consumed.add(`registry:${registry.name}`);
         } catch { return unknown(`Plan source ${source.path} cannot be inspected as a bounded regular file.`); }
     }
@@ -95,14 +115,16 @@ export function consumedRegistryContracts(report: PlanValidationReport, cwd: str
             const declaredFile = provider.skill.renderer === 'link' ? path.join(artifact, 'SKILL.md') : artifact;
             try {
                 const file = fs.realpathSync.native(declaredFile);
-                secureFs.readRegularFile(file, MAX_CONTRACT_BYTES);
+                const identity = contractFileIdentity(file);
                 const owners = physicalRegistries.filter(registry => within(registry.root, file));
                 if (owners.length !== 1) return unknown(`Runtime artifact ${artifact} has no unique physical registry owner (copied/rendered content is not ownership proof).`);
                 consumed.add(`registry:${owners[0].name}`);
+                identities.push(JSON.stringify(['artifact', target, contract, provider.skill.renderer, identity]));
             } catch { return unknown(`Runtime artifact ${artifact} is dangling, nonregular, unreadable or unbounded.`); }
         }
     }
-    return { provenance: 'proven', consumedRegistryComponents: [...consumed].sort() };
+    for (const registry of physicalRegistries) if (consumed.has(`registry:${registry.name}`)) identities.push(JSON.stringify(['registry', registry.name, registry.identity, registry.remote]));
+    return { provenance: 'proven', consumedRegistryComponents: [...consumed].sort(), identityDigest: crypto.createHash('sha256').update(identities.sort().join('\0')).digest('hex') };
 }
 
 /** Only the declared CLI floor is consumed here, not a new registry catalog.
@@ -153,9 +175,10 @@ export async function admitRegistryPlan(input: AdmissionInput, dependencies: Reg
             const refreshedRegistries = inventory();
             const refreshed = consumedRegistryContracts(input.plan, input.cwd, refreshedRegistries, target);
             const previousComponents = scope.consumedRegistryComponents.join('\0');
+            const previousIdentity = scope.identityDigest;
             registries = refreshedRegistries;
             scope = refreshed.provenance === 'unknown' ? refreshed
-                : refreshed.consumedRegistryComponents.join('\0') !== previousComponents
+                : refreshed.consumedRegistryComponents.join('\0') !== previousComponents || refreshed.identityDigest !== previousIdentity
                     ? unknown('Consumed registry ownership changed during an asynchronous admission observation. Re-run actual currentness and read-only plan admission.') : refreshed;
             if (scope.provenanceDiagnostic) scope = { ...scope, provenanceDiagnostic: { ...scope.provenanceDiagnostic, message: `${scope.provenanceDiagnostic.message} Re-run actual currentness after repair.` } };
         } catch { scope = unknown('Registry inventory changed or cannot be read after asynchronous admission. Re-run actual currentness.'); }

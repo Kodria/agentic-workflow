@@ -403,15 +403,18 @@ describe('plan admit Commander wiring', () => {
         } finally { outputSpy.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
     });
 
-    it.each(['owner-currentness', 'inventory-currentness', 'owner-sensors', 'floor-sensors'] as const)('rechecks actual runtime contract %s after awaits before admitted', async scenario => {
+    it.each(['owner-currentness', 'inventory-currentness', 'owner-sensors', 'floor-sensors', 'registry-identity-currentness', 'body-currentness'] as const)('rechecks actual runtime contract %s after awaits before admitted', async scenario => {
         const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-supplier-drift-')));
         const oldHome = process.env.HOME;
         process.env.HOME = path.join(root, 'home');
         const registryRoot = path.join(root, 'registry');
         const owned = path.join(registryRoot, 'skills', 'using-awm');
         const unowned = path.join(root, 'unowned', 'using-awm');
-        for (const directory of [owned, unowned]) { fs.mkdirSync(directory, { recursive: true }); fs.writeFileSync(path.join(directory, 'SKILL.md'), 'contract'); }
+        const replacementRoot = path.join(root, 'replacement-registry');
+        const replacementOwned = path.join(replacementRoot, 'skills', 'using-awm');
+        for (const directory of [owned, unowned, replacementOwned]) { fs.mkdirSync(directory, { recursive: true }); fs.writeFileSync(path.join(directory, 'SKILL.md'), 'contract'); }
         fs.writeFileSync(path.join(registryRoot, 'awm-registry.json'), '{}');
+        fs.writeFileSync(path.join(replacementRoot, 'awm-registry.json'), '{}');
         fs.writeFileSync(path.join(root, 'source.md'), 'project source');
         const installed = providerFor('codex').skill.global!;
         fs.mkdirSync(installed, { recursive: true });
@@ -419,6 +422,7 @@ describe('plan admit Commander wiring', () => {
         fs.symlinkSync(owned, artifact, process.platform === 'win32' ? 'junction' : 'dir');
         const outputSpy = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
         let inventoryChanged = false;
+        let registryChanged = false;
         const replaceOwner = () => { fs.unlinkSync(artifact); fs.symlinkSync(unowned, artifact, process.platform === 'win32' ? 'junction' : 'dir'); };
         const sensors = jest.fn().mockImplementation(async () => {
             if (scenario === 'owner-sensors') replaceOwner();
@@ -428,11 +432,16 @@ describe('plan admit Commander wiring', () => {
         const program = new Command();
         registerPlanCommand(program, {
             validatePlanFile: () => ({ ...valid, manifest: { ...valid.manifest, sources: [{ id: 'source', path: 'source.md', locator: 'contract', fact: 'contract' }] } }),
-            listRegistries: () => [{ name: inventoryChanged ? 'replacement' : 'fixture', remote: 'https://example.invalid/fixture.git', contentRoot: registryRoot }],
+            listRegistries: () => [{ name: inventoryChanged ? 'replacement' : 'fixture', remote: registryChanged ? 'https://replacement.invalid/fixture.git' : 'https://example.invalid/fixture.git', contentRoot: registryChanged ? replacementRoot : registryRoot }],
             readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
             checkCurrentness: async () => {
                 if (scenario === 'owner-currentness') replaceOwner();
                 if (scenario === 'inventory-currentness') inventoryChanged = true;
+                if (scenario === 'registry-identity-currentness') {
+                    registryChanged = true;
+                    fs.unlinkSync(artifact); fs.symlinkSync(replacementOwned, artifact, process.platform === 'win32' ? 'junction' : 'dir');
+                }
+                if (scenario === 'body-currentness') fs.writeFileSync(path.join(owned, 'SKILL.md'), 'changed native runtime contract');
                 return { checkedAt: 'x', compatibility: { status: 'not-checked' }, components: ['cli', 'registry:fixture'].map(component => ({ component, installed: '1.0.0', latest: '1.0.0', channel: 'stable', source: 'fixture', checkedAt: 'x', status: 'current', detail: 'ok', remedy: 'none' })) };
             }, runSensors: sensors,
         });
