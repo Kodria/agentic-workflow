@@ -115,7 +115,7 @@ function resolveStaticV2Compatibility(cwd: string, manifest: SensorManifestV2, s
         const probeStatus = variant?.probe.kind === 'config-present'
             ? (evidence.configFiles.length > 0 ? 'matched' : 'not-matched')
             : variant?.probe.kind === 'package-script-present'
-                ? (evidence.scripts.length > 0 ? 'matched' : 'not-matched')
+                ? (variant.probe.script !== undefined && evidence.scripts.includes(variant.probe.script) ? 'matched' : 'not-matched')
                 : undefined;
         return [name, probeStatus === undefined
             ? initial[name]

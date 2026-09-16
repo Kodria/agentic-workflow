@@ -200,9 +200,16 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
     const runtimeRange = policy?.runtimeRange ?? text(requirements!.runtimeRange, source, `${location}.requirements.runtimeRange`);
     if (semver.validRange(toolRange) === null || semver.validRange(runtimeRange) === null) invalid(source, `${location}.requirements ranges must be valid semver ranges`);
     const probe = policy ? undefined : record(value.probe, source, `${location}.probe`);
+    let probeScript: string | undefined;
     if (probe) {
-        fields(probe, ['kind'], source, `${location}.probe`);
+        fields(probe, ['kind', 'script'], source, `${location}.probe`);
         if (typeof probe.kind !== 'string' || !ALLOWED_PROBES.has(probe.kind as CompatibilityProbe)) invalid(source, `${location}.probe.kind must be an allowed probe`);
+        if (probe.kind === 'package-script-present') {
+            probeScript = text(probe.script, source, `${location}.probe.script`);
+            if (!/^[A-Za-z0-9][A-Za-z0-9:_-]*$/.test(probeScript)) invalid(source, `${location}.probe.script must be a package script name`);
+        } else if ('script' in probe) {
+            invalid(source, `${location}.probe.script is only valid for package-script-present`);
+        }
     }
     const changedCommand = 'changedCommand' in value ? parseStructuredCommand(value.changedCommand, source) : undefined;
     if (changedCommand && !changedCommand.fileInput) invalid(source, `${location}.changedCommand must declare fileInput`);
@@ -215,7 +222,7 @@ function parseVariant(input: unknown, source: unknown, location: string): Sensor
             : { tool: text(requirements!.tool, source, `${location}.requirements.tool`), toolRange, runtime: text(requirements!.runtime, source, `${location}.requirements.runtime`), runtimeRange, ...('configFiles' in requirements! ? { configFiles: stringArray(requirements!.configFiles, source, `${location}.requirements.configFiles`).map((file, index) => asset(file, source, `${location}.requirements.configFiles[${index}]`)) } : {}), ...('packageJsonFields' in requirements! ? { packageJsonFields: stringArray(requirements!.packageJsonFields, source, `${location}.requirements.packageJsonFields`).map((field, index) => { if (!/^[A-Za-z][A-Za-z0-9]*$/.test(field)) invalid(source, `${location}.requirements.packageJsonFields[${index}] must be a stable package.json field`); return field; }) } : {}) },
         assets: assetArray(value.assets, source, `${location}.assets`, true),
         formatter: text(value.formatter, source, `${location}.formatter`),
-        probe: { kind: policy?.probe ?? probe!.kind as CompatibilityProbe },
+        probe: { kind: policy?.probe ?? probe!.kind as CompatibilityProbe, ...(probeScript ? { script: probeScript } : {}) },
         ...(policy ? { policyRef: SEMGREP_POLICY_REF } : {}),
         command: parseStructuredCommand(value.command, source),
         ...(changedCommand ? { changedCommand } : {}),

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import semver from 'semver';
+import { spawnSync } from 'child_process';
 import { platform } from '../../../core/paths';
 import type { SensorPack } from './types';
 
@@ -15,6 +16,8 @@ export type ProjectEvidence = {
     declaredToolRanges: Record<string, string>;
     /** Exact versions inspected from contained local node_modules package metadata. */
     toolVersions: Record<string, string | null>;
+    /** The bounded resolver that produced each tool version. */
+    toolProvenance: Record<string, 'node-modules-bin' | 'python-environment' | 'path' | null>;
     packageManager: string | null;
     packageManagerConflict: boolean;
     scripts: string[];
@@ -136,8 +139,25 @@ function installedPackageVersion(root: string, tool: string): string | null {
     } catch { return null; }
 }
 
+const PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+
+/** Resolve only a closed package-manager name with argv, no shell, a short timeout,
+ * and a bounded semver-only response. The returned version is evidence for the same
+ * PATH command the sensor will execute, never for a project dependency shadowing it. */
+function pathPackageManagerVersion(tool: string): string | null {
+    if (!PACKAGE_MANAGERS.has(tool)) return null;
+    try {
+        const result = spawnSync(tool, ['--version'], {
+            cwd: process.cwd(), shell: false, encoding: 'utf8', timeout: 5_000,
+            maxBuffer: 1024, windowsHide: true,
+        });
+        if (result.error || result.status !== 0 || result.signal || typeof result.stdout !== 'string' || result.stdout.length > 256) return null;
+        return exactVersion(result.stdout.trim());
+    } catch { return null; }
+}
+
 /** Read bounded project metadata only; it never shells out, downloads, or mutates. */
-export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependencies: { platform?: () => NodeJS.Platform } = {}): ProjectEvidence {
+export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependencies: { platform?: () => NodeJS.Platform; pathToolVersion?: (tool: string) => string | null } = {}): ProjectEvidence {
     if (typeof cwd !== 'string' || cwd.trim() === '') throw new Error('cwd must be a non-empty path');
     let root: string; try { root = fs.realpathSync(cwd); if (!fs.statSync(root).isDirectory()) throw new Error(); } catch { throw new Error(`cwd is not a readable project directory: ${cwd}`); }
     if (!pack || typeof pack !== 'object' || typeof pack.name !== 'string') throw new Error('pack must be a parsed sensor pack');
@@ -147,6 +167,7 @@ export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependen
     const lockManagers = new Set(locks.map(file => LOCKFILES[file]));
     const declaredManager = typeof pkg?.packageManager === 'string' ? pkg.packageManager.split('@')[0] : null;
     if (declaredManager) lockManagers.add(declaredManager);
+    const packageManager = declaredManager ?? (lockManagers.size === 1 ? [...lockManagers][0] : null);
     const configCandidates = new Set(COMMON_CONFIGS);
     if ('schemaVersion' in pack) {
         for (const marker of pack.detects) configCandidates.add(marker);
@@ -160,13 +181,28 @@ export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependen
     const packageJsonFields = Object.keys(pkg ?? {}).filter(field => /^[A-Za-z][A-Za-z0-9]*$/.test(field)).sort();
     const declaredToolRanges = { ...stringMap(pkg?.dependencies), ...stringMap(pkg?.devDependencies), ...stringMap(pkg?.peerDependencies) };
     const tools = new Set<string>();
-    if ('schemaVersion' in pack) for (const sensor of Object.values(pack.sensors)) for (const variant of sensor.variants) tools.add(variant.requirements.tool);
+    const pathTools = new Set<string>();
+    if ('schemaVersion' in pack) for (const sensor of Object.values(pack.sensors)) for (const variant of sensor.variants) {
+        tools.add(variant.requirements.tool);
+        if (variant.command?.resolution === 'path' && variant.command.packageManager === variant.requirements.tool) pathTools.add(variant.requirements.tool);
+    }
     const environment = pythonEnvironment(root);
     const sitePackages = environment ? pythonSitePackages(root, environment.rootParts, targetPlatform) : [];
-    const toolVersions = Object.fromEntries([...tools].sort().map(tool => [tool, pythonToolVersion(root, sitePackages, tool) ?? installedPackageVersion(root, tool)]));
+    const toolVersions: Record<string, string | null> = {};
+    const toolProvenance: ProjectEvidence['toolProvenance'] = {};
+    for (const tool of [...tools].sort()) {
+        if (pathTools.has(tool) && packageManager === tool) {
+            toolVersions[tool] = exactVersion((dependencies.pathToolVersion ?? pathPackageManagerVersion)(tool));
+            toolProvenance[tool] = toolVersions[tool] === null ? null : 'path';
+        } else {
+            const pythonVersion = pythonToolVersion(root, sitePackages, tool);
+            toolVersions[tool] = pythonVersion ?? installedPackageVersion(root, tool);
+            toolProvenance[tool] = pythonVersion ? 'python-environment' : toolVersions[tool] ? 'node-modules-bin' : null;
+        }
+    }
     return {
         cwd: root, os: targetPlatform, runtimeVersions: { node: process.versions.node ?? null, ...(environment ? { python: environment.runtimeVersion } : {}) }, pythonEnvironmentRoot: environment?.rootParts[0] ?? null, declaredToolRanges, toolVersions,
-        packageManager: declaredManager ?? (lockManagers.size === 1 ? [...lockManagers][0] : null), packageManagerConflict: lockManagers.size > 1,
+        toolProvenance, packageManager, packageManagerConflict: lockManagers.size > 1,
         scripts, configFiles, packageJsonFields, paths: [...new Set([...(safeFile(root, 'package.json') ? ['package.json'] : []), ...locks, ...configFiles])].sort(),
     };
 }

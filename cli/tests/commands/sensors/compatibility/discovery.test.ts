@@ -62,6 +62,25 @@ describe('discoverProjectEvidence', () => {
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
 
+    it('takes a selected PATH package manager version only from its bounded executable provenance', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-package-manager-discovery-'));
+        const pathToolVersion = jest.fn((tool: string) => tool === 'npm' ? '10.9.2' : null);
+        try {
+            fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ packageManager: 'npm@10.9.2', scripts: { test: 'jest' } }));
+            fs.mkdirSync(path.join(root, 'node_modules', 'npm'), { recursive: true });
+            fs.writeFileSync(path.join(root, 'node_modules', 'npm', 'package.json'), JSON.stringify({ version: '999.0.0' }));
+            const pack = { schemaVersion: 2, name: 'js-ts', detects: ['package.json'], sensors: {
+                test: { applicability: { allFiles: ['package.json'] }, variants: [{ requirements: { tool: 'npm', runtime: 'node' }, command: { executable: 'npm', resolution: 'path', packageManager: 'npm' } }] },
+            } } as any;
+
+            const evidence = discoverProjectEvidence(root, pack, { platform: () => 'darwin', pathToolVersion });
+
+            expect(pathToolVersion).toHaveBeenCalledWith('npm');
+            expect(evidence.toolVersions.npm).toBe('10.9.2');
+            expect(evidence.toolProvenance.npm).toBe('path');
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
     test.each([
         ['linux', ['.venv', 'lib', 'python3.12', 'site-packages']],
         ['win32', ['.venv', 'Lib', 'site-packages']],

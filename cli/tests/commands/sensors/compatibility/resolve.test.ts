@@ -37,6 +37,17 @@ describe('resolveSensorCompatibility', () => {
         expect(resolveSensorCompatibility({ defaultCmd: 'eslint .' } as any, evidence(), context)).toEqual(legacyCompatibility('legacy pack without schemaVersion'));
     });
 
+    it('does not certify a PATH package manager from node_modules provenance', () => {
+        const packageManager = variant('npm-script');
+        packageManager.requirements = { tool: 'npm', toolRange: '>=10 <11', runtime: 'node', runtimeRange: '>=20' };
+        packageManager.command = { executable: 'npm', resolution: 'path', args: ['test'], packageManager: 'npm' } as any;
+        const npmSensor = { applicability: { allFiles: ['package.json'] }, variants: [packageManager] };
+        expect(resolveSensorCompatibility(npmSensor as any, evidence({ toolVersions: { npm: '10.9.2' }, runtimeVersions: { node: '24.0.0' }, toolProvenance: { npm: 'node-modules-bin' } }), context))
+            .toMatchObject({ state: 'missing-tool', reason: 'tool-not-found' });
+        expect(resolveSensorCompatibility(npmSensor as any, evidence({ toolVersions: { npm: '10.9.2' }, runtimeVersions: { node: '24.0.0' }, toolProvenance: { npm: 'path' }, probe: { status: 'matched' } }), context))
+            .toMatchObject({ state: 'certified', variantId: 'npm-script' });
+    });
+
     it('fails an equal-precedence match with its pack, sensor, IDs, and ranges', () => {
         expect(() => resolveProjectCompatibility({ schemaVersion: 2, name: 'js-ts', sensors: { lint: { ...sensor, variants: [variant('one'), variant('two')] } } } as any, evidence())).toThrow(/js-ts.*lint.*one.*>=9 <12.*two.*>=9 <12/i);
     });

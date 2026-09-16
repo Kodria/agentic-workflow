@@ -44,7 +44,7 @@ export type SensorVariant = {
     requirements: { tool: string; toolRange: string; runtime: string; runtimeRange: string; configFiles?: string[]; packageJsonFields?: string[] };
     assets: string[];
     formatter: string;
-    probe: { kind: CompatibilityProbe };
+    probe: { kind: CompatibilityProbe; script?: string };
     /** A registry-owned policy whose compatibility requirements are authoritative. */
     policyRef?: 'shared/semgrep-policy.json';
     command: StructuredCommand;

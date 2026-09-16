@@ -303,7 +303,7 @@ describe('runSensors v2 lifecycle contract', () => {
             sensors: { lint: { fast: true, applicability: { allFiles: ['package.json'] }, variants: [{
                 id: 'eslint-10', priority: 1, certifiedRange: '>=10 <11',
                 requirements: { tool: 'eslint', toolRange: '>=10 <11', runtime: 'node', runtimeRange: '>=0' },
-                assets: ['eslint.config.awm.mjs'], formatter: 'generic', probe: { kind: 'package-script-present' },
+                assets: ['eslint.config.awm.mjs'], formatter: 'generic', probe: { kind: 'package-script-present', script: 'lint' },
                 command: { executable: 'live-eslint', resolution: 'node-modules-bin', args: ['.'] },
             }] } },
         }));
@@ -548,7 +548,7 @@ describe('runSensors — not_certified + auto-discovery', () => {
                 sensors: { lint: { applicability: { allFiles: ['package.json'] }, variants: [{
                     id: 'eslint-10', priority: 1, certifiedRange: '>=10 <11',
                     requirements: { tool: 'eslint', toolRange: '>=10 <11', runtime: 'node', runtimeRange: '>=0' },
-                    assets: [], formatter: 'generic', probe: { kind: 'package-script-present' },
+                    assets: [], formatter: 'generic', probe: { kind: 'package-script-present', script: 'lint' },
                     command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] },
                 }] } },
             };

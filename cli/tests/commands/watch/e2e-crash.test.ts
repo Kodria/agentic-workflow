@@ -86,7 +86,7 @@ function writeFixtureBaselineRegistry(awmHome: string): void {
                     requirements: { tool: 'npm', toolRange: '>=1.0.0', runtime: 'node', runtimeRange: '>=20.0.0' },
                     certifiedRange: '>=1.0.0',
                     command: { executable: 'npm', resolution: 'path', args: ['test', '--', '--silent'], packageManager: 'npm' },
-                    assets: [], formatter: 'test', probe: { kind: 'package-script-present' },
+                    assets: [], formatter: 'test', probe: { kind: 'package-script-present', script: 'test' },
                 }],
             },
         },
@@ -118,12 +118,11 @@ describe('E2E real: crash/restart del supervisor', () => {
     beforeEach(async () => {
         repo = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-e2e-'));
         git(repo, 'init', '-q', '-b', 'main');
-        fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'fixture', scripts: { test: 'node -e "process.exit(0)" --' } }));
-        // Compatibility discovery deliberately trusts only contained package
-        // metadata, never a globally inherited npm binary.  Supply that real
-        // local evidence while execution still uses the fixture's normal npm.
-        fs.mkdirSync(path.join(repo, 'node_modules', 'npm'), { recursive: true });
-        fs.writeFileSync(path.join(repo, 'node_modules', 'npm', 'package.json'), JSON.stringify({ name: 'npm', version: '11.0.0' }));
+        const npmVersion = execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim();
+        fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'fixture', packageManager: `npm@${npmVersion}`, scripts: { test: 'node -e "process.exit(0)" --' } }));
+        // The package manager is deliberately selected in package metadata.
+        // Discovery must certify the same bounded PATH npm that the sensor runs,
+        // rather than accept a shadow package under this fixture's node_modules.
         fs.mkdirSync(path.join(repo, 'plans'), { recursive: true });
         fs.writeFileSync(path.join(repo, 'plans', 'fixture.md'), fs.readFileSync(path.join(__dirname, '../../core/plan/fixtures/compact-slices-v1/valid.md'), 'utf8'));
         fs.writeFileSync(path.join(repo, 'source.md'), '## Canonical source\nfixture source\n');
@@ -133,7 +132,7 @@ describe('E2E real: crash/restart del supervisor', () => {
             sensors: { test: {
                 enabled: true, variantId: 'npm-script',
                 command: { executable: 'npm', resolution: 'path', args: ['test', '--', '--silent'], packageManager: 'npm' },
-                initializedCompatibility: { state: 'certified', reason: 'fixture', variantId: 'npm-script', toolVersion: '11.0.0', runtimeVersion: process.versions.node, certifiedRange: '>=8.0.0', evidence: [] },
+                initializedCompatibility: { state: 'certified', reason: 'fixture', variantId: 'npm-script', toolVersion: npmVersion, runtimeVersion: process.versions.node, certifiedRange: '>=8.0.0', evidence: [] },
             } },
         }));
         git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'c');

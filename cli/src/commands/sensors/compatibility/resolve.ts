@@ -3,7 +3,7 @@ import { legacyCompatibility } from './manifest';
 import type { CompatibilityEvidence, SensorPack, SensorPackSensor, SensorVariant } from './types';
 import type { ProjectEvidence } from './discovery';
 
-export type ResolveEvidence = { paths?: string[]; applicable?: boolean; packSelection?: 'explicit'; packageManagerConflict?: boolean; toolVersion?: string | null; runtimeVersion?: string | null; toolVersions?: Record<string, string | null>; runtimeVersions?: Record<string, string | null>; packageJsonFields?: string[]; os?: NodeJS.Platform; probe?: { status?: string } };
+export type ResolveEvidence = { paths?: string[]; applicable?: boolean; packSelection?: 'explicit'; packageManagerConflict?: boolean; toolVersion?: string | null; runtimeVersion?: string | null; toolVersions?: Record<string, string | null>; toolProvenance?: Record<string, 'node-modules-bin' | 'python-environment' | 'path' | null>; runtimeVersions?: Record<string, string | null>; packageJsonFields?: string[]; os?: NodeJS.Platform; probe?: { status?: string } };
 export type ResolveContext = { pack: string; sensor: string };
 
 function result(state: CompatibilityEvidence['state'], reason: string, variant: SensorVariant | null, evidence: ResolveEvidence): CompatibilityEvidence {
@@ -33,7 +33,10 @@ function specificity(variant: SensorVariant): number {
 }
 function validVersion(value: string | null | undefined): value is string { return typeof value === 'string' && semver.valid(value) !== null; }
 function toolFor(variant: SensorVariant, evidence: ResolveEvidence): string | null | undefined {
-    return evidence.toolVersions === undefined ? evidence.toolVersion : evidence.toolVersions[variant.requirements.tool];
+    const tool = variant.requirements.tool;
+    const version = evidence.toolVersions === undefined ? evidence.toolVersion : evidence.toolVersions[tool];
+    const provenance = evidence.toolProvenance?.[tool];
+    return provenance !== undefined && provenance !== null && provenance !== variant.command.resolution ? null : version;
 }
 function runtimeFor(variant: SensorVariant, evidence: ResolveEvidence): string | null | undefined {
     return evidence.runtimeVersions === undefined ? evidence.runtimeVersion : evidence.runtimeVersions[variant.requirements.runtime];
