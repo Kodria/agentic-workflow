@@ -1,3 +1,12 @@
+## v9.8.0 - 2026-09-16
+
+### Features
+- enforce compact-only R1 admission and portable sensors (#149)
+
+### Fixes
+- **tests:** verify Windows diagnostic filesystem identity (#152)
+- **ci:** use native Windows identity and fail failed suites early (#151)
+
 ## v9.7.1 - 2026-09-07
 
 ### Fixes
