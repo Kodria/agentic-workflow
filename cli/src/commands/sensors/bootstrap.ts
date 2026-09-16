@@ -65,11 +65,16 @@ async function projectSensors(projectRoot: string, registryRoot?: string, reques
     catch { return { reason: 'source-invalid', remedy: 'repair-or-run-awm-update' }; }
     if (parsed.kind !== 'v2') return { reason: 'source-unsupported', remedy: 'install-a-v2-sensor-pack' };
     let live;
-    try { live = await resolveParsedPackCompatibility(detectionRoot, parsed.pack); }
+    try {
+        live = requestedPack
+            ? await resolveParsedPackCompatibility(detectionRoot, parsed.pack, { packSelection: 'explicit' })
+            : await resolveParsedPackCompatibility(detectionRoot, parsed.pack);
+    }
     catch { return { reason: 'compatibility-unresolvable', remedy: 'repair-project-tools-or-select-another-mode' }; }
     const sensors: SensorManifestV3ProjectSensors['sensors'] = {};
     for (const [name, packSensor] of Object.entries(live.pack.sensors)) {
         const evidence = live.sensors[name];
+        if (evidence.state === 'not-applicable') continue;
         const variant = evidence.variantId === null ? undefined : packSensor.variants.find(item => item.id === evidence.variantId);
         if (!variant) return { reason: 'sensor-variant-unresolvable', remedy: 'repair-project-tools-or-select-another-mode' };
         sensors[name] = { enabled: true, ...(packSensor.fast === undefined ? {} : { fast: packSensor.fast }), ...(packSensor.timeout === undefined ? {} : { timeout: packSensor.timeout }), variantId: variant.id, command: variant.command, ...(variant.assets.length === 0 ? {} : { assets: variant.assets }), ...(variant.policyRef ? { policyRef: variant.policyRef } : {}), initializedCompatibility: evidence };

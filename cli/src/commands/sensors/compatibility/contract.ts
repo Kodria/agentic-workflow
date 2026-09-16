@@ -280,7 +280,11 @@ function parseSensor(input: unknown, source: unknown, location: string, variantI
     const applicability: SensorPackSensor['applicability'] = {};
     if ('allFiles' in applicabilityInput) applicability.allFiles = stringArray(applicabilityInput.allFiles, source, `${location}.applicability.allFiles`).map((file, index) => asset(file, source, `${location}.applicability.allFiles[${index}]`));
     if ('anyFiles' in applicabilityInput) applicability.anyFiles = stringArray(applicabilityInput.anyFiles, source, `${location}.applicability.anyFiles`).map((file, index) => asset(file, source, `${location}.applicability.anyFiles[${index}]`));
-    if ('kind' in applicabilityInput) applicability.kind = text(applicabilityInput.kind, source, `${location}.applicability.kind`);
+    if ('kind' in applicabilityInput) {
+        const kind = text(applicabilityInput.kind, source, `${location}.applicability.kind`);
+        if (kind !== 'explicit-or-supported-language' && kind !== 'explicit-opt-in') invalid(source, `${location}.applicability.kind must be a supported applicability kind`);
+        applicability.kind = kind;
+    }
     if (Object.keys(applicability).length === 0) invalid(source, `${location}.applicability must declare a condition`);
     if ('fast' in value && typeof value.fast !== 'boolean') invalid(source, `${location}.fast must be a boolean`);
     let timeout: number | undefined;

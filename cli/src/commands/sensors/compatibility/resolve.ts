@@ -20,7 +20,7 @@ function result(state: CompatibilityEvidence['state'], reason: string, variant: 
     return { state, reason, variantId: variant?.id ?? null, toolVersion, runtimeVersion, certifiedRange: variant?.certifiedRange ?? null, evidence: refs.slice(0, 32) };
 }
 function applies(sensor: SensorPackSensor, evidence: ResolveEvidence): boolean {
-    if (sensor.applicability.kind === 'explicit-or-supported-language') {
+    if (sensor.applicability.kind === 'explicit-or-supported-language' || sensor.applicability.kind === 'explicit-opt-in') {
         return evidence.applicable === true || evidence.packSelection === 'explicit';
     }
     if (evidence.applicable === false) return false;

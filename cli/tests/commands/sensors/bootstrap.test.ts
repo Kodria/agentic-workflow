@@ -140,6 +140,27 @@ describe('planSensorBootstrap', () => {
         await expect(planSensorBootstrap(root, { mode: 'project-sensors' })).resolves.toMatchObject({ kind: 'blocked', reason: 'sensor-variant-unresolvable', changes: [] });
     });
 
+    it('omits explicit-opt-in sensors that are not applicable while retaining mandatory gates', async () => {
+        const variant = { id: 'main', command: { executable: 'tool', resolution: 'path', args: ['run'] }, assets: [] };
+        const pack = { schemaVersion: 2, name: 'js-ts', sensors: {
+            security: { variants: [variant] }, test: { variants: [variant] },
+            format: { applicability: { kind: 'explicit-opt-in' }, variants: [variant] },
+            mutation: { applicability: { kind: 'explicit-opt-in' }, variants: [variant] },
+        } };
+        (listPackSources as jest.Mock).mockReturnValue([source]);
+        (parseSensorPack as jest.Mock).mockReturnValue({ kind: 'v2', pack });
+        (resolveParsedPackCompatibility as jest.Mock).mockResolvedValue({ pack, sensors: {
+            security: { state: 'certified', reason: 'range-and-probe', variantId: 'main', toolVersion: '1.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=1', evidence: [] },
+            test: { state: 'certified', reason: 'range-and-probe', variantId: 'main', toolVersion: '1.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=1', evidence: [] },
+            format: { state: 'not-applicable', reason: 'applicability-not-met', variantId: null, toolVersion: null, runtimeVersion: null, certifiedRange: null, evidence: [] },
+            mutation: { state: 'not-applicable', reason: 'applicability-not-met', variantId: null, toolVersion: null, runtimeVersion: null, certifiedRange: null, evidence: [] },
+        } });
+
+        const plan = await planSensorBootstrap(root, { mode: 'project-sensors' });
+        expect(plan).toMatchObject({ kind: 'create', manifest: { sensors: { security: expect.any(Object), test: expect.any(Object) } } });
+        expect(Object.keys((plan as any).manifest.sensors)).toEqual(['security', 'test']);
+    });
+
     it('converts a compatibility probe failure into a stable blocked plan', async () => {
         (listPackSources as jest.Mock).mockReturnValue([source]);
         (parseSensorPack as jest.Mock).mockReturnValue({ kind: 'v2', pack: { schemaVersion: 2, name: 'js-ts', sensors: {} } });

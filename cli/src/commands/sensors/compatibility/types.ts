@@ -67,7 +67,7 @@ export type SemgrepPolicy = {
 export type SensorPackHardening = Record<string, { assets: string[] }>;
 
 export type SensorPackSensor = {
-    applicability: { allFiles?: string[]; anyFiles?: string[]; kind?: string };
+    applicability: { allFiles?: string[]; anyFiles?: string[]; kind?: 'explicit-or-supported-language' | 'explicit-opt-in' };
     variants: SensorVariant[];
     fast?: boolean;
     timeout?: number;
