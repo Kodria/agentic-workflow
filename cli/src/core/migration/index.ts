@@ -160,12 +160,18 @@ export function collectIssue148HistoricalFacts(historicalRoot: string, issueLink
         });
     } catch { ledgerEntries = []; }
     const ancestor = (() => { try { execFileSync('git', ['merge-base', '--is-ancestor', '81c008c', 'HEAD'], { cwd: root, stdio: 'pipe' }); return true; } catch { return false; } })();
-    const taskOneChecked = /### Task 1:[\s\S]*?(?=\n### Task 2:)/.test(text) && /### Task 1:[\s\S]*?- \[x\]/.test(text);
+    const taskOneStart = text.search(/^### Task 1:/m);
+    const taskOneEnd = text.indexOf('\n### Task ', taskOneStart + 1);
+    const taskOneSection = taskOneStart < 0 ? '' : text.slice(taskOneStart, taskOneEnd < 0 ? text.length : taskOneEnd);
+    const taskOneChecked = /^- \[x\]/m.test(taskOneSection);
     const taskOneFiles = new Set(taskFiles(text, '1'));
     const reviewForTaskOne = (item: typeof ledgerEntries[number]): boolean => taskOneFiles.has(item.ref.replace(/:\d+(?::\d+)?$/, ''));
     const ledgerReviews = ledgerEntries.some(item => item.branch === branch && item.phase === 'review' && item.source_skill === 'specification-reviewer' && item.polarity === 'win' && reviewForTaskOne(item))
-        && ledgerEntries.some(item => item.branch === branch && item.phase === 'review' && item.source_skill === 'requesting-code-review' && item.polarity === 'win' && item.signature === 'awm-facts-nested-yaml-boundary-reviewed' && reviewForTaskOne(item));
+        && ledgerEntries.some(item => item.branch === branch && item.phase === 'review' && item.source_skill === 'requesting-code-review' && item.polarity === 'win' && item.signature === 'facts-contract-json-and-literal-validation' && reviewForTaskOne(item));
     const taskIds = ids(text); const proven = digest === 'c11477dd59cb19094983c671cc0b760f1d1e51b9679e13dba90f1b0c2cba48e7' && ancestor && taskOneChecked && ledgerReviews;
-    const tasks = taskIds.map(id => id === '1' && proven ? { id, state: 'completed' as const, missing: [] } : id === '2' ? { id, state: 'pending' as const, missing: ['quality-review'] } : { id, state: 'unstarted' as const, missing: [] });
+    // A checked historical antecedent without sufficient provenance is not
+    // unstarted. Preserve it for reconciliation; never imply permission to
+    // replay its implementation or borrow another task's review.
+    const tasks = taskIds.map(id => id === '1' && proven ? { id, state: 'completed' as const, missing: [] } : id === '1' && taskOneChecked ? { id, state: 'pending' as const, missing: ['historical-completion-provenance'] } : id === '2' ? { id, state: 'pending' as const, missing: ['quality-review'] } : { id, state: 'unstarted' as const, missing: [] });
     return { state: proven ? 'planning-required' : 'blocked', planDigest: digest, issueLinks: [...issueLinks], tasks, diagnostics: proven ? ['Task 2 quality re-review remains'] : ['issue-148 historical provenance is incomplete or inconsistent'], facts: [{ taskId: '1', issue126 }] };
 }

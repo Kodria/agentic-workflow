@@ -158,10 +158,13 @@ describe('collectIssue148HistoricalFacts', () => {
             const report = collectIssue148HistoricalFacts(historical, ['https://github.com/Kodria/agentic-workflow/issues/126', 'https://github.com/Kodria/agentic-workflow/issues/148']);
             expect(report).toMatchObject({ state: 'blocked', diagnostics: ['issue-148 historical provenance is incomplete or inconsistent'] });
             expect(report.tasks).toEqual([
-                { id: '1', state: 'unstarted', missing: [] },
+                { id: '1', state: 'pending', missing: ['historical-completion-provenance'] },
                 { id: '2', state: 'pending', missing: ['quality-review'] },
                 ...Array.from({ length: 12 }, (_, index) => ({ id: String(index + 3), state: 'unstarted' as const, missing: [] })),
             ]);
+            fs.writeFileSync(path.join(historical, 'docs', 'plans', '2026-09-14-awm-facts-plan.md'), '### Task 1: unchecked\n\n### Task 2: later\n- [x] unrelated check\n');
+            expect(collectIssue148HistoricalFacts(historical, ['https://github.com/Kodria/agentic-workflow/issues/126', 'https://github.com/Kodria/agentic-workflow/issues/148']).tasks[0])
+                .toEqual({ id: '1', state: 'unstarted', missing: [] });
         } finally { cwd.mockRestore(); fs.rmSync(parent, { recursive: true, force: true }); }
     });
 });
