@@ -41,9 +41,13 @@ This generates the runnable output under `dist/index.js`.
 ### 4. Running the Tests
 Before submitting a PR, ensure that the core discovery/executor functionality passes the existing test suite:
 ```bash
+npm run native:build
 npm test
 ```
-The goal is to maintain 100% passing tests for any new CLI parameter flags.
+`native:build` creates the ignored, host-specific `secure-fs` artifact required
+by the integration fixtures; it must be run again after a clean checkout or a
+change under `native/`. The goal is to maintain 100% passing tests for any new
+CLI parameter flags.
 
 ### 5. Local Execution (Testing changes locally)
 

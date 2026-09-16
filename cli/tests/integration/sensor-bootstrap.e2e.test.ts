@@ -10,6 +10,7 @@ import { secureFs } from '../../src/core/secure-fs/native-bridge';
 
 const cliRoot = path.resolve(__dirname, '../..');
 const bin = path.join(cliRoot, 'dist/src/index.js');
+const nativeArtifact = path.join(cliRoot, 'prebuilds', `${process.platform}-${process.arch}`, 'secure_fs.node');
 const fixtureRoot = path.join(cliRoot, 'tests/fixtures/sensor-compatibility');
 
 type Fixture = { root: string; project: string; awmHome: string; registryRoot: string };
@@ -70,6 +71,7 @@ function v2Manifest(): object {
 
 beforeAll(() => {
     if (!fs.existsSync(bin)) throw new Error(`Sensor bootstrap E2E requires the compiled CLI at ${bin}; run npm run build before this test.`);
+    if (!fs.existsSync(nativeArtifact)) throw new Error(`Sensor bootstrap E2E requires the host secure-fs artifact at ${nativeArtifact}; run npm run native:build before this test.`);
 });
 
 test('compiled bootstrap creates once and the exact second invocation is a byte-stable no-op', () => {
