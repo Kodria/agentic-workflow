@@ -155,3 +155,34 @@ test('compiled bootstrap migrates v2 once, preserves all non-manifest project by
         expect(hashTree(subject.awmHome)).toBe(machineBefore);
     } finally { fs.rmSync(subject.root, { recursive: true, force: true }); }
 });
+
+test('compiled bootstrap explicitly migrates a legacy manifest through the current unique registry source', () => {
+    const subject = fixture();
+    try {
+        const manifest = path.join(subject.project, '.awm', 'sensors.json');
+        const legacy = {
+            pack: 'js-ts',
+            sensors: { lint: { cmd: 'npx eslint .' } },
+        };
+        fs.writeFileSync(manifest, JSON.stringify(legacy, null, 2) + '\n');
+        const before = fs.readFileSync(manifest);
+        const machineBefore = hashTree(subject.awmHome);
+
+        const dryRun = run(subject, '--dry-run');
+        expect(dryRun.status).toBe(0);
+        expect(`${dryRun.stdout}${dryRun.stderr}`).not.toContain('legacy-v1-preserved');
+        expect(fs.readFileSync(manifest)).toEqual(before);
+
+        const migrated = run(subject);
+        expect(migrated.status).toBe(0);
+        expect(`${migrated.stdout}${migrated.stderr}`).toContain('migrated');
+        expect(`${migrated.stdout}${migrated.stderr}`).not.toContain('legacy-v1-preserved');
+        expect(JSON.parse(fs.readFileSync(manifest, 'utf8'))).toMatchObject({
+            schemaVersion: 3,
+            mode: 'project-sensors',
+            pack: 'js-ts',
+            source: { registry: 'baseline' },
+        });
+        expect(hashTree(subject.awmHome)).toBe(machineBefore);
+    } finally { fs.rmSync(subject.root, { recursive: true, force: true }); }
+});
