@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import semver from 'semver';
-import { spawnSync } from 'child_process';
 import { platform } from '../../../core/paths';
 import type { SensorPack } from './types';
 
@@ -139,23 +138,6 @@ function installedPackageVersion(root: string, tool: string): string | null {
     } catch { return null; }
 }
 
-const PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
-
-/** Resolve only a closed package-manager name with argv, no shell, a short timeout,
- * and a bounded semver-only response. The returned version is evidence for the same
- * PATH command the sensor will execute, never for a project dependency shadowing it. */
-function pathPackageManagerVersion(tool: string): string | null {
-    if (!PACKAGE_MANAGERS.has(tool)) return null;
-    try {
-        const result = spawnSync(tool, ['--version'], {
-            cwd: process.cwd(), shell: false, encoding: 'utf8', timeout: 5_000,
-            maxBuffer: 1024, windowsHide: true, stdio: 'pipe',
-        });
-        if (result.error || result.status !== 0 || result.signal || typeof result.stdout !== 'string' || result.stdout.length > 256) return null;
-        return exactVersion(result.stdout.trim());
-    } catch { return null; }
-}
-
 /** Read bounded project metadata only; it never shells out, downloads, or mutates. */
 export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependencies: { platform?: () => NodeJS.Platform; pathToolVersion?: (tool: string) => string | null } = {}): ProjectEvidence {
     if (typeof cwd !== 'string' || cwd.trim() === '') throw new Error('cwd must be a non-empty path');
@@ -192,7 +174,10 @@ export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependen
     const toolProvenance: ProjectEvidence['toolProvenance'] = {};
     for (const tool of [...tools].sort()) {
         if (pathTools.has(tool) && packageManager === tool) {
-            toolVersions[tool] = exactVersion((dependencies.pathToolVersion ?? pathPackageManagerVersion)(tool));
+            // Discovery/status is read-only. A PATH executable is not inspected or
+            // executed here; callers that already possess trusted runtime evidence
+            // may inject it explicitly for an execution-time compatibility check.
+            toolVersions[tool] = exactVersion(dependencies.pathToolVersion?.(tool) ?? null);
             toolProvenance[tool] = toolVersions[tool] === null ? null : 'path';
         } else {
             const pythonVersion = pythonToolVersion(root, sitePackages, tool);

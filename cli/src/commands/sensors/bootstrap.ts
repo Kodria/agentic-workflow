@@ -99,6 +99,13 @@ export async function planSensorBootstrap(cwd: string = process.cwd(), input: Bo
             return { kind: 'noop', projectRoot: project.projectRoot, manifestPath: project.manifestPath, changes: [], dryRun: opts.dryRun };
         }
         if (project.manifest.kind === 'legacy') {
+            // Legacy manifests can carry arbitrary commands and per-sensor
+            // semantics that a v3 pack cannot prove equivalent. Replacing
+            // them is therefore a deliberate opt-in, never an automatic
+            // side effect of inspection or an unqualified bootstrap.
+            if (opts.mode !== 'project-sensors') {
+                return blocked(project.projectRoot, project.manifestPath, opts.dryRun, 'legacy-replacement-requires-project-sensors-mode', 'rerun-bootstrap-with-mode-project-sensors');
+            }
             // The legacy pack name identifies the source to migrate, but must not
             // activate v2 sensors which require an explicit project opt-in.
             const planned = await projectSensors(project.projectRoot, opts.registryRoot, project.manifest.pack.pack, undefined, false);

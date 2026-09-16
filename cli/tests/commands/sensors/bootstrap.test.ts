@@ -72,7 +72,7 @@ describe('planSensorBootstrap', () => {
         expect(planV2Migration).not.toHaveBeenCalled();
     });
 
-    it('plans explicit bootstrap migration of a legacy v1 manifest through one official pack source', async () => {
+    it('requires explicit project-sensors mode before replacing a legacy v1 manifest', async () => {
         const project = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-bootstrap-legacy-'));
         const manifestPath = path.join(project, '.awm', 'sensors.json');
         const variant = { id: 'eslint-9', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: [] };
@@ -80,12 +80,13 @@ describe('planSensorBootstrap', () => {
         try {
             fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
             fs.writeFileSync(manifestPath, JSON.stringify({ pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .' } } }));
-            (resolveSensorProject as jest.Mock).mockReturnValueOnce({ state: 'configured', projectRoot: project, manifestPath, packageRoot: project, manifest: { kind: 'legacy', pack: { pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .' } }, compatibility: {} } } });
+            (resolveSensorProject as jest.Mock).mockReturnValue({ state: 'configured', projectRoot: project, manifestPath, packageRoot: project, manifest: { kind: 'legacy', pack: { pack: 'js-ts', sensors: { lint: { cmd: 'npx eslint .' } }, compatibility: {} } } });
             (listPackSources as jest.Mock).mockReturnValue([source]);
             (parseSensorPack as jest.Mock).mockReturnValue({ kind: 'v2', pack });
             (resolveParsedPackCompatibility as jest.Mock).mockResolvedValue({ pack, sensors: { lint: { state: 'certified', reason: 'ok', variantId: 'eslint-9', toolVersion: '9.0.0', runtimeVersion: '24.0.0', certifiedRange: '>=9 <10', evidence: [] } } });
 
-            await expect(planSensorBootstrap(project)).resolves.toMatchObject({ kind: 'migrate', changes: [{ path: '.awm/sensors.json', action: 'replace' }], migration: { kind: 'legacy-v1' }, source });
+            await expect(planSensorBootstrap(project)).resolves.toMatchObject({ kind: 'blocked', reason: 'legacy-replacement-requires-project-sensors-mode', changes: [] });
+            await expect(planSensorBootstrap(project, { mode: 'project-sensors' })).resolves.toMatchObject({ kind: 'migrate', changes: [{ path: '.awm/sensors.json', action: 'replace' }], migration: { kind: 'legacy-v1' }, source });
             // A legacy manifest identifies the old pack; it is not an explicit
             // opt-in to every optional sensor in that pack.
             expect(resolveParsedPackCompatibility).toHaveBeenCalledWith(project, pack);
