@@ -219,10 +219,10 @@ describe('native secure-fs durable publication source contract', () => {
         const native = source();
         const write = native.slice(native.indexOf('napi_value WriteProjectTransaction'), native.indexOf('\n}  // namespace'));
         expect(native).toMatch(/if \(fsync\(parent\) != 0\)[\s\S]{0,240}Throw\(env, "secure-fs durable directory sync failed"\)/);
-        expect(write).toMatch(/const bool durable = fsync\(parent\) == 0;[\s\S]{0,180}secure-fs durable directory sync failed/);
-        const withoutWriteSync = write.replace('const bool durable = fsync(parent) == 0;', 'const bool durable = true;');
-        expect(withoutWriteSync).not.toMatch(/const bool durable = fsync\(parent\) == 0;/);
-        expect(withoutWriteSync).not.toMatch(/const bool durable = fsync\(parent\) == 0;[\s\S]{0,180}secure-fs durable directory sync failed/);
+        expect(write).toMatch(/fsync\(parent\) == 0;[\s\S]{0,180}secure-fs durable directory sync failed/);
+        const withoutWriteSync = write.replace('fsync(parent) == 0', 'true');
+        expect(withoutWriteSync).not.toMatch(/fsync\(parent\) == 0;/);
+        expect(withoutWriteSync).not.toMatch(/fsync\(parent\) == 0;[\s\S]{0,180}secure-fs durable directory sync failed/);
     });
 
     it('requires the Windows publish path to report parent flush failure', () => {
@@ -509,6 +509,29 @@ const nativeFixtureAvailable = ['linux', 'darwin', 'win32'].includes(process.pla
     && ['x64', 'arm64'].includes(process.arch)
     && fs.existsSync(path.join(__dirname, '../../../prebuilds', `${process.platform}-${process.arch}`, 'secure_fs.node'));
 const nativeOnly = nativeFixtureAvailable ? describe : describe.skip;
+const testAddonPath = path.join(__dirname, '../../../native/build/Release/secure_fs_test.node');
+const nativeTestOnly = fs.existsSync(testAddonPath) ? describe : describe.skip;
+
+nativeTestOnly('native secure-fs directory-sync fault injection', () => {
+    type TestBinding = NativeSecureFsBinding & { setDirectoryFsyncFailureForTests(enabled: boolean): void };
+    let root: string;
+    let testBinding: TestBinding;
+
+    beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-secure-fs-fsync-')); testBinding = require(testAddonPath) as TestBinding; });
+    afterEach(() => { testBinding.setDirectoryFsyncFailureForTests(false); fs.rmSync(root, { recursive: true, force: true }); });
+
+    it('writes the target then reports the forced post-publication directory-sync failure', () => {
+        testBinding.setDirectoryFsyncFailureForTests(true);
+        expect(() => testBinding.writeProjectTransaction(root, 'durable.txt', Buffer.from('published'), { mode: 'create', createParents: false })).toThrow('secure-fs durable directory sync failed');
+        expect(fs.readFileSync(path.join(root, 'durable.txt'), 'utf8')).toBe('published');
+    });
+
+    it('keeps the production prebuild free of the test-only control', () => {
+        if (!nativeFixtureAvailable) return;
+        const production = require(path.join(__dirname, '../../../prebuilds', `${process.platform}-${process.arch}`, 'secure_fs.node')) as Record<string, unknown>;
+        expect(production.setDirectoryFsyncFailureForTests).toBeUndefined();
+    });
+});
 
 nativeOnly('native secure-fs identity fence fixtures', () => {
     let root: string;

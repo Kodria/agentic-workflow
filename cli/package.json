@@ -19,6 +19,7 @@
   },
   "scripts": {
     "native:build": "node-gyp rebuild --directory native && node scripts/package-native.js",
+    "native:test-build": "node-gyp rebuild --directory native",
     "native:package-check": "node scripts/assert-native-package.js",
     "build": "tsc && chmod +x dist/src/index.js",
     "typecheck": "tsc --noEmit",
