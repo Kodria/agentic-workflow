@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { AGENT_TARGETS } from '../../providers';
-import type { ProviderExecutionCapabilities } from '../admission';
+import type { ProviderExecutionCapabilities } from './capability-types';
 import type { PlanDiagnostic } from '../plan/types';
 import type { CapabilityReceipt, RuntimeKey, Selection } from './types';
 import { MAX_IDENTIFIER, assertDigest, canonicalUtcTimestamp } from './validate';

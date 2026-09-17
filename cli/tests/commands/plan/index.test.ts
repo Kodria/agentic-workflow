@@ -682,8 +682,8 @@ describe('plan validation public boundaries', () => {
 
     it('rejects an unowned requirement before claiming complete ownership or exit 0', () => {
         const malformed = { ...valid, manifest: { ...valid.manifest, requirements: [...valid.manifest.requirements, 'R4-VAL-5'] } };
-        expect(() => formatReport(malformed, 'plan.md')).toThrow('plan validator returned an invalid valid report');
-        expect(() => exitCodeFor(malformed)).toThrow('plan validator returned an invalid valid report');
+        expect(() => formatReport(malformed as unknown as PlanValidationReport, 'plan.md')).toThrow('plan validator returned an invalid valid report');
+        expect(() => exitCodeFor(malformed as unknown as PlanValidationReport)).toThrow('plan validator returned an invalid valid report');
     });
 
     it('rejects a requirement owned by two slices', () => {
@@ -692,8 +692,8 @@ describe('plan validation public boundaries', () => {
                 ...valid.manifest.slices[0], id: 'S2', requirements: [valid.manifest.requirements[0]],
             }] },
         };
-        expect(() => formatReport(malformed, 'plan.md')).toThrow('plan validator returned an invalid valid report');
-        expect(() => exitCodeFor(malformed)).toThrow('plan validator returned an invalid valid report');
+        expect(() => formatReport(malformed as unknown as PlanValidationReport, 'plan.md')).toThrow('plan validator returned an invalid valid report');
+        expect(() => exitCodeFor(malformed as unknown as PlanValidationReport)).toThrow('plan validator returned an invalid valid report');
     });
 
     it.each(['requirements', 'sources', 'commands', 'slices', 'closureCommands'] as const)(

@@ -1,5 +1,5 @@
 import type { AgentTarget } from '../../providers';
-import type { ProviderExecutionCapabilities } from '../admission';
+import type { ProviderExecutionCapabilities } from './capability-types';
 
 export type ImplementerProfile = 'mechanical' | 'integration' | 'judgment';
 export type RoutingRole = 'implementer' | 'specification-reviewer' | 'code-quality-reviewer' | 'final-reviewer' | 'architecture' | 'track-a-qa' | 'track-b-qa' | 'controller' | 'documentation' | 'retro' | 'finishing';

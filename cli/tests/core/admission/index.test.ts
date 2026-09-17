@@ -93,7 +93,7 @@ describe('admitPlan', () => {
     });
 
     it('reports the schema-2 journal prerequisite for otherwise admissible unattended work', async () => {
-        const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as PlanValidationReport;
+        const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as unknown as PlanValidationReport;
         const report = await admitPlan({ plan: unattended, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'] });
         expect(report).toMatchObject({ state: 'blocked', executionMode: 'desatendido', journal: 'missing' });
         expect(report.diagnostics[0]).toMatchObject({ code: 'ADMISSION_JOURNAL_BINDING_REQUIRED' });
@@ -101,7 +101,7 @@ describe('admitPlan', () => {
     });
 
     it('admits unattended work only with an exact schema-2 plan binding', async () => {
-        const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as PlanValidationReport;
+        const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as unknown as PlanValidationReport;
         const journal = { ...emptyState('main'), schema: 2 as const, planBinding: { path: 'docs/plan.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1' as const, executionMode: 'desatendido' as const, boundAt: '2026-09-15T00:00:00.000Z' } };
         const admitted = await admitPlan({ plan: unattended, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], journalState: journal, planPath: 'docs/plan.md' });
         expect(admitted).toMatchObject({ state: 'admitted', journal: 'current', executionMode: 'desatendido' });

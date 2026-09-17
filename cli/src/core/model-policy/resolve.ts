@@ -15,9 +15,15 @@ export type ResolveDispatchInput = Omit<ResolveSelectionInput, 'requestedProfile
 export function resolveDispatch(input: ResolveDispatchInput): DispatchResolution {
     if (!input || typeof input !== 'object' || !input.plan) throw new Error('resolveDispatch requires a plan');
     assertVerifiedValidPlanReport(input.plan);
-    if (input.plan.schema === 'compact-slices/v1') return resolveV1Dispatch(input);
+    const local = ['implementer', 'specification-reviewer', 'code-quality-reviewer'].includes(input.role);
+    if (input.plan.schema === 'compact-slices/v1') {
+        if (input.sliceId !== undefined && !input.plan.manifest.slices.some(slice => slice.id === input.sliceId)) throw new Error('routing slice does not exist in the validated plan');
+        if (local && typeof input.sliceId !== 'string') throw new Error('local routing requires a slice');
+        return resolveV1Dispatch(input);
+    }
     if (input.role !== 'implementer') {
-        if (input.sliceId !== undefined) throw new Error('slice is only valid for implementer routing');
+        if (local && (typeof input.sliceId !== 'string' || !input.plan.manifest.slices.some(slice => slice.id === input.sliceId))) throw new Error('local routing requires a valid slice');
+        if (!local && input.sliceId !== undefined) throw new Error('slice is only valid for local routing');
         return resolveSelection({ ...input, requestedProfile: 'full' });
     }
     if (typeof input.sliceId !== 'string' || input.sliceId.length === 0) throw new Error('implementer routing requires a slice');

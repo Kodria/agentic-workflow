@@ -461,7 +461,7 @@ describe('validatePlanFile', () => {
 
     test('keeps a future schema behind partial markers invalid rather than unsupported', () => {
         const plan = path.join(root, 'partial-future.md'); fs.writeFileSync(plan, `${START}\n{"schema":"compact-slices/v2"}`);
-        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
     });
 
     test('applies scalar limits before classifying a future schema as unsupported', () => {
@@ -792,7 +792,7 @@ describe('validatePlanFile', () => {
     test('recognizes a parseable future schema when only the END marker is broken', () => {
         const plan = path.join(root, 'future-missing-end.md');
         fs.writeFileSync(plan, `${START}\n{"schema":"compact-slices/v2"}\n`);
-        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'unsupported', schema: 'compact-slices/v2' });
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [expect.objectContaining({ code: 'PLAN_MARKERS' })] });
     });
 
     test('accepts CRLF Markdown with nested headings and fenced code in a required section', () => {

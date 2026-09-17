@@ -17,7 +17,7 @@ export interface CompactPlanManifest {
     schema: 'compact-slices/v1'; planId: string; requirements: RequirementId[]; sources: PlanSource[];
     commands: PlanCommand[]; slices: PlanSlice[]; closureCommands: EntityId[];
 }
-export type CompactPlanV2 = Omit<CompactPlanManifest, 'schema' | 'slices'> & { schema: 'compact-slices/v2'; slices: PlanSlice[]; /** Legacy test-only admission metadata is never accepted by the validator. */ executionMode?: string; };
+export type CompactPlanV2 = Omit<CompactPlanManifest, 'schema' | 'slices'> & { schema: 'compact-slices/v2'; slices: PlanSliceV2[]; };
 export type SupportedPlanManifest = CompactPlanManifest | CompactPlanV2;
 export type PlanValidationReport =
     | { state: 'valid'; schema: 'compact-slices/v1' | 'compact-slices/v2'; planDigest: string; /** Versioned progress-independent identity, derived from the same validated bytes. */ executionDigest?: string; manifest: SupportedPlanManifest; /** Derived from the validated bytes, never a later reopen. */ executionMode?: 'interactivo' | 'desatendido' }
