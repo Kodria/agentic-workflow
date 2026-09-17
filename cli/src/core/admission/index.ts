@@ -29,7 +29,7 @@ export type AdmissionReport = {
     routingForecast?: RoutingForecast;
 };
 export type RoutingForecast = {
-    kind: 'routing-v1'; implementerProfiles: Record<ImplementerProfile, number>;
+    kind: 'routing-v1'; slices: number; implementerProfiles: Record<ImplementerProfile, number>;
     roles: Record<'specification-reviewer' | 'code-quality-reviewer' | 'final-reviewer' | 'track-a-qa' | 'documentation' | 'retro' | 'finishing', number>;
     trackB: { state: 'known'; count: number } | { state: 'unavailable'; lowerBound: 1 };
     controller: { state: 'known'; count: number } | { state: 'unavailable'; lowerBound: 0 };
@@ -87,7 +87,7 @@ function routingForecast(plan: Extract<PlanValidationReport, { state: 'valid' }>
     const qa = routing.qaLens;
     if (qa !== undefined && (!Array.isArray(qa) || qa.length > 64 || new Set(qa).size !== qa.length || qa.some(id => typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(id)))) throw new Error('routing qaLens must be unique validated lens ids');
     if (routing.controllerCount !== undefined && (!Number.isSafeInteger(routing.controllerCount) || routing.controllerCount < 0 || routing.controllerCount > 1)) throw new Error('routing controllerCount must be 0 or 1');
-    return { kind: 'routing-v1', implementerProfiles: profiles, roles: { 'specification-reviewer': plan.manifest.slices.length, 'code-quality-reviewer': plan.manifest.slices.length, 'final-reviewer': 1, 'track-a-qa': 1, documentation: 1, retro: 1, finishing: 1 }, trackB: qa === undefined ? { state: 'unavailable', lowerBound: 1 } : { state: 'known', count: qa.length }, controller: routing.controllerCount === undefined ? { state: 'unavailable', lowerBound: 0 } : { state: 'known', count: routing.controllerCount } };
+    return { kind: 'routing-v1', slices: plan.manifest.slices.length, implementerProfiles: profiles, roles: { 'specification-reviewer': plan.manifest.slices.length, 'code-quality-reviewer': plan.manifest.slices.length, 'final-reviewer': 1, 'track-a-qa': 1, documentation: 1, retro: 1, finishing: 1 }, trackB: qa === undefined ? { state: 'unavailable', lowerBound: 1 } : { state: 'known', count: qa.length }, controller: routing.controllerCount === undefined ? { state: 'unavailable', lowerBound: 0 } : { state: 'known', count: routing.controllerCount } };
 }
 function currentness(report: CurrentnessReport, consumedRegistryComponents: readonly string[]): { status: AdmissionReport['currentness']; diagnostics: PlanDiagnostic[] } {
     const consumed = new Set(['cli', ...consumedRegistryComponents]);
@@ -138,9 +138,10 @@ function validForecast(value: unknown): value is DispatchForecast {
 }
 function validRoutingForecast(value: unknown): value is RoutingForecast {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-    const record = value as Record<string, unknown>; const profiles = record.implementerProfiles as Record<string, unknown>;
+    const record = value as Record<string, unknown>; const profiles = record.implementerProfiles as Record<string, unknown>; const roles = record.roles as Record<string, unknown>;
     const count = (item: unknown): boolean => Number.isSafeInteger(item) && (item as number) >= 0;
-    return record.kind === 'routing-v1' && !!profiles && Object.keys(profiles).length === 3 && ['mechanical', 'integration', 'judgment'].every(key => count(profiles[key])) && !!record.roles && typeof record.roles === 'object' && Object.values(record.roles as Record<string, unknown>).every(count)
+    const roleKeys = ['specification-reviewer', 'code-quality-reviewer', 'final-reviewer', 'track-a-qa', 'documentation', 'retro', 'finishing'];
+    return record.kind === 'routing-v1' && Object.keys(record).length === 6 && count(record.slices) && !!profiles && Object.keys(profiles).length === 3 && ['mechanical', 'integration', 'judgment'].every(key => count(profiles[key])) && (Object.values(profiles) as unknown[]).reduce<number>((sum, profile) => sum + (profile as number), 0) === record.slices && !!roles && typeof roles === 'object' && Object.keys(roles).length === roleKeys.length && roleKeys.every(key => key in roles) && roles['specification-reviewer'] === record.slices && roles['code-quality-reviewer'] === record.slices && ['final-reviewer', 'track-a-qa', 'documentation', 'retro', 'finishing'].every(key => roles[key] === 1)
         && !!record.trackB && typeof record.trackB === 'object' && (((record.trackB as any).state === 'known' && count((record.trackB as any).count)) || ((record.trackB as any).state === 'unavailable' && (record.trackB as any).lowerBound === 1))
         && !!record.controller && typeof record.controller === 'object' && (((record.controller as any).state === 'known' && count((record.controller as any).count)) || ((record.controller as any).state === 'unavailable' && (record.controller as any).lowerBound === 0));
 }
@@ -219,6 +220,7 @@ function completeAdmission(input: AdmissionInput, plan: Extract<PlanValidationRe
     if (!routing?.runtime || !routing.policy || !routing.capabilities) return blocked(input, [diagnostic('ADMISSION_ROUTING_FACTS_REQUIRED', 'Compact v2 requires an approved policy, current capability receipt, and runtime identity.')], { planDigest: plan.planDigest, provider, executionMode, journal, currentness, sensors, capabilityResolution });
     let runtime: RuntimeKey;
     try { runtime = validateRuntimeKey(routing.runtime); } catch { return blocked(input, [diagnostic('ADMISSION_ROUTING_RUNTIME_INVALID', 'Compact v2 routing runtime identity is invalid.')], { planDigest: plan.planDigest, provider, executionMode, journal, currentness, sensors, capabilityResolution }); }
+    if (runtime.target !== provider) return blocked(input, [diagnostic('ADMISSION_ROUTING_PROVIDER_MISMATCH', 'Compact v2 routing runtime target must exactly match the admitted provider.')], { planDigest: plan.planDigest, provider, executionMode, journal, currentness, sensors, capabilityResolution });
     const now = routing.now ?? new Date();
     for (const slice of plan.manifest.slices) {
         const resolved = resolveSelection({ role: 'implementer', requestedProfile: (slice as unknown as { implementerProfile: ImplementerProfile }).implementerProfile, policy: routing.policy, capabilities: routing.capabilities, runtime, now });

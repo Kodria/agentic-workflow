@@ -29,12 +29,26 @@ describe('admitPlan', () => {
         const report = await admitPlan({ plan: v2(profile), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], routing: routing() });
         expect(report).toMatchObject({ state: 'admitted', routingForecast: { implementerProfiles: { [profile]: 1 }, trackB: { state: 'unavailable', lowerBound: 1 }, controller: { state: 'unavailable', lowerBound: 0 } } });
     });
+    it('blocks a valid cross-provider policy and receipt instead of admitting codex under another runtime target', async () => {
+        const evidence = routing();
+        const foreign = structuredClone(evidence);
+        foreign.runtime.target = 'cursor';
+        foreign.policy.content.mappings[0].target = 'cursor';
+        foreign.capabilities.runtime.target = 'cursor';
+        const report = await admitPlan({ plan: v2(), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], routing: foreign });
+        expect(report).toMatchObject({ state: 'blocked', provider: 'codex', diagnostics: [expect.objectContaining({ code: 'ADMISSION_ROUTING_PROVIDER_MISMATCH' })] });
+    });
     it('rejects a forecast whose total or role topology does not match its slices', () => {
         const forecast = { kind: 'topology', slices: 2, roles: { implementer: 2, 'specification-reviewer': 2, 'code-quality-reviewer': 2, 'final-reviewer': 1, 'track-a-qa': 1, 'track-b-qa': 1, documentation: 1, retro: 1, finishing: 1 }, total: 99 };
         expect(() => sanitizeAdmissionReport({ state: 'admitted', planState: 'valid', journal: 'not-required', currentness: 'not-checked', sensors: 'not-required', diagnostics: [], forecast })).toThrow(/invalid report/);
         forecast.total = 12;
         forecast.roles.implementer = 1;
         expect(() => sanitizeAdmissionReport({ state: 'admitted', planState: 'valid', journal: 'not-required', currentness: 'not-checked', sensors: 'not-required', diagnostics: [], forecast })).toThrow(/invalid report/);
+    });
+    it('rejects forged routing forecast role keys and profile totals at the public sanitizer', () => {
+        const base = { kind: 'routing-v1', slices: 1, implementerProfiles: { mechanical: 1, integration: 0, judgment: 0 }, roles: { 'specification-reviewer': 1, 'code-quality-reviewer': 1, 'final-reviewer': 1, 'track-a-qa': 1, documentation: 1, retro: 1, finishing: 1 }, trackB: { state: 'unavailable', lowerBound: 1 }, controller: { state: 'unavailable', lowerBound: 0 } };
+        expect(() => sanitizeAdmissionReport({ state: 'admitted', planState: 'valid', journal: 'not-required', currentness: 'not-checked', sensors: 'not-required', diagnostics: [], routingForecast: { ...base, roles: { ...base.roles, architecture: 1 } } })).toThrow(/invalid report/);
+        expect(() => sanitizeAdmissionReport({ state: 'admitted', planState: 'valid', journal: 'not-required', currentness: 'not-checked', sensors: 'not-required', diagnostics: [], routingForecast: { ...base, implementerProfiles: { ...base.implementerProfiles, mechanical: 0 } } })).toThrow(/invalid report/);
     });
     it('preserves the distinct unsupported plan state and bounded validator diagnostic', async () => {
         const report = await admitPlan({ plan: { state: 'unsupported', schema: 'compact-slices/v9', diagnostics: [{ code: 'PLAN_UNSUPPORTED_SCHEMA', message: `future\u001b${'x'.repeat(5000)}` }] }, provider: 'codex', cwd: process.cwd() });

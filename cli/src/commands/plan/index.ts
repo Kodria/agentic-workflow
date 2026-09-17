@@ -200,8 +200,11 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
         .option('--execution-mode <mode>', 'explicit override: interactivo or desatendido')
         .option('--require-current', 'require authoritative consumed-contract currentness')
         .option('--verify-sensors', 'require an empirical sensor pass')
+        .option('--runtime-kind <kind>', 'routing runtime kind for compact v2')
+        .option('--runtime-version <version>', 'routing runtime version for compact v2')
+        .option('--account-scope-digest <sha>', 'routing account scope digest for compact v2')
         .option('--json', 'emit one stable JSON report')
-        .action(async (planPath: string, options: { provider: string; cwd: string; executionMode?: string; requireCurrent?: boolean; verifySensors?: boolean; json?: boolean }) => {
+        .action(async (planPath: string, options: { provider: string; cwd: string; executionMode?: string; requireCurrent?: boolean; verifySensors?: boolean; runtimeKind?: string; runtimeVersion?: string; accountScopeDigest?: string; json?: boolean }) => {
             assertText(planPath, 'plan path');
             assertText(options.cwd, '--cwd');
             assertText(options.provider, '--provider');
@@ -210,6 +213,9 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
             const currentnessCheck = deps.checkCurrentness ?? checkCurrentness;
             const sensorRun = deps.runSensors ?? runSensors;
             const registryInventory = deps.listRegistries ?? listRegistries;
+            const routing = options.runtimeKind !== undefined || options.runtimeVersion !== undefined || options.accountScopeDigest !== undefined
+                ? (() => { if (!options.runtimeKind || !options.runtimeVersion || !options.accountScopeDigest) throw new Error('compact v2 routing requires runtime kind, version, and account scope digest'); const runtime = validateRuntimeKey({ target: options.provider, kind: options.runtimeKind, version: options.runtimeVersion, accountScopeDigest: options.accountScopeDigest }); const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(options.cwd); const capabilities = (deps.readCapabilities ?? readCapabilities)(runtime, new Date()); return { runtime, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined }; })()
+                : undefined;
             const planReport = deps.validatePlanFile(planPath, options.cwd);
             // The mode comes from the same authenticated bytes/digest that produced
             // planReport. Never reopen the path to parse a mutable header.
@@ -224,12 +230,12 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
             // capability before empirical evidence gates have had their ordered turn.
             const earlyBoundary = planReport.state !== 'valid' || !isAgentTarget(options.provider) || !enabledAgents.includes(options.provider);
             if (earlyBoundary) {
-                const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal });
+                const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, routing, ...journal });
                 process.stdout.write(admissionOutput(report, options.json === true));
                 process.exitCode = 2;
                 return;
             }
-            const report = await admitRegistryPlan({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true },
+            const report = await admitRegistryPlan({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, routing, ...journal, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true },
                 { admitPlan: admission, listRegistries: registryInventory, checkCurrentness: currentnessCheck, runSensors: sensorRun });
             process.stdout.write(admissionOutput(report, options.json === true));
             if (report.state !== 'admitted') process.exitCode = 2;
