@@ -47,6 +47,11 @@ describe('capability receipt validation', () => {
         try { expect(() => approveCapabilities({ file: linked, cwd: root, expectedDigest: digest, now: new Date('2026-09-17T00:00:00.000Z') })).toThrow(/symlink|unsafe/); }
         finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
+    it.each(['destination', 'ancestor'] as const)('rejects a symlinked %s without changing external bytes', kind => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-receipt-')); const prior = process.env.AWM_HOME; process.env.AWM_HOME = path.join(root, 'operator'); const external = path.join(root, 'external.json'); fs.writeFileSync(external, 'outside'); const runtime = receipt().runtime;
+        try { const target = capabilityReceiptPath(runtime); const ancestor = path.dirname(path.dirname(target)); fs.mkdirSync(kind === 'destination' ? path.dirname(target) : path.dirname(ancestor), { recursive: true }); if (kind === 'destination') fs.symlinkSync(external, target); else fs.symlinkSync(root, ancestor); expect(readCapabilities(runtime, new Date('2026-09-17T12:00:00.000Z')).state).toBe('invalid'); expect(fs.readFileSync(external, 'utf8')).toBe('outside'); }
+        finally { if (prior === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = prior; fs.rmSync(root, { recursive: true, force: true }); }
+    });
     it('publishes with exact predecessor CAS and leaves the accepted C2 receipt intact', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-receipt-')); const previous = process.env.AWM_HOME; process.env.AWM_HOME = path.join(root, 'operator'); const file = path.join(root, 'receipt.json'); const now = new Date('2026-09-17T12:00:00.000Z'); const first = receipt(); fs.writeFileSync(file, JSON.stringify(first));
         try {

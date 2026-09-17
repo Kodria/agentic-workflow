@@ -21,6 +21,13 @@ describe('resolveSelection', () => {
         expect(resolveSelection(value)).toMatchObject({ state: 'blocked' });
     });
     it('accepts codex only through its explicit native receipt fixture', () => expect(resolveSelection(input())).toMatchObject({ state: 'resolved' }));
+    it.each(['antigravity', 'opencode', 'claude-code', 'codex', 'cursor', 'copilot'] as const)('resolves an explicit matching policy and native receipt for %s', target => {
+        const value = input(); value.policy.content.mappings = (['antigravity', 'opencode', 'claude-code', 'codex', 'cursor', 'copilot'] as const).map(rowTarget => ({ ...structuredClone(value.policy.content.mappings[0]), target: rowTarget })); value.runtime = { ...value.runtime, target }; value.capabilities.runtime = { ...value.capabilities.runtime, target };
+        expect(resolveSelection(value)).toMatchObject({ state: 'resolved' });
+    });
+    it('blocks an explicit unverified override despite a complete target mapping', () => {
+        const value = input(); value.capabilities.capabilities.modelOverride = 'unverified'; expect(resolveSelection(value)).toMatchObject({ state: 'blocked', diagnostics: [{ code: 'ROUTING_MODEL_OVERRIDE_UNAVAILABLE' }] });
+    });
     it.each(['specification-reviewer', 'code-quality-reviewer', 'final-reviewer', 'architecture', 'track-a-qa', 'track-b-qa', 'controller', 'documentation', 'retro', 'finishing'] as const)('routes %s to full capability independently of requested profile', role => {
         const result = resolveSelection({ ...input(), role, requestedProfile: 'mechanical' });
         expect(result.state).toBe('resolved');
