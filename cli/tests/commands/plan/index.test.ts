@@ -233,6 +233,19 @@ describe('plan validate Commander wiring', () => {
 });
 
 describe('plan admit Commander wiring', () => {
+    it.each([
+        ['invalid plan', invalid, 'codex', ['codex']],
+        ['invalid provider', valid, 'not-a-provider', ['codex']],
+        ['disabled provider', valid, 'codex', ['cursor']],
+    ] as const)('does not read routing facts for %s even with complete runtime flags', async (_name, report, provider, enabledAgents) => {
+        const policy = jest.fn(); const capabilities = jest.fn(); const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerPlanCommand(program, { validatePlanFile: () => report, readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: [...enabledAgents], installMethod: 'symlink', defaultScope: 'local' }), readEffectivePolicy: policy as any, readCapabilities: capabilities as any });
+        try {
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', provider, '--cwd', repositoryRoot, '--runtime-kind', 'native', '--runtime-version', '1.0.0', '--account-scope-digest', 'a'.repeat(64), '--json']);
+            expect(policy).not.toHaveBeenCalled(); expect(capabilities).not.toHaveBeenCalled();
+        } finally { output.mockRestore(); process.exitCode = undefined; }
+    });
     it('derives desatendido from the canonical plan header and requires a journal without a flag', async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-admit-header-'));
         const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);

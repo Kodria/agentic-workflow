@@ -213,9 +213,6 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
             const currentnessCheck = deps.checkCurrentness ?? checkCurrentness;
             const sensorRun = deps.runSensors ?? runSensors;
             const registryInventory = deps.listRegistries ?? listRegistries;
-            const routing = options.runtimeKind !== undefined || options.runtimeVersion !== undefined || options.accountScopeDigest !== undefined
-                ? (() => { if (!options.runtimeKind || !options.runtimeVersion || !options.accountScopeDigest) throw new Error('compact v2 routing requires runtime kind, version, and account scope digest'); const runtime = validateRuntimeKey({ target: options.provider, kind: options.runtimeKind, version: options.runtimeVersion, accountScopeDigest: options.accountScopeDigest }); const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(options.cwd); const capabilities = (deps.readCapabilities ?? readCapabilities)(runtime, new Date()); return { runtime, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined }; })()
-                : undefined;
             const planReport = deps.validatePlanFile(planPath, options.cwd);
             // The mode comes from the same authenticated bytes/digest that produced
             // planReport. Never reopen the path to parse a mutable header.
@@ -230,11 +227,14 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
             // capability before empirical evidence gates have had their ordered turn.
             const earlyBoundary = planReport.state !== 'valid' || !isAgentTarget(options.provider) || !enabledAgents.includes(options.provider);
             if (earlyBoundary) {
-                const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, routing, ...journal });
+                const report = await admission({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal });
                 process.stdout.write(admissionOutput(report, options.json === true));
                 process.exitCode = 2;
                 return;
             }
+            const routing = planReport.schema === 'compact-slices/v2'
+                ? (() => { if (!options.runtimeKind || !options.runtimeVersion || !options.accountScopeDigest) return undefined; const runtime = validateRuntimeKey({ target: options.provider, kind: options.runtimeKind, version: options.runtimeVersion, accountScopeDigest: options.accountScopeDigest }); const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(options.cwd); const capabilities = (deps.readCapabilities ?? readCapabilities)(runtime, new Date()); return { runtime, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined }; })()
+                : undefined;
             const report = await admitRegistryPlan({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, routing, ...journal, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true },
                 { admitPlan: admission, listRegistries: registryInventory, checkCurrentness: currentnessCheck, runSensors: sensorRun });
             process.stdout.write(admissionOutput(report, options.json === true));
