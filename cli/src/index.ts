@@ -50,6 +50,7 @@ import { registerTrackCommand } from './commands/track';
 import { registerEvidenceCommand } from './commands/evidence';
 import { registerProcessCommand } from './commands/process';
 import { registerContextCommand } from './commands/context';
+import { registerModelPolicyCommand } from './commands/model-policy';
 import { runAddBundleCore } from './commands/add';
 import { runSyncCore } from './commands/sync';
 import { runUpdateCore, updateOutro } from './commands/update';
@@ -60,6 +61,7 @@ import { cliVersion } from './core/cli-version';
 
 export const program = new Command();
 program.name('awm').description('Agentic Workflow Manager').version(cliVersion());
+registerModelPolicyCommand(program);
 
 program.hook('postAction', (_command, actionCommand) => {
     if (actionCommand.name() === 'preflight') return;
