@@ -156,6 +156,8 @@ export type RegistryAdmissionDependencies = {
     checkCurrentness?: typeof checkCurrentness;
     runSensors?: typeof runSensors;
     admitPlan?: typeof admitPlan;
+    /** Deferred until every registry/currentness/sensor gate has admitted. */
+    readRouting?: () => AdmissionInput['routing'];
 };
 
 /** One admission authority for the public command AND actual watch dispatch.
@@ -211,5 +213,6 @@ export async function admitRegistryPlan(input: AdmissionInput, dependencies: Reg
         if (currentnessGate.currentness !== 'current') return currentnessGate;
         compatibilityDiagnostics = registryCompatibility(registries, scope.consumedRegistryComponents);
     }
-    return compose({ currentness, compatibilityDiagnostics, sensors });
+    const routing = input.plan.schema === 'compact-slices/v2' ? (dependencies.readRouting?.() ?? input.routing) : undefined;
+    return compose({ currentness, compatibilityDiagnostics, sensors, routing });
 }

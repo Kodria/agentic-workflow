@@ -233,6 +233,13 @@ describe('plan validate Commander wiring', () => {
 });
 
 describe('plan admit Commander wiring', () => {
+    it('does not read v2 routing facts after currentness blocks', async () => {
+        const policy = jest.fn(); const capabilities = jest.fn(); const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerPlanCommand(program, { validatePlanFile: () => ({ ...valid, schema: 'compact-slices/v2', manifest: { ...valid.manifest, schema: 'compact-slices/v2', slices: valid.manifest.slices.map(slice => ({ ...slice, implementerProfile: 'mechanical' })) } } as any), readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }), readEffectivePolicy: policy as any, readCapabilities: capabilities as any, listRegistries: () => [], checkCurrentness: async () => ({ checkedAt: 'x', compatibility: { status: 'not-checked' }, components: [{ component: 'cli', installed: '1', latest: '2', channel: 'stable', source: 'x', checkedAt: 'x', status: 'stale', detail: 'x', remedy: 'x' }] }) });
+        try { await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', repositoryRoot, '--require-current', '--runtime-kind', 'native', '--runtime-version', '1.0.0', '--account-scope-digest', 'a'.repeat(64), '--json']); expect(policy).not.toHaveBeenCalled(); expect(capabilities).not.toHaveBeenCalled(); }
+        finally { output.mockRestore(); process.exitCode = undefined; }
+    });
     it.each([
         ['invalid plan', invalid, 'codex', ['codex']],
         ['invalid provider', valid, 'not-a-provider', ['codex']],
