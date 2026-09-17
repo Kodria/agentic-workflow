@@ -1,13 +1,30 @@
 import type { PlanDiagnostic } from '../plan/types';
-import type { PlanValidationReport } from '../plan/types';
 import { capabilityReceiptDigest, receiptIsCurrent, routingDiagnostic, validateCapabilityReceipt } from './capabilities';
 import type { ApprovedPolicy, CapabilityReceipt, ImplementerProfile, RoutingRole, RuntimeKey, Selection } from './types';
 import { validateApprovedPolicy } from './validate';
 import { assertVerifiedValidPlanReport } from '../plan/validate';
+import type { PlanValidationReport } from '../plan/types';
 
 export type SelectionResolution = { state: 'resolved'; selection: Selection; effectiveProfile: ImplementerProfile | 'full'; outcome: 'native' | 'degraded'; policyDigest: string; capabilityDigest: string; unavailableEvidence: string[] } | { state: 'blocked'; diagnostics: PlanDiagnostic[] };
 export type ResolveSelectionInput = { role: RoutingRole; requestedProfile: ImplementerProfile | 'full'; policy?: ApprovedPolicy; capabilities?: CapabilityReceipt; runtime: RuntimeKey; now: Date };
 export type V1Resolution = { state: 'not-required'; reason: 'v1-without-opt-in' } | SelectionResolution;
+export type DispatchResolution = V1Resolution;
+export type ResolveDispatchInput = Omit<ResolveSelectionInput, 'requestedProfile'> & { plan: Extract<PlanValidationReport, { state: 'valid' }>; sliceId?: string; optInV1: boolean };
+/** Resolve only from the immutable validator report; a reopened plan may never
+ * provide a routing profile after validation. */
+export function resolveDispatch(input: ResolveDispatchInput): DispatchResolution {
+    if (!input || typeof input !== 'object' || !input.plan) throw new Error('resolveDispatch requires a plan');
+    assertVerifiedValidPlanReport(input.plan);
+    if (input.plan.schema === 'compact-slices/v1') return resolveV1Dispatch(input);
+    if (input.role !== 'implementer') {
+        if (input.sliceId !== undefined) throw new Error('slice is only valid for implementer routing');
+        return resolveSelection({ ...input, requestedProfile: 'full' });
+    }
+    if (typeof input.sliceId !== 'string' || input.sliceId.length === 0) throw new Error('implementer routing requires a slice');
+    const slice = input.plan.manifest.slices.find(candidate => candidate.id === input.sliceId);
+    if (!slice) throw new Error('routing slice does not exist in the validated plan');
+    return resolveSelection({ ...input, requestedProfile: (slice as unknown as { implementerProfile: ImplementerProfile }).implementerProfile });
+}
 export function resolveV1Dispatch(input: Omit<ResolveSelectionInput, 'requestedProfile'> & { plan: Extract<PlanValidationReport, { state: 'valid' }>; optInV1: boolean }): V1Resolution {
     if (!input.plan || input.plan.schema !== 'compact-slices/v1') throw new Error('resolveV1Dispatch requires an authenticated v1 plan report');
     assertVerifiedValidPlanReport(input.plan);

@@ -14,10 +14,10 @@ import { readJournal } from '../../core/journal/store';
 import { collectIssue148HistoricalFacts, collectMigrationFacts, type MigrationFactsReport } from '../../core/migration';
 import { readEffectivePolicy } from '../../core/model-policy/store';
 import { readCapabilities, validateRuntimeKey } from '../../core/model-policy/capabilities';
-import { resolveV1Dispatch } from '../../core/model-policy/resolve';
+import { resolveDispatch } from '../../core/model-policy/resolve';
 import type { RoutingRole } from '../../core/model-policy/types';
 
-const SUPPORTED_SCHEMA = 'compact-slices/v1';
+const SUPPORTED_SCHEMA = 'compact-slices/v1, compact-slices/v2';
 const MAX_PATH_LENGTH = 4096;
 const MAX_DIAGNOSTICS = 20;
 const MAX_DIAGNOSTIC_LENGTH = 4096;
@@ -156,10 +156,10 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
         assertText(planPath, 'plan path'); for (const [value, label] of [[options.provider, '--provider'], [options.runtimeKind, '--runtime-kind'], [options.runtimeVersion, '--runtime-version'], [options.accountScopeDigest, '--account-scope-digest'], [options.role, '--role']]) assertText(value, label); if (options.slice) assertText(options.slice, '--slice'); if (options.lineage) assertText(options.lineage, '--lineage');
         const cwd = options.cwd ?? process.cwd(); assertText(cwd, '--cwd'); const report = deps.validatePlanFile(planPath, cwd); assertReport(report);
         if (report.state !== 'valid') { process.stdout.write(options.json ? `${JSON.stringify({ state: 'blocked', diagnostics: report.state === 'invalid' ? report.diagnostics : [{ code: 'ROUTING_PLAN_INVALID', message: 'Plan must validate before resolution.' }] })}\n` : 'Plan routing: blocked\n'); process.exitCode = 2; return; }
-        if (options.lineage || options.slice) { process.stdout.write(options.json ? `${JSON.stringify({ state: 'blocked', diagnostics: [{ code: 'ROUTING_V2_UNAVAILABLE', message: 'Slice and lineage routing require compact-slices/v2 support.' }] })}\n` : 'Plan routing: blocked\n'); process.exitCode = 2; return; }
+        if (options.lineage) { process.stdout.write(options.json ? `${JSON.stringify({ state: 'blocked', diagnostics: [{ code: 'ROUTING_LINEAGE_UNAVAILABLE', message: 'Lineage routing requires the durable C4 journal contract.' }] })}\n` : 'Plan routing: blocked\n'); process.exitCode = 2; return; }
         const roles: readonly string[] = ['implementer', 'specification-reviewer', 'code-quality-reviewer', 'final-reviewer', 'architecture', 'track-a-qa', 'track-b-qa', 'controller', 'documentation', 'retro', 'finishing']; if (!roles.includes(options.role)) throw new Error('--role is invalid');
         const runtime = validateRuntimeKey({ target: options.provider, kind: options.runtimeKind, version: options.runtimeVersion, accountScopeDigest: options.accountScopeDigest });
-        const result = !options.optInV1 ? resolveV1Dispatch({ plan: report, role: options.role as RoutingRole, policy: undefined, capabilities: undefined, runtime, now: new Date(), optInV1: false }) : (() => { const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(cwd); const capabilities = (deps.readCapabilities ?? readCapabilities)(runtime, new Date()); return resolveV1Dispatch({ plan: report, role: options.role as RoutingRole, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined, runtime, now: new Date(), optInV1: true }); })();
+        const result = report.schema === 'compact-slices/v1' && !options.optInV1 ? resolveDispatch({ plan: report, role: options.role as RoutingRole, policy: undefined, capabilities: undefined, runtime, now: new Date(), optInV1: false }) : (() => { const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(cwd); const capabilities = (deps.readCapabilities ?? readCapabilities)(runtime, new Date()); return resolveDispatch({ plan: report, role: options.role as RoutingRole, sliceId: options.slice, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined, runtime, now: new Date(), optInV1: options.optInV1 === true }); })();
         process.stdout.write(options.json ? `${JSON.stringify(result)}\n` : `Plan routing: ${result.state}\n`); if (result.state === 'blocked') process.exitCode = 2;
     });
     plan.command('migration-facts <plan-path>')

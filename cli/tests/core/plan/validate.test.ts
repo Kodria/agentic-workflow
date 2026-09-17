@@ -49,6 +49,16 @@ function fixture(root: string, mutate?: (manifest: Record<string, unknown>) => v
     return plan;
 }
 
+function v2Fixture(root: string, profile: 'mechanical' | 'integration' | 'judgment' = 'mechanical'): string {
+    const plan = fixture(root, manifest => {
+        manifest.schema = 'compact-slices/v2';
+        const slices = manifest.slices as Array<Record<string, unknown>>;
+        slices[0].implementerProfile = profile;
+    });
+    fs.writeFileSync(plan, fs.readFileSync(plan, 'utf8').replace(START, '<!-- AWM:COMPACT-SLICES:START v2 -->').replace(END, '<!-- AWM:COMPACT-SLICES:END v2 -->'));
+    return plan;
+}
+
 describe('validatePlanFile', () => {
     it('validates an authenticated snapshot without reopening a swapped plan parent', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plan-snapshot-')); const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-plan-snapshot-outside-'));
@@ -77,6 +87,35 @@ describe('validatePlanFile', () => {
         const plan = fixture(root); const before = fs.readFileSync(plan, 'utf8');
         expect(validatePlanFile(plan, root)).toMatchObject({ state: 'valid', schema: 'compact-slices/v1' });
         expect(fs.readFileSync(plan, 'utf8')).toBe(before);
+    });
+
+    test.each(['mechanical', 'integration', 'judgment'] as const)('accepts v2 with the exact %s implementer profile', profile => {
+        const report = validatePlanFile(v2Fixture(root, profile), root);
+        expect(report).toMatchObject({ state: 'valid', schema: 'compact-slices/v2', manifest: { slices: [expect.objectContaining({ implementerProfile: profile })] } });
+    });
+
+    test('rejects v1 profile without weakening exact keys', () => {
+        expect(validatePlanFile(fixture(root, manifest => { ((manifest.slices as Array<Record<string, unknown>>)[0]).implementerProfile = 'mechanical'; }), root)).toMatchObject({ state: 'invalid' });
+    });
+    test.each([
+        ['missing profile', (text: string) => text.replace(/,\n\s*"implementerProfile": "mechanical"/, '')],
+        ['concrete model', (text: string) => text.replace('"implementerProfile": "mechanical"', '"implementerProfile": "mechanical",\n      "model": "vendor-model"')],
+        ['unknown profile', (text: string) => text.replace('"implementerProfile": "mechanical"', '"implementerProfile": "cheap"')],
+    ])('rejects v2 %s without weakening exact keys', (_name, mutate) => {
+        const plan = v2Fixture(root); fs.writeFileSync(plan, mutate(fs.readFileSync(plan, 'utf8')));
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid' });
+    });
+
+    test('preserves v2 profile bytes in the execution identity', () => {
+        const mechanical = fs.readFileSync(v2Fixture(root, 'mechanical'), 'utf8');
+        const integration = mechanical.replace('"implementerProfile": "mechanical"', '"implementerProfile": "integration"');
+        const integrationPath = path.join(root, 'integration.md'); fs.writeFileSync(integrationPath, integration);
+        const left = validatePlanFile(path.join(root, 'plan.md'), root);
+        const right = validatePlanFile(integrationPath, root);
+        expect(left).toMatchObject({ state: 'valid', schema: 'compact-slices/v2' });
+        expect(right).toMatchObject({ state: 'valid', schema: 'compact-slices/v2' });
+        if (left.state !== 'valid' || right.state !== 'valid') throw new Error('v2 fixture must validate');
+        expect(left.executionDigest).not.toBe(right.executionDigest);
     });
 
     test('makes an approved valid report and its nested manifest immutable after verification', () => {

@@ -11,12 +11,16 @@ export interface PlanSlice {
     sources: EntityId[]; redCommands: EntityId[]; greenCommands: EntityId[];
     reviewEvidence: ReviewEvidence[]; risk: SliceRisk; fallback: string[];
 }
+export type ImplementerProfile = 'mechanical' | 'integration' | 'judgment';
+export interface PlanSliceV2 extends PlanSlice { implementerProfile: ImplementerProfile; }
 export interface CompactPlanManifest {
     schema: 'compact-slices/v1'; planId: string; requirements: RequirementId[]; sources: PlanSource[];
     commands: PlanCommand[]; slices: PlanSlice[]; closureCommands: EntityId[];
 }
+export type CompactPlanV2 = Omit<CompactPlanManifest, 'schema' | 'slices'> & { schema: 'compact-slices/v2'; slices: PlanSlice[]; /** Legacy test-only admission metadata is never accepted by the validator. */ executionMode?: string; };
+export type SupportedPlanManifest = CompactPlanManifest | CompactPlanV2;
 export type PlanValidationReport =
-    | { state: 'valid'; schema: 'compact-slices/v1'; planDigest: string; /** Versioned progress-independent identity, derived from the same validated bytes. */ executionDigest?: string; manifest: CompactPlanManifest; /** Derived from the validated bytes, never a later reopen. */ executionMode?: 'interactivo' | 'desatendido' }
+    | { state: 'valid'; schema: 'compact-slices/v1' | 'compact-slices/v2'; planDigest: string; /** Versioned progress-independent identity, derived from the same validated bytes. */ executionDigest?: string; manifest: SupportedPlanManifest; /** Derived from the validated bytes, never a later reopen. */ executionMode?: 'interactivo' | 'desatendido' }
     | { state: 'migration-required'; reason: 'unmarked-plan' }
     | { state: 'invalid'; diagnostics: PlanDiagnostic[] }
     | { state: 'unsupported'; schema: string; diagnostics: PlanDiagnostic[] };
