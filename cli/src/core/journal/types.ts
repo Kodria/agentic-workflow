@@ -233,6 +233,8 @@ export interface AppliedRequest {
     outcome: RequestOutcome;
     resultRef?: string;     // ej. job-id creado — permite regenerar el ack (R1.3)
 }
+export interface RoutingEnvelopeRecord { schema: 'routing-envelope/v1'; role: string; requestedProfile: string; effectiveProfile: string; policyDigest: string; capabilityDigest: string; planDigest: string; executionDigest: string; }
+export interface RoutingAttempt { id: string; obligationId: string; lineageId: string; attempt: number; envelope: RoutingEnvelopeRecord; envelopeDigest: string; fingerprint: string; state: 'reserved' | 'active' | 'complete' | 'blocked' | 'unknown'; nativeAgentId?: string; }
 
 export interface JournalState {
     schema: 1 | 2;
@@ -258,6 +260,7 @@ export interface JournalState {
     verdicts: Verdict[];
     fixes: FixObligation[];
     appliedRequests: Record<string, AppliedRequest>;  // por requestId (los alias duplican entrada)
+    routingAttempts?: RoutingAttempt[];
     requestProblems: RequestProblem[];                // corrupcion/rechazos de contenido bloquean el gate
     custodyDecisions?: CustodyDecision[];             // compatible con journals previos; decisiones humanas auditadas
     controllerHeartbeatAt?: string;
@@ -356,6 +359,7 @@ export function isWellFormedState(x: unknown): x is JournalState {
         || !Array.isArray(x.dispatches) || !x.dispatches.every(isWellFormedDispatch)) return false;
     if (!isObj(x.jobs) || !Object.values(x.jobs).every(isWellFormedJob)) return false;
     if (!isObj(x.appliedRequests) || !Object.values(x.appliedRequests).every(isWellFormedAppliedRequest)) return false;
+    if (x.routingAttempts !== undefined && (!Array.isArray(x.routingAttempts) || x.routingAttempts.length > 4096 || !x.routingAttempts.every(isWellFormedRoutingAttempt))) return false;
     if (!Array.isArray(x.requestProblems) || !x.requestProblems.every(isWellFormedRequestProblem)) return false;
     if (x.custodyDecisions !== undefined && (!Array.isArray(x.custodyDecisions) || !x.custodyDecisions.every(isWellFormedCustodyDecision))) return false;
     if (!x.generations.every(isWellFormedGeneration) || !x.tasks.every(isWellFormedTask)) return false;
@@ -455,6 +459,13 @@ function isWellFormedAppliedRequest(x: unknown): x is AppliedRequest {
         && typeof x.payloadDigest === 'string'
         && ['applied', 'rejected-stale-generation', 'rejected-digest-mismatch', 'rejected-secret'].includes(String(x.outcome))
         && (x.resultRef === undefined || typeof x.resultRef === 'string');
+}
+function isWellFormedRoutingAttempt(x: unknown): x is RoutingAttempt {
+    return isObj(x) && Object.keys(x).every(key => ['id', 'obligationId', 'lineageId', 'attempt', 'envelope', 'envelopeDigest', 'fingerprint', 'state', 'nativeAgentId'].includes(key)
+        && typeof x.id === 'string' && typeof x.obligationId === 'string' && typeof x.lineageId === 'string' && Number.isSafeInteger(x.attempt) && (x.attempt as number) > 0
+        && typeof x.envelopeDigest === 'string' && /^[a-f0-9]{64}$/.test(x.envelopeDigest) && typeof x.fingerprint === 'string' && /^[a-f0-9]{64}$/.test(x.fingerprint)
+        && ['reserved', 'active', 'complete', 'blocked', 'unknown'].includes(String(x.state)) && (x.nativeAgentId === undefined || typeof x.nativeAgentId === 'string') && isObj(x.envelope)
+        && (x.envelope as Record<string, unknown>).schema === 'routing-envelope/v1' && ['role', 'requestedProfile', 'effectiveProfile', 'policyDigest', 'capabilityDigest', 'planDigest', 'executionDigest'].every(key => typeof (x.envelope as Record<string, unknown>)[key] === 'string'));
 }
 
 function isWellFormedRequestProblem(x: unknown): x is RequestProblem {
