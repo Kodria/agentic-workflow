@@ -23,4 +23,9 @@ describe('model-policy command', () => {
         expect(readEffectivePolicy).toHaveBeenCalledWith('fixture-root');
         await expect(program.parseAsync(['node', 'awm', 'model-policy', 'contract', '--cwd', '--json'])).rejects.toThrow();
     });
+    it('reports receipt provenance in status and rejects stale receipt state', async () => {
+        const readCapabilities = jest.fn(() => ({ state: 'stale' as const, reason: 'expired' })); const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined }); registerModelPolicyCommand(program, { readEffectivePolicy: () => ({ state: 'absent' }), readCapabilities });
+        await program.parseAsync(['node', 'awm', 'model-policy', 'status', '--provider', 'codex', '--runtime-kind', 'native', '--runtime-version', '1.0.0', '--account-scope-digest', 'a'.repeat(64), '--json']);
+        expect(JSON.parse(String(out.mock.calls[0][0]))).toMatchObject({ policy: { state: 'absent' }, capability: { state: 'stale' } }); expect(process.exitCode).toBe(2);
+    });
 });

@@ -1,9 +1,14 @@
 import { createHash } from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { AGENT_TARGETS } from '../../providers';
 import type { ProviderExecutionCapabilities } from '../admission';
 import type { PlanDiagnostic } from '../plan/types';
 import type { CapabilityReceipt, RuntimeKey, Selection } from './types';
 import { MAX_IDENTIFIER, assertDigest } from './validate';
+import { awmHome } from '../paths';
+import { parseJsonNoDuplicate } from '../plan/json';
+import { secureFs } from '../secure-fs/native-bridge';
 
 const RUNTIME_KIND = /^[a-z0-9][a-z0-9_-]{0,127}$/;
 const SEMVER = /^\d+\.\d+\.\d+$/;
@@ -57,3 +62,22 @@ export function validateCapabilityReceipt(value: unknown): CapabilityReceipt {
 }
 export function receiptIsCurrent(receipt: CapabilityReceipt, runtime: RuntimeKey, now: Date): boolean { return receipt.runtime.target === runtime.target && receipt.runtime.kind === runtime.kind && receipt.runtime.version === runtime.version && receipt.runtime.accountScopeDigest === runtime.accountScopeDigest && Number.isFinite(now.getTime()) && Date.parse(receipt.recordedAt) <= now.getTime() && now.getTime() <= Date.parse(receipt.expiresAt); }
 export function routingDiagnostic(code: string, message: string): PlanDiagnostic { return { code, message }; }
+
+export type CapabilityRead = { state: 'current'; receipt: CapabilityReceipt; digest: string } | { state: 'absent' } | { state: 'stale'; reason: string } | { state: 'invalid'; reason: string };
+export type ApproveCapabilitiesInput = { file: string; cwd: string; expectedDigest: string; replaceDigest?: string };
+export function capabilityReceiptPath(runtime: RuntimeKey): string { const valid = validateRuntimeKey(runtime); return path.join(awmHome(), 'routing-capabilities', valid.target, `${valid.kind}.json`); }
+function safeParents(file: string): void { for (let dir = path.dirname(path.resolve(file)); ; dir = path.dirname(dir)) { try { const stat = fs.lstatSync(dir); if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`unsafe capability parent: ${dir}`); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; } if (dir === path.dirname(dir)) return; } }
+function readBytes(file: string): Buffer | null { safeParents(file); try { const stat = fs.lstatSync(file, { bigint: true }); if (stat.isSymbolicLink() || !stat.isFile() || stat.size > BigInt(256 * 1024)) throw new Error('capability receipt is unsafe or exceeds 256 KiB'); return fs.readFileSync(file); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; } }
+function parseReceipt(bytes: Buffer): CapabilityReceipt { return validateCapabilityReceipt(parseJsonNoDuplicate(new TextDecoder('utf-8', { fatal: true }).decode(bytes))); }
+export function readCapabilities(runtime: RuntimeKey, now: Date): CapabilityRead {
+    try { const valid = validateRuntimeKey(runtime); const bytes = readBytes(capabilityReceiptPath(valid)); if (!bytes) return { state: 'absent' }; const receipt = parseReceipt(bytes); if (!receiptIsCurrent(receipt, valid, now)) return { state: 'stale', reason: 'receipt runtime does not match or attestation expired' }; return { state: 'current', receipt, digest: capabilityReceiptDigest(receipt) }; }
+    catch (error) { return { state: 'invalid', reason: (error as Error).message.slice(0, 4096) }; }
+}
+function ensureParents(file: string): void { const chain: string[] = []; for (let dir = path.dirname(path.resolve(file)); ; dir = path.dirname(dir)) { chain.unshift(dir); if (dir === path.dirname(dir)) break; } for (const dir of chain) { try { const stat = fs.lstatSync(dir); if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`unsafe capability parent: ${dir}`); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; fs.mkdirSync(dir, { mode: 0o700 }); } } }
+export function approveCapabilities(input: ApproveCapabilitiesInput): CapabilityReceipt {
+    if (!input || typeof input !== 'object' || typeof input.file !== 'string' || typeof input.cwd !== 'string') throw new Error('capability approval input is required'); assertDigest(input.expectedDigest, 'expectedDigest'); if (input.replaceDigest) assertDigest(input.replaceDigest, 'replaceDigest');
+    const candidate = readBytes(path.resolve(input.cwd, input.file)); if (!candidate) throw new Error('capability candidate is absent'); const receipt = parseReceipt(candidate); const digest = capabilityReceiptDigest(receipt); if (digest !== input.expectedDigest) throw new Error('capability receipt digest does not match expectedDigest');
+    const target = capabilityReceiptPath(receipt.runtime); ensureParents(target); const root = awmHome(); const destination = path.relative(root, target).split(path.sep).join('/');
+    secureFs.withProjectLease(root, () => { const current = readBytes(target); if (!current) { if (input.replaceDigest) throw new Error('replacement requires existing capability receipt'); secureFs.writeProjectTransaction(root, destination, Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`), { mode: 'create', createParents: true }); return; } const observed = secureFs.readRegularFile(target, 256 * 1024); const prior = parseReceipt(observed.bytes); if (!input.replaceDigest || capabilityReceiptDigest(prior) !== input.replaceDigest) throw new Error('capability receipt replacement predecessor mismatch'); secureFs.writeProjectTransaction(root, destination, Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`), { mode: 'replace', createParents: false, expected: observed.bytes, expectedIdentity: observed.identity }); });
+    return receipt;
+}

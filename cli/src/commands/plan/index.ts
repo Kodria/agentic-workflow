@@ -12,6 +12,10 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 import { readJournal } from '../../core/journal/store';
 import { collectIssue148HistoricalFacts, collectMigrationFacts, type MigrationFactsReport } from '../../core/migration';
+import { readEffectivePolicy } from '../../core/model-policy/store';
+import { readCapabilities, validateRuntimeKey } from '../../core/model-policy/capabilities';
+import { resolveV1Dispatch } from '../../core/model-policy/resolve';
+import type { RoutingRole } from '../../core/model-policy/types';
 
 const SUPPORTED_SCHEMA = 'compact-slices/v1';
 const MAX_PATH_LENGTH = 4096;
@@ -26,6 +30,8 @@ export interface PlanCommandDependencies {
     readPreferences?: typeof readPreferences;
     listRegistries?: () => RegistrySource[];
     collectMigrationFacts?: (planPath: string, cwd: string, issueLinks: string[]) => MigrationFactsReport;
+    readEffectivePolicy?: typeof readEffectivePolicy;
+    readCapabilities?: typeof readCapabilities;
 }
 
 function journalObservation(cwd: string): { journalState: ReturnType<typeof readJournal>['state']; journalCorrupt: boolean } {
@@ -146,6 +152,17 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
     assertDependencies(deps);
 
     const plan = program.command('plan').description('inspect plan contracts');
+    plan.command('resolve <plan-path>').requiredOption('--provider <target>').requiredOption('--runtime-kind <kind>').requiredOption('--runtime-version <version>').requiredOption('--account-scope-digest <sha>').requiredOption('--role <role>').option('--opt-in-v1').option('--slice <id>').option('--lineage <id>').option('--cwd <path>').option('--json').action((planPath: string, options: { provider: string; runtimeKind: string; runtimeVersion: string; accountScopeDigest: string; role: string; optInV1?: boolean; slice?: string; lineage?: string; cwd?: string; json?: boolean }) => {
+        assertText(planPath, 'plan path'); for (const [value, label] of [[options.provider, '--provider'], [options.runtimeKind, '--runtime-kind'], [options.runtimeVersion, '--runtime-version'], [options.accountScopeDigest, '--account-scope-digest'], [options.role, '--role']]) assertText(value, label); if (options.slice) assertText(options.slice, '--slice'); if (options.lineage) assertText(options.lineage, '--lineage');
+        const cwd = options.cwd ?? process.cwd(); assertText(cwd, '--cwd'); const report = deps.validatePlanFile(planPath, cwd); assertReport(report);
+        if (report.state !== 'valid') { process.stdout.write(options.json ? `${JSON.stringify({ state: 'blocked', diagnostics: report.state === 'invalid' ? report.diagnostics : [{ code: 'ROUTING_PLAN_INVALID', message: 'Plan must validate before resolution.' }] })}\n` : 'Plan routing: blocked\n'); process.exitCode = 2; return; }
+        if (options.lineage || options.slice) { process.stdout.write(options.json ? `${JSON.stringify({ state: 'blocked', diagnostics: [{ code: 'ROUTING_V2_UNAVAILABLE', message: 'Slice and lineage routing require compact-slices/v2 support.' }] })}\n` : 'Plan routing: blocked\n'); process.exitCode = 2; return; }
+        const roles: readonly string[] = ['implementer', 'specification-reviewer', 'code-quality-reviewer', 'final-reviewer', 'architecture', 'track-a-qa', 'track-b-qa', 'controller', 'documentation', 'retro', 'finishing']; if (!roles.includes(options.role)) throw new Error('--role is invalid');
+        const runtime = validateRuntimeKey({ target: options.provider, kind: options.runtimeKind, version: options.runtimeVersion, accountScopeDigest: options.accountScopeDigest });
+        const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(cwd); const capabilities = (deps.readCapabilities ?? readCapabilities)(runtime, new Date());
+        const result = options.optInV1 ? resolveV1Dispatch({ plan: report, role: options.role as RoutingRole, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined, runtime, now: new Date(), optInV1: true }) : resolveV1Dispatch({ plan: report, role: options.role as RoutingRole, policy: undefined, capabilities: undefined, runtime, now: new Date(), optInV1: false });
+        process.stdout.write(options.json ? `${JSON.stringify(result)}\n` : `Plan routing: ${result.state}\n`); if (result.state === 'blocked') process.exitCode = 2;
+    });
     plan.command('migration-facts <plan-path>')
         .description('collect read-only durable migration facts')
         .option('--cwd <path>')
