@@ -18,6 +18,7 @@ import { exportDir, logsDir } from '../../core/journal/paths';
 import { verifyBranchInvariant } from '../watch/lock';
 import { writeFileAtomicDurable } from '../../core/atomic-file';
 import { resolveCommandContext } from '../../core/tracks/context';
+import { routingReport } from '../../core/model-policy/journal';
 import fs from 'fs';
 
 function branchOf(cwd: string): string {
@@ -216,6 +217,15 @@ export function registerJobCommand(program: Command): void {
             const g = computeGate(r.state, r.corrupt, realFingerprintNow(repo));
             process.stdout.write(JSON.stringify(g, null, 2) + '\n');
             if (!g.pass) process.exit(1);   // falla cerrado (R3.2)
+        });
+
+    job.command('routing-report')
+        .description('informe de routing read-only; nunca expone envelopes ni identidad nativa')
+        .action(() => {
+            const repo = process.cwd(); const branch = branchOf(repo); assertAuthenticatedCwd(repo, branch);
+            const r = readJournal(repo, branch);
+            if (r.corrupt || r.state === null) { process.stdout.write(JSON.stringify({ corruptState: true }) + '\n'); process.exit(1); return; }
+            process.stdout.write(JSON.stringify(routingReport(r.state), null, 2) + '\n');
         });
 
     job.command('reap')

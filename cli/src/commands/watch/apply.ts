@@ -436,6 +436,7 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
             s.verdicts.push({
                 id: verdictId, obligationId, result, detail: redactText(String(p.detail ?? '')), receivedAt: now(),
                 fingerprint: p.fingerprint, argv: verdictArgv, paths: verdictPaths, cwd: p.cwd,
+                ...(typeof p.routingAttemptId === 'string' ? { routingAttemptId: p.routingAttemptId } : {}),
             });
             for (const t of s.tasks) {
                 const o = t.reviewObligations.find((x) => x.id === obligationId);

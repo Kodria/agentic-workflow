@@ -57,6 +57,21 @@ function passingState(): JournalState {
 }
 
 describe('gate', () => {
+    test('un verdict routed exige intento observado, identidad y fingerprint coincidentes', () => {
+        const s = passingState();
+        s.verdicts[0] = { ...s.verdicts[0], routingAttemptId: 'route-1' } as never;
+        let gate = computeGate(s, false, fpCurrent);
+        expect(gate.reasons.some((reason) => reason.category === 'routing-evidence')).toBe(true);
+        s.routingAttempts = [{
+            id: 'route-1', obligationId: 'o-spec', lineageId: 'lineage-1', attempt: 1,
+            envelope: { schema: 'routing-envelope/v1', role: 'specification-reviewer', requestedProfile: 'full', effectiveProfile: 'full', policyDigest: 'p', capabilityDigest: 'c', planDigest: 'plan', executionDigest: 'execution' },
+            envelopeDigest: 'a'.repeat(64), fingerprint: 'fp', state: 'active', nativeAgentId: 'native-1',
+        }];
+        expect(computeGate(s, false, fpCurrent).pass).toBe(true);
+        s.routingAttempts[0].fingerprint = 'different';
+        gate = computeGate(s, false, fpCurrent);
+        expect(gate.reasons.some((reason) => reason.category === 'routing-evidence')).toBe(true);
+    });
     test('el estado de referencia pasa; la corrupcion bloquea (R3.2)', () => {  // verifies R3.2
         expect(computeGate(passingState(), false, fpCurrent).pass).toBe(true);
         const g = computeGate(null, true, fpCurrent);

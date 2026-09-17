@@ -136,6 +136,8 @@ export interface Verdict {
     argv: string[];
     paths: string[];
     cwd: string;
+    /** Present only when this verdict came from a routed native attempt. */
+    routingAttemptId?: string;
 }
 export interface FixObligation { id: string; verdictId: string; closed: boolean; }
 export interface RequestProblem { file: string; kind: 'corrupt' | 'rejected'; detail: string; at: string; }
@@ -447,7 +449,8 @@ function isWellFormedVerdict(x: unknown): x is Verdict {
     return isObj(x) && typeof x.id === 'string' && typeof x.obligationId === 'string'
         && ['pass', 'fail', 'inconclusive'].includes(String(x.result))
         && typeof x.detail === 'string' && typeof x.receivedAt === 'string'
-        && typeof x.fingerprint === 'string' && strings(x.argv) && strings(x.paths) && typeof x.cwd === 'string';
+        && typeof x.fingerprint === 'string' && strings(x.argv) && strings(x.paths) && typeof x.cwd === 'string'
+        && (x.routingAttemptId === undefined || typeof x.routingAttemptId === 'string');
 }
 
 function isWellFormedFix(x: unknown): x is FixObligation {

@@ -17,3 +17,14 @@ export function reserveRoutingAttempt(state: JournalState, input: { obligationId
 export function observeRoutingAttempt(state: JournalState, input: { attemptId: string; nativeAgentId: string }, now: string): JournalState {
     assertTimestamp(now); if (!input || !input.attemptId || !input.nativeAgentId) throw new Error('routing observation is invalid'); const next = clone(state); const attempt = next.routingAttempts!.find(item => item.id === input.attemptId); if (!attempt) throw new Error('routing attempt is unknown'); if (attempt.state !== 'reserved' && attempt.state !== 'active') throw new Error('routing attempt cannot be observed'); attempt.state = 'active'; attempt.nativeAgentId = input.nativeAgentId; return next;
 }
+/** Read-only operational summary. Deliberately excludes envelopes, prompts and
+ * native identities: this is safe to expose in a status command. */
+export function routingReport(state: JournalState): { schema: 'routing-report/v1'; attempts: number; byRole: Record<string, number>; byState: Record<string, number>; retries: number } {
+    const attempts = state.routingAttempts ?? [];
+    const byRole: Record<string, number> = {}; const byState: Record<string, number> = {};
+    for (const attempt of attempts) {
+        byRole[attempt.envelope.role] = (byRole[attempt.envelope.role] ?? 0) + 1;
+        byState[attempt.state] = (byState[attempt.state] ?? 0) + 1;
+    }
+    return { schema: 'routing-report/v1', attempts: attempts.length, byRole, byState, retries: attempts.filter((attempt) => attempt.attempt > 1).length };
+}

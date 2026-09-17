@@ -9,7 +9,7 @@ export type GateCategory =
     | 'empty-cycle-plan' | 'missing-verifier' | 'dangling-reference'
     | 'unsatisfied-plan' | 'adverse-verdict' | 'stale-fingerprint'
     | 'open-obligation' | 'open-fix' | 'request-problem'
-    | 'corrupt-state' | 'wrong-context' | 'foreign-task';
+    | 'corrupt-state' | 'wrong-context' | 'foreign-task' | 'routing-evidence';
 export interface GateReason { category: GateCategory; detail: string; }
 export interface GateResult { pass: boolean; reasons: GateReason[]; }
 
@@ -148,6 +148,12 @@ function evaluateEvidence(state: JournalState, fingerprintNow: FingerprintNow, s
         }
     }
     for (const v of state.verdicts) {
+        if (v.routingAttemptId !== undefined) {
+            const attempt = state.routingAttempts?.find((candidate) => candidate.id === v.routingAttemptId);
+            if (attempt === undefined || !['active', 'complete'].includes(attempt.state) || !attempt.nativeAgentId || attempt.obligationId !== v.obligationId || attempt.fingerprint !== v.fingerprint) {
+                reasons.push({ category: 'routing-evidence', detail: `verdict routed ${v.id} no tiene evidencia de intento observado, vigente y ligado` });
+            }
+        }
         if (v.result !== 'pass') {
             const fix = state.fixes.find((f) => f.verdictId === v.id);
             if (fix === undefined || !fix.closed) reasons.push({ category: 'open-fix', detail: `verdict adverso ${v.id} sin fix cerrado` });
