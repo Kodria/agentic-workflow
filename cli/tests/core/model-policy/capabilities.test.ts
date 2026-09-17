@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { capabilityReceiptPath, readCapabilities, validateCapabilityReceipt } from '../../../src/core/model-policy/capabilities';
+import { approveCapabilities, capabilityReceiptDigest, capabilityReceiptPath, readCapabilities, validateCapabilityReceipt } from '../../../src/core/model-policy/capabilities';
 import type { CapabilityReceipt } from '../../../src/core/model-policy/types';
 
 const digest = 'a'.repeat(64);
@@ -33,5 +33,10 @@ describe('capability receipt validation', () => {
     it('uses only a validated target and runtime kind in its persistence path', () => {
         expect(capabilityReceiptPath(receipt().runtime)).toMatch(/routing-capabilities[\\/]codex[\\/]native\.json$/);
         expect(() => capabilityReceiptPath({ ...receipt().runtime, kind: '../native' } as any)).toThrow();
+    });
+    it.each(['2026-09-15T23:59:59.999Z', '2026-09-18T00:00:00.001Z'])('rejects stale or future approval at the injected clock', recordedAt => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-receipt-')); const candidate = path.join(root, 'receipt.json'); const value = receipt(); value.recordedAt = recordedAt; value.expiresAt = recordedAt === '2026-09-15T23:59:59.999Z' ? '2026-09-16T23:59:59.999Z' : '2026-09-19T00:00:00.001Z'; fs.writeFileSync(candidate, JSON.stringify(value));
+        try { expect(() => approveCapabilities({ file: candidate, cwd: root, expectedDigest: capabilityReceiptDigest(value), now: new Date('2026-09-17T00:00:00.000Z') })).toThrow(/future|stale/); }
+        finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
 });

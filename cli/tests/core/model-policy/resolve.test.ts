@@ -1,4 +1,5 @@
 import { resolveSelection } from '../../../src/core/model-policy/resolve';
+import { resolveV1Dispatch } from '../../../src/core/model-policy/resolve';
 import type { ApprovedPolicy, CapabilityReceipt } from '../../../src/core/model-policy/types';
 
 const sha = 'a'.repeat(64);
@@ -8,6 +9,9 @@ const capabilities = (): CapabilityReceipt => ({ schema: 'routing-capabilities/v
 const input = () => ({ role: 'implementer' as const, requestedProfile: 'mechanical' as const, policy: policy(), capabilities: capabilities(), runtime: capabilities().runtime, now: new Date('2026-09-17T12:00:00.000Z') });
 
 describe('resolveSelection', () => {
+    it('rejects a structurally fabricated v1 report before resolution', () => {
+        expect(() => resolveV1Dispatch({ ...input(), plan: { state: 'valid', schema: 'compact-slices/v1', planDigest: sha, manifest: {} } as any, optInV1: false })).toThrow(/invalid valid report/);
+    });
     it.each(['specification-reviewer', 'code-quality-reviewer', 'final-reviewer', 'architecture', 'track-a-qa', 'track-b-qa', 'controller', 'documentation', 'retro', 'finishing'] as const)('routes %s to full capability independently of requested profile', role => {
         const result = resolveSelection({ ...input(), role, requestedProfile: 'mechanical' });
         expect(result.state).toBe('resolved');

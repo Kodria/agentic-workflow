@@ -51,6 +51,13 @@ describe('plan validate Commander wiring', () => {
         process.exitCode = previousExitCode;
     });
 
+    it('returns v1 not-required before reading personal policy or capability state', async () => {
+        const policy = jest.fn(); const capabilities = jest.fn(); const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerPlanCommand(program, { validatePlanFile: () => valid, readEffectivePolicy: policy as any, readCapabilities: capabilities as any });
+        await program.parseAsync(['node', 'awm', 'plan', 'resolve', 'plans/r4.md', '--provider', 'codex', '--runtime-kind', 'native', '--runtime-version', '1.0.0', '--account-scope-digest', 'a'.repeat(64), '--role', 'controller', '--json']);
+        expect(JSON.parse(String(stdoutWrite.mock.calls[0][0]))).toEqual({ state: 'not-required', reason: 'v1-without-opt-in' }); expect(policy).not.toHaveBeenCalled(); expect(capabilities).not.toHaveBeenCalled();
+    });
+
     it('emits deterministic human output for a valid compact plan', async () => {
         await commandFor(valid).parseAsync(['node', 'awm', 'plan', 'validate', 'plans/r4.md']);
 

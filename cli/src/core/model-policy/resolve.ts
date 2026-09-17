@@ -3,12 +3,14 @@ import type { PlanValidationReport } from '../plan/types';
 import { capabilityReceiptDigest, receiptIsCurrent, routingDiagnostic, validateCapabilityReceipt } from './capabilities';
 import type { ApprovedPolicy, CapabilityReceipt, ImplementerProfile, RoutingRole, RuntimeKey, Selection } from './types';
 import { validateApprovedPolicy } from './validate';
+import { assertVerifiedValidPlanReport } from '../plan/validate';
 
 export type SelectionResolution = { state: 'resolved'; selection: Selection; effectiveProfile: ImplementerProfile | 'full'; outcome: 'native' | 'degraded'; policyDigest: string; capabilityDigest: string; unavailableEvidence: string[] } | { state: 'blocked'; diagnostics: PlanDiagnostic[] };
 export type ResolveSelectionInput = { role: RoutingRole; requestedProfile: ImplementerProfile | 'full'; policy?: ApprovedPolicy; capabilities?: CapabilityReceipt; runtime: RuntimeKey; now: Date };
 export type V1Resolution = { state: 'not-required'; reason: 'v1-without-opt-in' } | SelectionResolution;
 export function resolveV1Dispatch(input: Omit<ResolveSelectionInput, 'requestedProfile'> & { plan: Extract<PlanValidationReport, { state: 'valid' }>; optInV1: boolean }): V1Resolution {
     if (!input.plan || input.plan.schema !== 'compact-slices/v1') throw new Error('resolveV1Dispatch requires an authenticated v1 plan report');
+    assertVerifiedValidPlanReport(input.plan);
     if (!input.optInV1) return { state: 'not-required', reason: 'v1-without-opt-in' };
     return resolveSelection({ ...input, requestedProfile: 'full' });
 }
@@ -16,6 +18,8 @@ function equal(left: Selection, right: Selection): boolean { return left.selecto
 function blocked(code: string, message: string): SelectionResolution { return { state: 'blocked', diagnostics: [routingDiagnostic(code, message)] }; }
 export function resolveSelection(input: ResolveSelectionInput): SelectionResolution {
     if (!input || typeof input !== 'object' || !input.runtime || !(input.now instanceof Date) || !Number.isFinite(input.now.getTime())) throw new Error('resolveSelection requires a runtime and finite clock');
+    if (!['implementer', 'specification-reviewer', 'code-quality-reviewer', 'final-reviewer', 'architecture', 'track-a-qa', 'track-b-qa', 'controller', 'documentation', 'retro', 'finishing'].includes(input.role)) throw new Error('resolveSelection role is invalid');
+    if (!['mechanical', 'integration', 'judgment', 'full'].includes(input.requestedProfile)) throw new Error('resolveSelection requestedProfile is invalid');
     if (!input.policy) return blocked('ROUTING_POLICY_ABSENT', 'A digest-bound approved routing policy is required.');
     if (!input.capabilities) return blocked('ROUTING_CAPABILITY_ABSENT', 'A current capability receipt is required.');
     let policy: ApprovedPolicy; let capabilities: CapabilityReceipt;
