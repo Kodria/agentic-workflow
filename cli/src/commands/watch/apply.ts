@@ -11,6 +11,7 @@ import { fsyncDirSync } from '../../core/atomic-file';
 import { redactText } from '../../core/journal/redact';
 import { gitCheckTrackId, headSha } from '../../core/tracks/git';
 import type { Job, JournalState, ReviewObligation, TrackRef, VerificationItem } from '../../core/journal/types';
+import { observeRoutingAttempt, reserveRoutingAttempt } from '../../core/model-policy/journal';
 
 export interface ApplySummary { applied: number; rejectedStale: number; rejectedDigest: number; rejectedInvalid: number; corrupt: number; }
 
@@ -108,6 +109,16 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
         s.controllerHeartbeatAt = now();
         applyOutcome(s, { ...base, outcome: 'applied' });
         return;
+    }
+    if (env.kind === 'routing-reserve') {
+        const p = env.payload;
+        const reserved = reserveRoutingAttempt(s, { obligationId: String(p.obligationId ?? ''), lineageId: String(p.lineageId ?? ''), envelope: p.envelope as any, fingerprint: String(p.fingerprint ?? '') }, String(p.at ?? now()));
+        Object.assign(s, reserved.state); applyOutcome(s, { ...base, outcome: 'applied', resultRef: reserved.attemptId }); return;
+    }
+    if (env.kind === 'routing-observe') {
+        const p = env.payload;
+        const observed = observeRoutingAttempt(s, { attemptId: String(p.attemptId ?? ''), nativeAgentId: String(p.nativeAgentId ?? '') }, String(p.at ?? now()));
+        Object.assign(s, observed); applyOutcome(s, { ...base, outcome: 'applied', resultRef: String(p.attemptId ?? '') }); return;
     }
     if (env.kind === 'job-request') {
         // get-or-create por idempotencyKey (RNF-T.7); duplicado => applyOutcome

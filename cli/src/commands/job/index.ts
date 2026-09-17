@@ -135,6 +135,23 @@ export function registerJobCommand(program: Command): void {
             emitHeartbeat(repo, branch, opts.generation);
         });
 
+    job.command('routing-reserve')
+        .requiredOption('--generation <token>').requiredOption('--obligation <id>').requiredOption('--lineage <id>')
+        .requiredOption('--envelope <json>').requiredOption('--fingerprint <sha>')
+        .action((opts) => {
+            let envelope: unknown; try { envelope = JSON.parse(opts.envelope); } catch { throw new Error('--envelope requires JSON'); }
+            const repo = process.cwd(); const branch = branchOf(repo); assertAuthenticatedCwd(repo, branch);
+            const emitted = emitRequest(repo, branch, { kind: 'routing-reserve', generationToken: opts.generation, idempotencyKey: crypto.createHash('sha256').update(`routing-reserve:${opts.generation}:${opts.obligation}:${opts.lineage}:${opts.fingerprint}:${opts.envelope}`).digest('hex'), payload: { obligationId: opts.obligation, lineageId: opts.lineage, envelope: envelope as Record<string, unknown>, fingerprint: opts.fingerprint } });
+            process.stdout.write(JSON.stringify({ requestId: emitted.requestId }) + '\n');
+        });
+    job.command('routing-observe')
+        .requiredOption('--generation <token>').requiredOption('--attempt <id>').requiredOption('--native-agent-id <id>')
+        .action((opts) => {
+            const repo = process.cwd(); const branch = branchOf(repo); assertAuthenticatedCwd(repo, branch);
+            const emitted = emitRequest(repo, branch, { kind: 'routing-observe', generationToken: opts.generation, idempotencyKey: crypto.createHash('sha256').update(`routing-observe:${opts.generation}:${opts.attempt}:${opts.nativeAgentId}`).digest('hex'), payload: { attemptId: opts.attempt, nativeAgentId: opts.nativeAgentId } });
+            process.stdout.write(JSON.stringify({ requestId: emitted.requestId }) + '\n');
+        });
+
     job.command('ps').action(() => {
         const repo = process.cwd();
         const branch = branchOf(repo);

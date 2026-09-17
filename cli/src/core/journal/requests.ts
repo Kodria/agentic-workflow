@@ -9,7 +9,7 @@ import type { AppliedRequest, JournalState } from './types';
 export type RequestKind =
     | 'job-request' | 'register-entity' | 'controller-heartbeat' | 'verdict'
     | 'track-prepare-request' | 'track-freeze-request' | 'track-join-request'
-    | 'track-teardown-request' | 'track-finalize-request';
+    | 'track-teardown-request' | 'track-finalize-request' | 'routing-reserve' | 'routing-observe';
 
 export interface RequestEnvelope {
     kind: RequestKind;
@@ -69,7 +69,7 @@ export interface PendingRequest { requestId: string; envelope: RequestEnvelope &
 const KNOWN_KINDS: readonly RequestKind[] = [
     'job-request', 'register-entity', 'controller-heartbeat', 'verdict',
     'track-prepare-request', 'track-freeze-request', 'track-join-request',
-    'track-teardown-request', 'track-finalize-request',
+    'track-teardown-request', 'track-finalize-request', 'routing-reserve', 'routing-observe',
 ];
 
 function isRecord(x: unknown): x is Record<string, unknown> {
