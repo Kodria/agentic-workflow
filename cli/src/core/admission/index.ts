@@ -51,6 +51,8 @@ export type AdmissionInput = {
     planPath?: string;
     /** Explicit routing evidence; absent facts block v2 only after existing gates. */
     routing?: { policy?: ApprovedPolicy; capabilities?: CapabilityReceipt; runtime?: RuntimeKey; now?: Date; qaLens?: readonly string[]; controllerCount?: number };
+    /** Internal deferred reader; invoked only after all ordinary admission gates. */
+    routingReader?: () => AdmissionInput['routing'];
 };
 
 const UNKNOWN: ProviderExecutionCapabilities = {
@@ -216,7 +218,7 @@ export async function admitPlan(input: AdmissionInput): Promise<AdmissionReport>
 
 function completeAdmission(input: AdmissionInput, plan: Extract<PlanValidationReport, { state: 'valid' }>, provider: AgentTarget, executionMode: ExecutionMode, journal: AdmissionReport['journal'], currentness: AdmissionReport['currentness'], sensors: AdmissionReport['sensors'], capabilityResolution: ProviderExecutionResolution): AdmissionReport {
     if (plan.schema === 'compact-slices/v1') return { state: 'admitted', planState: 'valid', planDigest: plan.planDigest, provider, executionMode, journal, currentness, sensors, capabilityResolution, forecast: forecast(plan.manifest.slices.length), diagnostics: [] };
-    const routing = input.routing;
+    const routing = input.routing ?? input.routingReader?.();
     if (!routing?.runtime || !routing.policy || !routing.capabilities) return blocked(input, [diagnostic('ADMISSION_ROUTING_FACTS_REQUIRED', 'Compact v2 requires an approved policy, current capability receipt, and runtime identity.')], { planDigest: plan.planDigest, provider, executionMode, journal, currentness, sensors, capabilityResolution });
     let runtime: RuntimeKey;
     try { runtime = validateRuntimeKey(routing.runtime); } catch { return blocked(input, [diagnostic('ADMISSION_ROUTING_RUNTIME_INVALID', 'Compact v2 routing runtime identity is invalid.')], { planDigest: plan.planDigest, provider, executionMode, journal, currentness, sensors, capabilityResolution }); }

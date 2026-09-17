@@ -213,6 +213,5 @@ export async function admitRegistryPlan(input: AdmissionInput, dependencies: Reg
         if (currentnessGate.currentness !== 'current') return currentnessGate;
         compatibilityDiagnostics = registryCompatibility(registries, scope.consumedRegistryComponents);
     }
-    const routing = input.plan.schema === 'compact-slices/v2' ? (dependencies.readRouting?.() ?? input.routing) : undefined;
-    return compose({ currentness, compatibilityDiagnostics, sensors, routing });
+    return compose({ currentness, compatibilityDiagnostics, sensors, ...(dependencies.readRouting ? { routingReader: dependencies.readRouting } : {}) });
 }

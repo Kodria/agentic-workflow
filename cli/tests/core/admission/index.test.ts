@@ -25,6 +25,14 @@ describe('admitPlan', () => {
         expect(report).toMatchObject({ state: 'blocked', sensors: 'pass' });
         expect(report.diagnostics[0].code).toBe('ADMISSION_ROUTING_FACTS_REQUIRED');
     });
+    it.each([
+        ['journal', { provider: 'codex', executionMode: 'desatendido' as const }],
+        ['provider capability', { provider: 'cursor', executionMode: 'interactivo' as const }],
+    ])('does not invoke deferred v2 routing facts when %s gate blocks', async (_name, fields) => {
+        const reader = jest.fn(() => { throw new Error('routing reader must not run'); });
+        const report = await admitPlan({ plan: v2(), cwd: process.cwd(), enabledAgents: [fields.provider as any], routingReader: reader, ...fields });
+        expect(report.state).toBe('blocked'); expect(reader).not.toHaveBeenCalled();
+    });
     it.each(['mechanical', 'integration', 'judgment'] as const)('admits v2 %s with policy and capability evidence and an honest unknown forecast', async profile => {
         const report = await admitPlan({ plan: v2(profile), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], routing: routing() });
         expect(report).toMatchObject({ state: 'admitted', routingForecast: { implementerProfiles: { [profile]: 1 }, trackB: { state: 'unavailable', lowerBound: 1 }, controller: { state: 'unavailable', lowerBound: 0 } } });
