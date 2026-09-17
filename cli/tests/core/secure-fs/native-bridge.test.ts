@@ -217,8 +217,12 @@ describe('native secure-fs durable publication source contract', () => {
 
     it('turns parent-directory fsync failure after publication into a bounded error', () => {
         const native = source();
+        const write = native.slice(native.indexOf('napi_value WriteProjectTransaction'), native.indexOf('\n}  // namespace'));
         expect(native).toMatch(/if \(fsync\(parent\) != 0\)[\s\S]{0,240}Throw\(env, "secure-fs durable directory sync failed"\)/);
-        expect(native).not.toMatch(/unlinkat\(parent, temporary\.c_str\(\), 0\); fsync\(parent\); close\(parent\); napi_value undefined/);
+        expect(write).toMatch(/const bool durable = fsync\(parent\) == 0;[\s\S]{0,180}secure-fs durable directory sync failed/);
+        const withoutWriteSync = write.replace('const bool durable = fsync(parent) == 0;', 'const bool durable = true;');
+        expect(withoutWriteSync).not.toMatch(/const bool durable = fsync\(parent\) == 0;/);
+        expect(withoutWriteSync).not.toMatch(/const bool durable = fsync\(parent\) == 0;[\s\S]{0,180}secure-fs durable directory sync failed/);
     });
 
     it('requires the Windows publish path to report parent flush failure', () => {

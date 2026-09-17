@@ -5,6 +5,7 @@ import { canonicalPolicyDigest } from '../../../src/core/model-policy/canonical'
 import { approvePolicyWithBoundary, readEffectivePolicy, type ApprovePolicyInput, type PolicyStoreBoundary } from '../../../src/core/model-policy/store';
 import { userPolicyPath } from '../../../src/core/model-policy/paths';
 import type { PolicyContent } from '../../../src/core/model-policy/types';
+import type { FileIdentityToken } from '../../../src/core/secure-fs/native-bridge';
 
 const policy = (): PolicyContent => ({ schema: 'model-policy/v1', mappings: [{ target: 'codex', runtimeKind: 'native', profiles: {
     mechanical: { selector: { kind: 'model', id: 'gpt-5.6-luna' }, effort: { kind: 'explicit', value: 'medium' } },
@@ -12,13 +13,22 @@ const policy = (): PolicyContent => ({ schema: 'model-policy/v1', mappings: [{ t
     judgment: { selector: { kind: 'model', id: 'gpt-5.6-sol' }, effort: { kind: 'explicit', value: 'medium' } },
 }, fullCapability: { selector: { kind: 'model', id: 'gpt-5.6-sol' }, effort: { kind: 'explicit', value: 'high' } }, degradation: { allowMissingModelOverride: false, allowMissingEffortOverride: false, allowMissingObservedIdentity: false } }], implementationBudget: { maxAttempts: 3, escalation: ['mechanical', 'integration', 'judgment'], judgmentEfforts: ['medium', 'high'] } });
 
-const identityFencedBoundary: PolicyStoreBoundary = {
+function createIdentityFencedBoundary(): PolicyStoreBoundary {
+    const observations = new WeakMap<object, { file: string; bytes: Buffer }>();
+    return {
     withProjectLease: <T,>(_root: string, operation: () => T): T => operation(),
-    readRegularFile: (file: string) => ({ bytes: fs.readFileSync(file), identity: Object.freeze({ file }) } as any),
-    writeProjectTransaction: (root: string, destination: string, content: Buffer, options: { mode: 'create' | 'replace'; expected?: Buffer }) => {
+    readRegularFile: (file: string) => {
+        const identity = Object.freeze({}) as FileIdentityToken;
+        const bytes = fs.readFileSync(file); observations.set(identity, { file, bytes });
+        return { bytes, identity };
+    },
+    writeProjectTransaction: (root: string, destination: string, content: Buffer, options) => {
         const file = path.join(root, destination); fs.mkdirSync(path.dirname(file), { recursive: true });
         if (options.mode === 'create' && fs.existsSync(file)) throw new Error('project destination already exists');
-        if (options.mode === 'replace' && (!options.expected || !fs.readFileSync(file).equals(options.expected))) throw new Error('original changed before fenced replacement');
+        if (options.mode === 'replace') {
+            const observed = observations.get(options.expectedIdentity);
+            if (!observed || observed.file !== file || !observed.bytes.equals(options.expected) || !fs.readFileSync(file).equals(options.expected)) throw new Error('original changed before fenced replacement');
+        }
         const temporary = `${file}.test-tmp`; const fd = fs.openSync(temporary, 'wx', 0o600);
         try {
             fs.writeFileSync(fd, content); fs.fsyncSync(fd); fs.closeSync(fd);
@@ -28,7 +38,8 @@ const identityFencedBoundary: PolicyStoreBoundary = {
         }
         finally { try { fs.rmSync(temporary, { force: true }); } catch { /* preserve transaction result */ } }
     },
-};
+}; }
+const identityFencedBoundary = createIdentityFencedBoundary();
 const approve = (input: ApprovePolicyInput) => approvePolicyWithBoundary(input, identityFencedBoundary);
 
 describe('approved policy store', () => {
@@ -59,6 +70,15 @@ describe('approved policy store', () => {
         expect(approve({ file, scope: 'user', cwd: root, expectedDigest: digest, replaceDigest: digest }).lineage.previousDigest).toBe(digest);
     });
 
+    it('rejects an unexpected opaque identity token before replacing bytes', () => {
+        const target = path.join(root, 'identity.json'); fs.writeFileSync(target, 'observed');
+        const observed = identityFencedBoundary.readRegularFile(target, 1024);
+        expect(() => identityFencedBoundary.writeProjectTransaction(root, 'identity.json', Buffer.from('replacement'), {
+            mode: 'replace', createParents: false, expected: observed.bytes, expectedIdentity: Object.freeze({}) as FileIdentityToken,
+        })).toThrow(/original changed/i);
+        expect(fs.readFileSync(target, 'utf8')).toBe('observed');
+    });
+
     it('resolves a relative candidate through cwd instead of process cwd', () => {
         const cwd = path.join(root, 'project'); fs.mkdirSync(cwd); const file = path.join(cwd, 'candidate.json'); fs.writeFileSync(file, JSON.stringify(policy()));
         const digest = canonicalPolicyDigest(policy());
@@ -71,7 +91,7 @@ describe('approved policy store', () => {
         let entered = false; let accepted = 0;
         const boundary: PolicyStoreBoundary = {
             withProjectLease: <T,>(_root: string, operation: () => T): T => operation(),
-            readRegularFile: (target: string) => ({ bytes: fs.readFileSync(target), identity: Object.freeze({ target }) } as any),
+            readRegularFile: (target: string) => ({ bytes: fs.readFileSync(target), identity: Object.freeze({}) as FileIdentityToken }),
             writeProjectTransaction: (base: string, destination: string, bytes: Buffer, options: { mode: 'create' | 'replace'; expected?: Buffer }) => {
                 const target = path.join(base, destination);
                 if (options.mode === 'replace' && !entered) {
@@ -95,7 +115,7 @@ describe('approved policy store', () => {
         const before = fs.readFileSync(userPolicyPath());
         const boundary: PolicyStoreBoundary = {
             withProjectLease: <T,>(_root: string, operation: () => T): T => operation(),
-            readRegularFile: (target: string) => ({ bytes: fs.readFileSync(target), identity: Object.freeze({ target }) } as any),
+            readRegularFile: (target: string) => ({ bytes: fs.readFileSync(target), identity: Object.freeze({}) as FileIdentityToken }),
             writeProjectTransaction: () => { throw new Error('injected durable publication failure'); },
         };
         expect(() => approvePolicyWithBoundary({ file, scope: 'user', cwd: root, expectedDigest: digest, replaceDigest: digest }, boundary)).toThrow(/publication failure/);
