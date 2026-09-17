@@ -1,8 +1,8 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { writeFileAtomicDurable, fsyncDirSync } from '../atomic-file';
 import { parseJsonNoDuplicate } from '../plan/json';
+import { secureFs } from '../secure-fs/native-bridge';
 import { canonicalPolicyDigest } from './canonical';
 import { projectPolicyPath, userPolicyPath } from './paths';
 import type { ApprovedPolicy, EffectivePolicy, PolicyContent } from './types';
@@ -43,10 +43,11 @@ export function readEffectivePolicy(cwd: string): EffectivePolicy {
 export function approvePolicy(input: ApprovePolicyInput): ApprovedPolicy {
     if (!input || typeof input !== 'object') throw new Error('approval input is required');
     assertPath(input.file, 'file'); assertPath(input.cwd, 'cwd'); assertDigest(input.expectedDigest, 'expectedDigest'); if (input.replaceDigest !== undefined) assertDigest(input.replaceDigest, 'replaceDigest');
-    const candidateRaw = readBounded(input.file); if (candidateRaw === null) throw new Error('policy candidate is absent');
+    const cwd = path.resolve(input.cwd);
+    const candidateRaw = readBounded(path.resolve(cwd, input.file)); if (candidateRaw === null) throw new Error('policy candidate is absent');
     const content: PolicyContent = validatePolicyContent(parseJsonNoDuplicate(candidateRaw)); const digest = canonicalPolicyDigest(content);
     if (digest !== input.expectedDigest) throw new Error('policy content digest does not match expectedDigest');
-    const target = policyTarget(input.scope, input.cwd); createDirectories(target); assertSafeParents(target); assertRegularOrAbsent(target);
+    const target = policyTarget(input.scope, cwd); createDirectories(target); assertSafeParents(target); assertRegularOrAbsent(target);
     const unlock = lock(target);
     try {
         const existingRaw = readBounded(target); const existing = existingRaw === null ? null : parseApproved(existingRaw);
@@ -55,12 +56,21 @@ export function approvePolicy(input: ApprovePolicyInput): ApprovedPolicy {
         if (existing !== null && existing.contentDigest !== input.replaceDigest) throw new Error('replacement predecessor digest mismatch');
         const approved: ApprovedPolicy = { schema: 'approved-model-policy/v1', content, contentDigest: digest, approval: { approvedAt: new Date().toISOString(), approvalId: crypto.randomUUID() }, lineage: { previousDigest: existing?.contentDigest ?? null } };
         const serialized = `${JSON.stringify(approved, null, 2)}\n`;
-        if (existing === null) {
-            const temporary = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${crypto.randomUUID()}.tmp`); let fd: number | undefined;
-            try { fd = fs.openSync(temporary, 'wx', 0o600); fs.writeFileSync(fd, serialized, 'utf8'); fs.fsyncSync(fd); fs.closeSync(fd); fd = undefined; fs.linkSync(temporary, target); fsyncDirSync(path.dirname(target)); }
-            catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('refusing to overwrite existing policy'); throw error; }
-            finally { if (fd !== undefined) try { fs.closeSync(fd); } catch { /* preserve primary error */ } try { fs.rmSync(temporary, { force: true }); } catch { /* preserve primary error */ } }
-        } else writeFileAtomicDurable(target, serialized, 0o600);
+        const root = input.scope === 'project' ? cwd : path.dirname(target);
+        const destination = input.scope === 'project' ? '.awm/model-policy.json' : path.basename(target);
+        secureFs.withProjectLease(root, () => {
+            if (existing === null) {
+                secureFs.writeProjectTransaction(root, destination, Buffer.from(serialized, 'utf8'), { mode: 'create', createParents: true });
+                return;
+            }
+            // A native identity-fenced transaction proves that neither bytes nor
+            // file identity changed after the bounded observation. A JS rename
+            // cannot make that CAS claim, so it is deliberately not used here.
+            const observed = secureFs.readRegularFile(target, MAX_POLICY_BYTES);
+            const current = parseApproved(new TextDecoder('utf-8', { fatal: true }).decode(observed.bytes));
+            if (current.contentDigest !== input.replaceDigest) throw new Error('replacement predecessor digest changed under writer lock');
+            secureFs.writeProjectTransaction(root, destination, Buffer.from(serialized, 'utf8'), { mode: 'replace', createParents: false, expected: observed.bytes, expectedIdentity: observed.identity });
+        });
         return approved;
     } finally { unlock(); }
 }
