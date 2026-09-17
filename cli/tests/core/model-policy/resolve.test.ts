@@ -21,6 +21,10 @@ describe('resolveSelection', () => {
         const value = input(); value.capabilities.availableSelections = [selection('full', 'high')];
         expect(resolveSelection(value)).toMatchObject({ state: 'blocked', diagnostics: [{ code: 'ROUTING_SELECTION_UNAVAILABLE' }] });
     });
+    it('blocks a corrupt receipt before trusting its availability list', () => {
+        const value = input(); value.capabilities.availableSelections = [];
+        expect(resolveSelection(value)).toMatchObject({ state: 'blocked', diagnostics: [{ code: 'ROUTING_CAPABILITY_INVALID' }] });
+    });
     it('degrades only to an attested matching full default when a missing override is approved', () => {
         const value = input(); value.policy.content.mappings[0].degradation.allowMissingModelOverride = true; value.capabilities.capabilities.modelOverride = 'unsupported'; value.capabilities.runtimeDefaultSelection = selection('full', 'high');
         expect(resolveSelection(value)).toMatchObject({ state: 'resolved', outcome: 'degraded', selection: selection('full', 'high') });
