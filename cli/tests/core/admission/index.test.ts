@@ -33,6 +33,17 @@ describe('admitPlan', () => {
         const report = await admitPlan({ plan: v2(), cwd: process.cwd(), enabledAgents: [fields.provider as any], routingReader: reader, ...fields });
         expect(report.state).toBe('blocked'); expect(reader).not.toHaveBeenCalled();
     });
+    it.each(['fail', 'not_certified'] as const)('does not invoke deferred v2 routing facts when sensors are %s', async overall => {
+        const reader = jest.fn(() => { throw new Error('routing reader must not run'); });
+        const report = await admitPlan({ plan: v2(), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], verifySensors: true, sensors: { overall, sensors: [] } as any, routingReader: reader });
+        expect(report).toMatchObject({ state: 'blocked', sensors: overall === 'not_certified' ? 'not-certified' : 'fail' }); expect(reader).not.toHaveBeenCalled();
+    });
+    it('does not invoke deferred v2 routing facts when compatibility blocks', async () => {
+        const reader = jest.fn(() => { throw new Error('routing reader must not run'); });
+        const currentness = { checkedAt: 'x', compatibility: { status: 'not-checked' as const }, components: [{ component: 'cli', installed: '1', latest: '1', channel: 'stable' as const, source: 'x', checkedAt: 'x', status: 'current' as const, detail: 'x', remedy: 'none' as const }] };
+        const report = await admitPlan({ plan: v2(), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], requireCurrent: true, provenance: 'proven', currentness, compatibilityDiagnostics: [{ code: 'COMPAT', message: 'blocked' }], routingReader: reader });
+        expect(report).toMatchObject({ state: 'blocked', diagnostics: [expect.objectContaining({ code: 'COMPAT' })] }); expect(reader).not.toHaveBeenCalled();
+    });
     it.each(['mechanical', 'integration', 'judgment'] as const)('admits v2 %s with policy and capability evidence and an honest unknown forecast', async profile => {
         const report = await admitPlan({ plan: v2(profile), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], routing: routing() });
         expect(report).toMatchObject({ state: 'admitted', routingForecast: { implementerProfiles: { [profile]: 1 }, trackB: { state: 'unavailable', lowerBound: 1 }, controller: { state: 'unavailable', lowerBound: 0 } } });
