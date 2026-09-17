@@ -25,6 +25,9 @@ describe('capability receipt validation', () => {
         ['expiry greater than 24 hours', () => { const value = receipt(); value.expiresAt = '2026-09-18T00:00:00.001Z'; return value; }],
         ['missing capability field', () => { const value = receipt(); delete (value.capabilities as any).effortOverride; return value; }],
     ])('rejects %s', (_name, make) => expect(() => validateCapabilityReceipt(make())).toThrow());
+    it.each(['renderer', 'documentation'])('does not certify supported execution from %s evidence', kind => {
+        const value = receipt(); value.evidence = value.evidence.map(entry => ({ ...entry, kind: kind as any })); expect(() => validateCapabilityReceipt(value)).toThrow(/evidence|native/i);
+    });
     it('reads absent capability state without creating operator storage', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-receipt-')); const prior = process.env.AWM_HOME; process.env.AWM_HOME = path.join(root, 'operator');
         try { expect(readCapabilities(receipt().runtime, new Date('2026-09-17T12:00:00.000Z'))).toEqual({ state: 'absent' }); expect(fs.existsSync(process.env.AWM_HOME!)).toBe(false); }
@@ -43,8 +46,8 @@ describe('capability receipt validation', () => {
         expect(() => approveCapabilities({ file: 'missing.json', cwd: process.cwd(), expectedDigest: digest, replaceDigest: '' })).toThrow(/replaceDigest/);
     });
     it('rejects a symlinked candidate and a symlinked receipt destination', () => {
-        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-receipt-')); const linked = path.join(root, 'linked.json'); fs.symlinkSync(path.join(root, 'missing'), linked);
-        try { expect(() => approveCapabilities({ file: linked, cwd: root, expectedDigest: digest, now: new Date('2026-09-17T00:00:00.000Z') })).toThrow(/symlink|unsafe/); }
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-receipt-')); const linked = path.join(root, 'linked.json'); const outside = path.join(root, 'outside.json'); fs.writeFileSync(outside, JSON.stringify(receipt())); const before = fs.readFileSync(outside); fs.symlinkSync(outside, linked);
+        try { expect(() => approveCapabilities({ file: linked, cwd: root, expectedDigest: digest, now: new Date('2026-09-17T00:00:00.000Z') })).toThrow(/symlink|unsafe/); expect(fs.readFileSync(outside).equals(before)).toBe(true); }
         finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
     it.each(['destination', 'ancestor'] as const)('rejects a symlinked %s without changing external bytes', kind => {
@@ -62,5 +65,15 @@ describe('capability receipt validation', () => {
             expect(approveCapabilities({ file, cwd: root, expectedDigest: secondDigest, replaceDigest: firstDigest, now })).toEqual(second);
             expect(readCapabilities(second.runtime, now)).toMatchObject({ state: 'current', digest: secondDigest });
         } finally { if (previous === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = previous; fs.rmSync(root, { recursive: true, force: true }); }
+    });
+    it('accepts exactly one competing replacement from the same observed predecessor', async () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-receipt-')); const prior = process.env.AWM_HOME; process.env.AWM_HOME = path.join(root, 'operator'); const now = new Date('2026-09-17T12:00:00.000Z'); const file = path.join(root, 'receipt.json'); const base = receipt(); fs.writeFileSync(file, JSON.stringify(base));
+        try { const predecessor = capabilityReceiptDigest(base); approveCapabilities({ file, cwd: root, expectedDigest: predecessor, now }); const candidate = (id: string) => { const value = receipt(); value.approval.approvalId = id; fs.writeFileSync(file, JSON.stringify(value)); return { value, digest: capabilityReceiptDigest(value) }; }; const left = candidate('left'); const right = candidate('right'); const attempts = await Promise.allSettled([Promise.resolve().then(() => approveCapabilities({ file, cwd: root, expectedDigest: left.digest, replaceDigest: predecessor, now })), Promise.resolve().then(() => approveCapabilities({ file, cwd: root, expectedDigest: right.digest, replaceDigest: predecessor, now }))]); expect(attempts.filter(item => item.status === 'fulfilled')).toHaveLength(1); expect(attempts.filter(item => item.status === 'rejected')).toHaveLength(1); expect(readCapabilities(base.runtime, now)).toMatchObject({ state: 'current' }); }
+        finally { if (prior === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = prior; fs.rmSync(root, { recursive: true, force: true }); }
+    });
+    it.each(['destination', 'ancestor'] as const)('writer rejects symlinked %s and preserves external bytes', kind => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-receipt-')); const prior = process.env.AWM_HOME; process.env.AWM_HOME = path.join(root, 'operator'); const now = new Date('2026-09-17T12:00:00.000Z'); const value = receipt(); const file = path.join(root, 'candidate.json'); fs.writeFileSync(file, JSON.stringify(value)); const outside = path.join(root, 'outside'); fs.writeFileSync(outside, 'outside'); const target = capabilityReceiptPath(value.runtime); const ancestor = path.dirname(path.dirname(target));
+        try { fs.mkdirSync(kind === 'destination' ? path.dirname(target) : path.dirname(ancestor), { recursive: true }); if (kind === 'destination') fs.symlinkSync(outside, target); else fs.symlinkSync(root, ancestor); expect(() => approveCapabilities({ file, cwd: root, expectedDigest: capabilityReceiptDigest(value), now })).toThrow(/unsafe|symlink|lease/); expect(fs.readFileSync(outside, 'utf8')).toBe('outside'); }
+        finally { if (prior === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = prior; fs.rmSync(root, { recursive: true, force: true }); }
     });
 });
