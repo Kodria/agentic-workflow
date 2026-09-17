@@ -5,7 +5,7 @@ import { AGENT_TARGETS } from '../../providers';
 import type { ProviderExecutionCapabilities } from '../admission';
 import type { PlanDiagnostic } from '../plan/types';
 import type { CapabilityReceipt, RuntimeKey, Selection } from './types';
-import { MAX_IDENTIFIER, assertDigest } from './validate';
+import { MAX_IDENTIFIER, assertDigest, canonicalUtcTimestamp } from './validate';
 import { awmHome } from '../paths';
 import { parseJsonNoDuplicate } from '../plan/json';
 import { secureFs } from '../secure-fs/native-bridge';
@@ -19,7 +19,7 @@ const CAPABILITY_VALUES = new Set(['supported', 'unsupported', 'unverified']);
 function object(value: unknown, name: string): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${name} must be an object`); return value as Record<string, unknown>; }
 function exact(value: Record<string, unknown>, keys: string[], name: string): void { const actual = Object.keys(value); if (actual.length !== keys.length || actual.some(key => !keys.includes(key))) throw new Error(`${name} has unknown or missing fields`); }
 function text(value: unknown, name: string, pattern?: RegExp): string { if (typeof value !== 'string' || value.length === 0 || value.length > MAX_IDENTIFIER || CONTROL.test(value) || (pattern && !pattern.test(value))) throw new Error(`${name} is invalid`); return value; }
-function timestamp(value: unknown, name: string): string { if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) throw new Error(`${name} must be an ISO timestamp`); return value; }
+function timestamp(value: unknown, name: string): string { return canonicalUtcTimestamp(value, name); }
 function selection(value: unknown, name: string): Selection {
     const item = object(value, name); exact(item, ['selector', 'effort'], name);
     const selector = object(item.selector, `${name}.selector`); exact(selector, ['kind', 'id'], `${name}.selector`);

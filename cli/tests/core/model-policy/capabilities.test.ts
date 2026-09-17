@@ -59,6 +59,12 @@ describe('capability receipt validation', () => {
         ['expiry greater than 24 hours', () => { const value = receipt(); value.expiresAt = '2026-09-18T00:00:00.001Z'; return value; }],
         ['missing capability field', () => { const value = receipt(); delete (value.capabilities as any).effortOverride; return value; }],
     ])('rejects %s', (_name, make) => expect(() => validateCapabilityReceipt(make())).toThrow());
+    it.each(['September 17, 2026 00:00:00 UTC', '2026-09-17', '2026-09-17T00:00:00.000+00:00', '2026-09-17T00:00:00.000Zx', '2026-02-30T00:00:00.000Z', '2026-09-17T00:00:00Z'])('rejects a noncanonical receipt timestamp: %s', timestamp => {
+        const recorded = receipt(); recorded.recordedAt = timestamp;
+        const expires = receipt(); expires.expiresAt = timestamp;
+        expect(() => validateCapabilityReceipt(recorded)).toThrow();
+        expect(() => validateCapabilityReceipt(expires)).toThrow();
+    });
     it.each(['renderer', 'documentation'])('does not certify supported execution from %s evidence', kind => {
         const value = receipt(); value.evidence = value.evidence.map(entry => ({ ...entry, kind: kind as any })); expect(() => validateCapabilityReceipt(value)).toThrow(/evidence|native/i);
     });

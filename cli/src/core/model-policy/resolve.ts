@@ -30,7 +30,6 @@ export function resolveSelection(input: ResolveSelectionInput): SelectionResolut
     if (!mapping) return blocked('ROUTING_POLICY_MAPPING_ABSENT', 'Approved policy has no exact target/runtime mapping.');
     const effectiveProfile = input.role === 'implementer' ? input.requestedProfile : 'full';
     const wanted = effectiveProfile === 'full' ? mapping.fullCapability : mapping.profiles[effectiveProfile];
-    if (!capabilities.availableSelections.some(candidate => equal(candidate, wanted))) return blocked('ROUTING_SELECTION_UNAVAILABLE', 'Approved selection is not currently available; no substitute is allowed.');
     let selection = wanted; const unavailableEvidence: string[] = []; let outcome: 'native' | 'degraded' = 'native';
     const canDegrade = (capability: 'modelOverride' | 'effortOverride', allowed: boolean, code: string): SelectionResolution | undefined => {
         const state = capabilities.capabilities[capability];
@@ -40,7 +39,12 @@ export function resolveSelection(input: ResolveSelectionInput): SelectionResolut
         selection = mapping.fullCapability; outcome = 'degraded'; unavailableEvidence.push(capability); return undefined;
     };
     const model = canDegrade('modelOverride', mapping.degradation.allowMissingModelOverride, 'ROUTING_MODEL_OVERRIDE_UNAVAILABLE'); if (model) return model;
-    const effort = canDegrade('effortOverride', mapping.degradation.allowMissingEffortOverride, 'ROUTING_EFFORT_OVERRIDE_UNAVAILABLE'); if (effort) return effort;
+    if (!capabilities.availableSelections.some(candidate => equal(candidate, selection))) return blocked('ROUTING_SELECTION_UNAVAILABLE', 'Approved selection is not currently available; no substitute is allowed.');
+    if (selection.effort.kind === 'runtime-default') {
+        if (!capabilities.runtimeDefaultSelection || !equal(capabilities.runtimeDefaultSelection, selection)) return blocked('ROUTING_SELECTION_UNAVAILABLE', 'Runtime-default selection is not explicitly attested.');
+    } else {
+        const effort = canDegrade('effortOverride', mapping.degradation.allowMissingEffortOverride, 'ROUTING_EFFORT_OVERRIDE_UNAVAILABLE'); if (effort) return effort;
+    }
     if (capabilities.capabilities.observedModelEvidence !== 'supported') {
         if (!mapping.degradation.allowMissingObservedIdentity) return blocked('ROUTING_OBSERVED_IDENTITY_UNAVAILABLE', 'Observed model identity is required and unavailable.');
         outcome = 'degraded'; unavailableEvidence.push('observedModelEvidence');

@@ -7,6 +7,7 @@ export const MAX_IDENTIFIER = 128;
 const SHA256 = /^[0-9a-f]{64}$/;
 const RUNTIME_KIND = /^[a-z0-9][a-z0-9_-]{0,127}$/;
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+const CANONICAL_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const profiles: ImplementerProfile[] = ['mechanical', 'integration', 'judgment'];
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -19,6 +20,12 @@ function exact(object: Record<string, unknown>, keys: string[], label: string): 
 }
 function text(value: unknown, label: string, pattern?: RegExp): string {
     if (typeof value !== 'string' || value.length === 0 || value.length > MAX_IDENTIFIER || CONTROL.test(value) || (pattern && !pattern.test(value))) throw new Error(`${label} is invalid`);
+    return value;
+}
+export function canonicalUtcTimestamp(value: unknown, label: string): string {
+    if (typeof value !== 'string' || !CANONICAL_UTC_TIMESTAMP.test(value)) throw new Error(`${label} must be a canonical UTC ISO-8601 timestamp`);
+    const parsed = new Date(value);
+    if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== value) throw new Error(`${label} must be a canonical UTC ISO-8601 timestamp`);
     return value;
 }
 function bool(value: unknown, label: string): boolean { if (typeof value !== 'boolean') throw new Error(`${label} must be boolean`); return value; }
@@ -61,8 +68,9 @@ export function validateApprovedPolicy(value: unknown): ApprovedPolicy {
     const approval = record(item.approval, 'approval'); exact(approval, ['approvedAt', 'approvalId'], 'approval');
     const lineage = record(item.lineage, 'lineage'); exact(lineage, ['previousDigest'], 'lineage');
     const contentDigest = text(item.contentDigest, 'contentDigest', SHA256);
-    if (typeof approval.approvedAt !== 'string' || !Number.isFinite(Date.parse(approval.approvedAt)) || typeof approval.approvalId !== 'string' || approval.approvalId.length === 0 || approval.approvalId.length > MAX_IDENTIFIER || CONTROL.test(approval.approvalId) || (lineage.previousDigest !== null && (typeof lineage.previousDigest !== 'string' || !SHA256.test(lineage.previousDigest)))) throw new Error('approved policy metadata is invalid');
-    return { schema: 'approved-model-policy/v1', content: validatePolicyContent(item.content), contentDigest, approval: { approvedAt: approval.approvedAt, approvalId: approval.approvalId }, lineage: { previousDigest: lineage.previousDigest as string | null } };
+    if (typeof approval.approvalId !== 'string' || approval.approvalId.length === 0 || approval.approvalId.length > MAX_IDENTIFIER || CONTROL.test(approval.approvalId) || (lineage.previousDigest !== null && (typeof lineage.previousDigest !== 'string' || !SHA256.test(lineage.previousDigest)))) throw new Error('approved policy metadata is invalid');
+    const approvedAt = canonicalUtcTimestamp(approval.approvedAt, 'approval.approvedAt');
+    return { schema: 'approved-model-policy/v1', content: validatePolicyContent(item.content), contentDigest, approval: { approvedAt, approvalId: approval.approvalId }, lineage: { previousDigest: lineage.previousDigest as string | null } };
 }
 
 export function assertDigest(value: unknown, label: string): asserts value is string { if (typeof value !== 'string' || !SHA256.test(value)) throw new Error(`${label} must be a 64-character lowercase SHA-256 digest`); }
