@@ -226,7 +226,7 @@ describe('native secure-fs durable publication source contract', () => {
     });
 
     it('requires the Windows publish path to report parent flush failure', () => {
-        expect(source()).toMatch(/FlushFileBuffers\(parent\.handle\)[\s\S]{0,240}secure-fs durable directory sync failed/);
+        expect(source()).toMatch(/directory_sync_failed[\s\S]{0,240}FlushFileBuffers\(parent\.handle\)[\s\S]{0,240}if \(directory_sync_failed\).*secure-fs durable directory sync failed/);
     });
 });
 
@@ -510,14 +510,17 @@ const nativeFixtureAvailable = ['linux', 'darwin', 'win32'].includes(process.pla
     && fs.existsSync(path.join(__dirname, '../../../prebuilds', `${process.platform}-${process.arch}`, 'secure_fs.node'));
 const nativeOnly = nativeFixtureAvailable ? describe : describe.skip;
 const testAddonPath = path.join(__dirname, '../../../native/build/Release/secure_fs_test.node');
-const nativeTestOnly = fs.existsSync(testAddonPath) ? describe : describe.skip;
+const nativeTestOnly = describe;
 
 nativeTestOnly('native secure-fs directory-sync fault injection', () => {
     type TestBinding = NativeSecureFsBinding & { setDirectoryFsyncFailureForTests(enabled: boolean): void };
     let root: string;
     let testBinding: TestBinding;
 
-    beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-secure-fs-fsync-')); testBinding = require(testAddonPath) as TestBinding; });
+    beforeEach(() => {
+        expect(fs.existsSync(testAddonPath)).toBe(true);
+        root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-secure-fs-fsync-')); testBinding = require(testAddonPath) as TestBinding;
+    });
     afterEach(() => { testBinding.setDirectoryFsyncFailureForTests(false); fs.rmSync(root, { recursive: true, force: true }); });
 
     it('writes the target then reports the forced post-publication directory-sync failure', () => {

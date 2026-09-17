@@ -1204,15 +1204,16 @@ napi_value WriteProjectTransaction(napi_env env, napi_callback_info info) {
     publish_result = PublishNoReplace(staged, parent.handle, parent.basename);
   }
   if (publish_result != PublishResult::kPublished && !DiscardStagingFile(staged)) publish_result = PublishResult::kFailed;
-  const bool durable_parent = publish_result == PublishResult::kPublished
+  const bool directory_sync_failed = publish_result == PublishResult::kPublished
 #ifdef AWM_SECURE_FS_TESTING
-      && !force_directory_fsync_failure_for_tests
-#endif
+      && (force_directory_fsync_failure_for_tests || FlushFileBuffers(parent.handle) == 0);
+#else
       && FlushFileBuffers(parent.handle) == 0;
+#endif
   CloseHandle(staged);
   if (original != INVALID_HANDLE_VALUE) CloseHandle(original);
   CloseWindowsParent(&parent);
-  if (durable_parent) { Throw(env, "secure-fs durable directory sync failed"); return nullptr; }
+  if (directory_sync_failed) { Throw(env, "secure-fs durable directory sync failed"); return nullptr; }
   if (publish_result == PublishResult::kApiUnavailable) { Throw(env, "secure-fs Windows FileRenameInfoEx is unavailable"); return nullptr; }
   if (options.replace && publish_result != PublishResult::kPublished) {
     if (replacement_error != ERROR_SUCCESS) {

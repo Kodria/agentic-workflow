@@ -18,8 +18,8 @@
     "doc": "docs"
   },
   "scripts": {
-    "native:build": "node-gyp rebuild --directory native && node scripts/package-native.js",
-    "native:test-build": "node-gyp rebuild --directory native",
+    "native:build": "node-gyp configure --directory native && node-gyp build --directory native -- secure_fs && node scripts/package-native.js",
+    "native:test-build": "node-gyp configure --directory native && node-gyp build --directory native -- secure_fs_test",
     "native:package-check": "node scripts/assert-native-package.js",
     "build": "tsc && chmod +x dist/src/index.js",
     "typecheck": "tsc --noEmit",
