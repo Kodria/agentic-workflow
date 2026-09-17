@@ -9,6 +9,7 @@ import type { ApprovedPolicy, EffectivePolicy, PolicyContent } from './types';
 import { assertDigest, MAX_POLICY_BYTES, validateApprovedPolicy, validatePolicyContent } from './validate';
 
 export interface ApprovePolicyInput { file: string; scope: 'user' | 'project'; cwd: string; expectedDigest: string; replaceDigest?: string; }
+export type PolicyStoreBoundary = Pick<typeof secureFs, 'withProjectLease' | 'readRegularFile' | 'writeProjectTransaction'>;
 
 function assertPath(value: unknown, label: string): asserts value is string {
     if (typeof value !== 'string' || value.length === 0 || value.length > 4096 || /[\u0000-\u001f\u007f-\u009f]/.test(value)) throw new Error(`${label} must be a bounded path without control characters`);
@@ -40,7 +41,8 @@ export function readEffectivePolicy(cwd: string): EffectivePolicy {
     try { const raw = readBounded(user); if (raw === null) return { state: 'absent' }; return { state: 'approved', provenance: 'user', policy: parseApproved(raw) }; } catch (error) { return { state: 'invalid', provenance: 'user', reason: (error as Error).message.slice(0, 4096) }; }
 }
 
-export function approvePolicy(input: ApprovePolicyInput): ApprovedPolicy {
+/** Testable transaction seam; production callers use approvePolicy, which binds secureFs. */
+export function approvePolicyWithBoundary(input: ApprovePolicyInput, boundary: PolicyStoreBoundary): ApprovedPolicy {
     if (!input || typeof input !== 'object') throw new Error('approval input is required');
     assertPath(input.file, 'file'); assertPath(input.cwd, 'cwd'); assertDigest(input.expectedDigest, 'expectedDigest'); if (input.replaceDigest !== undefined) assertDigest(input.replaceDigest, 'replaceDigest');
     const cwd = path.resolve(input.cwd);
@@ -58,19 +60,21 @@ export function approvePolicy(input: ApprovePolicyInput): ApprovedPolicy {
         const serialized = `${JSON.stringify(approved, null, 2)}\n`;
         const root = input.scope === 'project' ? cwd : path.dirname(target);
         const destination = input.scope === 'project' ? '.awm/model-policy.json' : path.basename(target);
-        secureFs.withProjectLease(root, () => {
+        boundary.withProjectLease(root, () => {
             if (existing === null) {
-                secureFs.writeProjectTransaction(root, destination, Buffer.from(serialized, 'utf8'), { mode: 'create', createParents: true });
+                boundary.writeProjectTransaction(root, destination, Buffer.from(serialized, 'utf8'), { mode: 'create', createParents: true });
                 return;
             }
             // A native identity-fenced transaction proves that neither bytes nor
             // file identity changed after the bounded observation. A JS rename
             // cannot make that CAS claim, so it is deliberately not used here.
-            const observed = secureFs.readRegularFile(target, MAX_POLICY_BYTES);
+            const observed = boundary.readRegularFile(target, MAX_POLICY_BYTES);
             const current = parseApproved(new TextDecoder('utf-8', { fatal: true }).decode(observed.bytes));
             if (current.contentDigest !== input.replaceDigest) throw new Error('replacement predecessor digest changed under writer lock');
-            secureFs.writeProjectTransaction(root, destination, Buffer.from(serialized, 'utf8'), { mode: 'replace', createParents: false, expected: observed.bytes, expectedIdentity: observed.identity });
+            boundary.writeProjectTransaction(root, destination, Buffer.from(serialized, 'utf8'), { mode: 'replace', createParents: false, expected: observed.bytes, expectedIdentity: observed.identity });
         });
         return approved;
     } finally { unlock(); }
 }
+
+export function approvePolicy(input: ApprovePolicyInput): ApprovedPolicy { return approvePolicyWithBoundary(input, secureFs); }

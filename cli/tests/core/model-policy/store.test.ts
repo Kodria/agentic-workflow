@@ -16,7 +16,7 @@ jest.mock('../../../src/core/secure-fs/native-bridge', () => ({
     },
 }));
 import { canonicalPolicyDigest } from '../../../src/core/model-policy/canonical';
-import { approvePolicy, readEffectivePolicy } from '../../../src/core/model-policy/store';
+import { approvePolicy, approvePolicyWithBoundary, readEffectivePolicy, type PolicyStoreBoundary } from '../../../src/core/model-policy/store';
 import { userPolicyPath } from '../../../src/core/model-policy/paths';
 import type { PolicyContent } from '../../../src/core/model-policy/types';
 
@@ -73,6 +73,43 @@ describe('approved policy store', () => {
         process.env.POLICY_TEST_MUTATE_DURING_REPLACE = '1';
         expect(() => approvePolicy({ file, scope: 'user', cwd: root, expectedDigest: digest, replaceDigest: digest })).toThrow(/changed|replacement/i);
         expect(fs.readFileSync(userPolicyPath(), 'utf8')).toBe('external mutation');
+    });
+
+    it('accepts exactly one of two competing fenced replacements', () => {
+        const file = candidate(); const digest = canonicalPolicyDigest(policy()); approvePolicy({ file, scope: 'user', cwd: root, expectedDigest: digest });
+        const input = { file, scope: 'user' as const, cwd: root, expectedDigest: digest, replaceDigest: digest };
+        let entered = false; let accepted = 0;
+        const boundary: PolicyStoreBoundary = {
+            withProjectLease: <T,>(_root: string, operation: () => T): T => operation(),
+            readRegularFile: (target: string) => ({ bytes: fs.readFileSync(target), identity: Object.freeze({ target }) } as any),
+            writeProjectTransaction: (base: string, destination: string, bytes: Buffer, options: { mode: 'create' | 'replace'; expected?: Buffer }) => {
+                const target = path.join(base, destination);
+                if (options.mode === 'replace' && !entered) {
+                    entered = true;
+                    // Model a non-cooperating external process: the native
+                    // identity fence, not this advisory lock, must reject us.
+                    fs.rmSync(`${target}.lock`);
+                    approvePolicyWithBoundary(input, boundary);
+                    fs.writeFileSync(`${target}.lock`, 'outer lock placeholder');
+                }
+                if (options.mode === 'replace' && (!options.expected || !fs.readFileSync(target).equals(options.expected))) throw new Error('original changed before fenced replacement');
+                fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, bytes); accepted++;
+            },
+        };
+        expect(() => approvePolicyWithBoundary(input, boundary)).toThrow(/changed|replacement/i);
+        expect(accepted).toBe(1);
+    });
+
+    it('returns a failed publication and preserves predecessor bytes on injected transaction failure', () => {
+        const file = candidate(); const digest = canonicalPolicyDigest(policy()); approvePolicy({ file, scope: 'user', cwd: root, expectedDigest: digest });
+        const before = fs.readFileSync(userPolicyPath());
+        const boundary: PolicyStoreBoundary = {
+            withProjectLease: <T,>(_root: string, operation: () => T): T => operation(),
+            readRegularFile: (target: string) => ({ bytes: fs.readFileSync(target), identity: Object.freeze({ target }) } as any),
+            writeProjectTransaction: () => { throw new Error('injected durable publication failure'); },
+        };
+        expect(() => approvePolicyWithBoundary({ file, scope: 'user', cwd: root, expectedDigest: digest, replaceDigest: digest }, boundary)).toThrow(/publication failure/);
+        expect(fs.readFileSync(userPolicyPath()).equals(before)).toBe(true);
     });
 
     it('blocks an invalid project policy instead of falling back to a valid user policy', () => {
