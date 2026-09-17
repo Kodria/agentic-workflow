@@ -228,6 +228,13 @@ describe('native secure-fs durable publication source contract', () => {
     it('requires the Windows publish path to report parent flush failure', () => {
         expect(source()).toMatch(/directory_sync_failed[\s\S]{0,240}FlushFileBuffers\(parent\.handle\)[\s\S]{0,240}if \(directory_sync_failed\).*secure-fs durable directory sync failed/);
     });
+
+    it('does not clean a staging name already consumed by a fenced POSIX rename', () => {
+        const write = source().slice(source().indexOf('napi_value WriteProjectTransaction'), source().indexOf('\n}  // namespace'));
+        expect(write).toContain('const bool cleaned = options.replace || unlinkat(parent, temporary.c_str(), 0) == 0;');
+        const reverted = write.replace('options.replace || ', '');
+        expect(reverted).not.toContain('const bool cleaned = options.replace || unlinkat(parent, temporary.c_str(), 0) == 0;');
+    });
 });
 
 describe('native secure-fs POSIX source contract', () => {
@@ -529,6 +536,16 @@ nativeTestOnly('native secure-fs directory-sync fault injection', () => {
         expect(fs.readFileSync(path.join(root, 'durable.txt'), 'utf8')).toBe('published');
     });
 
+    it('publishes an exact fenced replacement with fault injection disabled', () => {
+        const target = path.join(root, 'replace.json');
+        fs.writeFileSync(target, 'before');
+        const observed = testBinding.readRegularFile(target, 1024);
+        expect(() => testBinding.writeProjectTransaction(root, 'replace.json', Buffer.from('after'), {
+            mode: 'replace', expected: observed.bytes, expectedIdentity: observed.identity, createParents: false,
+        })).not.toThrow();
+        expect(fs.readFileSync(target, 'utf8')).toBe('after');
+    });
+
     it('keeps the production prebuild free of the test-only control', () => {
         if (!nativeFixtureAvailable) return;
         const production = require(path.join(__dirname, '../../../prebuilds', `${process.platform}-${process.arch}`, 'secure_fs.node')) as Record<string, unknown>;
@@ -564,16 +581,6 @@ nativeOnly('native secure-fs identity fence fixtures', () => {
         expect(observed.identity[4]).toBe(1);
         expect(observed.identity[5]).toBe(process.platform === 'win32' ? 2 : 1);
         expect(observed.identity.subarray(6, 8)).toEqual(Buffer.alloc(2));
-    });
-
-    it('publishes an exact fenced replacement without treating rename-consumed staging as cleanup failure', () => {
-        const target = path.join(root, 'replace.json');
-        fs.writeFileSync(target, 'before');
-        const observed = binding.readRegularFile(target, 1024);
-        expect(() => binding.writeProjectTransaction(root, 'replace.json', Buffer.from('after'), {
-            mode: 'replace', expected: observed.bytes, expectedIdentity: observed.identity, createParents: false,
-        })).not.toThrow();
-        expect(fs.readFileSync(target, 'utf8')).toBe('after');
     });
 
     it('rejects embedded NUL path arguments before any truncated filesystem access', () => {
