@@ -1135,7 +1135,11 @@ napi_value RemoveObservedProjectFile(napi_env env, napi_callback_info info) {
     Throw(env, "secure-fs identity-fenced removal failed");
     return nullptr;
   }
-  fsync(parent);
+  if (fsync(parent) != 0) {
+    close(parent);
+    Throw(env, "secure-fs durable directory sync failed");
+    return nullptr;
+  }
   close(parent);
 #endif
   napi_value undefined;
@@ -1188,9 +1192,12 @@ napi_value WriteProjectTransaction(napi_env env, napi_callback_info info) {
     publish_result = PublishNoReplace(staged, parent.handle, parent.basename);
   }
   if (publish_result != PublishResult::kPublished && !DiscardStagingFile(staged)) publish_result = PublishResult::kFailed;
+  const bool durable_parent = publish_result == PublishResult::kPublished
+      && FlushFileBuffers(parent.handle) == 0;
   CloseHandle(staged);
   if (original != INVALID_HANDLE_VALUE) CloseHandle(original);
   CloseWindowsParent(&parent);
+  if (durable_parent) { Throw(env, "secure-fs durable directory sync failed"); return nullptr; }
   if (publish_result == PublishResult::kApiUnavailable) { Throw(env, "secure-fs Windows FileRenameInfoEx is unavailable"); return nullptr; }
   if (options.replace && publish_result != PublishResult::kPublished) {
     if (replacement_error != ERROR_SUCCESS) {
@@ -1276,7 +1283,11 @@ napi_value WriteProjectTransaction(napi_env env, napi_callback_info info) {
     else Throw(env, "secure-fs transaction failed");
     return nullptr;
   }
-  unlinkat(parent, temporary.c_str(), 0); fsync(parent); close(parent); napi_value undefined; napi_get_undefined(env, &undefined); return undefined;
+  const bool cleaned = unlinkat(parent, temporary.c_str(), 0) == 0;
+  const bool durable = fsync(parent) == 0;
+  close(parent);
+  if (!cleaned || !durable) { Throw(env, "secure-fs durable directory sync failed"); return nullptr; }
+  napi_value undefined; napi_get_undefined(env, &undefined); return undefined;
 #endif
 }
 

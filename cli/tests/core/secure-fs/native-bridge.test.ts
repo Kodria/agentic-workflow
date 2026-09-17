@@ -212,6 +212,20 @@ describe('native secure-fs Windows source contract', () => {
     });
 });
 
+describe('native secure-fs durable publication source contract', () => {
+    const source = () => fs.readFileSync(path.resolve(__dirname, '../../../native/secure_fs.cc'), 'utf8').replace(/\r\n/g, '\n');
+
+    it('turns parent-directory fsync failure after publication into a bounded error', () => {
+        const native = source();
+        expect(native).toMatch(/if \(fsync\(parent\) != 0\)[\s\S]{0,240}Throw\(env, "secure-fs durable directory sync failed"\)/);
+        expect(native).not.toMatch(/unlinkat\(parent, temporary\.c_str\(\), 0\); fsync\(parent\); close\(parent\); napi_value undefined/);
+    });
+
+    it('requires the Windows publish path to report parent flush failure', () => {
+        expect(source()).toMatch(/FlushFileBuffers\(parent\.handle\)[\s\S]{0,240}secure-fs durable directory sync failed/);
+    });
+});
+
 describe('native secure-fs POSIX source contract', () => {
     const source = (): string => fs.readFileSync(path.resolve(__dirname, '../../../native/secure_fs.cc'), 'utf8');
 
@@ -499,6 +513,12 @@ nativeOnly('native secure-fs identity fence fixtures', () => {
     beforeEach(() => {
         root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-secure-fs-identity-'));
         binding = require(path.join(__dirname, '../../../prebuilds', `${process.platform}-${process.arch}`, 'secure_fs.node')) as NativeSecureFsBinding;
+    });
+
+    it('performs a real artifact-backed publish when the CI prebuild is available', () => {
+        const target = path.join(root, 'durable.txt');
+        binding.writeProjectTransaction(root, 'durable.txt', Buffer.from('published'), { mode: 'create', createParents: false });
+        expect(fs.readFileSync(target, 'utf8')).toBe('published');
     });
     afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });
 
