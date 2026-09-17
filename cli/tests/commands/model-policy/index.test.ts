@@ -28,4 +28,8 @@ describe('model-policy command', () => {
         await program.parseAsync(['node', 'awm', 'model-policy', 'status', '--provider', 'codex', '--runtime-kind', 'native', '--runtime-version', '1.0.0', '--account-scope-digest', 'a'.repeat(64), '--json']);
         expect(JSON.parse(String(out.mock.calls[0][0]))).toMatchObject({ policy: { state: 'absent' }, capability: { state: 'stale' } }); expect(process.exitCode).toBe(2);
     });
+    it('rejects an empty replacement digest for capability approval at the command boundary', async () => {
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined }); registerModelPolicyCommand(program, { approveCapabilities: jest.fn() as any });
+        await expect(program.parseAsync(['node', 'awm', 'model-policy', 'capabilities', 'approve', '--file', 'receipt.json', '--expected-digest', 'a'.repeat(64), '--replace-digest', ''])).rejects.toThrow(/requires a non-empty value/);
+    });
 });

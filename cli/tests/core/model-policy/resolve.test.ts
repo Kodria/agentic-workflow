@@ -12,6 +12,15 @@ describe('resolveSelection', () => {
     it('rejects a structurally fabricated v1 report before resolution', () => {
         expect(() => resolveV1Dispatch({ ...input(), plan: { state: 'valid', schema: 'compact-slices/v1', planDigest: sha, manifest: {} } as any, optInV1: false })).toThrow(/invalid valid report/);
     });
+    it('fails loudly for an unknown runtime role or requested profile', () => {
+        expect(() => resolveSelection({ ...input(), role: 'renderer' as any })).toThrow(/role is invalid/);
+        expect(() => resolveSelection({ ...input(), requestedProfile: 'cheap' as any })).toThrow(/requestedProfile is invalid/);
+    });
+    it.each(['antigravity', 'opencode', 'claude-code', 'cursor', 'copilot'] as const)('does not infer routed support for %s from any renderer fact', target => {
+        const value = input(); value.runtime = { ...value.runtime, target }; value.capabilities.runtime = { ...value.capabilities.runtime, target };
+        expect(resolveSelection(value)).toMatchObject({ state: 'blocked' });
+    });
+    it('accepts codex only through its explicit native receipt fixture', () => expect(resolveSelection(input())).toMatchObject({ state: 'resolved' }));
     it.each(['specification-reviewer', 'code-quality-reviewer', 'final-reviewer', 'architecture', 'track-a-qa', 'track-b-qa', 'controller', 'documentation', 'retro', 'finishing'] as const)('routes %s to full capability independently of requested profile', role => {
         const result = resolveSelection({ ...input(), role, requestedProfile: 'mechanical' });
         expect(result.state).toBe('resolved');

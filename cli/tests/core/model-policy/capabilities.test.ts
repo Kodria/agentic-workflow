@@ -39,4 +39,12 @@ describe('capability receipt validation', () => {
         try { expect(() => approveCapabilities({ file: candidate, cwd: root, expectedDigest: capabilityReceiptDigest(value), now: new Date('2026-09-17T00:00:00.000Z') })).toThrow(/future|stale/); }
         finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
+    it('rejects an empty replace digest before reading or writing capability state', () => {
+        expect(() => approveCapabilities({ file: 'missing.json', cwd: process.cwd(), expectedDigest: digest, replaceDigest: '' })).toThrow(/replaceDigest/);
+    });
+    it('rejects a symlinked candidate and a symlinked receipt destination', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-receipt-')); const linked = path.join(root, 'linked.json'); fs.symlinkSync(path.join(root, 'missing'), linked);
+        try { expect(() => approveCapabilities({ file: linked, cwd: root, expectedDigest: digest, now: new Date('2026-09-17T00:00:00.000Z') })).toThrow(/symlink|unsafe/); }
+        finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
 });
