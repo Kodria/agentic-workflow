@@ -47,4 +47,15 @@ describe('capability receipt validation', () => {
         try { expect(() => approveCapabilities({ file: linked, cwd: root, expectedDigest: digest, now: new Date('2026-09-17T00:00:00.000Z') })).toThrow(/symlink|unsafe/); }
         finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
+    it('publishes with exact predecessor CAS and leaves the accepted C2 receipt intact', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-receipt-')); const previous = process.env.AWM_HOME; process.env.AWM_HOME = path.join(root, 'operator'); const file = path.join(root, 'receipt.json'); const now = new Date('2026-09-17T12:00:00.000Z'); const first = receipt(); fs.writeFileSync(file, JSON.stringify(first));
+        try {
+            const firstDigest = capabilityReceiptDigest(first); expect(approveCapabilities({ file, cwd: root, expectedDigest: firstDigest, now })).toEqual(first);
+            expect(() => approveCapabilities({ file, cwd: root, expectedDigest: firstDigest, now })).toThrow(/predecessor|exists/i);
+            const second = receipt(); second.approval.approvalId = 'approval-2'; fs.writeFileSync(file, JSON.stringify(second)); const secondDigest = capabilityReceiptDigest(second);
+            expect(() => approveCapabilities({ file, cwd: root, expectedDigest: secondDigest, replaceDigest: 'f'.repeat(64), now })).toThrow(/predecessor/);
+            expect(approveCapabilities({ file, cwd: root, expectedDigest: secondDigest, replaceDigest: firstDigest, now })).toEqual(second);
+            expect(readCapabilities(second.runtime, now)).toMatchObject({ state: 'current', digest: secondDigest });
+        } finally { if (previous === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = previous; fs.rmSync(root, { recursive: true, force: true }); }
+    });
 });
