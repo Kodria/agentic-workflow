@@ -566,6 +566,16 @@ nativeOnly('native secure-fs identity fence fixtures', () => {
         expect(observed.identity.subarray(6, 8)).toEqual(Buffer.alloc(2));
     });
 
+    it('publishes an exact fenced replacement without treating rename-consumed staging as cleanup failure', () => {
+        const target = path.join(root, 'replace.json');
+        fs.writeFileSync(target, 'before');
+        const observed = binding.readRegularFile(target, 1024);
+        expect(() => binding.writeProjectTransaction(root, 'replace.json', Buffer.from('after'), {
+            mode: 'replace', expected: observed.bytes, expectedIdentity: observed.identity, createParents: false,
+        })).not.toThrow();
+        expect(fs.readFileSync(target, 'utf8')).toBe('after');
+    });
+
     it('rejects embedded NUL path arguments before any truncated filesystem access', () => {
         const target = path.join(root, 'sensors.json');
         fs.writeFileSync(target, 'owner bytes');

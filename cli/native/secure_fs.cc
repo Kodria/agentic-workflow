@@ -1299,7 +1299,9 @@ napi_value WriteProjectTransaction(napi_env env, napi_callback_info info) {
     else Throw(env, "secure-fs transaction failed");
     return nullptr;
   }
-  const bool cleaned = unlinkat(parent, temporary.c_str(), 0) == 0;
+  // renameat consumes the staging name for a replacement. Only create/no-replace
+  // publication leaves a staging sibling that must be unlinked durably.
+  const bool cleaned = options.replace || unlinkat(parent, temporary.c_str(), 0) == 0;
   const bool durable =
 #ifdef AWM_SECURE_FS_TESTING
       !force_directory_fsync_failure_for_tests &&
