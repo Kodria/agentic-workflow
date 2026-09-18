@@ -3,11 +3,23 @@
 This playbook is an operator-run acceptance procedure. It does not authorize a
 paid provider probe and it never records prompts, provider output, or secrets.
 
+Before starting, fill this evidence header and retain it outside the fixture:
+
+```
+CLI_VERSION_OR_SHA=<released CLI version or commit>
+REGISTRY_VERSION_OR_SHA=<installed registry version or commit>
+PLAN_PATH=<absolute compact-v2 plan path>
+PLAN_DIGEST=<admission output>
+EXECUTION_DIGEST=<admission output>
+EVIDENCE_DIR=<absolute durable evidence directory>
+```
+
 1. Create a scratch repository and isolated `HOME`, `AWM_HOME`, and `cwd`;
-   use the exact released CLI and registry pair recorded by the issue. Do not
+   use the exact `CLI_VERSION_OR_SHA` / `REGISTRY_VERSION_OR_SHA` pair above. Do not
    alter global policy, registries, or capability files. Admit a compact v2
    plan with an approved policy and a current capability
-   receipt. Record the plan and execution digests shown by admission.
+   receipt. Record `PLAN_DIGEST`, `EXECUTION_DIGEST`, request IDs, attempt IDs,
+   routing report, and gate JSON beneath `EVIDENCE_DIR`.
 2. Start the supervised cycle and submit `job routing-reserve` with the active
    generation token, obligation, lineage, routing envelope, and reproducible
    fingerprint. The supervisor must durably acknowledge the reservation before
@@ -28,6 +40,8 @@ paid provider probe and it never records prompts, provider output, or secrets.
    different fingerprint. Both must be rejected by the supervised reducer and
    must leave durable evidence of the rejected request.
 
+Mark each target `VERIFIED` only after all numbered steps and evidence files
+exist. Otherwise mark it `UNTESTED`; never infer it from a policy or renderer.
 For a v1 plan, do not use lineage routing: its legacy admission and gate path
 remain unchanged. Claude availability is UNTESTED unless this exact procedure
 is completed there; every uncertified target remains blocked/degraded. On exit,

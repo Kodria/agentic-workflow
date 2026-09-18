@@ -6,6 +6,42 @@ New to AWM? Start with [installation](installation.md), [configuration](configur
 and [project setup](project-setup.md). This page is the exhaustive command surface;
 the [runbook](runbook.md) covers ongoing operations.
 
+## Compact v2 routing and custody
+
+`compact-slices/v1` remains valid and has no routing requirement unless an
+operator explicitly opts in. `compact-slices/v2` adds only the per-slice
+implementer profile; it never embeds a provider or model. Routing is admitted
+only with an approved policy and a current native capability receipt.
+
+```
+awm model-policy contract --json
+awm model-policy approve --file <policy.json> --scope user|project --expected-digest <sha> --json
+awm model-policy capabilities approve --file <receipt.json> --expected-digest <sha> --json
+awm model-policy status --provider <target> --runtime-kind <kind> --runtime-version <version> --account-scope-digest <sha> --json
+```
+
+Policy approval is not a native capability probe. Receipt approval is an owner
+attestation; stale, absent, or mismatched facts block routing.
+
+```
+awm plan resolve <plan> --provider <target> --runtime-kind <kind> --runtime-version <version> --account-scope-digest <sha> --role <role> [--slice <id>] [--opt-in-v1] [--lineage <id>] [--cwd <path>] --json
+```
+
+Local implementer/specification/code-quality roles require a valid slice;
+global roles reject one. With `--lineage`, this is read-only: it returns an
+effective envelope and a custody handoff, not a dispatch.
+
+```
+awm job routing-reserve --generation <token> --obligation <id> --lineage <id> --envelope-file <file> --fingerprint <sha> [--cwd <root>] --json
+awm job routing-observe --generation <token> --attempt <id> --native-agent-id <id> --observation-file <file> [--cwd <root>] --json
+awm job routing-report --json
+```
+
+The supervisor is the sole journal writer. Reserve only emits a durable
+request; wait for its applied acknowledgement before native action. Envelope
+and observation files must be bounded non-symlink JSON files with no duplicate
+keys. `routing-report` is read-only and exposes aggregate counts only.
+
 ## Concepts used across commands
 
 - **Agent target** (`-a, --agent`): one of `claude-code`, `codex`, `opencode`, `cursor`, `copilot`, or `antigravity`. It determines where artifacts install and how context is delivered. See [configuration](configuration.md) for provider capabilities, defaults, and coexistence.
