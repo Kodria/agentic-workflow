@@ -1204,11 +1204,16 @@ napi_value WriteProjectTransaction(napi_env env, napi_callback_info info) {
     publish_result = PublishNoReplace(staged, parent.handle, parent.basename);
   }
   if (publish_result != PublishResult::kPublished && !DiscardStagingFile(staged)) publish_result = PublishResult::kFailed;
+  // Windows does not support FlushFileBuffers on a directory handle. This is
+  // the same narrowly documented capability gap as fsyncDirSync: only the
+  // known ACCESS_DENIED result degrades after an already flushed file publish;
+  // every other parent-flush failure remains a durable-write failure.
   const bool directory_sync_failed = publish_result == PublishResult::kPublished
 #ifdef AWM_SECURE_FS_TESTING
-      && (force_directory_fsync_failure_for_tests || FlushFileBuffers(parent.handle) == 0);
+      && (force_directory_fsync_failure_for_tests
+          || (FlushFileBuffers(parent.handle) == 0 && GetLastError() != ERROR_ACCESS_DENIED));
 #else
-      && FlushFileBuffers(parent.handle) == 0;
+      && FlushFileBuffers(parent.handle) == 0 && GetLastError() != ERROR_ACCESS_DENIED;
 #endif
   CloseHandle(staged);
   if (original != INVALID_HANDLE_VALUE) CloseHandle(original);

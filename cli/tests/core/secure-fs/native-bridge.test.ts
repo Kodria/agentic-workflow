@@ -225,8 +225,9 @@ describe('native secure-fs durable publication source contract', () => {
         expect(withoutWriteSync).not.toMatch(/fsync\(parent\) == 0;[\s\S]{0,180}secure-fs durable directory sync failed/);
     });
 
-    it('requires the Windows publish path to report parent flush failure', () => {
-        expect(source()).toMatch(/directory_sync_failed[\s\S]{0,240}FlushFileBuffers\(parent\.handle\)[\s\S]{0,240}if \(directory_sync_failed\).*secure-fs durable directory sync failed/);
+    it('degrades only the unsupported Windows directory flush and retains all other durable failures', () => {
+        expect(source()).toMatch(/FlushFileBuffers\(parent\.handle\) == 0 && GetLastError\(\) != ERROR_ACCESS_DENIED/);
+        expect(source()).toMatch(/if \(directory_sync_failed\).*secure-fs durable directory sync failed/);
     });
 
     it('does not clean a staging name already consumed by a fenced POSIX rename', () => {
@@ -900,6 +901,7 @@ windowsOnly('native secure-fs Windows handle fixtures', () => {
                     fs.symlinkSync(workerData.outside, workerData.trusted, 'junction');
                     Atomics.add(state, 1, 1);
                     Atomics.notify(state, 1);
+                    parentPort.postMessage('ready');
                     Atomics.wait(state, 0, 0, 1);
                     fs.rmSync(workerData.trusted);
                     fs.renameSync(workerData.parked, workerData.trusted);
@@ -911,14 +913,26 @@ windowsOnly('native secure-fs Windows handle fixtures', () => {
             restore();
             parentPort.postMessage('done');
             `, { eval: true, workerData: { shared, trusted, parked, outside } });
-        const done = new Promise<void>((resolve, reject) => {
-            worker.once('message', () => resolve());
-            worker.once('error', reject);
+        let resolveReady: () => void;
+        let rejectReady: (error: Error) => void;
+        let resolveDone: () => void;
+        let rejectDone: (error: Error) => void;
+        const ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+        const done = new Promise<void>((resolve, reject) => { resolveDone = resolve; rejectDone = reject; });
+        const readyTimeout = setTimeout(() => rejectReady(new Error('junction swap worker did not become ready')), 5_000);
+        worker.on('message', message => {
+            if (message === 'ready') { clearTimeout(readyTimeout); resolveReady(); }
+            if (message === 'done') resolveDone();
+        });
+        worker.once('error', error => {
+            clearTimeout(readyTimeout);
+            const failure = error instanceof Error ? error : new Error('junction swap worker failed');
+            rejectReady(failure); rejectDone(failure);
         });
 
         let published = 0;
         try {
-            Atomics.wait(state, 1, 0, 5_000);
+            await ready;
             expect(Atomics.load(state, 1)).toBeGreaterThan(0);
             for (let attempt = 0; attempt < 500; attempt += 1) {
                 try {
