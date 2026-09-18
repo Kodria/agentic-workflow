@@ -58,5 +58,5 @@ export function routingReport(state: JournalState): { schema: 'routing-report/v1
         for (const reason of attempt.envelope.unavailableEvidence) unavailable[reason] = (unavailable[reason] ?? 0) + 1;
         if (attempt.verdict !== undefined) verdicts[attempt.verdict] = (verdicts[attempt.verdict] ?? 0) + 1;
     }
-    return { schema: 'routing-report/v1', attempts: attempts.length, plannedByRole, actualByRole, byState, retries: attempts.filter((attempt) => attempt.attempt > 1).length, fallbacks: attempts.filter((attempt) => attempt.envelope.outcome === 'degraded').length, unavailable, verdicts, administrativeRepairs: attempts.filter((attempt) => attempt.reasonCode !== undefined && attempt.envelope.unavailableEvidence.length === 0).length };
+    return { schema: 'routing-report/v1', attempts: attempts.length, plannedByRole, actualByRole, byState, retries: attempts.filter((attempt) => attempt.attempt > 1).length, fallbacks: attempts.filter((attempt) => attempt.envelope.outcome === 'degraded').length, unavailable, verdicts, administrativeRepairs: attempts.filter((attempt) => attempt.administrativeRepair === true).length };
 }
