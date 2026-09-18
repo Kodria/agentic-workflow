@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { fsyncDirSync } from '../../../src/core/atomic-file';
 import { canonicalPolicyDigest } from '../../../src/core/model-policy/canonical';
 import { approvePolicyWithBoundary, readEffectivePolicy, type ApprovePolicyInput, type PolicyStoreBoundary } from '../../../src/core/model-policy/store';
 import { userPolicyPath } from '../../../src/core/model-policy/paths';
@@ -33,8 +34,12 @@ function createIdentityFencedBoundary(): PolicyStoreBoundary {
         try {
             fs.writeFileSync(fd, content); fs.fsyncSync(fd); fs.closeSync(fd);
             fs.renameSync(temporary, file);
-            const parent = fs.openSync(path.dirname(file), 'r');
-            try { fs.fsyncSync(parent); } finally { fs.closeSync(parent); }
+            // La durabilidad de la ENTRADA publicada se pide por el unico helper
+            // que define esa politica (atomic-file.fsyncDirSync): fail-closed en
+            // POSIX y degradado SOLO ante el gap conocido de win32 (EPERM al
+            // fsync-ear un fd de directorio, capacidad que el SO no expone).
+            // Reimplementarla aca la hacia divergir y rompia la matriz Windows.
+            fsyncDirSync(path.dirname(file));
         }
         finally { try { fs.rmSync(temporary, { force: true }); } catch { /* preserve transaction result */ } }
     },
