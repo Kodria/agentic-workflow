@@ -33,6 +33,8 @@ export interface PlanCommandDependencies {
     collectMigrationFacts?: (planPath: string, cwd: string, issueLinks: string[]) => MigrationFactsReport;
     readEffectivePolicy?: typeof readEffectivePolicy;
     readCapabilities?: typeof readCapabilities;
+    /** Test seam only; production defaults to the real clock. */
+    routingNow?: () => Date;
 }
 
 function journalObservation(cwd: string): { journalState: ReturnType<typeof readJournal>['state']; journalCorrupt: boolean } {
@@ -244,7 +246,7 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
                 process.exitCode = 2;
                 return;
             }
-            const readRouting = (): AdmissionInput['routing'] => { if (!options.runtimeKind || !options.runtimeVersion || !options.accountScopeDigest) return undefined; const runtime = validateRuntimeKey({ target: options.provider, kind: options.runtimeKind, version: options.runtimeVersion, accountScopeDigest: options.accountScopeDigest }); const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(options.cwd); const capabilities = (deps.readCapabilities ?? readCapabilities)(runtime, new Date()); return { runtime, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined }; };
+            const readRouting = (): AdmissionInput['routing'] => { if (!options.runtimeKind || !options.runtimeVersion || !options.accountScopeDigest) return undefined; const runtime = validateRuntimeKey({ target: options.provider, kind: options.runtimeKind, version: options.runtimeVersion, accountScopeDigest: options.accountScopeDigest }); const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(options.cwd); const at = deps.routingNow?.() ?? new Date(); if (!(at instanceof Date) || !Number.isFinite(at.getTime())) throw new Error('routingNow must return a finite Date'); const capabilities = (deps.readCapabilities ?? readCapabilities)(runtime, at); return { runtime, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined, now: at }; };
             const report = await admitRegistryPlan({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true },
                 { admitPlan: admission, listRegistries: registryInventory, checkCurrentness: currentnessCheck, runSensors: sensorRun, readRouting });
             process.stdout.write(admissionOutput(report, options.json === true));
