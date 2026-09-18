@@ -18,6 +18,9 @@ export interface GateResult { pass: boolean; reasons: GateReason[]; }
 export type FingerprintNow = (argv: string[], paths: string[], cwd: string) => string | null;
 
 const LIVE = ['received', 'spawn-intent', 'claimed', 'running', 'cancel-requested'];
+function sameSelection(left: { selector: { kind: string; id: string }; effort: { kind: string; value?: string } }, right: { selector: { kind: string; id: string }; effort: { kind: string; value?: string } }): boolean {
+    return left.selector.kind === right.selector.kind && left.selector.id === right.selector.id && left.effort.kind === right.effort.kind && left.effort.value === right.effort.value;
+}
 
 /** Alcance de la evaluacion (C6): el gate global (computeGate) exige QA +
  *  interlock de ambito de ciclo y considera TODAS las tareas del journal; el
@@ -150,7 +153,12 @@ function evaluateEvidence(state: JournalState, fingerprintNow: FingerprintNow, s
     for (const v of state.verdicts) {
         if (v.routingAttemptId !== undefined) {
             const attempt = state.routingAttempts?.find((candidate) => candidate.id === v.routingAttemptId);
-            if (attempt === undefined || !['active', 'complete'].includes(attempt.state) || !attempt.nativeAgentId || attempt.obligationId !== v.obligationId || attempt.fingerprint !== v.fingerprint) {
+            const binding = state.planBinding;
+            const bound = binding !== undefined && binding.digest === attempt?.envelope.planDigest && binding.executionDigest === attempt?.envelope.executionDigest;
+            const observed = attempt?.observed;
+            const selectionMatches = attempt !== undefined && observed !== undefined && sameSelection(observed, attempt.envelope.resolved);
+            const nativeObservationValid = attempt?.envelope.outcome === 'native' ? selectionMatches : (selectionMatches || (attempt?.envelope.unavailableEvidence.length ?? 0) > 0 && Boolean(attempt?.reasonCode));
+            if (attempt === undefined || !['active', 'complete'].includes(attempt.state) || !attempt.nativeAgentId || attempt.obligationId !== v.obligationId || attempt.fingerprint !== v.fingerprint || !bound || !nativeObservationValid) {
                 reasons.push({ category: 'routing-evidence', detail: `verdict routed ${v.id} no tiene evidencia de intento observado, vigente y ligado` });
             }
         }

@@ -65,8 +65,9 @@ describe('gate', () => {
         s.routingAttempts = [{
             schema: 'routing-attempt/v1', id: 'route-1', obligationId: 'o-spec', lineageId: 'lineage-1', attempt: 1,
             envelope: { schema: 'routing-envelope/v1', runtime: { target: 'codex', kind: 'native', version: '1', accountScopeDigest: '0'.repeat(64) }, role: 'specification-reviewer', requestedProfile: 'full', effectiveProfile: 'full', resolved: { selector: { kind: 'model', id: 'm' }, effort: { kind: 'explicit', value: 'high' } }, outcome: 'native', unavailableEvidence: [], policyDigest: 'a'.repeat(64), capabilityDigest: 'b'.repeat(64), planDigest: 'c'.repeat(64), executionDigest: 'd'.repeat(64) },
-            envelopeDigest: 'a'.repeat(64), fingerprint: 'fp', state: 'active', nativeAgentId: 'native-1',
+            envelopeDigest: 'a'.repeat(64), fingerprint: 'fp', state: 'active', nativeAgentId: 'native-1', observed: { selector: { kind: 'model', id: 'm' }, effort: { kind: 'explicit', value: 'high' } },
         }];
+        s.planBinding = { path: 'plan.md', digest: 'c'.repeat(64), executionDigest: 'd'.repeat(64), executionIdentitySchema: 'awm-plan-execution/v1', schema: 'compact-slices/v2', executionMode: 'desatendido', boundAt: 'now' };
         expect(computeGate(s, false, fpCurrent).pass).toBe(true);
         s.routingAttempts![0].fingerprint = 'different';
         gate = computeGate(s, false, fpCurrent);

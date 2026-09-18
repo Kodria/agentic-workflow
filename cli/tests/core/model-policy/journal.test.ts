@@ -19,6 +19,6 @@ describe('routing journal helpers', () => {
     });
     it('reports routing attempts without envelope bodies or native identities', () => {
         const state = reserveRoutingAttempt(emptyState('main'), { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope, fingerprint: 'e'.repeat(64) }, '2026-09-17T00:00:00.000Z').state;
-        expect(routingReport(state)).toEqual({ schema: 'routing-report/v1', attempts: 1, byRole: { implementer: 1 }, byState: { reserved: 1 }, retries: 0 });
+        expect(routingReport(state)).toEqual({ schema: 'routing-report/v1', attempts: 1, plannedByRole: { implementer: 1 }, actualByRole: {}, byState: { reserved: 1 }, retries: 0, fallbacks: 0, unavailable: {}, administrativeRepairs: 0 });
     });
 });
