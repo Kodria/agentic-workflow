@@ -1,3 +1,8 @@
+## v9.9.0 - 2026-09-18
+
+### Features
+- provider-neutral model routing (R2-B) (#154)
+
 ## v9.8.0 - 2026-09-16
 
 ### Features
