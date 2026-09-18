@@ -161,8 +161,10 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
             const observed = journalObservation(cwd);
             const binding = observed.journalState?.planBinding;
             const attempts = observed.journalState?.routingAttempts?.filter((attempt) => attempt.lineageId === options.lineage) ?? [];
+            const lineage = observed.journalState?.implementationLineages?.find((candidate) => candidate.id === options.lineage);
             const bound = !observed.journalCorrupt && binding?.digest === report.planDigest && binding.executionDigest === report.executionDigest;
-            if (!bound || attempts.some((attempt) => attempt.envelope.planDigest !== report.planDigest || attempt.envelope.executionDigest !== report.executionDigest || attempt.state === 'unknown')) {
+            const lineageMatches = lineage !== undefined && lineage.sliceId === options.slice && lineage.planDigest === report.planDigest && lineage.executionDigest === report.executionDigest && attempts.every((attempt) => attempt.obligationId === lineage.obligationId && attempt.envelope.sliceId === options.slice);
+            if (!bound || !lineageMatches || attempts.length > 3 || attempts.some((attempt) => attempt.envelope.planDigest !== report.planDigest || attempt.envelope.executionDigest !== report.executionDigest || ['unknown', 'reserved', 'active'].includes(attempt.state))) {
                 process.stdout.write(options.json ? `${JSON.stringify({ state: 'blocked', diagnostics: [{ code: 'ROUTING_LINEAGE_UNBOUND', message: 'Lineage routing requires a current journal binding and non-unknown matching attempts.' }] })}\n` : 'Plan routing: blocked\n'); process.exitCode = 2; return;
             }
         }

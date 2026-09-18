@@ -174,7 +174,7 @@ describe('aplicacion transaccional de requests', () => {
     });
 
     test('routing reserve/observe es supervisado, idempotente y una generacion vieja no muta intentos', () => {
-        const envelope = { schema: 'routing-envelope/v1', runtime: { target: 'codex', kind: 'native', version: '1', accountScopeDigest: '0'.repeat(64) }, role: 'implementer', requestedProfile: 'mechanical', effectiveProfile: 'mechanical', resolved: { selector: { kind: 'model', id: 'm' }, effort: { kind: 'explicit', value: 'medium' } }, outcome: 'native', unavailableEvidence: [], policyDigest: 'a'.repeat(64), capabilityDigest: 'b'.repeat(64), planDigest: 'c'.repeat(64), executionDigest: 'd'.repeat(64) };
+        const envelope = { schema: 'routing-envelope/v1', runtime: { target: 'codex', kind: 'native', version: '1', accountScopeDigest: '0'.repeat(64) }, role: 'implementer', sliceId: 'S1', requestedProfile: 'mechanical', effectiveProfile: 'mechanical', resolved: { selector: { kind: 'model', id: 'm' }, effort: { kind: 'explicit', value: 'medium' } }, outcome: 'native', unavailableEvidence: [], policyDigest: 'a'.repeat(64), capabilityDigest: 'b'.repeat(64), planDigest: 'c'.repeat(64), executionDigest: 'd'.repeat(64) };
         emitRequest(repo, 'rama', { kind: 'routing-reserve', generationToken: 'g1', idempotencyKey: 'routing-1', payload: { obligationId: 'o1', lineageId: 'l1', envelope, fingerprint: 'e'.repeat(64) } });
         consumePendingRequests(repo, 'rama', 'g1');
         const attempt = readJournal(repo, 'rama').state!.routingAttempts![0];

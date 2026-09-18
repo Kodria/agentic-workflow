@@ -9,10 +9,16 @@ export function reserveRoutingAttempt(state: JournalState, input: { obligationId
     assertTimestamp(now); if (!isWellFormedState(state) || !input || typeof input.obligationId !== 'string' || input.obligationId.length === 0 || input.obligationId.length > 128 || typeof input.lineageId !== 'string' || input.lineageId.length === 0 || input.lineageId.length > 128 || !isRoutingEnvelope(input.envelope) || !/^[a-f0-9]{64}$/.test(input.fingerprint)) throw new Error('routing reservation is invalid');
     const next = clone(state); const envelopeDigest = digest(input.envelope); const existing = next.routingAttempts!.find(item => item.lineageId === input.lineageId && item.envelopeDigest === envelopeDigest && item.fingerprint === input.fingerprint && ['reserved', 'active'].includes(item.state));
     if (existing) return { state: next, attemptId: existing.id };
+    if (input.envelope.role === 'implementer' && input.envelope.sliceId === undefined) throw new Error('routing implementer requires a slice');
+    next.implementationLineages ??= [];
+    const priorLineage = next.implementationLineages.find(lineage => lineage.id === input.lineageId);
+    if (input.envelope.role === 'implementer' && priorLineage === undefined) next.implementationLineages.push({ id: input.lineageId, obligationId: input.obligationId, sliceId: input.envelope.sliceId!, planDigest: input.envelope.planDigest, executionDigest: input.envelope.executionDigest, attempts: 0 });
+    if (priorLineage !== undefined && (priorLineage.obligationId !== input.obligationId || priorLineage.planDigest !== input.envelope.planDigest || priorLineage.executionDigest !== input.envelope.executionDigest || priorLineage.sliceId !== input.envelope.sliceId)) throw new Error('routing lineage binding mismatch');
     const attempts = next.routingAttempts!.filter(item => item.lineageId === input.lineageId && item.envelope.role === 'implementer');
     if (input.envelope.role === 'implementer' && attempts.length >= 3) throw new Error('routing implementation budget exhausted');
     const attempt = attempts.length + 1; const id = `route-${crypto.createHash('sha256').update(`${input.lineageId}\0${attempt}\0${envelopeDigest}\0${input.fingerprint}`).digest('hex').slice(0, 24)}`;
     next.routingAttempts!.push({ schema: 'routing-attempt/v1', id, obligationId: input.obligationId, lineageId: input.lineageId, attempt, envelope: structuredClone(input.envelope), envelopeDigest, fingerprint: input.fingerprint, state: 'reserved' });
+    const lineage = next.implementationLineages.find(candidate => candidate.id === input.lineageId); if (lineage !== undefined) lineage.attempts = attempt;
     return { state: next, attemptId: id };
 }
 export function observeRoutingAttempt(state: JournalState, input: { attemptId: string; nativeAgentId: string; observed?: RoutingSelection; unavailableReason?: string }, now: string): JournalState {
