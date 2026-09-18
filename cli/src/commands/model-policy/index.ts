@@ -6,8 +6,8 @@ import { MAX_MAPPINGS, MAX_POLICY_BYTES, assertDigest } from '../../core/model-p
 import { approveCapabilities, readCapabilities, type ApproveCapabilitiesInput } from '../../core/model-policy/capabilities';
 
 const roles = ['implementer', 'specification-reviewer', 'code-quality-reviewer', 'final-reviewer', 'architecture', 'track-a-qa', 'track-b-qa', 'controller', 'documentation', 'retro', 'finishing'];
-const profiles = ['mechanical', 'integration', 'judgment'];
-const contract = { schema: 'routing-protocol/v1', supportedPlanSchemas: ['compact-slices/v1'], roles, profiles, limits: { maxFileBytes: MAX_POLICY_BYTES, maxMappings: MAX_MAPPINGS, maxIdentifierChars: 128, maxDiagnostics: 20, maxDiagnosticChars: 4096 } };
+const implementerProfiles = ['mechanical', 'integration', 'judgment'];
+const contract = { schema: 'routing-protocol/v1', supportedPlanSchemas: ['compact-slices/v1', 'compact-slices/v2'], roles, implementerProfiles, limits: { maxFileBytes: MAX_POLICY_BYTES, maxMappings: MAX_MAPPINGS, maxIdentifierChars: 128, maxDiagnostics: 20, maxDiagnosticChars: 4096 } };
 const protocolDigest = createHash('sha256').update(JSON.stringify(contract), 'utf8').digest('hex');
 
 export interface ModelPolicyCommandDependencies { approvePolicy?: (input: ApprovePolicyInput) => ReturnType<typeof approvePolicy>; readEffectivePolicy?: typeof readEffectivePolicy; approveCapabilities?: (input: ApproveCapabilitiesInput) => ReturnType<typeof approveCapabilities>; readCapabilities?: typeof readCapabilities; }

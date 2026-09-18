@@ -9,7 +9,12 @@ describe('model-policy command', () => {
     it('emits a read-only protocol contract as JSON', async () => {
         const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined }); registerModelPolicyCommand(program);
         await program.parseAsync(['node', 'awm', 'model-policy', 'contract', '--json']);
-        expect(JSON.parse(String(out.mock.calls[0][0]))).toMatchObject({ schema: 'routing-protocol/v1', supportedPlanSchemas: ['compact-slices/v1'], limits: { maxFileBytes: 262144 } });
+        expect(JSON.parse(String(out.mock.calls[0][0]))).toMatchObject({
+            schema: 'routing-protocol/v1',
+            supportedPlanSchemas: ['compact-slices/v1', 'compact-slices/v2'],
+            implementerProfiles: ['mechanical', 'integration', 'judgment'],
+            limits: { maxFileBytes: 262144 },
+        });
     });
     it('rejects missing values instead of silently accepting an incomplete approval', async () => {
         const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined }); registerModelPolicyCommand(program);
