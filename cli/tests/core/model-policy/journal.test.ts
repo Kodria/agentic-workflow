@@ -14,7 +14,7 @@ describe('routing journal helpers', () => {
     });
     it('rejects a fourth implementer attempt in one lineage', () => {
         let state = emptyState('main');
-        for (const [index, profile] of (['mechanical', 'integration', 'judgment'] as const).entries()) { state = reserveRoutingAttempt(state, { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: { ...envelope, effectiveProfile: profile }, fingerprint: `${'a'.repeat(63)}${index}` }, '2026-09-17T00:00:00.000Z').state; state.routingAttempts![state.routingAttempts!.length - 1].state = 'blocked'; }
+        for (const [index, profile] of (['mechanical', 'integration', 'judgment'] as const).entries()) { state = reserveRoutingAttempt(state, { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: { ...envelope, effectiveProfile: profile }, fingerprint: `${'a'.repeat(63)}${index}` }, '2026-09-17T00:00:00.000Z').state; state.routingAttempts![state.routingAttempts!.length - 1].state = 'blocked'; state.routingAttempts![state.routingAttempts!.length - 1].verdict = 'fail'; }
         expect(() => reserveRoutingAttempt(state, { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope, fingerprint: 'f'.repeat(64) }, '2026-09-17T00:00:00.000Z')).toThrow(/budget/i);
     });
     it('reports routing attempts without envelope bodies or native identities', () => {
@@ -25,11 +25,11 @@ describe('routing journal helpers', () => {
         let state = emptyState('main');
         expect(resolveLineageEscalation(state, 'l1', 'mechanical')).toEqual({ profile: 'mechanical', effort: 'medium' });
         state = reserveRoutingAttempt(state, { obligationId: 'impl:S1', lineageId: 'l1', envelope, fingerprint: '1'.repeat(64) }, '2026-09-17T00:00:00.000Z').state;
-        state.routingAttempts![0].state = 'blocked';
+        state.routingAttempts![0].state = 'blocked'; state.routingAttempts![0].verdict = 'fail';
         expect(resolveLineageEscalation(state, 'l1', 'mechanical')).toEqual({ profile: 'integration', effort: 'medium' });
-        state.routingAttempts!.push({ ...state.routingAttempts![0], id: 'route-2', attempt: 2, envelope: { ...envelope, effectiveProfile: 'integration' }, state: 'blocked' });
+        state.routingAttempts!.push({ ...state.routingAttempts![0], id: 'route-2', attempt: 2, envelope: { ...envelope, effectiveProfile: 'integration' }, state: 'blocked', verdict: 'fail' });
         expect(resolveLineageEscalation(state, 'l1', 'mechanical')).toEqual({ profile: 'judgment', effort: 'medium' });
-        state.routingAttempts!.push({ ...state.routingAttempts![0], id: 'route-3', attempt: 3, envelope: { ...envelope, effectiveProfile: 'judgment', resolved: { selector: { kind: 'model', id: 'm' }, effort: { kind: 'explicit', value: 'medium' } } }, state: 'blocked' });
+        state.routingAttempts!.push({ ...state.routingAttempts![0], id: 'route-3', attempt: 3, envelope: { ...envelope, effectiveProfile: 'judgment', resolved: { selector: { kind: 'model', id: 'm' }, effort: { kind: 'explicit', value: 'medium' } } }, state: 'blocked', verdict: 'fail' });
         expect(resolveLineageEscalation(state, 'l1', 'mechanical')).toEqual({ profile: 'judgment', effort: 'high' });
         state.routingAttempts![2].envelope = { ...state.routingAttempts![2].envelope, resolved: { selector: { kind: 'model', id: 'm' }, effort: { kind: 'explicit', value: 'high' } } };
         expect(() => resolveLineageEscalation(state, 'l1', 'mechanical')).toThrow(/exhausted/i);

@@ -40,6 +40,7 @@ export function resolveLineageEscalation(state: JournalState, lineageId: string,
     if (attempts.some((attempt) => ['reserved', 'active', 'unknown'].includes(attempt.state))) throw new Error('routing lineage has a live or unknown attempt');
     if (attempts.length === 0) return { profile: initial, effort: 'medium' };
     const last = attempts[attempts.length - 1];
+    if (last.verdict !== 'fail') throw new Error('routing lineage advances only after a terminal failed verdict');
     if (last.envelope.effectiveProfile === 'mechanical') return { profile: 'integration', effort: 'medium' };
     if (last.envelope.effectiveProfile === 'integration') return { profile: 'judgment', effort: 'medium' };
     if (last.envelope.effectiveProfile === 'judgment' && last.envelope.resolved.effort.kind === 'explicit' && last.envelope.resolved.effort.value === 'medium') return { profile: 'judgment', effort: 'high' };
