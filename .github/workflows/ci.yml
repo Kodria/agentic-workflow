@@ -67,6 +67,18 @@ jobs:
         run: >-
           node -e "const fs=require('fs'); const path=require('path'); const file=path.join('prebuilds', '${{ matrix.target }}', 'secure_fs.node'); if (!fs.existsSync(file)) throw new Error('native build artifact is missing: ' + file);"
 
+      # Fault-injection coverage loads a separate addon with test-only exports.
+      # Build it on every native matrix host, but keep it in native/build so
+      # only the production secure_fs artifact is uploaded or packaged.
+      - name: Build test-only native addon
+        working-directory: cli
+        run: npm run native:test-build
+
+      - name: Verify test-only native addon
+        working-directory: cli
+        run: >-
+          node -e "const fs=require('fs'); const path=require('path'); const file=path.join('native/build/Release', 'secure_fs_test.node'); if (!fs.existsSync(file)) throw new Error('test-only native addon is missing: ' + file);"
+
       - name: Upload native secure-fs artifact
         uses: actions/upload-artifact@v4
         with:

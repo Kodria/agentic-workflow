@@ -68,6 +68,18 @@ struct WriteOptions {
 };
 
 void Throw(napi_env env, const char* message) { napi_throw_error(env, nullptr, message); }
+#ifdef AWM_SECURE_FS_TESTING
+bool force_directory_fsync_failure_for_tests = false;
+
+napi_value SetDirectoryFsyncFailureForTests(napi_env env, napi_callback_info info) {
+  size_t argc = 1; napi_value args[1];
+  if (napi_get_cb_info(env, info, &argc, args, nullptr, nullptr) != napi_ok || argc != 1) { Throw(env, "setDirectoryFsyncFailureForTests requires boolean"); return nullptr; }
+  bool enabled = false;
+  if (napi_get_value_bool(env, args[0], &enabled) != napi_ok) { Throw(env, "setDirectoryFsyncFailureForTests requires boolean"); return nullptr; }
+  force_directory_fsync_failure_for_tests = enabled;
+  napi_value undefined; napi_get_undefined(env, &undefined); return undefined;
+}
+#endif
 void ThrowDestinationExists(napi_env env) {
   napi_throw_error(env, kDestinationExistsErrorCode,
       "secure-fs no-replace destination already exists");
@@ -1135,7 +1147,11 @@ napi_value RemoveObservedProjectFile(napi_env env, napi_callback_info info) {
     Throw(env, "secure-fs identity-fenced removal failed");
     return nullptr;
   }
-  fsync(parent);
+  if (fsync(parent) != 0) {
+    close(parent);
+    Throw(env, "secure-fs durable directory sync failed");
+    return nullptr;
+  }
   close(parent);
 #endif
   napi_value undefined;
@@ -1188,9 +1204,21 @@ napi_value WriteProjectTransaction(napi_env env, napi_callback_info info) {
     publish_result = PublishNoReplace(staged, parent.handle, parent.basename);
   }
   if (publish_result != PublishResult::kPublished && !DiscardStagingFile(staged)) publish_result = PublishResult::kFailed;
+  // Windows does not support FlushFileBuffers on a directory handle. This is
+  // the same narrowly documented capability gap as fsyncDirSync: only the
+  // known ACCESS_DENIED result degrades after an already flushed file publish;
+  // every other parent-flush failure remains a durable-write failure.
+  const bool directory_sync_failed = publish_result == PublishResult::kPublished
+#ifdef AWM_SECURE_FS_TESTING
+      && (force_directory_fsync_failure_for_tests
+          || (FlushFileBuffers(parent.handle) == 0 && GetLastError() != ERROR_ACCESS_DENIED));
+#else
+      && FlushFileBuffers(parent.handle) == 0 && GetLastError() != ERROR_ACCESS_DENIED;
+#endif
   CloseHandle(staged);
   if (original != INVALID_HANDLE_VALUE) CloseHandle(original);
   CloseWindowsParent(&parent);
+  if (directory_sync_failed) { Throw(env, "secure-fs durable directory sync failed"); return nullptr; }
   if (publish_result == PublishResult::kApiUnavailable) { Throw(env, "secure-fs Windows FileRenameInfoEx is unavailable"); return nullptr; }
   if (options.replace && publish_result != PublishResult::kPublished) {
     if (replacement_error != ERROR_SUCCESS) {
@@ -1276,7 +1304,17 @@ napi_value WriteProjectTransaction(napi_env env, napi_callback_info info) {
     else Throw(env, "secure-fs transaction failed");
     return nullptr;
   }
-  unlinkat(parent, temporary.c_str(), 0); fsync(parent); close(parent); napi_value undefined; napi_get_undefined(env, &undefined); return undefined;
+  // renameat consumes the staging name for a replacement. Only create/no-replace
+  // publication leaves a staging sibling that must be unlinked durably.
+  const bool cleaned = options.replace || unlinkat(parent, temporary.c_str(), 0) == 0;
+  const bool durable =
+#ifdef AWM_SECURE_FS_TESTING
+      !force_directory_fsync_failure_for_tests &&
+#endif
+      fsync(parent) == 0;
+  close(parent);
+  if (!cleaned || !durable) { Throw(env, "secure-fs durable directory sync failed"); return nullptr; }
+  napi_value undefined; napi_get_undefined(env, &undefined); return undefined;
 #endif
 }
 
@@ -1289,6 +1327,9 @@ NAPI_MODULE_INIT() {
       {"readRegularFile", nullptr, ReadRegularFile, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"writeProjectTransaction", nullptr, WriteProjectTransaction, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"removeObservedProjectFile", nullptr, RemoveObservedProjectFile, nullptr, nullptr, nullptr, napi_default, nullptr},
+#ifdef AWM_SECURE_FS_TESTING
+      {"setDirectoryFsyncFailureForTests", nullptr, SetDirectoryFsyncFailureForTests, nullptr, nullptr, nullptr, napi_default, nullptr},
+#endif
   };
   napi_define_properties(env, exports, sizeof(properties) / sizeof(properties[0]), properties);
   return exports;

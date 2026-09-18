@@ -5,14 +5,14 @@ import type { PlanDiagnostic, PlanValidationReport } from '../plan/types';
 import type { RunOutput } from '../../commands/sensors/types';
 import type { JournalState } from '../journal/types';
 import { bindingPlanPath } from '../journal/paths';
+import type { CapabilityStatus, ProviderExecutionCapabilities } from '../model-policy/capability-types';
+type ImplementerProfile = 'mechanical' | 'integration' | 'judgment';
+import type { ApprovedPolicy, CapabilityReceipt, RuntimeKey } from '../model-policy/types';
+import { resolveSelection } from '../model-policy/resolve';
+import { validateRuntimeKey } from '../model-policy/capabilities';
 
 export type ExecutionMode = 'interactivo' | 'desatendido';
-export type CapabilityStatus = 'supported' | 'unsupported' | 'unverified';
-export type ProviderExecutionCapabilities = {
-    artifactDelivery: CapabilityStatus; interactiveExecution: CapabilityStatus; unattendedController: CapabilityStatus;
-    nativeSubagents: CapabilityStatus; modelOverride: CapabilityStatus; effortOverride: CapabilityStatus;
-    observedModelEvidence: CapabilityStatus; durableResume: CapabilityStatus;
-};
+export type { CapabilityStatus, ProviderExecutionCapabilities } from '../model-policy/capability-types';
 export type ProviderExecutionResolution = {
     outcome: 'native' | 'degraded' | 'blocked'; provider: AgentTarget; capabilities: ProviderExecutionCapabilities;
     evidenceVersion: 'r1-v1'; diagnostics: PlanDiagnostic[];
@@ -26,6 +26,13 @@ export type AdmissionReport = {
     executionMode?: ExecutionMode; provider?: AgentTarget; journal: 'not-required' | 'current' | 'missing' | 'corrupt' | 'stale';
     currentness: 'current' | 'stale' | 'unverifiable' | 'not-checked'; sensors: 'pass' | 'fail' | 'not-certified' | 'not-required';
     capabilityResolution?: ProviderExecutionResolution; forecast?: DispatchForecast; diagnostics: PlanDiagnostic[];
+    routingForecast?: RoutingForecast;
+};
+export type RoutingForecast = {
+    kind: 'routing-v1'; slices: number; implementerProfiles: Record<ImplementerProfile, number>;
+    roles: Record<'specification-reviewer' | 'code-quality-reviewer' | 'final-reviewer' | 'track-a-qa' | 'documentation' | 'retro' | 'finishing', number>;
+    trackB: { state: 'known'; count: number } | { state: 'unavailable'; lowerBound: 1 };
+    controller: { state: 'known'; count: number } | { state: 'unavailable'; lowerBound: 0 };
 };
 export type AdmissionInput = {
     plan: PlanValidationReport; provider: string; cwd: string; enabledAgents?: readonly AgentTarget[];
@@ -42,6 +49,10 @@ export type AdmissionInput = {
     journalCorrupt?: boolean;
     /** Repository-relative path used to make the binding identity exact. */
     planPath?: string;
+    /** Explicit routing evidence; absent facts block v2 only after existing gates. */
+    routing?: { policy?: ApprovedPolicy; capabilities?: CapabilityReceipt; runtime?: RuntimeKey; now?: Date; qaLens?: readonly string[]; controllerCount?: number };
+    /** Internal deferred reader; invoked only after all ordinary admission gates. */
+    routingReader?: () => AdmissionInput['routing'];
 };
 
 const UNKNOWN: ProviderExecutionCapabilities = {
@@ -71,6 +82,14 @@ function blocked(input: AdmissionInput, diagnostics: PlanDiagnostic[], extras: P
 function forecast(slices: number): DispatchForecast {
     const roles = { implementer: slices, 'specification-reviewer': slices, 'code-quality-reviewer': slices, 'final-reviewer': 1, 'track-a-qa': 1, 'track-b-qa': 1, documentation: 1, retro: 1, finishing: 1 };
     return { kind: 'topology', slices, roles, total: Object.values(roles).reduce((sum, count) => sum + count, 0) };
+}
+function routingForecast(plan: Extract<PlanValidationReport, { state: 'valid' }>, routing: NonNullable<AdmissionInput['routing']>): RoutingForecast {
+    const profiles: Record<ImplementerProfile, number> = { mechanical: 0, integration: 0, judgment: 0 };
+    for (const slice of plan.manifest.slices) profiles[(slice as unknown as { implementerProfile: ImplementerProfile }).implementerProfile] += 1;
+    const qa = routing.qaLens;
+    if (qa !== undefined && (!Array.isArray(qa) || qa.length > 64 || new Set(qa).size !== qa.length || qa.some(id => typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(id)))) throw new Error('routing qaLens must be unique validated lens ids');
+    if (routing.controllerCount !== undefined && (!Number.isSafeInteger(routing.controllerCount) || routing.controllerCount < 0 || routing.controllerCount > 1)) throw new Error('routing controllerCount must be 0 or 1');
+    return { kind: 'routing-v1', slices: plan.manifest.slices.length, implementerProfiles: profiles, roles: { 'specification-reviewer': plan.manifest.slices.length, 'code-quality-reviewer': plan.manifest.slices.length, 'final-reviewer': 1, 'track-a-qa': 1, documentation: 1, retro: 1, finishing: 1 }, trackB: qa === undefined ? { state: 'unavailable', lowerBound: 1 } : { state: 'known', count: qa.length }, controller: routing.controllerCount === undefined ? { state: 'unavailable', lowerBound: 0 } : { state: 'known', count: routing.controllerCount } };
 }
 function currentness(report: CurrentnessReport, consumedRegistryComponents: readonly string[]): { status: AdmissionReport['currentness']; diagnostics: PlanDiagnostic[] } {
     const consumed = new Set(['cli', ...consumedRegistryComponents]);
@@ -119,6 +138,15 @@ function validForecast(value: unknown): value is DispatchForecast {
         && roles.every(role => (record.roles as Record<string, unknown>)[role] === topology[role as keyof typeof topology])
         && record.total === Object.values(topology).reduce((sum, count) => sum + count, 0);
 }
+function validRoutingForecast(value: unknown): value is RoutingForecast {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const record = value as Record<string, unknown>; const profiles = record.implementerProfiles as Record<string, unknown>; const roles = record.roles as Record<string, unknown>;
+    const count = (item: unknown): boolean => Number.isSafeInteger(item) && (item as number) >= 0;
+    const roleKeys = ['specification-reviewer', 'code-quality-reviewer', 'final-reviewer', 'track-a-qa', 'documentation', 'retro', 'finishing'];
+    return record.kind === 'routing-v1' && Object.keys(record).length === 6 && count(record.slices) && !!profiles && Object.keys(profiles).length === 3 && ['mechanical', 'integration', 'judgment'].every(key => count(profiles[key])) && (Object.values(profiles) as unknown[]).reduce<number>((sum, profile) => sum + (profile as number), 0) === record.slices && !!roles && typeof roles === 'object' && Object.keys(roles).length === roleKeys.length && roleKeys.every(key => key in roles) && roles['specification-reviewer'] === record.slices && roles['code-quality-reviewer'] === record.slices && ['final-reviewer', 'track-a-qa', 'documentation', 'retro', 'finishing'].every(key => roles[key] === 1)
+        && !!record.trackB && typeof record.trackB === 'object' && (((record.trackB as any).state === 'known' && count((record.trackB as any).count)) || ((record.trackB as any).state === 'unavailable' && (record.trackB as any).lowerBound === 1))
+        && !!record.controller && typeof record.controller === 'object' && (((record.controller as any).state === 'known' && count((record.controller as any).count)) || ((record.controller as any).state === 'unavailable' && (record.controller as any).lowerBound === 0));
+}
 function validDiagnostics(value: unknown): value is PlanDiagnostic[] {
     return Array.isArray(value) && value.every(item => item && typeof item === 'object' && typeof (item as PlanDiagnostic).code === 'string' && typeof (item as PlanDiagnostic).message === 'string' && ((item as PlanDiagnostic).field === undefined || typeof (item as PlanDiagnostic).field === 'string'));
 }
@@ -136,6 +164,7 @@ export function sanitizeAdmissionReport(report: unknown): AdmissionReport {
         if (!resolution || typeof resolution !== 'object' || !['native', 'degraded', 'blocked'].includes(resolution.outcome as string) || !isAgentTarget(resolution.provider) || !validCapabilities(resolution.capabilities) || resolution.evidenceVersion !== 'r1-v1' || !validDiagnostics(resolution.diagnostics)) invalidAdmission();
     }
     if (value.forecast !== undefined && !validForecast(value.forecast)) invalidAdmission();
+    if (value.routingForecast !== undefined && !validRoutingForecast(value.routingForecast)) invalidAdmission();
     const capabilityResolution = value.capabilityResolution === undefined ? undefined : { ...(value.capabilityResolution as ProviderExecutionResolution), diagnostics: sanitizeDiagnostics((value.capabilityResolution as ProviderExecutionResolution).diagnostics) };
     return { ...(value as AdmissionReport), ...(capabilityResolution ? { capabilityResolution } : {}), diagnostics: sanitizeDiagnostics(value.diagnostics as PlanDiagnostic[]) };
 }
@@ -179,12 +208,27 @@ export async function admitPlan(input: AdmissionInput): Promise<AdmissionReport>
         const capabilities = PROVIDER_EXECUTION_CAPABILITIES[provider];
         const resolution: ProviderExecutionResolution = { outcome: capabilities.unattendedController === 'supported' ? 'native' : 'blocked', provider, capabilities, evidenceVersion: 'r1-v1', diagnostics: [] };
         if (resolution.outcome === 'blocked') return blocked(input, [diagnostic('ADMISSION_CAPABILITY_UNVERIFIED', `Provider ${provider} has no verified unattended execution capability.`)], { planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', sensors: input.verifySensors ? 'pass' : 'not-required', capabilityResolution: resolution });
-        return { state: 'admitted', planState: 'valid', planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', sensors: input.verifySensors ? 'pass' : 'not-required', capabilityResolution: resolution, forecast: forecast(plan.manifest.slices.length), diagnostics: [] };
+        return completeAdmission(input, plan, provider, mode, journal, input.requireCurrent ? 'current' : 'not-checked', input.verifySensors ? 'pass' : 'not-required', resolution);
     }
     const capabilities = PROVIDER_EXECUTION_CAPABILITIES[provider];
     const resolution: ProviderExecutionResolution = { outcome: capabilities.interactiveExecution === 'supported' ? 'native' : 'blocked', provider, capabilities, evidenceVersion: 'r1-v1', diagnostics: [] };
     if (resolution.outcome === 'blocked') return blocked(input, [diagnostic('ADMISSION_CAPABILITY_UNVERIFIED', `Provider ${provider} has no verified interactive execution capability.`)], { planDigest: plan.planDigest, provider, executionMode: mode, capabilityResolution: resolution });
-    return { state: 'admitted', planState: 'valid', planDigest: plan.planDigest, provider, executionMode: mode, journal: 'not-required', currentness: input.requireCurrent ? 'current' : 'not-checked', sensors: input.verifySensors ? 'pass' : 'not-required', capabilityResolution: resolution, forecast: forecast(plan.manifest.slices.length), diagnostics: [] };
+    return completeAdmission(input, plan, provider, mode, 'not-required', input.requireCurrent ? 'current' : 'not-checked', input.verifySensors ? 'pass' : 'not-required', resolution);
+}
+
+function completeAdmission(input: AdmissionInput, plan: Extract<PlanValidationReport, { state: 'valid' }>, provider: AgentTarget, executionMode: ExecutionMode, journal: AdmissionReport['journal'], currentness: AdmissionReport['currentness'], sensors: AdmissionReport['sensors'], capabilityResolution: ProviderExecutionResolution): AdmissionReport {
+    if (plan.schema === 'compact-slices/v1') return { state: 'admitted', planState: 'valid', planDigest: plan.planDigest, provider, executionMode, journal, currentness, sensors, capabilityResolution, forecast: forecast(plan.manifest.slices.length), diagnostics: [] };
+    const routing = input.routing ?? input.routingReader?.();
+    if (!routing?.runtime || !routing.policy || !routing.capabilities) return blocked(input, [diagnostic('ADMISSION_ROUTING_FACTS_REQUIRED', 'Compact v2 requires an approved policy, current capability receipt, and runtime identity.')], { planDigest: plan.planDigest, provider, executionMode, journal, currentness, sensors, capabilityResolution });
+    let runtime: RuntimeKey;
+    try { runtime = validateRuntimeKey(routing.runtime); } catch { return blocked(input, [diagnostic('ADMISSION_ROUTING_RUNTIME_INVALID', 'Compact v2 routing runtime identity is invalid.')], { planDigest: plan.planDigest, provider, executionMode, journal, currentness, sensors, capabilityResolution }); }
+    if (runtime.target !== provider) return blocked(input, [diagnostic('ADMISSION_ROUTING_PROVIDER_MISMATCH', 'Compact v2 routing runtime target must exactly match the admitted provider.')], { planDigest: plan.planDigest, provider, executionMode, journal, currentness, sensors, capabilityResolution });
+    const now = routing.now ?? new Date();
+    for (const slice of plan.manifest.slices) {
+        const resolved = resolveSelection({ role: 'implementer', requestedProfile: (slice as unknown as { implementerProfile: ImplementerProfile }).implementerProfile, policy: routing.policy, capabilities: routing.capabilities, runtime, now });
+        if (resolved.state === 'blocked') return blocked(input, resolved.diagnostics, { planDigest: plan.planDigest, provider, executionMode, journal, currentness, sensors, capabilityResolution });
+    }
+    return { state: 'admitted', planState: 'valid', planDigest: plan.planDigest, provider, executionMode, journal, currentness, sensors, capabilityResolution, forecast: forecast(plan.manifest.slices.length), routingForecast: routingForecast(plan, routing), diagnostics: [] };
 }
 
 // Structural exhaustiveness guard: adding an AgentTarget requires an explicit entry above.

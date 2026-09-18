@@ -212,6 +212,32 @@ describe('native secure-fs Windows source contract', () => {
     });
 });
 
+describe('native secure-fs durable publication source contract', () => {
+    const source = () => fs.readFileSync(path.resolve(__dirname, '../../../native/secure_fs.cc'), 'utf8').replace(/\r\n/g, '\n');
+
+    it('turns parent-directory fsync failure after publication into a bounded error', () => {
+        const native = source();
+        const write = native.slice(native.indexOf('napi_value WriteProjectTransaction'), native.indexOf('\n}  // namespace'));
+        expect(native).toMatch(/if \(fsync\(parent\) != 0\)[\s\S]{0,240}Throw\(env, "secure-fs durable directory sync failed"\)/);
+        expect(write).toMatch(/fsync\(parent\) == 0;[\s\S]{0,180}secure-fs durable directory sync failed/);
+        const withoutWriteSync = write.replace('fsync(parent) == 0', 'true');
+        expect(withoutWriteSync).not.toMatch(/fsync\(parent\) == 0;/);
+        expect(withoutWriteSync).not.toMatch(/fsync\(parent\) == 0;[\s\S]{0,180}secure-fs durable directory sync failed/);
+    });
+
+    it('degrades only the unsupported Windows directory flush and retains all other durable failures', () => {
+        expect(source()).toMatch(/FlushFileBuffers\(parent\.handle\) == 0 && GetLastError\(\) != ERROR_ACCESS_DENIED/);
+        expect(source()).toMatch(/if \(directory_sync_failed\).*secure-fs durable directory sync failed/);
+    });
+
+    it('does not clean a staging name already consumed by a fenced POSIX rename', () => {
+        const write = source().slice(source().indexOf('napi_value WriteProjectTransaction'), source().indexOf('\n}  // namespace'));
+        expect(write).toContain('const bool cleaned = options.replace || unlinkat(parent, temporary.c_str(), 0) == 0;');
+        const reverted = write.replace('options.replace || ', '');
+        expect(reverted).not.toContain('const bool cleaned = options.replace || unlinkat(parent, temporary.c_str(), 0) == 0;');
+    });
+});
+
 describe('native secure-fs POSIX source contract', () => {
     const source = (): string => fs.readFileSync(path.resolve(__dirname, '../../../native/secure_fs.cc'), 'utf8');
 
@@ -491,6 +517,42 @@ const nativeFixtureAvailable = ['linux', 'darwin', 'win32'].includes(process.pla
     && ['x64', 'arm64'].includes(process.arch)
     && fs.existsSync(path.join(__dirname, '../../../prebuilds', `${process.platform}-${process.arch}`, 'secure_fs.node'));
 const nativeOnly = nativeFixtureAvailable ? describe : describe.skip;
+const testAddonPath = path.join(__dirname, '../../../native/build/Release/secure_fs_test.node');
+const nativeTestOnly = describe;
+
+nativeTestOnly('native secure-fs directory-sync fault injection', () => {
+    type TestBinding = NativeSecureFsBinding & { setDirectoryFsyncFailureForTests(enabled: boolean): void };
+    let root: string;
+    let testBinding: TestBinding;
+
+    beforeEach(() => {
+        expect(fs.existsSync(testAddonPath)).toBe(true);
+        root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-secure-fs-fsync-')); testBinding = require(testAddonPath) as TestBinding;
+    });
+    afterEach(() => { testBinding.setDirectoryFsyncFailureForTests(false); fs.rmSync(root, { recursive: true, force: true }); });
+
+    it('writes the target then reports the forced post-publication directory-sync failure', () => {
+        testBinding.setDirectoryFsyncFailureForTests(true);
+        expect(() => testBinding.writeProjectTransaction(root, 'durable.txt', Buffer.from('published'), { mode: 'create', createParents: false })).toThrow('secure-fs durable directory sync failed');
+        expect(fs.readFileSync(path.join(root, 'durable.txt'), 'utf8')).toBe('published');
+    });
+
+    it('publishes an exact fenced replacement with fault injection disabled', () => {
+        const target = path.join(root, 'replace.json');
+        fs.writeFileSync(target, 'before');
+        const observed = testBinding.readRegularFile(target, 1024);
+        expect(() => testBinding.writeProjectTransaction(root, 'replace.json', Buffer.from('after'), {
+            mode: 'replace', expected: observed.bytes, expectedIdentity: observed.identity, createParents: false,
+        })).not.toThrow();
+        expect(fs.readFileSync(target, 'utf8')).toBe('after');
+    });
+
+    it('keeps the production prebuild free of the test-only control', () => {
+        if (!nativeFixtureAvailable) return;
+        const production = require(path.join(__dirname, '../../../prebuilds', `${process.platform}-${process.arch}`, 'secure_fs.node')) as Record<string, unknown>;
+        expect(production.setDirectoryFsyncFailureForTests).toBeUndefined();
+    });
+});
 
 nativeOnly('native secure-fs identity fence fixtures', () => {
     let root: string;
@@ -499,6 +561,12 @@ nativeOnly('native secure-fs identity fence fixtures', () => {
     beforeEach(() => {
         root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-secure-fs-identity-'));
         binding = require(path.join(__dirname, '../../../prebuilds', `${process.platform}-${process.arch}`, 'secure_fs.node')) as NativeSecureFsBinding;
+    });
+
+    it('performs a real artifact-backed publish when the CI prebuild is available', () => {
+        const target = path.join(root, 'durable.txt');
+        binding.writeProjectTransaction(root, 'durable.txt', Buffer.from('published'), { mode: 'create', createParents: false });
+        expect(fs.readFileSync(target, 'utf8')).toBe('published');
     });
     afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });
 
@@ -833,6 +901,7 @@ windowsOnly('native secure-fs Windows handle fixtures', () => {
                     fs.symlinkSync(workerData.outside, workerData.trusted, 'junction');
                     Atomics.add(state, 1, 1);
                     Atomics.notify(state, 1);
+                    parentPort.postMessage('ready');
                     Atomics.wait(state, 0, 0, 1);
                     fs.rmSync(workerData.trusted);
                     fs.renameSync(workerData.parked, workerData.trusted);
@@ -844,14 +913,26 @@ windowsOnly('native secure-fs Windows handle fixtures', () => {
             restore();
             parentPort.postMessage('done');
             `, { eval: true, workerData: { shared, trusted, parked, outside } });
-        const done = new Promise<void>((resolve, reject) => {
-            worker.once('message', () => resolve());
-            worker.once('error', reject);
+        let resolveReady: () => void;
+        let rejectReady: (error: Error) => void;
+        let resolveDone: () => void;
+        let rejectDone: (error: Error) => void;
+        const ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+        const done = new Promise<void>((resolve, reject) => { resolveDone = resolve; rejectDone = reject; });
+        const readyTimeout = setTimeout(() => rejectReady(new Error('junction swap worker did not become ready')), 5_000);
+        worker.on('message', message => {
+            if (message === 'ready') { clearTimeout(readyTimeout); resolveReady(); }
+            if (message === 'done') resolveDone();
+        });
+        worker.once('error', error => {
+            clearTimeout(readyTimeout);
+            const failure = error instanceof Error ? error : new Error('junction swap worker failed');
+            rejectReady(failure); rejectDone(failure);
         });
 
         let published = 0;
         try {
-            Atomics.wait(state, 1, 0, 5_000);
+            await ready;
             expect(Atomics.load(state, 1)).toBeGreaterThan(0);
             for (let attempt = 0; attempt < 500; attempt += 1) {
                 try {

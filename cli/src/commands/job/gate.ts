@@ -9,7 +9,7 @@ export type GateCategory =
     | 'empty-cycle-plan' | 'missing-verifier' | 'dangling-reference'
     | 'unsatisfied-plan' | 'adverse-verdict' | 'stale-fingerprint'
     | 'open-obligation' | 'open-fix' | 'request-problem'
-    | 'corrupt-state' | 'wrong-context' | 'foreign-task';
+    | 'corrupt-state' | 'wrong-context' | 'foreign-task' | 'routing-evidence';
 export interface GateReason { category: GateCategory; detail: string; }
 export interface GateResult { pass: boolean; reasons: GateReason[]; }
 
@@ -18,6 +18,9 @@ export interface GateResult { pass: boolean; reasons: GateReason[]; }
 export type FingerprintNow = (argv: string[], paths: string[], cwd: string) => string | null;
 
 const LIVE = ['received', 'spawn-intent', 'claimed', 'running', 'cancel-requested'];
+function sameSelection(left: { selector: { kind: string; id: string }; effort: { kind: string; value?: string } }, right: { selector: { kind: string; id: string }; effort: { kind: string; value?: string } }): boolean {
+    return left.selector.kind === right.selector.kind && left.selector.id === right.selector.id && left.effort.kind === right.effort.kind && left.effort.value === right.effort.value;
+}
 
 /** Alcance de la evaluacion (C6): el gate global (computeGate) exige QA +
  *  interlock de ambito de ciclo y considera TODAS las tareas del journal; el
@@ -148,6 +151,21 @@ function evaluateEvidence(state: JournalState, fingerprintNow: FingerprintNow, s
         }
     }
     for (const v of state.verdicts) {
+        if (v.routingAttemptId !== undefined) {
+            const attempt = state.routingAttempts?.find((candidate) => candidate.id === v.routingAttemptId);
+            const binding = state.planBinding;
+            const bound = binding !== undefined && binding.digest === attempt?.envelope.planDigest && binding.executionDigest === attempt?.envelope.executionDigest;
+            const observed = attempt?.observed;
+            const selectionMatches = attempt !== undefined && observed !== undefined && sameSelection(observed, attempt.envelope.resolved);
+            // A reported actual selection is authoritative: degradation may
+            // explain absent observability, never excuse an observed mismatch.
+            const nativeObservationValid = observed !== undefined
+                ? selectionMatches
+                : attempt?.envelope.outcome === 'degraded' && (attempt.envelope.unavailableEvidence.length ?? 0) > 0 && Boolean(attempt.reasonCode);
+            if (attempt === undefined || !['active', 'complete'].includes(attempt.state) || !attempt.nativeAgentId || attempt.obligationId !== v.obligationId || attempt.fingerprint !== v.fingerprint || !bound || !nativeObservationValid) {
+                reasons.push({ category: 'routing-evidence', detail: `verdict routed ${v.id} no tiene evidencia de intento observado, vigente y ligado` });
+            }
+        }
         if (v.result !== 'pass') {
             const fix = state.fixes.find((f) => f.verdictId === v.id);
             if (fix === undefined || !fix.closed) reasons.push({ category: 'open-fix', detail: `verdict adverso ${v.id} sin fix cerrado` });

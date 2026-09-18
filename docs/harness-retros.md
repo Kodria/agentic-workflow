@@ -701,6 +701,30 @@ Auditable log of recurring/structural harness gaps converted into rules. See the
 
 ## 2026-09-16 — R1 compact-only: curas del harness, no reparaciones locales por proyecto
 
+## 2026-09-17 — R2B routing custody: retro desatendido
+
+- **Evidencia:** el ledger de `codex/issue-126-r2b-planning` contenía 11
+  entradas válidas, 8 hallazgos. `awm ledger recurring --min 2` agrupó las
+  rutas de artefactos nativos (3) y los bordes de policy-store (2). La
+  cobertura de sensores fue `gaps` estáticos y `partial` empírico; no es una
+  certificación de seguridad ni de aceptación nativa.
+- **Curas ya verificadas:** las correcciones C1–C4 añadieron validación
+  fail-closed, regresiones de routing y documentación de custody. Los hallazgos
+  de contrato `--cwd` y CAS tienen wins posteriores en el ledger; no se añade
+  una regla textual duplicada.
+- **Recomendaciones no aplicadas (requieren autoridad):** evaluar un corpus
+  nativo de transacciones para fsync/reemplazo y una cobertura instalada de
+  seguridad/secret scanning. Son cambios de infraestructura y dependencias,
+  fuera del alcance de este retro.
+- **Descartes (modo desatendido):** no se modifican `AGENTS.md`,
+  `CONSTITUTION.md`, sensores ni configuración de seguridad: los restantes
+  hallazgos son regresiones ya curadas o requieren decisión de plataforma. No
+  se infiere PASS para native/Claude.
+- **Archivo:** `awm watch journal-status --json` devolvió `missing`; se omitió
+  captura de ciclo y se archivó el ledger explícitamente. `awm ledger list`
+  devolvió `[]` después del archive. Evidencia de código: CMD-JOURNAL, CMD-PLAN,
+  typecheck/build y sensores del ciclo; aceptación nativa sigue UNTESTED.
+
 - **Clase:** lógica, seguridad, proceso y aislamiento de pruebas. Los grupos de
   migración, admisión y custodia convergieron dentro de este mismo ciclo de
   revisión; no se presentan como recurrencias observadas en otros proyectos.

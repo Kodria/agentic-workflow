@@ -18,6 +18,9 @@ import { exportDir, logsDir } from '../../core/journal/paths';
 import { verifyBranchInvariant } from '../watch/lock';
 import { writeFileAtomicDurable } from '../../core/atomic-file';
 import { resolveCommandContext } from '../../core/tracks/context';
+import { routingReport } from '../../core/model-policy/journal';
+import { isRoutingEnvelope, isRoutingSelection } from '../../core/journal/types';
+import { parseJsonNoDuplicate } from '../../core/plan/json';
 import fs from 'fs';
 
 function branchOf(cwd: string): string {
@@ -34,6 +37,12 @@ function realFingerprintNow(repo: string): FingerprintNow {
         try { return computeFingerprint(repo, argv, paths, cwd).fingerprint; }
         catch { return null; }
     };
+}
+function readBoundedJson(file: string): unknown {
+    if (typeof file !== 'string' || file.length === 0 || file.length > 4096) throw new Error('routing file path is invalid');
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 256 * 1024) throw new Error('routing file must be a bounded non-symlink regular file');
+    try { return parseJsonNoDuplicate(fs.readFileSync(file, 'utf8')); } catch { throw new Error('routing file must contain JSON without duplicate keys'); }
 }
 
 /** Guard de entrada (R9.4): sin descriptor de track, es un no-op — el caso
@@ -135,6 +144,25 @@ export function registerJobCommand(program: Command): void {
             emitHeartbeat(repo, branch, opts.generation);
         });
 
+    job.command('routing-reserve')
+        .requiredOption('--generation <token>').requiredOption('--obligation <id>').requiredOption('--lineage <id>')
+        .requiredOption('--envelope-file <file>').requiredOption('--fingerprint <sha>').option('--cwd <root>', 'repository root', '.').option('--json')
+        .action((opts) => {
+            const envelope = readBoundedJson(opts.envelopeFile); if (!isRoutingEnvelope(envelope) || !/^[a-f0-9]{64}$/.test(opts.fingerprint)) throw new Error('routing-reserve requires a valid envelope and fingerprint');
+            const repo = path.resolve(opts.cwd); const branch = branchOf(repo); assertAuthenticatedCwd(repo, branch);
+            const emitted = emitRequest(repo, branch, { kind: 'routing-reserve', generationToken: opts.generation, idempotencyKey: crypto.createHash('sha256').update(`routing-reserve:${opts.generation}:${opts.obligation}:${opts.lineage}:${opts.fingerprint}:${JSON.stringify(envelope)}`).digest('hex'), payload: { obligationId: opts.obligation, lineageId: opts.lineage, envelope, fingerprint: opts.fingerprint } });
+            process.stdout.write(JSON.stringify({ requestId: emitted.requestId }) + '\n');
+        });
+    job.command('routing-observe')
+        .requiredOption('--generation <token>').requiredOption('--attempt <id>').requiredOption('--native-agent-id <id>')
+        .requiredOption('--observation-file <file>').option('--cwd <root>', 'repository root', '.').option('--json')
+        .action((opts) => {
+            const observation = readBoundedJson(opts.observationFile); if (typeof observation !== 'object' || observation === null || Array.isArray(observation)) throw new Error('routing-observe requires an observation object'); const observed = (observation as { observed?: unknown }).observed; const unavailableReason = (observation as { unavailableReason?: unknown }).unavailableReason; if ((observed !== undefined && !isRoutingSelection(observed)) || (unavailableReason !== undefined && typeof unavailableReason !== 'string')) throw new Error('routing-observe requires a valid observation');
+            const repo = path.resolve(opts.cwd); const branch = branchOf(repo); assertAuthenticatedCwd(repo, branch);
+            const emitted = emitRequest(repo, branch, { kind: 'routing-observe', generationToken: opts.generation, idempotencyKey: crypto.createHash('sha256').update(`routing-observe:${opts.generation}:${opts.attempt}:${opts.nativeAgentId}:${JSON.stringify(observation)}`).digest('hex'), payload: { attemptId: opts.attempt, nativeAgentId: opts.nativeAgentId, ...(observed === undefined ? {} : { observed }), ...(unavailableReason === undefined ? {} : { unavailableReason }) } });
+            process.stdout.write(JSON.stringify({ requestId: emitted.requestId }) + '\n');
+        });
+
     job.command('ps').action(() => {
         const repo = process.cwd();
         const branch = branchOf(repo);
@@ -199,6 +227,16 @@ export function registerJobCommand(program: Command): void {
             const g = computeGate(r.state, r.corrupt, realFingerprintNow(repo));
             process.stdout.write(JSON.stringify(g, null, 2) + '\n');
             if (!g.pass) process.exit(1);   // falla cerrado (R3.2)
+        });
+
+    job.command('routing-report')
+        .description('informe de routing read-only; nunca expone envelopes ni identidad nativa')
+        .option('--json', 'emit the routing report as JSON')
+        .action(() => {
+            const repo = process.cwd(); const branch = branchOf(repo); assertAuthenticatedCwd(repo, branch);
+            const r = readJournal(repo, branch);
+            if (r.corrupt || r.state === null) { process.stdout.write(JSON.stringify({ corruptState: true }) + '\n'); process.exit(1); return; }
+            process.stdout.write(JSON.stringify(routingReport(r.state), null, 2) + '\n');
         });
 
     job.command('reap')

@@ -10,7 +10,8 @@ import { requestsDir } from '../../core/journal/paths';
 import { fsyncDirSync } from '../../core/atomic-file';
 import { redactText } from '../../core/journal/redact';
 import { gitCheckTrackId, headSha } from '../../core/tracks/git';
-import type { Job, JournalState, ReviewObligation, TrackRef, VerificationItem } from '../../core/journal/types';
+import { isRoutingEnvelope, isRoutingSelection, type Job, type JournalState, type ReviewObligation, type RoutingSelection, type TrackRef, type VerificationItem } from '../../core/journal/types';
+import { observeRoutingAttempt, reserveRoutingAttempt } from '../../core/model-policy/journal';
 
 export interface ApplySummary { applied: number; rejectedStale: number; rejectedDigest: number; rejectedInvalid: number; corrupt: number; }
 
@@ -108,6 +109,18 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
         s.controllerHeartbeatAt = now();
         applyOutcome(s, { ...base, outcome: 'applied' });
         return;
+    }
+    if (env.kind === 'routing-reserve') {
+        const p = env.payload;
+        if (typeof p.obligationId !== 'string' || typeof p.lineageId !== 'string' || !isRoutingEnvelope(p.envelope) || typeof p.fingerprint !== 'string' || (p.at !== undefined && typeof p.at !== 'string')) throw new Error('routing-reserve requiere payload estricto');
+        const reserved = reserveRoutingAttempt(s, { obligationId: p.obligationId, lineageId: p.lineageId, envelope: p.envelope, fingerprint: p.fingerprint }, p.at ?? now());
+        Object.assign(s, reserved.state); applyOutcome(s, { ...base, outcome: 'applied', resultRef: reserved.attemptId }); return;
+    }
+    if (env.kind === 'routing-observe') {
+        const p = env.payload;
+        if (typeof p.attemptId !== 'string' || typeof p.nativeAgentId !== 'string' || (p.observed !== undefined && !isRoutingSelection(p.observed)) || (p.unavailableReason !== undefined && typeof p.unavailableReason !== 'string') || (p.at !== undefined && typeof p.at !== 'string')) throw new Error('routing-observe requiere payload estricto');
+        const observed = observeRoutingAttempt(s, { attemptId: p.attemptId, nativeAgentId: p.nativeAgentId, ...(p.observed === undefined ? {} : { observed: p.observed as RoutingSelection }), ...(p.unavailableReason === undefined ? {} : { unavailableReason: p.unavailableReason }) }, p.at ?? now());
+        Object.assign(s, observed); applyOutcome(s, { ...base, outcome: 'applied', resultRef: p.attemptId }); return;
     }
     if (env.kind === 'job-request') {
         // get-or-create por idempotencyKey (RNF-T.7); duplicado => applyOutcome
@@ -420,11 +433,20 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
         }
         if (!s.verdicts.some((v) => v.id === verdictId)) {
             const result = p.result;
+            if (p.routingAttemptId !== undefined) {
+                if (typeof p.routingAttemptId !== 'string') throw new Error('verdict routed requiere routingAttemptId valido');
+                const attempt = s.routingAttempts?.find(candidate => candidate.id === p.routingAttemptId);
+                if (!attempt || attempt.obligationId !== obligationId || attempt.state !== 'active') throw new Error('verdict routed requiere intento activo ligado a la obligacion');
+                attempt.state = result === 'pass' ? 'complete' : 'blocked';
+                attempt.verdict = result;
+                if (typeof p.reasonCode === 'string' && p.reasonCode.length > 0 && p.reasonCode.length <= 128) attempt.reasonCode = p.reasonCode;
+            }
             // R2.3: redaccion tambien en el `detail` de texto libre humano, no
             // solo en argv — antes de cualquier escritura durable.
             s.verdicts.push({
                 id: verdictId, obligationId, result, detail: redactText(String(p.detail ?? '')), receivedAt: now(),
                 fingerprint: p.fingerprint, argv: verdictArgv, paths: verdictPaths, cwd: p.cwd,
+                ...(typeof p.routingAttemptId === 'string' ? { routingAttemptId: p.routingAttemptId } : {}),
             });
             for (const t of s.tasks) {
                 const o = t.reviewObligations.find((x) => x.id === obligationId);

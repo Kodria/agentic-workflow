@@ -2,11 +2,13 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { parseJsonNoDuplicate } from './json';
-import type { CompactPlanManifest, PlanDiagnostic, PlanSlice, PlanValidationReport } from './types';
+import type { CompactPlanManifest, CompactPlanV2, PlanDiagnostic, PlanSlice, PlanValidationReport } from './types';
 import { executionPlanDigest } from './identity';
 
 const START = '<!-- AWM:COMPACT-SLICES:START v1 -->';
 const END = '<!-- AWM:COMPACT-SLICES:END v1 -->';
+const START_V2 = '<!-- AWM:COMPACT-SLICES:START v2 -->';
+const END_V2 = '<!-- AWM:COMPACT-SLICES:END v2 -->';
 const MAX_PLAN = 1024 * 1024;
 const MAX_MANIFEST = 256 * 1024;
 const MAX_SOURCE = 1024 * 1024;
@@ -241,20 +243,23 @@ function validatePlan(planPath: string, cwd: string, snapshot?: Buffer): PlanVal
         bytes = planRead.bytes;
     }
     let text: string; try { text = normalizeLineEndings(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)); } catch { return diagnostic('PLAN_ENCODING', 'plan must be valid UTF-8'); }
-    const starts = count(text, START); const ends = count(text, END); const signaled = starts > 0 || ends > 0 || compactSchemaSignal(text);
+    const starts = count(text, START); const ends = count(text, END); const signaled = starts > 0 || ends > 0 || count(text, START_V2) > 0 || count(text, END_V2) > 0 || compactSchemaSignal(text);
     if (!signaled) return markerlessSchemaClassification(text) ?? { state: 'migration-required', reason: 'unmarked-plan' };
-    if (starts === 0 && ends === 0) return markerlessSchemaClassification(text) ?? diagnostic('PLAN_MARKERS', 'compact markers must occur once in order');
-    if (starts !== 1 || ends !== 1 || text.indexOf(START) > text.indexOf(END)) { const partial = starts === 1 ? text.slice(text.indexOf(START) + START.length, ends ? text.indexOf(END) : undefined).trim() : ''; try { const candidate = parseJsonNoDuplicate(partial); if (object(candidate) && typeof candidate.schema === 'string' && Buffer.byteLength(candidate.schema, 'utf8') <= MAX_STRING && candidate.schema.startsWith('compact-slices/') && candidate.schema !== 'compact-slices/v1') return unsupported(candidate.schema); } catch { /* invalid below */ } return diagnostic('PLAN_MARKERS', 'compact markers must occur once in order'); }
-    const body = text.slice(text.indexOf(START) + START.length, text.indexOf(END)); if (Buffer.byteLength(body, 'utf8') > MAX_MANIFEST) return diagnostic('PLAN_LIMIT', 'manifest exceeds maximum size');
+    const start = text.includes(START_V2) ? START_V2 : START;
+    const end = start === START_V2 ? END_V2 : END;
+    const startsForSchema = count(text, start); const endsForSchema = count(text, end);
+    if (starts === 0 && ends === 0 && startsForSchema === 0 && endsForSchema === 0) return markerlessSchemaClassification(text) ?? diagnostic('PLAN_MARKERS', 'compact markers must occur once in order');
+    if (startsForSchema !== 1 || endsForSchema !== 1 || text.indexOf(start) > text.indexOf(end) || (start === START && (count(text, START_V2) !== 0 || count(text, END_V2) !== 0)) || (start === START_V2 && (starts !== 0 || ends !== 0))) return diagnostic('PLAN_MARKERS', 'compact markers must occur once in order');
+    const body = text.slice(text.indexOf(start) + start.length, text.indexOf(end)); if (Buffer.byteLength(body, 'utf8') > MAX_MANIFEST) return diagnostic('PLAN_LIMIT', 'manifest exceeds maximum size');
     let raw: unknown; try { raw = parseJsonNoDuplicate(body.trim()); } catch { return diagnostic('PLAN_JSON', 'manifest must be valid JSON without duplicate keys'); }
     if (!object(raw)) return diagnostic('PLAN_SHAPE', 'manifest must be an object');
     if (typeof raw.schema === 'string' && Buffer.byteLength(raw.schema, 'utf8') > MAX_STRING) return diagnostic('PLAN_LIMIT', 'schema exceeds maximum string size');
-    if (typeof raw.schema === 'string' && raw.schema.startsWith('compact-slices/') && raw.schema !== 'compact-slices/v1') return unsupported(raw.schema);
+    if (typeof raw.schema === 'string' && raw.schema.startsWith('compact-slices/') && raw.schema !== 'compact-slices/v1' && !(raw.schema === 'compact-slices/v2' && start === START_V2)) return unsupported(raw.schema);
     if (!exact(raw, ['schema', 'planId', 'requirements', 'sources', 'commands', 'slices', 'closureCommands'])) return diagnostic(Object.keys(raw).some((key) => !['schema', 'planId', 'requirements', 'sources', 'commands', 'slices', 'closureCommands'].includes(key)) ? 'PLAN_UNKNOWN_FIELD' : 'PLAN_MISSING_FIELD', 'manifest fields must exactly match the contract');
     if (!Array.isArray(raw.requirements) || !Array.isArray(raw.sources) || !Array.isArray(raw.commands) || !Array.isArray(raw.slices) || !Array.isArray(raw.closureCommands)) return diagnostic('PLAN_SHAPE', 'manifest collections are invalid');
     if (raw.requirements.length > 256 || raw.sources.length > 256 || raw.commands.length > 512 || raw.slices.length > 64 || raw.closureCommands.length > 512) return diagnostic('PLAN_LIMIT', 'manifest exceeds collection limits');
     if (typeof raw.planId === 'string' && Buffer.byteLength(raw.planId, 'utf8') > MAX_STRING) return diagnostic('PLAN_LIMIT', 'plan id exceeds maximum string size');
-    if (raw.schema !== 'compact-slices/v1' || typeof raw.planId !== 'string' || !PLAN_ID.test(raw.planId) || !allStrings(raw.requirements) || new Set(raw.requirements).size !== raw.requirements.length) return diagnostic('PLAN_SHAPE', 'manifest scalar fields are invalid');
+    if ((raw.schema !== 'compact-slices/v1' && raw.schema !== 'compact-slices/v2') || (raw.schema === 'compact-slices/v1' && start !== START) || (raw.schema === 'compact-slices/v2' && start !== START_V2) || typeof raw.planId !== 'string' || !PLAN_ID.test(raw.planId) || !allStrings(raw.requirements) || new Set(raw.requirements).size !== raw.requirements.length) return diagnostic('PLAN_SHAPE', 'manifest scalar fields are invalid');
     if ((raw.requirements as string[]).some((id) => !validRequirementId(id)) || !allStrings(raw.closureCommands) || new Set(raw.closureCommands as string[]).size !== (raw.closureCommands as string[]).length) return diagnostic('PLAN_SHAPE', 'manifest arrays or identifiers are invalid');
     const sourceIds = new Set<string>();
     for (const source of raw.sources) {
@@ -273,7 +278,8 @@ function validatePlan(planPath: string, cwd: string, snapshot?: Buffer): PlanVal
     const commandIds = new Set<string>(); const closureIds = new Set(raw.closureCommands as string[]);
     for (const command of raw.commands) { if (!exact(command, ['id', 'program', 'args', 'covers']) || !validId(command.id) || commandIds.has(command.id) || typeof command.program !== 'string' || command.program.length === 0 || Buffer.byteLength(command.program, 'utf8') > MAX_STRING || !allStrings(command.args) || command.args.length > 128 || !allStrings(command.covers) || new Set(command.covers as string[]).size !== (command.covers as string[]).length || ((command.covers as string[]).length === 0 && !closureIds.has(command.id)) || (command.covers as string[]).some((id) => !validRequirementId(id) || !(raw.requirements as string[]).includes(id))) return diagnostic('PLAN_COMMAND_SHAPE', 'command fields are invalid'); commandIds.add(command.id); const program = command.program as string; if (isLauncher(program) || unsafeCommand(program) || program.includes('\\') || /^[a-zA-Z]:/.test(program) || /\s/.test(program) || (program.includes('/') && !executableInside(root, program))) return diagnostic('PLAN_COMMAND_UNSAFE', 'command program is not inert and safe'); if ((command.args as string[]).some(unsafeCommand)) return diagnostic('PLAN_COMMAND_UNSAFE', 'command arguments contain shell syntax'); }
     const sliceIds = new Set<string>(); const owners = new Map<string, number>();
-    for (const slice of raw.slices) { if (!exact(slice, ['id', 'title', 'requirements', 'dependsOn', 'sectionAnchor', 'sources', 'redCommands', 'greenCommands', 'reviewEvidence', 'risk', 'fallback']) || !validId(slice.id) || sliceIds.has(slice.id) || typeof slice.title !== 'string' || slice.title.length === 0 || Buffer.byteLength(slice.title, 'utf8') > MAX_STRING || !allStrings(slice.requirements) || (slice.requirements as string[]).length === 0 || (slice.requirements as string[]).some((id) => !validRequirementId(id) || !(raw.requirements as string[]).includes(id)) || !allStrings(slice.dependsOn) || typeof slice.sectionAnchor !== 'string' || slice.sectionAnchor.length === 0 || Buffer.byteLength(slice.sectionAnchor, 'utf8') > MAX_STRING || !uniqueRefs(slice.sources, sourceIds) || !uniqueRefs(slice.redCommands, commandIds) || (slice.redCommands as string[]).length === 0 || !uniqueRefs(slice.greenCommands, commandIds) || (slice.greenCommands as string[]).length === 0 || !allStrings(slice.fallback) || (slice.fallback as string[]).length === 0 || (slice.fallback as string[]).some((item) => item.trim().length === 0) || slice.risk !== 'bounded' && slice.risk !== 'full-context') return diagnostic('PLAN_SLICE_SHAPE', 'slice fields are invalid'); sliceIds.add(slice.id); if (!Array.isArray(slice.reviewEvidence) || slice.reviewEvidence.length !== 2 || new Set(slice.reviewEvidence).size !== 2 || !slice.reviewEvidence.includes('specification') || !slice.reviewEvidence.includes('code-quality')) return diagnostic('PLAN_REVIEW_EVIDENCE', 'review evidence must be specification and code-quality'); for (const requirement of slice.requirements as string[]) owners.set(requirement, (owners.get(requirement) ?? 0) + 1); }
+    const sliceFields = ['id', 'title', 'requirements', 'dependsOn', 'sectionAnchor', 'sources', 'redCommands', 'greenCommands', 'reviewEvidence', 'risk', 'fallback'];
+    for (const slice of raw.slices) { if (!exact(slice, raw.schema === 'compact-slices/v2' ? [...sliceFields, 'implementerProfile'] : sliceFields) || (raw.schema === 'compact-slices/v2' && !['mechanical', 'integration', 'judgment'].includes(slice.implementerProfile as string)) || !validId(slice.id) || sliceIds.has(slice.id) || typeof slice.title !== 'string' || slice.title.length === 0 || Buffer.byteLength(slice.title, 'utf8') > MAX_STRING || !allStrings(slice.requirements) || (slice.requirements as string[]).length === 0 || (slice.requirements as string[]).some((id) => !validRequirementId(id) || !(raw.requirements as string[]).includes(id)) || !allStrings(slice.dependsOn) || typeof slice.sectionAnchor !== 'string' || slice.sectionAnchor.length === 0 || Buffer.byteLength(slice.sectionAnchor, 'utf8') > MAX_STRING || !uniqueRefs(slice.sources, sourceIds) || !uniqueRefs(slice.redCommands, commandIds) || (slice.redCommands as string[]).length === 0 || !uniqueRefs(slice.greenCommands, commandIds) || (slice.greenCommands as string[]).length === 0 || !allStrings(slice.fallback) || (slice.fallback as string[]).length === 0 || (slice.fallback as string[]).some((item) => item.trim().length === 0) || slice.risk !== 'bounded' && slice.risk !== 'full-context') return diagnostic('PLAN_SLICE_SHAPE', 'slice fields are invalid'); sliceIds.add(slice.id); if (!Array.isArray(slice.reviewEvidence) || slice.reviewEvidence.length !== 2 || new Set(slice.reviewEvidence).size !== 2 || !slice.reviewEvidence.includes('specification') || !slice.reviewEvidence.includes('code-quality')) return diagnostic('PLAN_REVIEW_EVIDENCE', 'review evidence must be specification and code-quality'); for (const requirement of slice.requirements as string[]) owners.set(requirement, (owners.get(requirement) ?? 0) + 1); }
     if ((raw.requirements as string[]).some((requirement) => owners.get(requirement) !== 1)) return diagnostic('PLAN_REQUIREMENT_OWNER', 'each requirement must have exactly one owner');
     const slices = raw.slices as PlanSlice[]; for (const slice of slices) { if (new Set(slice.dependsOn).size !== slice.dependsOn.length || slice.dependsOn.includes(slice.id) || !slice.dependsOn.every((id) => sliceIds.has(id))) return diagnostic('PLAN_DEPENDENCY', 'slice dependencies must resolve and be non-self unique'); }
     const visited = new Set<string>(); const visiting = new Set<string>(); const byId = new Map(slices.map((slice) => [slice.id, slice])); const cycle = (id: string): boolean => { if (visiting.has(id)) return true; if (visited.has(id)) return false; visiting.add(id); const found = byId.get(id)!.dependsOn.some(cycle); visiting.delete(id); visited.add(id); return found; }; if (slices.some((slice) => cycle(slice.id))) return diagnostic('PLAN_DEPENDENCY', 'slice dependencies must be acyclic');
@@ -283,10 +289,10 @@ function validatePlan(planPath: string, cwd: string, snapshot?: Buffer): PlanVal
     if (raw.requirements.length === 0 || raw.sources.length === 0 || raw.commands.length === 0 || raw.slices.length === 0 || raw.closureCommands.length === 0) return diagnostic('PLAN_SHAPE', 'manifest collections must be nonempty');
     const markdown = checkMarkdown(text, slices); if (markdown) return markdown;
     const report: PlanValidationReport = {
-        state: 'valid', schema: 'compact-slices/v1',
+        state: 'valid', schema: raw.schema,
         planDigest: crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
         executionDigest: executionPlanDigest(text),
-        manifest: raw as unknown as CompactPlanManifest, executionMode: executionModeFromValidatedText(text),
+        manifest: raw as unknown as CompactPlanManifest | CompactPlanV2, executionMode: executionModeFromValidatedText(text),
     };
     freezeJson(report);
     verifiedValidReports.add(report);

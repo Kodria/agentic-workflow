@@ -51,6 +51,13 @@ describe('plan validate Commander wiring', () => {
         process.exitCode = previousExitCode;
     });
 
+    it('returns v1 not-required before reading personal policy or capability state', async () => {
+        const policy = jest.fn(); const capabilities = jest.fn(); const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerPlanCommand(program, { validatePlanFile: () => valid, readEffectivePolicy: policy as any, readCapabilities: capabilities as any });
+        await program.parseAsync(['node', 'awm', 'plan', 'resolve', 'plans/r4.md', '--provider', 'codex', '--runtime-kind', 'native', '--runtime-version', '1.0.0', '--account-scope-digest', 'a'.repeat(64), '--role', 'controller', '--json']);
+        expect(JSON.parse(String(stdoutWrite.mock.calls[0][0]))).toEqual({ state: 'not-required', reason: 'v1-without-opt-in' }); expect(policy).not.toHaveBeenCalled(); expect(capabilities).not.toHaveBeenCalled();
+    });
+
     it('emits deterministic human output for a valid compact plan', async () => {
         await commandFor(valid).parseAsync(['node', 'awm', 'plan', 'validate', 'plans/r4.md']);
 
@@ -226,6 +233,26 @@ describe('plan validate Commander wiring', () => {
 });
 
 describe('plan admit Commander wiring', () => {
+    it('does not read v2 routing facts after currentness blocks', async () => {
+        const policy = jest.fn(); const capabilities = jest.fn(); const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerPlanCommand(program, { validatePlanFile: () => ({ ...valid, schema: 'compact-slices/v2', manifest: { ...valid.manifest, schema: 'compact-slices/v2', slices: valid.manifest.slices.map(slice => ({ ...slice, implementerProfile: 'mechanical' })) } } as any), readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }), readEffectivePolicy: policy as any, readCapabilities: capabilities as any, listRegistries: () => [], checkCurrentness: async () => ({ checkedAt: 'x', compatibility: { status: 'not-checked' }, components: [{ component: 'cli', installed: '1', latest: '2', channel: 'stable', source: 'x', checkedAt: 'x', status: 'stale', detail: 'x', remedy: 'x' }] }) });
+        try { await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', repositoryRoot, '--require-current', '--runtime-kind', 'native', '--runtime-version', '1.0.0', '--account-scope-digest', 'a'.repeat(64), '--json']); expect(policy).not.toHaveBeenCalled(); expect(capabilities).not.toHaveBeenCalled(); }
+        finally { output.mockRestore(); process.exitCode = undefined; }
+    });
+    it.each([
+        ['invalid plan', invalid, 'codex', ['codex']],
+        ['invalid provider', valid, 'not-a-provider', ['codex']],
+        ['disabled provider', valid, 'codex', ['cursor']],
+    ] as const)('does not read routing facts for %s even with complete runtime flags', async (_name, report, provider, enabledAgents) => {
+        const policy = jest.fn(); const capabilities = jest.fn(); const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerPlanCommand(program, { validatePlanFile: () => report, readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: [...enabledAgents], installMethod: 'symlink', defaultScope: 'local' }), readEffectivePolicy: policy as any, readCapabilities: capabilities as any });
+        try {
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', provider, '--cwd', repositoryRoot, '--runtime-kind', 'native', '--runtime-version', '1.0.0', '--account-scope-digest', 'a'.repeat(64), '--json']);
+            expect(policy).not.toHaveBeenCalled(); expect(capabilities).not.toHaveBeenCalled();
+        } finally { output.mockRestore(); process.exitCode = undefined; }
+    });
     it('derives desatendido from the canonical plan header and requires a journal without a flag', async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-admit-header-'));
         const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
@@ -675,8 +702,8 @@ describe('plan validation public boundaries', () => {
 
     it('rejects an unowned requirement before claiming complete ownership or exit 0', () => {
         const malformed = { ...valid, manifest: { ...valid.manifest, requirements: [...valid.manifest.requirements, 'R4-VAL-5'] } };
-        expect(() => formatReport(malformed, 'plan.md')).toThrow('plan validator returned an invalid valid report');
-        expect(() => exitCodeFor(malformed)).toThrow('plan validator returned an invalid valid report');
+        expect(() => formatReport(malformed as unknown as PlanValidationReport, 'plan.md')).toThrow('plan validator returned an invalid valid report');
+        expect(() => exitCodeFor(malformed as unknown as PlanValidationReport)).toThrow('plan validator returned an invalid valid report');
     });
 
     it('rejects a requirement owned by two slices', () => {
@@ -685,8 +712,8 @@ describe('plan validation public boundaries', () => {
                 ...valid.manifest.slices[0], id: 'S2', requirements: [valid.manifest.requirements[0]],
             }] },
         };
-        expect(() => formatReport(malformed, 'plan.md')).toThrow('plan validator returned an invalid valid report');
-        expect(() => exitCodeFor(malformed)).toThrow('plan validator returned an invalid valid report');
+        expect(() => formatReport(malformed as unknown as PlanValidationReport, 'plan.md')).toThrow('plan validator returned an invalid valid report');
+        expect(() => exitCodeFor(malformed as unknown as PlanValidationReport)).toThrow('plan validator returned an invalid valid report');
     });
 
     it.each(['requirements', 'sources', 'commands', 'slices', 'closureCommands'] as const)(

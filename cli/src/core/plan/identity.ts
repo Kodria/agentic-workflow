@@ -4,6 +4,8 @@ export const MAX_PLAN_SNAPSHOT_BYTES = 1024 * 1024;
 export const EXECUTION_IDENTITY_SCHEMA = 'awm-plan-execution/v1' as const;
 const START = '<!-- AWM:COMPACT-SLICES:START v1 -->';
 const END = '<!-- AWM:COMPACT-SLICES:END v1 -->';
+const START_V2 = '<!-- AWM:COMPACT-SLICES:START v2 -->';
+const END_V2 = '<!-- AWM:COMPACT-SLICES:END v2 -->';
 
 /** Only lifecycle syntax actually emitted by the skills is non-executable.
  * Unknown metadata, prose, inline comments and code remain identity-bearing. */
@@ -46,8 +48,8 @@ export function executionPlanDigest(text: string): string {
             return { line };
         }
         if (fence) return { line };
-        if (line === START) { manifest = true; return { line }; }
-        if (line === END) { manifest = false; return { line }; }
+        if (line === START || line === START_V2) { manifest = true; return { line }; }
+        if (line === END || line === END_V2) { manifest = false; return { line }; }
         if (manifest) return { line };
         const lifecycle = lifecycleMarker(line);
         return { line: line.replace(/^( {0,3}[-*+] +)\[[ xX]\]( +\S.*)$/, '$1[ ]$2'), lifecycle };

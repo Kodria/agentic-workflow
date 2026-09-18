@@ -34,4 +34,19 @@ describe('native release artifacts', () => {
         expect(gitignore).toContain('cli/native-artifacts/');
         expect(tracked).toBe('');
     });
+
+    it('builds the fault-injection addon before every Jest suite without publishing it', () => {
+        const pkg = JSON.parse(fs.readFileSync(path.join(CLI_ROOT, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
+        expect(pkg.scripts['native:test-build']).toContain('secure_fs_test');
+        for (const name of ['ci.yml', 'release.yml']) {
+            const workflow = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', name), 'utf8');
+            const testBuild = workflow.indexOf('run: npm run native:test-build');
+            const jest = workflow.indexOf('run: npx jest --runInBand --bail');
+            expect(testBuild).toBeGreaterThanOrEqual(0);
+            expect(testBuild).toBeLessThan(jest);
+            expect(workflow).toContain("'native/build/Release', 'secure_fs_test.node'");
+            expect(workflow).not.toContain('path: cli/prebuilds/${{ matrix.target }}/secure_fs_test.node');
+            expect(workflow).not.toContain('secure_fs_test.node\n');
+        }
+    });
 });

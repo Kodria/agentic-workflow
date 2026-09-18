@@ -2,6 +2,10 @@
 
 ### Features
 - enforce compact-only R1 admission and portable sensors (#149)
+- **routing:** add digest-bound model-policy, compact v2 resolution, and supervised routing custody (#126)
+
+### Compatibility
+- compact-slices/v1 remains unchanged unless explicitly resolved with `--opt-in-v1`; compact-slices/v2 requires approved policy and current capabilities. Native and Claude acceptance remain UNTESTED until the operator playbook is run.
 
 ### Fixes
 - **tests:** verify Windows diagnostic filesystem identity (#152)

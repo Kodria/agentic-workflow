@@ -12,8 +12,13 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 import { readJournal } from '../../core/journal/store';
 import { collectIssue148HistoricalFacts, collectMigrationFacts, type MigrationFactsReport } from '../../core/migration';
+import { readEffectivePolicy } from '../../core/model-policy/store';
+import { readCapabilities, validateRuntimeKey } from '../../core/model-policy/capabilities';
+import { resolveDispatch, resolveSelection } from '../../core/model-policy/resolve';
+import { resolveLineageEscalation } from '../../core/model-policy/journal';
+import type { RoutingRole } from '../../core/model-policy/types';
 
-const SUPPORTED_SCHEMA = 'compact-slices/v1';
+const SUPPORTED_SCHEMA = 'compact-slices/v1, compact-slices/v2';
 const MAX_PATH_LENGTH = 4096;
 const MAX_DIAGNOSTICS = 20;
 const MAX_DIAGNOSTIC_LENGTH = 4096;
@@ -26,6 +31,10 @@ export interface PlanCommandDependencies {
     readPreferences?: typeof readPreferences;
     listRegistries?: () => RegistrySource[];
     collectMigrationFacts?: (planPath: string, cwd: string, issueLinks: string[]) => MigrationFactsReport;
+    readEffectivePolicy?: typeof readEffectivePolicy;
+    readCapabilities?: typeof readCapabilities;
+    /** Test seam only; production defaults to the real clock. */
+    routingNow?: () => Date;
 }
 
 function journalObservation(cwd: string): { journalState: ReturnType<typeof readJournal>['state']; journalCorrupt: boolean } {
@@ -146,6 +155,27 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
     assertDependencies(deps);
 
     const plan = program.command('plan').description('inspect plan contracts');
+    plan.command('resolve <plan-path>').requiredOption('--provider <target>').requiredOption('--runtime-kind <kind>').requiredOption('--runtime-version <version>').requiredOption('--account-scope-digest <sha>').requiredOption('--role <role>').option('--opt-in-v1').option('--slice <id>').option('--lineage <id>').option('--cwd <path>').option('--json').action((planPath: string, options: { provider: string; runtimeKind: string; runtimeVersion: string; accountScopeDigest: string; role: string; optInV1?: boolean; slice?: string; lineage?: string; cwd?: string; json?: boolean }) => {
+        assertText(planPath, 'plan path'); for (const [value, label] of [[options.provider, '--provider'], [options.runtimeKind, '--runtime-kind'], [options.runtimeVersion, '--runtime-version'], [options.accountScopeDigest, '--account-scope-digest'], [options.role, '--role']]) assertText(value, label); if (options.slice) assertText(options.slice, '--slice'); if (options.lineage) assertText(options.lineage, '--lineage');
+        const cwd = options.cwd ?? process.cwd(); assertText(cwd, '--cwd'); const report = deps.validatePlanFile(planPath, cwd); assertReport(report);
+        if (report.state !== 'valid') { process.stdout.write(options.json ? `${JSON.stringify({ state: 'blocked', diagnostics: report.state === 'invalid' ? report.diagnostics : [{ code: 'ROUTING_PLAN_INVALID', message: 'Plan must validate before resolution.' }] })}\n` : 'Plan routing: blocked\n'); process.exitCode = 2; return; }
+        if (options.lineage) {
+            if (report.schema !== 'compact-slices/v2') { process.stdout.write(options.json ? `${JSON.stringify({ state: 'blocked', diagnostics: [{ code: 'ROUTING_LINEAGE_V1', message: 'Lineage routing is only available for compact v2 plans.' }] })}\n` : 'Plan routing: blocked\n'); process.exitCode = 2; return; }
+            const observed = journalObservation(cwd);
+            const binding = observed.journalState?.planBinding;
+            const attempts = observed.journalState?.routingAttempts?.filter((attempt) => attempt.lineageId === options.lineage) ?? [];
+            const lineage = observed.journalState?.implementationLineages?.find((candidate) => candidate.id === options.lineage);
+            const bound = !observed.journalCorrupt && binding?.digest === report.planDigest && binding.executionDigest === report.executionDigest;
+            const lineageMatches = lineage !== undefined && lineage.sliceId === options.slice && lineage.planDigest === report.planDigest && lineage.executionDigest === report.executionDigest && attempts.every((attempt) => attempt.obligationId === lineage.obligationId && attempt.envelope.sliceId === options.slice);
+            if (!bound || !lineageMatches || attempts.length > 3 || attempts.some((attempt) => attempt.envelope.planDigest !== report.planDigest || attempt.envelope.executionDigest !== report.executionDigest || ['unknown', 'reserved', 'active'].includes(attempt.state))) {
+                process.stdout.write(options.json ? `${JSON.stringify({ state: 'blocked', diagnostics: [{ code: 'ROUTING_LINEAGE_UNBOUND', message: 'Lineage routing requires a current journal binding and non-unknown matching attempts.' }] })}\n` : 'Plan routing: blocked\n'); process.exitCode = 2; return;
+            }
+        }
+        const roles: readonly string[] = ['implementer', 'specification-reviewer', 'code-quality-reviewer', 'final-reviewer', 'architecture', 'track-a-qa', 'track-b-qa', 'controller', 'documentation', 'retro', 'finishing']; if (!roles.includes(options.role)) throw new Error('--role is invalid');
+        const runtime = validateRuntimeKey({ target: options.provider, kind: options.runtimeKind, version: options.runtimeVersion, accountScopeDigest: options.accountScopeDigest });
+        const result = report.schema === 'compact-slices/v1' && !options.optInV1 ? resolveDispatch({ plan: report, role: options.role as RoutingRole, policy: undefined, capabilities: undefined, runtime, now: new Date(), optInV1: false }) : (() => { const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(cwd); const capabilities = (deps.readCapabilities ?? readCapabilities)(runtime, new Date()); if (!options.lineage) return resolveDispatch({ plan: report, role: options.role as RoutingRole, sliceId: options.slice, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined, runtime, now: new Date(), optInV1: options.optInV1 === true }); const state = journalObservation(cwd).journalState!; const lineage = state.implementationLineages!.find(candidate => candidate.id === options.lineage)!; const next = resolveLineageEscalation(state, options.lineage, lineage.initialProfile); const resolved = resolveSelection({ role: 'implementer', requestedProfile: next.profile, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined, runtime, now: new Date() }); if (resolved.state === 'blocked') return resolved; const highRequiresFull = next.effort !== 'high' || (policy.state === 'approved' && (() => { const full = policy.policy.content.mappings.find(row => row.target === runtime.target && row.runtimeKind === runtime.kind)?.fullCapability; return full?.selector.kind === resolved.selection.selector.kind && full.selector.id === resolved.selection.selector.id && full.effort.kind === 'explicit' && full.effort.value === 'high'; })()); if (resolved.selection.effort.kind !== 'explicit' || resolved.selection.effort.value !== next.effort || !highRequiresFull) return { state: 'blocked' as const, diagnostics: [{ code: 'ROUTING_ESCALATION_EFFORT_UNAVAILABLE', message: 'The approved selected effort does not match the next lineage escalation.' }] }; return { ...resolved, envelope: { schema: 'routing-envelope/v1' as const, runtime, role: 'implementer', planDigest: report.planDigest, executionDigest: report.executionDigest!, sliceId: lineage.sliceId, requestedProfile: lineage.initialProfile, effectiveProfile: next.profile, resolved: resolved.selection, policyDigest: resolved.policyDigest, capabilityDigest: resolved.capabilityDigest, outcome: resolved.outcome, unavailableEvidence: resolved.unavailableEvidence }, custodyHandoff: { kind: 'routing-reserve', obligationId: lineage.obligationId, lineageId: lineage.id } }; })();
+        process.stdout.write(options.json ? `${JSON.stringify(result)}\n` : `Plan routing: ${result.state}\n`); if (result.state === 'blocked') process.exitCode = 2;
+    });
     plan.command('migration-facts <plan-path>')
         .description('collect read-only durable migration facts')
         .option('--cwd <path>')
@@ -184,8 +214,11 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
         .option('--execution-mode <mode>', 'explicit override: interactivo or desatendido')
         .option('--require-current', 'require authoritative consumed-contract currentness')
         .option('--verify-sensors', 'require an empirical sensor pass')
+        .option('--runtime-kind <kind>', 'routing runtime kind for compact v2')
+        .option('--runtime-version <version>', 'routing runtime version for compact v2')
+        .option('--account-scope-digest <sha>', 'routing account scope digest for compact v2')
         .option('--json', 'emit one stable JSON report')
-        .action(async (planPath: string, options: { provider: string; cwd: string; executionMode?: string; requireCurrent?: boolean; verifySensors?: boolean; json?: boolean }) => {
+        .action(async (planPath: string, options: { provider: string; cwd: string; executionMode?: string; requireCurrent?: boolean; verifySensors?: boolean; runtimeKind?: string; runtimeVersion?: string; accountScopeDigest?: string; json?: boolean }) => {
             assertText(planPath, 'plan path');
             assertText(options.cwd, '--cwd');
             assertText(options.provider, '--provider');
@@ -213,8 +246,9 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
                 process.exitCode = 2;
                 return;
             }
+            const readRouting = (): AdmissionInput['routing'] => { if (!options.runtimeKind || !options.runtimeVersion || !options.accountScopeDigest) return undefined; const runtime = validateRuntimeKey({ target: options.provider, kind: options.runtimeKind, version: options.runtimeVersion, accountScopeDigest: options.accountScopeDigest }); const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(options.cwd); const at = deps.routingNow?.() ?? new Date(); if (!(at instanceof Date) || !Number.isFinite(at.getTime())) throw new Error('routingNow must return a finite Date'); const capabilities = (deps.readCapabilities ?? readCapabilities)(runtime, at); return { runtime, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined, now: at }; };
             const report = await admitRegistryPlan({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true },
-                { admitPlan: admission, listRegistries: registryInventory, checkCurrentness: currentnessCheck, runSensors: sensorRun });
+                { admitPlan: admission, listRegistries: registryInventory, checkCurrentness: currentnessCheck, runSensors: sensorRun, readRouting });
             process.stdout.write(admissionOutput(report, options.json === true));
             if (report.state !== 'admitted') process.exitCode = 2;
         });

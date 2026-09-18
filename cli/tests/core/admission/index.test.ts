@@ -1,6 +1,7 @@
 import { admitPlan, sanitizeAdmissionReport } from '../../../src/core/admission';
 import type { PlanValidationReport } from '../../../src/core/plan/types';
 import { emptyState } from '../../../src/core/journal/types';
+import type { ApprovedPolicy, CapabilityReceipt, RuntimeKey } from '../../../src/core/model-policy/types';
 
 const valid: Extract<PlanValidationReport, { state: 'valid' }> = {
     state: 'valid', schema: 'compact-slices/v1', planDigest: 'a'.repeat(64),
@@ -12,12 +13,62 @@ const valid: Extract<PlanValidationReport, { state: 'valid' }> = {
 };
 
 describe('admitPlan', () => {
+    const sha = 'a'.repeat(64);
+    const routing = () => ({
+        now: new Date('2026-09-17T12:00:00.000Z'),
+        runtime: { target: 'codex', kind: 'native', version: '1.0.0', accountScopeDigest: sha } as RuntimeKey,
+        policy: { schema: 'approved-model-policy/v1', content: { schema: 'model-policy/v1', mappings: [{ target: 'codex', runtimeKind: 'native', profiles: { mechanical: { selector: { kind: 'model', id: 'm' }, effort: { kind: 'explicit', value: 'low' } }, integration: { selector: { kind: 'model', id: 'i' }, effort: { kind: 'explicit', value: 'medium' } }, judgment: { selector: { kind: 'model', id: 'j' }, effort: { kind: 'explicit', value: 'medium' } } }, fullCapability: { selector: { kind: 'model', id: 'f' }, effort: { kind: 'explicit', value: 'high' } }, degradation: { allowMissingModelOverride: false, allowMissingEffortOverride: false, allowMissingObservedIdentity: false } }], implementationBudget: { maxAttempts: 3, escalation: ['mechanical', 'integration', 'judgment'], judgmentEfforts: ['medium', 'high'] } }, contentDigest: sha, approval: { approvedAt: '2026-09-17T00:00:00.000Z', approvalId: 'approval' }, lineage: { previousDigest: null } } as ApprovedPolicy,
+        capabilities: { schema: 'routing-capabilities/v1', runtime: { target: 'codex', kind: 'native', version: '1.0.0', accountScopeDigest: sha }, recordedAt: '2026-09-17T00:00:00.000Z', expiresAt: '2026-09-18T00:00:00.000Z', capabilities: { artifactDelivery: 'unverified', interactiveExecution: 'supported', unattendedController: 'supported', nativeSubagents: 'unverified', modelOverride: 'supported', effortOverride: 'supported', observedModelEvidence: 'supported', durableResume: 'unverified' }, availableSelections: ['m', 'i', 'j', 'f'].map((id, n) => ({ selector: { kind: 'model' as const, id }, effort: { kind: 'explicit' as const, value: n === 0 ? 'low' : n === 3 ? 'high' : 'medium' } })), evidence: ['interactiveExecution', 'unattendedController', 'modelOverride', 'effortOverride', 'observedModelEvidence'].map(capability => ({ capability: capability as any, kind: 'native-control' as const, receiptDigest: sha })), approval: { approvalId: 'approval', snapshotDigest: sha } } as CapabilityReceipt,
+    });
+    const v2 = (profile: 'mechanical' | 'integration' | 'judgment' = 'mechanical') => ({ ...valid, schema: 'compact-slices/v2' as const, manifest: { ...valid.manifest, schema: 'compact-slices/v2' as const, slices: valid.manifest.slices.map(slice => ({ ...slice, implementerProfile: profile })) } }) as PlanValidationReport;
+    it('blocks v2 routing only after existing sensors pass when routing facts are absent', async () => {
+        const report = await admitPlan({ plan: v2(), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], verifySensors: true, sensors: { overall: 'pass', sensors: [] } as any });
+        expect(report).toMatchObject({ state: 'blocked', sensors: 'pass' });
+        expect(report.diagnostics[0].code).toBe('ADMISSION_ROUTING_FACTS_REQUIRED');
+    });
+    it.each([
+        ['journal', { provider: 'codex', executionMode: 'desatendido' as const }],
+        ['provider capability', { provider: 'cursor', executionMode: 'interactivo' as const }],
+    ])('does not invoke deferred v2 routing facts when %s gate blocks', async (_name, fields) => {
+        const reader = jest.fn(() => { throw new Error('routing reader must not run'); });
+        const report = await admitPlan({ plan: v2(), cwd: process.cwd(), enabledAgents: [fields.provider as any], routingReader: reader, ...fields });
+        expect(report.state).toBe('blocked'); expect(reader).not.toHaveBeenCalled();
+    });
+    it.each(['fail', 'not_certified'] as const)('does not invoke deferred v2 routing facts when sensors are %s', async overall => {
+        const reader = jest.fn(() => { throw new Error('routing reader must not run'); });
+        const report = await admitPlan({ plan: v2(), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], verifySensors: true, sensors: { overall, sensors: [] } as any, routingReader: reader });
+        expect(report).toMatchObject({ state: 'blocked', sensors: overall === 'not_certified' ? 'not-certified' : 'fail' }); expect(reader).not.toHaveBeenCalled();
+    });
+    it('does not invoke deferred v2 routing facts when compatibility blocks', async () => {
+        const reader = jest.fn(() => { throw new Error('routing reader must not run'); });
+        const currentness = { checkedAt: 'x', compatibility: { status: 'not-checked' as const }, components: [{ component: 'cli', installed: '1', latest: '1', channel: 'stable' as const, source: 'x', checkedAt: 'x', status: 'current' as const, detail: 'x', remedy: 'none' as const }] };
+        const report = await admitPlan({ plan: v2(), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], requireCurrent: true, provenance: 'proven', currentness, compatibilityDiagnostics: [{ code: 'COMPAT', message: 'blocked' }], routingReader: reader });
+        expect(report).toMatchObject({ state: 'blocked', diagnostics: [expect.objectContaining({ code: 'COMPAT' })] }); expect(reader).not.toHaveBeenCalled();
+    });
+    it.each(['mechanical', 'integration', 'judgment'] as const)('admits v2 %s with policy and capability evidence and an honest unknown forecast', async profile => {
+        const report = await admitPlan({ plan: v2(profile), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], routing: routing() });
+        expect(report).toMatchObject({ state: 'admitted', routingForecast: { implementerProfiles: { [profile]: 1 }, trackB: { state: 'unavailable', lowerBound: 1 }, controller: { state: 'unavailable', lowerBound: 0 } } });
+    });
+    it('blocks a valid cross-provider policy and receipt instead of admitting codex under another runtime target', async () => {
+        const evidence = routing();
+        const foreign = structuredClone(evidence);
+        foreign.runtime.target = 'cursor';
+        foreign.policy.content.mappings[0].target = 'cursor';
+        foreign.capabilities.runtime.target = 'cursor';
+        const report = await admitPlan({ plan: v2(), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], routing: foreign });
+        expect(report).toMatchObject({ state: 'blocked', provider: 'codex', diagnostics: [expect.objectContaining({ code: 'ADMISSION_ROUTING_PROVIDER_MISMATCH' })] });
+    });
     it('rejects a forecast whose total or role topology does not match its slices', () => {
         const forecast = { kind: 'topology', slices: 2, roles: { implementer: 2, 'specification-reviewer': 2, 'code-quality-reviewer': 2, 'final-reviewer': 1, 'track-a-qa': 1, 'track-b-qa': 1, documentation: 1, retro: 1, finishing: 1 }, total: 99 };
         expect(() => sanitizeAdmissionReport({ state: 'admitted', planState: 'valid', journal: 'not-required', currentness: 'not-checked', sensors: 'not-required', diagnostics: [], forecast })).toThrow(/invalid report/);
         forecast.total = 12;
         forecast.roles.implementer = 1;
         expect(() => sanitizeAdmissionReport({ state: 'admitted', planState: 'valid', journal: 'not-required', currentness: 'not-checked', sensors: 'not-required', diagnostics: [], forecast })).toThrow(/invalid report/);
+    });
+    it('rejects forged routing forecast role keys and profile totals at the public sanitizer', () => {
+        const base = { kind: 'routing-v1', slices: 1, implementerProfiles: { mechanical: 1, integration: 0, judgment: 0 }, roles: { 'specification-reviewer': 1, 'code-quality-reviewer': 1, 'final-reviewer': 1, 'track-a-qa': 1, documentation: 1, retro: 1, finishing: 1 }, trackB: { state: 'unavailable', lowerBound: 1 }, controller: { state: 'unavailable', lowerBound: 0 } };
+        expect(() => sanitizeAdmissionReport({ state: 'admitted', planState: 'valid', journal: 'not-required', currentness: 'not-checked', sensors: 'not-required', diagnostics: [], routingForecast: { ...base, roles: { ...base.roles, architecture: 1 } } })).toThrow(/invalid report/);
+        expect(() => sanitizeAdmissionReport({ state: 'admitted', planState: 'valid', journal: 'not-required', currentness: 'not-checked', sensors: 'not-required', diagnostics: [], routingForecast: { ...base, implementerProfiles: { ...base.implementerProfiles, mechanical: 0 } } })).toThrow(/invalid report/);
     });
     it('preserves the distinct unsupported plan state and bounded validator diagnostic', async () => {
         const report = await admitPlan({ plan: { state: 'unsupported', schema: 'compact-slices/v9', diagnostics: [{ code: 'PLAN_UNSUPPORTED_SCHEMA', message: `future\u001b${'x'.repeat(5000)}` }] }, provider: 'codex', cwd: process.cwd() });
@@ -76,7 +127,7 @@ describe('admitPlan', () => {
     });
 
     it('reports the schema-2 journal prerequisite for otherwise admissible unattended work', async () => {
-        const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as PlanValidationReport;
+        const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as unknown as PlanValidationReport;
         const report = await admitPlan({ plan: unattended, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'] });
         expect(report).toMatchObject({ state: 'blocked', executionMode: 'desatendido', journal: 'missing' });
         expect(report.diagnostics[0]).toMatchObject({ code: 'ADMISSION_JOURNAL_BINDING_REQUIRED' });
@@ -84,7 +135,7 @@ describe('admitPlan', () => {
     });
 
     it('admits unattended work only with an exact schema-2 plan binding', async () => {
-        const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as PlanValidationReport;
+        const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as unknown as PlanValidationReport;
         const journal = { ...emptyState('main'), schema: 2 as const, planBinding: { path: 'docs/plan.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1' as const, executionMode: 'desatendido' as const, boundAt: '2026-09-15T00:00:00.000Z' } };
         const admitted = await admitPlan({ plan: unattended, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], journalState: journal, planPath: 'docs/plan.md' });
         expect(admitted).toMatchObject({ state: 'admitted', journal: 'current', executionMode: 'desatendido' });

@@ -136,6 +136,8 @@ export interface Verdict {
     argv: string[];
     paths: string[];
     cwd: string;
+    /** Present only when this verdict came from a routed native attempt. */
+    routingAttemptId?: string;
 }
 export interface FixObligation { id: string; verdictId: string; closed: boolean; }
 export interface RequestProblem { file: string; kind: 'corrupt' | 'rejected'; detail: string; at: string; }
@@ -233,6 +235,12 @@ export interface AppliedRequest {
     outcome: RequestOutcome;
     resultRef?: string;     // ej. job-id creado — permite regenerar el ack (R1.3)
 }
+export type RoutingSelection = { selector: { kind: 'model' | 'tier'; id: string }; effort: { kind: 'explicit'; value: string } | { kind: 'runtime-default' } };
+const ROUTING_ROLES = ['implementer', 'specification-reviewer', 'code-quality-reviewer', 'final-reviewer', 'architecture', 'track-a-qa', 'track-b-qa', 'controller', 'documentation', 'retro', 'finishing'] as const;
+const UNAVAILABLE_EVIDENCE = ['modelOverride', 'effortOverride', 'observedModelEvidence'] as const;
+export interface RoutingEnvelopeRecord { schema: 'routing-envelope/v1'; runtime: { target: string; kind: string; version: string; accountScopeDigest: string }; role: string; planDigest: string; executionDigest: string; sliceId?: string; requestedProfile: 'mechanical' | 'integration' | 'judgment' | 'full'; effectiveProfile: 'mechanical' | 'integration' | 'judgment' | 'full'; resolved: RoutingSelection; policyDigest: string; capabilityDigest: string; outcome: 'native' | 'degraded'; unavailableEvidence: string[]; }
+export interface RoutingAttempt { schema: 'routing-attempt/v1'; id: string; obligationId: string; lineageId: string; attempt: number; envelope: RoutingEnvelopeRecord; envelopeDigest: string; fingerprint: string; state: 'reserved' | 'active' | 'complete' | 'blocked' | 'unknown'; nativeAgentId?: string; observed?: RoutingSelection; verdict?: 'pass' | 'fail' | 'inconclusive'; reasonCode?: string; administrativeRepair?: true; }
+export interface ImplementationLineage { id: string; obligationId: string; sliceId: string; planDigest: string; executionDigest: string; initialProfile: 'mechanical' | 'integration' | 'judgment'; initialEffort: 'medium' | 'high'; attempts: number; }
 
 export interface JournalState {
     schema: 1 | 2;
@@ -258,6 +266,8 @@ export interface JournalState {
     verdicts: Verdict[];
     fixes: FixObligation[];
     appliedRequests: Record<string, AppliedRequest>;  // por requestId (los alias duplican entrada)
+    routingAttempts?: RoutingAttempt[];
+    implementationLineages?: ImplementationLineage[];
     requestProblems: RequestProblem[];                // corrupcion/rechazos de contenido bloquean el gate
     custodyDecisions?: CustodyDecision[];             // compatible con journals previos; decisiones humanas auditadas
     controllerHeartbeatAt?: string;
@@ -356,6 +366,8 @@ export function isWellFormedState(x: unknown): x is JournalState {
         || !Array.isArray(x.dispatches) || !x.dispatches.every(isWellFormedDispatch)) return false;
     if (!isObj(x.jobs) || !Object.values(x.jobs).every(isWellFormedJob)) return false;
     if (!isObj(x.appliedRequests) || !Object.values(x.appliedRequests).every(isWellFormedAppliedRequest)) return false;
+    if (x.routingAttempts !== undefined && (!Array.isArray(x.routingAttempts) || x.routingAttempts.length > 4096 || !x.routingAttempts.every(isWellFormedRoutingAttempt))) return false;
+    if (x.implementationLineages !== undefined && (!Array.isArray(x.implementationLineages) || x.implementationLineages.length > 4096 || !x.implementationLineages.every(isWellFormedImplementationLineage))) return false;
     if (!Array.isArray(x.requestProblems) || !x.requestProblems.every(isWellFormedRequestProblem)) return false;
     if (x.custodyDecisions !== undefined && (!Array.isArray(x.custodyDecisions) || !x.custodyDecisions.every(isWellFormedCustodyDecision))) return false;
     if (!x.generations.every(isWellFormedGeneration) || !x.tasks.every(isWellFormedTask)) return false;
@@ -443,7 +455,8 @@ function isWellFormedVerdict(x: unknown): x is Verdict {
     return isObj(x) && typeof x.id === 'string' && typeof x.obligationId === 'string'
         && ['pass', 'fail', 'inconclusive'].includes(String(x.result))
         && typeof x.detail === 'string' && typeof x.receivedAt === 'string'
-        && typeof x.fingerprint === 'string' && strings(x.argv) && strings(x.paths) && typeof x.cwd === 'string';
+        && typeof x.fingerprint === 'string' && strings(x.argv) && strings(x.paths) && typeof x.cwd === 'string'
+        && (x.routingAttemptId === undefined || typeof x.routingAttemptId === 'string');
 }
 
 function isWellFormedFix(x: unknown): x is FixObligation {
@@ -456,6 +469,17 @@ function isWellFormedAppliedRequest(x: unknown): x is AppliedRequest {
         && ['applied', 'rejected-stale-generation', 'rejected-digest-mismatch', 'rejected-secret'].includes(String(x.outcome))
         && (x.resultRef === undefined || typeof x.resultRef === 'string');
 }
+function isWellFormedRoutingAttempt(x: unknown): x is RoutingAttempt {
+    return isObj(x) && Object.keys(x).every(key => ['schema', 'id', 'obligationId', 'lineageId', 'attempt', 'envelope', 'envelopeDigest', 'fingerprint', 'state', 'nativeAgentId', 'observed', 'verdict', 'reasonCode', 'administrativeRepair'].includes(key))
+        && x.schema === 'routing-attempt/v1'
+        && typeof x.id === 'string' && typeof x.obligationId === 'string' && typeof x.lineageId === 'string' && Number.isSafeInteger(x.attempt) && (x.attempt as number) > 0
+        && typeof x.envelopeDigest === 'string' && /^[a-f0-9]{64}$/.test(x.envelopeDigest) && typeof x.fingerprint === 'string' && /^[a-f0-9]{64}$/.test(x.fingerprint)
+        && ['reserved', 'active', 'complete', 'blocked', 'unknown'].includes(String(x.state)) && (x.nativeAgentId === undefined || typeof x.nativeAgentId === 'string') && (x.observed === undefined || isRoutingSelection(x.observed)) && (x.verdict === undefined || ['pass', 'fail', 'inconclusive'].includes(String(x.verdict))) && (x.reasonCode === undefined || typeof x.reasonCode === 'string') && (x.administrativeRepair === undefined || x.administrativeRepair === true) && isRoutingEnvelope(x.envelope);
+}
+function isDigest(value: unknown): boolean { return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value); }
+export function isRoutingSelection(x: unknown): x is RoutingSelection { return isObj(x) && Object.keys(x).every(key => key === 'selector' || key === 'effort') && isObj(x.selector) && Object.keys(x.selector).every(key => key === 'kind' || key === 'id') && ['model', 'tier'].includes(String(x.selector.kind)) && typeof x.selector.id === 'string' && x.selector.id.length > 0 && x.selector.id.length <= 128 && isObj(x.effort) && ((x.effort.kind === 'runtime-default' && Object.keys(x.effort).length === 1) || (x.effort.kind === 'explicit' && Object.keys(x.effort).length === 2 && typeof x.effort.value === 'string' && x.effort.value.length > 0 && x.effort.value.length <= 128)); }
+export function isRoutingEnvelope(x: unknown): x is RoutingEnvelopeRecord { if (!isObj(x) || !Object.keys(x).every(key => ['schema','runtime','role','planDigest','executionDigest','sliceId','requestedProfile','effectiveProfile','resolved','policyDigest','capabilityDigest','outcome','unavailableEvidence'].includes(key))) return false; const runtime = x.runtime; return x.schema === 'routing-envelope/v1' && isObj(runtime) && Object.keys(runtime).every(key => ['target','kind','version','accountScopeDigest'].includes(key)) && ['codex','claude-code','cursor','copilot','opencode','antigravity'].includes(String(runtime.target)) && typeof runtime.kind === 'string' && runtime.kind.length > 0 && runtime.kind.length <= 128 && typeof runtime.version === 'string' && runtime.version.length > 0 && runtime.version.length <= 128 && isDigest(runtime.accountScopeDigest) && typeof x.role === 'string' && ROUTING_ROLES.includes(x.role as typeof ROUTING_ROLES[number]) && isDigest(x.planDigest) && isDigest(x.executionDigest) && (x.sliceId === undefined || (typeof x.sliceId === 'string' && x.sliceId.length > 0 && x.sliceId.length <= 128)) && ['mechanical','integration','judgment','full'].includes(String(x.requestedProfile)) && ['mechanical','integration','judgment','full'].includes(String(x.effectiveProfile)) && isRoutingSelection(x.resolved) && isDigest(x.policyDigest) && isDigest(x.capabilityDigest) && ['native','degraded'].includes(String(x.outcome)) && Array.isArray(x.unavailableEvidence) && x.unavailableEvidence.length <= UNAVAILABLE_EVIDENCE.length && x.unavailableEvidence.every(value => typeof value === 'string' && UNAVAILABLE_EVIDENCE.includes(value as typeof UNAVAILABLE_EVIDENCE[number])); }
+function isWellFormedImplementationLineage(x: unknown): x is ImplementationLineage { return isObj(x) && Object.keys(x).every(key => ['id','obligationId','sliceId','planDigest','executionDigest','initialProfile','initialEffort','attempts'].includes(key)) && typeof x.id === 'string' && x.id.length > 0 && typeof x.obligationId === 'string' && x.obligationId.length > 0 && typeof x.sliceId === 'string' && x.sliceId.length > 0 && isDigest(x.planDigest) && isDigest(x.executionDigest) && ['mechanical','integration','judgment'].includes(String(x.initialProfile)) && ['medium','high'].includes(String(x.initialEffort)) && Number.isSafeInteger(x.attempts) && (x.attempts as number) >= 0 && (x.attempts as number) <= 3; }
 
 function isWellFormedRequestProblem(x: unknown): x is RequestProblem {
     return isObj(x) && typeof x.file === 'string' && (x.kind === 'corrupt' || x.kind === 'rejected')

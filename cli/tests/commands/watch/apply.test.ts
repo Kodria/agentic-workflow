@@ -173,6 +173,19 @@ describe('aplicacion transaccional de requests', () => {
         expect(s.controllerHeartbeatAt).toBeUndefined();
     });
 
+    test('routing reserve/observe es supervisado, idempotente y una generacion vieja no muta intentos', () => {
+        const envelope = { schema: 'routing-envelope/v1', runtime: { target: 'codex', kind: 'native', version: '1', accountScopeDigest: '0'.repeat(64) }, role: 'implementer', sliceId: 'S1', requestedProfile: 'mechanical', effectiveProfile: 'mechanical', resolved: { selector: { kind: 'model', id: 'm' }, effort: { kind: 'explicit', value: 'medium' } }, outcome: 'native', unavailableEvidence: [], policyDigest: 'a'.repeat(64), capabilityDigest: 'b'.repeat(64), planDigest: 'c'.repeat(64), executionDigest: 'd'.repeat(64) };
+        emitRequest(repo, 'rama', { kind: 'routing-reserve', generationToken: 'g1', idempotencyKey: 'routing-1', payload: { obligationId: 'o1', lineageId: 'l1', envelope, fingerprint: 'e'.repeat(64) } });
+        consumePendingRequests(repo, 'rama', 'g1');
+        const attempt = readJournal(repo, 'rama').state!.routingAttempts![0];
+        emitRequest(repo, 'rama', { kind: 'routing-observe', generationToken: 'g1', idempotencyKey: 'routing-2', payload: { attemptId: attempt.id, nativeAgentId: 'native-1' } });
+        consumePendingRequests(repo, 'rama', 'g1');
+        expect(readJournal(repo, 'rama').state!.routingAttempts![0]).toMatchObject({ state: 'active', nativeAgentId: 'native-1' });
+        emitRequest(repo, 'rama', { kind: 'routing-reserve', generationToken: 'old', idempotencyKey: 'routing-old', payload: { obligationId: 'o1', lineageId: 'l2', envelope, fingerprint: 'f'.repeat(64) } });
+        expect(consumePendingRequests(repo, 'rama', 'g1').rejectedStale).toBe(1);
+        expect(readJournal(repo, 'rama').state!.routingAttempts).toHaveLength(1);
+    });
+
     test('request corrupta se aparta VISIBLE como .corrupt, jamas se descarta (R1.6)', () => {  // verifies R1.6
         fs.writeFileSync(path.join(requestsDir(repo, 'rama'), 'req-roto.json'), '{no-json');
         const out = consumePendingRequests(repo, 'rama', 'g1');
