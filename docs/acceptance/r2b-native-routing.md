@@ -12,6 +12,18 @@ PLAN_PATH=<absolute compact-v2 plan path>
 PLAN_DIGEST=<admission output>
 EXECUTION_DIGEST=<admission output>
 EVIDENCE_DIR=<absolute durable evidence directory>
+PROVIDER=codex
+RUNTIME_KIND=native
+RUNTIME_VERSION=<attested runtime version>
+ACCOUNT_SCOPE_DIGEST=<64-lowercase-hex>
+GENERATION=<active supervisor generation token>
+OBLIGATION=<registered review obligation>
+LINEAGE=<implementation lineage id>
+FINGERPRINT=<64-lowercase-hex reproducible fingerprint>
+POLICY_DIGEST=<64-lowercase-hex policy content digest>
+RECEIPT_DIGEST=<64-lowercase-hex receipt snapshot digest>
+ATTEMPT_ID=<applied routing reservation attempt id>
+NATIVE_AGENT_ID=<native runtime returned identity>
 ```
 
 1. Create a scratch repository and isolated `HOME`, `AWM_HOME`, and `cwd`;
@@ -20,10 +32,25 @@ EVIDENCE_DIR=<absolute durable evidence directory>
    plan with an approved policy and a current capability
    receipt. Record `PLAN_DIGEST`, `EXECUTION_DIGEST`, request IDs, attempt IDs,
    routing report, and gate JSON beneath `EVIDENCE_DIR`.
+
+```sh
+awm model-policy approve --file "$EVIDENCE_DIR/policy.json" --scope project --expected-digest "$POLICY_DIGEST" --json
+awm model-policy capabilities approve --file "$EVIDENCE_DIR/receipt.json" --expected-digest "$RECEIPT_DIGEST" --json
+awm plan admit "$PLAN_PATH" --provider "$PROVIDER" --cwd "$PWD" --runtime-kind "$RUNTIME_KIND" --runtime-version "$RUNTIME_VERSION" --account-scope-digest "$ACCOUNT_SCOPE_DIGEST" --json | tee "$EVIDENCE_DIR/admission.json"
+awm plan resolve "$PLAN_PATH" --provider "$PROVIDER" --runtime-kind "$RUNTIME_KIND" --runtime-version "$RUNTIME_VERSION" --account-scope-digest "$ACCOUNT_SCOPE_DIGEST" --role implementer --slice S1 --lineage "$LINEAGE" --cwd "$PWD" --json | tee "$EVIDENCE_DIR/resolution.json"
+```
 2. Start the supervised cycle and submit `job routing-reserve` with the active
    generation token, obligation, lineage, routing envelope, and reproducible
    fingerprint. The supervisor must durably acknowledge the reservation before
    any native dispatch is attempted.
+
+```sh
+awm job routing-reserve --generation "$GENERATION" --obligation "$OBLIGATION" --lineage "$LINEAGE" --envelope-file "$EVIDENCE_DIR/envelope.json" --fingerprint "$FINGERPRINT" --cwd "$PWD" --json | tee "$EVIDENCE_DIR/reserve.json"
+# Wait for the supervisor's applied acknowledgement, then dispatch natively.
+awm job routing-observe --generation "$GENERATION" --attempt "$ATTEMPT_ID" --native-agent-id "$NATIVE_AGENT_ID" --observation-file "$EVIDENCE_DIR/observation.json" --cwd "$PWD" --json | tee "$EVIDENCE_DIR/observe.json"
+awm job routing-report | tee "$EVIDENCE_DIR/routing-report.json"
+awm job gate | tee "$EVIDENCE_DIR/gate.json"
+```
 3. Submit `job routing-observe` only after the native runtime returns its
    agent identity. Confirm `job routing-report` exposes counts only; it must
    not expose the envelope or native identity.

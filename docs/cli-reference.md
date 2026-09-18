@@ -34,7 +34,7 @@ effective envelope and a custody handoff, not a dispatch.
 ```
 awm job routing-reserve --generation <token> --obligation <id> --lineage <id> --envelope-file <file> --fingerprint <sha> [--cwd <root>] --json
 awm job routing-observe --generation <token> --attempt <id> --native-agent-id <id> --observation-file <file> [--cwd <root>] --json
-awm job routing-report --json
+awm job routing-report
 ```
 
 The supervisor is the sole journal writer. Reserve only emits a durable
