@@ -48,14 +48,15 @@ export function resolveLineageEscalation(state: JournalState, lineageId: string,
 }
 /** Read-only operational summary. Deliberately excludes envelopes, prompts and
  * native identities: this is safe to expose in a status command. */
-export function routingReport(state: JournalState): { schema: 'routing-report/v1'; attempts: number; plannedByRole: Record<string, number>; actualByRole: Record<string, number>; byState: Record<string, number>; retries: number; fallbacks: number; unavailable: Record<string, number>; administrativeRepairs: number } {
+export function routingReport(state: JournalState): { schema: 'routing-report/v1'; attempts: number; plannedByRole: Record<string, number>; actualByRole: Record<string, number>; byState: Record<string, number>; retries: number; fallbacks: number; unavailable: Record<string, number>; verdicts: Record<string, number>; administrativeRepairs: number } {
     const attempts = state.routingAttempts ?? [];
-    const plannedByRole: Record<string, number> = {}; const actualByRole: Record<string, number> = {}; const byState: Record<string, number> = {}; const unavailable: Record<string, number> = {};
+    const plannedByRole: Record<string, number> = {}; const actualByRole: Record<string, number> = {}; const byState: Record<string, number> = {}; const unavailable: Record<string, number> = {}; const verdicts: Record<string, number> = {};
     for (const attempt of attempts) {
         plannedByRole[attempt.envelope.role] = (plannedByRole[attempt.envelope.role] ?? 0) + 1;
         if (attempt.nativeAgentId !== undefined) actualByRole[attempt.envelope.role] = (actualByRole[attempt.envelope.role] ?? 0) + 1;
         byState[attempt.state] = (byState[attempt.state] ?? 0) + 1;
         for (const reason of attempt.envelope.unavailableEvidence) unavailable[reason] = (unavailable[reason] ?? 0) + 1;
+        if (attempt.verdict !== undefined) verdicts[attempt.verdict] = (verdicts[attempt.verdict] ?? 0) + 1;
     }
-    return { schema: 'routing-report/v1', attempts: attempts.length, plannedByRole, actualByRole, byState, retries: attempts.filter((attempt) => attempt.attempt > 1).length, fallbacks: attempts.filter((attempt) => attempt.envelope.outcome === 'degraded').length, unavailable, administrativeRepairs: attempts.filter((attempt) => attempt.reasonCode !== undefined).length };
+    return { schema: 'routing-report/v1', attempts: attempts.length, plannedByRole, actualByRole, byState, retries: attempts.filter((attempt) => attempt.attempt > 1).length, fallbacks: attempts.filter((attempt) => attempt.envelope.outcome === 'degraded').length, unavailable, verdicts, administrativeRepairs: attempts.filter((attempt) => attempt.reasonCode !== undefined && attempt.envelope.unavailableEvidence.length === 0).length };
 }
