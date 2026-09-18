@@ -38,7 +38,7 @@ NATIVE_AGENT_ID=<native runtime returned identity>
 awm model-policy approve --file "$EVIDENCE_DIR/policy.json" --scope project --expected-digest "$POLICY_DIGEST" --json
 awm model-policy capabilities approve --file "$EVIDENCE_DIR/receipt.json" --expected-digest "$RECEIPT_DIGEST" --json
 awm plan admit "$PLAN_PATH" --provider "$PROVIDER" --cwd "$PWD" --runtime-kind "$RUNTIME_KIND" --runtime-version "$RUNTIME_VERSION" --account-scope-digest "$ACCOUNT_SCOPE_DIGEST" --json | tee "$EVIDENCE_DIR/admission.json"
-awm plan resolve "$PLAN_PATH" --provider "$PROVIDER" --runtime-kind "$RUNTIME_KIND" --runtime-version "$RUNTIME_VERSION" --account-scope-digest "$ACCOUNT_SCOPE_DIGEST" --role implementer --slice S1 --lineage "$LINEAGE" --cwd "$PWD" --json | tee "$EVIDENCE_DIR/resolution.json"
+awm plan resolve "$PLAN_PATH" --provider "$PROVIDER" --runtime-kind "$RUNTIME_KIND" --runtime-version "$RUNTIME_VERSION" --account-scope-digest "$ACCOUNT_SCOPE_DIGEST" --role implementer --slice S1 --cwd "$PWD" --json | tee "$EVIDENCE_DIR/resolution.json"
 ```
 2. Start the supervised cycle and submit `job routing-reserve` with the active
    generation token, obligation, lineage, routing envelope, and reproducible
@@ -49,7 +49,7 @@ awm plan resolve "$PLAN_PATH" --provider "$PROVIDER" --runtime-kind "$RUNTIME_KI
 awm job routing-reserve --generation "$GENERATION" --obligation "$OBLIGATION" --lineage "$LINEAGE" --envelope-file "$EVIDENCE_DIR/envelope.json" --fingerprint "$FINGERPRINT" --cwd "$PWD" --json | tee "$EVIDENCE_DIR/reserve.json"
 # Wait for the supervisor's applied acknowledgement, then dispatch natively.
 awm job routing-observe --generation "$GENERATION" --attempt "$ATTEMPT_ID" --native-agent-id "$NATIVE_AGENT_ID" --observation-file "$EVIDENCE_DIR/observation.json" --cwd "$PWD" --json | tee "$EVIDENCE_DIR/observe.json"
-awm job routing-report | tee "$EVIDENCE_DIR/routing-report.json"
+awm job routing-report --json | tee "$EVIDENCE_DIR/routing-report.json"
 awm job gate | tee "$EVIDENCE_DIR/gate.json"
 ```
 3. Submit `job routing-observe` only after the native runtime returns its
@@ -61,10 +61,20 @@ awm job gate | tee "$EVIDENCE_DIR/gate.json"
    with its `routingAttemptId`. `job gate`
    must reject a missing attempt, missing observed identity, stale fingerprint,
    unknown attempt, or plan/execution digest mismatch.
-5. Interrupt after reservation and before observation. On resumption, replaying
+5. Only after a reservation has been observed and receives a terminal `fail`
+   verdict, resolve the correction against that existing lineage. Do not pass
+   `--lineage` for the first v2 resolution or for an active/unknown attempt.
+
+```sh
+awm plan resolve "$PLAN_PATH" --provider "$PROVIDER" --runtime-kind "$RUNTIME_KIND" --runtime-version "$RUNTIME_VERSION" --account-scope-digest "$ACCOUNT_SCOPE_DIGEST" --role implementer --slice S1 --lineage "$LINEAGE" --cwd "$PWD" --json | tee "$EVIDENCE_DIR/correction-resolution.json"
+```
+
+   Submit the returned effective envelope through a new `routing-reserve` and
+   wait for its applied acknowledgement before any correction dispatch.
+6. Interrupt after reservation and before observation. On resumption, replaying
    the same reservation must return the same attempt; an unknown native outcome
    must block re-dispatch until an operator records an observation or recovery.
-6. Attempt a request from a superseded generation and a verdict bound to a
+7. Attempt a request from a superseded generation and a verdict bound to a
    different fingerprint. Both must be rejected by the supervised reducer and
    must leave durable evidence of the rejected request.
 

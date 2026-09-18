@@ -231,6 +231,7 @@ export function registerJobCommand(program: Command): void {
 
     job.command('routing-report')
         .description('informe de routing read-only; nunca expone envelopes ni identidad nativa')
+        .option('--json', 'emit the routing report as JSON')
         .action(() => {
             const repo = process.cwd(); const branch = branchOf(repo); assertAuthenticatedCwd(repo, branch);
             const r = readJournal(repo, branch);
