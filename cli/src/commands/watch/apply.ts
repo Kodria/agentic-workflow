@@ -433,6 +433,14 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
         }
         if (!s.verdicts.some((v) => v.id === verdictId)) {
             const result = p.result;
+            if (p.routingAttemptId !== undefined) {
+                if (typeof p.routingAttemptId !== 'string') throw new Error('verdict routed requiere routingAttemptId valido');
+                const attempt = s.routingAttempts?.find(candidate => candidate.id === p.routingAttemptId);
+                if (!attempt || attempt.obligationId !== obligationId || attempt.state !== 'active') throw new Error('verdict routed requiere intento activo ligado a la obligacion');
+                attempt.state = result === 'pass' ? 'complete' : 'blocked';
+                attempt.verdict = result;
+                if (typeof p.reasonCode === 'string' && p.reasonCode.length > 0 && p.reasonCode.length <= 128) attempt.reasonCode = p.reasonCode;
+            }
             // R2.3: redaccion tambien en el `detail` de texto libre humano, no
             // solo en argv — antes de cualquier escritura durable.
             s.verdicts.push({
