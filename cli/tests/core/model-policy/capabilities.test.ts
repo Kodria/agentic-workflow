@@ -17,37 +17,91 @@ const receipt = (): CapabilityReceipt => ({
     approval: { approvalId: 'approval-1', snapshotDigest: digest },
 });
 type C2Outcome = { outcome: 'accepted'; digest: string } | { outcome: 'rejected'; reason: string };
-type C2Competitor = { ready: Promise<void>; release: () => void; outcome: Promise<C2Outcome> };
+type C2Competitor = { ready: Promise<void>; release: () => void; outcome: Promise<C2Outcome>; close: () => Promise<void> };
+
+/** A child can retain its fixture script briefly after it reports an outcome on
+ * Windows. Retry only that documented transient after every child has exited. */
+async function removeC2Fixture(target: string, attempts = 10, delayMs = 50, remove = (pathToRemove: string) => fs.rmSync(pathToRemove, { recursive: true, force: true }), isWindows = process.platform === 'win32'): Promise<void> {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        try {
+            remove(target);
+            return;
+        } catch (error) {
+            if (!isWindows || (error as NodeJS.ErrnoException).code !== 'EBUSY' || attempt === attempts - 1) throw error;
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+    }
+}
 
 function startC2Competitor(root: string, candidate: string, expectedDigest: string, predecessor: string, awmHome: string): C2Competitor {
     const module = path.resolve(__dirname, '../../../dist/src/core/model-policy/capabilities.js');
     const worker = path.join(root, `c2-competitor-${path.basename(candidate)}.js`);
     fs.writeFileSync(worker, `
 const { approveCapabilities, capabilityReceiptDigest } = require(process.env.C2_CAPABILITIES_MODULE);
-process.on('message', message => {
-    if (message !== 'go') return;
+function report(message) {
+    if (typeof process.send !== 'function' || !process.connected) process.exit(1);
+    process.send(message, () => {
+        if (process.connected) process.disconnect();
+    });
+}
+process.once('message', message => {
+    if (message !== 'go') process.exit(1);
     try {
         const receipt = approveCapabilities({ file: process.env.C2_CANDIDATE, cwd: process.env.C2_CWD, expectedDigest: process.env.C2_EXPECTED_DIGEST, replaceDigest: process.env.C2_PREDECESSOR, now: new Date(process.env.C2_NOW) });
-        process.send({ outcome: 'accepted', digest: capabilityReceiptDigest(receipt) });
+        report({ outcome: 'accepted', digest: capabilityReceiptDigest(receipt) });
     } catch (error) {
-        process.send({ outcome: 'rejected', reason: error instanceof Error ? error.message : String(error) });
+        report({ outcome: 'rejected', reason: error instanceof Error ? error.message : String(error) });
     }
-    process.disconnect();
 });
+process.once('disconnect', () => process.exit(0));
 process.send({ type: 'ready' });
 `);
-    let readyResolve!: () => void; let readyReject!: (error: Error) => void; let outcomeResolve!: (outcome: C2Outcome) => void; let outcomeReject!: (error: Error) => void; let settled = false;
+    let readyResolve!: () => void; let readyReject!: (error: Error) => void; let outcomeResolve!: (outcome: C2Outcome) => void; let outcomeReject!: (error: Error) => void;
+    let readySettled = false; let outcomeSettled = false; let exitResolve!: () => void;
     const ready = new Promise<void>((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
     const outcome = new Promise<C2Outcome>((resolve, reject) => { outcomeResolve = resolve; outcomeReject = reject; });
+    const exited = new Promise<void>(resolve => { exitResolve = resolve; });
     const child = fork(worker, [], { cwd: root, env: { ...process.env, AWM_HOME: awmHome, C2_CAPABILITIES_MODULE: module, C2_CANDIDATE: candidate, C2_CWD: root, C2_EXPECTED_DIGEST: expectedDigest, C2_PREDECESSOR: predecessor, C2_NOW: '2026-09-17T12:00:00.000Z' }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
-    child.once('error', error => { readyReject(error); if (!settled) { settled = true; outcomeReject(error); } });
+    const rejectPending = (error: Error) => {
+        if (!readySettled) { readySettled = true; readyReject(error); }
+        if (!outcomeSettled) { outcomeSettled = true; outcomeReject(error); }
+    };
+    child.once('error', rejectPending);
     child.on('message', (message: unknown) => {
-        if (message && typeof message === 'object' && (message as { type?: string }).type === 'ready') { readyResolve(); return; }
+        if (message && typeof message === 'object' && (message as { type?: string }).type === 'ready') {
+            if (!readySettled) { readySettled = true; readyResolve(); }
+            return;
+        }
         const result = message as Partial<C2Outcome>;
-        if (!settled && (result.outcome === 'accepted' || result.outcome === 'rejected')) { settled = true; outcomeResolve(result as C2Outcome); }
+        if (!outcomeSettled && (result.outcome === 'accepted' || result.outcome === 'rejected')) { outcomeSettled = true; outcomeResolve(result as C2Outcome); }
     });
-    child.once('exit', code => { if (!settled) outcomeReject(new Error(`C2 competitor exited before reporting an outcome (${code})`)); });
-    return { ready, release: () => child.send('go'), outcome };
+    child.once('exit', code => { exitResolve(); rejectPending(new Error(`C2 competitor exited before reporting an outcome (${code})`)); });
+    // A failure before both outcomes are awaited must not leave a rejected
+    // promise unobserved while the test's finally block is closing the child.
+    void ready.catch(() => undefined);
+    void outcome.catch(() => undefined);
+    return {
+        ready,
+        release: () => {
+            if (!child.connected) throw new Error('C2 competitor IPC closed before release');
+            child.send('go');
+        },
+        outcome,
+        close: async () => {
+            if (child.exitCode !== null || child.signalCode !== null) return exited;
+            if (child.connected) {
+                try { child.disconnect(); }
+                catch (error) {
+                    if ((error as NodeJS.ErrnoException).code !== 'ERR_IPC_DISCONNECTED') throw error;
+                }
+            }
+            const timeout = setTimeout(() => {
+                if (child.exitCode === null && child.signalCode === null) child.kill();
+            }, 5000);
+            try { await exited; }
+            finally { clearTimeout(timeout); }
+        },
+    };
 }
 
 describe('capability receipt validation', () => {
@@ -106,10 +160,60 @@ describe('capability receipt validation', () => {
             expect(readCapabilities(second.runtime, now)).toMatchObject({ state: 'current', digest: secondDigest });
         } finally { if (previous === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = previous; fs.rmSync(root, { recursive: true, force: true }); }
     });
+    it('retries only bounded Windows EBUSY cleanup after a C2 child exits', async () => {
+        const calls: string[] = [];
+        await removeC2Fixture('fixture', 3, 0, () => {
+            calls.push('remove');
+            if (calls.length < 3) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+        }, true);
+        expect(calls).toHaveLength(3);
+        await expect(removeC2Fixture('fixture', 3, 0, () => {
+            calls.push('non-busy');
+            throw Object.assign(new Error('denied'), { code: 'EPERM' });
+        }, true)).rejects.toThrow('denied');
+        expect(calls.filter(call => call === 'non-busy')).toHaveLength(1);
+    });
     it('accepts exactly one process-raced C2 replacement from the same observed predecessor', async () => {
-        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-receipt-')); const prior = process.env.AWM_HOME; process.env.AWM_HOME = path.join(root, 'operator'); const now = new Date('2026-09-17T12:00:00.000Z'); const file = path.join(root, 'receipt.json'); const base = receipt(); fs.writeFileSync(file, JSON.stringify(base));
-        try { const predecessor = capabilityReceiptDigest(base); approveCapabilities({ file, cwd: root, expectedDigest: predecessor, now }); const candidate = (id: string) => { const value = receipt(); value.approval.approvalId = id; const candidateFile = path.join(root, `${id}.json`); fs.writeFileSync(candidateFile, JSON.stringify(value), { mode: 0o400 }); return { file: candidateFile, digest: capabilityReceiptDigest(value) }; }; const left = candidate('left'); const right = candidate('right'); const leftProcess = startC2Competitor(root, left.file, left.digest, predecessor, process.env.AWM_HOME!); const rightProcess = startC2Competitor(root, right.file, right.digest, predecessor, process.env.AWM_HOME!); await Promise.all([leftProcess.ready, rightProcess.ready]); leftProcess.release(); rightProcess.release(); const outcomes = await Promise.all([leftProcess.outcome, rightProcess.outcome]); const accepted = outcomes.filter((outcome): outcome is Extract<C2Outcome, { outcome: 'accepted' }> => outcome.outcome === 'accepted'); const rejected = outcomes.filter((outcome): outcome is Extract<C2Outcome, { outcome: 'rejected' }> => outcome.outcome === 'rejected'); expect(accepted).toHaveLength(1); expect(rejected).toHaveLength(1); expect(rejected[0].reason).toMatch(/predecessor|lease|exist/i); const persisted = readCapabilities(base.runtime, now); expect(persisted).toMatchObject({ state: 'current', digest: accepted[0].digest }); expect([left.digest, right.digest]).toContain(accepted[0].digest); }
-        finally { if (prior === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = prior; fs.rmSync(root, { recursive: true, force: true }); }
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-receipt-'));
+        const prior = process.env.AWM_HOME;
+        const now = new Date('2026-09-17T12:00:00.000Z');
+        const file = path.join(root, 'receipt.json');
+        const base = receipt();
+        let leftProcess: C2Competitor | undefined;
+        let rightProcess: C2Competitor | undefined;
+        process.env.AWM_HOME = path.join(root, 'operator');
+        fs.writeFileSync(file, JSON.stringify(base));
+        try {
+            const predecessor = capabilityReceiptDigest(base);
+            approveCapabilities({ file, cwd: root, expectedDigest: predecessor, now });
+            const candidate = (id: string) => {
+                const value = receipt();
+                value.approval.approvalId = id;
+                const candidateFile = path.join(root, `${id}.json`);
+                fs.writeFileSync(candidateFile, JSON.stringify(value), { mode: 0o400 });
+                return { file: candidateFile, digest: capabilityReceiptDigest(value) };
+            };
+            const left = candidate('left');
+            const right = candidate('right');
+            leftProcess = startC2Competitor(root, left.file, left.digest, predecessor, process.env.AWM_HOME!);
+            rightProcess = startC2Competitor(root, right.file, right.digest, predecessor, process.env.AWM_HOME!);
+            await Promise.all([leftProcess.ready, rightProcess.ready]);
+            leftProcess.release();
+            rightProcess.release();
+            const outcomes = await Promise.all([leftProcess.outcome, rightProcess.outcome]);
+            const accepted = outcomes.filter((outcome): outcome is Extract<C2Outcome, { outcome: 'accepted' }> => outcome.outcome === 'accepted');
+            const rejected = outcomes.filter((outcome): outcome is Extract<C2Outcome, { outcome: 'rejected' }> => outcome.outcome === 'rejected');
+            expect(accepted).toHaveLength(1);
+            expect(rejected).toHaveLength(1);
+            expect(rejected[0].reason).toMatch(/predecessor|lease|exist/i);
+            const persisted = readCapabilities(base.runtime, now);
+            expect(persisted).toMatchObject({ state: 'current', digest: accepted[0].digest });
+            expect([left.digest, right.digest]).toContain(accepted[0].digest);
+        } finally {
+            await Promise.all([leftProcess?.close(), rightProcess?.close()].filter((value): value is Promise<void> => value !== undefined));
+            if (prior === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = prior;
+            await removeC2Fixture(root);
+        }
     });
     it.each(['destination', 'ancestor'] as const)('writer rejects symlinked %s and preserves external bytes', kind => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-receipt-')); const prior = process.env.AWM_HOME; process.env.AWM_HOME = path.join(root, 'operator'); const now = new Date('2026-09-17T12:00:00.000Z'); const value = receipt(); const file = path.join(root, 'candidate.json'); fs.writeFileSync(file, JSON.stringify(value)); const outside = path.join(root, 'outside'); fs.writeFileSync(outside, 'outside'); const target = capabilityReceiptPath(value.runtime); const ancestor = path.dirname(path.dirname(target));
