@@ -20,6 +20,7 @@ import { writeFileAtomicDurable } from '../../core/atomic-file';
 import { resolveCommandContext } from '../../core/tracks/context';
 import { routingReport } from '../../core/model-policy/journal';
 import { isRoutingEnvelope, isRoutingSelection } from '../../core/journal/types';
+import { parseJsonNoDuplicate } from '../../core/plan/json';
 import fs from 'fs';
 
 function branchOf(cwd: string): string {
@@ -39,9 +40,9 @@ function realFingerprintNow(repo: string): FingerprintNow {
 }
 function readBoundedJson(file: string): unknown {
     if (typeof file !== 'string' || file.length === 0 || file.length > 4096) throw new Error('routing file path is invalid');
-    const stat = fs.statSync(file);
-    if (!stat.isFile() || stat.size > 256 * 1024) throw new Error('routing file must be a bounded regular file');
-    try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { throw new Error('routing file must contain JSON'); }
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 256 * 1024) throw new Error('routing file must be a bounded non-symlink regular file');
+    try { return parseJsonNoDuplicate(fs.readFileSync(file, 'utf8')); } catch { throw new Error('routing file must contain JSON without duplicate keys'); }
 }
 
 /** Guard de entrada (R9.4): sin descriptor de track, es un no-op — el caso
