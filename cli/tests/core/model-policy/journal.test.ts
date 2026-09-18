@@ -1,5 +1,5 @@
 import { emptyState } from '../../../src/core/journal/types';
-import { observeRoutingAttempt, reserveRoutingAttempt, routingReport } from '../../../src/core/model-policy/journal';
+import { observeRoutingAttempt, reserveRoutingAttempt, routingReport, resolveLineageEscalation } from '../../../src/core/model-policy/journal';
 
 const envelope = { schema: 'routing-envelope/v1' as const, runtime: { target: 'codex', kind: 'native', version: '1', accountScopeDigest: '0'.repeat(64) }, role: 'implementer', sliceId: 'S1', requestedProfile: 'mechanical' as const, effectiveProfile: 'mechanical' as const, resolved: { selector: { kind: 'model' as const, id: 'm' }, effort: { kind: 'explicit' as const, value: 'medium' } }, outcome: 'native' as const, unavailableEvidence: [], policyDigest: 'a'.repeat(64), capabilityDigest: 'b'.repeat(64), planDigest: 'c'.repeat(64), executionDigest: 'd'.repeat(64) };
 
@@ -14,11 +14,24 @@ describe('routing journal helpers', () => {
     });
     it('rejects a fourth implementer attempt in one lineage', () => {
         let state = emptyState('main');
-        for (const [index, profile] of (['mechanical', 'integration', 'judgment'] as const).entries()) state = reserveRoutingAttempt(state, { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: { ...envelope, effectiveProfile: profile }, fingerprint: `${'a'.repeat(63)}${index}` }, '2026-09-17T00:00:00.000Z').state;
+        for (const [index, profile] of (['mechanical', 'integration', 'judgment'] as const).entries()) { state = reserveRoutingAttempt(state, { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: { ...envelope, effectiveProfile: profile }, fingerprint: `${'a'.repeat(63)}${index}` }, '2026-09-17T00:00:00.000Z').state; state.routingAttempts![state.routingAttempts!.length - 1].state = 'blocked'; }
         expect(() => reserveRoutingAttempt(state, { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope, fingerprint: 'f'.repeat(64) }, '2026-09-17T00:00:00.000Z')).toThrow(/budget/i);
     });
     it('reports routing attempts without envelope bodies or native identities', () => {
         const state = reserveRoutingAttempt(emptyState('main'), { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope, fingerprint: 'e'.repeat(64) }, '2026-09-17T00:00:00.000Z').state;
         expect(routingReport(state)).toEqual({ schema: 'routing-report/v1', attempts: 1, plannedByRole: { implementer: 1 }, actualByRole: {}, byState: { reserved: 1 }, retries: 0, fallbacks: 0, unavailable: {}, administrativeRepairs: 0 });
+    });
+    it('uses the exact deterministic implementation escalation sequence', () => {
+        let state = emptyState('main');
+        expect(resolveLineageEscalation(state, 'l1', 'mechanical')).toEqual({ profile: 'mechanical', effort: 'medium' });
+        state = reserveRoutingAttempt(state, { obligationId: 'impl:S1', lineageId: 'l1', envelope, fingerprint: '1'.repeat(64) }, '2026-09-17T00:00:00.000Z').state;
+        state.routingAttempts![0].state = 'blocked';
+        expect(resolveLineageEscalation(state, 'l1', 'mechanical')).toEqual({ profile: 'integration', effort: 'medium' });
+        state.routingAttempts!.push({ ...state.routingAttempts![0], id: 'route-2', attempt: 2, envelope: { ...envelope, effectiveProfile: 'integration' }, state: 'blocked' });
+        expect(resolveLineageEscalation(state, 'l1', 'mechanical')).toEqual({ profile: 'judgment', effort: 'medium' });
+        state.routingAttempts!.push({ ...state.routingAttempts![0], id: 'route-3', attempt: 3, envelope: { ...envelope, effectiveProfile: 'judgment', resolved: { selector: { kind: 'model', id: 'm' }, effort: { kind: 'explicit', value: 'medium' } } }, state: 'blocked' });
+        expect(resolveLineageEscalation(state, 'l1', 'mechanical')).toEqual({ profile: 'judgment', effort: 'high' });
+        state.routingAttempts![2].envelope = { ...state.routingAttempts![2].envelope, resolved: { selector: { kind: 'model', id: 'm' }, effort: { kind: 'explicit', value: 'high' } } };
+        expect(() => resolveLineageEscalation(state, 'l1', 'mechanical')).toThrow(/exhausted/i);
     });
 });
