@@ -1,4 +1,4 @@
-import { emptyState } from '../../../src/core/journal/types';
+import { emptyState, isRoutingEnvelope } from '../../../src/core/journal/types';
 import { observeRoutingAttempt, reserveRoutingAttempt, routingReport, resolveLineageEscalation } from '../../../src/core/model-policy/journal';
 
 const envelope = { schema: 'routing-envelope/v1' as const, runtime: { target: 'codex', kind: 'native', version: '1', accountScopeDigest: '0'.repeat(64) }, role: 'implementer', sliceId: 'S1', requestedProfile: 'mechanical' as const, effectiveProfile: 'mechanical' as const, resolved: { selector: { kind: 'model' as const, id: 'm' }, effort: { kind: 'explicit' as const, value: 'medium' } }, outcome: 'native' as const, unavailableEvidence: [], policyDigest: 'a'.repeat(64), capabilityDigest: 'b'.repeat(64), planDigest: 'c'.repeat(64), executionDigest: 'd'.repeat(64) };
@@ -33,5 +33,9 @@ describe('routing journal helpers', () => {
         expect(resolveLineageEscalation(state, 'l1', 'mechanical')).toEqual({ profile: 'judgment', effort: 'high' });
         state.routingAttempts![2].envelope = { ...state.routingAttempts![2].envelope, resolved: { selector: { kind: 'model', id: 'm' }, effort: { kind: 'explicit', value: 'high' } } };
         expect(() => resolveLineageEscalation(state, 'l1', 'mechanical')).toThrow(/exhausted/i);
+    });
+    it('rejects hostile roles and unavailable provenance before it can reach a report', () => {
+        expect(isRoutingEnvelope({ ...envelope, role: 'attacker-key' })).toBe(false);
+        expect(isRoutingEnvelope({ ...envelope, unavailableEvidence: ['secret=leak'] })).toBe(false);
     });
 });
