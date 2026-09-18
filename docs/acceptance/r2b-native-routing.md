@@ -21,7 +21,8 @@ OBLIGATION=<registered review obligation>
 LINEAGE=<implementation lineage id>
 FINGERPRINT=<64-lowercase-hex reproducible fingerprint>
 POLICY_DIGEST=<64-lowercase-hex policy content digest>
-RECEIPT_DIGEST=<64-lowercase-hex receipt snapshot digest>
+RECEIPT_DIGEST=<64-lowercase-hex canonical capabilityReceiptDigest of receipt.json>
+RECEIPT_SNAPSHOT_DIGEST=<receipt approval.snapshotDigest; evidence only, not --expected-digest>
 ATTEMPT_ID=<applied routing reservation attempt id>
 NATIVE_AGENT_ID=<native runtime returned identity>
 ```
