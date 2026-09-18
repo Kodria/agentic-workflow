@@ -10,7 +10,7 @@ import { requestsDir } from '../../core/journal/paths';
 import { fsyncDirSync } from '../../core/atomic-file';
 import { redactText } from '../../core/journal/redact';
 import { gitCheckTrackId, headSha } from '../../core/tracks/git';
-import type { Job, JournalState, ReviewObligation, TrackRef, VerificationItem } from '../../core/journal/types';
+import { isRoutingEnvelope, isRoutingSelection, type Job, type JournalState, type ReviewObligation, type RoutingSelection, type TrackRef, type VerificationItem } from '../../core/journal/types';
 import { observeRoutingAttempt, reserveRoutingAttempt } from '../../core/model-policy/journal';
 
 export interface ApplySummary { applied: number; rejectedStale: number; rejectedDigest: number; rejectedInvalid: number; corrupt: number; }
@@ -112,13 +112,15 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
     }
     if (env.kind === 'routing-reserve') {
         const p = env.payload;
-        const reserved = reserveRoutingAttempt(s, { obligationId: String(p.obligationId ?? ''), lineageId: String(p.lineageId ?? ''), envelope: p.envelope as any, fingerprint: String(p.fingerprint ?? '') }, String(p.at ?? now()));
+        if (typeof p.obligationId !== 'string' || typeof p.lineageId !== 'string' || !isRoutingEnvelope(p.envelope) || typeof p.fingerprint !== 'string' || (p.at !== undefined && typeof p.at !== 'string')) throw new Error('routing-reserve requiere payload estricto');
+        const reserved = reserveRoutingAttempt(s, { obligationId: p.obligationId, lineageId: p.lineageId, envelope: p.envelope, fingerprint: p.fingerprint }, p.at ?? now());
         Object.assign(s, reserved.state); applyOutcome(s, { ...base, outcome: 'applied', resultRef: reserved.attemptId }); return;
     }
     if (env.kind === 'routing-observe') {
         const p = env.payload;
-        const observed = observeRoutingAttempt(s, { attemptId: String(p.attemptId ?? ''), nativeAgentId: String(p.nativeAgentId ?? '') }, String(p.at ?? now()));
-        Object.assign(s, observed); applyOutcome(s, { ...base, outcome: 'applied', resultRef: String(p.attemptId ?? '') }); return;
+        if (typeof p.attemptId !== 'string' || typeof p.nativeAgentId !== 'string' || (p.observed !== undefined && !isRoutingSelection(p.observed)) || (p.unavailableReason !== undefined && typeof p.unavailableReason !== 'string') || (p.at !== undefined && typeof p.at !== 'string')) throw new Error('routing-observe requiere payload estricto');
+        const observed = observeRoutingAttempt(s, { attemptId: p.attemptId, nativeAgentId: p.nativeAgentId, ...(p.observed === undefined ? {} : { observed: p.observed as RoutingSelection }), ...(p.unavailableReason === undefined ? {} : { unavailableReason: p.unavailableReason }) }, p.at ?? now());
+        Object.assign(s, observed); applyOutcome(s, { ...base, outcome: 'applied', resultRef: p.attemptId }); return;
     }
     if (env.kind === 'job-request') {
         // get-or-create por idempotencyKey (RNF-T.7); duplicado => applyOutcome

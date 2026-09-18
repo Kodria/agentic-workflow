@@ -19,6 +19,7 @@ import { verifyBranchInvariant } from '../watch/lock';
 import { writeFileAtomicDurable } from '../../core/atomic-file';
 import { resolveCommandContext } from '../../core/tracks/context';
 import { routingReport } from '../../core/model-policy/journal';
+import { isRoutingEnvelope, isRoutingSelection } from '../../core/journal/types';
 import fs from 'fs';
 
 function branchOf(cwd: string): string {
@@ -35,6 +36,12 @@ function realFingerprintNow(repo: string): FingerprintNow {
         try { return computeFingerprint(repo, argv, paths, cwd).fingerprint; }
         catch { return null; }
     };
+}
+function readBoundedJson(file: string): unknown {
+    if (typeof file !== 'string' || file.length === 0 || file.length > 4096) throw new Error('routing file path is invalid');
+    const stat = fs.statSync(file);
+    if (!stat.isFile() || stat.size > 256 * 1024) throw new Error('routing file must be a bounded regular file');
+    try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { throw new Error('routing file must contain JSON'); }
 }
 
 /** Guard de entrada (R9.4): sin descriptor de track, es un no-op — el caso
@@ -138,18 +145,20 @@ export function registerJobCommand(program: Command): void {
 
     job.command('routing-reserve')
         .requiredOption('--generation <token>').requiredOption('--obligation <id>').requiredOption('--lineage <id>')
-        .requiredOption('--envelope <json>').requiredOption('--fingerprint <sha>')
+        .requiredOption('--envelope-file <file>').requiredOption('--fingerprint <sha>').option('--cwd <root>', 'repository root', '.').option('--json')
         .action((opts) => {
-            let envelope: unknown; try { envelope = JSON.parse(opts.envelope); } catch { throw new Error('--envelope requires JSON'); }
-            const repo = process.cwd(); const branch = branchOf(repo); assertAuthenticatedCwd(repo, branch);
-            const emitted = emitRequest(repo, branch, { kind: 'routing-reserve', generationToken: opts.generation, idempotencyKey: crypto.createHash('sha256').update(`routing-reserve:${opts.generation}:${opts.obligation}:${opts.lineage}:${opts.fingerprint}:${opts.envelope}`).digest('hex'), payload: { obligationId: opts.obligation, lineageId: opts.lineage, envelope: envelope as Record<string, unknown>, fingerprint: opts.fingerprint } });
+            const envelope = readBoundedJson(opts.envelopeFile); if (!isRoutingEnvelope(envelope) || !/^[a-f0-9]{64}$/.test(opts.fingerprint)) throw new Error('routing-reserve requires a valid envelope and fingerprint');
+            const repo = path.resolve(opts.cwd); const branch = branchOf(repo); assertAuthenticatedCwd(repo, branch);
+            const emitted = emitRequest(repo, branch, { kind: 'routing-reserve', generationToken: opts.generation, idempotencyKey: crypto.createHash('sha256').update(`routing-reserve:${opts.generation}:${opts.obligation}:${opts.lineage}:${opts.fingerprint}:${JSON.stringify(envelope)}`).digest('hex'), payload: { obligationId: opts.obligation, lineageId: opts.lineage, envelope, fingerprint: opts.fingerprint } });
             process.stdout.write(JSON.stringify({ requestId: emitted.requestId }) + '\n');
         });
     job.command('routing-observe')
         .requiredOption('--generation <token>').requiredOption('--attempt <id>').requiredOption('--native-agent-id <id>')
+        .requiredOption('--observation-file <file>').option('--cwd <root>', 'repository root', '.').option('--json')
         .action((opts) => {
-            const repo = process.cwd(); const branch = branchOf(repo); assertAuthenticatedCwd(repo, branch);
-            const emitted = emitRequest(repo, branch, { kind: 'routing-observe', generationToken: opts.generation, idempotencyKey: crypto.createHash('sha256').update(`routing-observe:${opts.generation}:${opts.attempt}:${opts.nativeAgentId}`).digest('hex'), payload: { attemptId: opts.attempt, nativeAgentId: opts.nativeAgentId } });
+            const observation = readBoundedJson(opts.observationFile); if (typeof observation !== 'object' || observation === null || Array.isArray(observation)) throw new Error('routing-observe requires an observation object'); const observed = (observation as { observed?: unknown }).observed; const unavailableReason = (observation as { unavailableReason?: unknown }).unavailableReason; if ((observed !== undefined && !isRoutingSelection(observed)) || (unavailableReason !== undefined && typeof unavailableReason !== 'string')) throw new Error('routing-observe requires a valid observation');
+            const repo = path.resolve(opts.cwd); const branch = branchOf(repo); assertAuthenticatedCwd(repo, branch);
+            const emitted = emitRequest(repo, branch, { kind: 'routing-observe', generationToken: opts.generation, idempotencyKey: crypto.createHash('sha256').update(`routing-observe:${opts.generation}:${opts.attempt}:${opts.nativeAgentId}:${JSON.stringify(observation)}`).digest('hex'), payload: { attemptId: opts.attempt, nativeAgentId: opts.nativeAgentId, ...(observed === undefined ? {} : { observed }), ...(unavailableReason === undefined ? {} : { unavailableReason }) } });
             process.stdout.write(JSON.stringify({ requestId: emitted.requestId }) + '\n');
         });
 
