@@ -54,20 +54,51 @@ export function resolveSelection(input: ResolveSelectionInput): SelectionResolut
     const effectiveProfile = input.role === 'implementer' ? input.requestedProfile : 'full';
     const wanted = effectiveProfile === 'full' ? mapping.fullCapability : mapping.profiles[effectiveProfile];
     let selection = wanted; const unavailableEvidence: string[] = []; let outcome: 'native' | 'degraded' = 'native';
-    const canDegrade = (capability: 'modelOverride' | 'effortOverride', allowed: boolean, code: string): SelectionResolution | undefined => {
-        const state = capabilities.capabilities[capability];
+    // Surrendering the model means the runtime picks, so the only safe landing
+    // place is the attested runtime default, and it must be the approved full
+    // capability. Surrendering the EFFORT is a narrower loss and is handled
+    // separately below: collapsing to fullCapability there would throw away a
+    // model override the runtime demonstrably honours.
+    const degradeModel = (): SelectionResolution | undefined => {
+        const state = capabilities.capabilities.modelOverride;
         if (state === 'supported') return undefined;
-        if (state === 'unverified') return blocked(code, `${capability} is unverified.`);
-        if (!allowed || !capabilities.runtimeDefaultSelection || !equal(capabilities.runtimeDefaultSelection, mapping.fullCapability)) return blocked(code, `${capability} is unavailable and no matching approved full default is attested.`);
-        selection = mapping.fullCapability; outcome = 'degraded'; unavailableEvidence.push(capability); return undefined;
+        if (state === 'unverified') return blocked('ROUTING_MODEL_OVERRIDE_UNAVAILABLE', 'modelOverride is unverified.');
+        if (!mapping.degradation.allowMissingModelOverride || !capabilities.runtimeDefaultSelection || !equal(capabilities.runtimeDefaultSelection, mapping.fullCapability)) return blocked('ROUTING_MODEL_OVERRIDE_UNAVAILABLE', 'modelOverride is unavailable and no matching approved full default is attested.');
+        selection = mapping.fullCapability; outcome = 'degraded'; unavailableEvidence.push('modelOverride'); return undefined;
     };
-    const model = canDegrade('modelOverride', mapping.degradation.allowMissingModelOverride, 'ROUTING_MODEL_OVERRIDE_UNAVAILABLE'); if (model) return model;
+    // Degrading effort surrenders the effort component ONLY, keeping the routed
+    // model. On a runtime where the model can be overridden but reasoning effort
+    // cannot — effort belongs to the agent definition, not the invocation — the
+    // alternative was to route every profile to the full-capability model, so a
+    // mechanical slice would quietly run the judgment model while the diagnostic
+    // spoke only of effort. That is the silent defaulting the consumer reference
+    // forbids. The model at runtime-default effort must itself be attested.
+    const degradeEffort = (): SelectionResolution | undefined => {
+        const state = capabilities.capabilities.effortOverride;
+        if (state === 'supported') return undefined;
+        if (state === 'unverified') return blocked('ROUTING_EFFORT_OVERRIDE_UNAVAILABLE', 'effortOverride is unverified.');
+        if (!mapping.degradation.allowMissingEffortOverride) return blocked('ROUTING_EFFORT_OVERRIDE_UNAVAILABLE', 'effortOverride is unavailable and the mapping does not allow degrading it.');
+        const degraded: Selection = { selector: selection.selector, effort: { kind: 'runtime-default' } };
+        if (!capabilities.runtimeDefaultSelection || !capabilities.availableSelections.some(candidate => equal(candidate, degraded))) return blocked('ROUTING_EFFORT_OVERRIDE_UNAVAILABLE', 'effortOverride is unavailable and the routed model at runtime-default effort is not attested.');
+        selection = degraded; outcome = 'degraded'; unavailableEvidence.push('effortOverride'); return undefined;
+    };
+    const model = degradeModel(); if (model) return model;
+    if (selection.effort.kind === 'explicit') { const effort = degradeEffort(); if (effort) return effort; }
+    // availableSelections is the receipt's attestation of what can actually be
+    // chosen, so it is checked on the FINAL selection, after any degradation
+    // rewrote it. Checking it first forced a runtime that cannot honour explicit
+    // effort to attest selections it could never run, purely to reach the
+    // degradation that would then discard them — the honest receipt was the one
+    // that failed.
     if (!capabilities.availableSelections.some(candidate => equal(candidate, selection))) return blocked('ROUTING_SELECTION_UNAVAILABLE', 'Approved selection is not currently available; no substitute is allowed.');
-    if (selection.effort.kind === 'runtime-default') {
-        if (!capabilities.runtimeDefaultSelection || !equal(capabilities.runtimeDefaultSelection, selection)) return blocked('ROUTING_SELECTION_UNAVAILABLE', 'Runtime-default selection is not explicitly attested.');
-    } else {
-        const effort = canDegrade('effortOverride', mapping.degradation.allowMissingEffortOverride, 'ROUTING_EFFORT_OVERRIDE_UNAVAILABLE'); if (effort) return effort;
-    }
+    // A runtime-default effort is only meaningful if the receipt declares what the
+    // runtime default is. It need NOT equal this selection: requiring that made
+    // every per-profile selection unreachable on a runtime whose default model
+    // differs, even with modelOverride attested supported and the selection
+    // itself attested available. Attesting `haiku at runtime-default effort` is
+    // precisely the statement that the model may be overridden while effort is
+    // left alone.
+    if (selection.effort.kind === 'runtime-default' && !capabilities.runtimeDefaultSelection) return blocked('ROUTING_SELECTION_UNAVAILABLE', 'Runtime-default selection is not explicitly attested.');
     if (capabilities.capabilities.observedModelEvidence !== 'supported') {
         if (!mapping.degradation.allowMissingObservedIdentity) return blocked('ROUTING_OBSERVED_IDENTITY_UNAVAILABLE', 'Observed model identity is required and unavailable.');
         outcome = 'degraded'; unavailableEvidence.push('observedModelEvidence');

@@ -70,6 +70,80 @@ describe('resolveSelection', () => {
         const value = input(); value.policy.content.mappings[0].fullCapability = runtimeDefaultSelection('full'); value.capabilities.availableSelections = [selection('mechanical', 'low'), selection('integration', 'medium'), selection('judgment', 'medium'), runtimeDefaultSelection('full')]; value.capabilities.runtimeDefaultSelection = runtimeDefaultSelection('full'); value.capabilities.capabilities.effortOverride = 'unsupported';
         expect(resolveV1Dispatch({ ...value, plan: verifiedV1Plan, optInV1: true })).toMatchObject({ state: 'resolved', outcome: 'native', selection: runtimeDefaultSelection('full') });
     });
+    // Regression for the collapse that made routed model and surrendered effort
+    // indistinguishable: degrading effort used to rewrite the selection to
+    // fullCapability, so a mechanical slice silently ran the judgment model while
+    // the only evidence emitted named effortOverride.
+    it('keeps the routed per-profile model when effort override degrades', () => {
+        const value = input();
+        value.policy.content.mappings[0].degradation.allowMissingEffortOverride = true;
+        value.capabilities.capabilities.effortOverride = 'unsupported';
+        value.capabilities.runtimeDefaultSelection = runtimeDefaultSelection('full');
+        value.capabilities.availableSelections = [...value.capabilities.availableSelections, runtimeDefaultSelection('mechanical'), runtimeDefaultSelection('integration'), runtimeDefaultSelection('full')];
+        expect(resolveSelection({ ...value, requestedProfile: 'mechanical' })).toMatchObject({ state: 'resolved', outcome: 'degraded', selection: runtimeDefaultSelection('mechanical'), effectiveProfile: 'mechanical', unavailableEvidence: ['effortOverride'] });
+        expect(resolveSelection({ ...value, requestedProfile: 'integration' })).toMatchObject({ state: 'resolved', outcome: 'degraded', selection: runtimeDefaultSelection('integration'), effectiveProfile: 'integration', unavailableEvidence: ['effortOverride'] });
+    });
+    // An honest receipt for a runtime with no effort control attests ONLY
+    // runtime-default selections — it cannot claim `mechanical at low effort` is
+    // selectable. Checking availability before degradation rejected exactly that
+    // receipt, so the contract only worked for a receipt that overclaimed.
+    it('degrades effort against a receipt that attests only runtime-default selections', () => {
+        const value = input();
+        value.policy.content.mappings[0].degradation.allowMissingEffortOverride = true;
+        value.capabilities.capabilities.effortOverride = 'unsupported';
+        value.capabilities.availableSelections = [runtimeDefaultSelection('mechanical'), runtimeDefaultSelection('integration'), runtimeDefaultSelection('judgment'), runtimeDefaultSelection('full')];
+        value.capabilities.runtimeDefaultSelection = runtimeDefaultSelection('full');
+        expect(resolveSelection({ ...value, requestedProfile: 'mechanical' })).toMatchObject({ state: 'resolved', outcome: 'degraded', selection: runtimeDefaultSelection('mechanical'), unavailableEvidence: ['effortOverride'] });
+    });
+    // The runtime default is one selection; a per-profile selection at
+    // runtime-default effort is a different one. Requiring them equal made every
+    // profile but the default model unroutable, with modelOverride attested
+    // supported and the selection itself attested available.
+    it('routes a per-profile runtime-default selection whose model differs from the runtime default', () => {
+        const value = input();
+        value.policy.content.mappings[0].profiles.mechanical = runtimeDefaultSelection('mechanical');
+        value.capabilities.availableSelections = [runtimeDefaultSelection('mechanical'), runtimeDefaultSelection('full')];
+        value.capabilities.runtimeDefaultSelection = runtimeDefaultSelection('full');
+        expect(resolveSelection({ ...value, requestedProfile: 'mechanical' })).toMatchObject({ state: 'resolved', outcome: 'native', selection: runtimeDefaultSelection('mechanical'), effectiveProfile: 'mechanical' });
+    });
+    it('still blocks a runtime-default selection the receipt does not attest at all', () => {
+        const value = input();
+        value.policy.content.mappings[0].profiles.mechanical = runtimeDefaultSelection('mechanical');
+        value.capabilities.availableSelections = [runtimeDefaultSelection('full')];
+        value.capabilities.runtimeDefaultSelection = runtimeDefaultSelection('full');
+        expect(resolveSelection({ ...value, requestedProfile: 'mechanical' })).toMatchObject({ state: 'blocked', diagnostics: [{ code: 'ROUTING_SELECTION_UNAVAILABLE' }] });
+    });
+    it('still blocks a runtime-default selection when the receipt declares no runtime default', () => {
+        const value = input();
+        value.policy.content.mappings[0].profiles.mechanical = runtimeDefaultSelection('mechanical');
+        value.capabilities.availableSelections = [runtimeDefaultSelection('mechanical')];
+        delete value.capabilities.runtimeDefaultSelection;
+        expect(resolveSelection({ ...value, requestedProfile: 'mechanical' })).toMatchObject({ state: 'blocked', diagnostics: [{ code: 'ROUTING_SELECTION_UNAVAILABLE' }] });
+    });
+    it('blocks effort degradation when the routed model at runtime-default effort is not attested', () => {
+        const value = input();
+        value.policy.content.mappings[0].degradation.allowMissingEffortOverride = true;
+        value.capabilities.capabilities.effortOverride = 'unsupported';
+        value.capabilities.runtimeDefaultSelection = runtimeDefaultSelection('full');
+        value.capabilities.availableSelections = [...value.capabilities.availableSelections, runtimeDefaultSelection('full')];
+        expect(resolveSelection({ ...value, requestedProfile: 'mechanical' })).toMatchObject({ state: 'blocked', diagnostics: [{ code: 'ROUTING_EFFORT_OVERRIDE_UNAVAILABLE' }] });
+    });
+    it('keeps effort strict when the mapping does not allow degrading it', () => {
+        const value = input();
+        value.capabilities.capabilities.effortOverride = 'unsupported';
+        value.capabilities.runtimeDefaultSelection = runtimeDefaultSelection('full');
+        value.capabilities.availableSelections = [...value.capabilities.availableSelections, runtimeDefaultSelection('mechanical'), runtimeDefaultSelection('full')];
+        expect(value.policy.content.mappings[0].degradation.allowMissingEffortOverride).toBe(false);
+        expect(resolveSelection({ ...value, requestedProfile: 'mechanical' })).toMatchObject({ state: 'blocked', diagnostics: [{ code: 'ROUTING_EFFORT_OVERRIDE_UNAVAILABLE' }] });
+    });
+    it('never degrades effort on an unverified capability, only on an attested unsupported one', () => {
+        const value = input();
+        value.policy.content.mappings[0].degradation.allowMissingEffortOverride = true;
+        value.capabilities.capabilities.effortOverride = 'unverified';
+        value.capabilities.runtimeDefaultSelection = runtimeDefaultSelection('full');
+        value.capabilities.availableSelections = [...value.capabilities.availableSelections, runtimeDefaultSelection('mechanical'), runtimeDefaultSelection('full')];
+        expect(resolveSelection({ ...value, requestedProfile: 'mechanical' })).toMatchObject({ state: 'blocked', diagnostics: [{ code: 'ROUTING_EFFORT_OVERRIDE_UNAVAILABLE', message: expect.stringMatching(/unverified/) }] });
+    });
     it('does not require effort override after model fallback selects an attested runtime-default full selection', () => {
         const value = input(); value.policy.content.mappings[0].fullCapability = runtimeDefaultSelection('full'); value.capabilities.availableSelections = [selection('mechanical', 'low'), selection('integration', 'medium'), selection('judgment', 'medium'), runtimeDefaultSelection('full')]; value.capabilities.runtimeDefaultSelection = runtimeDefaultSelection('full'); value.policy.content.mappings[0].degradation.allowMissingModelOverride = true; value.capabilities.capabilities.modelOverride = 'unsupported'; value.capabilities.capabilities.effortOverride = 'unsupported';
         expect(resolveSelection(value)).toMatchObject({ state: 'resolved', outcome: 'degraded', selection: runtimeDefaultSelection('full'), unavailableEvidence: ['modelOverride'] });
