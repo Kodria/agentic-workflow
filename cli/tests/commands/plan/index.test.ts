@@ -10,6 +10,10 @@ import type { AdmissionReport } from '../../../src/core/admission';
 import { initWatch } from '../../../src/commands/watch/init';
 import { providerFor } from '../../../src/providers';
 import { renderArtifact, renderedFilename } from '../../../src/core/renderers/registry';
+import { canonicalPolicyDigest } from '../../../src/core/model-policy/canonical';
+import { capabilityReceiptDigest } from '../../../src/core/model-policy/capabilities';
+import { reserveRoutingAttempt } from '../../../src/core/model-policy/journal';
+import { emptyState, isRoutingEnvelope } from '../../../src/core/journal/types';
 
 const stdoutWrite = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
@@ -17,6 +21,9 @@ const repositoryRoot = path.resolve(__dirname, '../../../..');
 const approved = validatePlanFile('docs/plans/2026-09-14-compact-only-bootstrap-plan.md', repositoryRoot);
 if (approved.state !== 'valid') throw new Error(`tracked bootstrap plan must validate before command tests: ${approved.state}`);
 const valid = approved;
+const approvedV2 = validatePlanFile('valid.md', path.join(__dirname, '../../core/plan/fixtures/compact-slices-v2'));
+if (approvedV2.state !== 'valid') throw new Error(`v2 fixture must validate before command tests: ${approvedV2.state}`);
+const v2Valid = approvedV2;
 const invalid: Extract<PlanValidationReport, { state: 'invalid' }> = {
     state: 'invalid', diagnostics: [{ code: 'PLAN_MARKERS', message: 'compact markers must occur once in order' }],
 };
@@ -56,6 +63,58 @@ describe('plan validate Commander wiring', () => {
         registerPlanCommand(program, { validatePlanFile: () => valid, readEffectivePolicy: policy as any, readCapabilities: capabilities as any });
         await program.parseAsync(['node', 'awm', 'plan', 'resolve', 'plans/r4.md', '--provider', 'codex', '--runtime-kind', 'native', '--runtime-version', '1.0.0', '--account-scope-digest', 'a'.repeat(64), '--role', 'controller', '--json']);
         expect(JSON.parse(String(stdoutWrite.mock.calls[0][0]))).toEqual({ state: 'not-required', reason: 'v1-without-opt-in' }); expect(policy).not.toHaveBeenCalled(); expect(capabilities).not.toHaveBeenCalled();
+    });
+
+    // The consumer reference says: call `plan resolve` for the exact role and
+    // local slice, then send ITS frozen envelope to `job routing-reserve`. The
+    // envelope was only ever built on the --lineage branch, which resolves the
+    // lineage out of journal state — and lineages are created by
+    // reserveRoutingAttempt, i.e. by routing-reserve itself. envelope <= lineage
+    // <= reserve <= envelope, so the first attempt of any lineage could never be
+    // reserved. This test goes from resolve output to a reserved attempt with no
+    // hand-built envelope literal, which is the only shape that can catch it:
+    // tests/commands/job/routing.test.ts passes a literal and so starts one step
+    // past the gap.
+    it('emits a reservable envelope on a first v2 attempt, closing the resolve to reserve path', async () => {
+        // A genuinely validated report: the resolver rejects any object that did
+        // not come out of validatePlanFile, so a spread-and-relabel fixture
+        // cannot reach this path at all.
+        const sliceId = 'S1';
+        const sel = { selector: { kind: 'model' as const, id: 'gpt-5.6-luna' }, effort: { kind: 'explicit' as const, value: 'medium' } };
+        const full = { selector: { kind: 'model' as const, id: 'gpt-5.6-sol' }, effort: { kind: 'explicit' as const, value: 'high' } };
+        const sha = 'a'.repeat(64);
+        const content = { schema: 'model-policy/v1' as const, mappings: [{ target: 'codex' as const, runtimeKind: 'native', profiles: { mechanical: sel, integration: sel, judgment: sel }, fullCapability: full, degradation: { allowMissingModelOverride: false, allowMissingEffortOverride: false, allowMissingObservedIdentity: false } }], implementationBudget: { maxAttempts: 3 as const, escalation: ['mechanical', 'integration', 'judgment'] as ['mechanical', 'integration', 'judgment'], judgmentEfforts: ['medium', 'high'] as ['medium', 'high'] } };
+        const readEffectivePolicy = () => ({ state: 'approved' as const, provenance: 'user' as const, policy: { schema: 'approved-model-policy/v1' as const, content, contentDigest: canonicalPolicyDigest(content), approval: { approvedAt: '2026-09-19T00:00:00.000Z', approvalId: 'a1' }, lineage: { previousDigest: null } } });
+        const receipt = {
+            schema: 'routing-capabilities/v1' as const,
+            runtime: { target: 'codex' as const, kind: 'native', version: '1.0.0', accountScopeDigest: sha },
+            recordedAt: new Date(Date.now() - 60_000).toISOString(), expiresAt: new Date(Date.now() + 6 * 3600_000).toISOString(),
+            capabilities: { artifactDelivery: 'supported', interactiveExecution: 'supported', unattendedController: 'supported', nativeSubagents: 'supported', modelOverride: 'supported', effortOverride: 'supported', observedModelEvidence: 'supported', durableResume: 'unverified' } as never,
+            availableSelections: [sel, full], runtimeDefaultSelection: full,
+            evidence: (['modelOverride', 'effortOverride', 'observedModelEvidence', 'nativeSubagents', 'artifactDelivery', 'interactiveExecution', 'unattendedController'] as const).map(capability => ({ capability, kind: 'native-control' as const, receiptDigest: 'b'.repeat(64) })),
+            approval: { approvalId: 'r1', snapshotDigest: 'c'.repeat(64) },
+        };
+        const readCapabilities = () => ({ state: 'current' as const, receipt, digest: capabilityReceiptDigest(receipt) });
+
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerPlanCommand(program, { validatePlanFile: () => v2Valid, readEffectivePolicy: readEffectivePolicy as never, readCapabilities: readCapabilities as never });
+        await program.parseAsync(['node', 'awm', 'plan', 'resolve', 'plans/r4.md', '--provider', 'codex', '--runtime-kind', 'native', '--runtime-version', '1.0.0', '--account-scope-digest', sha, '--role', 'implementer', '--slice', sliceId, '--cwd', repositoryRoot, '--json']);
+
+        const emitted = JSON.parse(String(stdoutWrite.mock.calls[stdoutWrite.mock.calls.length - 1][0]));
+        expect(emitted.state).toBe('resolved');
+        expect(emitted.envelope).toBeDefined();
+        // The CLI must be the sole author: the envelope has to satisfy the same
+        // predicate routing-reserve applies, with nothing filled in by the caller.
+        expect(isRoutingEnvelope(emitted.envelope)).toBe(true);
+        expect(emitted.envelope).toMatchObject({ schema: 'routing-envelope/v1', role: 'implementer', sliceId, requestedProfile: 'mechanical', effectiveProfile: 'mechanical', resolved: sel });
+        expect(emitted.envelope.planDigest).toBe(v2Valid.planDigest);
+        expect(emitted.envelope.executionDigest).toBe(v2Valid.executionDigest);
+
+        // The point of the whole thing: that envelope reserves a first attempt,
+        // which is what creates the lineage the escalation path later needs.
+        const reserved = reserveRoutingAttempt(emptyState('main'), { obligationId: 'o1', lineageId: 'l1', envelope: emitted.envelope, fingerprint: 'e'.repeat(64) }, '2026-09-19T00:00:00.000Z');
+        expect(reserved.attemptId).toEqual(expect.any(String));
+        expect(reserved.state.implementationLineages).toEqual([expect.objectContaining({ id: 'l1', sliceId, initialProfile: 'mechanical' })]);
     });
 
     it('emits deterministic human output for a valid compact plan', async () => {
