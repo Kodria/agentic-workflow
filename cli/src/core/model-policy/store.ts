@@ -19,7 +19,13 @@ function assertSafeParents(file: string): void {
     for (const parent of ancestors(file)) { try { const stat = fs.lstatSync(parent, { bigint: true }); if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`unsafe policy parent: ${parent}`); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; } }
 }
 function assertRegularOrAbsent(file: string): void { try { const stat = fs.lstatSync(file, { bigint: true }); if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`policy file rejects symlink or non-regular file: ${file}`); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; } }
-function readBounded(file: string): string | null {
+/**
+ * Bounded, symlink-refusing, identity-fenced read of a candidate or stored file.
+ * Exported so the read-only digest path observes a file under exactly the same
+ * constraints the approval path does, rather than growing a second reader that
+ * could drift from it.
+ */
+export function readBoundedCandidate(file: string): string | null {
     assertSafeParents(file); let inspected: fs.BigIntStats;
     try { inspected = fs.lstatSync(file, { bigint: true }); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
     if (inspected.isSymbolicLink() || !inspected.isFile() || inspected.size < 0n || inspected.size > BigInt(MAX_POLICY_BYTES)) throw new Error('policy file is unsafe or exceeds 256 KiB');
@@ -36,9 +42,9 @@ function lock(file: string): () => void { const lockPath = `${file}.lock`; asser
 export function readEffectivePolicy(cwd: string): EffectivePolicy {
     assertPath(cwd, 'cwd');
     const project = projectPolicyPath(cwd);
-    try { const raw = readBounded(project); if (raw !== null) return { state: 'approved', provenance: 'project', policy: parseApproved(raw) }; } catch (error) { return { state: 'invalid', provenance: 'project', reason: (error as Error).message.slice(0, 4096) }; }
+    try { const raw = readBoundedCandidate(project); if (raw !== null) return { state: 'approved', provenance: 'project', policy: parseApproved(raw) }; } catch (error) { return { state: 'invalid', provenance: 'project', reason: (error as Error).message.slice(0, 4096) }; }
     const user = userPolicyPath();
-    try { const raw = readBounded(user); if (raw === null) return { state: 'absent' }; return { state: 'approved', provenance: 'user', policy: parseApproved(raw) }; } catch (error) { return { state: 'invalid', provenance: 'user', reason: (error as Error).message.slice(0, 4096) }; }
+    try { const raw = readBoundedCandidate(user); if (raw === null) return { state: 'absent' }; return { state: 'approved', provenance: 'user', policy: parseApproved(raw) }; } catch (error) { return { state: 'invalid', provenance: 'user', reason: (error as Error).message.slice(0, 4096) }; }
 }
 
 /** Testable transaction seam; production callers use approvePolicy, which binds secureFs. */
@@ -46,13 +52,13 @@ export function approvePolicyWithBoundary(input: ApprovePolicyInput, boundary: P
     if (!input || typeof input !== 'object') throw new Error('approval input is required');
     assertPath(input.file, 'file'); assertPath(input.cwd, 'cwd'); assertDigest(input.expectedDigest, 'expectedDigest'); if (input.replaceDigest !== undefined) assertDigest(input.replaceDigest, 'replaceDigest');
     const cwd = path.resolve(input.cwd);
-    const candidateRaw = readBounded(path.resolve(cwd, input.file)); if (candidateRaw === null) throw new Error('policy candidate is absent');
+    const candidateRaw = readBoundedCandidate(path.resolve(cwd, input.file)); if (candidateRaw === null) throw new Error('policy candidate is absent');
     const content: PolicyContent = validatePolicyContent(parseJsonNoDuplicate(candidateRaw)); const digest = canonicalPolicyDigest(content);
     if (digest !== input.expectedDigest) throw new Error('policy content digest does not match expectedDigest');
     const target = policyTarget(input.scope, cwd); createDirectories(target); assertSafeParents(target); assertRegularOrAbsent(target);
     const unlock = lock(target);
     try {
-        const existingRaw = readBounded(target); const existing = existingRaw === null ? null : parseApproved(existingRaw);
+        const existingRaw = readBoundedCandidate(target); const existing = existingRaw === null ? null : parseApproved(existingRaw);
         if (existing === null && input.replaceDigest !== undefined) throw new Error('replacement requires an existing predecessor');
         if (existing !== null && input.replaceDigest === undefined) throw new Error('existing policy requires replaceDigest');
         if (existing !== null && existing.contentDigest !== input.replaceDigest) throw new Error('replacement predecessor digest mismatch');

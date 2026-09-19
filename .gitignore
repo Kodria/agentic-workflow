@@ -30,3 +30,4 @@ cli/prebuilds/
 # `actions/download-artifact` usa este directorio como staging del release.
 cli/native-artifacts/
 .worktrees/
+cli/native/build/
