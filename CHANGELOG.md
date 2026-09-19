@@ -1,3 +1,8 @@
+## v9.10.0 - 2026-09-19
+
+### Features
+- **model-policy:** make both approval paths reachable and route effort degradation correctly (#158)
+
 ## v9.9.0 - 2026-09-18
 
 ### Features
