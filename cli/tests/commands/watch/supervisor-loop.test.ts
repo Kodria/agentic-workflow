@@ -402,6 +402,22 @@ describe('supervisor loop', () => {
         const state = readJournal(repo, 'main').state!;
         expect(state.cycle.status).toBe('BLOCKED');
         expect(state.cycle.blockedReason).toMatch(/sensor/i);
+
+        // Entered once, not once per tick. enterCustody is idempotent on
+        // (status, reason), so the reason must not carry the running counter —
+        // otherwise every tick rewrites the journal and appends another
+        // custody-blocked event, unbounded. Observed against published 9.10.1
+        // before this was fixed: "tras 16 ticks", "tras 17 ticks", "tras 18
+        // ticks", one every 5s.
+        const eventsFile = path.join(repo, '.awm', 'journal', 'main', 'events.jsonl');
+        const custodyEvents = () => fs.readFileSync(eventsFile, 'utf8').split('\n').filter(line => line.includes('custody-blocked')).length;
+        const afterFirst = custodyEvents();
+        expect(afterFirst).toBe(1);
+        const revisionAfterFirst = state.revision;
+        for (let i = 0; i < 3; i += 1) expect(await sup.tick()).toBe('custody');
+        expect(custodyEvents()).toBe(afterFirst);
+        expect(readJournal(repo, 'main').state!.revision).toBe(revisionAfterFirst);
+
         // Deferring dispatch was right throughout, and stays right.
         expect(spawned).toBe(0);
     });
