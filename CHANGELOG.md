@@ -1,3 +1,8 @@
+## v9.10.1 - 2026-09-19
+
+### Fixes
+- **routing:** make routed dispatch reachable — bound the sensor deferral and emit the first envelope (#162)
+
 ## v9.10.0 - 2026-09-19
 
 ### Features
