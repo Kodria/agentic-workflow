@@ -148,6 +148,11 @@ export const DEFAULT_SUPERVISOR_CONFIG: SupervisorConfig = {
 // observaciones demostrables (cero jobs vivos, gate local verde, worktree
 // limpio, generación propia terminada con identidad confirmada), de
 // atender un `track-freeze-request` pedido por el supervisor del plan.
+/** How many consecutive ticks an inconclusive sensor verdict may defer dispatch
+ *  before the supervisor says so out loud. Small: the deferral covers a verdict
+ *  still settling, not one that never will. */
+export const MAX_SENSOR_DEFERRALS = 3;
+
 export type TickOutcome = 'continue' | 'custody' | 'complete' | 'frozen';
 
 const LIVE = ['received', 'spawn-intent', 'claimed', 'running', 'cancel-requested'];
@@ -172,6 +177,10 @@ function recoveryWhitelistBlocker(state: JournalState): string | undefined {
 export class Supervisor {
     private backoff = new Backoff();
     private relaunchNotBefore = 0;
+    /** Consecutive ticks deferred on an inconclusive sensor verdict. Bounded:
+     *  the deferral exists for a verdict that is still settling, and a verdict
+     *  that never settles must become visible rather than loop forever. */
+    private sensorDeferrals = 0;
     private lastActivity: { key: string; changedAt: number } | null = null;
     private lastGenerationToken: string | null = null;
 
@@ -245,11 +254,29 @@ export class Supervisor {
                 // the already-started controller is still settling. It never
                 // authorizes dispatch; retry the read-only admission next tick
                 // instead of permanently custodying a healthy cycle.
+                //
+                // Bounded, because the verdict is not always transient: a
+                // registry whose sensors are all disabled reports
+                // `not-certified` forever. Unbounded, this returned before
+                // `consumePendingRequests` below, so the supervisor ticked
+                // indefinitely applying nothing and writing nothing — no event,
+                // no state change, no exit. Refusing to progress is correct
+                // here; refusing invisibly is not. Consuming requests cannot be
+                // hoisted above this gate to compensate: applying a job-request
+                // creates a Job that runnerTick can start, which is the dispatch
+                // this admission exists to authorize.
                 if (admission.planState === 'valid' && admission.currentness === 'current'
-                    && admission.sensors === 'not-certified' && admission.journal === 'not-required') return 'continue';
+                    && admission.sensors === 'not-certified' && admission.journal === 'not-required') {
+                    this.sensorDeferrals += 1;
+                    if (this.sensorDeferrals <= MAX_SENSOR_DEFERRALS) return 'continue';
+                    enterCustody(this.repoRoot, this.branch, `veredicto de sensores no concluyente tras ${this.sensorDeferrals} ticks: ${admission.diagnostics.map(diagnostic => `${diagnostic.code}: ${diagnostic.message}`).join('; ')}`);
+                    return 'custody';
+                }
                 enterCustody(this.repoRoot, this.branch, `admisión compacta desatendida bloqueada antes de dispatch: ${admission.diagnostics.map(diagnostic => `${diagnostic.code}: ${diagnostic.message}`).join('; ')}`);
                 return 'custody';
             }
+            // The verdict settled, which is exactly what the deferral waited for.
+            this.sensorDeferrals = 0;
         }
         let recoveryResumeAction: ControllerRecoveryAction | undefined;
         // Schema-2 custody is reconciled before any controller launch.  This is
