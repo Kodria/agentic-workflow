@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execFileSync } from 'child_process';
-import { Supervisor, runSupervisorLoop, DEFAULT_SUPERVISOR_CONFIG } from '../../../src/commands/watch/supervisor';
+import { Supervisor, runSupervisorLoop, DEFAULT_SUPERVISOR_CONFIG, MAX_SENSOR_DEFERRALS } from '../../../src/commands/watch/supervisor';
 import { WrapperSpawner } from '../../../src/commands/watch/runner';
 import { runExecWrapper } from '../../../src/commands/job/exec-wrapper';
 import { beginGeneration, activeGeneration } from '../../../src/commands/watch/generations';
@@ -362,6 +362,48 @@ describe('supervisor loop', () => {
         git(repo, 'checkout', '-qb', 'otra');
         await expect(new Supervisor(repo, 'main', cfg, spy, undefined, admitted).tick()).rejects.toThrow(/rama|branch/i);
         expect(calls).toBe(0);
+    });
+
+    // The sensor deferral at the top of tick() covers a first inconclusive read
+    // while a controller settles, and returns 'continue' so a transient does not
+    // custody a healthy cycle. It returns BEFORE consumePendingRequests, and
+    // `sensors: 'not-certified'` is not always transient: it is the steady state
+    // of any registry whose sensors are all disabled, which the baseline registry
+    // documents about itself. Unbounded, the supervisor ticked forever applying
+    // nothing and writing nothing — no event, no state change, no exit. Observed
+    // against published 9.10.0: a routing-reserve and an unrelated
+    // controller-heartbeat both sat unconsumed for ~36 ticks with appliedRequests
+    // empty and the cycle still IN_PROGRESS.
+    test('an inconclusive sensor verdict defers dispatch a bounded number of ticks, then says so', async () => {
+        const repo = setupRepo();
+        initUnattendedFixture(repo);
+        beginGeneration(repo, 'main');
+        const token = activeGeneration(readJournal(repo, 'main').state!)!.token;
+        requestJob(repo, 'main', token, ['node', '-e', 'process.exit(0)'], [], '.');
+
+        // Exactly what `awm plan admit --require-current --verify-sensors` returns
+        // for that registry: valid plan, current contracts, sensors not certified.
+        // Every field matches the deferral condition.
+        const notCertified = async (): Promise<AdmissionReport> => ({
+            state: 'blocked', planState: 'valid', executionMode: 'desatendido',
+            journal: 'not-required', currentness: 'current', sensors: 'not-certified',
+            diagnostics: [{ code: 'ADMISSION_SENSORS_BLOCKED', message: 'sensors not certified' }],
+        });
+        let spawned = 0;
+        const sup = new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, () => { spawned += 1; }, undefined, notCertified);
+
+        for (let i = 0; i < MAX_SENSOR_DEFERRALS; i += 1) {
+            expect(await sup.tick()).toBe('continue');
+            expect(readJournal(repo, 'main').state!.cycle.status).toBe('IN_PROGRESS');
+        }
+        // The verdict never settled, so the supervisor must stop pretending it might.
+        expect(await sup.tick()).toBe('custody');
+
+        const state = readJournal(repo, 'main').state!;
+        expect(state.cycle.status).toBe('BLOCKED');
+        expect(state.cycle.blockedReason).toMatch(/sensor/i);
+        // Deferring dispatch was right throughout, and stays right.
+        expect(spawned).toBe(0);
     });
 
     test('una admisión compacta bloqueada no lanza controlador ni wrappers', async () => {
