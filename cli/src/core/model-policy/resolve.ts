@@ -83,12 +83,22 @@ export function resolveSelection(input: ResolveSelectionInput): SelectionResolut
         selection = degraded; outcome = 'degraded'; unavailableEvidence.push('effortOverride'); return undefined;
     };
     const model = degradeModel(); if (model) return model;
+    if (selection.effort.kind === 'explicit') { const effort = degradeEffort(); if (effort) return effort; }
+    // availableSelections is the receipt's attestation of what can actually be
+    // chosen, so it is checked on the FINAL selection, after any degradation
+    // rewrote it. Checking it first forced a runtime that cannot honour explicit
+    // effort to attest selections it could never run, purely to reach the
+    // degradation that would then discard them — the honest receipt was the one
+    // that failed.
     if (!capabilities.availableSelections.some(candidate => equal(candidate, selection))) return blocked('ROUTING_SELECTION_UNAVAILABLE', 'Approved selection is not currently available; no substitute is allowed.');
-    if (selection.effort.kind === 'runtime-default') {
-        if (!capabilities.runtimeDefaultSelection || !equal(capabilities.runtimeDefaultSelection, selection)) return blocked('ROUTING_SELECTION_UNAVAILABLE', 'Runtime-default selection is not explicitly attested.');
-    } else {
-        const effort = degradeEffort(); if (effort) return effort;
-    }
+    // A runtime-default effort is only meaningful if the receipt declares what the
+    // runtime default is. It need NOT equal this selection: requiring that made
+    // every per-profile selection unreachable on a runtime whose default model
+    // differs, even with modelOverride attested supported and the selection
+    // itself attested available. Attesting `haiku at runtime-default effort` is
+    // precisely the statement that the model may be overridden while effort is
+    // left alone.
+    if (selection.effort.kind === 'runtime-default' && !capabilities.runtimeDefaultSelection) return blocked('ROUTING_SELECTION_UNAVAILABLE', 'Runtime-default selection is not explicitly attested.');
     if (capabilities.capabilities.observedModelEvidence !== 'supported') {
         if (!mapping.degradation.allowMissingObservedIdentity) return blocked('ROUTING_OBSERVED_IDENTITY_UNAVAILABLE', 'Observed model identity is required and unavailable.');
         outcome = 'degraded'; unavailableEvidence.push('observedModelEvidence');

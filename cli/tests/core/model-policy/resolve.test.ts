@@ -83,6 +83,43 @@ describe('resolveSelection', () => {
         expect(resolveSelection({ ...value, requestedProfile: 'mechanical' })).toMatchObject({ state: 'resolved', outcome: 'degraded', selection: runtimeDefaultSelection('mechanical'), effectiveProfile: 'mechanical', unavailableEvidence: ['effortOverride'] });
         expect(resolveSelection({ ...value, requestedProfile: 'integration' })).toMatchObject({ state: 'resolved', outcome: 'degraded', selection: runtimeDefaultSelection('integration'), effectiveProfile: 'integration', unavailableEvidence: ['effortOverride'] });
     });
+    // An honest receipt for a runtime with no effort control attests ONLY
+    // runtime-default selections — it cannot claim `mechanical at low effort` is
+    // selectable. Checking availability before degradation rejected exactly that
+    // receipt, so the contract only worked for a receipt that overclaimed.
+    it('degrades effort against a receipt that attests only runtime-default selections', () => {
+        const value = input();
+        value.policy.content.mappings[0].degradation.allowMissingEffortOverride = true;
+        value.capabilities.capabilities.effortOverride = 'unsupported';
+        value.capabilities.availableSelections = [runtimeDefaultSelection('mechanical'), runtimeDefaultSelection('integration'), runtimeDefaultSelection('judgment'), runtimeDefaultSelection('full')];
+        value.capabilities.runtimeDefaultSelection = runtimeDefaultSelection('full');
+        expect(resolveSelection({ ...value, requestedProfile: 'mechanical' })).toMatchObject({ state: 'resolved', outcome: 'degraded', selection: runtimeDefaultSelection('mechanical'), unavailableEvidence: ['effortOverride'] });
+    });
+    // The runtime default is one selection; a per-profile selection at
+    // runtime-default effort is a different one. Requiring them equal made every
+    // profile but the default model unroutable, with modelOverride attested
+    // supported and the selection itself attested available.
+    it('routes a per-profile runtime-default selection whose model differs from the runtime default', () => {
+        const value = input();
+        value.policy.content.mappings[0].profiles.mechanical = runtimeDefaultSelection('mechanical');
+        value.capabilities.availableSelections = [runtimeDefaultSelection('mechanical'), runtimeDefaultSelection('full')];
+        value.capabilities.runtimeDefaultSelection = runtimeDefaultSelection('full');
+        expect(resolveSelection({ ...value, requestedProfile: 'mechanical' })).toMatchObject({ state: 'resolved', outcome: 'native', selection: runtimeDefaultSelection('mechanical'), effectiveProfile: 'mechanical' });
+    });
+    it('still blocks a runtime-default selection the receipt does not attest at all', () => {
+        const value = input();
+        value.policy.content.mappings[0].profiles.mechanical = runtimeDefaultSelection('mechanical');
+        value.capabilities.availableSelections = [runtimeDefaultSelection('full')];
+        value.capabilities.runtimeDefaultSelection = runtimeDefaultSelection('full');
+        expect(resolveSelection({ ...value, requestedProfile: 'mechanical' })).toMatchObject({ state: 'blocked', diagnostics: [{ code: 'ROUTING_SELECTION_UNAVAILABLE' }] });
+    });
+    it('still blocks a runtime-default selection when the receipt declares no runtime default', () => {
+        const value = input();
+        value.policy.content.mappings[0].profiles.mechanical = runtimeDefaultSelection('mechanical');
+        value.capabilities.availableSelections = [runtimeDefaultSelection('mechanical')];
+        delete value.capabilities.runtimeDefaultSelection;
+        expect(resolveSelection({ ...value, requestedProfile: 'mechanical' })).toMatchObject({ state: 'blocked', diagnostics: [{ code: 'ROUTING_SELECTION_UNAVAILABLE' }] });
+    });
     it('blocks effort degradation when the routed model at runtime-default effort is not attested', () => {
         const value = input();
         value.policy.content.mappings[0].degradation.allowMissingEffortOverride = true;
