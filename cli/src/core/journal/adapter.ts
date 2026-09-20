@@ -4,10 +4,30 @@ import { refIsAlive, activitySnapshot, ActivitySnapshot } from './process';
 
 export type SafeToReplace = 'safe' | 'indeterminate';
 
+/** Postura de autonomia con la que corre el controller desatendido.
+ *
+ *  `approval-free` es la UNICA postura hoy, y es deliberado: es la unica cuyo
+ *  mapeo se pudo leer del `--help` del binario real. Un grado intermedio
+ *  ("sandboxed pero sin prompts") exige medir en cada runtime que efectivamente
+ *  no pregunte — una postura que igual pregunta reproduce exactamente el stall
+ *  que este tipo existe para evitar (#168). No se agregan grados sin medirlos. */
+export type ControllerAutonomy = 'approval-free';
+
+export const CONTROLLER_AUTONOMIES = ['approval-free'] as const;
+
+export function isControllerAutonomy(value: unknown): value is ControllerAutonomy {
+    return typeof value === 'string' && (CONTROLLER_AUTONOMIES as readonly string[]).includes(value);
+}
+
 export interface ControllerAdapter {
     provider: 'codex' | 'claude-code';
     /** argv estructurado para lanzar/reanudar el controlador (shell:false). */
-    launchArgv(resumePrompt: string): string[];
+    launchArgv(resumePrompt: string, autonomy?: ControllerAutonomy): string[];
+    /** Si el mapeo postura -> flags de ESTE provider esta respaldado por el
+     *  `--help` del binario real. 'unverified' NO se lanza a ciegas: la
+     *  admision degrada `unattendedController` y bloquea con diagnostico
+     *  propio, en vez de inventar una flag que podria no existir (#168). */
+    autonomyMapping: 'verified' | 'unverified';
     /** Actividad observable del process group (null = muerto). */
     activity(ref: ProcessRef): ActivitySnapshot | null;
     /** Señal POSITIVA de reemplazo seguro (R4.2b): 'safe' SOLO con evidencia
@@ -24,16 +44,29 @@ function baseSafeToReplace(ref: ProcessRef): SafeToReplace {
     return refIsAlive(ref) ? 'indeterminate' : 'safe';
 }
 
+// `codex exec` tiene flags de aprobacion (`-a/--ask-for-approval never`,
+// `-s/--sandbox`), pero la evidencia R0 capturo el `--help` de `codex`, NO el
+// del subcomando `exec`, asi que no consta donde van ni como se llaman ahi.
+// Declarar el mapeo como 'unverified' y bloquear es honesto; adivinar la flag
+// dejaria al controller sin arrancar, que es peor que el stall que arreglamos.
 const codexAdapter: ControllerAdapter = {
     provider: 'codex',
     launchArgv: (resumePrompt) => ['codex', 'exec', `${RESUME_PROMPT_PREFIX}${resumePrompt}`],
+    autonomyMapping: 'unverified',
     activity: activitySnapshot,
     safeToReplace: baseSafeToReplace,
 };
 
+// Leido del `--help` de claude 2.1.278:
+//   --permission-mode <mode>  (choices: "acceptEdits", "auto", "bypassPermissions",
+//                              "manual", "dontAsk", "plan")
+// Las flags van ANTES de `-p`, que toma el prompt como posicional.
 const claudeAdapter: ControllerAdapter = {
     provider: 'claude-code',
-    launchArgv: (resumePrompt) => ['claude', '-p', `${RESUME_PROMPT_PREFIX}${resumePrompt}`],
+    launchArgv: (resumePrompt, autonomy) => ['claude',
+        ...(autonomy === 'approval-free' ? ['--permission-mode', 'bypassPermissions'] : []),
+        '-p', `${RESUME_PROMPT_PREFIX}${resumePrompt}`],
+    autonomyMapping: 'verified',
     activity: activitySnapshot,
     safeToReplace: baseSafeToReplace,
 };
@@ -85,6 +118,14 @@ function controllerArgvOverride(): string[] | null {
     return parsed as string[];
 }
 
+/** Lookup PURO del mapeo de postura por provider: sin env, sin throw, para que
+ *  la admision pueda preguntarlo sin construir un adapter ni honrar overrides. */
+export function controllerAutonomyMapping(provider: string): 'verified' | 'unverified' {
+    return provider === 'claude-code' ? claudeAdapter.autonomyMapping
+        : provider === 'codex' ? codexAdapter.autonomyMapping
+            : 'unverified';
+}
+
 export function adapterFor(provider: string): ControllerAdapter {
     const base = provider === 'codex' ? codexAdapter
         : provider === 'claude-code' ? claudeAdapter
@@ -92,5 +133,8 @@ export function adapterFor(provider: string): ControllerAdapter {
     if (base === null) throw new Error(`provider desconocido: ${provider} (validos: ${WATCH_PROVIDERS.join(', ')})`);
     const override = controllerArgvOverride();
     if (override === null) return base;
+    // El operador es dueno del argv completo: no se le inyecta la postura
+    // (duplicaria o contradiria sus propias flags). Sigue necesitando
+    // declararla para la admision, que es una afirmacion, no un argv.
     return { ...base, launchArgv: (resumePrompt) => [...override, resumePrompt] };
 }

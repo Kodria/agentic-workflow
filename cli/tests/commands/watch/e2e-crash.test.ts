@@ -174,7 +174,7 @@ while true; do sleep 1; done
             throw new Error(`fixture runSensors failed: ${JSON.stringify({ sensorReport, live })}`);
         }
         expect(sensorReport).toMatchObject({ source: { kind: 'logical', registry: 'baseline' } });
-        const admission = spawnSync(process.execPath, [CLI, 'plan', 'admit', 'plans/fixture.md', '--provider', 'codex', '--cwd', '.', '--execution-mode', 'desatendido', '--require-current', '--verify-sensors', '--json'], { cwd: repo, env, encoding: 'utf8' });
+        const admission = spawnSync(process.execPath, [CLI, 'plan', 'admit', 'plans/fixture.md', '--provider', 'codex', '--cwd', '.', '--execution-mode', 'desatendido', '--controller-autonomy', 'approval-free', '--require-current', '--verify-sensors', '--json'], { cwd: repo, env, encoding: 'utf8' });
         if (admission.status !== 0) throw new Error(`fixture admission failed: ${admission.stdout}${admission.stderr}`);
     });
 
@@ -204,7 +204,7 @@ while true; do sleep 1; done
         // in-repo log would make the real currentness/admission gate reject
         // the next tick before it can collect an exited job sidecar.
         const out = fs.openSync(path.join(stubBin, `sup-${children.length}.log`), 'a');
-        const child = spawn(process.execPath, [CLI, 'watch', '--provider', provider], {
+        const child = spawn(process.execPath, [CLI, 'watch', '--provider', provider, '--controller-autonomy', 'approval-free'], {
             cwd: repo, env, detached: true, stdio: ['ignore', out, out],
         });
         children.push(child);

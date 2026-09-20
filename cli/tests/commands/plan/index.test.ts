@@ -374,7 +374,7 @@ describe('plan admit Commander wiring', () => {
             initWatch(root, 'main', { path: 'plans/current.md', report: valid });
             const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
             registerPlanCommand(program, { validatePlanFile: () => valid, admitPlan: admit, readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }) });
-            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plans/current.md', '--provider', 'codex', '--cwd', root, '--execution-mode', 'desatendido', '--json']);
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plans/current.md', '--provider', 'codex', '--cwd', root, '--execution-mode', 'desatendido', '--controller-autonomy', 'approval-free', '--json']);
             expect(admit).toHaveBeenCalledWith(expect.objectContaining({ executionMode: 'desatendido', planPath: 'plans/current.md', journalCorrupt: false, journalState: expect.objectContaining({ schema: 2, planBinding: expect.objectContaining({ digest: valid.planDigest }) }) }));
         } finally { output.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
     });
