@@ -215,7 +215,7 @@ describe('readDeclaredOrchestrators', () => {
             stderrBoundary(result.diagnostics);
             expect(stderrBoundary.mock.calls[0][0].join('')).not.toMatch(/[\u2028\u0085]/);
             expect(stderrBoundary.mock.results[0].value).not.toMatch(/[\u2028\u0085]/);
-            // eslint-disable-next-line no-control-regex -- reject all terminal controls and line separators
+            // Reject all terminal controls and line separators.
             expect(result.diagnostics[0]).not.toMatch(/[\x00-\x1f\x7f-\x9f\u2028\u2029]/);
         });
 
@@ -241,7 +241,7 @@ describe('readDeclaredOrchestrators', () => {
             expect(result.diagnostics[0]).toContain('awm-registry.json');
             expect(result.diagnostics[0]).toContain('before');
             expect(result.diagnostics[0]).toContain('after');
-            // eslint-disable-next-line no-control-regex -- reject all terminal controls and line separators
+            // Reject all terminal controls and line separators.
             expect(result.diagnostics[0]).not.toMatch(/[\x00-\x1f\x7f-\x9f\u2028\u2029]/);
         });
 
@@ -318,7 +318,7 @@ describe('collectDeclaredOrchestrators', () => {
         const { diagnostics } = collectDeclaredOrchestrators();
 
         expect(diagnostics).toHaveLength(1);
-        // eslint-disable-next-line no-control-regex -- diagnostic must contain no terminal controls or line separators
+        // Diagnostic must contain no terminal controls or line separators.
         expect(diagnostics[0]).not.toMatch(/[\x00-\x1f\x7f-\x9f\u2028\u2029]/);
         expect(diagnostics[0]).toContain('shared');
         expect(diagnostics[0]).toContain('forged');
@@ -335,7 +335,7 @@ describe('collectDeclaredOrchestrators', () => {
         expect(diagnostics).toHaveLength(1);
         expect(diagnostics[0]).toContain('discovery unavailable');
         expect(diagnostics[0]).toContain('forged');
-        // eslint-disable-next-line no-control-regex -- diagnostic must contain no terminal controls or line separators
+        // Diagnostic must contain no terminal controls or line separators.
         expect(diagnostics[0]).not.toMatch(/[\x00-\x1f\x7f-\x9f\u2028\u2029]/);
     });
 

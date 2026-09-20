@@ -1,7 +1,6 @@
 // cli/src/commands/registry/add.ts
 // Logic for `awm registry add`, separated from commander wiring (testable without prompts).
 import fs from 'fs';
-import path from 'path';
 import simpleGit from 'simple-git';
 import {
     registriesDir,

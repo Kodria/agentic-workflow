@@ -2,16 +2,6 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
-import { runCommand, runStructuredCommand, ExecResult } from './exec';
-import { SensorResult, SensorError } from './types';
-import { parseTscOutput } from './formatters/tsc';
-import { parseEslintOutput } from './formatters/eslint';
-import { parseSemgrepOutput } from './formatters/semgrep';
-import { parseGenericOutput } from './formatters/generic';
-import { parseTestOutput } from './formatters/test';
-import { parseMypyOutput } from './formatters/mypy';
-import { parseRuffOutput } from './formatters/ruff';
-import { parseShellcheckOutput } from './formatters/shellcheck';
 import { SensorManifest, RunOutput, PreparedSensorExecution } from './types';
 import { readBaseline } from './baseline';
 import { applyBaseline, executePrepared } from './result';
@@ -22,7 +12,6 @@ import { changedFiles, changedScopeError } from './changed';
 import { detectStack } from './detection';
 import { resolveParsedPackCompatibility } from './compatibility/live';
 import { parseSensorPack } from './compatibility/contract';
-import type { SensorManifestV3ProjectSensors } from './compatibility/manifest';
 import { resolveSensorSource } from './compatibility/source';
 import type { PackSource } from './compatibility/pack-source';
 import { listRegistries } from '../../core/registries';
@@ -33,7 +22,6 @@ import { resolveSensorProject } from './project';
 // Sensor JSON output can be several MB on large repos (e.g. `eslint --format json`
 // with thousands of findings). A 1MB cap killed the child with SIGTERM when
 // exceeded — which previously surfaced as a false "timeout".
-const MAX_BUFFER = 64 * 1024 * 1024;
 /** Hard ceiling on parallel sensors: past this, they only contend for the same cores. */
 const MAX_CONCURRENCY = 4;
 

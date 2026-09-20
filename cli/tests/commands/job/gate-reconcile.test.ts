@@ -11,7 +11,7 @@ import { registerWatchCommand } from '../../../src/commands/watch';
 import { initWatch } from '../../../src/commands/watch/init';
 import { validatePlanFile } from '../../../src/core/plan/validate';
 import { emptyState, Job, JournalState, TrackRef } from '../../../src/core/journal/types';
-import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
+import { readJournal, writeJournal } from '../../../src/core/journal/store';
 import { writeDescriptor, TrackDescriptor } from '../../../src/core/tracks/descriptor';
 
 function job(partial: Partial<Job>): Job {

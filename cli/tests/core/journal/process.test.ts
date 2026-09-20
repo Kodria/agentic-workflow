@@ -225,7 +225,7 @@ describe('process identity', () => {
 
     test('captureRefFor degrada a unknown si ps falla, nunca crashea al capturar identidad (R2.1)', () => {  // verifies R2.1
         const cp = require('child_process');
-        const spy = jest.spyOn(cp, 'execFileSync').mockImplementation((...args) => {
+        const spy = jest.spyOn(cp, 'execFileSync').mockImplementation((..._args) => {
             const err: any = new Error('spawn ps ENOENT');
             err.code = 'ENOENT';
             throw err;

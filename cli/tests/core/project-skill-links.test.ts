@@ -17,7 +17,6 @@
 // For Copilot the gap is total, not partial: `skill.global` is null, so *every* skill
 // it has is project-scope, and none of them had any integrity path whatsoever.
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { classifySkillLinks, reconcileProjectSkillLinks } from '../../src/core/skill-integrity';
 import { providerFor } from '../../src/providers';

@@ -1,5 +1,4 @@
 // src/commands/init.ts
-import fs from 'fs';
 import { Command } from 'commander';
 import pc from 'picocolors';
 import { renderReport } from './doctor';

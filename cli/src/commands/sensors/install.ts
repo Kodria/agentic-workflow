@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { homeDir, awmHome } from '../../core/paths';
+import { awmHome } from '../../core/paths';
 import { readStrictJson } from '../hooks/shared';
 import { writeFileAtomic } from '../../core/atomic-file';
 import { getSettingsMergeHookConfig } from '../../providers';

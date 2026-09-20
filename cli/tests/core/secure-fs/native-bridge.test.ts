@@ -816,7 +816,6 @@ windowsOnly('native secure-fs Windows handle fixtures', () => {
         const junction = path.join(root, 'junction');
         fs.mkdirSync(outside);
         fs.symlinkSync(outside, junction, 'junction');
-        const target = path.join(junction, 'sensors.json');
 
         expect(() => binding.writeProjectTransaction(root, 'junction/sensors.json', Buffer.from('new bytes'), { mode: 'create', createParents: false })).toThrow(/rejected path ancestor/i);
         expect(fs.existsSync(path.join(outside, 'sensors.json'))).toBe(false);

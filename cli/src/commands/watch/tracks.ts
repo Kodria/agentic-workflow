@@ -36,7 +36,7 @@ import { JOIN_STRATEGY_NO_FF } from '../../core/tracks/types';
 import type { CohortProtocol, JoinIntent, PrepareObservation, ProtocolEffect, TrackPhase, TrackProtocolState } from '../../core/tracks/types';
 import type { IntegrationLockHandle } from '../../core/tracks/join';
 import type { ParsedTrack } from '../../core/tracks/plan-parser';
-import type { JournalState, TrackContext, TrackRef, ProcessRef } from '../../core/journal/types';
+import type { JournalState, TrackContext, TrackRef } from '../../core/journal/types';
 
 /** R8.1 (Task 12): pura, sin I/O — nombra los tracks que todavía no llegaron a
  *  `MERGED_UNVERIFIED` (el ciclo permanece IN_PROGRESS mientras existan). Vive

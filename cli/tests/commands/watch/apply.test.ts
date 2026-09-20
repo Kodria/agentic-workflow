@@ -101,7 +101,7 @@ describe('aplicacion transaccional de requests', () => {
     });
 
     test('register-entity CREA task con VerificationPlan y ReviewObligations; cycle-plan y dispatch (R1.4/R1.4b)', () => {  // verifies R1.4b
-        const request = emitRequest(repo, 'rama', {
+        emitRequest(repo, 'rama', {
             kind: 'register-entity', generationToken: 'g1', idempotencyKey: 'e1',
             payload: {
                 entity: 'task', taskId: 'T1', title: 'implementar',

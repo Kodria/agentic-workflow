@@ -1,7 +1,7 @@
 import {
   buildPackageView, STANDALONE_NAME, packageSummaryLines, packageDetailLines,
   packagePickerItems, artifactPickerItems,
-  findPackage, artifactCountLabel, ALL_SENTINEL, artifactValue, resolveLevel2Selection
+  findPackage, artifactCountLabel, ALL_SENTINEL, resolveLevel2Selection
 } from '../../src/utils/registry-view';
 import { SkillArtifact, WorkflowArtifact, AgentArtifact } from '../../src/core/discovery';
 import { BundleDefinition } from '../../src/core/bundles';

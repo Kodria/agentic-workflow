@@ -215,7 +215,7 @@ describe('multi-agent targeting (add/remove/sync/update/doctor)', () => {
         const { runUpdateCore } = require('../../src/commands/update');
 
         const syncRegistries = jest.fn(async () => [SYNCED_REGISTRY]);
-        const planReconciliation = jest.fn((o: any) => ({ operations: [], records: [], reports: [] }));
+        const planReconciliation = jest.fn((_operations: any) => ({ operations: [], records: [], reports: [] }));
         const applyInstallPlan = jest.fn(() => ({ installed: [], skipped: [], transactionId: 'tx', modifiedFiles: [] }));
         const resyncInstalledHooks = jest.fn(() => []);
 

@@ -209,7 +209,6 @@ describe('gatherProviderChecks — shared skills.global does not mask broken lin
 
     it('still reports shared (healthy, non-degrading) when the shared dir has no broken links', () => {
         const { gatherContext } = require('../../../src/core/diagnostics/context');
-        const { computeProviderOverall } = require('../../../src/core/diagnostics/checks');
 
         const scanSkills = jest.fn(() => ({ valid: ['ok-skill'], repairable: [], dead: [], usurped: [] }));
         const ctx = gatherContext({ cwd: tmpHome, bundles: [], agents: ['opencode', 'codex'], scanSkills });

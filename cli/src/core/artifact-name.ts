@@ -47,7 +47,6 @@ export function isSafeArtifactName(name: unknown): boolean {
     if (/[. ]$/.test(value)) return false;
 
     // Bytes de control y NUL: truncan la ruta a nivel syscall en algunos SO.
-    // eslint-disable-next-line no-control-regex
     if (/[\u0000-\u001f\u007f]/.test(value)) return false;
 
     // Cualquier separador (de ambas plataformas) convierte esto en una ruta,

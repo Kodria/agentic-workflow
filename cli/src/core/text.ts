@@ -9,14 +9,14 @@
  *  `AGENTS.md` documenta bajo `defensive-guard-consistency`: endurecer una copia
  *  y dejar la otra atrás. */
 export function stripControlChars(text: string): string {
-    // eslint-disable-next-line no-control-regex -- necesitamos matchear C0 deliberadamente
+    // Necesitamos matchear C0 deliberadamente.
     return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 }
 
 /** Keeps an untrusted diagnostic field on one terminal line, without changing
  * the whitespace policy for multiline public text or composed markdown. */
 export function sanitizeDiagnosticText(text: string): string {
-    // eslint-disable-next-line no-control-regex -- remove all C0/C1 controls, including terminal escape bytes
+    // Remove all C0/C1 controls, including terminal escape bytes.
     return text.replace(/\r\n|[\r\n\t\u2028\u2029]/g, ' ').replace(/[\x00-\x1f\x7f-\x9f]/g, '');
 }
 

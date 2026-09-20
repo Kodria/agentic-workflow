@@ -4,7 +4,6 @@ import {
     AgentTarget,
     ArtifactType,
     Scope,
-    UnsupportedRendererError,
     assertLinkRenderer,
     providerFor,
 } from '../providers';

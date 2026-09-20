@@ -48,7 +48,7 @@ describe('ConfigInstructionsStrategy.inject', () => {
 
 describe('ConfigInstructionsStrategy.remove', () => {
     it('removes only the sentinel, preserving user entries', () => {
-        const { configPath, absPath, provider, input } = setup({ instructions: ['docs/rules.md'] });
+        const { configPath, provider, input } = setup({ instructions: ['docs/rules.md'] });
         strat.inject(input, provider);
         strat.remove(input, provider);
         const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));

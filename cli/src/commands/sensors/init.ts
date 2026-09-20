@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { SensorManifest } from './types';
-import { parseSensorPack } from './compatibility/contract';
 import { resolvePackSource } from './compatibility/pack-source';
 import { applySensorBootstrap, planSensorBootstrap, type UnresolvedSensor } from './bootstrap';
 import { describeUnresolved } from './unresolved';
@@ -162,16 +161,6 @@ export function buildManifest(
         sensors[name] = { ...defaults[name], ...existingSensors[name] };
     }
     return { pack, sensors };
-}
-
-/** Pack names present as directories under `<registryRoot>/sensor-packs/`, sorted. */
-function availablePacks(registryRoot: string): string[] {
-    const packsDir = path.join(registryRoot, 'sensor-packs');
-    if (!fs.existsSync(packsDir) || !fs.statSync(packsDir).isDirectory()) return [];
-    return fs.readdirSync(packsDir, { withFileTypes: true })
-        .filter(e => e.isDirectory())
-        .map(e => e.name)
-        .sort();
 }
 
 export async function initSensors(opts: InitOptions = {}): Promise<{

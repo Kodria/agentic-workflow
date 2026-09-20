@@ -12,7 +12,6 @@
 // tests/core/skill-integrity.test.ts. Per CLAUDE.md, no test may touch the
 // real ~/.awm.
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import type { BundleDefinition } from '../../../src/core/bundles';
 import type { AgentTarget } from '../../../src/providers';

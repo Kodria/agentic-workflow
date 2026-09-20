@@ -16,10 +16,6 @@ import { trackRefFixture, descriptorFixture } from './fixtures';
 
 class ExitSignal extends Error { constructor(public code: number) { super(`process.exit(${code})`); } }
 
-function git(repo: string, args: string[]): string {
-    return execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
-}
-
 function gitInit(repo: string, branch: string): void {
     execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'init', '-q', '-b', branch], { cwd: repo });
     fs.writeFileSync(path.join(repo, 'f.txt'), 'x');

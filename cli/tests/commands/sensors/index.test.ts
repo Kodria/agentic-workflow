@@ -14,7 +14,7 @@ import { Command } from 'commander';
 import { log } from '@clack/prompts';
 import { runCoverage } from '../../../src/commands/sensors/coverage';
 import { renderCoverageHuman, renderCoverageJson } from '../../../src/commands/sensors/coverage/render';
-import { parsePositiveSafeInteger, registerSensorsCommand } from '../../../src/commands/sensors/index';
+import { registerSensorsCommand } from '../../../src/commands/sensors/index';
 import { exitCodeForVerdict } from '../../../src/commands/sensors/verdict';
 import { planSensorBootstrap, applySensorBootstrap } from '../../../src/commands/sensors/bootstrap';
 
