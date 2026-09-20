@@ -155,7 +155,6 @@ export const DOC_PATH = path.join(__dirname, '..', '..', 'docs', 'support-matrix
 
 /* istanbul ignore next — entrypoint de CLI, ejercitado por el test via las funciones puras */
 if (require.main === module) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const fs = require('fs');
     const current = fs.readFileSync(DOC_PATH, 'utf-8');
     fs.writeFileSync(DOC_PATH, spliceGenerated(current, renderProviderTables()), 'utf-8');
