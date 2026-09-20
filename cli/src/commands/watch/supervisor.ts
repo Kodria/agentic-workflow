@@ -269,7 +269,13 @@ export class Supervisor {
                     && admission.sensors === 'not-certified' && admission.journal === 'not-required') {
                     this.sensorDeferrals += 1;
                     if (this.sensorDeferrals <= MAX_SENSOR_DEFERRALS) return 'continue';
-                    enterCustody(this.repoRoot, this.branch, `veredicto de sensores no concluyente tras ${this.sensorDeferrals} ticks: ${admission.diagnostics.map(diagnostic => `${diagnostic.code}: ${diagnostic.message}`).join('; ')}`);
+                    // The reason must not carry the running counter. enterCustody is
+                    // idempotent on (status, reason), so a message that changes every
+                    // tick defeats that guard and rewrites the journal plus appends a
+                    // custody-blocked event every tickMs, without bound. Naming the
+                    // bound instead of the count keeps the reason stable, so custody
+                    // is entered once and stays entered.
+                    enterCustody(this.repoRoot, this.branch, `veredicto de sensores no concluyente tras ${MAX_SENSOR_DEFERRALS} ticks: ${admission.diagnostics.map(diagnostic => `${diagnostic.code}: ${diagnostic.message}`).join('; ')}`);
                     return 'custody';
                 }
                 enterCustody(this.repoRoot, this.branch, `admisión compacta desatendida bloqueada antes de dispatch: ${admission.diagnostics.map(diagnostic => `${diagnostic.code}: ${diagnostic.message}`).join('; ')}`);
