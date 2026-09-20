@@ -1,3 +1,8 @@
+## v9.11.2 - 2026-09-20
+
+### Fixes
+- **lint:** make the lint gate cover TypeScript, and revive the unattended certification (#174)
+
 ## v9.11.1 - 2026-09-20
 
 ### Fixes
