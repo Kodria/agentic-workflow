@@ -9,6 +9,9 @@ import { validatePlanFile } from '../../core/plan/validate';
 import { type AdmissionReport } from '../../core/admission';
 import { admitRegistryPlan } from '../../core/admission/registry-contracts';
 import { readPreferences } from '../../utils/config';
+import type { AdmissionInput } from '../../core/admission';
+import { readEffectivePolicy } from '../../core/model-policy/store';
+import { readCapabilities, validateRuntimeKey } from '../../core/model-policy/capabilities';
 import { adapterFor } from '../../core/journal/adapter';
 import { groupIsGone, terminateGroupConfirmed } from '../../core/journal/process';
 import { computeGate, computeTrackGate, FingerprintNow } from '../job/gate';
@@ -24,7 +27,39 @@ import type { CohortPhase } from '../../core/tracks/types';
 /** The supervisor is only allowed to dispatch after this exact admission. */
 export type DispatchAdmission = () => Promise<AdmissionReport>;
 
-function defaultDispatchAdmission(repoRoot: string, branch: string, provider: string): DispatchAdmission {
+/** Runtime identity the operator asserts for unattended compact v2 dispatch. */
+export type RoutingIdentity = { kind: string; version: string; accountScopeDigest: string };
+
+export interface DispatchAdmissionDeps {
+    admit?: typeof admitRegistryPlan;
+    readEffectivePolicy?: typeof readEffectivePolicy;
+    readCapabilities?: typeof readCapabilities;
+    now?: () => Date;
+}
+
+/** #166: compact v2 admission requires the runtime identity, and the supervisor
+ *  never supplied it — so `awm watch` blocked on every tick with
+ *  ADMISSION_ROUTING_FACTS_REQUIRED even with every other gate green.
+ *
+ *  The direction of attestation is the one `plan admit`/`plan resolve` already
+ *  use, and is the reason the identity is a flag rather than something derived:
+ *  the OPERATOR asserts the runtime, and the receipt reader is keyed BY that
+ *  assertion. Picking a runtime by hunting for a receipt would let whatever
+ *  receipt happens to be on disk decide what the supervisor claims to run on. */
+export function routingFacts(provider: string, identity: RoutingIdentity | undefined, cwd: string, deps: DispatchAdmissionDeps = {}): AdmissionInput['routing'] {
+    if (identity === undefined) return undefined;
+    const runtime = validateRuntimeKey({ target: provider, kind: identity.kind, version: identity.version, accountScopeDigest: identity.accountScopeDigest });
+    const at = deps.now?.() ?? new Date();
+    if (!(at instanceof Date) || !Number.isFinite(at.getTime())) throw new Error('routing observation time must be a finite Date');
+    const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(cwd);
+    const capabilities = (deps.readCapabilities ?? readCapabilities)(runtime, at);
+    // Fail open on neither: an unapproved policy or a non-current receipt is
+    // withheld, and admission blocks on the absence rather than on a stale fact.
+    return { runtime, policy: policy.state === 'approved' ? policy.policy : undefined,
+        capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined, now: at };
+}
+
+export function defaultDispatchAdmission(repoRoot: string, branch: string, provider: string, identity?: RoutingIdentity, deps: DispatchAdmissionDeps = {}): DispatchAdmission {
     return async () => {
         const observed = readJournal(repoRoot, branch);
         const binding = observed.state?.schema === 2 ? observed.state.planBinding : undefined;
@@ -33,9 +68,10 @@ function defaultDispatchAdmission(repoRoot: string, branch: string, provider: st
         }
         const plan = validatePlanFile(binding.path, repoRoot);
         const preferences = readPreferences();
-        return admitRegistryPlan({ plan, provider, cwd: repoRoot, enabledAgents: preferences.enabledAgents,
+        return (deps.admit ?? admitRegistryPlan)({ plan, provider, cwd: repoRoot, enabledAgents: preferences.enabledAgents,
             executionMode: 'desatendido', requireCurrent: true, verifySensors: true,
-            journalState: observed.state, journalCorrupt: observed.corrupt, planPath: binding.path });
+            journalState: observed.state, journalCorrupt: observed.corrupt, planPath: binding.path,
+            routing: routingFacts(provider, identity, repoRoot, deps) });
     };
 }
 
@@ -129,6 +165,7 @@ export interface SupervisorConfig {
     reconcileGraceMs: number;
     jobStallObservationMs: number;   // R3.5: umbral observacional de suspected-stall por job (nunca mata nada)
     maxParallelTracks: number;       // R10.2/R10.3: tope de tracks ACTIVE simultáneos (ver core/tracks/concurrency.ts)
+    routingIdentity?: RoutingIdentity;  // #166: identidad de runtime que exige la admisión compact v2
 }
 
 export const DEFAULT_SUPERVISOR_CONFIG: SupervisorConfig = {
@@ -142,6 +179,12 @@ export const DEFAULT_SUPERVISOR_CONFIG: SupervisorConfig = {
     jobStallObservationMs: 5 * 60000,   // R3.5 default: mismo orden de magnitud que heartbeatTimeoutMs, concern independiente
     maxParallelTracks: 1,                // overridden en tiempo de ejecución con loadDefaultParallelism() (watch/index.ts)
 };
+
+/** Single place the supervisor's config becomes its admission, so the runtime
+ *  identity cannot be dropped silently between the flag and the gate (#166). */
+export function admissionForConfig(repoRoot: string, branch: string, cfg: SupervisorConfig, deps: DispatchAdmissionDeps = {}): DispatchAdmission {
+    return defaultDispatchAdmission(repoRoot, branch, cfg.provider, cfg.routingIdentity, deps);
+}
 
 // 'frozen' (R5.2/R6.3, Task 10): SOLO puede ocurrir en el journal de un
 // TRACK individual (nunca en el del plan) — el track terminó, con las 6
@@ -192,7 +235,7 @@ export class Supervisor {
         private cfg: SupervisorConfig,
         private spawner: WrapperSpawner,
         trackRuntime?: TrackRuntime,
-        private dispatchAdmission: DispatchAdmission = defaultDispatchAdmission(repoRoot, branch, cfg.provider),
+        private dispatchAdmission: DispatchAdmission = admissionForConfig(repoRoot, branch, cfg),
     ) {
         this.trackRuntime = trackRuntime ?? defaultTrackRuntime(repoRoot, branch, { termGraceMs: cfg.termGraceMs, killGraceMs: cfg.killGraceMs });
     }

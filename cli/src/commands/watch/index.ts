@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import { execFileSync } from 'child_process';
 import { initWatch, rebindWatchPlan } from './init';
-import { runSupervisorLoop, DEFAULT_SUPERVISOR_CONFIG } from './supervisor';
+import { runSupervisorLoop, DEFAULT_SUPERVISOR_CONFIG, type RoutingIdentity } from './supervisor';
+import { validateRuntimeKey } from '../../core/model-policy/capabilities';
 import { EXEC_STDIO } from '../../core/journal/process';
 import { WATCH_PROVIDERS, isWatchProvider } from '../../core/journal/adapter';
 import { resolveCommandContext } from '../../core/tracks/context';
@@ -46,6 +47,12 @@ export function registerWatchCommand(program: Command): void {
         .option('--heartbeat-timeout <min>', 'minutos de silencio de heartbeat', '5')
         .option('--activity-window <min>', 'minutos extra sin actividad de proceso', '10')
         .option('--max-parallel <n>', 'tope de tracks ACTIVE simultáneos (default: derivado del benchmark empaquetado)')
+        // #166: la admisión compact v2 exige la identidad de runtime. Se declara
+        // acá, igual que en `plan admit`/`plan resolve`: el operador la asserta y
+        // el receipt debe coincidir, nunca al revés.
+        .option('--runtime-kind <kind>', 'identidad de runtime para despacho compact v2')
+        .option('--runtime-version <version>', 'identidad de runtime para despacho compact v2')
+        .option('--account-scope-digest <sha>', 'identidad de runtime para despacho compact v2')
         .action(async (opts) => {
             const repo = process.cwd();
             const branch = currentBranch(repo);
@@ -90,12 +97,36 @@ export function registerWatchCommand(program: Command): void {
                 process.exitCode = 1;
                 return;
             }
+            // Los tres viajan juntos o ninguno: una identidad parcial produciría
+            // exactamente el bloqueo silencioso que este flag existe para evitar.
+            const identityFlags: Array<[string, unknown]> = [['--runtime-kind', opts.runtimeKind], ['--runtime-version', opts.runtimeVersion], ['--account-scope-digest', opts.accountScopeDigest]];
+            const suppliedIdentity = identityFlags.filter(([, value]) => value !== undefined);
+            if (suppliedIdentity.length !== 0 && suppliedIdentity.length !== identityFlags.length) {
+                const missing = identityFlags.filter(([, value]) => value === undefined).map(([flag]) => flag);
+                process.stderr.write(`la identidad de runtime requiere los tres flags juntos; faltan: ${missing.join(', ')}\n`);
+                process.exitCode = 1;
+                return;
+            }
+            let routingIdentity: RoutingIdentity | undefined;
+            if (suppliedIdentity.length === identityFlags.length) {
+                try {
+                    // Valida acá, antes de tomar el lock: un digest mal formado
+                    // tiene que costar un mensaje, no un ciclo de custodia.
+                    validateRuntimeKey({ target: opts.provider, kind: opts.runtimeKind, version: opts.runtimeVersion, accountScopeDigest: opts.accountScopeDigest });
+                } catch (e) {
+                    process.stderr.write(`${(e as Error).message}\n`);
+                    process.exitCode = 1;
+                    return;
+                }
+                routingIdentity = { kind: String(opts.runtimeKind), version: String(opts.runtimeVersion), accountScopeDigest: String(opts.accountScopeDigest) };
+            }
             const cfg = {
                 ...DEFAULT_SUPERVISOR_CONFIG,
                 provider: opts.provider,
                 heartbeatTimeoutMs: minutes('--heartbeat-timeout', opts.heartbeatTimeout),
                 activityWindowMs: minutes('--activity-window', opts.activityWindow),
                 maxParallelTracks: opts.maxParallel !== undefined ? parseMaxParallel(opts.maxParallel) : loadDefaultParallelism(),
+                ...(routingIdentity === undefined ? {} : { routingIdentity }),
             };
             process.stdout.write(`awm watch: supervisor activo (${cfg.provider}) — Ctrl-C para terminar\n`);
             await runSupervisorLoop(repo, branch, cfg);
