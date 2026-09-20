@@ -1,4 +1,6 @@
 import { spawnSync } from 'child_process';
+import fs from 'fs';
+import { initRepo } from '../../helpers/git-fixture';
 import path from 'path';
 import { CONTROLLER_AUTONOMIES, adapterFor, controllerAutonomyMapping, isControllerAutonomy } from '../../../src/core/journal/adapter';
 import { PROVIDER_EXECUTION_CAPABILITIES, unattendedCapabilities } from '../../../src/core/admission';
@@ -76,9 +78,17 @@ describe('awm watch surfaces the posture on the compiled binary (#168)', () => {
     });
 
     test('refuses a posture it cannot honour instead of launching a controller that stalls', () => {
-        const result = spawnSync(process.execPath, [cli, 'watch', '--provider', 'claude-code', '--controller-autonomy', 'bypassPermissions'],
-            { encoding: 'utf8', env: { ...process.env, AWM_NO_UPDATE_CHECK: '1' } });
-        expect(result.status).toBe(1);
-        expect(result.stderr).toContain('--controller-autonomy invalido');
+        // Hermetic repo on a real branch: without a cwd of its own this inherits
+        // the checkout, and a detached HEAD makes `currentBranch()` fail first —
+        // which is exactly how this test passed locally and failed on all six CI
+        // legs. The assertion must depend on the flag, not on ambient git state.
+        const repo = initRepo();
+        try {
+            const result = spawnSync(process.execPath, [cli, 'watch', '--provider', 'claude-code', '--controller-autonomy', 'bypassPermissions'],
+                { cwd: repo, encoding: 'utf8', env: { ...process.env, AWM_NO_UPDATE_CHECK: '1' } });
+            expect(result.status).toBe(1);
+            expect(result.stderr).toContain('--controller-autonomy invalido');
+            expect(result.stderr).toContain('approval-free');
+        } finally { fs.rmSync(repo, { recursive: true, force: true }); }
     });
 });
