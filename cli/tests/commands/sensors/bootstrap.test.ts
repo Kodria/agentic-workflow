@@ -136,12 +136,16 @@ describe('planSensorBootstrap', () => {
         expect(resolveParsedPackCompatibility).toHaveBeenCalledWith(path.resolve(root, 'packages/web'), pack);
     });
 
-    it('blocks project-sensors when compatibility cannot select every declared sensor variant', async () => {
+    // #172 narrowed this: one unresolvable sensor no longer aborts a pack whose
+    // other sensors resolved (see partial-pack-bootstrap.test.ts). What still
+    // blocks is a pack where sensors apply and NONE of them resolve, which is a
+    // different condition from a pack with no applicable sensor at all.
+    it('blocks project-sensors when sensors apply and compatibility can select no variant at all', async () => {
         const variant = { id: 'eslint-9', command: { executable: 'eslint', resolution: 'node-modules-bin', args: ['.'] }, assets: [] };
         (listPackSources as jest.Mock).mockReturnValue([source]);
         (parseSensorPack as jest.Mock).mockReturnValue({ kind: 'v2', pack: { schemaVersion: 2, name: 'js-ts', sensors: { lint: { variants: [variant] } } } });
-        (resolveParsedPackCompatibility as jest.Mock).mockResolvedValue({ pack: { schemaVersion: 2, name: 'js-ts', sensors: { lint: { variants: [variant] } } }, sensors: { lint: { variantId: null } } });
-        await expect(planSensorBootstrap(root, { mode: 'project-sensors' })).resolves.toMatchObject({ kind: 'blocked', reason: 'sensor-variant-unresolvable', changes: [] });
+        (resolveParsedPackCompatibility as jest.Mock).mockResolvedValue({ pack: { schemaVersion: 2, name: 'js-ts', sensors: { lint: { variants: [variant] } } }, sensors: { lint: { state: 'missing-tool', reason: 'tool-not-found', variantId: null } } });
+        await expect(planSensorBootstrap(root, { mode: 'project-sensors' })).resolves.toMatchObject({ kind: 'blocked', reason: 'no-sensor-resolvable', changes: [] });
     });
 
     it('omits explicit-opt-in sensors that are not applicable while retaining mandatory gates', async () => {

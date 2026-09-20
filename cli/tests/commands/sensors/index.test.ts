@@ -1,4 +1,4 @@
-jest.mock('@clack/prompts', () => ({ log: { success: jest.fn(), info: jest.fn(), error: jest.fn() } }));
+jest.mock('@clack/prompts', () => ({ log: { success: jest.fn(), info: jest.fn(), error: jest.fn(), warn: jest.fn() } }));
 jest.mock('picocolors', () => ({ green: (s: string) => s, yellow: (s: string) => s, red: (s: string) => s }));
 jest.mock('../../../src/commands/sensors/run', () => ({ runSensors: jest.fn() }));
 jest.mock('../../../src/commands/sensors/init', () => ({ initSensors: jest.fn() }));

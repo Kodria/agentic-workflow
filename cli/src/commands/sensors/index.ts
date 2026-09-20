@@ -10,6 +10,7 @@ import { renderCoverageHuman, renderCoverageJson } from './coverage/render';
 import { capabilityRoot } from '../../core/registries';
 import { exitCodeForVerdict } from './verdict';
 import { applySensorBootstrap, planSensorBootstrap, type BootstrapMode } from './bootstrap';
+import { describeUnresolved } from './unresolved';
 
 /** Commander coercion for coverage recurrence emphasis. It deliberately runs
  * before the action, so an invalid value cannot trigger ledger I/O. */
@@ -68,14 +69,20 @@ export function registerSensorsCommand(program: Command): void {
             const registryRoot = opts.registryRoot ?? capabilityRoot('sensor-packs') ?? undefined;
             try {
                 const plan = await planSensorBootstrap(process.cwd(), { mode: 'project-sensors', registryRoot, configure: opts.configure, pack: opts.pack, packageRoot: opts.packageRoot });
-                if (plan.kind === 'blocked') throw new Error(`${plan.reason}: ${plan.remedy}`);
+                if (plan.kind === 'blocked') {
+                    const detail = describeUnresolved(plan.unresolved);
+                    throw new Error(`${plan.reason}: ${plan.remedy}${detail === '' ? '' : ` (${detail})`}`);
+                }
                 if (plan.kind === 'noop') { log.info('already-configured'); return; }
                 if (plan.kind === 'migrate') throw new Error('sensors init does not migrate an existing v2 manifest; run awm sensors bootstrap');
                 const result = applySensorBootstrap(plan);
                 const detected = plan.manifest.mode === 'project-sensors' ? plan.manifest.pack : 'none';
                 log.success(`Detected: ${detected}`);
-                // Said BEFORE "Wrote .awm/sensors.json": the manifest about to be
-                // reported as written is not the one the detection implied.
+                // Said BEFORE "Wrote .awm/sensors.json": a partially resolved pack
+                // must not be reported as a clean write, and the manifest about to
+                // be reported as written is not the one the detection implied.
+                const skipped = describeUnresolved(plan.unresolved);
+                if (skipped !== '') log.warn(`not initialized (tool unavailable here): ${skipped}`);
                 log.success(`${result} .awm/sensors.json`);
             } catch (e) {
                 log.error(e instanceof Error ? e.message : String(e));
@@ -93,7 +100,8 @@ export function registerSensorsCommand(program: Command): void {
             try {
                 const plan = await planSensorBootstrap(process.cwd(), { mode: opts.mode, reason: opts.reason, dryRun: opts.dryRun });
                 if (plan.kind === 'blocked') {
-                    log.error(`${plan.reason}: ${plan.remedy}`);
+                    const detail = describeUnresolved(plan.unresolved);
+                    log.error(`${plan.reason}: ${plan.remedy}${detail === '' ? '' : ` (${detail})`}`);
                     process.exitCode = 1;
                     return;
                 }
@@ -145,6 +153,12 @@ export function registerSensorsCommand(program: Command): void {
             for (const [name, check] of Object.entries(status.checks)) {
                 const mark = check.ok ? pc.green('✔') : pc.red('✘');
                 console.log(`  ${mark}  ${name.padEnd(12)} ${check.detail}`);
+            }
+            // A pack sensor that applies here but has no manifest entry is otherwise
+            // indistinguishable from one the pack never applied. It does not change
+            // the verdict; it is named so the gap is attributable. See #172.
+            for (const [name, gap] of Object.entries(status.uninitialized ?? {})) {
+                console.log(`  ${pc.yellow('–')}  ${name.padEnd(12)} not initialized: ${gap.state}/${gap.reason}`);
             }
             console.log('');
             if (status.overall !== 'READY') process.exit(1);

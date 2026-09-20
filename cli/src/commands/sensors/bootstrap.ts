@@ -17,15 +17,19 @@ import path from 'path';
 export type BootstrapMode = 'project-sensors' | 'native-gate' | 'opt-out';
 export type BootstrapOptions = { mode?: BootstrapMode; reason?: string; dryRun?: boolean; registryRoot?: string; configure?: boolean; pack?: string; packageRoot?: string };
 export type BootstrapChange = Readonly<{ path: '.awm/sensors.json' | string; action: 'create' | 'replace' }>;
+/** An applicable pack sensor whose variant could not be resolved on this machine.
+ *  It is reported, never guessed at: no entry is written for it, and the operator
+ *  is told which sensor and why. */
+export type UnresolvedSensor = Readonly<{ sensor: string; state: string; reason: string }>;
 type LegacyMigrationPlan = Readonly<{ kind: 'legacy-v1'; manifest: SensorManifestV3ProjectSensors }>;
 export type BootstrapPlan =
     | Readonly<{ kind: 'noop'; projectRoot: string; manifestPath: string; changes: []; dryRun: boolean }>
-    | Readonly<{ kind: 'blocked'; projectRoot: string; manifestPath: string; changes: []; dryRun: boolean; reason: string; remedy: string; candidates?: string[] }>
-    | Readonly<{ kind: 'create'; projectRoot: string; manifestPath: string; changes: BootstrapChange[]; dryRun: boolean; manifest: SensorManifestV3; source?: PackSource; configure?: boolean }>
-    | Readonly<{ kind: 'migrate'; projectRoot: string; manifestPath: string; changes: [BootstrapChange]; dryRun: boolean; migration: V2MigrationPlan | LegacyMigrationPlan; source: unknown; originalDigest: string }>;
+    | Readonly<{ kind: 'blocked'; projectRoot: string; manifestPath: string; changes: []; dryRun: boolean; reason: string; remedy: string; candidates?: string[]; unresolved?: readonly UnresolvedSensor[] }>
+    | Readonly<{ kind: 'create'; projectRoot: string; manifestPath: string; changes: BootstrapChange[]; dryRun: boolean; manifest: SensorManifestV3; source?: PackSource; configure?: boolean; unresolved?: readonly UnresolvedSensor[] }>
+    | Readonly<{ kind: 'migrate'; projectRoot: string; manifestPath: string; changes: [BootstrapChange]; dryRun: boolean; migration: V2MigrationPlan | LegacyMigrationPlan; source: unknown; originalDigest: string; unresolved?: readonly UnresolvedSensor[] }>;
 
-function blocked(projectRoot: string, manifestPath: string, dryRun: boolean, reason: string, remedy: string, candidates?: string[]): BootstrapPlan {
-    return { kind: 'blocked', projectRoot, manifestPath, changes: [], dryRun, reason, remedy, ...(candidates ? { candidates } : {}) };
+function blocked(projectRoot: string, manifestPath: string, dryRun: boolean, reason: string, remedy: string, candidates?: string[], unresolved?: readonly UnresolvedSensor[]): BootstrapPlan {
+    return { kind: 'blocked', projectRoot, manifestPath, changes: [], dryRun, reason, remedy, ...(candidates ? { candidates } : {}), ...(unresolved && unresolved.length > 0 ? { unresolved } : {}) };
 }
 
 function options(input: unknown): Required<Pick<BootstrapOptions, 'dryRun'>> & BootstrapOptions {
@@ -49,7 +53,7 @@ function declaration(mode: Exclude<BootstrapMode, 'project-sensors'>, reason: st
 
 function digest(bytes: Buffer): string { return createHash('sha256').update(bytes).digest('hex'); }
 
-async function projectSensors(projectRoot: string, registryRoot?: string, requestedPack?: string, packageRoot?: string, explicitPackSelection = requestedPack !== undefined): Promise<{ manifest: SensorManifestV3ProjectSensors; source: PackSource; changes: BootstrapChange[] } | { reason: string; remedy: string; candidates?: string[] }> {
+async function projectSensors(projectRoot: string, registryRoot?: string, requestedPack?: string, packageRoot?: string, explicitPackSelection = requestedPack !== undefined): Promise<{ manifest: SensorManifestV3ProjectSensors; source: PackSource; changes: BootstrapChange[]; unresolved: readonly UnresolvedSensor[] } | { reason: string; remedy: string; candidates?: string[]; unresolved?: readonly UnresolvedSensor[] }> {
     const detectionRoot = packageRoot ? path.resolve(projectRoot, packageRoot) : projectRoot;
     const detected = detectStack(detectionRoot);
     const pack = requestedPack ?? detected.pack;
@@ -72,18 +76,35 @@ async function projectSensors(projectRoot: string, registryRoot?: string, reques
     }
     catch { return { reason: 'compatibility-unresolvable', remedy: 'repair-project-tools-or-select-another-mode' }; }
     const sensors: SensorManifestV3ProjectSensors['sensors'] = {};
+    const unresolved: UnresolvedSensor[] = [];
+    let applicable = 0;
     for (const [name, packSensor] of Object.entries(live.pack.sensors)) {
         const evidence = live.sensors[name];
         if (evidence.state === 'not-applicable') continue;
+        applicable += 1;
         const variant = evidence.variantId === null ? undefined : packSensor.variants.find(item => item.id === evidence.variantId);
-        if (!variant) return { reason: 'sensor-variant-unresolvable', remedy: 'repair-project-tools-or-select-another-mode' };
+        // One applicable sensor whose tool is absent used to abort the whole
+        // manifest, including the sensors that DID resolve, so a project whose
+        // only gap was (say) semgrep could not configure sensors at all — and so
+        // could not pass preflight, and so could not be handed off. A missing tool
+        // is a gap in one sensor, not grounds to refuse the pack. It is skipped
+        // and REPORTED by name; nothing is invented for it, because the v3 entry
+        // shape requires a real variant, command and probe evidence. See #172.
+        if (!variant) { unresolved.push({ sensor: name, state: evidence.state, reason: evidence.reason }); continue; }
         sensors[name] = { enabled: true, ...(packSensor.fast === undefined ? {} : { fast: packSensor.fast }), ...(packSensor.timeout === undefined ? {} : { timeout: packSensor.timeout }), variantId: variant.id, command: variant.command, ...(variant.assets.length === 0 ? {} : { assets: variant.assets }), ...(variant.policyRef ? { policyRef: variant.policyRef } : {}), initializedCompatibility: evidence };
+    }
+    // A pack with NO applicable sensor still writes an honest empty manifest: that
+    // is the distinct "the registry has no pack for this stack" signal preflight
+    // already reports. But a pack where sensors apply and none of them resolve is
+    // a different condition, and writing an empty manifest would collide with it.
+    if (applicable > 0 && Object.keys(sensors).length === 0) {
+        return { reason: 'no-sensor-resolvable', remedy: 'repair-project-tools-or-select-another-mode', unresolved };
     }
     const manifest = parseSensorManifest({ schemaVersion: 3, mode: 'project-sensors', pack, source: { registry: source.registry.name }, ...(packageRoot ? { packageRoot } : {}), sensors }, 'bootstrap candidate');
     if (manifest.kind !== 'v3' || manifest.pack.mode !== 'project-sensors') throw new Error('bootstrap project-sensors candidate is invalid');
     serializeManifestV3(manifest.pack);
     const assets = [...new Set(Object.values(sensors).flatMap(sensor => sensor.assets ?? []))].sort();
-    return { manifest: manifest.pack, source, changes: [{ path: '.awm/sensors.json', action: 'create' }, ...assets.map(asset => ({ path: packageRoot ? `${packageRoot}/${asset}` : asset, action: 'create' as const }))] };
+    return { manifest: manifest.pack, source, changes: [{ path: '.awm/sensors.json', action: 'create' }, ...assets.map(asset => ({ path: packageRoot ? `${packageRoot}/${asset}` : asset, action: 'create' as const }))], unresolved };
 }
 
 /** Plan a one-time portable bootstrap. This function never writes project or machine state. */
@@ -109,7 +130,7 @@ export async function planSensorBootstrap(cwd: string = process.cwd(), input: Bo
             // The legacy pack name identifies the source to migrate, but must not
             // activate v2 sensors which require an explicit project opt-in.
             const planned = await projectSensors(project.projectRoot, opts.registryRoot, project.manifest.pack.pack, undefined, false);
-            if ('reason' in planned) return blocked(project.projectRoot, project.manifestPath, opts.dryRun, planned.reason, planned.remedy, 'candidates' in planned ? planned.candidates : undefined);
+            if ('reason' in planned) return blocked(project.projectRoot, project.manifestPath, opts.dryRun, planned.reason, planned.remedy, 'candidates' in planned ? planned.candidates : undefined, planned.unresolved);
             try {
                 const original = fs.readFileSync(project.manifestPath);
                 return {
@@ -117,6 +138,7 @@ export async function planSensorBootstrap(cwd: string = process.cwd(), input: Bo
                     changes: planned.changes.map((change, index) => index === 0 ? { ...change, action: 'replace' as const } : change) as [BootstrapChange],
                     dryRun: opts.dryRun, migration: { kind: 'legacy-v1', manifest: planned.manifest }, source: planned.source,
                     originalDigest: digest(original),
+                    ...(planned.unresolved.length > 0 ? { unresolved: planned.unresolved } : {}),
                 };
             } catch { return blocked(project.projectRoot, project.manifestPath, opts.dryRun, 'legacy-manifest-unreadable', 'repair-the-manifest-before-bootstrap'); }
         }
@@ -136,8 +158,8 @@ export async function planSensorBootstrap(cwd: string = process.cwd(), input: Bo
         return { kind: 'create', projectRoot: project.projectRoot, manifestPath: project.manifestPath, changes: [{ path: '.awm/sensors.json', action: 'create' }], dryRun: opts.dryRun, manifest: declaration(opts.mode, opts.reason), configure: opts.configure };
     }
     const planned = await projectSensors(project.projectRoot, opts.registryRoot, opts.pack, opts.packageRoot);
-    if ('reason' in planned) return blocked(project.projectRoot, project.manifestPath, opts.dryRun, planned.reason, planned.remedy, 'candidates' in planned ? planned.candidates : undefined);
-    return { kind: 'create', projectRoot: project.projectRoot, manifestPath: project.manifestPath, changes: planned.changes, dryRun: opts.dryRun, manifest: planned.manifest, source: planned.source, configure: opts.configure };
+    if ('reason' in planned) return blocked(project.projectRoot, project.manifestPath, opts.dryRun, planned.reason, planned.remedy, 'candidates' in planned ? planned.candidates : undefined, planned.unresolved);
+    return { kind: 'create', projectRoot: project.projectRoot, manifestPath: project.manifestPath, changes: planned.changes, dryRun: opts.dryRun, manifest: planned.manifest, source: planned.source, configure: opts.configure, ...(planned.unresolved.length > 0 ? { unresolved: planned.unresolved } : {}) };
 }
 
 /** Apply only a validated, non-dry-run create or migration plan. */

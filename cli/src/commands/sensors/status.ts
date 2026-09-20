@@ -125,8 +125,40 @@ function resolveStaticV2Compatibility(cwd: string, manifest: SensorManifestV2, s
     }));
 }
 
+/** Applicable pack sensors with no manifest entry, so the gap is attributable in
+ *  every `awm sensors status`, not only in the output of the `init` that skipped it. */
+function uninitializedSensors(manifest: SensorManifestV2, compatibility: Record<string, CompatibilityEvidence>): Record<string, { state: string; reason: string }> | undefined {
+    const entries = Object.entries(compatibility)
+        .filter(([name, evidence]) => evidence !== undefined && evidence.state !== 'not-applicable' && !Object.prototype.hasOwnProperty.call(manifest.sensors, name))
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([name, evidence]) => [name, { state: evidence.state, reason: evidence.reason }] as const);
+    return entries.length === 0 ? undefined : Object.fromEntries(entries);
+}
+
+/**
+ * Status never executes, so `discoverProjectEvidence` is called here without
+ * `pathToolVersion` and a `resolution: 'path'` tool is structurally invisible to
+ * it: `npm` on PATH resolves as `missing-tool`/`tool-not-found` whether it is
+ * installed or not. Reporting that as "compatibility drift" asserts something
+ * this command did not measure. `checkStructuredCommand` DOES consult PATH for
+ * exactly these commands, so defer to it rather than claim drift. Any other live
+ * state, or a genuinely different resolved variant, is still real drift.
+ *
+ * Today `missing-tool`/`tool-not-found` is the ONLY verdict a `path` tool can
+ * receive here, because discovery cannot see its version at all — so the state
+ * and reason conditions are unreachable as written. They are kept because every
+ * one of them can only make this guard NARROWER: a combination they reject falls
+ * through to the drift report, never past it. A future discovery that does read
+ * PATH would make them load-bearing rather than silently permissive.
+ */
+function unobservableOnPath(sensor: SensorManifestV2['sensors'][string], live: CompatibilityEvidence): boolean {
+    return sensor.command.resolution === 'path' && live.variantId === null
+        && live.state === 'missing-tool' && live.reason === 'tool-not-found';
+}
+
 function staticCompatibilityCheck(sensor: SensorManifestV2['sensors'][string], live: CompatibilityEvidence | undefined): SensorCheck | null {
     if (!live) return { ok: false, detail: 'live compatibility unavailable' };
+    if (unobservableOnPath(sensor, live)) return null;
     if (live.variantId !== sensor.variantId) {
         return { ok: false, detail: `compatibility drift: initialized ${sensor.variantId}, resolved ${live.variantId ?? live.state}` };
     }
@@ -228,9 +260,11 @@ export async function computeSensorStatus(cwd: string = process.cwd()): Promise<
             checks[name] = sensor.enabled === false ? { ok: true, detail: 'disabled' }
                 : staticCompatibilityCheck(sensor, compatibility[name]) ?? checkStructuredCommand(sensor.command, packageRoot, sensor.assets);
         }
+        const uninitialized = uninitializedSensors(manifest, compatibility);
         return {
             overall: Object.keys(checks).length > 0 && Object.values(checks).every(check => check.ok) ? 'READY' : 'DEGRADED',
             pack: manifest.pack, checks,
+            ...(uninitialized ? { uninitialized } : {}),
             ...projectMetadata(project, 'project-sensors', sourceMeta.reason, { ...sourceMeta }),
         };
     }
