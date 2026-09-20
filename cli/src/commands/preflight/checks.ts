@@ -210,11 +210,18 @@ function checkManifest(status: SensorStatusResult): PreflightCheck {
             remedy: `registry has no pack for '${manifest.pack}': run \`awm update\` or add a registry that has it`,
         };
     }
+    // An applicable sensor the project cannot initialize is a real gap, so it is
+    // named here rather than left as an absence. It does not flip `ok`: whether an
+    // uninitialized sensor should block a handoff is a gate-policy decision, and
+    // flipping it would restore the dead end #172 is about — a project whose only
+    // gap is one missing tool could then configure sensors and still never pass.
+    const uninitialized = Object.keys(status.uninitialized ?? {});
+    const gap = uninitialized.length === 0 ? '' : `; ${uninitialized.length} applicable sensor(s) not initialized: ${uninitialized.join(', ')}`;
     return {
         id: 'manifest',
         ok: true,
-        detail: enabled === 0 ? `pack ${manifest.pack}, all ${total} sensors disabled (deliberate opt-out)`
-            : `pack ${manifest.pack}, ${enabled}/${total} sensors enabled`,
+        detail: (enabled === 0 ? `pack ${manifest.pack}, all ${total} sensors disabled (deliberate opt-out)`
+            : `pack ${manifest.pack}, ${enabled}/${total} sensors enabled`) + gap,
     };
 }
 

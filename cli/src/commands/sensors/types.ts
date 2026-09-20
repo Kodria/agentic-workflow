@@ -180,4 +180,15 @@ export type SensorStatusResult = {
     overall: 'READY' | 'DEGRADED' | 'NOT_CONFIGURED';
     pack: string | null;
     checks: Record<string, SensorCheck>;
+    /**
+     * Pack sensors that apply to this project but have no manifest entry, with the
+     * live reason they could not be initialized. Present only when non-empty.
+     *
+     * `checks` covers what the manifest declares; without this, a sensor the pack
+     * applies and the project cannot run is simply absent, and indistinguishable
+     * from one the pack never applied. It deliberately does NOT feed `overall`:
+     * whether an uninitialized applicable sensor should degrade the verdict is a
+     * gate-policy decision, not a reporting one. See #172.
+     */
+    uninitialized?: Record<string, { state: string; reason: string }>;
 } & Partial<SensorAuthority>;

@@ -3,7 +3,8 @@ import path from 'path';
 import { SensorManifest } from './types';
 import { parseSensorPack } from './compatibility/contract';
 import { resolvePackSource } from './compatibility/pack-source';
-import { applySensorBootstrap, planSensorBootstrap } from './bootstrap';
+import { applySensorBootstrap, planSensorBootstrap, type UnresolvedSensor } from './bootstrap';
+import { describeUnresolved } from './unresolved';
 
 export type InitOptions = {
     configure?: boolean;
@@ -180,6 +181,8 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
     configured: string[];
     status: 'created' | 'already-configured';
     unavailablePack?: string;
+    /** Applicable sensors skipped because their variant could not be resolved here. */
+    unresolved?: readonly UnresolvedSensor[];
 }> {
     const cwd = opts.cwd ?? process.cwd();
     const detectionCwd = opts.packageRoot ? path.resolve(cwd, opts.packageRoot) : cwd;
@@ -187,7 +190,10 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
         mode: 'project-sensors', registryRoot: opts.registryRoot, configure: opts.configure,
         pack: opts.pack, packageRoot: opts.packageRoot,
     });
-    if (plan.kind === 'blocked') throw new Error(`${plan.reason}: ${plan.remedy}`);
+    if (plan.kind === 'blocked') {
+        const detail = describeUnresolved(plan.unresolved);
+        throw new Error(`${plan.reason}: ${plan.remedy}${detail === '' ? '' : ` (${detail})`}`);
+    }
     if (plan.kind === 'migrate') throw new Error('initSensors does not migrate existing v2 manifests; run awm sensors bootstrap');
     if (plan.kind === 'noop') return {
         // No manifest is written or synthesized here. The compatibility API only
@@ -195,5 +201,5 @@ export async function initSensors(opts: InitOptions = {}): Promise<{
         manifest: {} as SensorManifest, detection: detectStack(detectionCwd), configured: [], status: 'already-configured',
     };
     applySensorBootstrap(plan);
-    return { manifest: plan.manifest as unknown as SensorManifest, detection: detectStack(detectionCwd), configured: [], status: 'created' };
+    return { manifest: plan.manifest as unknown as SensorManifest, detection: detectStack(detectionCwd), configured: [], status: 'created', ...(plan.unresolved && plan.unresolved.length > 0 ? { unresolved: plan.unresolved } : {}) };
 }
