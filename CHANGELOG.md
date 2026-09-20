@@ -1,3 +1,8 @@
+## v9.11.1 - 2026-09-20
+
+### Fixes
+- **watch:** stop asserting unattendedController, declare the controller posture (#169)
+
 ## v9.11.0 - 2026-09-20
 
 ### Features
