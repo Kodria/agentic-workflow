@@ -99,6 +99,46 @@ function sanitize(text, workdir) {
 // Preparación del WORKDIR
 // ---------------------------------------------------------------------------
 
+/** Plan compacto v1 del fixture. Copia del corpus canonico de los tests
+ *  (`cli/tests/core/plan/fixtures/compact-slices-v1/valid.md`), con su `source.md`. */
+const COMPACT_PLAN = `**Modo de ejecución:** desatendido
+
+<!-- AWM:COMPACT-SLICES:START v1 -->
+{
+  "schema": "compact-slices/v1",
+  "planId": "r5-scripted-fixture",
+  "requirements": ["RF-1.3"],
+  "sources": [{"id":"SRC-CORPUS","path":"source.md","locator":"## Canonical source","fact":"intentionally small and stable"}],
+  "commands": [{"id":"CMD-TEST","program":"npm","args":["test"],"covers":["RF-1.3"]}],
+  "slices": [{"id":"S1","title":"Canonical corpus","requirements":["RF-1.3"],"dependsOn":[],"sectionAnchor":"slice-s1","sources":["SRC-CORPUS"],"redCommands":["CMD-TEST"],"greenCommands":["CMD-TEST"],"reviewEvidence":["specification","code-quality"],"risk":"bounded","fallback":["Use the explicit bounded fallback."]}],
+  "closureCommands": ["CMD-TEST"]
+}
+<!-- AWM:COMPACT-SLICES:END v1 -->
+
+<a id="slice-s1"></a>
+### Slice S1: Canonical corpus
+
+#### Surfaces
+
+The corpus files are the only surfaces.
+
+#### Implementation
+
+Validate the canonical fixture without transformations.
+
+#### Edge cases
+
+Each adversarial companion has an explicit non-success verdict.
+
+#### Evidence
+
+The validator report is the evidence.
+
+#### Fallback
+
+Use the explicit bounded fallback.
+`;
+
 function prepare(provider, environment, opts = {}) {
     const dist = path.join(REPO, 'cli', 'dist', 'src', 'index.js');
     if (!fs.existsSync(dist)) die(`falta el build: correr \`cd cli && npm ci && npm run build\` (no existe ${path.relative(REPO, dist)})`);
@@ -133,6 +173,14 @@ function prepare(provider, environment, opts = {}) {
         // verificador y persiste su evidencia, no que el verificador sea inteligente.
         scripts: { test: 'node -e "process.exit(0)"' },
     }, null, 2)}\n`);
+    // R1 (compact-only) volvio `--plan` obligatorio en `watch --init`, asi que el fixture
+    // necesita un plan compacto real o la certificacion no arranca. v1 a proposito: lo que
+    // se certifica aca es el contrato supervisor<->controller, no el routing (que exigiria
+    // policy aprobada, receipt vigente e identidad de runtime).
+    fs.mkdirSync(path.join(repo, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'source.md'),
+        '## Canonical source\n\nThe canonical corpus source is intentionally small and stable.\n');
+    fs.writeFileSync(path.join(repo, 'docs', 'plan.md'), COMPACT_PLAN);
     git(repo, ['add', '-A']);
     git(repo, ['commit', '-qm', 'seed']);
     // Fuera del commit a propósito: `.awm/` está gitignoreado, así que este archivo hace que
@@ -184,7 +232,7 @@ async function certifyScripted(timeoutMs) {
         AWM_CONTROLLER_ARGV: JSON.stringify(['node', controller, '--repo', run.repo, '--cli', run.cli]),
     };
 
-    execFileSync(process.execPath, [run.cli, 'watch', '--init'], { cwd: run.repo, stdio: 'ignore' });
+    execFileSync(process.execPath, [run.cli, 'watch', '--init', '--plan', 'docs/plan.md'], { cwd: run.repo, stdio: 'ignore' });
 
     // Timeouts más chicos que los defaults de producción (5 min de silencio de heartbeat +
     // 10 de ventana de actividad), que convertirían esta certificación en un cuarto de hora
@@ -194,7 +242,11 @@ async function certifyScripted(timeoutMs) {
     // en stall a un controller que todavía no había llegado a existir, y la corrida
     // encadenaba generaciones sin que nadie trabajara nunca. 2 min deja margen sobre esa
     // latencia observada sin volver a los plazos de producción.
+    // #168/#169: la admision desatendida exige la postura declarada del controller —
+    // tambien para v1. El controller real aca es el scripteado via AWM_CONTROLLER_ARGV, que
+    // no tiene capa de aprobacion; la postura es la asercion del operador, no un argv.
     const spawnWatch = () => spawn(process.execPath, [run.cli, 'watch', '--provider', 'claude-code',
+        '--controller-autonomy', 'approval-free',
         '--heartbeat-timeout', '2', '--activity-window', '2'], {
         cwd: run.repo, env, detached: true, stdio: 'ignore',
     });
