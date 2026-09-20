@@ -82,7 +82,6 @@ describe('runExport (engine end-to-end)', () => {
         // La lectura sale exclusivamente de roots: un root vacío no resuelve nada.
         // Control negativo real: contentRoots() (el fallback al registry instalado)
         // no debe invocarse en absoluto cuando opts.roots viene dado explícitamente.
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
         const registries = require('../../../src/core/registries');
         const spy = jest.spyOn(registries, 'contentRoots');
         const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-empty-root-'));

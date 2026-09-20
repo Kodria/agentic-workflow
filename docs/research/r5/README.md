@@ -27,7 +27,21 @@ y deriva los veredictos **del journal**, nunca de lo que el controller diga habe
 
 ## Estado real
 
-**Certificado (procesos reales, git real, reproducible):**
+> ⚠️ **La certificación de abajo NO es reproducible hoy.** Su evidencia es del
+> **2026-08-10**, `sourceHead 016dae56`, **anterior a compact-only (R1)**. R1 volvió `--plan`
+> obligatorio en `watch --init`, el runner nunca se actualizó, y **nada en CI lo corre**, así
+> que quedó muerto sin que nadie lo notara — ver #170.
+>
+> Corrido hoy sobre `151ca7ba` (9.11.1), con el runner reparado, da **`result: fail`**:
+> bloquea en `ADMISSION_CURRENTNESS_BLOCKED` antes de llegar al controller (acoplamiento
+> floor↔currentness de #164). La evidencia actual en
+> `evidence/scripted-local.json` registra ese `fail`.
+>
+> Lo de abajo describe lo que se certificó **entonces**, y se conserva porque es un registro
+> honesto de ese SHA — no de la máquina de hoy. Un `pass` que no se puede reproducir no
+> certifica nada, y esta advertencia existe para que nadie lo lea como vigente.
+
+**Certificado en 2026-08-10 sobre `016dae56` (procesos reales, git real; hoy NO reproducible):**
 
 - **bootstrap** — los dos tracks llegan a `ARMED` y la cohorte a `ACTIVE`.
 - **recovery** — tras `SIGKILL` al grupo del supervisor, el relevo **no duplica recursos**:
@@ -36,8 +50,9 @@ y deriva los veredictos **del journal**, nunca de lo que el controller diga habe
 - **fencing observado en vivo** — las requests de una generación superseded se rechazan
   (`request-rejected-stale`). El mecanismo funciona.
 
-**Certificado — `join` (`pass`):** la cohorte alcanza `COMPLETE` bajo supervisor vivo con
-relevo, con los 2 tracks en `JOINED` y **exactamente 1** job de integración final.
+**`join` (`pass` en 2026-08-10, hoy no reproducible):** la cohorte alcanza `COMPLETE` bajo
+supervisor vivo con relevo, con los 2 tracks en `JOINED` y **exactamente 1** job de
+integración final.
 
 Llegar ahí exigió reparar **siete defectos**, la mayoría de producto. El síntoma que este
 README describía antes — "el token del controller vivo pasa a ser stale y todas sus requests

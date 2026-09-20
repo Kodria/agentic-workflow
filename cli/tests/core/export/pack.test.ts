@@ -4,7 +4,6 @@ import os from 'os';
 import { packSkill, defaultZip } from '../../../src/core/export/pack';
 import { ZipFn } from '../../../src/core/export/types';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const childProcess = require('child_process');
 
 const okZip: ZipFn = (cwd, zipName) => {

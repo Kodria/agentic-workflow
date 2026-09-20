@@ -62,7 +62,6 @@ const defaultDeps: RunUpdateDeps = {
     applyInstallPlan: realApplyInstallPlan,
     resyncInstalledHooks,
     offerSelfUpdate: async (mode?: SelfUpdateMode) => {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { offerSelfUpdate: real } = require('../core/update-check');
         await real({ mode });
     },
