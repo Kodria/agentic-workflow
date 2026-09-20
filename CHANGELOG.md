@@ -1,3 +1,8 @@
+## v9.10.2 - 2026-09-20
+
+### Fixes
+- **watch:** keep the sensor custody reason stable so custody is entered once (#163)
+
 ## v9.10.1 - 2026-09-19
 
 ### Fixes
