@@ -1,3 +1,8 @@
+## v9.11.0 - 2026-09-20
+
+### Features
+- **watch:** supply the runtime identity compact v2 admission requires (#167)
+
 ## v9.10.2 - 2026-09-20
 
 ### Fixes
