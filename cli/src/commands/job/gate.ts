@@ -3,13 +3,14 @@
 // review tiene su categoria propia — nada aprueba por vacuidad ni por
 // referencia falsa.
 import type { JournalState, VerificationItem, VerificationKind } from '../../core/journal/types';
+import { ABSENT_JOURNAL_DETAIL } from '../../core/journal/store';
 
 export type GateCategory =
-    | 'corrupt' | 'cycle-blocked' | 'live-job' | 'pending-task'
+    | 'corrupt' | 'absent' | 'cycle-blocked' | 'live-job' | 'pending-task'
     | 'empty-cycle-plan' | 'missing-verifier' | 'dangling-reference'
     | 'unsatisfied-plan' | 'adverse-verdict' | 'stale-fingerprint'
     | 'open-obligation' | 'open-fix' | 'request-problem'
-    | 'corrupt-state' | 'wrong-context' | 'foreign-task' | 'routing-evidence';
+    | 'corrupt-state' | 'absent-state' | 'wrong-context' | 'foreign-task' | 'routing-evidence';
 export interface GateReason { category: GateCategory; detail: string; }
 export interface GateResult { pass: boolean; reasons: GateReason[]; }
 
@@ -174,9 +175,19 @@ function evaluateEvidence(state: JournalState, fingerprintNow: FingerprintNow, s
     return { pass: reasons.length === 0, reasons };
 }
 
-export function computeGate(state: JournalState | null, corrupt: boolean, fingerprintNow: FingerprintNow): GateResult {
+/**
+ * `absent` defaults to false so every existing caller keeps today's behaviour
+ * exactly: an unreadable journal fails closed either way. What changes is the
+ * REASON an absent one reports — it used to claim corruption, sending operators
+ * to look for damage in a healthy repository (#173). The exit code does not
+ * change: this interlock has no plan binding to read an execution mode from when
+ * the journal is missing, so it stays fail-closed and names the remedy instead.
+ */
+export function computeGate(state: JournalState | null, corrupt: boolean, fingerprintNow: FingerprintNow, absent = false): GateResult {
     if (corrupt || state === null) {
-        return { pass: false, reasons: [{ category: 'corrupt', detail: 'state.json corrupto o ilegible: la corrupcion jamas certifica' }] };
+        return absent && !corrupt
+            ? { pass: false, reasons: [{ category: 'absent', detail: ABSENT_JOURNAL_DETAIL }] }
+            : { pass: false, reasons: [{ category: 'corrupt', detail: 'state.json corrupto o ilegible: la corrupcion jamas certifica' }] };
     }
     return evaluateEvidence(state, fingerprintNow, { requireGlobalKinds: true });
 }
@@ -187,8 +198,12 @@ export function computeGate(state: JournalState | null, corrupt: boolean, finger
  *  ahi) y rechaza cualquier tarea que aparezca en el journal pero no en la
  *  asignacion del track (R2.3) — nunca certifica por una tarea ajena que se
  *  haya colado. */
-export function computeTrackGate(state: JournalState | null, corruptState: boolean, fingerprintNow: FingerprintNow): GateResult {
-    if (corruptState || state === null) return { pass: false, reasons: [{ category: 'corrupt-state', detail: 'journal ausente o corrupto' }] };
+export function computeTrackGate(state: JournalState | null, corruptState: boolean, fingerprintNow: FingerprintNow, absent = false): GateResult {
+    if (corruptState || state === null) {
+        return absent && !corruptState
+            ? { pass: false, reasons: [{ category: 'absent-state', detail: ABSENT_JOURNAL_DETAIL }] }
+            : { pass: false, reasons: [{ category: 'corrupt-state', detail: 'journal corrupto o ilegible' }] };
+    }
     if (state.trackContext === undefined) return { pass: false, reasons: [{ category: 'wrong-context', detail: 'gate local requiere trackContext' }] };
     const assigned = new Set(state.trackContext.taskIds);
     const foreign = state.tasks.filter((task) => !assigned.has(task.id));

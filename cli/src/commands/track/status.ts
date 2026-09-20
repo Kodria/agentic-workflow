@@ -55,7 +55,7 @@ export function aggregateTrackStatus(planRoot: string, plan: JournalState): Aggr
         const observed = readJournal(ref.worktreePath, ref.branch);
         tracks[ref.trackId] = {
             phase: ref.phase,
-            gate: computeTrackGate(observed.state, observed.corrupt, fingerprintFor(ref.worktreePath)),
+            gate: computeTrackGate(observed.state, observed.corrupt, fingerprintFor(ref.worktreePath), observed.absent),
         };
     }
     return { cohort: deriveCohortPhase(refs), tracks };

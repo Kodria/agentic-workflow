@@ -13,7 +13,7 @@ import { runExecWrapper } from './exec-wrapper';
 import { emitRequest } from '../../core/journal/requests';
 import { computeFingerprint } from '../../core/journal/fingerprint';
 import { EXEC_STDIO } from '../../core/journal/process';
-import { readJournal } from '../../core/journal/store';
+import { ABSENT_JOURNAL_DETAIL, journalPresence, readJournal } from '../../core/journal/store';
 import { exportDir, logsDir } from '../../core/journal/paths';
 import { verifyBranchInvariant } from '../watch/lock';
 import { writeFileAtomicDurable } from '../../core/atomic-file';
@@ -195,8 +195,13 @@ export function registerJobCommand(program: Command): void {
             const branch = branchOf(repo);
             assertAuthenticatedCwd(repo, branch);
             const r = readJournal(repo, branch);
-            if (r.corrupt || r.state === null) {
-                process.stdout.write(JSON.stringify({ corruptState: true }, null, 2) + '\n');
+            const presence = journalPresence(r);
+            if (presence !== 'present' || r.state === null) {
+                // Absence and corruption need different responses, so they are
+                // reported as different facts. Both still fail closed (#173).
+                process.stdout.write(JSON.stringify(presence === 'absent'
+                    ? { journal: 'absent', corruptState: false, remedy: ABSENT_JOURNAL_DETAIL }
+                    : { journal: 'corrupt', corruptState: true }, null, 2) + '\n');
                 process.exit(1);
             }
             try { verifyBranchInvariant(repo, r.state.branch); }
@@ -224,7 +229,7 @@ export function registerJobCommand(program: Command): void {
                 try { verifyBranchInvariant(repo, r.state.branch); }
                 catch (e) { process.stderr.write(`${(e as Error).message}\n`); process.exit(1); }
             }
-            const g = computeGate(r.state, r.corrupt, realFingerprintNow(repo));
+            const g = computeGate(r.state, r.corrupt, realFingerprintNow(repo), r.absent);
             process.stdout.write(JSON.stringify(g, null, 2) + '\n');
             if (!g.pass) process.exit(1);   // falla cerrado (R3.2)
         });
@@ -235,7 +240,8 @@ export function registerJobCommand(program: Command): void {
         .action(() => {
             const repo = process.cwd(); const branch = branchOf(repo); assertAuthenticatedCwd(repo, branch);
             const r = readJournal(repo, branch);
-            if (r.corrupt || r.state === null) { process.stdout.write(JSON.stringify({ corruptState: true }) + '\n'); process.exit(1); return; }
+            const presence = journalPresence(r);
+            if (presence !== 'present' || r.state === null) { process.stdout.write(JSON.stringify({ journal: presence, corruptState: presence === 'corrupt' }) + '\n'); process.exit(1); return; }
             process.stdout.write(JSON.stringify(routingReport(r.state), null, 2) + '\n');
         });
 
@@ -248,7 +254,7 @@ export function registerJobCommand(program: Command): void {
             const branch = branchOf(repo);
             assertAuthenticatedCwd(repo, branch);
             const r = readJournal(repo, branch);
-            if (r.corrupt || r.state === null) { process.stderr.write('journal corrupto o ausente\n'); process.exit(1); }
+            if (r.corrupt || r.state === null) { process.stderr.write(`${r.absent && !r.corrupt ? ABSENT_JOURNAL_DETAIL : 'journal corrupto o ilegible'}\n`); process.exit(1); }
             const plan = planReap(r.state);
             process.stdout.write(JSON.stringify(plan, null, 2) + '\n');   // R2.2: listar SIEMPRE primero
             if (opts.execute) {
@@ -266,7 +272,7 @@ export function registerJobCommand(program: Command): void {
             const branch = branchOf(repo);
             assertAuthenticatedCwd(repo, branch);
             const r = readJournal(repo, branch);
-            if (r.corrupt || r.state === null) { process.stderr.write('journal corrupto\n'); process.exit(1); }
+            if (r.corrupt || r.state === null) { process.stderr.write(`${r.absent && !r.corrupt ? ABSENT_JOURNAL_DETAIL : 'journal corrupto o ilegible'}\n`); process.exit(1); }
             let baseline: BaselineMetrics | null = null;
             if (opts.baseline !== undefined) {
                 let parsed: unknown;

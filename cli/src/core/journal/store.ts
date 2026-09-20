@@ -8,7 +8,34 @@ import { EXECUTION_IDENTITY_SCHEMA, executionPlanDigest, fullPlanDigest } from '
 import { verifiedPlanSnapshot } from '../plan/validate';
 import type { PlanValidationReport } from '../plan/types';
 
-export interface ReadResult { state: JournalState | null; corrupt: boolean; raw?: string; }
+/** Three distinct facts the two booleans below encode, named once so consumers
+ *  report them instead of collapsing absence into damage (#173). */
+export type JournalPresence = 'present' | 'absent' | 'corrupt';
+
+export function journalPresence(read: Pick<ReadResult, 'state' | 'corrupt' | 'absent'>): JournalPresence {
+    if (read.corrupt) return 'corrupt';
+    if (read.absent || read.state === null) return 'absent';
+    return 'present';
+}
+
+/** What an absent journal actually needs, naming the command rather than leaving
+ *  the operator to infer it — and saying who this interlock is for. */
+export const ABSENT_JOURNAL_DETAIL = 'journal ausente (no corrupto): el interlock desatendido exige un journal ligado — corre `awm watch --init --plan <plan>`. Un ciclo interactivo no requiere journal.';
+
+export interface ReadResult {
+    state: JournalState | null;
+    corrupt: boolean;
+    /**
+     * A journal that was never created, which is a different FACT from a damaged
+     * one and needs a different response: absence is resolved by
+     * `awm watch --init --plan`, corruption by inspecting the file. Collapsing
+     * the two sent operators looking for damage in a healthy repository — see
+     * #173. `corrupt` and `absent` are mutually exclusive; consumers that must
+     * block on both still check `state === null`.
+     */
+    absent: boolean;
+    raw?: string;
+}
 
 /** Schema 1 evoluciono de forma aditiva durante R1/R5. Normalizamos solamente
  * campos que antes no existian; evidencia legacy queda deliberadamente con
@@ -153,19 +180,28 @@ export function initBoundJournal(repoRoot: string, branch: string, binding: Plan
 }
 
 /** Lectura corrupt-aware (R1.6): sintaxis invalida O shape invalido => corrupt:true.
- *  Los CONSUMIDORES deciden: consultas muestran 'corrupt'; gate/reconcile bloquean. */
+ *  Un journal que nunca se creo es `absent`, jamas `corrupt`.
+ *  Los CONSUMIDORES deciden: consultas muestran el estado; gate/reconcile bloquean. */
 export function readJournal(repoRoot: string, branch: string): ReadResult {
     const sp = statePath(repoRoot, branch);
     let raw: string;
     try {
+        // Both tree assertions RETURN on ENOENT and throw a plain Error for an
+        // unsafe or linked segment, so the only ENOENT that can reach here comes
+        // from the state file itself. An unsafe tree is therefore never reported
+        // as absence — the same rule `watchJournalStatus` already states.
         assertJournalTree(repoRoot, branch);
         assertJournalFileNotSymlink(sp);
         raw = fs.readFileSync(sp, 'utf8');
-    } catch { return { state: null, corrupt: true }; }
+    } catch (error) {
+        return (error as NodeJS.ErrnoException).code === 'ENOENT'
+            ? { state: null, corrupt: false, absent: true }
+            : { state: null, corrupt: true, absent: false };
+    }
     let parsed: unknown;
-    try { parsed = normalizeSchemaOne(JSON.parse(raw)); } catch { return { state: null, corrupt: true, raw }; }
-    if (!isWellFormedState(parsed)) return { state: null, corrupt: true, raw };
-    return { state: parsed, corrupt: false, raw };
+    try { parsed = normalizeSchemaOne(JSON.parse(raw)); } catch { return { state: null, corrupt: true, absent: false, raw }; }
+    if (!isWellFormedState(parsed)) return { state: null, corrupt: true, absent: false, raw };
+    return { state: parsed, corrupt: false, absent: false, raw };
 }
 
 /** Escritura canonica: SOLO el supervisor la invoca (single-writer). CAS por
@@ -174,6 +210,10 @@ export function writeJournal(repoRoot: string, branch: string, state: JournalSta
     if (state.branch !== branch) throw new Error(`writeJournal: branch del estado (${state.branch}) no coincide con branch destino (${branch})`);
     const current = readJournal(repoRoot, branch);
     if (current.corrupt) throw new Error('journal corrupto: no se escribe sobre corrupcion (R1.6)');
+    // Absence used to arrive here as `corrupt`, and this guard is what kept
+    // initialization create-only. Naming it explicitly preserves that exactly:
+    // only initJournal/initBoundJournal may bring a journal into existence.
+    if (current.absent) throw new Error('journal inexistente: la creacion es de initJournal/initBoundJournal, no de writeJournal');
     if (current.state !== null && current.state.revision !== state.revision) {
         throw new Error(`revision desactualizada: disco=${current.state.revision} propuesta=${state.revision}`);
     }

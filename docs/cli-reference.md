@@ -766,13 +766,26 @@ gates:
 | `verdict` | Record a ReviewObligation verdict at the moment it is received. |
 | `list` / `ps` / `show <jobId>` | Read the journal: declared jobs, live processes, one job in full. |
 | `reconcile` | Read-only report of the R1.8 matrix plus `next_action`. The mutation belongs to the supervisor. |
-| `gate` | Fail-closed interlock: exits non-zero if **anything** blocks certification. |
+| `gate` | Fail-closed interlock: exits non-zero if **anything** blocks certification. Unattended only — see below. |
 | `reap` | List job processes with full identity. `--execute --jobs <ids...>` terminates them, with confirmation. |
 | `export` | Export the journal. |
 | `controller-heartbeat` | Emit the controller liveness signal the supervisor watches. |
 
 > `gate` is the one to reach for in automation: it is the interlock that refuses to
 > certify, not a report you have to interpret.
+
+**`gate` is the unattended interlock, and it needs a journal.** A journal binding is
+unattended by construction — `awm watch --init --plan` accepts only a compact plan whose
+execution mode is `desatendido` — so an interactive cycle has no journal, and `gate` has
+nothing to certify against. On a repository with no journal it reports
+`category: "absent"` and exits non-zero, naming `awm watch --init --plan` as the remedy.
+That is absence, not damage: a genuinely unreadable `state.json` reports
+`category: "corrupt"` instead, and the two want different responses.
+
+Do not wire `gate` into CI for an interactive project — it will be permanently red for a
+reason that has nothing to do with the code. The gate for an interactive cycle is
+`awm plan admit`, which reports `journal: "not-required"` for a plan whose execution mode
+is `interactivo` and blocks on the gates that do apply (state, currentness, sensors).
 
 ### `awm watch`
 
@@ -786,7 +799,7 @@ awm watch [--init] [--provider <p>] [--heartbeat-timeout <min>]
 
 | Flag | Description |
 |---|---|
-| `--init` | Bootstrap: create the current branch's journal, detect verifiers, and exit. |
+| `--init` | Bootstrap: create the current branch's journal, detect verifiers, and exit. Requires `--plan` with a valid **unattended** compact plan; an interactive plan is refused, because a journal binding records `executionMode: desatendido` by construction. |
 | `--provider <p>` | `codex` or `claude-code`. Default: `codex`. |
 | `--heartbeat-timeout <min>` | Minutes of heartbeat silence before a controller is considered gone. Default: `5`. |
 | `--activity-window <min>` | Extra minutes without process activity before relieving it. Default: `10`. |
