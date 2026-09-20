@@ -15,21 +15,31 @@ import path from 'path';
 
 const CLI_ROOT = path.resolve(__dirname, '../..');
 
-function lintedFiles(): string[] {
-    const raw = execFileSync('npx', ['eslint', '.', '--config', 'eslint.config.awm.mjs', '--format', 'json'], {
-        cwd: CLI_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-    });
-    return (JSON.parse(raw) as Array<{ filePath: string }>).map(entry => entry.filePath);
+interface LintResult { filePath: string; messages: Array<{ message: string }> }
+
+/** One eslint run for the whole suite. Invoked through node against eslint's own
+ *  js entrypoint rather than `npx`: on Windows `npx` resolves to `npx.cmd`, and
+ *  `execFileSync` cannot execute a `.cmd` without a shell — the exact trap this
+ *  repo already documents in tests/integration/published-doctor-evidence.e2e.test.ts,
+ *  and the one this test hit on both Windows legs of its first CI run. Going
+ *  through `process.execPath` needs no shell, so no argument escaping either. */
+function lint(): LintResult[] {
+    const raw = execFileSync(process.execPath, [
+        path.join(CLI_ROOT, 'node_modules', 'eslint', 'bin', 'eslint.js'),
+        '.', '--config', 'eslint.config.awm.mjs', '--format', 'json',
+    ], { cwd: CLI_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    return JSON.parse(raw) as LintResult[];
 }
 
 describe('the lint gate covers TypeScript (#171)', () => {
     jest.setTimeout(10 * 60_000);
 
-    const files = lintedFiles();
+    const results = lint();
+    const files = results.map(entry => entry.filePath);
     const typescript = files.filter(file => file.endsWith('.ts'));
 
     test('lints the TypeScript sources, not only the js/mjs tooling', () => {
-        // The count is a floor, not a lock: adding sources must not fail this.
+        // A floor, not a lock: adding sources must not fail this.
         expect(typescript.length).toBeGreaterThan(400);
         expect(typescript.some(file => file.includes(`${path.sep}src${path.sep}`))).toBe(true);
         expect(typescript.some(file => file.includes(`${path.sep}tests${path.sep}`))).toBe(true);
@@ -40,15 +50,12 @@ describe('the lint gate covers TypeScript (#171)', () => {
     });
 
     test('reports no unresolved rule references', () => {
-        // Four stale `eslint-disable @typescript-eslint/no-var-requires`
-        // comments survived precisely because .ts was never linted: eslint
-        // errors on a rule it cannot resolve, and nobody ever saw it. A new one
-        // must fail here rather than wait for the next person to turn the gate on.
-        const raw = execFileSync('npx', ['eslint', '.', '--config', 'eslint.config.awm.mjs', '--format', 'json'], {
-            cwd: CLI_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-        });
-        const unresolved = (JSON.parse(raw) as Array<{ filePath: string; messages: Array<{ message: string }> }>)
-            .flatMap(entry => entry.messages.filter(m => /Definition for rule .* was not found/.test(m.message))
+        // Four stale `eslint-disable @typescript-eslint/no-var-requires` comments
+        // survived precisely because .ts was never linted: eslint errors on a rule
+        // it cannot resolve, and nobody ever saw it. A new one must fail here
+        // rather than wait for the next person to turn the gate on.
+        const unresolved = results.flatMap(entry =>
+            entry.messages.filter(m => /Definition for rule .* was not found/.test(m.message))
                 .map(m => `${entry.filePath}: ${m.message}`));
         expect(unresolved).toEqual([]);
     });
