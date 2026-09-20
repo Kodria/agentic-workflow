@@ -1,3 +1,8 @@
+## v9.11.3 - 2026-09-20
+
+### Fixes
+- **sensors:** one unresolvable sensor no longer refuses the whole pack (#176)
+
 ## v9.11.2 - 2026-09-20
 
 ### Fixes
