@@ -1,3 +1,8 @@
+## v9.11.4 - 2026-09-20
+
+### Fixes
+- **journal:** an absent journal is not a corrupt one (#178)
+
 ## v9.11.3 - 2026-09-20
 
 ### Fixes
