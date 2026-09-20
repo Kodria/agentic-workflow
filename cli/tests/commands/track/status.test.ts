@@ -92,7 +92,7 @@ describe('aggregateTrackStatus — agregado read-only (R9.5, R9.6)', () => {
         expect(fs.readFileSync(statePath(planRoot, planBranch), 'utf8')).toBe(planBefore);
     });
 
-    test('journal de track corrupto/ausente nunca se descarta en silencio: gate rojo con corrupt-state', () => {
+    test('journal de track ausente nunca se descarta en silencio: gate rojo con absent-state', () => {
         // ni siquiera se inicializa el journal del segundo track: readJournal
         // sobre un directorio sin state.json => corrupt:true (R1.6).
         const missingTrackRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-status-missing-'));
@@ -103,7 +103,10 @@ describe('aggregateTrackStatus — agregado read-only (R9.5, R9.6)', () => {
 
             const out = aggregateTrackStatus(planRoot, readJournal(planRoot, planBranch).state!);
             expect(out.tracks.ghost.gate.pass).toBe(false);
-            expect(out.tracks.ghost.gate.reasons).toEqual([{ category: 'corrupt-state', detail: expect.any(String) }]);
+            // #173: the track journal here is ABSENT, not damaged. The gate is
+            // still red — it is never discarded in silence — but it now names the
+            // fact it observed instead of claiming corruption.
+            expect(out.tracks.ghost.gate.reasons).toEqual([{ category: 'absent-state', detail: expect.any(String) }]);
         } finally {
             fs.rmSync(missingTrackRoot, { recursive: true, force: true });
         }

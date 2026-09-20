@@ -168,7 +168,10 @@ describe('watch --init: plan-vs-repo mecanico', () => {
     test('watch --init --plan bloquea un plan no valido antes de crear journal', () => {
         const invalid: PlanValidationReport = { state: 'invalid', diagnostics: [{ code: 'PLAN_SHAPE', message: 'bad' }] };
         expect(() => initWatch(repo, 'rama', { path: 'docs/plan.md', report: invalid })).toThrow(/válido/i);
-        expect(readJournal(repo, 'rama').corrupt).toBe(true);
+        // #173: this asserted `.corrupt` as a proxy for "no journal was created",
+        // which is the exact confusion that issue is about. The fact it means is
+        // absence, and that is now what it says.
+        expect(readJournal(repo, 'rama')).toMatchObject({ state: null, corrupt: false, absent: true });
     });
 
     test('watch --init --plan rechaza un plan interactivo antes de crear un binding desatendido', () => {

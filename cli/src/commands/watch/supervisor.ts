@@ -471,7 +471,7 @@ export class Supervisor {
         if (custody) return 'custody';
         if (freezing) return this.attemptFreeze();
         const r = readJournal(this.repoRoot, this.branch);
-        const gate = computeGate(r.state, r.corrupt, this.fingerprintNow);
+        const gate = computeGate(r.state, r.corrupt, this.fingerprintNow, r.absent);
         const liveJobs = r.state === null ? 1 : Object.values(r.state.jobs).filter((j) => LIVE.includes(j.executionState)).length;
         // R7/C3/C4 (Task 12): un journal de PLAN con cohorte de tracks NUNCA
         // declara `cycle.status = COMPLETE` por este camino genérico mientras
@@ -642,7 +642,11 @@ export async function runSupervisorLoop(
     dispatchAdmission?: DispatchAdmission,
 ): Promise<void> {
     const r = readJournal(repoRoot, branch);
-    if (r.corrupt || r.state === null) throw new Error('journal ausente o corrupto: corre `awm watch --init` primero');
+    if (r.corrupt || r.state === null) {
+        throw new Error(r.absent && !r.corrupt
+            ? 'journal ausente: corre `awm watch --init --plan <plan>` primero'
+            : 'journal corrupto o ilegible: inspecciona .awm/journal antes de continuar');
+    }
     if (r.state.schema !== 2 || !r.state.planBinding) {
         throw new Error('journal legacy o sin binding compacto: `awm watch` no puede ejecutar ni despachar trabajo');
     }
