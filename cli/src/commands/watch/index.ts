@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process';
 import { initWatch, rebindWatchPlan } from './init';
 import { runSupervisorLoop, DEFAULT_SUPERVISOR_CONFIG, type RoutingIdentity } from './supervisor';
 import { validateRuntimeKey } from '../../core/model-policy/capabilities';
+import { CONTROLLER_AUTONOMIES, isControllerAutonomy } from '../../core/journal/adapter';
 import { EXEC_STDIO } from '../../core/journal/process';
 import { WATCH_PROVIDERS, isWatchProvider } from '../../core/journal/adapter';
 import { resolveCommandContext } from '../../core/tracks/context';
@@ -53,6 +54,9 @@ export function registerWatchCommand(program: Command): void {
         .option('--runtime-kind <kind>', 'identidad de runtime para despacho compact v2')
         .option('--runtime-version <version>', 'identidad de runtime para despacho compact v2')
         .option('--account-scope-digest <sha>', 'identidad de runtime para despacho compact v2')
+        // #168: sin esto el controller desatendido arranca y se cuelga en la
+        // primera herramienta pidiendo aprobación. Se declara, no se adivina.
+        .option('--controller-autonomy <postura>', `postura del controller desatendido (${CONTROLLER_AUTONOMIES.join(' | ')})`)
         .action(async (opts) => {
             const repo = process.cwd();
             const branch = currentBranch(repo);
@@ -120,6 +124,11 @@ export function registerWatchCommand(program: Command): void {
                 }
                 routingIdentity = { kind: String(opts.runtimeKind), version: String(opts.runtimeVersion), accountScopeDigest: String(opts.accountScopeDigest) };
             }
+            if (opts.controllerAutonomy !== undefined && !isControllerAutonomy(opts.controllerAutonomy)) {
+                process.stderr.write(`--controller-autonomy invalido: ${String(opts.controllerAutonomy)} (validos: ${CONTROLLER_AUTONOMIES.join(', ')})\n`);
+                process.exitCode = 1;
+                return;
+            }
             const cfg = {
                 ...DEFAULT_SUPERVISOR_CONFIG,
                 provider: opts.provider,
@@ -127,6 +136,7 @@ export function registerWatchCommand(program: Command): void {
                 activityWindowMs: minutes('--activity-window', opts.activityWindow),
                 maxParallelTracks: opts.maxParallel !== undefined ? parseMaxParallel(opts.maxParallel) : loadDefaultParallelism(),
                 ...(routingIdentity === undefined ? {} : { routingIdentity }),
+                ...(opts.controllerAutonomy === undefined ? {} : { controllerAutonomy: opts.controllerAutonomy }),
             };
             process.stdout.write(`awm watch: supervisor activo (${cfg.provider}) — Ctrl-C para terminar\n`);
             await runSupervisorLoop(repo, branch, cfg);

@@ -8,6 +8,7 @@ import { readPreferences } from '../../utils/config';
 import { isAgentTarget } from '../../providers';
 import { listRegistries, type RegistrySource } from '../../core/registries';
 import { admitRegistryPlan } from '../../core/admission/registry-contracts';
+import { CONTROLLER_AUTONOMIES, isControllerAutonomy } from '../../core/journal/adapter';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { readJournal } from '../../core/journal/store';
@@ -233,8 +234,9 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
         .option('--runtime-kind <kind>', 'routing runtime kind for compact v2')
         .option('--runtime-version <version>', 'routing runtime version for compact v2')
         .option('--account-scope-digest <sha>', 'routing account scope digest for compact v2')
+        .option('--controller-autonomy <posture>', 'unattended controller autonomy posture (#168)')
         .option('--json', 'emit one stable JSON report')
-        .action(async (planPath: string, options: { provider: string; cwd: string; executionMode?: string; requireCurrent?: boolean; verifySensors?: boolean; runtimeKind?: string; runtimeVersion?: string; accountScopeDigest?: string; json?: boolean }) => {
+        .action(async (planPath: string, options: { provider: string; cwd: string; executionMode?: string; requireCurrent?: boolean; verifySensors?: boolean; runtimeKind?: string; runtimeVersion?: string; accountScopeDigest?: string; controllerAutonomy?: string; json?: boolean }) => {
             assertText(planPath, 'plan path');
             assertText(options.cwd, '--cwd');
             assertText(options.provider, '--provider');
@@ -263,7 +265,8 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
                 return;
             }
             const readRouting = (): AdmissionInput['routing'] => { if (!options.runtimeKind || !options.runtimeVersion || !options.accountScopeDigest) return undefined; const runtime = validateRuntimeKey({ target: options.provider, kind: options.runtimeKind, version: options.runtimeVersion, accountScopeDigest: options.accountScopeDigest }); const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(options.cwd); const at = deps.routingNow?.() ?? new Date(); if (!(at instanceof Date) || !Number.isFinite(at.getTime())) throw new Error('routingNow must return a finite Date'); const capabilities = (deps.readCapabilities ?? readCapabilities)(runtime, at); return { runtime, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined, now: at }; };
-            const report = await admitRegistryPlan({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true },
+            if (options.controllerAutonomy !== undefined && !isControllerAutonomy(options.controllerAutonomy)) throw new Error(`--controller-autonomy is invalid: ${options.controllerAutonomy} (valid: ${CONTROLLER_AUTONOMIES.join(', ')})`);
+            const report = await admitRegistryPlan({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true, ...(options.controllerAutonomy === undefined ? {} : { controllerAutonomy: options.controllerAutonomy }) },
                 { admitPlan: admission, listRegistries: registryInventory, checkCurrentness: currentnessCheck, runSensors: sensorRun, readRouting });
             process.stdout.write(admissionOutput(report, options.json === true));
             if (report.state !== 'admitted') process.exitCode = 2;

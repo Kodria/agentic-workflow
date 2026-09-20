@@ -12,7 +12,7 @@ import { readPreferences } from '../../utils/config';
 import type { AdmissionInput } from '../../core/admission';
 import { readEffectivePolicy } from '../../core/model-policy/store';
 import { readCapabilities, validateRuntimeKey } from '../../core/model-policy/capabilities';
-import { adapterFor } from '../../core/journal/adapter';
+import { adapterFor, type ControllerAutonomy } from '../../core/journal/adapter';
 import { groupIsGone, terminateGroupConfirmed } from '../../core/journal/process';
 import { computeGate, computeTrackGate, FingerprintNow } from '../job/gate';
 import { isWorktreeClean, headSha } from '../../core/tracks/git';
@@ -59,7 +59,7 @@ export function routingFacts(provider: string, identity: RoutingIdentity | undef
         capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined, now: at };
 }
 
-export function defaultDispatchAdmission(repoRoot: string, branch: string, provider: string, identity?: RoutingIdentity, deps: DispatchAdmissionDeps = {}): DispatchAdmission {
+export function defaultDispatchAdmission(repoRoot: string, branch: string, provider: string, identity?: RoutingIdentity, deps: DispatchAdmissionDeps = {}, autonomy?: ControllerAutonomy): DispatchAdmission {
     return async () => {
         const observed = readJournal(repoRoot, branch);
         const binding = observed.state?.schema === 2 ? observed.state.planBinding : undefined;
@@ -71,7 +71,8 @@ export function defaultDispatchAdmission(repoRoot: string, branch: string, provi
         return (deps.admit ?? admitRegistryPlan)({ plan, provider, cwd: repoRoot, enabledAgents: preferences.enabledAgents,
             executionMode: 'desatendido', requireCurrent: true, verifySensors: true,
             journalState: observed.state, journalCorrupt: observed.corrupt, planPath: binding.path,
-            routing: routingFacts(provider, identity, repoRoot, deps) });
+            routing: routingFacts(provider, identity, repoRoot, deps),
+            controllerAutonomy: autonomy });
     };
 }
 
@@ -166,6 +167,7 @@ export interface SupervisorConfig {
     jobStallObservationMs: number;   // R3.5: umbral observacional de suspected-stall por job (nunca mata nada)
     maxParallelTracks: number;       // R10.2/R10.3: tope de tracks ACTIVE simultáneos (ver core/tracks/concurrency.ts)
     routingIdentity?: RoutingIdentity;  // #166: identidad de runtime que exige la admisión compact v2
+    controllerAutonomy?: ControllerAutonomy;  // #168: postura con la que el controller desatendido puede ejecutar
 }
 
 export const DEFAULT_SUPERVISOR_CONFIG: SupervisorConfig = {
@@ -183,7 +185,7 @@ export const DEFAULT_SUPERVISOR_CONFIG: SupervisorConfig = {
 /** Single place the supervisor's config becomes its admission, so the runtime
  *  identity cannot be dropped silently between the flag and the gate (#166). */
 export function admissionForConfig(repoRoot: string, branch: string, cfg: SupervisorConfig, deps: DispatchAdmissionDeps = {}): DispatchAdmission {
-    return defaultDispatchAdmission(repoRoot, branch, cfg.provider, cfg.routingIdentity, deps);
+    return defaultDispatchAdmission(repoRoot, branch, cfg.provider, cfg.routingIdentity, deps, cfg.controllerAutonomy);
 }
 
 // 'frozen' (R5.2/R6.3, Task 10): SOLO puede ocurrir en el journal de un
@@ -252,7 +254,7 @@ export class Supervisor {
             return 'custody';
         }
         try {
-            ensureControllerGeneration(this.repoRoot, this.branch, this.cfg.provider, action, this.spawner, this.cfg.reconcileGraceMs);
+            ensureControllerGeneration(this.repoRoot, this.branch, this.cfg.provider, action, this.spawner, this.cfg.reconcileGraceMs, this.cfg.controllerAutonomy);
             return 'ok';
         } catch (error) {
             this.backoff.recordRelaunch();

@@ -9,7 +9,7 @@ import { adapterFor } from '../../core/journal/adapter';
 import { logsDir } from '../../core/journal/paths';
 import { claimPath, identityPath, resultPath } from '../job/exec-wrapper';
 import { defaultWrapperSpawner, WrapperSpawner } from './runner';
-import type { ControllerAdapter, SafeToReplace } from '../../core/journal/adapter';
+import type { ControllerAdapter, ControllerAutonomy, SafeToReplace } from '../../core/journal/adapter';
 import { isWellFormedProcessRef, isControllerRecoveryAction } from '../../core/journal/types';
 import type { Generation, Job, JournalState, ControllerRecoveryAction } from '../../core/journal/types';
 
@@ -103,6 +103,7 @@ export function launchControllerGeneration(
     provider: string,
     action: unknown,
     spawner: WrapperSpawner = defaultWrapperSpawner(),
+    autonomy?: ControllerAutonomy,
 ): void {
     const requestedAction = recoveryAction(action);
     const s = requireState(repoRoot, branch);
@@ -114,7 +115,7 @@ export function launchControllerGeneration(
     gen.spawnNonce = gen.spawnNonce ?? crypto.randomBytes(8).toString('hex');
     gen.provider = gen.provider ?? provider;
     gen.resumeAction = gen.resumeAction ?? requestedAction;
-    const argv = adapter.launchArgv(promptForGeneration(gen));
+    const argv = adapter.launchArgv(promptForGeneration(gen), autonomy);
     const digest = argvDigest(argv);
     if (gen.launchArgvDigest !== undefined && gen.launchArgvDigest !== digest) throw new Error('controller argv cambio: no se reemite el mismo nonce con otro comando');
     gen.launchArgvDigest = digest;
@@ -178,6 +179,7 @@ export function ensureControllerGeneration(
     action: unknown,
     spawner: WrapperSpawner,
     ambiguityGraceMs: number,
+    autonomy?: ControllerAutonomy,
 ): void {
     const requestedAction = recoveryAction(action);
     if (collectControllerGeneration(repoRoot, branch)) return;
@@ -186,7 +188,7 @@ export function ensureControllerGeneration(
     if (gen.resumePrompt !== undefined) throw new Error('generacion legacy con prompt: decision explicita requerida; no se reemite');
     if (gen.processRef !== undefined || gen.wrapperRef !== undefined) return;
     if (gen.controllerJobId === undefined || gen.spawnNonce === undefined) {
-        launchControllerGeneration(repoRoot, branch, provider, requestedAction, spawner);
+        launchControllerGeneration(repoRoot, branch, provider, requestedAction, spawner, autonomy);
         return;
     }
     const logs = logsDir(repoRoot, branch);
@@ -206,7 +208,7 @@ export function ensureControllerGeneration(
     // El intent ya estaba durable pero el spawn no ocurrio: es seguro reemitir
     // exactamente el mismo nonce. Si el wrapper original solo estaba demorado,
     // su claim wx arbitra cual de ambos ejecuta.
-    launchControllerGeneration(repoRoot, branch, gen.provider ?? provider, gen.resumeAction ?? requestedAction, spawner);
+    launchControllerGeneration(repoRoot, branch, gen.provider ?? provider, gen.resumeAction ?? requestedAction, spawner, autonomy);
 }
 
 /** Custodia (R4.5): ciclo BLOCKED con razon auditada. QUIEN NO HACE NADA:

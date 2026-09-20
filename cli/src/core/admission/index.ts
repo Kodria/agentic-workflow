@@ -5,6 +5,7 @@ import type { PlanDiagnostic, PlanValidationReport } from '../plan/types';
 import type { RunOutput } from '../../commands/sensors/types';
 import type { JournalState } from '../journal/types';
 import { bindingPlanPath } from '../journal/paths';
+import type { ControllerAutonomy } from '../journal/adapter';
 import type { CapabilityStatus, ProviderExecutionCapabilities } from '../model-policy/capability-types';
 type ImplementerProfile = 'mechanical' | 'integration' | 'judgment';
 import type { ApprovedPolicy, CapabilityReceipt, RuntimeKey } from '../model-policy/types';
@@ -53,6 +54,8 @@ export type AdmissionInput = {
     routing?: { policy?: ApprovedPolicy; capabilities?: CapabilityReceipt; runtime?: RuntimeKey; now?: Date; qaLens?: readonly string[]; controllerCount?: number };
     /** Internal deferred reader; invoked only after all ordinary admission gates. */
     routingReader?: () => AdmissionInput['routing'];
+    /** #168: postura de autonomia que el operador declara para el controller. */
+    controllerAutonomy?: ControllerAutonomy;
 };
 
 const UNKNOWN: ProviderExecutionCapabilities = {
@@ -60,7 +63,13 @@ const UNKNOWN: ProviderExecutionCapabilities = {
     modelOverride: 'unverified', effortOverride: 'unverified', observedModelEvidence: 'unverified', durableResume: 'unverified',
 };
 
-/** Deliberate R1 evidence table. Artifact delivery is never used as execution evidence. */
+/** Deliberate R1 evidence table. Artifact delivery is never used as execution evidence.
+ *
+ *  `unattendedController: 'supported'` describes the supervisor<->controller
+ *  CONTRACT, which D-016 certifies with a scripted controller. It does NOT say a
+ *  real agent runtime can occupy the role — D-016 marks that explicitly
+ *  unverified. Read this table through `unattendedCapabilities()`, neverdirectly:
+ *  the raw row overstates what has been established (#168). */
 export const PROVIDER_EXECUTION_CAPABILITIES: Readonly<Record<AgentTarget, ProviderExecutionCapabilities>> = {
     antigravity: { ...UNKNOWN },
     opencode: { ...UNKNOWN },
@@ -69,6 +78,20 @@ export const PROVIDER_EXECUTION_CAPABILITIES: Readonly<Record<AgentTarget, Provi
     cursor: { ...UNKNOWN },
     copilot: { ...UNKNOWN },
 };
+
+/** #168: the controller can only act if it was launched with an autonomy
+ *  posture. That posture is an OPERATOR ASSERTION, exactly like
+ *  `--expected-digest` or the compact v2 runtime identity: AWM cannot verify it
+ *  independently (a codex operator may carry approval policy in their own
+ *  config), so it refuses to guess rather than refusing the operator. Without a
+ *  declaration `unattendedController` degrades to 'unverified' — which is what
+ *  D-016 already said, and what the raw table contradicted. */
+export function unattendedCapabilities(provider: AgentTarget, autonomy: ControllerAutonomy | undefined): ProviderExecutionCapabilities {
+    const base = PROVIDER_EXECUTION_CAPABILITIES[provider];
+    if (base.unattendedController !== 'supported') return base;
+    if (autonomy !== undefined) return base;
+    return { ...base, unattendedController: 'unverified' };
+}
 
 const MAX_DIAGNOSTICS = 20;
 const MAX_DIAGNOSTIC_LENGTH = 4096;
@@ -205,9 +228,18 @@ export async function admitPlan(input: AdmissionInput): Promise<AdmissionReport>
     if (mode === 'desatendido') {
         const journal = journalStatus(input, plan);
         if (journal !== 'current') return blocked(input, [diagnostic('ADMISSION_JOURNAL_BINDING_REQUIRED', 'Unattended execution requires a healthy schema-2 journal binding for this exact plan; run watch --init --plan.')], { planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', sensors: input.verifySensors ? 'pass' : 'not-required' });
-        const capabilities = PROVIDER_EXECUTION_CAPABILITIES[provider];
+        const capabilities = unattendedCapabilities(provider, input.controllerAutonomy);
         const resolution: ProviderExecutionResolution = { outcome: capabilities.unattendedController === 'supported' ? 'native' : 'blocked', provider, capabilities, evidenceVersion: 'r1-v1', diagnostics: [] };
-        if (resolution.outcome === 'blocked') return blocked(input, [diagnostic('ADMISSION_CAPABILITY_UNVERIFIED', `Provider ${provider} has no verified unattended execution capability.`)], { planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', sensors: input.verifySensors ? 'pass' : 'not-required', capabilityResolution: resolution });
+        if (resolution.outcome === 'blocked') {
+            // Distinguir las dos razones: el provider nunca tuvo la capacidad,
+            // o el operador no declaro postura. Un solo diagnostico las
+            // confundiria y el operador no sabria si le falta una flag o si el
+            // provider directamente no sirve (#168).
+            const reason = PROVIDER_EXECUTION_CAPABILITIES[provider].unattendedController !== 'supported'
+                ? diagnostic('ADMISSION_CAPABILITY_UNVERIFIED', `Provider ${provider} has no verified unattended execution capability.`)
+                : diagnostic('ADMISSION_CONTROLLER_AUTONOMY_REQUIRED', `Unattended dispatch on ${provider} requires an explicit controller autonomy posture; without it the controller blocks on its first tool call.`);
+            return blocked(input, [reason], { planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', sensors: input.verifySensors ? 'pass' : 'not-required', capabilityResolution: resolution });
+        }
         return completeAdmission(input, plan, provider, mode, journal, input.requireCurrent ? 'current' : 'not-checked', input.verifySensors ? 'pass' : 'not-required', resolution);
     }
     const capabilities = PROVIDER_EXECUTION_CAPABILITIES[provider];

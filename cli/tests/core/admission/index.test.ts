@@ -137,9 +137,47 @@ describe('admitPlan', () => {
     it('admits unattended work only with an exact schema-2 plan binding', async () => {
         const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as unknown as PlanValidationReport;
         const journal = { ...emptyState('main'), schema: 2 as const, planBinding: { path: 'docs/plan.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1' as const, executionMode: 'desatendido' as const, boundAt: '2026-09-15T00:00:00.000Z' } };
-        const admitted = await admitPlan({ plan: unattended, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], journalState: journal, planPath: 'docs/plan.md' });
+        // #168: the posture is now part of what makes unattended work admissible,
+        // so this case declares it; the cases below pin what happens without it.
+        const base = { plan: unattended, cwd: process.cwd(), enabledAgents: ['claude-code'] as const, planPath: 'docs/plan.md', controllerAutonomy: 'approval-free' as const };
+        const admitted = await admitPlan({ ...base, provider: 'claude-code', journalState: journal });
         expect(admitted).toMatchObject({ state: 'admitted', journal: 'current', executionMode: 'desatendido' });
-        const stale = await admitPlan({ plan: unattended, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], journalState: { ...journal, planBinding: { ...journal.planBinding, digest: 'b'.repeat(64) } }, planPath: 'docs/plan.md' });
+        const stale = await admitPlan({ ...base, provider: 'claude-code', journalState: { ...journal, planBinding: { ...journal.planBinding, digest: 'b'.repeat(64) } } });
         expect(stale).toMatchObject({ state: 'blocked', journal: 'stale' });
+    });
+
+    describe('unattended dispatch needs a controller that can actually act (#168)', () => {
+        const unattended = () => ({ ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as unknown as PlanValidationReport);
+        const journal = () => ({ ...emptyState('main'), schema: 2 as const, planBinding: { path: 'docs/plan.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1' as const, executionMode: 'desatendido' as const, boundAt: '2026-09-15T00:00:00.000Z' } });
+
+        it('blocks claude-code when the operator declared no posture', async () => {
+            const report = await admitPlan({ plan: unattended(), provider: 'claude-code', cwd: process.cwd(), enabledAgents: ['claude-code'], journalState: journal(), planPath: 'docs/plan.md' });
+            expect(report.state).toBe('blocked');
+            expect(report.diagnostics[0]).toMatchObject({ code: 'ADMISSION_CONTROLLER_AUTONOMY_REQUIRED' });
+            expect(report.capabilityResolution?.capabilities.unattendedController).toBe('unverified');
+        });
+
+        it('blocks codex too when no posture was declared', async () => {
+            const report = await admitPlan({ plan: unattended(), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], journalState: journal(), planPath: 'docs/plan.md' });
+            expect(report.state).toBe('blocked');
+            expect(report.diagnostics[0]).toMatchObject({ code: 'ADMISSION_CONTROLLER_AUTONOMY_REQUIRED' });
+        });
+
+        it('admits codex on the declaration alone, since AWM cannot verify its posture either way', async () => {
+            const report = await admitPlan({ plan: unattended(), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], journalState: journal(), planPath: 'docs/plan.md', controllerAutonomy: 'approval-free' });
+            expect(report.state).toBe('admitted');
+        });
+
+        it('keeps the original diagnostic for a provider that never had the capability', async () => {
+            const report = await admitPlan({ plan: unattended(), provider: 'cursor', cwd: process.cwd(), enabledAgents: ['cursor'], journalState: journal(), planPath: 'docs/plan.md', controllerAutonomy: 'approval-free' });
+            expect(report.state).toBe('blocked');
+            expect(report.diagnostics[0]).toMatchObject({ code: 'ADMISSION_CAPABILITY_UNVERIFIED' });
+        });
+
+        it('admits claude-code once the posture is declared', async () => {
+            const report = await admitPlan({ plan: unattended(), provider: 'claude-code', cwd: process.cwd(), enabledAgents: ['claude-code'], journalState: journal(), planPath: 'docs/plan.md', controllerAutonomy: 'approval-free' });
+            expect(report.state).toBe('admitted');
+            expect(report.capabilityResolution?.outcome).toBe('native');
+        });
     });
 });
