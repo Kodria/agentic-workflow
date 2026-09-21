@@ -105,3 +105,41 @@ describe('validateRunOptions', () => {
             .toThrow(/refusing to combine --changed with a baseline capture/);
     });
 });
+
+// El bloqueo que esto arregla: `compatible-unverified` significa que la herramienta esta,
+// cae en el rango operativo declarado por el pack y su probe coincidio — solo la version
+// exacta no es la que el registry congelo. Saltearla dejaba el veredicto en
+// `not_certified` y la admision desatendida bloqueada en cualquier maquina cuya version
+// no fuera el pin, que para el gestor que viene con Node es siempre.
+describe('prepareV2Sensor: que versiones ejecutan', () => {
+    const unverified = { state: 'compatible-unverified' as const, reason: 'operational-range-and-probe', variantId: 'eslint-live', toolVersion: '10.9.7', runtimeVersion: '22.0.0', certifiedRange: '=10.8.3', evidence: [] };
+
+    it('ejecuta una version operativa que el registry no congelo, y lo declara', () => {
+        const prepared = prepareV2Sensor(v2Input({ liveState: unverified, requestedScope: 'full' }));
+        expect(prepared.syntheticStatus).toBeUndefined();
+        expect(prepared.command).toEqual({ kind: 'structured', value: { executable: 'live-eslint', resolution: 'path', args: ['.'] } });
+        expect(prepared.certification).toBe('operational-unverified');
+    });
+
+    it('marca como certificada la ejecucion con la version congelada', () => {
+        const prepared = prepareV2Sensor(v2Input({ requestedScope: 'full' }));
+        expect(prepared.syntheticStatus).toBeUndefined();
+        expect(prepared.certification).toBe('certified');
+    });
+
+    it.each([
+        ['incompatible', 'no-operational-variant'],
+        ['missing-tool', 'tool-not-found'],
+        ['unverifiable', 'probe-not-matched'],
+        ['not-applicable', 'sensor-not-applicable'],
+    ])('no ejecuta un sensor %s: sin herramienta o sin probe no hay nada que medir', (state, reason) => {
+        const prepared = prepareV2Sensor(v2Input({
+            liveState: { ...unverified, state, reason },
+            requestedScope: 'full',
+        }));
+        expect(prepared.syntheticStatus).toBe('inconclusive');
+        expect(prepared.syntheticReason).toBe(`${state}: ${reason}`);
+        expect(prepared.command).toBeUndefined();
+        expect(prepared.certification).toBeUndefined();
+    });
+});

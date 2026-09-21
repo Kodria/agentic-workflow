@@ -68,6 +68,7 @@ export function interpretResult(prepared: PreparedSensorExecution, raw: ExecResu
     const execution = executionEvidence(prepared, raw.elapsedMs);
     const withEvidence = (result: Omit<SensorResult, 'execution'>): SensorResult => ({
         ...result,
+        ...(prepared.certification ? { certification: prepared.certification } : {}),
         ...(prepared.effectiveScope === 'changed' ? { scope: 'changed' as const } : {}),
         execution,
     });
