@@ -570,7 +570,11 @@ describe('plan admit Commander wiring', () => {
         } finally { outputSpy.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
     });
 
-    it('does not run sensors after currentness blocks', async () => {
+    // Antes esta prueba afirmaba que un CLI stale bloqueaba y por eso los sensores no
+    // corrian. Eso era el defecto: cada publicacion de npm detenia cualquier maquina.
+    // La propiedad de orden —si el gate de contratos bloquea, los sensores no corren—
+    // sigue cubierta arriba con un registry consumido stale.
+    it('con el CLI stale admite y SI corre los sensores: la version publicada en npm no detiene el ciclo', async () => {
         const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
         const sensors = jest.fn();
         const program = new Command();
@@ -584,8 +588,8 @@ describe('plan admit Commander wiring', () => {
         });
         try {
             await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', repositoryRoot, '--require-current', '--verify-sensors', '--json']);
-            expect(sensors).not.toHaveBeenCalled();
-            expect(JSON.parse(String(output.mock.calls[0][0]))).toMatchObject({ state: 'blocked', currentness: 'stale', sensors: 'not-required' });
+            expect(sensors).toHaveBeenCalled();
+            expect(JSON.parse(String(output.mock.calls[0][0]))).toMatchObject({ currentness: 'current', cliCurrentness: 'stale' });
         } finally { output.mockRestore(); process.exitCode = undefined; }
     });
 

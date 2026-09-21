@@ -181,3 +181,56 @@ describe('admitPlan', () => {
         });
     });
 });
+
+// Un CLI atrasado detenia el ciclo entero: como cada merge a main publica, cualquier
+// maquina quedaba bloqueada minutos despues de un release con todo lo demas en verde.
+// El gate ahora mide los contratos consumidos (los registries, de donde salen las
+// skills y los packs que el plan ejecuta) y reporta el CLI sin bloquear.
+describe('admitPlan: el CLI atrasado avisa, los contratos consumidos bloquean', () => {
+    const component = (name: string, status: 'current' | 'stale' | 'unverifiable') => ({
+        component: name, installed: '1.0.0', latest: status === 'current' ? '1.0.0' : '2.0.0',
+        channel: 'stable' as const, source: 'npm', checkedAt: 'x', status, detail: 'd', remedy: 'r',
+    });
+    const admit = (components: ReturnType<typeof component>[], consumed: string[] = ['registry:baseline']) => admitPlan({
+        plan: valid, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'],
+        requireCurrent: true, provenance: 'proven', consumedRegistryComponents: consumed,
+        currentness: { checkedAt: 'x', compatibility: { status: 'not-checked' }, components } as any,
+    });
+
+    it('admite con el CLI stale cuando el registry consumido esta current', async () => {
+        const report = await admit([component('cli', 'stale'), component('registry:baseline', 'current')]);
+        expect(report.state).toBe('admitted');
+        expect(report.currentness).toBe('current');
+        expect(report.cliCurrentness).toBe('stale');
+    });
+
+    it('admite con el CLI inverificable: no haber podido consultar npm no es un defecto del ciclo', async () => {
+        const report = await admit([component('cli', 'unverifiable'), component('registry:baseline', 'current')]);
+        expect(report.state).toBe('admitted');
+        expect(report.cliCurrentness).toBe('unverifiable');
+    });
+
+    it('bloquea con un registry consumido stale, y ahi el CLI no lo salva', async () => {
+        const report = await admit([component('cli', 'current'), component('registry:baseline', 'stale')]);
+        expect(report.state).toBe('blocked');
+        expect(report.currentness).toBe('stale');
+        expect(report.diagnostics[0].code).toBe('ADMISSION_CURRENTNESS_BLOCKED');
+        expect(report.cliCurrentness).toBe('current');
+    });
+
+    it('bloquea cuando falta la evidencia de un registry consumido', async () => {
+        const report = await admit([component('cli', 'current')]);
+        expect(report.state).toBe('blocked');
+        expect(report.diagnostics[0].code).toBe('ADMISSION_CURRENTNESS_MISSING_COMPONENT');
+    });
+
+    it('reporta el CLI tambien cuando el bloqueo lo produjo otro gate', async () => {
+        const report = await admitPlan({
+            plan: valid, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'],
+            requireCurrent: true, provenance: 'proven', consumedRegistryComponents: [],
+            currentness: { checkedAt: 'x', compatibility: { status: 'not-checked' }, components: [component('cli', 'stale')] } as any,
+            verifySensors: true, sensors: { overall: 'fail', sensors: [] } as any,
+        });
+        expect(report).toMatchObject({ state: 'blocked', sensors: 'fail', cliCurrentness: 'stale' });
+    });
+});
