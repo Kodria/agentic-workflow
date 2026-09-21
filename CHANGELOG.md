@@ -1,3 +1,8 @@
+## v9.11.5 - 2026-09-21
+
+### Fixes
+- **lint:** lint TypeScript with the TypeScript-aware rule, and make the gate block (#180)
+
 ## v9.11.4 - 2026-09-20
 
 ### Fixes
