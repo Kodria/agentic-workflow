@@ -25,6 +25,64 @@ describe('discoverProjectEvidence', () => {
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
     });
 
+    // #147: el gestor de paquetes en PATH era invisible sin lockfile, asi que el sensor
+    // `test` del pack js-ts reportaba tool-not-found con `npm test` ejecutable, y en
+    // desatendido eso bloquea la admision por sensores.
+    const packageManagerPack = {
+        schemaVersion: 2,
+        name: 'js-ts',
+        detects: ['package.json'],
+        sensors: {
+            test: {
+                applicability: { allFiles: ['package.json'] },
+                variants: [
+                    { id: 'npm-script', requirements: { tool: 'npm', configFiles: [] }, command: { executable: 'npm', resolution: 'path', packageManager: 'npm' } },
+                    { id: 'pnpm-script', requirements: { tool: 'pnpm', configFiles: [] }, command: { executable: 'pnpm', resolution: 'path', packageManager: 'pnpm' } },
+                ],
+            },
+        },
+    };
+
+    it('probes the package managers on PATH when the project declares none', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-discovery-pm-undeclared-'));
+        try {
+            fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'node -e ""' } }));
+            const evidence = discoverProjectEvidence(root, packageManagerPack as any, { pathToolVersion: tool => (tool === 'npm' ? '10.9.7' : null) });
+            expect(evidence.packageManager).toBeNull();
+            expect(evidence.toolVersions.npm).toBe('10.9.7');
+            expect(evidence.toolProvenance.npm).toBe('path');
+            // pnpm no esta en PATH: se sondeo y no se encontro, que es un hecho medido.
+            expect(evidence.toolVersions.pnpm).toBeNull();
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
+    it('probes only the declared package manager, so a pnpm project never resolves through npm', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-discovery-pm-declared-'));
+        try {
+            fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'node -e ""' } }));
+            fs.writeFileSync(path.join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9');
+            const probed: string[] = [];
+            const evidence = discoverProjectEvidence(root, packageManagerPack as any, { pathToolVersion: tool => { probed.push(tool); return '10.9.7'; } });
+            expect(evidence.packageManager).toBe('pnpm');
+            expect(probed).toEqual(['pnpm']);
+            expect(evidence.toolVersions.npm).toBeNull();
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
+    it('probes nothing when the lockfiles conflict: an undecided project is not an undeclared one', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-discovery-pm-conflict-'));
+        try {
+            fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'node -e ""' } }));
+            fs.writeFileSync(path.join(root, 'package-lock.json'), '{}');
+            fs.writeFileSync(path.join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9');
+            const probed: string[] = [];
+            const evidence = discoverProjectEvidence(root, packageManagerPack as any, { pathToolVersion: tool => { probed.push(tool); return '10.9.7'; } });
+            expect(evidence.packageManagerConflict).toBe(true);
+            expect(probed).toEqual([]);
+            expect(evidence.toolVersions.npm).toBeNull();
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+
     it('includes pack and applicability markers when deciding whether a sensor applies', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-discovery-markers-'));
         try {
