@@ -32,6 +32,42 @@ export function awmCodexEntry(scriptsDir: string): object {
     };
 }
 
+/**
+ * Una entrada NUESTRA en `SessionStart` de Codex que ya no es la canonica (#184).
+ *
+ * Medido en una Mac real: `hooks.json` con dos entradas de AWM cuyos matchers se
+ * solapan en startup/clear/compact, o sea el hook corre dos veces por sesion y el
+ * contexto se inyecta dos veces. Ninguna de las dos vias existentes la alcanzaba:
+ * `isAwmCodexEntry` exige el matcher ACTUAL, e `isDeadAwmHookEntry` compara el
+ * basename del ejecutable contra 'session-start' cuando aca el ejecutable es
+ * `run-hook.cmd`. Y no es "muerta": el wrapper existe porque Claude Code si lo usa,
+ * asi que ninguna prueba de vivencia puede alcanzarla.
+ *
+ * Se reconoce por PROCEDENCIA y no-canonicidad, en dos formas:
+ *
+ *  - `run-hook.cmd session-start`: el contrato de wrapper que escribe el adapter de
+ *    Claude (claude.ts) y que este adapter declara no usar. En el archivo de Codex
+ *    solo puede ser un resto de una version anterior.
+ *  - nuestro propio script con el matcher viejo: misma ruta exacta que instalamos,
+ *    pero el matcher cambio, asi que el instalador la ignoraba y AGREGABA otra.
+ *
+ * Deliberadamente fuera: una instalacion paralela VIVA de otro AWM_HOME, que usa la
+ * forma nativa con su propia ruta. `isDeadAwmHookEntry` la preserva a proposito y
+ * esta funcion no revierte esa decision.
+ */
+export function isStaleAwmCodexEntry(entry: unknown, scriptsDir: string, canonicalMatcher: string): boolean {
+    const candidate = entry as { matcher?: unknown; hooks?: unknown };
+    if (!Array.isArray(candidate?.hooks)) return false;
+    const ours = path.join(scriptsDir, 'session-start');
+    return candidate.hooks.some((hook: unknown) => {
+        const command = (hook as { command?: unknown })?.command;
+        if (typeof command !== 'string' || command.length === 0) return false;
+        const [executable, ...args] = command.split(' ');
+        if (path.basename(executable) === 'run-hook.cmd' && args.join(' ') === 'session-start') return true;
+        return executable === ours && candidate.matcher !== canonicalMatcher;
+    });
+}
+
 function isAwmCodexEntry(entry: any, scriptsDir: string): boolean {
     return (
         entry?.matcher === codexMatcher() &&
@@ -59,7 +95,8 @@ export function installCodexHook(options: InstallOptions): InstallResult {
     // Se podan primero las entradas nuestras que apuntan a un script inexistente: son
     // restos de otro AWM_HOME ya borrado, y el agente las intenta ejecutar cada sesion.
     // Una instalacion paralela VIVA no se toca — su script existe. Ver isDeadAwmHookEntry.
-    const entries = raw.filter((entry) => !isDeadAwmHookEntry(entry, codexMatcher(), 'session-start', config.scriptsDir));
+    const entries = raw.filter((entry) => !isDeadAwmHookEntry(entry, codexMatcher(), 'session-start', config.scriptsDir)
+        && !isStaleAwmCodexEntry(entry, config.scriptsDir, codexMatcher()));
     const matches = entries.filter((entry) => isAwmCodexEntry(entry, config.scriptsDir));
     if (matches.length > 1) {
         throw new Error('multiple AWM SessionStart entries in Codex hooks.json');

@@ -325,6 +325,106 @@ describe('installHook / computeHookStatus / uninstallHook — Codex adapter', ()
             expect(isDeadAwmHookEntry(foreign, 'startup|resume|clear|compact', 'session-start', codexScriptsDir)).toBe(false);
         });
 
+        // #184, medido en una Mac real: `~/.codex/hooks.json` con DOS entradas de AWM,
+        // matchers solapados en startup/clear/compact, o sea el hook corre dos veces por
+        // sesion y el contexto se inyecta dos veces — tokens duplicados en cada arranque.
+        //
+        // La entrada vieja es la forma WRAPPER de Claude (`run-hook.cmd session-start` con
+        // el matcher de Claude), que este adapter declara en su propio encabezado que no
+        // usa. Es invisible para las dos vias que la reconocerian: `isAwmCodexEntry` exige
+        // el matcher actual, e `isDeadAwmHookEntry` compara el basename del EJECUTABLE
+        // contra 'session-start' — y aca el ejecutable es `run-hook.cmd`. Y no es "muerta":
+        // `run-hook.cmd` existe, porque Claude Code si lo usa, asi que ninguna prueba de
+        // vivencia puede alcanzarla.
+        function legacyClaudeWrapperEntry() {
+            return {
+                matcher: 'startup|clear|compact',
+                hooks: [{ type: 'command', command: `${path.join(tmpHome, '.awm/hooks/run-hook.cmd')} session-start` }],
+            };
+        }
+
+        it('drops the legacy run-hook.cmd wrapper entry, so the hook stops firing twice', () => {
+            installCodexFixture({ heartbeat: false });
+            // El wrapper EXISTE en disco: es el que usa Claude Code de verdad.
+            fs.mkdirSync(path.join(tmpHome, '.awm/hooks'), { recursive: true });
+            fs.writeFileSync(path.join(tmpHome, '.awm/hooks/run-hook.cmd'), '#!/bin/sh\n', { mode: 0o755 });
+
+            const current = JSON.parse(fs.readFileSync(hooksJson, 'utf-8'));
+            current.hooks.SessionStart.unshift(legacyClaudeWrapperEntry());
+            fs.writeFileSync(hooksJson, JSON.stringify(current, null, 2));
+
+            writeRegistry();
+            const { installHook } = require('../../../src/commands/hooks/install');
+            installHook({ agent: 'codex', registryRoot: tmpRegistry, installMethod: 'copy' });
+
+            const after = JSON.parse(fs.readFileSync(hooksJson, 'utf-8')).hooks.SessionStart;
+            expect(after).toHaveLength(1);
+            expect(after[0].matcher).toBe('startup|resume|clear|compact');
+            expect(after[0].hooks[0].command).toBe(path.join(codexScriptsDir, 'session-start'));
+        });
+
+        it('drops our own entry when only its matcher drifted, instead of adding a second one', () => {
+            installCodexFixture({ heartbeat: false });
+            const current = JSON.parse(fs.readFileSync(hooksJson, 'utf-8'));
+            current.hooks.SessionStart.unshift({
+                matcher: 'startup|clear|compact',
+                hooks: [{ type: 'command', command: path.join(codexScriptsDir, 'session-start') }],
+            });
+            fs.writeFileSync(hooksJson, JSON.stringify(current, null, 2));
+
+            writeRegistry();
+            const { installHook } = require('../../../src/commands/hooks/install');
+            installHook({ agent: 'codex', registryRoot: tmpRegistry, installMethod: 'copy' });
+
+            const after = JSON.parse(fs.readFileSync(hooksJson, 'utf-8')).hooks.SessionStart;
+            expect(after).toHaveLength(1);
+            expect(after[0].matcher).toBe('startup|resume|clear|compact');
+        });
+
+        it('leaves a live parallel AWM_HOME alone: cleaning our own leftovers is not breaking someone else', () => {
+            installCodexFixture({ heartbeat: false });
+            const other = path.join(tmpHome, 'other-awm/hooks/codex');
+            fs.mkdirSync(other, { recursive: true });
+            fs.writeFileSync(path.join(other, 'session-start'), '#!/bin/sh\n', { mode: 0o755 });
+
+            const current = JSON.parse(fs.readFileSync(hooksJson, 'utf-8'));
+            current.hooks.SessionStart.unshift(entryFor(path.join(other, 'session-start')));
+            fs.writeFileSync(hooksJson, JSON.stringify(current, null, 2));
+
+            writeRegistry();
+            const { installHook } = require('../../../src/commands/hooks/install');
+            installHook({ agent: 'codex', registryRoot: tmpRegistry, installMethod: 'copy' });
+
+            const after = JSON.parse(fs.readFileSync(hooksJson, 'utf-8')).hooks.SessionStart;
+            expect(after).toHaveLength(2);
+        });
+
+        // La guarda real: podar por procedencia tiene que distinguir NUESTRA ruta exacta
+        // de la de otro AWM_HOME. Con matcher canonico la distincion no se ejercita (nada
+        // la poda de todos modos), asi que este caso usa un matcher DERIVADO: si la regla
+        // mirara el basename en vez de la ruta completa, le romperia la instalacion a otro.
+        it('leaves a live parallel AWM_HOME alone even when ITS matcher drifted', () => {
+            installCodexFixture({ heartbeat: false });
+            const other = path.join(tmpHome, 'other-awm/hooks/codex');
+            fs.mkdirSync(other, { recursive: true });
+            fs.writeFileSync(path.join(other, 'session-start'), '#!/bin/sh\n', { mode: 0o755 });
+
+            const current = JSON.parse(fs.readFileSync(hooksJson, 'utf-8'));
+            current.hooks.SessionStart.unshift({
+                matcher: 'startup|clear|compact',
+                hooks: [{ type: 'command', command: path.join(other, 'session-start') }],
+            });
+            fs.writeFileSync(hooksJson, JSON.stringify(current, null, 2));
+
+            writeRegistry();
+            const { installHook } = require('../../../src/commands/hooks/install');
+            installHook({ agent: 'codex', registryRoot: tmpRegistry, installMethod: 'copy' });
+
+            const after = JSON.parse(fs.readFileSync(hooksJson, 'utf-8')).hooks.SessionStart;
+            expect(after).toHaveLength(2);
+            expect(after.some((e: any) => e.hooks[0].command === path.join(other, 'session-start'))).toBe(true);
+        });
+
         it('install removes the stale entry instead of accumulating a second one', () => {
             installCodexFixture({ heartbeat: false });
             const hooksJson = path.join(tmpHome, '.codex', 'hooks.json');
