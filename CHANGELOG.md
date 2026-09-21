@@ -1,3 +1,8 @@
+## v9.11.6 - 2026-09-21
+
+### Fixes
+- **sensors,admission:** stop blocking unattended execution on machines where nothing is wrong (#182)
+
 ## v9.11.5 - 2026-09-21
 
 ### Fixes
