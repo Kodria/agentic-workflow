@@ -25,6 +25,13 @@ export type PreparedSensorExecution = {
     files?: number;
     syntheticStatus?: 'pass' | 'skipped' | 'inconclusive';
     syntheticReason?: string;
+    /**
+     * Whether the tool version this will run is the one the registry froze
+     * (`certified`) or one the pack declares operational but never froze
+     * (`operational-unverified`). Both execute; the distinction travels with the
+     * result so a verdict never claims more evidence than it has.
+     */
+    certification?: 'certified' | 'operational-unverified';
 };
 
 export type SensorConfig = {
@@ -113,6 +120,14 @@ export type SensorResult = {
     status: 'pass' | 'fail' | 'inconclusive' | 'skipped';
     errors: SensorError[];
     skipReason?: string;
+    /**
+     * Which tool version produced this verdict: the registry's frozen one
+     * (`certified`), or one inside the pack's operational range whose exact
+     * version the registry never froze (`operational-unverified`). The verdict
+     * itself is the sensor's real output either way — this says how much the
+     * registry vouches for the version that produced it.
+     */
+    certification?: 'certified' | 'operational-unverified';
     /**
      * The run was cut short (timeout, output cap) but the partial output still
      * yielded findings. The findings listed are real; their *absence* proves

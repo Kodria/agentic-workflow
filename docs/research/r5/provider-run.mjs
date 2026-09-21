@@ -183,13 +183,21 @@ function prepare(provider, environment, opts = {}) {
     fs.writeFileSync(path.join(repo, 'docs', 'plan.md'), COMPACT_PLAN);
     git(repo, ['add', '-A']);
     git(repo, ['commit', '-qm', 'seed']);
-    // Fuera del commit a propósito: `.awm/` está gitignoreado, así que este archivo hace que
-    // `detectRequiredVerifiers` exija 'sensors' sin ensuciar el árbol (que el autoreporte de
-    // QA global necesita limpio).
-    fs.mkdirSync(path.join(repo, '.awm'), { recursive: true });
-    fs.writeFileSync(path.join(repo, '.awm', 'sensors.json'), `${JSON.stringify({
-        sensors: [{ name: 'noop', kind: 'custom', cmd: 'node -e "process.exit(0)"' }],
-    }, null, 2)}\n`);
+    // El manifiesto de sensores lo escribe `awm sensors init`, no este runner. Un
+    // manifiesto a mano —lo que hacía antes— tenía la forma de un contrato viejo, así que
+    // los sensores resolvían `not-certified` y la admisión desatendida bloqueaba con
+    // ADMISSION_SENSORS_BLOCKED: la certificación medía un fixture desactualizado, no al
+    // supervisor. Queda fuera del commit porque `.awm/` está gitignoreado, que es lo que
+    // hace que `detectRequiredVerifiers` exija 'sensors' sin ensuciar el árbol (el
+    // autoreporte de QA global necesita el árbol limpio).
+    try {
+        execFileSync(process.execPath, [dist, 'sensors', 'init'], { cwd: repo, stdio: 'ignore' });
+    } catch (error) {
+        die(`\`awm sensors init\` falló en el fixture: la máquina necesita \`awm init\` con el registry baseline sembrado (${error.message})`);
+    }
+    if (!fs.existsSync(path.join(repo, '.awm', 'sensors.json'))) {
+        die('`awm sensors init` no dejó .awm/sensors.json: sin manifiesto la admisión desatendida bloquea por sensores y la certificación no mide al supervisor');
+    }
 
     const run = {
         schema: 1, provider, environment, sourceHead,

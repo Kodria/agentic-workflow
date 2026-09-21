@@ -459,3 +459,34 @@ onPosix('runStructuredCommand — Python environments', () => {
         }
     });
 });
+
+// Ejecutar con una version que el registry no congelo es correcto — el sensor mide de
+// verdad — pero el resultado no puede presentarse como si la version estuviera
+// certificada. La distincion viaja hasta el veredicto o se pierde en silencio.
+const raw = (overrides: Record<string, unknown> = {}) => ({
+    stdout: '', stderr: '', code: 0, signal: null, timedOut: false, overflowed: false, elapsedMs: 5, ...overrides,
+} as Parameters<typeof interpretResult>[1]);
+
+describe('interpretResult: procedencia de la version que produjo el veredicto', () => {
+    it('propaga operational-unverified a un pass', () => {
+        const result = interpretResult(sensor({ certification: 'operational-unverified' }), raw({ code: 0, elapsedMs: 12 }));
+        expect(result.status).toBe('pass');
+        expect(result.certification).toBe('operational-unverified');
+    });
+
+    it('propaga certified cuando corrio la version congelada', () => {
+        const result = interpretResult(sensor({ certification: 'certified' }), raw({ code: 0, elapsedMs: 12 }));
+        expect(result.certification).toBe('certified');
+    });
+
+    it('propaga la procedencia tambien cuando el sensor falla', () => {
+        const result = interpretResult(sensor({ certification: 'operational-unverified' }), raw({ code: 1, stdout: 'boom', elapsedMs: 9 }));
+        expect(result.status).not.toBe('pass');
+        expect(result.certification).toBe('operational-unverified');
+    });
+
+    it('no inventa procedencia cuando la preparacion no la declara', () => {
+        const result = interpretResult(sensor(), raw({ code: 0, elapsedMs: 3 }));
+        expect(result.certification).toBeUndefined();
+    });
+});

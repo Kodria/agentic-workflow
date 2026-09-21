@@ -136,12 +136,29 @@ function v2Synthetic(input: PrepareV2SensorInput, reason: string): PreparedSenso
 export function prepareV2Sensor(input: PrepareV2SensorInput): PreparedSensorExecution {
     if (!input || typeof input !== 'object' || !input.sensor || typeof input.name !== 'string' || input.name === '') throw new Error('v2 preparation input is invalid');
     const requestedScope = resolveRequestedScope(input.requestedScope);
-    if (!input.liveState || input.liveState.state !== 'certified') return v2Synthetic(input, input.liveState ? `${input.liveState.state}: ${input.liveState.reason}` : 'compatibility could not be revalidated');
+    // Un sensor se ejecuta cuando la herramienta ESTA y funciona aca: `certified` es
+    // la version exacta que el registry congelo, y `compatible-unverified` es una que
+    // cae dentro del rango operativo declarado por el pack y cuyo probe coincidio
+    // (resolve.ts: 'operational-range-and-probe'). Antes solo corria la primera, asi
+    // que una maquina con npm 10.9.7 frente a un certifiedRange `=10.8.3` no ejecutaba
+    // el sensor: quedaba `inconclusive`, el veredicto global caia a `not_certified` y
+    // la admision desatendida bloqueaba. No se puede pinear el gestor de paquetes que
+    // viene con Node, asi que eso bloqueaba en cualquier maquina sin que nada estuviera
+    // mal — se saltaba la verificacion justamente donde mas hace falta.
+    //
+    // La diferencia no se pierde: viaja en `certification` hasta el resultado, asi que
+    // un veredicto producido por una version no congelada dice que lo fue. Lo que NO
+    // se ejecuta sigue sin ejecutarse: `incompatible` (fuera de rango), `missing-tool`
+    // (no esta), `unverifiable` (el probe no coincidio) y `not-applicable`.
+    if (!input.liveState || (input.liveState.state !== 'certified' && input.liveState.state !== 'compatible-unverified')) {
+        return v2Synthetic(input, input.liveState ? `${input.liveState.state}: ${input.liveState.reason}` : 'compatibility could not be revalidated');
+    }
     if (input.liveState.variantId !== input.sensor.variantId) return v2Synthetic(input, `variant-drift: manifest ${input.sensor.variantId}, live ${input.liveState.variantId ?? 'none'}; run \`awm sensors init\``);
     const variant: SensorVariant | undefined = input.liveSensor?.variants.find(candidate => candidate.id === input.sensor.variantId);
     if (!variant) return v2Synthetic(input, 'variant-drift: selected live variant has no command; run `awm sensors init`');
     const common = {
         name: input.name,
+        certification: input.liveState.state === 'certified' ? 'certified' as const : 'operational-unverified' as const,
         ...(variant.formatter ? { formatter: variant.formatter } : {}),
         ...timeout(input.projectTimeout ?? input.sensor.timeout, input.packTimeout ?? input.liveSensor?.timeout, input.sensor.fast ?? input.liveSensor?.fast ?? false),
         requestedScope,

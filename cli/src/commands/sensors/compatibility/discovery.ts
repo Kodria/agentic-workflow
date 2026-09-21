@@ -168,12 +168,26 @@ export function discoverProjectEvidence(cwd: unknown, pack: SensorPack, dependen
         tools.add(variant.requirements.tool);
         if (variant.command?.resolution === 'path' && variant.command.packageManager === variant.requirements.tool) pathTools.add(variant.requirements.tool);
     }
+    // Un proyecto que todavia no declaro su gestor —sin lockfile y sin campo
+    // `packageManager`— es el caso de un `package.json` recien creado, y era el
+    // unico caso en que un gestor presente en PATH quedaba estructuralmente
+    // invisible: sin lockfile, `packageManager` es null, la rama de PATH no se
+    // toma, y `npm` se buscaba en `node_modules/npm` (donde jamas esta). El
+    // sensor `test` del pack js-ts reportaba `tool-not-found` con `npm test`
+    // perfectamente ejecutable, y en desatendido eso bloquea la admision (#147).
+    //
+    // Cuando el proyecto NO declaro gestor se sondean todos los gestores del
+    // pack presentes en PATH y la prioridad de las variantes elige: no se
+    // adivina un gestor por defecto, se miden los que hay. Cuando SI lo declaro
+    // —lockfile o campo— solo se sondea ese: un proyecto pnpm nunca resuelve por
+    // npm. Un conflicto de lockfiles no habilita nada: sigue sin sondearse.
+    const undeterminedPackageManager = packageManager === null && lockManagers.size === 0;
     const environment = pythonEnvironment(root);
     const sitePackages = environment ? pythonSitePackages(root, environment.rootParts, targetPlatform) : [];
     const toolVersions: Record<string, string | null> = {};
     const toolProvenance: ProjectEvidence['toolProvenance'] = {};
     for (const tool of [...tools].sort()) {
-        if (pathTools.has(tool) && packageManager === tool) {
+        if (pathTools.has(tool) && (packageManager === tool || undeterminedPackageManager)) {
             // Discovery/status is read-only. A PATH executable is not inspected or
             // executed here; callers that already possess trusted runtime evidence
             // may inject it explicitly for an execution-time compatibility check.
