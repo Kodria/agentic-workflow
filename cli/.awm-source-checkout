@@ -1,9 +1,0 @@
-Este archivo marca un checkout de fuente del CLI, no una instalación publicada.
-
-`cli/package.json` declara `files: ["dist", "prebuilds"]`, así que este archivo
-jamás viaja en el tarball de npm. Su presencia es lo único que habilita los
-seams de test que, de otro modo, serían alcanzables desde el entorno en una
-instalación real — hoy AWM_CURRENTNESS_LATEST_CLI (ver
-src/core/currentness/source-checkout.ts).
-
-No lo agregues a `files` ni lo copies dentro de dist/.
