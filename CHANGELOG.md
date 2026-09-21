@@ -1,3 +1,8 @@
+## v9.11.7 - 2026-09-21
+
+### Fixes
+- **hooks:** prune the legacy AWM entry so Codex stops running the session hook twice (#185)
+
 ## v9.11.6 - 2026-09-21
 
 ### Fixes
