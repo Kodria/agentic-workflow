@@ -32,7 +32,7 @@ describe('sanitizeDeclaredField', () => {
     });
 
     it('no deja ESC ni otros C0 sobrevivir aunque el saneo markdown no los toque', () => {  // verifies confirmed Finding 1
-        // eslint-disable-next-line no-control-regex -- verificamos la ausencia deliberada de C0
+        // Verificamos la ausencia deliberada de C0.
         expect(sanitizeDeclaredField('name\x1b[31mred\x07')).not.toMatch(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/);
     });
 

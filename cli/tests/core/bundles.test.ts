@@ -9,7 +9,6 @@ import {
     resolveBundleClosure,
     defaultScopeForBundle,
     createBundleDiagnosticReporter,
-    BundleDefinition,
 } from '../../src/core/bundles';
 
 function makeFixture(): string {

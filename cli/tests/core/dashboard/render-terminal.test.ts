@@ -26,7 +26,7 @@ describe('renderFullTerminal', () => {
     it('renders all lifecycle sections in canonical order with status and remediation', () => {
         const output = renderFullTerminal(validateDashboardSnapshotV1(completeSnapshot()));
         const headings = ['Machine / install', 'Project readiness', 'Design / planning', 'Execution', 'QA', 'Docs', 'Retro', 'Final / history', 'Processes'];
-        expect(headings.map((heading) => output.indexOf(heading))).toEqual([...headings.map((_, index) => expect.any(Number))].map((_, index) => expect.any(Number)));
+        expect(headings.map((heading) => output.indexOf(heading))).toEqual(headings.map(() => expect.any(Number)));
         for (let index = 1; index < headings.length; index++) expect(output.indexOf(headings[index])).toBeGreaterThan(output.indexOf(headings[index - 1]));
         expect(output).toContain('⚠ Sensors [project.sensors] — 2 stale');
         expect(output).toContain('→ awm sync');

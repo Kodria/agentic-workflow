@@ -84,7 +84,7 @@ describe('directory fsync has exactly one implementation', () => {
         expect(rejects(regression, 1)).toBe(true);
 
         // The sanctioned replacement carries no directory open at all.
-        expect(regression.map((_, i) => i).some(i => rejects(['fsyncDirSync(path.dirname(file));'], 0))).toBe(false);
+        expect(rejects(['fsyncDirSync(path.dirname(file));'], 0)).toBe(false);
 
         // Flushing a FILE descriptor stays legal — that is a real, portable fsync.
         const fileFlush = ["const fd = fs.openSync(temporary, 'wx', 0o600);", 'fs.fsyncSync(fd);'];

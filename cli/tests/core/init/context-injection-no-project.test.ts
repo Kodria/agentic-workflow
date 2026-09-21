@@ -26,7 +26,6 @@
 // purpose, and this step read that as "no project found" and wrote into cwd anyway —
 // under the one flag whose entire promise is that it won't touch the project.
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { stepContextInjection } from '../../../src/core/init/steps';
 import { planInitMutationTargets } from '../../../src/core/init/mutation-targets';

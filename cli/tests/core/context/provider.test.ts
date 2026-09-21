@@ -217,7 +217,7 @@ describe('composedOrchestrators', () => {
             { name: 'a\x1bx', appliesWhen: 'w\x07', terminatesTo: 't\x00' },
         ]);
         expect(out[0].name).toBe('ax');
-        // eslint-disable-next-line no-control-regex -- verificamos la ausencia deliberada de C0
+        // Verificamos la ausencia deliberada de C0.
         const controlCharPattern = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
         expect(out[0].name).not.toMatch(controlCharPattern);
         expect(out[0].appliesWhen).not.toMatch(controlCharPattern);
@@ -233,7 +233,7 @@ describe('composedOrchestrators', () => {
                 { name: 'evil\x1b[31m', appliesWhen: 'w', terminatesTo: 't' },
             ],
         });
-        // eslint-disable-next-line no-control-regex -- verificamos la ausencia deliberada de C0
+        // Verificamos la ausencia deliberada de C0.
         expect(ctx.markdown).not.toMatch(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/);
     });
 

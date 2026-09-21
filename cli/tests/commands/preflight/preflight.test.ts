@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { execFileSync, execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 import { preflight } from '../../../src/commands/preflight/checks';
 import { exitCodeFor, formatReport } from '../../../src/commands/preflight';
@@ -22,7 +22,6 @@ jest.mock('../../../src/commands/sensors/run', () => ({
 jest.mock('../../../src/core/currentness/check', () => ({
     checkCurrentness: jest.fn(),
 }));
-const mockExecSync = execSync as jest.MockedFunction<typeof execSync>;
 const mockRunSensors = runSensors as jest.MockedFunction<typeof runSensors>;
 const mockCheckCurrentness = checkCurrentness as jest.MockedFunction<typeof checkCurrentness>;
 

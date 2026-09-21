@@ -23,7 +23,6 @@ export function findProjectRoot(startDir: string): string | null {
     } catch {
         return null;
     }
-    // eslint-disable-next-line no-constant-condition
     while (true) {
         if (
             fs.existsSync(path.join(dir, '.git')) ||

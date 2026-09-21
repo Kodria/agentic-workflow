@@ -1,6 +1,6 @@
 // cli/tests/release/orchestrator.test.ts
 import { release, ReleaseIO, ReleaseOpts } from '../../src/release/orchestrator';
-import { GIT_LOG_FORMAT, US, RS } from '../../src/release/core';
+import { US, RS } from '../../src/release/core';
 
 function makeIO(over: Partial<ReleaseIO> & { commits?: string; tags?: string; npmView?: string } = {}): {
   io: ReleaseIO; calls: string[]; versions: () => { pkg: string; lock: string };

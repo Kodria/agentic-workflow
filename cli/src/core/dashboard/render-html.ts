@@ -16,13 +16,6 @@ function sectionHtml(section: DashboardSectionV1, supplement = ''): string {
     return `<section id="${section.id}" aria-label="${title}"><header><h2>${title}</h2><span class="eyebrow">${escapeHtml(section.availability.replace('_', ' '))}</span></header><div class="section-body">${availability}${supplement}${rows}</div></section>`;
 }
 
-function diagnosticCards(items: DashboardSectionV1['items'], attribute: 'data-machine-diagnostics' | 'data-machine-preparation'): string {
-    const labels = ['installation', 'sensors', 'permissions'];
-    const cards = items.slice(0, 3).map((item, index) => `<li data-diagnostic-card="${labels[index] ?? 'diagnostic'}"><span class="state ${item.state}">${STATE_GLYPH[item.state]} ${STATE_TEXT[item.state]}</span><strong>${escapeHtml(item.label)}</strong><span>${item.detail ? escapeHtml(item.detail) : 'No additional detail'}</span></li>`).join('') || '<li><span class="state not_applicable">— Not applicable</span><strong>No machine observations</strong><span>Machine diagnostics are not available.</span></li>';
-    if (attribute === 'data-machine-diagnostics') return `<section data-machine-diagnostics aria-labelledby="machine-diagnostics-heading"><header><h2 id="machine-diagnostics-heading">Machine diagnostics</h2></header><div class="section-body"><ul class="diagnostic-grid">${cards}</ul></div></section>`;
-    return `<div class="machine-preparation-strip" data-machine-preparation role="group" aria-labelledby="machine-preparation-heading"><h3 id="machine-preparation-heading">Preparación de máquina</h3><ul class="diagnostic-grid">${cards}</ul></div>`;
-}
-
 function machineBento(items: DashboardSectionV1['items']): string {
     const names = ['Instalación', 'Sensores globales', 'Persistencia'];
     return `<div class="machine-bento" data-machine-bento>${names.map((name, index) => {

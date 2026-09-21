@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { parseJsonNoDuplicate } from './json';
-import type { CompactPlanManifest, CompactPlanV2, PlanDiagnostic, PlanSlice, PlanValidationReport } from './types';
+import type { CompactPlanManifest, CompactPlanV2, PlanSlice, PlanValidationReport } from './types';
 import { executionPlanDigest } from './identity';
 
 const START = '<!-- AWM:COMPACT-SLICES:START v1 -->';

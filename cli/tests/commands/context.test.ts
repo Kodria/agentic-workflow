@@ -78,7 +78,7 @@ describe('awm context orchestrators', () => {
     it('sanea bytes de control antes de escribir a la terminal', () => {         // verifies R5.4
         const hostil = { name: 'x\x1b[31m', appliesWhen: 'w\x07', terminatesTo: 't\x00' };
         const r = runContextOrchestrators(collected([hostil]), { json: false });
-        // eslint-disable-next-line no-control-regex -- verificamos la ausencia deliberada de C0
+        // Verificamos la ausencia deliberada de C0.
         expect(r.stdout).not.toMatch(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/);
     });
 });

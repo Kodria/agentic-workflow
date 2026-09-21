@@ -88,7 +88,7 @@ describe('awm process show (texto)', () => {
         });
         const r = runProcessShow({ models: [hostile], diagnostics: [] }, 'mi-proceso', false);
         expect(r.code).toBe(0);
-        // eslint-disable-next-line no-control-regex -- necesitamos verificar la ausencia deliberada de C0
+        // Necesitamos verificar la ausencia deliberada de C0.
         expect(r.stdout).not.toMatch(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/);
         expect(r.stdout).toContain('Objetivo[31mmalicioso[0m.');
         expect(r.stdout).toContain('Uno]0;pwned');

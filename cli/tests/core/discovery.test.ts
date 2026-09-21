@@ -11,7 +11,6 @@ const SKILLS_ROOT = CONTENT_ROOT;
 const WORKFLOWS_ROOT = CONTENT_ROOT;
 // For backward-compat with mock expectations that check SKILLS_DIR-style paths:
 const SKILLS_DIR = path.join(CONTENT_ROOT, 'skills');
-const WORKFLOWS_DIR = path.join(CONTENT_ROOT, 'workflows');
 const directoryStat = { dev: 1n, ino: 3n, isDirectory: () => true, isSymbolicLink: () => false };
 const skillStat = { dev: 1n, ino: 2n, size: 0n, isFile: () => true, isSymbolicLink: () => false };
 

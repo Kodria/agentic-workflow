@@ -110,7 +110,6 @@ export function computeLayout(storyMap: StoryMap): Layout {
 
     for (let ai = 0; ai < activities.length; ai++) {
         const activity = activities[ai];
-        const numTaskCols = Math.max(1, activity.tasks.length);
         const groupWidth = activityGroupWidths[ai];
 
         // Activity card — spans its task columns

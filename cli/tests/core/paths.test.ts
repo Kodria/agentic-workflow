@@ -8,7 +8,6 @@ import {
   platformLabel,
   noteWindowsCaveat,
   WINDOWS_KNOWN_GAP,
-  resolveOnPath,
 } from '../../src/core/paths';
 
 

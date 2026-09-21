@@ -23,7 +23,6 @@
 // Cualquier chequeo indemostrable (no existe, no legible, mismatch, fallo de
 // git) es "ownership NO probado" — fail-closed (R4.6): el caller nunca
 // adopta ni borra lo que no pudo probar.
-import fs from 'fs';
 import { readDescriptor } from './descriptor';
 import { sameExistingPath } from '../paths';
 import { ownedWorktreeExists } from './git';

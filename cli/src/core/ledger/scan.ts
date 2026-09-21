@@ -170,7 +170,6 @@ export function scanProjectLedgers(projectRoot: string, overrides: Partial<Ledge
         if (!assertDirectoryInside(root, archive)) throw new Error('ledger archive directory escapes project root');
         directories.push({ directory: archive, archive: true });
     }
-    let filesSeen = 0;
     let linesSeen = 0;
     let entryLimitReached = false;
     let omittedEvidenceRefs = 0;
@@ -178,7 +177,6 @@ export function scanProjectLedgers(projectRoot: string, overrides: Partial<Ledge
     const collected = collectBoundedCandidates(root, directories, limits.maxFiles);
     for (const { isArchive, target } of collected.candidates.slice(0, limits.maxFiles)) {
         if (entryLimitReached) break;
-        filesSeen += 1;
         const stat = fs.lstatSync(target);
         if (stat.isSymbolicLink()) { skip('symlink-entry'); continue; }
         if (!stat.isFile()) { skip('nonregular-entry'); continue; }

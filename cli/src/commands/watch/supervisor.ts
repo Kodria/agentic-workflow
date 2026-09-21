@@ -1,8 +1,6 @@
 // Loop foreground (R4.4/R4.5): tick = apply -> collect/spawn -> stall -> gate.
 // COMPLETE exige gate verde (que exige cero vivos): drenaje ANTES de declarar.
 // Custodia BLOCKED: el loop sigue, el lock NO se libera, nada se mata.
-import fs from 'fs';
-import path from 'path';
 import { readJournal, writeJournal, appendEvent } from '../../core/journal/store';
 import { computeFingerprint, reconcileUnattendedRecovery } from '../../core/journal/fingerprint';
 import { validatePlanFile } from '../../core/plan/validate';

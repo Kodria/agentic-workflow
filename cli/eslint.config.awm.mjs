@@ -3,6 +3,7 @@
 // Usage: npx eslint . --config eslint.config.awm.mjs --format json
 
 import tsParser from '@typescript-eslint/parser';
+import tsPlugin from '@typescript-eslint/eslint-plugin';
 
 let projectConfig = [];
 try {
@@ -56,17 +57,25 @@ export default [
   {
     files: ['**/*.ts'],
     languageOptions: { parser: tsParser, parserOptions: { sourceType: 'module' } },
+    plugins: { '@typescript-eslint': tsPlugin },
     rules: {
       // TypeScript resuelve identificadores no definidos en compilacion; sobre
       // .ts esta regla solo produce falsos positivos con tipos y globals.
       'no-undef': 'off',
-      // 'warn', no 'error', SOLO en este paso: prender el gate destapa 263
-      // hallazgos reales en 85 archivos que nunca se lintearon (211 args sin
-      // usar, 48 vars/imports muertos). Se reportan y se cuentan desde ya; el
-      // paso siguiente los limpia y sube esto a 'error'. Un 'error' de entrada
-      // dejaria CI en rojo con un diff mecanico de 85 archivos encima del
-      // arreglo del gate.
-      'no-unused-vars': ['warn', { vars: 'all', args: 'after-used', argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      // La regla base de eslint no entiende anotaciones de tipo, asi que marca
+      // como "arg sin usar" cada nombre de parametro dentro de un TIPO de
+      // funcion — `type FingerprintNow = (argv: string[], ...) => ...` daba tres
+      // hallazgos. Cuando #171 prendio el gate, esa era la mayoria del backlog:
+      // 259 hallazgos con la regla base contra 64 con la regla TS-aware, medido
+      // sobre el mismo arbol. Renombrar 200 nombres a `_x` habria empeorado la
+      // legibilidad de los tipos para silenciar ruido, asi que el arreglo es la
+      // regla correcta, no el renombre. Ahora si es 'error': el resto de los
+      // hallazgos son reales y estan limpios.
+      'no-unused-vars': 'off',
+      '@typescript-eslint/no-unused-vars': ['error', {
+        vars: 'all', args: 'after-used', argsIgnorePattern: '^_', varsIgnorePattern: '^_',
+        caughtErrors: 'all', caughtErrorsIgnorePattern: '^_',
+      }],
     },
   },
 ];
