@@ -1,3 +1,8 @@
+## v9.11.8 - 2026-09-22
+
+### Fixes
+- **ci:** stabilize Windows gate cleanup (#187)
+
 ## v9.11.7 - 2026-09-21
 
 ### Fixes
