@@ -24,6 +24,13 @@ function command(cwd: string, executable: string, args: string[], env = process.
     return spawnSync(executable, args, { cwd, encoding: 'utf8', env, shell: needsShell });
 }
 
+function assertCommandSucceeded(result: SpawnSyncReturns<string>, label: string): void {
+    if (result.status === 0) return;
+    const output = [result.error?.message, result.stderr, result.stdout]
+        .filter(Boolean).join('\n').trim().slice(-4_000);
+    throw new Error(`${label} failed (status=${String(result.status)}, signal=${String(result.signal)})${output ? `\n${output}` : ''}`);
+}
+
 /** Published evidence accepts only exact versions and immutable git tags. */
 export function assertImmutableArtifacts(version: string | undefined, tag: string | undefined, commit: string | undefined, remote: string): void {
     if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('published CLI version must be an exact immutable semver');
@@ -79,7 +86,10 @@ acceptance('published doctor and evidence acceptance (R8.7)', () => {
             const project = path.join(root, 'project');
             const home = path.join(root, 'home');
             fs.mkdirSync(project, { recursive: true }); fs.mkdirSync(home, { recursive: true });
-            expect(command(root, 'npm', ['install', '--prefix', artifacts, '--ignore-scripts', '--no-audit', '--no-fund', `agentic-workflow-manager@${cliVersion}`]).status).toBe(0);
+            assertCommandSucceeded(
+                command(root, 'npm', ['install', '--prefix', artifacts, '--ignore-scripts', '--no-audit', '--no-fund', `agentic-workflow-manager@${cliVersion}`]),
+                `npm install agentic-workflow-manager@${cliVersion}`,
+            );
             expect(command(root, 'git', ['clone', '--depth', '1', '--branch', registryTag!, registryRemote, registry]).status).toBe(0);
             expect(command(registry, 'git', ['describe', '--exact-match', '--tags', 'HEAD']).stdout.trim()).toBe(registryTag);
             expect(command(registry, 'git', ['rev-parse', 'HEAD']).stdout.trim()).toBe(registryCommit);
@@ -133,6 +143,10 @@ acceptance('published doctor and evidence acceptance (R8.7)', () => {
 });
 
 describe('published artifact provenance guard', () => {
+    test('reports the command diagnostic when an exact install fails', () => {
+        const failure = { status: 1, signal: null, stdout: '', stderr: 'npm ERR! code E404\nnpm ERR! tarball not found' } as SpawnSyncReturns<string>;
+        expect(() => assertCommandSucceeded(failure, 'npm install agentic-workflow-manager@9.8.0')).toThrow(/E404[\s\S]*tarball not found/);
+    });
     test.each(['file:../cli', '../cli', 'latest', 'workspace:*', '8.4.0@latest'])('rejects mutable CLI reference %s', (version) => {
         expect(() => assertImmutableArtifacts(version, 'v3.2.0', 'a'.repeat(40), registryRemote)).toThrow(/published CLI/i);
     });

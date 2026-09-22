@@ -240,7 +240,7 @@ jobs:
         run: npm ci
       - name: Verify publication visibility guard
         run: node --test .github/scripts/wait-npm-publication.test.cjs
-      - name: Wait for exact npm artifact visibility
+      - name: Wait for exact npm artifact installability
         env:
           AWM_PUBLISHED_CLI_VERSION: ${{ needs.release.outputs.version }}
         run: node .github/scripts/wait-npm-publication.cjs

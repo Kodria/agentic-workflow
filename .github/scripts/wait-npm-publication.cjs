@@ -1,13 +1,38 @@
 const { setTimeout: sleep } = require('node:timers/promises');
+const { spawnSync } = require('node:child_process');
+const { mkdtempSync, rmSync } = require('node:fs');
+const { tmpdir } = require('node:os');
+const { join } = require('node:path');
+
+function installExact(version, timeoutMs) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error('npm install timeout must be a positive bounded integer');
+  const root = mkdtempSync(join(tmpdir(), 'awm-publication-install-'));
+  try {
+    const result = spawnSync('npm', [
+      'install', '--prefix', join(root, 'consumer'), '--cache', join(root, 'cache'),
+      '--ignore-scripts', '--no-audit', '--no-fund', '--prefer-online',
+      '--registry=https://registry.npmjs.org/', `agentic-workflow-manager@${version}`,
+    ], { encoding: 'utf8', shell: process.platform === 'win32', timeout: timeoutMs });
+    const detail = [result.error?.message, result.stderr, result.stdout]
+      .filter(Boolean).join('\n').trim().slice(-1_000);
+    return { ok: result.status === 0, detail };
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+}
 
 // Publishing succeeds before every public npm edge can serve the new artifact.
 // Wait read-only, with a hard deadline; never retry the publication itself.
 async function waitForPublication(version, options = {}) {
   if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('npm visibility requires an exact version');
   const { fetch = globalThis.fetch, sleep: pause = sleep, now = Date.now, log = console.log,
-    deadlineMs = 300_000, intervalMs = 10_000, requestTimeoutMs = 10_000 } = options;
-  for (const value of [deadlineMs, intervalMs, requestTimeoutMs]) {
-    if (!Number.isSafeInteger(value) || value <= 0 || value > 300_000) throw new Error('visibility timing must be a positive bounded integer');
+    install = installExact, deadlineMs = 600_000, intervalMs = 10_000, requestTimeoutMs = 10_000 } = options;
+  if (typeof fetch !== 'function' || typeof pause !== 'function' || typeof now !== 'function' ||
+    typeof log !== 'function' || typeof install !== 'function') throw new Error('npm visibility dependencies must be functions');
+  if (!Number.isSafeInteger(deadlineMs) || deadlineMs <= 0 || deadlineMs > 900_000 ||
+    !Number.isSafeInteger(intervalMs) || intervalMs <= 0 || intervalMs > 300_000 ||
+    !Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs <= 0 || requestTimeoutMs > 300_000) {
+    throw new Error('visibility timing must be a positive bounded integer');
   }
   const endpoint = `https://registry.npmjs.org/agentic-workflow-manager/${version}`;
   const tarball = `https://registry.npmjs.org/agentic-workflow-manager/-/agentic-workflow-manager-${version}.tgz`;
@@ -33,8 +58,14 @@ async function waitForPublication(version, options = {}) {
         throw new Error('npm visibility metadata does not identify the exact immutable artifact');
       }
       const archive = now() < deadline ? await request(tarball, 'HEAD') : null;
-      if (archive?.ok) { log(`npm artifact ${version} is visible with integrity ${metadata.dist.integrity}`); return metadata; }
-      transient(archive);
+      if (archive?.ok) {
+        const installed = await install(version, Math.max(1, Math.min(60_000, deadline - now())));
+        if (installed?.ok === true) {
+          log(`npm artifact ${version} is installable with integrity ${metadata.dist.integrity}`);
+          return metadata;
+        }
+        last = `npm install: ${String(installed?.detail || 'exit non-zero').slice(-1_000)}`;
+      } else transient(archive);
     } else transient(response);
     log(`npm artifact ${version} not yet visible (${last}); bounded read-only retry`);
     const remaining = deadline - now();
