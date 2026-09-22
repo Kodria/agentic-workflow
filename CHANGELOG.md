@@ -1,3 +1,8 @@
+## v9.11.9 - 2026-09-22
+
+### Fixes
+- **release:** verify published npm installability (#188)
+
 ## v9.11.8 - 2026-09-22
 
 ### Fixes
