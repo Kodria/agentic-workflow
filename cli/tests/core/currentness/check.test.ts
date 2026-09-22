@@ -100,6 +100,21 @@ describe('checkCurrentness', () => {
         }));
     });
 
+    it('does not claim a CLI ahead of npm latest is stale or recommend a downgrade', async () => {
+        const { checkCurrentness } = require('../../../src/core/currentness/check');
+        const result = await checkCurrentness(root, deps({
+            cliVersion: () => '1.2.4',
+        }));
+
+        expect(result.components[0]).toEqual(expect.objectContaining({
+            installed: '1.2.4',
+            latest: '1.2.3',
+            status: 'unverifiable',
+            detail: expect.stringMatching(/ahead.*npm latest/i),
+        }));
+        expect(result.components[0].remedy).not.toContain('npm i -g');
+    });
+
     it('marks a registry tag above the max-safe numeric boundary as stale', async () => {
         const installed = 'v1.9007199254740992.0';
         const latest = 'v1.9007199254740993.0';
@@ -163,6 +178,101 @@ describe('checkCurrentness', () => {
         ));
 
         expect(result.components.some((c: { status: string }) => c.status === 'unverifiable')).toBe(true);
+    });
+
+    it('identifies missing exact-tag provenance without blaming source access', async () => {
+        const { checkCurrentness } = require('../../../src/core/currentness/check');
+        const result = await checkCurrentness(root, deps({
+            git: jest.fn().mockImplementation(async (_cwd: string, args: string[]) => {
+                if (args[0] === 'describe') throw new Error('fatal: no tag exactly matches HEAD');
+                if (args[0] === 'ls-remote') return `${'a'.repeat(40)}\trefs/tags/v1.2.3\n`;
+                if (args[0] === 'remote') return 'https://example.test/team/repo.git\n';
+                return `${'a'.repeat(40)}\n`;
+            }),
+        }));
+
+        expect(result.components[1]).toEqual(expect.objectContaining({
+            status: 'unverifiable',
+            detail: expect.stringMatching(/exact.*tag.*HEAD/i),
+            remedy: expect.stringMatching(/stable tag/i),
+        }));
+        expect(result.components[1].remedy).not.toContain('Restore source access');
+    });
+
+    it('identifies origin mismatch while keeping credential-bearing remotes out of diagnostics', async () => {
+        const { checkCurrentness } = require('../../../src/core/currentness/check');
+        const result = await checkCurrentness(root, deps({
+            git: jest.fn().mockImplementation(async (_cwd: string, args: string[]) => {
+                if (args[0] === 'remote') return 'https://user:secret@example.test/team/other.git\n';
+                if (args[0] === 'ls-remote') return `${'a'.repeat(40)}\trefs/tags/v1.2.3\n`;
+                if (args[0] === 'describe') return 'v1.2.3\n';
+                return `${'a'.repeat(40)}\n`;
+            }),
+        }));
+
+        expect(result.components[1]).toEqual(expect.objectContaining({
+            status: 'unverifiable',
+            detail: expect.stringMatching(/origin.*configured remote/i),
+            remedy: expect.stringMatching(/origin/i),
+        }));
+        expect(JSON.stringify(result)).not.toContain('secret');
+        expect(JSON.stringify(result)).not.toContain('user:');
+    });
+
+    it('makes an SSH-user-only origin mismatch visible after sanitizing both remotes', async () => {
+        const configured = 'ssh://github.example/team/repo.git';
+        const { checkCurrentness } = require('../../../src/core/currentness/check');
+        const result = await checkCurrentness(root, deps({
+            listRegistries: () => [{ name: 'baseline', remote: configured, contentRoot: '/registry' }],
+            git: jest.fn().mockImplementation(async (_cwd: string, args: string[]) => {
+                if (args[0] === 'remote') return 'ssh://git@github.example/team/repo.git\n';
+                if (args[0] === 'ls-remote') return `${'a'.repeat(40)}\trefs/tags/v1.2.3\n`;
+                if (args[0] === 'describe') return 'v1.2.3\n';
+                return `${'a'.repeat(40)}\n`;
+            }),
+        }));
+
+        expect(result.components[1]).toEqual(expect.objectContaining({
+            status: 'unverifiable',
+            detail: expect.stringMatching(/origin.*SSH userinfo present.*configured.*no SSH userinfo/i),
+        }));
+        expect(JSON.stringify(result)).not.toContain('git@');
+    });
+
+    it('distinguishes a remote tag query failure from local registry failures', async () => {
+        const { checkCurrentness } = require('../../../src/core/currentness/check');
+        const result = await checkCurrentness(root, deps({
+            git: jest.fn().mockImplementation(async (_cwd: string, args: string[]) => {
+                if (args[0] === 'ls-remote') throw new Error('remote unavailable');
+                if (args[0] === 'remote') return 'https://example.test/team/repo.git\n';
+                if (args[0] === 'describe') return 'v1.2.3\n';
+                return `${'a'.repeat(40)}\n`;
+            }),
+        }));
+
+        expect(result.components[1]).toEqual(expect.objectContaining({
+            status: 'unverifiable',
+            detail: expect.stringMatching(/remote.*tags/i),
+            remedy: expect.stringMatching(/source access/i),
+        }));
+    });
+
+    it('reports a remote with no stable tags as a tag problem', async () => {
+        const { checkCurrentness } = require('../../../src/core/currentness/check');
+        const result = await checkCurrentness(root, deps({
+            git: jest.fn().mockImplementation(async (_cwd: string, args: string[]) => {
+                if (args[0] === 'ls-remote') return `${'a'.repeat(40)}\trefs/tags/v1.2.4-rc.1\n`;
+                if (args[0] === 'remote') return 'https://example.test/team/repo.git\n';
+                if (args[0] === 'describe') return 'v1.2.3\n';
+                return `${'a'.repeat(40)}\n`;
+            }),
+        }));
+
+        expect(result.components[1]).toEqual(expect.objectContaining({
+            status: 'unverifiable',
+            detail: expect.stringMatching(/no stable.*tag/i),
+            remedy: expect.stringMatching(/stable tag/i),
+        }));
     });
 
     it('bypasses passive update controls and makes no writes', async () => {

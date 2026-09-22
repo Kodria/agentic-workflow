@@ -209,7 +209,10 @@ either can block unattended handoff. Stale CLI remediation is
 `npm i -g agentic-workflow-manager@latest` followed by a fresh process; stale
 registries use `awm update --yes`, while pinned-behind registries require
 `awm unpin REGISTRY_NAME` followed by `awm update --yes`. Unverifiable authority
-requires restoring access and rerunning strict preflight.
+remains blocking and reports its cause: a CLI ahead of npm `latest` calls for
+checking both versions, local registry tag or origin problems call for inspecting
+the checkout, and only a failed remote tag query calls for restoring source
+access. Rerun strict preflight after resolving the reported cause.
 If the local registry inventory itself is malformed, strict JSON still emits an
 `unverifiable` `registry:inventory` component and its repair remedy; it does not
 fall back to an unstructured error.
