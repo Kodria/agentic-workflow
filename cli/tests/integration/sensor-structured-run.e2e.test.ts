@@ -2,6 +2,7 @@ import { spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { removeFixtureTree } from '../helpers/fixture-cleanup';
 
 const cliDir = path.resolve(__dirname, '../..');
 const bin = path.join(cliDir, 'dist/src/index.js');
@@ -133,6 +134,6 @@ test('compiled sensors run materializes a v2 registry command and passes its lit
         // preserve argv); this sentinel is the side-effect half of the regression.
         expect(fs.existsSync(path.join(fixture.project, 'structured-shell-injection'))).toBe(false);
     } finally {
-        fs.rmSync(fixture.root, { recursive: true, force: true });
+        removeFixtureTree(fixture.root);
     }
 });
