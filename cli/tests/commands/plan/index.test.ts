@@ -14,6 +14,7 @@ import { canonicalPolicyDigest } from '../../../src/core/model-policy/canonical'
 import { capabilityReceiptDigest } from '../../../src/core/model-policy/capabilities';
 import { reserveRoutingAttempt } from '../../../src/core/model-policy/journal';
 import { emptyState, isRoutingEnvelope } from '../../../src/core/journal/types';
+import { removeFixtureTree } from '../../helpers/fixture-cleanup';
 
 const stdoutWrite = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
@@ -195,7 +196,7 @@ describe('plan validate Commander wiring', () => {
             expect(human.stdout + json.stdout).not.toMatch(/full-quality|alternate|legacy path/i);
             expect(fs.readFileSync(plan).equals(before)).toBe(true);
         } finally {
-            fs.rmSync(fixtureRoot, { recursive: true, force: true });
+            removeFixtureTree(fixtureRoot);
         }
     });
 

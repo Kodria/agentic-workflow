@@ -114,11 +114,6 @@ jobs:
           path: cli/prebuilds/${{ matrix.target }}/secure_fs.node
           if-no-files-found: error
 
-      - name: Windows admission smoke
-        if: runner.os == 'Windows'
-        working-directory: cli
-        run: npx jest tests/commands/plan/index.test.ts --runInBand --bail
-
       - name: Tests
         working-directory: cli
         run: npx jest --runInBand --bail

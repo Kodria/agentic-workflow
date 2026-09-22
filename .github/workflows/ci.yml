@@ -108,11 +108,6 @@ jobs:
       - name: Verify published sensor support matrix
         run: git diff --exit-code -- docs/support-matrix.md
 
-      - name: Windows admission smoke
-        if: runner.os == 'Windows'
-        working-directory: cli
-        run: npx jest tests/commands/plan/index.test.ts --runInBand --bail
-
       - name: Test
         working-directory: cli
         run: npx jest --runInBand --bail
