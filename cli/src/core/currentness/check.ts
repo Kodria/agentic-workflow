@@ -52,6 +52,16 @@ function sanitizeSource(value: string): string {
     return authoritativeSource(value) ?? '[configured remote]';
 }
 
+function sshUserInfoLabel(value: string): string {
+    try {
+        const url = new URL(value);
+        if (url.protocol === 'ssh:') return url.username ? 'SSH userinfo present' : 'no SSH userinfo';
+    } catch {
+        if (/^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[A-Za-z0-9._/-]+$/.test(value)) return 'SSH userinfo present';
+    }
+    return 'no SSH userinfo';
+}
+
 function parseVersion(value: string): [string, string, string] | null {
     const match = STRICT_SEMVER.exec(value.trim());
     if (!match) return null;
@@ -138,30 +148,35 @@ async function registryComponent(registry: RegistrySource, git: GitTransport, pr
     const authorizedSource = authoritativeSource(registry.remote);
     const source = authorizedSource ?? '[configured remote]';
     const pin = prefs.pins?.[registry.name];
-    if (!authorizedSource) return unavailable(`registry:${registry.name}`, source, checkedAt, null, pin);
-    let origin: string;
-    let head: string;
-    let exactTag: string;
-    let remoteTags: string;
-    try {
-        [origin, head, exactTag, remoteTags] = await Promise.all([
-            deadline(git(registry.contentRoot, ['remote', 'get-url', 'origin'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
-            deadline(git(registry.contentRoot, ['rev-parse', 'HEAD'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
-            deadline(git(registry.contentRoot, ['describe', '--tags', '--exact-match', 'HEAD'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
-            deadline(git(registry.contentRoot, ['ls-remote', '--tags', registry.remote], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
-        ]);
-    } catch {
-        return unavailable(`registry:${registry.name}`, source, checkedAt, null, pin);
-    }
-    const installed = exactTag.trim();
-    const latest = latestStableTag(remoteTags);
-    const localHead = head.trim();
+    const fail = (detail: string, remedy: string, installed: string | null = null, latest: string | null = null): CurrentnessComponent => ({
+        ...unavailable(`registry:${registry.name}`, source, checkedAt, installed, pin), latest, detail, remedy,
+    });
+    if (!authorizedSource) return fail('Configured registry remote is not an authoritative HTTPS or SSH source.', 'Configure an authoritative registry remote and rerun strict preflight.');
+
+    const [originResult, headResult, tagResult, remoteResult] = await Promise.allSettled([
+        deadline(git(registry.contentRoot, ['remote', 'get-url', 'origin'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
+        deadline(git(registry.contentRoot, ['rev-parse', 'HEAD'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
+        deadline(git(registry.contentRoot, ['describe', '--tags', '--exact-match', 'HEAD'], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
+        deadline(git(registry.contentRoot, ['ls-remote', '--tags', registry.remote], { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_OUTPUT_BYTES })),
+    ]);
+    if (originResult.status === 'rejected') return fail('Could not read local registry origin.', 'Inspect the local registry checkout and its origin remote.');
+    if (headResult.status === 'rejected') return fail('Could not read local registry HEAD.', 'Inspect or repair the local registry checkout.');
+    if (tagResult.status === 'rejected') return fail('Could not read an exact tag at local registry HEAD.', 'Check out a stable tag in the local registry and rerun strict preflight.');
+    if (remoteResult.status === 'rejected') return fail('Could not query authoritative remote tags.', 'Restore source access and rerun strict preflight.');
+
+    const installed = tagResult.value.trim();
+    const latest = latestStableTag(remoteResult.value);
+    const localHead = headResult.value.trim();
     const installedVersion = parseVersion(installed);
-    if (!installedVersion || !latest || !/^[0-9a-fA-F]{40,64}$/.test(localHead) || origin.trim() !== registry.remote) {
-        return unavailable(`registry:${registry.name}`, source, checkedAt, installedVersion ? installed : null, pin);
-    }
+    if (!installedVersion) return fail('Local registry HEAD does not have an exact stable tag.', 'Check out a stable tag in the local registry and rerun strict preflight.');
+    if (!latest) return fail('No stable version tag was found on the authoritative remote.', 'Publish a stable tag or correct the configured registry remote.', installed);
+    if (!/^[0-9a-fA-F]{40,64}$/.test(localHead)) return fail('Local registry HEAD is not a valid commit SHA.', 'Inspect or repair the local registry checkout.', installed, latest.tag);
+    if (originResult.value.trim() !== registry.remote) return fail(
+        `Local origin does not match configured remote (origin: ${sanitizeSource(originResult.value.trim())} [${sshUserInfoLabel(originResult.value.trim())}]; configured: ${source} [${sshUserInfoLabel(registry.remote)}]).`,
+        'Align the local origin with the configured registry remote and rerun strict preflight.', installed, latest.tag,
+    );
     const relation = compareStrict(installed, latest.tag);
-    if (relation === null) return unavailable(`registry:${registry.name}`, source, checkedAt, installed, pin);
+    if (relation === null) return fail('Stable registry tags could not be compared.', 'Inspect local and remote stable tags.', installed, latest.tag);
     if (relation === 0 && localHead === latest.sha) {
         return { component: `registry:${registry.name}`, installed, latest: latest.tag, channel: 'stable', source, ...(pin ? { pin } : {}), checkedAt, status: 'current', detail: 'Exact stable tag and configured origin match the authoritative remote.', remedy: 'No action required.' };
     }
@@ -172,7 +187,7 @@ async function registryComponent(registry: RegistrySource, git: GitTransport, pr
             remedy: pin ? `awm unpin ${registry.name} && awm update --yes` : 'awm update --yes',
         };
     }
-    return unavailable(`registry:${registry.name}`, source, checkedAt, installed, pin);
+    return fail('Installed stable tag is ahead of the authoritative remote or does not match its commit.', 'Inspect the local tag and authoritative remote before updating.', installed, latest.tag);
 }
 
 /** Strict, read-only remote currentness check. It intentionally never reads/writes update cache. */
@@ -187,11 +202,14 @@ export async function checkCurrentness(cwd: string, deps: CurrentnessDeps = {}):
 
     const installedCli = getCliVersion();
     const latest = await latestCli(fetchImpl);
-    const cli: CurrentnessComponent = !parseVersion(installedCli) || !latest || compareStrict(installedCli, latest) === null
+    const relation = latest ? compareStrict(installedCli, latest) : null;
+    const cli: CurrentnessComponent = relation === null
         ? unavailable('cli', NPM_SOURCE, checkedAt, parseVersion(installedCli) ? installedCli : null)
-        : compareStrict(installedCli, latest) === 0
+        : relation === 0
             ? { component: 'cli', installed: installedCli, latest, channel: 'stable', source: NPM_SOURCE, checkedAt, status: 'current', detail: 'Installed version equals the npm latest release.', remedy: 'No action required.' }
-            : { component: 'cli', installed: installedCli, latest, channel: 'stable', source: NPM_SOURCE, checkedAt, status: 'stale', detail: 'Installed version is behind the npm latest release.', remedy: `npm i -g ${CLI_PACKAGE_NAME}@latest && rerun in a fresh process` };
+            : relation < 0
+                ? { component: 'cli', installed: installedCli, latest, channel: 'stable', source: NPM_SOURCE, checkedAt, status: 'stale', detail: 'Installed version is behind the npm latest release.', remedy: `npm i -g ${CLI_PACKAGE_NAME}@latest && rerun in a fresh process` }
+                : { component: 'cli', installed: installedCli, latest, channel: 'stable', source: NPM_SOURCE, checkedAt, status: 'unverifiable', detail: 'Installed version is ahead of the npm latest release; remote currentness cannot be established.', remedy: 'Check the installed CLI version and npm latest metadata, then rerun strict preflight.' };
 
     const components = [cli];
     let registries: RegistrySource[];
