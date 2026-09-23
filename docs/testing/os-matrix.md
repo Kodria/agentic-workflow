@@ -5,7 +5,7 @@ Only the **deltas per operating system**. Run [core-acceptance.md](core-acceptan
 | OS | Continuous verification |
 |---|---|
 | Linux | Full suite on `ubuntu-latest`, every PR and every push to `main` |
-| Windows (native) | Full suite and native artifact build on `windows-2022` (x64) and `windows-11-arm` (ARM64), every PR and every push to `main` |
+| Windows (native) | `windows-2022` (x64): full suite and native artifact. `windows-11-arm` (ARM64): the matrix job builds the sole native artifact and runs the remainder; a required hot job runs `track-finalize` and `track-freeze`. Together they cover the full suite, every PR and every push to `main`. |
 | macOS | Full suite on `macos-latest`, every PR and every push to `main`; the manual playbook additionally exercises real agent binaries. |
 | WSL | Reports as Linux; covered by the Linux path |
 

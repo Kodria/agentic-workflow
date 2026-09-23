@@ -85,13 +85,13 @@ El repo es público: los runners no cuestan minutos.
 
 `release.yml` corría sus tests solo en `ubuntu-latest` y no dependía de la matriz `ci` — un workflow aparte, disparado por PR. Un fallo exclusivo de Windows o macOS publicaba a npm igual. **Pasó con la v3.13.7**, que salió con la matriz en rojo. `CLAUDE.md` afirmaba *"CI gates the release on the tests passing"*; era cierto para una plataforma.
 
-`release.yml` ahora tiene su propio job `test` con la matriz de tres sistemas, y el job `release` declara `needs: test`. Rojo en cualquiera de las tres no publica.
+`release.yml` tiene su propio job `test` con la matriz de plataformas. El job `release` declara `needs: [test, windows-arm-hot]`: rojo en cualquier plataforma o en cualquiera de los dos shards ARM no publica. El job ARM dedicado ejecuta `track-finalize` y `track-freeze`; el miembro ARM de la matriz ejecuta el resto y sigue siendo el único productor del artefacto nativo.
 
 **Descartadas:**
 - *Corregir la doc a "sobre Linux"* — honesto y sin riesgo, pero aceptaba que un bug solo-Windows pudiera publicarse. Este ciclo produjo cinco bugs específicos de plataforma; no es hipotético.
 - *`workflow_run`* — más limpio conceptualmente, pero es el que más riesgo tiene de dejar de publicar en silencio si queda mal configurado. La duplicación de la matriz entre `ci.yml` y `release.yml` es el precio, y es visible.
 
-**Costo:** el release espera a las tres plataformas (~5 min, lo que tarda Windows) en vez de ~2. Se paga una vez por merge a `main`.
+**Costo:** el release espera a toda la matriz y al shard ARM dedicado. En la [primera CI del shard](https://github.com/Kodria/agentic-workflow/actions/runs/35808870550), los siete jobs pasaron y el más lento tardó 16m27s, frente a 20m53s antes de separar las dos suites.
 
 ---
 

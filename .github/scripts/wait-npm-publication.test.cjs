@@ -85,6 +85,6 @@ test('release checks visibility before acceptance without rerunning or weakening
   assert.ok(consumer.indexOf('Wait for exact npm artifact installability') >= 0);
   assert.ok(consumer.indexOf('Wait for exact npm artifact installability') < consumer.indexOf('Accept published dashboard'));
   assert.match(consumer, /node \.github\/scripts\/wait-npm-publication\.cjs/);
-  assert.match(workflow, /release:\s*\n\s*needs: test/);
+  assert.match(workflow, /release:\s*\n\s*needs: \[test, windows-arm-hot\]/);
   assert.match(workflow, /cancel-in-progress: false/);
 });
