@@ -1,3 +1,8 @@
+## v9.11.11 - 2026-09-23
+
+### Fixes
+- **ci:** isolate Windows ARM watch bottlenecks (#190)
+
 ## v9.11.10 - 2026-09-23
 
 ### Fixes
