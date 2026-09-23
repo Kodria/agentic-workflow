@@ -115,11 +115,46 @@ jobs:
           if-no-files-found: error
 
       - name: Tests
+        if: matrix.target != 'win32-arm64'
         working-directory: cli
         run: npx jest --runInBand --bail
 
+      - name: Tests (Windows ARM remainder)
+        if: matrix.target == 'win32-arm64'
+        working-directory: cli
+        run: npx jest --runInBand --bail --testPathIgnorePatterns='node_modules|track-(finalize|freeze)\.test\.ts$'
+
+  # This job tests only the two ARM bottlenecks. The matrix job remains the
+  # sole producer of the win32-arm64 artifact consumed by the release.
+  windows-arm-hot:
+    runs-on: windows-11-arm
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install
+        working-directory: cli
+        run: npm ci
+
+      - name: Build
+        working-directory: cli
+        run: npm run native:build && npm run build
+
+      - name: Build test-only native addon
+        working-directory: cli
+        run: npm run native:test-build
+
+      - name: Test hot Windows ARM suites
+        working-directory: cli
+        run: npx jest --runTestsByPath tests/commands/watch/track-finalize.test.ts tests/commands/watch/track-freeze.test.ts --runInBand --bail
+
   release:
-    needs: test          # rojo en CUALQUIER plataforma no publica
+    needs: [test, windows-arm-hot] # rojo en cualquier plataforma o shard ARM no publica
     runs-on: ubuntu-latest
     outputs:
       published: ${{ steps.release-result.outputs.published }}
@@ -193,7 +228,7 @@ jobs:
           done
           rm "$TARBALL"
 
-      # Sin paso de tests aca: `needs: test` ya los corrio en las tres plataformas.
+      # Sin paso de tests aca: ambos jobs requeridos ya los corrieron.
       # Repetirlos en ubuntu seria correr por cuarta vez lo que ya paso, y daria la
       # impresion de que el gate vive en este job cuando vive en la matriz.
 
