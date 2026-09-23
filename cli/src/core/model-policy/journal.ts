@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { isRoutingEnvelope, isRoutingSelection, isWellFormedState, type JournalState, type RoutingEnvelopeRecord, type RoutingSelection } from '../journal/types';
-import type { ApprovedPolicy, CapabilityReceipt } from './types';
-import { resolveEscalatedSelection } from './resolve';
+import type { ApprovedPolicy, CapabilityReceipt, RoutingRole } from './types';
+import { resolveEscalatedSelection, resolveSelection } from './resolve';
 import { validateRuntimeKey } from './capabilities';
 
 type ApprovalSnapshot = { policy?: ApprovedPolicy; capabilities?: CapabilityReceipt; checkedAt: Date };
@@ -28,13 +28,14 @@ export function reserveRoutingAttempt(state: JournalState, input: { obligationId
         const actualEffort = input.envelope.resolved.effort.kind === 'explicit' ? input.envelope.resolved.effort.value : 'runtime-default';
         const judgmentHighAfterIntegration = expected.profile === 'judgment' && expected.effort === 'medium' && actualEffort === 'high' && attempts.length > 0 && attempts[attempts.length - 1].envelope.effectiveProfile === 'integration';
         if (input.envelope.effectiveProfile !== expected.profile || (actualEffort !== expected.effort && !judgmentHighAfterIntegration)) throw new Error('routing effective escalation mismatch');
-        if (input.envelope.effectiveProfile === 'judgment' && actualEffort === 'high') {
-            const approval = input.approval?.();
-            if (!approval) throw new Error('routing judgment high requires current approval');
-            const resolved = resolveEscalatedSelection({ role: 'implementer', requestedProfile: 'judgment', expectedEffort: 'high', runtime: validateRuntimeKey(input.envelope.runtime), policy: approval.policy, capabilities: approval.capabilities, now: approval.checkedAt });
-            if (resolved.state !== 'resolved' || canonical(resolved.selection) !== canonical(input.envelope.resolved) || resolved.policyDigest !== input.envelope.policyDigest || resolved.capabilityDigest !== input.envelope.capabilityDigest || resolved.outcome !== input.envelope.outcome || canonical(resolved.unavailableEvidence) !== canonical(input.envelope.unavailableEvidence)) throw new Error('routing judgment high approval mismatch');
-        }
     }
+    const approval = input.approval?.();
+    if (!approval) throw new Error('routing reservation requires current approval');
+    const selectionInput = { role: input.envelope.role as RoutingRole, requestedProfile: input.envelope.role === 'implementer' ? input.envelope.effectiveProfile : 'full' as const, runtime: validateRuntimeKey(input.envelope.runtime), policy: approval.policy, capabilities: approval.capabilities, now: approval.checkedAt };
+    const resolved = input.envelope.role === 'implementer' && input.envelope.effectiveProfile === 'judgment' && input.envelope.resolved.effort.kind === 'explicit' && input.envelope.resolved.effort.value === 'high'
+        ? resolveEscalatedSelection({ ...selectionInput, role: 'implementer', requestedProfile: 'judgment', expectedEffort: 'high' })
+        : resolveSelection(selectionInput);
+    if (resolved.state !== 'resolved' || resolved.effectiveProfile !== input.envelope.effectiveProfile || canonical(resolved.selection) !== canonical(input.envelope.resolved) || resolved.policyDigest !== input.envelope.policyDigest || resolved.capabilityDigest !== input.envelope.capabilityDigest || resolved.outcome !== input.envelope.outcome || canonical(resolved.unavailableEvidence) !== canonical(input.envelope.unavailableEvidence)) throw new Error('routing reservation approval mismatch');
     const attempt = attempts.length + 1; const id = `route-${crypto.createHash('sha256').update(`${input.lineageId}\0${attempt}\0${envelopeDigest}\0${input.fingerprint}`).digest('hex').slice(0, 24)}`;
     next.routingAttempts!.push({ schema: 'routing-attempt/v1', id, obligationId: input.obligationId, lineageId: input.lineageId, attempt, envelope: structuredClone(input.envelope), envelopeDigest, fingerprint: input.fingerprint, state: 'reserved' });
     const lineage = next.implementationLineages.find(candidate => candidate.id === input.lineageId); if (lineage !== undefined) lineage.attempts = attempt;

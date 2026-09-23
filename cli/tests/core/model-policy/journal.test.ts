@@ -1,20 +1,12 @@
 import { emptyState, isRoutingEnvelope } from '../../../src/core/journal/types';
 import { observeRoutingAttempt, reserveRoutingAttempt, routingReport, resolveLineageEscalation } from '../../../src/core/model-policy/journal';
 import { capabilityReceiptDigest } from '../../../src/core/model-policy/capabilities';
-import type { ApprovedPolicy, CapabilityReceipt } from '../../../src/core/model-policy/types';
-
-const envelope = { schema: 'routing-envelope/v1' as const, runtime: { target: 'codex' as const, kind: 'native', version: '1.0.0', accountScopeDigest: '0'.repeat(64) }, role: 'implementer', sliceId: 'S1', requestedProfile: 'mechanical' as const, effectiveProfile: 'mechanical' as const, resolved: { selector: { kind: 'model' as const, id: 'm' }, effort: { kind: 'explicit' as const, value: 'medium' } }, outcome: 'native' as const, unavailableEvidence: [], policyDigest: 'a'.repeat(64), capabilityDigest: 'b'.repeat(64), planDigest: 'c'.repeat(64), executionDigest: 'd'.repeat(64) };
-const selection = (value: 'medium' | 'high') => ({ selector: { kind: 'model' as const, id: 'm' }, effort: { kind: 'explicit' as const, value } });
-const approval = () => {
-    const policy: ApprovedPolicy = { schema: 'approved-model-policy/v1', content: { schema: 'model-policy/v1', mappings: [{ target: 'codex', runtimeKind: 'native', profiles: { mechanical: selection('medium'), integration: selection('medium'), judgment: selection('medium') }, fullCapability: selection('high'), degradation: { allowMissingModelOverride: false, allowMissingEffortOverride: false, allowMissingObservedIdentity: false } }], implementationBudget: { maxAttempts: 3, escalation: ['mechanical', 'integration', 'judgment'], judgmentEfforts: ['medium', 'high'] } }, contentDigest: 'a'.repeat(64), approval: { approvedAt: '2026-09-17T00:00:00.000Z', approvalId: 'approval-1' }, lineage: { previousDigest: null } };
-    const capabilities: CapabilityReceipt = { schema: 'routing-capabilities/v1', runtime: envelope.runtime, recordedAt: '2026-09-17T00:00:00.000Z', expiresAt: '2026-09-18T00:00:00.000Z', capabilities: { artifactDelivery: 'unverified', interactiveExecution: 'supported', unattendedController: 'supported', nativeSubagents: 'unverified', modelOverride: 'supported', effortOverride: 'supported', observedModelEvidence: 'supported', durableResume: 'unverified' }, availableSelections: [selection('medium'), selection('high')], evidence: (['interactiveExecution', 'unattendedController', 'modelOverride', 'effortOverride', 'observedModelEvidence'] as const).map(capability => ({ capability, kind: 'native-control' as const, receiptDigest: 'a'.repeat(64) })), approval: { approvalId: 'approval-1', snapshotDigest: 'a'.repeat(64) } };
-    return { policy, capabilities, checkedAt: new Date('2026-09-17T12:00:00.000Z') };
-};
+import { routingApproval as approval, routingEnvelope as envelope, routingSelection as selection } from '../../helpers/routing-approval';
 
 describe('routing journal helpers', () => {
     it('reserves one idempotent attempt and records native observation', () => {
         const state = emptyState('main');
-        const reserved = reserveRoutingAttempt(state, { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope, fingerprint: 'e'.repeat(64) }, '2026-09-17T00:00:00.000Z');
+        const reserved = reserveRoutingAttempt(state, { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope, fingerprint: 'e'.repeat(64), approval }, '2026-09-17T00:00:00.000Z');
         const replay = reserveRoutingAttempt(reserved.state, { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope, fingerprint: 'e'.repeat(64) }, '2026-09-17T00:01:00.000Z');
         expect(replay.attemptId).toBe(reserved.attemptId);
         const observed = observeRoutingAttempt(replay.state, { attemptId: reserved.attemptId, nativeAgentId: 'native-1' }, '2026-09-17T00:02:00.000Z');
@@ -22,13 +14,15 @@ describe('routing journal helpers', () => {
     });
     it('reserves an initial mechanical attempt at its approved explicit high effort', () => {
         const high = { ...envelope, resolved: { ...envelope.resolved, effort: { kind: 'explicit' as const, value: 'high' } } };
-        const reserved = reserveRoutingAttempt(emptyState('main'), { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: high, fingerprint: 'e'.repeat(64) }, '2026-09-17T00:00:00.000Z');
-        expect(reserved.state.routingAttempts?.[0].envelope.resolved).toEqual(high.resolved);
+        expect(() => reserveRoutingAttempt(emptyState('main'), { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: high, fingerprint: 'e'.repeat(64) }, '2026-09-17T00:00:00.000Z')).toThrow(/approval/i);
+        const approved = approval();
+        approved.policy.content.mappings[0].profiles.mechanical = selection('high');
+        const reserved = reserveRoutingAttempt(emptyState('main'), { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: high, fingerprint: 'e'.repeat(64), approval: () => approved }, '2026-09-17T00:00:00.000Z');
         expect(reserved.state.implementationLineages?.[0].initialEffort).toBe('high');
     });
     it('reserves the approved high-effort judgment profile after a failed integration attempt', () => {
         const integration = { ...envelope, requestedProfile: 'integration' as const, effectiveProfile: 'integration' as const };
-        const first = reserveRoutingAttempt(emptyState('main'), { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: integration, fingerprint: 'e'.repeat(64) }, '2026-09-17T00:00:00.000Z').state;
+        const first = reserveRoutingAttempt(emptyState('main'), { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: integration, fingerprint: 'e'.repeat(64), approval }, '2026-09-17T00:00:00.000Z').state;
         first.routingAttempts![0].state = 'blocked';
         first.routingAttempts![0].verdict = 'fail';
         const judgment = { ...integration, effectiveProfile: 'judgment' as const, resolved: { ...integration.resolved, effort: { kind: 'explicit' as const, value: 'high' } } };
@@ -38,19 +32,19 @@ describe('routing journal helpers', () => {
     });
     it('rejects judgment high without current matching approval at reservation', () => {
         const integration = { ...envelope, requestedProfile: 'integration' as const, effectiveProfile: 'integration' as const };
-        const first = reserveRoutingAttempt(emptyState('main'), { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: integration, fingerprint: 'e'.repeat(64) }, '2026-09-17T00:00:00.000Z').state;
+        const first = reserveRoutingAttempt(emptyState('main'), { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: integration, fingerprint: 'e'.repeat(64), approval }, '2026-09-17T00:00:00.000Z').state;
         first.routingAttempts![0].state = 'blocked'; first.routingAttempts![0].verdict = 'fail';
         const high = { ...integration, effectiveProfile: 'judgment' as const, resolved: selection('high') };
         const input = { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: high, fingerprint: 'f'.repeat(64) };
         expect(() => reserveRoutingAttempt(first, input, '2026-09-17T00:01:00.000Z')).toThrow(/approval/i);
         const approved = approval();
-        expect(() => reserveRoutingAttempt(first, { ...input, approval: () => approved }, '2026-09-17T00:01:00.000Z')).toThrow(/approval/i);
+        expect(() => reserveRoutingAttempt(first, { ...input, envelope: { ...high, capabilityDigest: 'b'.repeat(64) }, approval: () => approved }, '2026-09-17T00:01:00.000Z')).toThrow(/approval/i);
         const stale = { ...approved, checkedAt: new Date('2026-09-19T00:00:00.000Z') };
         expect(() => reserveRoutingAttempt(first, { ...input, envelope: { ...high, capabilityDigest: capabilityReceiptDigest(approved.capabilities) }, approval: () => stale }, '2026-09-17T00:01:00.000Z')).toThrow(/approval/i);
     });
     it('reserves judgment high after a failed judgment medium attempt without resetting the lineage', () => {
         const judgment = { ...envelope, requestedProfile: 'judgment' as const, effectiveProfile: 'judgment' as const };
-        const first = reserveRoutingAttempt(emptyState('main'), { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: judgment, fingerprint: 'e'.repeat(64) }, '2026-09-17T00:00:00.000Z').state;
+        const first = reserveRoutingAttempt(emptyState('main'), { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: judgment, fingerprint: 'e'.repeat(64), approval }, '2026-09-17T00:00:00.000Z').state;
         first.routingAttempts![0].state = 'blocked';
         first.routingAttempts![0].verdict = 'fail';
         const high = { ...judgment, resolved: { ...judgment.resolved, effort: { kind: 'explicit' as const, value: 'high' } } };
@@ -60,17 +54,17 @@ describe('routing journal helpers', () => {
     });
     it('rejects a fourth implementer attempt in one lineage', () => {
         let state = emptyState('main');
-        for (const [index, profile] of (['mechanical', 'integration', 'judgment'] as const).entries()) { state = reserveRoutingAttempt(state, { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: { ...envelope, effectiveProfile: profile }, fingerprint: `${'a'.repeat(63)}${index}` }, '2026-09-17T00:00:00.000Z').state; state.routingAttempts![state.routingAttempts!.length - 1].state = 'blocked'; state.routingAttempts![state.routingAttempts!.length - 1].verdict = 'fail'; }
+        for (const [index, profile] of (['mechanical', 'integration', 'judgment'] as const).entries()) { state = reserveRoutingAttempt(state, { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope: { ...envelope, effectiveProfile: profile }, fingerprint: `${'a'.repeat(63)}${index}`, approval }, '2026-09-17T00:00:00.000Z').state; state.routingAttempts![state.routingAttempts!.length - 1].state = 'blocked'; state.routingAttempts![state.routingAttempts!.length - 1].verdict = 'fail'; }
         expect(() => reserveRoutingAttempt(state, { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope, fingerprint: 'f'.repeat(64) }, '2026-09-17T00:00:00.000Z')).toThrow(/budget/i);
     });
     it('reports routing attempts without envelope bodies or native identities', () => {
-        const state = reserveRoutingAttempt(emptyState('main'), { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope, fingerprint: 'e'.repeat(64) }, '2026-09-17T00:00:00.000Z').state;
+        const state = reserveRoutingAttempt(emptyState('main'), { obligationId: 'impl:S1', lineageId: 'lineage:S1', envelope, fingerprint: 'e'.repeat(64), approval }, '2026-09-17T00:00:00.000Z').state;
         expect(routingReport(state)).toEqual({ schema: 'routing-report/v1', attempts: 1, plannedByRole: { implementer: 1 }, actualByRole: {}, byState: { reserved: 1 }, retries: 0, fallbacks: 0, unavailable: {}, verdicts: {}, administrativeRepairs: 0 });
     });
     it('uses the exact deterministic implementation escalation sequence', () => {
         let state = emptyState('main');
         expect(resolveLineageEscalation(state, 'l1', 'mechanical')).toEqual({ profile: 'mechanical', effort: 'medium' });
-        state = reserveRoutingAttempt(state, { obligationId: 'impl:S1', lineageId: 'l1', envelope, fingerprint: '1'.repeat(64) }, '2026-09-17T00:00:00.000Z').state;
+        state = reserveRoutingAttempt(state, { obligationId: 'impl:S1', lineageId: 'l1', envelope, fingerprint: '1'.repeat(64), approval }, '2026-09-17T00:00:00.000Z').state;
         state.routingAttempts![0].state = 'blocked'; state.routingAttempts![0].verdict = 'fail';
         expect(resolveLineageEscalation(state, 'l1', 'mechanical')).toEqual({ profile: 'integration', effort: 'medium' });
         state.routingAttempts!.push({ ...state.routingAttempts![0], id: 'route-2', attempt: 2, envelope: { ...envelope, effectiveProfile: 'integration' }, state: 'blocked', verdict: 'fail' });
