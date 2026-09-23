@@ -782,3 +782,4 @@ la aceptación de una publicación instalada.
 - **Cobertura:** `awm sensors coverage --json` reportó `overall: gaps` por detectores opcionales no instalados; no se cambió el pack ni la configuración global para este issue.
 - **Descartes:** ninguna regla global nueva ni inicialización de sensores opcionales; serían cambios fuera del alcance del PR.
 - **CI posterior:** Windows x64 detectó que el nuevo test estructural asumía LF aunque el checkout entregó CRLF. Una regresión CRLF reprodujo RED; normalizar el texto del workflow dentro del test dio GREEN 6/6. Los runs obsoletos se cancelaron y la revisión final vuelve a exigir siete jobs verdes.
+- **Guard de fallo:** una mutación con `; exit 0` tras el comando Jest hot pasó inadvertida por una aserción de subcadena. El test ahora exige la línea de comando completa; la mutación dio RED antes y GREEN después.

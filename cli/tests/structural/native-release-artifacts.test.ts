@@ -36,7 +36,7 @@ function assertArmPartition(source: string): void {
     expect(hotJob).toContain('runs-on: windows-11-arm');
     expect(hotJob).toContain('run: npm run native:build');
     expect(hotJob).toContain('run: npm run native:test-build');
-    expect(hotJob).toContain('run: npx jest --runTestsByPath tests/commands/watch/track-finalize.test.ts tests/commands/watch/track-freeze.test.ts --runInBand --bail');
+    expect(hotJob.split('\n')).toContain('        run: npx jest --runTestsByPath tests/commands/watch/track-finalize.test.ts tests/commands/watch/track-freeze.test.ts --runInBand --bail');
     expect(hotJob).not.toContain('upload-artifact@v4');
     expect(hotJob).not.toContain('secure-fs-win32-arm64');
     expect(hotJob).not.toMatch(/^\s*if:/m);
@@ -97,7 +97,11 @@ describe('native release artifacts', () => {
                 /(run: npx jest --runInBand --bail --testPathIgnorePatterns='[^']+'\n)/,
                 '$1        continue-on-error: true\n',
             );
-            for (const mutated of [swapped, nonGating, duplicateArtifact, broadIgnore, skippedHot, nonGatingRemainder]) {
+            const maskedHot = workflow.replace(
+                /(run: npx jest --runTestsByPath [^\n]+ --runInBand --bail)(?=\n)/,
+                '$1; exit 0',
+            );
+            for (const mutated of [swapped, nonGating, duplicateArtifact, broadIgnore, skippedHot, nonGatingRemainder, maskedHot]) {
                 expect(mutated).not.toBe(workflow);
             }
             expect(() => assertArmPartition(swapped)).toThrow();
@@ -106,6 +110,7 @@ describe('native release artifacts', () => {
             expect(() => assertArmPartition(broadIgnore)).toThrow();
             expect(() => assertArmPartition(skippedHot)).toThrow();
             expect(() => assertArmPartition(nonGatingRemainder)).toThrow();
+            expect(() => assertArmPartition(maskedHot)).toThrow();
         }
     });
 
