@@ -1,3 +1,8 @@
+## v9.11.10 - 2026-09-23
+
+### Fixes
+- **currentness:** distinguish ahead CLI and registry failures (#189)
+
 ## v9.11.9 - 2026-09-22
 
 ### Fixes
