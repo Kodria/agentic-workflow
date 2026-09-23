@@ -5,7 +5,8 @@ import path from 'path';
 const CLI_ROOT = path.resolve(__dirname, '..', '..');
 const REPO_ROOT = path.resolve(CLI_ROOT, '..');
 
-function assertArmPartition(workflow: string): void {
+function assertArmPartition(source: string): void {
+    const workflow = source.replace(/\r\n/g, '\n');
     expect(workflow.match(/^  windows-arm-hot:\s*$/gm)).toHaveLength(1);
     const [matrixJob, rest] = workflow.split(/^  windows-arm-hot:\s*$/m);
     expect(rest).toBeDefined();
@@ -58,6 +59,13 @@ describe('native release artifacts', () => {
         for (const name of ['ci.yml', 'release.yml']) {
             const workflow = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', name), 'utf8');
             assertArmPartition(workflow);
+        }
+    });
+
+    it('checks the same partition after a Windows CRLF checkout', () => {
+        for (const name of ['ci.yml', 'release.yml']) {
+            const workflow = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', name), 'utf8');
+            assertArmPartition(workflow.replace(/\n/g, '\r\n'));
         }
     });
 

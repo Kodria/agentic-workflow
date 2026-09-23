@@ -781,3 +781,4 @@ la aceptación de una publicación instalada.
 - **Verificación:** 307 suites y 4.107 tests locales PASS, 2 suites y 16 tests omitidos; guard de publicación 7/7; sensores `overall: pass`. La primera CI de siete jobs pasó y redujo el job más lento de 20m53s a 16m27s. La revisión final del regex se valida en un segundo run del PR.
 - **Cobertura:** `awm sensors coverage --json` reportó `overall: gaps` por detectores opcionales no instalados; no se cambió el pack ni la configuración global para este issue.
 - **Descartes:** ninguna regla global nueva ni inicialización de sensores opcionales; serían cambios fuera del alcance del PR.
+- **CI posterior:** Windows x64 detectó que el nuevo test estructural asumía LF aunque el checkout entregó CRLF. Una regresión CRLF reprodujo RED; normalizar el texto del workflow dentro del test dio GREEN 6/6. Los runs obsoletos se cancelaron y la revisión final vuelve a exigir siete jobs verdes.
