@@ -1,3 +1,8 @@
+## v9.11.12 - 2026-09-23
+
+### Fixes
+- **routing:** honor approved effort through lineage escalation (#191)
+
 ## v9.11.11 - 2026-09-23
 
 ### Fixes
