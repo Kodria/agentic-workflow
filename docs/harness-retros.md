@@ -772,3 +772,12 @@ el scope global en 20 segundos, antes del recorrido completo. La corrección de
 identidad pasa 85 pruebas focales locales; la integración siguiente exige ambos
 smokes Windows reales aprobados. Ningún resultado local sustituye Windows o
 la aceptación de una publicación instalada.
+
+## 2026-09-23 — Shard Windows ARM del issue #159
+
+- **Hallazgos:** 8, sin wins; 6 convergen en la misma familia de gates estructurales de CI. La cobertura empírica los reporta sin clase de sensor-pack asignada; no se inventó una clase.
+- **Curas ejecutables:** el guard de publicación exige ambos jobs; `native-release-artifacts.test.ts` comprueba condiciones ligadas a comandos, un solo upload de artefacto, ausencia de `if` o `continue-on-error` que neutralice los shards y un filtro limitado a las dos rutas exactas. Mutaciones de guards, uploads, suites adicionales y pasos no bloqueantes dieron RED antes de la corrección y GREEN después. El filtro por nombre de archivo se reemplazó por la ruta de `cli/tests/commands/watch`, incluyendo separadores Unix y Windows.
+- **Clasificación:** siete hallazgos estructurales y uno de lógica (el filtro demasiado amplio), resueltos con pruebas específicas y la corrección del regex. No se añade una regla global a `CONSTITUTION.md` o `AGENTS.md`: estos contratos de GitHub Actions son propios de este workflow y las regresiones ya viven junto a él.
+- **Verificación:** 307 suites y 4.107 tests locales PASS, 2 suites y 16 tests omitidos; guard de publicación 7/7; sensores `overall: pass`. La primera CI de siete jobs pasó y redujo el job más lento de 20m53s a 16m27s. La revisión final del regex se valida en un segundo run del PR.
+- **Cobertura:** `awm sensors coverage --json` reportó `overall: gaps` por detectores opcionales no instalados; no se cambió el pack ni la configuración global para este issue.
+- **Descartes:** ninguna regla global nueva ni inicialización de sensores opcionales; serían cambios fuera del alcance del PR.

@@ -122,7 +122,7 @@ jobs:
       - name: Tests (Windows ARM remainder)
         if: matrix.target == 'win32-arm64'
         working-directory: cli
-        run: npx jest --runInBand --bail --testPathIgnorePatterns='node_modules|track-(finalize|freeze)\.test\.ts$'
+        run: npx jest --runInBand --bail --testPathIgnorePatterns='node_modules|[/\\]cli[/\\]tests[/\\]commands[/\\]watch[/\\]track-(finalize|freeze)\.test\.ts$'
 
   # This job tests only the two ARM bottlenecks. The matrix job remains the
   # sole producer of the win32-arm64 artifact consumed by the release.

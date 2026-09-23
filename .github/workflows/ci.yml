@@ -118,7 +118,7 @@ jobs:
       - name: Test (Windows ARM remainder)
         if: matrix.target == 'win32-arm64'
         working-directory: cli
-        run: npx jest --runInBand --bail --testPathIgnorePatterns='node_modules|track-(finalize|freeze)\.test\.ts$'
+        run: npx jest --runInBand --bail --testPathIgnorePatterns='node_modules|[/\\]cli[/\\]tests[/\\]commands[/\\]watch[/\\]track-(finalize|freeze)\.test\.ts$'
 
       # This is intentionally a second consumer boundary: the regular suite
       # executes this checkout, while this gate invokes the npm tarball that a
