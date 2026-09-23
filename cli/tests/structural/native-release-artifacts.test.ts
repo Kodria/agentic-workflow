@@ -5,6 +5,10 @@ import path from 'path';
 const CLI_ROOT = path.resolve(__dirname, '..', '..');
 const REPO_ROOT = path.resolve(CLI_ROOT, '..');
 
+function readWorkflow(name: string): string {
+    return fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', name), 'utf8').replace(/\r\n/g, '\n');
+}
+
 function assertArmPartition(source: string): void {
     const workflow = source.replace(/\r\n/g, '\n');
     expect(workflow.match(/^  windows-arm-hot:\s*$/gm)).toHaveLength(1);
@@ -42,12 +46,12 @@ function assertArmPartition(source: string): void {
 describe('native release artifacts', () => {
     it('runs each platform suite once without weakening publication', () => {
         for (const name of ['ci.yml', 'release.yml']) {
-            const workflow = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', name), 'utf8');
+            const workflow = readWorkflow(name);
             expect(workflow).not.toContain('- name: Windows admission smoke');
             expect(workflow).not.toContain('run: npx jest tests/commands/plan/index.test.ts --runInBand --bail');
             expect(workflow).toContain('run: npx jest --runInBand --bail');
         }
-        const release = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'release.yml'), 'utf8');
+        const release = readWorkflow('release.yml');
         expect(release).toMatch(/release:\s*\n\s*needs: \[test, windows-arm-hot\]/);
         for (const target of ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64', 'win32-x64', 'win32-arm64']) {
             expect(release).toContain(`target: ${target}`);
@@ -57,21 +61,21 @@ describe('native release artifacts', () => {
 
     it('partitions the two hot ARM suites without duplicating the native artifact', () => {
         for (const name of ['ci.yml', 'release.yml']) {
-            const workflow = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', name), 'utf8');
+            const workflow = readWorkflow(name);
             assertArmPartition(workflow);
         }
     });
 
     it('checks the same partition after a Windows CRLF checkout', () => {
         for (const name of ['ci.yml', 'release.yml']) {
-            const workflow = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', name), 'utf8');
+            const workflow = readWorkflow(name);
             assertArmPartition(workflow.replace(/\n/g, '\r\n'));
         }
     });
 
     it('rejects swapped matrix guards, non-gating hot tests and duplicate artifacts', () => {
         for (const name of ['ci.yml', 'release.yml']) {
-            const workflow = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', name), 'utf8');
+            const workflow = readWorkflow(name);
             const swapped = workflow.replace(
                 /if: matrix\.target (?:!=|==) 'win32-arm64'/g,
                 (guard) => guard.includes('!=') ? "if: matrix.target == 'win32-arm64'" : "if: matrix.target != 'win32-arm64'",
@@ -93,6 +97,9 @@ describe('native release artifacts', () => {
                 /(run: npx jest --runInBand --bail --testPathIgnorePatterns='[^']+'\n)/,
                 '$1        continue-on-error: true\n',
             );
+            for (const mutated of [swapped, nonGating, duplicateArtifact, broadIgnore, skippedHot, nonGatingRemainder]) {
+                expect(mutated).not.toBe(workflow);
+            }
             expect(() => assertArmPartition(swapped)).toThrow();
             expect(() => assertArmPartition(nonGating)).toThrow();
             expect(() => assertArmPartition(duplicateArtifact)).toThrow();
@@ -118,7 +125,7 @@ describe('native release artifacts', () => {
         const pkg = JSON.parse(fs.readFileSync(path.join(CLI_ROOT, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
         expect(pkg.scripts['native:test-build']).toContain('secure_fs_test');
         for (const name of ['ci.yml', 'release.yml']) {
-            const workflow = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', name), 'utf8');
+            const workflow = readWorkflow(name);
             const testBuild = workflow.indexOf('run: npm run native:test-build');
             const jest = workflow.indexOf('run: npx jest --runInBand --bail');
             expect(testBuild).toBeGreaterThanOrEqual(0);
