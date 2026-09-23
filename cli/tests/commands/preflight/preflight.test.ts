@@ -7,6 +7,7 @@ import { preflight } from '../../../src/commands/preflight/checks';
 import { exitCodeFor, formatReport } from '../../../src/commands/preflight';
 import { runSensors } from '../../../src/commands/sensors/run';
 import { checkCurrentness } from '../../../src/core/currentness/check';
+import { readEffectivePolicy } from '../../../src/core/model-policy/store';
 
 // Only `execSync` (used by `resolveOnPath` to check for `gh`/`glab`) is mocked — `git
 // remote get-url origin` runs for real via `execFileSync` against real tmpdir git repos,
@@ -22,8 +23,13 @@ jest.mock('../../../src/commands/sensors/run', () => ({
 jest.mock('../../../src/core/currentness/check', () => ({
     checkCurrentness: jest.fn(),
 }));
+jest.mock('../../../src/core/model-policy/store', () => ({
+    ...jest.requireActual('../../../src/core/model-policy/store'),
+    readEffectivePolicy: jest.fn(),
+}));
 const mockRunSensors = runSensors as jest.MockedFunction<typeof runSensors>;
 const mockCheckCurrentness = checkCurrentness as jest.MockedFunction<typeof checkCurrentness>;
+const mockReadEffectivePolicy = readEffectivePolicy as jest.MockedFunction<typeof readEffectivePolicy>;
 
 /** Turn a tmpdir into a real git repo with (optionally) an `origin` remote. */
 function gitRepo(dir: string, remoteUrl?: string): void {
@@ -115,6 +121,7 @@ const check = (r: Awaited<ReturnType<typeof preflight>>, id: string) => r.checks
 
 describe('preflight', () => {
     beforeEach(() => {
+        mockReadEffectivePolicy.mockReturnValue({ state: 'absent' });
         mockCheckCurrentness.mockResolvedValue({
             checkedAt: '2026-08-26T00:00:00.000Z',
             compatibility: { status: 'not-checked' },
@@ -125,6 +132,16 @@ describe('preflight', () => {
                 detail: 'Installed version matches npm dist-tags.latest.', remedy: 'No action required.',
             }],
         });
+    });
+
+    it('advises machine model setup for an approved mapping without degrading ordinary harness readiness', async () => {
+        mockReadEffectivePolicy.mockReturnValue({
+            state: 'approved', provenance: 'user',
+            policy: { content: { mappings: [{ target: 'codex', runtimeKind: 'native' }] } } as never,
+        });
+        const report = await preflight(make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } }));
+        expect(check(report, 'routing-setup')).toMatchObject({ advisory: true, ok: false, remedy: 'awm model-policy discover --provider codex --json' });
+        expect(report.status).toBe('ready');
     });
 
     afterEach(() => {

@@ -86,7 +86,7 @@ export type ProviderCheckState =
 
 export type ProviderCheck = {
     id: 'binary.version' | 'skills.global' | 'agents.native' | 'workflows.global' |
-        'context.global' | 'hook.trust' | 'guidance.project' | 'constitution.delivery';
+        'context.global' | 'hook.trust' | 'guidance.project' | 'constitution.delivery' | 'routing.machine';
     state: ProviderCheckState;
     target?: string;
     owners?: AgentTarget[];

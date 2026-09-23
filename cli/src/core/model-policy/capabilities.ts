@@ -65,7 +65,11 @@ export function routingDiagnostic(code: string, message: string): PlanDiagnostic
 
 export type CapabilityRead = { state: 'current'; receipt: CapabilityReceipt; digest: string } | { state: 'absent' } | { state: 'stale'; reason: string } | { state: 'invalid'; reason: string };
 export type ApproveCapabilitiesInput = { file: string; cwd: string; expectedDigest: string; replaceDigest?: string; now?: Date };
-export function capabilityReceiptPath(runtime: RuntimeKey): string { const valid = validateRuntimeKey(runtime); return path.join(awmHome(), 'routing-capabilities', valid.target, `${valid.kind}.json`); }
+export function storedCapabilityPath(target: RuntimeKey['target'], kind: string): string {
+    if (typeof target !== 'string' || !(AGENT_TARGETS as readonly string[]).includes(target) || typeof kind !== 'string' || !RUNTIME_KIND.test(kind)) throw new Error('stored capability target or kind is invalid');
+    return path.join(awmHome(), 'routing-capabilities', target, `${kind}.json`);
+}
+export function capabilityReceiptPath(runtime: RuntimeKey): string { const valid = validateRuntimeKey(runtime); return storedCapabilityPath(valid.target, valid.kind); }
 function safeParents(file: string): void { for (let dir = path.dirname(path.resolve(file)); ; dir = path.dirname(dir)) { try { const stat = fs.lstatSync(dir); if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`unsafe capability parent: ${dir}`); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; } if (dir === path.dirname(dir)) return; } }
 function readBytes(file: string): Buffer | null { safeParents(file); try { const stat = fs.lstatSync(file, { bigint: true }); if (stat.isSymbolicLink() || !stat.isFile() || stat.size > BigInt(256 * 1024)) throw new Error('capability receipt is unsafe or exceeds 256 KiB'); return fs.readFileSync(file); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; } }
 function parseReceipt(bytes: Buffer): CapabilityReceipt { return validateCapabilityReceipt(parseJsonNoDuplicate(new TextDecoder('utf-8', { fatal: true }).decode(bytes))); }

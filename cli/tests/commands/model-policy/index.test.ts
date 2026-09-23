@@ -80,4 +80,44 @@ describe('model-policy command', () => {
         await expect(program.parseAsync(['node', 'awm', 'model-policy', 'capabilities', 'approve', '--file', 'receipt.json', '--expected-digest', 'a'.repeat(64), '--replace-digest', ''])).rejects.toThrow(/requires a non-empty value/);
         expect(approveCapabilities).not.toHaveBeenCalled();
     });
+    it('discovers the Codex catalog explicitly without approving capabilities', async () => {
+        const queryCodexModelCatalog = jest.fn(async () => ({ provenance: 'native-catalog' as const, selections: [], nativeDispatchVerified: false as const, actualModelVerified: false as const }));
+        const approveCapabilities = jest.fn();
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerModelPolicyCommand(program, { queryCodexModelCatalog, approveCapabilities: approveCapabilities as never });
+        await program.parseAsync(['node', 'awm', 'model-policy', 'discover', '--provider', 'codex', '--json']);
+        expect(queryCodexModelCatalog).toHaveBeenCalledTimes(1);
+        expect(JSON.parse(String(out.mock.calls[0][0]))).toMatchObject({ state: 'catalog-only', nativeDispatchVerified: false, actualModelVerified: false });
+        expect(approveCapabilities).not.toHaveBeenCalled();
+    });
+    it('reports missing machine selections from the approved Codex policy without certifying dispatch', async () => {
+        const available = { selector: { kind: 'model' as const, id: 'gpt-6-sol' }, effort: { kind: 'explicit' as const, value: 'high' } };
+        const missing = { selector: { kind: 'model' as const, id: 'gpt-6-luna' }, effort: { kind: 'explicit' as const, value: 'low' } };
+        const queryCodexModelCatalog = jest.fn(async () => ({ provenance: 'native-catalog' as const, selections: [available], nativeDispatchVerified: false as const, actualModelVerified: false as const }));
+        const readEffectivePolicy = jest.fn(() => ({ state: 'approved' as const, policy: { content: { mappings: [{ target: 'codex', runtimeKind: 'native', profiles: { mechanical: missing, integration: available, judgment: available }, fullCapability: available }] } } }));
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerModelPolicyCommand(program, { queryCodexModelCatalog, readEffectivePolicy: readEffectivePolicy as never });
+        await program.parseAsync(['node', 'awm', 'model-policy', 'discover', '--provider', 'codex', '--cwd', 'fixture-root', '--json']);
+        expect(readEffectivePolicy).toHaveBeenCalledWith('fixture-root');
+        expect(JSON.parse(String(out.mock.calls[0][0]))).toMatchObject({ state: 'catalog-only', policyCoverage: { state: 'missing', missing: [missing] }, nativeDispatchVerified: false, actualModelVerified: false });
+        expect(process.exitCode).toBe(2);
+    });
+    it('reports catalog coverage but still refuses to claim native dispatch or backend identity', async () => {
+        const selection = { selector: { kind: 'model' as const, id: 'gpt-6-sol' }, effort: { kind: 'explicit' as const, value: 'high' } };
+        const queryCodexModelCatalog = jest.fn(async () => ({ provenance: 'native-catalog' as const, selections: [selection], nativeDispatchVerified: false as const, actualModelVerified: false as const }));
+        const readEffectivePolicy = jest.fn(() => ({ state: 'approved' as const, policy: { content: { mappings: [{ target: 'codex', runtimeKind: 'native', profiles: { mechanical: selection, integration: selection, judgment: selection }, fullCapability: selection }] } } }));
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerModelPolicyCommand(program, { queryCodexModelCatalog, readEffectivePolicy: readEffectivePolicy as never });
+        await program.parseAsync(['node', 'awm', 'model-policy', 'discover', '--provider', 'codex', '--json']);
+        expect(JSON.parse(String(out.mock.calls[0][0]))).toMatchObject({ state: 'catalog-only', policyCoverage: { state: 'complete', missing: [] }, nativeDispatchVerified: false, actualModelVerified: false });
+    });
+    it('does not silently treat Claude as Codex during native discovery', async () => {
+        const queryCodexModelCatalog = jest.fn();
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerModelPolicyCommand(program, { queryCodexModelCatalog });
+        await program.parseAsync(['node', 'awm', 'model-policy', 'discover', '--provider', 'claude-code', '--json']);
+        expect(JSON.parse(String(out.mock.calls[0][0]))).toMatchObject({ state: 'unverified', provider: 'claude-code' });
+        expect(queryCodexModelCatalog).not.toHaveBeenCalled();
+        expect(process.exitCode).toBe(2);
+    });
 });
