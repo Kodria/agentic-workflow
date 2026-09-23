@@ -1,11 +1,16 @@
 import crypto from 'crypto';
 import { isRoutingEnvelope, isRoutingSelection, isWellFormedState, type JournalState, type RoutingEnvelopeRecord, type RoutingSelection } from '../journal/types';
+import type { ApprovedPolicy, CapabilityReceipt } from './types';
+import { resolveEscalatedSelection } from './resolve';
+import { validateRuntimeKey } from './capabilities';
+
+type ApprovalSnapshot = { policy?: ApprovedPolicy; capabilities?: CapabilityReceipt; checkedAt: Date };
 
 function assertTimestamp(value: string): void { if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) throw new Error('routing timestamp is invalid'); }
 function canonical(value: unknown): string { if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`; if (value !== null && typeof value === 'object') { const record = value as Record<string, unknown>; return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonical(record[key])}`).join(',')}}`; } return JSON.stringify(value); }
 function digest(value: unknown): string { return crypto.createHash('sha256').update(canonical(value)).digest('hex'); }
 function clone(state: JournalState): JournalState { const next = structuredClone(state); if (!Array.isArray(next.routingAttempts)) next.routingAttempts = []; return next; }
-export function reserveRoutingAttempt(state: JournalState, input: { obligationId: string; lineageId: string; envelope: RoutingEnvelopeRecord; fingerprint: string }, now: string): { state: JournalState; attemptId: string } {
+export function reserveRoutingAttempt(state: JournalState, input: { obligationId: string; lineageId: string; envelope: RoutingEnvelopeRecord; fingerprint: string; approval?: () => ApprovalSnapshot }, now: string): { state: JournalState; attemptId: string } {
     assertTimestamp(now); if (!isWellFormedState(state) || !input || typeof input.obligationId !== 'string' || input.obligationId.length === 0 || input.obligationId.length > 128 || typeof input.lineageId !== 'string' || input.lineageId.length === 0 || input.lineageId.length > 128 || !isRoutingEnvelope(input.envelope) || !/^[a-f0-9]{64}$/.test(input.fingerprint)) throw new Error('routing reservation is invalid');
     const next = clone(state); const envelopeDigest = digest(input.envelope); const existing = next.routingAttempts!.find(item => item.lineageId === input.lineageId && item.obligationId === input.obligationId && item.envelopeDigest === envelopeDigest && item.fingerprint === input.fingerprint && ['reserved', 'active'].includes(item.state));
     if (existing) return { state: next, attemptId: existing.id };
@@ -23,6 +28,12 @@ export function reserveRoutingAttempt(state: JournalState, input: { obligationId
         const actualEffort = input.envelope.resolved.effort.kind === 'explicit' ? input.envelope.resolved.effort.value : 'runtime-default';
         const judgmentHighAfterIntegration = expected.profile === 'judgment' && expected.effort === 'medium' && actualEffort === 'high' && attempts.length > 0 && attempts[attempts.length - 1].envelope.effectiveProfile === 'integration';
         if (input.envelope.effectiveProfile !== expected.profile || (actualEffort !== expected.effort && !judgmentHighAfterIntegration)) throw new Error('routing effective escalation mismatch');
+        if (input.envelope.effectiveProfile === 'judgment' && actualEffort === 'high') {
+            const approval = input.approval?.();
+            if (!approval) throw new Error('routing judgment high requires current approval');
+            const resolved = resolveEscalatedSelection({ role: 'implementer', requestedProfile: 'judgment', expectedEffort: 'high', runtime: validateRuntimeKey(input.envelope.runtime), policy: approval.policy, capabilities: approval.capabilities, now: approval.checkedAt });
+            if (resolved.state !== 'resolved' || canonical(resolved.selection) !== canonical(input.envelope.resolved) || resolved.policyDigest !== input.envelope.policyDigest || resolved.capabilityDigest !== input.envelope.capabilityDigest || resolved.outcome !== input.envelope.outcome || canonical(resolved.unavailableEvidence) !== canonical(input.envelope.unavailableEvidence)) throw new Error('routing judgment high approval mismatch');
+        }
     }
     const attempt = attempts.length + 1; const id = `route-${crypto.createHash('sha256').update(`${input.lineageId}\0${attempt}\0${envelopeDigest}\0${input.fingerprint}`).digest('hex').slice(0, 24)}`;
     next.routingAttempts!.push({ schema: 'routing-attempt/v1', id, obligationId: input.obligationId, lineageId: input.lineageId, attempt, envelope: structuredClone(input.envelope), envelopeDigest, fingerprint: input.fingerprint, state: 'reserved' });
