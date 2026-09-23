@@ -21,7 +21,8 @@ export function reserveRoutingAttempt(state: JournalState, input: { obligationId
         if (initial === 'full') throw new Error('routing implementer profile is invalid');
         const expected = resolveLineageEscalation(next, input.lineageId, initial);
         const actualEffort = input.envelope.resolved.effort.kind === 'explicit' ? input.envelope.resolved.effort.value : 'runtime-default';
-        if (input.envelope.effectiveProfile !== expected.profile || actualEffort !== expected.effort) throw new Error('routing effective escalation mismatch');
+        const judgmentHighAfterIntegration = expected.profile === 'judgment' && expected.effort === 'medium' && actualEffort === 'high' && attempts.length > 0 && attempts[attempts.length - 1].envelope.effectiveProfile === 'integration';
+        if (input.envelope.effectiveProfile !== expected.profile || (actualEffort !== expected.effort && !judgmentHighAfterIntegration)) throw new Error('routing effective escalation mismatch');
     }
     const attempt = attempts.length + 1; const id = `route-${crypto.createHash('sha256').update(`${input.lineageId}\0${attempt}\0${envelopeDigest}\0${input.fingerprint}`).digest('hex').slice(0, 24)}`;
     next.routingAttempts!.push({ schema: 'routing-attempt/v1', id, obligationId: input.obligationId, lineageId: input.lineageId, attempt, envelope: structuredClone(input.envelope), envelopeDigest, fingerprint: input.fingerprint, state: 'reserved' });
@@ -38,7 +39,10 @@ export function resolveLineageEscalation(state: JournalState, lineageId: string,
     if (!isWellFormedState(state) || typeof lineageId !== 'string' || lineageId.length === 0) throw new Error('routing lineage is invalid');
     const attempts = (state.routingAttempts ?? []).filter((attempt) => attempt.lineageId === lineageId && attempt.envelope.role === 'implementer').sort((left, right) => left.attempt - right.attempt);
     if (attempts.some((attempt) => ['reserved', 'active', 'unknown'].includes(attempt.state))) throw new Error('routing lineage has a live or unknown attempt');
-    if (attempts.length === 0) return { profile: initial, effort: 'medium' };
+    if (attempts.length === 0) {
+        const lineage = state.implementationLineages?.find(candidate => candidate.id === lineageId);
+        return { profile: initial, effort: lineage?.initialEffort ?? 'medium' };
+    }
     const last = attempts[attempts.length - 1];
     if (last.verdict !== 'fail') throw new Error('routing lineage advances only after a terminal failed verdict');
     if (last.envelope.effectiveProfile === 'mechanical') return { profile: 'integration', effort: 'medium' };

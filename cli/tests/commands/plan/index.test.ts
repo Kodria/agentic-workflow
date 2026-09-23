@@ -81,7 +81,7 @@ describe('plan validate Commander wiring', () => {
         // not come out of validatePlanFile, so a spread-and-relabel fixture
         // cannot reach this path at all.
         const sliceId = 'S1';
-        const sel = { selector: { kind: 'model' as const, id: 'gpt-5.6-luna' }, effort: { kind: 'explicit' as const, value: 'medium' } };
+        const sel = { selector: { kind: 'model' as const, id: 'gpt-5.6-luna' }, effort: { kind: 'explicit' as const, value: 'high' } };
         const full = { selector: { kind: 'model' as const, id: 'gpt-5.6-sol' }, effort: { kind: 'explicit' as const, value: 'high' } };
         const sha = 'a'.repeat(64);
         const content = { schema: 'model-policy/v1' as const, mappings: [{ target: 'codex' as const, runtimeKind: 'native', profiles: { mechanical: sel, integration: sel, judgment: sel }, fullCapability: full, degradation: { allowMissingModelOverride: false, allowMissingEffortOverride: false, allowMissingObservedIdentity: false } }], implementationBudget: { maxAttempts: 3 as const, escalation: ['mechanical', 'integration', 'judgment'] as ['mechanical', 'integration', 'judgment'], judgmentEfforts: ['medium', 'high'] as ['medium', 'high'] } };
