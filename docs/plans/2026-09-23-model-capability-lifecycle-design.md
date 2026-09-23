@@ -24,6 +24,10 @@ effort override, or observed identity.
 - **R-SETUP-2:** WHEN no routing policy exists, THE diagnostics SHALL keep the
   ordinary harness ready and report routing setup as optional rather than a
   blocking sensor failure.
+- **R-SETUP-3:** WHEN the operator explicitly enrolls a machine/provider, THE
+  setup flow SHALL validate the approved role selections, runtime, account and
+  effective provider configuration, and SHALL finish with a per-selection
+  readiness report. Setup is idempotent and is not repeated on ordinary work.
 - **R-NATIVE-1:** WHEN a provider exposes a native, read-only model catalog and
   runtime/account identity, THE setup flow SHALL capture their validated values
   without inference; unknown or unsupported fields remain `UNTESTED`.
@@ -40,12 +44,30 @@ effort override, or observed identity.
 - **R-LIFE-3:** WHEN normal work produces a verifiable native dispatch
   observation, THE lifecycle SHALL record it once for the matching
   machine/provider/selection, without launching an additional task.
-- **R-TRUST-1:** IF provenance or actual model/effort cannot be verified, THEN
-  THE affected selection SHALL remain `UNTESTED` and routing SHALL fail closed;
-  no savings claim or fabricated receipt is allowed.
+- **R-TRUST-1:** IF native dispatch, accepted model/effort or provenance cannot
+  be verified, THEN optimized routing for that selection SHALL fail closed.
+  Actual backend-model identity is a separate evidence level: when unavailable,
+  it remains `UNTESTED` and only an explicitly approved operational/degraded
+  policy may route; no verified savings claim or fabricated receipt is allowed.
+- **R-TRUST-2:** IF an observed selection differs from the approved one, THEN
+  THE current optimized route SHALL stop and record a durable mismatch. A
+  catalog entry or static setting never overrides this native observation.
 - **R-OPS-1:** WHEN an explicit active probe is necessary, THE CLI SHALL require
   a separate opt-in, state that tokens will be consumed, and report measured
   usage when the provider exposes it (otherwise `unknown`, never zero).
+- **R-OPS-2:** WHEN optimized routing cannot be used during an unattended run,
+  THE controller SHALL persist the reason and affected selection, surface it in
+  status and the final report, and continue with an independently verified
+  full-capability fallback when one exists. If no safe fallback exists, only the
+  affected obligation blocks and the run reports the required operator action.
+- **R-OPS-3:** WHEN the same routing fault recurs in a run, THE controller SHALL
+  avoid repeated failed optimized dispatches, count affected obligations, and
+  emit one actionable alert for the run rather than silently paying full cost
+  on every task.
+- **R-METRIC-1:** THE report SHALL distinguish configured/accepted selection,
+  actual backend identity and measured token usage. Estimated savings may be
+  labelled as estimates; verified savings require provider evidence of the
+  effective model and usage. Missing data is `unknown`, never zero.
 
 ## Boundaries
 
@@ -69,8 +91,14 @@ continuation. `UNTESTED` remains distinct from `unsupported`.
 Codex can expose a model catalog through app-server `model/list`; that catalog
 alone does not grant dispatch support. Claude Code's model picker can be
 restricted by local and organization settings; a configured alias is not proof
-of effective model selection. Provider-specific proof must therefore be derived
-from an actual native event/trace, not from a static config file.
+of effective model selection. Claude Code documents `SubagentStart` with an
+`agent_id` and `agent_type`, and `SubagentStop` with a separate
+`agent_transcript_path`; those hooks establish lifecycle identity, not by
+themselves the backend model. Its model restrictions can substitute an allowed
+model for a requested restricted one. Provider-specific proof must therefore
+be derived from an actual native event/trace, not from a static config file.
+Sources: [Claude hooks](https://code.claude.com/docs/en/hooks),
+[Claude model configuration](https://code.claude.com/docs/en/model-config).
 
 Codex App Server explicitly labels `thread.model` and `thread.reasoningEffort`
 as current/persisted thread configuration, **not per-turn execution telemetry**.
@@ -81,27 +109,64 @@ telemetry, `observedModelEvidence` must remain `unverified`; an owner-approved
 claim, and an owner who requires actual identity keeps the gate blocked.
 Source: [Codex `Thread` protocol schema](https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/schema/json/v2/ThreadListResponse.json).
 
-## Open owner decision DA-1: actual backend identity
+## Owner decision DA-1: operational readiness without backend telemetry
 
-The currently approved Codex mapping has
-`degradation.allowMissingObservedIdentity=false`. The provider surface reviewed
-above does not expose actual per-turn backend identity. The owner must choose
-one of two explicit outcomes before a final routing implementation plan is
-admitted:
+The owner clarified the desired operation: configure each machine/provider at
+specific setup moments, then run optimized daily work without periodic paid
+renewal. An unattended run must not stop for an ordinary routing fault, and
+must not silently abandon optimization. Treat this as approval of an
+**operational evidence level**, not as proof of actual backend identity:
 
-1. Keep strict identity: Codex routing remains `BLOCKED` until native per-turn
-   evidence exists; machine setup/catalog availability may still be reported,
-   but cannot turn the gate green.
-2. Approve degraded identity: a verified native dispatch and configured
-   model/effort may route with `observedModelEvidence=unverified`, an explicit
-   `degraded` outcome and no savings claim. This requires an ordinary reviewed
-   replacement of the approved policy; AWM must not flip the flag itself.
+- One-time enrollment must prove the provider accepted a native subagent
+  dispatch and the configured model/effort for each routed selection. A
+  one-time active check may consume tokens only after explicit setup opt-in;
+  its measured usage or `unknown` cost is shown then, not buried in daily work.
+- With a matching runtime/account/config/policy fingerprint, normal work uses
+  the enrolled optimized route. The receipt has no wall-clock expiry. Actual
+  backend identity remains `UNTESTED` where the provider does not expose it;
+  reports show configured routing and only estimated, never verified, savings.
+- A change or rejection invalidates the affected selection, records a durable
+  reason and moves that run to a verified full-capability fallback. It raises
+  one actionable alert and a final summary, not a pause on every task. If the
+  full-capability path is also unverified, the affected obligation blocks.
+- The currently installed approved Codex policy still has
+  `degradation.allowMissingObservedIdentity=false`. AWM must not rewrite it
+  implicitly. The one-time setup flow presents a reviewed policy replacement
+  for explicit approval before operational routing is enabled.
 
-This is a product/security decision, not a timestamp-renewal implementation
-detail. Both outcomes preserve fail-closed handling for missing dispatch or
-model/effort override evidence. Until DA-1 is answered, the final compact plan
-is `planning-required`. The delivery map and acceptance gates are in
+The operator-visible state transition is:
+
+`UNENROLLED -> SETUP_PENDING -> READY_OPERATIONAL -> DRIFT_DETECTED ->
+FALLBACK_FULL or BLOCKED -> REENROLL_ONCE -> READY_OPERATIONAL`.
+
+`READY_OPERATIONAL` means native dispatch plus accepted configured selection,
+not proven backend identity. `doctor`/`preflight` explain `UNENROLLED` and
+`DRIFT_DETECTED` without starting a model. `FALLBACK_FULL` is a durable warning,
+not a green optimized-routing result. The delivery map and acceptance gates are in
 `docs/plans/2026-09-23-model-routing-closure-roadmap.md`.
+
+### Unattended incident and notification contract
+
+Before the first routed dispatch in a run, compare the receipt's local scoped
+fingerprints. A match makes no provider request and does not change the receipt.
+On local drift or a native rejection/mismatch, append a redacted durable event
+before choosing another route. Use stable reason codes such as
+`RUNTIME_DRIFT`, `ACCOUNT_DRIFT`, `CONFIG_DRIFT`, `POLICY_DRIFT`,
+`PROVIDER_REJECTED`, `SELECTION_MISMATCH`, `PROVENANCE_MISSING` and
+`FALLBACK_UNAVAILABLE`; retain an affected-obligation count and remedy, not a
+prompt, transcript, secret or native account identifier. The same-run circuit
+breaker skips further optimized attempts for the affected selection.
+
+If the full-capability selection was separately enrolled and still matches the
+current machine/provider scope, continue the obligation at full capability.
+Emit one warning in the active task and include the reason, fallback count and
+reenrollment command in the final unattended summary and read-only routing
+status. Do not call the run optimized or silently report savings. If the full
+selection is not safe, block only the affected obligation and report that
+operator action is required. Do not recursively fallback or launch an active
+probe without explicit authorization. A remote provider change that cannot be
+seen in local state can only be detected when a native call rejects or yields a
+mismatch; no local fingerprint can promise otherwise.
 
 ## Sequencing and acceptance
 
