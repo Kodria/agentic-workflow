@@ -31,7 +31,8 @@ The full CLI suite passed after building the test native addon (310 suites,
 PR #192 was closed because this checkpoint alone is not mergeable as the
 requested solution. Keep it as an antecedent, not an accepted capability proof.
 
-The current approved Codex mapping has
+Open owner decision **DA-1** in the source design is the execution gate. The
+current approved Codex mapping has
 `allowMissingObservedIdentity=false`. The app-server `Thread` schema calls
 `thread.model` and `thread.reasoningEffort` thread configuration, **not per-turn
 execution telemetry**. Therefore catalog coverage and a thread's configured

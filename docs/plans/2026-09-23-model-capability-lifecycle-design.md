@@ -81,6 +81,28 @@ telemetry, `observedModelEvidence` must remain `unverified`; an owner-approved
 claim, and an owner who requires actual identity keeps the gate blocked.
 Source: [Codex `Thread` protocol schema](https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/schema/json/v2/ThreadListResponse.json).
 
+## Open owner decision DA-1: actual backend identity
+
+The currently approved Codex mapping has
+`degradation.allowMissingObservedIdentity=false`. The provider surface reviewed
+above does not expose actual per-turn backend identity. The owner must choose
+one of two explicit outcomes before a final routing implementation plan is
+admitted:
+
+1. Keep strict identity: Codex routing remains `BLOCKED` until native per-turn
+   evidence exists; machine setup/catalog availability may still be reported,
+   but cannot turn the gate green.
+2. Approve degraded identity: a verified native dispatch and configured
+   model/effort may route with `observedModelEvidence=unverified`, an explicit
+   `degraded` outcome and no savings claim. This requires an ordinary reviewed
+   replacement of the approved policy; AWM must not flip the flag itself.
+
+This is a product/security decision, not a timestamp-renewal implementation
+detail. Both outcomes preserve fail-closed handling for missing dispatch or
+model/effort override evidence. Until DA-1 is answered, the final compact plan
+is `planning-required`. The delivery map and acceptance gates are in
+`docs/plans/2026-09-23-model-routing-closure-roadmap.md`.
+
 ## Sequencing and acceptance
 
 1. Add read-only routing setup diagnostics and explicit no-token discovery.
