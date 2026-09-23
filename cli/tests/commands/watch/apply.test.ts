@@ -10,6 +10,9 @@ import { initJournal, readJournal, writeJournal } from '../../../src/core/journa
 import { requestsDir, eventsPath } from '../../../src/core/journal/paths';
 import * as atomicFile from '../../../src/core/atomic-file';
 import { computeGate } from '../../../src/commands/job/gate';
+import { canonicalPolicyDigest } from '../../../src/core/model-policy/canonical';
+import { capabilityReceiptDigest } from '../../../src/core/model-policy/capabilities';
+import { routingApproval, routingEnvelope } from '../../helpers/routing-approval';
 
 function jobPayload(argv: string[]): Record<string, unknown> {
     return { argv, paths: [], cwd: '.', fingerprint: 'fp-1', commandDigest: 'cd-1', expandedPaths: [] };
@@ -174,16 +177,29 @@ describe('aplicacion transaccional de requests', () => {
     });
 
     test('routing reserve/observe es supervisado, idempotente y una generacion vieja no muta intentos', () => {
-        const envelope = { schema: 'routing-envelope/v1', runtime: { target: 'codex', kind: 'native', version: '1', accountScopeDigest: '0'.repeat(64) }, role: 'implementer', sliceId: 'S1', requestedProfile: 'mechanical', effectiveProfile: 'mechanical', resolved: { selector: { kind: 'model', id: 'm' }, effort: { kind: 'explicit', value: 'medium' } }, outcome: 'native', unavailableEvidence: [], policyDigest: 'a'.repeat(64), capabilityDigest: 'b'.repeat(64), planDigest: 'c'.repeat(64), executionDigest: 'd'.repeat(64) };
-        emitRequest(repo, 'rama', { kind: 'routing-reserve', generationToken: 'g1', idempotencyKey: 'routing-1', payload: { obligationId: 'o1', lineageId: 'l1', envelope, fingerprint: 'e'.repeat(64) } });
-        consumePendingRequests(repo, 'rama', 'g1');
-        const attempt = readJournal(repo, 'rama').state!.routingAttempts![0];
-        emitRequest(repo, 'rama', { kind: 'routing-observe', generationToken: 'g1', idempotencyKey: 'routing-2', payload: { attemptId: attempt.id, nativeAgentId: 'native-1' } });
-        consumePendingRequests(repo, 'rama', 'g1');
-        expect(readJournal(repo, 'rama').state!.routingAttempts![0]).toMatchObject({ state: 'active', nativeAgentId: 'native-1' });
-        emitRequest(repo, 'rama', { kind: 'routing-reserve', generationToken: 'old', idempotencyKey: 'routing-old', payload: { obligationId: 'o1', lineageId: 'l2', envelope, fingerprint: 'f'.repeat(64) } });
-        expect(consumePendingRequests(repo, 'rama', 'g1').rejectedStale).toBe(1);
-        expect(readJournal(repo, 'rama').state!.routingAttempts).toHaveLength(1);
+        const priorHome = process.env.AWM_HOME;
+        process.env.AWM_HOME = path.join(repo, 'operator');
+        try {
+            const approved = routingApproval();
+            approved.policy.contentDigest = canonicalPolicyDigest(approved.policy.content);
+            approved.capabilities.recordedAt = new Date(Date.now() - 60_000).toISOString();
+            approved.capabilities.expiresAt = new Date(Date.now() + 3_600_000).toISOString();
+            const envelope = { ...routingEnvelope, policyDigest: approved.policy.contentDigest, capabilityDigest: capabilityReceiptDigest(approved.capabilities) };
+            fs.mkdirSync(path.join(repo, '.awm'), { recursive: true });
+            fs.writeFileSync(path.join(repo, '.awm', 'model-policy.json'), JSON.stringify(approved.policy));
+            const receiptPath = path.join(process.env.AWM_HOME, 'routing-capabilities', 'codex', 'native.json');
+            fs.mkdirSync(path.dirname(receiptPath), { recursive: true });
+            fs.writeFileSync(receiptPath, JSON.stringify(approved.capabilities));
+            emitRequest(repo, 'rama', { kind: 'routing-reserve', generationToken: 'g1', idempotencyKey: 'routing-1', payload: { obligationId: 'o1', lineageId: 'l1', envelope, fingerprint: 'e'.repeat(64) } });
+            expect(consumePendingRequests(repo, 'rama', 'g1').applied).toBe(1);
+            const attempt = readJournal(repo, 'rama').state!.routingAttempts![0];
+            emitRequest(repo, 'rama', { kind: 'routing-observe', generationToken: 'g1', idempotencyKey: 'routing-2', payload: { attemptId: attempt.id, nativeAgentId: 'native-1' } });
+            consumePendingRequests(repo, 'rama', 'g1');
+            expect(readJournal(repo, 'rama').state!.routingAttempts![0]).toMatchObject({ state: 'active', nativeAgentId: 'native-1' });
+            emitRequest(repo, 'rama', { kind: 'routing-reserve', generationToken: 'old', idempotencyKey: 'routing-old', payload: { obligationId: 'o1', lineageId: 'l2', envelope, fingerprint: 'f'.repeat(64) } });
+            expect(consumePendingRequests(repo, 'rama', 'g1').rejectedStale).toBe(1);
+            expect(readJournal(repo, 'rama').state!.routingAttempts).toHaveLength(1);
+        } finally { if (priorHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = priorHome; }
     });
 
     test('request corrupta se aparta VISIBLE como .corrupt, jamas se descarta (R1.6)', () => {  // verifies R1.6

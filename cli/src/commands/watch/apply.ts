@@ -12,6 +12,8 @@ import { redactText } from '../../core/journal/redact';
 import { gitCheckTrackId, headSha } from '../../core/tracks/git';
 import { isRoutingEnvelope, isRoutingSelection, type Job, type JournalState, type ReviewObligation, type RoutingSelection, type TrackRef, type VerificationItem } from '../../core/journal/types';
 import { observeRoutingAttempt, reserveRoutingAttempt } from '../../core/model-policy/journal';
+import { readEffectivePolicy } from '../../core/model-policy/store';
+import { readCapabilities, validateRuntimeKey } from '../../core/model-policy/capabilities';
 
 export interface ApplySummary { applied: number; rejectedStale: number; rejectedDigest: number; rejectedInvalid: number; corrupt: number; }
 
@@ -113,7 +115,13 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
     if (env.kind === 'routing-reserve') {
         const p = env.payload;
         if (typeof p.obligationId !== 'string' || typeof p.lineageId !== 'string' || !isRoutingEnvelope(p.envelope) || typeof p.fingerprint !== 'string' || (p.at !== undefined && typeof p.at !== 'string')) throw new Error('routing-reserve requiere payload estricto');
-        const reserved = reserveRoutingAttempt(s, { obligationId: p.obligationId, lineageId: p.lineageId, envelope: p.envelope, fingerprint: p.fingerprint }, p.at ?? now());
+        const envelope = p.envelope;
+        const reserved = reserveRoutingAttempt(s, { obligationId: p.obligationId, lineageId: p.lineageId, envelope, fingerprint: p.fingerprint, approval: () => {
+            const checkedAt = new Date();
+            const policy = readEffectivePolicy(repoRoot);
+            const capabilities = readCapabilities(validateRuntimeKey(envelope.runtime), checkedAt);
+            return { checkedAt, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined };
+        } }, p.at ?? now());
         Object.assign(s, reserved.state); applyOutcome(s, { ...base, outcome: 'applied', resultRef: reserved.attemptId }); return;
     }
     if (env.kind === 'routing-observe') {

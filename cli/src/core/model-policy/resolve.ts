@@ -7,6 +7,21 @@ import type { PlanValidationReport } from '../plan/types';
 
 export type SelectionResolution = { state: 'resolved'; selection: Selection; effectiveProfile: ImplementerProfile | 'full'; outcome: 'native' | 'degraded'; policyDigest: string; capabilityDigest: string; unavailableEvidence: string[] } | { state: 'blocked'; diagnostics: PlanDiagnostic[] };
 export type ResolveSelectionInput = { role: RoutingRole; requestedProfile: ImplementerProfile | 'full'; policy?: ApprovedPolicy; capabilities?: CapabilityReceipt; runtime: RuntimeKey; now: Date };
+export function resolveEscalatedSelection(input: ResolveSelectionInput & { requestedProfile: ImplementerProfile; expectedEffort: 'medium' | 'high' }): SelectionResolution {
+    if (!input || input.role !== 'implementer' || !['medium', 'high'].includes(input.expectedEffort)) throw new Error('escalated selection requires an implementer and a supported effort');
+    const selected = resolveSelection(input);
+    if (selected.state === 'blocked') return selected;
+    const effort = selected.selection.effort;
+    if (input.requestedProfile !== 'judgment') return effort.kind === 'explicit' && effort.value === input.expectedEffort ? selected : blocked('ROUTING_ESCALATION_EFFORT_UNAVAILABLE', 'The approved selected effort does not match the next lineage escalation.');
+    if (effort.kind === 'explicit' && effort.value === 'medium' && input.expectedEffort === 'medium') return selected;
+    const full = resolveSelection({ ...input, role: 'code-quality-reviewer', requestedProfile: 'full' });
+    if (full.state === 'blocked') return full;
+    const sameModel = full.selection.selector.kind === selected.selection.selector.kind && full.selection.selector.id === selected.selection.selector.id;
+    if (!sameModel || full.selection.effort.kind !== 'explicit' || full.selection.effort.value !== 'high') return blocked('ROUTING_ESCALATION_EFFORT_UNAVAILABLE', 'Judgment high requires the same approved full-capability model at explicit high effort.');
+    if (effort.kind === 'explicit' && effort.value === 'high') return selected;
+    if (effort.kind === 'explicit' && effort.value === 'medium' && input.expectedEffort === 'high') return { ...full, effectiveProfile: 'judgment' };
+    return blocked('ROUTING_ESCALATION_EFFORT_UNAVAILABLE', 'The approved selected effort does not match the next lineage escalation.');
+}
 export type V1Resolution = { state: 'not-required'; reason: 'v1-without-opt-in' } | SelectionResolution;
 export type DispatchResolution = V1Resolution;
 export type ResolveDispatchInput = Omit<ResolveSelectionInput, 'requestedProfile'> & { plan: Extract<PlanValidationReport, { state: 'valid' }>; sliceId?: string; optInV1: boolean };

@@ -81,7 +81,7 @@ describe('plan validate Commander wiring', () => {
         // not come out of validatePlanFile, so a spread-and-relabel fixture
         // cannot reach this path at all.
         const sliceId = 'S1';
-        const sel = { selector: { kind: 'model' as const, id: 'gpt-5.6-luna' }, effort: { kind: 'explicit' as const, value: 'medium' } };
+        const sel = { selector: { kind: 'model' as const, id: 'gpt-5.6-luna' }, effort: { kind: 'explicit' as const, value: 'high' } };
         const full = { selector: { kind: 'model' as const, id: 'gpt-5.6-sol' }, effort: { kind: 'explicit' as const, value: 'high' } };
         const sha = 'a'.repeat(64);
         const content = { schema: 'model-policy/v1' as const, mappings: [{ target: 'codex' as const, runtimeKind: 'native', profiles: { mechanical: sel, integration: sel, judgment: sel }, fullCapability: full, degradation: { allowMissingModelOverride: false, allowMissingEffortOverride: false, allowMissingObservedIdentity: false } }], implementationBudget: { maxAttempts: 3 as const, escalation: ['mechanical', 'integration', 'judgment'] as ['mechanical', 'integration', 'judgment'], judgmentEfforts: ['medium', 'high'] as ['medium', 'high'] } };
@@ -113,7 +113,7 @@ describe('plan validate Commander wiring', () => {
 
         // The point of the whole thing: that envelope reserves a first attempt,
         // which is what creates the lineage the escalation path later needs.
-        const reserved = reserveRoutingAttempt(emptyState('main'), { obligationId: 'o1', lineageId: 'l1', envelope: emitted.envelope, fingerprint: 'e'.repeat(64) }, '2026-09-19T00:00:00.000Z');
+        const reserved = reserveRoutingAttempt(emptyState('main'), { obligationId: 'o1', lineageId: 'l1', envelope: emitted.envelope, fingerprint: 'e'.repeat(64), approval: () => ({ policy: readEffectivePolicy().policy, capabilities: receipt, checkedAt: new Date() }) }, '2026-09-19T00:00:00.000Z');
         expect(reserved.attemptId).toEqual(expect.any(String));
         expect(reserved.state.implementationLineages).toEqual([expect.objectContaining({ id: 'l1', sliceId, initialProfile: 'mechanical' })]);
     });

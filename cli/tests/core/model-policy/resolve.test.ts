@@ -1,5 +1,5 @@
 import path from 'path';
-import { resolveSelection } from '../../../src/core/model-policy/resolve';
+import { resolveEscalatedSelection, resolveSelection } from '../../../src/core/model-policy/resolve';
 import { resolveV1Dispatch } from '../../../src/core/model-policy/resolve';
 import { validatePlanFile } from '../../../src/core/plan/validate';
 import type { ApprovedPolicy, CapabilityReceipt } from '../../../src/core/model-policy/types';
@@ -147,5 +147,23 @@ describe('resolveSelection', () => {
     it('does not require effort override after model fallback selects an attested runtime-default full selection', () => {
         const value = input(); value.policy.content.mappings[0].fullCapability = runtimeDefaultSelection('full'); value.capabilities.availableSelections = [selection('mechanical', 'low'), selection('integration', 'medium'), selection('judgment', 'medium'), runtimeDefaultSelection('full')]; value.capabilities.runtimeDefaultSelection = runtimeDefaultSelection('full'); value.policy.content.mappings[0].degradation.allowMissingModelOverride = true; value.capabilities.capabilities.modelOverride = 'unsupported'; value.capabilities.capabilities.effortOverride = 'unsupported';
         expect(resolveSelection(value)).toMatchObject({ state: 'resolved', outcome: 'degraded', selection: runtimeDefaultSelection('full'), unavailableEvidence: ['modelOverride'] });
+    });
+});
+
+describe('resolveEscalatedSelection', () => {
+    it('accepts the approved judgment high profile after integration when full capability matches', () => {
+        const value = input();
+        value.policy.content.mappings[0].profiles.judgment = selection('full', 'high');
+        expect(resolveEscalatedSelection({ ...value, requestedProfile: 'judgment', expectedEffort: 'medium' })).toMatchObject({ state: 'resolved', effectiveProfile: 'judgment', selection: selection('full', 'high') });
+    });
+    it('promotes judgment medium to the attested full high selection on its last correction', () => {
+        const value = input();
+        value.policy.content.mappings[0].profiles.judgment = selection('full', 'medium');
+        value.capabilities.availableSelections.push(selection('full', 'medium'));
+        expect(resolveEscalatedSelection({ ...value, requestedProfile: 'judgment', expectedEffort: 'high' })).toMatchObject({ state: 'resolved', effectiveProfile: 'judgment', selection: selection('full', 'high') });
+    });
+    it('blocks judgment high escalation when the full selection uses another model', () => {
+        const value = input();
+        expect(resolveEscalatedSelection({ ...value, requestedProfile: 'judgment', expectedEffort: 'high' })).toMatchObject({ state: 'blocked', diagnostics: [{ code: 'ROUTING_ESCALATION_EFFORT_UNAVAILABLE' }] });
     });
 });
