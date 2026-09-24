@@ -17,6 +17,7 @@ function controlledDirectory(directory: string): void {
 export interface WatchJournalStatus {
     state: 'missing' | 'corrupt' | 'present';
     cycleState?: JournalState['cycle']['status'];
+    latestGeneration?: { n: number; token: string; state: JournalState['generations'][number]['state'] };
     binding?: { path: string; digest: string; executionDigest?: string; executionIdentitySchema?: string; schema: string; executionMode: string; boundAt: string };
     bootstrapUnused: boolean;
 }
@@ -39,8 +40,11 @@ export function watchJournalStatus(repoRoot: string, branch: string): WatchJourn
     try { assertUnused(current.state); assertUnusedTree(repoRoot, branch); bootstrapUnused = true; }
     catch { /* recognized present journal, but never eligible by absence alone */ }
     const binding = current.state.planBinding;
+    const latest = current.state.generations.reduce<JournalState['generations'][number] | undefined>(
+        (prev, generation) => prev === undefined || generation.n > prev.n ? generation : prev, undefined);
     return {
         state: 'present', cycleState: current.state.cycle.status, bootstrapUnused,
+        ...(latest ? { latestGeneration: { n: latest.n, token: latest.token, state: latest.state } } : {}),
         ...(binding ? { binding: { path: binding.path, digest: binding.digest, ...(binding.executionDigest ? { executionDigest: binding.executionDigest, executionIdentitySchema: binding.executionIdentitySchema } : {}), schema: binding.schema, executionMode: binding.executionMode, boundAt: binding.boundAt } } : {}),
     };
 }

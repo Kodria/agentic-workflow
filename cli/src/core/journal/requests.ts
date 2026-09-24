@@ -76,7 +76,7 @@ function isRecord(x: unknown): x is Record<string, unknown> {
     return typeof x === 'object' && x !== null && !Array.isArray(x);
 }
 
-function isWellFormedEnvelope(x: unknown): x is RequestEnvelope & { requestId: string } {
+export function isWellFormedEnvelope(x: unknown): x is RequestEnvelope & { requestId: string } {
     if (!isRecord(x)) return false;
     return typeof x.requestId === 'string' && x.requestId.length > 0
         && KNOWN_KINDS.includes(x.kind as RequestEnvelope['kind'])

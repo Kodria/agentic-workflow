@@ -95,13 +95,32 @@ export function registerJobCommand(program: Command): void {
             let payload: unknown;
             try { payload = JSON.parse(opts.json); } catch { throw new Error('--json requiere un objeto JSON valido'); }
             if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) throw new Error('--json requiere un objeto JSON');
+            if ('entity' in payload && (payload as Record<string, unknown>).entity !== opts.entity) {
+                throw new Error('--json entity debe coincidir con --entity');
+            }
             const repo = process.cwd();
             const branch = branchOf(repo);
             assertAuthenticatedCwd(repo, branch);
+            if (opts.entity === 'task') {
+                const current = readJournal(repo, branch);
+                if (current.corrupt || current.state === null) throw new Error('register --entity task requiere journal valido');
+                const taskId = (payload as Record<string, unknown>).taskId;
+                const rawPlan = (payload as Record<string, unknown>).verificationPlan;
+                const allowedKinds = ['test', 'lint', 'sensors', 'review', 'qa', 'interlock', 'track-integration'];
+                if (typeof taskId !== 'string' || taskId.length === 0) throw new Error('register --entity task requiere taskId');
+                if (rawPlan !== undefined && (!Array.isArray(rawPlan) || !rawPlan.every(item =>
+                    typeof item === 'object' && item !== null && typeof item.id === 'string' && item.id.length > 0
+                    && allowedKinds.includes(item.kind) && (item.satisfiedBy === undefined || typeof item.satisfiedBy === 'string')))) {
+                    throw new Error('register --entity task requiere verificationPlan valido');
+                }
+                const plan = (rawPlan ?? []) as Array<{ kind: string }>;
+                const missing = current.state.requiredVerifiers.filter(kind => !plan.some(item => item.kind === kind));
+                if (missing.length > 0) throw new Error(`register --entity task: verificationPlan no cubre los verificadores requeridos: ${missing.join(', ')}`);
+            }
             const r = emitRequest(repo, branch, {
                 kind: 'register-entity', generationToken: opts.generation,
                 idempotencyKey: crypto.createHash('sha256').update(`${opts.entity}:${opts.json}`).digest('hex'),
-                payload: { entity: opts.entity, ...(payload as Record<string, unknown>) },
+                payload: { ...(payload as Record<string, unknown>), entity: opts.entity },
             });
             process.stdout.write(JSON.stringify({ requestId: r.requestId }, null, 2) + '\n');
         });

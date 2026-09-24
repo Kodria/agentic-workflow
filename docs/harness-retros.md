@@ -792,3 +792,10 @@ la aceptación de una publicación instalada.
 - **Recomendaciones no aplicadas:** valorar cobertura de sensores opcionales y clasificación empírica en un ciclo dedicado; no instalar herramientas ni modificar el pack como side effect de este PR.
 - **Descartes:** no se edita `AGENTS.md`, `CONSTITUTION.md` ni el árbol de remediación. El grupo de ledger no prueba recurrencia sistémica fuera de esta rama, y las curas locales son verificables. No se inventa un recibo, una inferencia ni un ahorro verificado.
 - **Captura de ciclo:** `awm watch journal-status --json` devolvió `missing` para esta rama. Se omite explícitamente `awm evidence capture`: la evidencia manual/nativa durable está en el plan activo, los tests, la salida de sensores y esta revisión QA; no se afirma `COMPLETE` de un ciclo desatendido inexistente.
+
+## 2026-09-24 — Recuperación de requests rechazadas (#194)
+
+- **Hallazgos:** dos defectos lógicos registrados: resolución vinculable a otra tarea y causa de custodia que cambiaba entre ticks. Ambos quedaron cubiertos por pruebas de regresión en el CLI. No hubo patrón recurrente en `awm ledger recurring --min 2`.
+- **Cura:** la validación cruza ID, digest, tarea y generación; el supervisor conserva la causa de requests hasta una decisión explícita de reanudación y nunca reemplaza una causa independiente. Las pruebas cubren también recuperación diferida y reintentos tras interrupción.
+- **Verificación:** la suite completa previa al último ajuste pasó 331 suites y 4221 tests (2 suites y 16 tests omitidos); el candidato final pasó 49 pruebas enfocadas y sensores `overall: pass`. La cobertura empírica del pack sigue parcial y sus detectores opcionales faltantes no son un defecto introducido por #194.
+- **Descartes:** no se añaden reglas globales ni sensores nuevos: estos invariantes son propios de la custodia del journal y ya tienen tests locales. No se afirma que un request inválido se autocorrija sin intervención; el CLI ofrece recuperación pública y auditada.

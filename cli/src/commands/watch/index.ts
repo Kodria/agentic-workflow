@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { execFileSync } from 'child_process';
 import { initWatch, rebindWatchPlan } from './init';
+import { recoverRejectedTask } from './request-recovery';
 import { runSupervisorLoop, DEFAULT_SUPERVISOR_CONFIG, type RoutingIdentity } from './supervisor';
 import { validateRuntimeKey } from '../../core/model-policy/capabilities';
 import { CONTROLLER_AUTONOMIES, isControllerAutonomy } from '../../core/journal/adapter';
@@ -141,6 +142,29 @@ export function registerWatchCommand(program: Command): void {
             process.stdout.write(`awm watch: supervisor activo (${cfg.provider}) — Ctrl-C para terminar\n`);
             await runSupervisorLoop(repo, branch, cfg);
             process.stdout.write('gate verde: ciclo COMPLETE — drenado, lock liberado, apagando\n');
+        });
+
+    watch.command('recover-request')
+        .description('reconcilia una task rechazada con una request correctiva aplicada bajo lock exclusivo')
+        .requiredOption('--rejected <requestId>', 'request rechazada archivada')
+        .requiredOption('--replacement <requestId>', 'request correctiva pendiente')
+        .requiredOption('--generation <token>', 'generacion vigente')
+        .requiredOption('--reason <text>', 'motivo auditado de la recuperacion')
+        .option('--resume', 'reanuda explicitamente custodia si el unico bloqueo era la request')
+        .action((opts: { rejected: string; replacement: string; generation: string; reason: string; resume?: boolean }) => {
+            const repo = process.cwd();
+            const branch = currentBranch(repo);
+            try {
+                resolveCommandContext(repo, branch);
+                recoverRejectedTask(repo, branch, {
+                    rejectedRequestId: opts.rejected, replacementRequestId: opts.replacement,
+                    generationToken: opts.generation, reason: opts.reason, resume: opts.resume === true,
+                });
+                process.stdout.write(JSON.stringify({ recovered: true, rejectedRequestId: opts.rejected, replacementRequestId: opts.replacement, resumed: opts.resume === true }) + '\n');
+            } catch (error) {
+                process.stderr.write(`${(error as Error).message}\n`);
+                process.exitCode = 1;
+            }
         });
 
     watch

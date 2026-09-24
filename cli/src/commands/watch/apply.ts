@@ -10,7 +10,7 @@ import { requestsDir } from '../../core/journal/paths';
 import { fsyncDirSync } from '../../core/atomic-file';
 import { redactText } from '../../core/journal/redact';
 import { gitCheckTrackId, headSha } from '../../core/tracks/git';
-import { isRoutingEnvelope, isRoutingSelection, type Job, type JournalState, type ReviewObligation, type RoutingSelection, type TrackRef, type VerificationItem } from '../../core/journal/types';
+import { activeRequestProblems, isRoutingEnvelope, isRoutingSelection, type Job, type JournalState, type ReviewObligation, type RoutingSelection, type TrackRef, type VerificationItem } from '../../core/journal/types';
 import { observeRoutingAttempt, reserveRoutingAttempt } from '../../core/model-policy/journal';
 import { readEffectivePolicy } from '../../core/model-policy/store';
 import { readCapabilities, validateRuntimeKey } from '../../core/model-policy/capabilities';
@@ -123,7 +123,7 @@ function trackWorktreePath(repoRoot: string, trackId: string): string {
     return path.join(path.dirname(repoRoot), `${path.basename(repoRoot)}.track-${trackId}`);
 }
 
-function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId: string }, digest: string, repoRoot: string, eventScope?: EventScope): void {
+export function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId: string }, digest: string, repoRoot: string, eventScope?: EventScope): void {
     const base = { requestId: env.requestId, idempotencyKey: env.idempotencyKey, payloadDigest: digest };
     if (env.kind === 'controller-heartbeat') {
         s.controllerHeartbeatAt = now();
@@ -461,6 +461,7 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
                 throw new Error('register --entity custody-decision requiere decision=resume y reason no vacio');
             }
             if (s.cycle.status !== 'BLOCKED') throw new Error('custody-decision solo aplica a un ciclo BLOCKED');
+            if (activeRequestProblems(s).length > 0) throw new Error('custody-decision no resuelve requests rechazadas pendientes');
             s.custodyDecisions ??= [];
             s.custodyDecisions.push({ at: now(), decision: 'resume', reason: p.reason, generationToken: env.generationToken });
             for (const generation of s.generations) {
@@ -611,7 +612,10 @@ export function consumePendingRequests(repoRoot: string, branch: string, activeT
                 rejectedInvalid++;
                 deferredRenames.push({ from: p.file, to: `${p.file}.rejected` });
                 if (!s.requestProblems.some((problem) => problem.file === p.file && problem.kind === 'rejected')) {
-                    s.requestProblems.push({ file: p.file, kind: 'rejected', detail: redactText((e as Error).message), at: now() });
+                    s.requestProblems.push({ file: p.file, kind: 'rejected', detail: redactText((e as Error).message), at: now(),
+                        requestId: env.requestId, generationToken: env.generationToken,
+                        ...(env.kind === 'register-entity' && env.payload.entity === 'task' && typeof env.payload.taskId === 'string'
+                            ? { taskId: env.payload.taskId } : {}) });
                 }
                 appendEvent(repoRoot, branch, { kind: 'request-rejected-invalid', requestId: env.requestId, detail: (e as Error).message });
                 dirChanged = true;

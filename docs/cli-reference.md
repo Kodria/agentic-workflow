@@ -361,8 +361,41 @@ awm watch journal-status [--json]
 ```
 
 Read-only observation of the current branch: `missing`, `corrupt`, or `present`,
-with sanitized binding metadata and `bootstrapUnused`. It exports no plan,
+with sanitized binding metadata, `bootstrapUnused`, and the latest generation's
+number, token and state when one exists. The generation token remains visible
+after the supervisor stops, so it can be used for a verified recovery. It exports no plan,
 prompt, source body, or inferred completion evidence.
+
+### `awm watch recover-request`
+
+```bash
+awm watch recover-request --rejected <requestId> --replacement <requestId> --generation <token> --reason <text> [--resume]
+```
+
+Use this only for a `register-entity task` request that the supervisor rejected.
+`awm job gate` exits non-zero and reports the rejected request's file and
+reason. Correct the task payload, including every verifier required by the
+journal; `awm job register --entity task` now rejects missing verifier kinds
+before it writes a new request. Record the new request ID from that command's
+output. `awm watch journal-status --json` reports `latestGeneration.token`,
+including after a clean supervisor shutdown.
+
+Stop the supervisor and let it release its lock before running recovery. The
+command checks the archived original (`.json.rejected`), the pending replacement,
+the same task ID and current generation, and the absence of a live controller.
+It applies the replacement and records the link, digest, reason and timestamp in
+the journal before removing the pending file; the rejected archive remains.
+An incompatible or still-invalid replacement leaves the cycle blocked. The
+operation is safe to retry after interruption.
+
+Use `--resume` only after all active request problems are corrected and the
+request rejection is the sole custody cause. Without it, the cycle remains
+`BLOCKED` until an explicit later recovery call with the same IDs, generation
+and reason plus `--resume`. Other custody causes cannot be cleared by this
+command. Then restart `awm watch` with the cycle's normal provider/runtime
+options and inspect `awm job gate`: unfinished tasks and other missing evidence
+still block certification. This is an operator recovery path, not an automatic
+retry of invalid requests.
 
 ### `awm watch archive-unused`
 
