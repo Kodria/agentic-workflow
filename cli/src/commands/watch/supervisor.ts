@@ -10,6 +10,11 @@ import { readPreferences } from '../../utils/config';
 import type { AdmissionInput } from '../../core/admission';
 import { readEffectivePolicy } from '../../core/model-policy/store';
 import { readCapabilities, validateRuntimeKey } from '../../core/model-policy/capabilities';
+import { readStoredEventReceipt } from '../../core/model-policy/event-store';
+import { queryLocalCodexScope } from '../../core/model-policy/local-codex-scope';
+import { queryLocalEventScope } from '../../core/model-policy/local-event-scope';
+import type { EventScope } from '../../core/model-policy/capabilities-v2';
+import { routingReport } from '../../core/model-policy/journal';
 import { adapterFor, type ControllerAutonomy } from '../../core/journal/adapter';
 import { groupIsGone, terminateGroupConfirmed } from '../../core/journal/process';
 import { computeGate, computeTrackGate, FingerprintNow } from '../job/gate';
@@ -32,6 +37,8 @@ export interface DispatchAdmissionDeps {
     admit?: typeof admitRegistryPlan;
     readEffectivePolicy?: typeof readEffectivePolicy;
     readCapabilities?: typeof readCapabilities;
+    readStoredEventReceipt?: typeof readStoredEventReceipt;
+    queryLocalCodexScope?: typeof queryLocalCodexScope;
     now?: () => Date;
 }
 
@@ -66,10 +73,29 @@ export function defaultDispatchAdmission(repoRoot: string, branch: string, provi
         }
         const plan = validatePlanFile(binding.path, repoRoot);
         const preferences = readPreferences();
+        let routing: AdmissionInput['routing'];
+        if ((provider === 'codex' || provider === 'claude-code') && identity) {
+            const runtime = validateRuntimeKey({ target: provider, kind: identity.kind, version: identity.version, accountScopeDigest: identity.accountScopeDigest });
+            const stored = (deps.readStoredEventReceipt ?? readStoredEventReceipt)(runtime);
+            if (stored.state === 'absent') routing = routingFacts(provider, identity, repoRoot, deps);
+            else {
+                const at = deps.now?.() ?? new Date();
+                if (!(at instanceof Date) || !Number.isFinite(at.getTime())) throw new Error('routing observation time must be a finite Date');
+                const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(repoRoot);
+                routing = { runtime, policy: policy.state === 'approved' ? policy.policy : undefined, now: at };
+                if (stored.state === 'invalid') routing.eventIssue = { code: 'ROUTING_CAPABILITY_INVALID', message: `Sealed native event receipt is invalid; run awm model-policy setup --provider ${provider}.` };
+                else {
+                    const local = await (provider === 'codex' && deps.queryLocalCodexScope ? deps.queryLocalCodexScope(repoRoot, identity.kind) : queryLocalEventScope(repoRoot, provider, identity.kind));
+                    if (local.state === 'current' && JSON.stringify(local.scope.runtime) === JSON.stringify(runtime)) {
+                        routing.eventReceipt = stored.receipt; routing.eventScope = local.scope;
+                    } else { const reason = local.state === 'unverified' ? local.reason : 'RUNTIME_IDENTITY_MISMATCH'; routing.eventIssue = { code: `ROUTING_${reason}`, message: `${provider} runtime/account scope changed or cannot be verified (${reason}); run awm model-policy setup --provider ${provider} --json.` }; }
+                }
+            }
+        } else routing = routingFacts(provider, identity, repoRoot, deps);
         return (deps.admit ?? admitRegistryPlan)({ plan, provider, cwd: repoRoot, enabledAgents: preferences.enabledAgents,
             executionMode: 'desatendido', requireCurrent: true, verifySensors: true,
             journalState: observed.state, journalCorrupt: observed.corrupt, planPath: binding.path,
-            routing: routingFacts(provider, identity, repoRoot, deps),
+            routing,
             controllerAutonomy: autonomy });
     };
 }
@@ -419,7 +445,29 @@ export class Supervisor {
         const r0 = readJournal(this.repoRoot, this.branch);
         if (r0.corrupt || r0.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
         const gen = activeGeneration(r0.state);
-        consumePendingRequests(this.repoRoot, this.branch, gen?.token ?? null);
+        let eventScope: EventScope | undefined;
+        if ((this.cfg.provider === 'codex' || this.cfg.provider === 'claude-code') && this.cfg.routingIdentity) {
+            const asserted = validateRuntimeKey({ target: this.cfg.provider, ...this.cfg.routingIdentity });
+            const event = readStoredEventReceipt(asserted);
+            if (event.state === 'present') {
+                const local = await queryLocalEventScope(this.repoRoot, asserted.target, asserted.kind);
+                if (local.state === 'current' && JSON.stringify(local.scope.runtime) === JSON.stringify(asserted)) eventScope = local.scope;
+            }
+        }
+        consumePendingRequests(this.repoRoot, this.branch, gen?.token ?? null, eventScope);
+        const alertRead = readJournal(this.repoRoot, this.branch);
+        if (alertRead.corrupt || !alertRead.state) throw new Error('routing alert cannot read durable journal');
+        const pendingAlerts = alertRead.state.routingIncidents?.filter(item => item.alertState === 'pending') ?? [];
+        if (pendingAlerts.length > 0) {
+            for (const incident of pendingAlerts) {
+                const alert = { id: incident.id, reasonCode: incident.reasonCode, selection: incident.selection,
+                    fallbackCount: incident.fallbackCount, remedy: `awm model-policy setup --provider ${incident.target} --json` };
+                process.stderr.write(`AWM routing alert ${JSON.stringify(alert)}\n`);
+                appendEvent(this.repoRoot, this.branch, { kind: 'routing-incident', ...alert });
+                incident.alertState = 'reported';
+            }
+            writeJournal(this.repoRoot, this.branch, alertRead.state);
+        }
         // P1/P2 (R4.1-R4.10): a lo sumo un side effect de bootstrap de tracks
         // por tick, ANTES de tocar jobs — mientras la cohorte está PREPARING,
         // ningún job de track se despacha (eso lo maneja `runnerTick` con los
@@ -669,7 +717,11 @@ export async function runSupervisorLoop(
             // 'frozen' (Task 10): mismo camino de salida que 'complete' —
             // drenar ownership y liberar el lock, el track ya cumplió su
             // freeze y no debe seguir despachando ni corriendo su loop.
-            if (out === 'complete' || out === 'frozen') break;
+            if (out === 'complete' || out === 'frozen') {
+                const finalState = readJournal(repoRoot, branch);
+                if (!finalState.corrupt && finalState.state?.routingIncidents?.length) process.stderr.write(`AWM final routing summary ${JSON.stringify(routingReport(finalState.state))}\n`);
+                break;
+            }
             // 'custody': NO liberar lock, NO salir — seguir auditando (R4.5)
             await new Promise<void>((resolve) => {
                 let settled = false;

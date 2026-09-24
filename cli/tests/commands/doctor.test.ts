@@ -1,4 +1,4 @@
-import { registerDoctorCommand, renderProviderReport, renderReport, runDoctor } from '../../src/commands/doctor';
+import { attachRoutingSetupGuidance, registerDoctorCommand, renderProviderReport, renderReport, runDoctor } from '../../src/commands/doctor';
 import { Command } from 'commander';
 import type { CheckReport, ProviderDiagnosticReport } from '../../src/core/diagnostics/types';
 import type { AwmPreferences } from '../../src/utils/config';
@@ -36,6 +36,13 @@ describe('runDoctor legacy JSON fixtures', () => {
             captured.cleanup();
         }
     });
+});
+
+test('doctor labels sealed routing coverage as local-only without asking for recurring setup', () => {
+    const report = attachRoutingSetupGuidance({ overall: 'healthy', providers: [{ id: 'codex', label: 'Codex', tier: 'hooks-native', checks: [] }] } as never,
+        [{ target: 'codex', runtimeKind: 'native', state: 'coverage-only' }]);
+    expect(report.providers[0].checks).toEqual([{ id: 'routing.machine', state: 'supported',
+        detail: 'sealed selection coverage for native only; current runtime/account/config scope is checked at routed dispatch' }]);
 });
 
 describe('runDoctor dashboard modes', () => {

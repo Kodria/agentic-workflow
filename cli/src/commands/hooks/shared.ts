@@ -148,6 +148,7 @@ export type HookStatus = {
         sessionStartScript: CheckResult;
         runHookWrapper?: CheckResult;
         settingsEntry: CheckResult;
+        routingCapture?: CheckResult;
     };
 };
 

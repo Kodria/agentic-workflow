@@ -58,6 +58,27 @@ function isAwmEntry(entry: any, scriptsDir: string, matcher: string): boolean {
     );
 }
 
+function routingCommand(event: 'start' | 'stop'): string { return `awm model-policy hook-event --event ${event}`; }
+function routingEntry(event: 'start' | 'stop'): { matcher: string; hooks: Array<{ type: string; command: string; async: false }> } {
+    return { matcher: '.+', hooks: [{ type: 'command', command: routingCommand(event), async: false }] };
+}
+function isRoutingEntry(entry: any, event: 'start' | 'stop'): boolean {
+    return entry?.matcher === '.+' && Array.isArray(entry?.hooks) && entry.hooks.some((hook: any) =>
+        hook?.type === 'command' && hook.command === routingCommand(event) && hook.async === false);
+}
+function mergeRoutingEntries(settings: any): boolean {
+    let changed = false;
+    for (const [eventName, event] of [['SubagentStart', 'start'], ['SubagentStop', 'stop']] as const) {
+        if (!Array.isArray(settings.hooks[eventName])) settings.hooks[eventName] = [];
+        const entries: any[] = settings.hooks[eventName];
+        const expected = routingEntry(event);
+        const index = entries.findIndex(entry => isRoutingEntry(entry, event));
+        if (index < 0) { entries.push(expected); changed = true; }
+        else if (JSON.stringify(entries[index]) !== JSON.stringify(expected)) { entries[index] = expected; changed = true; }
+    }
+    return changed;
+}
+
 export function installClaudeHook(options: InstallOptions): InstallResult {
     const config = getSettingsMergeHookConfig(options.agent);
 
@@ -118,18 +139,20 @@ export function installClaudeHook(options: InstallOptions): InstallResult {
     };
 
     let status: InstallResult['status'];
+    let sessionChanged = false;
     if (awmEntryIdx >= 0) {
         // Igual que en codex.ts: si la poda saco algo, hay que escribir aunque nuestra
         // entrada ya este identica — si no, la limpieza se calcula y se tira.
-        if (!pruned && JSON.stringify(entries[awmEntryIdx]) === JSON.stringify(newEntry)) {
-            return { status: 'already-up-to-date', scriptsDir: config.scriptsDir, settingsPath: config.settingsPath, backupPath: null };
-        }
-        entries[awmEntryIdx] = newEntry;
+        if (pruned || JSON.stringify(entries[awmEntryIdx]) !== JSON.stringify(newEntry)) { entries[awmEntryIdx] = newEntry; sessionChanged = true; }
         status = 'installed';
     } else {
         entries.push(newEntry);
+        sessionChanged = true;
         status = 'installed';
     }
+
+    const routingChanged = mergeRoutingEntries(settings);
+    if (!sessionChanged && !routingChanged) return { status: 'already-up-to-date', scriptsDir: config.scriptsDir, settingsPath: config.settingsPath, backupPath: null };
 
     // 7. Write settings
     fs.writeFileSync(config.settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
@@ -158,6 +181,15 @@ function checkSettingsEntry(settingsPath: string, scriptsDir: string, matcher: s
     return { ok: true, detail: settingsPath };
 }
 
+function checkRoutingCapture(settingsPath: string): CheckResult {
+    try {
+        const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+        if (isRoutingEntry((parsed?.hooks?.SubagentStart ?? []).find((entry: any) => isRoutingEntry(entry, 'start')), 'start')
+            && isRoutingEntry((parsed?.hooks?.SubagentStop ?? []).find((entry: any) => isRoutingEntry(entry, 'stop')), 'stop')) return { ok: true, detail: settingsPath };
+    } catch { /* missing or invalid settings cannot provide native capture */ }
+    return { ok: false, detail: 'AWM native Claude routing hooks are missing; rerun awm hooks install --agent claude-code' };
+}
+
 export function computeClaudeHookStatus(agent: 'claude-code'): HookStatus {
     const config = getSettingsMergeHookConfig(agent);
 
@@ -165,7 +197,8 @@ export function computeClaudeHookStatus(agent: 'claude-code'): HookStatus {
         bootstrapSkill: checkFile(path.join(config.scriptsDir, 'using-awm.md')),
         sessionStartScript: checkExecutable(path.join(config.scriptsDir, 'session-start')),
         runHookWrapper: checkExecutable(path.join(config.scriptsDir, 'run-hook.cmd')),
-        settingsEntry: checkSettingsEntry(config.settingsPath, config.scriptsDir, config.matcher, config.eventName)
+        settingsEntry: checkSettingsEntry(config.settingsPath, config.scriptsDir, config.matcher, config.eventName),
+        routingCapture: checkRoutingCapture(config.settingsPath),
     };
 
     const allOk = Object.values(checks).every((c) => c.ok);
@@ -196,8 +229,12 @@ export function uninstallClaudeHook(agent: 'claude-code'): UninstallResult {
     const entries: any[] = settings?.hooks?.[config.eventName] ?? [];
     const beforeLength = entries.length;
     const filtered = entries.filter((e) => !isAwmEntry(e, config.scriptsDir, config.matcher));
+    const startEntries: any[] = settings?.hooks?.SubagentStart ?? [];
+    const stopEntries: any[] = settings?.hooks?.SubagentStop ?? [];
+    const filteredStart = startEntries.filter(entry => !isRoutingEntry(entry, 'start'));
+    const filteredStop = stopEntries.filter(entry => !isRoutingEntry(entry, 'stop'));
 
-    if (filtered.length === beforeLength) {
+    if (filtered.length === beforeLength && filteredStart.length === startEntries.length && filteredStop.length === stopEntries.length) {
         return { status: 'not-installed', backupPath: null };
     }
 
@@ -205,12 +242,12 @@ export function uninstallClaudeHook(agent: 'claude-code'): UninstallResult {
 
     if (filtered.length === 0) {
         delete settings.hooks[config.eventName];
-        if (Object.keys(settings.hooks).length === 0) {
-            delete settings.hooks;
-        }
     } else {
         settings.hooks[config.eventName] = filtered;
     }
+    if (filteredStart.length === 0) delete settings.hooks.SubagentStart; else settings.hooks.SubagentStart = filteredStart;
+    if (filteredStop.length === 0) delete settings.hooks.SubagentStop; else settings.hooks.SubagentStop = filteredStop;
+    if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
 
     fs.writeFileSync(config.settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
 

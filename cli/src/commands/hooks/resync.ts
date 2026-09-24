@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { AGENT_TARGETS, AgentTarget, getHookConfig } from '../../providers';
 import { computeHookStatus } from './status';
-import { claudeResyncSourcesExist, resyncClaudeHookFiles } from './claude';
+import { claudeResyncSourcesExist, installClaudeHook } from './claude';
 import { codexResyncSourcesExist, resyncCodexHookFiles } from './codex';
 
 export type ResyncAction = 'resynced' | 'not-installed' | 'registry-missing';
@@ -44,7 +44,7 @@ export function resyncInstalledHooks(
                     results.push({ agent, action: 'registry-missing' });
                     continue;
                 }
-                resyncClaudeHookFiles(config, registryRoot, method);
+                installClaudeHook({ agent: 'claude-code', registryRoot, installMethod: method });
                 results.push({ agent, action: 'resynced' });
                 break;
             }

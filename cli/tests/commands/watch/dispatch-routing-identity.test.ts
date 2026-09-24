@@ -153,6 +153,26 @@ describe('the supervisor admission actually carries the identity (#166)', () => 
             expect((seen[0].routing as { runtime: unknown }).runtime).toEqual({ target: 'claude-code', kind: 'native', version: '2.0.0', accountScopeDigest: DIGEST });
         } finally { fs.rmSync(repo, { recursive: true, force: true }); }
     });
+    test('uses sealed event evidence and a freshly measured Codex scope instead of a 24h receipt', async () => {
+        const repo = boundRepo();
+        try {
+            const runtime = { target: 'codex' as const, kind: 'native', version: '0.156.1', accountScopeDigest: DIGEST };
+            const eventScope = { runtime, binaryDigest: 'b'.repeat(64), configDigest: 'c'.repeat(64) };
+            const eventReceipt = { schema: 'routing-capabilities/v2', ...eventScope, recordedAt: '2026-09-22T00:00:00.000Z', claims: [] };
+            const seen: Array<Record<string, unknown>> = [];
+            const readCapabilities = jest.fn();
+            const admission = defaultDispatchAdmission(repo, 'main', 'codex', { kind: 'native', version: '0.156.1', accountScopeDigest: DIGEST }, {
+                admit: (async (input: Record<string, unknown>) => { seen.push(input); return { state: 'admitted' }; }) as never,
+                readEffectivePolicy: () => ({ state: 'absent' }) as never,
+                readCapabilities,
+                readStoredEventReceipt: (() => ({ state: 'present', receipt: eventReceipt })) as never,
+                queryLocalCodexScope: (async () => ({ state: 'current', scope: eventScope })) as never,
+            });
+            await admission();
+            expect(readCapabilities).not.toHaveBeenCalled();
+            expect(seen[0].routing).toMatchObject({ runtime, eventScope, eventReceipt });
+        } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+    });
 
     test('dispatches without routing facts when no identity was asserted', async () => {
         const repo = boundRepo();

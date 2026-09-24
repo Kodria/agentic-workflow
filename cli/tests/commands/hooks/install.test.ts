@@ -59,6 +59,10 @@ describe('installHook (happy path + merge)', () => {
         expect(settings.hooks.SessionStart).toHaveLength(1);
         expect(settings.hooks.SessionStart[0].matcher).toBe('startup|clear|compact');
         expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('run-hook.cmd');
+        expect(settings.hooks.SubagentStart[0].hooks[0].command).toBe('awm model-policy hook-event --event start');
+        expect(settings.hooks.SubagentStop[0].hooks[0].command).toBe('awm model-policy hook-event --event stop');
+        expect(settings.hooks.SubagentStart[0].hooks[0].async).toBe(false);
+        expect(settings.hooks.SubagentStop[0].hooks[0].async).toBe(false);
 
         expect(result.backupPath).toBeNull();
     });
@@ -104,6 +108,8 @@ describe('installHook (happy path + merge)', () => {
 
         const settings = JSON.parse(fs.readFileSync(path.join(tmpHome, '.claude/settings.json'), 'utf-8'));
         expect(settings.hooks.SessionStart).toHaveLength(1);
+        expect(settings.hooks.SubagentStart).toHaveLength(1);
+        expect(settings.hooks.SubagentStop).toHaveLength(1);
     });
 
     it('replaces a stale AWM entry when paths change', () => {

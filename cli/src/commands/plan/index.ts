@@ -17,6 +17,10 @@ import { readEffectivePolicy } from '../../core/model-policy/store';
 import { readCapabilities, validateRuntimeKey } from '../../core/model-policy/capabilities';
 import { resolveDispatch, resolveEscalatedSelection } from '../../core/model-policy/resolve';
 import { resolveLineageEscalation } from '../../core/model-policy/journal';
+import { readStoredEventReceipt } from '../../core/model-policy/event-store';
+import { queryLocalCodexScope } from '../../core/model-policy/local-codex-scope';
+import { queryLocalEventScope } from '../../core/model-policy/local-event-scope';
+import type { EventReceipt, EventScope } from '../../core/model-policy/capabilities-v2';
 import type { ImplementerProfile, RoutingRole } from '../../core/model-policy/types';
 
 const SUPPORTED_SCHEMA = 'compact-slices/v1, compact-slices/v2';
@@ -34,6 +38,8 @@ export interface PlanCommandDependencies {
     collectMigrationFacts?: (planPath: string, cwd: string, issueLinks: string[]) => MigrationFactsReport;
     readEffectivePolicy?: typeof readEffectivePolicy;
     readCapabilities?: typeof readCapabilities;
+    readStoredEventReceipt?: typeof readStoredEventReceipt;
+    queryLocalCodexScope?: typeof queryLocalCodexScope;
     /** Test seam only; production defaults to the real clock. */
     routingNow?: () => Date;
 }
@@ -156,7 +162,7 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
     assertDependencies(deps);
 
     const plan = program.command('plan').description('inspect plan contracts');
-    plan.command('resolve <plan-path>').requiredOption('--provider <target>').requiredOption('--runtime-kind <kind>').requiredOption('--runtime-version <version>').requiredOption('--account-scope-digest <sha>').requiredOption('--role <role>').option('--opt-in-v1').option('--slice <id>').option('--lineage <id>').option('--cwd <path>').option('--json').action((planPath: string, options: { provider: string; runtimeKind: string; runtimeVersion: string; accountScopeDigest: string; role: string; optInV1?: boolean; slice?: string; lineage?: string; cwd?: string; json?: boolean }) => {
+    plan.command('resolve <plan-path>').requiredOption('--provider <target>').requiredOption('--runtime-kind <kind>').requiredOption('--runtime-version <version>').requiredOption('--account-scope-digest <sha>').requiredOption('--role <role>').option('--opt-in-v1').option('--slice <id>').option('--lineage <id>').option('--cwd <path>').option('--json').action(async (planPath: string, options: { provider: string; runtimeKind: string; runtimeVersion: string; accountScopeDigest: string; role: string; optInV1?: boolean; slice?: string; lineage?: string; cwd?: string; json?: boolean }) => {
         assertText(planPath, 'plan path'); for (const [value, label] of [[options.provider, '--provider'], [options.runtimeKind, '--runtime-kind'], [options.runtimeVersion, '--runtime-version'], [options.accountScopeDigest, '--account-scope-digest'], [options.role, '--role']]) assertText(value, label); if (options.slice) assertText(options.slice, '--slice'); if (options.lineage) assertText(options.lineage, '--lineage');
         const cwd = options.cwd ?? process.cwd(); assertText(cwd, '--cwd'); const report = deps.validatePlanFile(planPath, cwd); assertReport(report);
         if (report.state !== 'valid') { process.stdout.write(options.json ? `${JSON.stringify({ state: 'blocked', diagnostics: report.state === 'invalid' ? report.diagnostics : [{ code: 'ROUTING_PLAN_INVALID', message: 'Plan must validate before resolution.' }] })}\n` : 'Plan routing: blocked\n'); process.exitCode = 2; return; }
@@ -174,8 +180,19 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
         }
         const roles: readonly string[] = ['implementer', 'specification-reviewer', 'code-quality-reviewer', 'final-reviewer', 'architecture', 'track-a-qa', 'track-b-qa', 'controller', 'documentation', 'retro', 'finishing']; if (!roles.includes(options.role)) throw new Error('--role is invalid');
         const runtime = validateRuntimeKey({ target: options.provider, kind: options.runtimeKind, version: options.runtimeVersion, accountScopeDigest: options.accountScopeDigest });
-        const result = report.schema === 'compact-slices/v1' && !options.optInV1 ? resolveDispatch({ plan: report, role: options.role as RoutingRole, policy: undefined, capabilities: undefined, runtime, now: new Date(), optInV1: false }) : (() => { const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(cwd); const capabilities = (deps.readCapabilities ?? readCapabilities)(runtime, new Date()); if (!options.lineage) {
-            const first = resolveDispatch({ plan: report, role: options.role as RoutingRole, sliceId: options.slice, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined, runtime, now: new Date(), optInV1: options.optInV1 === true });
+        let eventFacts: { eventReceipt: EventReceipt; eventScope: EventScope } | undefined;
+        if (report.schema === 'compact-slices/v2' && (runtime.target === 'codex' || runtime.target === 'claude-code')) {
+            const stored = (deps.readStoredEventReceipt ?? readStoredEventReceipt)(runtime);
+            if (stored.state === 'invalid') { process.stdout.write(`${JSON.stringify({ state: 'blocked', diagnostics: [{ code: 'ROUTING_CAPABILITY_INVALID', message: 'Native event receipt is invalid.' }] })}\n`); process.exitCode = 2; return; }
+            if (stored.state === 'present') {
+                const local = await (runtime.target === 'codex' && deps.queryLocalCodexScope ? deps.queryLocalCodexScope(path.resolve(cwd), runtime.kind) : queryLocalEventScope(path.resolve(cwd), runtime.target, runtime.kind));
+                if (local.state !== 'current' || JSON.stringify(local.scope.runtime) !== JSON.stringify(runtime)) { const reason = local.state === 'unverified' ? local.reason : 'RUNTIME_IDENTITY_MISMATCH'; process.stdout.write(`${JSON.stringify({ state: 'blocked', diagnostics: [{ code: `ROUTING_${reason}`, message: `Current local ${runtime.target} scope cannot be verified (${reason}); run awm model-policy setup --provider ${runtime.target} --json.` }] })}\n`); process.exitCode = 2; return; }
+                eventFacts = { eventReceipt: stored.receipt, eventScope: local.scope };
+            }
+        }
+        const circuitIncidents = report.schema === 'compact-slices/v2' ? journalObservation(cwd).journalState?.routingIncidents : undefined;
+        const result = report.schema === 'compact-slices/v1' && !options.optInV1 ? resolveDispatch({ plan: report, role: options.role as RoutingRole, policy: undefined, capabilities: undefined, runtime, now: new Date(), optInV1: false }) : (() => { const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(cwd); const capabilities = eventFacts ? { state: 'absent' as const } : (deps.readCapabilities ?? readCapabilities)(runtime, new Date()); if (!options.lineage) {
+            const first = resolveDispatch({ plan: report, role: options.role as RoutingRole, sliceId: options.slice, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined, ...eventFacts, circuitIncidents, runtime, now: new Date(), optInV1: options.optInV1 === true });
             // The consumer forwards THIS envelope to `job routing-reserve`, which
             // is what creates the lineage the --lineage escalation path below
             // then reads. Emitting it only there made the first attempt of any
@@ -189,8 +206,8 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
             const slice = (report.manifest as unknown as { slices: Array<{ id: string; implementerProfile: ImplementerProfile }> }).slices.find((candidate) => candidate.id === options.slice);
             const requestedProfile = options.role === 'implementer' ? slice?.implementerProfile : 'full';
             if (requestedProfile === undefined) return first;
-            return { ...first, envelope: { schema: 'routing-envelope/v1' as const, runtime, role: options.role, planDigest: report.planDigest, executionDigest: report.executionDigest, ...(options.slice === undefined ? {} : { sliceId: options.slice }), requestedProfile, effectiveProfile: first.effectiveProfile, resolved: first.selection, policyDigest: first.policyDigest, capabilityDigest: first.capabilityDigest, outcome: first.outcome, unavailableEvidence: first.unavailableEvidence } };
-        } const state = journalObservation(cwd).journalState!; const lineage = state.implementationLineages!.find(candidate => candidate.id === options.lineage)!; const next = resolveLineageEscalation(state, options.lineage, lineage.initialProfile); const resolved = resolveEscalatedSelection({ role: 'implementer', requestedProfile: next.profile, expectedEffort: next.effort, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined, runtime, now: new Date() }); if (resolved.state === 'blocked') return resolved; return { ...resolved, envelope: { schema: 'routing-envelope/v1' as const, runtime, role: 'implementer', planDigest: report.planDigest, executionDigest: report.executionDigest!, sliceId: lineage.sliceId, requestedProfile: lineage.initialProfile, effectiveProfile: next.profile, resolved: resolved.selection, policyDigest: resolved.policyDigest, capabilityDigest: resolved.capabilityDigest, outcome: resolved.outcome, unavailableEvidence: resolved.unavailableEvidence }, custodyHandoff: { kind: 'routing-reserve', obligationId: lineage.obligationId, lineageId: lineage.id } }; })();
+            return { ...first, envelope: { schema: 'routing-envelope/v1' as const, runtime, role: options.role, planDigest: report.planDigest, executionDigest: report.executionDigest, ...(options.slice === undefined ? {} : { sliceId: options.slice }), requestedProfile, effectiveProfile: first.effectiveProfile, resolved: first.selection, policyDigest: first.policyDigest, capabilityDigest: first.capabilityDigest, outcome: first.outcome, unavailableEvidence: first.unavailableEvidence, ...(first.nativeAgentType ? { nativeAgentType: first.nativeAgentType } : {}) } };
+        } const state = journalObservation(cwd).journalState!; const lineage = state.implementationLineages!.find(candidate => candidate.id === options.lineage)!; const next = resolveLineageEscalation(state, options.lineage, lineage.initialProfile); const resolved = resolveEscalatedSelection({ role: 'implementer', requestedProfile: next.profile, expectedEffort: next.effort, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined, ...eventFacts, circuitIncidents, runtime, now: new Date() }); if (resolved.state === 'blocked') return resolved; return { ...resolved, envelope: { schema: 'routing-envelope/v1' as const, runtime, role: 'implementer', planDigest: report.planDigest, executionDigest: report.executionDigest!, sliceId: lineage.sliceId, requestedProfile: lineage.initialProfile, effectiveProfile: resolved.effectiveProfile, resolved: resolved.selection, policyDigest: resolved.policyDigest, capabilityDigest: resolved.capabilityDigest, outcome: resolved.outcome, unavailableEvidence: resolved.unavailableEvidence, ...(resolved.nativeAgentType ? { nativeAgentType: resolved.nativeAgentType } : {}) }, custodyHandoff: { kind: 'routing-reserve', obligationId: lineage.obligationId, lineageId: lineage.id } }; })();
         process.stdout.write(options.json ? `${JSON.stringify(result)}\n` : `Plan routing: ${result.state}\n`); if (result.state === 'blocked') process.exitCode = 2;
     });
     plan.command('migration-facts <plan-path>')
@@ -264,7 +281,25 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
                 process.exitCode = 2;
                 return;
             }
-            const readRouting = (): AdmissionInput['routing'] => { if (!options.runtimeKind || !options.runtimeVersion || !options.accountScopeDigest) return undefined; const runtime = validateRuntimeKey({ target: options.provider, kind: options.runtimeKind, version: options.runtimeVersion, accountScopeDigest: options.accountScopeDigest }); const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(options.cwd); const at = deps.routingNow?.() ?? new Date(); if (!(at instanceof Date) || !Number.isFinite(at.getTime())) throw new Error('routingNow must return a finite Date'); const capabilities = (deps.readCapabilities ?? readCapabilities)(runtime, at); return { runtime, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined, now: at }; };
+            const readRouting = async (): Promise<AdmissionInput['routing']> => {
+                if (!options.runtimeKind || !options.runtimeVersion || !options.accountScopeDigest) return undefined;
+                const runtime = validateRuntimeKey({ target: options.provider, kind: options.runtimeKind, version: options.runtimeVersion, accountScopeDigest: options.accountScopeDigest });
+                const policy = (deps.readEffectivePolicy ?? readEffectivePolicy)(options.cwd);
+                const at = deps.routingNow?.() ?? new Date();
+                if (!(at instanceof Date) || !Number.isFinite(at.getTime())) throw new Error('routingNow must return a finite Date');
+                const base = { runtime, policy: policy.state === 'approved' ? policy.policy : undefined, now: at };
+                if (runtime.target === 'codex' || runtime.target === 'claude-code') {
+                    const stored = (deps.readStoredEventReceipt ?? readStoredEventReceipt)(runtime);
+                    if (stored.state === 'invalid') return { ...base, eventIssue: { code: 'ROUTING_CAPABILITY_INVALID', message: 'Sealed native event receipt is invalid.' } };
+                    if (stored.state === 'present') {
+                        const local = await (runtime.target === 'codex' && deps.queryLocalCodexScope ? deps.queryLocalCodexScope(path.resolve(options.cwd), runtime.kind) : queryLocalEventScope(path.resolve(options.cwd), runtime.target, runtime.kind));
+                        if (local.state !== 'current' || JSON.stringify(local.scope.runtime) !== JSON.stringify(runtime)) { const reason = local.state === 'unverified' ? local.reason : 'RUNTIME_IDENTITY_MISMATCH'; return { ...base, eventIssue: { code: `ROUTING_${reason}`, message: `Local ${runtime.target} scope cannot be verified (${reason}); run awm model-policy setup --provider ${runtime.target} --json.` } }; }
+                        return { ...base, eventReceipt: stored.receipt, eventScope: local.scope };
+                    }
+                }
+                const capabilities = (deps.readCapabilities ?? readCapabilities)(runtime, at);
+                return { ...base, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined };
+            };
             if (options.controllerAutonomy !== undefined && !isControllerAutonomy(options.controllerAutonomy)) throw new Error(`--controller-autonomy is invalid: ${options.controllerAutonomy} (valid: ${CONTROLLER_AUTONOMIES.join(', ')})`);
             const report = await admitRegistryPlan({ plan: planReport, provider: options.provider, cwd: options.cwd, enabledAgents, executionMode, planPath: normalizedPlanPath, ...journal, requireCurrent: options.requireCurrent === true, verifySensors: options.verifySensors === true, ...(options.controllerAutonomy === undefined ? {} : { controllerAutonomy: options.controllerAutonomy }) },
                 { admitPlan: admission, listRegistries: registryInventory, checkCurrentness: currentnessCheck, runSensors: sensorRun, readRouting });

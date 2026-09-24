@@ -120,4 +120,92 @@ describe('model-policy command', () => {
         expect(queryCodexModelCatalog).not.toHaveBeenCalled();
         expect(process.exitCode).toBe(2);
     });
+    it('reports every Codex selection and the full fallback as unverified without dispatch', async () => {
+        const cheap = { selector: { kind: 'model' as const, id: 'gpt-6-sol' }, effort: { kind: 'explicit' as const, value: 'low' } };
+        const full = { selector: { kind: 'model' as const, id: 'gpt-6-astra' }, effort: { kind: 'explicit' as const, value: 'high' } };
+        const queryCodexModelCatalog = jest.fn(async () => ({ provenance: 'native-catalog' as const, selections: [cheap, full], nativeDispatchVerified: false as const, actualModelVerified: false as const }));
+        const queryCodexMachineFacts = jest.fn(async () => ({ provenance: 'codex-app-server-config-account' as const, configDigest: 'c'.repeat(64), accountState: 'identified' as const, accountScopeDigest: 'a'.repeat(64), inferenceDispatched: false as const }));
+        const queryRuntimeExecutable = jest.fn(async () => ({ version: '0.156.0', binaryDigest: 'b'.repeat(64), inferenceDispatched: false as const }));
+        const ensureMachineKey = jest.fn(() => Buffer.alloc(32, 7));
+        const readEffectivePolicy = jest.fn(() => ({ state: 'approved' as const, policy: { content: { mappings: [{ target: 'codex', runtimeKind: 'native', profiles: { mechanical: cheap, integration: cheap, judgment: full }, fullCapability: full, degradation: { allowMissingObservedIdentity: false } }] } } }));
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerModelPolicyCommand(program, { queryCodexModelCatalog, queryCodexMachineFacts, queryRuntimeExecutable, ensureMachineKey, readEffectivePolicy: readEffectivePolicy as never });
+        await program.parseAsync(['node', 'awm', 'model-policy', 'setup', '--provider', 'codex', '--json']);
+        const report = JSON.parse(String(out.mock.calls[0][0]));
+        expect(report).toMatchObject({ state: 'setup-pending', provider: 'codex', inferenceDispatched: false, tokenUsage: 'unknown', nativeDispatchVerified: false, actualModelVerified: false,
+            machine: { runtimeVersion: '0.156.0', binaryDigest: 'b'.repeat(64), configDigest: 'c'.repeat(64), accountState: 'identified', accountScopeDigest: 'a'.repeat(64) } });
+        expect(report.selections).toEqual(expect.arrayContaining([
+            expect.objectContaining({ role: 'mechanical', catalogAvailable: true, dispatch: 'untested' }),
+            expect.objectContaining({ role: 'fullCapability', catalogAvailable: true, dispatch: 'untested' }),
+        ]));
+        expect(report.policyAction).toMatch(/allowMissingObservedIdentity/);
+        expect(queryCodexModelCatalog).toHaveBeenCalledTimes(1);
+        expect(queryCodexMachineFacts).toHaveBeenCalledTimes(1);
+        expect(queryRuntimeExecutable).toHaveBeenCalledTimes(1);
+        expect(ensureMachineKey).toHaveBeenCalledTimes(1);
+        expect(process.exitCode).toBe(2);
+    });
+    it('never runs inference merely because setup was requested', async () => {
+        const queryCodexModelCatalog = jest.fn();
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerModelPolicyCommand(program, { queryCodexModelCatalog });
+        await expect(program.parseAsync(['node', 'awm', 'model-policy', 'setup', '--provider', 'codex', '--allow-inference'])).rejects.toThrow(/unknown option/i);
+        expect(queryCodexModelCatalog).not.toHaveBeenCalled();
+    });
+    it('captures only an approved Codex selection from an existing native child, with local scope', async () => {
+        const selected = { selector: { kind: 'model' as const, id: 'gpt-6-luna' }, effort: { kind: 'explicit' as const, value: 'high' } };
+        const mapping = { target: 'codex', runtimeKind: 'native', profiles: { mechanical: selected, integration: selected, judgment: selected }, fullCapability: selected,
+            degradation: { allowMissingModelOverride: false, allowMissingEffortOverride: false, allowMissingObservedIdentity: true } };
+        const queryCodexChildThreadObservation = jest.fn(async () => ({ configuredSelection: selected, childRuntimeVersion: '0.156.1', observedAt: '2026-09-23T01:00:00.000Z' }));
+        const publishCodexObservation = jest.fn(() => ({ schema: 'routing-capabilities/v2', claims: [{ selection: selected }] }));
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerModelPolicyCommand(program, { readEffectivePolicy: (() => ({ state: 'approved', policy: { content: { mappings: [mapping] } } })) as never,
+            queryCodexChildThreadObservation: queryCodexChildThreadObservation as never, publishCodexObservation: publishCodexObservation as never,
+            queryCodexMachineFacts: (async () => ({ configDigest: 'c'.repeat(64), accountScopeDigest: 'a'.repeat(64), accountState: 'identified' })) as never,
+            queryRuntimeExecutable: (async () => ({ version: '0.156.1', binaryDigest: 'b'.repeat(64) })) as never,
+            ensureMachineKey: (() => Buffer.alloc(32, 7)) as never });
+        await program.parseAsync(['node', 'awm', 'model-policy', 'capture', '--provider', 'codex', '--runtime-kind', 'native', '--parent-thread-id', 'parent-1', '--child-thread-id', 'child-1', '--json']);
+        expect(queryCodexChildThreadObservation).toHaveBeenCalledWith(expect.objectContaining({ parentThreadId: 'parent-1', childThreadId: 'child-1' }));
+        expect(publishCodexObservation).toHaveBeenCalledWith(expect.objectContaining({ expectedSelection: selected,
+            scope: { runtime: { target: 'codex', kind: 'native', version: '0.156.1', accountScopeDigest: 'a'.repeat(64) }, binaryDigest: 'b'.repeat(64), configDigest: 'c'.repeat(64) } }));
+        expect(JSON.parse(String(out.mock.calls[0][0]))).toMatchObject({ state: 'captured', actualModelVerified: false, tokenUsage: 'unknown' });
+    });
+    it('reports a matching event-scoped enrollment as ready after 25 hours without refreshing it', async () => {
+        const selected = { selector: { kind: 'model' as const, id: 'gpt-6-luna' }, effort: { kind: 'explicit' as const, value: 'high' } };
+        const mapping = { target: 'codex', runtimeKind: 'native', profiles: { mechanical: selected, integration: selected, judgment: selected }, fullCapability: selected,
+            degradation: { allowMissingModelOverride: false, allowMissingEffortOverride: false, allowMissingObservedIdentity: true } };
+        const { createHash } = await import('crypto');
+        const mappingDigest = createHash('sha256').update(JSON.stringify({ target: mapping.target, runtimeKind: mapping.runtimeKind, selection: selected })).digest('hex');
+        const receipt = { schema: 'routing-capabilities/v2', runtime: { target: 'codex', kind: 'native', version: '0.156.1', accountScopeDigest: 'a'.repeat(64) },
+            binaryDigest: 'b'.repeat(64), configDigest: 'c'.repeat(64), recordedAt: '2026-09-22T01:00:00.000Z', claims: [{ selection: selected, mappingDigest,
+                eventDigest: 'e'.repeat(64), source: 'codex-turn-context', observedAt: '2026-09-22T00:59:00.000Z', actualModel: 'unverified', tokenUsage: 'unknown' }] };
+        const readStoredEventReceipt = jest.fn(() => ({ state: 'present' as const, receipt }));
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerModelPolicyCommand(program, { readEffectivePolicy: (() => ({ state: 'approved', policy: { content: { mappings: [mapping] } } })) as never,
+            readStoredEventReceipt: readStoredEventReceipt as never,
+            queryCodexModelCatalog: (async () => ({ selections: [selected] })) as never,
+            queryCodexMachineFacts: (async () => ({ configDigest: 'c'.repeat(64), accountScopeDigest: 'a'.repeat(64), accountState: 'identified' })) as never,
+            queryRuntimeExecutable: (async () => ({ version: '0.156.1', binaryDigest: 'b'.repeat(64) })) as never,
+            ensureMachineKey: (() => Buffer.alloc(32, 7)) as never });
+        await program.parseAsync(['node', 'awm', 'model-policy', 'setup', '--provider', 'codex', '--json']);
+        expect(JSON.parse(String(out.mock.calls[0][0]))).toMatchObject({ state: 'ready-operational', selections: expect.arrayContaining([expect.objectContaining({ dispatch: 'verified', acceptedSelection: 'verified', actualModel: 'untested' })]) });
+        expect(readStoredEventReceipt).toHaveBeenCalledTimes(1);
+        expect(process.exitCode).toBeUndefined();
+    });
+    it('discovers Claude version and account without claiming a model or dispatch', async () => {
+        const selected = { selector: { kind: 'model' as const, id: 'claude-sonnet-4-6' }, effort: { kind: 'runtime-default' as const } };
+        const mapping = { target: 'claude-code', runtimeKind: 'native', profiles: { mechanical: selected, integration: selected, judgment: selected }, fullCapability: selected,
+            degradation: { allowMissingModelOverride: false, allowMissingEffortOverride: false, allowMissingObservedIdentity: false } };
+        const queryClaudeAuthStatus = jest.fn(async () => ({ accountState: 'identified' as const, accountScopeDigest: 'a'.repeat(64), inferenceDispatched: false as const }));
+        const queryRuntimeExecutable = jest.fn(async () => ({ version: '2.1.263', binaryDigest: 'b'.repeat(64), inferenceDispatched: false as const }));
+        const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
+        registerModelPolicyCommand(program, { readEffectivePolicy: (() => ({ state: 'approved', policy: { content: { mappings: [mapping] } } })) as never,
+            queryClaudeAuthStatus: queryClaudeAuthStatus as never, queryRuntimeExecutable: queryRuntimeExecutable as never,
+            readClaudeModelConfigDigest: (() => 'c'.repeat(64)) as never,
+            ensureMachineKey: (() => Buffer.alloc(32, 7)) as never });
+        await program.parseAsync(['node', 'awm', 'model-policy', 'setup', '--provider', 'claude-code', '--json']);
+        expect(JSON.parse(String(out.mock.calls[0][0]))).toMatchObject({ state: 'setup-pending', provider: 'claude-code', machine: { runtimeVersion: '2.1.263', accountState: 'identified', configState: 'local-fingerprint' },
+            nativeDispatchVerified: false, actualModelVerified: false, inferenceDispatched: false });
+        expect(queryClaudeAuthStatus).toHaveBeenCalledTimes(1);
+    });
 });

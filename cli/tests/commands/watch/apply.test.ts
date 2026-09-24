@@ -13,6 +13,11 @@ import { computeGate } from '../../../src/commands/job/gate';
 import { canonicalPolicyDigest } from '../../../src/core/model-policy/canonical';
 import { capabilityReceiptDigest } from '../../../src/core/model-policy/capabilities';
 import { routingApproval, routingEnvelope } from '../../helpers/routing-approval';
+import { ensureMachineKey } from '../../../src/core/model-policy/machine-key';
+import { signNativeRoutingProof } from '../../../src/core/model-policy/native-routing-proof';
+import * as eventStore from '../../../src/core/model-policy/event-store';
+import * as policyStore from '../../../src/core/model-policy/store';
+import { selectionPolicyDigest } from '../../../src/core/model-policy/selection-policy-digest';
 
 function jobPayload(argv: string[]): Record<string, unknown> {
     return { argv, paths: [], cwd: '.', fingerprint: 'fp-1', commandDigest: 'cd-1', expandedPaths: [] };
@@ -200,6 +205,70 @@ describe('aplicacion transaccional de requests', () => {
             expect(consumePendingRequests(repo, 'rama', 'g1').rejectedStale).toBe(1);
             expect(readJournal(repo, 'rama').state!.routingAttempts).toHaveLength(1);
         } finally { if (priorHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = priorHome; }
+    });
+
+    test('un recibo nativo v2 no acepta una observacion positiva redactada por el agente', () => {
+        const state = readJournal(repo, 'rama').state!;
+        state.routingAttempts = [{ schema: 'routing-attempt/v1', id: 'route-native-1', obligationId: 'o1', lineageId: 'l1', attempt: 1,
+            envelope: routingEnvelope, envelopeDigest: 'a'.repeat(64), fingerprint: 'b'.repeat(64), state: 'reserved',
+            nativeEvidenceRequired: true, reservedAt: new Date(Date.now() - 1_000).toISOString() }];
+        writeJournal(repo, 'rama', state);
+        emitRequest(repo, 'rama', { kind: 'routing-observe', generationToken: 'g1', idempotencyKey: 'forged-positive',
+            payload: { attemptId: 'route-native-1', nativeAgentId: 'fake-child', observed: routingEnvelope.resolved } });
+        const result = consumePendingRequests(repo, 'rama', 'g1');
+        expect({ result, problems: readJournal(repo, 'rama').state?.requestProblems }).toMatchObject({ result: { applied: 1 } });
+        const after = readJournal(repo, 'rama').state!;
+        expect(after.routingAttempts?.[0]).toMatchObject({ state: 'blocked', reasonCode: 'PROVENANCE_MISSING', verdict: 'inconclusive' });
+        expect(after.routingIncidents).toMatchObject([{ reasonCode: 'PROVENANCE_MISSING', alertState: 'pending' }]);
+    });
+
+    test('un evento nativo sellado posterior a la reserva activa solo su intento', () => {
+        const previousHome = process.env.AWM_HOME;
+        const operator = path.join(repo, 'operator');
+        fs.mkdirSync(operator);
+        process.env.AWM_HOME = operator;
+        const scope = { runtime: routingEnvelope.runtime, binaryDigest: 'b'.repeat(64), configDigest: 'c'.repeat(64) };
+        const approved = routingApproval().policy;
+        const enrolledAt = new Date(Date.now() - 1_000).toISOString();
+        const eventReader = jest.spyOn(eventStore, 'readStoredEventReceipt').mockReturnValue({ state: 'present', receipt: {
+            schema: 'routing-capabilities/v2', ...scope, recordedAt: enrolledAt, claims: [{
+                selection: routingEnvelope.resolved, mappingDigest: selectionPolicyDigest(approved.content.mappings[0], routingEnvelope.resolved),
+                eventDigest: 'c'.repeat(64), source: 'codex-turn-context', observedAt: enrolledAt,
+                actualModel: 'unverified', tokenUsage: 'unknown' }],
+        } });
+        const policyReader = jest.spyOn(policyStore, 'readEffectivePolicy').mockReturnValue({ state: 'approved', provenance: 'project', policy: approved });
+        try {
+            const reservedAt = new Date(Date.now() - 2_000).toISOString();
+            const state = readJournal(repo, 'rama').state!;
+            state.routingAttempts = [{ schema: 'routing-attempt/v1', id: 'route-native-1', obligationId: 'o1', lineageId: 'l1', attempt: 1,
+                envelope: routingEnvelope, envelopeDigest: 'a'.repeat(64), fingerprint: 'b'.repeat(64), state: 'reserved',
+                nativeEvidenceRequired: true, reservedAt }];
+            writeJournal(repo, 'rama', state);
+            const proof = signNativeRoutingProof({ attemptId: 'route-native-1', nativeAgentId: 'child-1', source: 'codex-turn-context',
+                eventDigest: 'c'.repeat(64), observedAt: new Date(Date.now() - 1_000).toISOString(), selection: routingEnvelope.resolved }, ensureMachineKey(operator));
+            emitRequest(repo, 'rama', { kind: 'routing-observe', generationToken: 'g1', idempotencyKey: 'native-positive',
+                payload: { attemptId: 'route-native-1', nativeAgentId: 'child-1', observed: routingEnvelope.resolved, nativeProof: proof } });
+            expect(consumePendingRequests(repo, 'rama', 'g1', scope).applied).toBe(1);
+            expect(readJournal(repo, 'rama').state!.routingAttempts?.[0]).toMatchObject({ state: 'active', nativeEventDigest: 'c'.repeat(64) });
+        } finally { eventReader.mockRestore(); policyReader.mockRestore(); if (previousHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = previousHome; }
+    });
+    test('un proof en cola no activa el intento sin scope local vigente', () => {
+        const previousHome = process.env.AWM_HOME;
+        const operator = path.join(repo, 'operator'); fs.mkdirSync(operator); process.env.AWM_HOME = operator;
+        try {
+            const state = readJournal(repo, 'rama').state!;
+            const reservedAt = new Date(Date.now() - 2_000).toISOString();
+            state.routingAttempts = [{ schema: 'routing-attempt/v1', id: 'route-native-1', obligationId: 'o1', lineageId: 'l1', attempt: 1,
+                envelope: routingEnvelope, envelopeDigest: 'a'.repeat(64), fingerprint: 'b'.repeat(64), state: 'reserved',
+                nativeEvidenceRequired: true, reservedAt }];
+            writeJournal(repo, 'rama', state);
+            const proof = signNativeRoutingProof({ attemptId: 'route-native-1', nativeAgentId: 'child-1', source: 'codex-turn-context',
+                eventDigest: 'c'.repeat(64), observedAt: new Date(Date.now() - 1_000).toISOString(), selection: routingEnvelope.resolved }, ensureMachineKey(operator));
+            emitRequest(repo, 'rama', { kind: 'routing-observe', generationToken: 'g1', idempotencyKey: 'native-stale-scope',
+                payload: { attemptId: 'route-native-1', nativeAgentId: 'child-1', observed: routingEnvelope.resolved, nativeProof: proof } });
+            consumePendingRequests(repo, 'rama', 'g1');
+            expect(readJournal(repo, 'rama').state!.routingAttempts?.[0]).toMatchObject({ state: 'blocked', reasonCode: 'PROVENANCE_MISSING' });
+        } finally { if (previousHome === undefined) delete process.env.AWM_HOME; else process.env.AWM_HOME = previousHome; }
     });
 
     test('request corrupta se aparta VISIBLE como .corrupt, jamas se descarta (R1.6)', () => {  // verifies R1.6

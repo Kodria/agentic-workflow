@@ -82,6 +82,8 @@ function checkRoutingSetup(cwd: string): PreflightCheck[] {
     const invalid = guidance.find(item => item.state === 'policy-invalid');
     if (invalid?.state === 'policy-invalid') return [{ id: 'routing-setup', ok: false, advisory: true, detail: 'approved routing policy is invalid', remedy: 'repair the model policy before using routed subagents' }];
     const targets = guidance.filter((item): item is Extract<typeof item, { state: 'needs-evidence' }> => item.state === 'needs-evidence');
+    if (targets.length === 0) return [{ id: 'routing-setup', ok: true, advisory: true,
+        detail: 'sealed routing selections are covered locally; doctor/preflight do not verify current runtime/account/config scope (checked at routed dispatch)' }];
     return [{ id: 'routing-setup', ok: false, advisory: true,
         detail: `routing machine evidence needs a native check for ${targets.map(item => `${item.target}/${item.runtimeKind}`).join(', ')}`,
         remedy: targets[0].command }];

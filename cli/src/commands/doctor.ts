@@ -80,8 +80,9 @@ export function attachRoutingSetupGuidance(report: ProviderDiagnosticReport, gui
     const providers = report.providers.map(provider => {
         const checks = [...provider.checks];
         for (const item of guidance) {
-            if (item.state !== 'needs-evidence' || item.target !== provider.id) continue;
-            checks.push({ id: 'routing.machine', state: 'pending', detail: `native routing evidence not checked for ${item.runtimeKind}`, remediationCode: item.command });
+            if (item.state === 'policy-invalid' || item.target !== provider.id) continue;
+            if (item.state === 'needs-evidence') checks.push({ id: 'routing.machine', state: 'pending', detail: `native routing evidence not checked for ${item.runtimeKind}`, remediationCode: item.command });
+            else checks.push({ id: 'routing.machine', state: 'supported', detail: `sealed selection coverage for ${item.runtimeKind} only; current runtime/account/config scope is checked at routed dispatch` });
         }
         return { ...provider, checks };
     });

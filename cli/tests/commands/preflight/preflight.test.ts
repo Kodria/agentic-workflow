@@ -8,6 +8,7 @@ import { exitCodeFor, formatReport } from '../../../src/commands/preflight';
 import { runSensors } from '../../../src/commands/sensors/run';
 import { checkCurrentness } from '../../../src/core/currentness/check';
 import { readEffectivePolicy } from '../../../src/core/model-policy/store';
+import * as setupReadiness from '../../../src/core/model-policy/setup-readiness';
 
 // Only `execSync` (used by `resolveOnPath` to check for `gh`/`glab`) is mocked — `git
 // remote get-url origin` runs for real via `execFileSync` against real tmpdir git repos,
@@ -140,8 +141,21 @@ describe('preflight', () => {
             policy: { content: { mappings: [{ target: 'codex', runtimeKind: 'native' }] } } as never,
         });
         const report = await preflight(make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } }));
-        expect(check(report, 'routing-setup')).toMatchObject({ advisory: true, ok: false, remedy: 'awm model-policy discover --provider codex --json' });
+        expect(check(report, 'routing-setup')).toMatchObject({ advisory: true, ok: false, remedy: 'awm model-policy setup --provider codex --json' });
         expect(report.status).toBe('ready');
+    });
+
+    it('labels sealed local coverage without claiming current machine verification or demanding setup', async () => {
+        const guidance = jest.spyOn(setupReadiness, 'routingSetupGuidance').mockReturnValueOnce([
+            { target: 'codex', runtimeKind: 'native', state: 'coverage-only' },
+        ]);
+        try {
+            const report = await preflight(make({ manifest: { pack: 'generic', sensors: { security: { enabled: false } } } }));
+            expect(check(report, 'routing-setup')).toMatchObject({ advisory: true, ok: true,
+                detail: expect.stringContaining('do not verify current runtime/account/config scope') });
+            expect(check(report, 'routing-setup').remedy).toBeUndefined();
+            expect(report.status).toBe('ready');
+        } finally { guidance.mockRestore(); }
     });
 
     afterEach(() => {

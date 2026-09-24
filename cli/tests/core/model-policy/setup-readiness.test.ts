@@ -4,6 +4,7 @@ import { capabilityReceiptPath } from '../../../src/core/model-policy/capabiliti
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { selectionPolicyDigest } from '../../../src/core/model-policy/selection-policy-digest';
 
 const approved: EffectivePolicy = {
     state: 'approved', provenance: 'user',
@@ -19,7 +20,7 @@ describe('routing setup guidance', () => {
     });
     it('names the exact provider and explicit discovery step without certifying the receipt', () => {
         expect(routingSetupGuidance(approved)).toEqual([
-            { target: 'codex', runtimeKind: 'native', state: 'needs-evidence', command: 'awm model-policy discover --provider codex --json' },
+            { target: 'codex', runtimeKind: 'native', state: 'needs-evidence', command: 'awm model-policy setup --provider codex --json' },
         ]);
     });
     it('reports invalid policy instead of silently falling back to a machine default', () => {
@@ -56,5 +57,21 @@ describe('routing setup guidance', () => {
             else process.env.AWM_HOME = previous;
             fs.rmSync(root, { recursive: true, force: true });
         }
+    });
+    it('reports sealed v2 coverage without claiming that passive diagnostics checked the current machine', () => {
+        const selection = { selector: { kind: 'model' as const, id: 'gpt-6-sol' }, effort: { kind: 'explicit' as const, value: 'high' } };
+        const policy = structuredClone(approved);
+        if (policy.state !== 'approved') throw new Error('expected policy');
+        const mapping = policy.policy.content.mappings[0];
+        mapping.profiles = { mechanical: selection, integration: selection, judgment: selection };
+        mapping.fullCapability = selection;
+        mapping.degradation.allowMissingObservedIdentity = true;
+        const receipt = { schema: 'routing-capabilities/v2', runtime: { target: 'codex', kind: 'native', version: '0.156.1', accountScopeDigest: 'a'.repeat(64) },
+            binaryDigest: 'b'.repeat(64), configDigest: 'c'.repeat(64), recordedAt: '2026-09-22T00:00:00.000Z', claims: [{ selection,
+                mappingDigest: selectionPolicyDigest(mapping, selection), eventDigest: 'd'.repeat(64), source: 'codex-turn-context', observedAt: '2026-09-22T00:00:00.000Z', actualModel: 'unverified', tokenUsage: 'unknown' }] };
+        expect(routingSetupGuidance(policy, new Date('2026-09-23T01:00:00.000Z'), { readStoredEventReceipt: (() => ({ state: 'present', receipt })) as never })).toEqual([
+            { target: 'codex', runtimeKind: 'native', state: 'coverage-only' },
+        ]);
+        expect(routingSetupGuidance(policy, new Date('2026-09-23T01:00:00.000Z'), { readStoredEventReceipt: (() => ({ state: 'invalid', reason: 'bad seal' })) as never })).toMatchObject([{ state: 'needs-evidence' }]);
     });
 });

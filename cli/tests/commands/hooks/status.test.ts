@@ -38,7 +38,9 @@ describe('computeHookStatus', () => {
                 SessionStart: [{
                     matcher: 'startup|clear|compact',
                     hooks: [{ type: 'command', command: `${hooksDir}/run-hook.cmd session-start`, async: false }]
-                }]
+                }],
+                SubagentStart: [{ matcher: '.+', hooks: [{ type: 'command', command: 'awm model-policy hook-event --event start', async: false }] }],
+                SubagentStop: [{ matcher: '.+', hooks: [{ type: 'command', command: 'awm model-policy hook-event --event stop', async: false }] }]
             }
         }, null, 2));
     }
@@ -52,6 +54,16 @@ describe('computeHookStatus', () => {
         expect(result.checks.sessionStartScript.ok).toBe(true);
         expect(result.checks.runHookWrapper.ok).toBe(true);
         expect(result.checks.settingsEntry.ok).toBe(true);
+    });
+
+    it('does not certify a non-command routing hook with matching command text', () => {
+        setupInstalledHook();
+        const settings = path.join(tmpHome, '.claude/settings.json');
+        const parsed = JSON.parse(fs.readFileSync(settings, 'utf8'));
+        parsed.hooks.SubagentStart[0].hooks[0].type = 'prompt';
+        fs.writeFileSync(settings, JSON.stringify(parsed));
+        const { computeHookStatus } = require('../../../src/commands/hooks/status');
+        expect(computeHookStatus('claude-code').checks.routingCapture.ok).toBe(false);
     });
 
     it('reports DEGRADED when bootstrap skill is missing', () => {
