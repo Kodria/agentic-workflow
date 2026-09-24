@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { assertJournalInitPaths, initBoundJournal, initJournal, readJournal, rebindJournalPlan, writeJournal } from '../../core/journal/store';
 import { bindingPlanPath, statePath } from '../../core/journal/paths';
-import type { PlanBinding, VerificationKind } from '../../core/journal/types';
+import { activeRequestProblems, type PlanBinding, type VerificationKind } from '../../core/journal/types';
 import type { PlanValidationReport } from '../../core/plan/types';
 import { acquireLock, releaseLock } from './lock';
 import { verifiedPlanSnapshot } from '../../core/plan/validate';
@@ -77,7 +77,7 @@ function rebindBlocker(state: ReturnType<typeof readJournal>['state']): string |
     if (state === null) return 'journal inexistente o corrupto';
     const nonterminal = Object.values(state.jobs).filter(job => !TERMINAL_JOB_STATES.has(job.executionState));
     if (nonterminal.length > 0) return `hay jobs no terminales: ${nonterminal.map(job => job.id).join(', ')}`;
-    if (state.requestProblems.length > 0) return 'hay conflictos durables de requests';
+    if (activeRequestProblems(state).length > 0) return 'hay conflictos durables de requests';
     if (state.verdicts.some(verdict => verdict.result !== 'pass')) return 'hay evidencia adversa durable';
     if (state.fixes.some(fix => !fix.closed)) return 'hay fixes abiertos';
     if (state.cycle.status === 'BLOCKED') return 'el ciclo está bloqueado';

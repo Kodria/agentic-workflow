@@ -2,6 +2,7 @@
 // sobrecargados; shape validation antes de usar campos deserializados.
 
 import crypto from 'crypto';
+import path from 'path';
 import { TRACK_PHASES, JOIN_STRATEGY_NO_FF } from '../tracks/types';
 import type { CohortPhase, TrackPhase, JoinStrategy } from '../tracks/types';
 import { bindingPlanPath } from './paths';
@@ -140,7 +141,23 @@ export interface Verdict {
     routingAttemptId?: string;
 }
 export interface FixObligation { id: string; verdictId: string; closed: boolean; }
-export interface RequestProblem { file: string; kind: 'corrupt' | 'rejected'; detail: string; at: string; }
+export interface RequestProblem {
+    file: string; kind: 'corrupt' | 'rejected'; detail: string; at: string;
+    requestId?: string; taskId?: string; generationToken?: string;
+    resolution?: { replacementRequestId: string; replacementPayloadDigest: string; reason: string; generationToken: string; at: string };
+}
+export function activeRequestProblems(state: Pick<JournalState, 'requestProblems' | 'appliedRequests' | 'tasks'>): RequestProblem[] {
+    return state.requestProblems.filter(problem => {
+        const resolution = problem.resolution;
+        if (!resolution || !problem.requestId || !problem.taskId || !problem.generationToken
+            || path.basename(problem.file) !== `${problem.requestId}.json`
+            || resolution.generationToken !== problem.generationToken) return true;
+        const applied = state.appliedRequests[resolution.replacementRequestId];
+        return applied?.outcome !== 'applied' || applied.resultRef !== problem.taskId
+            || applied.payloadDigest !== resolution.replacementPayloadDigest
+            || !state.tasks.some(task => task.id === problem.taskId);
+    });
+}
 export interface CustodyDecision { at: string; decision: 'resume'; reason: string; generationToken: string; }
 
 /** Minimal durable custody proof for a compact unattended cycle.  It deliberately
@@ -499,7 +516,20 @@ function isWellFormedImplementationLineage(x: unknown): x is ImplementationLinea
 
 function isWellFormedRequestProblem(x: unknown): x is RequestProblem {
     return isObj(x) && typeof x.file === 'string' && (x.kind === 'corrupt' || x.kind === 'rejected')
-        && typeof x.detail === 'string' && typeof x.at === 'string';
+        && typeof x.detail === 'string' && typeof x.at === 'string'
+        && (x.requestId === undefined || typeof x.requestId === 'string')
+        && (x.taskId === undefined || typeof x.taskId === 'string')
+        && (x.generationToken === undefined || typeof x.generationToken === 'string')
+        && (x.resolution === undefined || (x.kind === 'rejected' && isObj(x.resolution)
+            && Object.keys(x.resolution).every(key => ['replacementRequestId', 'replacementPayloadDigest', 'reason', 'generationToken', 'at'].includes(key))
+            && typeof x.requestId === 'string' && x.requestId.length > 0
+            && typeof x.taskId === 'string' && x.taskId.length > 0
+            && typeof x.generationToken === 'string' && x.generationToken.length > 0
+            && typeof x.resolution.replacementRequestId === 'string' && x.resolution.replacementRequestId.length > 0
+            && typeof x.resolution.replacementPayloadDigest === 'string' && /^[a-f0-9]{64}$/.test(x.resolution.replacementPayloadDigest)
+            && typeof x.resolution.reason === 'string' && x.resolution.reason.trim().length > 0
+            && typeof x.resolution.generationToken === 'string' && x.resolution.generationToken.length > 0
+            && typeof x.resolution.at === 'string' && Number.isFinite(Date.parse(x.resolution.at))));
 }
 
 function isWellFormedCustodyDecision(x: unknown): x is CustodyDecision {

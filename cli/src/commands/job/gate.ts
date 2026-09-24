@@ -2,7 +2,7 @@
 // VIGENTE satisface (R1.4c, RF-2.8). Cada agujero del bloqueador 5 de la
 // review tiene su categoria propia — nada aprueba por vacuidad ni por
 // referencia falsa.
-import type { JournalState, VerificationItem, VerificationKind } from '../../core/journal/types';
+import { activeRequestProblems, type JournalState, type VerificationItem, type VerificationKind } from '../../core/journal/types';
 import { ABSENT_JOURNAL_DETAIL } from '../../core/journal/store';
 
 export type GateCategory =
@@ -41,7 +41,7 @@ function evaluateEvidence(state: JournalState, fingerprintNow: FingerprintNow, s
     if (state.cycle.status === 'BLOCKED') {
         reasons.push({ category: 'cycle-blocked', detail: `ciclo BLOCKED: ${state.cycle.blockedReason ?? 'sin razon registrada'}` });
     }
-    for (const problem of state.requestProblems) {
+    for (const problem of activeRequestProblems(state)) {
         reasons.push({ category: 'request-problem', detail: `request ${problem.kind} en ${problem.file}: ${problem.detail}` });
     }
     for (const j of Object.values(state.jobs)) {

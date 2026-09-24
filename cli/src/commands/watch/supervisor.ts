@@ -24,7 +24,7 @@ import { consumePendingRequests } from './apply';
 import { runnerTick, WrapperSpawner, defaultWrapperSpawner } from './runner';
 import { reconcileTracks, reconcileOpenJoin, defaultTrackRuntime, TrackRuntime } from './tracks';
 import { decideStall, Backoff, beginGeneration, activeGeneration, ensureControllerGeneration, collectControllerGeneration, controllerGenerationHasUnresolvedClaim, resolveGeneration, enterCustody } from './generations';
-import type { JournalState, ControllerRecoveryAction } from '../../core/journal/types';
+import { activeRequestProblems, type JournalState, type ControllerRecoveryAction } from '../../core/journal/types';
 import type { CohortPhase } from '../../core/tracks/types';
 
 /** The supervisor is only allowed to dispatch after this exact admission. */
@@ -226,9 +226,12 @@ export type TickOutcome = 'continue' | 'custody' | 'complete' | 'frozen';
 
 const LIVE = ['received', 'spawn-intent', 'claimed', 'running', 'cancel-requested'];
 
-function recoveryWhitelistBlocker(state: JournalState): string | undefined {
-    if (state.cycle.status === 'BLOCKED') return 'el ciclo está bloqueado';
-    if (state.requestProblems.length > 0) return 'hay conflictos durables de requests';
+export function recoveryWhitelistBlocker(state: JournalState): string | undefined {
+    if (state.cycle.status === 'BLOCKED') {
+        return state.cycle.blockedReason === 'recovery no autorizado: hay conflictos durables de requests'
+            ? 'hay conflictos durables de requests' : 'el ciclo está bloqueado';
+    }
+    if (activeRequestProblems(state).length > 0) return 'hay conflictos durables de requests';
     // Pending work is the normal reason to launch (or retry launching) the
     // controller.  It is not recovery evidence and therefore cannot turn a
     // transient launch failure into permanent custody.  Conversely, once a
