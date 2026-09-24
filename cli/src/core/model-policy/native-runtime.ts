@@ -8,7 +8,8 @@ export type RuntimeExecutableQuery = { command: string; args: string[]; timeoutM
 
 function executablePath(command: string): string {
     if (typeof command !== 'string' || command.length === 0 || command.length > 4096 || /[\u0000-\u001f\u007f-\u009f]/.test(command)) throw new Error('runtime executable command is invalid');
-    const candidates = path.isAbsolute(command) ? [command] : (process.env.PATH ?? '').split(path.delimiter).filter(Boolean).map(dir => path.join(dir, command));
+    const names = process.platform === 'win32' && path.extname(command) === '' ? [command, `${command}.exe`] : [command];
+    const candidates = path.isAbsolute(command) ? names : (process.env.PATH ?? '').split(path.delimiter).filter(Boolean).flatMap(dir => names.map(name => path.join(dir, name)));
     for (const candidate of candidates) {
         try {
             fs.accessSync(candidate, fs.constants.X_OK);

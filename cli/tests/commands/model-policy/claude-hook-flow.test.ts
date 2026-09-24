@@ -23,8 +23,18 @@ describe('Claude hook to event receipt integration', () => {
                 implementationBudget: { maxAttempts: 3 as const, escalation: ['mechanical', 'integration', 'judgment'] as ['mechanical', 'integration', 'judgment'], judgmentEfforts: ['medium', 'high'] as ['medium', 'high'] } };
             fs.writeFileSync(path.join(project, 'candidate.json'), JSON.stringify(content));
             approvePolicy({ file: 'candidate.json', scope: 'project', cwd: project, expectedDigest: canonicalPolicyDigest(content) });
-            const executable = path.join(bin, 'claude');
-            fs.writeFileSync(executable, `#!${process.execPath}\nif (process.argv[2] === '--version') process.stdout.write('2.1.263\\n');\nelse if (process.argv[2] === 'auth') process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'anthropic', email: 'test@example.invalid', orgId: 'org-test' }));\n`, { mode: 0o755 });
+            const executable = path.join(bin, process.platform === 'win32' ? 'claude.exe' : 'claude');
+            const authResponse = { loggedIn: true, authMethod: 'claude.ai', apiProvider: 'anthropic', email: 'test@example.invalid', orgId: 'org-test' };
+            let preload: string | undefined;
+            if (process.platform === 'win32') {
+                // A Unix shebang cannot be launched by CreateProcess. Use a real
+                // .exe and intercept only its auth-status invocation in Node.
+                fs.copyFileSync(process.execPath, executable);
+                preload = path.join(root, 'claude-preload.cjs');
+                fs.writeFileSync(preload, `if (require('path').basename(process.execPath).toLowerCase() === 'claude.exe' && process.argv[1] === 'auth') { process.stdout.write(${JSON.stringify(JSON.stringify(authResponse))}); process.exit(0); }\n`);
+            } else {
+                fs.writeFileSync(executable, `#!${process.execPath}\nif (process.argv[2] === '--version') process.stdout.write('2.1.263\\n');\nelse if (process.argv[2] === 'auth') process.stdout.write(${JSON.stringify(JSON.stringify(authResponse))});\n`, { mode: 0o755 });
+            }
             const timestamp = new Date().toISOString();
             const transcript = path.join(configDir, 'projects', 'p', 's', 'subagents', 'agent-agent-1.jsonl');
             fs.mkdirSync(path.dirname(transcript), { recursive: true });
@@ -34,11 +44,12 @@ describe('Claude hook to event receipt integration', () => {
             const start = { hook_event_name: 'SubagentStart', session_id: 'session-1', agent_id: 'agent-1', agent_type: 'awm-integration' };
             const stop = { ...start, hook_event_name: 'SubagentStop', agent_transcript_path: transcript, stop_hook_active: false };
             const cli = path.resolve(__dirname, '../../../dist/src/index.js');
-            const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}` };
+            const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}` };
+            if (preload) env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ''} --require=${JSON.stringify(preload)}`;
             const first = spawnSync(process.execPath, [cli, 'model-policy', 'hook-event', '--event', 'start', '--cwd', project], { cwd: project, env, input: JSON.stringify(start), encoding: 'utf8' });
             expect(first.status).toBe(0); expect(first.stdout).toBe('');
             const second = spawnSync(process.execPath, [cli, 'model-policy', 'hook-event', '--event', 'stop', '--cwd', project], { cwd: project, env, input: JSON.stringify(stop), encoding: 'utf8' });
-            expect(second.status).toBe(0); expect(second.stdout).toBe('');
+            expect(second.status).toBe(0); expect(second.stdout).toBe(''); expect(second.stderr).toBe('');
             const files = fs.readdirSync(path.join(awmHome, 'routing-capabilities-v2', 'claude-code'));
             expect(files).toEqual(['native.json']);
             const raw = fs.readFileSync(path.join(awmHome, 'routing-capabilities-v2', 'claude-code', 'native.json'), 'utf8');
