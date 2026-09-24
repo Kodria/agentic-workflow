@@ -141,8 +141,15 @@ export function registerWatchCommand(program: Command): void {
                 ...(opts.controllerAutonomy === undefined ? {} : { controllerAutonomy: opts.controllerAutonomy }),
             };
             process.stdout.write(`awm watch: supervisor activo (${cfg.provider}) — Ctrl-C para terminar\n`);
-            await runSupervisorLoop(repo, branch, cfg);
-            process.stdout.write('gate verde: ciclo COMPLETE — drenado, lock liberado, apagando\n');
+            const outcome = await runSupervisorLoop(repo, branch, cfg);
+            const final = watchJournalStatus(repo, branch);
+            if (outcome === 'complete' && final.state === 'present' && final.cycleState === 'COMPLETE') {
+                process.stdout.write('gate verde: ciclo COMPLETE — drenado, lock liberado, apagando\n');
+            } else {
+                process.stdout.write(`awm watch: ${outcome === 'stopped' ? 'detenido' : 'track congelado'}; ciclo ${final.cycleState ?? final.state} — sin certificacion de cierre\n`);
+                if (outcome === 'stopped') process.exitCode = 130;
+                else if (outcome === 'complete' || final.state !== 'present') process.exitCode = 1;
+            }
         });
 
     watch.command('recover-request')

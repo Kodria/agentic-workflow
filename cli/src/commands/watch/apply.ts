@@ -146,6 +146,13 @@ export function applyRequestToState(s: JournalState, env: RequestEnvelope & { re
             const capabilities = readCapabilities(validateRuntimeKey(envelope.runtime), checkedAt);
             return { checkedAt, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined };
         } }, p.at ?? now());
+        const routingAttempt = reserved.state.routingAttempts?.find(item => item.id === reserved.attemptId);
+        if (!routingAttempt) throw new Error('routing reservation produced no attempt');
+        const priorReservationAck = routingAttempt.reservationRequestId === undefined ? undefined
+            : reserved.state.appliedRequests[routingAttempt.reservationRequestId];
+        if (!priorReservationAck || priorReservationAck.outcome !== 'applied' || priorReservationAck.resultRef !== routingAttempt.id) {
+            routingAttempt.reservationRequestId = env.requestId;
+        }
         Object.assign(s, reserved.state); applyOutcome(s, { ...base, outcome: 'applied', resultRef: reserved.attemptId }); return;
     }
     if (env.kind === 'routing-observe') {
@@ -153,6 +160,13 @@ export function applyRequestToState(s: JournalState, env: RequestEnvelope & { re
         if (typeof p.attemptId !== 'string' || typeof p.nativeAgentId !== 'string' || (p.observed !== undefined && !isRoutingSelection(p.observed)) || (p.unavailableReason !== undefined && typeof p.unavailableReason !== 'string') || (p.at !== undefined && typeof p.at !== 'string')) throw new Error('routing-observe requiere payload estricto');
         const attempt = s.routingAttempts?.find(item => item.id === p.attemptId);
         if (!attempt) throw new Error('routing-observe attempt is unknown');
+        if (s.planBinding?.schema === 'compact-slices/v2' && attempt.envelope.role === 'implementer') {
+            if (attempt.nativeEvidenceRequired !== true) throw new Error('routing-observe v2 requires a native event receipt');
+            const dispatch = s.dispatches.find(item => item.routingAttemptId === attempt.id);
+            const ack = dispatch?.dispatchRequestId ? s.appliedRequests[dispatch.dispatchRequestId] : undefined;
+            if (!dispatch || ack?.outcome !== 'applied' || ack.requestId !== dispatch.dispatchRequestId
+                || ack.resultRef !== dispatch.id) throw new Error('routing-observe requires applied dispatch ack');
+        }
         let key: Buffer | null = null;
         if (attempt.nativeEvidenceRequired) {
             try { key = readMachineKey(awmHome()); } catch { /* missing/unsafe machine key is recorded as PROVENANCE_MISSING */ }
@@ -418,8 +432,35 @@ export function applyRequestToState(s: JournalState, env: RequestEnvelope & { re
             const dispatchId = p.dispatchId;
             const taskId = p.taskId;
             if (!s.tasks.some((task) => task.id === taskId)) throw new Error('register --entity dispatch: taskId desconocido');
-            if (!s.dispatches.some((d) => d.id === dispatchId)) {
-                s.dispatches.push({ id: dispatchId, taskId, at: now() });
+            const v2 = s.planBinding?.schema === 'compact-slices/v2';
+            let routingAttemptId: string | undefined;
+            let reservedForNewDispatch = true;
+            if (v2) {
+                if (typeof p.routingAttemptId !== 'string' || p.routingAttemptId.length === 0) throw new Error('register --entity dispatch v2 requiere routingAttemptId');
+                const attempt = s.routingAttempts?.find(candidate => candidate.id === p.routingAttemptId);
+                if (!attempt || attempt.envelope.role !== 'implementer'
+                    || attempt.envelope.sliceId !== taskId || attempt.envelope.planDigest !== s.planBinding!.digest
+                    || attempt.envelope.executionDigest !== s.planBinding!.executionDigest
+                    || !attempt.reservationRequestId
+                    || s.appliedRequests[attempt.reservationRequestId]?.outcome !== 'applied'
+                    || s.appliedRequests[attempt.reservationRequestId]?.requestId !== attempt.reservationRequestId
+                    || s.appliedRequests[attempt.reservationRequestId]?.resultRef !== attempt.id) {
+                    throw new Error('register --entity dispatch: routing reservation for this slice and plan lacks applied ack');
+                }
+                routingAttemptId = attempt.id;
+                if (attempt.nativeEvidenceRequired !== true) throw new Error('register --entity dispatch v2 requires native event receipt');
+                reservedForNewDispatch = attempt.state === 'reserved';
+            } else if (p.routingAttemptId !== undefined) throw new Error('register --entity dispatch: routingAttemptId solo para compact v2');
+            const existing = s.dispatches.find(d => d.id === dispatchId);
+            if (existing && (existing.taskId !== taskId || existing.routingAttemptId !== routingAttemptId)) {
+                throw new Error('register --entity dispatch: dispatchId conflictivo');
+            }
+            if (!existing) {
+                if (routingAttemptId && s.dispatches.some(d => d.routingAttemptId === routingAttemptId)) {
+                    throw new Error('register --entity dispatch: routing reservation ya tiene un dispatch');
+                }
+                if (!reservedForNewDispatch) throw new Error('register --entity dispatch: routing attempt ya no esta reservado');
+                s.dispatches.push({ id: dispatchId, taskId, at: now(), ...(routingAttemptId ? { routingAttemptId, dispatchRequestId: env.requestId } : {}) });
                 const task = s.tasks.find((t) => t.id === taskId);
                 if (task !== undefined) task.attempts += 1;
             }

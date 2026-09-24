@@ -87,9 +87,13 @@ export function isWellFormedEnvelope(x: unknown): x is RequestEnvelope & { reque
 
 export function listPendingRequests(repoRoot: string, branch: string): PendingRequest[] {
     const dir = requestsDir(repoRoot, branch);
+    const directory = fs.lstatSync(dir);
+    if (directory.isSymbolicLink() || !directory.isDirectory()) throw new Error('request directory is not a controlled directory');
     return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort().map((f) => {
         const file = path.join(dir, f);
         try {
+            const stat = fs.lstatSync(file);
+            if (stat.isSymbolicLink() || !stat.isFile()) return { requestId: f, envelope: null as never, file, corrupt: true };
             const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
             // Shape completa antes de cualquier uso downstream. JSON valido no
             // implica envelope valido: payload/generation/idempotency ausentes

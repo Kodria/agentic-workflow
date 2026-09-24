@@ -86,7 +86,7 @@ function promptForGeneration(gen: Generation): string {
         'resume-next-action': 'Retoma el next_action vigente del journal.',
         'reconcile-active-jobs': 'Reconcilia los jobs activos existentes del journal sin duplicarlos.',
     };
-    return `${instructions[gen.resumeAction.kind]}\nGeneracion activa: ${gen.token}. Incluye --generation ${gen.token} en cada comando awm job.`;
+    return `${instructions[gen.resumeAction.kind]}\nGeneracion activa: ${gen.token}. Incluye --generation ${gen.token} solo en awm job request, register, verdict, controller-heartbeat, routing-reserve y routing-observe. Ejecuta awm job reconcile sin --generation; awm job ack <requestId> tambien es de solo lectura y no acepta ese flag. En compact v2: espera el ack applied de routing-reserve, toma su resultRef como routingAttemptId, registra dispatch con ese routingAttemptId y espera su ack applied antes de lanzar al implementador nativo. Ningun implementador escribe antes de ese ack. Luego emite routing-observe y espera su ack; un recibo de emision no es un ack aplicado.`;
 }
 
 function recoveryAction(action: unknown): ControllerRecoveryAction {

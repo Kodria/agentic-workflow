@@ -23,6 +23,7 @@ import * as currentnessCheck from '../../../src/core/currentness/check';
 import * as sensorCommands from '../../../src/commands/sensors/run';
 import * as preferencesConfig from '../../../src/utils/config';
 import { providerFor } from '../../../src/providers';
+import * as adapterModule from '../../../src/core/journal/adapter';
 
 jest.setTimeout(60000);
 
@@ -63,6 +64,19 @@ const admitted = async (): Promise<AdmissionReport> => ({
     state: 'admitted', planState: 'valid', executionMode: 'desatendido',
     journal: 'current', currentness: 'current', sensors: 'pass', diagnostics: [],
 });
+
+/** Lifecycle fixtures do not spawn a real controller. Explicitly adopt a
+ * simulated native identity before expecting job dispatch. */
+function adoptFixtureController(repo: string): void {
+    const state = readJournal(repo, 'main').state!;
+    const gen = activeGeneration(state)!;
+    gen.processRef = { pid: process.pid, processGroup: process.pid, startTime: 'fixture',
+        spawnNonce: gen.spawnNonce!, argvDigest: gen.launchArgvDigest!, psArgsDigest: 'b'.repeat(64) };
+    writeJournal(repo, 'main', state);
+    const adapter = adapterModule.adapterFor('codex');
+    jest.spyOn(adapterModule, 'adapterFor').mockReturnValue({ ...adapter,
+        activity: () => ({ cpuTime: '0', groupSize: 1 }), safeToReplace: () => 'indeterminate' });
+}
 
 /** Legacy fixtures predate compact-only admission; make their execution contract explicit. */
 function initUnattendedFixture(repo: string): void {
@@ -239,6 +253,8 @@ describe('supervisor loop', () => {
         try {
             let sawContinueWithLiveJob = false;
             let outcome = 'continue';
+            expect(await sup.tick()).toBe('continue');
+            adoptFixtureController(repo);
             for (let i = 0; i < 400 && outcome !== 'complete'; i++) {
                 outcome = await sup.tick();
                 const s = readJournal(repo, 'main').state!;
@@ -252,7 +268,8 @@ describe('supervisor loop', () => {
             expect(final.cycle.status).toBe('COMPLETE');
             expect(typeof final.cycle.completedAt).toBe('string');
             expect(Object.values(final.jobs).every((j) => j.executionState === 'exited' && j.verdict === 'pass')).toBe(true);
-            expect(final.generations.every((entry) => entry.state === 'terminated' && entry.processRef === undefined)).toBe(true);
+            expect(final.generations.every((entry) => entry.state === 'terminated'
+                && (entry.processRef === undefined || entry.processRef.pid === process.pid))).toBe(true);
             expect(controllerSpawnAttempts).toBeGreaterThan(0);
         } finally {
             recovery.mockRestore();
@@ -329,6 +346,8 @@ describe('supervisor loop', () => {
             };
             const sup = new Supervisor(repo, 'main', cfg, lifecycleSpawner, undefined, admitted);
             let outcome = 'continue';
+            expect(await sup.tick()).toBe('continue');
+            adoptFixtureController(repo);
             for (let i = 0; i < 400 && outcome !== 'complete'; i++) {
                 outcome = await sup.tick();
                 await new Promise((r) => setTimeout(r, 50));

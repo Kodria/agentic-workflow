@@ -10,7 +10,7 @@ import { reconcileJobs } from './reconcile';
 import { planReap, executeReap } from './reap';
 import { buildExport, BaselineMetrics } from './export';
 import { runExecWrapper } from './exec-wrapper';
-import { emitRequest } from '../../core/journal/requests';
+import { ackFor, emitRequest, listPendingRequests } from '../../core/journal/requests';
 import { computeFingerprint } from '../../core/journal/fingerprint';
 import { EXEC_STDIO } from '../../core/journal/process';
 import { ABSENT_JOURNAL_DETAIL, journalPresence, readJournal } from '../../core/journal/store';
@@ -214,6 +214,61 @@ export function registerJobCommand(program: Command): void {
         assertAuthenticatedCwd(repo, branch);
         process.stdout.write(JSON.stringify(queryPs(repo, branch), null, 2) + '\n');
     });
+
+    job.command('ack')
+        .description('consulta read-only el acuse durable de una request por ID exacto')
+        .argument('<requestId>')
+        .action((requestId: string) => {
+            if (!/^req-[A-Za-z0-9-]{1,124}$/.test(requestId)) throw new Error('requestId invalido');
+            const repo = process.cwd(); const branch = branchOf(repo); assertAuthenticatedCwd(repo, branch);
+            const read = readJournal(repo, branch);
+            if (read.corrupt || !read.state) {
+                process.stdout.write(JSON.stringify({ requestId, state: 'unverifiable', journal: read.corrupt ? 'corrupt' : 'absent' }) + '\n');
+                process.exitCode = 1;
+                return;
+            }
+            verifyBranchInvariant(repo, read.state.branch);
+            const ack = ackFor(read.state, requestId);
+            if (ack) {
+                process.stdout.write(JSON.stringify({ requestId, state: ack.outcome === 'applied' ? 'applied' : 'rejected',
+                    outcome: ack.outcome, ...(ack.resultRef ? { resultRef: ack.resultRef } : {}) }) + '\n');
+                if (ack.outcome !== 'applied') process.exitCode = 1;
+                return;
+            }
+            const problem = read.state.requestProblems.find(item => item.requestId === requestId
+                || (item.kind === 'corrupt' && path.basename(item.file) === `${requestId}.json`));
+            if (problem) {
+                process.stdout.write(JSON.stringify({ requestId, state: problem.kind === 'corrupt' ? 'unverifiable' : 'rejected', reasonCode: problem.kind }) + '\n');
+                process.exitCode = 1;
+                return;
+            }
+            let pending: ReturnType<typeof listPendingRequests>[number] | undefined;
+            try {
+                pending = listPendingRequests(repo, branch).find(item => item.requestId === requestId
+                    || (item.corrupt && path.basename(item.file) === `${requestId}.json`));
+            } catch {
+                process.stdout.write(JSON.stringify({ requestId, state: 'unverifiable', reasonCode: 'request-directory' }) + '\n');
+                process.exitCode = 1;
+                return;
+            }
+            // The supervisor may have consumed the request between the first
+            // journal snapshot and the queue read. Recheck before saying unknown.
+            const latest = readJournal(repo, branch);
+            if (latest.corrupt || !latest.state) {
+                process.stdout.write(JSON.stringify({ requestId, state: 'unverifiable', journal: latest.corrupt ? 'corrupt' : 'absent' }) + '\n');
+                process.exitCode = 1;
+                return;
+            }
+            const latestAck = ackFor(latest.state, requestId);
+            if (latestAck) {
+                process.stdout.write(JSON.stringify({ requestId, state: latestAck.outcome === 'applied' ? 'applied' : 'rejected',
+                    outcome: latestAck.outcome, ...(latestAck.resultRef ? { resultRef: latestAck.resultRef } : {}) }) + '\n');
+                if (latestAck.outcome !== 'applied') process.exitCode = 1;
+                return;
+            }
+            process.stdout.write(JSON.stringify({ requestId, state: pending?.corrupt ? 'unverifiable' : pending ? 'pending' : 'unknown' }) + '\n');
+            if (!pending || pending.corrupt) process.exitCode = 1;
+        });
 
     job.command('list').action(() => {
         const repo = process.cwd();

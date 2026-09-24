@@ -84,6 +84,7 @@ effective envelope and a custody handoff, not a dispatch.
 
 ```
 awm job routing-reserve --generation <token> --obligation <id> --lineage <id> --envelope-file <file> --fingerprint <sha> [--cwd <root>] --json
+awm job ack <requestId>
 awm job routing-observe --generation <token> --attempt <id> --native-agent-id <id> --observation-file <file> [--cwd <root>] --json
 awm job routing-report --json
 ```
@@ -99,9 +100,18 @@ The supervisor verifies the locally sealed event proof; a self-reported
 the attempt records `PROVENANCE_MISSING` and can fall back only to an
 independently enrolled full selection. This does not block unrelated work.
 
-The supervisor is the sole journal writer. Reserve only emits a durable
-request; wait for its applied acknowledgement before native action. Envelope
-and observation files must be bounded non-symlink JSON files with no duplicate
+The supervisor is the sole journal writer. For a compact v2 implementer,
+`routing-reserve` only emits a request ID. Poll `awm job ack <requestId>` until
+`state` is `applied`, then use its `resultRef` as `routingAttemptId` when
+registering the task's dispatch with `awm job register --generation <token>
+--entity dispatch --json <payload>`. Wait for that dispatch request's own
+`applied` ACK before launching the native child or allowing it to write. Only
+then emit `routing-observe` for the actual child and wait for its ACK; emitting
+a request is not an applied acknowledgement. `ack` and `reconcile` are
+read-only and do not accept `--generation`. `ack` reports `pending`, `applied`,
+`rejected`, `unknown`, or `unverifiable` as bounded JSON; only `pending` and
+`applied` exit successfully, and `pending` does not authorize native launch.
+Envelope and observation files must be bounded non-symlink JSON files with no duplicate
 keys. When an optimized selection is missing or rejected, resolution may use
 only the independently enrolled full-capability selection; if that too is
 unverified, the affected obligation blocks with a reason code. Routing
@@ -918,6 +928,7 @@ gates:
 | `verdict` | Record a ReviewObligation verdict at the moment it is received. |
 | `list` / `ps` / `show <jobId>` | Read the journal: declared jobs, live processes, one job in full. |
 | `reconcile` | Read-only report of the R1.8 matrix plus `next_action`. The mutation belongs to the supervisor. |
+| `ack <requestId>` | Read-only exact-ID request acknowledgement. Wait for `applied` before an action that depends on the request. |
 | `gate` | Fail-closed interlock: exits non-zero if **anything** blocks certification. Unattended only — see below. |
 | `reap` | List job processes with full identity. `--execute --jobs <ids...>` terminates them, with confirmation. |
 | `export` | Export the journal. |
@@ -960,6 +971,13 @@ awm watch [--init] [--provider <p>] [--heartbeat-timeout <min>]
 The two timeouts are separate on purpose: a silent heartbeat is not the same as a dead
 process. A controller can stop reporting while its work is still advancing, and the
 activity window is what keeps that work from being reclaimed out from under it.
+Full compact admission runs before an initial or replacement controller generation.
+During an already-admitted generation, ordinary RED edits do not rerun the sensor
+pre-dispatch gate on every tick; plan binding and runtime identity remain checked,
+and verification jobs still determine whether the cycle can finish. A received
+job waits while a local controller launch lacks an adopted process identity.
+Stopping `watch` with Ctrl-C reports the journal's actual cycle state and exits
+with code 130; it does not certify `COMPLETE`.
 
 ### `awm track`
 
