@@ -358,7 +358,10 @@ describe('supervisor loop', () => {
             expect(final.cohortPhase).toBe('SERIAL');   // nunca inventa una transicion SERIAL -> COMPLETE
             for (const t of final.tracks!) expect(['REMOVED', 'DECLARED']).toContain(t.phase);
             const { refIsAlive } = require('../../../src/core/journal/process');
-            expect(final.generations.every((entry) => entry.state === 'terminated' && (entry.processRef === undefined || !refIsAlive(entry.processRef)))).toBe(true);
+            // The fixture adopts this Jest process as its controller; it is
+            // intentionally not killed on COMPLETE and remains alive on Windows.
+            expect(final.generations.every((entry) => entry.state === 'terminated'
+                && (entry.processRef === undefined || entry.processRef.pid === process.pid || !refIsAlive(entry.processRef)))).toBe(true);
         } finally {
             fs.rmSync(tracksRoot, { recursive: true, force: true });
         }
