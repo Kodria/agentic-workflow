@@ -397,6 +397,44 @@ options and inspect `awm job gate`: unfinished tasks and other missing evidence
 still block certification. This is an operator recovery path, not an automatic
 retry of invalid requests.
 
+### `awm watch recover-admission`
+
+Use this only when the current branch's unattended cycle is `BLOCKED` by
+`ADMISSION_CURRENTNESS_BLOCKED` or `ADMISSION_SENSORS_BLOCKED`. The supervisor
+first retries an inconclusive currentness or sensor observation up to three
+times, waiting five seconds between checks. It does not launch a controller,
+create a generation, consume requests or dispatch jobs during those checks.
+`stale` currentness and other conclusive failures enter custody immediately.
+
+Stop `awm watch` cleanly so it releases the supervisor lock. Inspect
+`awm job gate` for the blocking reason and `awm watch journal-status --json`
+for the latest generation token. Then use
+the **same** provider, native runtime identity and controller posture as the
+cycle; `--provider` must be explicit even for Codex:
+
+```bash
+awm watch --provider codex --runtime-kind native --runtime-version <version> --account-scope-digest <sha256> --controller-autonomy approval-free recover-admission --generation <token> --reason "currentness y sensores verificados por el operador"
+```
+
+Omit `--generation` only if the journal has no generation (for example, when
+admission failed before the first launch). Run this from the repository's
+current branch. The command takes the exclusive lock, verifies the bound plan,
+strict currentness and sensors, the sealed native receipt against the local
+runtime/account scope, and the absence of active request problems or ambiguous
+controller/jobs. It records the original blocking reason, operator reason and
+generation in the journal before changing the cycle to `IN_PROGRESS`. A
+repeat of the same successful command returns `already-recovered` without a
+second transition. For older journals without recorded runtime context, the
+identity is an explicit operator assertion, marked as such in the audit; AWM
+cannot reconstruct a historical runtime identity that was never stored.
+
+If any check fails, the cycle stays `BLOCKED` and the error names the failing
+gate. Fix the underlying currentness, sensors or native receipt first; do not
+edit `state.json`. After recovery, restart `awm watch` with the same flags.
+Its next tick repeats strict admission **before** consuming requests or
+dispatching, then resumes the durable `nextAction` and existing S1/jobs. A
+pending task remains pending; recovery never declares it complete.
+
 ### `awm watch archive-unused`
 
 ```bash

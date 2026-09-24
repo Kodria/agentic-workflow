@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { execFileSync } from 'child_process';
 import { initWatch, rebindWatchPlan } from './init';
 import { recoverRejectedTask } from './request-recovery';
+import { recoverAdmissionCustody } from './admission-recovery';
 import { runSupervisorLoop, DEFAULT_SUPERVISOR_CONFIG, type RoutingIdentity } from './supervisor';
 import { validateRuntimeKey } from '../../core/model-policy/capabilities';
 import { CONTROLLER_AUTONOMIES, isControllerAutonomy } from '../../core/journal/adapter';
@@ -161,6 +162,34 @@ export function registerWatchCommand(program: Command): void {
                     generationToken: opts.generation, reason: opts.reason, resume: opts.resume === true,
                 });
                 process.stdout.write(JSON.stringify({ recovered: true, rejectedRequestId: opts.rejected, replacementRequestId: opts.replacement, resumed: opts.resume === true }) + '\n');
+            } catch (error) {
+                process.stderr.write(`${(error as Error).message}\n`);
+                process.exitCode = 1;
+            }
+        });
+
+    watch.command('recover-admission')
+        .description('reanuda offline una custodia por admisión tras una nueva comprobación estricta')
+        .option('--generation <token>', 'token de la ultima generacion; omitir solo si no existe')
+        .requiredOption('--reason <text>', 'motivo explícito de la decisión del operador')
+        .action(async (opts: { generation?: string; reason: string }, command: Command) => {
+            const repo = process.cwd();
+            try {
+                const branch = currentBranch(repo);
+                resolveCommandContext(repo, branch);
+                const parent = command.parent?.opts() ?? {};
+                if (command.parent?.getOptionValueSource('provider') !== 'cli') throw new Error('recover-admission requiere --provider explícito');
+                if (!isControllerAutonomy(parent.controllerAutonomy)) throw new Error('recover-admission requiere --controller-autonomy valido');
+                if (parent.runtimeKind === undefined || parent.runtimeVersion === undefined || parent.accountScopeDigest === undefined) {
+                    throw new Error('recover-admission requiere --runtime-kind, --runtime-version y --account-scope-digest');
+                }
+                const outcome = await recoverAdmissionCustody(repo, branch, {
+                    provider: parent.provider,
+                    routingIdentity: { kind: parent.runtimeKind, version: parent.runtimeVersion, accountScopeDigest: parent.accountScopeDigest },
+                    controllerAutonomy: parent.controllerAutonomy,
+                    generationToken: opts.generation, reason: opts.reason,
+                });
+                process.stdout.write(JSON.stringify({ recovered: true, outcome, generationToken: opts.generation ?? null }) + '\n');
             } catch (error) {
                 process.stderr.write(`${(error as Error).message}\n`);
                 process.exitCode = 1;

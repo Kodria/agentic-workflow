@@ -159,6 +159,29 @@ export function activeRequestProblems(state: Pick<JournalState, 'requestProblems
     });
 }
 export interface CustodyDecision { at: string; decision: 'resume'; reason: string; generationToken: string; }
+export const MAX_ADMISSION_DEFERRALS = 3;
+
+/** A failed read-only admission observation never authorizes dispatch. */
+export interface AdmissionRetry {
+    kind: 'currentness' | 'sensors';
+    attempts: number;
+    firstAt: string;
+    nextRetryAt: string;
+}
+export interface AdmissionContext {
+    provider: 'codex' | 'claude-code';
+    runtime?: { kind: string; version: string; accountScopeDigest: string };
+    controllerAutonomy?: 'approval-free';
+}
+export interface AdmissionRecovery {
+    at: string;
+    reason: string;
+    blockedReason: string;
+    generationToken?: string;
+    context: AdmissionContext;
+    planDigest: string;
+    assertion: 'recorded' | 'legacy-operator-asserted';
+}
 
 /** Minimal durable custody proof for a compact unattended cycle.  It deliberately
  * contains identity metadata only: never plan bodies, prompts, credentials, or
@@ -289,6 +312,9 @@ export interface JournalState {
     implementationLineages?: ImplementationLineage[];
     requestProblems: RequestProblem[];                // corrupcion/rechazos de contenido bloquean el gate
     custodyDecisions?: CustodyDecision[];             // compatible con journals previos; decisiones humanas auditadas
+    admissionRetry?: AdmissionRetry;
+    admissionContext?: AdmissionContext;
+    admissionRecoveries?: AdmissionRecovery[];
     controllerHeartbeatAt?: string;
     tracks?: TrackRef[];                              // solo presente en el journal del PLAN que orquesta tracks (R9.2)
     trackContext?: TrackContext;                      // solo presente en el journal de un TRACK individual (R9.1)
@@ -390,6 +416,9 @@ export function isWellFormedState(x: unknown): x is JournalState {
     if (x.implementationLineages !== undefined && (!Array.isArray(x.implementationLineages) || x.implementationLineages.length > 4096 || !x.implementationLineages.every(isWellFormedImplementationLineage))) return false;
     if (!Array.isArray(x.requestProblems) || !x.requestProblems.every(isWellFormedRequestProblem)) return false;
     if (x.custodyDecisions !== undefined && (!Array.isArray(x.custodyDecisions) || !x.custodyDecisions.every(isWellFormedCustodyDecision))) return false;
+    if (x.admissionRetry !== undefined && !isWellFormedAdmissionRetry(x.admissionRetry)) return false;
+    if (x.admissionContext !== undefined && !isWellFormedAdmissionContext(x.admissionContext)) return false;
+    if (x.admissionRecoveries !== undefined && (!Array.isArray(x.admissionRecoveries) || !x.admissionRecoveries.every(isWellFormedAdmissionRecovery))) return false;
     if (!x.generations.every(isWellFormedGeneration) || !x.tasks.every(isWellFormedTask)) return false;
     if (!x.cycleVerificationPlan.every(isWellFormedVerificationItem)) return false;
     if (!x.verdicts.every(isWellFormedVerdict) || !x.fixes.every(isWellFormedFix)) return false;
@@ -535,6 +564,37 @@ function isWellFormedRequestProblem(x: unknown): x is RequestProblem {
 function isWellFormedCustodyDecision(x: unknown): x is CustodyDecision {
     return isObj(x) && typeof x.at === 'string' && x.decision === 'resume'
         && typeof x.reason === 'string' && typeof x.generationToken === 'string';
+}
+
+function isWellFormedAdmissionRetry(x: unknown): x is AdmissionRetry {
+    return isObj(x) && Object.keys(x).length === 4
+        && (x.kind === 'currentness' || x.kind === 'sensors')
+        && Number.isInteger(x.attempts) && Number(x.attempts) >= 1 && Number(x.attempts) <= MAX_ADMISSION_DEFERRALS
+        && typeof x.firstAt === 'string' && Number.isFinite(Date.parse(x.firstAt))
+        && typeof x.nextRetryAt === 'string' && Number.isFinite(Date.parse(x.nextRetryAt))
+        && Date.parse(x.nextRetryAt) >= Date.parse(x.firstAt);
+}
+
+function isWellFormedAdmissionContext(x: unknown): x is AdmissionContext {
+    if (!isObj(x) || !Object.keys(x).every(key => ['provider', 'runtime', 'controllerAutonomy'].includes(key))
+        || (x.provider !== 'codex' && x.provider !== 'claude-code')
+        || (x.controllerAutonomy !== undefined && x.controllerAutonomy !== 'approval-free')) return false;
+    if (x.runtime === undefined) return true;
+    return isObj(x.runtime) && Object.keys(x.runtime).length === 3
+        && typeof x.runtime.kind === 'string' && x.runtime.kind.length > 0
+        && typeof x.runtime.version === 'string' && x.runtime.version.length > 0
+        && typeof x.runtime.accountScopeDigest === 'string' && /^[a-f0-9]{64}$/.test(x.runtime.accountScopeDigest);
+}
+
+function isWellFormedAdmissionRecovery(x: unknown): x is AdmissionRecovery {
+    return isObj(x) && Object.keys(x).every(key => ['at', 'reason', 'blockedReason', 'generationToken', 'context', 'planDigest', 'assertion'].includes(key))
+        && typeof x.at === 'string' && Number.isFinite(Date.parse(x.at))
+        && typeof x.reason === 'string' && x.reason.trim().length > 0 && x.reason.length <= 1024
+        && typeof x.blockedReason === 'string' && x.blockedReason.length > 0
+        && (x.generationToken === undefined || (typeof x.generationToken === 'string' && x.generationToken.length > 0))
+        && isWellFormedAdmissionContext(x.context)
+        && typeof x.planDigest === 'string' && /^[a-f0-9]{64}$/.test(x.planDigest)
+        && (x.assertion === 'recorded' || x.assertion === 'legacy-operator-asserted');
 }
 
 export function isWellFormedProcessRef(x: unknown): x is ProcessRef {
