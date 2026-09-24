@@ -391,10 +391,13 @@ describe('supervisor loop', () => {
         });
         let spawned = 0;
         const sup = new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, () => { spawned += 1; }, undefined, notCertified);
+        let now = Date.now();
+        jest.spyOn(Date, 'now').mockImplementation(() => now);
 
         for (let i = 0; i < MAX_SENSOR_DEFERRALS; i += 1) {
             expect(await sup.tick()).toBe('continue');
             expect(readJournal(repo, 'main').state!.cycle.status).toBe('IN_PROGRESS');
+            now += 5000;
         }
         // The verdict never settled, so the supervisor must stop pretending it might.
         expect(await sup.tick()).toBe('custody');
@@ -420,6 +423,96 @@ describe('supervisor loop', () => {
 
         // Deferring dispatch was right throughout, and stays right.
         expect(spawned).toBe(0);
+    });
+
+    test('unverifiable currentness retries durably across supervisor restart and does not spawn before admitted', async () => {
+        initUnattendedFixture(repo);
+        let now = Date.now();
+        jest.spyOn(Date, 'now').mockImplementation(() => now);
+        let verdict: 'unverifiable' | 'current' = 'unverifiable';
+        const observe = async (): Promise<AdmissionReport> => verdict === 'unverifiable'
+            ? { state: 'blocked', planState: 'valid', executionMode: 'desatendido', journal: 'not-required', currentness: 'unverifiable', sensors: 'not-required', diagnostics: [{ code: 'ADMISSION_CURRENTNESS_BLOCKED', message: 'registry:baseline' }] }
+            : admitted();
+        let spawned = 0;
+        const spawn: WrapperSpawner = () => { spawned += 1; };
+        expect(await new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, spawn, undefined, observe, true).tick()).toBe('continue');
+        expect(readJournal(repo, 'main').state).toHaveProperty('admissionRetry.attempts', 1);
+        expect(readJournal(repo, 'main').state!.generations).toHaveLength(0);
+        expect(spawned).toBe(0);
+        // New supervisor instance represents a process restart. Repeated early
+        // ticks cannot spend or reset the durable retry budget.
+        const restarted = new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, spawn, undefined, observe, true);
+        expect(await restarted.tick()).toBe('continue');
+        expect(readJournal(repo, 'main').state).toHaveProperty('admissionRetry.attempts', 1);
+        now += 5000;
+        verdict = 'current';
+        expect(await restarted.tick()).toBe('continue');
+        expect(readJournal(repo, 'main').state).not.toHaveProperty('admissionRetry');
+        expect(readJournal(repo, 'main').state!.cycle.status).toBe('IN_PROGRESS');
+        expect(readJournal(repo, 'main').state!.generations).toHaveLength(1);
+        expect(spawned).toBeGreaterThan(0);
+    });
+
+    test('stale currentness is conclusive and never receives transient retry budget', async () => {
+        initUnattendedFixture(repo);
+        const blocked = async (): Promise<AdmissionReport> => ({ state: 'blocked', planState: 'valid', executionMode: 'desatendido', journal: 'current', currentness: 'stale', sensors: 'not-required', diagnostics: [{ code: 'ADMISSION_CURRENTNESS_BLOCKED', message: 'stale' }] });
+        let spawned = 0;
+        expect(await new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, () => { spawned++; }, undefined, blocked).tick()).toBe('custody');
+        const state = readJournal(repo, 'main').state!;
+        expect(state.cycle.status).toBe('BLOCKED');
+        expect(state).not.toHaveProperty('admissionRetry');
+        expect(state.generations).toHaveLength(0);
+        expect(spawned).toBe(0);
+    });
+
+    test('first admission observation binds provider, runtime and autonomy; changed restart identity never dispatches', async () => {
+        initUnattendedFixture(repo);
+        const identity = { kind: 'native', version: '1.0.0', accountScopeDigest: 'a'.repeat(64) };
+        const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, routingIdentity: identity, controllerAutonomy: 'approval-free' as const };
+        const notCurrent = async (): Promise<AdmissionReport> => ({ state: 'blocked', planState: 'valid', executionMode: 'desatendido', journal: 'not-required', currentness: 'unverifiable', sensors: 'not-required', diagnostics: [{ code: 'ADMISSION_CURRENTNESS_BLOCKED', message: 'temporary' }] });
+        let spawns = 0;
+        expect(await new Supervisor(repo, 'main', cfg, () => { spawns++; }, undefined, notCurrent).tick()).toBe('continue');
+        expect(readJournal(repo, 'main').state).toHaveProperty('admissionContext', { provider: 'codex', runtime: identity, controllerAutonomy: 'approval-free' });
+        const changed = { ...cfg, routingIdentity: { ...identity, accountScopeDigest: 'b'.repeat(64) } };
+        expect(await new Supervisor(repo, 'main', changed, () => { spawns++; }, undefined, admitted).tick()).toBe('custody');
+        expect(readJournal(repo, 'main').state!.cycle.status).toBe('BLOCKED');
+        expect(spawns).toBe(0);
+    });
+
+    test('alternating transient causes share one durable retry budget', async () => {
+        initUnattendedFixture(repo);
+        let now = Date.now();
+        jest.spyOn(Date, 'now').mockImplementation(() => now);
+        let reads = 0;
+        const alternating = async (): Promise<AdmissionReport> => {
+            const sensor = reads++ % 2 === 1;
+            return sensor
+                ? { state: 'blocked', planState: 'valid', executionMode: 'desatendido', journal: 'not-required', currentness: 'current', sensors: 'not-certified', diagnostics: [{ code: 'ADMISSION_SENSORS_BLOCKED', message: 'temporary' }] }
+                : { state: 'blocked', planState: 'valid', executionMode: 'desatendido', journal: 'not-required', currentness: 'unverifiable', sensors: 'not-required', diagnostics: [{ code: 'ADMISSION_CURRENTNESS_BLOCKED', message: 'temporary' }] };
+        };
+        let spawns = 0;
+        for (let i = 0; i < MAX_SENSOR_DEFERRALS + 1; i++) {
+            const outcome = await new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, () => { spawns++; }, undefined, alternating).tick();
+            expect(outcome).toBe(i < MAX_SENSOR_DEFERRALS ? 'continue' : 'custody');
+            now += 5000;
+        }
+        expect(reads).toBe(MAX_SENSOR_DEFERRALS + 1);
+        expect(spawns).toBe(0);
+        expect(readJournal(repo, 'main').state!.generations).toHaveLength(0);
+    });
+
+    test('an incomplete first configuration can be corrected before dispatch without trapping the cycle', async () => {
+        initUnattendedFixture(repo);
+        const notCurrent = async (): Promise<AdmissionReport> => ({ state: 'blocked', planState: 'valid', executionMode: 'desatendido', journal: 'not-required', currentness: 'unverifiable', sensors: 'not-required', diagnostics: [{ code: 'ADMISSION_CURRENTNESS_BLOCKED', message: 'temporary' }] });
+        let spawned = 0;
+        expect(await new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, () => { spawned++; }, undefined, notCurrent).tick()).toBe('continue');
+        expect(readJournal(repo, 'main').state).not.toHaveProperty('admissionContext');
+        const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, routingIdentity: { kind: 'native', version: '1.0.0', accountScopeDigest: 'a'.repeat(64) }, controllerAutonomy: 'approval-free' as const };
+        const retry = readJournal(repo, 'main').state!.admissionRetry!;
+        jest.spyOn(Date, 'now').mockReturnValue(Date.parse(retry.nextRetryAt));
+        expect(await new Supervisor(repo, 'main', cfg, () => { spawned++; }, undefined, admitted, true).tick()).toBe('continue');
+        expect(readJournal(repo, 'main').state).toHaveProperty('admissionContext', { provider: 'codex', runtime: cfg.routingIdentity, controllerAutonomy: 'approval-free' });
+        expect(spawned).toBeGreaterThan(0);
     });
 
     test('una admisión compacta bloqueada no lanza controlador ni wrappers', async () => {

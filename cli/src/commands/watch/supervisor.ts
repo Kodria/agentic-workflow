@@ -15,7 +15,7 @@ import { queryLocalCodexScope } from '../../core/model-policy/local-codex-scope'
 import { queryLocalEventScope } from '../../core/model-policy/local-event-scope';
 import type { EventScope } from '../../core/model-policy/capabilities-v2';
 import { routingReport } from '../../core/model-policy/journal';
-import { adapterFor, type ControllerAutonomy } from '../../core/journal/adapter';
+import { adapterFor, isWatchProvider, isControllerAutonomy, type ControllerAutonomy } from '../../core/journal/adapter';
 import { groupIsGone, terminateGroupConfirmed } from '../../core/journal/process';
 import { computeGate, computeTrackGate, FingerprintNow } from '../job/gate';
 import { isWorktreeClean, headSha } from '../../core/tracks/git';
@@ -24,7 +24,7 @@ import { consumePendingRequests } from './apply';
 import { runnerTick, WrapperSpawner, defaultWrapperSpawner } from './runner';
 import { reconcileTracks, reconcileOpenJoin, defaultTrackRuntime, TrackRuntime } from './tracks';
 import { decideStall, Backoff, beginGeneration, activeGeneration, ensureControllerGeneration, collectControllerGeneration, controllerGenerationHasUnresolvedClaim, resolveGeneration, enterCustody } from './generations';
-import { activeRequestProblems, type JournalState, type ControllerRecoveryAction } from '../../core/journal/types';
+import { activeRequestProblems, MAX_ADMISSION_DEFERRALS, type AdmissionContext, type AdmissionRetry, type JournalState, type ControllerRecoveryAction } from '../../core/journal/types';
 import type { CohortPhase } from '../../core/tracks/types';
 
 /** The supervisor is only allowed to dispatch after this exact admission. */
@@ -212,6 +212,21 @@ export function admissionForConfig(repoRoot: string, branch: string, cfg: Superv
     return defaultDispatchAdmission(repoRoot, branch, cfg.provider, cfg.routingIdentity, deps, cfg.controllerAutonomy);
 }
 
+function admissionContextForConfig(cfg: SupervisorConfig): AdmissionContext {
+    if (!isWatchProvider(cfg.provider)) throw new Error('provider de supervisor invalido');
+    if (cfg.controllerAutonomy !== undefined && !isControllerAutonomy(cfg.controllerAutonomy)) throw new Error('postura del controller invalida');
+    const runtime = cfg.routingIdentity === undefined ? undefined : validateRuntimeKey({ target: cfg.provider, ...cfg.routingIdentity });
+    return { provider: cfg.provider,
+        ...(runtime ? { runtime: { kind: runtime.kind, version: runtime.version, accountScopeDigest: runtime.accountScopeDigest } } : {}),
+        ...(cfg.controllerAutonomy ? { controllerAutonomy: cfg.controllerAutonomy } : {}) };
+}
+
+function sameAdmissionContext(left: AdmissionContext, right: AdmissionContext): boolean {
+    return left.provider === right.provider && left.controllerAutonomy === right.controllerAutonomy
+        && left.runtime?.kind === right.runtime?.kind && left.runtime?.version === right.runtime?.version
+        && left.runtime?.accountScopeDigest === right.runtime?.accountScopeDigest;
+}
+
 // 'frozen' (R5.2/R6.3, Task 10): SOLO puede ocurrir en el journal de un
 // TRACK individual (nunca en el del plan) — el track terminó, con las 6
 // observaciones demostrables (cero jobs vivos, gate local verde, worktree
@@ -220,7 +235,22 @@ export function admissionForConfig(repoRoot: string, branch: string, cfg: Superv
 /** How many consecutive ticks an inconclusive sensor verdict may defer dispatch
  *  before the supervisor says so out loud. Small: the deferral covers a verdict
  *  still settling, not one that never will. */
-export const MAX_SENSOR_DEFERRALS = 3;
+export const MAX_SENSOR_DEFERRALS = MAX_ADMISSION_DEFERRALS;
+export const ADMISSION_RETRY_DELAY_MS = 5000;
+
+function transientAdmission(report: AdmissionReport): AdmissionRetry['kind'] | undefined {
+    // Currentness and sensors are evaluated before journalStatus, so their
+    // blocked reports legitimately carry journal=not-required. The caller
+    // verifies the bound journal identity independently before deferring.
+    if (report.state !== 'blocked' || report.executionMode !== 'desatendido'
+        || report.planState !== 'valid' || !['not-required', 'current'].includes(report.journal)
+        || report.diagnostics.length !== 1) return undefined;
+    if (report.currentness === 'unverifiable' && report.sensors === 'not-required'
+        && report.diagnostics[0].code === 'ADMISSION_CURRENTNESS_BLOCKED') return 'currentness';
+    if (report.currentness === 'current' && report.sensors === 'not-certified'
+        && report.diagnostics[0].code === 'ADMISSION_SENSORS_BLOCKED') return 'sensors';
+    return undefined;
+}
 
 export type TickOutcome = 'continue' | 'custody' | 'complete' | 'frozen';
 
@@ -249,10 +279,6 @@ export function recoveryWhitelistBlocker(state: JournalState): string | undefine
 export class Supervisor {
     private backoff = new Backoff();
     private relaunchNotBefore = 0;
-    /** Consecutive ticks deferred on an inconclusive sensor verdict. Bounded:
-     *  the deferral exists for a verdict that is still settling, and a verdict
-     *  that never settles must become visible rather than loop forever. */
-    private sensorDeferrals = 0;
     private lastActivity: { key: string; changedAt: number } | null = null;
     private lastGenerationToken: string | null = null;
 
@@ -265,6 +291,7 @@ export class Supervisor {
         private spawner: WrapperSpawner,
         trackRuntime?: TrackRuntime,
         private dispatchAdmission: DispatchAdmission = admissionForConfig(repoRoot, branch, cfg),
+        private autoBeginGeneration = false,
     ) {
         this.trackRuntime = trackRuntime ?? defaultTrackRuntime(repoRoot, branch, { termGraceMs: cfg.termGraceMs, killGraceMs: cfg.killGraceMs });
     }
@@ -299,7 +326,7 @@ export class Supervisor {
     }
 
     async tick(): Promise<TickOutcome> {
-        const before0 = readJournal(this.repoRoot, this.branch);
+        let before0 = readJournal(this.repoRoot, this.branch);
         if (before0.corrupt || before0.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
         // Historical/schema-1 journals are intentionally readable by migration
         // commands, never executable.  Do this before controller recovery,
@@ -310,6 +337,21 @@ export class Supervisor {
         // must retain its normal no-op result even if old work evidence is no
         // longer reconstructible.
         if (before0.state.cycle.status === 'COMPLETE') return 'complete';
+        // A historical custody cannot be silently converted into another
+        // cause on a later tick. Only the locked offline recovery may resume.
+        if (before0.state.cycle.status === 'BLOCKED') return 'custody';
+        const assertedContext = admissionContextForConfig(this.cfg);
+        if (before0.state.admissionContext && !sameAdmissionContext(before0.state.admissionContext, assertedContext)) {
+            enterCustody(this.repoRoot, this.branch, 'identidad de admisión cambió al reiniciar: provider/runtime/postura');
+            return 'custody';
+        }
+        if (!before0.state.admissionContext && assertedContext.runtime && assertedContext.controllerAutonomy) {
+            before0.state.admissionContext = assertedContext;
+            writeJournal(this.repoRoot, this.branch, before0.state);
+            before0 = readJournal(this.repoRoot, this.branch);
+            if (before0.corrupt || !before0.state) throw new Error('journal no verificable tras vincular identidad de admisión');
+        }
+        if (before0.state.admissionRetry && Date.now() < Date.parse(before0.state.admissionRetry.nextRetryAt)) return 'continue';
         // A controller can create jobs and runnerTick can start them. Both are
         // downstream of the same full compact unattended admission, so it must
         // complete before any reconciliation path that could dispatch either.
@@ -322,39 +364,47 @@ export class Supervisor {
             }
             if (admission.state !== 'admitted' || admission.executionMode !== 'desatendido'
                 || admission.currentness !== 'current' || admission.sensors !== 'pass' || admission.journal !== 'current') {
-                // A first empirical sensor observation can be inconclusive while
-                // the already-started controller is still settling. It never
-                // authorizes dispatch; retry the read-only admission next tick
-                // instead of permanently custodying a healthy cycle.
-                //
-                // Bounded, because the verdict is not always transient: a
-                // registry whose sensors are all disabled reports
-                // `not-certified` forever. Unbounded, this returned before
-                // `consumePendingRequests` below, so the supervisor ticked
-                // indefinitely applying nothing and writing nothing — no event,
-                // no state change, no exit. Refusing to progress is correct
-                // here; refusing invisibly is not. Consuming requests cannot be
-                // hoisted above this gate to compensate: applying a job-request
-                // creates a Job that runnerTick can start, which is the dispatch
-                // this admission exists to authorize.
-                if (admission.planState === 'valid' && admission.currentness === 'current'
-                    && admission.sensors === 'not-certified' && admission.journal === 'not-required') {
-                    this.sensorDeferrals += 1;
-                    if (this.sensorDeferrals <= MAX_SENSOR_DEFERRALS) return 'continue';
-                    // The reason must not carry the running counter. enterCustody is
-                    // idempotent on (status, reason), so a message that changes every
-                    // tick defeats that guard and rewrites the journal plus appends a
-                    // custody-blocked event every tickMs, without bound. Naming the
-                    // bound instead of the count keeps the reason stable, so custody
-                    // is entered once and stays entered.
-                    enterCustody(this.repoRoot, this.branch, `veredicto de sensores no concluyente tras ${MAX_SENSOR_DEFERRALS} ticks: ${admission.diagnostics.map(diagnostic => `${diagnostic.code}: ${diagnostic.message}`).join('; ')}`);
+                const kind = transientAdmission(admission);
+                if (kind) {
+                    const binding = before0.state.planBinding;
+                    const plan = validatePlanFile(binding.path, this.repoRoot);
+                    if (plan.state !== 'valid' || plan.planDigest !== binding.digest || plan.schema !== binding.schema
+                        || (binding.executionDigest !== undefined && plan.executionDigest !== binding.executionDigest)
+                        || (admission.planDigest !== undefined && admission.planDigest !== binding.digest)) {
+                        enterCustody(this.repoRoot, this.branch, 'binding del plan alterado durante admisión transitoria');
+                        return 'custody';
+                    }
+                    const prior = before0.state.admissionRetry;
+                    const attempts = (prior?.attempts ?? 0) + 1;
+                    if (attempts <= MAX_ADMISSION_DEFERRALS) {
+                        const now = Date.now();
+                        before0.state.admissionRetry = { kind, attempts, firstAt: prior?.firstAt ?? new Date(now).toISOString(), nextRetryAt: new Date(now + ADMISSION_RETRY_DELAY_MS).toISOString() };
+                        writeJournal(this.repoRoot, this.branch, before0.state);
+                        appendEvent(this.repoRoot, this.branch, { kind: 'admission-retry', cause: kind, attempts, retryAfterMs: ADMISSION_RETRY_DELAY_MS });
+                        return 'continue';
+                    }
+                    enterCustody(this.repoRoot, this.branch, `admisión ${kind} no verificable tras ${MAX_ADMISSION_DEFERRALS} reintentos: ${admission.diagnostics.map(diagnostic => `${diagnostic.code}: ${diagnostic.message}`).join('; ')}`);
                     return 'custody';
                 }
                 enterCustody(this.repoRoot, this.branch, `admisión compacta desatendida bloqueada antes de dispatch: ${admission.diagnostics.map(diagnostic => `${diagnostic.code}: ${diagnostic.message}`).join('; ')}`);
                 return 'custody';
             }
-            // The verdict settled, which is exactly what the deferral waited for.
-            this.sensorDeferrals = 0;
+            // An incomplete assertion can be repaired while the cycle is
+            // still waiting. Bind it only after an admitted observation, never
+            // on an early currentness/sensor response that has not reached the
+            // provider, runtime and autonomy gates yet.
+            if (!before0.state.admissionContext) {
+                before0.state.admissionContext = assertedContext;
+                writeJournal(this.repoRoot, this.branch, before0.state);
+                before0 = readJournal(this.repoRoot, this.branch);
+                if (before0.corrupt || !before0.state) throw new Error('journal no verificable tras vincular admisión completa');
+            }
+            if (before0.state.admissionRetry) {
+                before0.state.admissionRetry = undefined;
+                writeJournal(this.repoRoot, this.branch, before0.state);
+                before0 = readJournal(this.repoRoot, this.branch);
+                if (before0.corrupt || !before0.state) throw new Error('journal no verificable tras resolver reintento de admisión');
+            }
         }
         let recoveryResumeAction: ControllerRecoveryAction | undefined;
         // Schema-2 custody is reconciled before any controller launch.  This is
@@ -398,14 +448,14 @@ export class Supervisor {
             // verdicts, and an adverse verdict without a closed fix all stop
             // recovery before a controller can create more work.
             const verdictById = new Map(before0.state.verdicts.map(verdict => [verdict.id, verdict]));
-            const openReviewOrFix = before0.state.tasks.some(task => {
+            const openReviewOrFix = (terminalTaskClaims && before0.state.tasks.some(task => {
                 const obligations = task.reviewObligations;
                 return !(['spec', 'quality'] as const).every(kind => obligations.some(obligation => obligation.kind === kind))
                     || obligations.some(obligation => {
                         const verdict = obligation.verdictId === undefined ? undefined : verdictById.get(obligation.verdictId);
                         return verdict === undefined || verdict.result !== 'pass';
                     });
-            }) || before0.state.verdicts.some(verdict => verdict.result !== 'pass'
+            })) || before0.state.verdicts.some(verdict => verdict.result !== 'pass'
                 && !before0.state!.fixes.some(fix => fix.verdictId === verdict.id && fix.closed));
             const recovery = reconcileUnattendedRecovery({
                 journal: before0.state, journalCorrupt: false, plan: before0.state.planBinding,
@@ -442,6 +492,7 @@ export class Supervisor {
         // un controller nuevo ni volver a despachar; simplemente reafirma el
         // mismo resultado terminal.
         if (before.frozen !== undefined) return 'frozen';
+        if (this.autoBeginGeneration && activeGeneration(before) === undefined) beginGeneration(this.repoRoot, this.branch);
         const pending = before.cycle.nextAction;
         const resumeAction: ControllerRecoveryAction = recoveryResumeAction ?? { schema: 'controller-recovery/v1', kind: pending !== undefined ? 'resume-next-action' : 'resume-cycle' };
         if (this.ensureController(resumeAction) === 'custody') return 'custody';
@@ -708,12 +759,8 @@ export async function runSupervisorLoop(
     const onSignal = () => { shutdownRequested = true; wakeSleep?.(); };
     process.on('SIGINT', onSignal);
     process.on('SIGTERM', onSignal);
-    const sup = new Supervisor(repoRoot, branch, cfg, spawner, trackRuntime, dispatchAdmission);
+    const sup = new Supervisor(repoRoot, branch, cfg, spawner, trackRuntime, dispatchAdmission, true);
     try {
-        const s0 = readJournal(repoRoot, branch).state!;
-        if (activeGeneration(s0) === undefined) {
-            beginGeneration(repoRoot, branch);
-        }
         for (;;) {
             if (shutdownRequested) break;
             const out = await sup.tick();
