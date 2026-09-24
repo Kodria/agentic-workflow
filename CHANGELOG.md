@@ -1,3 +1,8 @@
+## v9.12.3 - 2026-09-24
+
+### Fixes
+- **watch:** acknowledge v2 S1 handoff and report true cycle state (#196) (#198)
+
 ## v9.12.2 - 2026-09-24
 
 ### Fixes
