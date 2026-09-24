@@ -1,3 +1,8 @@
+## v9.12.2 - 2026-09-24
+
+### Fixes
+- **watch:** recover transient admission custody (#197)
+
 ## v9.12.1 - 2026-09-24
 
 ### Fixes
