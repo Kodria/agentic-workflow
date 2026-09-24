@@ -522,17 +522,20 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
     (process.platform === 'win32' ? test.skip : test)('real SIGINT stops the loop without claiming COMPLETE', async () => {
         const repo = boundRepo();
         const compiled = path.resolve(__dirname, '../../../dist/src/commands/watch/supervisor.js');
-        const script = `const s=require(${JSON.stringify(compiled)}); const report={state:'admitted',planState:'valid',executionMode:'desatendido',journal:'current',currentness:'current',sensors:'pass',diagnostics:[]}; s.runSupervisorLoop(process.cwd(),'main',{...s.DEFAULT_SUPERVISOR_CONFIG,tickMs:30},()=>{},undefined,async()=>report).then(out=>console.log(JSON.stringify({out}))).catch(e=>{console.error(e);process.exitCode=2})`;
+        const script = `const s=require(${JSON.stringify(compiled)}); const report={state:'admitted',planState:'valid',executionMode:'desatendido',journal:'current',currentness:'current',sensors:'pass',diagnostics:[]}; process.on('newListener',function ready(event){if(event==='SIGINT'){process.removeListener('newListener',ready);setImmediate(()=>console.log('SIGINT_READY'))}}); s.runSupervisorLoop(process.cwd(),'main',{...s.DEFAULT_SUPERVISOR_CONFIG,tickMs:30},()=>{},undefined,async()=>report).then(out=>console.log(JSON.stringify({out}))).catch(e=>{console.error(e);process.exitCode=2})`;
         const child = spawn(process.execPath, ['-e', script], { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'] });
         let stdout = ''; let stderr = '';
         child.stdout.on('data', chunk => { stdout += String(chunk); });
         child.stderr.on('data', chunk => { stderr += String(chunk); });
         try {
             const deadline = Date.now() + 4000;
-            while (!fs.existsSync(supervisorLockPath(repo)) && child.exitCode === null && Date.now() < deadline) {
+            // The lock is acquired just before the signal handler is installed.
+            // Wait for the child's readiness marker to avoid killing it in that gap.
+            while ((!fs.existsSync(supervisorLockPath(repo)) || !stdout.includes('SIGINT_READY')) && child.exitCode === null && Date.now() < deadline) {
                 await new Promise(resolve => setTimeout(resolve, 25));
             }
             expect(fs.existsSync(supervisorLockPath(repo))).toBe(true);
+            expect(stdout).toContain('SIGINT_READY');
             child.kill('SIGINT');
             const exit = await new Promise<number | null>(resolve => child.once('exit', code => resolve(code)));
             expect(exit).toBe(0);
