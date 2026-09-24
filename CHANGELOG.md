@@ -1,3 +1,8 @@
+## v9.12.1 - 2026-09-24
+
+### Fixes
+- recover rejected task requests without bypassing custody (#194) (#195)
+
 ## v9.12.0 - 2026-09-24
 
 ### Features
