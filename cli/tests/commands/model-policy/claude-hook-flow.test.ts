@@ -31,7 +31,7 @@ describe('Claude hook to event receipt integration', () => {
                 // .exe and intercept only its auth-status invocation in Node.
                 fs.copyFileSync(process.execPath, executable);
                 preload = path.join(root, 'claude-preload.cjs');
-                fs.writeFileSync(preload, `if (require('path').basename(process.execPath).toLowerCase() === 'claude.exe' && process.argv[1] === 'auth') { process.stdout.write(${JSON.stringify(JSON.stringify(authResponse))}); process.exit(0); }\n`);
+                fs.writeFileSync(preload, `if (require('path').basename(process.execPath).toLowerCase() === 'claude.exe' && require('path').basename(process.argv[1] || '') === 'auth') { process.stdout.write(${JSON.stringify(JSON.stringify(authResponse))}); process.exit(0); }\n`);
             } else {
                 fs.writeFileSync(executable, `#!${process.execPath}\nif (process.argv[2] === '--version') process.stdout.write('2.1.263\\n');\nelse if (process.argv[2] === 'auth') process.stdout.write(${JSON.stringify(JSON.stringify(authResponse))});\n`, { mode: 0o755 });
             }
@@ -46,6 +46,12 @@ describe('Claude hook to event receipt integration', () => {
             const cli = path.resolve(__dirname, '../../../dist/src/index.js');
             const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}` };
             if (preload) env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ''} --require=${JSON.stringify(preload)}`;
+            const authProbe = spawnSync(executable, ['auth', 'status'], { env, encoding: 'utf8' });
+            expect(authProbe.status).toBe(0);
+            expect(JSON.parse(authProbe.stdout)).toMatchObject(authResponse);
+            const versionProbe = spawnSync(executable, ['--version'], { env, encoding: 'utf8' });
+            expect(versionProbe.status).toBe(0);
+            expect(versionProbe.stdout).toMatch(/\d+\.\d+\.\d+/);
             const first = spawnSync(process.execPath, [cli, 'model-policy', 'hook-event', '--event', 'start', '--cwd', project], { cwd: project, env, input: JSON.stringify(start), encoding: 'utf8' });
             expect(first.status).toBe(0); expect(first.stdout).toBe('');
             const second = spawnSync(process.execPath, [cli, 'model-policy', 'hook-event', '--event', 'stop', '--cwd', project], { cwd: project, env, input: JSON.stringify(stop), encoding: 'utf8' });
