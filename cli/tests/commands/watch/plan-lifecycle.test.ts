@@ -14,6 +14,7 @@ import { Supervisor, DEFAULT_SUPERVISOR_CONFIG } from '../../../src/commands/wat
 import { runExecWrapper } from '../../../src/commands/job/exec-wrapper';
 import { acquireLock, releaseLock } from '../../../src/commands/watch/lock';
 import { archiveUnusedWatch } from '../../../src/commands/watch/archive-unused';
+import * as adapterModule from '../../../src/core/journal/adapter';
 
 jest.setTimeout(30000);
 
@@ -41,7 +42,7 @@ describe('compact lifecycle proof and unused bootstrap archival', () => {
         fs.writeFileSync(path.join(repo, 'docs/plan.md'), `${fs.readFileSync(path.join(__dirname, '../../core/plan/fixtures/compact-slices-v1/valid.md'), 'utf8')}\n- [ ] Reviewed task.\n`);
         initWatch(repo, 'main', { path: 'docs/plan.md', report: valid(repo) });
     });
-    afterEach(() => { fs.rmSync(repo, { recursive: true, force: true }); });
+    afterEach(() => { jest.restoreAllMocks(); fs.rmSync(repo, { recursive: true, force: true }); });
 
     test('durable journal retains hash commitments only, never the validated plan source body', () => {
         const contents = (directory: string): string => fs.readdirSync(directory, { withFileTypes: true }).map(entry =>
@@ -129,6 +130,18 @@ describe('compact lifecycle proof and unused bootstrap archival', () => {
                 fingerprint: computeFingerprint(repo, argv, ['source.md'], '.').fingerprint, argv, paths: ['source.md'], cwd: '.',
             } });
         }
+        // This fixture acts as the external controller. Give it an adopted
+        // identity before expecting the supervisor to dispatch verification
+        // jobs; launch intent alone is deliberately insufficient.
+        expect(await supervisor.tick()).toBe('continue');
+        const launched = readJournal(repo, 'main').state!;
+        const gen = launched.generations.find(entry => entry.token === generation.token)!;
+        gen.processRef = { pid: process.pid, processGroup: process.pid, startTime: 'fixture',
+            spawnNonce: gen.spawnNonce!, argvDigest: gen.launchArgvDigest!, psArgsDigest: 'b'.repeat(64) };
+        writeJournal(repo, 'main', launched);
+        const adapter = adapterModule.adapterFor('codex');
+        jest.spyOn(adapterModule, 'adapterFor').mockReturnValue({ ...adapter,
+            activity: () => ({ cpuTime: '0', groupSize: 1 }), safeToReplace: () => 'indeterminate' });
         for (let i = 0; i < 100; i++) {
             expect(await supervisor.tick()).toBe('continue');
             if (Object.values(readJournal(repo, 'main').state!.jobs).some(job => job.verdict === 'pass')) break;

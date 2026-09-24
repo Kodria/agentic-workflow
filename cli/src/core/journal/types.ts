@@ -209,7 +209,7 @@ export interface TaskEntity {
     completedAt?: string;
 }
 
-export interface DispatchRecord { id: string; taskId: string; at: string; }
+export interface DispatchRecord { id: string; taskId: string; at: string; routingAttemptId?: string; dispatchRequestId?: string; }
 
 export interface JobResult { exitCode: number; endedAt: string; resultPath: string; }
 export interface Job {
@@ -279,7 +279,7 @@ export type RoutingSelection = { selector: { kind: 'model' | 'tier'; id: string 
 const ROUTING_ROLES = ['implementer', 'specification-reviewer', 'code-quality-reviewer', 'final-reviewer', 'architecture', 'track-a-qa', 'track-b-qa', 'controller', 'documentation', 'retro', 'finishing'] as const;
 const UNAVAILABLE_EVIDENCE = ['modelOverride', 'effortOverride', 'observedModelEvidence'] as const;
 export interface RoutingEnvelopeRecord { schema: 'routing-envelope/v1'; runtime: { target: string; kind: string; version: string; accountScopeDigest: string }; role: string; planDigest: string; executionDigest: string; sliceId?: string; requestedProfile: 'mechanical' | 'integration' | 'judgment' | 'full'; effectiveProfile: 'mechanical' | 'integration' | 'judgment' | 'full'; resolved: RoutingSelection; policyDigest: string; capabilityDigest: string; outcome: 'native' | 'degraded'; unavailableEvidence: string[]; nativeAgentType?: string; }
-export interface RoutingAttempt { schema: 'routing-attempt/v1'; id: string; obligationId: string; lineageId: string; attempt: number; envelope: RoutingEnvelopeRecord; envelopeDigest: string; fingerprint: string; state: 'reserved' | 'active' | 'complete' | 'blocked' | 'unknown'; reservedAt?: string; nativeEvidenceRequired?: true; nativeEventDigest?: string; nativeAgentId?: string; observed?: RoutingSelection; observedBackendModel?: string; verdict?: 'pass' | 'fail' | 'inconclusive'; reasonCode?: string; administrativeRepair?: true; }
+export interface RoutingAttempt { schema: 'routing-attempt/v1'; id: string; obligationId: string; lineageId: string; attempt: number; envelope: RoutingEnvelopeRecord; envelopeDigest: string; fingerprint: string; state: 'reserved' | 'active' | 'complete' | 'blocked' | 'unknown'; reservedAt?: string; reservationRequestId?: string; nativeEvidenceRequired?: true; nativeEventDigest?: string; nativeAgentId?: string; observed?: RoutingSelection; observedBackendModel?: string; verdict?: 'pass' | 'fail' | 'inconclusive'; reasonCode?: string; administrativeRepair?: true; }
 export interface RoutingIncident { schema: 'routing-incident/v1'; id: string; runStartedAt: string; target: string; selection: RoutingSelection; reasonCode: string; firstAt: string; lastAt: string; affectedObligations: number; fallbackCount: number; blockedCount: number; alertState: 'pending' | 'reported'; }
 export interface ImplementationLineage { id: string; obligationId: string; sliceId: string; planDigest: string; executionDigest: string; initialProfile: 'mechanical' | 'integration' | 'judgment'; initialEffort: 'medium' | 'high' | 'runtime-default'; attempts: number; }
 
@@ -406,12 +406,40 @@ export function isWellFormedState(x: unknown): x is JournalState {
         || (x.cycle.nextAction !== undefined && !isWellFormedNextAction(x.cycle.nextAction))
         || (x.cycle.status === 'IN_PROGRESS' && x.cycle.nextAction === undefined)) return false;
     if (!Array.isArray(x.generations) || !Array.isArray(x.tasks)) return false;
+    if (!x.tasks.every(isWellFormedTask)) return false;
     if (!Array.isArray(x.cycleVerificationPlan) || !Array.isArray(x.verdicts) || !Array.isArray(x.fixes)) return false;
     if (!Array.isArray(x.requiredVerifiers) || !x.requiredVerifiers.every((kind) => VERIFICATION_KINDS.includes(kind as VerificationKind))
         || !Array.isArray(x.dispatches) || !x.dispatches.every(isWellFormedDispatch)) return false;
     if (!isObj(x.jobs) || !Object.values(x.jobs).every(isWellFormedJob)) return false;
     if (!isObj(x.appliedRequests) || !Object.values(x.appliedRequests).every(isWellFormedAppliedRequest)) return false;
+    if (!Object.entries(x.appliedRequests).every(([requestId, ack]) => requestId === (ack as AppliedRequest).requestId)) return false;
     if (x.routingAttempts !== undefined && (!Array.isArray(x.routingAttempts) || x.routingAttempts.length > 4096 || !x.routingAttempts.every(isWellFormedRoutingAttempt))) return false;
+    // A linked v2 dispatch is evidence of a native handoff. Reject a broken
+    // link or a second dispatch for one reservation on journal read as well as
+    // at request-application time. Historical unlinked records remain readable
+    // but cannot masquerade as this new acknowledged handoff.
+    if ((x.planBinding as PlanBinding | undefined)?.schema === 'compact-slices/v2') {
+        const binding = x.planBinding as PlanBinding;
+        const attempts = (x.routingAttempts ?? []) as RoutingAttempt[];
+        const dispatches = x.dispatches as DispatchRecord[];
+        const linked = new Set<string>();
+        for (const dispatch of dispatches) {
+            if (!dispatch.routingAttemptId) continue;
+            if (linked.has(dispatch.routingAttemptId)) return false;
+            linked.add(dispatch.routingAttemptId);
+            const attempt = attempts.find(candidate => candidate.id === dispatch.routingAttemptId);
+            if (!attempt || !((x.tasks as TaskEntity[]).some(task => task.id === dispatch.taskId))
+                || attempt.envelope.role !== 'implementer' || attempt.envelope.sliceId !== dispatch.taskId
+                || attempt.envelope.planDigest !== binding.digest || attempt.envelope.executionDigest !== binding.executionDigest
+                || !attempt.reservationRequestId || !dispatch.dispatchRequestId) return false;
+            const acknowledgements = x.appliedRequests as Record<string, AppliedRequest>;
+            const reservationAck = acknowledgements[attempt.reservationRequestId];
+            const dispatchAck = acknowledgements[dispatch.dispatchRequestId];
+            if (reservationAck?.outcome !== 'applied' || reservationAck.requestId !== attempt.reservationRequestId
+                || reservationAck.resultRef !== attempt.id || dispatchAck?.outcome !== 'applied'
+                || dispatchAck.requestId !== dispatch.dispatchRequestId || dispatchAck.resultRef !== dispatch.id) return false;
+        }
+    }
     if (x.routingIncidents !== undefined && (!Array.isArray(x.routingIncidents) || x.routingIncidents.length > 4096 || !x.routingIncidents.every(isWellFormedRoutingIncident))) return false;
     if (x.implementationLineages !== undefined && (!Array.isArray(x.implementationLineages) || x.implementationLineages.length > 4096 || !x.implementationLineages.every(isWellFormedImplementationLineage))) return false;
     if (!Array.isArray(x.requestProblems) || !x.requestProblems.every(isWellFormedRequestProblem)) return false;
@@ -459,7 +487,10 @@ function isWellFormedNextAction(x: unknown): x is NextAction {
 }
 
 function isWellFormedDispatch(x: unknown): x is DispatchRecord {
-    return isObj(x) && typeof x.id === 'string' && typeof x.taskId === 'string' && typeof x.at === 'string';
+    return isObj(x) && Object.keys(x).every(key => ['id', 'taskId', 'at', 'routingAttemptId', 'dispatchRequestId'].includes(key))
+        && typeof x.id === 'string' && x.id.length > 0 && typeof x.taskId === 'string' && x.taskId.length > 0
+        && typeof x.at === 'string' && (x.routingAttemptId === undefined || (typeof x.routingAttemptId === 'string' && x.routingAttemptId.length > 0))
+        && (x.dispatchRequestId === undefined || (typeof x.dispatchRequestId === 'string' && x.dispatchRequestId.length > 0));
 }
 
 function strings(x: unknown): x is string[] {
@@ -519,11 +550,11 @@ function isWellFormedAppliedRequest(x: unknown): x is AppliedRequest {
         && (x.resultRef === undefined || typeof x.resultRef === 'string');
 }
 function isWellFormedRoutingAttempt(x: unknown): x is RoutingAttempt {
-    return isObj(x) && Object.keys(x).every(key => ['schema', 'id', 'obligationId', 'lineageId', 'attempt', 'envelope', 'envelopeDigest', 'fingerprint', 'state', 'reservedAt', 'nativeEvidenceRequired', 'nativeEventDigest', 'nativeAgentId', 'observed', 'observedBackendModel', 'verdict', 'reasonCode', 'administrativeRepair'].includes(key))
+    return isObj(x) && Object.keys(x).every(key => ['schema', 'id', 'obligationId', 'lineageId', 'attempt', 'envelope', 'envelopeDigest', 'fingerprint', 'state', 'reservedAt', 'reservationRequestId', 'nativeEvidenceRequired', 'nativeEventDigest', 'nativeAgentId', 'observed', 'observedBackendModel', 'verdict', 'reasonCode', 'administrativeRepair'].includes(key))
         && x.schema === 'routing-attempt/v1'
         && typeof x.id === 'string' && typeof x.obligationId === 'string' && typeof x.lineageId === 'string' && Number.isSafeInteger(x.attempt) && (x.attempt as number) > 0
         && typeof x.envelopeDigest === 'string' && /^[a-f0-9]{64}$/.test(x.envelopeDigest) && typeof x.fingerprint === 'string' && /^[a-f0-9]{64}$/.test(x.fingerprint)
-        && ['reserved', 'active', 'complete', 'blocked', 'unknown'].includes(String(x.state)) && (x.reservedAt === undefined || (typeof x.reservedAt === 'string' && Number.isFinite(Date.parse(x.reservedAt)))) && (x.nativeEvidenceRequired === undefined || x.nativeEvidenceRequired === true) && (x.nativeEventDigest === undefined || isDigest(x.nativeEventDigest)) && (x.nativeAgentId === undefined || typeof x.nativeAgentId === 'string') && (x.observed === undefined || isRoutingSelection(x.observed)) && (x.observedBackendModel === undefined || (typeof x.observedBackendModel === 'string' && x.observedBackendModel.length > 0 && x.observedBackendModel.length <= 128)) && (x.verdict === undefined || ['pass', 'fail', 'inconclusive'].includes(String(x.verdict))) && (x.reasonCode === undefined || typeof x.reasonCode === 'string') && (x.administrativeRepair === undefined || x.administrativeRepair === true) && isRoutingEnvelope(x.envelope);
+        && ['reserved', 'active', 'complete', 'blocked', 'unknown'].includes(String(x.state)) && (x.reservedAt === undefined || (typeof x.reservedAt === 'string' && Number.isFinite(Date.parse(x.reservedAt)))) && (x.reservationRequestId === undefined || (typeof x.reservationRequestId === 'string' && x.reservationRequestId.length > 0 && x.reservationRequestId.length <= 128)) && (x.nativeEvidenceRequired === undefined || x.nativeEvidenceRequired === true) && (x.nativeEventDigest === undefined || isDigest(x.nativeEventDigest)) && (x.nativeAgentId === undefined || typeof x.nativeAgentId === 'string') && (x.observed === undefined || isRoutingSelection(x.observed)) && (x.observedBackendModel === undefined || (typeof x.observedBackendModel === 'string' && x.observedBackendModel.length > 0 && x.observedBackendModel.length <= 128)) && (x.verdict === undefined || ['pass', 'fail', 'inconclusive'].includes(String(x.verdict))) && (x.reasonCode === undefined || typeof x.reasonCode === 'string') && (x.administrativeRepair === undefined || x.administrativeRepair === true) && isRoutingEnvelope(x.envelope);
 }
 function isWellFormedRoutingIncident(x: unknown): x is RoutingIncident {
     if (!isObj(x) || Object.keys(x).length !== 12 || !Object.keys(x).every(key => ['schema','id','runStartedAt','target','selection','reasonCode','firstAt','lastAt','affectedObligations','fallbackCount','blockedCount','alertState'].includes(key))) return false;

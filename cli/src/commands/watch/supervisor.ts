@@ -351,11 +351,57 @@ export class Supervisor {
             before0 = readJournal(this.repoRoot, this.branch);
             if (before0.corrupt || !before0.state) throw new Error('journal no verificable tras vincular identidad de admisión');
         }
-        if (before0.state.admissionRetry && Date.now() < Date.parse(before0.state.admissionRetry.nextRetryAt)) return 'continue';
+        // Full sensor admission belongs to the launch boundary. Once that
+        // generation has a durable controller launch intent, RED edits are
+        // normal work, not a new pre-dispatch baseline. Preserve binding
+        // checks while it runs; the next generation gets a fresh admission.
+        const binding = before0.state.planBinding;
+        if (!binding) throw new Error('binding compacto ausente tras lectura del journal');
+        const launched = activeGeneration(before0.state);
+        const ownedLaunch = launched !== undefined && (launched.processRef !== undefined || launched.wrapperRef !== undefined
+            || controllerGenerationHasUnresolvedClaim(this.repoRoot, this.branch, launched));
+        const generationAdmitted = launched?.controllerJobId !== undefined && launched.launchArgvDigest !== undefined && ownedLaunch;
+        if (generationAdmitted) {
+            const plan = validatePlanFile(binding.path, this.repoRoot);
+            if (plan.state !== 'valid' || plan.planDigest !== binding.digest || plan.schema !== binding.schema
+                || (binding.executionDigest !== undefined && plan.executionDigest !== binding.executionDigest)) {
+                enterCustody(this.repoRoot, this.branch, 'binding del plan alterado durante generacion admitida');
+                return 'custody';
+            }
+            if (binding.schema === 'compact-slices/v2') {
+                const asserted = assertedContext.runtime;
+                if (!asserted) {
+                    enterCustody(this.repoRoot, this.branch, 'runtime de routing ausente durante generacion v2');
+                    return 'custody';
+                }
+                const expected = validateRuntimeKey({ target: assertedContext.provider, ...asserted });
+                let local: Awaited<ReturnType<typeof queryLocalEventScope>>;
+                try { local = await queryLocalEventScope(this.repoRoot, expected.target, expected.kind); }
+                catch (error) {
+                    enterCustody(this.repoRoot, this.branch, `runtime local no verificable: ${(error as Error).message}`);
+                    return 'custody';
+                }
+                if (local.state !== 'current' || JSON.stringify(local.scope.runtime) !== JSON.stringify(expected)) {
+                    enterCustody(this.repoRoot, this.branch, 'runtime local cambió durante generacion admitida');
+                    return 'custody';
+                }
+                const stored = readStoredEventReceipt(expected);
+                if (stored.state === 'invalid' || (stored.state === 'present' &&
+                    (stored.receipt.binaryDigest !== local.scope.binaryDigest || stored.receipt.configDigest !== local.scope.configDigest))) {
+                    enterCustody(this.repoRoot, this.branch, 'recibo nativo cambió durante generacion admitida');
+                    return 'custody';
+                }
+                if (stored.state === 'absent' && readCapabilities(expected, new Date()).state !== 'current') {
+                    enterCustody(this.repoRoot, this.branch, 'capacidades de routing no verificables durante generacion admitida');
+                    return 'custody';
+                }
+            }
+        }
+        if (!generationAdmitted && before0.state.admissionRetry && Date.now() < Date.parse(before0.state.admissionRetry.nextRetryAt)) return 'continue';
         // A controller can create jobs and runnerTick can start them. Both are
         // downstream of the same full compact unattended admission, so it must
         // complete before any reconciliation path that could dispatch either.
-        if (before0.state.schema === 2 && before0.state.planBinding) {
+        if (!generationAdmitted) {
             let admission: AdmissionReport;
             try { admission = await this.dispatchAdmission(); }
             catch (error) {
@@ -366,7 +412,6 @@ export class Supervisor {
                 || admission.currentness !== 'current' || admission.sensors !== 'pass' || admission.journal !== 'current') {
                 const kind = transientAdmission(admission);
                 if (kind) {
-                    const binding = before0.state.planBinding;
                     const plan = validatePlanFile(binding.path, this.repoRoot);
                     if (plan.state !== 'valid' || plan.planDigest !== binding.digest || plan.schema !== binding.schema
                         || (binding.executionDigest !== undefined && plan.executionDigest !== binding.executionDigest)
@@ -553,6 +598,9 @@ export class Supervisor {
         const finalizing = afterRequests.state?.cohortPhase === 'FINAL_INTEGRATION' || afterRequests.state?.cohortPhase === 'FINAL_INTERLOCK';
         if (!finalizing && afterRequests.state !== null && activeGeneration(afterRequests.state) === undefined
             && afterRequests.state.generations.length > 0 && afterRequests.state.cycle.status === 'IN_PROGRESS') {
+            // The current tick used its launched generation's admission. A
+            // replacement must wait until the next tick's full admission.
+            if (generationAdmitted) return 'continue';
             beginGeneration(this.repoRoot, this.branch);
             if (this.ensureController(resumeAction) === 'custody') return 'custody';
         }
@@ -564,11 +612,14 @@ export class Supervisor {
         const freezeCheck = readJournal(this.repoRoot, this.branch);
         const freezing = !freezeCheck.corrupt && freezeCheck.state !== null
             && freezeCheck.state.freezeRequested === true && freezeCheck.state.frozen === undefined;
+        // Reconcile controller ownership and, if needed, freshly admit its
+        // replacement before runnerTick can launch received jobs.
+        const supervision = await this.superviseController();
+        if (supervision === 'custody') return 'custody';
         runnerTick(this.repoRoot, this.branch, this.spawner, {
-            reconcileGraceMs: this.cfg.reconcileGraceMs, stallObservationMs: this.cfg.jobStallObservationMs, dispatch: !freezing,
+            reconcileGraceMs: this.cfg.reconcileGraceMs, stallObservationMs: this.cfg.jobStallObservationMs,
+            dispatch: !freezing && supervision === 'ok',
         });
-        const custody = await this.superviseController();
-        if (custody) return 'custody';
         if (freezing) return this.attemptFreeze();
         const r = readJournal(this.repoRoot, this.branch);
         const gate = computeGate(r.state, r.corrupt, this.fingerprintNow, r.absent);
@@ -676,13 +727,20 @@ export class Supervisor {
         return 'frozen';   // paso 6 ("libera el lock y sale"): runSupervisorLoop trata 'frozen' igual que 'complete'
     }
 
-    /** true => custodia (el caller NO libera lock ni sale). */
-    private async superviseController(): Promise<boolean> {
+    /** Deferred ownership drains existing jobs but never starts new work. */
+    private async superviseController(): Promise<'ok' | 'deferred' | 'custody'> {
         const r = readJournal(this.repoRoot, this.branch);
         if (r.corrupt || r.state === null) throw new Error('journal corrupto (R1.6)');
         const s = r.state;
         const gen = activeGeneration(s);
-        if (gen?.processRef === undefined) return false;         // sin controlador propio: nada que supervisar
+        // Track worktrees may be driven by the plan controller without a
+        // local generation. The canonical final-integration job also runs
+        // after the plan controller is deliberately paused. An existing but
+        // unadopted launch is different: claim recovery/backoff must never
+        // dispatch received jobs under that generation.
+        if (gen === undefined) return s.trackContext || s.cohortPhase === 'FINAL_INTEGRATION'
+            || s.cohortPhase === 'FINAL_INTERLOCK' ? 'ok' : 'deferred';
+        if (gen.processRef === undefined) return 'deferred';
         if (this.lastGenerationToken !== gen.token) {
             this.lastGenerationToken = gen.token;
             this.lastActivity = null;
@@ -695,52 +753,72 @@ export class Supervisor {
             this.lastActivity = { key, changedAt: Date.now() };
         }
         const activityFrozenMs = Date.now() - this.lastActivity.changedAt;
-        const decision = decideStall(
-            { heartbeatAgeMs, activityFrozenMs, safeToReplace: adapter.safeToReplace(gen.processRef) },
+        const safeToReplace = adapter.safeToReplace(gen.processRef);
+        // A dead process with proven identity is not healthy merely because
+        // its last heartbeat was recent. Resolve it before any new job starts.
+        const decision = snap === null && safeToReplace === 'safe' ? 'resolve-generation' : decideStall(
+            { heartbeatAgeMs, activityFrozenMs, safeToReplace },
             { heartbeatTimeoutMs: this.cfg.heartbeatTimeoutMs, activityWindowMs: this.cfg.activityWindowMs },
         );
-        if (decision === 'healthy') { this.backoff.reset(); return false; }
+        if (decision === 'healthy') { this.backoff.reset(); return 'ok'; }
         if (decision === 'suspected-stall-observe') {
             if (gen.state !== 'controller-suspected-stall') {
                 gen.state = 'controller-suspected-stall';        // SOLO observacion (R4.2)
                 writeJournal(this.repoRoot, this.branch, s);
                 appendEvent(this.repoRoot, this.branch, { kind: 'controller-suspected-stall', n: gen.n });
             }
-            return false;
+            return 'ok';
         }
         if (decision === 'custody-blocked') {
             enterCustody(this.repoRoot, this.branch, 'doble senial de stall sin safeToReplace positivo del adapter (R4.2b)');
-            return true;
+            return 'custody';
         }
         // resolve-generation
         const resolved = await resolveGeneration(this.repoRoot, this.branch, adapter, { termGraceMs: this.cfg.termGraceMs, killGraceMs: this.cfg.killGraceMs });
-        if (resolved === 'custody-blocked') return true;
+        if (resolved === 'custody-blocked') return 'custody';
         if (this.backoff.exhausted()) {
             enterCustody(this.repoRoot, this.branch, 'tope de relanzamientos por hora alcanzado (R4.3)');
-            return true;
+            return 'custody';
         }
-        if (Date.now() < this.relaunchNotBefore) return false;   // esperando backoff, auditando
+        if (Date.now() < this.relaunchNotBefore) return 'deferred';   // esperando backoff, auditando
+        // This is a different controller generation, even though the tick
+        // began under the old one's admission. Do not reuse that admission
+        // after RED edits, runtime drift, or a currentness change.
+        let replacementAdmission: AdmissionReport;
+        try { replacementAdmission = await this.dispatchAdmission(); }
+        catch (error) {
+            enterCustody(this.repoRoot, this.branch, `admisión de reemplazo no verificable: ${(error as Error).message}`);
+            return 'custody';
+        }
+        if (replacementAdmission.state !== 'admitted' || replacementAdmission.executionMode !== 'desatendido'
+            || replacementAdmission.currentness !== 'current' || replacementAdmission.sensors !== 'pass'
+            || replacementAdmission.journal !== 'current') {
+            enterCustody(this.repoRoot, this.branch, `admisión de reemplazo bloqueada antes de dispatch: ${replacementAdmission.diagnostics.map(d => `${d.code}: ${d.message}`).join('; ')}`);
+            return 'custody';
+        }
         beginGeneration(this.repoRoot, this.branch);
         const nextAction = readJournal(this.repoRoot, this.branch).state!.cycle.nextAction;
         const action: ControllerRecoveryAction = { schema: 'controller-recovery/v1', kind: nextAction !== undefined ? 'resume-next-action' : 'resume-cycle' };
         const launched = this.ensureController(action);
-        if (launched === 'custody') return true;
+        if (launched === 'custody') return 'custody';
         if (launched === 'ok') {
             this.backoff.recordRelaunch();
             this.relaunchNotBefore = Date.now() + this.backoff.nextMs();
         }
-        return false;
+        return launched === 'deferred' ? 'deferred' : 'ok';
     }
 }
 
 /** Foreground, visible, terminable (R2.4): sin daemons. SIGINT/SIGTERM libera
  *  el lock y sale; COMPLETE => auto-exit liberando lock y terminando la
  *  generacion propia (cero huerfanos). */
+export type SupervisorLoopOutcome = 'complete' | 'frozen' | 'stopped';
+
 export async function runSupervisorLoop(
     repoRoot: string, branch: string, cfg: SupervisorConfig,
     spawner: WrapperSpawner = defaultWrapperSpawner(), trackRuntime?: TrackRuntime,
     dispatchAdmission?: DispatchAdmission,
-): Promise<void> {
+): Promise<SupervisorLoopOutcome> {
     const r = readJournal(repoRoot, branch);
     if (r.corrupt || r.state === null) {
         throw new Error(r.absent && !r.corrupt
@@ -751,11 +829,12 @@ export async function runSupervisorLoop(
         throw new Error('journal legacy o sin binding compacto: `awm watch` no puede ejecutar ni despachar trabajo');
     }
     verifyBranchInvariant(repoRoot, r.state.branch);
-    if (r.state.cycle.status === 'COMPLETE') return;
+    if (r.state.cycle.status === 'COMPLETE') return 'complete';
     const handle = acquireLock(repoRoot);
     let shutdownRequested = false;
     let wakeSleep: (() => void) | null = null;
     let safeToRelease = false;
+    let terminal: SupervisorLoopOutcome = 'stopped';
     const onSignal = () => { shutdownRequested = true; wakeSleep?.(); };
     process.on('SIGINT', onSignal);
     process.on('SIGTERM', onSignal);
@@ -768,6 +847,7 @@ export async function runSupervisorLoop(
             // drenar ownership y liberar el lock, el track ya cumplió su
             // freeze y no debe seguir despachando ni corriendo su loop.
             if (out === 'complete' || out === 'frozen') {
+                terminal = out;
                 const finalState = readJournal(repoRoot, branch);
                 if (!finalState.corrupt && finalState.state?.routingIncidents?.length) process.stderr.write(`AWM final routing summary ${JSON.stringify(routingReport(finalState.state))}\n`);
                 break;
@@ -799,6 +879,7 @@ export async function runSupervisorLoop(
         }
         if (shutdownRequested) writeJournal(repoRoot, branch, sEnd);
         safeToRelease = true;
+        return terminal;
     } finally {
         process.removeListener('SIGINT', onSignal);
         process.removeListener('SIGTERM', onSignal);
