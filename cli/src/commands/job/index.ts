@@ -22,6 +22,8 @@ import { routingReport } from '../../core/model-policy/journal';
 import { isRoutingEnvelope, isRoutingSelection } from '../../core/journal/types';
 import { parseJsonNoDuplicate } from '../../core/plan/json';
 import fs from 'fs';
+import { observeNativeRoutingChild } from '../../core/model-policy/native-routing-observe';
+import { secureFs } from '../../core/secure-fs/native-bridge';
 
 function branchOf(cwd: string): string {
     // stdio explicito (ver EXEC_STDIO en journal/process.ts): evita el relay
@@ -38,11 +40,15 @@ function realFingerprintNow(repo: string): FingerprintNow {
         catch { return null; }
     };
 }
-function readBoundedJson(file: string): unknown {
+export function readBoundedJson(file: string): unknown {
     if (typeof file !== 'string' || file.length === 0 || file.length > 4096) throw new Error('routing file path is invalid');
     const stat = fs.lstatSync(file);
     if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 256 * 1024) throw new Error('routing file must be a bounded non-symlink regular file');
-    try { return parseJsonNoDuplicate(fs.readFileSync(file, 'utf8')); } catch { throw new Error('routing file must contain JSON without duplicate keys'); }
+    let bytes: Uint8Array;
+    try { bytes = secureFs.readRegularFile(file, 256 * 1024).bytes; }
+    catch { throw new Error('routing file must remain a bounded non-symlink regular file'); }
+    try { return parseJsonNoDuplicate(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
+    catch { throw new Error('routing file must contain UTF-8 JSON without duplicate keys'); }
 }
 
 /** Guard de entrada (R9.4): sin descriptor de track, es un no-op — el caso
@@ -156,10 +162,30 @@ export function registerJobCommand(program: Command): void {
     job.command('routing-observe')
         .requiredOption('--generation <token>').requiredOption('--attempt <id>').requiredOption('--native-agent-id <id>')
         .requiredOption('--observation-file <file>').option('--cwd <root>', 'repository root', '.').option('--json')
-        .action((opts) => {
+        .action(async (opts) => {
             const observation = readBoundedJson(opts.observationFile); if (typeof observation !== 'object' || observation === null || Array.isArray(observation)) throw new Error('routing-observe requires an observation object'); const observed = (observation as { observed?: unknown }).observed; const unavailableReason = (observation as { unavailableReason?: unknown }).unavailableReason; if ((observed !== undefined && !isRoutingSelection(observed)) || (unavailableReason !== undefined && typeof unavailableReason !== 'string')) throw new Error('routing-observe requires a valid observation');
             const repo = path.resolve(opts.cwd); const branch = branchOf(repo); assertAuthenticatedCwd(repo, branch);
-            const emitted = emitRequest(repo, branch, { kind: 'routing-observe', generationToken: opts.generation, idempotencyKey: crypto.createHash('sha256').update(`routing-observe:${opts.generation}:${opts.attempt}:${opts.nativeAgentId}:${JSON.stringify(observation)}`).digest('hex'), payload: { attemptId: opts.attempt, nativeAgentId: opts.nativeAgentId, ...(observed === undefined ? {} : { observed }), ...(unavailableReason === undefined ? {} : { unavailableReason }) } });
+            const read = readJournal(repo, branch);
+            if (read.corrupt || !read.state) throw new Error('routing-observe requires a healthy journal');
+            const attempt = read.state.routingAttempts?.find(item => item.id === opts.attempt);
+            if (!attempt) throw new Error('routing-observe attempt is unknown');
+            let nativeProof: Awaited<ReturnType<typeof observeNativeRoutingChild>> | undefined;
+            let reason = unavailableReason;
+            if (attempt.nativeEvidenceRequired && reason === undefined) {
+                try {
+                    const parentThreadId = (observation as { parentThreadId?: unknown }).parentThreadId;
+                    if (read.state.routingAttempts?.some(item => item.id !== attempt.id && item.nativeEvidenceRequired && item.nativeAgentId === opts.nativeAgentId))
+                        throw new Error('native child was already used by another attempt');
+                    nativeProof = await observeNativeRoutingChild({ attempt, nativeAgentId: opts.nativeAgentId,
+                        ...(typeof parentThreadId === 'string' ? { parentThreadId } : {}), cwd: repo, now: new Date(),
+                        consumedEventDigests: (read.state.routingAttempts ?? []).map(item => item.nativeEventDigest).filter((item): item is string => item !== undefined) });
+                } catch { reason = 'PROVENANCE_MISSING'; }
+            }
+            const payload = { attemptId: opts.attempt, nativeAgentId: opts.nativeAgentId,
+                ...(nativeProof ? { observed: nativeProof.selection, nativeProof } : attempt.nativeEvidenceRequired ? {} : observed === undefined ? {} : { observed }),
+                ...(reason === undefined ? {} : { unavailableReason: reason }) };
+            const emitted = emitRequest(repo, branch, { kind: 'routing-observe', generationToken: opts.generation,
+                idempotencyKey: crypto.createHash('sha256').update(`routing-observe:${opts.generation}:${opts.attempt}:${opts.nativeAgentId}:${JSON.stringify(payload)}`).digest('hex'), payload });
             process.stdout.write(JSON.stringify({ requestId: emitted.requestId }) + '\n');
         });
 

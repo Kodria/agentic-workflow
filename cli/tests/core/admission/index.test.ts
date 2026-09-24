@@ -2,6 +2,8 @@ import { admitPlan, sanitizeAdmissionReport } from '../../../src/core/admission'
 import type { PlanValidationReport } from '../../../src/core/plan/types';
 import { emptyState } from '../../../src/core/journal/types';
 import type { ApprovedPolicy, CapabilityReceipt, RuntimeKey } from '../../../src/core/model-policy/types';
+import { selectionPolicyDigest } from '../../../src/core/model-policy/selection-policy-digest';
+import type { EventReceipt } from '../../../src/core/model-policy/capabilities-v2';
 
 const valid: Extract<PlanValidationReport, { state: 'valid' }> = {
     state: 'valid', schema: 'compact-slices/v1', planDigest: 'a'.repeat(64),
@@ -48,6 +50,25 @@ describe('admitPlan', () => {
     it.each(['mechanical', 'integration', 'judgment'] as const)('admits v2 %s with policy and capability evidence and an honest unknown forecast', async profile => {
         const report = await admitPlan({ plan: v2(profile), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], routing: routing() });
         expect(report).toMatchObject({ state: 'admitted', routingForecast: { implementerProfiles: { [profile]: 1 }, trackB: { state: 'unavailable', lowerBound: 1 }, controller: { state: 'unavailable', lowerBound: 0 } } });
+    });
+    it('awaits read-only routing evidence only after earlier admission gates pass', async () => {
+        const reader = jest.fn(async () => routing());
+        expect(await admitPlan({ plan: v2(), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], routingReader: reader })).toMatchObject({ state: 'admitted' });
+        expect(reader).toHaveBeenCalledTimes(1);
+    });
+    it('admits a +25h event-scoped Codex enrollment only when the full fallback is independently proved', async () => {
+        const evidence = routing(); evidence.policy.content.mappings[0].degradation.allowMissingObservedIdentity = true;
+        const mapping = evidence.policy.content.mappings[0];
+        const eventScope = { runtime: evidence.runtime, binaryDigest: 'b'.repeat(64), configDigest: 'c'.repeat(64) };
+        const claimed = [mapping.profiles.mechanical, mapping.fullCapability];
+        const eventReceipt: EventReceipt = { schema: 'routing-capabilities/v2', ...eventScope, recordedAt: '2026-09-17T00:00:00.000Z', claims: claimed.map(selection => ({ selection,
+            mappingDigest: selectionPolicyDigest(mapping, selection), eventDigest: sha, source: 'codex-turn-context', observedAt: '2026-09-17T00:00:00.000Z', actualModel: 'unverified', tokenUsage: 'unknown' })) };
+        const routingFacts = { runtime: evidence.runtime, policy: evidence.policy, eventReceipt, eventScope, now: new Date('2026-09-18T01:00:00.000Z') };
+        expect(await admitPlan({ plan: v2(), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], routing: routingFacts })).toMatchObject({ state: 'admitted' });
+        expect(await admitPlan({ plan: v2(), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], routing: { ...routingFacts,
+            eventReceipt: { ...eventReceipt, claims: [eventReceipt.claims[1]] } } })).toMatchObject({ state: 'admitted' });
+        expect(await admitPlan({ plan: v2(), provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'], routing: { ...routingFacts,
+            eventReceipt: { ...eventReceipt, claims: [eventReceipt.claims[0]] } } })).toMatchObject({ state: 'blocked', diagnostics: [{ code: 'ROUTING_SELECTION_UNENROLLED' }] });
     });
     it('blocks a valid cross-provider policy and receipt instead of admitting codex under another runtime target', async () => {
         const evidence = routing();

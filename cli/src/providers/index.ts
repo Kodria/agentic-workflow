@@ -104,10 +104,12 @@ const CONFIG_HOME: Record<AgentTarget, { envVar: string | null; dir: string }> =
     // Una corrida del playbook en una maquina con CODEX_HOME seteado encontro el hook
     // instalado donde Codex no mira. Ver docs/decisions.md D-011.
     codex: { envVar: 'CODEX_HOME', dir: '.codex' },
+    // Claude Code documenta CLAUDE_CONFIG_DIR para mover toda su configuracion,
+    // incluidos settings.json y transcripciones de subagentes.
+    'claude-code': { envVar: 'CLAUDE_CONFIG_DIR', dir: '.claude' },
     // Los demas usan su directorio por defecto. `null` es una afirmacion honesta —
     // "no le conocemos override"— y no un "no tiene". Cuando se confirme uno contra su
     // binario, se cambia aca y el guard obliga a que todas sus rutas lo sigan.
-    'claude-code': { envVar: null, dir: '.claude' },
     opencode: { envVar: null, dir: '.config/opencode' },
     cursor: { envVar: null, dir: '.cursor' },
     copilot: { envVar: null, dir: '.github' },

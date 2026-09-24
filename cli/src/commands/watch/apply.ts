@@ -14,10 +14,28 @@ import { isRoutingEnvelope, isRoutingSelection, type Job, type JournalState, typ
 import { observeRoutingAttempt, reserveRoutingAttempt } from '../../core/model-policy/journal';
 import { readEffectivePolicy } from '../../core/model-policy/store';
 import { readCapabilities, validateRuntimeKey } from '../../core/model-policy/capabilities';
+import { readStoredEventReceipt } from '../../core/model-policy/event-store';
+import { evaluateEventReceipt, type EventScope } from '../../core/model-policy/capabilities-v2';
+import { readMachineKey } from '../../core/model-policy/machine-key';
+import { awmHome } from '../../core/paths';
+import { verifyNativeRoutingProof, type NativeRoutingProof } from '../../core/model-policy/native-routing-proof';
+import { selectionPolicyDigest } from '../../core/model-policy/selection-policy-digest';
 
 export interface ApplySummary { applied: number; rejectedStale: number; rejectedDigest: number; rejectedInvalid: number; corrupt: number; }
 
 function now(): string { return new Date().toISOString(); }
+
+function currentNativeAttempt(repoRoot: string, envelope: { runtime: { target: string; kind: string; version: string; accountScopeDigest: string }; policyDigest: string; resolved: RoutingSelection }, eventScope: EventScope | undefined, at: Date): boolean {
+    if (!eventScope || JSON.stringify(eventScope.runtime) !== JSON.stringify(envelope.runtime)) return false;
+    try {
+        const stored = readStoredEventReceipt(validateRuntimeKey(envelope.runtime));
+        const approved = readEffectivePolicy(repoRoot);
+        if (stored.state !== 'present' || approved.state !== 'approved' || approved.policy.contentDigest !== envelope.policyDigest) return false;
+        const mapping = approved.policy.content.mappings.find(row => row.target === envelope.runtime.target && row.runtimeKind === envelope.runtime.kind);
+        return !!mapping && evaluateEventReceipt(stored.receipt, eventScope, envelope.resolved,
+            selectionPolicyDigest(mapping, envelope.resolved), at).state === 'current';
+    } catch { return false; }
+}
 
 const VERIFICATION_KINDS = ['test', 'lint', 'sensors', 'review', 'qa', 'interlock', 'track-integration'] as const;
 
@@ -105,7 +123,7 @@ function trackWorktreePath(repoRoot: string, trackId: string): string {
     return path.join(path.dirname(repoRoot), `${path.basename(repoRoot)}.track-${trackId}`);
 }
 
-function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId: string }, digest: string, repoRoot: string): void {
+function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId: string }, digest: string, repoRoot: string, eventScope?: EventScope): void {
     const base = { requestId: env.requestId, idempotencyKey: env.idempotencyKey, payloadDigest: digest };
     if (env.kind === 'controller-heartbeat') {
         s.controllerHeartbeatAt = now();
@@ -119,6 +137,12 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
         const reserved = reserveRoutingAttempt(s, { obligationId: p.obligationId, lineageId: p.lineageId, envelope, fingerprint: p.fingerprint, approval: () => {
             const checkedAt = new Date();
             const policy = readEffectivePolicy(repoRoot);
+            const event = readStoredEventReceipt(validateRuntimeKey(envelope.runtime));
+            if (event.state === 'invalid') throw new Error('routing native event receipt is invalid');
+            if (event.state === 'present') {
+                if (!eventScope) throw new Error('routing native event scope is unverified');
+                return { checkedAt, policy: policy.state === 'approved' ? policy.policy : undefined, eventReceipt: event.receipt, eventScope };
+            }
             const capabilities = readCapabilities(validateRuntimeKey(envelope.runtime), checkedAt);
             return { checkedAt, policy: policy.state === 'approved' ? policy.policy : undefined, capabilities: capabilities.state === 'current' ? capabilities.receipt : undefined };
         } }, p.at ?? now());
@@ -127,7 +151,32 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
     if (env.kind === 'routing-observe') {
         const p = env.payload;
         if (typeof p.attemptId !== 'string' || typeof p.nativeAgentId !== 'string' || (p.observed !== undefined && !isRoutingSelection(p.observed)) || (p.unavailableReason !== undefined && typeof p.unavailableReason !== 'string') || (p.at !== undefined && typeof p.at !== 'string')) throw new Error('routing-observe requiere payload estricto');
-        const observed = observeRoutingAttempt(s, { attemptId: p.attemptId, nativeAgentId: p.nativeAgentId, ...(p.observed === undefined ? {} : { observed: p.observed as RoutingSelection }), ...(p.unavailableReason === undefined ? {} : { unavailableReason: p.unavailableReason }) }, p.at ?? now());
+        const attempt = s.routingAttempts?.find(item => item.id === p.attemptId);
+        if (!attempt) throw new Error('routing-observe attempt is unknown');
+        let key: Buffer | null = null;
+        if (attempt.nativeEvidenceRequired) {
+            try { key = readMachineKey(awmHome()); } catch { /* missing/unsafe machine key is recorded as PROVENANCE_MISSING */ }
+        }
+        const proof = p.nativeProof;
+        const nativeProof = proof as NativeRoutingProof | undefined;
+        const checkedAt = new Date();
+        const validProof = attempt.nativeEvidenceRequired && key && attempt.reservedAt
+            ? verifyNativeRoutingProof(proof, { attemptId: p.attemptId, nativeAgentId: p.nativeAgentId,
+                reservedAt: attempt.reservedAt, selection: attempt.envelope.resolved }, key, checkedAt)
+                && checkedAt.getTime() - Date.parse(nativeProof!.observedAt) <= 15 * 60_000
+                && currentNativeAttempt(repoRoot, attempt.envelope, eventScope, checkedAt)
+                && (attempt.envelope.runtime.target === 'codex' ? nativeProof?.source === 'codex-turn-context' : nativeProof?.source === 'claude-assistant-transcript')
+                && p.observed !== undefined && JSON.stringify(p.observed) === JSON.stringify(nativeProof?.selection)
+                && !s.routingAttempts?.some(item => item.id !== attempt.id && item.nativeEvidenceRequired
+                    && (item.nativeAgentId === p.nativeAgentId || item.nativeEventDigest === nativeProof?.eventDigest))
+            : false;
+        const observed = observeRoutingAttempt(s, { attemptId: p.attemptId, nativeAgentId: p.nativeAgentId,
+            ...(validProof ? { observed: nativeProof!.selection as RoutingSelection, nativeEventDigest: nativeProof!.eventDigest,
+                ...(nativeProof!.actualModel === undefined ? {} : { observedBackendModel: nativeProof!.actualModel }) }
+                : attempt.nativeEvidenceRequired ? {} : p.observed === undefined ? {} : { observed: p.observed as RoutingSelection }),
+            ...(attempt.nativeEvidenceRequired
+                ? validProof ? {} : { unavailableReason: p.unavailableReason === 'PROVIDER_REJECTED' ? 'PROVIDER_REJECTED' : 'PROVENANCE_MISSING' }
+                : p.unavailableReason === undefined ? {} : { unavailableReason: p.unavailableReason }) }, p.at ?? now());
         Object.assign(s, observed); applyOutcome(s, { ...base, outcome: 'applied', resultRef: p.attemptId }); return;
     }
     if (env.kind === 'job-request') {
@@ -499,7 +548,7 @@ function applyRequestToState(s: JournalState, env: RequestEnvelope & { requestId
 /** Consume TODAS las requests pendientes en orden. ORDEN CRITICO (R1.3,
  *  bloqueador 4): (1) mutar estado, (2) writeJournal, (3) borrar archivos,
  *  (4) fsync del directorio. Solo el supervisor llama esto (single-writer). */
-export function consumePendingRequests(repoRoot: string, branch: string, activeToken: string | null): ApplySummary {
+export function consumePendingRequests(repoRoot: string, branch: string, activeToken: string | null, eventScope?: EventScope): ApplySummary {
     const r = readJournal(repoRoot, branch);
     if (r.corrupt || r.state === null) throw new Error('journal corrupto: el supervisor no opera sobre corrupcion (R1.6)');
     let s = r.state;
@@ -554,7 +603,7 @@ export function consumePendingRequests(repoRoot: string, branch: string, activeT
                 // nunca deja un estado parcialmente contaminado que luego no se
                 // pueda serializar o reintentar.
                 const candidate = structuredClone(s);
-                applyRequestToState(candidate, env, digest, repoRoot);
+                applyRequestToState(candidate, env, digest, repoRoot, eventScope);
                 s = candidate;
                 applied++;
                 stateTouched = true;

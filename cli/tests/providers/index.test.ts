@@ -130,7 +130,7 @@ describe('Providers Routing', () => {
         });
         expect(graph['claude-code']).toEqual({
             label: 'Claude Code',
-            configHome: { envVar: null, dir: '.claude', resolved: path.join(tmpHome, '.claude') },
+            configHome: { envVar: 'CLAUDE_CONFIG_DIR', dir: '.claude', resolved: path.join(tmpHome, '.claude') },
             skill: {
                 global: path.join(tmpHome, '.claude/skills'),
                 local: '.claude/skills',

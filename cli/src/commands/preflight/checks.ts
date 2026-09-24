@@ -12,6 +12,8 @@ import { inspectContextKernel } from '../../core/context-kernel/inspect';
 import { verifyMinCliVersions } from '../../core/registries';
 import { checkCurrentness } from '../../core/currentness/check';
 import type { CurrentnessReport } from '../../core/currentness/types';
+import { readEffectivePolicy } from '../../core/model-policy/store';
+import { routingSetupGuidance } from '../../core/model-policy/setup-readiness';
 
 /**
  * Preflight: can this project be gated at all?
@@ -34,7 +36,7 @@ import type { CurrentnessReport } from '../../core/currentness/types';
  */
 
 export type PreflightCheck = {
-    id: 'context' | 'context-kernel' | 'manifest' | 'tools' | 'pack' | 'host' | 'sensors-baseline' | 'sensors-execution' | 'compatibility' | 'currentness';
+    id: 'context' | 'context-kernel' | 'manifest' | 'tools' | 'pack' | 'host' | 'sensors-baseline' | 'sensors-execution' | 'compatibility' | 'currentness' | 'routing-setup';
     ok: boolean;
     /** Informational warning: rendered prominently, but does not degrade the harness. */
     advisory?: boolean;
@@ -73,6 +75,19 @@ export type PreflightOptions = {
 };
 
 const MANIFEST = path.join('.awm', 'sensors.json');
+
+function checkRoutingSetup(cwd: string): PreflightCheck[] {
+    const guidance = routingSetupGuidance(readEffectivePolicy(cwd));
+    if (guidance.length === 0) return [];
+    const invalid = guidance.find(item => item.state === 'policy-invalid');
+    if (invalid?.state === 'policy-invalid') return [{ id: 'routing-setup', ok: false, advisory: true, detail: 'approved routing policy is invalid', remedy: 'repair the model policy before using routed subagents' }];
+    const targets = guidance.filter((item): item is Extract<typeof item, { state: 'needs-evidence' }> => item.state === 'needs-evidence');
+    if (targets.length === 0) return [{ id: 'routing-setup', ok: true, advisory: true,
+        detail: 'sealed routing selections are covered locally; doctor/preflight do not verify current runtime/account/config scope (checked at routed dispatch)' }];
+    return [{ id: 'routing-setup', ok: false, advisory: true,
+        detail: `routing machine evidence needs a native check for ${targets.map(item => `${item.target}/${item.runtimeKind}`).join(', ')}`,
+        remedy: targets[0].command }];
+}
 
 /**
  * The agent needs project context delivered every session. A repo with neither file
@@ -534,6 +549,7 @@ export async function preflight(cwd: string = process.cwd(), opts: PreflightOpti
         ...(opts.verifySensors === true ? [await checkSensorExecution(cwd)] : []),
         // Strict mode is the only path that contacts authoritative npm/Git sources.
         ...(opts.requireCurrent === true ? [checkCompatibility()] : []),
+        ...checkRoutingSetup(cwd),
         // Runs unconditionally — orthogonal to sensor configuration entirely, this is
         // about PR/MR tooling, not sensors.
         checkHost(cwd),

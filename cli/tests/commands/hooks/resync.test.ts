@@ -65,6 +65,9 @@ describe('resyncInstalledHooks', () => {
             { agent: 'claude-code', action: 'resynced' },
             { agent: 'codex', action: 'not-installed' },
         ]);
+        const settings = JSON.parse(fs.readFileSync(path.join(tmpHome, '.claude/settings.json'), 'utf8'));
+        expect(settings.hooks.SubagentStart[0].hooks[0].command).toBe('awm model-policy hook-event --event start');
+        expect(settings.hooks.SubagentStop[0].hooks[0].command).toBe('awm model-policy hook-event --event stop');
         const synced = fs.readFileSync(path.join(scriptsDir, 'session-start'), 'utf-8');
         expect(synced).toContain('NEW VERSION');
         expect(fs.lstatSync(path.join(scriptsDir, 'session-start')).isSymbolicLink()).toBe(false);

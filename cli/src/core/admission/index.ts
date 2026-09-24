@@ -9,7 +9,8 @@ import type { ControllerAutonomy } from '../journal/adapter';
 import type { CapabilityStatus, ProviderExecutionCapabilities } from '../model-policy/capability-types';
 type ImplementerProfile = 'mechanical' | 'integration' | 'judgment';
 import type { ApprovedPolicy, CapabilityReceipt, RuntimeKey } from '../model-policy/types';
-import { resolveSelection } from '../model-policy/resolve';
+import { resolveEventSelection, resolveEventWithFallback, resolveSelection } from '../model-policy/resolve';
+import type { EventReceipt, EventScope } from '../model-policy/capabilities-v2';
 import { validateRuntimeKey } from '../model-policy/capabilities';
 
 export type ExecutionMode = 'interactivo' | 'desatendido';
@@ -57,9 +58,9 @@ export type AdmissionInput = {
     /** Repository-relative path used to make the binding identity exact. */
     planPath?: string;
     /** Explicit routing evidence; absent facts block v2 only after existing gates. */
-    routing?: { policy?: ApprovedPolicy; capabilities?: CapabilityReceipt; runtime?: RuntimeKey; now?: Date; qaLens?: readonly string[]; controllerCount?: number };
+    routing?: { policy?: ApprovedPolicy; capabilities?: CapabilityReceipt; eventReceipt?: EventReceipt; eventScope?: EventScope; eventIssue?: { code: string; message: string }; runtime?: RuntimeKey; now?: Date; qaLens?: readonly string[]; controllerCount?: number };
     /** Internal deferred reader; invoked only after all ordinary admission gates. */
-    routingReader?: () => AdmissionInput['routing'];
+    routingReader?: () => AdmissionInput['routing'] | Promise<AdmissionInput['routing']>;
     /** #168: postura de autonomia que el operador declara para el controller. */
     controllerAutonomy?: ControllerAutonomy;
 };
@@ -267,25 +268,36 @@ export async function admitPlan(input: AdmissionInput): Promise<AdmissionReport>
                 : diagnostic('ADMISSION_CONTROLLER_AUTONOMY_REQUIRED', `Unattended dispatch on ${provider} requires an explicit controller autonomy posture; without it the controller blocks on its first tool call.`);
             return blocked(input, [reason], { planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', cliCurrentness, sensors: input.verifySensors ? 'pass' : 'not-required', capabilityResolution: resolution });
         }
-        return completeAdmission(input, plan, provider, mode, journal, input.requireCurrent ? 'current' : 'not-checked', input.verifySensors ? 'pass' : 'not-required', resolution, cliCurrentness);
+        const routing = plan.schema === 'compact-slices/v2' ? input.routing ?? await input.routingReader?.() : input.routing;
+        return completeAdmission({ ...input, routing, routingReader: undefined }, plan, provider, mode, journal, input.requireCurrent ? 'current' : 'not-checked', input.verifySensors ? 'pass' : 'not-required', resolution, cliCurrentness);
     }
     const capabilities = PROVIDER_EXECUTION_CAPABILITIES[provider];
     const resolution: ProviderExecutionResolution = { outcome: capabilities.interactiveExecution === 'supported' ? 'native' : 'blocked', provider, capabilities, evidenceVersion: 'r1-v1', diagnostics: [] };
     if (resolution.outcome === 'blocked') return blocked(input, [diagnostic('ADMISSION_CAPABILITY_UNVERIFIED', `Provider ${provider} has no verified interactive execution capability.`)], { planDigest: plan.planDigest, provider, executionMode: mode, capabilityResolution: resolution });
-    return completeAdmission(input, plan, provider, mode, 'not-required', input.requireCurrent ? 'current' : 'not-checked', input.verifySensors ? 'pass' : 'not-required', resolution, cliCurrentness);
+    const routing = plan.schema === 'compact-slices/v2' ? input.routing ?? await input.routingReader?.() : input.routing;
+    return completeAdmission({ ...input, routing, routingReader: undefined }, plan, provider, mode, 'not-required', input.requireCurrent ? 'current' : 'not-checked', input.verifySensors ? 'pass' : 'not-required', resolution, cliCurrentness);
 }
 
 function completeAdmission(input: AdmissionInput, plan: Extract<PlanValidationReport, { state: 'valid' }>, provider: AgentTarget, executionMode: ExecutionMode, journal: AdmissionReport['journal'], currentness: AdmissionReport['currentness'], sensors: AdmissionReport['sensors'], capabilityResolution: ProviderExecutionResolution, cliCurrentness: AdmissionReport['cliCurrentness'] = 'not-checked'): AdmissionReport {
     if (plan.schema === 'compact-slices/v1') return { state: 'admitted', planState: 'valid', planDigest: plan.planDigest, provider, executionMode, journal, currentness, cliCurrentness, sensors, capabilityResolution, forecast: forecast(plan.manifest.slices.length), diagnostics: [] };
-    const routing = input.routing ?? input.routingReader?.();
-    if (!routing?.runtime || !routing.policy || !routing.capabilities) return blocked(input, [diagnostic('ADMISSION_ROUTING_FACTS_REQUIRED', 'Compact v2 requires an approved policy, current capability receipt, and runtime identity.')], { planDigest: plan.planDigest, provider, executionMode, journal, currentness, cliCurrentness, sensors, capabilityResolution });
+    const routing = input.routing;
+    if (routing?.eventIssue) return blocked(input, [diagnostic(routing.eventIssue.code, routing.eventIssue.message)], { planDigest: plan.planDigest, provider, executionMode, journal, currentness, cliCurrentness, sensors, capabilityResolution });
+    if (!routing?.runtime || !routing.policy || (!routing.capabilities && !(routing.eventReceipt && routing.eventScope))) return blocked(input, [diagnostic('ADMISSION_ROUTING_FACTS_REQUIRED', 'Compact v2 requires an approved policy, current capability evidence, and runtime identity.')], { planDigest: plan.planDigest, provider, executionMode, journal, currentness, cliCurrentness, sensors, capabilityResolution });
     let runtime: RuntimeKey;
     try { runtime = validateRuntimeKey(routing.runtime); } catch { return blocked(input, [diagnostic('ADMISSION_ROUTING_RUNTIME_INVALID', 'Compact v2 routing runtime identity is invalid.')], { planDigest: plan.planDigest, provider, executionMode, journal, currentness, cliCurrentness, sensors, capabilityResolution }); }
     if (runtime.target !== provider) return blocked(input, [diagnostic('ADMISSION_ROUTING_PROVIDER_MISMATCH', 'Compact v2 routing runtime target must exactly match the admitted provider.')], { planDigest: plan.planDigest, provider, executionMode, journal, currentness, cliCurrentness, sensors, capabilityResolution });
+    if (routing.eventReceipt && routing.eventScope && JSON.stringify(runtime) !== JSON.stringify(routing.eventScope.runtime)) return blocked(input, [diagnostic('ADMISSION_ROUTING_RUNTIME_MISMATCH', 'Event-scoped routing facts do not match the admitted runtime.')], { planDigest: plan.planDigest, provider, executionMode, journal, currentness, cliCurrentness, sensors, capabilityResolution });
     const now = routing.now ?? new Date();
     for (const slice of plan.manifest.slices) {
-        const resolved = resolveSelection({ role: 'implementer', requestedProfile: (slice as unknown as { implementerProfile: ImplementerProfile }).implementerProfile, policy: routing.policy, capabilities: routing.capabilities, runtime, now });
+        const profile = (slice as unknown as { implementerProfile: ImplementerProfile }).implementerProfile;
+        const resolved = routing.eventReceipt && routing.eventScope
+            ? resolveEventWithFallback({ role: 'implementer', requestedProfile: profile, policy: routing.policy, receipt: routing.eventReceipt, scope: routing.eventScope, now })
+            : resolveSelection({ role: 'implementer', requestedProfile: profile, policy: routing.policy, capabilities: routing.capabilities, runtime, now });
         if (resolved.state === 'blocked') return blocked(input, resolved.diagnostics, { planDigest: plan.planDigest, provider, executionMode, journal, currentness, cliCurrentness, sensors, capabilityResolution });
+    }
+    if (routing.eventReceipt && routing.eventScope) {
+        const full = resolveEventSelection({ role: 'code-quality-reviewer', requestedProfile: 'full', policy: routing.policy, receipt: routing.eventReceipt, scope: routing.eventScope, now });
+        if (full.state === 'blocked') return blocked(input, full.diagnostics, { planDigest: plan.planDigest, provider, executionMode, journal, currentness, cliCurrentness, sensors, capabilityResolution });
     }
     return { state: 'admitted', planState: 'valid', planDigest: plan.planDigest, provider, executionMode, journal, currentness, cliCurrentness, sensors, capabilityResolution, forecast: forecast(plan.manifest.slices.length), routingForecast: routingForecast(plan, routing), diagnostics: [] };
 }

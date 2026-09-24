@@ -16,7 +16,7 @@ function gitInit(repo: string): void {
     execFileSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', 'commit', '-qm', 'fixture'], { cwd: repo });
 }
 
-test('`job routing-report --json` emits only aggregate routing evidence', async () => {
+test('`job routing-report --json` exposes selections but not native child identities or envelopes', async () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-routing-report-'));
     try {
         gitInit(repo); initJournal(repo, 'main');
@@ -33,8 +33,9 @@ test('`job routing-report --json` emits only aggregate routing evidence', async 
         const cwd = jest.spyOn(process, 'cwd').mockReturnValue(repo);
         await program.parseAsync(['node', 'awm', 'job', 'routing-report', '--json']);
         const rendered = String(out.mock.calls[0][0]); const report = JSON.parse(rendered);
-        expect(report).toMatchObject({ schema: 'routing-report/v1', attempts: 1, plannedByRole: { implementer: 1 }, actualByRole: { implementer: 1 }, byState: { active: 1 } });
-        expect(rendered).not.toContain('native-private'); expect(rendered).not.toContain('model-private');
+        expect(report).toMatchObject({ schema: 'routing-report/v1', attempts: 1, plannedByRole: { implementer: 1 }, actualByRole: { implementer: 1 }, byState: { active: 1 },
+            selections: [{ configured: privateSelection, accepted: 'unknown', backendModel: 'unknown' }] });
+        expect(rendered).not.toContain('native-private'); expect(rendered).not.toContain('obligation');
         cwd.mockRestore(); out.mockRestore();
     } finally { fs.rmSync(repo, { recursive: true, force: true }); }
 });

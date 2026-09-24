@@ -14,6 +14,8 @@ import { renderDashboardHtml } from '../core/dashboard/render-html';
 import { renderFullTerminal } from '../core/dashboard/render-terminal';
 import { resolveHtmlTarget, writeHtmlAtomically } from '../core/dashboard/write-html';
 import { BundleDiagnosticReporter, createBundleDiagnosticReporter } from '../core/bundles';
+import { readEffectivePolicy } from '../core/model-policy/store';
+import { routingSetupGuidance, type RoutingSetupGuidance } from '../core/model-policy/setup-readiness';
 
 function glyph(status: CheckResult['status']): string {
     if (status === 'ok') return pc.green('✔');
@@ -69,7 +71,23 @@ const CHECK_LABELS: Record<ProviderCheck['id'], string> = {
     'hook.trust': 'hook SessionStart',
     'guidance.project': 'project guidance',
     'constitution.delivery': 'constitution delivery',
+    'routing.machine': 'model routing on this machine',
 };
+
+/** Adds a setup prompt without changing existing provider health or mutating the report. */
+export function attachRoutingSetupGuidance(report: ProviderDiagnosticReport, guidance: RoutingSetupGuidance[]): ProviderDiagnosticReport {
+    if (!report || !Array.isArray(report.providers) || !Array.isArray(guidance)) throw new Error('doctor routing setup input is invalid');
+    const providers = report.providers.map(provider => {
+        const checks = [...provider.checks];
+        for (const item of guidance) {
+            if (item.state === 'policy-invalid' || item.target !== provider.id) continue;
+            if (item.state === 'needs-evidence') checks.push({ id: 'routing.machine', state: 'pending', detail: `native routing evidence not checked for ${item.runtimeKind}`, remediationCode: item.command });
+            else checks.push({ id: 'routing.machine', state: 'supported', detail: `sealed selection coverage for ${item.runtimeKind} only; current runtime/account/config scope is checked at routed dispatch` });
+        }
+        return { ...provider, checks };
+    });
+    return { ...report, providers };
+}
 
 const OK_STATES: ProviderCheckState[] = ['supported', 'healthy', 'shared', 'delivered'];
 const PENDING_STATES: ProviderCheckState[] = ['pending', 'pending-trust'];
@@ -179,7 +197,7 @@ export function runDoctor(opts: RunDoctorOptions = {}): number {
     try {
         const ctx = gatherContext({ cwd: opts.cwd, agents: targets, reporter });
         const providers = ctx.providers ?? [];
-        report = { providers, overall: computeProviderOverall(providers) };
+        report = attachRoutingSetupGuidance({ providers, overall: computeProviderOverall(providers) }, routingSetupGuidance(readEffectivePolicy(opts.cwd ?? process.cwd())));
     } catch (err) {
         process.stderr.write(`awm doctor: internal error: ${(err as Error).message}\n`);
         return 2;

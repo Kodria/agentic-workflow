@@ -157,7 +157,7 @@ export type RegistryAdmissionDependencies = {
     runSensors?: typeof runSensors;
     admitPlan?: typeof admitPlan;
     /** Deferred until every registry/currentness/sensor gate has admitted. */
-    readRouting?: () => AdmissionInput['routing'];
+    readRouting?: () => AdmissionInput['routing'] | Promise<AdmissionInput['routing']>;
 };
 
 /** One admission authority for the public command AND actual watch dispatch.
