@@ -15,13 +15,64 @@ only with an approved policy and a current native capability receipt.
 
 ```
 awm model-policy contract --json
+awm model-policy setup --provider codex|claude-code --json
+awm model-policy discover --provider codex --json
+awm model-policy capture --provider codex --runtime-kind native --parent-thread-id <id> --child-thread-id <id> --json
 awm model-policy approve --file <policy.json> --scope user|project --expected-digest <sha> --json
 awm model-policy capabilities approve --file <receipt.json> --expected-digest <sha> --json
 awm model-policy status --provider <target> --runtime-kind <kind> --runtime-version <version> --account-scope-digest <sha> --json
 ```
 
-Policy approval is not a native capability probe. Receipt approval is an owner
-attestation; stale, absent, or mismatched facts block routing.
+Policy approval is not a native capability probe. Legacy `routing-capabilities/v1`
+approval remains an owner attestation with a 24-hour expiry. `setup` inspects
+the actual CLI binary, account and model-relevant configuration on this machine;
+it does not dispatch inference. A native v2 receipt is captured separately for
+each approved selection and has no clock renewal. It becomes stale when the
+runtime binary/version, account scope, model configuration, or that selection's
+policy mapping changes. `doctor` and `preflight` show setup guidance when an
+approved mapping lacks local evidence. With sealed local coverage they label it
+as coverage only, not a current-machine attestation; routed dispatch checks
+the actual runtime/account/config fingerprints. Daily work does not run a
+paid probe.
+
+For Codex, configure the desired models in the native runtime and complete one
+child turn per distinct approved selection. `capture` reads a recent existing
+parent/child pair through the Codex app server; a catalog listing alone cannot
+certify dispatch. Codex currently does not expose independently verified backend
+model identity in this path, so routing requires an explicit policy decision to
+allow operational/degraded use (`allowMissingObservedIdentity`), never verified
+savings. Setup has no active-probe option: the available provider APIs cannot
+start a child and prove its provenance safely on behalf of setup. A one-time
+ordinary native child per approved selection supplies the evidence; setup and
+routine diagnostics never silently spend tokens.
+
+For Claude Code, run `awm hooks install --agent claude-code` once on each machine.
+Create a custom agent under the provider's `agents/` directory for each distinct
+approved full model ID, for example:
+
+```md
+---
+name: awm-integration
+description: Approved integration worker
+model: claude-sonnet-4-6
+---
+Perform the assigned integration task.
+```
+
+The name must begin `awm-`; the model must be an exact ID, not an alias or
+`inherit`. Set the same approved model at runtime-default effort, invoke that
+named agent once as normal work, then run `awm model-policy setup --provider
+claude-code --json`. Native SubagentStart/Stop hooks pair its identity with the
+child transcript's observed model. The v2 receipt binds the named agent to the
+selection, and `plan resolve` returns `envelope.nativeAgentType`; dispatch that
+type, not a generic agent with a model parameter. An unrelated agent is ignored.
+Claude effort overrides are not certified by this path; use runtime-default
+effort only. Hook failures are reported by reason code in setup and stderr, but
+do not stop the native Claude task.
+
+On every machine/provider, repeat setup only after a relevant change or when a
+missing selection is first used. No fabricated renewal, background token use,
+or success claim based solely on a model name in a candidate JSON is allowed.
 
 ```
 awm plan resolve <plan> --provider <target> --runtime-kind <kind> --runtime-version <version> --account-scope-digest <sha> --role <role> [--slice <id>] [--opt-in-v1] [--lineage <id>] [--cwd <path>] --json
@@ -37,10 +88,37 @@ awm job routing-observe --generation <token> --attempt <id> --native-agent-id <i
 awm job routing-report --json
 ```
 
+For a v2 Codex attempt, the observation file contains
+`{"parentThreadId":"<native-parent-thread-id>"}` and `--native-agent-id` is the
+actual child thread ID. The CLI reads that completed child and its local turn
+context, checks that the event occurred after reservation, and refreshes only
+the matching receipt claim. For Claude, use the named `envelope.nativeAgentType`
+and pass `{}` after its Stop hook has captured the same agent ID and transcript.
+The supervisor verifies the locally sealed event proof; a self-reported
+`observed` selection is not accepted for v2. If verification is unavailable,
+the attempt records `PROVENANCE_MISSING` and can fall back only to an
+independently enrolled full selection. This does not block unrelated work.
+
 The supervisor is the sole journal writer. Reserve only emits a durable
 request; wait for its applied acknowledgement before native action. Envelope
 and observation files must be bounded non-symlink JSON files with no duplicate
-keys. `routing-report` is read-only and exposes aggregate counts only.
+keys. When an optimized selection is missing or rejected, resolution may use
+only the independently enrolled full-capability selection; if that too is
+unverified, the affected obligation blocks with a reason code. Routing
+incidents and fallback counts are durable, and the unattended supervisor emits
+an alert instead of silently claiming optimization. Alerts are durable and
+carry a stable incident ID; after a crash at the delivery boundary stderr may
+repeat the same alert ID, which is preferable to losing the incident.
+`routing-report` is read-only. Its `selections` rows show the configured
+selection and a separately native-reconciled accepted selection, or `unknown`.
+`nativeReconciledByRole` does not count agent-reported child IDs alone. Claude
+can supply a provider-reported model ID from its captured transcript; Codex
+does not expose backend model identity here. Token usage remains `unknown`, so
+savings remain `unverified` even when a model ID is reported. A machine-wide
+runtime/account/config drift blocks unattended admission in visible custody:
+the same scope also invalidates the full fallback, so no safe routed dispatch
+can continue until `awm model-policy setup --provider TARGET --json` explains
+the required reenrollment.
 
 ## Concepts used across commands
 

@@ -81,8 +81,11 @@ awm job routing-report --json | tee "$EVIDENCE_DIR/routing-report.json"
 awm job gate | tee "$EVIDENCE_DIR/gate.json"
 ```
 3. Submit `job routing-observe` only after the native runtime returns its
-   agent identity. Confirm `job routing-report` exposes counts only; it must
-   not expose the envelope or native identity.
+   agent identity. Confirm `job routing-report` exposes role counts and
+   configured/accepted model selections, but not the envelope, obligation,
+   native agent identity, prompt, transcript, or account identity. An accepted
+   selection without a sealed native event is `unknown`; backend model and
+   token usage remain `unknown` unless provider evidence is available.
 4. Exercise one mechanical and one integration native attempt and record their
    actual native agent IDs/effective selections. Obtain independent full
    specification and code-quality reviews. Submit each routed review verdict

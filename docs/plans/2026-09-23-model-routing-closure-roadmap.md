@@ -79,12 +79,12 @@ today:
 
 ## Operating constraints
 
-The operator journey has only these moments (the `setup` invocation below is
-the planned CLI contract, **not a command in the released v9.11.12 CLI**):
+The operator journey has only these moments. `setup` is introduced by this
+implementation; it was not available in the released v9.11.12 CLI.
 
 | Moment | AWM action | Operator action |
 | --- | --- | --- |
-| New machine/provider or changed model policy | `doctor`/`preflight` reports `UNENROLLED` and a precise remedy. Planned `awm model-policy setup --provider <target>` checks config/catalog/account, verifies the full fallback and offers a one-time native dispatch check with disclosed token cost. | Configure/approve once. Do not hand-author a receipt. |
+| New machine/provider or changed model policy | `doctor`/`preflight` points to `awm model-policy setup --provider <target> --json` when an approved mapping lacks local evidence. Setup checks config/catalog/account and the full fallback independently, without inference. It names each selection still needing native evidence and reports token usage as `unknown`. | Configure/approve once and use one ordinary native child per missing selection. Do not hand-author a receipt. |
 | Ordinary attended or unattended work | Local read-only fingerprint comparison, then optimized dispatch. Normal native events are captured opportunistically. | None; no daily renewal or probe. |
 | Drift, provider rejection or selection mismatch | Persist a reason code; one alert and same-run circuit breaker. Continue at the independently verified full selection, or block only the affected obligation if unsafe. Include count and remedy in final report. | Review the visible incident after the run; no silent fallback. |
 | After an actual environment change | Re-enroll the affected machine/provider/selection once. | Run the setup remedy once; unchanged selections keep their evidence. |
@@ -93,9 +93,10 @@ the planned CLI contract, **not a command in the released v9.11.12 CLI**):
   before routed dispatch; it must not invoke a model or update a receipt just
   because time passed. A provider event can invalidate a previously matching
   selection immediately.
-- Active inference probes are separate, opt-in, and disclose token use if the
-  provider reports it; otherwise cost is `unknown`, never zero. Ordinary
-  development must not contain a daily probe or a test prompt.
+- No active-probe flag is implemented: the native interfaces cannot safely
+  create an attested child on behalf of setup. A one-time ordinary child per
+  missing selection provides the initial evidence; setup and ordinary
+  development do not launch a test prompt. Token cost is `unknown`, never zero.
 - After setup, daily pre-dispatch validation is a local, read-only fingerprint
   check. A matching fingerprint keeps optimized routing ready without touching
   the receipt. Drift/rejection is an event, not a 24-hour timer. The fallback
