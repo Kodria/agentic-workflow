@@ -1,3 +1,8 @@
+## v9.12.0 - 2026-09-24
+
+### Features
+- close native model routing lifecycle and unattended recovery (#193)
+
 ## v9.11.12 - 2026-09-23
 
 ### Fixes
