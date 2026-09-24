@@ -85,7 +85,11 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
     beforeAll(() => {
         // These tests execute the published CLI entrypoint, not only ts-jest
         // imports. Rebuild it so source regressions cannot hide behind dist.
-        execFileSync('npm', ['run', 'build'], { cwd: path.resolve(__dirname, '../../../'), stdio: 'pipe' });
+        execFileSync('npm', ['run', 'build'], {
+            cwd: path.resolve(__dirname, '../../../'), stdio: 'pipe',
+            // Windows exposes npm as npm.cmd, which requires a shell to spawn.
+            shell: process.platform === 'win32',
+        });
     }, 30000);
 
     test('controller prompt fences only generation-mutating job verbs, not reconcile', () => {
