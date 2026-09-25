@@ -499,11 +499,18 @@ export function applyRequestToState(s: JournalState, env: RequestEnvelope & { re
                     { taskId, entity: 'dispatch', dispatchId: existing.id },
                     { taskId, dispatchId: existing.id, entity: 'dispatch' },
                 ].map(payload => digestOf(payload));
-                const oldAckApplied = Object.values(s.appliedRequests).some(ack => ack.outcome === 'applied'
+                const appliedAcks = Object.values(s.appliedRequests);
+                const oldAckIndex = appliedAcks.findIndex(ack => ack.outcome === 'applied'
                     && ack.resultRef === existing.id && legacyDigests.includes(ack.payloadDigest));
+                const reservationAckIndex = appliedAcks.findIndex(ack => ack.requestId === attempt.reservationRequestId);
+                // The single writer appends ACKs to appliedRequests and persists
+                // their insertion order. Equal millisecond timestamps need this
+                // additional durable ordering evidence, not an inferred child.
+                const legacyPrecedesReservation = oldAt < reservedAt
+                    || (oldAt === reservedAt && oldAckIndex >= 0 && reservationAckIndex > oldAckIndex);
                 const safeLegacy = reservedForNewDispatch && Number.isFinite(oldAt) && Number.isFinite(reservedAt)
-                    && oldAt < reservedAt
-                    && oldAckApplied
+                    && legacyPrecedesReservation
+                    && oldAckIndex >= 0
                     && s.dispatches.filter(d => d.taskId === taskId).length === 1
                     && s.tasks.find(t => t.id === taskId)?.attempts === 1
                     && s.tasks.find(t => t.id === taskId)?.status === 'in-progress'

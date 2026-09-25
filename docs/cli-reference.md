@@ -118,6 +118,10 @@ using that historical `dispatchId` and the applied `routingAttemptId`. AWM
 preserves the old record and ACK, returns a distinct linked ID in the new
 ACK's `resultRef`, and does not count a second implementer attempt. The old ACK
 is historical only; its untyped `resultRef` cannot authorize a native child.
+If the legacy dispatch and reservation timestamps tie at millisecond precision,
+AWM also requires the old applied ACK to precede the reservation ACK in the
+single-writer journal's persisted ACK order. A missing or reversed order remains
+in custody; equal timestamps alone never authorize a child.
 A different requested ID is rejected even if the first linked attempt later fails: a
 blocked routing verdict alone does not prove that the native child stopped.
 That retry needs separately verified ownership before another dispatch.

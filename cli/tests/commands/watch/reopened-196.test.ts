@@ -195,6 +195,39 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
         expect(state.dispatches).toHaveLength(2);
     });
 
+    test('equal-millisecond legacy timestamps reconcile only when the durable dispatch ACK precedes the reservation ACK', () => {
+        const state = v2State();
+        const at = state.routingAttempts![0].reservedAt!;
+        state.dispatches.push({ id: 'dispatch-S1', taskId: 'S1', at });
+        state.tasks[0].attempts = 1;
+        state.tasks[0].status = 'in-progress';
+        const reservationAck = state.appliedRequests['reserve-1'];
+        const historicalAck = { requestId: 'old-dispatch-request', idempotencyKey: 'old-dispatch-key',
+            payloadDigest: legacyDispatchDigest(), outcome: 'applied' as const, resultRef: 'dispatch-S1' };
+        state.appliedRequests = { 'old-dispatch-request': historicalAck, 'reserve-1': reservationAck };
+        const durable = JSON.parse(JSON.stringify(state)) as JournalState;
+        expect(Object.keys(durable.appliedRequests)).toEqual(['old-dispatch-request', 'reserve-1']);
+        dispatch(durable, { routingAttemptId: 'route-1' });
+        expect(durable.dispatches).toHaveLength(2);
+        expect(durable.dispatches[0]).toEqual({ id: 'dispatch-S1', taskId: 'S1', at });
+        expect(durable.appliedRequests['old-dispatch-request']).toEqual(historicalAck);
+        expect(durable.tasks[0].attempts).toBe(1);
+        expect(isWellFormedState(durable)).toBe(true);
+    });
+
+    test('equal-millisecond legacy timestamps do not infer order from a later dispatch ACK', () => {
+        const state = v2State();
+        state.dispatches.push({ id: 'dispatch-S1', taskId: 'S1', at: state.routingAttempts![0].reservedAt! });
+        state.tasks[0].attempts = 1;
+        state.tasks[0].status = 'in-progress';
+        state.appliedRequests['old-dispatch-request'] = { requestId: 'old-dispatch-request',
+            idempotencyKey: 'old-dispatch-key', payloadDigest: legacyDispatchDigest(),
+            outcome: 'applied', resultRef: 'dispatch-S1' };
+        expect(() => dispatch(state, { routingAttemptId: 'route-1' })).toThrow(/legacy handoff/);
+        expect(state.dispatches).toHaveLength(1);
+        expect(state.appliedRequests['dispatch-request']).toBeUndefined();
+    });
+
     test('historical ACK matching is independent of JSON key order but not payload identity', () => {
         for (const rawJson of [
             '{"taskId":"S1","dispatchId":"dispatch-S1"}',
@@ -915,10 +948,10 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
             expect(readJournal(repo, 'main').state!.requestProblems).toEqual([]);
             expect(cli('ack', task.requestId).state).toBe('applied');
 
-            // Durable 9.12.2 intent predates the route reservation. Neither
-            // the record nor its old ACK may be rewritten to imply a child.
+            // Durable 9.12.2 intent and ACK precede the route reservation.
+            // Equal timestamp granularity alone must not imply a child.
             const historical = readJournal(repo, 'main').state!;
-            const historicalAt = new Date(Date.now() - 60_000).toISOString();
+            let historicalAt = new Date(Date.now() - 60_000).toISOString();
             historical.dispatches.push({ id: 'dispatch-S1', taskId: 'S1', at: historicalAt });
             historical.tasks[0].attempts = 1;
             historical.tasks[0].status = 'in-progress';
@@ -934,6 +967,14 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
             const reservation = cli('ack', reserve.requestId);
             expect(reservation.state).toBe('applied');
             const attemptId: string = reservation.resultRef;
+            // Reproduce the real journal's millisecond tie without changing
+            // the durable ACK order or adding any native evidence.
+            const tied = readJournal(repo, 'main').state!;
+            historicalAt = tied.routingAttempts!.find(attempt => attempt.id === attemptId)!.reservedAt!;
+            tied.dispatches[0].at = historicalAt;
+            expect(Object.keys(tied.appliedRequests).indexOf('old-dispatch-request'))
+                .toBeLessThan(Object.keys(tied.appliedRequests).indexOf(reserve.requestId));
+            writeJournal(repo, 'main', tied);
             const dispatchPayload = JSON.stringify({ dispatchId: 'dispatch-S1', taskId: 'S1', routingAttemptId: attemptId });
             const queuedDispatch = cli('register', '--generation', generation.token, '--entity', 'dispatch', '--json', dispatchPayload);
             expect(cli('ack', queuedDispatch.requestId).state).toBe('pending');
