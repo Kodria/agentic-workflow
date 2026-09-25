@@ -58,8 +58,10 @@ function dispatch(state: JournalState, payload: Record<string, unknown>): void {
             dispatchId: 'dispatch-S1', taskId: 'S1', ...payload } }, 'd'.repeat(64), process.cwd());
 }
 
-function legacyDispatchDigest(): string {
-    return digestOf({ entity: 'dispatch', dispatchId: 'dispatch-S1', taskId: 'S1' });
+function legacyDispatchDigest(rawJson = '{"dispatchId":"dispatch-S1","taskId":"S1"}'): string {
+    // 9.12.2 job register emits { ...JSON.parse(--json), entity: --entity }.
+    // Preserve the caller's key order: digestOf uses JSON.stringify bytes.
+    return digestOf({ ...JSON.parse(rawJson) as Record<string, unknown>, entity: 'dispatch' });
 }
 
 function boundRepo(version: 'v1' | 'v2' = 'v1'): string {
@@ -157,6 +159,7 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
     });
 
     test('9.12.2 unlinked S1 dispatch is preserved while a fresh routed dispatch gets its own real ACK', () => {
+        expect(legacyDispatchDigest()).toBe('01edb739d12771ff6ffea2ea4296bf477b745f76afb66b4b20cb90cd470f5666');
         const state = v2State();
         const oldAt = new Date(Date.parse(state.routingAttempts![0].reservedAt!) - 60_000).toISOString();
         state.dispatches.push({ id: 'dispatch-S1', taskId: 'S1', at: oldAt });
@@ -190,6 +193,25 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
                 dispatchId: 'dispatch-S1', taskId: 'S1', routingAttemptId: 'route-1' } }, 'd'.repeat(64), process.cwd()))
             .toThrow(/conflictivo/);
         expect(state.dispatches).toHaveLength(2);
+    });
+
+    test('historical ACK matching is independent of JSON key order but not payload identity', () => {
+        for (const rawJson of [
+            '{"taskId":"S1","dispatchId":"dispatch-S1"}',
+            '{"entity":"dispatch","taskId":"S1","dispatchId":"dispatch-S1"}',
+        ]) {
+            const state = v2State();
+            state.dispatches.push({ id: 'dispatch-S1', taskId: 'S1',
+                at: new Date(Date.parse(state.routingAttempts![0].reservedAt!) - 60_000).toISOString() });
+            state.tasks[0].status = 'in-progress';
+            state.tasks[0].attempts = 1;
+            state.appliedRequests['old-dispatch-request'] = { requestId: 'old-dispatch-request',
+                idempotencyKey: 'old-dispatch-key', payloadDigest: legacyDispatchDigest(rawJson),
+                outcome: 'applied', resultRef: 'dispatch-S1' };
+            dispatch(state, { routingAttemptId: 'route-1' });
+            expect(state.dispatches).toHaveLength(2);
+            expect(state.appliedRequests['dispatch-request']).toMatchObject({ outcome: 'applied', resultRef: state.dispatches[1].id });
+        }
     });
 
     test('historical unlinked S1 cannot be bypassed with a different requested dispatch ID', () => {

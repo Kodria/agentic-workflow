@@ -487,12 +487,20 @@ export function applyRequestToState(s: JournalState, env: RequestEnvelope & { re
                 }
                 const oldAt = Date.parse(existing.at);
                 const reservedAt = Date.parse(attempt.reservedAt ?? '');
-                // The 9.12.2 record has no request link. Match the exact
-                // legacy payload digest, not merely an untyped resultRef that
-                // an unrelated request might happen to share.
-                const legacyDigest = digestOf({ entity: 'dispatch', dispatchId: existing.id, taskId });
+                // 9.12.2 emits {...JSON.parse(--json), entity}; JSON.stringify
+                // preserves caller key order. The old record has no request
+                // link, so accept only permutations of these exact three
+                // fields, not an unrelated resultRef or extra payload fields.
+                const legacyDigests = [
+                    { entity: 'dispatch', dispatchId: existing.id, taskId },
+                    { entity: 'dispatch', taskId, dispatchId: existing.id },
+                    { dispatchId: existing.id, entity: 'dispatch', taskId },
+                    { dispatchId: existing.id, taskId, entity: 'dispatch' },
+                    { taskId, entity: 'dispatch', dispatchId: existing.id },
+                    { taskId, dispatchId: existing.id, entity: 'dispatch' },
+                ].map(payload => digestOf(payload));
                 const oldAckApplied = Object.values(s.appliedRequests).some(ack => ack.outcome === 'applied'
-                    && ack.resultRef === existing.id && ack.payloadDigest === legacyDigest);
+                    && ack.resultRef === existing.id && legacyDigests.includes(ack.payloadDigest));
                 const safeLegacy = reservedForNewDispatch && Number.isFinite(oldAt) && Number.isFinite(reservedAt)
                     && oldAt < reservedAt
                     && oldAckApplied
