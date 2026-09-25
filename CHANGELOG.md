@@ -1,3 +1,8 @@
+## v9.13.0 - 2026-09-25
+
+### Features
+- **plan:** require explicit dispatch mode for new plans (#201)
+
 ## v9.12.5 - 2026-09-25
 
 ### Fixes
