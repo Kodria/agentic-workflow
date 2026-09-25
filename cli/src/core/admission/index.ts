@@ -27,6 +27,8 @@ export type AdmissionReport = {
     state: 'admitted' | 'blocked'; planState: PlanValidationReport['state']; planDigest?: string;
     executionMode?: ExecutionMode; provider?: AgentTarget; journal: 'not-required' | 'current' | 'missing' | 'corrupt' | 'stale';
     currentness: 'current' | 'stale' | 'unverifiable' | 'not-checked'; sensors: 'pass' | 'fail' | 'not-certified' | 'not-required';
+    /** A launched, owned generation may reuse its pre-launch sensor pass. */
+    sensorEvidence?: 'generation-bound';
     /**
      * Estado del CLI propio frente a npm: REPORTADO, nunca bloqueante. `currentness`
      * es el veredicto sobre los contratos consumidos (los registries); esto es
@@ -45,6 +47,8 @@ export type RoutingForecast = {
 export type AdmissionInput = {
     plan: PlanValidationReport; provider: string; cwd: string; enabledAgents?: readonly AgentTarget[];
     executionMode?: ExecutionMode; requireCurrent?: boolean; verifySensors?: boolean;
+    /** Supervisor replacement must empirically re-run sensors before a new generation. */
+    freshSensorsRequired?: boolean;
     currentness?: CurrentnessReport; sensors?: RunOutput;
     /** Exact registry components reached from validated plan-source provenance. */
     consumedRegistryComponents?: readonly string[];
@@ -205,6 +209,7 @@ export function sanitizeAdmissionReport(report: unknown): AdmissionReport {
     const value = report as Record<string, unknown>;
     if ((value.state !== 'admitted' && value.state !== 'blocked') || !PLAN_STATES.has(value.planState as AdmissionReport['planState']) || !JOURNALS.has(value.journal as AdmissionReport['journal']) || !CURRENTNESS.has(value.currentness as AdmissionReport['currentness']) || !SENSORS.has(value.sensors as AdmissionReport['sensors']) || !validDiagnostics(value.diagnostics)) invalidAdmission();
     if (value.cliCurrentness !== undefined && !CLI_CURRENTNESS.has(value.cliCurrentness as string)) invalidAdmission();
+    if (value.sensorEvidence !== undefined && value.sensorEvidence !== 'generation-bound') invalidAdmission();
     if (value.planDigest !== undefined && (typeof value.planDigest !== 'string' || !/^[a-f0-9]{64}$/.test(value.planDigest))) invalidAdmission();
     if (value.executionMode !== undefined && value.executionMode !== 'interactivo' && value.executionMode !== 'desatendido') invalidAdmission();
     if (value.provider !== undefined && !isAgentTarget(value.provider)) invalidAdmission();

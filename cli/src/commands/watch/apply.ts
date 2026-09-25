@@ -20,6 +20,7 @@ import { readMachineKey } from '../../core/model-policy/machine-key';
 import { awmHome } from '../../core/paths';
 import { verifyNativeRoutingProof, type NativeRoutingProof } from '../../core/model-policy/native-routing-proof';
 import { selectionPolicyDigest } from '../../core/model-policy/selection-policy-digest';
+import { groupIsGone, refIsAlive } from '../../core/journal/process';
 
 export interface ApplySummary { applied: number; rejectedStale: number; rejectedDigest: number; rejectedInvalid: number; corrupt: number; }
 
@@ -451,7 +452,72 @@ export function applyRequestToState(s: JournalState, env: RequestEnvelope & { re
                 if (attempt.nativeEvidenceRequired !== true) throw new Error('register --entity dispatch v2 requires native event receipt');
                 reservedForNewDispatch = attempt.state === 'reserved';
             } else if (p.routingAttemptId !== undefined) throw new Error('register --entity dispatch: routingAttemptId solo para compact v2');
+            const noLiveJobs = (): boolean => Object.values(s.jobs).every(job => ['exited', 'cancelled'].includes(job.executionState)
+                && [job.processRef, job.wrapperRef].every(ref => !ref || (!refIsAlive(ref) && groupIsGone(ref.processGroup))));
+            const historical = v2 ? s.dispatches.filter(d => d.taskId === taskId && !d.routingAttemptId) : [];
+            // A blocked routing verdict does not prove its native child has
+            // stopped. This migration permits exactly the first linked handoff;
+            // a subsequent retry needs a separately verified ownership path.
+            if (historical.some(d => d.id !== dispatchId))
+                throw new Error('register --entity dispatch: historical unlinked dispatch ID conflictivo');
             const existing = s.dispatches.find(d => d.id === dispatchId);
+            // A 9.12.2 controller could ACK the unlinked intent before it
+            // reserved the native route. Keep that record and ACK as history;
+            // only a fresh request can create the first linked handoff.
+            if (v2 && existing?.taskId === taskId && !existing.routingAttemptId && !existing.dispatchRequestId && routingAttemptId) {
+                const attempt = s.routingAttempts!.find(candidate => candidate.id === routingAttemptId)!;
+                const linkedReplay = s.dispatches.find(d => d.dispatchRequestId === env.requestId);
+                if (linkedReplay) {
+                    const replayAck = s.appliedRequests[env.requestId];
+                    if (linkedReplay.taskId !== taskId || linkedReplay.routingAttemptId !== routingAttemptId
+                        || replayAck?.outcome !== 'applied' || replayAck.idempotencyKey !== env.idempotencyKey
+                        || replayAck.payloadDigest !== digest || replayAck.resultRef !== linkedReplay.id)
+                        throw new Error('register --entity dispatch: routed replay conflictivo');
+                    applyOutcome(s, { ...base, outcome: 'applied', resultRef: linkedReplay.id });
+                    return;
+                }
+                const linkedPrior = s.dispatches.find(d => d.routingAttemptId === routingAttemptId);
+                if (linkedPrior) {
+                    const priorAck = linkedPrior.dispatchRequestId ? s.appliedRequests[linkedPrior.dispatchRequestId] : undefined;
+                    if (linkedPrior.taskId !== taskId || priorAck?.outcome !== 'applied'
+                        || priorAck.idempotencyKey !== env.idempotencyKey || priorAck.payloadDigest !== digest)
+                        throw new Error('register --entity dispatch: routed replay conflictivo');
+                    applyOutcome(s, { ...base, outcome: 'applied', resultRef: linkedPrior.id });
+                    return;
+                }
+                const oldAt = Date.parse(existing.at);
+                const reservedAt = Date.parse(attempt.reservedAt ?? '');
+                // 9.12.2 emits {...JSON.parse(--json), entity}; JSON.stringify
+                // preserves caller key order. The old record has no request
+                // link, so accept only permutations of these exact three
+                // fields, not an unrelated resultRef or extra payload fields.
+                const legacyDigests = [
+                    { entity: 'dispatch', dispatchId: existing.id, taskId },
+                    { entity: 'dispatch', taskId, dispatchId: existing.id },
+                    { dispatchId: existing.id, entity: 'dispatch', taskId },
+                    { dispatchId: existing.id, taskId, entity: 'dispatch' },
+                    { taskId, entity: 'dispatch', dispatchId: existing.id },
+                    { taskId, dispatchId: existing.id, entity: 'dispatch' },
+                ].map(payload => digestOf(payload));
+                const oldAckApplied = Object.values(s.appliedRequests).some(ack => ack.outcome === 'applied'
+                    && ack.resultRef === existing.id && legacyDigests.includes(ack.payloadDigest));
+                const safeLegacy = reservedForNewDispatch && Number.isFinite(oldAt) && Number.isFinite(reservedAt)
+                    && oldAt < reservedAt
+                    && oldAckApplied
+                    && s.dispatches.filter(d => d.taskId === taskId).length === 1
+                    && s.tasks.find(t => t.id === taskId)?.attempts === 1
+                    && s.tasks.find(t => t.id === taskId)?.status === 'in-progress'
+                    && noLiveJobs()
+                    && !s.routingAttempts?.some(candidate => candidate.envelope.sliceId === taskId
+                        && (candidate.nativeAgentId || candidate.nativeEventDigest || candidate.observed));
+                if (!safeLegacy) throw new Error('register --entity dispatch: legacy handoff no reconciliable sin evidencia exclusiva');
+                const linkedId = `routed-${crypto.createHash('sha256').update(env.requestId).digest('hex').slice(0,32)}`;
+                if (s.dispatches.some(d => d.id === linkedId) || s.dispatches.some(d => d.routingAttemptId === routingAttemptId))
+                    throw new Error('register --entity dispatch: routed ID o reservation conflictivo');
+                s.dispatches.push({ id: linkedId, taskId, at: now(), routingAttemptId, dispatchRequestId: env.requestId });
+                applyOutcome(s, { ...base, outcome: 'applied', resultRef: linkedId });
+                return;
+            }
             if (existing && (existing.taskId !== taskId || existing.routingAttemptId !== routingAttemptId)) {
                 throw new Error('register --entity dispatch: dispatchId conflictivo');
             }

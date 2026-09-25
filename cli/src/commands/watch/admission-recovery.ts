@@ -33,8 +33,11 @@ function sameContext(a: AdmissionContext, b: AdmissionContext): boolean {
         && a.runtime?.accountScopeDigest === b.runtime?.accountScopeDigest;
 }
 
-function admissionCustodyCause(reason: string | undefined): 'currentness' | 'sensors' | undefined {
-    if (!reason || (reason.match(/ADMISSION_[A-Z_]+/g) ?? []).length !== 1) return undefined;
+function admissionCustodyCause(reason: string | undefined): 'currentness' | 'sensors' | 'runtime' | undefined {
+    if (!reason) return undefined;
+    if (reason === 'runtime local cambió durante generacion admitida'
+        || /^runtime local no verificable: (?:NATIVE_QUERY_FAILED|ACCOUNT_UNVERIFIED|MACHINE_KEY_MISSING|HOOK_CAPTURE_FAILED)$/.test(reason)) return 'runtime';
+    if ((reason.match(/ADMISSION_[A-Z_]+/g) ?? []).length !== 1) return undefined;
     const old = reason.startsWith('admisión compacta desatendida bloqueada antes de dispatch: ');
     if ((old || reason.startsWith('admisión currentness no verificable tras 3 reintentos: '))
         && reason.includes('ADMISSION_CURRENTNESS_BLOCKED:')) return 'currentness';
@@ -45,6 +48,11 @@ function admissionCustodyCause(reason: string | undefined): 'currentness' | 'sen
 
 function assertNoAmbiguousWork(repoRoot: string, branch: string, state: JournalState): void {
     if (activeRequestProblems(state).length > 0) throw new Error('recovery bloqueado: request rechazada o corrupta activa');
+    if (state.routingAttempts?.some(attempt => attempt.state !== 'reserved'
+        || attempt.nativeAgentId !== undefined || attempt.nativeEventDigest !== undefined
+        || attempt.observed !== undefined)) throw new Error('recovery bloqueado: intento nativo activo o ambiguo');
+    if (state.dispatches.some(dispatch => dispatch.routingAttemptId !== undefined))
+        throw new Error('recovery bloqueado: dispatch nativo ACK-applied sin prueba de child terminado');
     for (const generation of state.generations) {
         if (controllerGenerationHasUnresolvedClaim(repoRoot, branch, generation)) throw new Error('recovery bloqueado: claim de controller sin identidad demostrable');
         for (const ref of [generation.processRef, generation.wrapperRef]) {
@@ -84,7 +92,7 @@ export async function recoverAdmissionCustody(
             && previous.reason === input.reason && previous.generationToken === input.generationToken
             && sameContext(previous.context, context)) return 'already-recovered';
         if (state.cycle.status !== 'BLOCKED' || !admissionCustodyCause(state.cycle.blockedReason)) {
-            throw new Error('recovery solo admite custodia causada por admisión currentness o sensores');
+            throw new Error('recovery solo admite custodia causada por admisión currentness, sensores o runtime local verificable');
         }
         const latest = state.generations.at(-1);
         if (latest?.token !== input.generationToken || (latest === undefined && input.generationToken !== undefined)) {

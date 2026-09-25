@@ -8,7 +8,7 @@ import { applyRequestToState, consumePendingRequests } from '../../../src/comman
 import { beginGeneration, launchControllerGeneration } from '../../../src/commands/watch/generations';
 import { emptyState, isWellFormedState, type JournalState } from '../../../src/core/journal/types';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
-import { emitRequest } from '../../../src/core/journal/requests';
+import { digestOf, emitRequest } from '../../../src/core/journal/requests';
 import { requestJob } from '../../../src/commands/job/request';
 import { initWatch } from '../../../src/commands/watch/init';
 import { validatePlanFile } from '../../../src/core/plan/validate';
@@ -18,6 +18,7 @@ import * as supervisorModule from '../../../src/commands/watch/supervisor';
 import * as generationModule from '../../../src/commands/watch/generations';
 import * as adapterModule from '../../../src/core/journal/adapter';
 import type { AdmissionReport } from '../../../src/core/admission';
+import { admitRegistryPlan } from '../../../src/core/admission/registry-contracts';
 import { routingEnvelope } from '../../helpers/routing-approval';
 import { routingApproval } from '../../helpers/routing-approval';
 import { canonicalPolicyDigest } from '../../../src/core/model-policy/canonical';
@@ -30,6 +31,7 @@ import * as localScope from '../../../src/core/model-policy/local-event-scope';
 import { claimPath } from '../../../src/commands/job/exec-wrapper';
 import { logsDir, requestsDir, statePath } from '../../../src/core/journal/paths';
 import { supervisorLockPath } from '../../../src/core/journal/paths';
+import { captureSelfRef } from '../../../src/core/journal/process';
 
 function v2State(): JournalState {
     const state = emptyState('main');
@@ -54,6 +56,12 @@ function dispatch(state: JournalState, payload: Record<string, unknown>): void {
     applyRequestToState(state, { kind: 'register-entity', requestId: 'dispatch-request',
         generationToken: 'g1', idempotencyKey: 'dispatch-key', payload: { entity: 'dispatch',
             dispatchId: 'dispatch-S1', taskId: 'S1', ...payload } }, 'd'.repeat(64), process.cwd());
+}
+
+function legacyDispatchDigest(rawJson = '{"dispatchId":"dispatch-S1","taskId":"S1"}'): string {
+    // 9.12.2 job register emits { ...JSON.parse(--json), entity: --entity }.
+    // Preserve the caller's key order: digestOf uses JSON.stringify bytes.
+    return digestOf({ ...JSON.parse(rawJson) as Record<string, unknown>, entity: 'dispatch' });
 }
 
 function boundRepo(version: 'v1' | 'v2' = 'v1'): string {
@@ -148,6 +156,139 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
         expect(() => dispatch(state, { routingAttemptId: 'route-2' })).toThrow(/conflict|dispatch/i);
         expect(state.dispatches).toHaveLength(1);
         expect(state.tasks[0].attempts).toBe(1);
+    });
+
+    test('9.12.2 unlinked S1 dispatch is preserved while a fresh routed dispatch gets its own real ACK', () => {
+        expect(legacyDispatchDigest()).toBe('01edb739d12771ff6ffea2ea4296bf477b745f76afb66b4b20cb90cd470f5666');
+        const state = v2State();
+        const oldAt = new Date(Date.parse(state.routingAttempts![0].reservedAt!) - 60_000).toISOString();
+        state.dispatches.push({ id: 'dispatch-S1', taskId: 'S1', at: oldAt });
+        state.tasks[0].attempts = 1;
+        state.tasks[0].status = 'in-progress';
+        state.jobs['completed-test'] = { id: 'completed-test', fingerprint: 'fixture', commandDigest: 'fixture',
+            argv: ['true'], cwd: '.', paths: [], expandedPaths: [], executionState: 'exited',
+            observationState: 'progressing', phaseTimestamps: { exited: new Date().toISOString() } };
+        state.appliedRequests['old-dispatch-request'] = { requestId: 'old-dispatch-request',
+            idempotencyKey: 'old-dispatch-key', payloadDigest: legacyDispatchDigest(), outcome: 'applied', resultRef: 'dispatch-S1' };
+        state.appliedRequests['old-dispatch-retry'] = { ...state.appliedRequests['old-dispatch-request'], requestId: 'old-dispatch-retry' };
+        const oldRecord = structuredClone(state.dispatches[0]);
+        const oldAck = structuredClone(state.appliedRequests['old-dispatch-request']);
+        const retryAck = structuredClone(state.appliedRequests['old-dispatch-retry']);
+        dispatch(state, { routingAttemptId: 'route-1' });
+        expect(state.dispatches[0]).toEqual(oldRecord);
+        expect(state.appliedRequests['old-dispatch-request']).toEqual(oldAck);
+        expect(state.appliedRequests['old-dispatch-retry']).toEqual(retryAck);
+        expect(state.dispatches).toHaveLength(2);
+        const linked = state.dispatches[1];
+        expect(linked).toMatchObject({ taskId: 'S1', routingAttemptId: 'route-1', dispatchRequestId: 'dispatch-request' });
+        expect(linked.id).not.toBe('dispatch-S1');
+        expect(state.appliedRequests['dispatch-request']).toMatchObject({ outcome: 'applied', resultRef: linked.id });
+        expect(state.tasks[0].attempts).toBe(1);
+        expect(isWellFormedState(state)).toBe(true);
+        dispatch(state, { routingAttemptId: 'route-1' });
+        expect(state.dispatches).toHaveLength(2);
+        expect(state.tasks[0].attempts).toBe(1);
+        expect(() => applyRequestToState(state, { kind: 'register-entity', requestId: 'unrelated-dispatch-request',
+            generationToken: 'g1', idempotencyKey: 'different-dispatch-key', payload: { entity: 'dispatch',
+                dispatchId: 'dispatch-S1', taskId: 'S1', routingAttemptId: 'route-1' } }, 'd'.repeat(64), process.cwd()))
+            .toThrow(/conflictivo/);
+        expect(state.dispatches).toHaveLength(2);
+    });
+
+    test('historical ACK matching is independent of JSON key order but not payload identity', () => {
+        for (const rawJson of [
+            '{"taskId":"S1","dispatchId":"dispatch-S1"}',
+            '{"entity":"dispatch","taskId":"S1","dispatchId":"dispatch-S1"}',
+        ]) {
+            const state = v2State();
+            state.dispatches.push({ id: 'dispatch-S1', taskId: 'S1',
+                at: new Date(Date.parse(state.routingAttempts![0].reservedAt!) - 60_000).toISOString() });
+            state.tasks[0].status = 'in-progress';
+            state.tasks[0].attempts = 1;
+            state.appliedRequests['old-dispatch-request'] = { requestId: 'old-dispatch-request',
+                idempotencyKey: 'old-dispatch-key', payloadDigest: legacyDispatchDigest(rawJson),
+                outcome: 'applied', resultRef: 'dispatch-S1' };
+            dispatch(state, { routingAttemptId: 'route-1' });
+            expect(state.dispatches).toHaveLength(2);
+            expect(state.appliedRequests['dispatch-request']).toMatchObject({ outcome: 'applied', resultRef: state.dispatches[1].id });
+        }
+    });
+
+    test('historical unlinked S1 cannot be bypassed with a different requested dispatch ID', () => {
+        const state = v2State();
+        state.dispatches.push({ id: 'dispatch-S1', taskId: 'S1',
+            at: new Date(Date.parse(state.routingAttempts![0].reservedAt!) - 60_000).toISOString() });
+        state.tasks[0].status = 'in-progress';
+        state.tasks[0].attempts = 1;
+        state.appliedRequests['old-dispatch-request'] = { requestId: 'old-dispatch-request',
+            idempotencyKey: 'old-dispatch-key', payloadDigest: legacyDispatchDigest(), outcome: 'applied', resultRef: 'dispatch-S1' };
+        expect(() => dispatch(state, { dispatchId: 'new-S1', routingAttemptId: 'route-1' })).toThrow(/legacy|historical|conflict/i);
+        expect(state.dispatches).toHaveLength(1);
+        expect(state.tasks[0].attempts).toBe(1);
+        expect(state.appliedRequests['dispatch-request']).toBeUndefined();
+    });
+
+    test('historical handoff requires a matching applied legacy dispatch ACK', () => {
+        for (const ack of ['missing', 'unrelated', 'rejected'] as const) {
+            const state = v2State();
+            state.dispatches.push({ id: 'dispatch-S1', taskId: 'S1',
+                at: new Date(Date.parse(state.routingAttempts![0].reservedAt!) - 60_000).toISOString() });
+            state.tasks[0].status = 'in-progress';
+            state.tasks[0].attempts = 1;
+            if (ack !== 'missing') state.appliedRequests['old-dispatch-request'] = {
+                requestId: 'old-dispatch-request', idempotencyKey: 'old-dispatch-key',
+                payloadDigest: ack === 'unrelated' ? digestOf({ entity: 'task', taskId: 'S1' }) : legacyDispatchDigest(),
+                outcome: ack === 'rejected' ? 'rejected-stale-generation' : 'applied', resultRef: 'dispatch-S1',
+            };
+            expect(() => dispatch(state, { routingAttemptId: 'route-1' })).toThrow(/legacy|historical|ACK|evidencia/i);
+            expect(state.dispatches).toHaveLength(1);
+            expect(state.appliedRequests['dispatch-request']).toBeUndefined();
+        }
+    });
+
+    test('a failed linked handoff does not authorize another child without native ownership proof', () => {
+        const state = v2State();
+        state.dispatches.push({ id: 'dispatch-S1', taskId: 'S1',
+            at: new Date(Date.parse(state.routingAttempts![0].reservedAt!) - 60_000).toISOString() });
+        state.tasks[0].status = 'in-progress';
+        state.tasks[0].attempts = 1;
+        state.appliedRequests['old-dispatch-request'] = { requestId: 'old-dispatch-request',
+            idempotencyKey: 'old-dispatch-key', payloadDigest: legacyDispatchDigest(), outcome: 'applied', resultRef: 'dispatch-S1' };
+        dispatch(state, { routingAttemptId: 'route-1' });
+        state.routingAttempts![0].state = 'blocked';
+        state.routingAttempts![0].verdict = 'fail';
+        state.routingAttempts!.push({ ...state.routingAttempts![0], id: 'route-2', state: 'reserved',
+            verdict: undefined, reservationRequestId: 'reserve-2' });
+        state.appliedRequests['reserve-2'] = { requestId: 'reserve-2', idempotencyKey: 'reserve-2',
+            payloadDigest: 'd'.repeat(64), outcome: 'applied', resultRef: 'route-2' };
+        expect(() => applyRequestToState(state, { kind: 'register-entity', requestId: 'dispatch-request-2',
+            generationToken: 'g1', idempotencyKey: 'dispatch-key-2', payload: { entity: 'dispatch',
+                dispatchId: 'dispatch-S1-retry', taskId: 'S1', routingAttemptId: 'route-2' } }, 'd'.repeat(64), process.cwd()))
+            .toThrow(/historical|conflict/i);
+        expect(state.dispatches).toHaveLength(2);
+        expect(state.tasks[0].attempts).toBe(1);
+        expect(state.appliedRequests['dispatch-request-2']).toBeUndefined();
+        expect(isWellFormedState(state)).toBe(true);
+    });
+
+    test('legacy dispatch reconciliation refuses ambiguous or already-observed work', () => {
+        for (const scenario of ['two-old-dispatches', 'observed', 'wrong-order', 'existing-job'] as const) {
+            const state = v2State();
+            state.dispatches.push({ id: 'dispatch-S1', taskId: 'S1',
+                at: new Date(Date.parse(state.routingAttempts![0].reservedAt!) - 60_000).toISOString() });
+            state.tasks[0].attempts = 1;
+            state.appliedRequests['old-dispatch-request'] = { requestId: 'old-dispatch-request',
+                idempotencyKey: 'old-dispatch-key', payloadDigest: legacyDispatchDigest(), outcome: 'applied', resultRef: 'dispatch-S1' };
+            if (scenario === 'two-old-dispatches') state.dispatches.push({ id: 'other-old', taskId: 'S1', at: state.dispatches[0].at });
+            if (scenario === 'observed') state.routingAttempts![0].nativeAgentId = 'native-child';
+            if (scenario === 'wrong-order') state.dispatches[0].at = new Date(Date.parse(state.routingAttempts![0].reservedAt!) + 60_000).toISOString();
+            if (scenario === 'existing-job') state.jobs['unreconciled'] = { id: 'unreconciled',
+                fingerprint: 'fixture', commandDigest: 'fixture', argv: ['true'], cwd: '.', paths: [], expandedPaths: [],
+                executionState: 'received', observationState: 'progressing', phaseTimestamps: {} };
+            expect(() => dispatch(state, { routingAttemptId: 'route-1' })).toThrow();
+            expect(state.dispatches.some(item => item.routingAttemptId === 'route-1')).toBe(false);
+            expect(state.appliedRequests['dispatch-request']).toBeUndefined();
+        }
     });
 
     test('an exact dispatch replay after native observation does not duplicate S1', () => {
@@ -307,6 +448,112 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
         } finally { jest.restoreAllMocks(); fs.rmSync(repo, { recursive: true, force: true }); }
     });
 
+    test('controller admission reuses only an owned generation sensor pass, never a new generation', async () => {
+        const repo = boundRepo();
+        try {
+            beginGeneration(repo, 'main');
+            launchControllerGeneration(repo, 'main', 'codex', { schema: 'controller-recovery/v1', kind: 'resume-cycle' }, () => {});
+            const state = readJournal(repo, 'main').state!;
+            const generation = state.generations[0];
+            const claim = claimPath(logsDir(repo, 'main'), generation.controllerJobId!, generation.spawnNonce!);
+            fs.writeFileSync(claim, '{}');
+            generation.wrapperRef = captureSelfRef(generation.spawnNonce!);
+            state.admissionContext = { provider: 'codex', controllerAutonomy: 'approval-free' };
+            writeJournal(repo, 'main', state);
+            const sensorRun = jest.fn(async () => ({ sensors: [], overall: 'not_certified',
+                projectRoot: repo, manifestPath: path.join(repo, '.awm', 'sensors.json'), mode: 'project-sensors' } as never));
+            const admit = async (freshSensorsRequired = false) => admitRegistryPlan({
+                plan: validatePlanFile('plans/cycle.md', repo), provider: 'codex', cwd: repo,
+                executionMode: 'desatendido', planPath: 'plans/cycle.md', journalState: readJournal(repo, 'main').state,
+                verifySensors: true, controllerAutonomy: 'approval-free',
+                ...(freshSensorsRequired ? { freshSensorsRequired: true } : {}),
+            }, { runSensors: sensorRun });
+            const active = await admit();
+            expect(active.state).toBe('admitted');
+            expect(active).toHaveProperty('sensorEvidence', 'generation-bound');
+            expect(sensorRun).not.toHaveBeenCalled();
+            const replacement = await admit(true);
+            expect(replacement).toMatchObject({ state: 'blocked', sensors: 'not-certified' });
+            expect(sensorRun).toHaveBeenCalledTimes(1);
+            const claimOnly = readJournal(repo, 'main').state!;
+            claimOnly.generations[0].wrapperRef = undefined;
+            writeJournal(repo, 'main', claimOnly);
+            expect(await admit()).toMatchObject({ state: 'blocked', sensors: 'not-certified' });
+            expect(sensorRun).toHaveBeenCalledTimes(2);
+            const mismatched = readJournal(repo, 'main').state!;
+            mismatched.generations[0].processRef = captureSelfRef('different-nonce');
+            writeJournal(repo, 'main', mismatched);
+            expect(await admit()).toMatchObject({ state: 'blocked', sensors: 'not-certified' });
+            expect(sensorRun).toHaveBeenCalledTimes(3);
+            fs.unlinkSync(claim);
+            const unowned = await admit();
+            expect(unowned).toMatchObject({ state: 'blocked', sensors: 'not-certified' });
+            expect(sensorRun).toHaveBeenCalledTimes(4);
+            const stale = readJournal(repo, 'main').state!;
+            stale.generations[0].processRef = { pid: 99999997, processGroup: 99999997,
+                startTime: 'Thu Sep 24 20:00:00 2026', spawnNonce: generation.spawnNonce!,
+                argvDigest: generation.launchArgvDigest!, psArgsDigest: 'b'.repeat(64) };
+            writeJournal(repo, 'main', stale);
+            expect(await admit()).toMatchObject({ state: 'blocked', sensors: 'not-certified' });
+            expect(sensorRun).toHaveBeenCalledTimes(5);
+            beginGeneration(repo, 'main');
+            const next = await admit();
+            expect(next).toMatchObject({ state: 'blocked', sensors: 'not-certified' });
+            expect(sensorRun).toHaveBeenCalledTimes(6);
+        } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+    });
+
+    test('generation-bound sensor reuse rejects a changed live v2 runtime', async () => {
+        const repo = boundRepo('v2');
+        try {
+            beginGeneration(repo, 'main');
+            launchControllerGeneration(repo, 'main', 'codex', { schema: 'controller-recovery/v1', kind: 'resume-cycle' }, () => {});
+            const state = readJournal(repo, 'main').state!;
+            const generation = state.generations[0];
+            fs.writeFileSync(claimPath(logsDir(repo, 'main'), generation.controllerJobId!, generation.spawnNonce!), '{}');
+            generation.wrapperRef = captureSelfRef(generation.spawnNonce!);
+            state.admissionContext = { provider: 'codex', controllerAutonomy: 'approval-free',
+                runtime: { kind: 'native', version: '0.156.0', accountScopeDigest: 'a'.repeat(64) } };
+            writeJournal(repo, 'main', state);
+            const sensorRun = jest.fn(async () => ({ sensors: [], overall: 'not_certified' } as never));
+            const report = await admitRegistryPlan({ plan: validatePlanFile('plans/cycle.md', repo),
+                provider: 'codex', cwd: repo, executionMode: 'desatendido', planPath: 'plans/cycle.md',
+                journalState: readJournal(repo, 'main').state, verifySensors: true, controllerAutonomy: 'approval-free',
+            }, { runSensors: sensorRun, readRouting: async () => ({ runtime: { target: 'codex', kind: 'native',
+                version: '0.157.0', accountScopeDigest: 'a'.repeat(64) } }) });
+            expect(report.state).toBe('blocked');
+            expect(report.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'ADMISSION_GENERATION_RUNTIME_MISMATCH' })]));
+            expect(sensorRun).not.toHaveBeenCalled();
+        } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+    });
+
+    test('active v2 controller admission reuses owned sensors while still checking routing evidence', async () => {
+        const repo = boundRepo('v2');
+        try {
+            beginGeneration(repo, 'main');
+            launchControllerGeneration(repo, 'main', 'codex', { schema: 'controller-recovery/v1', kind: 'resume-cycle' }, () => {});
+            const state = readJournal(repo, 'main').state!;
+            const generation = state.generations[0];
+            fs.writeFileSync(claimPath(logsDir(repo, 'main'), generation.controllerJobId!, generation.spawnNonce!), '{}');
+            generation.wrapperRef = captureSelfRef(generation.spawnNonce!);
+            state.admissionContext = { provider: 'codex', controllerAutonomy: 'approval-free',
+                runtime: { kind: routingEnvelope.runtime.kind, version: routingEnvelope.runtime.version,
+                    accountScopeDigest: routingEnvelope.runtime.accountScopeDigest } };
+            writeJournal(repo, 'main', state);
+            const evidence = routingApproval();
+            const sensorRun = jest.fn(async () => ({ sensors: [], overall: 'not_certified' } as never));
+            const readRouting = jest.fn(async () => ({ runtime: routingEnvelope.runtime,
+                policy: evidence.policy, capabilities: evidence.capabilities, now: evidence.checkedAt }));
+            const report = await admitRegistryPlan({ plan: validatePlanFile('plans/cycle.md', repo),
+                provider: 'codex', cwd: repo, executionMode: 'desatendido', planPath: 'plans/cycle.md',
+                journalState: readJournal(repo, 'main').state, verifySensors: true, controllerAutonomy: 'approval-free',
+            }, { runSensors: sensorRun, readRouting });
+            expect(report).toMatchObject({ state: 'admitted', sensors: 'pass', sensorEvidence: 'generation-bound' });
+            expect(sensorRun).not.toHaveBeenCalled();
+            expect(readRouting).toHaveBeenCalledTimes(1);
+        } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+    });
+
     test('the same RED continuation applies to compact v2 with unchanged native scope', async () => {
         const repo = boundRepo('v2');
         try {
@@ -346,6 +593,28 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
             expect(await sup.tick()).toBe('custody');
             expect(readJournal(repo, 'main').state!.generations).toHaveLength(1);
         } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+    });
+
+    test.each(['unverified', 'throws'] as const)('an active v2 generation records an inconclusive local runtime query (%s) without claiming drift', async scenario => {
+        const repo = boundRepo('v2');
+        try {
+            beginGeneration(repo, 'main');
+            launchControllerGeneration(repo, 'main', 'codex', { schema: 'controller-recovery/v1', kind: 'resume-cycle' }, () => {});
+            const gen = readJournal(repo, 'main').state!.generations[0];
+            fs.writeFileSync(claimPath(logsDir(repo, 'main'), gen.controllerJobId!, gen.spawnNonce!), '{}');
+            const query = jest.spyOn(localScope, 'queryLocalEventScope');
+            if (scenario === 'throws') query.mockRejectedValue(new Error('permission denied while reading a private path'));
+            else query.mockResolvedValue({ state: 'unverified', reason: 'NATIVE_QUERY_FAILED' });
+            const expected = routingEnvelope.runtime;
+            const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, routingIdentity: {
+                kind: expected.kind, version: expected.version, accountScopeDigest: expected.accountScopeDigest,
+            }, controllerAutonomy: 'approval-free' as const };
+            let spawns = 0;
+            expect(await new Supervisor(repo, 'main', cfg, () => { spawns++; }, undefined, async () => admitted, true).tick()).toBe('custody');
+            const final = readJournal(repo, 'main').state!;
+            expect(final.cycle.blockedReason).toBe('runtime local no verificable: NATIVE_QUERY_FAILED');
+            expect(spawns).toBe(0);
+        } finally { jest.restoreAllMocks(); fs.rmSync(repo, { recursive: true, force: true }); }
     });
 
     test('an active v2 generation refuses dispatch when local runtime identity drifts', async () => {
@@ -397,16 +666,15 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
             requestJob(repo, 'main', state.generations[0].token, [process.execPath, '-e', 'process.exit(0)'], [], '.');
             const adapter = adapterModule.adapterFor('codex');
             jest.spyOn(adapterModule, 'adapterFor').mockReturnValue({ ...adapter, activity: () => null, safeToReplace: () => 'safe' });
-            jest.spyOn(generationModule, 'resolveGeneration').mockImplementation(async () => {
-                const current = readJournal(repo, 'main').state!;
-                current.generations[0].state = 'terminated';
-                writeJournal(repo, 'main', current);
-                return 'proven-dead';
-            });
+            jest.spyOn(generationModule, 'resolveGeneration').mockResolvedValue('proven-dead');
             let admissions = 0;
             let jobSpawns = 0;
             const sup = new Supervisor(repo, 'main', { ...DEFAULT_SUPERVISOR_CONFIG, heartbeatTimeoutMs: 0, activityWindowMs: 0 },
-                () => { jobSpawns += 1; }, undefined, async () => { admissions += 1; return redSensor; }, true);
+                () => { jobSpawns += 1; }, undefined, async (request) => {
+                    admissions += 1;
+                    expect(request).toMatchObject({ freshSensorsRequired: true });
+                    return { ...admitted, sensorEvidence: 'generation-bound' };
+                }, true);
             expect(await sup.tick()).toBe('custody');
             expect(readJournal(repo, 'main').state!.generations).toHaveLength(1);
             expect(admissions).toBe(1);
@@ -576,7 +844,7 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
         }
     }, 10000);
 
-    test('recovered v2 S1 uses real CLI reservation, dispatch ack, observation and one continuation', async () => {
+    test('recovered historical v2 S1 uses real CLI reservation, new dispatch ack, observation and one continuation', async () => {
         const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-196-integral-'));
         const previousHome = process.env.AWM_HOME;
         const operator = path.join(repo, 'operator');
@@ -647,6 +915,17 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
             expect(readJournal(repo, 'main').state!.requestProblems).toEqual([]);
             expect(cli('ack', task.requestId).state).toBe('applied');
 
+            // Durable 9.12.2 intent predates the route reservation. Neither
+            // the record nor its old ACK may be rewritten to imply a child.
+            const historical = readJournal(repo, 'main').state!;
+            const historicalAt = new Date(Date.now() - 60_000).toISOString();
+            historical.dispatches.push({ id: 'dispatch-S1', taskId: 'S1', at: historicalAt });
+            historical.tasks[0].attempts = 1;
+            historical.tasks[0].status = 'in-progress';
+            historical.appliedRequests['old-dispatch-request'] = { requestId: 'old-dispatch-request',
+                idempotencyKey: 'old-dispatch-key', payloadDigest: legacyDispatchDigest(), outcome: 'applied', resultRef: 'dispatch-S1' };
+            writeJournal(repo, 'main', historical);
+
             const reserve = cli('routing-reserve', '--generation', generation.token, '--obligation', 'S1-implementer',
                 '--lineage', 'lineage-S1', '--envelope-file', envelopeFile, '--fingerprint', 'f'.repeat(64));
             expect(cli('ack', reserve.requestId).state).toBe('pending');
@@ -660,7 +939,9 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
             expect(cli('ack', queuedDispatch.requestId).state).toBe('pending');
             expect(fs.existsSync(path.join(repo, 's1-red.test.ts'))).toBe(false);
             consumePendingRequests(repo, 'main', generation.token, scope);
-            expect(cli('ack', queuedDispatch.requestId)).toMatchObject({ state: 'applied', resultRef: 'dispatch-S1' });
+            const routedAck = cli('ack', queuedDispatch.requestId);
+            expect(routedAck.state).toBe('applied');
+            expect(routedAck.resultRef).not.toBe('dispatch-S1');
             const worker = spawnSync(process.execPath, ['-e', `require('fs').writeFileSync(${JSON.stringify(path.join(repo, 's1-red.test.ts'))}, 'test("RED", () => { throw new Error("RED"); });\\n')`], {
                 cwd: repo, encoding: 'utf8', env: { ...process.env, AWM_NO_UPDATE_CHECK: '1' },
             });
@@ -675,7 +956,7 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
             expect(cli('ack', observation.requestId).state).toBe('applied');
             const replay = cli('register', '--generation', generation.token, '--entity', 'dispatch', '--json', dispatchPayload);
             consumePendingRequests(repo, 'main', generation.token, scope);
-            expect(cli('ack', replay.requestId).state).toBe('applied');
+            expect(cli('ack', replay.requestId)).toMatchObject({ state: 'applied', resultRef: routedAck.resultRef });
             expect(cli('reconcile').nextAction).toBeTruthy();
             const unsupported = spawnSync(process.execPath, [compiled, 'job', 'reconcile', '--generation', generation.token], {
                 cwd: repo, encoding: 'utf8', env: { ...process.env, AWM_NO_UPDATE_CHECK: '1' },
@@ -684,7 +965,11 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
             expect(unsupported.stderr).toMatch(/generation|unknown option/i);
             const final = readJournal(repo, 'main').state!;
             expect(final.tasks).toHaveLength(1);
-            expect(final.dispatches).toHaveLength(1);
+            expect(final.dispatches).toHaveLength(2);
+            expect(final.dispatches[0]).toEqual({ id: 'dispatch-S1', taskId: 'S1', at: historicalAt });
+            expect(final.appliedRequests['old-dispatch-request']).toEqual(historical.appliedRequests['old-dispatch-request']);
+            expect(final.dispatches[1]).toMatchObject({ id: routedAck.resultRef,
+                taskId: 'S1', routingAttemptId: attemptId, dispatchRequestId: queuedDispatch.requestId });
             expect(final.routingAttempts).toHaveLength(1);
             expect(final.routingAttempts![0].state).toBe('active');
             expect(final.tasks[0].attempts).toBe(1);

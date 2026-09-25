@@ -111,6 +111,18 @@ a request is not an applied acknowledgement. `ack` and `reconcile` are
 read-only and do not accept `--generation`. `ack` reports `pending`, `applied`,
 `rejected`, `unknown`, or `unverifiable` as bounded JSON; only `pending` and
 `applied` exit successfully, and `pending` does not authorize native launch.
+If a pre-9.12.3 journal already has an unlinked dispatch with an applied ACK
+matching the exact legacy dispatch payload for the same task *before* its
+still-reserved route, register a fresh dispatch request
+using that historical `dispatchId` and the applied `routingAttemptId`. AWM
+preserves the old record and ACK, returns a distinct linked ID in the new
+ACK's `resultRef`, and does not count a second implementer attempt. The old ACK
+is historical only; its untyped `resultRef` cannot authorize a native child.
+A different requested ID is rejected even if the first linked attempt later fails: a
+blocked routing verdict alone does not prove that the native child stopped.
+That retry needs separately verified ownership before another dispatch.
+An observed/ambiguous native attempt or live work blocks the first handoff;
+never launch a child using the historical ACK.
 Envelope and observation files must be bounded non-symlink JSON files with no duplicate
 keys. When an optimized selection is missing or rejected, resolution may use
 only the independently enrolled full-capability selection; if that too is
@@ -410,7 +422,8 @@ retry of invalid requests.
 ### `awm watch recover-admission`
 
 Use this only when the current branch's unattended cycle is `BLOCKED` by
-`ADMISSION_CURRENTNESS_BLOCKED` or `ADMISSION_SENSORS_BLOCKED`. The supervisor
+`ADMISSION_CURRENTNESS_BLOCKED`, `ADMISSION_SENSORS_BLOCKED`, or the exact
+local-runtime query/mismatch custody reason reported by the supervisor. The supervisor
 first retries an inconclusive currentness or sensor observation up to three
 times, waiting five seconds between checks. It does not launch a controller,
 create a generation, consume requests or dispatch jobs during those checks.
@@ -431,7 +444,8 @@ admission failed before the first launch). Run this from the repository's
 current branch. The command takes the exclusive lock, verifies the bound plan,
 strict currentness and sensors, the sealed native receipt against the local
 runtime/account scope, and the absence of active request problems or ambiguous
-controller/jobs. It records the original blocking reason, operator reason and
+controller/jobs, active/ambiguous native routing attempts, or a linked
+dispatch ACK that could already have launched a child. It records the original blocking reason, operator reason and
 generation in the journal before changing the cycle to `IN_PROGRESS`. A
 repeat of the same successful command returns `already-recovered` without a
 second transition. For older journals without recorded runtime context, the
@@ -439,7 +453,7 @@ identity is an explicit operator assertion, marked as such in the audit; AWM
 cannot reconstruct a historical runtime identity that was never stored.
 
 If any check fails, the cycle stays `BLOCKED` and the error names the failing
-gate. Fix the underlying currentness, sensors or native receipt first; do not
+gate. Fix the underlying currentness, sensors, runtime query or native receipt first; do not
 edit `state.json`. After recovery, restart `awm watch` with the same flags.
 Its next tick repeats strict admission **before** consuming requests or
 dispatching, then resumes the durable `nextAction` and existing S1/jobs. A

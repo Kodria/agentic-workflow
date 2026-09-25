@@ -28,7 +28,7 @@ import { activeRequestProblems, MAX_ADMISSION_DEFERRALS, type AdmissionContext, 
 import type { CohortPhase } from '../../core/tracks/types';
 
 /** The supervisor is only allowed to dispatch after this exact admission. */
-export type DispatchAdmission = () => Promise<AdmissionReport>;
+export type DispatchAdmission = (request?: { freshSensorsRequired?: boolean }) => Promise<AdmissionReport>;
 
 /** Runtime identity the operator asserts for unattended compact v2 dispatch. */
 export type RoutingIdentity = { kind: string; version: string; accountScopeDigest: string };
@@ -65,7 +65,7 @@ export function routingFacts(provider: string, identity: RoutingIdentity | undef
 }
 
 export function defaultDispatchAdmission(repoRoot: string, branch: string, provider: string, identity?: RoutingIdentity, deps: DispatchAdmissionDeps = {}, autonomy?: ControllerAutonomy): DispatchAdmission {
-    return async () => {
+    return async (request = {}) => {
         const observed = readJournal(repoRoot, branch);
         const binding = observed.state?.schema === 2 ? observed.state.planBinding : undefined;
         if (!binding || binding.executionMode !== 'desatendido') {
@@ -94,6 +94,7 @@ export function defaultDispatchAdmission(repoRoot: string, branch: string, provi
         } else routing = routingFacts(provider, identity, repoRoot, deps);
         return (deps.admit ?? admitRegistryPlan)({ plan, provider, cwd: repoRoot, enabledAgents: preferences.enabledAgents,
             executionMode: 'desatendido', requireCurrent: true, verifySensors: true,
+            freshSensorsRequired: request.freshSensorsRequired === true,
             journalState: observed.state, journalCorrupt: observed.corrupt, planPath: binding.path,
             routing,
             controllerAutonomy: autonomy });
@@ -377,11 +378,17 @@ export class Supervisor {
                 const expected = validateRuntimeKey({ target: assertedContext.provider, ...asserted });
                 let local: Awaited<ReturnType<typeof queryLocalEventScope>>;
                 try { local = await queryLocalEventScope(this.repoRoot, expected.target, expected.kind); }
-                catch (error) {
-                    enterCustody(this.repoRoot, this.branch, `runtime local no verificable: ${(error as Error).message}`);
+                catch {
+                    // Stable, non-sensitive custody reason remains recoverable
+                    // after a transient native query or permission failure.
+                    enterCustody(this.repoRoot, this.branch, 'runtime local no verificable: NATIVE_QUERY_FAILED');
                     return 'custody';
                 }
-                if (local.state !== 'current' || JSON.stringify(local.scope.runtime) !== JSON.stringify(expected)) {
+                if (local.state !== 'current') {
+                    enterCustody(this.repoRoot, this.branch, `runtime local no verificable: ${local.reason}`);
+                    return 'custody';
+                }
+                if (JSON.stringify(local.scope.runtime) !== JSON.stringify(expected)) {
                     enterCustody(this.repoRoot, this.branch, 'runtime local cambió durante generacion admitida');
                     return 'custody';
                 }
@@ -785,14 +792,14 @@ export class Supervisor {
         // began under the old one's admission. Do not reuse that admission
         // after RED edits, runtime drift, or a currentness change.
         let replacementAdmission: AdmissionReport;
-        try { replacementAdmission = await this.dispatchAdmission(); }
+        try { replacementAdmission = await this.dispatchAdmission({ freshSensorsRequired: true }); }
         catch (error) {
             enterCustody(this.repoRoot, this.branch, `admisión de reemplazo no verificable: ${(error as Error).message}`);
             return 'custody';
         }
         if (replacementAdmission.state !== 'admitted' || replacementAdmission.executionMode !== 'desatendido'
             || replacementAdmission.currentness !== 'current' || replacementAdmission.sensors !== 'pass'
-            || replacementAdmission.journal !== 'current') {
+            || replacementAdmission.journal !== 'current' || replacementAdmission.sensorEvidence === 'generation-bound') {
             enterCustody(this.repoRoot, this.branch, `admisión de reemplazo bloqueada antes de dispatch: ${replacementAdmission.diagnostics.map(d => `${d.code}: ${d.message}`).join('; ')}`);
             return 'custody';
         }
