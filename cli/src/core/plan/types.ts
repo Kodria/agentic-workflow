@@ -20,7 +20,7 @@ export interface CompactPlanManifest {
 export type CompactPlanV2 = Omit<CompactPlanManifest, 'schema' | 'slices'> & { schema: 'compact-slices/v2'; slices: PlanSliceV2[]; };
 export type SupportedPlanManifest = CompactPlanManifest | CompactPlanV2;
 export type PlanValidationReport =
-    | { state: 'valid'; schema: 'compact-slices/v1' | 'compact-slices/v2'; planDigest: string; /** Versioned progress-independent identity, derived from the same validated bytes. */ executionDigest?: string; manifest: SupportedPlanManifest; /** Derived from the validated bytes, never a later reopen. */ executionMode?: 'interactivo' | 'desatendido' }
+    | { state: 'valid'; schema: 'compact-slices/v1' | 'compact-slices/v2'; planDigest: string; /** Versioned progress-independent identity, derived from the same validated bytes. */ executionDigest?: string; manifest: SupportedPlanManifest; /** Derived from the validated bytes, never a later reopen. */ executionMode?: 'interactivo' | 'desatendido'; /** Optional for historical plans; new plans declare this explicitly. */ dispatchMode?: 'proveedor-nativo' | 'awm-routed' }
     | { state: 'migration-required'; reason: 'unmarked-plan' }
     | { state: 'invalid'; diagnostics: PlanDiagnostic[] }
     | { state: 'unsupported'; schema: string; diagnostics: PlanDiagnostic[] };

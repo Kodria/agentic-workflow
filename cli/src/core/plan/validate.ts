@@ -260,6 +260,10 @@ function validatePlan(planPath: string, cwd: string, snapshot?: Buffer): PlanVal
     if (raw.requirements.length > 256 || raw.sources.length > 256 || raw.commands.length > 512 || raw.slices.length > 64 || raw.closureCommands.length > 512) return diagnostic('PLAN_LIMIT', 'manifest exceeds collection limits');
     if (typeof raw.planId === 'string' && Buffer.byteLength(raw.planId, 'utf8') > MAX_STRING) return diagnostic('PLAN_LIMIT', 'plan id exceeds maximum string size');
     if ((raw.schema !== 'compact-slices/v1' && raw.schema !== 'compact-slices/v2') || (raw.schema === 'compact-slices/v1' && start !== START) || (raw.schema === 'compact-slices/v2' && start !== START_V2) || typeof raw.planId !== 'string' || !PLAN_ID.test(raw.planId) || !allStrings(raw.requirements) || new Set(raw.requirements).size !== raw.requirements.length) return diagnostic('PLAN_SHAPE', 'manifest scalar fields are invalid');
+    const dispatchHeaders = Array.from(text.slice(0, text.indexOf(start)).matchAll(/^[ \t]*\*\*Modo de despacho:\*\*[ \t]*([^\r\n]*)$/gm), match => match[1].trim());
+    if (dispatchHeaders.length > 1 || dispatchHeaders.some(value => value !== 'proveedor-nativo' && value !== 'awm-routed')) return diagnostic('PLAN_DISPATCH_MODE', 'dispatch mode must occur once and be proveedor-nativo or awm-routed');
+    const dispatchMode = dispatchHeaders[0] as 'proveedor-nativo' | 'awm-routed' | undefined;
+    if (dispatchMode && ((dispatchMode === 'proveedor-nativo') !== (raw.schema === 'compact-slices/v1'))) return diagnostic('PLAN_DISPATCH_MODE', 'dispatch mode does not match compact plan schema');
     if ((raw.requirements as string[]).some((id) => !validRequirementId(id)) || !allStrings(raw.closureCommands) || new Set(raw.closureCommands as string[]).size !== (raw.closureCommands as string[]).length) return diagnostic('PLAN_SHAPE', 'manifest arrays or identifiers are invalid');
     const sourceIds = new Set<string>();
     for (const source of raw.sources) {
@@ -293,6 +297,7 @@ function validatePlan(planPath: string, cwd: string, snapshot?: Buffer): PlanVal
         planDigest: crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
         executionDigest: executionPlanDigest(text),
         manifest: raw as unknown as CompactPlanManifest | CompactPlanV2, executionMode: executionModeFromValidatedText(text),
+        ...(dispatchMode ? { dispatchMode } : {}),
     };
     freezeJson(report);
     verifiedValidReports.add(report);

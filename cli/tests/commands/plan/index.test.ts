@@ -59,6 +59,13 @@ describe('plan validate Commander wiring', () => {
         process.exitCode = previousExitCode;
     });
 
+    it('requires an explicit dispatch header for strict new-plan validation', async () => {
+        const program = commandFor(valid);
+        await program.parseAsync(['node', 'awm', 'plan', 'validate', 'plans/r4.md', '--cwd', repositoryRoot, '--require-dispatch-mode', '--json']);
+        expect(JSON.parse(String(stdoutWrite.mock.calls.at(-1)![0]))).toMatchObject({ state: 'invalid', diagnostics: [{ code: 'PLAN_DISPATCH_MODE' }] });
+        expect(process.exitCode).toBe(2);
+    });
+
     it('returns v1 not-required before reading personal policy or capability state', async () => {
         const policy = jest.fn(); const capabilities = jest.fn(); const program = new Command(); program.exitOverride(); program.configureOutput({ writeErr: () => undefined });
         registerPlanCommand(program, { validatePlanFile: () => valid, readEffectivePolicy: policy as any, readCapabilities: capabilities as any });
