@@ -1,3 +1,8 @@
+## v9.12.4 - 2026-09-25
+
+### Fixes
+- recover #196 runtime custody and historical S1 handoff (#199)
+
 ## v9.12.3 - 2026-09-24
 
 ### Fixes
