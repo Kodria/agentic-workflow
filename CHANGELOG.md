@@ -1,3 +1,8 @@
+## v9.12.5 - 2026-09-25
+
+### Fixes
+- reconcile legacy dispatch with equal-millisecond ACK order (#200)
+
 ## v9.12.4 - 2026-09-25
 
 ### Fixes
