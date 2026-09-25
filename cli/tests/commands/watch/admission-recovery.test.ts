@@ -14,6 +14,7 @@ import type { AdmissionReport } from '../../../src/core/admission';
 import { recoverAdmissionCustody } from '../../../src/commands/watch/admission-recovery';
 import { registerWatchCommand } from '../../../src/commands/watch';
 import * as supervisorModule from '../../../src/commands/watch/supervisor';
+import { routingEnvelope } from '../../helpers/routing-approval';
 
 const DIGEST = 'a'.repeat(64);
 const identity = { kind: 'native', version: '1.0.0', accountScopeDigest: DIGEST };
@@ -128,6 +129,30 @@ describe('issue #196: admission custody recovery', () => {
         expect(await recoverAdmissionCustody(repo, 'main', input, admitted)).toBe('recovered');
     });
 
+    test.each([
+        'runtime local no verificable: NATIVE_QUERY_FAILED',
+        'runtime local cambió durante generacion admitida',
+    ])('runtime custody %s recovers only after strict offline revalidation', async (reason) => {
+        fs.writeFileSync(path.join(repo, 'plans', 'cycle.md'), fs.readFileSync(path.join(__dirname,
+            '../../core/plan/fixtures/compact-slices-v2/valid.md'), 'utf8'));
+        const v2Plan = validatePlanFile('plans/cycle.md', repo);
+        if (v2Plan.state !== 'valid' || !v2Plan.executionDigest) throw new Error('invalid v2 recovery fixture');
+        const state = readJournal(repo, 'main').state!;
+        state.planBinding = { ...state.planBinding!, schema: v2Plan.schema, digest: v2Plan.planDigest,
+            executionDigest: v2Plan.executionDigest, executionIdentitySchema: 'awm-plan-execution/v1' };
+        state.cycle.blockedReason = reason;
+        writeJournal(repo, 'main', state);
+        const revision = readJournal(repo, 'main').state!.revision;
+        await expect(recoverAdmissionCustody(repo, 'main', input, blocked('ADMISSION_SENSORS_BLOCKED', 'current', 'not-certified'))).rejects.toThrow();
+        expect(readJournal(repo, 'main').state!.revision).toBe(revision);
+        expect(await recoverAdmissionCustody(repo, 'main', input, admitted)).toBe('recovered');
+        const recovered = readJournal(repo, 'main').state!;
+        expect(recovered.cycle.status).toBe('IN_PROGRESS');
+        expect(recovered.planBinding?.schema).toBe('compact-slices/v2');
+        expect(recovered.admissionRecoveries?.at(-1)?.blockedReason).toBe(reason);
+        expect(recovered.generations).toEqual(state.generations);
+    });
+
     test('changed binding, active request problem, pending job and identity mismatch all fail closed', async () => {
         const check = async (mutate: (state: NonNullable<ReturnType<typeof readJournal>['state']>) => void, pattern: RegExp) => {
             const state = readJournal(repo, 'main').state!;
@@ -145,6 +170,18 @@ describe('issue #196: admission custody recovery', () => {
         const s2 = readJournal(repo, 'main').state!; s2.requestProblems = []; writeJournal(repo, 'main', s2);
         await check(state => { state.jobs['J1'] = { id: 'J1', fingerprint: 'x', commandDigest: 'x', argv: ['true'], cwd: '.', paths: [], expandedPaths: [], executionState: 'received', observationState: 'progressing', phaseTimestamps: {} }; }, /job/i);
         const sJob = readJournal(repo, 'main').state!; sJob.jobs = {}; writeJournal(repo, 'main', sJob);
+        await check(state => { state.routingAttempts = [{ schema: 'routing-attempt/v1', id: 'route-1',
+            obligationId: 'S1-implementer', lineageId: 'S1', attempt: 1, envelope: routingEnvelope,
+            envelopeDigest: 'e'.repeat(64), fingerprint: 'f'.repeat(64), state: 'active',
+            nativeAgentId: 'native-child' }]; }, /nativ|routing|attempt|intento/i);
+        const sRouting = readJournal(repo, 'main').state!; sRouting.routingAttempts = []; writeJournal(repo, 'main', sRouting);
+        await check(state => { state.routingAttempts = [{ schema: 'routing-attempt/v1', id: 'route-1',
+            obligationId: 'S1-implementer', lineageId: 'S1', attempt: 1, envelope: routingEnvelope,
+            envelopeDigest: 'e'.repeat(64), fingerprint: 'f'.repeat(64), state: 'reserved' }];
+        state.dispatches.push({ id: 'linked', taskId: 'S1', at: new Date().toISOString(),
+            routingAttemptId: 'route-1', dispatchRequestId: 'linked-ack' }); }, /nativ|routing|attempt|intento|dispatch/i);
+        const sPendingChild = readJournal(repo, 'main').state!;
+        sPendingChild.routingAttempts = []; sPendingChild.dispatches = []; writeJournal(repo, 'main', sPendingChild);
         await check(state => { state.generations[0].processRef = captureSelfRef('recovery-test'); }, /controller/i);
         const sController = readJournal(repo, 'main').state!; sController.generations[0].processRef = undefined; writeJournal(repo, 'main', sController);
         await check(state => { state.generations[0].provider = 'claude-code'; }, /provider|identidad/i);

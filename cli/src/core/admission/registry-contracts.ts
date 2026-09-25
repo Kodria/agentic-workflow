@@ -12,6 +12,10 @@ import { compareSemver } from '../versioning';
 import { checkCurrentness } from '../currentness/check';
 import { runSensors } from '../../commands/sensors/run';
 import { admitPlan, type AdmissionInput, type AdmissionReport } from './index';
+import { readJournal } from '../journal/store';
+import { bindingPlanPath } from '../journal/paths';
+import { activeGeneration } from '../../commands/watch/generations';
+import { refIsAlive } from '../journal/process';
 
 const FRAMEWORK_CONTRACTS = ['using-awm', 'writing-plans', 'development-process', 'subagent-driven-development', 'executing-plans', 'post-implementation-qa', 'post-implementation-docs', 'harness-retro', 'finishing-a-development-branch'] as const;
 const MAX_CONTRACT_BYTES = 1024 * 1024;
@@ -160,6 +164,40 @@ export type RegistryAdmissionDependencies = {
     readRouting?: () => AdmissionInput['routing'] | Promise<AdmissionInput['routing']>;
 };
 
+/** A controller may ask for admission while its supervisor is writing journal
+ * events. The already-launched generation passed sensors before launch; its
+ * durable intent plus verified live process identity is the evidence, not a
+ * second tree snapshot. A claim alone never certifies process ownership. */
+function hasOwnedGenerationAdmission(input: AdmissionInput): boolean {
+    if (!input.verifySensors || input.freshSensorsRequired || input.executionMode !== 'desatendido' || input.plan.state !== 'valid'
+        || input.journalCorrupt || !input.journalState || input.journalState.schema !== 2
+        || input.journalState.cycle.status !== 'IN_PROGRESS'
+        || input.journalState.admissionContext?.provider !== input.provider
+        || input.journalState.admissionContext.controllerAutonomy !== input.controllerAutonomy) return false;
+    const observed = input.journalState;
+    const binding = observed.planBinding;
+    if (!binding) return false;
+    if (input.plan.schema === 'compact-slices/v2' && !observed.admissionContext?.runtime) return false;
+    let expectedPath: string;
+    try { expectedPath = bindingPlanPath(input.planPath ?? ''); } catch { return false; }
+    if (binding.path !== expectedPath || binding.digest !== input.plan.planDigest || binding.schema !== input.plan.schema
+        || (binding.executionDigest !== undefined && binding.executionDigest !== input.plan.executionDigest)) return false;
+    let fresh: ReturnType<typeof readJournal>;
+    try { fresh = readJournal(input.cwd, observed.branch); } catch { return false; }
+    if (fresh.corrupt || !fresh.state || fresh.state.cycle.status !== 'IN_PROGRESS'
+        || fresh.state.revision < observed.revision || JSON.stringify(fresh.state.planBinding) !== JSON.stringify(binding)
+        || JSON.stringify(fresh.state.admissionContext) !== JSON.stringify(observed.admissionContext)) return false;
+    const generation = activeGeneration(fresh.state);
+    if (!generation || generation !== fresh.state.generations.at(-1)
+        || generation.provider !== input.provider || !generation.controllerJobId || !generation.launchArgvDigest) return false;
+    const prior = observed.generations.find(item => item.token === generation.token);
+    if (!prior || prior.controllerJobId !== generation.controllerJobId || prior.launchArgvDigest !== generation.launchArgvDigest) return false;
+    return (generation.processRef !== undefined && generation.processRef.spawnNonce === generation.spawnNonce
+            && generation.processRef.argvDigest === generation.launchArgvDigest && refIsAlive(generation.processRef))
+        || (generation.wrapperRef !== undefined && generation.wrapperRef.spawnNonce === generation.spawnNonce
+            && refIsAlive(generation.wrapperRef));
+}
+
 /** One admission authority for the public command AND actual watch dispatch.
  * No empirical execution occurs before provenance/currentness/CLI-floor gates. */
 export async function admitRegistryPlan(input: AdmissionInput, dependencies: RegistryAdmissionDependencies = {}): Promise<AdmissionReport> {
@@ -186,12 +224,14 @@ export async function admitRegistryPlan(input: AdmissionInput, dependencies: Reg
         } catch { scope = unknown('Registry inventory changed or cannot be read after asynchronous admission. Re-run actual currentness.'); }
         return scope.provenance === 'proven';
     };
+    let generationBound = false;
     const compose = async (fields: Partial<AdmissionInput>): Promise<AdmissionReport> => {
         const report = await admission({ ...input, provenance: scope.provenance, consumedRegistryComponents: scope.consumedRegistryComponents, ...fields });
+        const withEvidence = generationBound && report.sensors === 'pass' ? { ...report, sensorEvidence: 'generation-bound' as const } : report;
         if (scope.provenanceDiagnostic && report.diagnostics.some(diagnostic => diagnostic.code === 'ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED')) {
-            return { ...report, diagnostics: report.diagnostics.map(diagnostic => diagnostic.code === 'ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED' ? scope.provenanceDiagnostic! : diagnostic) };
+            return { ...withEvidence, diagnostics: report.diagnostics.map(diagnostic => diagnostic.code === 'ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED' ? scope.provenanceDiagnostic! : diagnostic) };
         }
-        return report;
+        return withEvidence;
     };
     let currentness = input.currentness;
     let compatibilityDiagnostics: PlanDiagnostic[] | undefined;
@@ -206,12 +246,27 @@ export async function admitRegistryPlan(input: AdmissionInput, dependencies: Reg
         const compatibilityGate = await compose({ currentness, compatibilityDiagnostics, verifySensors: true, sensors: undefined });
         if (compatibilityGate.currentness !== 'current') return compatibilityGate;
     }
-    const sensors = input.verifySensors ? input.sensors ?? await (dependencies.runSensors ?? runSensors)({ cwd: input.cwd, all: true, readOnly: true }) : undefined;
+    generationBound = input.sensors === undefined && hasOwnedGenerationAdmission(input);
+    const sensors = input.verifySensors ? input.sensors ?? (generationBound
+        ? { sensors: [], overall: 'pass' as const, reason: 'generation-bound-admission' }
+        : await (dependencies.runSensors ?? runSensors)({ cwd: input.cwd, all: true, readOnly: true })) : undefined;
     if (input.requireCurrent && input.verifySensors) {
         if (!refresh()) return compose({ currentness, sensors });
         const currentnessGate = await compose({ currentness, verifySensors: true, sensors: undefined });
         if (currentnessGate.currentness !== 'current') return currentnessGate;
         compatibilityDiagnostics = registryCompatibility(registries, scope.consumedRegistryComponents);
+    }
+    if (generationBound && input.plan.schema === 'compact-slices/v2') {
+        const routing = input.routing ?? await dependencies.readRouting?.();
+        const expected = input.journalState?.admissionContext?.runtime;
+        if (!expected || !routing?.runtime || routing.runtime.target !== input.provider
+            || routing.runtime.kind !== expected.kind || routing.runtime.version !== expected.version
+            || routing.runtime.accountScopeDigest !== expected.accountScopeDigest) {
+            return compose({ currentness, compatibilityDiagnostics, sensors,
+                routing: { ...routing, eventIssue: { code: 'ADMISSION_GENERATION_RUNTIME_MISMATCH',
+                    message: 'Live runtime identity differs from the admitted controller generation; stop and recover with a fresh admission.' } } });
+        }
+        return compose({ currentness, compatibilityDiagnostics, sensors, routing });
     }
     return compose({ currentness, compatibilityDiagnostics, sensors, ...(dependencies.readRouting ? { routingReader: dependencies.readRouting } : {}) });
 }
