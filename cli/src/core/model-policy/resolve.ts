@@ -110,6 +110,7 @@ export function resolveDispatch(input: ResolveDispatchInput): DispatchResolution
 export function resolveV1Dispatch(input: Omit<ResolveSelectionInput, 'requestedProfile'> & { plan: Extract<PlanValidationReport, { state: 'valid' }>; optInV1: boolean }): V1Resolution {
     if (!input.plan || input.plan.schema !== 'compact-slices/v1') throw new Error('resolveV1Dispatch requires an authenticated v1 plan report');
     assertVerifiedValidPlanReport(input.plan);
+    if (input.plan.dispatchMode === 'proveedor-nativo' && input.optInV1) return blocked('ROUTING_DISPATCH_MODE', 'Provider-native plan forbids v1 routing opt-in; create a separately approved routed plan.');
     if (!input.optInV1) return { state: 'not-required', reason: 'v1-without-opt-in' };
     return resolveConfiguredSelection({ ...input, requestedProfile: 'full' });
 }

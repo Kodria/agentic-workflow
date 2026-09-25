@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import { parseJsonNoDuplicate } from '../../../src/core/plan/json';
 import type { PlanValidationReport } from '../../../src/core/plan/types';
 import { validatePlanFile, validatePlanSnapshot } from '../../../src/core/plan/validate';
+import { resolveV1Dispatch } from '../../../src/core/model-policy/resolve';
 
 jest.mock('child_process', () => ({ exec: jest.fn(), execFileSync: jest.fn(), execSync: jest.fn(), spawn: jest.fn(), spawnSync: jest.fn() }));
 
@@ -92,6 +93,44 @@ describe('validatePlanFile', () => {
     test.each(['mechanical', 'integration', 'judgment'] as const)('accepts v2 with the exact %s implementer profile', profile => {
         const report = validatePlanFile(v2Fixture(root, profile), root);
         expect(report).toMatchObject({ state: 'valid', schema: 'compact-slices/v2', manifest: { slices: [expect.objectContaining({ implementerProfile: profile })] } });
+    });
+
+    test.each([
+        ['proveedor-nativo', false],
+        ['awm-routed', true],
+    ] as const)('accepts an explicit %s dispatch mode only with its matching schema', (mode, v2) => {
+        const plan = v2 ? v2Fixture(root) : fixture(root);
+        const before = fs.readFileSync(plan, 'utf8');
+        fs.writeFileSync(plan, `**Modo de despacho:** ${mode}\n${before}`);
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'valid', dispatchMode: mode });
+        fs.writeFileSync(plan, `**Modo de despacho:** ${v2 ? 'proveedor-nativo' : 'awm-routed'}\n${before}`);
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [{ code: 'PLAN_DISPATCH_MODE' }] });
+    });
+
+    test.each(['indefinido', 'proveedor-nativo\n**Modo de despacho:** proveedor-nativo'])('rejects an invalid or duplicated dispatch header: %s', value => {
+        const plan = fixture(root);
+        fs.writeFileSync(plan, `**Modo de despacho:** ${value}\n${fs.readFileSync(plan, 'utf8')}`);
+        expect(validatePlanFile(plan, root)).toMatchObject({ state: 'invalid', diagnostics: [{ code: 'PLAN_DISPATCH_MODE' }] });
+    });
+
+    test('binds an explicit dispatch choice into plan and execution identity', () => {
+        const plan = fixture(root);
+        const historical = validatePlanFile(plan, root);
+        fs.writeFileSync(plan, `**Modo de despacho:** proveedor-nativo\n${fs.readFileSync(plan, 'utf8')}`);
+        const explicit = validatePlanFile(plan, root);
+        expect(historical).toMatchObject({ state: 'valid' });
+        expect(explicit).toMatchObject({ state: 'valid', dispatchMode: 'proveedor-nativo' });
+        if (historical.state !== 'valid' || explicit.state !== 'valid') throw new Error('both v1 plans must validate');
+        expect(explicit.planDigest).not.toBe(historical.planDigest);
+        expect(explicit.executionDigest).not.toBe(historical.executionDigest);
+    });
+
+    test('does not let v1 opt-in override an explicit provider-native plan', () => {
+        const plan = fixture(root);
+        fs.writeFileSync(plan, `**Modo de despacho:** proveedor-nativo\n${fs.readFileSync(plan, 'utf8')}`);
+        const report = validatePlanFile(plan, root);
+        if (report.state !== 'valid') throw new Error('provider-native fixture must validate');
+        expect(resolveV1Dispatch({ plan: report, optInV1: true, role: 'controller', runtime: { target: 'codex', kind: 'native', version: '1.0.0', accountScopeDigest: 'a'.repeat(64) }, now: new Date() })).toMatchObject({ state: 'blocked', diagnostics: [{ code: 'ROUTING_DISPATCH_MODE' }] });
     });
 
     test('rejects v1 profile without weakening exact keys', () => {

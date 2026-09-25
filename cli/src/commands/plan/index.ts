@@ -118,6 +118,7 @@ function reportPayload(report: PlanValidationReport, planPath: string): Record<s
     case 'valid':
         return {
             state: report.state, path: planPath, schema: report.schema, planId: report.manifest.planId,
+            ...(report.dispatchMode ? { dispatchMode: report.dispatchMode } : {}),
             planDigest: report.planDigest,
             requirements: report.manifest.requirements.length, sources: report.manifest.sources.length,
             commands: report.manifest.commands.length, slices: report.manifest.slices.length, completeOwnership: true,
@@ -227,11 +228,15 @@ export function registerPlanCommand(program: Command, deps: PlanCommandDependenc
         .description('validate a compact plan without modifying it')
         .option('--json', 'emit one stable JSON report')
         .option('--cwd <path>', 'repository root for plan containment and source resolution')
-        .action((planPath: string, options: { json?: boolean; cwd?: string }) => {
+        .option('--require-dispatch-mode', 'require an explicit dispatch choice for a newly authored plan')
+        .action((planPath: string, options: { json?: boolean; cwd?: string; requireDispatchMode?: boolean }) => {
             assertText(planPath, 'plan path');
             const cwd = options.cwd ?? process.cwd();
             assertText(cwd, '--cwd');
-            const report = deps.validatePlanFile(planPath, cwd);
+            const validated = deps.validatePlanFile(planPath, cwd);
+            const report: PlanValidationReport = options.requireDispatchMode && validated.state === 'valid' && !validated.dispatchMode
+                ? { state: 'invalid', diagnostics: [{ code: 'PLAN_DISPATCH_MODE', message: 'new plans must declare Modo de despacho before the manifest' }] }
+                : validated;
             const output = options.json === true
                 ? `${JSON.stringify(reportPayload(report, planPath))}\n`
                 : formatReport(report, planPath);
