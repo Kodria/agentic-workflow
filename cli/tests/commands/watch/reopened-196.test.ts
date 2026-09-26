@@ -467,7 +467,7 @@ describe('issue #196 reopened: supervised S1 handoff', () => {
             writeJournal(repo, 'main', launched);
             const adapter = adapterModule.adapterFor('codex');
             jest.spyOn(adapterModule, 'adapterFor').mockReturnValue({ ...adapter,
-                activity: () => ({ cpuTime: '0', groupSize: 1 }), safeToReplace: () => 'indeterminate' });
+                activity: () => ({ cpuTime: '0', groupSize: 1, descendants: '0:none' }), safeToReplace: () => 'indeterminate' });
             fs.writeFileSync(path.join(repo, 's1-red.test.ts'), 'test("RED", () => { throw new Error("RED"); });\n');
             requestJob(repo, 'main', gen.token, [process.execPath, '-e', 'process.exit(0)'], [], '.');
             report = redSensor;

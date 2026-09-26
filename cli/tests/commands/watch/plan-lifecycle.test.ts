@@ -141,7 +141,7 @@ describe('compact lifecycle proof and unused bootstrap archival', () => {
         writeJournal(repo, 'main', launched);
         const adapter = adapterModule.adapterFor('codex');
         jest.spyOn(adapterModule, 'adapterFor').mockReturnValue({ ...adapter,
-            activity: () => ({ cpuTime: '0', groupSize: 1 }), safeToReplace: () => 'indeterminate' });
+            activity: () => ({ cpuTime: '0', groupSize: 1, descendants: '0:none' }), safeToReplace: () => 'indeterminate' });
         for (let i = 0; i < 100; i++) {
             expect(await supervisor.tick()).toBe('continue');
             if (Object.values(readJournal(repo, 'main').state!.jobs).some(job => job.verdict === 'pass')) break;
