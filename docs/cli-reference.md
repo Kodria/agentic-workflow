@@ -1001,6 +1001,13 @@ During an already-admitted generation, ordinary RED edits do not rerun the senso
 pre-dispatch gate on every tick; plan binding and runtime identity remain checked,
 and verification jobs still determine whether the cycle can finish. A received
 job waits while a local controller launch lacks an adopted process identity.
+When a controller exits after its last task, before requesting the cycle-level
+verifications its plan contains, the supervisor launches a replacement generation
+with the `resume-cycle` instruction so it can request them and close; no task is
+dispatched again. Recovery still enters `BLOCKED` custody when a required verifier
+is in no plan, a task-level item is unsatisfied, or any evidence is dangling,
+adverse or stale, or a review or fix is still open. A generation marked
+`controller-suspected-stall` returns to `active` as soon as its heartbeat resumes.
 Stopping `watch` with Ctrl-C reports the journal's actual cycle state and exits
 with code 130; it does not certify `COMPLETE`.
 
