@@ -1,3 +1,8 @@
+## v9.13.2 - 2026-09-26
+
+### Fixes
+- **watch:** relaunch the controller for a pending cycle closure (#203)
+
 ## v9.13.1 - 2026-09-26
 
 ### Fixes
