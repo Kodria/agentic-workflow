@@ -1,3 +1,8 @@
+## v9.14.0 - 2026-09-26
+
+### Features
+- **admission:** make durable custody opt-in for native v1 unattended work (#204)
+
 ## v9.13.2 - 2026-09-26
 
 ### Fixes
