@@ -365,7 +365,20 @@ and compatibility checks before native dispatch.
 awm plan admit PLAN_PATH --provider <target> --cwd <path> [--execution-mode interactivo|desatendido] [--require-current] [--verify-sensors] [--json]
 ```
 
-For unattended work, initialize the matching valid unattended plan first with
+Unattended work has two custody options:
+
+- **Native session (default for `proveedor-nativo` / `compact-slices/v1`).** With no
+  journal on the branch, an unattended v1 plan is admitted with `journal: "not-required"`
+  and runs in one provider session that dispatches its own native subagents and runs its
+  own verification — the unattended mode as it worked before 9.8.0. The controller
+  posture (`--controller-autonomy`) and every other gate still apply.
+- **Durable custody (opt-in).** Initializing a journal with `awm watch --init --plan`
+  opts the branch into the supervisor, journal and verification jobs: relaunch after a
+  controller exits, and closure evidence the model cannot supply itself. Once a journal
+  exists it must be current — a corrupt or stale journal still blocks. `awm-routed`
+  (`compact-slices/v2`) always requires it, because routing custody lives in the journal.
+
+To opt in, initialize the matching valid unattended plan first with
 `awm watch --init --plan PLAN_PATH`. Initialization binds the plan; it does not
 register tasks, review obligations, or a controller generation. Native dispatch
 requires that real runtime custody separately; an empty journal is not execution
@@ -955,10 +968,11 @@ gates:
 > `gate` is the one to reach for in automation: it is the interlock that refuses to
 > certify, not a report you have to interpret.
 
-**`gate` is the unattended interlock, and it needs a journal.** A journal binding is
+**`gate` is the interlock of durable custody, and it needs a journal.** A journal binding is
 unattended by construction — `awm watch --init --plan` accepts only a compact plan whose
-execution mode is `desatendido` — so an interactive cycle has no journal, and `gate` has
-nothing to certify against. On a repository with no journal it reports
+execution mode is `desatendido` — so an interactive cycle, or an unattended native session
+that did not opt into durable custody, has no journal, and `gate` has nothing to certify
+against. On a repository with no journal it reports
 `category: "absent"` and exits non-zero, naming `awm watch --init --plan` as the remedy.
 That is absence, not damage: a genuinely unreadable `state.json` reports
 `category: "corrupt"` instead, and the two want different responses.
@@ -966,7 +980,8 @@ That is absence, not damage: a genuinely unreadable `state.json` reports
 Do not wire `gate` into CI for an interactive project — it will be permanently red for a
 reason that has nothing to do with the code. The gate for an interactive cycle is
 `awm plan admit`, which reports `journal: "not-required"` for a plan whose execution mode
-is `interactivo` and blocks on the gates that do apply (state, currentness, sensors).
+is `interactivo`, or `desatendido` on a native v1 plan with no journal, and blocks on the
+gates that do apply (state, currentness, sensors, controller posture).
 
 ### `awm watch`
 

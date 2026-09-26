@@ -320,7 +320,7 @@ describe('plan admit Commander wiring', () => {
             expect(policy).not.toHaveBeenCalled(); expect(capabilities).not.toHaveBeenCalled();
         } finally { output.mockRestore(); process.exitCode = undefined; }
     });
-    it('derives desatendido from the canonical plan header and requires a journal without a flag', async () => {
+    it('derives desatendido from the canonical plan header; a native v1 plan needs no journal (opt-in durable custody)', async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-admit-header-'));
         const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
         try {
@@ -336,7 +336,11 @@ describe('plan admit Commander wiring', () => {
                 readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }),
             });
             await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', root, '--json']);
-            expect(JSON.parse(String(output.mock.calls[0][0]))).toMatchObject({ state: 'blocked', executionMode: 'desatendido', journal: expect.stringMatching(/missing|corrupt/) });
+            const withoutPosture = JSON.parse(String(output.mock.calls[0][0]));
+            expect(withoutPosture).toMatchObject({ state: 'blocked', executionMode: 'desatendido', journal: 'not-required' });
+            expect(withoutPosture.diagnostics[0]).toMatchObject({ code: 'ADMISSION_CONTROLLER_AUTONOMY_REQUIRED' });
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', root, '--controller-autonomy', 'approval-free', '--json']);
+            expect(JSON.parse(String(output.mock.calls[1][0]))).toMatchObject({ state: 'admitted', executionMode: 'desatendido', journal: 'not-required' });
         } finally { output.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
     });
 

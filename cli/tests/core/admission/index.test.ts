@@ -147,12 +147,44 @@ describe('admitPlan', () => {
         expect(report.diagnostics[0].code).toBe('ADMISSION_CAPABILITY_UNVERIFIED');
     });
 
-    it('reports the schema-2 journal prerequisite for otherwise admissible unattended work', async () => {
-        const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as unknown as PlanValidationReport;
-        const report = await admitPlan({ plan: unattended, provider: 'codex', cwd: process.cwd(), enabledAgents: ['codex'] });
-        expect(report).toMatchObject({ state: 'blocked', executionMode: 'desatendido', journal: 'missing' });
-        expect(report.diagnostics[0]).toMatchObject({ code: 'ADMISSION_JOURNAL_BINDING_REQUIRED' });
-        expect(report.forecast).toBeUndefined();
+    // The durable controller (journal + awm watch + jobs) is opt-in again for
+    // native v1 dispatch, as it was before 9.8.0: a v1 unattended plan with no
+    // journal on its branch runs as one native provider session. Creating a
+    // journal (awm watch --init) is the opt-in, after which it must be current.
+    // v2 routing custody lives in the journal, so awm-routed still requires it.
+    describe('the durable journal is opt-in for native v1 unattended work', () => {
+        const unattended = () => ({ ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as unknown as PlanValidationReport);
+        const base = () => ({ plan: unattended(), provider: 'codex' as const, cwd: process.cwd(), enabledAgents: ['codex'] as const, planPath: 'docs/plan.md', controllerAutonomy: 'approval-free' as const });
+
+        it('admits a v1 unattended plan with no journal as journal not-required', async () => {
+            const report = await admitPlan(base());
+            expect(report).toMatchObject({ state: 'admitted', executionMode: 'desatendido', journal: 'not-required' });
+            expect(report.diagnostics.map(d => d.code)).not.toContain('ADMISSION_JOURNAL_BINDING_REQUIRED');
+        });
+
+        it('keeps a journal that exists (the opt-in) fail-closed when it is corrupt or stale', async () => {
+            const corrupt = await admitPlan({ ...base(), journalCorrupt: true });
+            expect(corrupt).toMatchObject({ state: 'blocked', journal: 'corrupt' });
+            expect(corrupt.diagnostics[0]).toMatchObject({ code: 'ADMISSION_JOURNAL_BINDING_REQUIRED' });
+            const stale = await admitPlan({ ...base(), journalState: { ...emptyState('main'), schema: 2 as const, planBinding: { path: 'docs/plan.md', digest: 'b'.repeat(64), schema: 'compact-slices/v1' as const, executionMode: 'desatendido' as const, boundAt: '2026-09-15T00:00:00.000Z' } } });
+            expect(stale).toMatchObject({ state: 'blocked', journal: 'stale' });
+            const legacy = await admitPlan({ ...base(), journalState: emptyState('main') });
+            expect(legacy).toMatchObject({ state: 'blocked', journal: 'stale' });
+        });
+
+        it('still requires the journal for awm-routed v2 unattended work', async () => {
+            const v2Unattended = { ...valid, schema: 'compact-slices/v2' as const, manifest: { ...valid.manifest, executionMode: 'desatendido', schema: 'compact-slices/v2' as const, slices: valid.manifest.slices.map(slice => ({ ...slice, implementerProfile: 'mechanical' })) } } as unknown as PlanValidationReport;
+            const report = await admitPlan({ ...base(), plan: v2Unattended });
+            expect(report).toMatchObject({ state: 'blocked', executionMode: 'desatendido', journal: 'missing' });
+            expect(report.diagnostics[0]).toMatchObject({ code: 'ADMISSION_JOURNAL_BINDING_REQUIRED' });
+            expect(report.forecast).toBeUndefined();
+        });
+
+        it('keeps the controller posture gate for journal-less unattended work', async () => {
+            const report = await admitPlan({ ...base(), controllerAutonomy: undefined });
+            expect(report.state).toBe('blocked');
+            expect(report.diagnostics[0]).toMatchObject({ code: 'ADMISSION_CONTROLLER_AUTONOMY_REQUIRED' });
+        });
     });
 
     it('admits unattended work only with an exact schema-2 plan binding', async () => {
