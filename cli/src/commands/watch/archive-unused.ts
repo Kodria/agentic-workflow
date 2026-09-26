@@ -18,6 +18,7 @@ export interface WatchJournalStatus {
     state: 'missing' | 'corrupt' | 'present';
     cycleState?: JournalState['cycle']['status'];
     latestGeneration?: { n: number; token: string; state: JournalState['generations'][number]['state'] };
+    controllerWait?: { state: 'waiting-native-child'; since: string; checkedAt: string };
     binding?: { path: string; digest: string; executionDigest?: string; executionIdentitySchema?: string; schema: string; executionMode: string; boundAt: string };
     bootstrapUnused: boolean;
 }
@@ -45,6 +46,9 @@ export function watchJournalStatus(repoRoot: string, branch: string): WatchJourn
     return {
         state: 'present', cycleState: current.state.cycle.status, bootstrapUnused,
         ...(latest ? { latestGeneration: { n: latest.n, token: latest.token, state: latest.state } } : {}),
+        ...(current.state.cycle.status === 'IN_PROGRESS' && latest && current.state.controllerWait?.generationToken === latest.token
+            ? { controllerWait: { state: 'waiting-native-child' as const, since: current.state.controllerWait.since,
+                checkedAt: current.state.controllerWait.checkedAt } } : {}),
         ...(binding ? { binding: { path: binding.path, digest: binding.digest, ...(binding.executionDigest ? { executionDigest: binding.executionDigest, executionIdentitySchema: binding.executionIdentitySchema } : {}), schema: binding.schema, executionMode: binding.executionMode, boundAt: binding.boundAt } } : {}),
     };
 }

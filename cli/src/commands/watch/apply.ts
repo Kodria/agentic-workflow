@@ -451,6 +451,9 @@ export function applyRequestToState(s: JournalState, env: RequestEnvelope & { re
                 routingAttemptId = attempt.id;
                 if (attempt.nativeEvidenceRequired !== true) throw new Error('register --entity dispatch v2 requires native event receipt');
                 reservedForNewDispatch = attempt.state === 'reserved';
+                if (s.routingAttempts?.some(candidate => candidate.id !== attempt.id && candidate.envelope.sliceId === taskId
+                    && ['reserved', 'active', 'unknown'].includes(candidate.state)))
+                    throw new Error('register --entity dispatch: otro intento nativo de la slice sigue activo');
             } else if (p.routingAttemptId !== undefined) throw new Error('register --entity dispatch: routingAttemptId solo para compact v2');
             const noLiveJobs = (): boolean => Object.values(s.jobs).every(job => ['exited', 'cancelled'].includes(job.executionState)
                 && [job.processRef, job.wrapperRef].every(ref => !ref || (!refIsAlive(ref) && groupIsGone(ref.processGroup))));
@@ -458,7 +461,10 @@ export function applyRequestToState(s: JournalState, env: RequestEnvelope & { re
             // A blocked routing verdict does not prove its native child has
             // stopped. This migration permits exactly the first linked handoff;
             // a subsequent retry needs a separately verified ownership path.
-            if (historical.some(d => d.id !== dispatchId))
+            const recoveredHistorical = v2 && historical.length === 1
+                && s.dispatches.some(d => d.taskId === taskId && d.routingAttemptId
+                    && s.routingAttempts?.find(a => a.id === d.routingAttemptId)?.state === 'interrupted');
+            if (historical.some(d => d.id !== dispatchId) && !recoveredHistorical)
                 throw new Error('register --entity dispatch: historical unlinked dispatch ID conflictivo');
             const existing = s.dispatches.find(d => d.id === dispatchId);
             // A 9.12.2 controller could ACK the unlinked intent before it

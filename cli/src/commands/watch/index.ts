@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process';
 import { initWatch, rebindWatchPlan } from './init';
 import { recoverRejectedTask } from './request-recovery';
 import { recoverAdmissionCustody } from './admission-recovery';
+import { recoverInterruptedV2Attempt } from './v2-interruption';
 import { runSupervisorLoop, DEFAULT_SUPERVISOR_CONFIG, type RoutingIdentity } from './supervisor';
 import { validateRuntimeKey } from '../../core/model-policy/capabilities';
 import { CONTROLLER_AUTONOMIES, isControllerAutonomy } from '../../core/journal/adapter';
@@ -197,6 +198,40 @@ export function registerWatchCommand(program: Command): void {
                     generationToken: opts.generation, reason: opts.reason,
                 });
                 process.stdout.write(JSON.stringify({ recovered: true, outcome, generationToken: opts.generation ?? null }) + '\n');
+            } catch (error) {
+                process.stderr.write(`${(error as Error).message}\n`);
+                process.exitCode = 1;
+            }
+        });
+
+    watch.command('recover-v2-interruption')
+        .description('retira de forma auditada un hijo Codex V2 interrumpido y libera una sola reserva nueva')
+        .requiredOption('--attempt <id>')
+        .requiredOption('--child <id>')
+        .requiredOption('--parent <id>')
+        .requiredOption('--dispatch <id>')
+        .requiredOption('--job <id>')
+        .requiredOption('--job-fingerprint <sha>')
+        .requiredOption('--generation <token>')
+        .requiredOption('--plan-digest <sha>')
+        .requiredOption('--execution-digest <sha>')
+        .requiredOption('--parent-rollout <path>')
+        .requiredOption('--child-rollout <path>')
+        .requiredOption('--reason <text>')
+        .option('--check', 'verifica todos los guards sin publicar la transición')
+        .action(async opts => {
+            const repo = process.cwd();
+            try {
+                const branch = currentBranch(repo);
+                resolveCommandContext(repo, branch);
+                const outcome = await recoverInterruptedV2Attempt(repo, branch, {
+                    attemptId: opts.attempt, nativeAgentId: opts.child, parentThreadId: opts.parent,
+                    dispatchId: opts.dispatch, jobId: opts.job, jobFingerprint: opts.jobFingerprint,
+                    generationToken: opts.generation, planDigest: opts.planDigest, executionDigest: opts.executionDigest,
+                    parentRollout: path.resolve(opts.parentRollout), childRollout: path.resolve(opts.childRollout), reason: opts.reason,
+                    checkOnly: opts.check === true,
+                });
+                process.stdout.write(JSON.stringify({ outcome }) + '\n');
             } catch (error) {
                 process.stderr.write(`${(error as Error).message}\n`);
                 process.exitCode = 1;

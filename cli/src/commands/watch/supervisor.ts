@@ -16,7 +16,7 @@ import { queryLocalEventScope } from '../../core/model-policy/local-event-scope'
 import type { EventScope } from '../../core/model-policy/capabilities-v2';
 import { routingReport } from '../../core/model-policy/journal';
 import { adapterFor, isWatchProvider, isControllerAutonomy, type ControllerAutonomy } from '../../core/journal/adapter';
-import { groupIsGone, terminateGroupConfirmed } from '../../core/journal/process';
+import { groupIsGone, refIsAlive, terminateGroupConfirmed } from '../../core/journal/process';
 import { computeGate, computeTrackGate, FingerprintNow } from '../job/gate';
 import { isWorktreeClean, headSha } from '../../core/tracks/git';
 import { acquireLock, releaseLock, verifyBranchInvariant } from './lock';
@@ -767,7 +767,36 @@ export class Supervisor {
             { heartbeatAgeMs, activityFrozenMs, safeToReplace },
             { heartbeatTimeoutMs: this.cfg.heartbeatTimeoutMs, activityWindowMs: this.cfg.activityWindowMs },
         );
-        if (decision === 'healthy') { this.backoff.reset(); return 'ok'; }
+        if (decision === 'healthy') {
+            if (s.controllerWait) { s.controllerWait = undefined; writeJournal(this.repoRoot, this.branch, s); }
+            this.backoff.reset(); return 'ok';
+        }
+        // A live, identity-matched controller with an ACKed, observed native
+        // child is waiting on that child. Silence is expected in this state.
+        // Keep the wait visible and defer new jobs; only a positive adapter
+        // safety observation may enter ordinary replacement handling.
+        const waiting = s.routingAttempts?.find(attempt => attempt.state === 'active'
+            && attempt.nativeAgentId && attempt.nativeEventDigest && attempt.observed
+            && attempt.envelope.role === 'implementer'
+            && s.tasks.find(task => task.id === attempt.envelope.sliceId)?.status === 'in-progress'
+            && s.dispatches.some(dispatch => dispatch.routingAttemptId === attempt.id
+                && dispatch.dispatchRequestId
+                && s.appliedRequests[dispatch.dispatchRequestId]?.outcome === 'applied'
+                && s.appliedRequests[dispatch.dispatchRequestId]?.resultRef === dispatch.id));
+        if (waiting && safeToReplace !== 'safe' && refIsAlive(gen.processRef)) {
+            const now = new Date().toISOString();
+            const prior = s.controllerWait;
+            if (!prior || prior.generationToken !== gen.token || prior.routingAttemptId !== waiting.id
+                || Date.now() - Date.parse(prior.checkedAt) >= 60_000) {
+                s.controllerWait = { generationToken: gen.token, routingAttemptId: waiting.id,
+                    since: prior?.generationToken === gen.token && prior.routingAttemptId === waiting.id ? prior.since : now,
+                    checkedAt: now };
+                writeJournal(this.repoRoot, this.branch, s);
+                appendEvent(this.repoRoot, this.branch, { kind: 'controller-waiting-native-child', n: gen.n,
+                    routingAttemptId: waiting.id });
+            }
+            return 'deferred';
+        }
         if (decision === 'suspected-stall-observe') {
             if (gen.state !== 'controller-suspected-stall') {
                 gen.state = 'controller-suspected-stall';        // SOLO observacion (R4.2)

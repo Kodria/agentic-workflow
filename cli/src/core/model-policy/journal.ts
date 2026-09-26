@@ -33,7 +33,18 @@ export function reserveRoutingAttempt(state: JournalState, input: { obligationId
     if (input.envelope.role === 'implementer' && priorLineage === undefined) next.implementationLineages.push({ id: input.lineageId, obligationId: input.obligationId, sliceId: input.envelope.sliceId!, planDigest: input.envelope.planDigest, executionDigest: input.envelope.executionDigest, initialProfile: input.envelope.requestedProfile as 'mechanical' | 'integration' | 'judgment', initialEffort: input.envelope.resolved.effort.kind === 'runtime-default' ? 'runtime-default' : input.envelope.resolved.effort.value === 'high' ? 'high' : 'medium', attempts: 0 });
     if (priorLineage !== undefined && (priorLineage.obligationId !== input.obligationId || priorLineage.planDigest !== input.envelope.planDigest || priorLineage.executionDigest !== input.envelope.executionDigest || priorLineage.sliceId !== input.envelope.sliceId || priorLineage.initialProfile !== input.envelope.requestedProfile)) throw new Error('routing lineage binding mismatch');
     const attempts = next.routingAttempts!.filter(item => item.lineageId === input.lineageId && item.envelope.role === 'implementer');
+    if (input.envelope.role === 'implementer' && next.routingAttempts!.some(item => item.lineageId !== input.lineageId
+        && item.envelope.sliceId === input.envelope.sliceId && ['reserved', 'active', 'unknown'].includes(item.state)))
+        throw new Error('routing slice already has a live attempt');
     if (input.envelope.role === 'implementer' && attempts.length >= 3) throw new Error('routing implementation budget exhausted');
+    if (attempts.some(item => item.state === 'interrupted')) {
+        const interrupted = attempts[0];
+        if (attempts.length !== 1 || interrupted.state !== 'interrupted' || !interrupted.interruption
+            || input.envelope.effectiveProfile !== interrupted.envelope.effectiveProfile
+            || canonical(input.envelope.resolved) !== canonical(interrupted.envelope.resolved)
+            || input.envelope.policyDigest !== interrupted.envelope.policyDigest)
+            throw new Error('routing V2 interruption permits only one identical replacement selection');
+    }
     const fullFallback = input.envelope.role === 'implementer' && input.envelope.effectiveProfile === 'full';
     if (fullFallback && attempts.some(item => item.envelope.effectiveProfile === 'full')) throw new Error('routing full fallback cannot recursively retry a lineage');
     if (fullFallback && attempts.length > 0) {
@@ -117,6 +128,12 @@ export function resolveLineageEscalation(state: JournalState, lineageId: string,
         return { profile: initial, effort: lineage?.initialEffort ?? 'medium' };
     }
     const last = attempts[attempts.length - 1];
+    if (last.state === 'interrupted' && last.interruption && attempts.length === 1
+        && last.envelope.effectiveProfile !== 'full') {
+        return { profile: last.envelope.effectiveProfile as 'mechanical' | 'integration' | 'judgment',
+            effort: last.envelope.resolved.effort.kind === 'explicit'
+                ? last.envelope.resolved.effort.value as 'medium' | 'high' : 'runtime-default' };
+    }
     if (last.envelope.effectiveProfile === 'full') throw new Error('routing full fallback is exhausted');
     if (last.verdict === 'inconclusive' && ['PROVIDER_REJECTED', 'SELECTION_MISMATCH', 'PROVENANCE_MISSING'].includes(last.reasonCode ?? '')) {
         const lineage = state.implementationLineages?.find(candidate => candidate.id === lineageId);
