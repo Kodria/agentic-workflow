@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import {
     spawnStructured, refIsAlive, terminateGroupConfirmed, terminatePreviouslyOwnedGroup,
     groupIsGone, activitySnapshot, captureSelfRef, captureRefFor, processStatesAreGone,
+    descendantActivity,
 } from '../../../src/core/journal/process';
 import { isWindowsNative } from '../../../src/core/paths';
 
@@ -165,6 +166,71 @@ describe('process identity', () => {
         expect(typeof snap!.cpuTime).toBe('string');
         expect(snap!.groupSize).toBeGreaterThanOrEqual(1);
         child.kill('SIGKILL');
+    });
+
+    // False-stall root cause (Kodria/agentic-workflow#196, v1 smoke 2026-09-26):
+    // a Codex controller waiting on a native subagent barely moves its own CPU
+    // time, and the work it waits on can run in processes OUTSIDE its process
+    // group (sandboxed tool commands). Activity must see the whole descendant
+    // tree, or a healthy wait reads as frozen and the cycle enters custody.
+    describe('descendantActivity (descendant tree, not only the process group)', () => {
+        const table = [
+            '  10     1 00:00:05',
+            '  20    10 00:00:01',   // child
+            '  30    20 00:00:02',   // grandchild (e.g. setsid'd sandbox command)
+            '  40     1 00:00:09',   // unrelated
+            '  50    40 00:00:03',   // child of the unrelated process
+        ].join('\n');
+
+        test('counts children and grandchildren, excludes the root and unrelated processes', () => {
+            expect(descendantActivity(table, 10)).toMatch(/^2:[0-9a-f]{64}$/);
+            expect(descendantActivity(table, 20)).toMatch(/^1:/);
+            expect(descendantActivity(table, 30)).toBe('0:none');
+            expect(descendantActivity(table, 999)).toBe('0:none');
+        });
+
+        test('changes when a descendant accumulates cpu, appears or exits, and ignores unrelated churn', () => {
+            const base = descendantActivity(table, 10);
+            expect(descendantActivity(table.replace('30    20 00:00:02', '30    20 00:00:03'), 10)).not.toBe(base);
+            expect(descendantActivity(`${table}\n  60    30 00:00:00`, 10)).not.toBe(base);
+            expect(descendantActivity(table.split('\n').filter((line) => !line.includes('30    20')).join('\n'), 10)).not.toBe(base);
+            expect(descendantActivity(table.replace('50    40 00:00:03', '50    40 00:00:07'), 10)).toBe(base);
+            expect(descendantActivity(`${table}\n  70    40 00:00:00`, 10)).toBe(base);
+        });
+
+        test('rejects an invalid root and never follows a ppid cycle forever', () => {
+            expect(() => descendantActivity(table, 0)).toThrow(/root pid/);
+            expect(() => descendantActivity(table, Number.NaN)).toThrow(/root pid/);
+            expect(descendantActivity('  10     1 00:00:00\n  20    10 00:00:00\n  10    20 00:00:00', 10)).toMatch(/^1:/);
+        });
+
+        test('ignores malformed ps lines instead of inventing processes', () => {
+            expect(descendantActivity('garbage\n  20    10 00:00:01\n\n  x y z', 10)).toMatch(/^1:/);
+        });
+    });
+
+    test('activitySnapshot ve un nieto fuera del process group del controlador', async () => {
+        if (isWindowsNative()) return;   // win32 degrada activity sin ps (ver activitySnapshot)
+        const script = "setTimeout(() => { require('child_process').spawn(process.execPath, ['-e', 'setTimeout(()=>{}, 4000)'], { detached: true, stdio: 'ignore' }).unref(); }, 400); setTimeout(()=>{}, 4000)";
+        const { child, ref } = spawnStructured(['node', '-e', script], process.cwd(), 'n-desc');
+        try {
+            const before = activitySnapshot(ref);
+            expect(before).not.toBeNull();
+            let after = activitySnapshot(ref);
+            for (let i = 0; i < 40 && after !== null && after.descendants === before!.descendants; i++) {
+                await new Promise((resolve) => setTimeout(resolve, 50));
+                after = activitySnapshot(ref);
+            }
+            expect(after).not.toBeNull();
+            // The detached grandchild lives in its own process group: the group
+            // signal cannot see it, the descendant signal must.
+            expect(after!.groupSize).toBe(before!.groupSize);
+            expect(after!.descendants).not.toBe(before!.descendants);
+            expect(after!.descendants).toMatch(/^1:/);
+        } finally {
+            try { process.kill(-ref.processGroup, 'SIGKILL'); } catch { /* ya ausente */ }
+            child.kill('SIGKILL');
+        }
     });
 
     test('captureSelfRef captura la identidad del proceso actual (R2.1)', () => {  // verifies R2.1

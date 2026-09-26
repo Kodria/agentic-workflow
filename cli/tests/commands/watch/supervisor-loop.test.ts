@@ -11,7 +11,7 @@ import { requestJob } from '../../../src/commands/job/request';
 import { emitRequest } from '../../../src/core/journal/requests';
 import { initJournal, readJournal, writeJournal } from '../../../src/core/journal/store';
 import { supervisorLockPath } from '../../../src/core/journal/paths';
-import { spawnStructured } from '../../../src/core/journal/process';
+import { spawnStructured, activitySnapshot } from '../../../src/core/journal/process';
 import { computeFingerprint } from '../../../src/core/journal/fingerprint';
 import * as fingerprint from '../../../src/core/journal/fingerprint';
 import { reconcileTracks, defaultTrackRuntime, TrackRuntime, SupervisorObservation } from '../../../src/commands/watch/tracks';
@@ -75,7 +75,7 @@ function adoptFixtureController(repo: string): void {
     writeJournal(repo, 'main', state);
     const adapter = adapterModule.adapterFor('codex');
     jest.spyOn(adapterModule, 'adapterFor').mockReturnValue({ ...adapter,
-        activity: () => ({ cpuTime: '0', groupSize: 1 }), safeToReplace: () => 'indeterminate' });
+        activity: () => ({ cpuTime: '0', groupSize: 1, descendants: '0:none' }), safeToReplace: () => 'indeterminate' });
 }
 
 /** Legacy fixtures predate compact-only admission; make their execution contract explicit. */
@@ -653,6 +653,39 @@ describe('supervisor loop', () => {
         expect(fs.existsSync(supervisorLockPath(repo))).toBe(true);   // custodia NO libera el lock
         expect(child.killed).toBe(false);                              // y NO mato al controlador
         child.kill('SIGKILL');
+    });
+
+    // v1 smoke 2026-09-26 (#196): a Codex controller waiting on a native
+    // subagent kept an idle leader while the work ran in processes outside its
+    // process group, and the supervisor entered a false custody. Work in the
+    // descendant tree is activity: observe, never custody, while it moves.
+    itPosix('espera sana: lider ocioso + descendiente fuera del grupo trabajando => observa, no custodia (R4.2)', async () => {  // verifies R4.2b
+        initUnattendedFixture(repo);
+        beginGeneration(repo, 'main');
+        const worker = "require('child_process').spawn('sh', ['-c', 'while :; do sleep 0.02; done'], { detached: true, stdio: 'ignore' }).unref(); setTimeout(()=>{}, 20000)";
+        const { child, ref } = spawnStructured(['node', '-e', worker], process.cwd(), 'nWait');
+        try {
+            let s = readJournal(repo, 'main').state!;
+            activeGeneration(s)!.processRef = ref;
+            s.controllerHeartbeatAt = new Date(Date.now() - 3600000).toISOString();   // heartbeat vencido: bloqueado en la espera
+            writeJournal(repo, 'main', s);
+            await until(() => (activitySnapshot(ref)?.descendants ?? '0:none') !== '0:none');
+            const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', heartbeatTimeoutMs: 1, activityWindowMs: 50, tickMs: 20 };
+            const sup = new Supervisor(repo, 'main', cfg, fakeSpawner, undefined, admitted);
+            await sup.tick();
+            await new Promise((r) => setTimeout(r, 150));      // mas que la ventana, pero el arbol se movio
+            expect(await sup.tick()).not.toBe('custody');
+            const after = readJournal(repo, 'main').state!;
+            expect(after.cycle.status).toBe('IN_PROGRESS');
+            expect(activeGeneration(after)!.state).toBe('controller-suspected-stall');   // observado, jamas matado
+            expect(child.killed).toBe(false);
+        } finally {
+            // The detached shell leads its own group: kill that group, never a pattern match.
+            let shells: number[] = [];
+            try { shells = execFileSync('pgrep', ['-P', String(ref.pid)], { encoding: 'utf8' }).split('\n').filter(Boolean).map(Number); } catch { /* sin hijos */ }
+            for (const pid of shells) { try { process.kill(-pid, 'SIGKILL'); } catch { /* ya ausente */ } }
+            child.kill('SIGKILL');
+        }
     });
 
     itPosix('runSupervisorLoop: bootstrap gen-1 con stub codex, COMPLETE => libera lock y termina su generacion (R4.1/R4.5/R2.4)', async () => {  // verifies R4.1

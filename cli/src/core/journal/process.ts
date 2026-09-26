@@ -425,7 +425,56 @@ export function groupIsGone(pgid: number): boolean {
     }
 }
 
-export interface ActivitySnapshot { cpuTime: string; groupSize: number; }
+/** `descendants` is `<count>:<sha256>` over every descendant's pid and cpu time,
+ *  `0:none` without descendants, `unknown` when it cannot be observed. */
+export interface ActivitySnapshot { cpuTime: string; groupSize: number; descendants: string; }
+
+const MAX_PS_ROWS = 65536;
+
+/** Activity of every process descending from `rootPid` in a `ps -A -o
+ *  pid=,ppid=,time=` table. The process group alone misses work a controller
+ *  waits on when the provider runs it in its own group or session (sandboxed
+ *  tool commands), which turned a healthy wait on a native subagent into a
+ *  "frozen" controller and a false custody (#196, v1 smoke). Root excluded;
+ *  malformed rows ignored; a ppid cycle cannot loop because each pid is
+ *  visited once. */
+export function descendantActivity(psTable: string, rootPid: number): string {
+    if (!Number.isInteger(rootPid) || rootPid <= 0) throw new Error(`descendantActivity: root pid must be a positive integer, got ${rootPid}`);
+    const children = new Map<number, Array<{ pid: number; time: string }>>();
+    let rows = 0;
+    for (const line of psTable.split('\n')) {
+        const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s*$/.exec(line);
+        if (match === null) continue;
+        if (++rows > MAX_PS_ROWS) break;
+        const pid = Number(match[1]); const ppid = Number(match[2]);
+        const siblings = children.get(ppid) ?? [];
+        siblings.push({ pid, time: match[3] });
+        children.set(ppid, siblings);
+    }
+    const seen = new Set<number>([rootPid]);
+    const found: string[] = [];
+    const queue = [rootPid];
+    while (queue.length > 0) {
+        for (const child of children.get(queue.shift()!) ?? []) {
+            if (seen.has(child.pid)) continue;
+            seen.add(child.pid);
+            found.push(`${child.pid}:${child.time}`);
+            queue.push(child.pid);
+        }
+    }
+    if (found.length === 0) return '0:none';
+    found.sort();
+    return `${found.length}:${crypto.createHash('sha256').update(found.join('\n')).digest('hex')}`;
+}
+
+function observeDescendants(rootPid: number): string {
+    try {
+        const table = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,time='], { encoding: 'utf8', stdio: EXEC_STDIO, timeout: PS_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 });
+        return descendantActivity(table, rootPid);
+    } catch {
+        return 'unknown';
+    }
+}
 /** Llamada UNA VEZ POR TICK por el supervisor (ver superviseController en
  *  commands/watch/supervisor.ts) mientras un controlador este activo — el
  *  path mas caliente de todo el modulo. En win32, `ps`/`pgrep`, cuando
@@ -443,7 +492,7 @@ export interface ActivitySnapshot { cpuTime: string; groupSize: number; }
  *  es fuente de verdad en esta plataforma. */
 export function activitySnapshot(ref: ProcessRef): ActivitySnapshot | null {
     if (!refIsAlive(ref)) return null;
-    if (isWindowsNative()) return { cpuTime: 'unknown', groupSize: 1 };
+    if (isWindowsNative()) return { cpuTime: 'unknown', groupSize: 1, descendants: 'unknown' };
     let cpu = '0';
     try { cpu = psField(ref.pid, 'time') ?? '0'; } catch { cpu = '0'; }
     let groupSize = 1;
@@ -451,7 +500,7 @@ export function activitySnapshot(ref: ProcessRef): ActivitySnapshot | null {
         groupSize = execFileSync('pgrep', ['-g', String(ref.processGroup)], { encoding: 'utf8', stdio: EXEC_STDIO, timeout: PS_TIMEOUT_MS })
             .split('\n').filter(Boolean).length;
     } catch { groupSize = 1; }
-    return { cpuTime: cpu, groupSize };
+    return { cpuTime: cpu, groupSize, descendants: observeDescendants(ref.pid) };
 }
 
 /** win32: sin process groups POSIX ni convencion de pid negativo, y sin

@@ -983,12 +983,19 @@ awm watch [--init] [--provider <p>] [--heartbeat-timeout <min>]
 | `--init` | Bootstrap: create the current branch's journal, detect verifiers, and exit. Requires `--plan` with a valid **unattended** compact plan; an interactive plan is refused, because a journal binding records `executionMode: desatendido` by construction. |
 | `--provider <p>` | `codex` or `claude-code`. Default: `codex`. |
 | `--heartbeat-timeout <min>` | Minutes of heartbeat silence before a controller is considered gone. Default: `5`. |
-| `--activity-window <min>` | Extra minutes without process activity before relieving it. Default: `10`. |
+| `--activity-window <min>` | Extra minutes without process activity before relieving it. Activity is the controller's CPU time, the size of its process group, and the pid and CPU time of every descendant process — including descendants in another process group or session, such as sandboxed tool commands. Default: `10`. |
 | `--max-parallel <n>` | Cap of simultaneously ACTIVE tracks. Default: derived from the bundled benchmark. |
 
 The two timeouts are separate on purpose: a silent heartbeat is not the same as a dead
 process. A controller can stop reporting while its work is still advancing, and the
 activity window is what keeps that work from being reclaimed out from under it.
+Even when both signals expire, a live controller is never killed: the cycle enters
+`BLOCKED` custody. A controller whose own process idles while it waits on a native
+subagent is therefore only safe from that custody while the subagent's work shows up
+as activity in its descendant tree, or while the controller keeps emitting
+`awm job controller-heartbeat` between bounded waits. If your provider runs subagent
+work where neither is observable, raise both timeouts to cover the longest expected
+subagent run.
 Full compact admission runs before an initial or replacement controller generation.
 During an already-admitted generation, ordinary RED edits do not rerun the sensor
 pre-dispatch gate on every tick; plan binding and runtime identity remain checked,
