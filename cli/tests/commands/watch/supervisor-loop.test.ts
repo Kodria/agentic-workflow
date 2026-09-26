@@ -599,6 +599,94 @@ describe('supervisor loop', () => {
         expect(readJournal(repo, 'main').state!.cycle.status).toBe('BLOCKED');
     });
 
+    // v1 smoke 2026-09-26 (#196): the Codex controller exited after the last
+    // review, before requesting the cycle-level verifications it had planned.
+    // Tasks done + planned-but-never-requested cycle items is pending closure
+    // work, not an unsafe recovery claim: relaunch the controller to close.
+    function closurePendingState(repoRoot: string) {
+        initUnattendedFixture(repoRoot);
+        const state = readJournal(repoRoot, 'main').state!;
+        const verdict = (id: string, obligationId: string) => {
+            const argv = ['awm-review', obligationId];
+            return { id, obligationId, result: 'pass' as const, detail: 'ok', receivedAt: new Date().toISOString(),
+                fingerprint: computeFingerprint(repoRoot, argv, [], '.').fingerprint, argv, paths: [], cwd: '.' };
+        };
+        state.requiredVerifiers = ['test', 'sensors'];
+        state.tasks.push({ id: 'S1', title: 'terminada', status: 'done', attempts: 1, verificationPlan: [], reviewObligations: [
+            { id: 'o-spec', taskId: 'S1', kind: 'spec', verdictId: 'v-spec' },
+            { id: 'o-quality', taskId: 'S1', kind: 'quality', verdictId: 'v-quality' },
+        ] });
+        state.verdicts.push(verdict('v-spec', 'o-spec'), verdict('v-quality', 'o-quality'));
+        state.cycleVerificationPlan.push(
+            { id: 'cycle-test', kind: 'test' }, { id: 'cycle-sensors', kind: 'sensors' },
+            { id: 'cycle-qa', kind: 'qa' }, { id: 'cycle-interlock', kind: 'interlock' },
+        );
+        return state;
+    }
+
+    test('cierre pendiente: tareas terminadas + verificaciones de ciclo nunca pedidas => relanza el controller para cerrar, sin custodia', async () => {
+        const state = closurePendingState(repo);
+        writeJournal(repo, 'main', state);
+        beginGeneration(repo, 'main');                                  // el reemplazo que el loop abre tras la salida del anterior
+        let spawns = 0;
+        const outcome = await new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, () => { spawns++; }, undefined, admitted).tick();
+        expect(outcome).not.toBe('custody');
+        const after = readJournal(repo, 'main').state!;
+        expect(after.cycle.status).toBe('IN_PROGRESS');
+        expect(spawns).toBe(1);
+        expect(activeGeneration(after)!.resumeAction?.kind).toBe('resume-cycle');
+        expect(after.tasks.map(task => [task.id, task.status, task.attempts])).toEqual([['S1', 'done', 1]]);   // nada se redespacha
+    });
+
+    test.each([
+        ['un item de tarea sin satisfacer tras declararla terminada', (s: ReturnType<typeof readJournal>['state']) => {
+            s!.tasks[0].verificationPlan.push({ id: 'task-test', kind: 'test' });
+        }],
+        ['un item de ciclo que cita un job inexistente', (s: ReturnType<typeof readJournal>['state']) => {
+            s!.cycleVerificationPlan[0].satisfiedBy = 'job-fantasma';
+        }],
+        ['una revision obligatoria sin verdict', (s: ReturnType<typeof readJournal>['state']) => {
+            s!.tasks[0].reviewObligations[1].verdictId = undefined;
+        }],
+        ['un verdict de revision adverso sin fix cerrado', (s: ReturnType<typeof readJournal>['state']) => {
+            s!.verdicts[1].result = 'fail';
+        }],
+        ['un verificador requerido que ningun plan contiene', (s: ReturnType<typeof readJournal>['state']) => {
+            s!.cycleVerificationPlan.splice(0, 1);
+        }],
+    ])('cierre pendiente sigue fail-closed con %s: custodia sin controller', async (_name, mutate) => {
+        const state = closurePendingState(repo);
+        mutate(state);
+        writeJournal(repo, 'main', state);
+        beginGeneration(repo, 'main');                                  // mismo reemplazo: solo cambia la evidencia
+        let spawns = 0;
+        const outcome = await new Supervisor(repo, 'main', DEFAULT_SUPERVISOR_CONFIG, () => { spawns++; }, undefined, admitted).tick();
+        expect(outcome).toBe('custody');
+        expect(spawns).toBe(0);
+        expect(readJournal(repo, 'main').state!.cycle.status).toBe('BLOCKED');
+    });
+
+    // A controller that resumes heartbeating is healthy again; leaving the
+    // generation marked as a suspected stall misreports the cycle.
+    test('una generacion en sospecha de stall vuelve a active cuando el heartbeat se reanuda', async () => {
+        initUnattendedFixture(repo);
+        beginGeneration(repo, 'main');
+        const { child, ref } = spawnStructured(['node', '-e', 'setTimeout(()=>{}, 20000)'], process.cwd(), 'nBack');
+        try {
+            const s = readJournal(repo, 'main').state!;
+            const gen = activeGeneration(s)!;
+            gen.processRef = ref;
+            gen.state = 'controller-suspected-stall';
+            s.controllerHeartbeatAt = new Date().toISOString();
+            writeJournal(repo, 'main', s);
+            const cfg = { ...DEFAULT_SUPERVISOR_CONFIG, provider: 'codex', heartbeatTimeoutMs: 60000, activityWindowMs: 60000, tickMs: 20 };
+            expect(await new Supervisor(repo, 'main', cfg, fakeSpawner, undefined, admitted).tick()).not.toBe('custody');
+            expect(activeGeneration(readJournal(repo, 'main').state!)!.state).toBe('active');
+        } finally {
+            child.kill('SIGKILL');
+        }
+    });
+
     test('un journal schema-1 legacy no despacha controller ni jobs aunque contenga trabajo pendiente', async () => {
         initJournal(repo, 'main');
         const legacy = readJournal(repo, 'main').state!;

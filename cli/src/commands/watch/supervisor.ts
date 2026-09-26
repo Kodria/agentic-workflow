@@ -266,13 +266,17 @@ export function recoveryWhitelistBlocker(state: JournalState): string | undefine
     // Pending work is the normal reason to launch (or retry launching) the
     // controller.  It is not recovery evidence and therefore cannot turn a
     // transient launch failure into permanent custody.  Conversely, once a
-    // non-empty task set claims completion, missing required evidence is an
-    // unsafe recovery fact and must remain fail-closed.
+    // non-empty task set claims completion, a required verifier that no plan
+    // contains, or a task-level item left unsatisfied, is an unsafe recovery
+    // fact and must remain fail-closed. A cycle-level item that was planned
+    // but never requested is not: it is the pending closure a relaunched
+    // controller exists to perform (#196, v1 smoke), and the gate still
+    // demands its evidence before COMPLETE.
     if (state.tasks.length === 0 || state.tasks.some(task => task.status !== 'done')) return undefined;
     const verificationItems = [...state.cycleVerificationPlan, ...state.tasks.flatMap(task => task.verificationPlan)];
     for (const required of state.requiredVerifiers) {
         const requiredItems = verificationItems.filter(item => item.kind === required);
-        if (requiredItems.length === 0 || requiredItems.some(item => item.satisfiedBy === undefined)) return `falta evidencia del verificador requerido: ${required}`;
+        if (requiredItems.length === 0 || requiredItems.some(item => item.satisfiedBy === undefined && !state.cycleVerificationPlan.includes(item))) return `falta evidencia del verificador requerido: ${required}`;
     }
     return undefined;
 }
@@ -480,18 +484,23 @@ export class Supervisor {
                 const job = before0.state!.jobs[id];
                 return job !== undefined && job.verdict === 'pass' && !staleJob;
             };
-            const verificationItems = [...before0.state.cycleVerificationPlan, ...before0.state.tasks.flatMap(task => task.verificationPlan)];
-            const tests = verificationItems.filter(item => item.kind === 'test');
-            const sensorItems = verificationItems.filter(item => item.kind === 'sensors');
+            const cycleItems = before0.state.cycleVerificationPlan;
+            const verificationItems = [...cycleItems, ...before0.state.tasks.flatMap(task => task.verificationPlan)];
+            // Planned cycle items never requested are closure work, not
+            // evidence; every requested or task-level item is still judged.
+            const judged = (items: typeof verificationItems) => items.filter(item => item.satisfiedBy !== undefined || !cycleItems.includes(item));
+            const tests = judged(verificationItems.filter(item => item.kind === 'test'));
+            const sensorItems = judged(verificationItems.filter(item => item.kind === 'sensors'));
             // `computeGate` is the single authority for every verification
             // kind (review, QA and interlock included). Reuse its evidence
             // semantics instead of maintaining a weaker recovery subset.
             const evidenceGate = computeGate(before0.state, false, this.fingerprintNow);
             const terminalTaskClaims = before0.state.tasks.length > 0 && before0.state.tasks.every(task => task.status === 'done');
-            const unresolvedVerification = terminalTaskClaims && evidenceGate.reasons.some(reason => [
-                'dangling-reference', 'unsatisfied-plan', 'adverse-verdict',
+            const closurePending = terminalTaskClaims && cycleItems.some(item => item.satisfiedBy === undefined);
+            const unresolvedVerification = terminalTaskClaims && (evidenceGate.reasons.some(reason => [
+                'dangling-reference', 'adverse-verdict',
                 'stale-fingerprint', 'open-obligation', 'open-fix',
-            ].includes(reason.category));
+            ].includes(reason.category)) || verificationItems.some(item => item.satisfiedBy === undefined && !cycleItems.includes(item)));
             const hasStaleReview = before0.state.verdicts.some(verdict => verdict.fingerprint === '' || (verdict.argv.length > 0 && (() => {
                 try { return computeFingerprint(this.repoRoot, verdict.argv, verdict.paths, verdict.cwd).fingerprint !== verdict.fingerprint; } catch { return true; }
             })()));
@@ -516,7 +525,7 @@ export class Supervisor {
                 sensors: !terminalTaskClaims || sensorItems.length === 0 || sensorItems.every(item => passed(item.satisfiedBy)) ? 'pass' : 'missing',
                 verdicts: hasStaleReview ? 'stale' : (openReviewOrFix || unresolvedVerification) ? 'missing' : 'current',
             });
-            appendEvent(this.repoRoot, this.branch, { kind: 'unattended-recovery', nextAction: recovery.nextAction, activeJobIds: recovery.activeJobIds, diagnostics: recovery.diagnostics });
+            appendEvent(this.repoRoot, this.branch, { kind: 'unattended-recovery', nextAction: recovery.nextAction, activeJobIds: recovery.activeJobIds, diagnostics: recovery.diagnostics, closurePending });
             if (recovery.state !== 'ready') {
                 const staleReasons = terminalTaskClaims ? evidenceGate.reasons.filter(reason => reason.category === 'stale-fingerprint') : [];
                 const remedy = staleReasons.length > 0
@@ -525,7 +534,7 @@ export class Supervisor {
                 enterCustody(this.repoRoot, this.branch, `recovery no autorizado: ${recovery.diagnostics.join(', ')}${remedy}`);
                 return 'custody';
             }
-            recoveryResumeAction = { schema: 'controller-recovery/v1', kind: recovery.nextAction === 'reconcile-active-jobs' ? 'reconcile-active-jobs' : 'resume-next-action' };
+            recoveryResumeAction = { schema: 'controller-recovery/v1', kind: recovery.nextAction === 'reconcile-active-jobs' ? 'reconcile-active-jobs' : closurePending ? 'resume-cycle' : 'resume-next-action' };
         }
         // R6.2/R6.8/C7 (Task 11): reconciliar un `MERGE_HEAD` abierto por un
         // crash a mitad de un merge ANTES de cualquier guard general — hoy
@@ -767,7 +776,15 @@ export class Supervisor {
             { heartbeatAgeMs, activityFrozenMs, safeToReplace },
             { heartbeatTimeoutMs: this.cfg.heartbeatTimeoutMs, activityWindowMs: this.cfg.activityWindowMs },
         );
-        if (decision === 'healthy') { this.backoff.reset(); return 'ok'; }
+        if (decision === 'healthy') {
+            this.backoff.reset();
+            if (gen.state === 'controller-suspected-stall') {
+                gen.state = 'active';                             // heartbeat reanudado: la sospecha se levanta
+                writeJournal(this.repoRoot, this.branch, s);
+                appendEvent(this.repoRoot, this.branch, { kind: 'controller-stall-cleared', n: gen.n });
+            }
+            return 'ok';
+        }
         if (decision === 'suspected-stall-observe') {
             if (gen.state !== 'controller-suspected-stall') {
                 gen.state = 'controller-suspected-stall';        // SOLO observacion (R4.2)
