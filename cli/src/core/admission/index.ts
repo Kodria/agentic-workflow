@@ -259,8 +259,14 @@ export async function admitPlan(input: AdmissionInput): Promise<AdmissionReport>
         if (sensors !== 'pass') return blocked(input, [diagnostic('ADMISSION_SENSORS_BLOCKED', `Sensor verdict is ${sensors}.`)], { planDigest: plan.planDigest, provider, executionMode: mode, currentness: input.requireCurrent ? 'current' : 'not-checked', cliCurrentness, sensors });
     }
     if (mode === 'desatendido') {
-        const journal = journalStatus(input, plan);
-        if (journal !== 'current') return blocked(input, [diagnostic('ADMISSION_JOURNAL_BINDING_REQUIRED', 'Unattended execution requires a healthy schema-2 journal binding for this exact plan; run watch --init --plan.')], { planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', cliCurrentness, sensors: input.verifySensors ? 'pass' : 'not-required' });
+        // The durable controller (journal + awm watch + jobs) is opt-in, as it
+        // was before 9.8.0: native v1 dispatch with no journal on its branch
+        // runs as one provider session. Creating a journal is the opt-in, and
+        // from then on it must be current. v2 routing custody lives in the
+        // journal, so awm-routed work still requires it.
+        const observed = journalStatus(input, plan);
+        const journal: AdmissionReport['journal'] = observed === 'missing' && plan.schema === 'compact-slices/v1' ? 'not-required' : observed;
+        if (journal !== 'current' && journal !== 'not-required') return blocked(input, [diagnostic('ADMISSION_JOURNAL_BINDING_REQUIRED', 'Unattended execution requires a healthy schema-2 journal binding for this exact plan; run watch --init --plan.')], { planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', cliCurrentness, sensors: input.verifySensors ? 'pass' : 'not-required' });
         const capabilities = unattendedCapabilities(provider, input.controllerAutonomy);
         const resolution: ProviderExecutionResolution = { outcome: capabilities.unattendedController === 'supported' ? 'native' : 'blocked', provider, capabilities, evidenceVersion: 'r1-v1', diagnostics: [] };
         if (resolution.outcome === 'blocked') {
