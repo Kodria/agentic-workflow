@@ -1,3 +1,8 @@
+## v9.13.1 - 2026-09-26
+
+### Fixes
+- **watch:** count descendant processes as controller activity (#202)
+
 ## v9.13.0 - 2026-09-25
 
 ### Features
