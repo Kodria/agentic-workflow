@@ -1,3 +1,8 @@
+## v9.14.1 - 2026-09-28
+
+### Fixes
+- **admission:** honor the R8 registry opt-out closure exception (#205)
+
 ## v9.14.0 - 2026-09-26
 
 ### Features
