@@ -40,8 +40,9 @@ jobs:
             target: darwin-x64
           - os: macos-14
             target: darwin-arm64
-          # `windows-latest` moved to the VS2026 image, which node-gyp 11.5
-          # cannot discover. Pin the x64 compiler image; ARM64 remains native.
+          # x64 stays pinned to the VS2022 image so its compiler does not move
+          # under us. `windows-11-arm` only ships VS2026, which node-gyp
+          # discovers from 12.1 on (cli/package.json pins ^12.4).
           - os: windows-2022
             target: win32-x64
           - os: windows-11-arm

@@ -187,6 +187,51 @@ describe('admitPlan', () => {
         });
     });
 
+    // R8: a content registry whose sensors are ALL deliberately disabled may close
+    // work; its release proof lives in CI. The local verdict stays not-certified —
+    // never reported as pass — and the exception is named in the evidence.
+    describe('the R8 registry opt-out closure exception', () => {
+        const optOut = { overall: 'not_certified', sensors: [], mode: 'opt-out', reason: 'opt-out-declared', projectRoot: '/r', manifestPath: '/r/.awm/sensors.json' } as any;
+        const unattended = () => ({ ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as unknown as PlanValidationReport);
+        const base = () => ({ plan: valid as PlanValidationReport, provider: 'codex' as const, cwd: process.cwd(), enabledAgents: ['codex'] as const, verifySensors: true, sensors: optOut, sensorClosurePolicy: 'r8-registry-opt-out' as const });
+
+        it('admits interactive work without reporting the opt-out as a pass', async () => {
+            const report = await admitPlan(base());
+            expect(report).toMatchObject({ state: 'admitted', sensors: 'not-certified', sensorEvidence: 'r8-registry-opt-out' });
+        });
+
+        it('admits journal-less unattended work under the same exception', async () => {
+            const report = await admitPlan({ ...base(), plan: unattended(), planPath: 'docs/plan.md', controllerAutonomy: 'approval-free' });
+            expect(report).toMatchObject({ state: 'admitted', executionMode: 'desatendido', journal: 'not-required', sensors: 'not-certified', sensorEvidence: 'r8-registry-opt-out' });
+        });
+
+        it('reports the preserved verdict when a later gate blocks', async () => {
+            const report = await admitPlan({ ...base(), plan: unattended(), planPath: 'docs/plan.md' });
+            expect(report).toMatchObject({ state: 'blocked', sensors: 'not-certified', sensorEvidence: 'r8-registry-opt-out' });
+            expect(report.diagnostics[0]).toMatchObject({ code: 'ADMISSION_CONTROLLER_AUTONOMY_REQUIRED' });
+        });
+
+        it.each([
+            ['no declared policy', { sensorClosurePolicy: undefined }],
+            ['a failing sensor', { sensors: { ...optOut, overall: 'fail', mode: 'project-sensors' } }],
+            ['an absent manifest', { sensors: { ...optOut, mode: 'missing', reason: 'manifest-absent' } }],
+            ['a native gate', { sensors: { ...optOut, mode: 'native-gate', reason: 'native-gate-declared' } }],
+            ['an unavailable sensor source', { sensors: { ...optOut, mode: 'source-unavailable' } }],
+            ['all-disabled legacy sensors', { sensors: { ...optOut, overall: 'skipped', mode: 'project-sensors' } }],
+        ])('keeps blocking with %s', async (_name, fields) => {
+            const report = await admitPlan({ ...base(), ...fields } as any);
+            expect(report.state).toBe('blocked');
+            expect(report.diagnostics[0]).toMatchObject({ code: 'ADMISSION_SENSORS_BLOCKED' });
+            expect(report.sensorEvidence).toBeUndefined();
+        });
+
+        it('accepts only the known sensor evidence values at the public sanitizer', () => {
+            const report = { state: 'admitted', planState: 'valid', journal: 'not-required', currentness: 'not-checked', sensors: 'not-certified', diagnostics: [] };
+            expect(sanitizeAdmissionReport({ ...report, sensorEvidence: 'r8-registry-opt-out' }).sensorEvidence).toBe('r8-registry-opt-out');
+            expect(() => sanitizeAdmissionReport({ ...report, sensorEvidence: 'opt-out' })).toThrow('invalid report');
+        });
+    });
+
     it('admits unattended work only with an exact schema-2 plan binding', async () => {
         const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as unknown as PlanValidationReport;
         const journal = { ...emptyState('main'), schema: 2 as const, planBinding: { path: 'docs/plan.md', digest: 'a'.repeat(64), schema: 'compact-slices/v1' as const, executionMode: 'desatendido' as const, boundAt: '2026-09-15T00:00:00.000Z' } };

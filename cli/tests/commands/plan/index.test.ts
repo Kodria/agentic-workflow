@@ -320,6 +320,24 @@ describe('plan admit Commander wiring', () => {
             expect(policy).not.toHaveBeenCalled(); expect(capabilities).not.toHaveBeenCalled();
         } finally { output.mockRestore(); process.exitCode = undefined; }
     });
+    it.each([
+        ['a content registry', true, 'admitted'],
+        ['an ordinary project', false, 'blocked'],
+    ] as const)('applies the R8 sensor opt-out exception only to %s', async (_name, isRegistry, expected) => {
+        const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'awm-admit-r8-')));
+        const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+        if (isRegistry) fs.writeFileSync(path.join(root, 'awm-registry.json'), JSON.stringify({ minCliVersion: '1.0.0' }));
+        const sensors = jest.fn().mockResolvedValue({ overall: 'not_certified', sensors: [], mode: 'opt-out', reason: 'opt-out-declared', projectRoot: root, manifestPath: path.join(root, '.awm', 'sensors.json') });
+        const program = new Command();
+        registerPlanCommand(program, { validatePlanFile: () => valid, listRegistries: () => [], readPreferences: () => ({ defaultAgent: 'codex', enabledAgents: ['codex'], installMethod: 'symlink', defaultScope: 'local' }), runSensors: sensors });
+        try {
+            await program.parseAsync(['node', 'awm', 'plan', 'admit', 'plan.md', '--provider', 'codex', '--cwd', root, '--execution-mode', 'interactivo', '--verify-sensors', '--json']);
+            const report = JSON.parse(String(output.mock.calls.at(-1)![0]));
+            expect(report).toMatchObject({ state: expected, sensors: 'not-certified' });
+            if (isRegistry) expect(report.sensorEvidence).toBe('r8-registry-opt-out');
+            else expect(report.diagnostics[0].code).toBe('ADMISSION_SENSORS_BLOCKED');
+        } finally { output.mockRestore(); fs.rmSync(root, { recursive: true, force: true }); process.exitCode = undefined; }
+    });
     it('derives desatendido from the canonical plan header; a native v1 plan needs no journal (opt-in durable custody)', async () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-admit-header-'));
         const output = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);

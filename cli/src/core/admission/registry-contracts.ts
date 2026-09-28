@@ -11,6 +11,7 @@ import { cliVersion } from '../cli-version';
 import { compareSemver } from '../versioning';
 import { checkCurrentness } from '../currentness/check';
 import { runSensors } from '../../commands/sensors/run';
+import type { RunOutput } from '../../commands/sensors/types';
 import { admitPlan, type AdmissionInput, type AdmissionReport } from './index';
 import { readJournal } from '../journal/store';
 import { bindingPlanPath } from '../journal/paths';
@@ -198,6 +199,13 @@ function hasOwnedGenerationAdmission(input: AdmissionInput): boolean {
             && refIsAlive(generation.wrapperRef));
 }
 
+/** R8: only a content registry (its manifest at the sensor project root) may close on a deliberate opt-out. */
+function registryOptOutPolicy(sensors: RunOutput | undefined): AdmissionInput['sensorClosurePolicy'] {
+    if (sensors?.mode !== 'opt-out' || !sensors.projectRoot) return undefined;
+    try { return fs.statSync(path.join(sensors.projectRoot, REGISTRY_MANIFEST_NAME)).isFile() ? 'r8-registry-opt-out' : undefined; }
+    catch { return undefined; }
+}
+
 /** One admission authority for the public command AND actual watch dispatch.
  * No empirical execution occurs before provenance/currentness/CLI-floor gates. */
 export async function admitRegistryPlan(input: AdmissionInput, dependencies: RegistryAdmissionDependencies = {}): Promise<AdmissionReport> {
@@ -225,8 +233,9 @@ export async function admitRegistryPlan(input: AdmissionInput, dependencies: Reg
         return scope.provenance === 'proven';
     };
     let generationBound = false;
+    let sensorClosurePolicy: AdmissionInput['sensorClosurePolicy'];
     const compose = async (fields: Partial<AdmissionInput>): Promise<AdmissionReport> => {
-        const report = await admission({ ...input, provenance: scope.provenance, consumedRegistryComponents: scope.consumedRegistryComponents, ...fields });
+        const report = await admission({ ...input, provenance: scope.provenance, consumedRegistryComponents: scope.consumedRegistryComponents, ...(sensorClosurePolicy ? { sensorClosurePolicy } : {}), ...fields });
         const withEvidence = generationBound && report.sensors === 'pass' ? { ...report, sensorEvidence: 'generation-bound' as const } : report;
         if (scope.provenanceDiagnostic && report.diagnostics.some(diagnostic => diagnostic.code === 'ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED')) {
             return { ...withEvidence, diagnostics: report.diagnostics.map(diagnostic => diagnostic.code === 'ADMISSION_CURRENTNESS_PROVENANCE_REQUIRED' ? scope.provenanceDiagnostic! : diagnostic) };
@@ -250,6 +259,7 @@ export async function admitRegistryPlan(input: AdmissionInput, dependencies: Reg
     const sensors = input.verifySensors ? input.sensors ?? (generationBound
         ? { sensors: [], overall: 'pass' as const, reason: 'generation-bound-admission' }
         : await (dependencies.runSensors ?? runSensors)({ cwd: input.cwd, all: true, readOnly: true })) : undefined;
+    sensorClosurePolicy = registryOptOutPolicy(sensors);
     if (input.requireCurrent && input.verifySensors) {
         if (!refresh()) return compose({ currentness, sensors });
         const currentnessGate = await compose({ currentness, verifySensors: true, sensors: undefined });
