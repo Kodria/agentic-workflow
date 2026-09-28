@@ -68,8 +68,8 @@ jobs:
             target: darwin-x64
           - os: macos-14
             target: darwin-arm64
-          # Keep the release artifact compiler on VS2022: node-gyp 11.5 does
-          # not yet discover the VS2026 image behind windows-latest.
+          # Keep the x64 release artifact compiler on VS2022. `windows-11-arm`
+          # only ships VS2026, which node-gyp discovers from 12.1 on.
           - os: windows-2022
             target: win32-x64
           - os: windows-11-arm
