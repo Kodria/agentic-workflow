@@ -140,21 +140,30 @@ describe('runCommand — exit codes and output', () => {
 
     itLinux('never lets a structured capture file grow beyond maxBuffer', async () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-exec-cap-'));
-        const marker = path.join(dir, 'written');
-        const existing = new Set(fs.readdirSync(os.tmpdir()).filter(name => name.startsWith('awm-sensor-output-')));
+        // The overflow watcher kills the child and deletes the capture as soon as
+        // the cap is reached, so polling for the file races that cleanup. Capture
+        // files only grow, so their size at deletion is the largest they ever were.
+        const captureSizes: number[] = [];
+        const rmSync = fs.rmSync.bind(fs);
+        const removal = jest.spyOn(fs, 'rmSync').mockImplementation((target, options) => {
+            if (typeof target === 'string' && path.basename(target).startsWith('awm-sensor-output-')) {
+                captureSizes.push(fs.statSync(path.join(target, 'stdout')).size);
+            }
+            return rmSync(target, options);
+        });
         try {
-            const result = runStructuredCommand({
+            const result = await runStructuredCommand({
                 executable: 'node',
                 resolution: 'path',
-                args: ['-e', `const fs = require('fs'); try { fs.writeSync(1, Buffer.alloc(8192, 'x')); } catch {} fs.writeFileSync(${JSON.stringify(marker)}, 'written'); setTimeout(() => {}, 1000);`],
+                args: ['-e', `const fs = require('fs'); try { fs.writeSync(1, Buffer.alloc(8192, 'x')); } catch {} setTimeout(() => {}, 1000);`],
             }, { timeout: 5_000, cwd: dir, maxBuffer: 1_024 });
 
-            expect(await until(() => fs.existsSync(marker))).toBe(true);
-            const capture = fs.readdirSync(os.tmpdir()).find(name => name.startsWith('awm-sensor-output-') && !existing.has(name));
-            expect(capture).toBeDefined();
-            expect(fs.statSync(path.join(os.tmpdir(), capture!, 'stdout')).size).toBeLessThanOrEqual(1_024);
-            await expect(result).resolves.toMatchObject({ overflowed: true });
+            expect(result).toMatchObject({ overflowed: true });
+            expect(captureSizes).toHaveLength(1);
+            expect(captureSizes[0]).toBeGreaterThan(0);
+            expect(captureSizes[0]).toBeLessThanOrEqual(1_024);
         } finally {
+            removal.mockRestore();
             fs.rmSync(dir, { recursive: true, force: true });
         }
     });
