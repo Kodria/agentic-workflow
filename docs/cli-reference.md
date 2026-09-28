@@ -378,6 +378,24 @@ Unattended work has two custody options:
   exists it must be current — a corrupt or stale journal still blocks. `awm-routed`
   (`compact-slices/v2`) always requires it, because routing custody lives in the journal.
 
+`--verify-sensors` admits only on a sensor `pass`. The single exception is registry
+content closure (R8 in the baseline registry). It applies only when both hold:
+
+- the sensor manifest declares `"mode": "opt-out"`;
+- the sensor project root contains `awm-registry.json`.
+
+In that case admission reports the preserved verdict `sensors: "not-certified"` together
+with `sensorEvidence: "r8-registry-opt-out"`, never a `pass`, and every other gate still
+applies. The release proof of such a registry lives in its CI (`validate` and `auto-tag`).
+
+The exception does not apply to:
+
+- an opt-out outside a registry;
+- a registry with any sensor enabled;
+- `native-gate`, a missing or invalid manifest, or a failing sensor.
+
+The `awm watch` supervisor still requires a real `pass` before relaunching a controller.
+
 To opt in, initialize the matching valid unattended plan first with
 `awm watch --init --plan PLAN_PATH`. Initialization binds the plan; it does not
 register tasks, review obligations, or a controller generation. Native dispatch

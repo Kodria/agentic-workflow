@@ -27,8 +27,12 @@ export type AdmissionReport = {
     state: 'admitted' | 'blocked'; planState: PlanValidationReport['state']; planDigest?: string;
     executionMode?: ExecutionMode; provider?: AgentTarget; journal: 'not-required' | 'current' | 'missing' | 'corrupt' | 'stale';
     currentness: 'current' | 'stale' | 'unverifiable' | 'not-checked'; sensors: 'pass' | 'fail' | 'not-certified' | 'not-required';
-    /** A launched, owned generation may reuse its pre-launch sensor pass. */
-    sensorEvidence?: 'generation-bound';
+    /**
+     * `generation-bound`: a launched, owned generation may reuse its pre-launch sensor pass.
+     * `r8-registry-opt-out`: a content registry with every sensor deliberately disabled was
+     * admitted on a preserved `not-certified` verdict; its release proof lives in CI (R8).
+     */
+    sensorEvidence?: 'generation-bound' | 'r8-registry-opt-out';
     /**
      * Estado del CLI propio frente a npm: REPORTADO, nunca bloqueante. `currentness`
      * es el veredicto sobre los contratos consumidos (los registries); esto es
@@ -50,6 +54,8 @@ export type AdmissionInput = {
     /** Supervisor replacement must empirically re-run sensors before a new generation. */
     freshSensorsRequired?: boolean;
     currentness?: CurrentnessReport; sensors?: RunOutput;
+    /** Set by the command boundary only when the sensor project root is a content registry (R8). */
+    sensorClosurePolicy?: 'r8-registry-opt-out';
     /** Exact registry components reached from validated plan-source provenance. */
     consumedRegistryComponents?: readonly string[];
     /** No registry may be ignored until source-to-contract provenance is complete. */
@@ -209,7 +215,7 @@ export function sanitizeAdmissionReport(report: unknown): AdmissionReport {
     const value = report as Record<string, unknown>;
     if ((value.state !== 'admitted' && value.state !== 'blocked') || !PLAN_STATES.has(value.planState as AdmissionReport['planState']) || !JOURNALS.has(value.journal as AdmissionReport['journal']) || !CURRENTNESS.has(value.currentness as AdmissionReport['currentness']) || !SENSORS.has(value.sensors as AdmissionReport['sensors']) || !validDiagnostics(value.diagnostics)) invalidAdmission();
     if (value.cliCurrentness !== undefined && !CLI_CURRENTNESS.has(value.cliCurrentness as string)) invalidAdmission();
-    if (value.sensorEvidence !== undefined && value.sensorEvidence !== 'generation-bound') invalidAdmission();
+    if (value.sensorEvidence !== undefined && value.sensorEvidence !== 'generation-bound' && value.sensorEvidence !== 'r8-registry-opt-out') invalidAdmission();
     if (value.planDigest !== undefined && (typeof value.planDigest !== 'string' || !/^[a-f0-9]{64}$/.test(value.planDigest))) invalidAdmission();
     if (value.executionMode !== undefined && value.executionMode !== 'interactivo' && value.executionMode !== 'desatendido') invalidAdmission();
     if (value.provider !== undefined && !isAgentTarget(value.provider)) invalidAdmission();
@@ -253,10 +259,15 @@ export async function admitPlan(input: AdmissionInput): Promise<AdmissionReport>
         if (gate.diagnostics.length) return blocked(input, gate.diagnostics, { planDigest: plan.planDigest, provider, executionMode: mode, currentness: gate.status, cliCurrentness });
         if (input.compatibilityDiagnostics?.length) return blocked(input, input.compatibilityDiagnostics, { planDigest: plan.planDigest, provider, executionMode: mode, currentness: 'unverifiable', cliCurrentness });
     }
+    let sensorsReported: AdmissionReport['sensors'] = 'not-required';
+    let sensorEvidence: Pick<AdmissionReport, 'sensorEvidence'> = {};
     if (input.verifySensors) {
         if (!input.sensors) return blocked(input, [diagnostic('ADMISSION_SENSORS_REQUIRED', 'Sensor evidence was required but not supplied.')], { planDigest: plan.planDigest, provider, executionMode: mode, currentness: input.requireCurrent ? 'current' : 'not-checked', cliCurrentness });
         const sensors = sensorVerdict(input.sensors);
-        if (sensors !== 'pass') return blocked(input, [diagnostic('ADMISSION_SENSORS_BLOCKED', `Sensor verdict is ${sensors}.`)], { planDigest: plan.planDigest, provider, executionMode: mode, currentness: input.requireCurrent ? 'current' : 'not-checked', cliCurrentness, sensors });
+        const registryOptOut = sensors === 'not-certified' && input.sensorClosurePolicy === 'r8-registry-opt-out' && input.sensors.mode === 'opt-out';
+        if (sensors !== 'pass' && !registryOptOut) return blocked(input, [diagnostic('ADMISSION_SENSORS_BLOCKED', `Sensor verdict is ${sensors}.`)], { planDigest: plan.planDigest, provider, executionMode: mode, currentness: input.requireCurrent ? 'current' : 'not-checked', cliCurrentness, sensors });
+        sensorsReported = sensors;
+        if (registryOptOut) sensorEvidence = { sensorEvidence: 'r8-registry-opt-out' };
     }
     if (mode === 'desatendido') {
         // The durable controller (journal + awm watch + jobs) is opt-in, as it
@@ -266,7 +277,7 @@ export async function admitPlan(input: AdmissionInput): Promise<AdmissionReport>
         // journal, so awm-routed work still requires it.
         const observed = journalStatus(input, plan);
         const journal: AdmissionReport['journal'] = observed === 'missing' && plan.schema === 'compact-slices/v1' ? 'not-required' : observed;
-        if (journal !== 'current' && journal !== 'not-required') return blocked(input, [diagnostic('ADMISSION_JOURNAL_BINDING_REQUIRED', 'Unattended execution requires a healthy schema-2 journal binding for this exact plan; run watch --init --plan.')], { planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', cliCurrentness, sensors: input.verifySensors ? 'pass' : 'not-required' });
+        if (journal !== 'current' && journal !== 'not-required') return blocked(input, [diagnostic('ADMISSION_JOURNAL_BINDING_REQUIRED', 'Unattended execution requires a healthy schema-2 journal binding for this exact plan; run watch --init --plan.')], { planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', cliCurrentness, sensors: sensorsReported, ...sensorEvidence });
         const capabilities = unattendedCapabilities(provider, input.controllerAutonomy);
         const resolution: ProviderExecutionResolution = { outcome: capabilities.unattendedController === 'supported' ? 'native' : 'blocked', provider, capabilities, evidenceVersion: 'r1-v1', diagnostics: [] };
         if (resolution.outcome === 'blocked') {
@@ -277,16 +288,16 @@ export async function admitPlan(input: AdmissionInput): Promise<AdmissionReport>
             const reason = PROVIDER_EXECUTION_CAPABILITIES[provider].unattendedController !== 'supported'
                 ? diagnostic('ADMISSION_CAPABILITY_UNVERIFIED', `Provider ${provider} has no verified unattended execution capability.`)
                 : diagnostic('ADMISSION_CONTROLLER_AUTONOMY_REQUIRED', `Unattended dispatch on ${provider} requires an explicit controller autonomy posture; without it the controller blocks on its first tool call.`);
-            return blocked(input, [reason], { planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', cliCurrentness, sensors: input.verifySensors ? 'pass' : 'not-required', capabilityResolution: resolution });
+            return blocked(input, [reason], { planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', cliCurrentness, sensors: sensorsReported, ...sensorEvidence, capabilityResolution: resolution });
         }
         const routing = plan.schema === 'compact-slices/v2' ? input.routing ?? await input.routingReader?.() : input.routing;
-        return completeAdmission({ ...input, routing, routingReader: undefined }, plan, provider, mode, journal, input.requireCurrent ? 'current' : 'not-checked', input.verifySensors ? 'pass' : 'not-required', resolution, cliCurrentness);
+        return { ...completeAdmission({ ...input, routing, routingReader: undefined }, plan, provider, mode, journal, input.requireCurrent ? 'current' : 'not-checked', sensorsReported, resolution, cliCurrentness), ...sensorEvidence };
     }
     const capabilities = PROVIDER_EXECUTION_CAPABILITIES[provider];
     const resolution: ProviderExecutionResolution = { outcome: capabilities.interactiveExecution === 'supported' ? 'native' : 'blocked', provider, capabilities, evidenceVersion: 'r1-v1', diagnostics: [] };
     if (resolution.outcome === 'blocked') return blocked(input, [diagnostic('ADMISSION_CAPABILITY_UNVERIFIED', `Provider ${provider} has no verified interactive execution capability.`)], { planDigest: plan.planDigest, provider, executionMode: mode, capabilityResolution: resolution });
     const routing = plan.schema === 'compact-slices/v2' ? input.routing ?? await input.routingReader?.() : input.routing;
-    return completeAdmission({ ...input, routing, routingReader: undefined }, plan, provider, mode, 'not-required', input.requireCurrent ? 'current' : 'not-checked', input.verifySensors ? 'pass' : 'not-required', resolution, cliCurrentness);
+    return { ...completeAdmission({ ...input, routing, routingReader: undefined }, plan, provider, mode, 'not-required', input.requireCurrent ? 'current' : 'not-checked', sensorsReported, resolution, cliCurrentness), ...sensorEvidence };
 }
 
 function completeAdmission(input: AdmissionInput, plan: Extract<PlanValidationReport, { state: 'valid' }>, provider: AgentTarget, executionMode: ExecutionMode, journal: AdmissionReport['journal'], currentness: AdmissionReport['currentness'], sensors: AdmissionReport['sensors'], capabilityResolution: ProviderExecutionResolution, cliCurrentness: AdmissionReport['cliCurrentness'] = 'not-checked'): AdmissionReport {
