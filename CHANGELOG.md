@@ -1,3 +1,8 @@
+## v9.15.1 - 2026-09-29
+
+### Fixes
+- **watch:** suspend durable custody for all providers (#207)
+
 ## Unreleased
 
 ### Changes
