@@ -1,6 +1,7 @@
 import { AgentTarget, getHookConfig } from '../../providers';
 import { computeClaudeHookStatus } from './claude';
 import { computeCodexHookStatus } from './codex';
+import { computeCursorHookStatus } from './cursor';
 import type { CheckResult, HookStatus } from './shared';
 
 export type { CheckResult, HookStatus };
@@ -16,6 +17,8 @@ export function computeHookStatus(agent: AgentTarget): HookStatus {
             return computeClaudeHookStatus(agent as 'claude-code');
         case 'codex-hooks-json':
             return computeCodexHookStatus(agent as 'codex');
+        case 'cursor-hooks-json':
+            return computeCursorHookStatus(agent as 'cursor');
         /* istanbul ignore next -- HookConfig['type'] is exhaustively handled above */
         default: {
             const exhaustive: never = config.type;

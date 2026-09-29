@@ -366,11 +366,12 @@ function hookTrustCheck(agent: AgentTarget): ProviderCheck | null {
         return { id: 'hook.trust', state: 'absent', remediationCode: 'awm-init' };
     }
     if (status.trust) {
-        // Codex: 'pending-trust' | 'healthy' | 'stale' map directly onto ProviderCheckState.
+        // Codex: 'pending-trust' | 'healthy' | 'stale'; Cursor: 'pending-first-run' | …
         return {
             id: 'hook.trust',
             state: status.trust,
-            remediationCode: status.trust === 'pending-trust' ? 'open-hooks-trust' : undefined,
+            remediationCode: status.trust === 'pending-trust' ? 'open-hooks-trust'
+                : status.trust === 'pending-first-run' ? 'open-cursor-session' : undefined,
         };
     }
     return { id: 'hook.trust', state: status.overall === 'HEALTHY' ? 'healthy' : 'broken' };
@@ -465,6 +466,15 @@ export function gatherProviderChecks(agents: AgentTarget[], scanSkills: ScanSkil
             hookTrustCheck(agent),
             contextGlobalCheck(agent, projectRoot),
         ].filter((check): check is ProviderCheck => check !== null);
+
+        // R19: informational only — never overall-red by itself (state: pending).
+        if (agent === 'cursor' && agents.includes('claude-code') && agents.includes('cursor')) {
+            checks.push({
+                id: 'context.overlap',
+                state: 'pending',
+                detail: 'Claude Code may import Cursor hooks as a third-party path; R15 dual-delivery suppression requires the Cursor session-start hook installed',
+            });
+        }
 
         return { id: agent, label: provider.label, tier: providerTier(provider), checks };
     });

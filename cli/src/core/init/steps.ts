@@ -26,6 +26,7 @@ import { repairSkillLinks as realRepairSkillLinks } from '../skill-integrity';
 import { contentRoots } from '../registries';
 import { injectProjectConstitution as realInjectProjectConstitution } from '../context/project-constitution-inject';
 import { CodexAgentsStrategy } from '../context/strategies/codex-agents';
+import { migrateCursorMdcSkills } from './migrate-cursor-mdc';
 
 // ---------------------------------------------------------------------------
 // defaultActions — bridges the real functions to the InitActions interface
@@ -249,6 +250,9 @@ export function stepDevCore(d: InitDeps): StepResult {
             contentDir: d.contentDir,
             ...(localOnly ? { scopeOverride: 'local' as const } : {}),
         });
+    }
+    if (d.enabledAgents.includes('cursor') || d.agent === 'cursor') {
+        migrateCursorMdcSkills({ projectRoot: d.ctx.project?.root ?? d.cwd });
     }
     return ok('machine.devCore', 'machine', 'applied', localOnly ? 'installed at project scope (no global skill dir)' : undefined);
 }

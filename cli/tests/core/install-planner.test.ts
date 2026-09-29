@@ -85,6 +85,16 @@ describe('install-planner', () => {
             const group = agentsSharingSkillTarget('opencode', ['opencode', 'codex', 'copilot'], 'global', tmpWork);
             expect(group.sort()).toEqual(['codex', 'opencode']);
         });
+
+        it('includes cursor in the shared ~/.agents/skills group with codex and opencode (Plan B R7)', () => {
+            const group = agentsSharingSkillTarget(
+                'cursor',
+                ['cursor', 'codex', 'opencode', 'claude-code'],
+                'global',
+                tmpWork,
+            );
+            expect(group.sort()).toEqual(['codex', 'cursor', 'opencode']);
+        });
     });
 
     describe('planInstall', () => {
@@ -235,7 +245,7 @@ describe('install-planner', () => {
         });
 
         describe('renderer-driven filename computation (Task 4.3)', () => {
-            it('renders the Cursor skill target with a .mdc extension, stripping any pre-existing extension', () => {
+            it('installs Cursor skills via link under .agents/skills (shared group, Plan B R1/R2)', () => {
                 const plan = planInstall({
                     artifacts: [skillArtifact('development-process')],
                     selectedAgents: ['cursor'],
@@ -245,9 +255,9 @@ describe('install-planner', () => {
                     method: 'symlink',
                 });
                 expect(plan.operations[0].targetPath).toBe(
-                    path.join(tmpWork, '.cursor', 'rules', 'development-process.mdc'),
+                    path.join(tmpWork, '.agents', 'skills', 'development-process'),
                 );
-                expect(plan.operations[0].renderer).toBe('cursor-mdc');
+                expect(plan.operations[0].renderer).toBe('link');
             });
 
             it('renders the Copilot skill target with a .instructions.md extension (not .md.instructions.md)', () => {
@@ -283,13 +293,13 @@ describe('install-planner', () => {
                 expect(path.basename(plan.operations[0].targetPath)).toBe('development-process.instructions.md');
             });
 
-            it('does not truncate an installName with an embedded, non-extension dot (e.g. "v1.2-migration")', () => {
+            it('does not truncate a Cursor link installName with an embedded, non-extension dot', () => {
                 // Regression: physicalTarget used to derive the base name via
                 // path.parse(...).name, which strips everything after the LAST
                 // dot — not just a genuine trailing .md extension. A skill
                 // literally named `v1.2-migration` would silently truncate to
                 // `v1`, dropping `2-migration` and risking a collision with any
-                // other skill named `v1`.
+                // other skill named `v1`. Cursor now uses link under .agents/skills.
                 const dottedName: ArtifactIntent = {
                     name: 'v1.2-migration',
                     installName: 'v1.2-migration',
@@ -304,11 +314,11 @@ describe('install-planner', () => {
                     projectRoot: tmpWork,
                     method: 'symlink',
                 });
-                expect(path.basename(plan.operations[0].targetPath)).toBe('v1.2-migration.mdc');
-                expect(path.basename(plan.operations[0].targetPath)).not.toBe('v1.mdc');
+                expect(path.basename(plan.operations[0].targetPath)).toBe('v1.2-migration');
+                expect(path.basename(plan.operations[0].targetPath)).not.toBe('v1');
             });
 
-            it('still strips a real trailing .md extension for Cursor (not v1.2-migration.md.mdc)', () => {
+            it('still strips a real trailing .md extension for Copilot (not using-awm.md.instructions.md)', () => {
                 const withMdExtension: ArtifactIntent = {
                     name: 'using-awm',
                     installName: 'using-awm.md',
@@ -317,14 +327,14 @@ describe('install-planner', () => {
                 };
                 const plan = planInstall({
                     artifacts: [withMdExtension],
-                    selectedAgents: ['cursor'],
-                    enabledAgents: ['cursor'],
+                    selectedAgents: ['copilot'],
+                    enabledAgents: ['copilot'],
                     scope: 'local',
                     projectRoot: tmpWork,
                     method: 'symlink',
                 });
-                expect(path.basename(plan.operations[0].targetPath)).toBe('using-awm.mdc');
-                expect(path.basename(plan.operations[0].targetPath)).not.toBe('using-awm.md.mdc');
+                expect(path.basename(plan.operations[0].targetPath)).toBe('using-awm.instructions.md');
+                expect(path.basename(plan.operations[0].targetPath)).not.toBe('using-awm.md.instructions.md');
             });
         });
     });

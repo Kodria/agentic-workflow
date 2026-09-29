@@ -81,11 +81,12 @@ describe('a provider that declares a config-home override honors it everywhere',
     }
 
     it('shared, cross-agent conventions are NOT moved by one agent’s override', () => {
-        // `~/.agents/skills` lo comparten Codex y OpenCode: es del ecosistema, no de un
-        // agente. Moverlo con CODEX_HOME desconectaria a OpenCode de sus propias skills.
+        // `~/.agents/skills` lo comparten Codex, OpenCode y Cursor: es del ecosistema, no de un
+        // agente. Moverlo con CODEX_HOME desconectaria a OpenCode/Cursor de sus propias skills.
         const moved = providersWith({ HOME, CODEX_HOME: ELSEWHERE });
         expect(moved.codex.skill.global).toBe(path.join(HOME, '.agents/skills'));
         expect(moved.opencode.skill.global).toBe(path.join(HOME, '.agents/skills'));
+        expect(moved.cursor.skill.global).toBe(path.join(HOME, '.agents/skills'));
     });
 
     it('every agent declares a config home, so a new provider cannot skip the question', () => {

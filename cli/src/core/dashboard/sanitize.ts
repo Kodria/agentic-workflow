@@ -11,9 +11,9 @@ const CANONICAL_FINDING_IDS = new Set([
     'machine.preferences.missing', 'machine.registries.stale', 'project.profile.missing',
     'project.sensors.unavailable', 'project.preflight.degraded', 'planning.source.unavailable', 'execution.source.unavailable',
 ]);
-const PROVIDER_FINDING_ID = /^machine\.provider\.(?:claude-code|codex|opencode|cursor|copilot|antigravity)\.(?:binary\.version|skills\.global|agents\.native|workflows\.global|context\.global|hook\.trust|guidance\.project|constitution\.delivery)$/;
+const PROVIDER_FINDING_ID = /^machine\.provider\.(?:claude-code|codex|opencode|cursor|copilot|antigravity)\.(?:binary\.version|skills\.global|agents\.native|workflows\.global|context\.global|context\.overlap|hook\.trust|guidance\.project|constitution\.delivery)$/;
 const PROJECT_FINDING_ID = /^project\.(?:profile\.present|extensions\.configured|registry-pins\.present|bundles\.coherent|context\.present|constitution\.present|sensors\.present|preflight\.not_collected)$/;
-const PROVIDER_LABEL = /^Provider (?:claude-code|codex|opencode|cursor|copilot|antigravity): (?:binary\.version|skills\.global|agents\.native|workflows\.global|context\.global|hook\.trust|guidance\.project|constitution\.delivery)$/;
+const PROVIDER_LABEL = /^Provider (?:claude-code|codex|opencode|cursor|copilot|antigravity): (?:binary\.version|skills\.global|agents\.native|workflows\.global|context\.global|context\.overlap|hook\.trust|guidance\.project|constitution\.delivery)$/;
 // El slug ya lo validó PROCESS_NAME en core/process/model.ts. Repetir la forma
 // acá es deliberado: este módulo es la frontera de render y no puede confiar en
 // que su input pasó por aquel validador — un adapter nuevo podría no hacerlo.

@@ -208,13 +208,13 @@ describe('renderProviderReport — capability tier (Task 4.4)', () => {
             overall: 'healthy',
             providers: [
                 { id: 'claude-code', label: 'Claude Code', tier: 'hooks-native', checks: [] },
-                { id: 'cursor', label: 'Cursor', tier: 'agents-md-managed', checks: [] },
+                { id: 'cursor', label: 'Cursor', tier: 'hooks-native', checks: [] },
                 { id: 'antigravity', label: 'Antigravity', tier: 'context-only', checks: [] },
             ],
         };
         const out = renderProviderReport(report);
         expect(out).toContain('Provider: Claude Code (hooks-native)');
-        expect(out).toContain('Provider: Cursor (agents-md-managed)');
+        expect(out).toContain('Provider: Cursor (hooks-native)');
         expect(out).toContain('Provider: Antigravity (context-only)');
     });
 });
