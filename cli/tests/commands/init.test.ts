@@ -439,12 +439,20 @@ describe('runInit', () => {
     // GLOBAL ~/.cursor/rules directory with the expected frontmatter shape.
     // -----------------------------------------------------------------------
 
-    it('Gap A — real global-scope render: awm init --agent cursor renders a real .mdc into ~/.cursor/rules', async () => {
+    it('Gap A — real global-scope link: awm init --agent cursor links using-awm into ~/.agents/skills', async () => {
+        const { spawnSync } = require('child_process');
         const contentRoot = path.join(process.env.AWM_HOME as string, 'registries', 'baseline');
-        // A 'hooks' dir (even empty) is what makes capabilityRoot('hooks') resolve to
-        // this content root — that's the registryRoot stepContextInjection uses to
-        // find skills/using-awm/SKILL.md for the (unrelated) context-injection step.
+        // A 'hooks' dir is what makes capabilityRoot('hooks') resolve to this content
+        // root — registryRoot for stepContextInjection / stepHook. Plan B also needs
+        // the three Cursor hook scripts and an exact v4.9.0+ tag for the registry floor.
         fs.mkdirSync(path.join(contentRoot, 'hooks'), { recursive: true });
+        for (const name of ['cursor-session-start', 'cursor-pre-compact', 'cursor-post-tool-use']) {
+            fs.writeFileSync(
+                path.join(contentRoot, 'hooks', name),
+                '#!/usr/bin/env node\nconsole.log("{}")\n',
+                { mode: 0o755 },
+            );
+        }
         fs.mkdirSync(path.join(contentRoot, 'skills', 'using-awm'), { recursive: true });
         fs.writeFileSync(
             path.join(contentRoot, 'skills', 'using-awm', 'SKILL.md'),
@@ -459,6 +467,10 @@ describe('runInit', () => {
             name: 'dev-core', version: '1.0.0', description: 'Baseline', scope: 'baseline',
             dependsOn: [], skills: ['using-awm'], workflows: [], agents: [],
         }));
+        spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: contentRoot, stdio: 'ignore' });
+        spawnSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'add', '.'], { cwd: contentRoot, stdio: 'ignore' });
+        spawnSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture'], { cwd: contentRoot, stdio: 'ignore' });
+        spawnSync('git', ['tag', 'v4.9.0'], { cwd: contentRoot, stdio: 'ignore' });
 
         const projectCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'awm-init-cursor-cwd-'));
         try {
@@ -471,22 +483,17 @@ describe('runInit', () => {
                 // seedBaselineRegistry() writes registries.json pointing at 'baseline'
                 // (our manually-seeded content root above) since none exists yet — no
                 // real network clone happens because that content root already exists
-                // on disk. Only syncCache is stubbed, so stepCache's own sync (the
-                // content root above has no `.git`, so it reads as "not yet cloned")
-                // doesn't try to shell out to git either.
+                // on disk. Only syncCache is stubbed.
                 actions: { syncCache: async () => {} },
             });
 
             expect(code).toBeLessThanOrEqual(1);
 
-            const mdcPath = path.join(tmpHome, '.cursor', 'rules', 'using-awm.mdc');
-            expect(fs.existsSync(path.join(tmpHome, '.cursor', 'rules', 'using-awm'))).toBe(false);
-            expect(fs.existsSync(mdcPath)).toBe(true);
-            const rendered = fs.readFileSync(mdcPath, 'utf8');
-            expect(rendered).toContain('description: Use when starting any development conversation');
-            expect(rendered).toContain('globs:');
-            expect(rendered).toContain('alwaysApply: false');
-            expect(rendered).toContain('MUST invoke skills per the tiered policy.');
+            const linked = path.join(tmpHome, '.agents', 'skills', 'using-awm');
+            expect(fs.existsSync(path.join(tmpHome, '.cursor', 'rules', 'using-awm.mdc'))).toBe(false);
+            expect(fs.lstatSync(linked).isSymbolicLink() || fs.existsSync(path.join(linked, 'SKILL.md'))).toBe(true);
+            expect(fs.readFileSync(path.join(linked, 'SKILL.md'), 'utf8')).toContain('MUST invoke skills per the tiered policy.');
+            expect(fs.existsSync(path.join(tmpHome, '.cursor', 'hooks.json'))).toBe(true);
         } finally {
             fs.rmSync(projectCwd, { recursive: true, force: true });
         }
