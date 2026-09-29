@@ -58,6 +58,7 @@ function syncDescribeExactTag(repoDir: string): string | null {
         const out = execFileSync('git', ['describe', '--tags', '--exact-match', 'HEAD'], {
             cwd: repoDir,
             encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
             timeout: 2_000,
             maxBuffer: 64 * 1024,
             windowsHide: true,
