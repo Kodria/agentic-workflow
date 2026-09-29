@@ -244,8 +244,9 @@ Descomposición en planes (un plan por subsistema/repositorio, en orden de depen
   - El estado de runtime vive en `<AWM_HOME>/hooks/cursor/state/`.
   - `post-tool-use` ejecuta `session-start --reanchor`.
   - El benchmark `npm run bench:cursor-hooks` del registry entrega el p95 para la decisión de R16.2.
-- **Plan B:** `docs/plans/2026-09-29-cursor-cli-parity-plan.md` on branch `feat/cursor-cli-parity` (worktree `../agentic-workflow-cursor-cli`), base CLI `v9.14.1`.
-- **Plan C:** pendiente después de Plan B y del descubrimiento con `agent -p`.
+- **Plan B:** publicado CLI `v9.15.0` (#206).
+- **Camino B / custodia durable:** suspendido para todos los providers en CLI `v9.15.1` (#207, D-023) hasta retomar routing/custody.
+- **Plan C (reducido, 2026-09-29):** `docs/plans/2026-09-29-cursor-plan-c-native-admit.md` — admisión nativa interactiva + desatendida v1 sin journal; `versionCommand` de `agent`; evidencia en `docs/testing/cursor-execution-evidence.md`. **Fuera:** R23–R24 (`cursorAdapter` / `WATCH_PROVIDERS`) mientras D-023 esté vigente; `durableResume` y routing siguen `unverified`.
 - **Hallazgo de proceso (2026-09-28, ledger `unattended-requires-in-provider-session`):** desatendido = la sesión ya abierta del proveedor, con postura approval-free, despachando sus propios subagentes. **No** lanzar `claude --bg` / CLI headless desde otro agente (p. ej. Cursor). Esa forma se detiene en prompts de autorización (visto en Plan A `e1e5a159`: cleanup `rm -rf` tmp) que el lanzador no ve; el ciclo queda colgado en silencio. En futuras ocasiones ejecutar Plan A/B/C desatendido *dentro* del proveedor admitido.
 
 

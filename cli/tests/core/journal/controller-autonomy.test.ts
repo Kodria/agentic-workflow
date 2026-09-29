@@ -62,8 +62,16 @@ describe('unattendedController stops being asserted for free (#168)', () => {
     });
 
     test('never promotes a provider that never had the capability', () => {
-        expect(PROVIDER_EXECUTION_CAPABILITIES.cursor.unattendedController).toBe('unverified');
-        expect(unattendedCapabilities('cursor', 'approval-free').unattendedController).toBe('unverified');
+        expect(PROVIDER_EXECUTION_CAPABILITIES.copilot.unattendedController).toBe('unverified');
+        expect(unattendedCapabilities('copilot', 'approval-free').unattendedController).toBe('unverified');
+    });
+
+    test('Cursor gains unattendedController only with a declared posture (Plan C)', () => {
+        expect(PROVIDER_EXECUTION_CAPABILITIES.cursor.unattendedController).toBe('supported');
+        expect(unattendedCapabilities('cursor', undefined).unattendedController).toBe('unverified');
+        expect(unattendedCapabilities('cursor', 'approval-free').unattendedController).toBe('supported');
+        // Watch/custody resume is still unverified and suspended (D-023).
+        expect(PROVIDER_EXECUTION_CAPABILITIES.cursor.durableResume).toBe('unverified');
     });
 });
 

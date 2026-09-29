@@ -30,7 +30,7 @@ describe('admitPlan', () => {
     });
     it.each([
         ['journal', { provider: 'codex', executionMode: 'desatendido' as const }],
-        ['provider capability', { provider: 'cursor', executionMode: 'interactivo' as const }],
+        ['provider capability', { provider: 'copilot', executionMode: 'interactivo' as const }],
     ])('does not invoke deferred v2 routing facts when %s gate blocks', async (_name, fields) => {
         const reader = jest.fn(() => { throw new Error('routing reader must not run'); });
         const report = await admitPlan({ plan: v2(), cwd: process.cwd(), enabledAgents: [fields.provider as any], routingReader: reader, ...fields });
@@ -142,9 +142,34 @@ describe('admitPlan', () => {
     });
 
     it('does not let an unverified execution capability admit interactive work', async () => {
-        const report = await admitPlan({ plan: valid, provider: 'cursor', cwd: process.cwd(), enabledAgents: ['cursor'] });
-        expect(report).toMatchObject({ state: 'blocked', executionMode: 'interactivo', provider: 'cursor', journal: 'not-required' });
+        const report = await admitPlan({ plan: valid, provider: 'copilot', cwd: process.cwd(), enabledAgents: ['copilot'] });
+        expect(report).toMatchObject({ state: 'blocked', executionMode: 'interactivo', provider: 'copilot', journal: 'not-required' });
         expect(report.diagnostics[0].code).toBe('ADMISSION_CAPABILITY_UNVERIFIED');
+    });
+
+    it('admits Cursor interactive work once Plan C marks interactiveExecution supported', async () => {
+        const report = await admitPlan({ plan: valid, provider: 'cursor', cwd: process.cwd(), enabledAgents: ['cursor'] });
+        expect(report).toMatchObject({ state: 'admitted', executionMode: 'interactivo', provider: 'cursor', journal: 'not-required' });
+        expect(report.capabilityResolution).toMatchObject({ outcome: 'native', capabilities: { interactiveExecution: 'supported' } });
+    });
+
+    it('admits Cursor journal-less unattended v1 with an explicit autonomy posture', async () => {
+        const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as unknown as PlanValidationReport;
+        const report = await admitPlan({
+            plan: unattended, provider: 'cursor', cwd: process.cwd(), enabledAgents: ['cursor'],
+            planPath: 'docs/plan.md', controllerAutonomy: 'approval-free',
+        });
+        expect(report).toMatchObject({ state: 'admitted', executionMode: 'desatendido', provider: 'cursor', journal: 'not-required' });
+        expect(report.capabilityResolution).toMatchObject({ outcome: 'native', capabilities: { unattendedController: 'supported' } });
+    });
+
+    it('still requires the autonomy posture for Cursor unattended work', async () => {
+        const unattended = { ...valid, manifest: { ...valid.manifest, executionMode: 'desatendido' } } as unknown as PlanValidationReport;
+        const report = await admitPlan({
+            plan: unattended, provider: 'cursor', cwd: process.cwd(), enabledAgents: ['cursor'], planPath: 'docs/plan.md',
+        });
+        expect(report.state).toBe('blocked');
+        expect(report.diagnostics[0]).toMatchObject({ code: 'ADMISSION_CONTROLLER_AUTONOMY_REQUIRED' });
     });
 
     // The durable controller (journal + awm watch + jobs) is opt-in again for
@@ -284,7 +309,7 @@ describe('admitPlan', () => {
         });
 
         it('keeps the original diagnostic for a provider that never had the capability', async () => {
-            const report = await admitPlan({ plan: unattended(), provider: 'cursor', cwd: process.cwd(), enabledAgents: ['cursor'], journalState: journal(), planPath: 'docs/plan.md', controllerAutonomy: 'approval-free' });
+            const report = await admitPlan({ plan: unattended(), provider: 'copilot', cwd: process.cwd(), enabledAgents: ['copilot'], journalState: journal(), planPath: 'docs/plan.md', controllerAutonomy: 'approval-free' });
             expect(report.state).toBe('blocked');
             expect(report.diagnostics[0]).toMatchObject({ code: 'ADMISSION_CAPABILITY_UNVERIFIED' });
         });

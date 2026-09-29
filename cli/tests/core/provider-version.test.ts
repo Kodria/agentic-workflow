@@ -88,6 +88,29 @@ describe('assertProviderSupported', () => {
         expect(exec).not.toHaveBeenCalled();
     });
 
+    it('accepts the Cursor date-based agent line (Plan C)', () => {
+        const exec = jest.fn(() => Buffer.from('2026.09.26-dd393fe\n'));
+        expect(assertProviderSupported('cursor', exec)).toEqual({
+            provider: 'cursor',
+            version: '2026.09.26',
+        });
+        expect(exec).toHaveBeenCalledWith('agent', ['--version'], expect.any(Object));
+    });
+
+    it.each([
+        [Buffer.from('2026.09.25-abc1234\n'), 'requires Cursor >= 2026.09.26'],
+        [Buffer.from('2026.09.26\n'), 'could not parse Cursor version'],
+        [Buffer.from('v2026.09.26-dd393fe\n'), 'could not parse Cursor version'],
+    ])('rejects unsupported Cursor output without mutation', (output, message) => {
+        expect(() => assertProviderSupported('cursor', () => output)).toThrow(message);
+    });
+
+    it('reports a missing Cursor agent binary distinctly', () => {
+        const missing = Object.assign(new Error('spawnSync agent ENOENT'), { code: 'ENOENT' });
+        expect(() => assertProviderSupported('cursor', () => { throw missing; }))
+            .toThrow('Cursor is not installed or not available on PATH');
+    });
+
     it('reports a missing Codex binary distinctly', () => {
         const missing = Object.assign(new Error('spawnSync codex ENOENT'), { code: 'ENOENT' });
         expect(() => assertProviderSupported('codex', () => { throw missing; }))

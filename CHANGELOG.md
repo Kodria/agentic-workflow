@@ -1,12 +1,12 @@
+## Unreleased
+
+### Features
+- **cursor:** Plan C native-session admission — interactive and journal-less unattended v1 with version-gated `agent` binary
+
 ## v9.15.1 - 2026-09-29
 
 ### Fixes
 - **watch:** suspend durable custody for all providers (#207)
-
-## Unreleased
-
-### Changes
-- **watch:** suspend durable custody (`awm watch`) for all providers until routing/custody resumes; native v1 unattended ignores leftover journals while suspended
 
 ## v9.15.0 - 2026-09-29
 
