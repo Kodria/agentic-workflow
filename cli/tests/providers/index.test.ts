@@ -235,6 +235,15 @@ describe('Providers Routing', () => {
             expect(providerFor('copilot').hooks).toBeUndefined();
         });
 
+        it('declares Cursor agent version gate (Plan C R26)', () => {
+            expect(providerFor('cursor').minimumVersion).toBe('2026.09.26');
+            expect(providerFor('cursor').versionCommand).toEqual({
+                command: 'agent',
+                args: ['--version'],
+                versionPattern: /^(\d{4}\.\d{2}\.\d{2})-[0-9a-f]+$/,
+            });
+        });
+
         it('assigns Copilot instructions renderer; Cursor skills use link (cursor-mdc kept for migration)', () => {
             expect(providerFor('cursor').skill.renderer).toBe('link');
             expect(providerFor('copilot').skill.renderer).toBe('copilot-instructions');

@@ -49,7 +49,7 @@ The generated source is the provider configuration, so installation paths and de
 | `opencode` | `~/.config/opencode/agents` · `link` | — (not applicable) | — (none) | `~/.config/opencode/opencode.json` → `instructions` field | — (no gate) |
 | `claude-code` | `~/.claude/agents` · `link` | — (not applicable) | `cc-settings-merge` | hook `SessionStart` | — (no gate) |
 | `codex` | `~/.codex/agents` · `codex-agent-toml` | — (not applicable) | `codex-hooks-json` | `AGENTS.md` + `~/.codex/AGENTS.md` | 0.145.0 |
-| `cursor` | `~/.cursor/agents` · `link` | — (not applicable) | `cursor-hooks-json` | project `AGENTS.md` (no global equivalent) | — (no gate) |
+| `cursor` | `~/.cursor/agents` · `link` | — (not applicable) | `cursor-hooks-json` | project `AGENTS.md` (no global equivalent) | 2026.09.26 |
 | `copilot` | — (not applicable) | — (not applicable) | — (none) | project `AGENTS.md` (no global equivalent) | — (no gate) |
 
 > Generated from `cli/src/providers/index.ts`. **Do not edit by hand** — `npm run docs:matrix` regenerates it and

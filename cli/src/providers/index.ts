@@ -217,6 +217,15 @@ export function providers(): Record<AgentTarget, ProviderConfig> {
         cursor: {
             label: 'Cursor',
             configHome: configHomeFor('cursor'),
+            // Date-based CLI line (YYYY.MM.DD-<hash>). compareSemver orders the
+            // date triple as [YYYY, M, D]. Floor from owner-machine capture
+            // 2026.09.26-dd393fe (docs/testing/cursor-execution-evidence.md).
+            minimumVersion: '2026.09.26',
+            versionCommand: {
+                command: 'agent',
+                args: ['--version'],
+                versionPattern: /^(\d{4}\.\d{2}\.\d{2})-[0-9a-f]+$/,
+            },
             // Skills join the Codex/OpenCode shared physical dirs (~/.agents/skills +
             // .agents/skills, renderer link). cursor-mdc remains registered for S3
             // migration reads of historical ~/.cursor/rules installs.

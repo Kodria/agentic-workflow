@@ -93,7 +93,10 @@ export const PROVIDER_EXECUTION_CAPABILITIES: Readonly<Record<AgentTarget, Provi
     opencode: { ...UNKNOWN },
     'claude-code': { ...UNKNOWN, interactiveExecution: 'supported', unattendedController: 'supported', durableResume: 'supported' },
     codex: { ...UNKNOWN, interactiveExecution: 'supported', unattendedController: 'supported', durableResume: 'supported' },
-    cursor: { ...UNKNOWN },
+    // Plan C (native session only): interactive + journal-less unattended v1.
+    // durableResume stays unverified — Camino B / awm watch is suspended (D-023)
+    // and Cursor is not in WATCH_PROVIDERS. Evidence: docs/testing/cursor-execution-evidence.md
+    cursor: { ...UNKNOWN, interactiveExecution: 'supported', unattendedController: 'supported' },
     copilot: { ...UNKNOWN },
 };
 
