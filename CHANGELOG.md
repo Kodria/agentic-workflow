@@ -1,3 +1,8 @@
+## v9.16.0 - 2026-09-29
+
+### Features
+- **cursor:** Plan C native-session admission (#208)
+
 ## Unreleased
 
 ### Features
