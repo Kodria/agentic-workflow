@@ -430,13 +430,11 @@ describe('runInit', () => {
     });
 
     // -----------------------------------------------------------------------
-    // Gap A (QA panel) — GLOBAL-scope render pipeline for Cursor/Copilot was
-    // only ever exercised via LOCAL-scope `awm add`/bundle-install tests
-    // (tests/core/bundle-install.test.ts). This drives a real `awm init
-    // --agent cursor` through the REAL installBundle/applyInstallPlan path
-    // (no installBundle override — only syncCache is stubbed, to avoid a
-    // real network clone) and asserts a real rendered .mdc file lands in the
-    // GLOBAL ~/.cursor/rules directory with the expected frontmatter shape.
+    // Gap A (QA panel) — GLOBAL-scope Cursor skill delivery. Plan B installs
+    // Cursor skills as links under ~/.agents/skills (shared with Codex/
+    // OpenCode) plus native hooks.json entries (registry floor >= 4.9.0).
+    // Drives a real `awm init --agent cursor` through installBundle/
+    // applyInstallPlan (only syncCache stubbed) and asserts the link + hooks.
     // -----------------------------------------------------------------------
 
     it('Gap A — real global-scope link: awm init --agent cursor links using-awm into ~/.agents/skills', async () => {
