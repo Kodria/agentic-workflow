@@ -64,13 +64,15 @@ describe('el lector de diagnostico ve lo que el escritor dejo en disco', () => {
         expect(path.basename(targetPath)).toBe(renderedFilename('using-awm', renderer));
     });
 
-    it('cursor: el destino termina en .mdc (el lector que buscaba el nombre pelado nunca lo encontraba)', () => {
-        const { targetPath } = physicalTarget(
+    it('cursor: Plan B links skills under .agents/skills (basename matches installName, not .mdc)', () => {
+        const { targetPath, renderer } = physicalTarget(
             { name: 'using-awm', type: 'skill', installName: 'using-awm', sourcePath: '/tmp/src' },
             'cursor', 'local', projectRoot,
         );
-        expect(path.basename(targetPath)).toBe('using-awm.mdc');
-        expect(fs.existsSync(path.join(path.dirname(targetPath), 'using-awm'))).toBe(false);
+        expect(renderer).toBe('link');
+        expect(path.basename(targetPath)).toBe('using-awm');
+        expect(path.dirname(targetPath)).toBe(path.join(projectRoot, '.agents/skills'));
+        expect(path.basename(targetPath).endsWith('.mdc')).toBe(false);
     });
 
     it('copilot: el destino termina en .instructions.md', () => {
