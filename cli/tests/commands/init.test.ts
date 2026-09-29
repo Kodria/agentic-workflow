@@ -478,6 +478,10 @@ describe('runInit', () => {
                 agent: 'cursor',
                 yes: true,
                 machineOnly: true,
+                // Plan C adds a Cursor version gate; CI has no `agent` binary.
+                // Stub the same way Codex init tests do — the gate itself is
+                // covered in provider-version.test.ts.
+                assertProviderSupported: () => ({ provider: 'cursor' as const, version: '2026.09.26' }),
                 // seedBaselineRegistry() writes registries.json pointing at 'baseline'
                 // (our manually-seeded content root above) since none exists yet — no
                 // real network clone happens because that content root already exists
