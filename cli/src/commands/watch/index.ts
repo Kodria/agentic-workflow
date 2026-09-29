@@ -8,6 +8,7 @@ import { validateRuntimeKey } from '../../core/model-policy/capabilities';
 import { CONTROLLER_AUTONOMIES, isControllerAutonomy } from '../../core/journal/adapter';
 import { EXEC_STDIO } from '../../core/journal/process';
 import { WATCH_PROVIDERS, isWatchProvider } from '../../core/journal/adapter';
+import { DURABLE_CUSTODY_SUSPENDED_MESSAGE, isDurableCustodySuspended } from '../../core/journal/durable-custody';
 import { resolveCommandContext } from '../../core/tracks/context';
 import { parseMaxParallel, loadDefaultParallelism } from '../../core/tracks/concurrency';
 import { validatePlanFile } from '../../core/plan/validate';
@@ -15,6 +16,12 @@ import path from 'path';
 import { archiveUnusedWatch, watchJournalStatus } from './archive-unused';
 import { readJournal } from '../../core/journal/store';
 import { computeFingerprint } from '../../core/journal/fingerprint';
+
+function refuseIfDurableCustodySuspended(): never | void {
+    if (!isDurableCustodySuspended()) return;
+    process.stderr.write(`${DURABLE_CUSTODY_SUSPENDED_MESSAGE}\n`);
+    process.exit(1);
+}
 
 function currentBranch(cwd: string): string {
     // stdio explicito (ver EXEC_STDIO en journal/process.ts): evita el relay
@@ -59,6 +66,9 @@ export function registerWatchCommand(program: Command): void {
         // #168: sin esto el controller desatendido arranca y se cuelga en la
         // primera herramienta pidiendo aprobación. Se declara, no se adivina.
         .option('--controller-autonomy <postura>', `postura del controller desatendido (${CONTROLLER_AUTONOMIES.join(' | ')})`)
+        // Fail-closed for every watch verb (parent + subcommands) while durable
+        // custody is suspended. Help still works; only actions are refused.
+        .hook('preAction', () => { refuseIfDurableCustodySuspended(); })
         .action(async (opts) => {
             const repo = process.cwd();
             const branch = currentBranch(repo);

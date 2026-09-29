@@ -372,11 +372,13 @@ Unattended work has two custody options:
   and runs in one provider session that dispatches its own native subagents and runs its
   own verification — the unattended mode as it worked before 9.8.0. The controller
   posture (`--controller-autonomy`) and every other gate still apply.
-- **Durable custody (opt-in).** Initializing a journal with `awm watch --init --plan`
-  opts the branch into the supervisor, journal and verification jobs: relaunch after a
-  controller exits, and closure evidence the model cannot supply itself. Once a journal
-  exists it must be current — a corrupt or stale journal still blocks. `awm-routed`
-  (`compact-slices/v2`) always requires it, because routing custody lives in the journal.
+- **Durable custody (opt-in — currently suspended).** Initializing a journal with
+  `awm watch --init --plan` opts the branch into the supervisor, journal and verification
+  jobs. **This path is suspended for every provider until routing/custody work resumes**
+  (see [D-023](decisions.md#d-023)): every `awm watch` verb refuses, and native v1
+  admission treats any leftover journal as `journal: "not-required"` so it cannot trap
+  the session. `awm-routed` (`compact-slices/v2`) still requires a journal when that
+  path is active again.
 
 `--verify-sensors` admits only on a sensor `pass`. The single exception is registry
 content closure (R8 in the baseline registry). It applies only when both hold:
@@ -396,11 +398,12 @@ The exception does not apply to:
 
 The `awm watch` supervisor still requires a real `pass` before relaunching a controller.
 
-To opt in, initialize the matching valid unattended plan first with
-`awm watch --init --plan PLAN_PATH`. Initialization binds the plan; it does not
-register tasks, review obligations, or a controller generation. Native dispatch
-requires that real runtime custody separately; an empty journal is not execution
-evidence. An interactive plan cannot be bound as unattended.
+To opt in (when the D-023 suspension is lifted), initialize the matching valid
+unattended plan first with `awm watch --init --plan PLAN_PATH`. Initialization
+binds the plan; it does not register tasks, review obligations, or a controller
+generation. Native dispatch requires that real runtime custody separately; an
+empty journal is not execution evidence. An interactive plan cannot be bound as
+unattended. While suspended, that command refuses for every provider.
 
 `awm watch rebind --plan PLAN_PATH` may accept progress-only changes during a
 quiescent in-progress cycle when both bindings have a validated, hash-only
@@ -1005,6 +1008,10 @@ gates that do apply (state, currentness, sensors, controller posture).
 
 The durable supervisor. It executes requested jobs, relieves controllers whose heartbeat
 went silent, and **never kills live work**.
+
+> **Suspended (D-023).** Every `awm watch` entry point currently exits non-zero for all
+> providers. Use native provider-session unattended (`compact-slices/v1`, no journal)
+> until routing/custody work lifts this suspension.
 
 ```
 awm watch [--init] [--provider <p>] [--heartbeat-timeout <min>]

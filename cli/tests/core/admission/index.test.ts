@@ -185,6 +185,23 @@ describe('admitPlan', () => {
             expect(report.state).toBe('blocked');
             expect(report.diagnostics[0]).toMatchObject({ code: 'ADMISSION_CONTROLLER_AUTONOMY_REQUIRED' });
         });
+
+        // While Camino B is suspended, a leftover journal on the branch must not
+        // trap native v1 unattended admission. Jest sets AWM_ALLOW_DURABLE_CUSTODY=1
+        // for the rest of the suite; this case restores the operator default.
+        it('ignores leftover journals for native v1 while durable custody is suspended', async () => {
+            const previous = process.env.AWM_ALLOW_DURABLE_CUSTODY;
+            delete process.env.AWM_ALLOW_DURABLE_CUSTODY;
+            try {
+                const corrupt = await admitPlan({ ...base(), journalCorrupt: true });
+                expect(corrupt).toMatchObject({ state: 'admitted', executionMode: 'desatendido', journal: 'not-required' });
+                const stale = await admitPlan({ ...base(), journalState: { ...emptyState('main'), schema: 2 as const, planBinding: { path: 'docs/plan.md', digest: 'b'.repeat(64), schema: 'compact-slices/v1' as const, executionMode: 'desatendido' as const, boundAt: '2026-09-15T00:00:00.000Z' } } });
+                expect(stale).toMatchObject({ state: 'admitted', journal: 'not-required' });
+            } finally {
+                if (previous === undefined) delete process.env.AWM_ALLOW_DURABLE_CUSTODY;
+                else process.env.AWM_ALLOW_DURABLE_CUSTODY = previous;
+            }
+        });
     });
 
     // R8: a content registry whose sensors are ALL deliberately disabled may close

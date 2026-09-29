@@ -6,6 +6,7 @@ import type { RunOutput } from '../../commands/sensors/types';
 import type { JournalState } from '../journal/types';
 import { bindingPlanPath } from '../journal/paths';
 import type { ControllerAutonomy } from '../journal/adapter';
+import { isDurableCustodySuspended } from '../journal/durable-custody';
 import type { CapabilityStatus, ProviderExecutionCapabilities } from '../model-policy/capability-types';
 type ImplementerProfile = 'mechanical' | 'integration' | 'judgment';
 import type { ApprovedPolicy, CapabilityReceipt, RuntimeKey } from '../model-policy/types';
@@ -273,10 +274,15 @@ export async function admitPlan(input: AdmissionInput): Promise<AdmissionReport>
         // The durable controller (journal + awm watch + jobs) is opt-in, as it
         // was before 9.8.0: native v1 dispatch with no journal on its branch
         // runs as one provider session. Creating a journal is the opt-in, and
-        // from then on it must be current. v2 routing custody lives in the
-        // journal, so awm-routed work still requires it.
+        // from then on it must be current. While durable custody is suspended
+        // (see durable-custody.ts), leftover journals must not trap native v1
+        // unattended work. v2 routing custody lives in the journal, so
+        // awm-routed work still requires it when that path is active.
         const observed = journalStatus(input, plan);
-        const journal: AdmissionReport['journal'] = observed === 'missing' && plan.schema === 'compact-slices/v1' ? 'not-required' : observed;
+        const journal: AdmissionReport['journal'] =
+            plan.schema === 'compact-slices/v1' && (observed === 'missing' || isDurableCustodySuspended())
+                ? 'not-required'
+                : observed;
         if (journal !== 'current' && journal !== 'not-required') return blocked(input, [diagnostic('ADMISSION_JOURNAL_BINDING_REQUIRED', 'Unattended execution requires a healthy schema-2 journal binding for this exact plan; run watch --init --plan.')], { planDigest: plan.planDigest, provider, executionMode: mode, journal, currentness: input.requireCurrent ? 'current' : 'not-checked', cliCurrentness, sensors: sensorsReported, ...sensorEvidence });
         const capabilities = unattendedCapabilities(provider, input.controllerAutonomy);
         const resolution: ProviderExecutionResolution = { outcome: capabilities.unattendedController === 'supported' ? 'native' : 'blocked', provider, capabilities, evidenceVersion: 'r1-v1', diagnostics: [] };
