@@ -1,3 +1,8 @@
+## v9.15.0 - 2026-09-29
+
+### Features
+- **cursor:** Plan B CLI parity for skills, hooks, guidance, and doctor (#206)
+
 ## v9.14.1 - 2026-09-28
 
 ### Fixes
